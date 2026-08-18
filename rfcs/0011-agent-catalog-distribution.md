@@ -2,7 +2,12 @@
 
 **Author:** Urata Daiki
 **Date:** 2026-08-17
-**Status:** Draft
+**Status:** Accepted (2026-08-18 — maintainer decision; the standard two-week discussion
+window was waived by the project maintainer. Reviewed through two Codex passes with
+every finding verified against source before acceptance; the ten decisions listed at
+the end are settled as recommended. Implementation ships as three PRs: the
+`agent:sync --prune` ownership fix, the generator + audit gate + templates, and the
+publish script + docs.)
 
 ## Problem
 
@@ -176,11 +181,11 @@ There is no byte-comparison step, because there is no committed copy to
 compare against. What that costs is real but narrow: the exact published text
 never appears in a PR diff, so wording is reviewed at the source rather than
 at the output. What it must not cost is provenance — CI renders, asserts, and
-discards, and the release workflow renders again, so nothing yet proves the
-pushed tree is the audited one. The mirror job therefore renders **once**,
-runs `audit:agent-catalog` against that directory, and pushes that same
-directory; the audit is a `needs`-ordered step in the job that pushes, never
-a separate render.
+discards, and the publish step renders again, so nothing yet proves the
+pushed tree is the audited one. The publish script therefore renders
+**once**, runs the same assertions `audit:agent-catalog` runs against that
+directory, and pushes that same directory; it never pushes a tree it did not
+just audit.
 
 | Fact in the payload | Derived from |
 |---|---|
@@ -504,28 +509,42 @@ re-declaring it, or it becomes the next thing to drift.
 Two implementation notes. `.github/workflows/ci.yml` uses `actions/checkout@v6`
 with no `fetch-depth`, so the clone is shallow and neither `main` nor a merge
 base is available locally; the gate must fetch the base ref or take the PR base
-SHA from the event payload. And the release-side half — comparing the rendered
+SHA from the event payload. And the publish-side half — comparing the rendered
 plugin `version` against what is already published in `gurenjs/agent-skills` —
-must **skip the mirror as a success, not fail the job**: most releases will not
-move `@guren/cli`, and failing there would turn every unrelated package release
-red after npm publish has already succeeded.
+must **treat "already published" as a no-op, not an error**: most releases will
+not move `@guren/cli`, and the publish script has nothing to do on those.
 
-**Publishing.** Mirroring runs **after** npm publish succeeds, not merely on
-the same event. `release.yml` triggers on `release: published` and can still
-fail in build, test, or `changeset publish`; a second workflow on that same
-event would run concurrently and could publish a catalog describing a release
-that never shipped. So the mirror is a job in `release.yml` with
-`needs: publish`, or a `workflow_run` triggered by that workflow's success.
-It renders the payload, runs `audit:agent-catalog`, and commits the rendered
-tree to the root of `gurenjs/agent-skills` as an ordinary fast-forward
-commit. Not a force
-push: Claude Code keeps a local clone of a registered marketplace and
-refreshes it, so a rewritten history risks non-fast-forward failures for
-already-registered users — and the payload is deterministic, so a normal
-regenerate-and-commit produces the same tree anyway. It needs a token with
-write access to that repo — a maintainer action item, listed in §8.
-Publishing on release rather than on every `main` push keeps the plugin
-version and the CLI version consistent by construction.
+**Publishing: a maintainer-run script, not a CI push.** The first draft had a
+CI job push to `gurenjs/agent-skills` with a repository-scoped token. Review
+asked why a token is needed at all, and a survey of how other projects do this
+answered it. Remotion keeps its skills' source in its monorepo
+(`packages/skills/`) and publishes them to a separate `remotion-dev/skills`
+repository — the same shape as this RFC — and the publish step is a script
+the maintainer runs locally (`packages/it-tests/src/templates/publish.ts`):
+clone the public repo shallow, delete its tracked files, copy the rendered
+tree in, commit, push over the maintainer's own SSH. No CI credential, no
+secret. Its commit log is a run of "Update template" commits by one person,
+several a month.
+
+Guren does the same. `bun run publish:agent-catalog` renders the payload,
+runs the `audit:agent-catalog` assertions against it, and pushes it to
+`gurenjs/agent-skills` as an ordinary fast-forward commit — never a force
+push, because Claude Code keeps a local clone of a registered marketplace and
+refreshes it, and a rewritten history risks non-fast-forward failures for
+already-registered users. It runs as one line in the release procedure, next
+to the already-manual "create the GitHub Release" step. Ordering after a
+successful `changeset publish` is then trivially the maintainer's: they run it
+after the npm publish they can see succeeded, which is exactly the property a
+CI job would have had to reconstruct with `needs:`.
+
+The one thing a manual step lacks is a defense against forgetting. This
+repository already has the pattern for that: `published-drift.yml` compares
+what is on npm against `main` nightly, deliberately outside `ci.yml` so it
+cannot block a PR. A second job there renders the payload from `main` and
+diffs it against `gurenjs/agent-skills`'s HEAD; a red run means "run
+`publish:agent-catalog`", the same way today's red means "cut the release".
+It is read-only, so it needs no token either. That is the one place this
+design improves on Remotion's, which has no such check.
 
 **Behavior against an older or newer app.** The rule is that the plugin
 encodes no version-specific behavior, only version-*stable* delegation:
@@ -614,7 +633,8 @@ Manual, once before the first publish and after any payload change:
 ### 7. Scope cut for the first shippable version
 
 Explicitly **in**: the repo, `marketplace.json`, one `guren` plugin, two
-skills, the generator + CI gate, the mirror workflow, two changes to
+skills, the generator + CI gate, the `publish:agent-catalog` script + the
+nightly drift job, two changes to
 `@guren/cli` that shipping into a catalog forces (the `children` managed-
 namespace kind so `agent:sync --prune` stops deleting externally installed
 skills, §4; and exporting the builtin command registry so the audit can derive
@@ -651,7 +671,6 @@ Explicitly **out**:
 ### 8. Maintainer actions this needs
 
 - Create `gurenjs/agent-skills` (public, MIT).
-- Add a repo-scoped token as a secret in `gurenjs/guren` for the mirror push.
 - Confirm the marketplace `name` — `gurenjs` is proposed, and it must not be
   spelled `agent-skills` even though that is the repository name:
   `agent-skills` is on Claude Code's reserved marketplace-name list
@@ -785,7 +804,7 @@ changeset-based version gate, and the failure-path testing.
 | `scripts/build-agent-catalog.ts` + `audit:agent-catalog` + tests | 1 day |
 | Changeset-based version gate + release-side version check (§5) | 0.5 day |
 | Agent Plugins v1 manifest + vendored-schema validation (§4) | 0.5 day |
-| Mirror job ordered after a successful npm publish (§5) | 0.5 day |
+| `publish:agent-catalog` script + nightly drift job (§5) | 0.5 day |
 | Manual verification (§6 items 5–10), including failure paths | 1–1.5 days |
 | Docs (`docs/{en,ja}/guides/cli.md`), README positioning | 0.5 day |
 
@@ -800,9 +819,11 @@ submission (deferred, §7) and the maintainer-only steps in §8.
 1. **Ship this at all**, given Risk 1: the artifact is a discovery and
    on-ramp surface, not harness parity in the catalogs. Success metric
    proposed: catalog installs that convert to scaffolded apps.
-2. **Separate repo `gurenjs/agent-skills`, generated and mirrored, with the
-   rendered payload not committed to this monorepo** — versus a directory
-   published from this monorepo, and versus committing the payload here (§1).
+2. **Separate repo `gurenjs/agent-skills`, generated from this monorepo and
+   published by a maintainer-run script, with the rendered payload not
+   committed here** — versus a directory published from this monorepo, and
+   versus committing the payload here (§1). This is the shape Remotion uses
+   for `remotion-dev/skills`.
 3. **Plugin version derived from `@guren/cli`** — versus an independent
    semver with a bump gate (§5, Open Question 2).
 4. **Two skills only, no copy of `core/skills/`, no hooks, no MCP server in
@@ -821,10 +842,12 @@ submission (deferred, §7) and the maintainer-only steps in §8.
    `guren`** — note that `agent-skills` is fine as a *repository* name but is
    a reserved *marketplace* name, so the two must not be spelled the same
    (§8).
-8. **Mirror ordered after a successful npm publish**, not merely on the same
-   release event (§5).
-9. **Maintainer actions**: create the public repo, add the mirror token
-   secret (§8).
+8. **Publish by a maintainer-run script, not a CI push** (§5): no repository
+   token or secret; a nightly read-only drift job in `published-drift.yml`
+   catches a forgotten publish. — versus a CI job with a write token, which
+   the first draft proposed.
+9. **Maintainer action**: create the public repo (§8). Nothing else — no
+   token.
 10. **Defer the `anthropics/claude-plugins-community` submission** to after a
    version has been verified in the wild (§7, Open Question 6).
 
@@ -843,5 +866,9 @@ submission (deferred, §7) and the maintainer-only steps in §8.
   <https://github.com/agentplugins/agent-plugins-example>
 - VS Code plugin format auto-detection and marketplace discovery:
   <https://code.visualstudio.com/docs/agent-customization/agent-plugins>
+- Remotion's monorepo-source / separate-publish-repo shape and its
+  maintainer-run publish script (surveyed 2026-08-18):
+  <https://github.com/remotion-dev/skills>,
+  <https://github.com/remotion-dev/remotion/blob/main/packages/it-tests/src/templates/publish.ts>
 - `guren` absent from npm: `npm view guren` → 404;
   `@guren/cli` 2.6.1 provides the `guren` bin.
