@@ -729,8 +729,8 @@ export class QueryBuilder<
   /**
    * Load eager relations onto fetched results.
    * Supports dot notation for nested relations at any depth
-   * (e.g., 'posts.comments.author') — the full path is delegated to
-   * Model.loadRelationInto, which recurses through the relation chain.
+   * (e.g., 'posts.comments.author') — the paths are delegated to
+   * Model.loadRelationsInto, which recurses through the relation chain.
    * Constraint callbacks registered by the object form of `with()` travel
    * alongside, keyed by the path segment each one constrains.
    *
@@ -744,23 +744,16 @@ export class QueryBuilder<
 
     const copies = results.map((r) => ({ ...r }))
 
-    // A path whose head another path also walks is skipped: loading `posts`
-    // and then `posts.comments` reloads `posts` and replaces the very objects
-    // the first pass attached children to. Walking only the longest path is
-    // result-equivalent because constraints are keyed by full path, so each
-    // level still gets its own callback.
-    const paths = this.eagerLoad.filter(
-      (name) => !this.eagerLoad.some((other) => other.startsWith(`${name}.`)),
+    // Every path goes in at once: the loader groups them by head so a relation
+    // several paths share is read once. Loading it per path would replace the
+    // row objects an earlier path had already attached children to, leaving
+    // only the last path's children in the result.
+    await this.modelClass.loadRelationsInto(
+      copies as PlainObject[],
+      this.eagerLoad,
+      { trx: this.options.trx },
+      this.eagerLoadConstraints,
     )
-
-    for (const relation of paths) {
-      await this.modelClass.loadRelationInto(
-        copies as PlainObject[],
-        relation,
-        { trx: this.options.trx },
-        this.eagerLoadConstraints,
-      )
-    }
 
     return copies as TResult[]
   }

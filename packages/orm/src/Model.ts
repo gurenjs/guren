@@ -912,9 +912,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     }
 
     const copy = { ...record }
-    for (const rel of relationList) {
-      await this.loadRelationInto([copy], rel, queryOptions)
-    }
+    await this.loadRelationsInto([copy], relationList, queryOptions)
     return copy as TRecordFor<T> & RelationTypePick<T, Names>
   }
 
@@ -955,9 +953,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     }
 
     const copy = { ...record }
-    for (const rel of relationList) {
-      await this.loadRelationInto([copy], rel, queryOptions)
-    }
+    await this.loadRelationsInto([copy], relationList, queryOptions)
     return copy as TRecordFor<T> & RelationTypePick<T, Names>
   }
 
@@ -1617,9 +1613,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
 
     const records = result.data.map((record) => ({ ...record }))
 
-    for (const relationName of relationList) {
-      await this.loadRelationInto(records, relationName, queryOptions)
-    }
+    await this.loadRelationsInto(records, relationList, queryOptions)
 
     return {
       data: records as Array<TRecordFor<T> & RelationTypePick<T, Names>>,
@@ -1949,9 +1943,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     }
 
     const copies = records.map((record) => ({ ...record }))
-    for (const relationName of relationList) {
-      await this.loadRelationInto(copies, relationName, queryOptions)
-    }
+    await this.loadRelationsInto(copies, relationList, queryOptions)
 
     return copies as Array<TRecordFor<T> & RelationTypePick<T, Names>>
   }
@@ -2076,10 +2068,53 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
    * @internal Used by QueryBuilder for eager loading.
    * Supports nested paths with dot notation, e.g. `posts.comments`.
    *
+   * Paths are grouped by their head segment so a relation shared by several
+   * paths is loaded exactly once. Walking `posts.comments` and `posts.tags`
+   * independently would load `posts` twice, and the loaders assign fresh
+   * spread copies — so the second pass would replace the very row objects the
+   * first had already attached children to, and only the last path would
+   * survive.
+   *
    * `constraints` are keyed by the full path of the level each one constrains,
    * so `pathPrefix` accumulates the path walked so far as the recursion
    * descends: at `posts.comments` the leaf looks itself up under that whole
    * key, not under `comments`.
+   */
+  static async loadRelationsInto<T extends typeof Model>(
+    this: T,
+    records: Array<PlainObject>,
+    relationNames: readonly string[],
+    queryOptions?: ModelQueryOptions,
+    constraints?: EagerLoadConstraints,
+    pathPrefix = '',
+  ): Promise<void> {
+    if (records.length === 0 || relationNames.length === 0) return
+
+    // head -> the distinct tails to walk beneath it, in first-seen order. A
+    // bare path contributes no tail, so `posts` alongside `posts.comments`
+    // loads `posts` once and still descends into the comments.
+    const groups = new Map<string, string[]>()
+    for (const path of relationNames) {
+      const separator = path.indexOf('.')
+      const head = separator === -1 ? path : path.slice(0, separator)
+      const tail = separator === -1 ? '' : path.slice(separator + 1)
+      let tails = groups.get(head)
+      if (!tails) {
+        tails = []
+        groups.set(head, tails)
+      }
+      if (tail && !tails.includes(tail)) {
+        tails.push(tail)
+      }
+    }
+
+    for (const [head, tails] of groups) {
+      await this.loadRelationLevel(records, head, tails, queryOptions, constraints, pathPrefix)
+    }
+  }
+
+  /**
+   * @internal Kept as the single-path entry point onto {@link loadRelationsInto}.
    */
   static async loadRelationInto<T extends typeof Model>(
     this: T,
@@ -2089,7 +2124,21 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     constraints?: EagerLoadConstraints,
     pathPrefix = '',
   ): Promise<void> {
-    const [head, ...rest] = relationName.split('.')
+    await this.loadRelationsInto(records, [relationName], queryOptions, constraints, pathPrefix)
+  }
+
+  /**
+   * Load one relation level and recurse into the tails beneath it.
+   */
+  protected static async loadRelationLevel<T extends typeof Model>(
+    this: T,
+    records: Array<PlainObject>,
+    head: string,
+    tails: readonly string[],
+    queryOptions?: ModelQueryOptions,
+    constraints?: EagerLoadConstraints,
+    pathPrefix = '',
+  ): Promise<void> {
     const definition = this.getRelationDefinition(head)
 
     if (!definition) {
@@ -2126,7 +2175,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
         break
     }
 
-    if (rest.length === 0) {
+    if (tails.length === 0) {
       return
     }
 
@@ -2156,7 +2205,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     }
 
     const related = await resolveModelReference(definition.related)
-    await related.loadRelationInto(children, rest.join('.'), queryOptions, constraints, currentPath)
+    await related.loadRelationsInto(children, tails, queryOptions, constraints, currentPath)
   }
 
   protected static async loadHasMany(
