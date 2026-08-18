@@ -546,12 +546,15 @@ encodes no version-specific behavior, only version-*stable* delegation:
   "AI agent harness is ready", and exit 0, and a skill that keyed its
   fallback on a non-zero exit would report multi-agent success that never
   happened. `guren-harness` therefore establishes the version *before*
-  invoking `agent:init`. Note that `guren --version` is not a usable probe
-  either — it currently prints `ERROR No version specified` (`@guren/cli`
-  2.6.1; see §8). The skill reads
-  `node_modules/@guren/cli/package.json`'s `version` instead, and below 2.5.0
+  invoking `agent:init`, with `bunx guren --version`, and below 2.5.0
   installs claude-only deliberately while telling the user that multi-agent
-  targets need `@guren/cli` ≥ 2.5.0.
+  targets need `@guren/cli` ≥ 2.5.0. (`--version` reported
+  `ERROR No version specified` when this RFC was first drafted, which would
+  have forced the skill to read `node_modules/@guren/cli/package.json`
+  instead; #442 fixed it, so the obvious probe is now the correct one. Note
+  the floor this creates: on a CLI older than #442 the probe itself fails, so
+  the skill must treat an unparseable version as "older than 2.5.0" rather
+  than as an error.)
 - A *newer* app is mostly safe, but not "by construction". `agent:init` is
   version-matched to the app, so the harness it installs is always right for
   that app. What is not guaranteed is the plugin's own invocations: it names
@@ -659,12 +662,11 @@ Explicitly **out**:
   in `marketplace.json` is. Each user can also register only one marketplace
   per name.
 
-Found while verifying §5 and worth fixing independently of this RFC:
-`guren --version` prints `ERROR No version specified` rather than the CLI
-version (citty is never given a `version` in the main command's `meta`).
-Every agent-facing capability probe wants that command to work, so fixing it
-would let `guren-harness` use the obvious probe instead of reading
-`node_modules/`.
+~~Found while verifying §5 and worth fixing independently of this RFC:
+`guren --version` prints `ERROR No version specified`.~~ **Resolved
+(2026-08-17):** fixed in #442, which sets `meta.version` on the root command
+from the CLI's own manifest. `guren-harness` uses `guren --version` directly
+(§5); no maintainer action is left here.
 
 ## Alternatives Considered
 
