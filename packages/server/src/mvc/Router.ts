@@ -55,10 +55,49 @@ type ModelBindingResolver = (value: string) => Promise<unknown>
 /**
  * Model class with findOrFail static method.
  */
-interface BindableModel {
+export interface BindableModel {
   findOrFail(id: unknown, key?: string): Promise<unknown>
   /** Bound values are model classes at runtime; the constructor name is the introspection payload. */
   readonly name?: string
+}
+
+/**
+ * A model bound to a route parameter: the model class alone looks the value
+ * up by primary key (`Model.findOrFail(value)`); a `[Model, column]` tuple
+ * looks it up by that column (`Model.findOrFail(value, column)`), e.g.
+ * `bind: { slug: [Post, 'slug'] }`. Either way the controller reads the
+ * resolved record with `this.model(Model)`.
+ */
+export type RouteModelBinding = BindableModel | readonly [BindableModel, string]
+
+/** {@link RouteModelBinding} normalized for resolution. */
+interface ModelBinding {
+  model: BindableModel
+  /** Column to look up by; `undefined` means the model's primary key. */
+  key?: string
+}
+
+/**
+ * A router-level `bind(param, ...)` entry. `model` is present when the
+ * binding is a model (class or `[Model, column]`) — those records are also
+ * handed to `Controller.model()` — and absent for custom resolvers, whose
+ * value only reaches the action as a positional argument.
+ */
+interface RegisteredBinding {
+  resolve: ModelBindingResolver
+  model?: BindableModel
+}
+
+function normalizeModelBinding(binding: RouteModelBinding): ModelBinding {
+  if (Array.isArray(binding)) {
+    const [model, key] = binding as readonly [BindableModel, string]
+    return { model, key }
+  }
+  return { model: binding as BindableModel }
+}
+
+async function resolveModelBinding({ model, key }: ModelBinding, value: string): Promise<unknown> {
+  return key === undefined ? model.findOrFail(value) : model.findOrFail(value, key)
 }
 
 /**
@@ -142,7 +181,13 @@ export interface RouteContractOptions<
    * it is the one actually enforced.
    */
   resource?: ResourceResponseHint
-  bind?: Record<string, BindableModel>
+  /**
+   * Route model bindings: param name → model (see {@link RouteModelBinding}).
+   * `{ id: Post }` resolves by primary key, `{ slug: [Post, 'slug'] }` by
+   * that column; both throw the model's not-found exception (404) on a miss
+   * and expose the record to the controller via `this.model(Post)`.
+   */
+  bind?: Record<string, RouteModelBinding>
 }
 
 export interface RouteOpenApiMetadata {
@@ -171,7 +216,7 @@ interface RegisteredRoute {
   }
   resource?: ResourceResponseHint
   openapi?: RouteOpenApiMetadata
-  bindings?: Map<string, BindableModel>
+  bindings?: Map<string, ModelBinding>
 }
 
 /**
@@ -325,9 +370,7 @@ export class Router<M extends string = never> {
   private readonly middlewareStack: MiddlewareScopeEntry[][] = []
   private readonly middlewareAliases: Map<string, MiddlewareHandler> = new Map()
   private readonly middlewareGroups: Map<string, string[]> = new Map()
-  private readonly modelBindings: Map<string, ModelBindingResolver> = new Map()
-  /** Model class names for router-level bind(param, Model) calls — resolver-only binds carry no name. */
-  private readonly modelBindingNames: Map<string, string> = new Map()
+  private readonly modelBindings: Map<string, RegisteredBinding> = new Map()
 
   aliasMiddleware<N extends string>(name: N, handler: MiddlewareHandler): Router<M | N> {
     this.middlewareAliases.set(name, handler)
@@ -347,25 +390,32 @@ export class Router<M extends string = never> {
     return new RouterMiddlewareGroupBuilder(this, items)
   }
 
-  bind(param: string, modelOrResolver: BindableModel | ModelBindingResolver): this {
-    if (typeof modelOrResolver === 'function' && 'findOrFail' in modelOrResolver) {
-      // Model class with static findOrFail — wrap in resolver
-      const model = modelOrResolver as unknown as BindableModel
-      if (model.name) this.modelBindingNames.set(param, model.name)
-      this.modelBindings.set(param, async (value: string) => {
-        return model.findOrFail(value)
-      })
-    } else if (typeof modelOrResolver === 'function') {
-      // Custom resolver function
-      this.modelBindings.set(param, modelOrResolver as ModelBindingResolver)
-    } else {
-      // Object with findOrFail (e.g., model instance or plain object)
-      const model = modelOrResolver
-      this.modelBindings.set(param, async (value: string) => {
-        return model.findOrFail(value)
-      })
+  /**
+   * Bind a route parameter for every route on this router whose path names
+   * it. A model (class or `[Model, column]`) resolves through `findOrFail`
+   * and reaches the controller both via `this.model(Model)` and as a
+   * positional argument after the context; a custom resolver's value only
+   * arrives positionally, in path-parameter order:
+   *
+   * ```ts
+   * router.bind('post', async (slug) => Post.where('slug', slug).firstOrFail())
+   * router.get('/posts/:post', [PostController, 'show'])
+   *
+   * async show(_ctx: Context, post: PostRecord) { ... }
+   * ```
+   */
+  bind(param: string, modelOrResolver: RouteModelBinding | ModelBindingResolver): this {
+    if (typeof modelOrResolver === 'function' && !('findOrFail' in modelOrResolver)) {
+      this.modelBindings.set(param, { resolve: modelOrResolver as ModelBindingResolver })
+      return this
     }
 
+    // A model class, a `[Model, column]` tuple, or any object exposing findOrFail.
+    const binding = normalizeModelBinding(modelOrResolver as RouteModelBinding)
+    this.modelBindings.set(param, {
+      model: binding.model,
+      resolve: (value) => resolveModelBinding(binding, value),
+    })
     return this
   }
 
@@ -630,7 +680,6 @@ export class Router<M extends string = never> {
     this.middlewareAliases.clear()
     this.middlewareGroups.clear()
     this.modelBindings.clear()
-    this.modelBindingNames.clear()
   }
 
   definitions(): RouteDefinition[] {
@@ -649,7 +698,7 @@ export class Router<M extends string = never> {
       controller: isControllerAction(handler)
         ? { name: handler[0].name, action: String(handler[1]) }
         : undefined,
-      bindings: serializeBindings(path, bindings, this.modelBindingNames),
+      bindings: serializeBindings(path, bindings, this.modelBindings),
       ...openapi,
     }))
   }
@@ -806,7 +855,9 @@ function applyRouteContract(route: RegisteredRoute, options: RouteContractOption
     deprecated: options.deprecated,
   }
   if (options.bind) {
-    route.bindings = new Map(Object.entries(options.bind))
+    route.bindings = new Map(
+      Object.entries(options.bind).map(([param, binding]) => [param, normalizeModelBinding(binding)]),
+    )
   }
 }
 
@@ -1238,9 +1289,9 @@ function createContractValidationMiddleware(route: RegisteredRoute): MiddlewareH
 
 function resolveHandler(
   action: AnyRouteHandler,
-  modelBindings: Map<string, ModelBindingResolver>,
+  modelBindings: Map<string, RegisteredBinding>,
   container?: Container,
-  routeBindings?: Map<string, BindableModel>,
+  routeBindings?: Map<string, ModelBinding>,
   path?: string,
 ): MiddlewareHandler {
   if (isControllerAction(action)) {
@@ -1261,14 +1312,18 @@ function resolveHandler(
         controller.setContainer(container)
       }
 
-      // Resolve per-route model bindings (from RouteContractOptions.bind)
+      // Resolve per-route model bindings (from RouteContractOptions.bind).
+      // Remembered by param so a router-level bind() on the same name reuses
+      // the record instead of querying again and overwriting this.model().
+      const routeResolved = new Map<string, unknown>()
       if (routeBindings && routeBindings.size > 0) {
         const params = c.req.param() as Record<string, string>
-        for (const [paramName, model] of routeBindings) {
+        for (const [paramName, binding] of routeBindings) {
           const value = params[paramName]
           if (value !== undefined) {
-            const resolved = await model.findOrFail(value)
-            controller.setResolvedModel(model, resolved)
+            const resolved = await resolveModelBinding(binding, value)
+            controller.setResolvedModel(binding.model, resolved)
+            routeResolved.set(paramName, resolved)
           }
         }
       }
@@ -1278,11 +1333,18 @@ function resolveHandler(
         throw new Error(`Controller method ${String(methodName)} is not defined on ${ControllerClass.name}.`)
       }
 
+      // Router-level bindings (bind(param, ...)) travel as positional
+      // arguments after the context, in path-parameter order; the ones bound
+      // to a model are also exposed through `this.model(Model)`.
       const resolvedBindings = modelBindings.size > 0
-        ? await resolveModelBindings(c, modelBindings, path)
+        ? await resolveModelBindings(c, modelBindings, path, routeResolved)
         : []
+      const args: unknown[] = [c]
+      for (const { model, value } of resolvedBindings) {
+        if (model) controller.setResolvedModel(model, value)
+        args.push(value)
+      }
 
-      const args: unknown[] = resolvedBindings.length > 0 ? [c, ...resolvedBindings] : [c]
       const result = await (method as (...a: unknown[]) => unknown).apply(controller, args)
       return ensureResponse(result, c)
     }
@@ -1302,26 +1364,33 @@ function resolveHandler(
 
 async function resolveModelBindings(
   c: Context,
-  modelBindings: Map<string, ModelBindingResolver>,
-  path?: string,
-): Promise<unknown[]> {
+  modelBindings: Map<string, RegisteredBinding>,
+  path: string | undefined,
+  routeResolved: ReadonlyMap<string, unknown>,
+): Promise<Array<{ model?: BindableModel; value: unknown }>> {
   if (modelBindings.size === 0) {
     return []
   }
 
-  const resolved: unknown[] = []
+  const resolved: Array<{ model?: BindableModel; value: unknown }> = []
   const params = c.req.param()
 
   // Get path params in order from the route pattern
   const pathParams = path ? extractPathParamNames(path) : []
 
   for (const param of pathParams) {
-    const resolver = modelBindings.get(param)
-    if (!resolver) continue
+    const binding = modelBindings.get(param)
+    if (!binding) continue
+    // The route's own `bind` entry wins over the router-level one, as it
+    // does for introspection: its record fills the positional slot and is
+    // already the one `this.model()` returns, so no second lookup runs.
+    if (routeResolved.has(param)) {
+      resolved.push({ value: routeResolved.get(param) })
+      continue
+    }
     const value = params[param]
     if (value !== undefined) {
-      const model = await resolver(value)
-      resolved.push(model)
+      resolved.push({ model: binding.model, value: await binding.resolve(value) })
     }
   }
 
@@ -1376,17 +1445,17 @@ function buildResponse(result: unknown): Response {
  */
 function serializeBindings(
   path: string,
-  routeBindings: Map<string, BindableModel> | undefined,
-  routerBindingNames: Map<string, string>,
+  routeBindings: Map<string, ModelBinding> | undefined,
+  routerBindings: Map<string, RegisteredBinding>,
 ): Record<string, string> | undefined {
   const entries = new Map<string, string>()
 
   for (const param of extractPathParamNames(path)) {
-    const name = routerBindingNames.get(param)
+    const name = routerBindings.get(param)?.model?.name
     if (name) entries.set(param, name)
   }
 
-  for (const [param, model] of routeBindings ?? []) {
+  for (const [param, { model }] of routeBindings ?? []) {
     if (model.name) entries.set(param, model.name)
   }
 

@@ -60,6 +60,15 @@ async show() {
 }
 ```
 
+`bind: { id: Post }` always looks up by primary key. For a slug (or any other unique column) bind a
+`[Model, column]` tuple — `bind: { slug: [Post, 'slug'] }` — and `this.model(Post)` returns the record
+resolved by that column. Never adapt around this with a custom `{ findOrFail }` object.
+
+Router-level `router.bind('post', Post | [Post, 'slug'] | async (value) => ...)` binds every route whose
+path has `:post`; the resolved value reaches the action as a **positional argument after the context**
+(`async show(_ctx: Context, post: PostRecord)`), and model bindings are also available via `this.model(Post)`.
+A custom resolver's value is positional-only. Nothing is stored on the Hono context — `this.ctx.get('post')` is `undefined`.
+
 ## Auth helpers
 
 `this.auth` (requires `AuthServiceProvider`) exposes:
