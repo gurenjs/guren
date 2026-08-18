@@ -49,6 +49,18 @@ We keep **bold** choices and \`code\` spans, *emphasised*.
     expect(html).toContain('<td>serial</td>')
   })
 
+  it('keeps an escaped pipe inside a cell instead of splitting on it', () => {
+    // What `spec:generate` writes for a TypeScript union in a Props column.
+    const html = renderDocHtml(`| Page | Props |
+|------|-------|
+| posts/Edit | { post: PostFormValues \\| null } |
+`)
+
+    const row = html.match(/<tbody><tr>.*?<\/tr>/)?.[0] ?? ''
+    expect(row.match(/<td>/g)).toHaveLength(2)
+    expect(row).toContain('<td>{ post: PostFormValues | null }</td>')
+  })
+
   it('passes mermaid fences through and escapes other code fences', () => {
     const html = renderDocHtml(`\`\`\`mermaid
 erDiagram

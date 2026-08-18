@@ -112,14 +112,40 @@ function emphasis(escaped: string): string {
     .replace(/(^|[^*])\*([^*]+)\*/g, '$1<em>$2</em>')
 }
 
+/**
+ * Splits a table row on its unescaped pipes, unescaping `\|` back to a literal
+ * pipe. `spec:generate` writes TypeScript unions that way, so splitting on
+ * every pipe pushes each later cell one column right and leaves a stray
+ * backslash behind — the row renders with more cells than the table has
+ * headers.
+ */
+function splitCells(row: string): string[] {
+  const cells: string[] = []
+  let cell = ''
+
+  for (let cursor = 0; cursor < row.length; cursor += 1) {
+    if (row[cursor] === '\\' && row[cursor + 1] === '|') {
+      cell += '|'
+      cursor += 1
+    } else if (row[cursor] === '|') {
+      cells.push(cell)
+      cell = ''
+    } else {
+      cell += row[cursor]
+    }
+  }
+  cells.push(cell)
+
+  return cells
+}
+
 function renderTable(rows: string[], resolveLink?: (target: string) => string): string {
-  const cells = (row: string): string[] =>
-    row
-      .trim()
-      .replace(/^\|/, '')
-      .replace(/\|$/, '')
-      .split('|')
-      .map((cell) => inline(cell.trim(), resolveLink))
+  const cells = (row: string): string[] => {
+    let text = row.trim()
+    if (text.startsWith('|')) text = text.slice(1)
+    if (text.endsWith('|') && !text.endsWith('\\|')) text = text.slice(0, -1)
+    return splitCells(text).map((cell) => inline(cell.trim(), resolveLink))
+  }
 
   const [head, , ...body] = rows
   const thead = `<thead><tr>${cells(head).map((c) => `<th>${c}</th>`).join('')}</tr></thead>`
