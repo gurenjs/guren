@@ -896,6 +896,57 @@ const page = await Post.newQuery().with('author').orderBy('id', 'desc').paginate
 const users = await User.with('posts.comments')
 ```
 
+QueryBuilder では、`with()` のオブジェクト形式でリレーションごとにコールバックを
+渡し、読み込みクエリに条件を追加できます。コールバックは外部キーによる絞り込みが
+すでに適用されたクエリビルダを受け取るので、`where()` を呼ぶと読み込む関連レコード
+がさらに絞り込まれます。
+
+```ts
+const users = await User.newQuery()
+  .with({ posts: (q) => q.where('published', true) })
+  .get()
+
+users[0].posts // published な投稿だけが入る
+```
+
+各キーは、そのキーが指す階層だけに作用し、キーを書く順序は結果に影響しません。
+ドット付きのキーは末尾の階層にかかり、先頭のリレーションは絞り込まれません。
+両方の階層を絞りたい場合は、両方のキーを指定してください。
+
+```ts
+// `posts` は絞り込まれず、`comments` だけが絞り込まれる
+await User.newQuery()
+  .with({ 'posts.comments': (q) => q.where('approved', true) })
+  .get()
+
+// 両方の階層を絞り込む
+await User.newQuery()
+  .with({
+    posts: (q) => q.where('published', true),
+    'posts.comments': (q) => q.where('approved', true),
+  })
+  .get()
+```
+
+> [!WARNING]
+> コールバックの最上位で `orWhere()` を呼ぶと、ローダーが適用した外部キーの条件と
+> OR で結合されるため、絞り込みではなく**条件が広がります**。次のようにグループ化
+> してください: `q.where((g) => g.where('a', 1).orWhere('b', 2))`
+>
+> `select()` を使う場合は、リレーションのキーになる列（`hasMany` や `hasOne` なら
+> 外部キー、`belongsTo` ならオーナーキー）を必ず含めてください。含めないとローダー
+> が親レコードと突き合わせられず、リレーションは空になります。
+
+> [!NOTE]
+> リレーションは全親レコード分をまとめた 1 本のクエリで読み込むため、コールバック
+> 内の `limit()` は親ごとではなくクエリ全体に効きます。`morphTo` の場合はコール
+> バックが対象の型ごとに実行されるので、すべての対象に共通する列だけを参照でき
+> ます。
+
+静的メソッドの `Model.with()` はシグネチャが異なり、第 2 引数は**親**レコードを
+絞り込む条件です。コールバックによる制約を使う場合は
+`Model.newQuery().with({ ... })` を利用してください。
+
 ネストパスの型は `relationTypes` の先頭セグメントのみが反映されます。ネスト先まで型を効かせたい場合は、先頭リレーションのレコード型の中にネストした形を宣言してください。
 
 ```ts

@@ -9,7 +9,12 @@ import { executeObservers } from './ModelObserver'
 import type { ModelObserver, ModelObserverConstructor } from './ModelObserver'
 import { ModelNotFoundException } from './ModelNotFoundException'
 import { QueryBuilder, PREPARED_UPDATE } from './QueryBuilder'
-import type { WhereGroupCallback, WhereOperator } from './QueryBuilder'
+import type {
+  EagerLoadConstraint,
+  EagerLoadConstraints,
+  WhereGroupCallback,
+  WhereOperator,
+} from './QueryBuilder'
 import { serializeRecord, serializeRecords } from './serialization'
 import { MassAssignmentException } from './MassAssignmentException'
 
@@ -2076,6 +2081,8 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     records: Array<PlainObject>,
     relationName: string,
     queryOptions?: ModelQueryOptions,
+    constraints?: EagerLoadConstraints,
+    pathPrefix = '',
   ): Promise<void> {
     const [head, ...rest] = relationName.split('.')
     const definition = this.getRelationDefinition(head)
@@ -2084,27 +2091,33 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       throw new Error(`${this.name}: unknown relation "${head}".`)
     }
 
+    // A constraint is keyed by the full path of the level it constrains, so a
+    // nested walk that re-loads an already-constrained head reapplies the same
+    // filter instead of silently replacing it with unfiltered rows.
+    const currentPath = pathPrefix ? `${pathPrefix}.${head}` : head
+    const constraint = constraints?.get(currentPath)
+
     switch (definition.type) {
       case 'hasMany':
-        await this.loadHasMany(records, definition, queryOptions)
+        await this.loadHasMany(records, definition, queryOptions, constraint)
         break
       case 'hasOne':
-        await this.loadHasOne(records, definition, queryOptions)
+        await this.loadHasOne(records, definition, queryOptions, constraint)
         break
       case 'belongsTo':
-        await this.loadBelongsTo(records, definition, queryOptions)
+        await this.loadBelongsTo(records, definition, queryOptions, constraint)
         break
       case 'belongsToMany':
-        await this.loadBelongsToMany(records, definition, queryOptions)
+        await this.loadBelongsToMany(records, definition, queryOptions, constraint)
         break
       case 'hasManyThrough':
-        await this.loadHasManyThrough(records, definition, queryOptions)
+        await this.loadHasManyThrough(records, definition, queryOptions, constraint)
         break
       case 'morphMany':
-        await this.loadMorphMany(records, definition, queryOptions)
+        await this.loadMorphMany(records, definition, queryOptions, constraint)
         break
       case 'morphTo':
-        await this.loadMorphTo(records, definition, queryOptions)
+        await this.loadMorphTo(records, definition, queryOptions, constraint)
         break
     }
 
@@ -2138,43 +2151,47 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     }
 
     const related = await resolveModelReference(definition.related)
-    await related.loadRelationInto(children, rest.join('.'), queryOptions)
+    await related.loadRelationInto(children, rest.join('.'), queryOptions, constraints, currentPath)
   }
 
   protected static async loadHasMany(
     records: Array<PlainObject>,
     definition: HasManyRelationDefinition,
     queryOptions?: ModelQueryOptions,
+    constraint?: EagerLoadConstraint,
   ): Promise<void> {
     const { foreignKey, localKey, name } = definition
     const related = await resolveModelReference(definition.related)
-    await loadRelationData(records, name, related, localKey, foreignKey, true, queryOptions)
+    await loadRelationData(records, name, related, localKey, foreignKey, true, queryOptions, constraint)
   }
 
   protected static async loadHasOne(
     records: Array<PlainObject>,
     definition: HasOneRelationDefinition,
     queryOptions?: ModelQueryOptions,
+    constraint?: EagerLoadConstraint,
   ): Promise<void> {
     const { foreignKey, localKey, name } = definition
     const related = await resolveModelReference(definition.related)
-    await loadRelationData(records, name, related, localKey, foreignKey, false, queryOptions)
+    await loadRelationData(records, name, related, localKey, foreignKey, false, queryOptions, constraint)
   }
 
   protected static async loadBelongsTo(
     records: Array<PlainObject>,
     definition: BelongsToRelationDefinition,
     queryOptions?: ModelQueryOptions,
+    constraint?: EagerLoadConstraint,
   ): Promise<void> {
     const { foreignKey, ownerKey, name } = definition
     const related = await resolveModelReference(definition.related)
-    await loadRelationData(records, name, related, foreignKey, ownerKey, false, queryOptions)
+    await loadRelationData(records, name, related, foreignKey, ownerKey, false, queryOptions, constraint)
   }
 
   protected static async loadBelongsToMany(
     records: Array<PlainObject>,
     definition: BelongsToManyRelationDefinition,
     queryOptions?: ModelQueryOptions,
+    constraint?: EagerLoadConstraint,
   ): Promise<void> {
     const { pivotTable, foreignPivotKey, relatedPivotKey, parentKey, relatedKey, name } = definition
     const related = await resolveModelReference(definition.related)
@@ -2215,10 +2232,12 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       return
     }
 
-    // Step 2: Query related table for those IDs
-    const relatedRecords = await related.newQuery(queryOptions).where({
-      [relatedKey]: Array.from(allRelatedIds),
-    } as WhereClause) as PlainObject[]
+    // Step 2: Query related table for those IDs. The constraint filters the
+    // related rows, not the pivot lookup.
+    const relatedRecords = await applyEagerConstraint(
+      related.newQuery(queryOptions).where({ [relatedKey]: Array.from(allRelatedIds) } as WhereClause),
+      constraint,
+    )
 
     // Index related records by their key
     const relatedMap = new Map<unknown, PlainObject>()
@@ -2244,6 +2263,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     records: Array<PlainObject>,
     definition: HasManyThroughRelationDefinition,
     queryOptions?: ModelQueryOptions,
+    constraint?: EagerLoadConstraint,
   ): Promise<void> {
     const { firstKey, secondKey, localKey, secondLocalKey, name } = definition
     const related = await resolveModelReference(definition.related)
@@ -2284,10 +2304,12 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       return
     }
 
-    // Step 2: Query related model using through model's keys
-    const relatedRecords = await related.newQuery(queryOptions).where({
-      [secondKey]: Array.from(allThroughIds),
-    } as WhereClause) as PlainObject[]
+    // Step 2: Query related model using through model's keys. The constraint
+    // filters the related rows, not the intermediate lookup.
+    const relatedRecords = await applyEagerConstraint(
+      related.newQuery(queryOptions).where({ [secondKey]: Array.from(allThroughIds) } as WhereClause),
+      constraint,
+    )
 
     // Index related records by secondKey
     const relatedByKey = new Map<unknown, PlainObject[]>()
@@ -2318,6 +2340,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     records: Array<PlainObject>,
     definition: MorphManyRelationDefinition,
     queryOptions?: ModelQueryOptions,
+    constraint?: EagerLoadConstraint,
   ): Promise<void> {
     const { morphName, localKey, name } = definition
     const related = await resolveModelReference(definition.related)
@@ -2334,13 +2357,18 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       return
     }
 
-    const allRelated = await related.newQuery(queryOptions).where({
-      [typeColumn]: parentType,
-      [idColumn]: localValues,
-    } as WhereClause) as PlainObject[]
+    const allRelated = await applyEagerConstraint(
+      related.newQuery(queryOptions).where({ [typeColumn]: parentType, [idColumn]: localValues } as WhereClause),
+      constraint,
+    )
 
     const map = new Map<unknown, PlainObject[]>()
     for (const item of allRelated) {
+      // Group on the type as well as the id. The query already filters by
+      // type, but a constraint callback is free to widen it (a top-level
+      // `orWhere` does), and grouping on the id alone would then attach
+      // another model's rows to this one.
+      if (item[typeColumn] !== parentType) continue
       const key = item[idColumn]
       if (!map.has(key)) map.set(key, [])
       map.get(key)!.push({ ...item })
@@ -2356,6 +2384,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     records: Array<PlainObject>,
     definition: MorphToRelationDefinition,
     queryOptions?: ModelQueryOptions,
+    constraint?: EagerLoadConstraint,
   ): Promise<void> {
     const { morphName, name } = definition
     const typeColumn = `${morphName}Type`
@@ -2378,7 +2407,12 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       const modelClass = morphMap[type]
       if (!modelClass) continue
       const uniqueIds = Array.from(new Set(ids))
-      const results = await modelClass.newQuery(queryOptions).where({ id: uniqueIds } as WhereClause) as PlainObject[]
+      // Runs once per morph target, so a constraint here may only reference
+      // columns every target shares.
+      const results = await applyEagerConstraint(
+        modelClass.newQuery(queryOptions).where({ id: uniqueIds } as WhereClause),
+        constraint,
+      )
       const idMap = new Map<unknown, PlainObject>()
       for (const r of results) idMap.set(r.id, { ...r })
       resolved.set(type, idMap)
@@ -2396,6 +2430,22 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   }
 }
 
+/**
+ * Apply an eager-load constraint callback to the query that fetches a
+ * relation, then execute it. The callback runs with the foreign-key filter
+ * already on the builder, so a `where()` narrows it. A top-level `orWhere()`
+ * widens it instead — loaders that group results on something weaker than the
+ * full filter (morphMany, which groups on the morph id) must not rely on the
+ * query alone to keep other rows out.
+ */
+async function applyEagerConstraint(
+  query: QueryBuilder,
+  constraint?: EagerLoadConstraint,
+): Promise<PlainObject[]> {
+  constraint?.(query)
+  return (await query) as PlainObject[]
+}
+
 async function loadRelationData(
   records: PlainObject[],
   name: string,
@@ -2404,6 +2454,7 @@ async function loadRelationData(
   relatedKey: string,
   isArray: boolean,
   queryOptions?: ModelQueryOptions,
+  constraint?: EagerLoadConstraint,
 ): Promise<void> {
   const values = Array.from(
     new Set(records.map((r) => r[parentKey]).filter((v): v is unknown => v != null)),
@@ -2416,10 +2467,13 @@ async function loadRelationData(
     return
   }
 
-  const relatedRecords = await related.newQuery(queryOptions).where({ [relatedKey]: values } as WhereClause)
+  const relatedRecords = await applyEagerConstraint(
+    related.newQuery(queryOptions).where({ [relatedKey]: values } as WhereClause),
+    constraint,
+  )
   const map = new Map<unknown, PlainObject | PlainObject[]>()
 
-  for (const item of relatedRecords as PlainObject[]) {
+  for (const item of relatedRecords) {
     const key = item[relatedKey]
     if (isArray) {
       if (!map.has(key)) map.set(key, [])

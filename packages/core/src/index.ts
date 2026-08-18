@@ -71,6 +71,7 @@ export type {
   WhereGroupCallback,
   SimpleCondition,
   GroupCondition,
+  EagerLoadConstraint,
   ORMAdapterAdvanced,
   QueryBuilderOptions,
   HookName,

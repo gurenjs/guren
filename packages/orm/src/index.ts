@@ -44,6 +44,7 @@ export type {
   WhereGroupCallback,
   SimpleCondition,
   GroupCondition,
+  EagerLoadConstraint,
   ORMAdapterAdvanced,
   QueryBuilderOptions,
 } from './QueryBuilder'
