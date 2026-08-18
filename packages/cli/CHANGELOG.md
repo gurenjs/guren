@@ -1,5 +1,105 @@
 # @guren/cli
 
+## 2.6.2
+
+### Patch Changes
+
+- c0a32ac: Report the CLI version for `guren --version`
+
+  `guren --version` printed `ERROR  No version specified` and exited 1, behind a
+  full usage dump. The root command is built with citty, whose `--version`
+  handler reads `meta.version`, and the root command's `meta` only ever set
+  `name` and `description` — so the flag reported the absence of a version rather
+  than the version.
+
+  The root command now carries its own package version, read from the manifest at
+  startup rather than written into the source as a literal, which would drift at
+  every release:
+
+  ```
+  $ guren --version
+  2.6.1
+  ```
+
+  This is the obvious capability probe for tooling and AI agents that need to know
+  which Guren CLI an app has — whether `agent:init --target` is available, for
+  instance. citty ignores flags it does not recognise, so without a working
+  `--version` there was no cheap way to detect an older CLI: passing an
+  unsupported flag to it exits 0 and silently does something else.
+
+  The version prints on plain stdout, like every other command that emits a
+  payload rather than a diagnostic (`model:list`, `context`, `route:list`). citty's
+  own `runMain` logs it through consola, which makes the version unreadable
+  exactly where it gets read: consola's non-TTY reporter prefixes the level, so CI
+  and any piped caller saw `[log] 2.6.1`, and a configured log level could drop the
+  line entirely. `guren --version` now emits a bare version line regardless of
+  `CI`, `NODE_ENV`, or log level.
+
+  An unreadable manifest leaves `meta.version` unset rather than throwing. The
+  root command module is evaluated for every command, so that failure costs only
+  `--version`, which falls back to the message above, and never `make:model`.
+
+- 2be4b64: Bind a route parameter by a column other than the primary key
+
+  `bind: { id: Post }` resolves the parameter with `Post.findOrFail(value)`, so a
+  `/posts/:slug` route could not use route model binding: the router looked the
+  slug up as a primary key and answered 404 for every real post. The only way
+  through was an adapter object (`{ findOrFail: (v) => Post.findOrFail(v, 'slug') }`)
+  passed to both `bind:` and `this.model()`, which worked by accident of the
+  structural type and appeared nowhere in the docs.
+
+  The `bind` option now also accepts a `[Model, column]` tuple. The router calls
+  `Post.findOrFail(value, column)` and `this.model(Post)` returns that record, so
+  the class-only form and the tuple form read the same in the controller:
+
+  ```ts
+  router.get('/posts/:id',   { bind: { id: Post } },              [PostController, 'show'])
+  router.get('/posts/:slug', { bind: { slug: [Post, 'slug'] } },  [PostController, 'show'])
+
+  async show() {
+    const post = this.model(Post)
+  }
+  ```
+
+  Router-level `router.bind(param, ...)` accepts the same tuple, and its model
+  bindings — class or tuple — now feed `this.model(Post)` too. Values from
+  `router.bind()` still arrive as positional arguments after the context, in
+  path-parameter order; that is the only channel for a custom resolver function,
+  which has no model class to look the record up by. Because `this.model()` is
+  keyed by the model class, a route's own `bind` wins whenever both levels would
+  write the same class — a same-param override, or two params bound to one
+  model. The router-level binding still resolves and still fills its positional
+  slot, so a custom resolver's side effects are never skipped.
+
+  Neither channel ever landed on the Hono context: the routing guide told
+  readers to use `this.ctx.get('post')`, which has always been `undefined`. The
+  English and Japanese guides, the agent harness rules, and the `guren context`
+  API digest now describe the two channels that exist, including the one limit
+  `router.bind()` has always had — bindings resolve for controller-action routes,
+  never for inline handlers, which take Hono's `(ctx, next)`. A router test pins
+  each behavior, so the docs cannot drift from the implementation unnoticed
+  again.
+
+  `this.model(Post)` is also typed as the model's record now. Its return type
+  was read off `findOrFail`, which is generic in `this`, so `ReturnType` widened
+  it to the base row (`Record<string, unknown>`) and `post.id` came back
+  `unknown` — the docs claimed `PostRecord` all along. The record type now comes
+  from the `recordType` marker `defineModel()` sets; anything without a usable
+  marker — including an adapter whose `recordType` names something other than a
+  record — keeps the previous fallback.
+
+  `BindableModel` and the new `RouteModelBinding` type are exported from
+  `@guren/core` for code that builds `bind` maps outside a route call.
+
+- Updated dependencies [9e1ce65]
+- Updated dependencies [7251560]
+- Updated dependencies [866919c]
+- Updated dependencies [32e03dd]
+- Updated dependencies [2be4b64]
+- Updated dependencies [39b17e7]
+  - @guren/orm@2.5.0
+  - @guren/core@1.7.0
+
 ## 2.6.1
 
 ### Patch Changes

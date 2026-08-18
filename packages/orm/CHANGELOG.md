@@ -1,5 +1,141 @@
 # @guren/orm
 
+## 2.5.0
+
+### Minor Changes
+
+- 9e1ce65: Apply `with()` constraint callbacks when eager loading
+
+  `QueryBuilder.with()` accepts the object form
+  `with({ posts: (q) => q.where('published', true) })` and stored each callback,
+  but nothing ever read the stored map. Eager loading iterated only the relation
+  names, so the callback silently did nothing and the relation loaded fully
+  unconstrained, while the JSDoc advertised the feature as supported.
+
+  Constraint callbacks now reach the query that fetches the relation, for every
+  relation type (`hasMany`, `hasOne`, `belongsTo`, `belongsToMany`,
+  `hasManyThrough`, `morphMany`, `morphTo`) on `get()`, `first()` and `paginate()`
+  alike. The callback runs with the foreign-key filter already on the builder, so
+  a `where()` narrows it, and on the same query options the relation would have
+  used anyway — a constrained relation still loads on its parent query's
+  transaction.
+
+  Each object key constrains exactly the level it names, in any order: `posts`
+  constrains the head, `posts.comments` constrains the leaf and leaves `posts`
+  unfiltered, and listing both constrains both.
+
+  Three behaviours are worth knowing, and are documented in the database guide:
+
+  - A top-level `orWhere()` inside a callback _widens_ the query rather than
+    narrowing it, since it ORs against the foreign-key filter. Group it to keep
+    it contained. `morphMany` no longer trusts the query alone for this — it
+    groups results on the morph type as well as the id, so a widened constraint
+    can no longer attach another model's rows to a parent.
+  - A `select()` must include the column the relation is keyed on, or the loader
+    cannot match rows back to their parent and the relation loads empty.
+  - Relations load with one batched query for all parent records, so `limit()`
+    caps that whole query rather than applying per parent; and for `morphTo` the
+    callback runs once per morph target, so it may only reference columns every
+    target shares.
+
+  Eager loading also no longer walks a relation path whose head another path
+  already covers. Loading `posts` and `posts.comments` together used to fetch
+  `posts` twice, and the second fetch replaced the very rows the first pass had
+  attached children to — so whichever path ran last won. Only the longest path is
+  walked now, which removes the redundant query and makes the result independent
+  of the order the relations were named in.
+
+  The static `Model.with()` is unchanged — its second argument filters parent
+  records, not the relation.
+
+  `@guren/core` is bumped alongside because it re-exports ORM types through an
+  explicit allowlist, and `EagerLoadConstraint` was added to it. Core's dependency
+  range on `@guren/orm` is a caret that already admits the new minor, so nothing
+  would otherwise put core in the release plan and the new type would never reach
+  `@guren/core` users.
+
+- 7251560: Eager-loaded relations now run on the transaction that read their parents.
+
+  `QueryBuilder` carried its `trx` into the parent query but not into the relation
+  queries `with()` issues, so a transaction-bound `get()`, `first()` or
+  `paginate()` read parents inside the transaction and their relations on the
+  pool. On Postgres and MySQL, where the transaction selects a connection, that
+  means relations of uncommitted parents came back `null` (or empty), and reads
+  could be inconsistent even when they did not.
+
+  `Model.loadRelationInto()` and every relation loader it delegates to
+  (`belongsTo`, `hasMany`, `hasOne`, `belongsToMany`, `hasManyThrough`,
+  `morphMany`, `morphTo`, and nested-path recursion) now accept
+  `ModelQueryOptions` and pass it to each related query, including the pivot and
+  through-table reads. `QueryBuilder` forwards its own `trx`.
+
+  `Model.with()`, `findWith()`, `findWithOrFail()`, `withPaginate()` and
+  `withCount()` gained an optional trailing `queryOptions` argument so they can
+  forward a transaction too. These five previously took no query options at all,
+  so this completes the plumbing rather than fixing a reachable bug in them.
+
+### Patch Changes
+
+- 866919c: Load eager relations in `QueryBuilder.paginate()`
+
+  `Post.newQuery().with('author').paginate({ page, perPage })` returned the page
+  without `author` on any row. `get()` and `first()` both run their rows through
+  the builder's eager loader, but `paginate()` returned the adapter's rows as-is,
+  so a `.with()` on the chain was accepted and then silently dropped. The blog
+  blueprint's `PostController.index` uses exactly this chain, which is why its
+  posts index never received `author` and `PostResource.whenLoaded('author')`
+  omitted it without an error.
+
+  `paginate()` now attaches every relation named on the builder, the same way
+  `get()` and `first()` do. `Model.withPaginate()` was the working alternative all
+  along and is unchanged.
+
+- 32e03dd: Load a relation shared by several eager-load paths exactly once
+
+  `with('posts.comments', 'posts.tags')` walked each path independently, so the
+  shared `posts` head was loaded twice and the second pass replaced the very row
+  objects the first had attached children to. Only the last-named path survived,
+  with no error raised. Eager-load paths are now grouped by their head segment
+  and each level is loaded once, so sibling branches all land on the same records
+  regardless of the order they are named in. The same fix applies to
+  `Model.with()`, `findWith()`, `findWithOrFail()` and `withPaginate()`, which
+  had the same defect.
+
+- 39b17e7: Reject a connection URI where the SQLite driver expects a file path
+
+  `createSqliteDatabase()` treats its `filename` as a path, and creates the
+  directory above it with `mkdir -p`. So a connection string handed to a SQLite
+  app did not fail — it _succeeded_. `postgres://guren:guren@localhost:54322/guren`
+  became a real `postgres:/guren:guren@localhost:54322/` directory tree with a
+  real database inside it, and `db:migrate` and `db:status` then agreed with each
+  other about that stray file. The only symptom was that the database the app
+  actually reads stayed empty, which reads as "migrate claims success but does
+  nothing" rather than "migrate wrote somewhere else". A SQLite-backed Nightly
+  Canary failed this way for two weeks.
+
+  The resolved filename is now rejected when it names a database server, before
+  the `mkdir` runs:
+
+  ```
+  createSqliteDatabase() received a connection URI where it expects a file path:
+  postgres://guren:guren@localhost:54322/guren (from DATABASE_URL). Left alone it
+  would be created as a directory tree and migrated into silently.
+  ```
+
+  The check is on the resolved value rather than on the option, so it also covers
+  the `filename`-less path, where the driver falls back to `process.env.DATABASE_URL`
+  — an ambient Postgres URL that a SQLite app never meant to consume is the
+  likeliest way to hit this, and the option is not involved.
+
+  Rejected are `postgres://…`, `mysql://…`, `libsql://…` and anything else naming
+  a server. Filenames are not, and that includes two shapes a plain authority
+  check would have swept up: `file:` is sqlite's own URI scheme and never
+  addresses a server, so `file:///absolute/path.db` keeps working alongside
+  `file:local.db` and `file::memory:`; and a one-letter scheme is a Windows drive
+  rather than a scheme, so `C://data/app.db` keeps working alongside
+  `C:/data/app.db`. Plain `:memory:`, `./data/guren.db` and absolute paths were
+  never in scope.
+
 ## 2.4.0
 
 ### Minor Changes
