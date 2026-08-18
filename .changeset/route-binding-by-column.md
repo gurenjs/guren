@@ -30,19 +30,28 @@ Router-level `router.bind(param, ...)` accepts the same tuple, and its model
 bindings — class or tuple — now feed `this.model(Post)` too. Values from
 `router.bind()` still arrive as positional arguments after the context, in
 path-parameter order; that is the only channel for a custom resolver function,
-which has no model class to look the record up by. Neither ever landed on the
-Hono context: the routing guide told readers to use `this.ctx.get('post')`,
-which has always been `undefined`. The English and Japanese guides, the agent
-harness rules, and the `guren context` API digest now describe the two channels
-that exist. A router test pins each of them, so the docs cannot drift from the
-implementation unnoticed again.
+which has no model class to look the record up by. Because `this.model()` is
+keyed by the model class, a route's own `bind` wins whenever both levels would
+write the same class — a same-param override, or two params bound to one
+model. The router-level binding still resolves and still fills its positional
+slot, so a custom resolver's side effects are never skipped.
+
+Neither channel ever landed on the Hono context: the routing guide told
+readers to use `this.ctx.get('post')`, which has always been `undefined`. The
+English and Japanese guides, the agent harness rules, and the `guren context`
+API digest now describe the two channels that exist, including the one limit
+`router.bind()` has always had — bindings resolve for controller-action routes,
+never for inline handlers, which take Hono's `(ctx, next)`. A router test pins
+each behavior, so the docs cannot drift from the implementation unnoticed
+again.
 
 `this.model(Post)` is also typed as the model's record now. Its return type
 was read off `findOrFail`, which is generic in `this`, so `ReturnType` widened
 it to the base row (`Record<string, unknown>`) and `post.id` came back
 `unknown` — the docs claimed `PostRecord` all along. The record type now comes
-from the `recordType` marker `defineModel()` sets; classes without the marker
-keep the previous fallback.
+from the `recordType` marker `defineModel()` sets; anything without a usable
+marker — including an adapter whose `recordType` names something other than a
+record — keeps the previous fallback.
 
 `BindableModel` and the new `RouteModelBinding` type are exported from
 `@guren/core` for code that builds `bind` maps outside a route call.

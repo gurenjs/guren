@@ -1313,17 +1313,17 @@ function resolveHandler(
       }
 
       // Resolve per-route model bindings (from RouteContractOptions.bind).
-      // Remembered by param so a router-level bind() on the same name reuses
-      // the record instead of querying again and overwriting this.model().
-      const routeResolved = new Map<string, unknown>()
+      // The model classes they claim are remembered: `this.model()` is keyed
+      // by class, so a router-level bind() must not overwrite a record the
+      // route asked for by name.
+      const routeBoundModels = new Set<unknown>()
       if (routeBindings && routeBindings.size > 0) {
         const params = c.req.param() as Record<string, string>
         for (const [paramName, binding] of routeBindings) {
           const value = params[paramName]
           if (value !== undefined) {
-            const resolved = await resolveModelBinding(binding, value)
-            controller.setResolvedModel(binding.model, resolved)
-            routeResolved.set(paramName, resolved)
+            controller.setResolvedModel(binding.model, await resolveModelBinding(binding, value))
+            routeBoundModels.add(binding.model)
           }
         }
       }
@@ -1337,11 +1337,11 @@ function resolveHandler(
       // arguments after the context, in path-parameter order; the ones bound
       // to a model are also exposed through `this.model(Model)`.
       const resolvedBindings = modelBindings.size > 0
-        ? await resolveModelBindings(c, modelBindings, path, routeResolved)
+        ? await resolveModelBindings(c, modelBindings, path)
         : []
       const args: unknown[] = [c]
       for (const { model, value } of resolvedBindings) {
-        if (model) controller.setResolvedModel(model, value)
+        if (model && !routeBoundModels.has(model)) controller.setResolvedModel(model, value)
         args.push(value)
       }
 
@@ -1365,8 +1365,7 @@ function resolveHandler(
 async function resolveModelBindings(
   c: Context,
   modelBindings: Map<string, RegisteredBinding>,
-  path: string | undefined,
-  routeResolved: ReadonlyMap<string, unknown>,
+  path?: string,
 ): Promise<Array<{ model?: BindableModel; value: unknown }>> {
   if (modelBindings.size === 0) {
     return []
@@ -1381,13 +1380,6 @@ async function resolveModelBindings(
   for (const param of pathParams) {
     const binding = modelBindings.get(param)
     if (!binding) continue
-    // The route's own `bind` entry wins over the router-level one, as it
-    // does for introspection: its record fills the positional slot and is
-    // already the one `this.model()` returns, so no second lookup runs.
-    if (routeResolved.has(param)) {
-      resolved.push({ value: routeResolved.get(param) })
-      continue
-    }
     const value = params[param]
     if (value !== undefined) {
       resolved.push({ model: binding.model, value: await binding.resolve(value) })

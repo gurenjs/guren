@@ -203,7 +203,7 @@ The column name is a plain string — a misspelled column fails the query rather
 
 ### Router-level bindings
 
-`router.bind(param, ...)` binds a parameter name once for every route on that router whose path contains it. It accepts the same model forms as the `bind` option (`Post` or `[Post, 'slug']`), plus a custom resolver function:
+`router.bind(param, ...)` binds a parameter name once for every controller-action route on that router whose path contains it. It accepts the same model forms as the `bind` option (`Post` or `[Post, 'slug']`), plus a custom resolver function:
 
 ```ts
 router.bind('post', Post)                    // by primary key
@@ -224,7 +224,7 @@ async show(_ctx: Context, post: PostRecord) {
 ```
 
 > [!NOTE]
-> Bound values are not stored on the Hono context — `this.ctx.get('post')` returns `undefined`. Use `this.model(Post)` or the positional argument.
+> Bound values are not stored on the Hono context — `this.ctx.get('post')` returns `undefined`. Use `this.model(Post)` or the positional argument. Bindings resolve for controller-action routes only; an inline handler receives Hono's `(ctx, next)` and has to look the record up itself.
 
 ## Resource Routes
 

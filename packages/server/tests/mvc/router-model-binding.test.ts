@@ -22,7 +22,7 @@ class NotFound extends Error {
  * Mirrors the ORM's static `findOrFail(id, key = 'id')` signature and records
  * every call, so the tests can assert which column the router looked up by.
  */
-function makeModel(name = 'Post') {
+function makeModel(name = 'Post', rows: PostRecord[] = posts) {
   const calls: Array<[unknown, string | undefined]> = []
   return {
     name,
@@ -30,7 +30,7 @@ function makeModel(name = 'Post') {
     async findOrFail(id: unknown, key?: string): Promise<PostRecord> {
       calls.push([id, key])
       const column = (key ?? 'id') as keyof PostRecord
-      const found = posts.find((p) => String(p[column]) === String(id))
+      const found = rows.find((p) => String(p[column]) === String(id))
       if (!found) throw new NotFound(`${name} not found`)
       return found
     },
@@ -184,22 +184,70 @@ describe('Router-level bind(param, ...)', () => {
     expect(await response.text()).toContain('No model binding found for Post')
   })
 
-  it('lets the route-level bind win when the same param is bound at both levels, without a second lookup', async () => {
-    // Fixture rows are arranged so a by-slug and a by-id lookup of the same
-    // raw value disagree: '1' is post 1's id, but no post's slug — and 'second'
-    // is post 2's slug. Route-level `[Post, 'slug']` must be what both
-    // this.model() and the positional argument observe.
-    const Post = makeModel()
+  it('lets the route-level bind win for this.model() when both levels bind the same param', async () => {
+    // Rows arranged so the two lookups of the raw value '1' disagree: it is
+    // row 1's id and row 2's slug. The route asked for the slug, so that is
+    // what this.model() must return; the router-level binding still fills the
+    // positional slot, as it did before route bindings reached this.model().
+    const rows: PostRecord[] = [
+      { id: 1, slug: 'x', title: 'X' },
+      { id: 2, slug: '1', title: 'Y' },
+    ]
+    const Post = makeModel('Post', rows)
     const router = new Router()
     router.bind('post', Post) // by primary key, router-wide
     router.get('/posts/:post', { bind: { post: [Post, 'slug'] } }, [controllerFor(Post), 'showBoth'])
     const app = mount(router)
 
-    const response = await app.request('/posts/second')
+    const response = await app.request('/posts/1')
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ positional: posts[1], model: posts[1] })
-    expect(Post.calls).toEqual([['second', 'slug']])
-    expect(router.definitions()[0]?.bindings).toEqual({ post: 'Post' })
+    expect(await response.json()).toEqual({ positional: rows[0], model: rows[1] })
+    expect(Post.calls).toEqual([['1', 'slug'], ['1', undefined]])
+  })
+
+  it('does not overwrite a route-bound record when another param binds the same model class', async () => {
+    const Post = makeModel()
+    const router = new Router()
+    router.bind('other', Post) // by primary key on a different param
+    router.get('/posts/:id/:other', { bind: { id: [Post, 'slug'] } }, [controllerFor(Post), 'showBoth'])
+    const app = mount(router)
+
+    const response = await app.request('/posts/hello-world/2')
+    expect(response.status).toBe(200)
+    // `this.model(Post)` is keyed by class, so the route's own binding wins;
+    // the router-level record still arrives positionally.
+    expect(await response.json()).toEqual({ positional: posts[1], model: posts[0] })
+  })
+
+  it('still runs a router-level custom resolver when the route binds the same param', async () => {
+    const Post = makeModel()
+    let resolverCalls = 0
+    const router = new Router()
+    router.bind('post', async (value) => {
+      resolverCalls += 1
+      return { resolved: value }
+    })
+    router.get('/posts/:post', { bind: { post: [Post, 'slug'] } }, [controllerFor(Post), 'showBoth'])
+    const app = mount(router)
+
+    const response = await app.request('/posts/hello-world')
+    expect(response.status).toBe(200)
+    // The resolver's value fills the positional slot (it has no model class
+    // to be reached by), while this.model(Post) holds the route's record.
+    expect(await response.json()).toEqual({ positional: { resolved: 'hello-world' }, model: posts[0] })
+    expect(resolverCalls).toBe(1)
+  })
+
+  it('does not resolve bindings for an inline handler, which takes Hono (ctx, next)', async () => {
+    const Post = makeModel()
+    const router = new Router()
+    router.bind('post', Post)
+    router.get('/posts/:post', (c) => c.json({ param: c.req.param('post') }))
+    const app = mount(router)
+
+    const response = await app.request('/posts/1')
+    expect(await response.json()).toEqual({ param: '1' })
+    expect(Post.calls).toEqual([])
   })
 
   it('passes several bound values in path-parameter order', async () => {

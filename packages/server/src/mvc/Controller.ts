@@ -35,13 +35,17 @@ export type SafeValidationResult<T> =
  * carry their row type as a `recordType` marker (set by `defineModel()`);
  * `findOrFail`'s own return type cannot be read off the class because the
  * method is generic in `this`, and `ReturnType` widens it to the base row.
- * Anything without the marker — a class extending `Model` directly without
- * redeclaring it, or a plain `{ findOrFail }` adapter — falls back to
- * whatever its `findOrFail` resolves to.
+ * Anything without a usable marker — a class extending `Model` directly
+ * without redeclaring it, or a plain `{ findOrFail }` adapter — falls back to
+ * whatever its `findOrFail` resolves to. The marker is only trusted when it
+ * names an object type: `Model`'s own is `unknown`, and an unrelated
+ * `recordType` on some adapter (a string tag, say) describes no record.
  */
 export type BoundModelRecord<T extends { findOrFail(...args: any[]): Promise<any> }> =
   T extends { readonly recordType: infer R }
-    ? unknown extends R ? Awaited<ReturnType<T['findOrFail']>> : R
+    ? unknown extends R
+      ? Awaited<ReturnType<T['findOrFail']>>
+      : R extends object ? R : Awaited<ReturnType<T['findOrFail']>>
     : Awaited<ReturnType<T['findOrFail']>>
 
 type DefaultInertiaProps = Record<string, unknown>

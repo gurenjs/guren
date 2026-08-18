@@ -184,7 +184,7 @@ async show() {
 
 ### ルーターレベルのバインディング
 
-`router.bind(param, ...)` は、そのルーターに登録されたルートのうちパスに同名パラメータを含むものすべてに対して一度でバインドします。`bind` オプションと同じモデル形式（`Post` または `[Post, 'slug']`）に加え、独自 resolver 関数も渡せます。
+`router.bind(param, ...)` は、そのルーターに登録されたコントローラータプルのルートのうち、パスに同名パラメータを含むものすべてに対して一度でバインドします。`bind` オプションと同じモデル形式（`Post` または `[Post, 'slug']`）に加え、独自 resolver 関数も渡せます。
 
 ```ts
 router.bind('post', Post)                    // 主キーで検索
@@ -205,7 +205,7 @@ async show(_ctx: Context, post: PostRecord) {
 ```
 
 > [!NOTE]
-> バインドされた値は Hono のコンテキストには格納されません。`this.ctx.get('post')` は `undefined` を返すので、`this.model(Post)` か位置引数を使ってください。
+> バインドされた値は Hono のコンテキストには格納されません。`this.ctx.get('post')` は `undefined` を返すので、`this.model(Post)` か位置引数を使ってください。バインディングが解決されるのはコントローラータプルのルートだけです。インラインハンドラーは Hono の `(ctx, next)` を受け取るため、レコードは自分で取得してください。
 
 ## ブートストラップ
 `src/app.ts` で registrar を `createApp()` に渡します。

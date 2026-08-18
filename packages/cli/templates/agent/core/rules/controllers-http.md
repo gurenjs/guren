@@ -64,10 +64,12 @@ async show() {
 `[Model, column]` tuple — `bind: { slug: [Post, 'slug'] }` — and `this.model(Post)` returns the record
 resolved by that column. Never adapt around this with a custom `{ findOrFail }` object.
 
-Router-level `router.bind('post', Post | [Post, 'slug'] | async (value) => ...)` binds every route whose
-path has `:post`; the resolved value reaches the action as a **positional argument after the context**
+Router-level `router.bind('post', Post | [Post, 'slug'] | async (value) => ...)` binds every
+controller-action route whose path has `:post` (inline handlers never receive bindings); the resolved
+value reaches the action as a **positional argument after the context**
 (`async show(_ctx: Context, post: PostRecord)`), and model bindings are also available via `this.model(Post)`.
 A custom resolver's value is positional-only. Nothing is stored on the Hono context — `this.ctx.get('post')` is `undefined`.
+When a param is bound at both levels, or two params bind the same model class, the route's own `bind` is what `this.model()` returns.
 
 ## Auth helpers
 
