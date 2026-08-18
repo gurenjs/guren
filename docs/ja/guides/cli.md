@@ -264,6 +264,21 @@ Inertiaのページは `modules/<name>/` 配下にコロケーションされま
 - **Claude Code**: プロジェクトガイドの `CLAUDE.md`、`.claude/` 配下の検証済みAPIルール・スキル・サブエージェント、開発サーバーの MCP エンドポイントを指す `.mcp.json`（エンドポイント自体は scaffold された `dev` スクリプトの `GUREN_MCP=1` で有効になります）、そしてフィードバックループを構成する hooks です。セッション開始時に `guren context` のプロジェクトマップが読み込まれ、ルート・コントローラ・モデル・スキーマ・ページの編集後には `guren check` が自動で再実行され、失敗があればその場でコーディングエージェントに報告されます。
 - **Codex・Cursor・GitHub Copilot・OpenCode**: プロジェクトガイドの `AGENTS.md` と、`.agents/rules/`・`.agents/skills/` 配下の同じルール・スキル(スキルはエージェント横断の SKILL.md 標準形式)。加えて、Cursor にはネイティブ形式のルール(`.cursor/rules/guren-*.mdc`)、Copilot にはパススコープ付き instructions(`.github/instructions/guren-*.instructions.md`)、Codex にはハーネス自身のコマンドを承認不要にする許可リスト(`.codex/rules/guren.rules`)が生成されます。MCP クライアント設定は各ツールが参照する場所(`.codex/config.toml`・`.cursor/mcp.json`・`.vscode/mcp.json`・`opencode.json` の `mcp` エントリ)に書き出されます。これらのエージェントはハーネスの hooks を実行しないため、セッション開始時の `guren context` 実行と編集後の `guren check` 実行を `AGENTS.md` が指示します。
 
+### アプリを作る前に: カタログから Guren のスキルを入れる
+
+上のハーネスはアプリの `@guren/cli` の中にあるので、アプリができて初めて存在します。その手前、Guren を見たことのないエージェントが空のディレクトリにいる段階のために、Guren は導入用のスキル2本を [`gurenjs/agent-skills`](https://github.com/gurenjs/agent-skills) からエージェントカタログに公開しています。
+
+```bash
+# Claude Code
+claude plugin marketplace add gurenjs/agent-skills
+claude plugin install guren@gurenjs --scope project
+
+# Cursor・Codex・Copilot・OpenCode・Gemini CLI など(Agent Skills CLI)
+npx skills add gurenjs/agent-skills
+```
+
+このプラグインは [Agent Plugins v1](https://agent-plugins.org) にも準拠しているので、ルートの `plugin.json` を読むクライアントならそのリポジトリから直接インストールできます。中身は `guren-new-app`(Guren を説明し、`bunx create-guren-app` で雛形を作り、引き渡す)と `guren-harness`(`bunx guren agent:init --target <agents>` を実行し、`guren context` → 編集 → `guren check` → `guren audit` のループを説明する)の2本です。ハーネスの rules や skills は意図的にコピーしていません。それらはアプリ自身の CLI が入れるもので、アプリの版数と揃い続けます。リポジトリは各リリース時に `packages/cli/templates/agent-catalog/` から生成されるので、変更はそちらへ送ってください(`gurenjs/agent-skills` へは送らないでください)。
+
 | コマンド | 説明 | 例 |
 |---------|------|-----|
 | `agent:init` | 選択したエージェント向けのハーネスを既存アプリに導入(既存ファイルはスキップ、`--force` で上書き) | `bunx guren agent:init --target codex,cursor` |
