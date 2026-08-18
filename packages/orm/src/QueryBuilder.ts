@@ -744,10 +744,7 @@ export class QueryBuilder<
 
     const copies = results.map((r) => ({ ...r }))
 
-    // Every path goes in at once: the loader groups them by head so a relation
-    // several paths share is read once. Loading it per path would replace the
-    // row objects an earlier path had already attached children to, leaving
-    // only the last path's children in the result.
+    // Every path goes in at once so the loader can group them by head.
     await this.modelClass.loadRelationsInto(
       copies as PlainObject[],
       this.eagerLoad,

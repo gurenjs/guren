@@ -436,4 +436,25 @@ describe('relations on real bun:sqlite driver', () => {
       Model.morphMap = undefined
     }
   })
+
+  it('should reject a nested morphTo path even when there are no records to load', async () => {
+    // the throw has to stay ahead of any children inspection, so an empty
+    // result set still reports the unsupported path instead of resolving
+    Model.morphMap = { Post, User }
+    try {
+      await expect(Image.loadRelationInto([], 'imageable.author')).rejects.toThrow(
+        /nested eager loading through morphTo relation "imageable"/,
+      )
+    } finally {
+      Model.morphMap = undefined
+    }
+  })
+
+  it('should reject a path with a trailing dot instead of reading it as bare', async () => {
+    // `posts.` names an empty tail segment; silently treating it as `posts`
+    // would swallow a typo that used to be reported
+    await expect(User.newQuery().with('posts.' as never).get()).rejects.toThrow(
+      /unknown relation ""/,
+    )
+  })
 })
