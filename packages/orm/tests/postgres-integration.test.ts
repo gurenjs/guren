@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { sql } from 'drizzle-orm'
 import { integer, pgTable, serial, varchar } from 'drizzle-orm/pg-core'
 import { createPostgresDatabase, type PostgresDatabase } from '../src/postgres'
-import { Model } from '../src/Model'
+import { Model, type PaginatedResult, type TransactionHandle } from '../src/Model'
 import { DrizzleAdapter } from '../src/adapters/drizzle-adapter'
 
 // The unit tests in postgres.test.ts mock `postgres` and the migrator away, so
@@ -116,6 +116,9 @@ describePostgres('createPostgresDatabase against a real PostgreSQL server (requi
   })
 })
 
+/** Unwinds a transaction after its assertions have run, without failing it. */
+class RollbackSignal extends Error {}
+
 // Its own database: the block above resets the one it uses, which drops every
 // table in it, and these fixtures have to survive alongside them.
 const RELATIONS_DATABASE = 'guren_orm_relations_test'
@@ -190,8 +193,26 @@ describePostgres('eager loading inside a transaction (requires POSTGRES_URL)', (
     await database?.closeDatabase()
   })
 
-  it('loads a belongsTo relation on the transaction that read its parent', async () => {
+  /**
+   * Run a body inside a transaction, then unwind it so its fixtures stay out
+   * of later tests. Two things here are load-bearing: the signal is thrown
+   * only after the body's assertions have run, and every other error
+   * propagates untouched — so a failed assertion still surfaces as itself
+   * rather than as a rollback.
+   */
+  async function inRolledBackTransaction(
+    body: (trx: TransactionHandle) => Promise<void>,
+  ): Promise<void> {
     await Article.transaction(async (trx) => {
+      await body(trx)
+      throw new RollbackSignal()
+    }).catch((error: unknown) => {
+      if (!(error instanceof RollbackSignal)) throw error
+    })
+  }
+
+  it('loads a belongsTo relation on the transaction that read its parent', async () => {
+    await inRolledBackTransaction(async (trx) => {
       const author = (await Author.create({ name: 'Ada' }, { trx })) as AuthorRecord
       const article = (await Article.create(
         { title: 'On Engines', authorId: author.id },
@@ -213,35 +234,27 @@ describePostgres('eager loading inside a transaction (requires POSTGRES_URL)', (
 
       // Rolling back keeps the fixture out of later runs; the assertions above
       // have already been made, so a failure still surfaces as itself.
-      throw new RollbackSignal()
-    }).catch((error: unknown) => {
-      if (!(error instanceof RollbackSignal)) throw error
     })
   })
 
   it('loads relations through paginate() on the transaction', async () => {
-    await Article.transaction(async (trx) => {
+    await inRolledBackTransaction(async (trx) => {
       const author = (await Author.create({ name: 'Grace' }, { trx })) as AuthorRecord
       await Article.create({ title: 'On Compilers', authorId: author.id }, { trx })
 
       const page = (await Article.newQuery({ trx })
         .where('authorId', author.id)
         .with('author')
-        .paginate(1, 10)) as unknown as {
-        data: Array<ArticleRecord & { author: AuthorRecord | null }>
-      }
+        .paginate(1, 10)) as PaginatedResult<ArticleRecord & { author: AuthorRecord | null }>
 
       expect(page.data).toHaveLength(1)
       expect(page.data[0].author).toMatchObject({ name: 'Grace' })
 
-      throw new RollbackSignal()
-    }).catch((error: unknown) => {
-      if (!(error instanceof RollbackSignal)) throw error
     })
   })
 
   it('loads a hasMany relation on the transaction that read its parent', async () => {
-    await Article.transaction(async (trx) => {
+    await inRolledBackTransaction(async (trx) => {
       const author = (await Author.create({ name: 'Barbara' }, { trx })) as AuthorRecord
       await Article.create({ title: 'On Genomes', authorId: author.id }, { trx })
 
@@ -252,16 +265,13 @@ describePostgres('eager loading inside a transaction (requires POSTGRES_URL)', (
 
       expect(loaded.articles.map((article) => article.title)).toEqual(['On Genomes'])
 
-      throw new RollbackSignal()
-    }).catch((error: unknown) => {
-      if (!(error instanceof RollbackSignal)) throw error
     })
   })
 
   it('carries the transaction down a nested relation path', async () => {
     // The recursion in loadRelationInto() re-enters on the related model, so
     // the second hop has its own chance to fall back to the pool.
-    await Article.transaction(async (trx) => {
+    await inRolledBackTransaction(async (trx) => {
       const author = (await Author.create({ name: 'Katherine' }, { trx })) as AuthorRecord
       await Article.create({ title: 'On Orbits', authorId: author.id }, { trx })
 
@@ -272,14 +282,11 @@ describePostgres('eager loading inside a transaction (requires POSTGRES_URL)', (
 
       expect(loaded.articles[0]?.author).toMatchObject({ name: 'Katherine' })
 
-      throw new RollbackSignal()
-    }).catch((error: unknown) => {
-      if (!(error instanceof RollbackSignal)) throw error
     })
   })
 
   it('counts related rows on the transaction with withCount()', async () => {
-    await Article.transaction(async (trx) => {
+    await inRolledBackTransaction(async (trx) => {
       const author = (await Author.create({ name: 'Radia' }, { trx })) as AuthorRecord
       await Article.create({ title: 'On Trees', authorId: author.id }, { trx })
       await Article.create({ title: 'On Bridges', authorId: author.id }, { trx })
@@ -290,12 +297,6 @@ describePostgres('eager loading inside a transaction (requires POSTGRES_URL)', (
 
       expect(loaded.articlesCount).toBe(2)
 
-      throw new RollbackSignal()
-    }).catch((error: unknown) => {
-      if (!(error instanceof RollbackSignal)) throw error
     })
   })
 })
-
-/** Unwinds a transaction after its assertions have run, without failing it. */
-class RollbackSignal extends Error {}
