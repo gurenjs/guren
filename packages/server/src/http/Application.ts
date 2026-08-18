@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import type { MiddlewareHandler, ExecutionContext } from 'hono'
 import { Router } from '../mvc/Router'
-import { Container, mountModuleRoutes, type ServiceProvider, type GurenModule } from '../container'
+import { Container, mountModuleRoutes, setContainer, type ServiceProvider, type GurenModule } from '../container'
 import { ProviderManager, type ServiceProviderConstructor } from '../container/ServiceProvider'
 import { AuthManager } from '../auth/AuthManager'
 import { AuthServiceProvider } from '../providers/AuthServiceProvider'
@@ -714,6 +714,24 @@ export class Application {
     if (!hasUserProviderOf(InertiaServiceProvider)) {
       this.providerManager.register(InertiaServiceProvider)
     }
+
+    // Publish this container as the process-wide one. Code that runs outside a
+    // request has no context to reach it through — Job.make() and the exported
+    // resolve() both read the global — so without this every job that resolves
+    // a service throws "Container not initialized".
+    //
+    // Construction rather than boot(): `guren queue:work` bootstraps the app
+    // only far enough to read the queue driver, and an entry that just exports
+    // the application (no `ready`/`bootstrap`) is accepted there and never
+    // booted. A job dispatched from module scope is in the same position.
+    //
+    // Last statement of the constructor, so an application that fails to build
+    // — provider registration below instantiates providers, and that can throw
+    // — leaves the previous application's container in place rather than
+    // publishing its own half-built one. Otherwise last construction wins,
+    // which is what `bun --hot` wants: a reloaded entry replaces the stale
+    // container instead of being ignored.
+    setContainer(this.container)
   }
 
   get auth(): AuthManager {
