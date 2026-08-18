@@ -2075,6 +2075,11 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   /**
    * @internal Used by QueryBuilder for eager loading.
    * Supports nested paths with dot notation, e.g. `posts.comments`.
+   *
+   * `constraints` are keyed by the full path of the level each one constrains,
+   * so `pathPrefix` accumulates the path walked so far as the recursion
+   * descends: at `posts.comments` the leaf looks itself up under that whole
+   * key, not under `comments`.
    */
   static async loadRelationInto<T extends typeof Model>(
     this: T,
