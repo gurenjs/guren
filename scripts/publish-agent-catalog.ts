@@ -27,9 +27,9 @@
  * `--dry-run` does everything except commit and push, and prints the diff.
  * `--yes` skips the confirmation prompt (for the release checklist).
  */
-import { mkdtemp, readdir, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import process from 'node:process'
 import { auditRenderedFiles, claudePluginValidate, writeCatalog } from './build-agent-catalog'
 import { repoRoot } from './workspace-packages'
@@ -48,9 +48,13 @@ function remotes(): string[] {
   return [`git@github.com:${PUBLISH_REPO}.git`, `https://github.com/${PUBLISH_REPO}.git`]
 }
 
-function git(cwd: string, args: string[]): { ok: boolean; out: string } {
+function git(cwd: string, args: string[]): { ok: boolean; out: string; stdout: string } {
   const run = Bun.spawnSync(['git', ...args], { cwd })
-  return { ok: run.success, out: (run.stdout.toString() + run.stderr.toString()).trim() }
+  return {
+    ok: run.success,
+    out: (run.stdout.toString() + run.stderr.toString()).trim(),
+    stdout: run.stdout.toString(),
+  }
 }
 
 function fail(message: string): never {
@@ -92,9 +96,15 @@ async function main(): Promise<void> {
       fail(`Refusing to publish: claude plugin validate --strict failed.\n${validated.output}`)
     }
     if (validated.kind === 'unavailable') {
-      // publishing without the validator is a maintainer decision, made
-      // visibly; the audit in CI already ran on the same sources
-      console.warn(`Note: claude plugin validate could not run here (${validated.reason}); publishing on the derived-fact audit alone.`)
+      // CI cannot run the validator (no `claude` on the ubuntu runner), so
+      // publish is where it must run — this is the last gate before users.
+      // Refuse rather than warn: an unavailable check is not a green one.
+      // --skip-validate is the explicit override, for a maintainer who has
+      // run it by hand.
+      if (!args.includes('--skip-validate')) {
+        fail(`Refusing to publish: claude plugin validate could not run (${validated.reason}). Install the Claude Code CLI, or pass --skip-validate after validating by hand.`)
+      }
+      console.warn(`Note: --skip-validate given; publishing without claude plugin validate (${validated.reason}).`)
     }
     const nextVersion = (await pluginVersionIn(renderDir)) ?? fail('Rendered payload has no plugin version — refusing to publish.')
 
@@ -114,31 +124,43 @@ async function main(): Promise<void> {
     }
     if (!cloned) fail(`Could not clone ${PUBLISH_REPO}:\n${errors.join('\n')}`)
     const publishedVersion = await pluginVersionIn(cloneDir)
-    if (publishedVersion === nextVersion) {
-      console.log(`${PUBLISH_REPO} already publishes @guren/cli ${nextVersion}; nothing to do.`)
-      return
-    }
-    console.log(`Publishing @guren/cli ${nextVersion} to ${PUBLISH_REPO} (currently ${publishedVersion ?? 'unpublished'}).`)
+    console.log(
+      publishedVersion === nextVersion
+        ? `${PUBLISH_REPO} already publishes @guren/cli ${nextVersion}; checking the tree is byte-identical.`
+        : `Publishing @guren/cli ${nextVersion} to ${PUBLISH_REPO} (currently ${publishedVersion ?? 'unpublished'}).`,
+    )
 
-    // 3. replace tracked contents with the rendered tree
-    const tracked = git(cloneDir, ['ls-files'])
+    // 3. replace tracked contents with the rendered tree. Every tracked file
+    // is removed, then every rendered file is written at its exact path with
+    // mkdir -p — never `cp -R` of a directory, which nests (`plugins/plugins/`)
+    // when the destination already exists, i.e. on every publish after the
+    // first. Directories emptied by the removals are swept last.
+    const tracked = git(cloneDir, ['ls-files', '-z'])
     if (!tracked.ok) fail(`git ls-files failed in the clone:\n${tracked.out}`)
-    for (const path of tracked.out.split('\n').filter(Boolean)) {
+    for (const path of tracked.stdout.split('\0').filter(Boolean)) {
       await rm(join(cloneDir, path), { force: true })
     }
-    // copy rendered files in (recursive dir copy via cp -R keeps this dependency-free)
-    for (const entry of await readdir(renderDir)) {
-      const cp = Bun.spawnSync(['cp', '-R', join(renderDir, entry), join(cloneDir, entry)])
-      if (!cp.success) fail(`Failed to copy ${entry} into the clone.`)
+    for (const file of files) {
+      const dest = join(cloneDir, file.path)
+      await mkdir(dirname(dest), { recursive: true })
+      await writeFile(dest, file.content, 'utf8')
     }
-    // sweep empty directories left behind by removed files
     Bun.spawnSync(['find', cloneDir, '-type', 'd', '-empty', '-not', '-path', '*/.git*', '-delete'])
 
     git(cloneDir, ['add', '-A'])
     const status = git(cloneDir, ['status', '--porcelain'])
     if (status.out === '') {
-      console.log('Rendered payload is byte-identical to what is published; nothing to commit.')
+      // the same-version no-op: most releases do not move @guren/cli, and a
+      // publish that finds nothing to write is a success, not a failure
+      console.log('Rendered payload is byte-identical to what is published; nothing to do.')
       return
+    }
+    if (publishedVersion === nextVersion) {
+      // same version, different bytes: a LICENSE change, a wording fix that
+      // rode a CLI release, or a corrupted earlier publish. Republish — but
+      // note that plugin.json's version is Claude Code's cache key, so
+      // already-installed copies will not pick this up until the next bump.
+      console.warn(`Note: version ${nextVersion} is already published but the tree differs; republishing. Installed plugins keyed on this version will not refresh until @guren/cli moves.`)
     }
     const diffStat = git(cloneDir, ['diff', '--cached', '--stat'])
     console.log(diffStat.out)
