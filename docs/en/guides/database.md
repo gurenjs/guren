@@ -438,6 +438,17 @@ await User.newQuery()
 > parent. For `morphTo`, the callback runs once per morph target, so it may only
 > reference columns every target shares.
 
+For `belongsToMany` and `hasManyThrough`, the callback constrains the query for
+the **related** model — not the pivot or through-table lookup that finds which
+rows to fetch. Filter on the related model's own columns:
+
+```ts
+// keeps the `news` tags of each post; the pivot lookup is untouched
+await Post.newQuery()
+  .with({ tags: (q) => q.where('label', 'news') })
+  .get()
+```
+
 The static `Model.with()` is a different signature — its second argument filters
 the *parent* records, not the relation. Use `Model.newQuery().with({ ... })` for
 constraint callbacks.

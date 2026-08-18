@@ -1,5 +1,6 @@
 ---
 "@guren/orm": minor
+"@guren/core": minor
 ---
 
 Apply `with()` constraint callbacks when eager loading
@@ -45,3 +46,9 @@ of the order the relations were named in.
 
 The static `Model.with()` is unchanged — its second argument filters parent
 records, not the relation.
+
+`@guren/core` is bumped alongside because it re-exports ORM types through an
+explicit allowlist, and `EagerLoadConstraint` was added to it. Core's dependency
+range on `@guren/orm` is a caret that already admits the new minor, so nothing
+would otherwise put core in the release plan and the new type would never reach
+`@guren/core` users.

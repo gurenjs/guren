@@ -86,6 +86,8 @@ describe('relations on real bun:sqlite driver', () => {
   Post.belongsToMany('tags', Tag, postTagsTable, 'postId', 'tagId', 'id', 'id')
   Post.morphMany('images', Image, 'imageable', 'id')
   Image.morphTo('imageable', 'imageable')
+  // users -> posts (through) -> comments
+  User.hasManyThrough('postComments', Comment, Post, 'authorId', 'postId', 'id', 'id')
 
   beforeEach(() => {
     sqlite = new Database(':memory:')
@@ -342,5 +344,26 @@ describe('relations on real bun:sqlite driver', () => {
     const alice = users.find((u) => u.name === 'Alice')
     expect(alice?.posts.map((p) => p.title)).toEqual(['A1'])
     expect(alice?.posts[0]?.comments.map((c) => c.body)).toEqual(['keep'])
+  })
+
+  it('should constrain the related rows of a hasManyThrough, not the through lookup', async () => {
+    const users = (await User.newQuery()
+      .with({ postComments: (q) => q.where('body', 'keep') })
+      .get()) as Array<UserRecord & { postComments: CommentRecord[] }>
+
+    // Alice's posts A1/A2 carry comments keep/drop/keep; only the keeps survive,
+    // and the through read still finds both posts
+    const alice = users.find((u) => u.name === 'Alice')
+    expect(alice?.postComments.map((c) => c.body)).toEqual(['keep', 'keep'])
+    expect(alice?.postComments.map((c) => c.postId).sort()).toEqual([1, 2])
+
+    const unconstrained = (await User.newQuery().with('postComments').get()) as Array<
+      UserRecord & { postComments: CommentRecord[] }
+    >
+    expect(unconstrained.find((u) => u.name === 'Alice')?.postComments.map((c) => c.body).sort()).toEqual([
+      'drop',
+      'keep',
+      'keep',
+    ])
   })
 })
