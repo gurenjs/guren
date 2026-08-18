@@ -99,11 +99,12 @@ const benchmarks: Benchmark[] = [
 ]
 
 // Agents on Guren, 2026-08-18: 20 tasks × 3 models × {bare, shipped} × 3 trials.
-// Numbers are the Sonnet 5 column of results/RESULTS.md in gurenjs/agents-on-guren.
+// First two tiles are the Sonnet 5 column of results/RESULTS.md in
+// gurenjs/agents-on-guren; the third counts all 180 runs per condition.
 const agentBenchmarkStats = [
   { value: '−28%', label: 'turns with the harness (Sonnet 5, 60 runs each)' },
   { value: '−25%', label: 'cost, at 60/60 vs 58/60 tasks passed' },
-  { value: '119 vs 18', label: 'runs that reached for guren check, harness vs bare' },
+  { value: '119 vs 15', label: 'runs that ran guren check, harness vs bare (180 each)' },
 ]
 
 const deployTargets = [
