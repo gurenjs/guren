@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import type { MiddlewareHandler, ExecutionContext } from 'hono'
 import { Router } from '../mvc/Router'
-import { Container, mountModuleRoutes, type ServiceProvider, type GurenModule } from '../container'
+import { Container, mountModuleRoutes, setContainer, type ServiceProvider, type GurenModule } from '../container'
 import { ProviderManager, type ServiceProviderConstructor } from '../container/ServiceProvider'
 import { AuthManager } from '../auth/AuthManager'
 import { AuthServiceProvider } from '../providers/AuthServiceProvider'
@@ -632,6 +632,18 @@ export class Application {
     // scope to register the asset routes before bootstrap() awaits boot().
     // Registering first here is the only ordering an app cannot get in front of.
     this.mountSecurityDefaults()
+
+    // Publish this container as the process-wide one. Code that runs outside a
+    // request has no context to reach it through — Job.make() and the exported
+    // resolve() both read the global — so without this every job that resolves
+    // a service throws "Container not initialized".
+    //
+    // Set here rather than in boot() because a job can run against an app that
+    // was never booted: `guren queue:work` imports the app entry (which builds
+    // the Application at module scope) and reads the queue driver without
+    // calling boot(). Last construction wins, which is what `bun --hot` wants —
+    // a reloaded entry replaces the stale container instead of being ignored.
+    setContainer(this.container)
 
     // Bind core instances
     this.container.instance('app', this as Application)
