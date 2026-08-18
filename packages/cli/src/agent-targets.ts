@@ -93,8 +93,11 @@ function canonicalDirs(root: '.claude' | '.agents'): { rules: string; skills: st
  * and no longer plans. Prune still owns these: a `children` claim over the
  * current plan alone could never recognize a skill that left the set, and
  * cleaning those up on `agent:sync --prune` is deliberate, tested behavior.
- * Removing a skill from `core/skills/` means adding its old name here —
- * `tests/agent-targets.test.ts` asserts the union covers the shipped history.
+ * Removing a skill from `core/skills/` means adding its old name here. No
+ * test can enforce that — the repository has no record of what it used to
+ * ship — so it is a review obligation on any PR that deletes a skill
+ * directory; the test only pins that a retired name never returns as a
+ * shipped one.
  * Same device as the tombstones in `data-types.ts`: a dropped definition
  * whose name must stay claimed.
  */
@@ -128,11 +131,28 @@ function nativeRulePath(namespace: PatternNamespace, stem: string): string {
  * the plan rather than listed, so a renamed or added canonical skill cannot
  * leave the claim behind.
  */
+/**
+ * A claimed child must be exactly one plain path segment: no separators, no
+ * `.`/`..`, not empty. The claim is interpolated into a directory the prune
+ * walker will `rm` under, so a name like `..` would claim outside the app.
+ * Planned names come from the planner and cannot violate this; the retired
+ * list is a constant plus a test hook, and this is the one place both are
+ * checked before they reach the walker.
+ */
+function assertSkillName(name: string): void {
+  if (name === '' || name === '.' || name === '..' || name.includes('/') || name.includes('\\')) {
+    throw new Error(`Agent harness skill claim "${name}" is not a single path segment`)
+  }
+}
+
 function claimedSkillNames(
   skillsDir: string,
   plan: readonly PlannedFile[],
   retired: readonly string[],
 ): string[] {
+  for (const name of retired) {
+    assertSkillName(name)
+  }
   const names = new Set<string>(retired)
   const prefix = `${skillsDir}/`
   for (const file of plan) {
@@ -141,6 +161,7 @@ function claimedSkillNames(
     }
     const child = file.path.slice(prefix.length).split('/')[0]
     if (child) {
+      assertSkillName(child)
       names.add(child)
     }
   }

@@ -229,16 +229,26 @@ describe('managedNamespaces', () => {
     })
   })
 
+  it('rejects a retired name that is not a single path segment — the claim is rm-adjacent', () => {
+    for (const bad of ['.', '..', '../x', 'a/b', '']) {
+      expect(() => managedNamespaces(['claude'], plan(['claude']), [bad])).toThrow('not a single path segment')
+    }
+  })
+
   it('the skill claim is derived from the plan, so it tracks the real templates', async () => {
     const real = planComponents(['claude'], await loadAgentTemplates(), 'My App')
     const [, claude] = managedNamespaces(['claude'], real)
     if (claude.kind !== 'children') {
       throw new Error('expected a children claim')
     }
-    // every skill the real template ships is claimed, and only those
+    // the claim is exactly shipped ∪ retired — the derivation, not history.
+    // Nothing here can know a skill was dropped without a tombstone: that
+    // discipline is enforced by review of core/skills/ removals, and the
+    // comment on RETIRED_CANONICAL_SKILLS says so. What this does pin is
+    // that a retired name never silently returns as a shipped one, which
+    // would make the tombstone claim a duplicate.
     const shipped = [...new Set(real.filter((f) => f.path.startsWith('.claude/skills/')).map((f) => f.path.split('/')[2]))].sort()
     expect(claude.names).toEqual([...new Set([...shipped, ...RETIRED_CANONICAL_SKILLS])].sort())
-    // and no retired name has silently come back as a shipped one
     for (const retired of RETIRED_CANONICAL_SKILLS) {
       expect(shipped).not.toContain(retired)
     }

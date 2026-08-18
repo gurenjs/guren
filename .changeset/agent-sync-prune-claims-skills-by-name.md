@@ -2,7 +2,7 @@
 "@guren/cli": minor
 ---
 
-`agent:sync --prune` no longer deletes skills the framework did not write
+`agent:sync --prune` no longer deletes skill directories under names the framework never shipped
 
 The stale-file scan claimed `.claude/skills/` and `.agents/skills/` as whole
 directories, so any skill directory the current harness did not plan was
