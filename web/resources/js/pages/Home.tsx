@@ -98,6 +98,14 @@ const benchmarks: Benchmark[] = [
   },
 ]
 
+// Agents on Guren, 2026-08-18: 20 tasks × 3 models × {bare, shipped} × 3 trials.
+// Numbers are the Sonnet 5 column of results/RESULTS.md in gurenjs/agents-on-guren.
+const agentBenchmarkStats = [
+  { value: '−28%', label: 'turns with the harness (Sonnet 5, 60 runs each)' },
+  { value: '−25%', label: 'cost, at 60/60 vs 58/60 tasks passed' },
+  { value: '119 vs 18', label: 'runs that reached for guren check, harness vs bare' },
+]
+
 const deployTargets = [
   {
     name: 'Bun server',
@@ -289,18 +297,28 @@ export default function Home({ codeExamples }: Props) {
                 title="Terminal"
               />
               <p className="mt-4 text-sm leading-relaxed text-white/50">
-                None of this is aspirational: the whole loop is exercised in a public,
-                reproducible agent evaluation — same task, same model, only the harness
-                differs — and the rounds that did not help are published right next to the
-                ones that did.
+                None of this is aspirational: it is measured. <em>Agents on Guren</em> runs 20
+                bug, security and feature tasks with hidden acceptance tests across three models,
+                with and without the harness <code className="text-white/70">agent:init</code>{' '}
+                installs — 360 runs, every event stream published.
               </p>
+              <dl className="mt-4 grid grid-cols-3 gap-3">
+                {agentBenchmarkStats.map((s) => (
+                  <div key={s.label} className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-3 text-center">
+                    <dt className="order-2 mt-1 text-[11px] leading-snug text-white/50">{s.label}</dt>
+                    <dd className="order-1 bg-gradient-to-r from-crimson-300 to-crimson-500 bg-clip-text text-2xl font-extrabold text-transparent">
+                      {s.value}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
               <a
-                href="https://github.com/gurenjs/framework-comparison/tree/main/agent-eval"
+                href="https://github.com/gurenjs/agents-on-guren"
                 target="_blank"
                 rel="noreferrer"
                 className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-crimson-300 transition hover:text-crimson-200"
               >
-                Evaluation harness &amp; raw data
+                Benchmark report, tasks &amp; raw data
                 <ArrowRightIcon className="size-3.5" />
               </a>
             </div>
