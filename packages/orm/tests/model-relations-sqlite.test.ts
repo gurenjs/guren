@@ -91,4 +91,54 @@ describe('relations on real bun:sqlite driver', () => {
     const posts = await Post.where({ authorId: 1 }).orWhere({ authorId: [2] }).get()
     expect(posts).toHaveLength(3)
   })
+
+  // paginate() once handed back the raw rows from executeQuery(), so
+  // `.with('author').paginate(...)` returned pages whose relation was missing
+  // while the same chain ending in `.get()` attached it — the blog starter's
+  // /posts index rendered without author names because of it. It delegates to
+  // get() now; these assert that on the real driver, which the in-memory
+  // adapter used elsewhere cannot speak for.
+  it('should eager load through paginate() like get() does', async () => {
+    type PostWithAuthor = PostRecord & { author: UserRecord | null }
+
+    const query = () => Post.newQuery().with('author').orderBy('id', 'desc')
+
+    const viaGet = (await query().limit(2).get()) as PostWithAuthor[]
+    const page = await query().paginate({ page: 1, perPage: 2 })
+    const viaPaginate = page.data as PostWithAuthor[]
+
+    expect(viaPaginate.map((p) => p.title)).toEqual(['B1', 'A2'])
+    expect(viaPaginate.map((p) => p.author?.name)).toEqual(['Bob', 'Alice'])
+    expect(viaPaginate).toEqual(viaGet)
+    expect(page.meta).toMatchObject({ total: 3, perPage: 2, currentPage: 1, totalPages: 2, hasMore: true })
+
+    // The remaining page loads its relation as well.
+    const last = await query().paginate({ page: 2, perPage: 2 })
+    expect((last.data as PostWithAuthor[]).map((p) => [p.title, p.author?.name])).toEqual([['A1', 'Alice']])
+  })
+
+  it('should eager load nested paths through paginate()', async () => {
+    type UserWithPosts = UserRecord & { posts: Array<PostRecord & { author: UserRecord | null }> }
+
+    const page = await User.newQuery().with('posts.author').orderBy('id', 'asc').paginate(1, 2)
+    const users = page.data as UserWithPosts[]
+
+    expect(users.map((u) => u.name)).toEqual(['Alice', 'Bob'])
+    expect(users[0].posts.map((p) => p.title).sort()).toEqual(['A1', 'A2'])
+    expect(users[0].posts.every((p) => p.author?.name === 'Alice')).toBe(true)
+    expect(users[1].posts.map((p) => p.author?.name)).toEqual(['Bob'])
+  })
+
+  it('should restore the builder\'s own limit/offset after paginate()', async () => {
+    type PostWithAuthor = PostRecord & { author: UserRecord | null }
+
+    // The builder carries its own slice (rows 2..3); paginate() must not
+    // leave its page-2 slice (row 3 only) behind, nor clear the slice.
+    const builder = Post.newQuery().with('author').orderBy('id', 'asc').limit(2).offset(1)
+    const page = await builder.paginate({ page: 2, perPage: 1 })
+    expect((page.data as PostWithAuthor[]).map((p) => [p.title, p.author?.name])).toEqual([['A2', 'Alice']])
+
+    const after = (await builder.get()) as PostWithAuthor[]
+    expect(after.map((p) => [p.title, p.author?.name])).toEqual([['A2', 'Alice'], ['B1', 'Bob']])
+  })
 })
