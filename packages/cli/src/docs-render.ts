@@ -112,14 +112,48 @@ function emphasis(escaped: string): string {
     .replace(/(^|[^*])\*([^*]+)\*/g, '$1<em>$2</em>')
 }
 
+/**
+ * Splits a table row on its unescaped pipes, undoing the escaping
+ * `escapeMarkdownTableCell` applies: a backslash doubled, then every pipe
+ * escaped. Reading `\\` as one unit is what keeps the parity right — `\\|`
+ * is a literal backslash followed by a cell delimiter, not an escaped pipe.
+ *
+ * Splitting on every pipe instead pushes each later cell one column right and
+ * leaves a stray backslash behind, so a `screens.md` Props column holding a
+ * TypeScript union rendered with more cells than the table had headers.
+ */
+function splitCells(row: string): string[] {
+  const cells: string[] = []
+  let cell = ''
+
+  for (let cursor = 0; cursor < row.length; cursor += 1) {
+    const escaped = row[cursor] === '\\' && (row[cursor + 1] === '|' || row[cursor + 1] === '\\')
+    if (escaped) {
+      cell += row[cursor + 1]
+      cursor += 1
+    } else if (row[cursor] === '|') {
+      cells.push(cell)
+      cell = ''
+    } else {
+      cell += row[cursor]
+    }
+  }
+  cells.push(cell)
+
+  return cells
+}
+
 function renderTable(rows: string[], resolveLink?: (target: string) => string): string {
-  const cells = (row: string): string[] =>
-    row
-      .trim()
-      .replace(/^\|/, '')
-      .replace(/\|$/, '')
-      .split('|')
-      .map((cell) => inline(cell.trim(), resolveLink))
+  // The outer pipes are optional and produce an empty cell on each side. Which
+  // trailing pipe is a delimiter is a question only the scan can answer, so the
+  // empties are dropped from its result rather than sliced off the row first.
+  const cells = (row: string): string[] => {
+    const text = row.trim()
+    const parts = splitCells(text)
+    if (text.startsWith('|')) parts.shift()
+    if (parts.length > 1 && parts[parts.length - 1] === '') parts.pop()
+    return parts.map((cell) => inline(cell.trim(), resolveLink))
+  }
 
   const [head, , ...body] = rows
   const thead = `<thead><tr>${cells(head).map((c) => `<th>${c}</th>`).join('')}</tr></thead>`

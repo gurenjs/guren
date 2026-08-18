@@ -1,6 +1,10 @@
 # Deploys guren.dev to Cloudflare Workers on every main push that can change
 # the site: the app itself (web/), the docs it serves from the repo root
-# (docs/), and the workspace packages the worker bundle inlines (packages/).
+# (docs/), the workspace packages the worker bundle inlines (packages/), and
+# the blog example, whose docs bundle is published as the static docs-viewer
+# snapshot at /_guren/docs (web/scripts/prerender-docs-viewer.ts). The graph
+# covers the example's source files too, not only its docs/, so the whole
+# directory triggers a rebuild.
 #
 # Safe on a public repo: secrets are never exposed to workflows triggered
 # from fork pull requests, and this only runs on push to main. The API token
@@ -15,6 +19,7 @@ on:
     paths:
       - 'web/**'
       - 'docs/**'
+      - 'examples/blog/**'
       - 'packages/**'
       - '.github/workflows/deploy-web.yml'
   workflow_dispatch:

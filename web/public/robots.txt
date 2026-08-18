@@ -1,4 +1,5 @@
 User-agent: *
 Allow: /
+Disallow: /_guren/
 
 Sitemap: https://guren.dev/sitemap.xml

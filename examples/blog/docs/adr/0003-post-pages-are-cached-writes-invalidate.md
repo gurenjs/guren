@@ -12,9 +12,9 @@ generated: { by: "human:7nohe", at: 2026-08-11T11:19:26.406Z }
 
 ## Context
 
-Post lists and detail pages are read far more often than they change,
-and they are public ([[0001-posts-are-public-by-default]]), so caching
-them is safe.
+Post lists and detail pages are read far more often than they change, and
+they are public ([Posts are public by default](0001-posts-are-public-by-default.md)),
+so caching them is safe.
 
 ## Decision
 
