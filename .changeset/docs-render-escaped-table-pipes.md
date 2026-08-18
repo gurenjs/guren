@@ -2,4 +2,4 @@
 "@guren/cli": patch
 ---
 
-Keep an escaped pipe inside a docs table cell instead of splitting on it. `spec:generate` writes TypeScript unions as `A \| B`, so the docs viewer rendered those rows with one cell too many and a stray backslash — a `screens.md` Props column was the common case.
+Undo the table-cell escaping in the docs viewer's renderer instead of splitting on it. `escapeMarkdownTableCell` doubles a backslash and then escapes every pipe, so a `screens.md` Props column holding a TypeScript union (`A \| B`) rendered as two cells with a stray backslash, pushing the rest of the row one column right. Row splitting now scans for unescaped pipes and reads `\\` as one unit, so a cell that ends in a backslash still lets the delimiter behind it split.

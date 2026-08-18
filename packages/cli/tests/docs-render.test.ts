@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import { renderDocHtml } from '../src/docs-render'
+import { escapeMarkdownTableCell } from '../src/context-route'
 
 describe('renderDocHtml', () => {
   it('renders headings one level down, paragraphs, and inline spans', () => {
@@ -59,6 +60,35 @@ We keep **bold** choices and \`code\` spans, *emphasised*.
     const row = html.match(/<tbody><tr>.*?<\/tr>/)?.[0] ?? ''
     expect(row.match(/<td>/g)).toHaveLength(2)
     expect(row).toContain('<td>{ post: PostFormValues | null }</td>')
+  })
+
+  it('reads a doubled backslash as one, so the pipe behind it still splits', () => {
+    // `escapeMarkdownTableCell` doubles backslashes before escaping pipes, so
+    // `\\|` is a cell that ends in a backslash, not an escaped pipe.
+    const html = renderDocHtml(`| Path | Note |
+|------|------|
+| C:\\\\ | root |
+`)
+
+    const row = html.match(/<tbody><tr>.*?<\/tr>/)?.[0] ?? ''
+    expect(row.match(/<td>/g)).toHaveLength(2)
+    expect(row).toContain('<td>C:\\</td>')
+    expect(row).toContain('<td>root</td>')
+  })
+
+  it('round-trips every cell value the table escaper produces', () => {
+    const values = ['A | B', 'A \\| B', 'Post \\ Draft', '{ post: PostFormValues | null }']
+    const html = renderDocHtml(`| Value |
+|-------|
+${values.map((value) => `| ${escapeMarkdownTableCell(value)} |`).join('\n')}
+`)
+
+    const rows = html.match(/<tr><td>.*?<\/tr>/g) ?? []
+    expect(rows).toHaveLength(values.length)
+    rows.forEach((row, index) => {
+      expect(row.match(/<td>/g)).toHaveLength(1)
+      expect(row).toBe(`<tr><td>${values[index]}</td></tr>`)
+    })
   })
 
   it('passes mermaid fences through and escapes other code fences', () => {

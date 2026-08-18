@@ -113,19 +113,23 @@ function emphasis(escaped: string): string {
 }
 
 /**
- * Splits a table row on its unescaped pipes, unescaping `\|` back to a literal
- * pipe. `spec:generate` writes TypeScript unions that way, so splitting on
- * every pipe pushes each later cell one column right and leaves a stray
- * backslash behind — the row renders with more cells than the table has
- * headers.
+ * Splits a table row on its unescaped pipes, undoing the escaping
+ * `escapeMarkdownTableCell` applies: a backslash doubled, then every pipe
+ * escaped. Reading `\\` as one unit is what keeps the parity right — `\\|`
+ * is a literal backslash followed by a cell delimiter, not an escaped pipe.
+ *
+ * Splitting on every pipe instead pushes each later cell one column right and
+ * leaves a stray backslash behind, so a `screens.md` Props column holding a
+ * TypeScript union rendered with more cells than the table had headers.
  */
 function splitCells(row: string): string[] {
   const cells: string[] = []
   let cell = ''
 
   for (let cursor = 0; cursor < row.length; cursor += 1) {
-    if (row[cursor] === '\\' && row[cursor + 1] === '|') {
-      cell += '|'
+    const escaped = row[cursor] === '\\' && (row[cursor + 1] === '|' || row[cursor + 1] === '\\')
+    if (escaped) {
+      cell += row[cursor + 1]
       cursor += 1
     } else if (row[cursor] === '|') {
       cells.push(cell)
@@ -140,11 +144,15 @@ function splitCells(row: string): string[] {
 }
 
 function renderTable(rows: string[], resolveLink?: (target: string) => string): string {
+  // The outer pipes are optional and produce an empty cell on each side. Which
+  // trailing pipe is a delimiter is a question only the scan can answer, so the
+  // empties are dropped from its result rather than sliced off the row first.
   const cells = (row: string): string[] => {
-    let text = row.trim()
-    if (text.startsWith('|')) text = text.slice(1)
-    if (text.endsWith('|') && !text.endsWith('\\|')) text = text.slice(0, -1)
-    return splitCells(text).map((cell) => inline(cell.trim(), resolveLink))
+    const text = row.trim()
+    const parts = splitCells(text)
+    if (text.startsWith('|')) parts.shift()
+    if (parts.length > 1 && parts[parts.length - 1] === '') parts.pop()
+    return parts.map((cell) => inline(cell.trim(), resolveLink))
   }
 
   const [head, , ...body] = rows
