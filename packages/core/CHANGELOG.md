@@ -1,5 +1,125 @@
 # @guren/core
 
+## 1.7.0
+
+### Minor Changes
+
+- 9e1ce65: Apply `with()` constraint callbacks when eager loading
+
+  `QueryBuilder.with()` accepts the object form
+  `with({ posts: (q) => q.where('published', true) })` and stored each callback,
+  but nothing ever read the stored map. Eager loading iterated only the relation
+  names, so the callback silently did nothing and the relation loaded fully
+  unconstrained, while the JSDoc advertised the feature as supported.
+
+  Constraint callbacks now reach the query that fetches the relation, for every
+  relation type (`hasMany`, `hasOne`, `belongsTo`, `belongsToMany`,
+  `hasManyThrough`, `morphMany`, `morphTo`) on `get()`, `first()` and `paginate()`
+  alike. The callback runs with the foreign-key filter already on the builder, so
+  a `where()` narrows it, and on the same query options the relation would have
+  used anyway — a constrained relation still loads on its parent query's
+  transaction.
+
+  Each object key constrains exactly the level it names, in any order: `posts`
+  constrains the head, `posts.comments` constrains the leaf and leaves `posts`
+  unfiltered, and listing both constrains both.
+
+  Three behaviours are worth knowing, and are documented in the database guide:
+
+  - A top-level `orWhere()` inside a callback _widens_ the query rather than
+    narrowing it, since it ORs against the foreign-key filter. Group it to keep
+    it contained. `morphMany` no longer trusts the query alone for this — it
+    groups results on the morph type as well as the id, so a widened constraint
+    can no longer attach another model's rows to a parent.
+  - A `select()` must include the column the relation is keyed on, or the loader
+    cannot match rows back to their parent and the relation loads empty.
+  - Relations load with one batched query for all parent records, so `limit()`
+    caps that whole query rather than applying per parent; and for `morphTo` the
+    callback runs once per morph target, so it may only reference columns every
+    target shares.
+
+  Eager loading also no longer walks a relation path whose head another path
+  already covers. Loading `posts` and `posts.comments` together used to fetch
+  `posts` twice, and the second fetch replaced the very rows the first pass had
+  attached children to — so whichever path ran last won. Only the longest path is
+  walked now, which removes the redundant query and makes the result independent
+  of the order the relations were named in.
+
+  The static `Model.with()` is unchanged — its second argument filters parent
+  records, not the relation.
+
+  `@guren/core` is bumped alongside because it re-exports ORM types through an
+  explicit allowlist, and `EagerLoadConstraint` was added to it. Core's dependency
+  range on `@guren/orm` is a caret that already admits the new minor, so nothing
+  would otherwise put core in the release plan and the new type would never reach
+  `@guren/core` users.
+
+- 2be4b64: Bind a route parameter by a column other than the primary key
+
+  `bind: { id: Post }` resolves the parameter with `Post.findOrFail(value)`, so a
+  `/posts/:slug` route could not use route model binding: the router looked the
+  slug up as a primary key and answered 404 for every real post. The only way
+  through was an adapter object (`{ findOrFail: (v) => Post.findOrFail(v, 'slug') }`)
+  passed to both `bind:` and `this.model()`, which worked by accident of the
+  structural type and appeared nowhere in the docs.
+
+  The `bind` option now also accepts a `[Model, column]` tuple. The router calls
+  `Post.findOrFail(value, column)` and `this.model(Post)` returns that record, so
+  the class-only form and the tuple form read the same in the controller:
+
+  ```ts
+  router.get('/posts/:id',   { bind: { id: Post } },              [PostController, 'show'])
+  router.get('/posts/:slug', { bind: { slug: [Post, 'slug'] } },  [PostController, 'show'])
+
+  async show() {
+    const post = this.model(Post)
+  }
+  ```
+
+  Router-level `router.bind(param, ...)` accepts the same tuple, and its model
+  bindings — class or tuple — now feed `this.model(Post)` too. Values from
+  `router.bind()` still arrive as positional arguments after the context, in
+  path-parameter order; that is the only channel for a custom resolver function,
+  which has no model class to look the record up by. Because `this.model()` is
+  keyed by the model class, a route's own `bind` wins whenever both levels would
+  write the same class — a same-param override, or two params bound to one
+  model. The router-level binding still resolves and still fills its positional
+  slot, so a custom resolver's side effects are never skipped.
+
+  Neither channel ever landed on the Hono context: the routing guide told
+  readers to use `this.ctx.get('post')`, which has always been `undefined`. The
+  English and Japanese guides, the agent harness rules, and the `guren context`
+  API digest now describe the two channels that exist, including the one limit
+  `router.bind()` has always had — bindings resolve for controller-action routes,
+  never for inline handlers, which take Hono's `(ctx, next)`. A router test pins
+  each behavior, so the docs cannot drift from the implementation unnoticed
+  again.
+
+  `this.model(Post)` is also typed as the model's record now. Its return type
+  was read off `findOrFail`, which is generic in `this`, so `ReturnType` widened
+  it to the base row (`Record<string, unknown>`) and `post.id` came back
+  `unknown` — the docs claimed `PostRecord` all along. The record type now comes
+  from the `recordType` marker `defineModel()` sets; anything without a usable
+  marker — including an adapter whose `recordType` names something other than a
+  record — keeps the previous fallback.
+
+  `BindableModel` and the new `RouteModelBinding` type are exported from
+  `@guren/core` for code that builds `bind` maps outside a route call.
+
+### Patch Changes
+
+- Updated dependencies [c0a32ac]
+- Updated dependencies [9e1ce65]
+- Updated dependencies [7251560]
+- Updated dependencies [0fd78a8]
+- Updated dependencies [866919c]
+- Updated dependencies [32e03dd]
+- Updated dependencies [2be4b64]
+- Updated dependencies [39b17e7]
+  - @guren/cli@2.6.2
+  - @guren/orm@2.5.0
+  - @guren/server@2.8.0
+
 ## 1.6.2
 
 ### Patch Changes

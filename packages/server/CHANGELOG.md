@@ -1,5 +1,95 @@
 # @guren/server
 
+## 2.8.0
+
+### Minor Changes
+
+- 2be4b64: Bind a route parameter by a column other than the primary key
+
+  `bind: { id: Post }` resolves the parameter with `Post.findOrFail(value)`, so a
+  `/posts/:slug` route could not use route model binding: the router looked the
+  slug up as a primary key and answered 404 for every real post. The only way
+  through was an adapter object (`{ findOrFail: (v) => Post.findOrFail(v, 'slug') }`)
+  passed to both `bind:` and `this.model()`, which worked by accident of the
+  structural type and appeared nowhere in the docs.
+
+  The `bind` option now also accepts a `[Model, column]` tuple. The router calls
+  `Post.findOrFail(value, column)` and `this.model(Post)` returns that record, so
+  the class-only form and the tuple form read the same in the controller:
+
+  ```ts
+  router.get('/posts/:id',   { bind: { id: Post } },              [PostController, 'show'])
+  router.get('/posts/:slug', { bind: { slug: [Post, 'slug'] } },  [PostController, 'show'])
+
+  async show() {
+    const post = this.model(Post)
+  }
+  ```
+
+  Router-level `router.bind(param, ...)` accepts the same tuple, and its model
+  bindings — class or tuple — now feed `this.model(Post)` too. Values from
+  `router.bind()` still arrive as positional arguments after the context, in
+  path-parameter order; that is the only channel for a custom resolver function,
+  which has no model class to look the record up by. Because `this.model()` is
+  keyed by the model class, a route's own `bind` wins whenever both levels would
+  write the same class — a same-param override, or two params bound to one
+  model. The router-level binding still resolves and still fills its positional
+  slot, so a custom resolver's side effects are never skipped.
+
+  Neither channel ever landed on the Hono context: the routing guide told
+  readers to use `this.ctx.get('post')`, which has always been `undefined`. The
+  English and Japanese guides, the agent harness rules, and the `guren context`
+  API digest now describe the two channels that exist, including the one limit
+  `router.bind()` has always had — bindings resolve for controller-action routes,
+  never for inline handlers, which take Hono's `(ctx, next)`. A router test pins
+  each behavior, so the docs cannot drift from the implementation unnoticed
+  again.
+
+  `this.model(Post)` is also typed as the model's record now. Its return type
+  was read off `findOrFail`, which is generic in `this`, so `ReturnType` widened
+  it to the base row (`Record<string, unknown>`) and `post.id` came back
+  `unknown` — the docs claimed `PostRecord` all along. The record type now comes
+  from the `recordType` marker `defineModel()` sets; anything without a usable
+  marker — including an adapter whose `recordType` names something other than a
+  record — keeps the previous fallback.
+
+  `BindableModel` and the new `RouteModelBinding` type are exported from
+  `@guren/core` for code that builds `bind` maps outside a route call.
+
+### Patch Changes
+
+- 0fd78a8: Publish the application container so `Job.make()` works
+
+  `Job.make()` and the exported `resolve()` read the process-wide container that
+  `setContainer()` fills in, but nothing in the framework ever called it. Every
+  job that resolved a service — `this.make('mail')` inside `handle()`, the way a
+  controller resolves one — therefore threw `Container not initialized. Call
+setContainer() first.` the moment a driver ran it, whether that was `SyncDriver`
+  in-process or the worker behind `guren queue:work`.
+
+  `Application` now publishes its own container, so anything reaching for the
+  global finds the app's bindings.
+
+  It publishes at construction rather than in `boot()`: `guren queue:work`
+  bootstraps the app only far enough to read the queue driver, and an entry that
+  merely exports the application — with no `ready` or `bootstrap` export — is
+  accepted there and never booted. A job dispatched from module scope is in the
+  same position. Bindings a service provider registers still only exist after
+  `boot()`, as before; construction publishes the container, not its contents.
+
+  Publishing is the constructor's last step, so an application that fails to
+  build leaves the previous one's container in place instead of replacing it with
+  a half-built one. Otherwise the most recently constructed application wins,
+  which is what `bun --hot` needs — a reloaded entry replaces the stale container
+  rather than being ignored.
+
+- Updated dependencies [9e1ce65]
+- Updated dependencies [7251560]
+- Updated dependencies [866919c]
+- Updated dependencies [32e03dd]
+- Updated dependencies [39b17e7]
+  - @guren/orm@2.5.0
+
 ## 2.7.0
 
 ### Minor Changes
