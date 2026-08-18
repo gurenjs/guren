@@ -888,6 +888,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     id: TRecordFor<T>[keyof TRecordFor<T> & string],
     relations: K | readonly K[],
     key?: keyof TRecordFor<T> & string,
+    queryOptions?: ModelQueryOptions,
   ): Promise<(TRecordFor<T> & RelationTypePick<T, K | readonly K[]>) | null>
 
   static async findWith<T extends typeof Model, Names extends RelationNames>(
@@ -895,8 +896,9 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     id: TRecordFor<T>[keyof TRecordFor<T> & string],
     relations: Names,
     key?: keyof TRecordFor<T> & string,
+    queryOptions?: ModelQueryOptions,
   ): Promise<(TRecordFor<T> & RelationTypePick<T, Names>) | null> {
-    const record = await this.find(id, key)
+    const record = await this.find(id, key, queryOptions)
     if (record == null) return null
 
     const relationList = normalizeRelations(relations)
@@ -906,7 +908,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
 
     const copy = { ...record }
     for (const rel of relationList) {
-      await this.loadRelationInto([copy], rel)
+      await this.loadRelationInto([copy], rel, queryOptions)
     }
     return copy as TRecordFor<T> & RelationTypePick<T, Names>
   }
@@ -930,6 +932,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     id: TRecordFor<T>[keyof TRecordFor<T> & string],
     relations: K | readonly K[],
     key?: keyof TRecordFor<T> & string,
+    queryOptions?: ModelQueryOptions,
   ): Promise<TRecordFor<T> & RelationTypePick<T, K | readonly K[]>>
 
   static async findWithOrFail<T extends typeof Model, Names extends RelationNames>(
@@ -937,8 +940,9 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     id: TRecordFor<T>[keyof TRecordFor<T> & string],
     relations: Names,
     key?: keyof TRecordFor<T> & string,
+    queryOptions?: ModelQueryOptions,
   ): Promise<TRecordFor<T> & RelationTypePick<T, Names>> {
-    const record = await this.findOrFail(id, key)
+    const record = await this.findOrFail(id, key, queryOptions)
 
     const relationList = normalizeRelations(relations)
     if (relationList.length === 0) {
@@ -947,7 +951,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
 
     const copy = { ...record }
     for (const rel of relationList) {
-      await this.loadRelationInto([copy], rel)
+      await this.loadRelationInto([copy], rel, queryOptions)
     }
     return copy as TRecordFor<T> & RelationTypePick<T, Names>
   }
@@ -1590,14 +1594,16 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     this: T,
     relations: K | readonly K[],
     options?: PaginateOptions<TRecordFor<T>>,
+    queryOptions?: ModelQueryOptions,
   ): Promise<PaginatedResult<TRecordFor<T> & RelationTypePick<T, K | readonly K[]>>>
 
   static async withPaginate<T extends typeof Model, Names extends RelationNames>(
     this: T,
     relations: Names,
     options: PaginateOptions<TRecordFor<T>> = {},
+    queryOptions?: ModelQueryOptions,
   ): Promise<PaginatedResult<TRecordFor<T> & RelationTypePick<T, Names>>> {
-    const result = await this.paginate(options)
+    const result = await this.paginate(options, queryOptions)
     const relationList = normalizeRelations(relations)
 
     if (relationList.length === 0 || result.data.length === 0) {
@@ -1607,7 +1613,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     const records = result.data.map((record) => ({ ...record }))
 
     for (const relationName of relationList) {
-      await this.loadRelationInto(records, relationName)
+      await this.loadRelationInto(records, relationName, queryOptions)
     }
 
     return {
@@ -1916,14 +1922,18 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     this: T,
     relations: K | readonly K[],
     where?: WhereClauseFor<T>,
+    queryOptions?: ModelQueryOptions,
   ): Promise<Array<TRecordFor<T> & RelationTypePick<T, K | readonly K[]>>>
 
   static async with<T extends typeof Model, Names extends RelationNames>(
     this: T,
     relations: Names,
     where?: WhereClauseFor<T>,
+    queryOptions?: ModelQueryOptions,
   ): Promise<Array<TRecordFor<T> & RelationTypePick<T, Names>>> {
-    const records = where ? await this.where(where) : await this.all()
+    const records = where
+      ? await this.newQuery(queryOptions).where(where as Partial<Record<string, unknown>>).get()
+      : await this.all(queryOptions)
     if (!records.length) {
       return records as Array<TRecordFor<T> & RelationTypePick<T, Names>>
     }
@@ -1935,7 +1945,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
 
     const copies = records.map((record) => ({ ...record }))
     for (const relationName of relationList) {
-      await this.loadRelationInto(copies, relationName)
+      await this.loadRelationInto(copies, relationName, queryOptions)
     }
 
     return copies as Array<TRecordFor<T> & RelationTypePick<T, Names>>
@@ -2060,6 +2070,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     this: T,
     records: Array<PlainObject>,
     relationName: string,
+    queryOptions?: ModelQueryOptions,
   ): Promise<void> {
     const [head, ...rest] = relationName.split('.')
     const definition = this.getRelationDefinition(head)
@@ -2070,25 +2081,25 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
 
     switch (definition.type) {
       case 'hasMany':
-        await this.loadHasMany(records, definition)
+        await this.loadHasMany(records, definition, queryOptions)
         break
       case 'hasOne':
-        await this.loadHasOne(records, definition)
+        await this.loadHasOne(records, definition, queryOptions)
         break
       case 'belongsTo':
-        await this.loadBelongsTo(records, definition)
+        await this.loadBelongsTo(records, definition, queryOptions)
         break
       case 'belongsToMany':
-        await this.loadBelongsToMany(records, definition)
+        await this.loadBelongsToMany(records, definition, queryOptions)
         break
       case 'hasManyThrough':
-        await this.loadHasManyThrough(records, definition)
+        await this.loadHasManyThrough(records, definition, queryOptions)
         break
       case 'morphMany':
-        await this.loadMorphMany(records, definition)
+        await this.loadMorphMany(records, definition, queryOptions)
         break
       case 'morphTo':
-        await this.loadMorphTo(records, definition)
+        await this.loadMorphTo(records, definition, queryOptions)
         break
     }
 
@@ -2122,39 +2133,43 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     }
 
     const related = await resolveModelReference(definition.related)
-    await related.loadRelationInto(children, rest.join('.'))
+    await related.loadRelationInto(children, rest.join('.'), queryOptions)
   }
 
   protected static async loadHasMany(
     records: Array<PlainObject>,
     definition: HasManyRelationDefinition,
+    queryOptions?: ModelQueryOptions,
   ): Promise<void> {
     const { foreignKey, localKey, name } = definition
     const related = await resolveModelReference(definition.related)
-    await loadRelationData(records, name, related, localKey, foreignKey, true)
+    await loadRelationData(records, name, related, localKey, foreignKey, true, queryOptions)
   }
 
   protected static async loadHasOne(
     records: Array<PlainObject>,
     definition: HasOneRelationDefinition,
+    queryOptions?: ModelQueryOptions,
   ): Promise<void> {
     const { foreignKey, localKey, name } = definition
     const related = await resolveModelReference(definition.related)
-    await loadRelationData(records, name, related, localKey, foreignKey, false)
+    await loadRelationData(records, name, related, localKey, foreignKey, false, queryOptions)
   }
 
   protected static async loadBelongsTo(
     records: Array<PlainObject>,
     definition: BelongsToRelationDefinition,
+    queryOptions?: ModelQueryOptions,
   ): Promise<void> {
     const { foreignKey, ownerKey, name } = definition
     const related = await resolveModelReference(definition.related)
-    await loadRelationData(records, name, related, foreignKey, ownerKey, false)
+    await loadRelationData(records, name, related, foreignKey, ownerKey, false, queryOptions)
   }
 
   protected static async loadBelongsToMany(
     records: Array<PlainObject>,
     definition: BelongsToManyRelationDefinition,
+    queryOptions?: ModelQueryOptions,
   ): Promise<void> {
     const { pivotTable, foreignPivotKey, relatedPivotKey, parentKey, relatedKey, name } = definition
     const related = await resolveModelReference(definition.related)
@@ -2175,7 +2190,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     const adapter = this.getAdapter()
     const pivotRows = await adapter.findMany<PlainObject>(pivotTable, {
       where: { [foreignPivotKey]: parentValues } as WhereClause,
-    })
+    }, queryOptions)
 
     // Build a map: parentKeyValue -> relatedKeyValue[]
     const pivotMap = new Map<unknown, unknown[]>()
@@ -2196,7 +2211,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     }
 
     // Step 2: Query related table for those IDs
-    const relatedRecords = await related.where({
+    const relatedRecords = await related.newQuery(queryOptions).where({
       [relatedKey]: Array.from(allRelatedIds),
     } as WhereClause) as PlainObject[]
 
@@ -2223,6 +2238,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   protected static async loadHasManyThrough(
     records: Array<PlainObject>,
     definition: HasManyThroughRelationDefinition,
+    queryOptions?: ModelQueryOptions,
   ): Promise<void> {
     const { firstKey, secondKey, localKey, secondLocalKey, name } = definition
     const related = await resolveModelReference(definition.related)
@@ -2241,7 +2257,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     }
 
     // Step 1: Query through model for intermediate records
-    const throughRecords = await through.where({
+    const throughRecords = await through.newQuery(queryOptions).where({
       [firstKey]: localValues,
     } as WhereClause) as PlainObject[]
 
@@ -2264,7 +2280,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     }
 
     // Step 2: Query related model using through model's keys
-    const relatedRecords = await related.where({
+    const relatedRecords = await related.newQuery(queryOptions).where({
       [secondKey]: Array.from(allThroughIds),
     } as WhereClause) as PlainObject[]
 
@@ -2296,6 +2312,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   protected static async loadMorphMany(
     records: Array<PlainObject>,
     definition: MorphManyRelationDefinition,
+    queryOptions?: ModelQueryOptions,
   ): Promise<void> {
     const { morphName, localKey, name } = definition
     const related = await resolveModelReference(definition.related)
@@ -2312,7 +2329,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       return
     }
 
-    const allRelated = await related.where({
+    const allRelated = await related.newQuery(queryOptions).where({
       [typeColumn]: parentType,
       [idColumn]: localValues,
     } as WhereClause) as PlainObject[]
@@ -2333,6 +2350,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   protected static async loadMorphTo(
     records: Array<PlainObject>,
     definition: MorphToRelationDefinition,
+    queryOptions?: ModelQueryOptions,
   ): Promise<void> {
     const { morphName, name } = definition
     const typeColumn = `${morphName}Type`
@@ -2355,7 +2373,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       const modelClass = morphMap[type]
       if (!modelClass) continue
       const uniqueIds = Array.from(new Set(ids))
-      const results = await modelClass.where({ id: uniqueIds } as WhereClause) as PlainObject[]
+      const results = await modelClass.newQuery(queryOptions).where({ id: uniqueIds } as WhereClause) as PlainObject[]
       const idMap = new Map<unknown, PlainObject>()
       for (const r of results) idMap.set(r.id, { ...r })
       resolved.set(type, idMap)
@@ -2380,6 +2398,7 @@ async function loadRelationData(
   parentKey: string,
   relatedKey: string,
   isArray: boolean,
+  queryOptions?: ModelQueryOptions,
 ): Promise<void> {
   const values = Array.from(
     new Set(records.map((r) => r[parentKey]).filter((v): v is unknown => v != null)),
@@ -2392,7 +2411,7 @@ async function loadRelationData(
     return
   }
 
-  const relatedRecords = await related.where({ [relatedKey]: values } as WhereClause)
+  const relatedRecords = await related.newQuery(queryOptions).where({ [relatedKey]: values } as WhereClause)
   const map = new Map<unknown, PlainObject | PlainObject[]>()
 
   for (const item of relatedRecords as PlainObject[]) {
