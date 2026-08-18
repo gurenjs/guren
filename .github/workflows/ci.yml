@@ -126,6 +126,25 @@ jobs:
       - name: Docs audit
         run: bun run audit:docs
 
+      # The agent-catalog payload (RFC 0011) is generated, not committed, and
+      # published to gurenjs/agent-skills. Render it here and assert the facts
+      # it claims about the CLI: every `guren` command and flag a skill names is
+      # registered, every target is in AGENT_TARGETS, the Agent Plugins v1
+      # manifest conforms, and — because the plugin's version is the CLI's — a
+      # change to any catalog input carries a @guren/cli changeset. The base ref
+      # is fetched explicitly: the checkout above is shallow, so deepen both
+      # sides until a merge base exists (bounded), and the script falls back
+      # to a two-dot diff if none is found — over-reporting, never under.
+      - name: Agent catalog audit
+        run: |
+          base="${{ github.base_ref || 'main' }}"
+          git fetch --no-tags --depth=1 origin "$base"
+          for _ in 1 2 3 4 5 6; do
+            git merge-base HEAD "origin/$base" >/dev/null 2>&1 && break
+            git fetch --no-tags --deepen=50 origin "$base" HEAD || true
+          done
+          bun run audit:agent-catalog --base "origin/$base"
+
       - name: Dependency audit
         run: bun run audit:deps
 
