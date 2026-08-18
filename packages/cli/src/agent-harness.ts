@@ -12,6 +12,7 @@ import {
   planComponents,
   type AgentTarget,
   type HarnessComponent,
+  type PlannedFile,
   type TemplateFiles,
 } from './agent-targets'
 
@@ -53,6 +54,13 @@ export interface AgentHarnessOptions {
    * candidate first, and deletion stays an explicit opt-in.
    */
   prune?: boolean
+  /**
+   * Skill directory names the harness used to ship and no longer plans, which
+   * `sync` still owns for stale reporting and prune. Defaults to the
+   * framework's own `RETIRED_CANONICAL_SKILLS`; exposed so tests can exercise
+   * the retired path while that list is empty.
+   */
+  retiredSkills?: readonly string[]
 }
 
 export interface AgentHarnessResult {
@@ -189,45 +197,72 @@ async function detectInstalledComponents(
 async function findStaleManagedFiles(
   cwd: string,
   components: HarnessComponent[],
-  plannedPathsLower: ReadonlySet<string>,
+  plan: readonly PlannedFile[],
+  retiredSkills: readonly string[] | undefined,
 ): Promise<string[]> {
+  const plannedPathsLower = new Set(plan.map((file) => file.path.toLowerCase()))
   const stale: string[] = []
-  for (const namespace of managedNamespaces(components)) {
-    const root = join(cwd, namespace.dir)
-    // never claim through a symlinked root: readdir and rm would follow it,
-    // and a claim is only safe over files that live inside the app
+
+  /**
+   * One walk over one directory. `recursive` is the only knob: a `tree` and
+   * each named child of a `children` claim walk their whole subtree; a
+   * `pattern` looks only at the top level and only at framework-named files.
+   * The lstat guard is per walk, so a symlinked child is skipped exactly the
+   * way a symlinked root is — readdir and rm would follow it, and a claim is
+   * only safe over files that live inside the app.
+   */
+  const walk = async (
+    dir: string,
+    recursive: boolean,
+    accept: (entry: Dirent) => boolean,
+  ): Promise<void> => {
+    const root = join(cwd, dir)
     let rootInfo
     try {
       rootInfo = await lstat(root)
     } catch {
-      continue // namespace directory does not exist — nothing to clean
+      return // directory does not exist — nothing to clean
     }
     if (!rootInfo.isDirectory()) {
-      continue
+      return
     }
     let entries: Dirent[]
     try {
-      entries = await readdir(root, {
-        recursive: namespace.kind === 'tree',
-        withFileTypes: true,
-      })
+      entries = await readdir(root, { recursive, withFileTypes: true })
     } catch {
-      continue
+      return
     }
     for (const entry of entries) {
-      if (!entry.isFile()) {
-        continue
-      }
-      if (
-        namespace.kind === 'pattern' &&
-        !(entry.name.startsWith(namespace.prefix) && entry.name.endsWith(namespace.suffix))
-      ) {
+      if (!entry.isFile() || !accept(entry)) {
         continue
       }
       const relPath = toPosixRelative(cwd, join(entry.parentPath, entry.name))
       if (!plannedPathsLower.has(relPath.toLowerCase())) {
         stale.push(relPath)
       }
+    }
+  }
+
+  const everything = (): boolean => true
+  for (const namespace of managedNamespaces(components, plan, retiredSkills)) {
+    switch (namespace.kind) {
+      case 'tree':
+        await walk(namespace.dir, true, everything)
+        break
+      case 'pattern':
+        await walk(
+          namespace.dir,
+          false,
+          (entry) => entry.name.startsWith(namespace.prefix) && entry.name.endsWith(namespace.suffix),
+        )
+        break
+      case 'children':
+        // only the named children are ever entered; a sibling directory
+        // an external installer put there is not read, let alone claimed
+        for (const name of namespace.names) {
+          await walk(`${namespace.dir}/${name}`, true, everything)
+        }
+        break
     }
   }
   return stale.sort()
@@ -279,13 +314,7 @@ export async function installAgentHarness(options: AgentHarnessOptions = {}): Pr
   // Stale cleanup is a sync concern: init installs into places it has never
   // written, so "not in the plan" carries no leftover signal there.
   const stale =
-    mode === 'sync'
-      ? await findStaleManagedFiles(
-          cwd,
-          components,
-          new Set(plan.map((file) => file.path.toLowerCase())),
-        )
-      : []
+    mode === 'sync' ? await findStaleManagedFiles(cwd, components, plan, options.retiredSkills) : []
   const pruned = Boolean(options.prune) && stale.length > 0
   if (pruned) {
     for (const relPath of stale) {
