@@ -6,7 +6,7 @@
   "scripts": {
     "codegen": "bun run prerender:stub && cd .. && bun packages/cli/src/bin.ts codegen --app web --routes routes/web.ts --out types/generated/routes.d.ts --pages resources/js/pages --pagesOut .guren/pages.gen.ts --force",
     "routes:types": "bun run codegen",
-    "prerender": "bun scripts/prerender-docs.ts",
+    "prerender": "bun scripts/prerender-docs.ts && bun scripts/prerender-docs-viewer.ts",
     "prerender:stub": "bun scripts/prerender-docs.ts --stub",
     "dev": "bun run codegen && bun run prerender:stub && bun run dev:server",
     "dev:server": "bun run --watch bin/serve.ts",
@@ -43,6 +43,7 @@
     "@vitejs/plugin-react": "^6.0.0",
     "drizzle-kit": "1.0.0-rc.4",
     "marked": "^15.0.11",
+    "mermaid": "^11.16.1",
     "marked-highlight": "^2.2.3",
     "shiki": "^3.15.0",
     "tailwindcss": "^4.2.2",

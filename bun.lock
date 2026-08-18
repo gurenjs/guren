@@ -15,7 +15,7 @@
     },
     "examples/api": {
       "name": "@guren/example-api",
-      "version": "0.1.17",
+      "version": "0.1.18",
       "dependencies": {
         "@guren/cli": "workspace:*",
         "@guren/core": "workspace:*",
@@ -68,13 +68,13 @@
     },
     "packages/cli": {
       "name": "@guren/cli",
-      "version": "2.6.0",
+      "version": "2.6.1",
       "bin": {
         "guren": "./dist/bin.js",
       },
       "dependencies": {
         "@babel/parser": "^7.24.7",
-        "@guren/core": "^1.6.1",
+        "@guren/core": "^1.6.2",
         "@guren/orm": "^2.4.0",
         "citty": "^0.1.6",
         "consola": "^3.4.2",
@@ -92,12 +92,12 @@
     },
     "packages/core": {
       "name": "@guren/core",
-      "version": "1.6.1",
+      "version": "1.6.2",
       "bin": {
         "guren": "./dist/bin.js",
       },
       "dependencies": {
-        "@guren/cli": "^2.5.0",
+        "@guren/cli": "^2.6.1",
         "@guren/orm": "^2.4.0",
         "@guren/server": "^2.6.0",
       },
@@ -110,7 +110,7 @@
     },
     "packages/create-app": {
       "name": "create-guren-app",
-      "version": "1.8.1",
+      "version": "1.8.2",
       "bin": {
         "create-guren-app": "./dist/cli.js",
       },
@@ -181,9 +181,9 @@
     },
     "packages/plugin-cloudflare": {
       "name": "@guren/plugin-cloudflare",
-      "version": "0.3.0",
+      "version": "0.3.1",
       "dependencies": {
-        "@guren/core": "^1.5.2",
+        "@guren/core": "^1.6.2",
         "citty": "^0.1.6",
       },
       "devDependencies": {
@@ -196,7 +196,7 @@
     },
     "packages/plugin-lambda": {
       "name": "@guren/plugin-lambda",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "dependencies": {
         "@guren/core": "^1.4.0",
         "citty": "^0.1.6",
@@ -219,7 +219,7 @@
     },
     "packages/plugin-vercel": {
       "name": "@guren/plugin-vercel",
-      "version": "0.2.1",
+      "version": "0.3.0",
       "dependencies": {
         "@guren/core": "^1.4.0",
       },
@@ -290,7 +290,7 @@
     },
     "web": {
       "name": "web",
-      "version": "0.1.17",
+      "version": "0.1.18",
       "dependencies": {
         "@guren/cli": "workspace:*",
         "@guren/core": "workspace:*",
@@ -315,6 +315,7 @@
         "drizzle-kit": "1.0.0-rc.4",
         "marked": "^15.0.11",
         "marked-highlight": "^2.2.3",
+        "mermaid": "^11.16.1",
         "shiki": "^3.15.0",
         "tailwindcss": "^4.2.2",
         "typescript": "^5.4.0",

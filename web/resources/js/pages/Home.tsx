@@ -306,9 +306,10 @@ export default function Home({ codeExamples }: Props) {
             </div>
             <figure>
               <a
-                href="/docs-graph.png"
+                href="/_guren/docs"
                 target="_blank"
                 rel="noreferrer"
+                aria-label="Open the blog example's docs graph in the Guren docs viewer"
                 className="block overflow-hidden rounded-xl border border-white/10 bg-white/[0.03] p-2 transition hover:border-crimson-400/40"
               >
                 <img
@@ -322,9 +323,12 @@ export default function Home({ codeExamples }: Props) {
               </a>
               <figcaption className="mt-3 text-sm leading-relaxed text-white/50">
                 Your app&apos;s knowledge graph, drawn from the blog example&apos;s real docs —
-                plain markdown ADRs that declare the entities they govern and link to each
-                other with <code className="text-white/70">[[wiki-links]]</code>. Rendered live
-                at <code className="text-crimson-300/90">/_guren/docs</code>; broken links fail{' '}
+                plain markdown ADRs that declare the entities they govern in{' '}
+                <code className="text-white/70">frontmatter</code>, and link to the code and
+                to each other in the body.{' '}
+                <span className="text-white/70">Open the example&apos;s graph</span> — the same
+                screen your own docs get at <code className="text-crimson-300/90">/_guren/docs</code>{' '}
+                while you develop; broken links fail{' '}
                 <code className="text-white/70">guren check --docs</code> in CI.
               </figcaption>
             </figure>
