@@ -390,6 +390,69 @@ Nested relations use dot notation:
 const users = await User.with('posts.comments')
 ```
 
+On the QueryBuilder, the object form of `with()` takes a callback per relation
+to constrain the query that loads it. The callback receives that relation's
+query builder with the foreign-key filter already on it, so a `where()` narrows
+which related rows load:
+
+```ts
+const users = await User.newQuery()
+  .with({ posts: (q) => q.where('published', true) })
+  .get()
+
+users[0].posts // only the published posts
+```
+
+Each object key constrains exactly the level it names, and the order of the
+keys does not matter. A dotted key constrains the leaf and leaves the head
+unfiltered; list both keys to constrain both levels:
+
+```ts
+// `posts` loads unfiltered, `comments` are filtered
+await User.newQuery()
+  .with({ 'posts.comments': (q) => q.where('approved', true) })
+  .get()
+
+// both levels filtered
+await User.newQuery()
+  .with({
+    posts: (q) => q.where('published', true),
+    'posts.comments': (q) => q.where('approved', true),
+  })
+  .get()
+```
+
+> [!WARNING]
+> A top-level `orWhere()` inside a callback **widens** the query instead of
+> narrowing it, because it ORs against the foreign-key filter the loader
+> applied. Keep it grouped:
+> `q.where((g) => g.where('a', 1).orWhere('b', 2))`.
+>
+> A `select()` must include the column the relation is keyed on (the foreign
+> key for `hasMany`/`hasOne`, the owner key for `belongsTo`). Without it the
+> loader cannot match rows back to their parent and the relation loads empty.
+
+> [!NOTE]
+> Relations are loaded with one batched query for all parent records, so
+> `limit()` inside a constraint caps that whole query rather than applying per
+> parent. For `morphTo`, the callback runs once per morph target, so it may only
+> reference columns every target shares.
+
+For `belongsToMany` and `hasManyThrough`, the callback constrains the query for
+the **related** model — not the pivot or through-table lookup that finds which
+rows to fetch. Filter on the related model's own columns:
+
+```ts
+// keeps the `news` tags of each post; the pivot lookup is untouched
+await Post.newQuery()
+  .with({ tags: (q) => q.where('label', 'news') })
+  .get()
+```
+
+The static `Model.with()` is a different signature — its second argument filters
+the *parent* records, not the relation. Use `Model.newQuery().with({ ... })` for
+constraint callbacks.
+
 Nested paths type only the head segment from `relationTypes`. To get typed
 children, declare the nested shape inside the head relation's record type:
 

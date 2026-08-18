@@ -66,6 +66,19 @@ export interface QueryBuilderOptions {
 }
 
 /**
+ * A callback that further constrains the query used to fetch an eager-loaded
+ * relation. Registered through the object form of {@link QueryBuilder.with}.
+ */
+export type EagerLoadConstraint = (q: QueryBuilder) => void
+
+/**
+ * Constraint callbacks keyed by the relation path they constrain. A key names
+ * the exact level it applies to: `posts` constrains the head, `posts.comments`
+ * constrains the leaf.
+ */
+export type EagerLoadConstraints = ReadonlyMap<string, EagerLoadConstraint>
+
+/**
  * Fluent query builder for the Guren ORM.
  *
  * Provides a chainable API for constructing database queries with
@@ -98,7 +111,7 @@ export class QueryBuilder<
   private table: unknown
   private adapter: ORMAdapter
   private eagerLoad: string[] = []
-  private eagerLoadConstraints: Map<string, (q: QueryBuilder<any>) => void> = new Map() // eslint-disable-line @typescript-eslint/no-explicit-any
+  private eagerLoadConstraints: Map<string, EagerLoadConstraint> = new Map()
 
   constructor(modelClass: typeof Model, options: { trx?: unknown } = {}) {
     this.modelClass = modelClass
@@ -316,6 +329,20 @@ export class QueryBuilder<
    * Supports string names, arrays, dot notation for nested relations,
    * and constraint callbacks.
    *
+   * A constraint callback receives the query builder used to fetch that
+   * relation, and runs after the foreign-key filter is already on it, so a
+   * `where()` narrows that filter. Each object key constrains exactly the
+   * level it names, in any order: `posts` constrains the head,
+   * `posts.comments` constrains the leaf and leaves `posts` unfiltered.
+   *
+   * Three things behave differently than they may look:
+   * - `orWhere()` at the top level of a callback *widens* the query rather
+   *   than narrowing it, because it ORs against the foreign-key filter. Group
+   *   it (`q.where((g) => g.where(...).orWhere(...))`) to keep it contained.
+   * - `select()` must include the column the relation is keyed on, or the
+   *   loader cannot match rows back to their parent and the relation is empty.
+   * - `limit()` applies to the single batched query, not per parent record.
+   *
    * @example
    * // Simple
    * await User.where('active', true).with('posts').get()
@@ -325,8 +352,16 @@ export class QueryBuilder<
    *
    * // Nested (dot notation)
    * await User.where('active', true).with('posts.comments').get()
+   *
+   * // Constrained
+   * await User.newQuery().with({ posts: (q) => q.where('published', true) }).get()
+   *
+   * // Constrained at both levels
+   * await User.newQuery()
+   *   .with({ posts: (q) => q.where('published', true), 'posts.comments': (q) => q.orderBy('id') })
+   *   .get()
    */
-  with(...relations: (string | Record<string, (q: QueryBuilder<any>) => void>)[]): this { // eslint-disable-line @typescript-eslint/no-explicit-any
+  with(...relations: (string | Record<string, EagerLoadConstraint>)[]): this {
     for (const rel of relations) {
       if (typeof rel === 'string') {
         if (!this.eagerLoad.includes(rel)) this.eagerLoad.push(rel)
@@ -696,6 +731,8 @@ export class QueryBuilder<
    * Supports dot notation for nested relations at any depth
    * (e.g., 'posts.comments.author') — the full path is delegated to
    * Model.loadRelationInto, which recurses through the relation chain.
+   * Constraint callbacks registered by the object form of `with()` travel
+   * alongside, keyed by the path segment each one constrains.
    *
    * The builder's `trx` goes with it: a relation loaded for rows read inside
    * a transaction has to be read on that same handle, or the parents come
@@ -706,12 +743,23 @@ export class QueryBuilder<
     if (this.eagerLoad.length === 0 || results.length === 0) return results
 
     const copies = results.map((r) => ({ ...r }))
-    const model = this.modelClass as typeof Model & {
-      loadRelationInto(records: PlainObject[], name: string, queryOptions?: AdapterQueryOptions): Promise<void>
-    }
 
-    for (const relation of this.eagerLoad) {
-      await model.loadRelationInto(copies as PlainObject[], relation, { trx: this.options.trx })
+    // A path whose head another path also walks is skipped: loading `posts`
+    // and then `posts.comments` reloads `posts` and replaces the very objects
+    // the first pass attached children to. Walking only the longest path is
+    // result-equivalent because constraints are keyed by full path, so each
+    // level still gets its own callback.
+    const paths = this.eagerLoad.filter(
+      (name) => !this.eagerLoad.some((other) => other.startsWith(`${name}.`)),
+    )
+
+    for (const relation of paths) {
+      await this.modelClass.loadRelationInto(
+        copies as PlainObject[],
+        relation,
+        { trx: this.options.trx },
+        this.eagerLoadConstraints,
+      )
     }
 
     return copies as TResult[]
