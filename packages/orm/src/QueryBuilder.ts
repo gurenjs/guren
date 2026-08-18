@@ -696,17 +696,22 @@ export class QueryBuilder<
    * Supports dot notation for nested relations at any depth
    * (e.g., 'posts.comments.author') — the full path is delegated to
    * Model.loadRelationInto, which recurses through the relation chain.
+   *
+   * The builder's `trx` goes with it: a relation loaded for rows read inside
+   * a transaction has to be read on that same handle, or the parents come
+   * from the transaction and their children from the pool — which on
+   * Postgres/MySQL means uncommitted parents get a null relation back.
    */
   private readonly loadEagerRelations = async (results: TResult[]): Promise<TResult[]> => {
     if (this.eagerLoad.length === 0 || results.length === 0) return results
 
     const copies = results.map((r) => ({ ...r }))
     const model = this.modelClass as typeof Model & {
-      loadRelationInto(records: PlainObject[], name: string): Promise<void>
+      loadRelationInto(records: PlainObject[], name: string, queryOptions?: AdapterQueryOptions): Promise<void>
     }
 
     for (const relation of this.eagerLoad) {
-      await model.loadRelationInto(copies as PlainObject[], relation)
+      await model.loadRelationInto(copies as PlainObject[], relation, { trx: this.options.trx })
     }
 
     return copies as TResult[]

@@ -29,6 +29,7 @@ export type {
   PaginatedResult,
   ModelPaginationMeta,
   ORMAdapter,
+  ModelQueryOptions,
   TransactionHandle,
   TransactionModelScope,
   CastType,
