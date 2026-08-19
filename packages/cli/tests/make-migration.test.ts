@@ -1,8 +1,46 @@
 import { describe, expect, it, mock } from 'bun:test'
-import { mkdir, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { spawnSync } from 'node:child_process'
+import { existsSync, readdirSync } from 'node:fs'
+import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises'
+import { dirname, join, resolve } from 'node:path'
 import { createTempWorkspace } from './helpers'
 import * as realUtils from '../src/utils'
+
+const repoRoot = resolve(import.meta.dir, '../../..')
+
+/**
+ * The real `drizzle-kit` bin, and a directory it can resolve `drizzle-orm`
+ * from, or undefined when neither is installed.
+ *
+ * Resolved from `examples/blog`, which depends on both — bun's isolated
+ * layout keeps them out of the root `node_modules`, so a plain lookup from
+ * this package finds nothing. Returning undefined rather than throwing keeps
+ * the suite runnable in a checkout that has not installed the examples.
+ */
+function resolveDrizzleKit(): { bin: string; nodeModules: string } | undefined {
+  const from = join(repoRoot, 'examples/blog')
+  try {
+    // `Bun.resolveSync` can answer from the root `.bun/` store even when blog
+    // itself was never installed, which would leave the symlink below dangling
+    // and hard-fail the run we meant to skip.
+    if (!existsSync(join(from, 'node_modules'))) {
+      return undefined
+    }
+
+    const bin = join(dirname(Bun.resolveSync('drizzle-kit/package.json', from)), 'bin.cjs')
+    // The generated schema imports `drizzle-orm/pg-core`, which drizzle-kit
+    // resolves from the *workspace* with node's resolver, not from its own
+    // install. Throws here when it is absent, which is the skip signal.
+    Bun.resolveSync('drizzle-orm/pg-core', from)
+
+    // blog's own link farm, not the resolved path: bun's isolated layout keeps
+    // the real package under the root `.bun/` store, where node's resolver
+    // finds nothing by bare specifier.
+    return { bin, nodeModules: join(from, 'node_modules') }
+  } catch {
+    return undefined
+  }
+}
 
 const spawnCalls: Array<{ command: string; args: string[] }> = []
 
@@ -101,6 +139,12 @@ describe('makeMigration', () => {
   it('applies overrides and slugifies names', async () => {
     const workspace = await createTempWorkspace('guren-cli-make-migration-override-')
     try {
+      await writeFile(
+        join(workspace.dir, 'drizzle.config.ts'),
+        "export default { dialect: 'postgresql' }",
+        'utf8',
+      )
+
       await makeMigration({
         name: 'Add Users',
         schema: 'db/schema.ts',
@@ -113,6 +157,149 @@ describe('makeMigration', () => {
       expect(call?.args).toContain('--out')
       expect(call?.args).toContain('db/migrations')
       expect(call?.args).toContain('--name=add_users')
+      // Overrides drop `--config`, which drizzle-kit refuses alongside other
+      // flags, so the dialect has to be restated or the run cannot succeed.
+      expect(call?.args?.includes('--config')).toBe(false)
+      expect(call?.args).toContain('--dialect')
+      expect(call?.args).toContain('postgresql')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('carries the dialect onto the documented --schema/--out override flow', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-migration-documented-')
+    try {
+      // The exact invocation docs/ja/guides/database.md prints under
+      // "マイグレーションの生成". Before the dialect was carried across, this
+      // failed with `dialect: undefined` against a config that declared one.
+      await writeFile(
+        join(workspace.dir, 'drizzle.config.ts'),
+        "export default { dialect: 'postgresql', schema: './db/schema.ts', out: './db/migrations' }",
+        'utf8',
+      )
+
+      await makeMigration({ schema: './custom/schema.ts', out: './custom/migrations' })
+
+      const call = spawnCalls.pop()
+      expect(call?.args).toEqual([
+        'x',
+        'drizzle-kit',
+        'generate',
+        '--dialect',
+        'postgresql',
+        '--schema',
+        './custom/schema.ts',
+        '--out',
+        './custom/migrations',
+      ])
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('carries the driver, which selects a transport within the dialect', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-migration-driver-')
+    try {
+      await writeFile(
+        join(workspace.dir, 'drizzle.config.ts'),
+        "export default { dialect: 'postgresql', driver: 'aws-data-api', out: './db/migrations' }",
+        'utf8',
+      )
+
+      await makeMigration({ schema: './db/schema.ts' })
+
+      const call = spawnCalls.pop()
+      expect(call?.args).toContain('--driver')
+      expect(call?.args).toContain('aws-data-api')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('generates with no config at all when --dialect supplies what none declares', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-migration-dialect-flag-')
+    try {
+      // The no-config fallback: its DEFAULT_SCHEMA/DEFAULT_OUTPUT could never
+      // succeed while `dialect` went unstated, so nothing reached drizzle-kit
+      // that it would accept.
+      await makeMigration({ dialect: 'sqlite' })
+
+      const call = spawnCalls.pop()
+      expect(call?.args).toEqual([
+        'x',
+        'drizzle-kit',
+        'generate',
+        '--dialect',
+        'sqlite',
+        '--schema',
+        'db/schema.ts',
+        '--out',
+        'db/migrations',
+      ])
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('refuses, naming the dialect, when no config and no flag declare one', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-migration-no-dialect-')
+    try {
+      expect(makeMigration()).rejects.toThrow(/No drizzle config found.*dialect.*--dialect/s)
+      // Refused before spawning: drizzle-kit's own `dialect: undefined` names
+      // flags the user never typed.
+      expect(spawnCalls.length).toBe(0)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('names the config when it is the file that declares no dialect', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-migration-config-no-dialect-')
+    try {
+      await writeFile(join(workspace.dir, 'drizzle.config.ts'), "export default { out: './db/migrations' }", 'utf8')
+
+      expect(makeMigration({ out: './other' })).rejects.toThrow(
+        /drizzle\.config\.ts declares no `dialect`/,
+      )
+      expect(spawnCalls.length).toBe(0)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('distinguishes a config it could not load from one missing a dialect', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-migration-unloadable-')
+    try {
+      // The two send the user to different fixes, and only one is their
+      // config's fault.
+      await writeFile(
+        join(workspace.dir, 'drizzle.config.ts'),
+        "import 'a-package-that-is-not-installed'\nexport default { dialect: 'sqlite' }",
+        'utf8',
+      )
+
+      expect(makeMigration({ out: './other' })).rejects.toThrow(/Could not load drizzle\.config\.ts/)
+      expect(spawnCalls.length).toBe(0)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('refuses a list schema rather than generating half the tables', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-migration-list-schema-')
+    try {
+      // `--schema` takes one value and a repeated flag keeps only the last, so
+      // carrying a list would drop tables silently. The default template's own
+      // comment documents this shape.
+      await writeFile(
+        join(workspace.dir, 'drizzle.config.ts'),
+        "export default { dialect: 'sqlite', schema: ['./db/schema.ts', './modules/*/db/schema.ts'] }",
+        'utf8',
+      )
+
+      expect(makeMigration({ out: './other' })).rejects.toThrow(/declares `schema` as a list/)
+      expect(spawnCalls.length).toBe(0)
     } finally {
       await workspace.cleanup()
     }
@@ -124,7 +311,7 @@ describe('makeMigration', () => {
       const root = process.cwd()
       generateOnNextRun(join(root, 'db/migrations'), '0000_add_users')
 
-      const result = await makeMigration({ out: 'db/migrations' })
+      const result = await makeMigration({ out: 'db/migrations', dialect: 'sqlite' })
 
       expect(result.created).toEqual(['0000_add_users'])
       expect(result.migrationsFolder).toBe(join(root, 'db/migrations'))
@@ -139,7 +326,7 @@ describe('makeMigration', () => {
     try {
       // drizzle-kit prints "No schema changes, nothing to migrate." and exits 0,
       // so the folder is the only evidence that nothing was written.
-      const result = await makeMigration({ out: 'db/migrations' })
+      const result = await makeMigration({ out: 'db/migrations', dialect: 'sqlite' })
 
       expect(result.created).toEqual([])
       // Set, so the caller can tell "watched, nothing appeared" from "not watched".
@@ -158,7 +345,7 @@ describe('makeMigration', () => {
       await writeFile(join(folder, '0000_create_users', 'migration.sql'), '', 'utf8')
       generateOnNextRun(folder, '0001_add_posts')
 
-      const result = await makeMigration({ out: 'db/migrations' })
+      const result = await makeMigration({ out: 'db/migrations', dialect: 'sqlite' })
 
       expect(result.created).toEqual(['0001_add_posts'])
       spawnCalls.pop()
@@ -188,27 +375,29 @@ describe('makeMigration', () => {
     }
   })
 
-  it('watches the default folder when only --schema is overridden', async () => {
+  it('keeps the config out when only --schema is overridden', async () => {
     const workspace = await createTempWorkspace('guren-cli-make-migration-schema-only-')
     try {
       // A --schema override alone stops the config being passed to drizzle-kit,
-      // so `out` falls to the default and the config's own out is not what gets
-      // written to.
+      // so every field it declares has to be restated on the command line —
+      // `out` included. Overriding the schema is not a request to relocate the
+      // migrations, and writing them to the default folder instead would split
+      // the app's history across two directories.
       await writeFile(
         join(workspace.dir, 'drizzle.config.ts'),
-        "export default { out: './custom/migrations' }",
+        "export default { dialect: 'sqlite', out: './custom/migrations' }",
         'utf8',
       )
-      generateOnNextRun(join(process.cwd(), 'db/migrations'), '0000_add_users')
+      generateOnNextRun(join(process.cwd(), 'custom/migrations'), '0000_add_users')
 
       const result = await makeMigration({ schema: 'db/other-schema.ts' })
 
-      expect(result.migrationsFolder).toBe(join(process.cwd(), 'db/migrations'))
+      expect(result.migrationsFolder).toBe(join(process.cwd(), 'custom/migrations'))
       expect(result.created).toEqual(['0000_add_users'])
       expect(result.schemaPath).toBe('db/other-schema.ts')
       const call = spawnCalls.pop()
       expect(call?.args?.includes('--config')).toBe(false)
-      expect(call?.args).toContain('db/migrations')
+      expect(call?.args).toContain('./custom/migrations')
     } finally {
       await workspace.cleanup()
     }
@@ -270,6 +459,252 @@ describe('makeMigration', () => {
 
       expect(result.migrationsFolder).toBe(join(process.cwd(), 'custom/migrations'))
       expect(result.created).toEqual(['0000_from_promise'])
+      spawnCalls.pop()
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  /**
+   * The one test that can observe drizzle-kit *rejecting* what it was handed.
+   * Everything above asserts against a mocked `runCommand`, which accepts any
+   * argument list — including the one that shipped, where the override path
+   * stated no `dialect` and drizzle-kit exited 1 on every app.
+   *
+   * So it takes the args `makeMigration` actually built and feeds them to the
+   * real binary. Verified to fail without the fix: the same run minus
+   * `--dialect` exits 1 with "Please provide required params: [x] dialect".
+   */
+  it('builds an argument list real drizzle-kit accepts', async () => {
+    const drizzleKit = resolveDrizzleKit()
+    if (!drizzleKit) {
+      // A silent pass here would read as "the args were verified" when nothing
+      // ran, so say so. Everything above still holds; only the real-binary
+      // check is missing.
+      console.warn('[make-migration] skipped: no drizzle-kit installed (run `bun install` at the repo root)')
+      return
+    }
+
+    const workspace = await createTempWorkspace('guren-cli-make-migration-e2e-')
+    try {
+      // drizzle-kit reads the schema with node's resolver from the cwd, so the
+      // workspace needs a `drizzle-orm` to resolve. Symlinking beats installing
+      // one per run.
+      await symlink(drizzleKit.nodeModules, join(workspace.dir, 'node_modules'), 'dir')
+      await mkdir(join(workspace.dir, 'custom'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'custom/schema.ts'),
+        "import { pgTable, serial, text } from 'drizzle-orm/pg-core'\n" +
+          "export const widgets = pgTable('widgets', { id: serial('id').primaryKey(), label: text('label').notNull() })\n",
+        'utf8',
+      )
+      // Declares the dialect *and* the driver the override path has to carry
+      // across, so the real binary sees both flags rather than just `--dialect`.
+      await writeFile(
+        join(workspace.dir, 'drizzle.config.ts'),
+        "export default { dialect: 'postgresql', driver: 'aws-data-api', " +
+          "schema: './db/schema.ts', out: './db/migrations' }",
+        'utf8',
+      )
+
+      // The documented override invocation.
+      await makeMigration({ schema: './custom/schema.ts', out: './custom/migrations' })
+      const call = spawnCalls.pop()
+      expect(call?.args?.[0]).toBe('x')
+      expect(call?.args?.[1]).toBe('drizzle-kit')
+
+      // Drop the `bun x drizzle-kit` prefix; run the same generate args for real.
+      expect(call?.args).toContain('--driver')
+
+      const result = spawnSync('node', [drizzleKit.bin, ...(call?.args ?? []).slice(2)], {
+        cwd: workspace.dir,
+        encoding: 'utf8',
+      })
+
+      // Surface drizzle-kit's own output on failure; a bare status tells you
+      // nothing about which argument it objected to.
+      if (result.status !== 0) {
+        throw new Error(
+          `drizzle-kit rejected ${(call?.args ?? []).slice(2).join(' ')}\n${result.stdout}\n${result.stderr}`,
+        )
+      }
+      const generated = readdirSync(join(workspace.dir, 'custom/migrations'))
+      expect(generated.length).toBe(1)
+      const sql = await readFile(
+        join(workspace.dir, 'custom/migrations', generated[0] as string, 'migration.sql'),
+        'utf8',
+      )
+      // The overridden schema is what it read, not the config's.
+      expect(sql).toContain('CREATE TABLE "widgets"')
+    } finally {
+      await workspace.cleanup()
+    }
+    // Spawns a real drizzle-kit, which reads and bundles the schema — well past
+    // bun's 5s default on a cold run.
+  }, 60_000)
+
+  it('reports a config field the flag path cannot restate', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-migration-dropped-')
+    try {
+      // `--breakpoints` has no negation, so `false` cannot be restated and
+      // drizzle-kit re-enables it. Measured: the same schema yields one
+      // `--> statement-breakpoint` via flags and none via `--config`.
+      await writeFile(
+        join(workspace.dir, 'drizzle.config.ts'),
+        "export default { dialect: 'postgresql', breakpoints: false, out: './db/migrations' }",
+        'utf8',
+      )
+
+      const result = await makeMigration({ schema: './db/schema.ts' })
+
+      expect(result.droppedConfigFields).toEqual(['breakpoints'])
+      spawnCalls.pop()
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('reports nothing dropped when the config is passed whole', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-migration-nothing-dropped-')
+    try {
+      await writeFile(
+        join(workspace.dir, 'drizzle.config.ts'),
+        "export default { dialect: 'postgresql', breakpoints: false, out: './db/migrations' }",
+        'utf8',
+      )
+
+      const result = await makeMigration()
+
+      // The `--config` path carries every field by definition.
+      expect(result.droppedConfigFields).toEqual([])
+      spawnCalls.pop()
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('does not name the config schema when the override is a glob', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-migration-glob-override-')
+    try {
+      // The override is what drizzle-kit reads, and a glob names no one file.
+      // Falling back to the config's `schema` here would tell the user to edit
+      // a file that had nothing to do with this run.
+      await writeFile(
+        join(workspace.dir, 'drizzle.config.ts'),
+        "export default { dialect: 'sqlite', schema: './db/schema.ts', out: './db/migrations' }",
+        'utf8',
+      )
+
+      const result = await makeMigration({ schema: './modules/*/db/schema.ts' })
+
+      expect(result.schemaPath).toBeUndefined()
+      spawnCalls.pop()
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('names a non-glob override as the file to edit', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-migration-named-override-')
+    try {
+      await writeFile(
+        join(workspace.dir, 'drizzle.config.ts'),
+        "export default { dialect: 'sqlite', schema: './db/schema.ts', out: './db/migrations' }",
+        'utf8',
+      )
+
+      const result = await makeMigration({ schema: './custom/schema.ts' })
+
+      expect(result.schemaPath).toBe('./custom/schema.ts')
+      spawnCalls.pop()
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('reports a config it could not load while --dialect carried the run', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-migration-unreadable-proceed-')
+    try {
+      // drizzle-kit bundles configs with its own loader, so it may read one
+      // this process cannot — and then the defaults below describe a different
+      // schema than the app declared.
+      await writeFile(
+        join(workspace.dir, 'drizzle.config.ts'),
+        "import 'a-package-that-is-not-installed'\nexport default { schema: './custom/schema.ts' }",
+        'utf8',
+      )
+
+      const result = await makeMigration({ dialect: 'sqlite' })
+
+      expect(result.configUnreadable).toBe(true)
+      const call = spawnCalls.pop()
+      expect(call?.args).toContain('db/schema.ts')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('keeps --name on the config path, which drizzle-kit whitelists', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-migration-name-config-')
+    try {
+      // `generate` collides `--config` only with driver/breakpoints/schema/out/
+      // dialect, and whitelists name/custom/ignoreConflicts/explain/output/
+      // hints/hintsFile. So the primary documented invocation keeps both.
+      await writeFile(
+        join(workspace.dir, 'drizzle.config.ts'),
+        "export default { dialect: 'sqlite', out: './db/migrations' }",
+        'utf8',
+      )
+
+      await makeMigration({ name: 'add posts table' })
+
+      const call = spawnCalls.pop()
+      expect(call?.args).toContain('--config')
+      expect(call?.args).toContain('--name=add_posts_table')
+      expect(call?.args?.includes('--dialect')).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('does not name a brace or wildcard pattern as the file to edit', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-migration-brace-glob-')
+    try {
+      // drizzle-kit expands `schema` with glob.sync, so `{a,b}` and `?` are
+      // patterns just as much as `*`.
+      await writeFile(
+        join(workspace.dir, 'drizzle.config.ts'),
+        "export default { dialect: 'sqlite', out: './db/migrations' }",
+        'utf8',
+      )
+
+      const result = await makeMigration({ schema: './db/{posts,users}.ts' })
+
+      expect(result.schemaPath).toBeUndefined()
+      spawnCalls.pop()
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('does not claim a fallback when both paths were overridden', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-migration-no-fallback-')
+    try {
+      // The config is unreadable, but nothing fell back to a default: both
+      // paths came from the caller, so there is no substitution to report.
+      await writeFile(
+        join(workspace.dir, 'drizzle.config.ts'),
+        "import 'a-package-that-is-not-installed'\nexport default { schema: './x.ts' }",
+        'utf8',
+      )
+
+      const result = await makeMigration({
+        dialect: 'sqlite',
+        schema: './custom/schema.ts',
+        out: './custom/migrations',
+      })
+
+      expect(result.configUnreadable).toBe(false)
       spawnCalls.pop()
     } finally {
       await workspace.cleanup()

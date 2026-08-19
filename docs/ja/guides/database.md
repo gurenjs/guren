@@ -153,11 +153,25 @@ Guren CLI は drizzle-kit をラップしており、Drizzle スキーマから 
 bunx guren make:migration --name add_posts_table
 ```
 
-コマンドはプロジェクトルートの `drizzle.config.ts`（`.mts/.js/.mjs` も可）を参照し、スキーマパス・出力ディレクトリ・DB 方言のデフォルト値を取得します。`drizzle.config.json` も検出しますが、drizzle-kit 自身が Node 上で JSON 設定を読み込めないため、drizzle-kit の読み込みエラーになります。JSON 設定を使っている場合は `.ts` など読み込み可能な形式に移してください。必要に応じてスキーマや出力先を上書きできます。
+コマンドはプロジェクトルートの `drizzle.config.ts`（`.mts/.js/.mjs` も可）を参照し、スキーマパス・出力ディレクトリ・DB 方言のデフォルト値を取得します。`drizzle.config.json` も検出しますが、drizzle-kit 自身が Node 上で JSON 設定を読み込めないため、そのままでは drizzle-kit の読み込みエラーになります。JSON 設定を使っている場合は `.ts` など読み込み可能な形式に移してください。
+
+必要に応じてスキーマや出力先を上書きできます。
 
 ```bash
 bunx guren make:migration --schema ./custom/schema.ts --out ./custom/migrations
 ```
+
+上書きを指定すると drizzle-kit には `--config` を渡せなくなります（drizzle-kit は `--config` と他のフラグの併用を拒否します）。そのため Guren が設定ファイルを自分で読み、`dialect`（および `driver`）をコマンドラインへ引き継ぎます。上書きしなかった項目は設定ファイルの値がそのまま使われるので、`--schema` だけを指定した場合でも出力先は設定ファイルの `out` のままです。
+
+この経路では Guren 自身が設定を読むため、`drizzle.config.json` も利用できます。上書きを指定しない場合だけ、前述の drizzle-kit 側の制約が残ります。
+
+設定ファイルが無いアプリでは `dialect` の出どころが無いので、`--dialect` で明示してください。
+
+```bash
+bunx guren make:migration --dialect postgresql --schema ./db/schema.ts --out ./db/migrations
+```
+
+なお設定ファイルの `schema` を配列で宣言している場合、`--schema` は値を 1 つしか取らないため上書き経路では引き継げません。この場合は Guren がエラーで停止します（黙って一部のテーブルだけを生成しないためです）。`--schema` に 1 つのパスか glob を渡すか、上書きをやめて設定ファイルをそのまま使ってください。
 
 空のファイルが欲しい場合は手動で作成しても構いません。マイグレーションは単なる SQL です。
 

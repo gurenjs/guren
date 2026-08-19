@@ -759,13 +759,41 @@ const makeMigrationCommand = defineCommand({
       description: 'Override the migrations output directory',
       valueHint: 'db/migrations',
     },
+    dialect: {
+      type: 'string',
+      description: 'Database dialect, for apps with no drizzle config to declare one',
+      valueHint: 'postgresql',
+    },
   },
   async run({ args }) {
+    // Any of these three drops drizzle-kit's `--config`, which it refuses to
+    // accept alongside other flags — so `makeMigration` reassembles the config's
+    // dialect, schema and out onto the command line instead.
     const result = await makeMigration({
       name: args.name,
       schema: args.schema,
       out: args.out,
+      dialect: args.dialect,
     })
+
+    // Overrides drop `--config`, and `generate` has no flag for every field it
+    // would have read. Naming what was left behind beats a migration that
+    // quietly differs from the one the config asked for.
+    if (result.configUnreadable) {
+      consola.warn(
+        'Your drizzle config could not be loaded, so the schema and output paths fell back to ' +
+          'their defaults — the migration may not describe the schema your config points at. ' +
+          'Fix the config so it imports cleanly, or pass --schema/--out explicitly.',
+      )
+    }
+
+    if (result.droppedConfigFields.length > 0) {
+      consola.warn(
+        `Your drizzle config sets ${result.droppedConfigFields.join(', ')}, which cannot be passed ` +
+          'alongside --schema/--out/--dialect — drizzle-kit used its default instead. ' +
+          'Drop the overrides to have the config applied in full.',
+      )
+    }
 
     // drizzle-kit exits 0 for "No schema changes, nothing to migrate." too, so
     // the ✔ below is reported off what it wrote, not off the exit code. An
