@@ -62,8 +62,13 @@ export interface MySqlDatabase {
   closeDatabase(): Promise<void>
   configureOrm(): Promise<void>
   seedDatabase(): Promise<void>
-  /** Drops every table and view (including the drizzle migration tracker), then re-applies migrations — same end state as `guren db:reset`. */
-  resetDatabase(): Promise<void>
+  /**
+   * Drops every table and view (including the drizzle migration tracker), then
+   * re-applies migrations — same end state as `guren db:reset`. Reports that
+   * run the way `migrateDatabase()` does, so a reset that recreated nothing is
+   * distinguishable from one that did.
+   */
+  resetDatabase(): Promise<MigrationRunSummary | undefined>
   /** Per-migration applied state derived from the drizzle-kit journal and the __drizzle_migrations table. */
   migrationStatus(): Promise<MigrationStatusEntry[]>
 }
@@ -200,7 +205,7 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
     }
   }
 
-  async function resetDatabase(): Promise<void> {
+  async function resetDatabase(): Promise<MigrationRunSummary> {
     const { sql } = await import('drizzle-orm')
 
     await withAdminDb(async (adminDb) => {
@@ -232,7 +237,7 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
     // db:reset` leaves behind. A caller that migrates again — the documented
     // reset-then-migrate pattern — hits the memo and no-ops.
     migrations.reset()
-    await migrations.get()
+    return migrations.get()
   }
 
   async function migrationStatus(): Promise<MigrationStatusEntry[]> {

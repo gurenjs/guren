@@ -28,8 +28,13 @@ export interface SqliteDatabase {
   closeDatabase(): Promise<void>
   configureOrm(): Promise<void>
   seedDatabase(): Promise<void>
-  /** Drops every table and view (including the drizzle migration tracker), then re-applies migrations — same end state as `guren db:reset`. */
-  resetDatabase(): Promise<void>
+  /**
+   * Drops every table and view (including the drizzle migration tracker), then
+   * re-applies migrations — same end state as `guren db:reset`. Reports that
+   * run the way `migrateDatabase()` does, so a reset that recreated nothing is
+   * distinguishable from one that did.
+   */
+  resetDatabase(): Promise<MigrationRunSummary | undefined>
   /** Per-migration applied state derived from the drizzle-kit journal and the __drizzle_migrations table. */
   migrationStatus(): Promise<MigrationStatusEntry[]>
 }
@@ -202,12 +207,13 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
 
     closeDatabase,
 
-    async resetDatabase() {
+    async resetDatabase(): Promise<MigrationRunSummary | undefined> {
       await database.get()
       // Only reachable when a concurrent evaluation closed the handle while the
       // await above was suspended. Nothing here can act on a closed handle, and
       // migrating would re-open one against a database this call never dropped.
-      if (!sqliteClient) return
+      // No migration ran, so there is nothing to report about one.
+      if (!sqliteClient) return undefined
 
       // Anything left behind fails the next migration run, and three things
       // stand between this loop and that: SQLite refuses DROP TABLE on a view,
@@ -236,7 +242,7 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
       // db:reset` leaves behind. A caller that migrates again — the documented
       // reset-then-migrate pattern — hits the memo and no-ops.
       migrations.reset()
-      await migrations.get()
+      return migrations.get()
     },
 
     async migrationStatus() {

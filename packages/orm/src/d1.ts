@@ -33,7 +33,7 @@ export interface D1DatabaseHandle {
   /** Always throws: seed with SQL through `wrangler d1 execute`. */
   seedDatabase(): Promise<void>
   /** Always throws: recreate the database with wrangler instead. */
-  resetDatabase(): Promise<void>
+  resetDatabase(): Promise<never>
   /** Always throws: wrangler's tracker is authoritative — use `wrangler d1 migrations list`. */
   migrationStatus(): Promise<never>
 }

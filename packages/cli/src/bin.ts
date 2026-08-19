@@ -36,6 +36,7 @@ import { makeValidator } from './make-validator'
 import { makeTest, type TestRunner } from './make-test'
 import { makeView } from './make-view'
 import { runDatabaseMigrations, runDatabaseSeeders, resetDatabase } from './db-migrate'
+import type { MigrationRunSummary } from './db-migrate'
 import { showMigrationStatus } from './db-status'
 import type { WriterOptions } from './utils'
 import { generateRouteTypes } from './routes-types'
@@ -300,6 +301,39 @@ function describeMigrationsFolder(folder: string | undefined): string {
 
   const relativePath = relative(process.cwd(), folder)
   return relativePath === '' || relativePath.startsWith('..') ? folder : relativePath
+}
+
+/**
+ * Reports a migration run that applied nothing. Both `db:migrate` and
+ * `db:reset` can end on one, and a ✔ there reads as a database that is now up
+ * to date — after a reset, as one that still has its tables.
+ */
+function reportNoMigrationsApplied(
+  action: string,
+  summary: MigrationRunSummary,
+  outcome: string,
+  json: boolean,
+  extra?: Record<string, unknown>,
+): void {
+  const message = `No migrations found in ${describeMigrationsFolder(summary.migrationsFolder)} — ${outcome}.`
+
+  if (json) {
+    console.log(
+      JSON.stringify(
+        { success: true, action, message, migrationsFound: 0, looseSqlFiles: summary.looseSqlFiles, ...extra },
+        null,
+        2,
+      ),
+    )
+    return
+  }
+
+  consola.warn(message)
+  // A folder holding loose .sql files is not one waiting for db:make — the ORM
+  // has already explained why those files were skipped.
+  if (summary.looseSqlFiles === 0) {
+    consola.info(`Generate one with \`bun run db:make\`, then re-run \`bun run ${action}\`.`)
+  }
 }
 
 function reportSuccess(action: string, message: string, json: boolean, extra?: Record<string, unknown>): void {
@@ -712,26 +746,7 @@ const migrateCommand = defineCommand({
     const summary = await runDatabaseMigrations()
 
     if (summary && summary.migrationsFound === 0) {
-      const folder = describeMigrationsFolder(summary.migrationsFolder)
-      const message = `No migrations found in ${folder} — nothing was applied.`
-
-      if (args.json) {
-        console.log(
-          JSON.stringify(
-            { success: true, action: 'db:migrate', message, migrationsFound: 0, looseSqlFiles: summary.looseSqlFiles },
-            null,
-            2,
-          ),
-        )
-        return
-      }
-
-      consola.warn(message)
-      // A folder holding loose .sql files is not a folder waiting for db:make —
-      // the ORM has already explained why those files were skipped.
-      if (summary.looseSqlFiles === 0) {
-        consola.info('Generate one with `bun run db:make`, then re-run `bun run db:migrate`.')
-      }
+      reportNoMigrationsApplied('db:migrate', summary, 'nothing was applied', Boolean(args.json))
       return
     }
 
@@ -820,7 +835,18 @@ const resetCommand = defineCommand({
     }
 
     consola.info('Dropping all tables...')
-    await resetDatabase({ seed: Boolean(args.seed) })
+    const summary = await resetDatabase({ seed: Boolean(args.seed) })
+
+    if (summary && summary.migrationsFound === 0) {
+      reportNoMigrationsApplied(
+        'db:reset',
+        summary,
+        'the tables were dropped and nothing was re-applied',
+        Boolean(args.json),
+        { seed: Boolean(args.seed) },
+      )
+      return
+    }
 
     const message = args.seed
       ? 'Database reset and seeded successfully.'

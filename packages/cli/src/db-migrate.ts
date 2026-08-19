@@ -132,7 +132,13 @@ export interface ResetDatabaseOptions {
   seed?: boolean
 }
 
-export async function resetDatabase(options: ResetDatabaseOptions = {}): Promise<void> {
+/**
+ * Drops the schema and re-applies migrations. Returns the same summary
+ * `runDatabaseMigrations()` does for the migration half of the run: a reset
+ * that finds no migrations leaves an empty database behind, which is worth
+ * reporting rather than calling done.
+ */
+export async function resetDatabase(options: ResetDatabaseOptions = {}): Promise<MigrationRunSummary | undefined> {
   const module = await resolveDatabaseModule()
   const reset = pickFunction(module, ['resetDatabase', 'dropAllTables'])
   const migrate = pickFunction(module, ['migrateDatabase', 'runMigrations', 'getDatabase'])
@@ -148,12 +154,17 @@ export async function resetDatabase(options: ResetDatabaseOptions = {}): Promise
   }
 
   try {
-    await reset()
-    await migrate()
+    const summary = asMigrationRunSummary(await reset())
+    // `reset()` already re-applies migrations; this second call hits the
+    // driver's memo and no-ops, and exists for a config that only exports a
+    // bare dropAllTables().
+    const migrated = asMigrationRunSummary(await migrate())
 
     if (options.seed && seed) {
       await seed()
     }
+
+    return summary ?? migrated
   } finally {
     if (close) {
       await close()

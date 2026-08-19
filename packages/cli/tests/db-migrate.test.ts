@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createTempWorkspace } from './helpers'
-import { runDatabaseMigrations, runDatabaseSeeders } from '../src/db-migrate'
+import { runDatabaseMigrations, runDatabaseSeeders, resetDatabase } from '../src/db-migrate'
 
 describe('db-migrate helpers', () => {
   it('runs migrations and closes the database', async () => {
@@ -79,6 +79,47 @@ export async function getDatabase() {
       )
 
       expect(await runDatabaseMigrations()).toBeUndefined()
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('reports the reset run, which re-applies the migrations itself', async () => {
+    const workspace = await createTempWorkspace('guren-cli-db-reset-summary-')
+    try {
+      const calls: string[] = []
+      ;(globalThis as typeof globalThis & { __calls?: string[] }).__calls = calls
+
+      await mkdir(join(workspace.dir, 'config'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'config/database.ts'),
+        `
+export async function resetDatabase() {
+  globalThis.__calls.push('reset')
+  return { migrationsFolder: '/app/db/migrations', migrationsFound: 0, looseSqlFiles: 0 }
+}
+
+export async function migrateDatabase() {
+  globalThis.__calls.push('migrate')
+  return { migrationsFolder: '/app/db/migrations', migrationsFound: 0, looseSqlFiles: 0 }
+}
+
+export async function closeDatabase() {
+  globalThis.__calls.push('close')
+}
+`,
+        'utf8',
+      )
+
+      const summary = await resetDatabase()
+
+      expect(calls).toEqual(['reset', 'migrate', 'close'])
+      expect(summary).toEqual({
+        migrationsFolder: '/app/db/migrations',
+        migrationsFound: 0,
+        looseSqlFiles: 0,
+      })
+      delete (globalThis as typeof globalThis & { __calls?: string[] }).__calls
     } finally {
       await workspace.cleanup()
     }
