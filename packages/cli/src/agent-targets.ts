@@ -1,4 +1,5 @@
 import { parseDocFrontmatter } from './docs-frontmatter'
+import { safePathSegments } from './utils'
 
 /**
  * The one rule for which files each agent target owns and how the canonical
@@ -126,25 +127,33 @@ function nativeRulePath(namespace: PatternNamespace, stem: string): string {
 }
 
 /**
+ * A claimed child must be exactly one plain path segment. The claim is
+ * interpolated into a directory the prune walker will `rm` under, so a name
+ * like `..` would claim outside the app. What counts as a traversal rather
+ * than a name is `safePathSegments`' rule, not a second one written here —
+ * it already rejects `.`, `..`, a backslash (a separator on Windows) and a
+ * NUL (which truncates the path syscall-side). This adds the one constraint
+ * a skill directory has on top of it: exactly one segment, so a legal nested
+ * name like `a/b` is still refused.
+ *
+ * Checked here, where the claim is built, because this is the only place a
+ * `children` claim is ever constructed: `claimFamily` below is the sole
+ * producer, and every name it takes passes through here. A second copy at the
+ * walk that joins the name — closer to the `rm` it protects — would be a
+ * guard no test could make fire.
+ */
+function assertSkillName(name: string): void {
+  if (safePathSegments(name, 'skill claim').length !== 1) {
+    throw new Error(`Agent harness skill claim "${name}" is not a single path segment`)
+  }
+}
+
+/**
  * The skill directory names a `children` claim over `skillsDir` covers: every
  * immediate child the plan writes into, plus the retired names. Derived from
  * the plan rather than listed, so a renamed or added canonical skill cannot
  * leave the claim behind.
  */
-/**
- * A claimed child must be exactly one plain path segment: no separators, no
- * `.`/`..`, not empty. The claim is interpolated into a directory the prune
- * walker will `rm` under, so a name like `..` would claim outside the app.
- * Planned names come from the planner and cannot violate this; the retired
- * list is a constant plus a test hook, and this is the one place both are
- * checked before they reach the walker.
- */
-function assertSkillName(name: string): void {
-  if (name === '' || name === '.' || name === '..' || name.includes('/') || name.includes('\\')) {
-    throw new Error(`Agent harness skill claim "${name}" is not a single path segment`)
-  }
-}
-
 function claimedSkillNames(
   skillsDir: string,
   plan: readonly PlannedFile[],

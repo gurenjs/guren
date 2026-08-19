@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
 import { mkdtemp, mkdir, rm, readFile, rename, symlink, writeFile, access } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { installAgentHarness } from '../src/agent-harness'
-import { AGENT_TARGETS } from '../src/agent-targets'
+import { findStaleManagedFiles, installAgentHarness, loadAgentTemplates } from '../src/agent-harness'
+import { AGENT_TARGETS, planComponents } from '../src/agent-targets'
 
 /**
  * Whether `dir` lives on a case-insensitive filesystem. Probed rather than
@@ -328,24 +328,23 @@ describe('installAgentHarness', () => {
     )
   })
 
-  it('sync --prune removes a retired canonical skill, directory included', async () => {
+  it('sync claims a retired canonical skill the plan no longer writes', async () => {
     // "retired" is a name the framework used to ship — recorded in
-    // RETIRED_CANONICAL_SKILLS, injected here because that list is empty today
+    // RETIRED_CANONICAL_SKILLS, injected here because that list is empty
+    // today. Driven through findStaleManagedFiles rather than the installer:
+    // the seam for an empty constant belongs on an internal function, not on
+    // the published options type. What prune then does with a stale file is
+    // the shared machinery the retired-rule test above already pins.
     await installAgentHarness({ cwd: tempDir, mode: 'init' })
     await mkdir(join(tempDir, '.claude/skills/retired-skill'), { recursive: true })
     await writeFile(join(tempDir, '.claude/skills/retired-skill/SKILL.md'), 'old skill\n', 'utf8')
 
-    const result = await installAgentHarness({
-      cwd: tempDir,
-      mode: 'sync',
-      prune: true,
-      retiredSkills: ['retired-skill'],
-    })
+    const plan = planComponents(['claude'], await loadAgentTemplates(), 'My App')
+    const stale = await findStaleManagedFiles(tempDir, ['claude'], plan, ['retired-skill'])
 
-    expect(result.stale).toEqual(['.claude/skills/retired-skill/SKILL.md'])
-    expect(result.pruned).toBe(true)
-    await expect(access(join(tempDir, '.claude/skills/retired-skill'))).rejects.toThrow()
-    await access(join(tempDir, '.claude/skills/dev-workflow/SKILL.md'))
+    expect(stale).toEqual(['.claude/skills/retired-skill/SKILL.md'])
+    // and without the tombstone the same directory is not claimed at all
+    expect(await findStaleManagedFiles(tempDir, ['claude'], plan)).toEqual([])
   })
 
   it('sync never claims a skill the framework did not write — the skills roots are shared with external installers', async () => {
