@@ -267,11 +267,14 @@ export async function assertMinCli(): Promise<string[]> {
  * `a-.b` where a stricter hand-written regex would not.
  */
 type JsonSchema = {
+  $id?: string
   type?: string
   const?: unknown
   required?: string[]
   properties?: Record<string, JsonSchema>
-  additionalProperties?: boolean
+  // both forms are in use: `false` closes the root, and a schema constrains
+  // every `extensions` namespace to an object
+  additionalProperties?: boolean | JsonSchema
   items?: JsonSchema
   minLength?: number
   maxLength?: number
@@ -309,14 +312,39 @@ export function validateAgainstSchema(value: unknown, schema: JsonSchema, path =
         problems.push(...validateAgainstSchema(v, sub, `${path}.${key}`))
       } else if (schema.additionalProperties === false) {
         problems.push(`${path}: field "${key}" is not permitted (closed schema)`)
+      } else if (typeof schema.additionalProperties === 'object') {
+        // e.g. each `extensions` namespace must itself be an object
+        problems.push(...validateAgainstSchema(v, schema.additionalProperties, `${path}.${key}`))
       }
     }
   }
   return problems
 }
 
+/**
+ * Is the vendored file still the schema this rule thinks it is validating
+ * against? `{}` is itself a valid JSON Schema that accepts every document, so
+ * a gutted or truncated copy would turn this whole rule green rather than
+ * red. These are the constraints the rule leans on, asserted before it trusts
+ * any of them: the spec's own `$id`, the closed root, and the two required
+ * fields.
+ */
+export function schemaIdentityProblems(schema: JsonSchema): string[] {
+  const problems: string[] = []
+  if (schema.$id !== PORTABLE_SCHEMA_URL) {
+    problems.push(`plugin.schema.json: $id is ${JSON.stringify(schema.$id)}, expected ${PORTABLE_SCHEMA_URL}`)
+  }
+  if (schema.additionalProperties !== false) problems.push('plugin.schema.json: the root is no longer a closed schema')
+  for (const field of ['$schema', 'name']) {
+    if (!(schema.required ?? []).includes(field)) problems.push(`plugin.schema.json: "${field}" is no longer required`)
+  }
+  return problems
+}
+
 export async function assertPortableManifest(files: readonly RenderedFile[]): Promise<string[]> {
   const schema = JSON.parse(await readFile(join(repoRoot, TEMPLATE_DIR, 'plugin.schema.json'), 'utf8')) as JsonSchema
+  const identity = schemaIdentityProblems(schema)
+  if (identity.length > 0) return identity
   const file = files.find((f) => f.path === 'plugins/guren/plugin.json')
   if (!file) return ['plugins/guren/plugin.json was not rendered']
   let manifest: Record<string, unknown>

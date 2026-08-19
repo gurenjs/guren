@@ -13,6 +13,7 @@ import {
   changesetNames,
   claudePluginValidate,
   renderCatalog,
+  schemaIdentityProblems,
   validateAgainstSchema,
   writeCatalog,
 } from './build-agent-catalog.ts'
@@ -180,6 +181,8 @@ describe('audit: minimum CLI claim', () => {
   })
 })
 
+const PORTABLE_SCHEMA_ID = 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json'
+
 describe('audit: Agent Plugins v1 manifest', () => {
   const rootManifest = (obj: Record<string, unknown>) => [
     { path: 'plugins/guren/plugin.json', content: JSON.stringify(obj) },
@@ -222,6 +225,25 @@ describe('audit: Agent Plugins v1 manifest', () => {
     expect(author.some((p) => p.includes('author') && p.includes('twitter'))).toBe(true)
     const version = await assertPortableManifest(rootManifest({ ...valid, version: 1 }))
     expect(version.some((p) => p.includes('plugin.json.version'))).toBe(true)
+  })
+  it('fails on an extensions namespace that is not an object — a schema-valued additionalProperties', async () => {
+    // the vendored schema constrains each namespace with `{"type":"object"}`
+    // rather than with `false`, so a validator that only understands the
+    // boolean form waves this through
+    const problems = await assertPortableManifest(rootManifest({ ...valid, extensions: { 'com.example': 42 } }))
+    expect(problems.some((p) => p.includes('extensions') && p.includes('com.example'))).toBe(true)
+    expect(await assertPortableManifest(rootManifest({ ...valid, extensions: { 'com.example': {} } }))).toEqual([])
+  })
+  it('refuses to validate against a vendored schema that is no longer the spec schema', () => {
+    // `{}` is itself a valid JSON Schema that accepts every document, so a
+    // gutted or truncated vendored copy would turn this rule green, not red
+    expect(schemaIdentityProblems({})).not.toEqual([])
+    expect(schemaIdentityProblems({ $id: PORTABLE_SCHEMA_ID, required: ['$schema', 'name'], additionalProperties: true })).toEqual([
+      'plugin.schema.json: the root is no longer a closed schema',
+    ])
+    expect(
+      schemaIdentityProblems({ $id: PORTABLE_SCHEMA_ID, required: ['$schema', 'name'], additionalProperties: false }),
+    ).toEqual([])
   })
   it('validateAgainstSchema is driven by the schema, so an upstream change is honored', () => {
     // a schema that adds a constraint is enforced without touching this file
