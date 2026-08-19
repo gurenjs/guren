@@ -133,22 +133,71 @@ jobs:
       # manifest conforms, and — because the plugin's version is the CLI's — a
       # change to any catalog input carries a @guren/cli changeset.
       #
-      # The changeset gate diffs against the PR's base *SHA* from the event
-      # payload, fetched by SHA into a named ref: on a shallow checkout there
-      # is no refs/remotes/origin/<base>, `git fetch origin <branch>` only
-      # updates FETCH_HEAD, and HEAD on a pull_request run is the synthetic
-      # merge commit, so a deepen loop keyed on either guesses. A two-dot diff
-      # (base..HEAD) needs no merge base. On `push` to main there is no base
-      # to gate against, so only the derived-fact rules run there; the gate
-      # already fired on the PR that merged.
+      # The changeset gate diffs against a base *SHA* from the event payload,
+      # fetched by SHA into a named ref: on a shallow checkout there is no
+      # refs/remotes/origin/<base>, `git fetch origin <branch>` only updates
+      # FETCH_HEAD, and HEAD on a pull_request run is the synthetic merge
+      # commit, so a deepen loop keyed on either guesses. A two-dot diff
+      # (base..HEAD) needs no merge base.
+      #
+      # `push` carries its own base — `github.event.before`, the tip the push
+      # replaced — so it runs the same gate. Without it a commit landing on
+      # main skips the gate outright, and "the gate already fired on the PR
+      # that merged" only holds for commits that arrived through one.
+      #
+      # Two events have no base to gate against. Neither passes as if gated:
+      # the all-zero SHA a branch's first push carries, and a before-SHA the
+      # remote will not serve (force-pushed past, or garbage-collected). The
+      # derived-fact rules still run in each, and the audit's own closing line
+      # says "passed" — so the annotation that the gate did not run is emitted
+      # after it, where it is the last thing in the log rather than a line
+      # scrolled past above a pass.
+      #
+      # Ungating is only ever right for a base the remote genuinely cannot
+      # serve, and on the first attempt that is indistinguishable from a blip
+      # on the network or the ref lock — which would hand a real gap a green
+      # job. Retrying separates them: what survives three tries is the
+      # unremediable case, and no one can make a collected SHA fetchable again.
+      #
+      # The release commit stays green. `changeset version` empties .changeset
+      # and bumps versions; the only catalog input it moves is
+      # packages/cli/package.json, since the sync-template-deps pass that
+      # follows writes under packages/create-app/templates and never under
+      # packages/cli/templates. assertChangesetGate exempts a diff whose
+      # touched inputs are the CLI manifest alone, which is that commit — it
+      # reaches main as its own squash merge, so the push diff is that commit
+      # and nothing else.
       - name: Agent catalog audit
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             base_sha="${{ github.event.pull_request.base.sha }}"
-            git fetch --no-tags --depth=1 origin "$base_sha:refs/audit-base"
-            bun run audit:agent-catalog --base refs/audit-base
+          else
+            base_sha="${{ github.event.before }}"
+          fi
+          gate_ref=
+          skip_kind=
+          skip_reason=
+          if [ -z "$base_sha" ] || [ "$base_sha" = "0000000000000000000000000000000000000000" ]; then
+            skip_kind=notice
+            skip_reason="this event reports no previous tip, so there is no base commit to diff against"
+          else
+            for attempt in 1 2 3; do
+              if git fetch --no-tags --depth=1 origin "$base_sha:refs/audit-base"; then
+                gate_ref=refs/audit-base
+                break
+              fi
+              if [ "$attempt" -lt 3 ]; then sleep $((attempt * 5)); fi
+            done
+            if [ -z "$gate_ref" ]; then
+              skip_kind=warning
+              skip_reason="base $base_sha was not fetchable in 3 attempts (force-pushed past, or garbage-collected)"
+            fi
+          fi
+          if [ -n "$gate_ref" ]; then
+            bun run audit:agent-catalog --base "$gate_ref"
           else
             bun run audit:agent-catalog
+            echo "::${skip_kind}::agent-catalog: the derived-fact rules above passed, but THE CHANGESET GATE DID NOT RUN — ${skip_reason}. A catalog input changed without a @guren/cli changeset would not have been caught. This job being green is not that check passing."
           fi
 
       - name: Dependency audit
