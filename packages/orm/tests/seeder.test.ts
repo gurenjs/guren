@@ -238,13 +238,25 @@ describe('runSeeders run summary', () => {
   // Files that exported no seeder are the case a "run make:seeder" hint would
   // misdiagnose: the files are there, they just export nothing runnable.
   it('should count files that exported no seeder', async () => {
-    await writeFile(tempDir + '/helpers.ts', `export const fixtures = [1, 2, 3];`)
-    await writeFile(tempDir + '/types.ts', `export const kind = 'seed';`)
+    await writeFile(join(tempDir, 'helpers.ts'), `export const fixtures = [1, 2, 3];`)
+    await writeFile(join(tempDir, 'types.ts'), `export const kind = 'seed';`)
 
     expect(await runSeeders({}, tempDir)).toEqual({
       seedersFolder: tempDir,
       seedersRan: 0,
       filesWithoutSeeder: 2,
+    })
+  })
+
+  // A .d.ts carries a supported extension but can never export a seeder, so
+  // counting it would suppress the make:seeder hint for an empty folder.
+  it('should not count declaration files as seeders that failed to export', async () => {
+    await writeFile(join(tempDir, 'fixtures.d.ts'), `export declare const rows: number[]`)
+
+    expect(await runSeeders({}, tempDir)).toEqual({
+      seedersFolder: tempDir,
+      seedersRan: 0,
+      filesWithoutSeeder: 0,
     })
   })
 

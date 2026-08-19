@@ -8,6 +8,16 @@ import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 const SUPPORTED_EXTENSIONS = new Set(['.js', '.mjs', '.cjs', '.ts'])
 
+// A declaration file carries a supported extension but no runtime exports, so
+// importing one yields nothing and it would be counted as a seeder that failed
+// to export a handler — suppressing the `make:seeder` hint for a folder that
+// genuinely has no seeder in it.
+const DECLARATION_SUFFIXES = ['.d.ts', '.d.mts', '.d.cts']
+
+function isSeederCandidate(name: string): boolean {
+  return SUPPORTED_EXTENSIONS.has(extname(name)) && !DECLARATION_SUFFIXES.some((suffix) => name.endsWith(suffix))
+}
+
 /**
  * The context a seeder receives. `db` is the drizzle database the app
  * configured, so its type depends on the dialect: annotate the seeder with the
@@ -97,7 +107,7 @@ async function loadSeederModule(path: string): Promise<SeederHandler | undefined
 export interface SeederRunSummary {
   /** The folder that was read, absolute as the driver resolved it. */
   seedersFolder: string
-  /** Seeders that ran, in the order their files sorted. */
+  /** How many seeders ran. They run in the order their files sorted. */
   seedersRan: number
   /**
    * Files with a seeder extension that exported nothing runnable, so they were
@@ -119,23 +129,20 @@ async function collectSeeders<TDatabase>(
   const root = directory instanceof URL ? fileURLToPath(directory) : resolve(directory)
   const entries = await readdir(root, { withFileTypes: true })
   const files = entries
-    .filter((entry) => entry.isFile() && SUPPORTED_EXTENSIONS.has(extname(entry.name)))
+    .filter((entry) => entry.isFile() && isSeederCandidate(entry.name))
     .map((entry) => resolve(root, entry.name))
     .sort()
 
   const seeders: Array<SeederHandler<TDatabase>> = []
-  let filesWithoutSeeder = 0
 
   for (const file of files) {
     const handler = await loadSeederModule(file)
     if (handler) {
       seeders.push(handler as SeederHandler<TDatabase>)
-    } else {
-      filesWithoutSeeder += 1
     }
   }
 
-  return { root, seeders, filesWithoutSeeder }
+  return { root, seeders, filesWithoutSeeder: files.length - seeders.length }
 }
 
 /**

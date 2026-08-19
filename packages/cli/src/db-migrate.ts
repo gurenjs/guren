@@ -175,7 +175,8 @@ export interface ResetDatabaseOptions {
  * What a reset run reported, half by half. Either field is absent when the
  * app's config reported nothing for it, and `seeders` is also absent when the
  * run was not asked to seed — a reset without `--seed` has no seed run to
- * describe, which is not the same as one that seeded nothing.
+ * describe, which is not the same as one that seeded nothing. Being asked to
+ * seed a config that cannot is neither: it throws before anything is dropped.
  */
 export interface ResetRunSummary {
   migrations?: MigrationRunSummary
@@ -204,6 +205,13 @@ export async function resetDatabase(options: ResetDatabaseOptions = {}): Promise
     throw new Error('config/database.ts must export migrateDatabase(), runMigrations(), or getDatabase().')
   }
 
+  // Checked before reset() drops anything: seeding was asked for and cannot
+  // happen, and the alternative is to empty the database and then report a
+  // seed that never ran. `db:seed` already refuses the same config.
+  if (options.seed && !seed) {
+    throw new Error('config/database.ts must export seedDatabase() or runSeeders().')
+  }
+
   try {
     const summary = asMigrationRunSummary(await reset())
     // `reset()` already re-applies migrations; this second call hits the
@@ -212,10 +220,9 @@ export async function resetDatabase(options: ResetDatabaseOptions = {}): Promise
     // describes, since a driver reset that reports nothing ran nothing.
     const migrated = asMigrationRunSummary(await migrate())
 
-    let seeders: SeederRunSummary | undefined
-    if (options.seed && seed) {
-      seeders = asSeederRunSummary(await seed())
-    }
+    // `seed` is present whenever options.seed is — the guard above threw
+    // otherwise; the test is here only so it narrows.
+    const seeders = options.seed && seed ? asSeederRunSummary(await seed()) : undefined
 
     return { migrations: summary ?? migrated, seeders }
   } finally {

@@ -892,30 +892,27 @@ async function runResetCommand(
 
   consola.info('Dropping all tables...')
   const { migrations, seeders } = await resetDatabase({ seed })
+  // Assembled once so every exit below reports the same run the same way,
+  // whichever of them the command takes.
+  const runFields = { ...migrationRunFields(migrations), ...seederRunFields(seeders), seed }
 
   // The migration half wins when both came back empty: a reset that re-applied
   // nothing is the bigger news, and seeding an empty schema could not have
   // worked anyway. Stacking both warnings would bury it.
   if (migrations?.migrationsFound === 0) {
-    reportNoMigrationsApplied(action, migrations, 'the tables were dropped and nothing was re-applied', json, {
-      seed,
-      ...seederRunFields(seeders),
-    })
+    reportNoMigrationsApplied(action, migrations, 'the tables were dropped and nothing was re-applied', json, runFields)
     return
   }
 
   if (seeders?.seedersRan === 0) {
-    reportNoSeedersRan(action, seeders, `the database was ${doneVerb} but nothing was seeded`, json, {
-      seed,
-      ...migrationRunFields(migrations),
-    })
+    reportNoSeedersRan(action, seeders, `the database was ${doneVerb} but nothing was seeded`, json, runFields)
     return
   }
 
   const message = seed
     ? `Database ${doneVerb} and seeded successfully.`
     : `Database ${doneVerb} successfully.`
-  reportSuccess(action, message, json, { ...migrationRunFields(migrations), ...seederRunFields(seeders), seed })
+  reportSuccess(action, message, json, runFields)
 }
 
 const resetCommand = defineCommand({
