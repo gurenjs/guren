@@ -276,6 +276,14 @@ export async function makeMigration(options: MakeMigrationOptions = {}): Promise
   const configured = configPath ? await readDrizzleConfig(configPath) : {}
 
   const args = ['x', 'drizzle-kit', 'generate']
+
+  // Ahead of the branch because `--name` belongs to neither: drizzle-kit
+  // whitelists it beside `--config`, so it rides along whichever way the rest
+  // of the arguments are assembled.
+  if (name) {
+    args.push(`--name=${name}`)
+  }
+
   const droppedConfigFields: string[] = []
   let configUnreadable = false
   let schema: string | undefined
@@ -334,10 +342,6 @@ export async function makeMigration(options: MakeMigrationOptions = {}): Promise
     if (configured.unreadable && (options.schema == null || options.out == null)) {
       configUnreadable = true
     }
-  }
-
-  if (name) {
-    args.push(`--name=${name}`)
   }
 
   // The config branch is the only one that leaves the paths unstated on the

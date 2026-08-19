@@ -1,3 +1,4 @@
+import type { Dirent } from 'node:fs'
 import { readdir } from 'node:fs/promises'
 import { extname, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -127,7 +128,32 @@ async function collectSeeders<TDatabase>(
   directory: string | URL,
 ): Promise<{ root: string; seeders: Array<SeederHandler<TDatabase>>; filesWithoutSeeder: number }> {
   const root = directory instanceof URL ? fileURLToPath(directory) : resolve(directory)
-  const entries = await readdir(root, { withFileTypes: true })
+
+  // A folder that was never created holds no seeders — the same nothing-to-run
+  // an empty one reports, and what `db:seed` already has the right message for.
+  // Letting the ENOENT out instead reached the user through `seedFailure()` as
+  // "Failed to seed the database: ENOENT ... scandir", a filesystem error
+  // dressed as a database failure; `inspectMigrationsFolder()` has always
+  // answered `migrationsFound: 0` for a missing migrations folder.
+  //
+  // Only ENOENT is absence, and it is read off the listing itself rather than
+  // from a preceding existsSync: that check answers false for a folder whose
+  // *parent* is unreadable, which would turn a permission problem into a silent
+  // "no seeders found". ENOTDIR (a file sitting where the folder should be) and
+  // EACCES both still throw — both are misconfigurations a user has to see, and
+  // neither is a folder holding no seeders. A folder that was never
+  // *configured* is different again, and each driver's `seedDatabase()` still
+  // throws for it before reaching here.
+  let entries: Dirent[]
+  try {
+    entries = await readdir(root, { withFileTypes: true })
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+      throw error
+    }
+    return { root, seeders: [], filesWithoutSeeder: 0 }
+  }
+
   const files = entries
     .filter((entry) => entry.isFile() && isSeederCandidate(entry.name))
     .map((entry) => resolve(root, entry.name))

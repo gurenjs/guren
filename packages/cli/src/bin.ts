@@ -155,7 +155,7 @@ const makeCommandSpecs: MakeCommandSpec[] = [
   { name: 'make:mail', description: 'Generate a new mailable class.', argDescription: 'Mail class name', makeFn: makeMail, resourceName: 'Mail' },
   { name: 'make:middleware', description: 'Generate a new middleware.', argDescription: 'Middleware name', makeFn: makeMiddleware, resourceName: 'Middleware' },
   { name: 'make:policy', description: 'Generate a new authorization policy.', argDescription: 'Policy class name', makeFn: makePolicy, resourceName: 'Policy' },
-  { name: 'make:seeder', description: 'Generate a new database seeder.', argDescription: 'Seeder class name', makeFn: makeSeeder, resourceName: 'Seeder' },
+  { name: 'make:seeder', description: 'Generate a new database seeder.', argDescription: 'Seeder name', makeFn: makeSeeder, resourceName: 'Seeder' },
   { name: 'make:notification', description: 'Generate a new notification class.', argDescription: 'Notification class name', makeFn: makeNotification, resourceName: 'Notification' },
   { name: 'make:provider', description: 'Generate a new service provider.', argDescription: 'Provider class name', makeFn: makeProvider, resourceName: 'Provider' },
 ]
@@ -738,16 +738,48 @@ const makeExceptionCommand = defineCommand({
   },
 })
 
+/**
+ * The last value of a repeated citty flag.
+ *
+ * citty types every `string` arg as `string | undefined` and then hands back a
+ * `string[]` when the flag is passed twice — a lie no compiler catches, and one
+ * each of these three arguments fails differently on. `--name a --name b` died
+ * inside `makeMigration()` on `options.name?.trim is not a function`; `--schema`
+ * and `--out` were quietly comma-joined into a path nothing can open
+ * (`--schema a/schema.ts,b/schema.ts`) and still exited 0. Last-wins is what
+ * repeating a flag means to whoever typed it.
+ */
+function lastFlagValue(value: unknown): string | undefined {
+  const candidate = Array.isArray(value) ? value.at(-1) : value
+  return typeof candidate === 'string' ? candidate : undefined
+}
+
 const makeMigrationCommand = defineCommand({
   meta: {
     name: 'make:migration',
     description: 'Generate a new SQL migration file using drizzle-kit.',
   },
   args: {
+    // A `string`, not a `positional`, because citty resolves the two from
+    // different places and silently drops what the other one reads: declared
+    // positional, `--name add_posts_table` leaves `args` with neither a `name`
+    // key nor the value in `_` — no unknown-flag error either, so the command
+    // ran on to drizzle-kit with no name and drizzle-kit invented its own
+    // (`20260819113244_unusual_triton`). The flag is what docs/*/guides/
+    // database.md documents; the bare positional is what every skill and
+    // templates/agent/** uses, and a `string` arg still leaves unconsumed
+    // positionals in `_` for `run()` below to pick up.
+    //
+    // A second, differently-keyed positional would carry both spellings too,
+    // and would put the bare form back in citty's usage line — but citty
+    // renders a positional by its key, so help would read `[MIGRATIONNAME]`
+    // beside `--name`, and two args for one value raises a which-one-wins
+    // question there is no good answer to. One key, both spellings named in
+    // the description.
     name: {
-      type: 'positional',
-      required: false,
-      description: 'Optional migration name passed to drizzle-kit',
+      type: 'string',
+      description: 'Migration name, as `--name <name>` or a bare positional',
+      valueHint: 'add_posts_table',
     },
     schema: {
       type: 'string',
@@ -770,10 +802,14 @@ const makeMigrationCommand = defineCommand({
     // accept alongside other flags — so `makeMigration` reassembles the config's
     // dialect, schema and out onto the command line instead.
     const result = await makeMigration({
-      name: args.name,
-      schema: args.schema,
-      out: args.out,
-      dialect: args.dialect,
+      name: lastFlagValue(args.name) ?? args._[0],
+      schema: lastFlagValue(args.schema),
+      out: lastFlagValue(args.out),
+      // Through the same helper as the three above: citty hands back a
+      // `string[]` for a repeated flag whatever its declared type, and
+      // `--dialect` reaches drizzle-kit verbatim, so an array would arrive
+      // comma-joined as a dialect nothing accepts.
+      dialect: lastFlagValue(args.dialect),
     })
 
     // Overrides drop `--config`, and `generate` has no flag for every field it

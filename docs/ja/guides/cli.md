@@ -454,16 +454,24 @@ bunx guren db:rollback --all
 
 ### db:seed オプション
 
+`db:seed` は、`config/database.ts` の `seedersFolder`（スキャフォールドしたアプリでは `db/seeders`）にあるシーダーをファイル名順にすべて実行します。個別のシーダーだけを実行するオプションはありません。実行順を決めたい場合は、ファイル名に `001_`、`002_` のような接頭辞を付けてください。
+
 ```bash
 # 全シーダーを実行
 bunx guren db:seed
 
-# 特定のシーダーを実行
-bunx guren db:seed --class UserSeeder
-
 # 本番環境でシーディングを強制実行
 bunx guren db:seed --force
+
+# 実行せずに、何が起きるかだけを表示
+bunx guren db:seed --dry-run
+
+# 実行結果のサマリを JSON で出力
+bunx guren db:seed --json
 ```
+
+> [!NOTE]
+> `--json` が JSON にするのはコマンド自身のサマリだけです。シーダーの標準出力は抑制されません（`make:seeder` が生成する雛形は 1 行ログを出します）。`jq` に流す場合はシーダー側のログを止めてください。
 
 ## キューコマンド
 

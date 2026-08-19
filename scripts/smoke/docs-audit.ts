@@ -48,6 +48,13 @@ async function auditEnglishDocs(root: string): Promise<void> {
     assert(cli.includes(mcpPath), `CLI guide must name ${mcpPath} in the agent harness MCP config map.`)
   }
   assert(cli.includes('agent:init --target'), 'CLI guide must document agent:init --target.')
+  // `db:seed` has never accepted a per-seeder flag. The `--class` spelling
+  // documented here came from an unwired second implementation, and citty
+  // ignores an argument the command does not declare — so it did not fail
+  // loudly, it seeded the whole folder while reading as one seeder.
+  // A tombstone for that one invocation, not a check of the convention:
+  // it catches `--class` and `--class=X` on a db:seed line, nothing subtler.
+  assert(!/db:seed[^\n]*--class/.test(cli), 'CLI guide must not spell a per-seeder flag on a db:seed line — the command takes no such argument and would silently seed everything.')
 
   const consoleGuide = await read(root, 'docs/en/guides/console.md')
   assert(consoleGuide.includes('bunx guren make:command'), 'Console guide must document the make:command scaffold.')
@@ -191,6 +198,7 @@ async function auditJapaneseDocs(root: string): Promise<void> {
     assert(cli.includes(mcpPath), `Japanese CLI guide must name ${mcpPath} in the agent harness MCP config map.`)
   }
   assert(cli.includes('agent:init --target'), 'Japanese CLI guide must document agent:init --target.')
+  assert(!/db:seed[^\n]*--class/.test(cli), 'Japanese CLI guide must not spell a per-seeder flag on a db:seed line — the command takes no such argument and would silently seed everything.')
 
   const firstSteps = await read(root, 'docs/ja/guides/first-steps.md')
   assert(firstSteps.includes('@guren/core'), 'Japanese First Steps must describe the @guren/core standard path.')

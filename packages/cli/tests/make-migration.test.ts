@@ -1,9 +1,10 @@
 import { describe, expect, it, mock } from 'bun:test'
 import { spawnSync } from 'node:child_process'
 import { existsSync, readdirSync } from 'node:fs'
-import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
-import { createTempWorkspace } from './helpers'
+import { createTempWorkspace, runCliBin } from './helpers'
 import * as realUtils from '../src/utils'
 
 const repoRoot = resolve(import.meta.dir, '../../..')
@@ -730,4 +731,124 @@ describe('makeMigration', () => {
       await workspace.cleanup()
     }
   })
+})
+
+/**
+ * A stand-in for the `drizzle-kit` `bun x` would otherwise fetch, written where
+ * `bun x` looks first: `node_modules/.bin` under the invocation cwd. It records
+ * the argv it was handed and exits 0, which is what keeps this test off the
+ * network — a temp workspace has no ancestor `node_modules`, so without the
+ * stub `bun x drizzle-kit` would install the real one.
+ */
+async function seedDrizzleKitStub(dir: string): Promise<void> {
+  const binDir = join(dir, 'node_modules', '.bin')
+  await mkdir(binDir, { recursive: true })
+  const stub = join(binDir, 'drizzle-kit')
+  await writeFile(stub, '#!/bin/sh\nprintf \'%s\\n\' "$@" > "$GUREN_TEST_ARGV_OUT"\n', 'utf8')
+  await chmod(stub, 0o755)
+  // Declares a dialect because `--schema`/`--out` drop `--config`, and the flag
+  // path has to restate the dialect from somewhere. Config-path cases are
+  // unaffected: they pass `--config` and never name a dialect on the line.
+  await writeFile(join(dir, 'drizzle.config.ts'), "export default { dialect: 'sqlite' }", 'utf8')
+}
+
+/**
+ * The argv `make:migration` actually hands drizzle-kit, from a real spawn of
+ * the CLI.
+ *
+ * Spawned rather than imported because what is under test is the citty arg
+ * *declaration* in bin.ts — and bin.ts has no exports, it runs the CLI at
+ * module scope. A test that reached `makeMigration()` directly would keep
+ * passing through exactly the regression this pins: citty resolves positionals
+ * and string flags from different places, so declaring `name` a positional
+ * drops `--name <value>` with neither a `name` key nor an unknown-flag error,
+ * and `makeMigration()` — correct on its own, as the cases above show — is
+ * simply never told the name.
+ *
+ * No `createTempWorkspace`: its `process.chdir()` is there for commands that
+ * read `process.cwd()` in-process, and a subprocess is handed its cwd.
+ */
+async function drizzleKitArgvFor(cliArgs: string[]): Promise<string[]> {
+  const dir = await mkdtemp(join(tmpdir(), 'guren-cli-make-migration-argv-'))
+  try {
+    await seedDrizzleKitStub(dir)
+    const argvOut = join(dir, 'argv.txt')
+
+    const exitCode = await runCliBin(['make:migration', ...cliArgs], dir, {
+      env: { GUREN_TEST_ARGV_OUT: argvOut },
+    })
+    expect(exitCode).toBe(0)
+
+    const recorded = await readFile(argvOut, 'utf8')
+    return recorded.split('\n').filter((line) => line.length > 0)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+}
+
+describe('make:migration name argument', () => {
+  // The whole argv, not a `toContain` — a containment check passes just as
+  // happily on `--name=add_smoke_probe --name=wrong`, which is the shape a
+  // repeated flag produced before `lastFlagValue()`.
+  const NAMED_ARGV = ['generate', '--name=add_smoke_probe', '--config', 'drizzle.config.ts']
+
+  const forms: Array<[string, string[]]> = [
+    ['--name <value>', ['--name', 'add smoke probe']],
+    ['--name=<value>', ['--name=add smoke probe']],
+    ['a bare positional', ['add smoke probe']],
+    // Last-wins. Unnormalized, citty hands back a `string[]` here and
+    // `makeMigration()` dies on `options.name?.trim is not a function`.
+    ['a repeated --name', ['--name', 'ignored', '--name', 'add smoke probe']],
+  ]
+
+  for (const [label, cliArgs] of forms) {
+    it(`passes the name to drizzle-kit when given as ${label}`, async () => {
+      const argv = await drizzleKitArgvFor(cliArgs)
+
+      expect(argv).toEqual(NAMED_ARGV)
+    })
+  }
+
+  // `--schema` and `--out` take the same citty array, and failed on it more
+  // quietly than `--name` did: comma-joined into `a/schema.ts,b/schema.ts` and
+  // handed to drizzle-kit as a path, with a 0 exit code.
+  it('takes the last value of a repeated --schema or --out', async () => {
+    const argv = await drizzleKitArgvFor([
+      '--schema',
+      'a/schema.ts',
+      '--schema',
+      'b/schema.ts',
+      '--out',
+      'a/migrations',
+      '--out',
+      'b/migrations',
+    ])
+
+    // `--dialect` joins them: the overrides drop `--config`, so the dialect the
+    // config declares has to be restated on the line.
+    expect(argv).toEqual([
+      'generate',
+      '--dialect',
+      'sqlite',
+      '--schema',
+      'b/schema.ts',
+      '--out',
+      'b/migrations',
+    ])
+  })
+
+  // A bare `--name` was inert while the argument was a positional — citty
+  // dropped it with everything else. It reaches `makeMigration()` now, so pin
+  // that an empty value falls back to drizzle-kit's own naming rather than
+  // being forwarded as an empty `--name=`.
+  for (const [label, cliArgs] of [
+    ['no name is given', [] as string[]],
+    ['`--name` is given no value', ['--name']],
+  ] as const) {
+    it(`leaves drizzle-kit to name the migration when ${label}`, async () => {
+      const argv = await drizzleKitArgvFor([...cliArgs])
+
+      expect(argv.some((arg) => arg.startsWith('--name'))).toBe(false)
+    })
+  }
 })
