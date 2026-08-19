@@ -21,14 +21,39 @@ import { repoRoot } from './workspace-packages.ts'
 
 const script = join(repoRoot, 'scripts', 'publish-agent-catalog.ts')
 
+/**
+ * A commit identity supplied by the test rather than by the machine. A CI
+ * runner has no `user.email` and a hostname of `(none)`, so git cannot
+ * auto-detect one and every commit the script makes would fail there while
+ * passing on a maintainer's laptop.
+ */
+const gitIdentity = {
+  GIT_AUTHOR_NAME: 'Guren publish test',
+  GIT_AUTHOR_EMAIL: 'publish-test@guren.dev',
+  GIT_COMMITTER_NAME: 'Guren publish test',
+  GIT_COMMITTER_EMAIL: 'publish-test@guren.dev',
+}
+
 function run(remote: string, ...args: string[]) {
   return runWithEnv(remote, {}, ...args)
 }
 
+/**
+ * The git choreography these tests are about, with the validator gate stood
+ * down: `claude` is not on a CI runner's PATH and the script refuses to
+ * publish when the validator cannot run. That refusal has its own test below,
+ * so it is not a condition on all the others.
+ */
 function runWithEnv(remote: string, extraEnv: Record<string, string>, ...args: string[]) {
-  const proc = Bun.spawnSync(['bun', script, '--yes', ...args], {
+  return spawnPublish(remote, extraEnv, ['--yes', '--skip-validate', ...args])
+}
+
+function spawnPublish(remote: string, extraEnv: Record<string, string>, args: string[]) {
+  // argv[0] is this bun, not whatever `bun` PATH resolves to, so a test may
+  // hand the script a PATH that is missing tools without losing its runtime
+  const proc = Bun.spawnSync([process.execPath, script, ...args], {
     cwd: repoRoot,
-    env: { ...process.env, GUREN_AGENT_SKILLS_REMOTE: remote, ...extraEnv },
+    env: { ...process.env, ...gitIdentity, GUREN_AGENT_SKILLS_REMOTE: remote, ...extraEnv },
   })
   return {
     code: proc.exitCode,
@@ -63,6 +88,22 @@ afterAll(async () => {
 })
 
 describe('publish-agent-catalog', () => {
+  it('refuses to publish when claude plugin validate could not run', () => {
+    // a PATH with no `claude` on it: a CI runner, or a maintainer who has not
+    // installed the CLI. Publish is the last gate before users, so an
+    // unavailable validator refuses rather than warns — only --skip-validate
+    // (which every other test here passes) overrides that. Runs before any
+    // publish because it must not reach the remote at all.
+    const result = spawnPublish(bare, { PATH: '/usr/bin:/bin' }, ['--yes'])
+    expect(result.code).toBe(1)
+    expect(result.out).toContain('claude plugin validate could not run')
+    expect(result.out).toContain('--skip-validate')
+    // it refused before cloning: the remote is still just the seed commit
+    const check = join(scratch, 'check-refused')
+    Bun.spawnSync(['git', 'clone', '--quiet', bare, check])
+    expect(git(check, 'rev-list', '--count', 'main')).toBe('1')
+  })
+
   it('first publish replaces the tracked tree and pushes a fast-forward commit', async () => {
     const result = run(bare)
     expect(result.code).toBe(0)
