@@ -1,5 +1,6 @@
 export { makeController } from './make-controller'
 export { makeMigration } from './make-migration'
+export type { MakeMigrationOptions, MakeMigrationResult } from './make-migration'
 export { makeModel } from './make-model'
 export { makeView } from './make-view'
 export { makeRoute } from './make-route'
