@@ -535,10 +535,22 @@ several a month.
 
 Guren does the same. `bun run publish:agent-catalog` renders the payload,
 runs the `audit:agent-catalog` assertions against it, and pushes it to
-`gurenjs/agent-skills` as an ordinary fast-forward commit — never a force
-push, because Claude Code keeps a local clone of a registered marketplace and
-refreshes it, and a rewritten history risks non-fast-forward failures for
-already-registered users. It runs as one line in the release procedure, next
+`gurenjs/agent-skills` as a commit appended to that history — never a
+rewrite, because Claude Code keeps a local clone of a registered marketplace
+and refreshes it, and a rewritten history risks non-fast-forward failures for
+already-registered users. The push is leased to the tip the run cloned
+(`--force-with-lease=main:<oid>`), which is what makes "appended" true: a
+plain fast-forward push would also accept a remote somebody had deliberately
+rolled back, and would restore the history they had removed. Any other value
+at the remote means re-run, never overwrite.
+
+Provenance is §1's claim one step further along: the tree that is audited is
+the tree that is pushed. Between those two sits the maintainer's own git
+configuration — a global `excludesFile`, an attributes filter — so the script
+stages with `--force` and then compares what git holds in the index against
+what it rendered, path set and then blob, before it will commit anything.
+
+It runs as one line in the release procedure, next
 to the already-manual "create the GitHub Release" step. Ordering after a
 successful `changeset publish` is then trivially the maintainer's: they run it
 after the npm publish they can see succeeded, which is exactly the property a
@@ -725,10 +737,12 @@ code changes, no public API changes, no codemod, and `agent:init` output is
 unchanged; the plugin is an additional, optional entry point that terminates
 in the same commands.
 
-The exception is `agent:sync --prune` (§4). It stops deleting files under
-`.claude/skills/` and `.agents/skills/` that the framework never wrote —
-externally installed skills, including this plugin's own. Retired canonical
-skills are still pruned, via the tombstone constant. The change can only
+The exception is `agent:sync --prune` (§4). It stops deleting skill
+directories under `.claude/skills/` and `.agents/skills/` whose names are not
+canonical ones — externally installed skills, including this plugin's own.
+The judgment is the directory's name, not its authorship: a stray file inside
+a canonical skill directory is still claimed, and retired canonical names are
+still pruned via the tombstone constant. The change can only
 delete less than it does today, so no app can lose anything it would have
 kept; a user relying on `--prune` to clear third-party skills would have to do
 that themselves. This ships as a `@guren/cli` minor with the behavior noted in
