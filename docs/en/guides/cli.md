@@ -456,16 +456,24 @@ bunx guren db:rollback --all
 
 ### db:seed Options
 
+`db:seed` runs every seeder in the folder `config/database.ts` configures as `seedersFolder` (`db/seeders` in a scaffolded app), in filename order. There is no option to run a single seeder — prefix the filenames (`001_`, `002_`, …) when the order matters.
+
 ```bash
 # Run all seeders
 bunx guren db:seed
 
-# Run specific seeder
-bunx guren db:seed --class UserSeeder
-
 # Force seeding in production
 bunx guren db:seed --force
+
+# Show what would happen without executing
+bunx guren db:seed --dry-run
+
+# Emit the run summary as JSON
+bunx guren db:seed --json
 ```
+
+> [!NOTE]
+> `--json` covers the command's own summary. Seeder stdout is not suppressed — the `make:seeder` template logs a line per seeder — so silence those before piping to `jq`.
 
 ## Queue Commands
 

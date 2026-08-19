@@ -155,7 +155,7 @@ const makeCommandSpecs: MakeCommandSpec[] = [
   { name: 'make:mail', description: 'Generate a new mailable class.', argDescription: 'Mail class name', makeFn: makeMail, resourceName: 'Mail' },
   { name: 'make:middleware', description: 'Generate a new middleware.', argDescription: 'Middleware name', makeFn: makeMiddleware, resourceName: 'Middleware' },
   { name: 'make:policy', description: 'Generate a new authorization policy.', argDescription: 'Policy class name', makeFn: makePolicy, resourceName: 'Policy' },
-  { name: 'make:seeder', description: 'Generate a new database seeder.', argDescription: 'Seeder class name', makeFn: makeSeeder, resourceName: 'Seeder' },
+  { name: 'make:seeder', description: 'Generate a new database seeder.', argDescription: 'Seeder name', makeFn: makeSeeder, resourceName: 'Seeder' },
   { name: 'make:notification', description: 'Generate a new notification class.', argDescription: 'Notification class name', makeFn: makeNotification, resourceName: 'Notification' },
   { name: 'make:provider', description: 'Generate a new service provider.', argDescription: 'Provider class name', makeFn: makeProvider, resourceName: 'Provider' },
 ]
