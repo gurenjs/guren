@@ -743,15 +743,42 @@ const makeExceptionCommand = defineCommand({
  *
  * citty types every `string` arg as `string | undefined` and then hands back a
  * `string[]` when the flag is passed twice — a lie no compiler catches, and one
- * each of these three arguments fails differently on. `--name a --name b` died
- * inside `makeMigration()` on `options.name?.trim is not a function`; `--schema`
- * and `--out` were quietly comma-joined into a path nothing can open
- * (`--schema a/schema.ts,b/schema.ts`) and still exited 0. Last-wins is what
- * repeating a flag means to whoever typed it.
+ * that surfaces differently at every place the value is then used. Measured on
+ * this bin, three shapes crash: `make:migration --name a --name b` inside
+ * `makeMigration()` on `options.name?.trim is not a function`,
+ * `context --entity User --entity User` on `entityName.toLowerCase is not a
+ * function`, and `context --app . --app .` inside `resolve()` on `The
+ * "paths[0]" property must be of type string, got array`.
+ *
+ * The quiet ones are the reason to narrow a value before reading it rather than
+ * after a crash report: `make:migration --schema a.ts --schema b.ts` comma-joins
+ * them into a path nothing can open and still exits 0;
+ * `context --module app --module app` exits 1 blaming a module named `app,app`;
+ * `context --routes web.ts --routes web.ts` exits 0 reporting the entity's
+ * routes as none, because the same `resolve()` TypeError lands in a `catch` that
+ * exists for a routes file this CLI genuinely cannot load (`entity-context.ts`,
+ * `loadEntityRoutes`) and cannot tell the two apart. Last-wins is what repeating
+ * a flag means to whoever typed it.
  */
 function lastFlagValue(value: unknown): string | undefined {
   const candidate = Array.isArray(value) ? value.at(-1) : value
   return typeof candidate === 'string' ? candidate : undefined
+}
+
+/**
+ * The last value of a repeated citty `boolean` flag.
+ *
+ * `Boolean(args.flag)` reads as safe here and is not: citty arrays a repeated
+ * boolean the same way it arrays a string, and every array is truthy. So
+ * `--json=false --json=false` turns *off* into *on*, and `--json --json=false`
+ * ignores the half the user typed last. Only the `=value` spellings can express
+ * a false, so a bare `--json --json` is unaffected — which is exactly what makes
+ * this the kind of bug that survives casual testing. citty coerces the value
+ * itself (`--json=yes` and `--json=0` both arrive as `true`), so the only work
+ * left is picking the last one.
+ */
+function lastBooleanFlag(value: unknown): boolean {
+  return Boolean(Array.isArray(value) ? value.at(-1) : value)
 }
 
 const makeMigrationCommand = defineCommand({
@@ -2006,22 +2033,28 @@ const contextCommand = defineCommand({
     },
   },
   async run({ args }) {
-    const entity = args.entity ?? args._[0]
+    // Narrowed here rather than at each use so both branches below get the same
+    // treatment: `--app` and `--routes` reach a `resolve()` that throws on an
+    // array whether or not an entity was named.
+    const cwd = lastFlagValue(args.app)
+    const routesFile = lastFlagValue(args.routes)
+    const json = lastBooleanFlag(args.json)
+    const entity = lastFlagValue(args.entity) ?? args._[0]
 
     if (entity) {
       await displayEntityContext(entity, {
-        cwd: args.app,
-        json: Boolean(args.json),
-        routesFile: args.routes,
-        module: args.module,
+        cwd,
+        json,
+        routesFile,
+        module: lastFlagValue(args.module),
       })
       return
     }
 
     await displayContext({
-      cwd: args.app,
-      json: Boolean(args.json),
-      routesFile: args.routes,
+      cwd,
+      json,
+      routesFile,
     })
   },
 })
