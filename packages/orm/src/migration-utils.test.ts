@@ -88,6 +88,34 @@ describe('migrateDatabase run summary', () => {
     expect(summary).toEqual({ migrationsFolder: migrationsDir, migrationsFound: 0, looseSqlFiles: 2 })
   })
 
+  // The count used to be hardcoded to 0 on the applied path, which claimed a
+  // clean folder for one that is still skipping files.
+  test('should count loose .sql files sitting beside real migrations, without warning', async () => {
+    const migrationsDir = join(workDir, 'migrations')
+    writeDrizzleMigration(
+      migrationsDir,
+      '20260101000000_create_widgets',
+      'CREATE TABLE widgets (id integer primary key autoincrement);',
+    )
+    writeFileSync(join(migrationsDir, 'notes.sql'), 'SELECT 1;')
+
+    const warnings: unknown[][] = []
+    const realWarn = console.warn
+    console.warn = (...args: unknown[]) => void warnings.push(args)
+
+    const database = sqliteAt(migrationsDir)
+    try {
+      const summary = await database.migrateDatabase()
+
+      expect(summary).toEqual({ migrationsFolder: migrationsDir, migrationsFound: 1, looseSqlFiles: 1 })
+      // The folder did produce a database, and this runs on every app boot.
+      expect(warnings).toEqual([])
+    } finally {
+      console.warn = realWarn
+      await database.closeDatabase()
+    }
+  })
+
   test('should report how many migrations the folder held once one exists', async () => {
     const migrationsDir = join(workDir, 'migrations')
     writeDrizzleMigration(

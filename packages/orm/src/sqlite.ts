@@ -2,7 +2,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { hotReloadKey, releaseActiveConnection, replaceActiveConnection } from './active-connections'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
-import { buildMigrationStatus, migrationFailure, seedFailure, listLocalMigrations, noMigrationsToRun, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
+import { buildMigrationStatus, migrationFailure, seedFailure, inspectMigrationsFolder, listLocalMigrations, noMigrationsToRun, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders } from './seeder'
 import { singleFlight } from './single-flight'
 
@@ -30,9 +30,9 @@ export interface SqliteDatabase {
   seedDatabase(): Promise<void>
   /**
    * Drops every table and view (including the drizzle migration tracker), then
-   * re-applies migrations — same end state as `guren db:reset`. Reports that
-   * run the way `migrateDatabase()` does, so a reset that recreated nothing is
-   * distinguishable from one that did.
+   * re-applies migrations — same end state as `guren db:reset`. Resolves
+   * undefined only when a concurrent `closeDatabase()` left nothing to drop, so
+   * there was no migration run to report.
    */
   resetDatabase(): Promise<MigrationRunSummary | undefined>
   /** Per-migration applied state derived from the drizzle-kit journal and the __drizzle_migrations table. */
@@ -181,16 +181,16 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
 
   const migrations = singleFlight(async (): Promise<MigrationRunSummary> => {
     try {
-      const localMigrations = listLocalMigrations(resolvedMigrationsFolder)
-      if (localMigrations.length === 0) {
-        return noMigrationsToRun(resolvedMigrationsFolder)
+      const summary = inspectMigrationsFolder(resolvedMigrationsFolder)
+      if (summary.migrationsFound === 0) {
+        return noMigrationsToRun(summary)
       }
 
       const db = await database.get()
       const { migrate } = await import('drizzle-orm/bun-sqlite/migrator')
       await migrate(db as any, { migrationsFolder: resolvedMigrationsFolder }) // eslint-disable-line @typescript-eslint/no-explicit-any
 
-      return { migrationsFolder: resolvedMigrationsFolder, migrationsFound: localMigrations.length, looseSqlFiles: 0 }
+      return summary
     } catch (error) {
       // No endpoint: a SQLite file has no host, so only the cause chain adds signal.
       throw migrationFailure(error)

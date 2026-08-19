@@ -303,10 +303,23 @@ function describeMigrationsFolder(folder: string | undefined): string {
   return relativePath === '' || relativePath.startsWith('..') ? folder : relativePath
 }
 
+function reportSuccess(action: string, message: string, json: boolean, extra?: Record<string, unknown>): void {
+  if (json) {
+    console.log(JSON.stringify({ success: true, action, message, ...extra }, null, 2))
+  } else {
+    consola.success(message)
+  }
+}
+
+/** The two fields every db command reports about a migration run, or nothing when it has no summary. */
+function migrationRunFields(summary: MigrationRunSummary | undefined): Record<string, unknown> | undefined {
+  return summary && { migrationsFound: summary.migrationsFound, looseSqlFiles: summary.looseSqlFiles }
+}
+
 /**
- * Reports a migration run that applied nothing. Both `db:migrate` and
- * `db:reset` can end on one, and a ✔ there reads as a database that is now up
- * to date — after a reset, as one that still has its tables.
+ * Reports a migration run that applied nothing. `db:migrate`, `db:reset` and
+ * `db:fresh` can all end on one, and a ✔ there reads as a database that is now
+ * up to date — after a reset, as one that still has its tables.
  */
 function reportNoMigrationsApplied(
   action: string,
@@ -318,13 +331,7 @@ function reportNoMigrationsApplied(
   const message = `No migrations found in ${describeMigrationsFolder(summary.migrationsFolder)} — ${outcome}.`
 
   if (json) {
-    console.log(
-      JSON.stringify(
-        { success: true, action, message, migrationsFound: 0, looseSqlFiles: summary.looseSqlFiles, ...extra },
-        null,
-        2,
-      ),
-    )
+    reportSuccess(action, message, true, { ...migrationRunFields(summary), ...extra })
     return
   }
 
@@ -333,14 +340,6 @@ function reportNoMigrationsApplied(
   // has already explained why those files were skipped.
   if (summary.looseSqlFiles === 0) {
     consola.info(`Generate one with \`bun run db:make\`, then re-run \`bun run ${action}\`.`)
-  }
-}
-
-function reportSuccess(action: string, message: string, json: boolean, extra?: Record<string, unknown>): void {
-  if (json) {
-    console.log(JSON.stringify({ success: true, action, message, ...extra }, null, 2))
-  } else {
-    consola.success(message)
   }
 }
 
@@ -745,17 +744,12 @@ const migrateCommand = defineCommand({
 
     const summary = await runDatabaseMigrations()
 
-    if (summary && summary.migrationsFound === 0) {
+    if (summary?.migrationsFound === 0) {
       reportNoMigrationsApplied('db:migrate', summary, 'nothing was applied', Boolean(args.json))
       return
     }
 
-    reportSuccess(
-      'db:migrate',
-      'Database migrations completed.',
-      Boolean(args.json),
-      summary ? { migrationsFound: summary.migrationsFound } : undefined,
-    )
+    reportSuccess('db:migrate', 'Database migrations completed.', Boolean(args.json), migrationRunFields(summary))
   },
 })
 
@@ -795,6 +789,46 @@ const seedCommand = defineCommand({
   },
 })
 
+/**
+ * `db:reset` and `db:fresh` are the same command under two names, so they share
+ * one body: the guard against reporting success for a reset that dropped every
+ * table and re-applied nothing has to hold for both, and a second copy is how
+ * it would come to hold for only one.
+ */
+async function runResetCommand(
+  action: 'db:reset' | 'db:fresh',
+  doneVerb: 'reset' | 'refreshed',
+  args: { seed?: boolean; force?: boolean; json?: boolean; dryRun?: boolean },
+): Promise<void> {
+  if (!ensureDestructiveCommandAllowed(args.force)) {
+    return
+  }
+
+  const seed = Boolean(args.seed)
+  const json = Boolean(args.json)
+
+  if (args.dryRun) {
+    const message = seed
+      ? 'Would drop all tables, re-run all migrations, and run seeders.'
+      : 'Would drop all tables and re-run all migrations.'
+    reportDryRun(action, message, json, { seed })
+    return
+  }
+
+  consola.info('Dropping all tables...')
+  const summary = await resetDatabase({ seed })
+
+  if (summary?.migrationsFound === 0) {
+    reportNoMigrationsApplied(action, summary, 'the tables were dropped and nothing was re-applied', json, { seed })
+    return
+  }
+
+  const message = seed
+    ? `Database ${doneVerb} and seeded successfully.`
+    : `Database ${doneVerb} successfully.`
+  reportSuccess(action, message, json, { ...migrationRunFields(summary), seed })
+}
+
 const resetCommand = defineCommand({
   meta: {
     name: 'db:reset',
@@ -822,36 +856,7 @@ const resetCommand = defineCommand({
     },
   },
   async run({ args }) {
-    if (!ensureDestructiveCommandAllowed(args.force)) {
-      return
-    }
-
-    if (args.dryRun) {
-      const message = args.seed
-        ? 'Would drop all tables, re-run all migrations, and run seeders.'
-        : 'Would drop all tables and re-run all migrations.'
-      reportDryRun('db:reset', message, Boolean(args.json), { seed: Boolean(args.seed) })
-      return
-    }
-
-    consola.info('Dropping all tables...')
-    const summary = await resetDatabase({ seed: Boolean(args.seed) })
-
-    if (summary && summary.migrationsFound === 0) {
-      reportNoMigrationsApplied(
-        'db:reset',
-        summary,
-        'the tables were dropped and nothing was re-applied',
-        Boolean(args.json),
-        { seed: Boolean(args.seed) },
-      )
-      return
-    }
-
-    const message = args.seed
-      ? 'Database reset and seeded successfully.'
-      : 'Database reset successfully.'
-    reportSuccess('db:reset', message, Boolean(args.json), { seed: Boolean(args.seed) })
+    await runResetCommand('db:reset', 'reset', args)
   },
 })
 
@@ -882,25 +887,7 @@ const freshCommand = defineCommand({
     },
   },
   async run({ args }) {
-    if (!ensureDestructiveCommandAllowed(args.force)) {
-      return
-    }
-
-    if (args.dryRun) {
-      const message = args.seed
-        ? 'Would drop all tables, re-run all migrations, and run seeders.'
-        : 'Would drop all tables and re-run all migrations.'
-      reportDryRun('db:fresh', message, Boolean(args.json), { seed: Boolean(args.seed) })
-      return
-    }
-
-    consola.info('Dropping all tables...')
-    await resetDatabase({ seed: Boolean(args.seed) })
-
-    const message = args.seed
-      ? 'Database refreshed and seeded successfully.'
-      : 'Database refreshed successfully.'
-    reportSuccess('db:fresh', message, Boolean(args.json), { seed: Boolean(args.seed) })
+    await runResetCommand('db:fresh', 'refreshed', args)
   },
 })
 

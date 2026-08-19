@@ -1,6 +1,7 @@
 import { access } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { isRecord } from './runtime'
 
 const DATABASE_CONFIG_CANDIDATES = [
   'config/database.ts',
@@ -59,9 +60,12 @@ function pickFunction(module: Record<string, unknown>, names: string[]): (() => 
 
 /**
  * What the app's `migrateDatabase()` reported about the run. Mirrors
- * `MigrationRunSummary` from `@guren/orm`, but read structurally: the config
- * module belongs to the app, so it may be backed by an older ORM that resolves
- * to undefined, or by a migration function the user wrote themselves.
+ * `MigrationRunSummary` from `@guren/orm`, but declared here and read
+ * structurally rather than imported: the config module belongs to the app, so
+ * it may be backed by an older ORM that resolves to undefined, or by a
+ * migration function the user wrote themselves. The cost of that decoupling is
+ * that nothing pins the two shapes together — a field added to the ORM's
+ * summary has to be added here too before the CLI can see it.
  */
 export interface MigrationRunSummary {
   migrationsFolder?: string
@@ -70,11 +74,11 @@ export interface MigrationRunSummary {
 }
 
 function asMigrationRunSummary(value: unknown): MigrationRunSummary | undefined {
-  if (value == null || typeof value !== 'object') {
+  if (!isRecord(value)) {
     return undefined
   }
 
-  const { migrationsFolder, migrationsFound, looseSqlFiles } = value as Record<string, unknown>
+  const { migrationsFolder, migrationsFound, looseSqlFiles } = value
   if (typeof migrationsFound !== 'number') {
     return undefined
   }

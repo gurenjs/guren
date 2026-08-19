@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { hotReloadKey, releaseActiveConnection, replaceActiveConnection } from './active-connections'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
-import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailure, isConnectionFailure, migrationFailure, seedFailure, listLocalMigrations, noMigrationsToRun, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
+import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailure, isConnectionFailure, migrationFailure, seedFailure, inspectMigrationsFolder, listLocalMigrations, noMigrationsToRun, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders } from './seeder'
 import { singleFlight } from './single-flight'
 
@@ -62,13 +62,8 @@ export interface MySqlDatabase {
   closeDatabase(): Promise<void>
   configureOrm(): Promise<void>
   seedDatabase(): Promise<void>
-  /**
-   * Drops every table and view (including the drizzle migration tracker), then
-   * re-applies migrations — same end state as `guren db:reset`. Reports that
-   * run the way `migrateDatabase()` does, so a reset that recreated nothing is
-   * distinguishable from one that did.
-   */
-  resetDatabase(): Promise<MigrationRunSummary | undefined>
+  /** Drops every table and view (including the drizzle migration tracker), then re-applies migrations — same end state as `guren db:reset`. */
+  resetDatabase(): Promise<MigrationRunSummary>
   /** Per-migration applied state derived from the drizzle-kit journal and the __drizzle_migrations table. */
   migrationStatus(): Promise<MigrationStatusEntry[]>
 }
@@ -106,9 +101,9 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
     let endpoint: string | undefined
 
     try {
-      const localMigrations = listLocalMigrations(resolvedMigrationsFolder)
-      if (localMigrations.length === 0) {
-        return noMigrationsToRun(resolvedMigrationsFolder)
+      const summary = inspectMigrationsFolder(resolvedMigrationsFolder)
+      if (summary.migrationsFound === 0) {
+        return noMigrationsToRun(summary)
       }
 
       const { drizzle, migrate, createPool } = await loadMySqlModules()
@@ -126,7 +121,7 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
         await closePool(migrationClient)
       }
 
-      return { migrationsFolder: resolvedMigrationsFolder, migrationsFound: localMigrations.length, looseSqlFiles: 0 }
+      return summary
     } catch (error) {
       throw migrationFailure(error, endpoint)
     }

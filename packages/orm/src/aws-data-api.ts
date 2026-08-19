@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { hotReloadKey, releaseActiveConnection, replaceActiveConnection } from './active-connections'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
-import { buildMigrationStatus, listLocalMigrations, noMigrationsToRun, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
+import { buildMigrationStatus, inspectMigrationsFolder, listLocalMigrations, noMigrationsToRun, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders } from './seeder'
 import { singleFlight } from './single-flight'
 
@@ -68,13 +68,8 @@ export interface AwsDataApiDatabase {
   closeDatabase(): Promise<void>
   configureOrm(): Promise<void>
   seedDatabase(): Promise<void>
-  /**
-   * Drops the public schema (and the drizzle tracker schema), then re-applies
-   * migrations — same end state as `guren db:reset`. Reports that run the way
-   * `migrateDatabase()` does, so a reset that recreated nothing is
-   * distinguishable from one that did.
-   */
-  resetDatabase(): Promise<MigrationRunSummary | undefined>
+  /** Drops the public schema (and the drizzle tracker schema), then re-applies migrations — same end state as `guren db:reset`. */
+  resetDatabase(): Promise<MigrationRunSummary>
   /** Per-migration applied state derived from the drizzle-kit journal and drizzle.__drizzle_migrations. */
   migrationStatus(): Promise<MigrationStatusEntry[]>
 }
@@ -134,15 +129,15 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
 
   const migrations = singleFlight(async (): Promise<MigrationRunSummary> => {
     try {
-      const localMigrations = listLocalMigrations(resolvedMigrationsFolder)
-      if (localMigrations.length === 0) {
-        return noMigrationsToRun(resolvedMigrationsFolder)
+      const summary = inspectMigrationsFolder(resolvedMigrationsFolder)
+      if (summary.migrationsFound === 0) {
+        return noMigrationsToRun(summary)
       }
 
       const { migrate } = await loadAwsDataApiModules()
       await withAdminDb((db) => migrate(db, { migrationsFolder: resolvedMigrationsFolder }))
 
-      return { migrationsFolder: resolvedMigrationsFolder, migrationsFound: localMigrations.length, looseSqlFiles: 0 }
+      return summary
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error)
       throw new Error(`Failed to run database migrations: ${reason}`)
