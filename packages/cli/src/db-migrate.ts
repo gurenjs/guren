@@ -157,7 +157,8 @@ export async function resetDatabase(options: ResetDatabaseOptions = {}): Promise
     const summary = asMigrationRunSummary(await reset())
     // `reset()` already re-applies migrations; this second call hits the
     // driver's memo and no-ops, and exists for a config that only exports a
-    // bare dropAllTables().
+    // bare dropAllTables() — which is also the only case the fallback below
+    // describes, since a driver reset that reports nothing ran nothing.
     const migrated = asMigrationRunSummary(await migrate())
 
     if (options.seed && seed) {
