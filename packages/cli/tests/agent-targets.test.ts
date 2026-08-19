@@ -230,11 +230,17 @@ describe('managedNamespaces', () => {
   })
 
   it('rejects a retired name that is not a single path segment — the claim is rm-adjacent', () => {
-    // backslashes too: they are a separator on Windows, and dropping that
-    // half of the check would otherwise pass every test here
-    for (const bad of ['.', '..', '../x', 'a/b', '', 'a\\b', '..\\x']) {
-      expect(() => managedNamespaces(['claude'], plan(['claude']), [bad])).toThrow('not a single path segment')
+    const claim = (bad: string) => () => managedNamespaces(['claude'], plan(['claude']), [bad])
+    // the traversal half is safePathSegments' rule, reported in its words —
+    // including the backslash (a separator on Windows) and the NUL that
+    // truncates a path syscall-side, neither of which a hand-written
+    // separator check here would have caught
+    for (const bad of ['.', '..', '../x', 'a\\b', '..\\x', 'a\u0000b']) {
+      expect(claim(bad)).toThrow('path traversal')
     }
+    expect(claim('')).toThrow('required')
+    // and the one constraint a skill directory adds on top of it
+    expect(claim('a/b')).toThrow('not a single path segment')
   })
 
   it('the skill claim is derived from the plan, so it tracks the real templates', async () => {

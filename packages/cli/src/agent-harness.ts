@@ -54,13 +54,6 @@ export interface AgentHarnessOptions {
    * candidate first, and deletion stays an explicit opt-in.
    */
   prune?: boolean
-  /**
-   * Skill directory names the harness used to ship and no longer plans, which
-   * `sync` still owns for stale reporting and prune. Defaults to the
-   * framework's own `RETIRED_CANONICAL_SKILLS`; exposed so tests can exercise
-   * the retired path while that list is empty.
-   */
-  retiredSkills?: readonly string[]
 }
 
 export interface AgentHarnessResult {
@@ -221,12 +214,17 @@ async function isSameFile(cwd: string, left: string, right: string): Promise<boo
  * planned path exists on disk once the write loop has run (it either wrote the
  * file or skipped it because it was already there), so the identity check has
  * both sides to compare.
+ *
+ * Exported for tests: `retiredSkills` defaults to `RETIRED_CANONICAL_SKILLS`,
+ * which is empty, so the retired-name path has no other way to be exercised.
+ * The seam belongs here rather than on `AgentHarnessOptions`, which is a
+ * published type — a test hook there would outlive the reason for it.
  */
-async function findStaleManagedFiles(
+export async function findStaleManagedFiles(
   cwd: string,
   components: HarnessComponent[],
   plan: readonly PlannedFile[],
-  retiredSkills: readonly string[] | undefined,
+  retiredSkills?: readonly string[],
 ): Promise<string[]> {
   const plannedPaths = new Set(plan.map((file) => file.path))
   const plannedByLowerPath = new Map(plan.map((file) => [file.path.toLowerCase(), file.path]))
@@ -365,7 +363,7 @@ export async function installAgentHarness(options: AgentHarnessOptions = {}): Pr
   // Stale cleanup is a sync concern: init installs into places it has never
   // written, so "not in the plan" carries no leftover signal there.
   const stale =
-    mode === 'sync' ? await findStaleManagedFiles(cwd, components, plan, options.retiredSkills) : []
+    mode === 'sync' ? await findStaleManagedFiles(cwd, components, plan) : []
   const pruned = Boolean(options.prune) && stale.length > 0
   if (pruned) {
     for (const relPath of stale) {
