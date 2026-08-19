@@ -204,12 +204,35 @@ async function findStaleManagedFiles(
   const stale: string[] = []
 
   /**
+   * Is every path component from `cwd` down to `dir` a real directory inside
+   * the app? A claim is only safe over files that live there, and `lstat`
+   * refuses to follow just the component it is given: lstat'ing
+   * `.claude/skills/dev-workflow` says nothing about `.claude/skills`, which
+   * a symlink would hand the walk as an ordinary external directory. So each
+   * component is checked in turn, and a symlink anywhere along the way ends
+   * the walk before `readdir` — and `rm` — can follow it.
+   */
+  const insideTheApp = async (dir: string): Promise<boolean> => {
+    let current = cwd
+    for (const segment of dir.split('/')) {
+      current = join(current, segment)
+      let info
+      try {
+        info = await lstat(current)
+      } catch {
+        return false // does not exist — nothing to clean
+      }
+      if (!info.isDirectory()) {
+        return false
+      }
+    }
+    return true
+  }
+
+  /**
    * One walk over one directory. `recursive` is the only knob: a `tree` and
    * each named child of a `children` claim walk their whole subtree; a
    * `pattern` looks only at the top level and only at framework-named files.
-   * The lstat guard is per walk, so a symlinked child is skipped exactly the
-   * way a symlinked root is — readdir and rm would follow it, and a claim is
-   * only safe over files that live inside the app.
    */
   const walk = async (
     dir: string,
@@ -217,13 +240,7 @@ async function findStaleManagedFiles(
     accept: (entry: Dirent) => boolean,
   ): Promise<void> => {
     const root = join(cwd, dir)
-    let rootInfo
-    try {
-      rootInfo = await lstat(root)
-    } catch {
-      return // directory does not exist — nothing to clean
-    }
-    if (!rootInfo.isDirectory()) {
+    if (!(await insideTheApp(dir))) {
       return
     }
     let entries: Dirent[]

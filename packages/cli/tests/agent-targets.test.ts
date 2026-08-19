@@ -230,7 +230,9 @@ describe('managedNamespaces', () => {
   })
 
   it('rejects a retired name that is not a single path segment — the claim is rm-adjacent', () => {
-    for (const bad of ['.', '..', '../x', 'a/b', '']) {
+    // backslashes too: they are a separator on Windows, and dropping that
+    // half of the check would otherwise pass every test here
+    for (const bad of ['.', '..', '../x', 'a/b', '', 'a\\b', '..\\x']) {
       expect(() => managedNamespaces(['claude'], plan(['claude']), [bad])).toThrow('not a single path segment')
     }
   })

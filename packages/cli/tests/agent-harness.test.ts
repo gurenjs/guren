@@ -357,11 +357,21 @@ describe('installAgentHarness', () => {
     // dev-workflow/ that the current plan does not write is still stale
     await installAgentHarness({ cwd: tempDir, mode: 'init' })
     await writeFile(join(tempDir, '.claude/skills/dev-workflow/OLD.md'), 'leftover\n', 'utf8')
+    // one level down as well: a claim that only read the child's top level
+    // would report the first file and walk past this one
+    await mkdir(join(tempDir, '.claude/skills/dev-workflow/references'), { recursive: true })
+    await writeFile(join(tempDir, '.claude/skills/dev-workflow/references/OLD.md'), 'leftover\n', 'utf8')
 
     const result = await installAgentHarness({ cwd: tempDir, mode: 'sync', prune: true })
 
-    expect(result.stale).toEqual(['.claude/skills/dev-workflow/OLD.md'])
+    expect(result.stale).toEqual([
+      '.claude/skills/dev-workflow/OLD.md',
+      '.claude/skills/dev-workflow/references/OLD.md',
+    ])
     await expect(access(join(tempDir, '.claude/skills/dev-workflow/OLD.md'))).rejects.toThrow()
+    await expect(
+      access(join(tempDir, '.claude/skills/dev-workflow/references/OLD.md')),
+    ).rejects.toThrow()
     await access(join(tempDir, '.claude/skills/dev-workflow/SKILL.md'))
   })
 
@@ -383,6 +393,23 @@ describe('installAgentHarness', () => {
     // Through a symlink the child is not entered at all.
     expect(result.stale).toEqual([])
     expect(await readFile(join(outside, 'STRAY.md'), 'utf8')).toBe('not ours to delete\n')
+    await rm(outside, { recursive: true, force: true })
+  })
+
+  it('sync --prune does not delete through a symlinked skills root above a claimed name', async () => {
+    // the children claim walks `.claude/skills/<name>`, so an lstat of that
+    // path alone says nothing about `.claude/skills` itself: through a
+    // symlinked root the external target reports as an ordinary directory
+    await installAgentHarness({ cwd: tempDir, mode: 'init' })
+    const outside = join(tempDir, '..', `${basename(tempDir)}-skills`)
+    await rename(join(tempDir, '.claude/skills'), outside)
+    await symlink(outside, join(tempDir, '.claude/skills'), 'dir')
+    await writeFile(join(outside, 'dev-workflow/STRAY.md'), 'not ours to delete\n', 'utf8')
+
+    const result = await installAgentHarness({ cwd: tempDir, mode: 'sync', prune: true })
+
+    expect(result.stale).toEqual([])
+    expect(await readFile(join(outside, 'dev-workflow/STRAY.md'), 'utf8')).toBe('not ours to delete\n')
     await rm(outside, { recursive: true, force: true })
   })
 
@@ -419,6 +446,24 @@ describe('installAgentHarness', () => {
 
     expect(result.stale).toEqual(['.claude/rules/team-conventions.md'])
     await expect(access(join(tempDir, '.claude/rules/team-conventions.md'))).rejects.toThrow()
+  })
+
+  it('sync --prune does not delete through a symlinked .claude, above every namespace in it', async () => {
+    // the dotfiles pattern: .claude itself is a link into a shared checkout,
+    // and every namespace under it — the rules tree as much as the skills
+    // children — is then outside the app. The write loop still refreshes
+    // managed files through the link; only the claim to delete stops here.
+    await installAgentHarness({ cwd: tempDir, mode: 'init' })
+    const outside = join(tempDir, '..', `${basename(tempDir)}-dotfiles`)
+    await rename(join(tempDir, '.claude'), outside)
+    await symlink(outside, join(tempDir, '.claude'), 'dir')
+    await writeFile(join(outside, 'rules/legacy.md'), 'not ours to delete\n', 'utf8')
+
+    const result = await installAgentHarness({ cwd: tempDir, mode: 'sync', prune: true })
+
+    expect(result.stale).toEqual([])
+    expect(await readFile(join(outside, 'rules/legacy.md'), 'utf8')).toBe('not ours to delete\n')
+    await rm(outside, { recursive: true, force: true })
   })
 
   it('sync --prune never touches .claude/agents or .claude/hooks', async () => {
