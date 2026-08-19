@@ -511,6 +511,15 @@ export type {
   RegisteredTranslationKey,
 } from './i18n'
 // Database (Seeder & Factory)
+// The seeder half is deprecated (`seeder-class-convention`, registered in
+// `packages/cli/src/deprecations.ts`): `BaseSeeder`/`Seeder`/
+// `resetCalledSeeders`/`SeederRunner`/`createSeederRunner`, and the
+// `SeederClass`/`SeederInterface`/`SeederRunnerOptions` types below. Seeding
+// goes through `runSeeders()`/`defineSeeder`; `runSeeders()` does accept a
+// seeder class, but not one whose `run()` is declared to take no context, and
+// no command reaches `SeederRunner` at all. Removal is 3.0.0, which
+// `audit:core-semver` will hold until a `@guren/core` major is declared
+// alongside it. The factory half is live: `make:factory` scaffolds against it.
 export {
   BaseSeeder,
   Seeder,

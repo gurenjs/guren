@@ -1,16 +1,38 @@
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import type { SeederClass, SeederRunnerOptions } from './types'
+// Deprecated alongside this runner: the two halves of the same convention.
 import { resetCalledSeeders } from './Seeder'
+import { warnOnce } from '../support/warn-once'
 
 /**
  * Seeder runner for executing database seeders.
+ *
+ * @deprecated No Guren command reaches this runner. Write seeders with
+ * `defineSeeder` from `@guren/core` and run them with `db:seed`. Deprecated
+ * in 2.9.0, removed in 3.0.0.
+ *
+ * `db:seed` seeds by loading the seeders folder through `runSeeders()`, which
+ * runs every seeder it finds there and hands each one a `{ db }` context. This
+ * runner orchestrates differently: it runs a single seeder per call, taken
+ * from a class passed in, a name registered with {@link SeederRunner.register},
+ * or a name resolved to `<seedersPath>/<Name>.ts` and defaulting to
+ * `DatabaseSeeder`; it constructs it with `new` and invokes `.run()` with no
+ * context. Nothing in the framework calls any of it. See {@link BaseSeeder}
+ * for what the no-context `run()` costs a seeder written against it.
  */
 export class SeederRunner {
   private options: Required<SeederRunnerOptions>
   private seeders: Map<string, SeederClass> = new Map()
 
   constructor(options: SeederRunnerOptions = {}) {
+    warnOnce(
+      'seeder-class-convention:seeder-runner',
+      '[guren] Deprecation (seeder-class-convention): SeederRunner is deprecated\n'
+        + '  since 2.9.0, will be removed in 3.0.0.\n'
+        + "  No Guren command runs it. Write seeders with defineSeeder from '@guren/core' "
+        + 'and run them with `guren db:seed`.',
+    )
     this.options = {
       seedersPath: options.seedersPath ?? 'db/seeders',
       defaultSeeder: options.defaultSeeder ?? 'DatabaseSeeder',
@@ -146,6 +168,10 @@ export class SeederRunner {
 
 /**
  * Create a seeder runner.
+ *
+ * @deprecated No Guren command reaches this runner. Write seeders with
+ * `defineSeeder` from `@guren/core` instead. Deprecated in 2.9.0, removed in
+ * 3.0.0. See {@link SeederRunner}.
  */
 export function createSeederRunner(options?: SeederRunnerOptions): SeederRunner {
   return new SeederRunner(options)
