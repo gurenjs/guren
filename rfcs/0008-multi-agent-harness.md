@@ -330,9 +330,13 @@ exactly as today. New targets are opt-in per app. No codemod, no deprecation.
    Part 1.
    *Amended by RFC 0011 (2026-08-18):* a second, distinct problem in the
    same directories surfaced once skills started arriving from outside the
-   harness. `npx skills add` and Agent Plugins clients copy third-party
-   skills flat and unnamespaced into `.agents/skills/` and `.claude/skills/`
-   — the same roots this RFC declared framework-managed. Two consequences:
+   harness. `npx skills add` installs third-party skills into a project flat
+   and unnamespaced under `.agents/skills/` and the other agent skill roots —
+   by symlink into one canonical copy, or by file with `--copy` — the same
+   roots this RFC declared framework-managed. (Agent Plugins clients are not
+   the problem here: Claude keeps plugins in its own cache and Copilot under
+   `~/.copilot/installed-plugins/`, neither of which is a project skill
+   root.) Two consequences:
    a plugin skill under a canonical name (`scaffold`) *overwrites* the
    harness's own, so catalog-distributed skills carry a `guren-` prefix; and
    the whole-tree managed claim made every externally installed skill a

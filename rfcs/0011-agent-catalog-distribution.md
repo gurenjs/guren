@@ -23,8 +23,13 @@ a growth feature.
 Three channels now sit in front of developers who have *not* chosen a stack:
 
 - The Claude Code plugin marketplace — `claude plugin marketplace add <owner>/<repo>`,
-  plus the browsable community catalog `anthropics/claude-plugins-community`
-  that ships registered in every Claude Code install.
+  plus the reviewed community catalog `anthropics/claude-plugins-community`,
+  whose entries pass an automated validation and safety screen and are pinned
+  to a commit SHA. Only the *official* marketplace
+  (`anthropics/claude-plugins-official`) self-registers, on first interactive
+  start; a user adds the community one explicitly, the same one command a
+  self-hosted marketplace costs. What it buys is discovery — it is browsable
+  from `/plugin` and at `claude.com/plugins` — not a pre-installed audience.
 - The Agent Skills CLI (`npx skills add <owner>/<repo>`, `vercel-labs/skills`),
   which installs into Cursor, Codex, Copilot, OpenCode, Gemini CLI and ~70
   other agents from one GitHub repository.
@@ -50,13 +55,16 @@ Guren has no presence in any of them. That is the gap this RFC closes.
 
 ### The finding that shapes the whole design
 
-No channel can carry the harness.
+No channel can carry the harness *portably*. Skills are the only component
+every channel carries; everything else is per-client, and the harness is a
+five-target artifact.
 
-**Claude Code plugins have no rules component.** A plugin's component
-directories are `skills/`, `commands/`, `agents/`, `hooks/`, `.mcp.json`,
-`.lsp.json`, `monitors/`, `bin/`, `settings.json`. There is no `rules/`, and a
-`CLAUDE.md` at the plugin root is explicitly not loaded as project context —
-"plugins contribute context through skills, agents, and hooks."
+**Claude Code plugins have no rules component.** A plugin's components
+include `skills/`, `commands/`, `agents/`, `workflows/`, `output-styles/`,
+`themes/`, `hooks/hooks.json`, `.mcp.json`, `.lsp.json`,
+`monitors/monitors.json`, `bin/` and `settings.json`. There is no `rules/`,
+and a `CLAUDE.md` at the plugin root is explicitly not loaded as project
+context — "plugins contribute context through skills, agents, and hooks."
 
 **The skills CLI carries less still.** `skills add` discovers `SKILL.md`
 directories (in `skills/`, agent skill directories, or declared through
@@ -64,11 +72,18 @@ directories (in `skills/`, agent skill directories, or declared through
 target agent's skills directory. It writes no `AGENTS.md`, no rules, no MCP
 config, no hooks.
 
-So the glob-scoped rules, the `SessionStart` context injection, the
-`PostToolUse` `guren check` hook, the entry documents and the MCP client
-configs — the entire push half of the harness, and the part RFC 0008 argued
-is what makes agents succeed — cannot travel through a catalog. Only skills
-can.
+So the glob-scoped rules, the entry documents and the MCP client configs
+cannot travel through any channel. Hooks are the one qualified exception, and
+the qualification is what matters: a Claude plugin *can* ship
+`hooks/hooks.json`, and an Agent Plugins client can read client-specific
+config out of `extensions`, so the `SessionStart` injection and the
+`PostToolUse` `guren check` hook could travel to Claude Code and to Copilot —
+but only by writing and maintaining them once per client, in a payload that
+has no way to express the other three targets. That is a second copy of the
+harness with a different shape and no `agent:sync` behind it, which §7
+declines for the same reason it declines duplicating the rules: the harness
+these hooks belong to is installed by an app-local CLI, and this payload's job
+is to reach that CLI, not to reimplement what it installs.
 
 **And skills alone cannot carry Guren's differentiator either**, because that
 differentiator is CLI: `guren context`, `guren check`, `guren check --arch`,
@@ -131,8 +146,8 @@ source, and this monorepo is large and getting larger.
 
 The published repo's contents are **generated, never hand-edited**: sources
 live here (§2), `scripts/build-agent-catalog.ts` renders them, and the
-release workflow commits the result to the public repo. Nothing is authored
-in `gurenjs/agent-skills` itself — the same doctrine already applied to
+maintainer-run `publish:agent-catalog` script (§5) commits the result to the
+public repo. Nothing is authored in `gurenjs/agent-skills` itself — the same doctrine already applied to
 template dependency versions and spec views: *derived where possible,
 declared where not, checked always*.
 
@@ -144,8 +159,8 @@ tracked files: the scaffold templates it maintains *are* shipped inside the
 `create-guren-app` tarball, so they must be committed regardless and the
 `--check` mode simply guards what is already there. This payload has no such
 obligation. CI generates it into a temporary directory, asserts against it,
-and discards it; the release workflow generates it again and commits it to
-the public repo.
+and discards it; the maintainer-run publish script generates it again and
+commits it to the public repo.
 
 ### 2. Anti-drift: generate the payload, gate the facts
 
@@ -193,7 +208,7 @@ just audit.
 | Plugin `version` | `packages/cli/package.json` version (see §5) |
 | Minimum `@guren/cli` claim | a single constant in the generator, asserted `<=` the workspace version |
 | ~~Scaffolder name and invocation~~ | ~~the `create-guren-app` workspace package name~~ **Amended in implementation:** dropped. `create-guren-app` is named literally in the skill and the audit does not derive it; the generator never read the create-app manifest, so listing it as an input was a false promise. Renaming the scaffolder is a template edit under the changeset gate like any other. |
-| Every `guren <subcommand>` and flag the skills name | the CLI's registered command list plus each command's declared `args` |
+| Every `guren <subcommand>` the skills name, and every flag written on the same invocation | the CLI's registered command list plus each command's declared `args`. **Amended in implementation:** a flag is only checked when it is attached to a captured `guren <command>` invocation. A flag named in prose on its own (`--force` and `--prune` both appear that way in the harness skill) and the root `guren --version` are ungated — the parser has no invocation to bind them to. Naming the scope honestly here, rather than claiming coverage the rule does not have. |
 
 That last row is the one that earns its keep, and it needs a small refactor
 first. `builtinSubCommands` in `packages/cli/src/bin.ts` is a private `const`
@@ -244,11 +259,14 @@ checks manifest syntax and skill frontmatter, and is what the community
 marketplace review pipeline runs. Whether it runs unauthenticated in CI is
 unconfirmed (Open Question 1). One rule covers both outcomes so the two
 sections cannot drift: **`audit:agent-catalog` always attempts it, and treats
-"could not run" as its own non-zero outcome, distinct from both pass and
-fail.** An unavailable check is not a green one. Whether CI is configured to
-block on that distinct code, or only the release workflow is, is the
-maintainer's call once the answer is known — but the audit reports the same
-thing in both places. Note that this makes validation a *step inside*
+"could not run" as its own outcome, distinct from both pass and fail.** An
+unavailable check is not a green one, and where that principle is *enforced*
+was settled in implementation (Open Question 1): ordinary CI reports
+could-not-run in the log and exits zero on the derived-fact rules, because the
+ubuntu runner has no `claude`; `--require-validate` turns the same outcome
+into exit 2; and the blocking run is `publish:agent-catalog`, which refuses to
+publish when the validator cannot run at all. The audit reports the same thing
+everywhere; only the consequence differs. Note that this makes validation a *step inside*
 `audit:agent-catalog`, not a sibling command: §6 lists it separately only to
 name what the audit covers.
 
@@ -349,7 +367,10 @@ where it already works, in `agent:init`.
 did not.** The spec requires `plugin.json` at the **plugin root** carrying
 `$schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"` and a
 `name` matching `[a-z0-9]` plus hyphens and periods, 1–64 characters,
-alphanumeric at both ends. Claude Code instead reads
+alphanumeric at both ends, and no consecutive `--` or `..` — the schema's own
+`^(?!.*(?:--|\.\.))[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$`, which is why the
+implementation reads the pattern out of the vendored schema rather than
+restating it. Claude Code instead reads
 `.claude-plugin/plugin.json`. The first draft shipped only the latter, so the
 payload was Claude-shaped rather than portable.
 
@@ -367,8 +388,12 @@ manifests — that they drift — does not apply here.
 Two spec details worth carrying into the implementation. The manifest schema
 is **closed**: only `$schema`, `name`, `version`, `description`, `author`,
 `homepage`, `repository`, `license`, `keywords` and `extensions` are
-permitted at the top level, and anything else is a fatal validation error.
-Guren's plugin is metadata-only, so this costs nothing today — but it is the
+permitted at the top level. A conforming client does not refuse such a
+manifest — §5.2 requires it to "report and ignore each unknown field" and
+keep loading — so the hard failure is Guren's own: the vendored-schema gate
+rejects it, deliberately, because a field no client acts on is a field that
+silently does nothing. Guren's plugin is metadata-only, so this costs
+nothing today — but it is the
 reason no Claude-specific field can be added to the portable manifest later;
 such fields belong under `extensions["<reverse.domain>"]` or stay in
 `.claude-plugin/plugin.json`. And the spec's optional root `mcp.json`
@@ -377,8 +402,10 @@ used, for the same reason §7 gives for Claude's `.mcp.json`: Guren's endpoint
 is app-local and `agent:init` writes the client config.
 
 **The collision constraint.** Claude Code namespaces plugin skills by plugin
-name, so nothing collides there. `npx skills add` does not: it copies into a
-flat `.agents/skills/<name>/`, which is precisely where `agent:init` writes
+name, so nothing collides there. `npx skills add` does not: it installs flat
+into `.agents/skills/<name>/` — by default a symlink into one canonical copy,
+`--copy` for filesystems where that does not work, and unnamespaced either
+way. That is precisely where `agent:init` writes
 `dev-workflow`, `db-manage`, `feature`, `guren-api`, `scaffold` and
 `plugin-authoring`. A plugin skill named `scaffold` would overwrite the
 harness's own. Hence the `guren-` prefix on every plugin skill name, and
@@ -448,8 +475,14 @@ on-disk marker is introduced — which matters because RFC 0008 explicitly
 rejected a state file for sync detection ("No state file, no marker"). The
 tombstone is the same device `packages/cli/src/data-types.ts` already uses for
 a dropped definition whose name must stay claimed. Its cost is a maintenance
-step: removing a canonical skill means adding its name here, which a test can
-enforce by asserting the union covers every name any prior release wrote.
+step: removing a canonical skill means adding its name here. **Amended in
+implementation:** no test can enforce that, and the draft claimed one could.
+This repository keeps no record of what earlier releases shipped, so a test
+recomputing "shipped ∪ retired" from the current tree recomputes both sides of
+its own assertion. It is a review obligation on any PR that deletes a skill
+directory, stated on the constant itself; the test only pins that a retired
+name never returns as a shipped one. Automating it would need a persisted
+list of every canonical name ever shipped, which is a different design.
 
 Two mechanical notes for the implementer. `findStaleManagedFiles` currently
 passes `recursive: namespace.kind === 'tree'` to `readdir` and skips
@@ -520,6 +553,11 @@ SHA from the event payload. And the publish-side half — comparing the rendered
 plugin `version` against what is already published in `gurenjs/agent-skills` —
 must **treat "already published" as a no-op, not an error**: most releases will
 not move `@guren/cli`, and the publish script has nothing to do on those.
+**Amended in implementation:** the no-op is a byte-identical *tree*, not an
+equal version. The same version with different bytes — a LICENSE change, a
+wording fix that rode a release, a corrupted earlier publish — is republished
+as a corrective commit, with a warning that copies already installed under
+that version will not refresh until the version moves again.
 
 **Publishing: a maintainer-run script, not a CI push.** The first draft had a
 CI job push to `gurenjs/agent-skills` with a repository-scoped token. Review
@@ -618,10 +656,16 @@ Automated, in CI on every PR:
    with the schema vendored rather than fetched so CI does not depend on a
    third-party host. The closed-schema rule makes this a real gate: an
    unrecognized top-level field is fatal to conforming clients (§4).
-4. Mutation checks in the implementation PR, proving 1 and the version gate
-   can fail: name a nonexistent target; name an unregistered command; edit
-   `templates/agent-catalog/**` with no `@guren/cli` changeset present; change
-   `AGENT_TARGETS` with no `@guren/cli` changeset present.
+4. Mutation checks in the implementation PR, proving 1 can fail: name a
+   nonexistent target; name an unregistered command. **Amended in
+   implementation:** the two changeset-gate mutations in this list are *not*
+   automated. `assertChangesetGate` needs a git base ref, so the test suite
+   covers its frontmatter parser and its input list rather than the rule
+   itself; the gate was verified by hand on the implementation branch (with
+   the `@guren/cli` changesets hidden it fails with the full changed-input
+   list) and it runs on every PR. Listed here as manual coverage, because a
+   verification list that names checks nobody wrote is worse than a shorter
+   one.
 
 Manual, once before the first publish and after any payload change:
 
@@ -681,9 +725,10 @@ Explicitly **out**:
   gate.
 - **A second plugin** (e.g. a deploy-focused one). One plugin, one name, one
   thing to find.
-- **Submission to `anthropics/claude-plugins-community`.** Worth doing —
-  it is the catalog that ships registered in every Claude Code install, and
-  is more discoverable than a self-hosted marketplace URL — but it is a form
+- **Submission to `anthropics/claude-plugins-community`.** Worth doing — it
+  is browsable from `/plugin` and at `claude.com/plugins`, which a self-hosted
+  marketplace URL is not, and its entries carry Anthropic's automated
+  validation and safety screen — but it is a form
   submission plus a review pipeline, and it should follow a version that has
   been verified in the wild rather than gate the first publish.
 
@@ -762,29 +807,37 @@ the changeset.
    refuses to publish when it is unavailable (`--skip-validate` is the
    explicit override for a maintainer who validated by hand). Publish is the
    last gate before users, and it runs on a machine that has the CLI.
-2. **Plugin version derived from `@guren/cli` vs. independent.** Recommended
-   derived (§5); the cost is that a wording fix waits for a CLI release.
-   Review raised a sharper objection: `guren-new-app` mostly describes
-   `create-guren-app`, which versions independently of `@guren/cli`. A
-   create-app flag change can invalidate the skill without moving the plugin
-   version, and an unrelated CLI patch moves it for nothing. If the version
-   stays derived, the changeset gate in §5 should trigger on
-   `create-guren-app` changesets too — or the skill should stop naming
-   create-app flags and defer to `create-guren-app --help`.
-3. **Marketplace name.** `gurenjs` proposed. The trap is that the repository
-   is named `agent-skills` while `agent-skills` is itself a reserved
-   marketplace name, so the obvious-looking choice is the broken one (§8).
-   Re-confirm against the reserved list at implementation time; it has grown
-   before and is re-checked on every load.
+2. ~~**Plugin version derived from `@guren/cli` vs. independent.**
+   Recommended derived (§5); the cost is that a wording fix waits for a CLI
+   release. Review raised a sharper objection: `guren-new-app` mostly
+   describes `create-guren-app`, which versions independently of
+   `@guren/cli`.~~ **Resolved in implementation (2026-08-18):** the version
+   stays derived from `@guren/cli`, and the objection is answered by taking
+   the second branch — the skill stops naming create-app flags and defers to
+   `create-guren-app --help`, so a create-app flag change can no longer
+   invalidate it. The changeset gate therefore watches `@guren/cli` only, and
+   `create-guren-app` is not a catalog input.
+3. ~~**Marketplace name.** `gurenjs` proposed. The trap is that the
+   repository is named `agent-skills` while `agent-skills` is itself a
+   reserved marketplace name, so the obvious-looking choice is the broken
+   one (§8).~~ **Resolved in implementation (2026-08-18):** rendered as
+   `gurenjs`, and `claude plugin validate --strict` passes on the rendered
+   marketplace manifest, which is where a reserved name would surface. The
+   reserved list is still re-checked on every load, so a future addition
+   fails at the same gate rather than silently.
 4. **Instrumentation.** The premise — that catalogs drive discovery — is an
    assumption, not a measurement. Should the skills carry a distinguishable
    link to guren.dev so the existing analytics can size the channel before
    more is invested in it?
-5. **How much should the catalog skills name flags at all?** Every flag named
-   is a contract the audit has to defend (§2) and a way the plugin can go
-   stale against an app it does not control. The alternative is naming
-   commands only and telling the agent to read `--help`, which is more robust
-   and less useful. Where is the line?
+5. ~~**How much should the catalog skills name flags at all?** Every flag
+   named is a contract the audit has to defend (§2) and a way the plugin can
+   go stale against an app it does not control.~~ **Resolved in implementation
+   (2026-08-18):** the line is drawn at ownership. Flags of commands
+   `@guren/cli` ships are named and gated by the audit, because the plugin
+   version and the CLI version move together; flags of `create-guren-app`,
+   which versions independently, are not named at all and the skill defers to
+   `--help`. Note the residual gap recorded in §2: a flag written in prose
+   rather than on an invocation line is named but ungated.
 6. **`anthropics/claude-plugins-community` submission timing.** Deferred out
    of v1 (§7); when?
 7. **The Agent Plugins marketplaces are a separate listing problem.** VS Code
