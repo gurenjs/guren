@@ -2,40 +2,75 @@ import { existsSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 /**
- * Returns true when the folder contains drizzle-kit generated migrations
- * (subdirectories with a migration.sql file).
+ * What one `migrateDatabase()` call had to work with. `db:migrate` reports
+ * success off this rather than off the call returning: a folder with nothing
+ * in it applies nothing, and saying "completed" there reads as a database that
+ * is now up to date.
+ *
+ * It describes the run the driver memoized, not the folder as it stands now.
+ * Migrations are single-flighted per handle, so a second call returns this same
+ * summary without re-reading the folder — which is the pre-existing no-rerun
+ * behaviour, faithfully reported.
  */
-export function hasDrizzleMigrations(migrationsFolder: string): boolean {
-  if (!existsSync(migrationsFolder)) {
-    return false
-  }
-
-  const entries = readdirSync(migrationsFolder, { withFileTypes: true })
-  return entries.some(
-    (entry) => entry.isDirectory() && existsSync(resolve(migrationsFolder, entry.name, 'migration.sql')),
-  )
+export interface MigrationRunSummary {
+  /** The folder the migrator read, absolute as the driver resolved it. */
+  migrationsFolder: string
+  /** drizzle-kit migrations found there (one folder each, holding migration.sql). */
+  migrationsFound: number
+  /**
+   * Loose .sql files in that folder, which the drizzle migrator never runs.
+   * Non-zero alongside `migrationsFound: 0` means the folder is not empty but
+   * holds nothing to apply, which is a different problem from having generated
+   * no migrations yet.
+   */
+  looseSqlFiles: number
 }
 
 /**
- * Warns when the migrations folder contains loose .sql files, which the
- * drizzle migrator does not execute. Without this, `db:migrate` reports
- * success while silently skipping them.
+ * One read of the migrations folder, answering both questions a run summary
+ * asks of it. Kept together because they come from the same directory listing:
+ * counting the loose files separately would read it twice to report on one run.
  */
-export function warnIgnoredFlatSqlMigrations(migrationsFolder: string): void {
+export function inspectMigrationsFolder(migrationsFolder: string): MigrationRunSummary {
   if (!existsSync(migrationsFolder)) {
-    return
+    return { migrationsFolder, migrationsFound: 0, looseSqlFiles: 0 }
   }
 
-  const flatSqlFiles = readdirSync(migrationsFolder, { withFileTypes: true })
+  const entries = readdirSync(migrationsFolder, { withFileTypes: true })
+
+  return {
+    migrationsFolder,
+    migrationsFound: entries.filter(
+      (entry) => entry.isDirectory() && existsSync(resolve(migrationsFolder, entry.name, 'migration.sql')),
+    ).length,
+    looseSqlFiles: entries.filter((entry) => entry.isFile() && entry.name.endsWith('.sql')).length,
+  }
+}
+
+/**
+ * Reports a run that found nothing to apply, naming the loose .sql files if
+ * that is why the folder looked empty — without this, `db:migrate` reports the
+ * folder as having no migrations while files that look like migrations sit in
+ * it. The names cost a second read, so this only happens when there are some.
+ *
+ * A folder the migrator did run from is never warned about: it has already
+ * produced a database, and the warning would fire on every app boot.
+ */
+export function noMigrationsToRun(summary: MigrationRunSummary): MigrationRunSummary {
+  if (summary.looseSqlFiles === 0) {
+    return summary
+  }
+
+  const flatSqlFiles = readdirSync(summary.migrationsFolder, { withFileTypes: true })
     .filter((entry) => entry.isFile() && entry.name.endsWith('.sql'))
     .map((entry) => entry.name)
 
-  if (flatSqlFiles.length > 0) {
-    console.warn(
-      `[guren/orm] Ignoring ${flatSqlFiles.length} loose .sql file(s) in ${migrationsFolder}: ${flatSqlFiles.join(', ')}.\n` +
-      '[guren/orm] Migrations must be generated with drizzle-kit (`bun run db:make`), which creates one folder per migration.',
-    )
-  }
+  console.warn(
+    `[guren/orm] Ignoring ${flatSqlFiles.length} loose .sql file(s) in ${summary.migrationsFolder}: ${flatSqlFiles.join(', ')}.\n` +
+    '[guren/orm] Migrations must be generated with drizzle-kit (`bun run db:make`), which creates one folder per migration.',
+  )
+
+  return summary
 }
 
 /**

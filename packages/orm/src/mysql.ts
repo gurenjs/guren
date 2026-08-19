@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { hotReloadKey, releaseActiveConnection, replaceActiveConnection } from './active-connections'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
-import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailure, isConnectionFailure, migrationFailure, seedFailure, hasDrizzleMigrations, listLocalMigrations, warnIgnoredFlatSqlMigrations, type MigrationStatusEntry } from './migration-utils'
+import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailure, isConnectionFailure, migrationFailure, seedFailure, inspectMigrationsFolder, listLocalMigrations, noMigrationsToRun, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders } from './seeder'
 import { singleFlight } from './single-flight'
 
@@ -57,12 +57,13 @@ export interface MySqlDatabaseOptions {
 
 export interface MySqlDatabase {
   getDatabase(): Promise<MySql2Database>
-  migrateDatabase(): Promise<void>
+  /** Applies pending drizzle-kit migrations and reports what the folder held. */
+  migrateDatabase(): Promise<MigrationRunSummary>
   closeDatabase(): Promise<void>
   configureOrm(): Promise<void>
   seedDatabase(): Promise<void>
   /** Drops every table and view (including the drizzle migration tracker), then re-applies migrations — same end state as `guren db:reset`. */
-  resetDatabase(): Promise<void>
+  resetDatabase(): Promise<MigrationRunSummary>
   /** Per-migration applied state derived from the drizzle-kit journal and the __drizzle_migrations table. */
   migrationStatus(): Promise<MigrationStatusEntry[]>
 }
@@ -92,7 +93,7 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
     return resolved
   }
 
-  const migrations = singleFlight(async (): Promise<void> => {
+  const migrations = singleFlight(async (): Promise<MigrationRunSummary> => {
     // Scoped to this attempt, and resolved below rather than up front:
     // resolveConnectionString() throws when no connection string is configured,
     // so it must not run before the no-migrations early return. The catch needs
@@ -100,9 +101,9 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
     let endpoint: string | undefined
 
     try {
-      if (!hasDrizzleMigrations(resolvedMigrationsFolder)) {
-        warnIgnoredFlatSqlMigrations(resolvedMigrationsFolder)
-        return
+      const summary = inspectMigrationsFolder(resolvedMigrationsFolder)
+      if (summary.migrationsFound === 0) {
+        return noMigrationsToRun(summary)
       }
 
       const { drizzle, migrate, createPool } = await loadMySqlModules()
@@ -119,6 +120,8 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
       } finally {
         await closePool(migrationClient)
       }
+
+      return summary
     } catch (error) {
       throw migrationFailure(error, endpoint)
     }
@@ -197,7 +200,7 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
     }
   }
 
-  async function resetDatabase(): Promise<void> {
+  async function resetDatabase(): Promise<MigrationRunSummary> {
     const { sql } = await import('drizzle-orm')
 
     await withAdminDb(async (adminDb) => {
@@ -229,7 +232,7 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
     // db:reset` leaves behind. A caller that migrates again — the documented
     // reset-then-migrate pattern — hits the memo and no-ops.
     migrations.reset()
-    await migrations.get()
+    return migrations.get()
   }
 
   async function migrationStatus(): Promise<MigrationStatusEntry[]> {

@@ -439,7 +439,10 @@ const command = defineCommand({
     if (authInstalled) {
       consola.log('')
       consola.info('Auth scaffolding was included automatically.')
-      consola.info('Set up the users table with: bun run db:migrate && bun run db:seed')
+      // db:make first: the users table only exists in db/schema.ts until
+      // drizzle-kit generates a migration from it, and db:migrate with an empty
+      // db/migrations applies nothing.
+      consola.info('Set up the users table with: bun run db:make && bun run db:migrate && bun run db:seed')
     }
 
     if (renderingMode === 'ssr') {

@@ -1,6 +1,7 @@
 import { access } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { isRecord } from './runtime'
 
 const DATABASE_CONFIG_CANDIDATES = [
   'config/database.ts',
@@ -57,7 +58,44 @@ function pickFunction(module: Record<string, unknown>, names: string[]): (() => 
   return undefined
 }
 
-export async function runDatabaseMigrations(): Promise<void> {
+/**
+ * What the app's `migrateDatabase()` reported about the run. Mirrors
+ * `MigrationRunSummary` from `@guren/orm`, but declared here and read
+ * structurally rather than imported: the config module belongs to the app, so
+ * it may be backed by an older ORM that resolves to undefined, or by a
+ * migration function the user wrote themselves. The cost of that decoupling is
+ * that nothing pins the two shapes together — a field added to the ORM's
+ * summary has to be added here too before the CLI can see it.
+ */
+export interface MigrationRunSummary {
+  migrationsFolder?: string
+  migrationsFound: number
+  looseSqlFiles: number
+}
+
+function asMigrationRunSummary(value: unknown): MigrationRunSummary | undefined {
+  if (!isRecord(value)) {
+    return undefined
+  }
+
+  const { migrationsFolder, migrationsFound, looseSqlFiles } = value
+  if (typeof migrationsFound !== 'number') {
+    return undefined
+  }
+
+  return {
+    migrationsFolder: typeof migrationsFolder === 'string' ? migrationsFolder : undefined,
+    migrationsFound,
+    looseSqlFiles: typeof looseSqlFiles === 'number' ? looseSqlFiles : 0,
+  }
+}
+
+/**
+ * Runs the app's migrations. Returns what the run found when the app's ORM
+ * reports it, and undefined when it does not — an older `@guren/orm`, or a
+ * `config/database.ts` exporting a migration function of its own.
+ */
+export async function runDatabaseMigrations(): Promise<MigrationRunSummary | undefined> {
   const module = await resolveDatabaseModule()
   const migrate = pickFunction(module, ['migrateDatabase', 'runMigrations', 'getDatabase'])
   const close = pickFunction(module, ['closeDatabase'])
@@ -67,7 +105,7 @@ export async function runDatabaseMigrations(): Promise<void> {
   }
 
   try {
-    await migrate()
+    return asMigrationRunSummary(await migrate())
   } finally {
     if (close) {
       await close()
@@ -98,7 +136,13 @@ export interface ResetDatabaseOptions {
   seed?: boolean
 }
 
-export async function resetDatabase(options: ResetDatabaseOptions = {}): Promise<void> {
+/**
+ * Drops the schema and re-applies migrations. Returns the same summary
+ * `runDatabaseMigrations()` does for the migration half of the run: a reset
+ * that finds no migrations leaves an empty database behind, which is worth
+ * reporting rather than calling done.
+ */
+export async function resetDatabase(options: ResetDatabaseOptions = {}): Promise<MigrationRunSummary | undefined> {
   const module = await resolveDatabaseModule()
   const reset = pickFunction(module, ['resetDatabase', 'dropAllTables'])
   const migrate = pickFunction(module, ['migrateDatabase', 'runMigrations', 'getDatabase'])
@@ -114,12 +158,18 @@ export async function resetDatabase(options: ResetDatabaseOptions = {}): Promise
   }
 
   try {
-    await reset()
-    await migrate()
+    const summary = asMigrationRunSummary(await reset())
+    // `reset()` already re-applies migrations; this second call hits the
+    // driver's memo and no-ops, and exists for a config that only exports a
+    // bare dropAllTables() — which is also the only case the fallback below
+    // describes, since a driver reset that reports nothing ran nothing.
+    const migrated = asMigrationRunSummary(await migrate())
 
     if (options.seed && seed) {
       await seed()
     }
+
+    return summary ?? migrated
   } finally {
     if (close) {
       await close()

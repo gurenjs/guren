@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { hotReloadKey, releaseActiveConnection, replaceActiveConnection } from './active-connections'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
-import { buildMigrationStatus, hasDrizzleMigrations, listLocalMigrations, warnIgnoredFlatSqlMigrations, type MigrationStatusEntry } from './migration-utils'
+import { buildMigrationStatus, inspectMigrationsFolder, listLocalMigrations, noMigrationsToRun, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders } from './seeder'
 import { singleFlight } from './single-flight'
 
@@ -63,12 +63,13 @@ export interface AwsDataApiDatabaseOptions {
 
 export interface AwsDataApiDatabase {
   getDatabase(): Promise<AwsDataApiPgDatabase>
-  migrateDatabase(): Promise<void>
+  /** Applies pending drizzle-kit migrations and reports what the folder held. */
+  migrateDatabase(): Promise<MigrationRunSummary>
   closeDatabase(): Promise<void>
   configureOrm(): Promise<void>
   seedDatabase(): Promise<void>
   /** Drops the public schema (and the drizzle tracker schema), then re-applies migrations — same end state as `guren db:reset`. */
-  resetDatabase(): Promise<void>
+  resetDatabase(): Promise<MigrationRunSummary>
   /** Per-migration applied state derived from the drizzle-kit journal and drizzle.__drizzle_migrations. */
   migrationStatus(): Promise<MigrationStatusEntry[]>
 }
@@ -126,15 +127,17 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
     } as DrizzleConfig
   }
 
-  const migrations = singleFlight(async (): Promise<void> => {
+  const migrations = singleFlight(async (): Promise<MigrationRunSummary> => {
     try {
-      if (!hasDrizzleMigrations(resolvedMigrationsFolder)) {
-        warnIgnoredFlatSqlMigrations(resolvedMigrationsFolder)
-        return
+      const summary = inspectMigrationsFolder(resolvedMigrationsFolder)
+      if (summary.migrationsFound === 0) {
+        return noMigrationsToRun(summary)
       }
 
       const { migrate } = await loadAwsDataApiModules()
       await withAdminDb((db) => migrate(db, { migrationsFolder: resolvedMigrationsFolder }))
+
+      return summary
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error)
       throw new Error(`Failed to run database migrations: ${reason}`)
@@ -206,7 +209,7 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
     }
   }
 
-  async function resetDatabase(): Promise<void> {
+  async function resetDatabase(): Promise<MigrationRunSummary> {
     const { sql } = await import('drizzle-orm')
 
     await withAdminDb(async (adminDb) => {
@@ -220,7 +223,7 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
     // db:reset` leaves behind. A caller that migrates again — the documented
     // reset-then-migrate pattern — hits the memo and no-ops.
     migrations.reset()
-    await migrations.get()
+    return migrations.get()
   }
 
   async function migrationStatus(): Promise<MigrationStatusEntry[]> {

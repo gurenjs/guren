@@ -2,7 +2,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { hotReloadKey, releaseActiveConnection, replaceActiveConnection } from './active-connections'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
-import { buildMigrationStatus, migrationFailure, seedFailure, hasDrizzleMigrations, listLocalMigrations, warnIgnoredFlatSqlMigrations, type MigrationStatusEntry } from './migration-utils'
+import { buildMigrationStatus, migrationFailure, seedFailure, inspectMigrationsFolder, listLocalMigrations, noMigrationsToRun, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders } from './seeder'
 import { singleFlight } from './single-flight'
 
@@ -23,12 +23,18 @@ export interface SqliteDatabaseOptions {
 
 export interface SqliteDatabase {
   getDatabase(): Promise<unknown>
-  migrateDatabase(): Promise<void>
+  /** Applies pending drizzle-kit migrations and reports what the folder held. */
+  migrateDatabase(): Promise<MigrationRunSummary>
   closeDatabase(): Promise<void>
   configureOrm(): Promise<void>
   seedDatabase(): Promise<void>
-  /** Drops every table and view (including the drizzle migration tracker), then re-applies migrations — same end state as `guren db:reset`. */
-  resetDatabase(): Promise<void>
+  /**
+   * Drops every table and view (including the drizzle migration tracker), then
+   * re-applies migrations — same end state as `guren db:reset`. Resolves
+   * undefined only when a concurrent `closeDatabase()` left nothing to drop, so
+   * there was no migration run to report.
+   */
+  resetDatabase(): Promise<MigrationRunSummary | undefined>
   /** Per-migration applied state derived from the drizzle-kit journal and the __drizzle_migrations table. */
   migrationStatus(): Promise<MigrationStatusEntry[]>
 }
@@ -173,16 +179,18 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
     }
   }
 
-  const migrations = singleFlight(async (): Promise<void> => {
+  const migrations = singleFlight(async (): Promise<MigrationRunSummary> => {
     try {
-      if (!hasDrizzleMigrations(resolvedMigrationsFolder)) {
-        warnIgnoredFlatSqlMigrations(resolvedMigrationsFolder)
-        return
+      const summary = inspectMigrationsFolder(resolvedMigrationsFolder)
+      if (summary.migrationsFound === 0) {
+        return noMigrationsToRun(summary)
       }
 
       const db = await database.get()
       const { migrate } = await import('drizzle-orm/bun-sqlite/migrator')
       await migrate(db as any, { migrationsFolder: resolvedMigrationsFolder }) // eslint-disable-line @typescript-eslint/no-explicit-any
+
+      return summary
     } catch (error) {
       // No endpoint: a SQLite file has no host, so only the cause chain adds signal.
       throw migrationFailure(error)
@@ -199,12 +207,13 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
 
     closeDatabase,
 
-    async resetDatabase() {
+    async resetDatabase(): Promise<MigrationRunSummary | undefined> {
       await database.get()
       // Only reachable when a concurrent evaluation closed the handle while the
       // await above was suspended. Nothing here can act on a closed handle, and
       // migrating would re-open one against a database this call never dropped.
-      if (!sqliteClient) return
+      // No migration ran, so there is nothing to report about one.
+      if (!sqliteClient) return undefined
 
       // Anything left behind fails the next migration run, and three things
       // stand between this loop and that: SQLite refuses DROP TABLE on a view,
@@ -233,7 +242,7 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
       // db:reset` leaves behind. A caller that migrates again — the documented
       // reset-then-migrate pattern — hits the memo and no-ops.
       migrations.reset()
-      await migrations.get()
+      return migrations.get()
     },
 
     async migrationStatus() {

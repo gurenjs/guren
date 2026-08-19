@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import type postgres from 'postgres'
 import { hotReloadKey, releaseActiveConnection, replaceActiveConnection } from './active-connections'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
-import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailure, isConnectionFailure, migrationFailure, seedFailure, hasDrizzleMigrations, listLocalMigrations, warnIgnoredFlatSqlMigrations, type MigrationStatusEntry } from './migration-utils'
+import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailure, isConnectionFailure, migrationFailure, seedFailure, inspectMigrationsFolder, listLocalMigrations, noMigrationsToRun, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders } from './seeder'
 import { singleFlight } from './single-flight'
 
@@ -49,12 +49,13 @@ export interface PostgresDatabaseOptions {
 
 export interface PostgresDatabase {
   getDatabase(): Promise<PostgresJsDatabase>
-  migrateDatabase(): Promise<void>
+  /** Applies pending drizzle-kit migrations and reports what the folder held. */
+  migrateDatabase(): Promise<MigrationRunSummary>
   closeDatabase(): Promise<void>
   configureOrm(): Promise<void>
   seedDatabase(): Promise<void>
   /** Drops the public schema (and the drizzle tracker schema), then re-applies migrations — same end state as `guren db:reset`. */
-  resetDatabase(): Promise<void>
+  resetDatabase(): Promise<MigrationRunSummary>
   /** Per-migration applied state derived from the drizzle-kit journal and drizzle.__drizzle_migrations. */
   migrationStatus(): Promise<MigrationStatusEntry[]>
 }
@@ -84,7 +85,7 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
     return resolved
   }
 
-  const migrations = singleFlight(async (): Promise<void> => {
+  const migrations = singleFlight(async (): Promise<MigrationRunSummary> => {
     // Scoped to this attempt, and resolved below rather than up front:
     // resolveConnectionString() throws when no connection string is configured,
     // so it must not run before the no-migrations early return. The catch needs
@@ -92,9 +93,9 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
     let endpoint: string | undefined
 
     try {
-      if (!hasDrizzleMigrations(resolvedMigrationsFolder)) {
-        warnIgnoredFlatSqlMigrations(resolvedMigrationsFolder)
-        return
+      const summary = inspectMigrationsFolder(resolvedMigrationsFolder)
+      if (summary.migrationsFound === 0) {
+        return noMigrationsToRun(summary)
       }
 
       const { drizzle, migrate, postgres: postgresFactory } = await loadPostgresModules()
@@ -111,6 +112,8 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
       } finally {
         await migrationClient.end({ timeout: 0 })
       }
+
+      return summary
     } catch (error) {
       throw migrationFailure(error, endpoint)
     }
@@ -194,7 +197,7 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
     }
   }
 
-  async function resetDatabase(): Promise<void> {
+  async function resetDatabase(): Promise<MigrationRunSummary> {
     await withAdminClient(async (adminClient) => {
       await adminClient.unsafe('DROP SCHEMA IF EXISTS public CASCADE')
       await adminClient.unsafe('CREATE SCHEMA public')
@@ -206,7 +209,7 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
     // db:reset` leaves behind. A caller that migrates again — the documented
     // reset-then-migrate pattern — hits the memo and no-ops.
     migrations.reset()
-    await migrations.get()
+    return migrations.get()
   }
 
   async function migrationStatus(): Promise<MigrationStatusEntry[]> {
