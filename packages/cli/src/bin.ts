@@ -1311,6 +1311,11 @@ const queueRetryCommand = defineCommand({
     description: 'Retry a failed job or all failed jobs.',
   },
   args: {
+    // Left `positional` on purpose, unlike `context`'s entity arg. citty drops
+    // a value passed to a positional as a flag, so `--id 42` reads as no id at
+    // all — but here that lands in the `else` below, which reports the missing
+    // id and exits 1. The wrong spelling is already loud, so converting it to
+    // `string` would trade the `[ID]` in `--help` for nothing.
     id: {
       type: 'positional',
       required: false,
@@ -1937,10 +1942,19 @@ const contextCommand = defineCommand({
     description: 'Generate a project context map for AI agents. Pass an entity name (e.g. `guren context User`) for an entity-centric bundle.',
   },
   args: {
+    // Declared `string`, not `positional`, so both spellings reach the entity
+    // path. citty drops a value passed as a flag to a positional arg — it lands
+    // in neither `args.entity` nor `args._` and raises no unknown-flag error —
+    // and this command's no-entity branch is the whole-project map, so
+    // `guren context --entity User` would have printed that and exited 0. The
+    // flag spelling is one the docs actively teach: `--entity <Model>` is real
+    // on `make:adr` and `docs:graph`. A `string` arg still leaves an unconsumed
+    // positional in `_`, so `guren context User` is unchanged.
     entity: {
-      type: 'positional',
-      required: false,
-      description: 'Model class name for an entity-centric context bundle (case-insensitive).',
+      type: 'string',
+      valueHint: 'User',
+      description:
+        'Model class name for an entity-centric context bundle (case-insensitive). Also accepted positionally: `guren context User`.',
     },
     json: {
       type: 'boolean',
@@ -1960,8 +1974,10 @@ const contextCommand = defineCommand({
     },
   },
   async run({ args }) {
-    if (args.entity) {
-      await displayEntityContext(args.entity, {
+    const entity = args.entity ?? args._[0]
+
+    if (entity) {
+      await displayEntityContext(entity, {
         cwd: args.app,
         json: Boolean(args.json),
         routesFile: args.routes,
