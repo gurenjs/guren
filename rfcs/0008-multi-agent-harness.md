@@ -328,6 +328,21 @@ exactly as today. New targets are opt-in per app. No codemod, no deprecation.
    `.agents/skills/` only when a non-Claude target is selected *without*
    claude, and document the combination caveat. To be settled empirically in
    Part 1.
+   *Amended by RFC 0011 (2026-08-18):* a second, distinct problem in the
+   same directories surfaced once skills started arriving from outside the
+   harness. `npx skills add` installs third-party skills into a project flat
+   and unnamespaced under `.agents/skills/` and the other agent skill roots —
+   by symlink into one canonical copy, or by file with `--copy` — the same
+   roots this RFC declared framework-managed. (Agent Plugins clients are not
+   the problem here: Claude keeps plugins in its own cache and Copilot under
+   `~/.copilot/installed-plugins/`, neither of which is a project skill
+   root.) Two consequences:
+   a plugin skill under a canonical name (`scaffold`) *overwrites* the
+   harness's own, so catalog-distributed skills carry a `guren-` prefix; and
+   the whole-tree managed claim made every externally installed skill a
+   `--prune` candidate, including Guren's own catalog skills. The claim is
+   now per named child (planned ∪ a tombstone list of retired names) rather
+   than the whole tree — see RFC 0011 §4 and `packages/cli/src/agent-targets.ts`.
 3. **`copilot-instructions.md`.** Modern Copilot reads `AGENTS.md`, so this
    RFC does not emit `.github/copilot-instructions.md`. Older Copilot
    versions read only the latter — is supporting them worth a third entry
