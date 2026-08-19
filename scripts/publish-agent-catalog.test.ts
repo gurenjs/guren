@@ -34,17 +34,13 @@ const gitIdentity = {
   GIT_COMMITTER_EMAIL: 'publish-test@guren.dev',
 }
 
-function run(remote: string, ...args: string[]) {
-  return runWithEnv(remote, {}, ...args)
-}
-
 /**
  * The git choreography these tests are about, with the validator gate stood
  * down: `claude` is not on a CI runner's PATH and the script refuses to
  * publish when the validator cannot run. That refusal has its own test below,
  * so it is not a condition on all the others.
  */
-function runWithEnv(remote: string, extraEnv: Record<string, string>, ...args: string[]) {
+function run(remote: string, extraEnv: Record<string, string> = {}, ...args: string[]) {
   return spawnPublish(remote, extraEnv, ['--yes', '--skip-validate', ...args])
 }
 
@@ -149,7 +145,7 @@ describe('publish-agent-catalog', () => {
     // the bug this pins: `cp -R plugins clone/plugins` nests into
     // clone/plugins/plugins/ when the destination already exists — which it
     // does on every publish after the first
-    const result = runWithEnv(bare, { GUREN_CATALOG_VERSION_OVERRIDE: '99.0.0' })
+    const result = run(bare, { GUREN_CATALOG_VERSION_OVERRIDE: '99.0.0' })
     expect(result.code).toBe(0)
     expect(result.out).toContain('Publishing @guren/cli 99.0.0')
     expect(result.out).toContain('Published:')
@@ -218,7 +214,7 @@ describe('publish-agent-catalog', () => {
     Bun.spawnSync(['git', 'reset', '--quiet', '--hard', seedSha], { cwd: rewind })
     Bun.spawnSync(['git', 'push', '--quiet', '--force', 'origin', 'main'], { cwd: rewind })
 
-    const result = run(bare, '--dry-run')
+    const result = run(bare, {}, '--dry-run')
     expect(result.code).toBe(0)
     expect(result.out).toContain('--dry-run: not committing or pushing.')
     expect(result.out).toMatch(/\d+ files? changed/u)
@@ -238,7 +234,7 @@ describe('publish-agent-catalog', () => {
     const remote = await seedRemote('excludes.git')
     const excludes = join(scratch, 'global-excludes')
     await Bun.write(excludes, '*.md\n')
-    const result = runWithEnv(remote, {
+    const result = run(remote, {
       GIT_CONFIG_COUNT: '1',
       GIT_CONFIG_KEY_0: 'core.excludesFile',
       GIT_CONFIG_VALUE_0: excludes,
@@ -259,7 +255,7 @@ describe('publish-agent-catalog', () => {
     const remote = await seedRemote('filtered.git')
     const attributes = join(scratch, 'global-attributes')
     await Bun.write(attributes, '*.md filter=upcase\n')
-    const result = runWithEnv(remote, {
+    const result = run(remote, {
       GIT_CONFIG_COUNT: '2',
       GIT_CONFIG_KEY_0: 'core.attributesFile',
       GIT_CONFIG_VALUE_0: attributes,

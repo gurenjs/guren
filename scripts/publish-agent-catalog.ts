@@ -88,12 +88,13 @@ class PublishRefusal extends Error {}
 async function stagedTreeProblems(cloneDir: string, files: readonly RenderedFile[]): Promise<string[]> {
   const listed = git(cloneDir, ['ls-files', '--cached', '-z'])
   if (!listed.ok) return [`git ls-files failed after staging: ${listed.out}`]
-  const stagedPaths = listed.stdout.split('\0').filter(Boolean).sort()
-  const renderedPaths = files.map((file) => file.path).sort()
+  const stagedPaths = listed.stdout.split('\0').filter(Boolean)
+  const staged = new Set(stagedPaths)
+  const rendered = new Set(files.map((file) => file.path))
   const problems = [
-    ...stagedPaths.filter((p) => !renderedPaths.includes(p)).map((p) => `staged but not rendered: ${p}`),
-    ...renderedPaths.filter((p) => !stagedPaths.includes(p)).map((p) => `rendered but not staged: ${p}`),
-  ]
+    ...stagedPaths.filter((p) => !rendered.has(p)).map((p) => `staged but not rendered: ${p}`),
+    ...[...rendered].filter((p) => !staged.has(p)).map((p) => `rendered but not staged: ${p}`),
+  ].sort()
   if (problems.length > 0) return problems
   for (const file of files) {
     const blob = git(cloneDir, ['show', `:${file.path}`])
@@ -125,9 +126,13 @@ async function main(): Promise<void> {
   // render a second version without editing packages/cli/package.json. Left
   // in a maintainer's environment it would otherwise publish that synthetic
   // version to the real repository under the real plugin name.
-  if (process.env.GUREN_CATALOG_VERSION_OVERRIDE && !process.env.GUREN_AGENT_SKILLS_REMOTE) {
+  // asked of the destination this run actually resolved, not of the env var
+  // that happens to redirect it today: a second way to point somewhere else
+  // would leave a proxy check green while the hole it closes reopened
+  const override = process.env.GUREN_CATALOG_VERSION_OVERRIDE
+  if (override && remotes().some((remote) => remote.includes(PUBLISH_REPO))) {
     fail(
-      `Refusing to publish: GUREN_CATALOG_VERSION_OVERRIDE=${process.env.GUREN_CATALOG_VERSION_OVERRIDE} is set. It is a test hook for a local remote, not a way to publish a version @guren/cli does not have.`,
+      `Refusing to publish: GUREN_CATALOG_VERSION_OVERRIDE=${override} is set. It is a test hook for a local remote, not a way to publish a version @guren/cli does not have.`,
     )
   }
 
@@ -267,7 +272,11 @@ async function main(): Promise<void> {
 
 if (import.meta.main) {
   main().catch((error: unknown) => {
-    console.error(error instanceof Error ? error.message : String(error))
+    // a refusal is a sentence written for the maintainer and its stack says
+    // nothing; anything else is a crash, and reducing that to one line is how
+    // a real bug in this script looks like a considered decision not to
+    // publish
+    console.error(error instanceof PublishRefusal ? error.message : error)
     process.exit(1)
   })
 }
