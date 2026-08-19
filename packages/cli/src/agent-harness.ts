@@ -186,13 +186,41 @@ async function detectInstalledComponents(
 }
 
 /**
+ * Do two app-relative paths name the same file on disk? Only ever asked about
+ * a pair that differs by case alone, where the path strings cannot answer it:
+ * on a case-insensitive filesystem the two are one directory entry the write
+ * loop has just refreshed through the casing it found, on a case-sensitive one
+ * they are two files and the unplanned casing is a genuine leftover. `bigint`
+ * because a Windows file ID is 64 bits and would not survive a `number` — two
+ * distinct NTFS files could compare equal and spare a real leftover.
+ *
+ * A failed `lstat` leaves the two indistinguishable, so it answers "same": the
+ * entry is left alone rather than deleted on a claim that could not be
+ * established. Nothing is lost by that on the one plausible path — a directory
+ * readable but not searchable lists its names and refuses to stat them, and
+ * `rm` would be refused there too.
+ */
+async function isSameFile(cwd: string, left: string, right: string): Promise<boolean> {
+  try {
+    const [leftStat, rightStat] = await Promise.all([
+      lstat(join(cwd, left), { bigint: true }),
+      lstat(join(cwd, right), { bigint: true }),
+    ])
+    return leftStat.dev === rightStat.dev && leftStat.ino === rightStat.ino
+  } catch {
+    return true
+  }
+}
+
+/**
  * Files inside the active components' managed namespaces that the current
  * plan does not write. Planned files (managed or user-owned) are excluded
  * via the full planned path set, so a future planner change cannot turn its
- * own output into a prune candidate. The comparison is case-insensitive: on
- * a case-preserving filesystem the write loop can refresh a planned file
- * through a differently-cased directory entry, and an exact match would then
- * classify the file it just wrote as stale.
+ * own output into a prune candidate. A scanned entry that matches a planned
+ * path by case alone is settled by `isSameFile` rather than by string — every
+ * planned path exists on disk once the write loop has run (it either wrote the
+ * file or skipped it because it was already there), so the identity check has
+ * both sides to compare.
  */
 async function findStaleManagedFiles(
   cwd: string,
@@ -200,7 +228,8 @@ async function findStaleManagedFiles(
   plan: readonly PlannedFile[],
   retiredSkills: readonly string[] | undefined,
 ): Promise<string[]> {
-  const plannedPathsLower = new Set(plan.map((file) => file.path.toLowerCase()))
+  const plannedPaths = new Set(plan.map((file) => file.path))
+  const plannedByLowerPath = new Map(plan.map((file) => [file.path.toLowerCase(), file.path]))
   const stale: string[] = []
 
   /**
@@ -254,9 +283,14 @@ async function findStaleManagedFiles(
         continue
       }
       const relPath = toPosixRelative(cwd, join(entry.parentPath, entry.name))
-      if (!plannedPathsLower.has(relPath.toLowerCase())) {
-        stale.push(relPath)
+      if (plannedPaths.has(relPath)) {
+        continue
       }
+      const caseAlias = plannedByLowerPath.get(relPath.toLowerCase())
+      if (caseAlias && (await isSameFile(cwd, relPath, caseAlias))) {
+        continue
+      }
+      stale.push(relPath)
     }
   }
 
