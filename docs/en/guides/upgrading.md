@@ -13,7 +13,15 @@ bun install
 bunx guren codegen
 ```
 
-4. Run validations:
+4. Check the project for deprecated API usage:
+
+```bash
+bunx guren upgrade --check-only
+```
+
+Each finding names the version the API was deprecated in, the version it is removed in, the replacement to move to, and the files that use it. Nothing is written to disk.
+
+5. Run validations:
 
 ```bash
 bun run build
@@ -21,7 +29,7 @@ bun run typecheck
 bun run test
 ```
 
-5. Apply migration notes for your source/target versions.
+6. Apply migration notes for your source/target versions.
 
 ## Migration Notes
 

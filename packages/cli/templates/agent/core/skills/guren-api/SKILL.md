@@ -454,8 +454,11 @@ Source: `packages/server/src/http/resources/`
 Source: `packages/server/src/database/`
 
 - `Factory.ts` — Model factory for testing
-- `Seeder.ts` — Database seeder
-- `SeederRunner.ts` — Seeder execution
+- `Seeder.ts` — `BaseSeeder`/`Seeder`, deprecated in 2.9.0 (removed in 3.0.0)
+- `SeederRunner.ts` — deprecated in 2.9.0 (removed in 3.0.0), wired to no command
+
+Seeding itself does not live here. `db:seed` runs every seeder in `db/seeders/`,
+and seeders are written with `defineSeeder` from `@guren/core`.
 
 ### Logging
 Source: `packages/server/src/logging/`

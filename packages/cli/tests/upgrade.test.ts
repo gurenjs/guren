@@ -1,6 +1,6 @@
 import { beforeEach, afterEach, describe, expect, it, mock, spyOn } from 'bun:test'
-import { readFile, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 import { createTempWorkspace, type TempWorkspace } from './helpers'
 import { upgradeCanary, checkVersionCompatibility } from '../src/upgrade'
 import { findApplicableCodemods, compareVersions, codemods, type Codemod } from '../src/codemods'
@@ -568,5 +568,52 @@ describe('checkDeprecations', () => {
   it('returns empty array when no deprecations are registered', async () => {
     const result = await checkDeprecations(workspace.dir)
     expect(result).toHaveLength(0)
+  })
+
+  describe('seeder-class-convention', () => {
+    async function writeFileIn(relativePath: string, contents: string): Promise<void> {
+      const target = join(workspace.dir, relativePath)
+      await mkdir(dirname(target), { recursive: true })
+      await writeFile(target, contents)
+    }
+
+    function seederWarning(warnings: Awaited<ReturnType<typeof checkDeprecations>>) {
+      return warnings.find((warning) => warning.id === 'seeder-class-convention')
+    }
+
+    it('reports files importing the class-based seeder API', async () => {
+      await writeFileIn(
+        'db/seeders/LegacyUserSeeder.ts',
+        "import { Seeder } from '@guren/core'\nexport default class LegacyUserSeeder extends Seeder {\n  async run(): Promise<void> {}\n}\n",
+      )
+      await writeFileIn(
+        'app/Services/Runner.ts',
+        "import { createSeederRunner } from '@guren/core'\nexport const runner = createSeederRunner()\n",
+      )
+
+      const warning = seederWarning(await checkDeprecations(workspace.dir))
+
+      expect(warning).toBeDefined()
+      expect(warning?.affectedFiles.sort()).toEqual([
+        join('app', 'Services', 'Runner.ts'),
+        join('db', 'seeders', 'LegacyUserSeeder.ts'),
+      ])
+    })
+
+    // The negative case is the one that rots silently: `defineSeeder` ends in
+    // the same six letters as `Seeder`, so a detector matching the specifier
+    // as a substring would report every correctly written seeder in the app.
+    it('does not report a seeder written with defineSeeder', async () => {
+      await writeFileIn(
+        'db/seeders/001_users.ts',
+        "import { defineSeeder } from '@guren/core'\nexport default defineSeeder(async ({ db }) => { void db })\n",
+      )
+      await writeFileIn(
+        'app/Services/Seeding.ts',
+        "import { defineSeeder, runSeeders } from '@guren/core'\nexport const helpers = [defineSeeder, runSeeders]\n",
+      )
+
+      expect(seederWarning(await checkDeprecations(workspace.dir))).toBeUndefined()
+    })
   })
 })

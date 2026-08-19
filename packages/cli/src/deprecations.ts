@@ -6,7 +6,7 @@
  */
 import { readFile } from 'node:fs/promises'
 import { relative } from 'node:path'
-import { discoverAppSourceFiles, discoverModelFiles } from './discovery'
+import { discoverAppSourceFiles, discoverDbArtifactFiles, discoverModelFiles } from './discovery'
 import { extractClassDeclaration, findStaticClassProperty } from './model-parser'
 import { parseSourceFile } from './parse-cache'
 
@@ -69,6 +69,45 @@ async function detectLocalVisibilityCalls(cwd: string): Promise<string[]> {
   return affected.filter((file): file is string => file !== null)
 }
 
+/**
+ * Files that import the class-based seeder API rather than `defineSeeder`.
+ *
+ * Text search over the import statement, not the AST: what identifies the
+ * deprecation is the specifier list on an import from `@guren/core`, and a
+ * subclass of it can sit in any file the app puts code in. `@guren/server` is
+ * matched too — the core-first rule says not to import from it, but an app
+ * that already does is exactly the one this needs to reach.
+ *
+ * `defineSeeder` ends in the same six letters as `Seeder`, so the specifier is
+ * matched on its own word boundaries; a file that imports only `defineSeeder`
+ * is the supported case and must not be reported.
+ */
+const SEEDER_CLASS_SPECIFIERS = /\b(?:BaseSeeder|SeederRunner|createSeederRunner|resetCalledSeeders|Seeder|SeederClass|SeederInterface|SeederRunnerOptions)\b/
+const GUREN_IMPORT = /import\s+(?:type\s+)?\{([^}]*)\}\s*from\s*['"]@guren\/(?:core|server)['"]/g
+
+async function detectSeederClassImports(cwd: string): Promise<string[]> {
+  const files = [
+    ...(await discoverAppSourceFiles(cwd)),
+    ...(await discoverDbArtifactFiles(cwd, 'Seeder')),
+  ]
+  const affected = await Promise.all(
+    files.map(async (filePath) => {
+      const source = await readFile(filePath, 'utf-8')
+      for (const match of source.matchAll(GUREN_IMPORT)) {
+        const specifiers = match[1]
+          .split(',')
+          .map((part) => part.split(/\bas\b/)[0].replace(/^\s*type\s+/, '').trim())
+          .filter(Boolean)
+        if (specifiers.some((name) => SEEDER_CLASS_SPECIFIERS.test(name))) {
+          return relative(cwd, filePath)
+        }
+      }
+      return null
+    }),
+  )
+  return affected.filter((file): file is string => file !== null)
+}
+
 export const deprecations: Deprecation[] = [
   {
     id: 'model-guarded',
@@ -100,6 +139,17 @@ export const deprecations: Deprecation[] = [
       + 'serves it, so these calls have never done anything. Declare the disk\'s "visibility" option to match '
       + 'what it is, and keep restricted files on a disk that is not served.',
     detect: detectLocalVisibilityCalls,
+  },
+  {
+    id: 'seeder-class-convention',
+    what: 'Class-based seeder API (BaseSeeder/Seeder, SeederRunner, createSeederRunner)',
+    since: '2.9.0',
+    removedIn: '3.0.0',
+    replacement:
+      "Write seeders with defineSeeder from '@guren/core' — its handler receives the { db } context "
+      + 'that BaseSeeder.run() is declared not to take, and `db:seed` runs every seeder in the folder, '
+      + 'so the SeederRunner orchestration (which no Guren command reaches) is not needed.',
+    detect: detectSeederClassImports,
   },
 ]
 

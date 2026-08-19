@@ -13,7 +13,15 @@ bun install
 bunx guren codegen
 ```
 
-4. 検証実行
+4. 非推奨APIの使用箇所を確認
+
+```bash
+bunx guren upgrade --check-only
+```
+
+非推奨化されたバージョン、削除予定バージョン、置き換え先、使用しているファイルが項目ごとに表示されます。ファイルへの書き込みは行いません。
+
+5. 検証実行
 
 ```bash
 bun run build
@@ -21,7 +29,7 @@ bun run typecheck
 bun run test
 ```
 
-5. 対象バージョンの移行メモを適用
+6. 対象バージョンの移行メモを適用
 
 ## 移行メモ
 

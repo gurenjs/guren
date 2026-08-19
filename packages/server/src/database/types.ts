@@ -1,5 +1,9 @@
 /**
  * Seeder class interface.
+ *
+ * @deprecated The constructor shape `BaseSeeder` and `SeederRunner` expect.
+ * Write seeders with `defineSeeder` from `@guren/core` instead. Deprecated in
+ * 2.9.0, removed in 3.0.0.
  */
 export interface SeederClass {
   new (): Seeder
@@ -7,6 +11,12 @@ export interface SeederClass {
 
 /**
  * Abstract seeder interface.
+ *
+ * Exported from the package root as `SeederInterface`.
+ *
+ * @deprecated The no-context `run()` shape `BaseSeeder` imposes. Write seeders
+ * with `defineSeeder` from `@guren/core` instead, whose handler is typed to
+ * receive `{ db }`. Deprecated in 2.9.0, removed in 3.0.0.
  */
 export interface Seeder {
   run(): Promise<void>
@@ -32,6 +42,10 @@ export interface Factory<T> {
 
 /**
  * Seeder runner options.
+ *
+ * @deprecated Options for `SeederRunner`, which no Guren command reaches.
+ * Write seeders with `defineSeeder` from `@guren/core` and run them with
+ * `db:seed`. Deprecated in 2.9.0, removed in 3.0.0.
  */
 export interface SeederRunnerOptions {
   /**
