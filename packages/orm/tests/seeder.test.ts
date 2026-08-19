@@ -200,3 +200,87 @@ describe('runSeeders', () => {
     expect(mockDb.asyncDone).toBe(true)
   })
 })
+
+describe('runSeeders run summary', () => {
+  let tempDir: string
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'seeder-summary-test-'))
+  })
+
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true, force: true })
+  })
+
+  // The scaffolded `db/seeders/` ships holding only .gitkeep, so this is the
+  // shape a fresh app reports — the one db:seed used to call executed.
+  it('should report nothing ran for a folder holding no seeders', async () => {
+    await writeFile(join(tempDir, '.gitkeep'), '')
+
+    expect(await runSeeders({}, tempDir)).toEqual({
+      seedersFolder: tempDir,
+      seedersRan: 0,
+      filesWithoutSeeder: 0,
+    })
+  })
+
+  it('should report how many seeders ran', async () => {
+    await writeFile(join(tempDir, '01-first.ts'), `export default (ctx) => { ctx.db.ran = true; }`)
+    await writeFile(join(tempDir, '02-second.ts'), `export const seed = () => {};`)
+
+    expect(await runSeeders({}, tempDir)).toEqual({
+      seedersFolder: tempDir,
+      seedersRan: 2,
+      filesWithoutSeeder: 0,
+    })
+  })
+
+  // Files that exported no seeder are the case a "run make:seeder" hint would
+  // misdiagnose: the files are there, they just export nothing runnable.
+  it('should count files that exported no seeder', async () => {
+    await writeFile(join(tempDir, 'helpers.ts'), `export const fixtures = [1, 2, 3];`)
+    await writeFile(join(tempDir, 'types.ts'), `export const kind = 'seed';`)
+
+    expect(await runSeeders({}, tempDir)).toEqual({
+      seedersFolder: tempDir,
+      seedersRan: 0,
+      filesWithoutSeeder: 2,
+    })
+  })
+
+  // A .d.ts carries a supported extension but can never export a seeder, so
+  // counting it would suppress the make:seeder hint for an empty folder.
+  it('should not count declaration files as seeders that failed to export', async () => {
+    await writeFile(join(tempDir, 'fixtures.d.ts'), `export declare const rows: number[]`)
+
+    expect(await runSeeders({}, tempDir)).toEqual({
+      seedersFolder: tempDir,
+      seedersRan: 0,
+      filesWithoutSeeder: 0,
+    })
+  })
+
+  // Non-seeder extensions were never candidates, so they are not "skipped".
+  it('should not count files the loader never considered', async () => {
+    await writeFile(join(tempDir, 'seed.ts'), `export default () => {};`)
+    await writeFile(join(tempDir, 'README.md'), '# Seeders')
+
+    expect(await runSeeders({}, tempDir)).toEqual({
+      seedersFolder: tempDir,
+      seedersRan: 1,
+      filesWithoutSeeder: 0,
+    })
+  })
+
+  // The folder is reported as a path even when it was configured as a URL —
+  // `seedersFolder: new URL(...)` is what the scaffolded config passes.
+  it('should report a filesystem path for a URL directory', async () => {
+    await writeFile(join(tempDir, 'seed.ts'), `export default () => {};`)
+
+    expect(await runSeeders({}, new URL(`file://${tempDir}`))).toEqual({
+      seedersFolder: tempDir,
+      seedersRan: 1,
+      filesWithoutSeeder: 0,
+    })
+  })
+})

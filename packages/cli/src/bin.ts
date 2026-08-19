@@ -36,7 +36,7 @@ import { makeValidator } from './make-validator'
 import { makeTest, type TestRunner } from './make-test'
 import { makeView } from './make-view'
 import { runDatabaseMigrations, runDatabaseSeeders, resetDatabase } from './db-migrate'
-import type { MigrationRunSummary } from './db-migrate'
+import type { MigrationRunSummary, SeederRunSummary } from './db-migrate'
 import { showMigrationStatus } from './db-status'
 import type { WriterOptions } from './utils'
 import { generateRouteTypes } from './routes-types'
@@ -308,6 +308,11 @@ function describeMigrationsFolder(folder: string | undefined): string {
   return folder ? describePath(folder) : 'the migrations folder'
 }
 
+/** The seeders folder as the user would type it, or a stand-in when unknown. */
+function describeSeedersFolder(folder: string | undefined): string {
+  return folder ? describePath(folder) : 'the seeders folder'
+}
+
 function reportSuccess(action: string, message: string, json: boolean, extra?: Record<string, unknown>): void {
   if (json) {
     console.log(JSON.stringify({ success: true, action, message, ...extra }, null, 2))
@@ -345,6 +350,46 @@ function reportNoMigrationsApplied(
   // has already explained why those files were skipped.
   if (summary.looseSqlFiles === 0) {
     consola.info(`Generate one with \`bun run db:make\`, then re-run \`bun run ${action}\`.`)
+  }
+}
+
+/** The two fields every db command reports about a seed run, or nothing when it has no summary. */
+function seederRunFields(summary: SeederRunSummary | undefined): Record<string, unknown> | undefined {
+  return summary && { seedersRan: summary.seedersRan, filesWithoutSeeder: summary.filesWithoutSeeder }
+}
+
+/**
+ * Reports a seed run that ran nothing. On a fresh app `db/seeders/` is
+ * scaffolded empty, so the ✔ described a database that holds none of the rows
+ * the seeders would have written — the next green line after an empty
+ * `db/migrations`, and just as far from the cause.
+ */
+function reportNoSeedersRan(
+  action: string,
+  summary: SeederRunSummary,
+  outcome: string,
+  json: boolean,
+  extra?: Record<string, unknown>,
+): void {
+  const message = `No seeders found in ${describeSeedersFolder(summary.seedersFolder)} — ${outcome}.`
+
+  if (json) {
+    reportSuccess(action, message, true, { ...seederRunFields(summary), ...extra })
+    return
+  }
+
+  consola.warn(message)
+  // Files that exported no seeder are not a folder waiting for make:seeder —
+  // the seeders are written, they are just in a shape the loader skips.
+  if (summary.filesWithoutSeeder === 0) {
+    // Always db:seed, never the command that reported this: the migrations are
+    // already applied by now, so sending the user back through db:reset would
+    // drop every table again to reach the one step that was missing.
+    consola.info('Generate one with `bunx guren make:seeder`, then run `bun run db:seed`.')
+  } else {
+    consola.info(
+      `${summary.filesWithoutSeeder} file(s) there exported no seeder — each must default-export a handler, or export \`seed\`, \`run\`, or \`Seeder\`.`,
+    )
   }
 }
 
@@ -808,8 +853,14 @@ const seedCommand = defineCommand({
       return
     }
 
-    await runDatabaseSeeders()
-    reportSuccess('db:seed', 'Database seeders executed.', Boolean(args.json))
+    const summary = await runDatabaseSeeders()
+
+    if (summary?.seedersRan === 0) {
+      reportNoSeedersRan('db:seed', summary, 'nothing was seeded', Boolean(args.json))
+      return
+    }
+
+    reportSuccess('db:seed', 'Database seeders executed.', Boolean(args.json), seederRunFields(summary))
   },
 })
 
@@ -840,17 +891,28 @@ async function runResetCommand(
   }
 
   consola.info('Dropping all tables...')
-  const summary = await resetDatabase({ seed })
+  const { migrations, seeders } = await resetDatabase({ seed })
+  // Assembled once so every exit below reports the same run the same way,
+  // whichever of them the command takes.
+  const runFields = { ...migrationRunFields(migrations), ...seederRunFields(seeders), seed }
 
-  if (summary?.migrationsFound === 0) {
-    reportNoMigrationsApplied(action, summary, 'the tables were dropped and nothing was re-applied', json, { seed })
+  // The migration half wins when both came back empty: a reset that re-applied
+  // nothing is the bigger news, and seeding an empty schema could not have
+  // worked anyway. Stacking both warnings would bury it.
+  if (migrations?.migrationsFound === 0) {
+    reportNoMigrationsApplied(action, migrations, 'the tables were dropped and nothing was re-applied', json, runFields)
+    return
+  }
+
+  if (seeders?.seedersRan === 0) {
+    reportNoSeedersRan(action, seeders, `the database was ${doneVerb} but nothing was seeded`, json, runFields)
     return
   }
 
   const message = seed
     ? `Database ${doneVerb} and seeded successfully.`
     : `Database ${doneVerb} successfully.`
-  reportSuccess(action, message, json, { ...migrationRunFields(summary), seed })
+  reportSuccess(action, message, json, runFields)
 }
 
 const resetCommand = defineCommand({

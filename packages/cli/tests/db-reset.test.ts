@@ -78,9 +78,13 @@ export async function closeDatabase() {
 
     ;(globalThis as any).__calls = calls
 
-    await resetDatabase({ seed: true })
+    const summary = await resetDatabase({ seed: true })
 
     expect(calls).toEqual(['reset', 'migrate', 'seed', 'close'])
+    // Neither half reports anything here, which is what an app on an older
+    // @guren/orm looks like — both commands must keep their plain ✔ rather
+    // than warning about a run they cannot describe.
+    expect(summary).toEqual({ migrations: undefined, seeders: undefined })
 
     delete (globalThis as any).__calls
   })
@@ -116,6 +120,34 @@ export async function closeDatabase() {
     await resetDatabase({ seed: false })
 
     expect(calls).not.toContain('seed')
+
+    delete (globalThis as any).__calls
+  })
+
+  it('refuses to seed a config with no seed function, before dropping anything', async () => {
+    const calls: string[] = []
+
+    await mkdir(join(tempDir, 'config'), { recursive: true })
+    await writeFile(
+      join(tempDir, 'config/database.ts'),
+      `
+export async function resetDatabase() {
+  (globalThis as any).__calls.push('reset')
+}
+
+export async function migrateDatabase() {
+  (globalThis as any).__calls.push('migrate')
+}
+`,
+      'utf8',
+    )
+
+    ;(globalThis as any).__calls = calls
+
+    await expect(resetDatabase({ seed: true })).rejects.toThrow('must export seedDatabase() or runSeeders()')
+    // The alternative was to drop every table and then report a seed that
+    // never ran, which is the ✔ this whole guard exists to prevent.
+    expect(calls).toEqual([])
 
     delete (globalThis as any).__calls
   })

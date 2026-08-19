@@ -69,6 +69,7 @@ export { runSeeders, defineSeeder, loadSeeders } from './seeder'
 export type {
   SeederContext,
   SeederHandler,
+  SeederRunSummary,
   PostgresSeederContext,
   MySqlSeederContext,
   SqliteSeederContext,

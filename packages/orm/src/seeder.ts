@@ -8,6 +8,16 @@ import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 const SUPPORTED_EXTENSIONS = new Set(['.js', '.mjs', '.cjs', '.ts'])
 
+// A declaration file carries a supported extension but no runtime exports, so
+// importing one yields nothing and it would be counted as a seeder that failed
+// to export a handler — suppressing the `make:seeder` hint for a folder that
+// genuinely has no seeder in it.
+const DECLARATION_SUFFIXES = ['.d.ts', '.d.mts', '.d.cts']
+
+function isSeederCandidate(name: string): boolean {
+  return SUPPORTED_EXTENSIONS.has(extname(name)) && !DECLARATION_SUFFIXES.some((suffix) => name.endsWith(suffix))
+}
+
 /**
  * The context a seeder receives. `db` is the drizzle database the app
  * configured, so its type depends on the dialect: annotate the seeder with the
@@ -89,17 +99,37 @@ async function loadSeederModule(path: string): Promise<SeederHandler | undefined
 }
 
 /**
- * Seeders are loaded as modules, so the dialect they were written against is
- * unknowable here. `TDatabase` is the caller stating which database it will
- * hand them — the same contract `runSeeders()` fulfils from the driver side.
+ * What one `runSeeders()` call had to work with. `db:seed` reports success off
+ * this rather than off the call returning: a folder with no seeders in it seeds
+ * nothing, and saying "executed" there reads as a database that now holds the
+ * rows the seeders would have written.
  */
-export async function loadSeeders<TDatabase = PostgresJsDatabase>(
+export interface SeederRunSummary {
+  /** The folder that was read, absolute as the driver resolved it. */
+  seedersFolder: string
+  /** How many seeders ran. They run in the order their files sorted. */
+  seedersRan: number
+  /**
+   * Files with a seeder extension that exported nothing runnable, so they were
+   * skipped. Non-zero alongside `seedersRan: 0` means the folder is not empty
+   * but holds nothing to run — a different problem from having written no
+   * seeder yet, and one `make:seeder` would not solve.
+   */
+  filesWithoutSeeder: number
+}
+
+/**
+ * One read of the seeders folder: the handlers it yielded, and the files that
+ * yielded none. Kept together because they come from the same listing — the
+ * skipped count cannot be recovered from the handler array alone.
+ */
+async function collectSeeders<TDatabase>(
   directory: string | URL,
-): Promise<Array<SeederHandler<TDatabase>>> {
+): Promise<{ root: string; seeders: Array<SeederHandler<TDatabase>>; filesWithoutSeeder: number }> {
   const root = directory instanceof URL ? fileURLToPath(directory) : resolve(directory)
   const entries = await readdir(root, { withFileTypes: true })
   const files = entries
-    .filter((entry) => entry.isFile() && SUPPORTED_EXTENSIONS.has(extname(entry.name)))
+    .filter((entry) => entry.isFile() && isSeederCandidate(entry.name))
     .map((entry) => resolve(root, entry.name))
     .sort()
 
@@ -112,15 +142,32 @@ export async function loadSeeders<TDatabase = PostgresJsDatabase>(
     }
   }
 
-  return seeders
+  return { root, seeders, filesWithoutSeeder: files.length - seeders.length }
 }
 
-export async function runSeeders<TDatabase>(db: TDatabase, directory: string | URL): Promise<void> {
-  const seeders = await loadSeeders<TDatabase>(directory)
+/**
+ * Seeders are loaded as modules, so the dialect they were written against is
+ * unknowable here. `TDatabase` is the caller stating which database it will
+ * hand them — the same contract `runSeeders()` fulfils from the driver side.
+ */
+export async function loadSeeders<TDatabase = PostgresJsDatabase>(
+  directory: string | URL,
+): Promise<Array<SeederHandler<TDatabase>>> {
+  return (await collectSeeders<TDatabase>(directory)).seeders
+}
+
+/** Runs every seeder in `directory` and reports what the folder held. */
+export async function runSeeders<TDatabase>(
+  db: TDatabase,
+  directory: string | URL,
+): Promise<SeederRunSummary> {
+  const { root, seeders, filesWithoutSeeder } = await collectSeeders<TDatabase>(directory)
 
   for (const handler of seeders) {
     await handler({ db })
   }
+
+  return { seedersFolder: root, seedersRan: seeders.length, filesWithoutSeeder }
 }
 
 export function defineSeeder<TDatabase = PostgresJsDatabase>(
