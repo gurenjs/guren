@@ -61,6 +61,43 @@ describe('makeMigration', () => {
     }
   })
 
+  it('uses a drizzle.config.json, the format drizzle-kit names as its own default', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-migration-json-')
+    try {
+      await writeFile(
+        join(workspace.dir, 'drizzle.config.json'),
+        '{ "dialect": "postgresql", "schema": "db/schema.ts", "out": "db/migrations" }',
+        'utf8',
+      )
+
+      await makeMigration()
+
+      const call = spawnCalls.pop()
+      expect(call?.args).toContain('--config')
+      expect(call?.args).toContain('drizzle.config.json')
+      expect(call?.args?.includes('--schema')).toBe(false)
+      expect(call?.args?.includes('--out')).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('prefers a loadable config over the json drizzle-kit cannot import', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-migration-order-')
+    try {
+      await writeFile(join(workspace.dir, 'drizzle.config.js'), 'export default {}', 'utf8')
+      await writeFile(join(workspace.dir, 'drizzle.config.json'), '{}', 'utf8')
+
+      await makeMigration()
+
+      const call = spawnCalls.pop()
+      expect(call?.args).toContain('drizzle.config.js')
+      expect(call?.args?.includes('drizzle.config.json')).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('applies overrides and slugifies names', async () => {
     const workspace = await createTempWorkspace('guren-cli-make-migration-override-')
     try {
