@@ -397,11 +397,16 @@ export function checkTypes(rootNames: string[], compilerOptions: ts.CompilerOpti
 }
 
 /** Spawn the CLI bin as a subprocess and return its exit code. */
-export async function runCliBin(args: string[], cwd: string): Promise<number> {
+export async function runCliBin(
+  args: string[],
+  cwd: string,
+  options: { env?: Record<string, string> } = {},
+): Promise<number> {
   assertWorkspaceBuilt([SERVER_DIST_ENTRY])
 
   const proc = Bun.spawn(['bun', CLI_BIN_PATH, ...args], {
     cwd,
+    env: options.env ? { ...process.env, ...options.env } : undefined,
     stdout: 'ignore',
     stderr: 'ignore',
   })
