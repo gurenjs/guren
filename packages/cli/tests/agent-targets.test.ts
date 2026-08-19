@@ -6,6 +6,7 @@ import {
   managedNamespaces,
   parseTargetList,
   planComponents,
+  RETIRED_CANONICAL_SKILLS,
   type HarnessComponent,
   type TemplateFiles,
 } from '../src/agent-targets'
@@ -204,33 +205,76 @@ describe('planComponents', () => {
 const ALL_COMPONENTS: HarnessComponent[] = ['claude', 'agents', 'cursor', 'copilot', 'codex', 'opencode']
 
 describe('managedNamespaces', () => {
-  it('claims the rules and skills roots wholesale for claude and agents', () => {
-    expect(managedNamespaces(['claude', 'agents'])).toEqual([
+  const plan = (components: HarnessComponent[]) =>
+    planComponents(components, fakeTemplates(), 'My App')
+
+  it('claims the rules roots wholesale but the skills roots only by planned name', () => {
+    // the skills roots are shared with external installers (npx skills add,
+    // Agent Plugins clients), so a whole-tree claim there would prune skills
+    // the framework never wrote — including its own catalog-distributed ones
+    expect(managedNamespaces(['claude', 'agents'], plan(['claude', 'agents']))).toEqual([
       { kind: 'tree', dir: '.claude/rules' },
-      { kind: 'tree', dir: '.claude/skills' },
+      { kind: 'children', dir: '.claude/skills', names: ['scaffold'] },
       { kind: 'tree', dir: '.agents/rules' },
-      { kind: 'tree', dir: '.agents/skills' },
+      { kind: 'children', dir: '.agents/skills', names: ['scaffold'] },
     ])
   })
 
+  it('a retired skill name stays claimed alongside the planned ones', () => {
+    const [, claude] = managedNamespaces(['claude'], plan(['claude']), ['old-skill'])
+    expect(claude).toEqual({
+      kind: 'children',
+      dir: '.claude/skills',
+      names: ['old-skill', 'scaffold'],
+    })
+  })
+
+  it('rejects a retired name that is not a single path segment — the claim is rm-adjacent', () => {
+    // backslashes too: they are a separator on Windows, and dropping that
+    // half of the check would otherwise pass every test here
+    for (const bad of ['.', '..', '../x', 'a/b', '', 'a\\b', '..\\x']) {
+      expect(() => managedNamespaces(['claude'], plan(['claude']), [bad])).toThrow('not a single path segment')
+    }
+  })
+
+  it('the skill claim is derived from the plan, so it tracks the real templates', async () => {
+    const real = planComponents(['claude'], await loadAgentTemplates(), 'My App')
+    const [, claude] = managedNamespaces(['claude'], real)
+    if (claude.kind !== 'children') {
+      throw new Error('expected a children claim')
+    }
+    // the claim is exactly shipped ∪ retired — the derivation, not history.
+    // Nothing here can know a skill was dropped without a tombstone: that
+    // discipline is enforced by review of core/skills/ removals, and the
+    // comment on RETIRED_CANONICAL_SKILLS says so. What this does pin is
+    // that a retired name never silently returns as a shipped one, which
+    // would make the tombstone claim a duplicate.
+    const shipped = [...new Set(real.filter((f) => f.path.startsWith('.claude/skills/')).map((f) => f.path.split('/')[2]))].sort()
+    expect(claude.names).toEqual([...new Set([...shipped, ...RETIRED_CANONICAL_SKILLS])].sort())
+    for (const retired of RETIRED_CANONICAL_SKILLS) {
+      expect(shipped).not.toContain(retired)
+    }
+  })
+
   it('claims only guren-prefixed files in the shared cursor and copilot directories', () => {
-    expect(managedNamespaces(['cursor', 'copilot'])).toEqual([
+    expect(managedNamespaces(['cursor', 'copilot'], plan(['cursor', 'copilot']))).toEqual([
       { kind: 'pattern', dir: '.cursor/rules', prefix: 'guren-', suffix: '.mdc' },
       { kind: 'pattern', dir: '.github/instructions', prefix: 'guren-', suffix: '.instructions.md' },
     ])
   })
 
   it('claims nothing for codex and opencode, whose distinct files are user-owned', () => {
-    expect(managedNamespaces(['codex', 'opencode'])).toEqual([])
+    expect(managedNamespaces(['codex', 'opencode'], plan(['codex', 'opencode']))).toEqual([])
   })
 
   it('every planned file inside a shared namespace carries its ownership pattern', () => {
     // .cursor/rules and .github/instructions also hold user files, so a
     // managed file the pattern cannot claim would be orphaned on rename
-    const namespaces = managedNamespaces(ALL_COMPONENTS).filter(
+    const allPlanned = planComponents(ALL_COMPONENTS, fakeTemplates(), 'My App')
+    const namespaces = managedNamespaces(ALL_COMPONENTS, allPlanned).filter(
       (namespace) => namespace.kind === 'pattern',
     )
-    for (const file of planComponents(ALL_COMPONENTS, fakeTemplates(), 'My App')) {
+    for (const file of allPlanned) {
       for (const namespace of namespaces) {
         if (!file.path.startsWith(`${namespace.dir}/`)) {
           continue

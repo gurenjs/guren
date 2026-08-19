@@ -57,13 +57,24 @@ const MCP_ENDPOINT_MARKER = '_guren/mcp'
  * A claim over files the planner owns outright: anything matching it that the
  * current plan does not write is a leftover from an earlier harness version —
  * a renamed or removed canonical rule or skill — and `agent:sync` may report
- * it and, with `--prune`, delete it. Two shapes exist: a `tree` claims a
+ * it and, with `--prune`, delete it. Three shapes exist: a `tree` claims a
  * whole canonical root recursively; a `pattern` claims only framework-named
- * files at the top of a directory shared with user-authored files.
+ * files at the top of a directory shared with user-authored files; a
+ * `children` claims named subdirectories of a root, each recursively, and
+ * nothing else beneath that root.
+ *
+ * The skills roots are `children`, not `tree`, because they are shared with
+ * installers the framework does not control: `npx skills add` and the Agent
+ * Plugins clients copy third-party skills straight into `.agents/skills/` and
+ * `.claude/skills/`, flat and unnamespaced (RFC 0011). A tree claim there
+ * turned every one of them into a prune candidate — including the framework's
+ * own catalog-distributed skills. The claim therefore names exactly what the
+ * framework has ever written: the planned skills plus `RETIRED_CANONICAL_SKILLS`.
  */
 export type ManagedNamespace =
   | { kind: 'tree'; dir: string }
   | { kind: 'pattern'; dir: string; prefix: string; suffix: string }
+  | { kind: 'children'; dir: string; names: readonly string[] }
 
 type PatternNamespace = Extract<ManagedNamespace, { kind: 'pattern' }>
 
@@ -76,6 +87,21 @@ type PatternNamespace = Extract<ManagedNamespace, { kind: 'pattern' }>
 function canonicalDirs(root: '.claude' | '.agents'): { rules: string; skills: string } {
   return { rules: `${root}/rules`, skills: `${root}/skills` }
 }
+
+/**
+ * Canonical skill directory names the harness shipped in an earlier version
+ * and no longer plans. Prune still owns these: a `children` claim over the
+ * current plan alone could never recognize a skill that left the set, and
+ * cleaning those up on `agent:sync --prune` is deliberate, tested behavior.
+ * Removing a skill from `core/skills/` means adding its old name here. No
+ * test can enforce that — the repository has no record of what it used to
+ * ship — so it is a review obligation on any PR that deletes a skill
+ * directory; the test only pins that a retired name never returns as a
+ * shipped one.
+ * Same device as the tombstones in `data-types.ts`: a dropped definition
+ * whose name must stay claimed.
+ */
+export const RETIRED_CANONICAL_SKILLS: readonly string[] = []
 
 /**
  * The native-rule namespaces double as the path rule `planComponents` writes
@@ -100,6 +126,49 @@ function nativeRulePath(namespace: PatternNamespace, stem: string): string {
 }
 
 /**
+ * The skill directory names a `children` claim over `skillsDir` covers: every
+ * immediate child the plan writes into, plus the retired names. Derived from
+ * the plan rather than listed, so a renamed or added canonical skill cannot
+ * leave the claim behind.
+ */
+/**
+ * A claimed child must be exactly one plain path segment: no separators, no
+ * `.`/`..`, not empty. The claim is interpolated into a directory the prune
+ * walker will `rm` under, so a name like `..` would claim outside the app.
+ * Planned names come from the planner and cannot violate this; the retired
+ * list is a constant plus a test hook, and this is the one place both are
+ * checked before they reach the walker.
+ */
+function assertSkillName(name: string): void {
+  if (name === '' || name === '.' || name === '..' || name.includes('/') || name.includes('\\')) {
+    throw new Error(`Agent harness skill claim "${name}" is not a single path segment`)
+  }
+}
+
+function claimedSkillNames(
+  skillsDir: string,
+  plan: readonly PlannedFile[],
+  retired: readonly string[],
+): string[] {
+  for (const name of retired) {
+    assertSkillName(name)
+  }
+  const names = new Set<string>(retired)
+  const prefix = `${skillsDir}/`
+  for (const file of plan) {
+    if (!file.managed || !file.path.startsWith(prefix)) {
+      continue
+    }
+    const child = file.path.slice(prefix.length).split('/')[0]
+    if (child) {
+      assertSkillName(child)
+      names.add(child)
+    }
+  }
+  return [...names].sort()
+}
+
+/**
  * The namespaces the given components own. Deliberately narrower than the
  * managed file set: `.claude/agents/` and `.claude/hooks/` ship managed files
  * too, but those directories are the conventional home for user-authored
@@ -109,12 +178,23 @@ function nativeRulePath(namespace: PatternNamespace, stem: string): string {
  * rename multiplies across every root, and the entry documents present them
  * as the framework's rule catalog.
  */
-export function managedNamespaces(components: Iterable<HarnessComponent>): ManagedNamespace[] {
+export function managedNamespaces(
+  components: Iterable<HarnessComponent>,
+  plan: readonly PlannedFile[],
+  retiredSkills: readonly string[] = RETIRED_CANONICAL_SKILLS,
+): ManagedNamespace[] {
   const active = new Set<HarnessComponent>(components)
   const namespaces: ManagedNamespace[] = []
   const claimFamily = (root: '.claude' | '.agents'): void => {
     const dirs = canonicalDirs(root)
-    namespaces.push({ kind: 'tree', dir: dirs.rules }, { kind: 'tree', dir: dirs.skills })
+    namespaces.push(
+      { kind: 'tree', dir: dirs.rules },
+      {
+        kind: 'children',
+        dir: dirs.skills,
+        names: claimedSkillNames(dirs.skills, plan, retiredSkills),
+      },
+    )
   }
   if (active.has('claude')) {
     claimFamily('.claude')
