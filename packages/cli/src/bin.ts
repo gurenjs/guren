@@ -293,14 +293,19 @@ function reportDryRun(action: string, message: string, json: boolean, extra?: Re
   }
 }
 
-/** The migrations folder as the user would type it: cwd-relative when it is under cwd. */
-function describeMigrationsFolder(folder: string | undefined): string {
-  if (!folder) {
-    return 'the migrations folder'
-  }
+/**
+ * A path as the user would type it: cwd-relative when it is under cwd, and
+ * verbatim otherwise. `relative()` resolves a relative input against cwd on its
+ * own, so a config's './db/schema.ts' and an absolute folder both land here.
+ */
+function describePath(path: string): string {
+  const relativePath = relative(process.cwd(), path)
+  return relativePath === '' || relativePath.startsWith('..') ? path : relativePath
+}
 
-  const relativePath = relative(process.cwd(), folder)
-  return relativePath === '' || relativePath.startsWith('..') ? folder : relativePath
+/** The migrations folder as the user would type it, or a stand-in when unknown. */
+function describeMigrationsFolder(folder: string | undefined): string {
+  return folder ? describePath(folder) : 'the migrations folder'
 }
 
 function reportSuccess(action: string, message: string, json: boolean, extra?: Record<string, unknown>): void {
@@ -711,12 +716,31 @@ const makeMigrationCommand = defineCommand({
     },
   },
   async run({ args }) {
-    await makeMigration({
+    const result = await makeMigration({
       name: args.name,
       schema: args.schema,
       out: args.out,
     })
-    consola.success('Migration generated.')
+
+    // drizzle-kit exits 0 for "No schema changes, nothing to migrate." too, so
+    // the ✔ below is reported off what it wrote, not off the exit code. An
+    // unresolvable out dir leaves `migrationsFolder` unset and keeps the old
+    // message rather than describing a folder we did not watch.
+    if (result.migrationsFolder && result.created.length === 0) {
+      // The config states its paths as './db/schema.ts'; render it the same way
+      // as the folder above so one message does not mix two spellings.
+      const schema = result.schemaPath ? describePath(result.schemaPath) : 'your schema'
+      consola.warn(
+        `No migration generated in ${describeMigrationsFolder(result.migrationsFolder)} — ` +
+          `${schema} has no changes since the last one.`,
+      )
+      consola.info(`Edit \`${schema}\` to change your tables, then re-run \`bun run db:make\`.`)
+      return
+    }
+
+    consola.success(
+      result.created.length > 0 ? `Migration generated: ${result.created.join(', ')}.` : 'Migration generated.',
+    )
   },
 })
 
