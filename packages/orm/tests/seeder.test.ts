@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { defineSeeder, loadSeeders, runSeeders, type SeederContext } from '../src/seeder'
@@ -154,6 +154,11 @@ describe('loadSeeders', () => {
     const seeders = await loadSeeders(tempDir)
     expect(seeders).toEqual([])
   })
+
+  it('returns empty array for a directory that does not exist', async () => {
+    const seeders = await loadSeeders(join(tempDir, 'never-created'))
+    expect(seeders).toEqual([])
+  })
 })
 
 describe('runSeeders', () => {
@@ -268,6 +273,56 @@ describe('runSeeders run summary', () => {
     expect(await runSeeders({}, tempDir)).toEqual({
       seedersFolder: tempDir,
       seedersRan: 1,
+      filesWithoutSeeder: 0,
+    })
+  })
+
+  // An app that never created db/seeders/ used to have the readdir ENOENT
+  // surface through seedFailure() as "Failed to seed the database: ENOENT ...
+  // scandir" — a filesystem error dressed as a database failure. It holds no
+  // seeders, which is the nothing-to-run db:seed already reports, and is what
+  // `inspectMigrationsFolder()` has always answered for a missing db/migrations.
+  it('should report nothing ran for a folder that does not exist', async () => {
+    const missing = join(tempDir, 'never-created')
+
+    expect(await runSeeders({}, missing)).toEqual({
+      seedersFolder: missing,
+      seedersRan: 0,
+      filesWithoutSeeder: 0,
+    })
+  })
+
+  // A symlink pointing at nothing resolves to nothing, and the OS reports that
+  // as the same ENOENT a folder that was never created gives — so it reads as
+  // absent rather than as an error of its own.
+  it('should report nothing ran for a dangling symlink', async () => {
+    const link = join(tempDir, 'seeders')
+    await symlink(join(tempDir, 'never-created'), link)
+
+    expect(await runSeeders({}, link)).toEqual({
+      seedersFolder: link,
+      seedersRan: 0,
+      filesWithoutSeeder: 0,
+    })
+  })
+
+  // Absence is ENOENT and nothing else: a file sitting where the folder belongs
+  // is a misconfiguration, and reporting it as an empty folder would send the
+  // user to `make:seeder` to write a seeder into a path that cannot hold one.
+  it('should not report nothing ran for a file where the folder belongs', async () => {
+    const notAFolder = join(tempDir, 'seeders')
+    await writeFile(notAFolder, '')
+
+    await expect(runSeeders({}, notAFolder)).rejects.toThrow(/ENOTDIR/)
+  })
+
+  // Configs pass the folder as a URL, so the guard has to hold on that path too.
+  it('should report nothing ran for a missing folder given as a URL', async () => {
+    const missing = join(tempDir, 'never-created')
+
+    expect(await runSeeders({}, new URL(`file://${missing}`))).toEqual({
+      seedersFolder: missing,
+      seedersRan: 0,
       filesWithoutSeeder: 0,
     })
   })
