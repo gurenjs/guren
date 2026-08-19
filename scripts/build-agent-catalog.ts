@@ -33,6 +33,8 @@ import { dirname, join, relative } from 'node:path'
 import process from 'node:process'
 import { AGENT_TARGETS } from '../packages/cli/src/agent-targets'
 import { builtinSubCommands } from '../packages/cli/src/commands'
+import { compareVersions } from '../packages/cli/src/codemods'
+import { parseChangeset } from './smoke/core-semver-audit'
 import { repoRoot } from './workspace-packages'
 
 const TEMPLATE_DIR = 'packages/cli/templates/agent-catalog'
@@ -88,7 +90,7 @@ async function readContext(): Promise<RenderContext> {
   return { cliVersion, minCli: MIN_CLI_FOR_TARGETS, targets: AGENT_TARGETS }
 }
 
-function substitute(template: string, ctx: RenderContext, portableSchema: boolean): string {
+function substitute(template: string, ctx: RenderContext, portableSchema = false): string {
   return template
     .replaceAll('__CLI_VERSION__', ctx.cliVersion)
     .replaceAll('__MIN_CLI__', ctx.minCli)
@@ -115,21 +117,21 @@ export async function renderCatalog(): Promise<RenderedFile[]> {
   }
 
   const pluginRoot = 'plugins/guren'
-  add('.claude-plugin/marketplace.json', substitute(await loadTemplate('marketplace.json.tpl'), ctx, false))
-  add('README.md', substitute(await loadTemplate('README.md.tpl'), ctx, false))
-  add('CONTRIBUTING.md', substitute(await loadTemplate('CONTRIBUTING.md.tpl'), ctx, false))
-  add(`${pluginRoot}/README.md`, substitute(await loadTemplate('plugin-README.md.tpl'), ctx, false))
+  add('.claude-plugin/marketplace.json', substitute(await loadTemplate('marketplace.json.tpl'), ctx))
+  add('README.md', substitute(await loadTemplate('README.md.tpl'), ctx))
+  add('CONTRIBUTING.md', substitute(await loadTemplate('CONTRIBUTING.md.tpl'), ctx))
+  add(`${pluginRoot}/README.md`, substitute(await loadTemplate('plugin-README.md.tpl'), ctx))
   // one manifest template, rendered twice: the portable Agent Plugins v1
   // manifest at the plugin root, and Claude Code's location without $schema
   const pluginTpl = await loadTemplate('plugin.json.tpl')
   add(`${pluginRoot}/plugin.json`, substitute(pluginTpl, ctx, true))
-  add(`${pluginRoot}/.claude-plugin/plugin.json`, substitute(pluginTpl, ctx, false))
+  add(`${pluginRoot}/.claude-plugin/plugin.json`, substitute(pluginTpl, ctx))
 
   const skillsDir = join(repoRoot, TEMPLATE_DIR, 'skills')
   for (const entry of await readdir(skillsDir, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue
     const skillFile = join(skillsDir, entry.name, 'SKILL.md')
-    add(`${pluginRoot}/skills/${entry.name}/SKILL.md`, substitute(await readFile(skillFile, 'utf8'), ctx, false))
+    add(`${pluginRoot}/skills/${entry.name}/SKILL.md`, substitute(await readFile(skillFile, 'utf8'), ctx))
   }
 
   // LICENSE is copied, not templated: the published license can never
@@ -141,8 +143,13 @@ export async function renderCatalog(): Promise<RenderedFile[]> {
   return files.sort((a, b) => a.path.localeCompare(b.path))
 }
 
-export async function writeCatalog(outDir: string): Promise<RenderedFile[]> {
-  const files = await renderCatalog()
+/**
+ * `files` lets a caller that has already rendered — `--check`, which audits
+ * the payload before writing it for the validator — write that same array
+ * instead of rendering a second one. Same tree either way; one render.
+ */
+export async function writeCatalog(outDir: string, files?: readonly RenderedFile[]): Promise<readonly RenderedFile[]> {
+  files ??= await renderCatalog()
   for (const file of files) {
     const dest = join(outDir, file.path)
     await mkdir(dirname(dest), { recursive: true })
@@ -234,19 +241,17 @@ export function assertTargets(files: readonly RenderedFile[]): string[] {
   return problems
 }
 
-function compareSemver(a: string, b: string): number {
-  const pa = a.split('.').map(Number)
-  const pb = b.split('.').map(Number)
-  for (let i = 0; i < 3; i++) {
-    const d = (pa[i] ?? 0) - (pb[i] ?? 0)
-    if (d !== 0) return d
-  }
-  return 0
-}
-
 export async function assertMinCli(): Promise<string[]> {
   const ctx = await readContext()
-  return compareSemver(ctx.minCli, ctx.cliVersion) > 0
+  // `compareVersions` returns NaN when either side is not an exact version —
+  // a prerelease workspace version, a partial pin. `NaN > 0` is false, so a
+  // comparison that could not be made would otherwise read as "not ahead"
+  // and pass the gate it exists to be.
+  const order = compareVersions(ctx.minCli, ctx.cliVersion)
+  if (Number.isNaN(order)) {
+    return [`Cannot order MIN_CLI_FOR_TARGETS ${ctx.minCli} against the workspace @guren/cli ${ctx.cliVersion}`]
+  }
+  return order > 0
     ? [`MIN_CLI_FOR_TARGETS ${ctx.minCli} is ahead of the workspace @guren/cli ${ctx.cliVersion}`]
     : []
 }
@@ -369,19 +374,21 @@ export async function assertPortableManifest(files: readonly RenderedFile[]): Pr
 /**
  * Does this changeset's frontmatter release `pkg`? Only the `---`-delimited
  * block is read, so a package-looking line in the Markdown body does not
- * count; keys may be quoted or bare, as changesets accepts both. (The OKF
- * frontmatter parser in packages/cli is a fixed-field subset and does not
- * see package names, so this is the one place a tiny local parser is right.)
+ * count; keys may be quoted or bare, as changesets accepts both.
+ *
+ * The reading is `core-semver-audit.ts`'s, not a second one written here:
+ * that gate already had to be as permissive as `@changesets/parse` about
+ * comments, quoting and bump values, and two regexes for one file format is
+ * how the two gates come to disagree about what a release plan says.
+ * (The OKF frontmatter parser in packages/cli is a fixed-field subset that
+ * never sees package names, which is why it is not the one to reuse.)
+ *
+ * Throws on a changeset it cannot read, rather than reporting "no release
+ * for pkg" — the caller turns that into a reported problem, because a
+ * changeset nobody can parse is not evidence that a release was not planned.
  */
-export function changesetNames(source: string, pkg: string): boolean {
-  const block = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/u.exec(source)
-  if (!block) return false
-  for (const line of (block[1] ?? '').split(/\r?\n/u)) {
-    const m = /^\s*(?:"([^"]+)"|'([^']+)'|([^\s:"']+))\s*:/u.exec(line)
-    const key = m?.[1] ?? m?.[2] ?? m?.[3]
-    if (key === pkg) return true
-  }
-  return false
+export function changesetNames(source: string, pkg: string, file = 'changeset'): boolean {
+  return parseChangeset(file, source).releases.has(pkg)
 }
 
 /**
@@ -416,7 +423,12 @@ export async function assertChangesetGate(base: string): Promise<string[]> {
     // no .changeset dir — fall through to the failure below
   }
   for (const name of names) {
-    if (changesetNames(await readFile(join(changesetDir, name), 'utf8'), '@guren/cli')) return []
+    try {
+      if (changesetNames(await readFile(join(changesetDir, name), 'utf8'), '@guren/cli', name)) return []
+    } catch (error) {
+      // an unreadable changeset is not evidence that no release was planned
+      return [`could not read .changeset/${name}: ${error instanceof Error ? error.message : String(error)}`]
+    }
   }
   return [
     `catalog inputs changed (${touched.join(', ')}) but no .changeset/*.md names "@guren/cli". ` +
@@ -483,11 +495,12 @@ async function check(base: string | undefined, requireValidate: boolean): Promis
     return 1
   }
 
-  // render once and validate that same tree, then discard it
+  // write the tree that was just audited — not a second render of it — and
+  // validate that, then discard it. Provenance, and one render per run.
   const dir = await mkdtemp(join(tmpdir(), 'guren-agent-catalog-'))
   let outcome: ValidateOutcome
   try {
-    await writeCatalog(dir)
+    await writeCatalog(dir, files)
     outcome = await claudePluginValidate(dir)
   } finally {
     await rm(dir, { recursive: true, force: true })

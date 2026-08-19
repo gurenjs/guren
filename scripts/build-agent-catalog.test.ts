@@ -17,6 +17,7 @@ import {
   validateAgainstSchema,
   writeCatalog,
 } from './build-agent-catalog.ts'
+import { repoRoot } from './workspace-packages.ts'
 
 /**
  * The audit exists to fail. Every rule below is pinned in both directions: it
@@ -27,9 +28,16 @@ import {
 
 const md = (path: string, content: string) => [{ path, content }]
 
+/**
+ * One render, shared. Nothing here mutates the array, and re-rendering per
+ * test only re-reads the same ten template files.
+ */
+let rendered: Promise<Awaited<ReturnType<typeof renderCatalog>>>
+const catalog = () => (rendered ??= renderCatalog())
+
 describe('renderCatalog', () => {
   it('renders the full published tree with no token left behind', async () => {
-    const files = await renderCatalog()
+    const files = await catalog()
     const paths = files.map((f) => f.path).sort()
     expect(paths).toEqual(
       [
@@ -51,7 +59,7 @@ describe('renderCatalog', () => {
   })
 
   it('renders one manifest template into both locations, differing only by $schema', async () => {
-    const files = await renderCatalog()
+    const files = await catalog()
     const root = JSON.parse(files.find((f) => f.path === 'plugins/guren/plugin.json')!.content)
     const claude = JSON.parse(files.find((f) => f.path === 'plugins/guren/.claude-plugin/plugin.json')!.content)
     expect(root.$schema).toBe('https://agent-plugins.org/schemas/1.0.0/plugin.schema.json')
@@ -61,7 +69,7 @@ describe('renderCatalog', () => {
   })
 
   it('the plugin version is the workspace @guren/cli version', async () => {
-    const files = await renderCatalog()
+    const files = await catalog()
     const cli = (await Bun.file(new URL('../packages/cli/package.json', import.meta.url)).json()) as { version: string }
     const root = JSON.parse(files.find((f) => f.path === 'plugins/guren/plugin.json')!.content)
     const market = JSON.parse(files.find((f) => f.path === '.claude-plugin/marketplace.json')!.content)
@@ -72,7 +80,7 @@ describe('renderCatalog', () => {
   it('the pre-app skill never invokes bunx guren before an app exists', async () => {
     // the whole point of guren-new-app: `guren` is not on npm, so every
     // `bunx guren` line must come after the scaffold + postcondition section
-    const files = await renderCatalog()
+    const files = await catalog()
     const skill = files.find((f) => f.path.endsWith('guren-new-app/SKILL.md'))!.content
     const handoff = skill.indexOf('## Check the postcondition')
     expect(handoff).toBeGreaterThan(0)
@@ -83,9 +91,34 @@ describe('renderCatalog', () => {
   })
 })
 
+describe('the command registry is importable', () => {
+  it('builds on import without running the CLI or touching the filesystem', () => {
+    // the audit imports `commands.ts` to read what the CLI registers. That is
+    // only safe while importing it stays inert: a stray console line, a
+    // prompt, or a warning in any of the ~50 command modules it pulls in
+    // would run on every audit and every publish. The module says so in
+    // prose; this is what makes the claim fail when it stops being true.
+    //
+    // What it pins is output, not every possible side effect — a top-level
+    // `await` that merely waits would still pass. GUREN_QUIET_DUPLICATE_ORM
+    // silences the one line this workspace prints by design: `src` and
+    // `dist` copies of @guren/orm coexist here, which is not a property of
+    // the registry.
+    const probe = Bun.spawnSync([
+      process.execPath,
+      '-e',
+      "import('./packages/cli/src/commands.ts').then((m) => { if (Object.keys(m.builtinSubCommands).length === 0) process.exit(3) })",
+    ], { cwd: repoRoot, env: { ...process.env, GUREN_QUIET_DUPLICATE_ORM: '1' } })
+
+    expect(probe.exitCode).toBe(0)
+    expect(probe.stdout.toString()).toBe('')
+    expect(probe.stderr.toString()).toBe('')
+  })
+})
+
 describe('audit: commands and flags', () => {
   it('passes on the real payload', async () => {
-    expect(await assertCommandsAndFlags(await renderCatalog())).toEqual([])
+    expect(await assertCommandsAndFlags(await catalog())).toEqual([])
   })
 
   it('fails on a command the CLI does not register', async () => {
@@ -163,7 +196,7 @@ describe('audit: changeset gate parser', () => {
 
 describe('audit: targets', () => {
   it('passes on the real payload', async () => {
-    expect(assertTargets(await renderCatalog())).toEqual([])
+    expect(assertTargets(await catalog())).toEqual([])
   })
   it('fails on a target outside AGENT_TARGETS', () => {
     const problems = assertTargets(md('x.md', '`bunx guren agent:init --target codex,windsurf`'))
@@ -194,7 +227,7 @@ describe('audit: Agent Plugins v1 manifest', () => {
   }
 
   it('passes on the real payload', async () => {
-    expect(await assertPortableManifest(await renderCatalog())).toEqual([])
+    expect(await assertPortableManifest(await catalog())).toEqual([])
   })
   it('fails when $schema is missing (required by the spec)', async () => {
     const { $schema: _s, ...noSchema } = valid
