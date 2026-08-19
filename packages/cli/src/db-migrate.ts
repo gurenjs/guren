@@ -91,6 +91,36 @@ function asMigrationRunSummary(value: unknown): MigrationRunSummary | undefined 
 }
 
 /**
+ * What the app's `seedDatabase()` reported about the run. Mirrors
+ * `SeederRunSummary` from `@guren/orm`, and is read structurally for the same
+ * reason `MigrationRunSummary` is: the config module belongs to the app, so it
+ * may be backed by an older ORM that resolves to undefined, or by a seed
+ * function the user wrote themselves.
+ */
+export interface SeederRunSummary {
+  seedersFolder?: string
+  seedersRan: number
+  filesWithoutSeeder: number
+}
+
+function asSeederRunSummary(value: unknown): SeederRunSummary | undefined {
+  if (!isRecord(value)) {
+    return undefined
+  }
+
+  const { seedersFolder, seedersRan, filesWithoutSeeder } = value
+  if (typeof seedersRan !== 'number') {
+    return undefined
+  }
+
+  return {
+    seedersFolder: typeof seedersFolder === 'string' ? seedersFolder : undefined,
+    seedersRan,
+    filesWithoutSeeder: typeof filesWithoutSeeder === 'number' ? filesWithoutSeeder : 0,
+  }
+}
+
+/**
  * Runs the app's migrations. Returns what the run found when the app's ORM
  * reports it, and undefined when it does not — an older `@guren/orm`, or a
  * `config/database.ts` exporting a migration function of its own.
@@ -113,7 +143,12 @@ export async function runDatabaseMigrations(): Promise<MigrationRunSummary | und
   }
 }
 
-export async function runDatabaseSeeders(): Promise<void> {
+/**
+ * Runs the app's seeders. Returns what the run found when the app's ORM reports
+ * it, and undefined when it does not — an older `@guren/orm`, or a
+ * `config/database.ts` exporting a seed function of its own.
+ */
+export async function runDatabaseSeeders(): Promise<SeederRunSummary | undefined> {
   const module = await resolveDatabaseModule()
   const seed = pickFunction(module, ['seedDatabase', 'runSeeders'])
   const close = pickFunction(module, ['closeDatabase'])
@@ -123,7 +158,7 @@ export async function runDatabaseSeeders(): Promise<void> {
   }
 
   try {
-    await seed()
+    return asSeederRunSummary(await seed())
   } finally {
     if (close) {
       await close()
@@ -137,12 +172,24 @@ export interface ResetDatabaseOptions {
 }
 
 /**
- * Drops the schema and re-applies migrations. Returns the same summary
- * `runDatabaseMigrations()` does for the migration half of the run: a reset
- * that finds no migrations leaves an empty database behind, which is worth
- * reporting rather than calling done.
+ * What a reset run reported, half by half. Either field is absent when the
+ * app's config reported nothing for it, and `seeders` is also absent when the
+ * run was not asked to seed — a reset without `--seed` has no seed run to
+ * describe, which is not the same as one that seeded nothing.
  */
-export async function resetDatabase(options: ResetDatabaseOptions = {}): Promise<MigrationRunSummary | undefined> {
+export interface ResetRunSummary {
+  migrations?: MigrationRunSummary
+  seeders?: SeederRunSummary
+}
+
+/**
+ * Drops the schema, re-applies migrations, and optionally seeds. Returns the
+ * same summaries `runDatabaseMigrations()` and `runDatabaseSeeders()` do: a
+ * reset that finds no migrations leaves an empty database behind, and one that
+ * finds no seeders leaves it unpopulated — both worth reporting rather than
+ * calling done.
+ */
+export async function resetDatabase(options: ResetDatabaseOptions = {}): Promise<ResetRunSummary> {
   const module = await resolveDatabaseModule()
   const reset = pickFunction(module, ['resetDatabase', 'dropAllTables'])
   const migrate = pickFunction(module, ['migrateDatabase', 'runMigrations', 'getDatabase'])
@@ -165,11 +212,12 @@ export async function resetDatabase(options: ResetDatabaseOptions = {}): Promise
     // describes, since a driver reset that reports nothing ran nothing.
     const migrated = asMigrationRunSummary(await migrate())
 
+    let seeders: SeederRunSummary | undefined
     if (options.seed && seed) {
-      await seed()
+      seeders = asSeederRunSummary(await seed())
     }
 
-    return summary ?? migrated
+    return { migrations: summary ?? migrated, seeders }
   } finally {
     if (close) {
       await close()

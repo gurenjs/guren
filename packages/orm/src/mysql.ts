@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { hotReloadKey, releaseActiveConnection, replaceActiveConnection } from './active-connections'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
 import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailure, isConnectionFailure, migrationFailure, seedFailure, inspectMigrationsFolder, listLocalMigrations, noMigrationsToRun, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
-import { runSeeders } from './seeder'
+import { runSeeders, type SeederRunSummary } from './seeder'
 import { singleFlight } from './single-flight'
 
 type ConnectionResolver = string | (() => string | undefined)
@@ -61,7 +61,8 @@ export interface MySqlDatabase {
   migrateDatabase(): Promise<MigrationRunSummary>
   closeDatabase(): Promise<void>
   configureOrm(): Promise<void>
-  seedDatabase(): Promise<void>
+  /** Runs every seeder in the configured folder and reports what it held. */
+  seedDatabase(): Promise<SeederRunSummary>
   /** Drops every table and view (including the drizzle migration tracker), then re-applies migrations — same end state as `guren db:reset`. */
   resetDatabase(): Promise<MigrationRunSummary>
   /** Per-migration applied state derived from the drizzle-kit journal and the __drizzle_migrations table. */
@@ -171,14 +172,15 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
     DrizzleAdapter.configure(db as unknown as Parameters<typeof DrizzleAdapter.configure>[0])
   }
 
-  async function seedDatabase(): Promise<void> {
+  async function seedDatabase(): Promise<SeederRunSummary> {
     if (!resolvedSeedersFolder) {
       throw new Error('No seeders folder configured. Provide "seedersFolder" when calling createMySqlDatabase().')
     }
 
     const db = await database.get()
     try {
-      await runSeeders(db, resolvedSeedersFolder)
+      // Awaited inside the try so a seeder that throws still reaches seedFailure().
+      return await runSeeders(db, resolvedSeedersFolder)
     } catch (error) {
       throw seedFailure(error, describeConnectionEndpoint(resolveConnectionString()))
     }

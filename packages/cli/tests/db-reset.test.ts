@@ -78,9 +78,13 @@ export async function closeDatabase() {
 
     ;(globalThis as any).__calls = calls
 
-    await resetDatabase({ seed: true })
+    const summary = await resetDatabase({ seed: true })
 
     expect(calls).toEqual(['reset', 'migrate', 'seed', 'close'])
+    // Neither half reports anything here, which is what an app on an older
+    // @guren/orm looks like — both commands must keep their plain ✔ rather
+    // than warning about a run they cannot describe.
+    expect(summary).toEqual({ migrations: undefined, seeders: undefined })
 
     delete (globalThis as any).__calls
   })
