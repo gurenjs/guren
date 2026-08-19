@@ -153,7 +153,7 @@ Guren CLI は drizzle-kit をラップしており、Drizzle スキーマから 
 bunx guren make:migration --name add_posts_table
 ```
 
-コマンドはプロジェクトルートの `drizzle.config.ts`（`.mts/.js/.mjs` も可）を参照し、スキーマパス・出力ディレクトリ・DB 方言のデフォルト値を取得します。必要に応じてスキーマや出力先を上書きできます。
+コマンドはプロジェクトルートの `drizzle.config.ts`（`.mts/.js/.mjs` も可）を参照し、スキーマパス・出力ディレクトリ・DB 方言のデフォルト値を取得します。`drizzle.config.json` も検出しますが、drizzle-kit 自身が Node 上で JSON 設定を読み込めないため、drizzle-kit の読み込みエラーになります。JSON 設定を使っている場合は `.ts` など読み込み可能な形式に移してください。必要に応じてスキーマや出力先を上書きできます。
 
 ```bash
 bunx guren make:migration --schema ./custom/schema.ts --out ./custom/migrations
