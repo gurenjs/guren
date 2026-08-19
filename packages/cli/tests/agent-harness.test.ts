@@ -5,6 +5,25 @@ import { tmpdir } from 'node:os'
 import { installAgentHarness } from '../src/agent-harness'
 import { AGENT_TARGETS } from '../src/agent-targets'
 
+/**
+ * Whether `dir` lives on a case-insensitive filesystem. Probed rather than
+ * inferred from `process.platform`: macOS mounts case-sensitive volumes and
+ * Linux case-insensitive ones, and the behavior under test follows the
+ * filesystem the app was scaffolded on, not the OS running the test.
+ */
+async function filesystemIsCaseInsensitive(dir: string): Promise<boolean> {
+  const probe = join(dir, 'case-probe.tmp')
+  await writeFile(probe, '', 'utf8')
+  try {
+    await access(join(dir, 'CASE-PROBE.TMP'))
+    return true
+  } catch {
+    return false
+  } finally {
+    await rm(probe, { force: true })
+  }
+}
+
 describe('installAgentHarness', () => {
   let tempDir: string
 
@@ -505,10 +524,12 @@ describe('installAgentHarness', () => {
     expect(await readFile(join(tempDir, 'shared-rules/legacy.md'), 'utf8')).toBe('external\n')
   })
 
-  it('sync --prune spares a planned file reached through a differently-cased entry', async () => {
+  it('sync --prune settles a differently-cased entry by identity, not by name', async () => {
     await installAgentHarness({ cwd: tempDir, mode: 'init' })
-    // case-preserving filesystems keep this entry name while the write loop
-    // refreshes the planned lowercase path through it
+    const caseInsensitive = await filesystemIsCaseInsensitive(tempDir)
+    // what a case-only rename of a managed rule leaves behind: one directory
+    // entry on a case-insensitive filesystem, two distinct files on a
+    // case-sensitive one, so the two branches assert opposite outcomes
     await rename(
       join(tempDir, '.claude/rules/orm-models.md'),
       join(tempDir, '.claude/rules/ORM-MODELS.md'),
@@ -516,8 +537,15 @@ describe('installAgentHarness', () => {
 
     const result = await installAgentHarness({ cwd: tempDir, mode: 'sync', prune: true })
 
-    expect(result.stale).not.toContain('.claude/rules/ORM-MODELS.md')
+    // either way the planned path holds the current template
     expect(await readFile(join(tempDir, '.claude/rules/orm-models.md'), 'utf8')).toContain('defineModel')
+    if (caseInsensitive) {
+      // the entry the write loop just refreshed — pruning it would delete the plan's own output
+      expect(result.stale).not.toContain('.claude/rules/ORM-MODELS.md')
+    } else {
+      expect(result.stale).toContain('.claude/rules/ORM-MODELS.md')
+      await expect(access(join(tempDir, '.claude/rules/ORM-MODELS.md'))).rejects.toThrow()
+    }
   })
 
   it('sync --prune scans only the namespaces of the components being synced', async () => {
