@@ -57,7 +57,41 @@ function pickFunction(module: Record<string, unknown>, names: string[]): (() => 
   return undefined
 }
 
-export async function runDatabaseMigrations(): Promise<void> {
+/**
+ * What the app's `migrateDatabase()` reported about the run. Mirrors
+ * `MigrationRunSummary` from `@guren/orm`, but read structurally: the config
+ * module belongs to the app, so it may be backed by an older ORM that resolves
+ * to undefined, or by a migration function the user wrote themselves.
+ */
+export interface MigrationRunSummary {
+  migrationsFolder?: string
+  migrationsFound: number
+  looseSqlFiles: number
+}
+
+function asMigrationRunSummary(value: unknown): MigrationRunSummary | undefined {
+  if (value == null || typeof value !== 'object') {
+    return undefined
+  }
+
+  const { migrationsFolder, migrationsFound, looseSqlFiles } = value as Record<string, unknown>
+  if (typeof migrationsFound !== 'number') {
+    return undefined
+  }
+
+  return {
+    migrationsFolder: typeof migrationsFolder === 'string' ? migrationsFolder : undefined,
+    migrationsFound,
+    looseSqlFiles: typeof looseSqlFiles === 'number' ? looseSqlFiles : 0,
+  }
+}
+
+/**
+ * Runs the app's migrations. Returns what the run found when the app's ORM
+ * reports it, and undefined when it does not — an older `@guren/orm`, or a
+ * `config/database.ts` exporting a migration function of its own.
+ */
+export async function runDatabaseMigrations(): Promise<MigrationRunSummary | undefined> {
   const module = await resolveDatabaseModule()
   const migrate = pickFunction(module, ['migrateDatabase', 'runMigrations', 'getDatabase'])
   const close = pickFunction(module, ['closeDatabase'])
@@ -67,7 +101,7 @@ export async function runDatabaseMigrations(): Promise<void> {
   }
 
   try {
-    await migrate()
+    return asMigrationRunSummary(await migrate())
   } finally {
     if (close) {
       await close()

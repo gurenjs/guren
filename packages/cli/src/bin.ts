@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { readFileSync } from 'node:fs'
+import { relative } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { consola } from 'consola'
 import { defineCommand, showUsage } from 'citty'
@@ -289,6 +290,16 @@ function reportDryRun(action: string, message: string, json: boolean, extra?: Re
   } else {
     consola.info(`[dry-run] ${message}`)
   }
+}
+
+/** The migrations folder as the user would type it: cwd-relative when it is under cwd. */
+function describeMigrationsFolder(folder: string | undefined): string {
+  if (!folder) {
+    return 'the migrations folder'
+  }
+
+  const relativePath = relative(process.cwd(), folder)
+  return relativePath === '' || relativePath.startsWith('..') ? folder : relativePath
 }
 
 function reportSuccess(action: string, message: string, json: boolean, extra?: Record<string, unknown>): void {
@@ -698,8 +709,38 @@ const migrateCommand = defineCommand({
       return
     }
 
-    await runDatabaseMigrations()
-    reportSuccess('db:migrate', 'Database migrations completed.', Boolean(args.json))
+    const summary = await runDatabaseMigrations()
+
+    if (summary && summary.migrationsFound === 0) {
+      const folder = describeMigrationsFolder(summary.migrationsFolder)
+      const message = `No migrations found in ${folder} — nothing was applied.`
+
+      if (args.json) {
+        console.log(
+          JSON.stringify(
+            { success: true, action: 'db:migrate', message, migrationsFound: 0, looseSqlFiles: summary.looseSqlFiles },
+            null,
+            2,
+          ),
+        )
+        return
+      }
+
+      consola.warn(message)
+      // A folder holding loose .sql files is not a folder waiting for db:make —
+      // the ORM has already explained why those files were skipped.
+      if (summary.looseSqlFiles === 0) {
+        consola.info('Generate one with `bun run db:make`, then re-run `bun run db:migrate`.')
+      }
+      return
+    }
+
+    reportSuccess(
+      'db:migrate',
+      'Database migrations completed.',
+      Boolean(args.json),
+      summary ? { migrationsFound: summary.migrationsFound } : undefined,
+    )
   },
 })
 

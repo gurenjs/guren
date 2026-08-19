@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import type postgres from 'postgres'
 import { hotReloadKey, releaseActiveConnection, replaceActiveConnection } from './active-connections'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
-import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailure, isConnectionFailure, migrationFailure, seedFailure, hasDrizzleMigrations, listLocalMigrations, warnIgnoredFlatSqlMigrations, type MigrationStatusEntry } from './migration-utils'
+import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailure, isConnectionFailure, migrationFailure, seedFailure, listLocalMigrations, noMigrationsToRun, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders } from './seeder'
 import { singleFlight } from './single-flight'
 
@@ -49,7 +49,8 @@ export interface PostgresDatabaseOptions {
 
 export interface PostgresDatabase {
   getDatabase(): Promise<PostgresJsDatabase>
-  migrateDatabase(): Promise<void>
+  /** Applies pending drizzle-kit migrations and reports what the folder held. */
+  migrateDatabase(): Promise<MigrationRunSummary>
   closeDatabase(): Promise<void>
   configureOrm(): Promise<void>
   seedDatabase(): Promise<void>
@@ -84,7 +85,7 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
     return resolved
   }
 
-  const migrations = singleFlight(async (): Promise<void> => {
+  const migrations = singleFlight(async (): Promise<MigrationRunSummary> => {
     // Scoped to this attempt, and resolved below rather than up front:
     // resolveConnectionString() throws when no connection string is configured,
     // so it must not run before the no-migrations early return. The catch needs
@@ -92,9 +93,9 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
     let endpoint: string | undefined
 
     try {
-      if (!hasDrizzleMigrations(resolvedMigrationsFolder)) {
-        warnIgnoredFlatSqlMigrations(resolvedMigrationsFolder)
-        return
+      const localMigrations = listLocalMigrations(resolvedMigrationsFolder)
+      if (localMigrations.length === 0) {
+        return noMigrationsToRun(resolvedMigrationsFolder)
       }
 
       const { drizzle, migrate, postgres: postgresFactory } = await loadPostgresModules()
@@ -111,6 +112,8 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
       } finally {
         await migrationClient.end({ timeout: 0 })
       }
+
+      return { migrationsFolder: resolvedMigrationsFolder, migrationsFound: localMigrations.length, looseSqlFiles: 0 }
     } catch (error) {
       throw migrationFailure(error, endpoint)
     }

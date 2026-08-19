@@ -27,7 +27,7 @@ export interface D1DatabaseOptions {
 export interface D1DatabaseHandle {
   getDatabase(): Promise<unknown>
   /** Always throws: D1 migrations are applied with `wrangler d1 migrations apply`, never at runtime. */
-  migrateDatabase(): Promise<void>
+  migrateDatabase(): Promise<never>
   closeDatabase(): Promise<void>
   configureOrm(): Promise<void>
   /** Always throws: seed with SQL through `wrangler d1 execute`. */

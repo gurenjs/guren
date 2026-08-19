@@ -40,6 +40,71 @@ describe('listLocalMigrations', () => {
   })
 })
 
+describe('migrateDatabase run summary', () => {
+  let workDir: string
+
+  beforeEach(() => {
+    workDir = mkdtempSync(join(tmpdir(), 'guren-migrate-summary-'))
+  })
+
+  afterEach(() => {
+    rmSync(workDir, { recursive: true, force: true })
+  })
+
+  function sqliteAt(migrationsDir: string) {
+    return createSqliteDatabase({
+      migrationsFolder: migrationsDir,
+      filename: join(workDir, 'test.db'),
+    })
+  }
+
+  test('should report nothing found when the migrations folder is missing', async () => {
+    const migrationsDir = join(workDir, 'migrations')
+
+    const summary = await sqliteAt(migrationsDir).migrateDatabase()
+
+    expect(summary).toEqual({ migrationsFolder: migrationsDir, migrationsFound: 0, looseSqlFiles: 0 })
+  })
+
+  test('should report nothing found when the migrations folder is empty', async () => {
+    const migrationsDir = join(workDir, 'migrations')
+    mkdirSync(migrationsDir, { recursive: true })
+
+    const summary = await sqliteAt(migrationsDir).migrateDatabase()
+
+    expect(summary).toEqual({ migrationsFolder: migrationsDir, migrationsFound: 0, looseSqlFiles: 0 })
+  })
+
+  // Loose .sql files are the case a "run `db:make`" hint would misdiagnose:
+  // the migrations exist, they are just in a shape the drizzle migrator skips.
+  test('should count loose .sql files the migrator skipped', async () => {
+    const migrationsDir = join(workDir, 'migrations')
+    mkdirSync(migrationsDir, { recursive: true })
+    writeFileSync(join(migrationsDir, '0001_create_users.sql'), 'SELECT 1;')
+    writeFileSync(join(migrationsDir, '0002_create_posts.sql'), 'SELECT 1;')
+
+    const summary = await sqliteAt(migrationsDir).migrateDatabase()
+
+    expect(summary).toEqual({ migrationsFolder: migrationsDir, migrationsFound: 0, looseSqlFiles: 2 })
+  })
+
+  test('should report how many migrations the folder held once one exists', async () => {
+    const migrationsDir = join(workDir, 'migrations')
+    writeDrizzleMigration(
+      migrationsDir,
+      '20260101000000_create_widgets',
+      'CREATE TABLE widgets (id integer primary key autoincrement);',
+    )
+
+    const database = sqliteAt(migrationsDir)
+    const summary = await database.migrateDatabase()
+
+    expect(summary).toEqual({ migrationsFolder: migrationsDir, migrationsFound: 1, looseSqlFiles: 0 })
+
+    await database.closeDatabase()
+  })
+})
+
 describe('buildMigrationStatus', () => {
   const local = [{ name: '20260101000000_first' }, { name: '20260102000000_second' }]
 

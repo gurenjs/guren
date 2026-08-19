@@ -26,10 +26,59 @@ export async function closeDatabase() {
         'utf8',
       )
 
-      await runDatabaseMigrations()
+      const summary = await runDatabaseMigrations()
 
       expect(calls).toEqual(['migrate', 'close'])
+      // A config whose migration function reports nothing (an older @guren/orm,
+      // or one the user wrote) must keep the plain success path.
+      expect(summary).toBeUndefined()
       delete (globalThis as typeof globalThis & { __calls?: string[] }).__calls
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('returns what the run found when the config reports it', async () => {
+    const workspace = await createTempWorkspace('guren-cli-db-migrate-summary-')
+    try {
+      await mkdir(join(workspace.dir, 'config'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'config/database.ts'),
+        `
+export async function migrateDatabase() {
+  return { migrationsFolder: '/app/db/migrations', migrationsFound: 0, looseSqlFiles: 2 }
+}
+`,
+        'utf8',
+      )
+
+      expect(await runDatabaseMigrations()).toEqual({
+        migrationsFolder: '/app/db/migrations',
+        migrationsFound: 0,
+        looseSqlFiles: 2,
+      })
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('ignores a return value that is not a run summary', async () => {
+    const workspace = await createTempWorkspace('guren-cli-db-migrate-other-')
+    try {
+      await mkdir(join(workspace.dir, 'config'), { recursive: true })
+      // `getDatabase` is one of the accepted names, and it resolves to a
+      // drizzle instance rather than a summary.
+      await writeFile(
+        join(workspace.dir, 'config/database.ts'),
+        `
+export async function getDatabase() {
+  return { select() {} }
+}
+`,
+        'utf8',
+      )
+
+      expect(await runDatabaseMigrations()).toBeUndefined()
     } finally {
       await workspace.cleanup()
     }

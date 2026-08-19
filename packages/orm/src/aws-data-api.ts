@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { hotReloadKey, releaseActiveConnection, replaceActiveConnection } from './active-connections'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
-import { buildMigrationStatus, hasDrizzleMigrations, listLocalMigrations, warnIgnoredFlatSqlMigrations, type MigrationStatusEntry } from './migration-utils'
+import { buildMigrationStatus, listLocalMigrations, noMigrationsToRun, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders } from './seeder'
 import { singleFlight } from './single-flight'
 
@@ -63,7 +63,8 @@ export interface AwsDataApiDatabaseOptions {
 
 export interface AwsDataApiDatabase {
   getDatabase(): Promise<AwsDataApiPgDatabase>
-  migrateDatabase(): Promise<void>
+  /** Applies pending drizzle-kit migrations and reports what the folder held. */
+  migrateDatabase(): Promise<MigrationRunSummary>
   closeDatabase(): Promise<void>
   configureOrm(): Promise<void>
   seedDatabase(): Promise<void>
@@ -126,15 +127,17 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
     } as DrizzleConfig
   }
 
-  const migrations = singleFlight(async (): Promise<void> => {
+  const migrations = singleFlight(async (): Promise<MigrationRunSummary> => {
     try {
-      if (!hasDrizzleMigrations(resolvedMigrationsFolder)) {
-        warnIgnoredFlatSqlMigrations(resolvedMigrationsFolder)
-        return
+      const localMigrations = listLocalMigrations(resolvedMigrationsFolder)
+      if (localMigrations.length === 0) {
+        return noMigrationsToRun(resolvedMigrationsFolder)
       }
 
       const { migrate } = await loadAwsDataApiModules()
       await withAdminDb((db) => migrate(db, { migrationsFolder: resolvedMigrationsFolder }))
+
+      return { migrationsFolder: resolvedMigrationsFolder, migrationsFound: localMigrations.length, looseSqlFiles: 0 }
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error)
       throw new Error(`Failed to run database migrations: ${reason}`)
