@@ -18,20 +18,28 @@
  *    published with the one just rendered. Equal → nothing to do, exit 0.
  *    Most releases do not move @guren/cli, and failing here would make a
  *    routine step red for a reason that has nothing to do with the catalog.
- * 3. Delete every tracked file in the clone, copy the rendered tree in, and
- *    commit. Ordinary fast-forward push — never --force. Claude Code keeps a
- *    local clone of a registered marketplace and refreshes it; a rewritten
- *    history risks non-fast-forward failures for every registered user, and
- *    the payload is deterministic anyway.
+ * 3. Delete every tracked file in the clone, write the rendered tree in, and
+ *    check that what git staged is that same tree, path set and bytes — a
+ *    global excludesFile or clean filter sits between the two. Then commit
+ *    and push, appending to history rather than rewriting it: Claude Code
+ *    keeps a local clone of a registered marketplace and refreshes it, so a
+ *    rewritten history risks non-fast-forward failures for every registered
+ *    user, and the payload is deterministic anyway. The push is leased to the
+ *    tip that was cloned, so a remote that moved in the meantime — including
+ *    one somebody deliberately rolled back, which a plain fast-forward would
+ *    restore — is refused rather than overwritten.
  *
  * `--dry-run` does everything except commit and push, and prints the diff.
  * `--yes` skips the confirmation prompt (for the release checklist).
+ * `--skip-validate` publishes without `claude plugin validate`, for a
+ * maintainer who has run it by hand; without it, a validator that cannot run
+ * refuses the publish.
  */
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import process from 'node:process'
-import { auditRenderedFiles, claudePluginValidate, writeCatalog } from './build-agent-catalog'
+import { auditRenderedFiles, claudePluginValidate, writeCatalog, type RenderedFile } from './build-agent-catalog'
 import { repoRoot } from './workspace-packages'
 
 const PUBLISH_REPO = 'gurenjs/agent-skills'
@@ -57,9 +65,45 @@ function git(cwd: string, args: string[]): { ok: boolean; out: string; stdout: s
   }
 }
 
+/**
+ * Throws rather than exits: every refusal here happens inside the `try` that
+ * owns two temp directories, and `process.exit` would skip the `finally` that
+ * removes them. The top-level catch prints the message and exits 1, which is
+ * what a refusal looked like before.
+ */
 function fail(message: string): never {
-  console.error(message)
-  process.exit(1)
+  throw new PublishRefusal(message)
+}
+
+class PublishRefusal extends Error {}
+
+/**
+ * Is what git has staged exactly the tree that was rendered and audited? The
+ * script's whole claim is that those two are the same tree, and between them
+ * sit a maintainer's global git configuration and any hook or filter it
+ * installs — an excludesFile that drops `*.md`, an attributes filter that
+ * rewrites bytes. Compared here, at the point the two can still differ, by
+ * path set and then blob by blob.
+ */
+async function stagedTreeProblems(cloneDir: string, files: readonly RenderedFile[]): Promise<string[]> {
+  const listed = git(cloneDir, ['ls-files', '--cached', '-z'])
+  if (!listed.ok) return [`git ls-files failed after staging: ${listed.out}`]
+  const stagedPaths = listed.stdout.split('\0').filter(Boolean).sort()
+  const renderedPaths = files.map((file) => file.path).sort()
+  const problems = [
+    ...stagedPaths.filter((p) => !renderedPaths.includes(p)).map((p) => `staged but not rendered: ${p}`),
+    ...renderedPaths.filter((p) => !stagedPaths.includes(p)).map((p) => `rendered but not staged: ${p}`),
+  ]
+  if (problems.length > 0) return problems
+  for (const file of files) {
+    const blob = git(cloneDir, ['show', `:${file.path}`])
+    if (!blob.ok) {
+      problems.push(`could not read the staged copy of ${file.path}: ${blob.out}`)
+    } else if (blob.stdout !== file.content) {
+      problems.push(`staged bytes differ from the rendered bytes: ${file.path}`)
+    }
+  }
+  return problems
 }
 
 /** The plugin version a rendered or cloned tree declares, or null if unreadable. */
@@ -77,6 +121,16 @@ async function main(): Promise<void> {
   const dryRun = args.includes('--dry-run')
   const yes = args.includes('--yes')
 
+  // the generator's version override exists so this script's own test can
+  // render a second version without editing packages/cli/package.json. Left
+  // in a maintainer's environment it would otherwise publish that synthetic
+  // version to the real repository under the real plugin name.
+  if (process.env.GUREN_CATALOG_VERSION_OVERRIDE && !process.env.GUREN_AGENT_SKILLS_REMOTE) {
+    fail(
+      `Refusing to publish: GUREN_CATALOG_VERSION_OVERRIDE=${process.env.GUREN_CATALOG_VERSION_OVERRIDE} is set. It is a test hook for a local remote, not a way to publish a version @guren/cli does not have.`,
+    )
+  }
+
   // 1. render + audit the tree we are about to push
   const renderDir = await mkdtemp(join(tmpdir(), 'guren-catalog-publish-'))
   const cloneDir = await mkdtemp(join(tmpdir(), 'guren-catalog-clone-'))
@@ -91,20 +145,21 @@ async function main(): Promise<void> {
     if (problems.length > 0) {
       fail(`Refusing to publish: the rendered payload fails its own audit.\n${problems.map((p) => `  ${p}`).join('\n')}`)
     }
-    const validated = await claudePluginValidate(renderDir)
-    if (validated.kind === 'fail') {
-      fail(`Refusing to publish: claude plugin validate --strict failed.\n${validated.output}`)
-    }
-    if (validated.kind === 'unavailable') {
-      // CI cannot run the validator (no `claude` on the ubuntu runner), so
-      // publish is where it must run — this is the last gate before users.
-      // Refuse rather than warn: an unavailable check is not a green one.
-      // --skip-validate is the explicit override, for a maintainer who has
-      // run it by hand.
-      if (!args.includes('--skip-validate')) {
+    // CI cannot run the validator (no `claude` on the ubuntu runner), so
+    // publish is where it must run — this is the last gate before users.
+    // An unavailable check is not a green one, so it refuses; --skip-validate
+    // is the explicit override, for a maintainer who has run it by hand, and
+    // it skips the run itself rather than only forgiving the outcome.
+    if (args.includes('--skip-validate')) {
+      console.warn('Note: --skip-validate given; publishing without claude plugin validate.')
+    } else {
+      const validated = await claudePluginValidate(renderDir)
+      if (validated.kind === 'fail') {
+        fail(`Refusing to publish: claude plugin validate --strict failed.\n${validated.output}`)
+      }
+      if (validated.kind === 'unavailable') {
         fail(`Refusing to publish: claude plugin validate could not run (${validated.reason}). Install the Claude Code CLI, or pass --skip-validate after validating by hand.`)
       }
-      console.warn(`Note: --skip-validate given; publishing without claude plugin validate (${validated.reason}).`)
     }
     const nextVersion = (await pluginVersionIn(renderDir)) ?? fail('Rendered payload has no plugin version — refusing to publish.')
 
@@ -123,6 +178,10 @@ async function main(): Promise<void> {
       errors.push(clone.out)
     }
     if (!cloned) fail(`Could not clone ${PUBLISH_REPO}:\n${errors.join('\n')}`)
+    // the tip this run is allowed to move: the push leases it, so a remote
+    // that changed under us — including one somebody force-rolled backwards,
+    // which an ordinary fast-forward would happily restore — is refused
+    const baseOid = git(cloneDir, ['rev-parse', 'HEAD']).stdout.trim()
     const publishedVersion = await pluginVersionIn(cloneDir)
     console.log(
       publishedVersion === nextVersion
@@ -147,7 +206,17 @@ async function main(): Promise<void> {
     }
     Bun.spawnSync(['find', cloneDir, '-type', 'd', '-empty', '-not', '-path', '*/.git*', '-delete'])
 
-    git(cloneDir, ['add', '-A'])
+    // --force: a maintainer's global excludesFile applies inside the clone,
+    // and a publish that quietly stages nine of ten rendered files would be
+    // indistinguishable from a correct one
+    const add = git(cloneDir, ['add', '--force', '-A'])
+    if (!add.ok) fail(`git add failed in the clone:\n${add.out}`)
+    const staged = await stagedTreeProblems(cloneDir, files)
+    if (staged.length > 0) {
+      fail(
+        `Refusing to publish: the staged tree is not the tree that was audited.\n${staged.map((p) => `  ${p}`).join('\n')}`,
+      )
+    }
     const status = git(cloneDir, ['status', '--porcelain'])
     if (status.out === '') {
       // the same-version no-op: most releases do not move @guren/cli, and a
@@ -162,8 +231,10 @@ async function main(): Promise<void> {
       // already-installed copies will not pick this up until the next bump.
       console.warn(`Note: version ${nextVersion} is already published but the tree differs; republishing. Installed plugins keyed on this version will not refresh until @guren/cli moves.`)
     }
-    const diffStat = git(cloneDir, ['diff', '--cached', '--stat'])
-    console.log(diffStat.out)
+    // the stat says which files move; the patch is what a maintainer is
+    // actually authorizing, and the next step is a public push
+    console.log(git(cloneDir, ['diff', '--cached', '--stat']).out)
+    console.log(git(cloneDir, ['diff', '--cached', '--no-ext-diff']).out)
 
     if (dryRun) {
       console.log('\n--dry-run: not committing or pushing.')
@@ -182,9 +253,12 @@ async function main(): Promise<void> {
     const message = `Publish @guren/cli ${nextVersion}`
     const commit = git(cloneDir, ['commit', '--quiet', '-m', message])
     if (!commit.ok) fail(`git commit failed:\n${commit.out}`)
-    // ordinary push: fast-forward only, never --force
-    const push = git(cloneDir, ['push', '--quiet', 'origin', PUBLISH_BRANCH])
-    if (!push.ok) fail(`git push failed (a non-fast-forward means someone else pushed; re-run to rebase onto their tip):\n${push.out}`)
+    // leased to the tip that was cloned: any other value means the remote
+    // moved while this ran, and the answer is always to re-run rather than to
+    // overwrite. A plain push would reject a divergent remote but would
+    // happily fast-forward a deliberate rollback back into place.
+    const push = git(cloneDir, ['push', '--quiet', `--force-with-lease=${PUBLISH_BRANCH}:${baseOid}`, 'origin', PUBLISH_BRANCH])
+    if (!push.ok) fail(`git push failed (the remote moved since this run cloned it; re-run to publish onto its new tip):\n${push.out}`)
     console.log(`Published: ${message}`)
   } finally {
     await cleanup()

@@ -69,18 +69,23 @@ function git(cwd: string, ...args: string[]): string {
 let bare: string
 let scratch: string
 
-beforeAll(async () => {
-  scratch = await mkdtemp(join(tmpdir(), 'guren-publish-test-'))
-  bare = join(scratch, 'agent-skills.git')
-  // a bare repo with one placeholder commit on main, like the real one had
-  Bun.spawnSync(['git', 'init', '--quiet', '--bare', '--initial-branch=main', bare])
-  const seed = join(scratch, 'seed')
-  Bun.spawnSync(['git', 'clone', '--quiet', bare, seed])
+/** A bare repo with one placeholder commit on main, like the real one had. */
+async function seedRemote(name: string): Promise<string> {
+  const remote = join(scratch, name)
+  Bun.spawnSync(['git', 'init', '--quiet', '--bare', '--initial-branch=main', remote])
+  const seed = join(scratch, `${name}-seed`)
+  Bun.spawnSync(['git', 'clone', '--quiet', remote, seed])
   await Bun.write(join(seed, 'README.md'), 'placeholder\n')
   await Bun.write(join(seed, 'STALE.md'), 'a file the publish must remove\n')
   Bun.spawnSync(['git', '-c', 'user.name=t', '-c', 'user.email=t@t', 'add', '-A'], { cwd: seed })
   Bun.spawnSync(['git', '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '--quiet', '-m', 'seed'], { cwd: seed })
   Bun.spawnSync(['git', 'push', '--quiet', 'origin', 'main'], { cwd: seed })
+  return remote
+}
+
+beforeAll(async () => {
+  scratch = await mkdtemp(join(tmpdir(), 'guren-publish-test-'))
+  bare = await seedRemote('agent-skills.git')
 })
 
 afterAll(async () => {
@@ -174,6 +179,13 @@ describe('publish-agent-catalog', () => {
     Bun.spawnSync(['git', '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '--quiet', '-am', 'hand edit'], { cwd: drift })
     Bun.spawnSync(['git', 'push', '--quiet', 'origin', 'main'], { cwd: drift })
 
+    // byte-only drift, the same-version case the drift job exists for: every
+    // path is present and one file's contents differ
+    const byteDrift = await diffPublished(bare)
+    expect(byteDrift.code).toBe(1)
+    expect(byteDrift.report).toContain('differs: README.md')
+    expect(byteDrift.report).not.toContain('missing in published')
+
     const result = run(bare)
     expect(result.code).toBe(0)
     expect(result.out).toContain('already published but the tree differs; republishing')
@@ -211,8 +223,111 @@ describe('publish-agent-catalog', () => {
     expect(result.out).toContain('--dry-run: not committing or pushing.')
     expect(result.out).toMatch(/\d+ files? changed/u)
     expect(result.out).toContain('plugins/guren/plugin.json')
+    // the patch, not only the stat: a stat cannot show what the replacement
+    // text of a same-version wording change actually says
+    expect(result.out).toMatch(/^\+.*guren/mu)
     const check = join(scratch, 'check3')
     Bun.spawnSync(['git', 'clone', '--quiet', bare, check])
     expect(git(check, 'rev-list', '--count', 'main')).toBe('1')
+  })
+
+  it('a global gitignore cannot thin the published tree', async () => {
+    // core.excludesFile applies inside the clone too, so a plain `git add -A`
+    // stages whatever the maintainer's global ignores leave behind — a tree
+    // that passed the audit as ten files and reaches users as six
+    const remote = await seedRemote('excludes.git')
+    const excludes = join(scratch, 'global-excludes')
+    await Bun.write(excludes, '*.md\n')
+    const result = runWithEnv(remote, {
+      GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: 'core.excludesFile',
+      GIT_CONFIG_VALUE_0: excludes,
+    })
+
+    expect(result.code).toBe(0)
+    const check = join(scratch, 'check-excludes')
+    Bun.spawnSync(['git', 'clone', '--quiet', remote, check])
+    const files = git(check, 'ls-files').split('\n').sort()
+    expect(files).toContain('plugins/guren/skills/guren-new-app/SKILL.md')
+    expect(files).toContain('README.md')
+    expect(files.length).toBe(10)
+  })
+
+  it('refuses to publish a tree a clean filter rewrote on its way into the index', async () => {
+    // core.attributesFile is global too, and a clean filter rewrites bytes
+    // between the tree that passed the audit and the tree that gets pushed
+    const remote = await seedRemote('filtered.git')
+    const attributes = join(scratch, 'global-attributes')
+    await Bun.write(attributes, '*.md filter=upcase\n')
+    const result = runWithEnv(remote, {
+      GIT_CONFIG_COUNT: '2',
+      GIT_CONFIG_KEY_0: 'core.attributesFile',
+      GIT_CONFIG_VALUE_0: attributes,
+      GIT_CONFIG_KEY_1: 'filter.upcase.clean',
+      GIT_CONFIG_VALUE_1: 'tr a-z A-Z',
+    })
+
+    expect(result.code).toBe(1)
+    expect(result.out).toContain('the staged tree is not the tree that was audited')
+    expect(result.out).toContain('staged bytes differ from the rendered bytes')
+    const check = join(scratch, 'check-filtered')
+    Bun.spawnSync(['git', 'clone', '--quiet', remote, check])
+    expect(git(check, 'rev-list', '--count', 'main')).toBe('1')
+  })
+
+  it('refuses to push onto a remote that moved after this run cloned it', async () => {
+    // the confirmation prompt is the one moment a test can move the remote
+    // out from under a run that has already cloned it. A rollback is the
+    // dangerous shape: the new commit is still a fast-forward from the
+    // remote's rewound tip, so a plain push would restore exactly the history
+    // somebody had just removed.
+    const remote = await seedRemote('moved.git')
+    expect(run(remote).code).toBe(0)
+    const proc = Bun.spawn([process.execPath, script, '--skip-validate'], {
+      cwd: repoRoot,
+      env: { ...process.env, ...gitIdentity, GUREN_AGENT_SKILLS_REMOTE: remote, GUREN_CATALOG_VERSION_OVERRIDE: '99.0.0' },
+      stdin: 'pipe',
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    const reader = proc.stdout.getReader()
+    let seen = ''
+    while (!seen.includes('Push this to')) {
+      const { value, done } = await reader.read()
+      if (done) break
+      seen += new TextDecoder().decode(value)
+    }
+    reader.releaseLock()
+    expect(seen).toContain('Push this to')
+
+    // roll the remote back while the run waits for an answer
+    const rewind = join(scratch, 'moved-rewind')
+    Bun.spawnSync(['git', 'clone', '--quiet', remote, rewind])
+    const seedSha = git(rewind, 'rev-list', '--max-parents=0', 'main')
+    Bun.spawnSync(['git', 'reset', '--quiet', '--hard', seedSha], { cwd: rewind })
+    Bun.spawnSync(['git', 'push', '--quiet', '--force', 'origin', 'main'], { cwd: rewind })
+
+    proc.stdin.write('y\n')
+    proc.stdin.end()
+    const code = await proc.exited
+    const out = seen + (await new Response(proc.stderr).text())
+
+    expect(code).toBe(1)
+    expect(out).toContain('the remote moved since this run cloned it')
+    // the rollback stands: still one commit, not the restored history
+    const check = join(scratch, 'check-moved')
+    Bun.spawnSync(['git', 'clone', '--quiet', remote, check])
+    expect(git(check, 'rev-list', '--count', 'main')).toBe('1')
+  })
+
+  it('refuses the generator version override against the real remote', () => {
+    // the override is a test hook. Left in a maintainer's environment it
+    // would publish a version @guren/cli does not have, under the real name
+    const result = spawnPublish('', { GUREN_CATALOG_VERSION_OVERRIDE: '99.0.0' }, ['--yes', '--skip-validate'])
+
+    expect(result.code).toBe(1)
+    expect(result.out).toContain('GUREN_CATALOG_VERSION_OVERRIDE=99.0.0')
+    // refused before it could reach the network at all
+    expect(result.out).not.toContain('Could not clone')
   })
 })
