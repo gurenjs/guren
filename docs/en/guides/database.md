@@ -865,6 +865,26 @@ bunx guren make:migration --name add_posts_table
 bun run db:migrate
 ```
 
+The command reads `drizzle.config.ts` (or `.mts`/`.js`/`.mjs`) for the schema
+path, output directory, and dialect. You can override the paths:
+
+```bash
+bunx guren make:migration --schema ./custom/schema.ts --out ./custom/migrations
+```
+
+Overrides cannot be combined with drizzle-kit's `--config`, so Guren reads the
+config itself and restates its `dialect` (and `driver`) on the command line.
+Fields you did not override keep their configured values. If a config field
+cannot be restated as a flag, the command names it rather than letting the
+migration differ silently.
+
+An app with no drizzle config has nothing to declare the dialect, so state it
+directly:
+
+```bash
+bunx guren make:migration --dialect postgresql
+```
+
 > [!NOTE]
 > Once a migration has shipped to any environment, treat it as immutable. Create a follow-up migration to correct mistakes.
 
