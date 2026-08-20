@@ -256,6 +256,33 @@ kernel.registerMany([])`,
     }
   })
 
+  it('keeps a default-exported unknown expression in the check', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-console-default-expr-')
+
+    try {
+      // `new SendDigestCommand()` could surface a command; only provably
+      // inert shapes (literals, object/array expressions) are excluded
+      await mkdir(join(workspace.dir, 'app/Console/Commands'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'app/Console/Commands/SendDigestCommand.ts'),
+        `import { SendDigestCommand } from '../lib/impl.js'\nexport default new SendDigestCommand()`,
+        'utf8',
+      )
+      await mkdir(join(workspace.dir, 'src'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'src/console.ts'),
+        `import { ConsoleKernel } from '@guren/core'\n\nexport const kernel = new ConsoleKernel()\nkernel.registerMany([])`,
+        'utf8',
+      )
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      expect(report.checks.find(c => c.key === 'console-command:SendDigestCommand')!.status).toBe('warn')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('does not treat a computed member key as command surface', async () => {
     const workspace = await createTempWorkspace('guren-cli-check-console-computed-')
 

@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import type { Statement, Expression, ClassDeclaration, ClassBody, ClassProperty, CallExpression, Node, ObjectProperty } from '@babel/types'
+import { memberKeyName } from './ast-walk'
 import { extractDocsTags } from './docs-index'
 import { discoverModelFiles, toPosixRelative, moduleNameFromRelPath } from './discovery'
 import { parseSourceFile } from './parse-cache'
@@ -118,20 +119,6 @@ export function firstClassDeclaration(body: Statement[]): ClassDeclaration | nul
 function isAuthenticatableBase(node: Node): boolean {
   const target = node.type === 'TSInstantiationExpression' ? node.expression : node
   return target.type === 'Identifier' && target.name === 'AuthenticatableModel'
-}
-
-/**
- * The name a non-computed Identifier or string-literal key spells — the one
- * rule for reading a member's name off an object property or a class member.
- * Computed keys answer `undefined`: `[x]` names whatever `x` holds at
- * runtime, which a static scan cannot know, so treating `[signature]` as the
- * literal name `signature` would be a guess.
- */
-export function memberKeyName(member: { computed?: boolean | null; key: Node }): string | undefined {
-  if (member.computed) return undefined
-  if (member.key.type === 'Identifier') return member.key.name
-  if (member.key.type === 'StringLiteral') return member.key.value
-  return undefined
 }
 
 /** The name of an object property key, for both `{ base: X }` and `{ 'base': X }`. */

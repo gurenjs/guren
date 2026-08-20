@@ -1,5 +1,5 @@
 import { resolve } from 'node:path'
-import type { ClassDeclaration, ClassExpression, File, Node } from '@babel/types'
+import type { ClassDeclaration, ClassExpression, File } from '@babel/types'
 import {
   discoverCommandFiles,
   excludeBarrelFiles,
@@ -8,8 +8,7 @@ import {
   toPosixRelative,
   moduleNameFor,
 } from './discovery'
-import { walk } from './ast-walk'
-import { memberKeyName } from './model-parser'
+import { memberKeyName, walk } from './ast-walk'
 import { camelCase, escapeRegExp, referencesIdentifier } from './utils'
 import { ParseCache } from './parse-cache'
 import { check, type CheckResult } from './check-result'
@@ -87,9 +86,14 @@ function declaresCommand(ast: File): boolean {
     if ((node.type === 'ExportNamedDeclaration' || node.type === 'ExportAllDeclaration') && node.source) {
       return true
     }
+    // any default-exported expression counts unless its shape provably cannot
+    // surface a command — the same evidence-of-absence direction as the class
+    // branch below, so `export default new SendDigestCommand()` stays in while
+    // `export default TABLES` in an object-literal helper does not
     if (
       node.type === 'ExportDefaultDeclaration' &&
-      (node.declaration.type === 'Identifier' || node.declaration.type === 'CallExpression')
+      node.declaration.type !== 'ClassDeclaration' &&
+      !INERT_DEFAULT_EXPORTS.has(node.declaration.type)
     ) {
       return true
     }
@@ -104,13 +108,33 @@ function declaresCommand(ast: File): boolean {
       classNode.superClass != null ||
       classNode.body.body.some((member) => {
         if (!('key' in member)) return false
-        const name = memberKeyName(member as { computed?: boolean | null; key: Node })
+        const name = memberKeyName(member)
         return name === 'signature' || name === 'handle'
       })
-    if (declares) return false
   })
   return declares
 }
+
+/**
+ * Default-export shapes that cannot evaluate to a registrable command class:
+ * literals, object/array/template expressions, and plain functions. A
+ * `ClassDeclaration` is absent on purpose — the class walk judges those by
+ * their own evidence.
+ */
+const INERT_DEFAULT_EXPORTS = new Set([
+  'StringLiteral',
+  'NumericLiteral',
+  'BooleanLiteral',
+  'BigIntLiteral',
+  'NullLiteral',
+  'RegExpLiteral',
+  'TemplateLiteral',
+  'ObjectExpression',
+  'ArrayExpression',
+  'ArrowFunctionExpression',
+  'FunctionDeclaration',
+  'TSDeclareFunction',
+])
 
 /**
  * Local names `entry` imports from inside `modules/<moduleName>/`. The
@@ -199,9 +223,8 @@ export async function discoverDeclaredCommandFiles(cwd: string, cache: ParseCach
  * class, not that the kernel ends up with it. `warn`, never `fail`, since a
  * name reference is not proof of registration in the other direction either.
  *
- * Only files that {@link declaresCommand} — a helper module beside the
- * commands has no command to register, so demanding a registration for it
- * produces a warning that can never be satisfied.
+ * Only files that {@link declaresCommand}; that predicate's doc owns the
+ * reasoning for what is excluded and which way uncertainty falls.
  *
  * Not filtered by `--changed`, unlike `runCheck`'s file-scanning checks: what
  * decides the outcome is the *entrypoint's* content, so the edit that breaks

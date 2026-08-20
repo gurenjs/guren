@@ -1,7 +1,7 @@
 import { readFile, readdir } from 'node:fs/promises'
 import { extname, join, resolve } from 'node:path'
 import type { File } from '@babel/types'
-import { walk, type BabelNode } from './ast-walk'
+import { memberKeyName, walk, type BabelNode } from './ast-walk'
 import {
   collectFiles,
   toPosixRelative,
@@ -249,11 +249,9 @@ function lineOf(node: BabelNode): number {
 }
 
 function propertyKeyName(property: BabelNode): string | null {
-  if (property.computed) return null
   const key = property.key as BabelNode | undefined
-  if (key?.type === 'Identifier') return key.name as string
-  if (key?.type === 'StringLiteral') return key.value as string
-  return null
+  if (!key) return null
+  return memberKeyName({ computed: Boolean(property.computed), key }) ?? null
 }
 
 /** Extract every deploy-runtime signal from one parsed source file. */
