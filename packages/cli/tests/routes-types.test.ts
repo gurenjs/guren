@@ -212,7 +212,6 @@ describe('buildRouteModuleContent', () => {
   // scaffolded app's typecheck skip this file entirely. Compiling both shapes
   // is what keeps that suppression from coming back as a hidden type error.
   it('type-checks under strict tsc with and without named routes', async () => {
-    const ts = (await import('typescript')).default
     const dir = await mkdtemp(join(tmpdir(), 'guren-routes-types-'))
     try {
       const cases: Record<string, string> = {
@@ -237,13 +236,9 @@ describe('buildRouteModuleContent', () => {
       }
 
       const program = ts.createProgram(files, {
-        strict: true,
+        ...GENERATED_MODULE_COMPILER_OPTIONS,
         noUnusedLocals: true,
         noUnusedParameters: true,
-        target: ts.ScriptTarget.ES2022,
-        module: ts.ModuleKind.ESNext,
-        moduleResolution: ts.ModuleResolutionKind.Bundler,
-        noEmit: true,
       })
       const diagnostics = ts.getPreEmitDiagnostics(program)
 
