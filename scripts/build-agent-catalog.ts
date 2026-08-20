@@ -45,6 +45,19 @@ export const CLI_MANIFEST = 'packages/cli/package.json'
 const LICENSE = 'LICENSE'
 
 /**
+ * `core.hooksPath` pointed at nothing, on every git command that creates or
+ * clones a repository. The repository is fresh, but hooks are not: a
+ * maintainer's global `core.hooksPath` (or an `init.templateDir` that installs
+ * into the new clone) applies to it, and the hook runs before this code has
+ * looked at a single file. The rest of the maintainer's configuration is
+ * deliberately left alone — their credential helper and SSH setup are how any
+ * of this reaches a remote at all. Exported because publish-agent-catalog
+ * needs the same rule at more moments, and two copies of it is how one of
+ * them comes to be forgotten.
+ */
+export const NO_HOOKS = ['-c', 'core.hooksPath=']
+
+/**
  * The oldest `@guren/cli` whose `agent:init` accepts `--target`. The skills
  * tell users older CLIs need an upgrade for multi-agent installs. Asserted
  * `<=` the workspace version so it can never claim a future release.
@@ -609,7 +622,9 @@ async function check(base: string | undefined, requireValidate: boolean): Promis
 export async function diffPublished(remote: string): Promise<{ code: 0 | 1 | 2; report: string }> {
   const cloneDir = await mkdtemp(join(tmpdir(), 'guren-agent-catalog-published-'))
   try {
-    const clone = Bun.spawnSync(['git', 'clone', '--quiet', '--depth', '1', remote, cloneDir])
+    // NO_HOOKS: a post-checkout hook writing into the fresh clone would be
+    // read back below as what the public repository publishes
+    const clone = Bun.spawnSync(['git', ...NO_HOOKS, 'clone', '--quiet', '--depth', '1', remote, cloneDir])
     if (!clone.success) {
       return { code: 2, report: `could not clone ${remote}:\n${clone.stderr.toString().trim()}` }
     }

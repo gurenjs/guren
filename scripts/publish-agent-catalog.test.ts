@@ -50,7 +50,7 @@ function spawnPublish(remote: string, extraEnv: Record<string, string>, args: st
   // hand the script a PATH that is missing tools without losing its runtime
   const proc = Bun.spawnSync([process.execPath, script, ...args], {
     cwd: repoRoot,
-    env: { ...process.env, ...gitIdentity, GUREN_AGENT_SKILLS_REMOTE: remote, ...extraEnv },
+    env: { ...process.env, GIT_CONFIG_GLOBAL: childGitConfig, ...gitIdentity, GUREN_AGENT_SKILLS_REMOTE: remote, ...extraEnv },
   })
   return {
     code: proc.exitCode,
@@ -58,30 +58,64 @@ function spawnPublish(remote: string, extraEnv: Record<string, string>, args: st
   }
 }
 
+/**
+ * Every git call this file makes, hardened against the machine it runs on.
+ * A global `core.hooksPath` reaches repositories created here — including
+ * fresh clones, whose `post-checkout` runs before any assertion does — and
+ * publish-agent-catalog disables it the same way, its `NO_HOOKS` comment
+ * carrying the full hazard list. A global `commit.gpgsign` would make a
+ * commit *prompt*, and a hang under bun:test is charged to the following
+ * test, so it would not even look like the call that caused it. A CI runner
+ * has no committer identity to inherit. The same four flags guard
+ * build-agent-catalog.test.ts, which has no module to share them through.
+ */
+const HERMETIC = [
+  '-c', 'core.hooksPath=',
+  '-c', 'commit.gpgsign=false',
+  '-c', 'user.name=Guren publish test',
+  '-c', 'user.email=publish-test@guren.dev',
+]
+
 function git(cwd: string, ...args: string[]): string {
-  const proc = Bun.spawnSync(['git', ...args], { cwd })
+  const proc = Bun.spawnSync(['git', ...HERMETIC, ...args], { cwd })
   return proc.stdout.toString().trim()
 }
 
 let bare: string
 let scratch: string
+/**
+ * The global git configuration the *child* runs see, in place of the
+ * maintainer's. `HERMETIC` cannot reach them: the script makes its own
+ * commits, and a global `commit.gpgsign` makes those prompt — a hang, charged
+ * by bun:test to the following test. The script itself is right not to force
+ * signing off (a maintainer may want the publish commit signed), so the
+ * neutral configuration is the test's to supply.
+ *
+ * A file rather than `/dev/null` on purpose: it is where a test that wants to
+ * hand the script a hostile *global* configuration would write one. The three
+ * that do so today (`core.hooksPath`, `core.excludesFile`, `core.attributesFile`)
+ * inject through `GIT_CONFIG_*` in the env, a layer this does not touch.
+ */
+let childGitConfig: string
 
 /** A bare repo with one placeholder commit on main, like the real one had. */
 async function seedRemote(name: string): Promise<string> {
   const remote = join(scratch, name)
-  Bun.spawnSync(['git', 'init', '--quiet', '--bare', '--initial-branch=main', remote])
+  git(scratch, 'init', '--quiet', '--bare', '--initial-branch=main', remote)
   const seed = join(scratch, `${name}-seed`)
-  Bun.spawnSync(['git', 'clone', '--quiet', remote, seed])
+  git(scratch, 'clone', '--quiet', remote, seed)
   await Bun.write(join(seed, 'README.md'), 'placeholder\n')
   await Bun.write(join(seed, 'STALE.md'), 'a file the publish must remove\n')
-  Bun.spawnSync(['git', '-c', 'user.name=t', '-c', 'user.email=t@t', 'add', '-A'], { cwd: seed })
-  Bun.spawnSync(['git', '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '--quiet', '-m', 'seed'], { cwd: seed })
-  Bun.spawnSync(['git', 'push', '--quiet', 'origin', 'main'], { cwd: seed })
+  git(seed, 'add', '-A')
+  git(seed, 'commit', '--quiet', '-m', 'seed')
+  git(seed, 'push', '--quiet', 'origin', 'main')
   return remote
 }
 
 beforeAll(async () => {
   scratch = await mkdtemp(join(tmpdir(), 'guren-publish-test-'))
+  childGitConfig = join(scratch, 'child-gitconfig')
+  await Bun.write(childGitConfig, '[commit]\n\tgpgsign = false\n')
   bare = await seedRemote('agent-skills.git')
 })
 
@@ -131,7 +165,7 @@ describe('publish-agent-catalog', () => {
     expect(result.out).toContain('--skip-validate')
     // it refused before cloning: the remote is still just the seed commit
     const check = join(scratch, 'check-refused')
-    Bun.spawnSync(['git', 'clone', '--quiet', bare, check])
+    git(scratch, 'clone', '--quiet', bare, check)
     expect(git(check, 'rev-list', '--count', 'main')).toBe('1')
   })
 
@@ -142,7 +176,7 @@ describe('publish-agent-catalog', () => {
     expect(result.out).toContain('Published:')
 
     const check = join(scratch, 'check1')
-    Bun.spawnSync(['git', 'clone', '--quiet', bare, check])
+    git(scratch, 'clone', '--quiet', bare, check)
     const files = git(check, 'ls-files').split('\n').sort()
     expect(files).toContain('plugins/guren/plugin.json')
     expect(files).toContain('plugins/guren/skills/guren-new-app/SKILL.md')
@@ -160,8 +194,8 @@ describe('publish-agent-catalog', () => {
     expect(fresh.code).toBe(0)
     // and against a remote that only has the seed, every file is missing
     const stale = join(scratch, 'stale.git')
-    Bun.spawnSync(['git', 'clone', '--quiet', '--bare', bare, stale])
-    Bun.spawnSync(['git', 'update-ref', 'refs/heads/main', 'main~1'], { cwd: stale })
+    git(scratch, 'clone', '--quiet', '--bare', bare, stale)
+    git(stale, 'update-ref', 'refs/heads/main', 'main~1')
     const drift = await diffPublished(stale)
     expect(drift.code).toBe(1)
     expect(drift.report).toContain('missing in published: plugins/guren/plugin.json')
@@ -181,7 +215,7 @@ describe('publish-agent-catalog', () => {
     expect(result.out).toContain('Published:')
 
     const check = join(scratch, 'check-v2')
-    Bun.spawnSync(['git', 'clone', '--quiet', bare, check])
+    git(scratch, 'clone', '--quiet', bare, check)
     const files = git(check, 'ls-files').split('\n').sort()
     expect(files.filter((f) => f.startsWith('plugins/plugins/'))).toEqual([])
     expect(files.filter((f) => f.startsWith('.claude-plugin/.claude-plugin/'))).toEqual([])
@@ -200,10 +234,10 @@ describe('publish-agent-catalog', () => {
   it('same version, different content republishes (a LICENSE or wording change), with a warning', async () => {
     // simulate a drifted publish: overwrite one published file, keep the version
     const drift = join(scratch, 'drift')
-    Bun.spawnSync(['git', 'clone', '--quiet', bare, drift])
+    git(scratch, 'clone', '--quiet', bare, drift)
     await Bun.write(join(drift, 'README.md'), 'someone hand-edited this\n')
-    Bun.spawnSync(['git', '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '--quiet', '-am', 'hand edit'], { cwd: drift })
-    Bun.spawnSync(['git', 'push', '--quiet', 'origin', 'main'], { cwd: drift })
+    git(drift, 'commit', '--quiet', '-am', 'hand edit')
+    git(drift, 'push', '--quiet', 'origin', 'main')
 
     // byte-only drift, the same-version case the drift job exists for: every
     // path is present and one file's contents differ
@@ -217,7 +251,7 @@ describe('publish-agent-catalog', () => {
     expect(result.out).toContain('already published but the tree differs; republishing')
     expect(result.out).toContain('Published:')
     const check = join(scratch, 'check-drift')
-    Bun.spawnSync(['git', 'clone', '--quiet', bare, check])
+    git(scratch, 'clone', '--quiet', bare, check)
     expect(await Bun.file(join(check, 'README.md')).text()).not.toContain('hand-edited')
   })
 
@@ -227,11 +261,11 @@ describe('publish-agent-catalog', () => {
     expect(result.out).toContain('byte-identical to what is published; nothing to do')
     expect(result.out).not.toContain('Published:')
     const check = join(scratch, 'check2')
-    Bun.spawnSync(['git', 'clone', '--quiet', bare, check])
+    git(scratch, 'clone', '--quiet', bare, check)
     const before = git(check, 'rev-list', '--count', 'main')
     run(bare)
     const check2 = join(scratch, 'check2b')
-    Bun.spawnSync(['git', 'clone', '--quiet', bare, check2])
+    git(scratch, 'clone', '--quiet', bare, check2)
     expect(git(check2, 'rev-list', '--count', 'main')).toBe(before)
   })
 
@@ -239,10 +273,10 @@ describe('publish-agent-catalog', () => {
     // rewind the remote all the way to the seed commit so there is a full
     // publish's worth of diff to show
     const rewind = join(scratch, 'rewind')
-    Bun.spawnSync(['git', 'clone', '--quiet', bare, rewind])
+    git(scratch, 'clone', '--quiet', bare, rewind)
     const seedSha = git(rewind, 'rev-list', '--max-parents=0', 'main')
-    Bun.spawnSync(['git', 'reset', '--quiet', '--hard', seedSha], { cwd: rewind })
-    Bun.spawnSync(['git', 'push', '--quiet', '--force', 'origin', 'main'], { cwd: rewind })
+    git(rewind, 'reset', '--quiet', '--hard', seedSha)
+    git(rewind, 'push', '--quiet', '--force', 'origin', 'main')
 
     const result = run(bare, {}, '--dry-run')
     expect(result.code).toBe(0)
@@ -253,7 +287,7 @@ describe('publish-agent-catalog', () => {
     // text of a same-version wording change actually says
     expect(result.out).toMatch(/^\+.*guren/mu)
     const check = join(scratch, 'check3')
-    Bun.spawnSync(['git', 'clone', '--quiet', bare, check])
+    git(scratch, 'clone', '--quiet', bare, check)
     expect(git(check, 'rev-list', '--count', 'main')).toBe('1')
   })
 
@@ -272,7 +306,7 @@ describe('publish-agent-catalog', () => {
 
     expect(result.code).toBe(0)
     const check = join(scratch, 'check-excludes')
-    Bun.spawnSync(['git', 'clone', '--quiet', remote, check])
+    git(scratch, 'clone', '--quiet', remote, check)
     const files = git(check, 'ls-files').split('\n').sort()
     expect(files).toContain('plugins/guren/skills/guren-new-app/SKILL.md')
     expect(files).toContain('README.md')
@@ -297,7 +331,7 @@ describe('publish-agent-catalog', () => {
     expect(result.out).toContain('the staged tree is not the tree that was audited')
     expect(result.out).toContain('staged bytes differ from the rendered bytes')
     const check = join(scratch, 'check-filtered')
-    Bun.spawnSync(['git', 'clone', '--quiet', remote, check])
+    git(scratch, 'clone', '--quiet', remote, check)
     expect(git(check, 'rev-list', '--count', 'main')).toBe('1')
   })
 
@@ -311,7 +345,7 @@ describe('publish-agent-catalog', () => {
     expect(run(remote).code).toBe(0)
     const proc = Bun.spawn([process.execPath, script, '--skip-validate'], {
       cwd: repoRoot,
-      env: { ...process.env, ...gitIdentity, GUREN_AGENT_SKILLS_REMOTE: remote, GUREN_CATALOG_VERSION_OVERRIDE: '99.0.0' },
+      env: { ...process.env, GIT_CONFIG_GLOBAL: childGitConfig, ...gitIdentity, GUREN_AGENT_SKILLS_REMOTE: remote, GUREN_CATALOG_VERSION_OVERRIDE: '99.0.0' },
       stdin: 'pipe',
       stdout: 'pipe',
       stderr: 'pipe',
@@ -328,10 +362,10 @@ describe('publish-agent-catalog', () => {
 
     // roll the remote back while the run waits for an answer
     const rewind = join(scratch, 'moved-rewind')
-    Bun.spawnSync(['git', 'clone', '--quiet', remote, rewind])
+    git(scratch, 'clone', '--quiet', remote, rewind)
     const seedSha = git(rewind, 'rev-list', '--max-parents=0', 'main')
-    Bun.spawnSync(['git', 'reset', '--quiet', '--hard', seedSha], { cwd: rewind })
-    Bun.spawnSync(['git', 'push', '--quiet', '--force', 'origin', 'main'], { cwd: rewind })
+    git(rewind, 'reset', '--quiet', '--hard', seedSha)
+    git(rewind, 'push', '--quiet', '--force', 'origin', 'main')
 
     proc.stdin.write('y\n')
     proc.stdin.end()
@@ -342,7 +376,7 @@ describe('publish-agent-catalog', () => {
     expect(out).toContain('the remote moved since this run cloned it')
     // the rollback stands: still one commit, not the restored history
     const check = join(scratch, 'check-moved')
-    Bun.spawnSync(['git', 'clone', '--quiet', remote, check])
+    git(scratch, 'clone', '--quiet', remote, check)
     expect(git(check, 'rev-list', '--count', 'main')).toBe('1')
   })
 

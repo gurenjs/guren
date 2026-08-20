@@ -39,7 +39,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import process from 'node:process'
-import { auditRenderedFiles, claudePluginValidate, writeCatalog, type RenderedFile } from './build-agent-catalog'
+import { auditRenderedFiles, claudePluginValidate, NO_HOOKS, writeCatalog, type RenderedFile } from './build-agent-catalog'
 import { repoRoot } from './workspace-packages'
 
 const PUBLISH_REPO = 'gurenjs/agent-skills'
@@ -57,18 +57,6 @@ function remotes(): string[] {
 }
 
 /**
- * `core.hooksPath` pointed at nothing, on every git command this script runs.
- * The clone is fresh, but hooks are not: a maintainer's global `core.hooksPath`
- * (or an `init.templateDir` that installs into the new clone) applies to it,
- * and those hooks run at exactly the moments this script's guarantee depends
- * on — `post-checkout` after the clone, `pre-commit` between the staged-tree
- * check and the tree that gets committed, `post-commit` before the push. The
- * rest of the maintainer's configuration is deliberately left alone: their
- * credential helper and SSH setup are how this pushes at all.
- */
-const NO_HOOKS = ['-c', 'core.hooksPath=']
-
-/**
  * Does this remote name the public repository? A local path is never it, however
  * it is spelled — a bare repo at `/tmp/gurenjs/agent-skills.git` is a test
  * remote, not GitHub — and the owner/repo pair is compared case-insensitively
@@ -84,6 +72,14 @@ export function isPublishRepo(remote: string): boolean {
   return host?.toLowerCase() === 'github.com' && path.toLowerCase() === PUBLISH_REPO.toLowerCase()
 }
 
+/**
+ * `NO_HOOKS` on every git command this script runs, not only the clone: the
+ * moments this script's guarantee depends on are all hook moments —
+ * `post-checkout` after the clone, `pre-commit` between the staged-tree check
+ * and the tree that gets committed, `post-commit` before the push. The rule
+ * itself, and why the rest of the maintainer's configuration is left alone,
+ * lives with the constant in build-agent-catalog.
+ */
 function git(cwd: string, args: string[]): { ok: boolean; out: string; stdout: string } {
   const run = Bun.spawnSync(['git', ...NO_HOOKS, ...args], { cwd })
   return {
