@@ -8,10 +8,16 @@ const { renderMarkdownToHtml, rewriteDocLink } = await import(
 )
 
 describe('renderMarkdownToHtml', () => {
-  it('renders alert blocks', async () => {
+  it('renders alert blocks as diagnostic rows', async () => {
     const html = await renderMarkdownToHtml('> [!NOTE]\n> Hello there')
     expect(html).toContain('docs-alert--note')
-    expect(html).toContain('Note')
+    expect(html).toContain('<p class="docs-alert__label">note</p>')
+  })
+
+  it('maps warning directives onto the rule key', async () => {
+    const html = await renderMarkdownToHtml('> [!WARNING]\n> Careful')
+    expect(html).toContain('docs-alert--warning')
+    expect(html).toContain('<p class="docs-alert__label">rule</p>')
   })
 
   it('renders code blocks with shiki', async () => {

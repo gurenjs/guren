@@ -52,7 +52,7 @@ export default function AdminPostForm({ post }: Props) {
               onChange={(event) => form.setData('title', event.target.value)}
               className={fieldClass}
             />
-            {form.errors.title && <span className="text-sm text-red-600">{form.errors.title}</span>}
+            {form.errors.title && <span className="text-sm text-(--g-danger)">{form.errors.title}</span>}
           </label>
 
           <label className="flex flex-col gap-2">
@@ -64,7 +64,7 @@ export default function AdminPostForm({ post }: Props) {
               className={fieldClass}
             />
             {form.errors.description && (
-              <span className="text-sm text-red-600">{form.errors.description}</span>
+              <span className="text-sm text-(--g-danger)">{form.errors.description}</span>
             )}
           </label>
 
@@ -77,7 +77,7 @@ export default function AdminPostForm({ post }: Props) {
               className={`${fieldClass} font-mono text-sm`}
             />
             {form.errors.bodyMarkdown && (
-              <span className="text-sm text-red-600">{form.errors.bodyMarkdown}</span>
+              <span className="text-sm text-(--g-danger)">{form.errors.bodyMarkdown}</span>
             )}
           </label>
 
@@ -85,7 +85,7 @@ export default function AdminPostForm({ post }: Props) {
             <button
               type="submit"
               disabled={form.processing}
-              className="rounded-full bg-docs-accent px-6 py-2.5 font-semibold text-white disabled:opacity-60"
+              className="docs-btn-primary px-6 py-2.5 disabled:opacity-60"
             >
               {post ? 'Save changes' : 'Create post'}
             </button>

@@ -42,14 +42,14 @@ export default function AdminPosts({ posts }: Props) {
           <div className="flex items-center gap-3">
             <Link
               href="/admin/posts/new"
-              className="rounded-full bg-docs-accent px-5 py-2 font-semibold text-white no-underline"
+              className="docs-btn-primary px-5 py-2 no-underline"
             >
               New post
             </Link>
             <button
               type="button"
               onClick={() => router.post('/logout')}
-              className="rounded-full border border-docs-border px-5 py-2 font-semibold text-docs-text-secondary"
+              className="rounded-lg border border-docs-border px-5 py-2 font-semibold text-docs-text-secondary"
             >
               Log out
             </button>
@@ -62,7 +62,7 @@ export default function AdminPosts({ posts }: Props) {
           <div style={{ overflowX: 'auto' }}>
             <table className="w-full border-collapse text-left">
               <thead>
-                <tr className="border-b border-docs-border text-xs font-bold uppercase tracking-widest text-docs-text-muted">
+                <tr className="docs-kicker border-b border-docs-border text-xs text-docs-text-secondary">
                   <th className="px-3 py-2">Title</th>
                   <th className="px-3 py-2">Status</th>
                   <th className="px-3 py-2">Updated</th>
@@ -89,7 +89,7 @@ export default function AdminPosts({ posts }: Props) {
                         <span className="text-sm text-docs-text-muted">Draft</span>
                       )}
                     </td>
-                    <td className="px-3 py-3 text-sm text-docs-text-muted">{formatDate(post.updatedAt)}</td>
+                    <td className="docs-mono px-3 py-3 text-sm text-docs-text-secondary">{formatDate(post.updatedAt)}</td>
                     <td className="px-3 py-3">
                       <div className="flex items-center gap-3 text-sm">
                         <Link href={`/admin/posts/${post.id}/edit`} className="font-semibold text-docs-accent no-underline">
@@ -98,7 +98,7 @@ export default function AdminPosts({ posts }: Props) {
                         <button type="button" onClick={() => togglePublish(post)} className="font-semibold text-docs-text-secondary">
                           {post.publishedAt ? 'Unpublish' : 'Publish'}
                         </button>
-                        <button type="button" onClick={() => destroy(post)} className="font-semibold text-red-600">
+                        <button type="button" onClick={() => destroy(post)} className="docs-btn-danger px-2.5 py-1 text-sm">
                           Delete
                         </button>
                       </div>
