@@ -53,6 +53,7 @@
     "audit:template-deps": "bun run ./scripts/sync-template-deps.ts --check",
     "build:agent-catalog": "bun run ./scripts/build-agent-catalog.ts --out",
     "audit:agent-catalog": "bun run ./scripts/build-agent-catalog.ts --check",
+    "publish:agent-catalog": "bun run ./scripts/publish-agent-catalog.ts",
     "version-packages": "bun run audit:core-semver && bun run ./scripts/plan-create-app-bump.ts && changeset version && bun run ./scripts/sync-template-deps.ts --release && bun run audit:plugin-compat && bun install",
     "release": "bun run build && changeset publish",
     "test:bun": "bun run ./scripts/test-packages.ts",

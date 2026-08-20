@@ -266,6 +266,21 @@ What each selection writes:
 - **Claude Code**: a `CLAUDE.md` project guide, verified API rules, skills, and subagents under `.claude/`, an `.mcp.json` pointing at the dev server's MCP endpoint (the scaffolded `dev` script enables it via `GUREN_MCP=1`), and hooks that close the feedback loop — the `guren context` project map loads at session start, and `guren check` re-runs automatically after edits to routes, controllers, models, schema, or pages, reporting failures straight back to the coding agent.
 - **Codex, Cursor, GitHub Copilot, OpenCode**: an `AGENTS.md` project guide plus the same rules and skills under `.agents/rules/` and `.agents/skills/` (skills follow the cross-agent SKILL.md standard). Cursor additionally gets the rules in its native format (`.cursor/rules/guren-*.mdc`), Copilot as path-scoped instructions (`.github/instructions/guren-*.instructions.md`), and Codex a command-approval allowlist for the harness's own commands (`.codex/rules/guren.rules`). MCP client configs land where each tool looks: `.codex/config.toml`, `.cursor/mcp.json`, `.vscode/mcp.json`, or the `mcp` entry in `opencode.json`. These agents do not run the harness's hooks, so `AGENTS.md` instructs them to run `guren context` at session start and `guren check` after edits.
 
+### Before you have an app: install the Guren skills from a catalog
+
+The harness above lives inside an app's `@guren/cli`, so it only exists once an app does. For the step before that — an agent that has never seen Guren, in a directory with nothing in it — Guren publishes two on-ramp skills to the agent catalogs from [`gurenjs/agent-skills`](https://github.com/gurenjs/agent-skills):
+
+```bash
+# Claude Code
+claude plugin marketplace add gurenjs/agent-skills
+claude plugin install guren@gurenjs --scope user
+
+# Cursor, Codex, Copilot, OpenCode, Gemini CLI and others (Agent Skills CLI)
+npx skills add gurenjs/agent-skills
+```
+
+Install it at user scope: these skills are for the step *before* a project exists, and they are the same two skills whatever you are building — project scope would write them into whichever repository you happened to be standing in, and share an on-ramp with collaborators of an app that already has the harness. The plugin also conforms to [Agent Plugins v1](https://agent-plugins.org), so any client that reads a root `plugin.json` can install it from that repository directly. It ships `guren-new-app` (explains Guren, scaffolds an app with `bunx create-guren-app`, hands off) and `guren-harness` (runs `bunx guren agent:init --target <agents>` and explains the `guren context` → edit → `guren check` → `guren audit` loop). It deliberately does **not** copy the harness's rules or skills: those are installed by the app's own CLI and stay version-matched to it. The repository is generated from `packages/cli/templates/agent-catalog/` on each release; send changes there, not to `gurenjs/agent-skills`.
+
 | Command | Description | Example |
 |---------|-------------|---------|
 | `agent:init` | Install the agent harness for the selected agents into an existing app (skips files that already exist; `--force` overwrites) | `bunx guren agent:init --target codex,cursor` |
