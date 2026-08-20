@@ -175,6 +175,24 @@ checker being usable on NodeNext/bundler-resolution TypeScript (which
 writes `.js` specifiers for `.ts` files) and reporting a false warning
 on nearly every relative import in such a project.
 
+**Amended after release (issue #481):** the type-only exemption became
+a per-rule default rather than an absolute. A boundary crossed only by
+types had a detection rate of zero with nothing signalling the
+skip, and a type dependency is often one refactor away from a runtime
+one. `includeTypeImports: true` — on a rule, or on the rule set as a
+default — opts that boundary into type-level enforcement, covering
+whole-declaration type imports/exports and `import('...').X` in type
+positions (the latter requires a full-AST walk, paid only by files
+where some applicable rule opted in). The default behavior is
+unchanged, and dynamic `import()` *expressions* remain out of scope as
+frozen above. The opt-in covers only the explicit `guren.arch.ts`
+rules: the derived module boundary rules of Part 2 are deliberately
+option-free (no user-authorable vocabulary), so they stay runtime-only
+even under a set-wide `includeTypeImports` — documented at the option
+rather than left as a silent gap. For a type-only import, the resolver
+additionally accepts `.d.ts` / `index.d.ts` targets, which only a type
+import can legally name.
+
 #### CLI surface
 
 ```bash

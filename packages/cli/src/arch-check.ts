@@ -11,6 +11,7 @@ import {
   IMPORTABLE_EXTENSIONS,
 } from './discovery'
 import { matchesAnyGlob } from './glob-match'
+import { literalString, walk } from './ast-walk'
 import { loadArchConfig } from './arch-config'
 import type { ArchLayers, ArchRule, ArchRuleSet } from './arch/index'
 import type { ParseCache } from './parse-cache'
@@ -78,6 +79,10 @@ export async function runArchCheck(options: RunArchCheckOptions): Promise<CheckR
  * `export * from '../modules/<name>/db/schema'`, which the RFC's literal
  * "except index.ts" wording would otherwise flag as a violation of its own
  * generator's output.
+ *
+ * Always runtime imports only: these rules take no options, so a set-wide
+ * `includeTypeImports` in `guren.arch.ts` deliberately does not reach them
+ * — documented on `ArchRuleSet.includeTypeImports`.
  */
 async function evaluateDerivedModuleRules(
   cwd: string,
@@ -104,7 +109,7 @@ async function evaluateDerivedModuleRules(
 
     filesChecked += 1
     const resolvedImports = await Promise.all(
-      specifiers.map((specifier) => resolveImportSpecifier(cwd, absPath, specifier)),
+      specifiers.map((entry) => resolveImportSpecifier(cwd, absPath, entry.specifier)),
     )
     const importerModule = moduleNameFromRelPath(relPath)
 
@@ -157,6 +162,12 @@ async function evaluateArchRules(
   const rules = config.rules
   const results: CheckResult[] = []
 
+  // The effective flag is a property of the rule set, constant for the run —
+  // resolved once here so no later call site re-derives the
+  // `rule ?? set ?? false` cascade and drifts.
+  const ruleIncludesTypes = (rule: ArchRule): boolean =>
+    rule.includeTypeImports ?? config.includeTypeImports ?? false
+
   const files = await importableFiles()
   let filesChecked = 0
 
@@ -170,25 +181,29 @@ async function evaluateArchRules(
     const parsed = await cache.get(absPath)
     if (!parsed) continue
 
-    const specifiers = extractImportSpecifiers(parsed.ast.program.body)
+    // Type-only specifiers are only extracted (and the type-position walk
+    // only paid for) when some applicable rule will actually judge them.
+    const wantsTypes = applicableRules.some(ruleIncludesTypes)
+
+    const specifiers = extractImportSpecifiers(parsed.ast.program.body, wantsTypes)
     if (specifiers.length === 0) continue
 
     filesChecked += 1
-    const resolvedImports = await Promise.all(
-      specifiers.map((specifier) => resolveImportSpecifier(cwd, absPath, specifier)),
+    const resolvedImports = dedupeResolvedImports(
+      await Promise.all(
+        specifiers.map((entry) => resolveImportSpecifier(cwd, absPath, entry.specifier, entry.typeOnly)),
+      ),
     )
     const fromLabel = classifyLayer(relPath, layers) ?? relPath
 
-    const reportedUnresolved = new Set<string>()
     for (const imp of resolvedImports) {
-      if (imp.kind !== 'unresolved' || reportedUnresolved.has(imp.specifier)) continue
-      reportedUnresolved.add(imp.specifier)
+      if (imp.kind !== 'unresolved') continue
       results.push(
         check(
           `arch:unresolved:${relPath}:${imp.specifier}`,
           'Architecture boundary',
           'warn',
-          `${relPath} imports '${imp.specifier}', which could not be resolved to a project file.`,
+          `${relPath} ${importVerb(imp)} '${imp.specifier}', which could not be resolved to a project file.`,
           undefined,
           relPath,
         ),
@@ -199,8 +214,11 @@ async function evaluateArchRules(
       const disallowedTargets = normalizeToArray(rule.disallow)
       const disallowedPackages = new Set(normalizeToArray(rule.disallowPackages))
       const severity: CheckStatus = rule.severity ?? 'fail'
+      const includeTypes = ruleIncludesTypes(rule)
 
       for (const imp of resolvedImports) {
+        if (imp.typeOnly && !includeTypes) continue
+
         if (imp.kind === 'package') {
           if (disallowedPackages.has(imp.packageName)) {
             results.push(
@@ -208,7 +226,7 @@ async function evaluateArchRules(
                 `arch:${relPath}:${imp.specifier}:pkg`,
                 'Architecture boundary',
                 severity,
-                `${relPath} (${fromLabel}) imports disallowed package '${imp.packageName}'.`,
+                `${relPath} (${fromLabel}) ${importVerb(imp)} disallowed package '${imp.packageName}'.`,
                 rule.message ?? `Avoid importing '${imp.packageName}' directly from '${fromLabel}'.`,
                 relPath,
               ),
@@ -227,7 +245,7 @@ async function evaluateArchRules(
                 `arch:${relPath}:${imp.specifier}:${violatedTarget}`,
                 'Architecture boundary',
                 severity,
-                `${relPath} (${fromLabel}) imports '${imp.specifier}', which is in the disallowed layer '${violatedTarget}'.`,
+                `${relPath} (${fromLabel}) ${importVerb(imp)} '${imp.specifier}', which is in the disallowed layer '${violatedTarget}'.`,
                 rule.message ?? `Files in '${fromLabel}' must not import from '${violatedTarget}'.`,
                 relPath,
               ),
@@ -277,10 +295,45 @@ function normalizeToArray(value: string | string[] | undefined): string[] {
   return Array.isArray(value) ? value : [value]
 }
 
-type ResolvedImport =
-  | { specifier: string; kind: 'package'; packageName: string }
-  | { specifier: string; kind: 'file'; fileRelPath: string }
-  | { specifier: string; kind: 'unresolved' }
+type ResolvedImport = { specifier: string; typeOnly: boolean } & (
+  | { kind: 'package'; packageName: string }
+  | { kind: 'file'; fileRelPath: string }
+  | { kind: 'unresolved' }
+)
+
+/**
+ * One entry per resolved target, runtime beating type-only: a file that
+ * imports a module for real and also names it in a type position has one
+ * boundary crossing, and it is a runtime one. Keyed on the *resolved*
+ * identity, not the specifier — `'./Post.js'` and `'./Post'` are two
+ * spellings of one file, and keying on the string would let a type-only
+ * duplicate survive next to its runtime twin.
+ */
+/**
+ * The verb for a finding's message. Naming the kind keeps an
+ * includeTypeImports finding explainable — the file shows no runtime import
+ * to point at — and one rule keeps the label identical across the unresolved
+ * warning and the violation messages.
+ */
+function importVerb(imp: { typeOnly: boolean }): string {
+  return imp.typeOnly ? 'imports (type-only)' : 'imports'
+}
+
+function dedupeResolvedImports(imports: ResolvedImport[]): ResolvedImport[] {
+  if (imports.length < 2) return imports
+  const byTarget = new Map<string, ResolvedImport>()
+  for (const imp of imports) {
+    const key =
+      imp.kind === 'file' ? `file:${imp.fileRelPath}`
+      : imp.kind === 'package' ? `pkg:${imp.packageName}`
+      : `unresolved:${imp.specifier}`
+    const existing = byTarget.get(key)
+    if (!existing || (existing.typeOnly && !imp.typeOnly)) {
+      byTarget.set(key, imp)
+    }
+  }
+  return [...byTarget.values()]
+}
 
 function isBareSpecifier(specifier: string): boolean {
   return !specifier.startsWith('.') && !specifier.startsWith('@/')
@@ -296,9 +349,10 @@ async function resolveImportSpecifier(
   cwd: string,
   importerAbsPath: string,
   specifier: string,
+  typeOnly = false,
 ): Promise<ResolvedImport> {
   if (isBareSpecifier(specifier)) {
-    return { specifier, kind: 'package', packageName: packageNameFromSpecifier(specifier) }
+    return { specifier, typeOnly, kind: 'package', packageName: packageNameFromSpecifier(specifier) }
   }
 
   const rawTarget = specifier.startsWith('@/')
@@ -323,14 +377,19 @@ async function resolveImportSpecifier(
     join(base, 'index.tsx'),
     join(base, 'index.js'),
   ]
+  if (typeOnly) {
+    // A declaration file can satisfy only a type-only import — for a runtime
+    // import a lone `.d.ts` on disk really is unresolved.
+    candidates.push(`${base}.d.ts`, join(base, 'index.d.ts'))
+  }
 
   for (const candidate of candidates) {
     if (await pathExists(candidate)) {
-      return { specifier, kind: 'file', fileRelPath: toPosixRelative(cwd, candidate) }
+      return { specifier, typeOnly, kind: 'file', fileRelPath: toPosixRelative(cwd, candidate) }
     }
   }
 
-  return { specifier, kind: 'unresolved' }
+  return { specifier, typeOnly, kind: 'unresolved' }
 }
 
 const KNOWN_EXTENSIONS = ['.ts', '.tsx', '.mts', '.js', '.jsx', '.mjs']
@@ -351,35 +410,63 @@ async function pathExists(absPath: string): Promise<boolean> {
   }
 }
 
+interface ExtractedSpecifier {
+  specifier: string
+  /**
+   * The import compiles away entirely: a whole-declaration `import type` /
+   * `export type ... from`, or an `import('...')` in a type position. Rules
+   * skip these unless `includeTypeImports` says otherwise.
+   */
+  typeOnly: boolean
+}
+
 /**
- * Top-level `import ... from '...'` and `export ... from '...'` specifiers
- * only. Dynamic `import()` is intentionally not followed (scope frozen by
- * RFC 0002 — "static import / export ... from specifiers").
+ * Top-level `import ... from '...'` and `export ... from '...'` specifiers.
+ * Dynamic `import()` *expressions* are intentionally not followed (scope
+ * frozen by RFC 0002 — "static import / export ... from specifiers").
  *
  * Whole-declaration type-only imports/exports (`import type { X } from
- * '...'`, `export type { X } from '...'`) are skipped — they compile away
- * entirely, so they create no runtime coupling across a boundary. Sharing a
- * type (a DTO, a props interface) across layers is a common, benign
- * pattern; flagging it would be exactly the kind of plausible-but-wrong
- * violation the severity policy above exists to avoid. A *mixed*
- * declaration (`import { type X, Y } from '...'`) still counts — some
- * binding in it (`Y`) is a real runtime import, so the boundary crossing
- * is real regardless of `X`.
+ * '...'`, `export type { X } from '...'`) are marked `typeOnly` — they
+ * compile away entirely, so they create no runtime coupling across a
+ * boundary. Sharing a type (a DTO, a props interface) across layers is a
+ * common, benign pattern; flagging it by default would be exactly the kind
+ * of plausible-but-wrong violation the severity policy above exists to
+ * avoid. A *mixed* declaration (`import { type X, Y } from '...'`) counts
+ * as runtime — some binding in it (`Y`) is a real runtime import, so the
+ * boundary crossing is real regardless of `X`.
+ *
+ * With `includeTypeOnly`, type-only specifiers are returned too, and the
+ * whole AST is additionally walked for `import('...')` in type positions
+ * (`TSImportType`) — the one specifier form that lives outside the
+ * top-level statements. Only files where some applicable rule opted into
+ * type imports pay for that walk.
  */
-function extractImportSpecifiers(body: Statement[]): string[] {
-  const specifiers: string[] = []
+function extractImportSpecifiers(body: Statement[], includeTypeOnly = false): ExtractedSpecifier[] {
+  const specifiers: ExtractedSpecifier[] = []
 
   for (const node of body) {
     if (node.type === 'ImportDeclaration') {
-      if (node.importKind === 'type') continue
-      specifiers.push(node.source.value)
+      const typeOnly = node.importKind === 'type'
+      if (typeOnly && !includeTypeOnly) continue
+      specifiers.push({ specifier: node.source.value, typeOnly })
     } else if (
       (node.type === 'ExportNamedDeclaration' || node.type === 'ExportAllDeclaration') &&
       node.source
     ) {
-      if (node.exportKind === 'type') continue
-      specifiers.push(node.source.value)
+      const typeOnly = node.exportKind === 'type'
+      if (typeOnly && !includeTypeOnly) continue
+      specifiers.push({ specifier: node.source.value, typeOnly })
     }
+  }
+
+  if (includeTypeOnly) {
+    // `import('...').X` in a type position is the one specifier form living
+    // outside the top-level statements, so it needs the shared AST walker.
+    walk(body, (node) => {
+      if (node.type !== 'TSImportType') return
+      const spec = literalString(node.argument)
+      if (spec !== null) specifiers.push({ specifier: spec, typeOnly: true })
+    })
   }
 
   return specifiers
