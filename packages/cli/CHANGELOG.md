@@ -1,5 +1,195 @@
 # @guren/cli
 
+## 2.7.0
+
+### Minor Changes
+
+- 14a0b2d: Ship the agent-catalog sources and generator behind `gurenjs/agent-skills`
+
+  Adds `packages/cli/templates/agent-catalog/`: the two on-ramp skills
+  (`guren-new-app`, `guren-harness`) and the manifests published to the
+  Claude Code plugin marketplace, the Agent Skills CLI, and Agent Plugins v1
+  clients as `gurenjs/agent-skills` (RFC 0011). The rendered payload is not
+  committed; `scripts/build-agent-catalog.ts` renders it and
+  `audit:agent-catalog` asserts, in CI, that every `guren` command and flag
+  the skills name is one the CLI registers, every target is in
+  `AGENT_TARGETS`, and the root `plugin.json` conforms to the vendored Agent
+  Plugins v1 schema.
+
+  To make that audit derivable, the builtin command registry moves from
+  `bin.ts` into an importable `commands.ts` with no top-level side effects.
+  Nothing user-facing changes: `guren --help` lists the same commands.
+
+- fc22c89: `agent:sync --prune` no longer deletes skill directories under names the framework never shipped
+
+  The stale-file scan claimed `.claude/skills/` and `.agents/skills/` as whole
+  directories, so any skill directory the current harness did not plan was
+  reported stale and, with `--prune`, deleted. Those directories are shared
+  with installers the framework does not control — `npx skills add` and Agent
+  Plugins clients copy third-party skills straight into them, flat and
+  unnamespaced — which made every such skill a prune candidate, including the
+  framework's own catalog-distributed ones (RFC 0011).
+
+  The skills roots are now claimed per skill directory: the ones the harness
+  ships, plus a `RETIRED_CANONICAL_SKILLS` list of names it used to ship, so a
+  skill that leaves the canonical set is still cleaned up. Anything else under
+  those roots is never entered, listed, or deleted. Rules roots and the
+  `guren-*` native rules are unchanged. The change can only delete less than
+  before; a user who relied on `--prune` to clear third-party skills now
+  removes those by hand.
+
+- 6ea8279: Report what `db:make` actually generated instead of an unconditional "Migration generated."
+
+  `drizzle-kit generate` exits 0 whether it wrote a migration or printed "No schema changes, nothing to migrate.", and the CLI reported ✔ off that exit code. Paired with the empty-folder warning `db:migrate` now prints, a user whose `db/schema.ts` has no pending changes got a loop with nothing in it explaining why: warning → `db:make` → ✔ → `db:migrate` → the same warning.
+
+  `makeMigration()` now diffs the migrations folder around the child process and resolves that folder the same three ways it decides drizzle-kit's arguments — an explicit `--out`, the `out` the drizzle config declares, or the default. `db:make` names the migration it generated, and warns `No migration generated in db/migrations — db/schema.ts has no changes since the last one.` when there was none, pointing at the schema rather than back at `db:make`. The command still exits 0.
+
+  The folder is reported only when it was positively resolved: a drizzle config that declares no `out`, or one that throws on import, leaves the previous message rather than naming a folder drizzle-kit may not have written to.
+
+  `makeMigration()` now resolves to a `MakeMigrationResult` rather than `void`, and that type is exported alongside `MakeMigrationOptions` so a caller can name what it receives.
+
+- 50bdfec: Report an empty migrations folder from `db:migrate` instead of "Database migrations completed."
+
+  `migrateDatabase()` returns before it touches a connection when the folder holds no drizzle-kit migrations, so the CLI reported success for a run that applied nothing and created no database. On a fresh app that is the last green line before `db:seed` fails on a missing table, far from the cause.
+
+  The driver handles now resolve a `MigrationRunSummary` (`migrationsFolder`, `migrationsFound`, `looseSqlFiles`) from `migrateDatabase()` and `resetDatabase()`, and `db:migrate` warns `No migrations found in db/migrations — nothing was applied.`, pointing at `bun run db:make`. `db:reset` and `db:fresh` report the same run, where the ✔ was worse: they drop every table first, so the reported success described a database that had just been emptied. All three now carry `migrationsFound` and `looseSqlFiles` in their `--json` output whenever the app's ORM reports them. A folder holding loose `.sql` files gets the warning without the `db:make` hint — those migrations exist, they are just in a shape the drizzle migrator skips, which the ORM already explains. The command still exits 0, and a `config/database.ts` whose migration function reports nothing keeps the previous message.
+
+  `create-guren-app` also names `db:make` in the closing reminder it prints after scaffolding authentication, the one step of that sequence the reminder left out.
+
+- c8489f9: Report an empty seeders folder from `db:seed` instead of "Database seeders executed."
+
+  `runSeeders()` loops over zero seeders without complaint, so the CLI reported success for a run that wrote nothing. The scaffolded `db/seeders/` ships holding only `.gitkeep`, which makes this the next green line after an empty `db/migrations` on the fresh-app path — the same defect class, one step further from the cause.
+
+  `runSeeders()` and every driver's `seedDatabase()` now resolve a `SeederRunSummary` (`seedersFolder`, `seedersRan`, `filesWithoutSeeder`), and `db:seed` warns `No seeders found in db/seeders — nothing was seeded.`, pointing at `bunx guren make:seeder`. A folder whose files exported no seeder gets the warning without that hint and is told what a seeder module must export instead — those files exist, they are just in a shape the loader skips. `db:reset --seed` and `db:fresh --seed` report the same run, where the ✔ claimed a database that had just been emptied and not repopulated; when both halves came back empty the migration warning wins, since seeding a schema that was never re-applied could not have worked anyway. All three carry `seedersRan` and `filesWithoutSeeder` in their `--json` output whenever the app's ORM reports them.
+
+  `db:reset --seed` and `db:fresh --seed` also refuse up front, before dropping anything, when the app's `config/database.ts` exports no seed function at all: they previously emptied the database and then reported it seeded. `db:seed` already refused the same config.
+
+  The commands still exit 0 on the empty-folder diagnostic — it is not a failure — and a `config/database.ts` whose seed function reports nothing keeps the previous message.
+
+- 4464071: ### Deprecated
+
+  - **Class-based seeder API (`BaseSeeder` / `Seeder`, `SeederRunner`, `createSeederRunner`, `resetCalledSeeders`, and the `SeederClass` / `SeederInterface` / `SeederRunnerOptions` types)** — Write seeders with `defineSeeder` instead. Deprecated in 2.9.0, will be removed in 3.0.0. Detected by `bunx guren upgrade --check-only` as `seeder-class-convention`.
+
+  A seeder class is not itself unsupported. `db:seed` loads seeders through `runSeeders()`, which accepts a `defineSeeder` handler, an exported `seed`/`run`/`Seeder`, or a default export — including an exported class whose prototype has a `run` method, which it constructs and calls as `run({ db })`. That last shape is deliberate: `packages/orm/tests/seeder.test.ts` covers it as "supports class-based seeders with run method".
+
+  What `BaseSeeder` gets wrong is the signature it imposes. Its `run()` is declared to take no parameters, so it hides the one argument a seeder needs. A subclass cannot simply correct that: declaring `run(ctx: SeederContext)` fails to compile against the base (`TS2416: Target signature provides too few arguments. Expected 1 or more, but got 0`). Widening it to an optional `run(ctx?: SeederContext)` does compile, but then the subclass must handle a missing context, and that case is real: `call()`, `callOnce()`, `callMany()` and `callParallel()` construct child seeders and invoke `run()` with no arguments at all, so a parent that received a context cannot pass it down. The result is a seeder that is counted as having run while its context handling is left to chance.
+
+  `SeederRunner` is the orchestration those classes were written for, and no Guren command reaches it. It runs a single seeder per call — a class passed in, a name registered with `register()`, or a name resolved to `<seedersPath>/<Name>.ts` defaulting to `DatabaseSeeder` — constructing it with `new` and invoking `.run()` with no context. `db:seed` does none of that; it runs every seeder in the folder.
+
+  Nothing is removed and no existing call changes its result. This adds `@deprecated` JSDoc naming the replacement, a once-per-process runtime warning from the `BaseSeeder` and `SeederRunner` constructors, and a `seeder-class-convention` entry in the deprecation registry so `bunx guren upgrade --check-only` reports affected files. No codemod ships with it: the migration moves a class body into a handler and has to resolve how each `call()`/`callOnce()` child receives `db`, which is not a mechanical rewrite.
+
+  These exports are re-exported from `@guren/core`, which makes them Stable under `contributing/api-stability.md`, so the deprecation policy's minimum of two minor versions applies before removal. Deprecated in 2.9.0, that permits removal from 2.11.0 onward: `removedIn` targets 3.0.0 on the assumption that 3.0.0 follows 2.11.0, which is also what keeps this removal in the same batch as `local-disk-per-object-visibility`. If 3.0.0 is cut earlier than that, this entry moves to the following major rather than being removed early.
+
+  The sibling `BaseFactory` / `Factory` / `defineFactory` exports live in the same directory and are deliberately untouched — `make:factory` scaffolds `class …Factory extends Factory<typeof Model>`, `Factory` being the `BaseFactory` alias.
+
+### Patch Changes
+
+- 08203e5: Install the catalog plugin at user scope in the published README.
+
+  The two skills it ships are for the step before a project exists, and they are the same two whatever you are building. `--scope project` wrote them into whichever repository the user happened to be standing in — which at that moment is either nothing or something unrelated — and shared an on-ramp with the collaborators of an app that already has the harness installed. It is also not the scope the plugin CLI defaults to.
+
+- cdf34f8: Let `agent:sync --prune` remove a stale managed file whose name differs from a planned one only by case.
+
+  The stale scan compared paths case-insensitively, so that a case-preserving filesystem — where the write loop refreshes a planned file through a differently-cased directory entry it found on disk — would not classify the file it had just written as stale. On a case-sensitive filesystem those two names are two separate files: after a rename, `.claude/rules/ORM-MODELS.md` and `.claude/rules/orm-models.md` both exist, and the lowercased comparison hid the genuinely stale one from prune permanently.
+
+  The scan now matches exact paths first, and for a case-only mismatch spares the entry only when it and the planned path are the same file on disk (same device and inode). A filesystem that cannot answer that question leaves the entry alone — neither reported nor deleted — rather than spending an irreversible delete on a claim it could not establish.
+
+- d7f3034: Accept `guren context --entity <Model>`, which citty silently dropped
+
+  `context` declared its `entity` argument `type: 'positional'`. When a value is passed to a positional as a flag, citty 0.1.6 discards it entirely — it reaches neither `args.entity` nor the unconsumed positionals in `args._`, and no unknown-flag error is raised — so `guren context --entity User` ran as if no entity had been named. This command's no-entity branch is the whole-project map, so it printed that and exited 0: the wrong output, with nothing signalling the argument had been ignored.
+
+  The flag spelling is one the docs teach rather than an invented one. `--entity <Model>` is a real string flag on both `make:adr` and `docs:graph`, documented in the CLI guides in English and Japanese and in the agent harness template, so `context --entity User` is a natural thing to write after reading them.
+
+  `entity` is now `type: 'string'` and falls back to `args._[0]`, which accepts `guren context User`, `--entity User`, and `--entity=User` alike; a string arg still leaves an unconsumed positional in `_`, so the documented positional form is unchanged, including alongside `--module`. `guren context --help` now lists `--entity=<User>` under OPTIONS rather than as an `[ENTITY]` argument, and its description names the positional spelling.
+
+  `queue:retry` has the same optional-positional declaration and is deliberately left as it is: its `id`/`--all` guard reports the missing id and exits 1 when the value is dropped, so the wrong spelling is already refused loudly rather than acting on the wrong input.
+
+- 5923bfe: Fix `guren context` misreading a flag that is passed twice
+
+  citty hands an argument back as an array once its flag is repeated, and
+  `guren context` read all five of its own straight through.
+  `--entity User --entity User` exited 1 on `entityName.toLowerCase is not a
+function`, and `--app . --app .` exited 1 inside `resolve()`. The other three
+  never said anything untrue out loud: `--module app --module app` exited 1
+  blaming a module named `app,app`; `--routes web.ts --routes web.ts` exited 0
+  reporting the entity's routes as none, because the same `resolve()` failure
+  lands in the `catch` that exists for a routes file the CLI genuinely cannot
+  load; and `--json=true --json=false` printed JSON, because every array is
+  truthy. Each of the five now resolves to the value passed last.
+
+- 630b908: Point `db:make` at a `drizzle.config.json` instead of overriding it with defaults.
+
+  `makeMigration()` probed only `drizzle.config.{ts,mts,js,mjs}`, so an app whose
+  only drizzle config is the JSON one drizzle-kit names as its own default fell to
+  the no-config branch and was handed explicit `--schema db/schema.ts --out
+db/migrations`. drizzle-kit then reported `dialect: undefined` — blaming the user
+  for a value they had declared, in a file nothing had read. `drizzle.config.json`
+  is now probed last, after the loadable formats, matching drizzle-kit's own
+  `.ts` > `.js` > `.json` preference.
+
+  This does not make JSON configs work: `bun x drizzle-kit` runs drizzle-kit
+  through its `#!/usr/bin/env node` shebang, and under Node its `import()` of the
+  config needs a `type: json` import attribute it does not pass, so such an app now
+  gets drizzle-kit's own error naming the config file it could not load. That is
+  the honest failure — the previous one described a different problem entirely and
+  pointed away from the config that caused it. Nothing regresses either: on the
+  pinned drizzle-kit, the flags branch those apps leave cannot succeed for anyone,
+  since a run passing `--schema`/`--out` without `--dialect` is rejected. Apps with
+  a `.ts`, `.mts`, `.js` or `.mjs` config, and any run passing `--schema`/`--out`
+  explicitly, are unaffected.
+
+- 8c19ac3: Undo the table-cell escaping in the docs viewer's renderer instead of splitting on it. `escapeMarkdownTableCell` doubles a backslash and then escapes every pipe, so a `screens.md` Props column holding a TypeScript union (`A \| B`) rendered as two cells with a stray backslash, pushing the rest of the row one column right. Row splitting now scans for unescaped pipes and reads `\\` as one unit, so a cell that ends in a backslash still lets the delimiter behind it split.
+- ec57e11: Honor `--name` on `make:migration` (`db:make`), and take the last value of a repeated flag.
+
+  `guren make:migration --name add_posts_table` — the form the database guide documents — generated a migration under a name drizzle-kit invented (`20260819113244_unusual_triton`) rather than the one given. The argument was declared as a positional, and citty resolves positionals and string flags from different places: `--name <value>` arrived with neither a `name` key nor the value among the positionals, and no unknown-flag error to say so, so drizzle-kit was called with no name at all and fell back to naming the migration itself. Nothing about the run looked like a failure — the migration is generated and correct, only misnamed, which is the kind of thing noticed later when hunting for it by name. Both spellings work now: `--name <name>`, and the bare positional (`guren make:migration add_posts_table`) that the scaffolding skills use.
+
+  Repeating any of the command's three flags is also handled. citty types a `string` argument as `string | undefined` and then hands back a `string[]` when the flag appears twice, which each argument failed on differently: `--schema a/schema.ts --schema b/schema.ts` was comma-joined into a path nothing can open and still exited 0, and once `--name` started being read it would have thrown `options.name?.trim is not a function`. The last value wins, as it does everywhere else.
+
+- 4979e05: `make:seeder --help` no longer calls its argument a class name. The command
+  scaffolds a `defineSeeder` handler, which is what `db:seed` runs; the old
+  wording was the last user-reachable trace of a class-per-run seeder
+  convention the CLI never had.
+- a59d0b6: fix(cli): pass the dialect drizzle-kit requires when `make:migration` overrides the config
+
+  `make:migration` never stated `--dialect`, which drizzle-kit requires and will
+  not infer, so two paths could not generate anything on any app:
+
+  - The documented override flow. `--schema`/`--out` suppress `--config`
+    entirely, so `guren make:migration --schema ./custom/schema.ts --out
+./custom/migrations` failed with `dialect: undefined` even against a config
+    that declared one.
+  - The no-config fallback, whose `db/schema.ts` / `db/migrations` defaults were
+    therefore unreachable in practice.
+
+  Restoring `--config` alongside the overrides is not available: drizzle-kit
+  refuses the two together ("You can't use both --config and other cli options
+  for generate command"). So the overrides now carry everything the config would
+  have supplied — `dialect`, `driver`, and any un-overridden `schema`/`out`.
+
+  As a result, overriding only `--schema` no longer relocates the migrations to
+  the default folder; the config's `out` is kept, so one app's history stays in
+  one directory.
+
+  A config field that `generate` exposes no flag for cannot be restated this way
+  — `breakpoints: false` is the one such case, since `--breakpoints` has no
+  negation. The command now names any such field in a warning instead of letting
+  the generated SQL differ from what the config asked for.
+
+  Apps with no drizzle config can now state the dialect themselves with a new
+  `--dialect` flag. When nothing declares one, the command stops before spawning
+  drizzle-kit and names the missing field and the fix, rather than surfacing
+  `dialect: undefined` against flags the user never typed. A config declaring
+  `schema` as a list is likewise refused, because `--schema` takes one value and
+  a repeated flag silently keeps only the last.
+
+- Updated dependencies [2faefea]
+- Updated dependencies [50bdfec]
+- Updated dependencies [c8489f9]
+- Updated dependencies [6cbb012]
+- Updated dependencies [4464071]
+  - @guren/core@1.8.0
+  - @guren/orm@2.6.0
+
 ## 2.6.2
 
 ### Patch Changes

@@ -1,5 +1,55 @@
 # @guren/core
 
+## 1.8.0
+
+### Minor Changes
+
+- 2faefea: Export `MigrationRunSummary`, `MigrationStatusEntry`, and `SeederRunSummary` from `@guren/core`.
+
+  `@guren/core` re-exports the ORM through an explicit allowlist rather than `export *`, and these three types were never added to it. Every API that produces them already was: `runSeeders()` resolves a `SeederRunSummary`, and the `PostgresDatabase` / `MySqlDatabase` / `SqliteDatabase` / `AwsDataApiDatabase` handles resolve `MigrationRunSummary` from `migrateDatabase()` and `resetDatabase()`, `SeederRunSummary` from `seedDatabase()`, and `MigrationStatusEntry[]` from `migrationStatus()`. An application that follows the core-first rule — never import from `@guren/server` or `@guren/orm` directly — could call all of them and name none of their return types, so wrapping one in a helper with an explicit signature meant reaching past `@guren/core` for the type.
+
+  `MigrationRunSummary` and `SeederRunSummary` are new, added with the empty-folder reports for `db:migrate` and `db:seed`. `MigrationStatusEntry` has been exported from `@guren/orm` since the unified-migrations release and had the same gap the whole time; it is included here because deriving the allowlist from the ORM's export surface — rather than from the two names that prompted this — is what surfaced it. That diff is now empty: every one of the 71 types `@guren/orm` exports type-checks as an import from `@guren/core`.
+
+  Type-only, additive, no runtime change. `minor` matches how added exports are versioned here, and the bump is the point: a type-only allowlist addition ships no runtime difference, so without a changeset there is no release at all and an application's installed `@guren/core` keeps the old declarations no matter how permissive its version range is.
+
+### Patch Changes
+
+- 4464071: ### Deprecated
+
+  - **Class-based seeder API (`BaseSeeder` / `Seeder`, `SeederRunner`, `createSeederRunner`, `resetCalledSeeders`, and the `SeederClass` / `SeederInterface` / `SeederRunnerOptions` types)** — Write seeders with `defineSeeder` instead. Deprecated in 2.9.0, will be removed in 3.0.0. Detected by `bunx guren upgrade --check-only` as `seeder-class-convention`.
+
+  A seeder class is not itself unsupported. `db:seed` loads seeders through `runSeeders()`, which accepts a `defineSeeder` handler, an exported `seed`/`run`/`Seeder`, or a default export — including an exported class whose prototype has a `run` method, which it constructs and calls as `run({ db })`. That last shape is deliberate: `packages/orm/tests/seeder.test.ts` covers it as "supports class-based seeders with run method".
+
+  What `BaseSeeder` gets wrong is the signature it imposes. Its `run()` is declared to take no parameters, so it hides the one argument a seeder needs. A subclass cannot simply correct that: declaring `run(ctx: SeederContext)` fails to compile against the base (`TS2416: Target signature provides too few arguments. Expected 1 or more, but got 0`). Widening it to an optional `run(ctx?: SeederContext)` does compile, but then the subclass must handle a missing context, and that case is real: `call()`, `callOnce()`, `callMany()` and `callParallel()` construct child seeders and invoke `run()` with no arguments at all, so a parent that received a context cannot pass it down. The result is a seeder that is counted as having run while its context handling is left to chance.
+
+  `SeederRunner` is the orchestration those classes were written for, and no Guren command reaches it. It runs a single seeder per call — a class passed in, a name registered with `register()`, or a name resolved to `<seedersPath>/<Name>.ts` defaulting to `DatabaseSeeder` — constructing it with `new` and invoking `.run()` with no context. `db:seed` does none of that; it runs every seeder in the folder.
+
+  Nothing is removed and no existing call changes its result. This adds `@deprecated` JSDoc naming the replacement, a once-per-process runtime warning from the `BaseSeeder` and `SeederRunner` constructors, and a `seeder-class-convention` entry in the deprecation registry so `bunx guren upgrade --check-only` reports affected files. No codemod ships with it: the migration moves a class body into a handler and has to resolve how each `call()`/`callOnce()` child receives `db`, which is not a mechanical rewrite.
+
+  These exports are re-exported from `@guren/core`, which makes them Stable under `contributing/api-stability.md`, so the deprecation policy's minimum of two minor versions applies before removal. Deprecated in 2.9.0, that permits removal from 2.11.0 onward: `removedIn` targets 3.0.0 on the assumption that 3.0.0 follows 2.11.0, which is also what keeps this removal in the same batch as `local-disk-per-object-visibility`. If 3.0.0 is cut earlier than that, this entry moves to the following major rather than being removed early.
+
+  The sibling `BaseFactory` / `Factory` / `defineFactory` exports live in the same directory and are deliberately untouched — `make:factory` scaffolds `class …Factory extends Factory<typeof Model>`, `Factory` being the `BaseFactory` alias.
+
+- Updated dependencies [14a0b2d]
+- Updated dependencies [08203e5]
+- Updated dependencies [cdf34f8]
+- Updated dependencies [fc22c89]
+- Updated dependencies [d7f3034]
+- Updated dependencies [5923bfe]
+- Updated dependencies [630b908]
+- Updated dependencies [6ea8279]
+- Updated dependencies [50bdfec]
+- Updated dependencies [c8489f9]
+- Updated dependencies [6cbb012]
+- Updated dependencies [4464071]
+- Updated dependencies [8c19ac3]
+- Updated dependencies [ec57e11]
+- Updated dependencies [4979e05]
+- Updated dependencies [a59d0b6]
+  - @guren/cli@2.7.0
+  - @guren/orm@2.6.0
+  - @guren/server@2.9.0
+
 ## 1.7.0
 
 ### Minor Changes
