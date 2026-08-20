@@ -10,6 +10,9 @@ import { makeAuth } from '../src/make-auth'
 // which ports this same boot() so the blog blueprint's Layout.tsx nav (also
 // reading `props.auth.user`) doesn't render as a guest while signed in. Pinning
 // both copies to this snippet is how the two are kept from silently drifting.
+// AuthProvider diverges from the blueprint on purpose (showcase nav), so only
+// this snippet is pinned; the files the two trees share byte-for-byte are
+// pinned whole in scaffold-blog-sync.test.ts, which also documents the policy.
 const SHARE_INERTIA_AUTH_PROPS_SNIPPET = `shareInertiaProps(async (ctx) => {
       const auth = ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
       return { auth: { user: await auth?.user() } }
