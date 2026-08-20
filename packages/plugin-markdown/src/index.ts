@@ -1,0 +1,4 @@
+export { createMarkdownRenderer } from './renderer'
+export type { HighlightFn, MarkdownRenderer, MarkdownRendererOptions } from './renderer'
+export { markdownPlugin } from './plugin'
+export type { MarkdownPluginConfig } from './plugin'

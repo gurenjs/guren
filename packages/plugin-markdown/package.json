@@ -1,0 +1,64 @@
+{
+  "name": "@guren/plugin-markdown",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gurenjs/guren",
+    "directory": "packages/plugin-markdown"
+  },
+  "homepage": "https://github.com/gurenjs/guren#readme",
+  "bugs": {
+    "url": "https://github.com/gurenjs/guren/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "gurenPlugin": {
+    "compatibility": ">=1.0.0 <2.0.0"
+  },
+  "files": [
+    "dist",
+    "styles.css"
+  ],
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./shiki": {
+      "types": "./dist/shiki.d.ts",
+      "default": "./dist/shiki.js"
+    },
+    "./styles.css": "./styles.css"
+  },
+  "scripts": {
+    "build": "tsup",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@guren/core": "^1.7.0",
+    "@types/sanitize-html": "^2.16.1",
+    "marked": "^18.0.10",
+    "marked-highlight": "^2.2.4",
+    "sanitize-html": "^2.17.7"
+  },
+  "peerDependencies": {
+    "shiki": ">=3.0.0 <5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "shiki": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.10",
+    "shiki": "^4.4.3",
+    "tsup": "^8.5.0",
+    "typescript": "^5.4.0"
+  }
+}
