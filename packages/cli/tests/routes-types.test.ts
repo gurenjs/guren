@@ -253,7 +253,7 @@ describe('buildRouteModuleContent', () => {
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
-  })
+  }, COLD_TSC_TIMEOUT)
 })
 
 /**
