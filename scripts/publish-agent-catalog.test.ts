@@ -50,7 +50,7 @@ function spawnPublish(remote: string, extraEnv: Record<string, string>, args: st
   // hand the script a PATH that is missing tools without losing its runtime
   const proc = Bun.spawnSync([process.execPath, script, ...args], {
     cwd: repoRoot,
-    env: { ...process.env, ...gitIdentity, GUREN_AGENT_SKILLS_REMOTE: remote, ...extraEnv },
+    env: { ...process.env, GIT_CONFIG_GLOBAL: childGitConfig, ...gitIdentity, GUREN_AGENT_SKILLS_REMOTE: remote, ...extraEnv },
   })
   return {
     code: proc.exitCode,
@@ -83,6 +83,20 @@ function git(cwd: string, ...args: string[]): string {
 
 let bare: string
 let scratch: string
+/**
+ * The global git configuration the *child* runs see, in place of the
+ * maintainer's. `HERMETIC` cannot reach them: the script makes its own
+ * commits, and a global `commit.gpgsign` makes those prompt — a hang, charged
+ * by bun:test to the following test. The script itself is right not to force
+ * signing off (a maintainer may want the publish commit signed), so the
+ * neutral configuration is the test's to supply.
+ *
+ * A file rather than `/dev/null` on purpose: it is where a test that wants to
+ * hand the script a hostile *global* configuration would write one. The three
+ * that do so today (`core.hooksPath`, `core.excludesFile`, `core.attributesFile`)
+ * inject through `GIT_CONFIG_*` in the env, a layer this does not touch.
+ */
+let childGitConfig: string
 
 /** A bare repo with one placeholder commit on main, like the real one had. */
 async function seedRemote(name: string): Promise<string> {
@@ -100,6 +114,8 @@ async function seedRemote(name: string): Promise<string> {
 
 beforeAll(async () => {
   scratch = await mkdtemp(join(tmpdir(), 'guren-publish-test-'))
+  childGitConfig = join(scratch, 'child-gitconfig')
+  await Bun.write(childGitConfig, '[commit]\n\tgpgsign = false\n')
   bare = await seedRemote('agent-skills.git')
 })
 
@@ -329,7 +345,7 @@ describe('publish-agent-catalog', () => {
     expect(run(remote).code).toBe(0)
     const proc = Bun.spawn([process.execPath, script, '--skip-validate'], {
       cwd: repoRoot,
-      env: { ...process.env, ...gitIdentity, GUREN_AGENT_SKILLS_REMOTE: remote, GUREN_CATALOG_VERSION_OVERRIDE: '99.0.0' },
+      env: { ...process.env, GIT_CONFIG_GLOBAL: childGitConfig, ...gitIdentity, GUREN_AGENT_SKILLS_REMOTE: remote, GUREN_CATALOG_VERSION_OVERRIDE: '99.0.0' },
       stdin: 'pipe',
       stdout: 'pipe',
       stderr: 'pipe',
