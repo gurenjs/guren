@@ -174,6 +174,35 @@ export function createGurenControllerModule() {
 
   return {
     Controller,
+    // Mirrors @guren/core's definePlugin closely enough that app modules
+    // importing a plugin package (e.g. @guren/plugin-markdown) load under a
+    // mocked '@guren/core': each factory call yields an independent provider
+    // class with the configuration captured in a closure.
+    definePlugin: <TConfig>(definition: {
+      name: string
+      register?: (container: unknown, config: TConfig) => void
+      boot?: (container: unknown, config: TConfig) => void | Promise<void>
+      deferred?: boolean
+      provides?: string[]
+    }) => {
+      return (config: TConfig) => {
+        class PluginProvider {
+          static deferred = definition.deferred ?? false
+          static provides = definition.provides ?? []
+          constructor(public container: unknown) {}
+          register(): void {
+            definition.register?.(this.container, config)
+          }
+          async boot(): Promise<void> {
+            await definition.boot?.(this.container, config)
+          }
+        }
+        Object.defineProperty(PluginProvider, 'name', {
+          value: `${definition.name}PluginProvider`,
+        })
+        return PluginProvider
+      }
+    },
     parseRequestPayload: async (ctx: ControllerContext) => {
       const request = ctx.req.raw
       const contentType = request.headers.get('Content-Type') ?? ''

@@ -78,8 +78,12 @@ function extractAlertType(paragraph: Tokens.Paragraph): AlertType | null {
  * paragraph) and the matching blockquote renderer. Captures no per-render
  * state — one instance is safe to share across concurrent renders, since
  * token mutation is scoped to each parse.
+ *
+ * `labels` overrides the rendered label text per alert type (i18n, or a
+ * different vocabulary — several types may share one label). Class names are
+ * not affected: styling stays keyed to the directive that was written.
  */
-export function alertsExtension(): MarkedExtension {
+export function alertsExtension(labels: Partial<Record<AlertType, string>> = {}): MarkedExtension {
   return {
     walkTokens(token) {
       if (token.type !== 'blockquote' || !token.tokens?.length) return
@@ -96,7 +100,7 @@ export function alertsExtension(): MarkedExtension {
         const alertType = (token as AlertBlockquote).alertType
         if (!alertType) return `<blockquote>\n${content}</blockquote>\n`
         return `<div class="${ALERT_CLASS_PREFIX} ${ALERT_CLASS_PREFIX}--${alertType}">
-  <p class="${ALERT_CLASS_PREFIX}__label">${ALERT_LABELS[alertType]}</p>
+  <p class="${ALERT_CLASS_PREFIX}__label">${labels[alertType] ?? ALERT_LABELS[alertType]}</p>
   <div class="${ALERT_CLASS_PREFIX}__body">
 ${content}
   </div>
