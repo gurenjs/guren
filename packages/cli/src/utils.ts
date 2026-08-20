@@ -240,9 +240,15 @@ export function assertCwdUnsupported(options: WriterOptions, command: string): v
   )
 }
 
+/** One file of a multi-file scaffold: app-relative path plus its contents. */
+export interface ScaffoldFileEntry {
+  path: string
+  contents: string
+}
+
 /** `writeScaffoldFile` over a batch — every path is checked before any write. */
 export async function writeScaffoldFiles(
-  entries: Array<{ path: string; contents: string }>,
+  entries: ScaffoldFileEntry[],
   options: WriterOptions = {},
 ): Promise<string[]> {
   const cwd = writeRoot(options)

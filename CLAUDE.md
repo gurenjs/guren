@@ -396,6 +396,7 @@ export const handler = createLambdaHandler(app)
 | `packages/cli/src/model-list.ts` | AI agent: model introspection |
 | `packages/cli/src/model-parser.ts` | AI agent: Babel AST model parsing |
 | `packages/cli/src/make-feature.ts` | AI agent: CRUD feature scaffolding |
+| `packages/cli/src/scaffold-templates.ts` | Loader for static scaffold templates shipped as real sources under `packages/cli/templates/scaffold/` (typechecked by `typecheck:templates`); flag-dependent output stays in `build*Template()` functions, and `tests/scaffold-output.test.ts` parse-gates both |
 | `packages/cli/src/make-module.ts` | AI agent: application module scaffolding (`make:module`, see RFC 0002) |
 | `packages/cli/src/discovery.ts` | AI agent: shared file discovery utilities (module-aware — scans `modules/*/` too) |
 | `packages/server/src/container/defineModule.ts` | `defineModule()` + `GurenModule` type, auto-exported via `@guren/core` |
