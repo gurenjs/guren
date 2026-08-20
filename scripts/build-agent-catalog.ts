@@ -37,7 +37,7 @@ import { AGENT_TARGETS } from '../packages/cli/src/agent-targets'
 import { builtinSubCommands } from '../packages/cli/src/commands'
 import { compareVersions } from '../packages/cli/src/codemods'
 import { parseChangeset } from './smoke/core-semver-audit'
-import { repoRoot } from './workspace-packages'
+import { manifestAtRev, repoRoot, versionOf } from './workspace-packages'
 
 const TEMPLATE_DIR = 'packages/cli/templates/agent-catalog'
 /** Exported so the gate's tests name the manifest through the gate, not beside it. */
@@ -407,16 +407,6 @@ export function changesetNames(source: string, pkg: string, file = 'changeset'):
   return parseChangeset(file, source).releases.has(pkg)
 }
 
-/** The `version` field of a `packages/cli/package.json`, or undefined if absent. */
-function versionOf(manifest: string): string | undefined {
-  try {
-    const version = (JSON.parse(manifest) as { version?: unknown }).version
-    return typeof version === 'string' ? version : undefined
-  } catch {
-    return undefined
-  }
-}
-
 /**
  * Sources changed ⇒ a `@guren/cli` changeset is present, unless the CLI
  * version itself moved. Compared against `base` (a ref or SHA). Callers on
@@ -487,9 +477,8 @@ export async function assertChangesetGate(base: string, repo: string = repoRoot)
   // for anything that is not an exact version, and orders `1.0.0+build`
   // equal to `1.0.0` — two spellings that publish as two different payload
   // versions.
-  const show = Bun.spawnSync(['git', 'show', `${diffBase}:${CLI_MANIFEST}`], { cwd: repo })
-  const baseVersion = show.success ? versionOf(show.stdout.toString()) : undefined
-  const headVersion = versionOf(await readFile(join(repo, CLI_MANIFEST), 'utf8').catch(() => ''))
+  const baseVersion = versionOf(manifestAtRev(diffBase, CLI_MANIFEST, repo))
+  const headVersion = versionOf(await readFile(join(repo, CLI_MANIFEST), 'utf8').catch(() => undefined))
   if (baseVersion !== undefined && headVersion !== undefined && baseVersion !== headVersion) return []
   // A side that could not be read is not an exemption — that would be a
   // silent ungating living inside the audit, where the run still prints

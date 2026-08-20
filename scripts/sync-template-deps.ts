@@ -28,7 +28,7 @@ import {
   type DrizzlePinDeclineReason,
   type OrmManifest,
 } from '../packages/cli/src/drizzle-pins'
-import { collectPackages, repoRoot } from './workspace-packages'
+import { collectPackages, manifestAtRev, repoRoot, versionOf } from './workspace-packages'
 
 /**
  * The groups this script rewrites a template's ranges in. Exported because
@@ -245,17 +245,48 @@ async function check(): Promise<void> {
  * following an ORM drizzle pin that moved in an ordinary PR — would be failed
  * for a release that is not theirs to cut. The same fact is printed as a
  * reminder on that path instead.
+ *
+ * The two ways a version can be unreadable are not the same refusal, because
+ * they are not the same fact:
+ *
+ * - no manifest at `HEAD` at all — a scaffolder not yet committed — leaves
+ *   nothing to compare, so this warns and skips, as it always has.
+ * - a manifest that is there and whose version cannot be read is a broken
+ *   comparison, not an absent one, and it fails. Letting it through would be
+ *   worse than a noisy release: `undefined !== '2.8.0'` reads as *the version
+ *   moved*, so the gate would quietly exempt itself and publish `@guren/*`
+ *   ranges inside no new tarball — the exact silent staleness it exists to
+ *   stop. Both sides are checked; a working tree that lost its version
+ *   exempts the release just as effectively as a committed one.
+ *
+ * `repo` is the checkout to run in; it is the function's subject, not a test
+ * hook. The refusal is only observable against real commits, so its tests build
+ * throwaway repositories and point it at those.
  */
-async function assertCreateAppRepublishes(): Promise<void> {
+export async function assertCreateAppRepublishes(repo: string = repoRoot): Promise<void> {
   const manifestPath = 'packages/create-app/package.json'
-  const committed = Bun.spawnSync(['git', 'show', `HEAD:${manifestPath}`], { cwd: repoRoot })
-  if (!committed.success) {
+  const committed = manifestAtRev('HEAD', manifestPath, repo)
+  if (committed === undefined) {
     console.warn(`Could not read ${manifestPath} from git; skipping the create-guren-app release check.`)
     return
   }
 
-  const previous = (JSON.parse(committed.stdout.toString()) as { version?: string }).version
-  const current = (await Bun.file(join(repoRoot, manifestPath)).json() as { version?: string }).version
+  const previous = versionOf(committed)
+  const current = versionOf(await readFile(join(repo, manifestPath), 'utf8').catch(() => undefined))
+
+  const unreadable = [
+    ...(previous === undefined ? ['committed at HEAD'] : []),
+    ...(current === undefined ? ['in the working tree'] : []),
+  ]
+  if (unreadable.length > 0) {
+    throw new Error(
+      `${manifestPath} declares no readable version ${unreadable.join(' and ')}.\n` +
+      'This check compares the two to decide whether create-guren-app republishes,\n' +
+      'and a version it could not read is not a version that moved. Repair the\n' +
+      'manifest and re-run; passing here would ship the rewritten template ranges\n' +
+      'inside no new tarball.',
+    )
+  }
 
   if (previous === current) {
     throw new Error(

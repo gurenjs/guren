@@ -1,8 +1,20 @@
-// Shared discovery for the workspace packages under packages/.
+// Shared reading of the workspace's package manifests.
 //
-// Used by scripts/build-packages.ts and scripts/test-packages.ts so that adding
-// a package (a plugin, for example) never requires editing a hand-maintained
-// list in the root package.json.
+// Two questions, both answered here so that no script answers either one twice:
+//
+// - which packages live under packages/, and in what order they depend on each
+//   other. Used by scripts/build-packages.ts and scripts/test-packages.ts so
+//   that adding a package (a plugin, for example) never requires editing a
+//   hand-maintained list in the root package.json.
+// - what a manifest said at a git rev, which is how the release gates in
+//   scripts/ tell a version that moved from one that did not. `versionOf` is
+//   the rule that a version nobody could read is *not* a version: a gate that
+//   lets an unreadable manifest stand in for a number silently stops gating.
+//   Only one of the two gates had reached that conclusion. The other compared
+//   a bare `.version` against a bare `.version`, so an unreadable side read as
+//   *the version moved* and exempted the release it existed to gate. The rule
+//   lives here because a gate that reimplements it locally is how that
+//   happened, not because two correct copies wanted deduplicating.
 
 import { readdir, readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
@@ -97,6 +109,50 @@ export async function collectPackages(): Promise<WorkspacePackage[]> {
   }
 
   return packages.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/**
+ * The text of `manifestPath` as of `rev`, or `undefined` when git could not
+ * produce it there — the file did not exist at that commit, or the rev itself
+ * does not resolve.
+ *
+ * Deliberately separate from `versionOf` rather than folded into one
+ * `versionAtRev`: "there is no manifest at that rev" and "there is one and its
+ * version cannot be read" are the same `undefined` to a caller that only wants
+ * a version, and callers that must tell them apart would have no way back.
+ *
+ * `repo` is the checkout to read, not a test hook — a gate is only observable
+ * against real commits, so its tests build throwaway repositories. It must be
+ * the repository *root*: git resolves `<rev>:<path>` against the top of the
+ * working tree whatever the cwd is (from packages/cli, `git show HEAD:package.json`
+ * hands back the root manifest), while every caller pairs this with a
+ * working-tree `join(repo, manifestPath)` that resolves against `repo`. Point
+ * it at a subdirectory and the two sides read different files.
+ */
+export function manifestAtRev(rev: string, manifestPath: string, repo: string = repoRoot): string | undefined {
+  const show = Bun.spawnSync(['git', 'show', `${rev}:${manifestPath}`], { cwd: repo })
+  return show.success ? show.stdout.toString() : undefined
+}
+
+/**
+ * The `version` a package manifest declares, or `undefined` when it declares
+ * none this rule recognizes: unparseable JSON, an absent `version`, a
+ * `version` that is not a string, or no manifest text at all.
+ *
+ * Every one of those collapses to `undefined` on purpose, and callers must
+ * treat `undefined` as "unknown" rather than as a value. Comparing two
+ * unknowns reads as "unchanged"; comparing one against a real version reads as
+ * "moved". Both readings are wrong, and the second is the dangerous one — it
+ * is a release gate exempting itself.
+ */
+export function versionOf(manifest: string | undefined): string | undefined {
+  if (manifest === undefined) return undefined
+  try {
+    const version = (JSON.parse(manifest) as { version?: unknown }).version
+    return typeof version === 'string' ? version : undefined
+  } catch {
+    return undefined
+  }
 }
 
 // @guren/cli and @guren/core depend on each other, so the graph has one real
