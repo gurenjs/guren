@@ -25,7 +25,9 @@
  * `--check` also enforces the changeset gate: if any input this script reads
  * changed relative to the base ref, a changeset naming `@guren/cli` must be
  * present, because the plugin's version is the CLI's and a payload published
- * under an unchanged version is one every installed copy skips forever.
+ * under an unchanged version is one every installed copy skips forever. A
+ * diff that moves the CLI version itself is exempt — that is the release
+ * commit, and the harm the gate names cannot occur when the version moved.
  */
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -38,7 +40,8 @@ import { parseChangeset } from './smoke/core-semver-audit'
 import { repoRoot } from './workspace-packages'
 
 const TEMPLATE_DIR = 'packages/cli/templates/agent-catalog'
-const CLI_MANIFEST = 'packages/cli/package.json'
+/** Exported so the gate's tests name the manifest through the gate, not beside it. */
+export const CLI_MANIFEST = 'packages/cli/package.json'
 const LICENSE = 'LICENSE'
 
 /**
@@ -391,31 +394,87 @@ export function changesetNames(source: string, pkg: string, file = 'changeset'):
   return parseChangeset(file, source).releases.has(pkg)
 }
 
+/** The `version` field of a `packages/cli/package.json`, or undefined if absent. */
+function versionOf(manifest: string): string | undefined {
+  try {
+    const version = (JSON.parse(manifest) as { version?: unknown }).version
+    return typeof version === 'string' ? version : undefined
+  } catch {
+    return undefined
+  }
+}
+
 /**
- * Sources changed ⇒ a `@guren/cli` changeset is present. Compared against
- * `base` (a ref or SHA). Callers on shallow checkouts must fetch it first.
+ * The CLI version at `rev`, read from git rather than from the working tree.
+ * `undefined` means it could not be read — a missing manifest, unparseable
+ * JSON, no `version` field — which callers must not treat as "the version
+ * moved".
  */
-export async function assertChangesetGate(base: string): Promise<string[]> {
+function cliVersionAt(rev: string, repo: string): string | undefined {
+  const show = Bun.spawnSync(['git', 'show', `${rev}:${CLI_MANIFEST}`], { cwd: repo })
+  return show.success ? versionOf(show.stdout.toString()) : undefined
+}
+
+/**
+ * Sources changed ⇒ a `@guren/cli` changeset is present, unless the CLI
+ * version itself moved. Compared against `base` (a ref or SHA). Callers on
+ * shallow checkouts must fetch it first.
+ *
+ * `repo` is the checkout to run in; it is the function's subject, not a test
+ * hook. The gate is only observable against real commits, so its own tests
+ * build throwaway repositories and point it at those.
+ */
+export async function assertChangesetGate(base: string, repo: string = repoRoot): Promise<string[]> {
   // three-dot (merge-base..HEAD) is the precise diff on a full clone; it
   // needs a merge base, which a shallow CI checkout that fetched only the
   // base SHA does not have. Two-dot (base tip..HEAD) needs none and can only
   // over-report on a stale branch, never under-report — so try precise, then
-  // safe.
-  let diff = Bun.spawnSync(['git', 'diff', '--name-only', `${base}...HEAD`], { cwd: repoRoot })
-  if (!diff.success) {
-    diff = Bun.spawnSync(['git', 'diff', '--name-only', `${base}..HEAD`], { cwd: repoRoot })
-  }
+  // safe. Resolved to one rev rather than written as two diff spellings,
+  // because the version comparison below has to read the same side of the
+  // diff the file list came from: on a stale branch `base`'s tip can carry a
+  // *newer* version than HEAD, which would exempt a run the merge base would
+  // have gated.
+  const mergeBase = Bun.spawnSync(['git', 'merge-base', base, 'HEAD'], { cwd: repo })
+  const diffBase = mergeBase.success ? mergeBase.stdout.toString().trim() : base
+  const diff = Bun.spawnSync(['git', 'diff', '--name-only', `${diffBase}..HEAD`], { cwd: repo })
   if (!diff.success) {
     return [`could not diff against ${base}: ${diff.stderr.toString().trim()} — fetch the base ref before running --check`]
   }
   const changed = diff.stdout.toString().split('\n').filter(Boolean)
   const touched = changed.filter((f) => CATALOG_INPUTS.some((input) => (input.endsWith('/') ? f.startsWith(input) : f === input)))
   if (touched.length === 0) return []
-  // the CLI manifest only moves in the release PR, which is the version bump
-  // itself — no changeset expected there
-  if (touched.every((f) => f === CLI_MANIFEST)) return []
 
-  const changesetDir = join(repoRoot, '.changeset')
+  // The version moved ⇒ exempt. The harm this gate names is a payload
+  // published under an *unchanged* version, and that cannot happen once the
+  // version string differs — so `changeset version`'s own commit is green
+  // whatever else rides with it, including a catalog template and the
+  // changeset that commit just consumed. Note the direction: an exemption
+  // keyed on the version, never a demand that a PR move one. Feature PRs do
+  // not bump versions in this repo, and a gate that asked them to would be
+  // asking for a number `changeset version` writes (RFC 0011 §5).
+  //
+  // The head side is the working tree, matching how `.changeset/` is read
+  // below and how `renderCatalog` reads the version it publishes. Read off
+  // disk rather than through `readContext()`, which applies
+  // GUREN_CATALOG_VERSION_OVERRIDE — a stray env var must not be able to
+  // manufacture an exemption. Compared as strings, because the claim is
+  // literally "the same version string": `compareVersions` returns NaN on a
+  // prerelease or a partial pin, and `NaN !== 0` would exempt every one of
+  // them.
+  const baseVersion = cliVersionAt(diffBase, repo)
+  const headVersion = versionOf(await readFile(join(repo, CLI_MANIFEST), 'utf8').catch(() => ''))
+  if (baseVersion !== undefined && headVersion !== undefined && baseVersion !== headVersion) return []
+  // A side that could not be read is not an exemption — that would be a
+  // silent ungating living inside the audit, where the run still prints
+  // "passed" and no CI annotation covers it. It falls through to the
+  // changeset check instead, so a PR that has a changeset still passes, and
+  // says so in the failure below when one is missing.
+  const unreadable =
+    baseVersion === undefined || headVersion === undefined
+      ? ` The @guren/cli version could not be read on ${baseVersion === undefined ? `the base side (${diffBase})` : 'the working tree'}, so the version-moved exemption could not be evaluated.`
+      : ''
+
+  const changesetDir = join(repo, '.changeset')
   let names: string[] = []
   try {
     names = (await readdir(changesetDir)).filter((n) => n.endsWith('.md') && n !== 'README.md')
@@ -432,7 +491,8 @@ export async function assertChangesetGate(base: string): Promise<string[]> {
   }
   return [
     `catalog inputs changed (${touched.join(', ')}) but no .changeset/*.md names "@guren/cli". ` +
-      'The plugin version is the CLI version and a payload published under an unchanged version is one every installed copy skips forever; add a @guren/cli changeset.',
+      'The plugin version is the CLI version and a payload published under an unchanged version is one every installed copy skips forever; add a @guren/cli changeset.' +
+      unreadable,
   ]
 }
 
