@@ -82,7 +82,7 @@ export async function runArchCheck(options: RunArchCheckOptions): Promise<CheckR
  *
  * Always runtime imports only: these rules take no options, so a set-wide
  * `includeTypeImports` in `guren.arch.ts` deliberately does not reach them
- * — the `ArchRuleSet` JSDoc and the CLI guide both say so.
+ * — documented on `ArchRuleSet.includeTypeImports`.
  */
 async function evaluateDerivedModuleRules(
   cwd: string,
@@ -191,10 +191,7 @@ async function evaluateArchRules(
     filesChecked += 1
     const resolvedImports = dedupeResolvedImports(
       await Promise.all(
-        specifiers.map(async (entry) => ({
-          ...(await resolveImportSpecifier(cwd, absPath, entry.specifier, entry.typeOnly)),
-          typeOnly: entry.typeOnly,
-        })),
+        specifiers.map((entry) => resolveImportSpecifier(cwd, absPath, entry.specifier, entry.typeOnly)),
       ),
     )
     const fromLabel = classifyLayer(relPath, layers) ?? relPath
@@ -206,7 +203,7 @@ async function evaluateArchRules(
           `arch:unresolved:${relPath}:${imp.specifier}`,
           'Architecture boundary',
           'warn',
-          `${relPath} ${imp.typeOnly ? 'imports (type-only)' : 'imports'} '${imp.specifier}', which could not be resolved to a project file.`,
+          `${relPath} ${importVerb(imp)} '${imp.specifier}', which could not be resolved to a project file.`,
           undefined,
           relPath,
         ),
@@ -221,9 +218,6 @@ async function evaluateArchRules(
 
       for (const imp of resolvedImports) {
         if (imp.typeOnly && !includeTypes) continue
-        // naming the kind in the message keeps an includeTypeImports finding
-        // explainable: the file shows no runtime import to point at
-        const importVerb = imp.typeOnly ? 'imports (type-only)' : 'imports'
 
         if (imp.kind === 'package') {
           if (disallowedPackages.has(imp.packageName)) {
@@ -232,7 +226,7 @@ async function evaluateArchRules(
                 `arch:${relPath}:${imp.specifier}:pkg`,
                 'Architecture boundary',
                 severity,
-                `${relPath} (${fromLabel}) ${importVerb} disallowed package '${imp.packageName}'.`,
+                `${relPath} (${fromLabel}) ${importVerb(imp)} disallowed package '${imp.packageName}'.`,
                 rule.message ?? `Avoid importing '${imp.packageName}' directly from '${fromLabel}'.`,
                 relPath,
               ),
@@ -251,7 +245,7 @@ async function evaluateArchRules(
                 `arch:${relPath}:${imp.specifier}:${violatedTarget}`,
                 'Architecture boundary',
                 severity,
-                `${relPath} (${fromLabel}) ${importVerb} '${imp.specifier}', which is in the disallowed layer '${violatedTarget}'.`,
+                `${relPath} (${fromLabel}) ${importVerb(imp)} '${imp.specifier}', which is in the disallowed layer '${violatedTarget}'.`,
                 rule.message ?? `Files in '${fromLabel}' must not import from '${violatedTarget}'.`,
                 relPath,
               ),
@@ -301,10 +295,11 @@ function normalizeToArray(value: string | string[] | undefined): string[] {
   return Array.isArray(value) ? value : [value]
 }
 
-type ResolvedImport =
-  | { specifier: string; kind: 'package'; packageName: string }
-  | { specifier: string; kind: 'file'; fileRelPath: string }
-  | { specifier: string; kind: 'unresolved' }
+type ResolvedImport = { specifier: string; typeOnly: boolean } & (
+  | { kind: 'package'; packageName: string }
+  | { kind: 'file'; fileRelPath: string }
+  | { kind: 'unresolved' }
+)
 
 /**
  * One entry per resolved target, runtime beating type-only: a file that
@@ -314,10 +309,19 @@ type ResolvedImport =
  * spellings of one file, and keying on the string would let a type-only
  * duplicate survive next to its runtime twin.
  */
-function dedupeResolvedImports(
-  imports: Array<ResolvedImport & { typeOnly: boolean }>,
-): Array<ResolvedImport & { typeOnly: boolean }> {
-  const byTarget = new Map<string, ResolvedImport & { typeOnly: boolean }>()
+/**
+ * The verb for a finding's message. Naming the kind keeps an
+ * includeTypeImports finding explainable — the file shows no runtime import
+ * to point at — and one rule keeps the label identical across the unresolved
+ * warning and the violation messages.
+ */
+function importVerb(imp: { typeOnly: boolean }): string {
+  return imp.typeOnly ? 'imports (type-only)' : 'imports'
+}
+
+function dedupeResolvedImports(imports: ResolvedImport[]): ResolvedImport[] {
+  if (imports.length < 2) return imports
+  const byTarget = new Map<string, ResolvedImport>()
   for (const imp of imports) {
     const key =
       imp.kind === 'file' ? `file:${imp.fileRelPath}`
@@ -348,7 +352,7 @@ async function resolveImportSpecifier(
   typeOnly = false,
 ): Promise<ResolvedImport> {
   if (isBareSpecifier(specifier)) {
-    return { specifier, kind: 'package', packageName: packageNameFromSpecifier(specifier) }
+    return { specifier, typeOnly, kind: 'package', packageName: packageNameFromSpecifier(specifier) }
   }
 
   const rawTarget = specifier.startsWith('@/')
@@ -372,19 +376,20 @@ async function resolveImportSpecifier(
     join(base, 'index.ts'),
     join(base, 'index.tsx'),
     join(base, 'index.js'),
-    // A declaration file can satisfy only a type-only import, so the
-    // candidates exist only on that path — for a runtime import a lone
-    // `.d.ts` on disk really is unresolved.
-    ...(typeOnly ? [`${base}.d.ts`, join(base, 'index.d.ts')] : []),
   ]
+  if (typeOnly) {
+    // A declaration file can satisfy only a type-only import — for a runtime
+    // import a lone `.d.ts` on disk really is unresolved.
+    candidates.push(`${base}.d.ts`, join(base, 'index.d.ts'))
+  }
 
   for (const candidate of candidates) {
     if (await pathExists(candidate)) {
-      return { specifier, kind: 'file', fileRelPath: toPosixRelative(cwd, candidate) }
+      return { specifier, typeOnly, kind: 'file', fileRelPath: toPosixRelative(cwd, candidate) }
     }
   }
 
-  return { specifier, kind: 'unresolved' }
+  return { specifier, typeOnly, kind: 'unresolved' }
 }
 
 const KNOWN_EXTENSIONS = ['.ts', '.tsx', '.mts', '.js', '.jsx', '.mjs']
