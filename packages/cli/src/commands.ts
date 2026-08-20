@@ -2270,21 +2270,35 @@ const guidelinesCommand = defineCommand({
   },
 })
 
-function reportAgentHarnessResult(result: AgentHarnessResult): void {
+interface AgentHarnessReportContext {
+  command: 'agent:init' | 'agent:sync'
+  /** Whether this run was invoked with `--prune` — decides how stale files are phrased under a dry run. */
+  pruneRequested?: boolean
+}
+
+function reportAgentHarnessResult(result: AgentHarnessResult, context: AgentHarnessReportContext): void {
+  const wroteVerb = result.dryRun ? 'Would write' : 'Wrote'
+  const replacedVerb = result.dryRun ? 'would replace' : 'replaced'
+
   for (const file of result.written) {
-    consola.success(`${result.dryRun ? 'Would write' : 'Wrote'} ${file}`)
+    consola.success(`${wroteVerb} ${file}`)
   }
   if (result.replaced.length > 0) {
     // The one destructive step, so it gets the one warning: these files held
-    // something else — an older template version or a local edit, which
-    // nothing on disk can tell apart.
+    // something else. Which advice applies depends on who overwrote them —
+    // sync refreshing managed files, or init --force replacing files the user
+    // owns — and the sync-specific advice is exactly wrong for the latter
+    // (CLAUDE.md *is* the user's own file).
+    const advice =
+      context.command === 'agent:sync'
+        ? 'Local edits to framework-managed files do not survive agent:sync. Keep project-specific rules in files of your own — sync never touches files it does not ship.'
+        : 'These files were replaced because --force was passed; the previous contents are gone.'
     consola.warn(
-      `${result.replaced.length} of those ${result.dryRun ? 'would replace' : 'replaced'} existing contents: ${result.replaced.join(', ')}\n` +
-        'Local edits to framework-managed files do not survive agent:sync. Keep project-specific rules in files of your own — sync never touches files it does not ship.',
+      `${result.replaced.length} of those ${replacedVerb} existing contents: ${result.replaced.join(', ')}\n${advice}`,
     )
   }
   if (result.unchanged.length > 0) {
-    consola.info(`${result.unchanged.length} managed file(s) already up to date.`)
+    consola.info(`${result.unchanged.length} file(s) already up to date.`)
   }
   if (result.skipped.length > 0) {
     consola.info(`Skipped ${result.skipped.length} existing file(s): ${result.skipped.join(', ')}`)
@@ -2292,6 +2306,10 @@ function reportAgentHarnessResult(result: AgentHarnessResult): void {
   if (result.stale.length > 0) {
     if (result.pruned) {
       consola.success(`Removed ${result.stale.length} stale managed file(s): ${result.stale.join(', ')}`)
+    } else if (context.pruneRequested && result.dryRun) {
+      consola.info(
+        `Would remove ${result.stale.length} stale managed file(s): ${result.stale.join(', ')}`,
+      )
     } else {
       consola.info(
         `Found ${result.stale.length} file(s) in framework-managed directories that are not part of the current harness: ${result.stale.join(', ')}\n` +
@@ -2339,6 +2357,11 @@ const agentInitCommand = defineCommand({
       type: 'string',
       description: `${AGENT_TARGETS_HELP} Default: claude.`,
     },
+    dryRun: {
+      type: 'boolean',
+      description:
+        'Report what the init would write or replace without changing any file — the preview for --force.',
+    },
     app: {
       type: 'string',
       description: 'Application root directory.',
@@ -2350,11 +2373,35 @@ const agentInitCommand = defineCommand({
       mode: 'init',
       force: Boolean(args.force),
       targets: args.target ? parseTargetArg(args.target) : undefined,
+      dryRun: Boolean(args.dryRun),
     })
-    reportAgentHarnessResult(result)
-    consola.success('AI agent harness is ready. Update it later with `bunx guren agent:sync`.')
+    reportAgentHarnessResult(result, { command: 'agent:init' })
+    consola.success(
+      result.dryRun
+        ? `[dry-run] Nothing was written. Run \`bunx guren agent:init${agentFlagSuffix(args)}\` to apply.`
+        : 'AI agent harness is ready. Update it later with `bunx guren agent:sync`.',
+    )
   },
 })
+
+/**
+ * The flags to append to a dry run's "run this to apply" hint — the applied
+ * command must be the previewed one, so every flag except the dry-run itself
+ * survives into the suggestion.
+ */
+function agentFlagSuffix(args: {
+  force?: boolean
+  target?: string
+  prune?: boolean
+  app?: string
+}): string {
+  return [
+    args.force ? ' --force' : '',
+    args.target ? ` --target ${args.target}` : '',
+    args.prune ? ' --prune' : '',
+    args.app ? ` --app ${args.app}` : '',
+  ].join('')
+}
 
 const agentSyncCommand = defineCommand({
   meta: {
@@ -2372,7 +2419,10 @@ const agentSyncCommand = defineCommand({
       description:
         'Delete files in framework-managed directories that are no longer part of the harness. Without this flag they are only reported.',
     },
-    'dry-run': {
+    // camelCase like every other dryRun in this file (db:migrate, db:seed,
+    // queue:flush, upgrade) — citty's args proxy accepts --dry-run and
+    // --dryRun under either key spelling, so this is consistency, not behavior
+    dryRun: {
       type: 'boolean',
       description: 'Report what the sync would write, replace, or prune without changing any file.',
     },
@@ -2387,12 +2437,12 @@ const agentSyncCommand = defineCommand({
       mode: 'sync',
       targets: args.target ? parseTargetArg(args.target) : undefined,
       prune: Boolean(args.prune),
-      dryRun: Boolean(args['dry-run']),
+      dryRun: Boolean(args.dryRun),
     })
-    reportAgentHarnessResult(result)
+    reportAgentHarnessResult(result, { command: 'agent:sync', pruneRequested: Boolean(args.prune) })
     consola.success(
       result.dryRun
-        ? 'Dry run — nothing was written. Run `bunx guren agent:sync` to apply.'
+        ? `[dry-run] Nothing was written. Run \`bunx guren agent:sync${agentFlagSuffix(args)}\` to apply.`
         : 'Agent harness synced to the latest framework version.',
     )
   },

@@ -109,6 +109,11 @@ export interface AgentHarnessResult {
   mcpMergeHints: Array<{ path: string; snippet: string }>
 }
 
+/** `\r\n` → `\n`, for the up-to-date comparison in the write loop. */
+function normalizeLineEndings(value: string): string {
+  return value.replaceAll('\r\n', '\n')
+}
+
 function toTitleCase(value: string): string {
   const words = value
     .replace(/^@[^/]+\//u, '')
@@ -210,22 +215,33 @@ async function detectInstalledComponents(
  * because a Windows file ID is 64 bits and would not survive a `number` — two
  * distinct NTFS files could compare equal and spare a real leftover.
  *
- * A failed `lstat` leaves the two indistinguishable, so it answers "same": the
- * entry is left alone rather than deleted on a claim that could not be
- * established. Nothing is lost by that on the one plausible path — a directory
- * readable but not searchable lists its names and refuses to stat them, and
- * `rm` would be refused there too.
+ * One name that plainly does not exist (ENOENT) answers "different": two
+ * names, one of which has no directory entry, cannot be one entry — and on a
+ * dry run the planned side may legitimately not exist yet, which is exactly
+ * when the real `--prune` *would* report the scanned leftover. Answering
+ * "same" there made `--prune --dry-run` preview a stale list the real run
+ * would not produce.
+ *
+ * Any other `lstat` failure leaves the two indistinguishable, so it answers
+ * "same": the entry is left alone rather than deleted on a claim that could
+ * not be established. Nothing is lost by that on the one plausible path — a
+ * directory readable but not searchable lists its names and refuses to stat
+ * them, and `rm` would be refused there too.
  */
 async function isSameFile(cwd: string, left: string, right: string): Promise<boolean> {
-  try {
-    const [leftStat, rightStat] = await Promise.all([
-      lstat(join(cwd, left), { bigint: true }),
-      lstat(join(cwd, right), { bigint: true }),
-    ])
-    return leftStat.dev === rightStat.dev && leftStat.ino === rightStat.ino
-  } catch {
-    return true
+  const probe = (relPath: string) =>
+    lstat(join(cwd, relPath), { bigint: true }).then(
+      (stats) => ({ stats, code: undefined }),
+      (error: unknown) => ({ stats: undefined, code: (error as NodeJS.ErrnoException)?.code }),
+    )
+  const [leftStat, rightStat] = await Promise.all([probe(left), probe(right)])
+  if (leftStat.stats && rightStat.stats) {
+    return leftStat.stats.dev === rightStat.stats.dev && leftStat.stats.ino === rightStat.stats.ino
   }
+  if (leftStat.code === 'ENOENT' || rightStat.code === 'ENOENT') {
+    return false
+  }
+  return true
 }
 
 /**
@@ -233,10 +249,10 @@ async function isSameFile(cwd: string, left: string, right: string): Promise<boo
  * plan does not write. Planned files (managed or user-owned) are excluded
  * via the full planned path set, so a future planner change cannot turn its
  * own output into a prune candidate. A scanned entry that matches a planned
- * path by case alone is settled by `isSameFile` rather than by string — every
- * planned path exists on disk once the write loop has run (it either wrote the
- * file or skipped it because it was already there), so the identity check has
- * both sides to compare.
+ * path by case alone is settled by `isSameFile` rather than by string. After
+ * a real write loop both sides exist to compare; under `dryRun` the planned
+ * side may not, and `isSameFile` answers "different" for a missing name so
+ * the dry run previews the same stale list the real run would produce.
  *
  * Exported for tests: `retiredSkills` defaults to `RETIRED_CANONICAL_SKILLS`,
  * which is empty, so the retired-name path has no other way to be exercised.
@@ -384,11 +400,22 @@ export async function installAgentHarness(options: AgentHarnessOptions = {}): Pr
     // Already at the planned contents — writing would change nothing, so
     // don't, and don't report it as a write either. What's left in `written`
     // is the run's actual delta, which is what makes `replaced` trustworthy:
-    // every overwrite it names really discarded something. An unreadable file
-    // reads as differing, so the failure surfaces at the write below, where it
-    // always did.
-    const existing = exists ? await readIfExists(cwd, file.path).catch(() => null) : null
-    if (existing === file.content) {
+    // every overwrite it names really discarded something.
+    //
+    // A direct read, not `readIfExists`: the `exists` gate already answered
+    // the existence question, and the compare wants "differs" for a file it
+    // cannot read — on a real run that failure then surfaces at the write; on
+    // a dry run the file is reported as a would-replace, the conservative
+    // claim for content nothing could inspect.
+    //
+    // The comparison ignores line-ending differences. A checkout that
+    // normalizes to CRLF (core.autocrlf, editor hooks) would otherwise list
+    // every managed file under the replaced warning on every sync, forever —
+    // noise that trains users to ignore the one warning that matters. A
+    // CRLF-only variant counts as up to date and is left as the checkout
+    // made it.
+    const existing = exists ? await readFile(destPath, 'utf8').catch(() => null) : null
+    if (existing !== null && normalizeLineEndings(existing) === normalizeLineEndings(file.content)) {
       unchanged.push(file.path)
       continue
     }
