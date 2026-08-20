@@ -433,7 +433,10 @@ export async function assertChangesetGate(base: string, repo: string = repoRoot)
   // because the version comparison below has to read the same side of the
   // diff the file list came from: on a stale branch `base`'s tip can carry a
   // *newer* version than HEAD, which would exempt a run the merge base would
-  // have gated.
+  // have gated. The shallow fallback gives that precision up — it reads the
+  // base tip — which is safe for the two events CI passes a base for, because
+  // both name a specific commit rather than a moving branch: `push` sends the
+  // tip its own push replaced, and `pull_request` sends `base.sha`.
   // Empty output counts as a failure, not as a rev. Today's git exits
   // non-zero when there is no merge base, so this is belt-and-braces — but
   // the failure it prevents is silent rather than loud: an empty left side

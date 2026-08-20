@@ -513,6 +513,33 @@ describe('audit: changeset gate', () => {
     expect(problems[0]).toContain('README.md.tpl')
   })
 
+  it('exempts the release commit through a shallow-fetched base ref — the shape CI runs', async () => {
+    // The push event, reproduced: a depth-1 checkout of the tip, and the
+    // previous tip fetched by SHA into refs/audit-base at depth 1. There is
+    // no merge base, so the gate diffs against the ref name — and then has to
+    // read `packages/cli/package.json` out of it. Nothing else here exercises
+    // `git show <shallow-ref>:<path>`, and if that could not resolve, every
+    // release commit would be red for the reason this change removed.
+    const { repo: origin, base } = await baseRepo('2.7.1')
+    await commit(origin, 'reword the catalog', {
+      'packages/cli/templates/agent-catalog/README.md.tpl': 'after\n',
+      '.changeset/tidy-pandas-shout.md': CHANGESET,
+    })
+    await commit(origin, 'chore: version packages to 2.8.0', {
+      [CLI_MANIFEST]: manifest('2.8.0'),
+      '.changeset/tidy-pandas-shout.md': null,
+    })
+    // servers refuse a by-SHA want unless they allow it; GitHub does
+    git(origin, 'config', 'uploadpack.allowAnySHA1InWant', 'true')
+
+    const shallow = join(scratch, `repo-${++repoCount}-shallow`)
+    git(scratch, 'clone', '--quiet', '--depth', '1', `file://${origin}`, shallow)
+    git(shallow, 'fetch', '--no-tags', '--depth=1', 'origin', `${base}:refs/audit-base`)
+    expect(Bun.spawnSync(['git', 'merge-base', 'refs/audit-base', 'HEAD'], { cwd: shallow }).success).toBe(false)
+
+    expect(await assertChangesetGate('refs/audit-base', shallow)).toEqual([])
+  })
+
   it('reports a base ref it cannot resolve rather than passing', async () => {
     const { repo } = await baseRepo()
     const problems = await assertChangesetGate('refs/does-not-exist', repo)
