@@ -316,6 +316,150 @@ export default {
     }
   })
 
+  const TYPE_IMPORTS_LAYOUT = async (dir: string, archConfig: string): Promise<void> => {
+    await writeFile(join(dir, 'guren.arch.ts'), archConfig, 'utf8')
+    await mkdir(join(dir, 'app/Domain'), { recursive: true })
+    await mkdir(join(dir, 'app/Http/Controllers'), { recursive: true })
+    await writeFile(
+      join(dir, 'app/Http/Controllers/PostController.ts'),
+      `export interface PostDto { id: number }\nexport class PostController {}`,
+      'utf8',
+    )
+  }
+
+  it('flags a type-only import when the rule sets includeTypeImports', async () => {
+    const workspace = await createTempWorkspace('guren-cli-arch-type-optin-')
+    try {
+      await TYPE_IMPORTS_LAYOUT(
+        workspace.dir,
+        `export default {
+  layers: { domain: 'app/Domain/**', http: 'app/Http/**' },
+  rules: [{ from: 'domain', disallow: ['http'], includeTypeImports: true }],
+}`,
+      )
+      await writeFile(
+        join(workspace.dir, 'app/Domain/OrderService.ts'),
+        `import type { PostDto } from '../Http/Controllers/PostController'\nexport class OrderService {\n  dto?: PostDto\n}`,
+        'utf8',
+      )
+
+      const results = await runArchCheck({ cwd: workspace.dir, cache: new ParseCache() })
+      const violation = results.find((r) => r.filePath === 'app/Domain/OrderService.ts')
+      expect(violation).toBeDefined()
+      expect(violation!.status).toBe('fail')
+      expect(violation!.message).toContain('(type-only)')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('honors a set-wide includeTypeImports default, with the rule able to opt back out', async () => {
+    const workspace = await createTempWorkspace('guren-cli-arch-type-global-')
+    try {
+      await TYPE_IMPORTS_LAYOUT(
+        workspace.dir,
+        `export default {
+  layers: { domain: 'app/Domain/**', queries: 'src/queries/**', http: 'app/Http/**' },
+  includeTypeImports: true,
+  rules: [
+    { from: 'domain', disallow: ['http'] },
+    { from: 'src/queries/**', disallow: ['http'], includeTypeImports: false },
+  ],
+}`,
+      )
+      await writeFile(
+        join(workspace.dir, 'app/Domain/OrderService.ts'),
+        `import type { PostDto } from '../Http/Controllers/PostController'\nexport class OrderService {\n  dto?: PostDto\n}`,
+        'utf8',
+      )
+      await mkdir(join(workspace.dir, 'src/queries'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'src/queries/metrics.ts'),
+        `import type { PostDto } from '../../app/Http/Controllers/PostController'\nexport const rows: PostDto[] = []`,
+        'utf8',
+      )
+
+      const results = await runArchCheck({ cwd: workspace.dir, cache: new ParseCache() })
+      // the global default reaches the rule that says nothing...
+      expect(results.some((r) => r.filePath === 'app/Domain/OrderService.ts' && r.status === 'fail')).toBe(true)
+      // ...and the explicit opt-out wins over it
+      expect(results.some((r) => r.filePath === 'src/queries/metrics.ts')).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('sees an import(...) in a type position once type imports are included', async () => {
+    const workspace = await createTempWorkspace('guren-cli-arch-type-importtype-')
+    try {
+      await TYPE_IMPORTS_LAYOUT(
+        workspace.dir,
+        `export default {
+  layers: { domain: 'app/Domain/**', http: 'app/Http/**' },
+  rules: [{ from: 'domain', disallow: ['http'], includeTypeImports: true }],
+}`,
+      )
+      // no import statement at all — the only reference is the inline type
+      await writeFile(
+        join(workspace.dir, 'app/Domain/OrderService.ts'),
+        `export interface DashboardData {\n  rows: import('../Http/Controllers/PostController').PostDto[]\n}`,
+        'utf8',
+      )
+
+      const results = await runArchCheck({ cwd: workspace.dir, cache: new ParseCache() })
+      const violation = results.find((r) => r.filePath === 'app/Domain/OrderService.ts')
+      expect(violation).toBeDefined()
+      expect(violation!.status).toBe('fail')
+      expect(violation!.message).toContain('(type-only)')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('leaves an import(...) type position invisible without the opt-in, as documented', async () => {
+    const workspace = await createTempWorkspace('guren-cli-arch-type-importtype-off-')
+    try {
+      await TYPE_IMPORTS_LAYOUT(workspace.dir, ARCH_CONFIG)
+      await writeFile(
+        join(workspace.dir, 'app/Domain/OrderService.ts'),
+        `export interface DashboardData {\n  rows: import('../Http/Controllers/PostController').PostDto[]\n}`,
+        'utf8',
+      )
+
+      const results = await runArchCheck({ cwd: workspace.dir, cache: new ParseCache() })
+      expect(results.some((r) => r.filePath === 'app/Domain/OrderService.ts')).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('reports one runtime violation when the same module is imported both ways', async () => {
+    const workspace = await createTempWorkspace('guren-cli-arch-type-dedupe-')
+    try {
+      await TYPE_IMPORTS_LAYOUT(
+        workspace.dir,
+        `export default {
+  layers: { domain: 'app/Domain/**', http: 'app/Http/**' },
+  rules: [{ from: 'domain', disallow: ['http'], includeTypeImports: true }],
+}`,
+      )
+      await writeFile(
+        join(workspace.dir, 'app/Domain/OrderService.ts'),
+        `import { PostController } from '../Http/Controllers/PostController'\n`
+        + `import type { PostDto } from '../Http/Controllers/PostController'\n`
+        + `export class OrderService {\n  dto?: PostDto\n  ctrl = PostController\n}`,
+        'utf8',
+      )
+
+      const results = await runArchCheck({ cwd: workspace.dir, cache: new ParseCache() })
+      const violations = results.filter((r) => r.filePath === 'app/Domain/OrderService.ts')
+      expect(violations).toHaveLength(1)
+      expect(violations[0]!.message).not.toContain('(type-only)')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('restricts checked files to the provided changedFiles set', async () => {
     const workspace = await createTempWorkspace('guren-cli-arch-changed-')
     try {

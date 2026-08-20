@@ -104,7 +104,7 @@ async function evaluateDerivedModuleRules(
 
     filesChecked += 1
     const resolvedImports = await Promise.all(
-      specifiers.map((specifier) => resolveImportSpecifier(cwd, absPath, specifier)),
+      specifiers.map((entry) => resolveImportSpecifier(cwd, absPath, entry.specifier)),
     )
     const importerModule = moduleNameFromRelPath(relPath)
 
@@ -170,12 +170,21 @@ async function evaluateArchRules(
     const parsed = await cache.get(absPath)
     if (!parsed) continue
 
-    const specifiers = extractImportSpecifiers(parsed.ast.program.body)
+    // Type-only specifiers are only extracted (and the type-position walk
+    // only paid for) when some applicable rule will actually judge them.
+    const ruleIncludesTypes = (rule: ArchRule): boolean =>
+      rule.includeTypeImports ?? config.includeTypeImports ?? false
+    const wantsTypes = applicableRules.some(ruleIncludesTypes)
+
+    const specifiers = extractImportSpecifiers(parsed.ast.program.body, wantsTypes)
     if (specifiers.length === 0) continue
 
     filesChecked += 1
     const resolvedImports = await Promise.all(
-      specifiers.map((specifier) => resolveImportSpecifier(cwd, absPath, specifier)),
+      specifiers.map(async (entry) => ({
+        ...(await resolveImportSpecifier(cwd, absPath, entry.specifier)),
+        typeOnly: entry.typeOnly,
+      })),
     )
     const fromLabel = classifyLayer(relPath, layers) ?? relPath
 
@@ -199,8 +208,14 @@ async function evaluateArchRules(
       const disallowedTargets = normalizeToArray(rule.disallow)
       const disallowedPackages = new Set(normalizeToArray(rule.disallowPackages))
       const severity: CheckStatus = rule.severity ?? 'fail'
+      const includeTypes = ruleIncludesTypes(rule)
 
       for (const imp of resolvedImports) {
+        if (imp.typeOnly && !includeTypes) continue
+        // naming the kind in the message keeps an includeTypeImports finding
+        // explainable: the file shows no runtime import to point at
+        const importVerb = imp.typeOnly ? 'imports (type-only)' : 'imports'
+
         if (imp.kind === 'package') {
           if (disallowedPackages.has(imp.packageName)) {
             results.push(
@@ -208,7 +223,7 @@ async function evaluateArchRules(
                 `arch:${relPath}:${imp.specifier}:pkg`,
                 'Architecture boundary',
                 severity,
-                `${relPath} (${fromLabel}) imports disallowed package '${imp.packageName}'.`,
+                `${relPath} (${fromLabel}) ${importVerb} disallowed package '${imp.packageName}'.`,
                 rule.message ?? `Avoid importing '${imp.packageName}' directly from '${fromLabel}'.`,
                 relPath,
               ),
@@ -227,7 +242,7 @@ async function evaluateArchRules(
                 `arch:${relPath}:${imp.specifier}:${violatedTarget}`,
                 'Architecture boundary',
                 severity,
-                `${relPath} (${fromLabel}) imports '${imp.specifier}', which is in the disallowed layer '${violatedTarget}'.`,
+                `${relPath} (${fromLabel}) ${importVerb} '${imp.specifier}', which is in the disallowed layer '${violatedTarget}'.`,
                 rule.message ?? `Files in '${fromLabel}' must not import from '${violatedTarget}'.`,
                 relPath,
               ),
@@ -351,36 +366,94 @@ async function pathExists(absPath: string): Promise<boolean> {
   }
 }
 
+interface ExtractedSpecifier {
+  specifier: string
+  /**
+   * The import compiles away entirely: a whole-declaration `import type` /
+   * `export type ... from`, or an `import('...')` in a type position. Rules
+   * skip these unless `includeTypeImports` says otherwise.
+   */
+  typeOnly: boolean
+}
+
 /**
- * Top-level `import ... from '...'` and `export ... from '...'` specifiers
- * only. Dynamic `import()` is intentionally not followed (scope frozen by
- * RFC 0002 — "static import / export ... from specifiers").
+ * Top-level `import ... from '...'` and `export ... from '...'` specifiers.
+ * Dynamic `import()` *expressions* are intentionally not followed (scope
+ * frozen by RFC 0002 — "static import / export ... from specifiers").
  *
  * Whole-declaration type-only imports/exports (`import type { X } from
- * '...'`, `export type { X } from '...'`) are skipped — they compile away
- * entirely, so they create no runtime coupling across a boundary. Sharing a
- * type (a DTO, a props interface) across layers is a common, benign
- * pattern; flagging it would be exactly the kind of plausible-but-wrong
- * violation the severity policy above exists to avoid. A *mixed*
- * declaration (`import { type X, Y } from '...'`) still counts — some
- * binding in it (`Y`) is a real runtime import, so the boundary crossing
- * is real regardless of `X`.
+ * '...'`, `export type { X } from '...'`) are marked `typeOnly` — they
+ * compile away entirely, so they create no runtime coupling across a
+ * boundary. Sharing a type (a DTO, a props interface) across layers is a
+ * common, benign pattern; flagging it by default would be exactly the kind
+ * of plausible-but-wrong violation the severity policy above exists to
+ * avoid. A *mixed* declaration (`import { type X, Y } from '...'`) counts
+ * as runtime — some binding in it (`Y`) is a real runtime import, so the
+ * boundary crossing is real regardless of `X`.
+ *
+ * With `includeTypeOnly`, type-only specifiers are returned too, and the
+ * whole AST is additionally walked for `import('...')` in type positions
+ * (`TSImportType`) — the one specifier form that lives outside the
+ * top-level statements. Only files where some applicable rule opted into
+ * type imports pay for that walk.
  */
-function extractImportSpecifiers(body: Statement[]): string[] {
-  const specifiers: string[] = []
+function extractImportSpecifiers(body: Statement[], includeTypeOnly = false): ExtractedSpecifier[] {
+  const specifiers: ExtractedSpecifier[] = []
 
   for (const node of body) {
     if (node.type === 'ImportDeclaration') {
-      if (node.importKind === 'type') continue
-      specifiers.push(node.source.value)
+      specifiers.push({ specifier: node.source.value, typeOnly: node.importKind === 'type' })
     } else if (
       (node.type === 'ExportNamedDeclaration' || node.type === 'ExportAllDeclaration') &&
       node.source
     ) {
-      if (node.exportKind === 'type') continue
-      specifiers.push(node.source.value)
+      specifiers.push({ specifier: node.source.value, typeOnly: node.exportKind === 'type' })
     }
   }
 
-  return specifiers
+  if (!includeTypeOnly) {
+    return specifiers.filter((entry) => !entry.typeOnly)
+  }
+
+  collectTsImportTypes(body, specifiers)
+
+  // One entry per specifier, runtime beating type-only: a file that imports
+  // a module for real and also names it in a type position has one boundary
+  // crossing, and it is a runtime one.
+  const bySpecifier = new Map<string, ExtractedSpecifier>()
+  for (const entry of specifiers) {
+    const existing = bySpecifier.get(entry.specifier)
+    if (!existing || (existing.typeOnly && !entry.typeOnly)) {
+      bySpecifier.set(entry.specifier, entry)
+    }
+  }
+  return [...bySpecifier.values()]
+}
+
+/**
+ * `import('...').X` in type positions, anywhere in the file. `@babel/parser`
+ * ships no traversal API and the node can sit arbitrarily deep in a type
+ * annotation, so this is a structural walk: every nested object or array is
+ * visited, and `TSImportType` nodes contribute their literal argument. The
+ * AST is a tree (no parent links), so plain recursion terminates.
+ */
+function collectTsImportTypes(node: unknown, out: ExtractedSpecifier[]): void {
+  if (Array.isArray(node)) {
+    for (const item of node) collectTsImportTypes(item, out)
+    return
+  }
+  if (node === null || typeof node !== 'object') return
+
+  const candidate = node as { type?: unknown; argument?: { type?: unknown; value?: unknown } }
+  if (
+    candidate.type === 'TSImportType' &&
+    candidate.argument?.type === 'StringLiteral' &&
+    typeof candidate.argument.value === 'string'
+  ) {
+    out.push({ specifier: candidate.argument.value, typeOnly: true })
+  }
+
+  for (const value of Object.values(node)) {
+    if (value !== null && typeof value === 'object') collectTsImportTypes(value, out)
+  }
 }

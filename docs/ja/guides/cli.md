@@ -210,6 +210,15 @@ export default defineArchRules({
 
 各ルールの `from` と `disallow` には、上で定義したレイヤー名か、インラインの glob を指定できます。既存コードベースに新しい境界を導入する際は `severity: 'warn'` から始め、違反がゼロになったら外す(デフォルトの `'fail'` に戻す)運用が安全です。
 
+ルールが解析するのは実行時の依存です。型限定のimport(`import type { X } from '...'`・`export type { X } from '...'`・型位置の `import('...').X`)はコンパイルで消えるため、デフォルトでは対象外です。DTOやpropsのinterfaceをレイヤーをまたいで共有するのは通常問題ないからです。型レベルでも守りたい境界には、ルール(またはセット全体)に `includeTypeImports: true` を指定してください(ルール側の指定が優先されます):
+
+```typescript
+rules: [
+  // クエリ層への型依存は、実行時依存まであと一歩のリファクタリング距離にある。
+  { from: 'frontend', disallow: ['queries'], includeTypeImports: true },
+]
+```
+
 AIコーディングエージェントや大規模アプリで実用的に使うための2つのフラグ:
 
 ```bash

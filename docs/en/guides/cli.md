@@ -212,6 +212,15 @@ export default defineArchRules({
 
 Each rule's `from` and `disallow` accept either a layer name declared above or an inline glob. Add `severity: 'warn'` while rolling out a new boundary on an existing codebase, then drop it (defaulting to `'fail'`) once violations reach zero.
 
+Rules analyse *runtime* dependencies. Type-only imports (`import type { X } from '...'`, `export type { X } from '...'`, and `import('...').X` in a type position) compile away, so they are skipped by default — sharing a DTO or a props interface across layers is usually fine. For a boundary that should hold at the type level too, set `includeTypeImports: true` on the rule (or once on the whole set; a rule's own setting wins):
+
+```typescript
+rules: [
+  // Even a type dependency on the query layer is one refactor away from a runtime one.
+  { from: 'frontend', disallow: ['queries'], includeTypeImports: true },
+]
+```
+
 Two flags make this practical for AI coding agents and large apps:
 
 ```bash
