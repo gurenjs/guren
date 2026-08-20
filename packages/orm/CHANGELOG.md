@@ -1,5 +1,37 @@
 # @guren/orm
 
+## 2.6.0
+
+### Minor Changes
+
+- 50bdfec: Report an empty migrations folder from `db:migrate` instead of "Database migrations completed."
+
+  `migrateDatabase()` returns before it touches a connection when the folder holds no drizzle-kit migrations, so the CLI reported success for a run that applied nothing and created no database. On a fresh app that is the last green line before `db:seed` fails on a missing table, far from the cause.
+
+  The driver handles now resolve a `MigrationRunSummary` (`migrationsFolder`, `migrationsFound`, `looseSqlFiles`) from `migrateDatabase()` and `resetDatabase()`, and `db:migrate` warns `No migrations found in db/migrations — nothing was applied.`, pointing at `bun run db:make`. `db:reset` and `db:fresh` report the same run, where the ✔ was worse: they drop every table first, so the reported success described a database that had just been emptied. All three now carry `migrationsFound` and `looseSqlFiles` in their `--json` output whenever the app's ORM reports them. A folder holding loose `.sql` files gets the warning without the `db:make` hint — those migrations exist, they are just in a shape the drizzle migrator skips, which the ORM already explains. The command still exits 0, and a `config/database.ts` whose migration function reports nothing keeps the previous message.
+
+  `create-guren-app` also names `db:make` in the closing reminder it prints after scaffolding authentication, the one step of that sequence the reminder left out.
+
+- c8489f9: Report an empty seeders folder from `db:seed` instead of "Database seeders executed."
+
+  `runSeeders()` loops over zero seeders without complaint, so the CLI reported success for a run that wrote nothing. The scaffolded `db/seeders/` ships holding only `.gitkeep`, which makes this the next green line after an empty `db/migrations` on the fresh-app path — the same defect class, one step further from the cause.
+
+  `runSeeders()` and every driver's `seedDatabase()` now resolve a `SeederRunSummary` (`seedersFolder`, `seedersRan`, `filesWithoutSeeder`), and `db:seed` warns `No seeders found in db/seeders — nothing was seeded.`, pointing at `bunx guren make:seeder`. A folder whose files exported no seeder gets the warning without that hint and is told what a seeder module must export instead — those files exist, they are just in a shape the loader skips. `db:reset --seed` and `db:fresh --seed` report the same run, where the ✔ claimed a database that had just been emptied and not repopulated; when both halves came back empty the migration warning wins, since seeding a schema that was never re-applied could not have worked anyway. All three carry `seedersRan` and `filesWithoutSeeder` in their `--json` output whenever the app's ORM reports them.
+
+  `db:reset --seed` and `db:fresh --seed` also refuse up front, before dropping anything, when the app's `config/database.ts` exports no seed function at all: they previously emptied the database and then reported it seeded. `db:seed` already refused the same config.
+
+  The commands still exit 0 on the empty-folder diagnostic — it is not a failure — and a `config/database.ts` whose seed function reports nothing keeps the previous message.
+
+- 6cbb012: Report a missing `db/seeders/` from `db:seed` as "no seeders found" instead of a database failure
+
+  `collectSeeders()` read the folder with no handling for its absence, so an app that never created `db/seeders/` had the ENOENT propagate out of `runSeeders()` into the driver's `seedDatabase()`. In `createPostgresDatabase()`, `createMySqlDatabase()` and `createSqliteDatabase()` that means `seedFailure()` wrapped it as `Failed to seed the database: ENOENT: no such file or directory, scandir '/…/db/seeders'` — a filesystem error dressed as a database failure; `createAwsDataApiDatabase()` does not wrap, so the raw ENOENT surfaced. Either way the report blamed the database for a folder that simply holds no seeders.
+
+  **Behavior change to a Stable API:** `runSeeders()` (and `loadSeeders()`) no longer reject when the directory does not exist. `runSeeders()` now resolves a `SeederRunSummary` with `seedersRan: 0` and `filesWithoutSeeder: 0`, and `loadSeeders()` returns `[]`. `db:seed` therefore reports the missing folder with the warning it already prints for an empty one — `No seeders found in db/seeders — nothing was seeded.`, pointing at `bunx guren make:seeder` — and exits 0. This matches `inspectMigrationsFolder()`, which has always reported a missing `db/migrations` as `migrationsFound: 0` rather than throwing. Callers that relied on the rejection to detect an absent folder must now check the folder themselves: the summary cannot tell them apart, since `seedersRan: 0` describes an empty folder just as well.
+
+  Only absence is softened. A path that exists but is not a directory (`ENOTDIR`), or one the process may not read (`EACCES`), still throws — both are misconfigurations, not folders holding no seeders. A folder that was never _configured_ stays an error too: every driver's `seedDatabase()` still throws `No seeders folder configured. Provide "seedersFolder" when calling create<Driver>Database().` when the app passed no `seedersFolder` at all.
+
+  `examples/api` drops the workaround this cost it — it probed the folder with `existsSync` and passed `seedersFolder: undefined`, then guarded on the same flag again at boot.
+
 ## 2.5.0
 
 ### Minor Changes

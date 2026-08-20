@@ -1,5 +1,30 @@
 # web
 
+## 0.1.20
+
+### Patch Changes
+
+- Updated dependencies [14a0b2d]
+- Updated dependencies [08203e5]
+- Updated dependencies [cdf34f8]
+- Updated dependencies [fc22c89]
+- Updated dependencies [d7f3034]
+- Updated dependencies [5923bfe]
+- Updated dependencies [2faefea]
+- Updated dependencies [630b908]
+- Updated dependencies [6ea8279]
+- Updated dependencies [50bdfec]
+- Updated dependencies [c8489f9]
+- Updated dependencies [6cbb012]
+- Updated dependencies [4464071]
+- Updated dependencies [8c19ac3]
+- Updated dependencies [ec57e11]
+- Updated dependencies [4979e05]
+- Updated dependencies [a59d0b6]
+  - @guren/cli@2.7.0
+  - @guren/core@1.8.0
+  - @guren/orm@2.6.0
+
 ## 0.1.19
 
 ### Patch Changes
