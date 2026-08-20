@@ -10,14 +10,14 @@ const { renderMarkdownToHtml, rewriteDocLink } = await import(
 describe('renderMarkdownToHtml', () => {
   it('renders alert blocks as diagnostic rows', async () => {
     const html = await renderMarkdownToHtml('> [!NOTE]\n> Hello there')
-    expect(html).toContain('docs-alert--note')
-    expect(html).toContain('<p class="docs-alert__label">note</p>')
+    expect(html).toContain('guren-markdown-alert--note')
+    expect(html).toContain('<p class="guren-markdown-alert__label">note</p>')
   })
 
   it('maps warning directives onto the rule key', async () => {
     const html = await renderMarkdownToHtml('> [!WARNING]\n> Careful')
-    expect(html).toContain('docs-alert--warning')
-    expect(html).toContain('<p class="docs-alert__label">rule</p>')
+    expect(html).toContain('guren-markdown-alert--warning')
+    expect(html).toContain('<p class="guren-markdown-alert__label">rule</p>')
   })
 
   it('renders code blocks with shiki', async () => {

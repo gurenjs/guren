@@ -505,7 +505,7 @@ body.docs-theme {
    output: a mono key in a fixed gutter, a hairline, ordinary body text.
    Keys: note / ok / rule / never (the renderer maps GitHub's five
    directives onto them). ─── */
-.docs-alert {
+.guren-markdown-alert {
   display: grid;
   grid-template-columns: 84px 1fr;
   gap: 14px;
@@ -516,12 +516,12 @@ body.docs-theme {
 }
 
 /* stacked rows share one hairline */
-.docs-alert + .docs-alert {
+.guren-markdown-alert + .guren-markdown-alert {
   border-top: 0;
   margin-top: -1.25rem;
 }
 
-.docs-alert__label {
+.guren-markdown-alert__label {
   margin: 0;
   font-family: var(--g-font-mono);
   font-size: 0.8rem;
@@ -530,21 +530,21 @@ body.docs-theme {
   text-align: right;
 }
 
-.docs-alert__body {
+.guren-markdown-alert__body {
   font-size: 0.95rem;
   color: var(--docs-text-primary);
 }
 
-.docs-alert__body > :first-child { margin-top: 0; }
-.docs-alert__body > :last-child { margin-bottom: 0; }
+.guren-markdown-alert__body > :first-child { margin-top: 0; }
+.guren-markdown-alert__body > :last-child { margin-bottom: 0; }
 
-.docs-alert--note .docs-alert__label,
-.docs-alert--tip .docs-alert__label { color: var(--g-ok); }
+.guren-markdown-alert--note .guren-markdown-alert__label,
+.guren-markdown-alert--tip .guren-markdown-alert__label { color: var(--g-ok); }
 
-.docs-alert--important .docs-alert__label,
-.docs-alert--warning .docs-alert__label { color: var(--g-warn); }
+.guren-markdown-alert--important .guren-markdown-alert__label,
+.guren-markdown-alert--warning .guren-markdown-alert__label { color: var(--g-warn); }
 
-.docs-alert--caution .docs-alert__label { color: var(--g-danger); }
+.guren-markdown-alert--caution .guren-markdown-alert__label { color: var(--g-danger); }
 
 /* ─── Copy button — sits on the themeless ink surface, so it is themeless
    too ─── */
