@@ -42,9 +42,11 @@ import { generatePageTypes } from '../src/pages-types'
  * The syntax gate for every generator: render representative outputs and
  * require each generated .ts/.tsx to parse. This is the check that covers the
  * flag-dependent builders too — the files under templates/scaffold/ get the
- * stronger `typecheck:templates` pass (tsconfig.templates.json), but a
- * builder's output exists only at generation time, so this is the one place
- * its syntax can fail before a user's editor does.
+ * stronger `typecheck:templates` pass (tsconfig.templates.json), and
+ * make:auth's rendered builder output gets its own compile gate in
+ * scaffold-builder-typecheck.test.ts, but every other builder's output exists
+ * only at generation time, so this is the one place its syntax can fail
+ * before a user's editor does.
  *
  * The covered set is asserted against `builtinSubCommands`, so a new `make:*`
  * command fails here until it either joins the matrix or names its reason in
