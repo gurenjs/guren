@@ -1,9 +1,10 @@
 import { posix } from 'node:path'
 
-import { Marked, type Tokens } from 'marked'
-import { markedHighlight } from 'marked-highlight'
 import { codeToHtml } from 'shiki'
 
+import { createMarkdownRenderer } from '@guren/plugin-markdown'
+
+import { MARKDOWN_CODE_THEMES, SITE_ALERT_LABELS } from '../../config/markdown.js'
 import { docPaths, GITHUB_URL } from '../../config/site.js'
 import {
   docCategoryDir,
@@ -15,31 +16,7 @@ import {
   type DocLocale,
 } from './docs-config.js'
 
-// The code surface is themeless ink (Guren UI): app.css always applies the
-// dark palette from the `--shiki-dark` custom properties and pins the
-// background to the ink token. The output stays dual-theme so it is
-// interchangeable with the blog pipeline's stored HTML (PostRenderer.ts).
-const DOCS_THEMES = {
-  light: 'rose-pine-dawn',
-  dark: 'rose-pine-moon',
-} as const
 const DEFAULT_LANGUAGE = 'text'
-const ALERT_DIRECTIVE_PATTERN = /^\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*/iu
-
-type AlertType = 'note' | 'tip' | 'important' | 'warning' | 'caution'
-
-// Callouts render as diagnostic rows (Guren UI): GitHub's five directives
-// map onto the note / ok / rule / never key vocabulary of `guren check`.
-const ALERT_METADATA: Record<
-  AlertType,
-  { label: string; classSuffix: string }
-> = {
-  note: { label: 'note', classSuffix: 'note' },
-  tip: { label: 'ok', classSuffix: 'tip' },
-  important: { label: 'rule', classSuffix: 'important' },
-  warning: { label: 'rule', classSuffix: 'warning' },
-  caution: { label: 'never', classSuffix: 'caution' },
-}
 
 export interface DocLinkContext {
   locale: DocLocale
@@ -98,137 +75,32 @@ export function rewriteDocLink(href: string, context: DocLinkContext): string {
   return `${GITHUB_URL}/blob/main/${joined}${suffix}`
 }
 
+// Docs fences carry arbitrary languages, so this pipeline keeps the full
+// shiki entry instead of the plugin's fine-grained adapter. That is fine
+// here because docs render at build time (scripts/prerender-docs.ts) — the
+// Worker bundle never sees this import.
+async function highlightDocsCode(code: string, lang?: string): Promise<string> {
+  const normalizedLang = lang?.trim() || DEFAULT_LANGUAGE
+  try {
+    return await codeToHtml(code, { lang: normalizedLang, themes: MARKDOWN_CODE_THEMES, defaultColor: 'light' })
+  } catch {
+    return await codeToHtml(code, { lang: DEFAULT_LANGUAGE, themes: MARKDOWN_CODE_THEMES, defaultColor: 'light' })
+  }
+}
+
 export async function renderMarkdownToHtml(
   markdown: string,
   linkContext?: DocLinkContext,
 ): Promise<string> {
-  // A fresh instance per render keeps the heading slug map and link context
-  // request-scoped — safe for concurrent requests.
-  const seenSlugs = new Map<string, number>()
-  const instance = new Marked()
-  instance.setOptions({ gfm: true, breaks: false, async: true })
-
-  instance.use(
-    markedHighlight({
-      async: true,
-      highlight: async (code: string, lang?: string) => {
-        const normalizedLang = lang?.trim() || DEFAULT_LANGUAGE
-        try {
-          return await codeToHtml(code, { lang: normalizedLang, themes: DOCS_THEMES, defaultColor: 'light' })
-        } catch {
-          return await codeToHtml(code, { lang: DEFAULT_LANGUAGE, themes: DOCS_THEMES, defaultColor: 'light' })
-        }
-      },
-    }),
-  )
-
-  instance.use({
-    walkTokens(token) {
-      if (linkContext && token.type === 'link' && typeof token.href === 'string') {
-        token.href = rewriteDocLink(token.href, linkContext)
-        return
-      }
-      if (token.type !== 'blockquote' || !token.tokens?.length) return
-      const first = token.tokens[0]
-      if (first.type !== 'paragraph') return
-      const alertType = extractAlertType(first as Tokens.Paragraph)
-      if (!alertType) return
-      ;(token as Tokens.Blockquote & { alertType?: AlertType }).alertType = alertType
-      if (!first.text.trim()) token.tokens.shift()
-    },
-    renderer: {
-      heading({ tokens, depth }: Tokens.Heading) {
-        const text = this.parser.parseInline(tokens)
-        const id = slugifyHeading(text, seenSlugs)
-        return `<h${depth} id="${id}">${text}</h${depth}>\n`
-      },
-      blockquote(token) {
-        const content = this.parser.parse(token.tokens ?? [])
-        const alertType = (token as Tokens.Blockquote & { alertType?: AlertType }).alertType
-        if (!alertType) return `<blockquote>\n${content}</blockquote>\n`
-        const meta = ALERT_METADATA[alertType]
-        return `<div class="docs-alert docs-alert--${meta.classSuffix}">
-  <p class="docs-alert__label">${meta.label}</p>
-  <div class="docs-alert__body">
-${content}
-  </div>
-</div>`
-      },
-    },
+  // A renderer per call binds the link context; render() itself keeps its
+  // heading-slug state per render, so concurrent requests stay isolated.
+  const renderer = createMarkdownRenderer({
+    // Trusted repo content, rendered at build time — the sanitizer would
+    // only strip the raw HTML some docs legitimately embed.
+    sanitize: false,
+    alertLabels: SITE_ALERT_LABELS,
+    rewriteLink: linkContext ? (href) => rewriteDocLink(href, linkContext) : undefined,
+    highlight: highlightDocsCode,
   })
-
-  const rendered = await instance.parse(markdown, { async: true })
-  return typeof rendered === 'string' ? rendered : ''
-}
-
-/**
- * One pass of `/<[^>]*>/g` as a linear scan — the regex itself is quadratic
- * on `<`-heavy input with no closing bracket. Unclosed `<` tails are kept
- * verbatim, matching the regex (which requires a closing `>`).
- */
-function stripHtmlTagsOnce(html: string): string {
-  let out = ''
-  let i = 0
-  while (i < html.length) {
-    const open = html.indexOf('<', i)
-    if (open === -1) {
-      return out + html.slice(i)
-    }
-    const close = html.indexOf('>', open + 1)
-    if (close === -1) {
-      return out + html.slice(i)
-    }
-    out += html.slice(i, open)
-    i = close + 1
-  }
-  return out
-}
-
-function slugifyHeading(text: string, seenSlugs: Map<string, number>): string {
-  // Repeat until stable: a single pass can splice a new tag together
-  // (e.g. `<scr<x>ipt>` becomes `<script>` after one removal).
-  let stripped = text
-  let previous: string
-  do {
-    previous = stripped
-    stripped = stripHtmlTagsOnce(stripped)
-  } while (stripped !== previous)
-  let slug = stripped
-    .toLowerCase()
-    .trim()
-    .replace(/[\s]+/g, '-')
-    .replace(/[^\p{L}\p{N}\-]/gu, '')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '')
-  slug = slug || `heading-${Math.random().toString(36).slice(2, 8)}`
-
-  const count = seenSlugs.get(slug) ?? 0
-  seenSlugs.set(slug, count + 1)
-  if (count > 0) {
-    slug = `${slug}-${count}`
-  }
-  return slug
-}
-
-function extractAlertType(paragraph: Tokens.Paragraph): AlertType | null {
-  const match = paragraph.text.match(ALERT_DIRECTIVE_PATTERN)
-  if (!match) {
-    return null
-  }
-
-  const normalizedType = match[1].toLowerCase() as AlertType
-  paragraph.text = paragraph.text.replace(ALERT_DIRECTIVE_PATTERN, '').trimStart()
-
-  if (paragraph.tokens?.length) {
-    const firstToken = paragraph.tokens[0]
-    if ('text' in firstToken && typeof firstToken.text === 'string') {
-      firstToken.text = firstToken.text.replace(ALERT_DIRECTIVE_PATTERN, '').trimStart()
-    }
-
-    if ('raw' in firstToken && typeof firstToken.raw === 'string') {
-      firstToken.raw = firstToken.raw.replace(ALERT_DIRECTIVE_PATTERN, '').trimStart()
-    }
-  }
-
-  return normalizedType
+  return renderer.render(markdown)
 }

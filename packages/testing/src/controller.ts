@@ -727,6 +727,41 @@ export function createControllerModuleMock() {
     providers: definition.providers ?? [],
   })
 
+  /**
+   * Mirrors the real `definePlugin` in
+   * `packages/server/src/container/definePlugin.ts` — hand-copied for the
+   * same reason as `defineModule` above. Plugin packages call it at import
+   * time (e.g. `@guren/plugin-markdown`), so controllers that transitively
+   * import one cannot load under this mock without it. Each factory call
+   * yields an independent provider extending the mock `ServiceProvider`,
+   * with the configuration captured in a closure and `register`'s result
+   * propagated (the real container awaits an async register).
+   */
+  const definePlugin = <TConfig>(definition: {
+    name: string
+    register: (container: unknown, config: TConfig) => void | Promise<void>
+    boot?: (container: unknown, config: TConfig) => void | Promise<void>
+    deferred?: boolean
+    provides?: string[]
+  }) => {
+    return (config: TConfig) => {
+      class PluginProvider extends ServiceProvider {
+        static deferred = definition.deferred ?? false
+        static provides = definition.provides ?? []
+        override register(): void | Promise<void> {
+          return definition.register(this.container, config)
+        }
+        override boot(): void | Promise<void> {
+          return definition.boot?.(this.container, config)
+        }
+      }
+      Object.defineProperty(PluginProvider, 'name', {
+        value: `${definition.name}PluginProvider`,
+      })
+      return PluginProvider
+    }
+  }
+
   const createEventManager = () => ({
     on: () => {},
     emit: async () => {},
@@ -759,6 +794,7 @@ export function createControllerModuleMock() {
     AuthenticationException,
     ServiceProvider,
     defineModule,
+    definePlugin,
     MemoryApiTokenStore,
     createApiToken,
     revokeApiToken,

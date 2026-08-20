@@ -17,6 +17,13 @@ describe('renderPostMarkdown', () => {
     expect(html).toContain('<span')
   })
 
+  it('should render alerts with the site vocabulary shared with docs', async () => {
+    const html = await renderPostMarkdown('> [!WARNING]\n> Careful')
+
+    expect(html).toContain('guren-markdown-alert--warning')
+    expect(html).toContain('>rule</p>')
+  })
+
   it('should fall back to plain text for unknown languages', async () => {
     const html = await renderPostMarkdown('```notalanguage\nplain body\n```')
 

@@ -69,6 +69,41 @@ describe('createMarkdownRenderer', () => {
       expect(html).not.toContain('guren-markdown-alert')
     })
 
+    test('should override label text per type via alertLabels', async () => {
+      // The guren.dev docs vocabulary: five directives, four labels.
+      const renderer = createMarkdownRenderer({
+        alertLabels: { note: 'note', tip: 'ok', important: 'rule', warning: 'rule', caution: 'never' },
+      })
+      const warning = await renderer.render('> [!WARNING]\n> Careful.')
+      expect(warning).toContain('guren-markdown-alert--warning')
+      expect(warning).toContain('>rule</p>')
+      const tip = await renderer.render('> [!TIP]\n> Nice.')
+      expect(tip).toContain('guren-markdown-alert--tip')
+      expect(tip).toContain('>ok</p>')
+    })
+
+    test('should keep default labels for types alertLabels omits', async () => {
+      const renderer = createMarkdownRenderer({ alertLabels: { note: 'メモ' } })
+      expect(await renderer.render('> [!NOTE]\n> x')).toContain('>メモ</p>')
+      expect(await renderer.render('> [!CAUTION]\n> x')).toContain('>Caution</p>')
+    })
+
+    test('should HTML-escape label text even when sanitize is off', async () => {
+      const renderer = createMarkdownRenderer({
+        sanitize: false,
+        alertLabels: { note: '<em onmouseover=alert(1)>Note</em> Q&A' },
+      })
+      const html = await renderer.render('> [!NOTE]\n> x')
+      expect(html).not.toContain('<em')
+      expect(html).toContain('&lt;em onmouseover=alert(1)&gt;Note&lt;/em&gt; Q&amp;A')
+    })
+
+    test('should honor an explicit empty label as suppression', async () => {
+      const renderer = createMarkdownRenderer({ alertLabels: { note: '' } })
+      const html = await renderer.render('> [!NOTE]\n> x')
+      expect(html).toContain('class="guren-markdown-alert__label"></p>')
+    })
+
     test('should survive the default sanitizer', async () => {
       const renderer = createMarkdownRenderer()
       const html = await renderer.render('> [!CAUTION]\n> Careful.')

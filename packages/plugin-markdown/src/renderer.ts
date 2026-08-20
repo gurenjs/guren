@@ -2,7 +2,7 @@ import { Marked, type MarkedExtension, type Tokens } from 'marked'
 import { markedHighlight } from 'marked-highlight'
 import sanitizeHtml from 'sanitize-html'
 
-import { alertsExtension } from './alerts'
+import { alertsExtension, type AlertType } from './alerts'
 import { defaultSanitizeOptions } from './sanitize'
 import { createSlugger } from './slugger'
 
@@ -28,6 +28,14 @@ export interface MarkdownRendererOptions {
   sanitize?: boolean | ((defaults: sanitizeHtml.IOptions) => sanitizeHtml.IOptions)
   /** GitHub-style `> [!NOTE]` blockquote alerts. Default true. */
   alerts?: boolean
+  /**
+   * Label text per alert type (default: `Note`, `Tip`, `Important`,
+   * `Warning`, `Caution`). For i18n or a different vocabulary — several
+   * types may share one label. Class names are unaffected. Labels render as
+   * text (HTML-escaped); an explicit empty string suppresses the label text,
+   * while omitted types keep their default label.
+   */
+  alertLabels?: Partial<Record<AlertType, string>>
   /** Heading `id` attributes via the hardened slugger. Default true. */
   anchors?: boolean
   /** Rewrite every link `href` before rendering (e.g. relative `.md` → routes). */
@@ -55,6 +63,7 @@ export function createMarkdownRenderer(options: MarkdownRendererOptions = {}): M
     sanitize = true,
     alerts = true,
     anchors = true,
+    alertLabels,
     rewriteLink,
     highlight,
   } = options
@@ -94,7 +103,7 @@ export function createMarkdownRenderer(options: MarkdownRendererOptions = {}): M
     )
   }
   if (alerts) {
-    staticExtensions.push(alertsExtension())
+    staticExtensions.push(alertsExtension(alertLabels))
   }
   if (rewriteLink) {
     staticExtensions.push({

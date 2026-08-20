@@ -90,17 +90,6 @@ function buildPrevNext(
   }
 }
 
-function slugify(text: string): string {
-  return text
-    .toLowerCase()
-    .trim()
-    .replace(/[\s]+/g, '-')
-    .replace(/[^\p{L}\p{N}\-]/gu, '')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '')
-    || `heading-${Math.random().toString(36).slice(2, 8)}`
-}
-
 function useTableOfContents(doc: DocPage | null) {
   const [items, setItems] = useState<TocItem[]>([])
   const [activeId, setActiveId] = useState<string>('')
@@ -119,9 +108,8 @@ function useTableOfContents(doc: DocPage | null) {
     const tocItems: TocItem[] = []
 
     headings.forEach((heading) => {
-      if (!heading.id) {
-        heading.id = slugify(heading.textContent ?? '')
-      }
+      // The server slugger ids every heading; one without an id would only
+      // mean a non-markdown heading, which the TOC has no anchor for anyway.
       if (heading.id) {
         tocItems.push({
           id: heading.id,
