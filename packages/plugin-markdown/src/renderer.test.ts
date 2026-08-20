@@ -88,6 +88,22 @@ describe('createMarkdownRenderer', () => {
       expect(await renderer.render('> [!CAUTION]\n> x')).toContain('>Caution</p>')
     })
 
+    test('should HTML-escape label text even when sanitize is off', async () => {
+      const renderer = createMarkdownRenderer({
+        sanitize: false,
+        alertLabels: { note: '<em onmouseover=alert(1)>Note</em> Q&A' },
+      })
+      const html = await renderer.render('> [!NOTE]\n> x')
+      expect(html).not.toContain('<em')
+      expect(html).toContain('&lt;em onmouseover=alert(1)&gt;Note&lt;/em&gt; Q&amp;A')
+    })
+
+    test('should honor an explicit empty label as suppression', async () => {
+      const renderer = createMarkdownRenderer({ alertLabels: { note: '' } })
+      const html = await renderer.render('> [!NOTE]\n> x')
+      expect(html).toContain('class="guren-markdown-alert__label"></p>')
+    })
+
     test('should survive the default sanitizer', async () => {
       const renderer = createMarkdownRenderer()
       const html = await renderer.render('> [!CAUTION]\n> Careful.')

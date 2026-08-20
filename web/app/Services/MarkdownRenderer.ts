@@ -1,8 +1,10 @@
 import { posix } from 'node:path'
 
-import { createMarkdownRenderer } from '@guren/plugin-markdown'
 import { codeToHtml } from 'shiki'
 
+import { createMarkdownRenderer } from '@guren/plugin-markdown'
+
+import { MARKDOWN_CODE_THEMES, SITE_ALERT_LABELS } from '../../config/markdown.js'
 import { docPaths, GITHUB_URL } from '../../config/site.js'
 import {
   docCategoryDir,
@@ -14,25 +16,7 @@ import {
   type DocLocale,
 } from './docs-config.js'
 
-// The code surface is themeless ink (Guren UI): app.css always applies the
-// dark palette from the `--shiki-dark` custom properties and pins the
-// background to the ink token. The output stays dual-theme so it is
-// interchangeable with the blog pipeline's stored HTML (PostRenderer.ts).
-const DOCS_THEMES = {
-  light: 'rose-pine-dawn',
-  dark: 'rose-pine-moon',
-} as const
 const DEFAULT_LANGUAGE = 'text'
-
-// Callouts render as diagnostic rows (Guren UI): GitHub's five directives
-// map onto the note / ok / rule / never key vocabulary of `guren check`.
-const DOCS_ALERT_LABELS = {
-  note: 'note',
-  tip: 'ok',
-  important: 'rule',
-  warning: 'rule',
-  caution: 'never',
-} as const
 
 export interface DocLinkContext {
   locale: DocLocale
@@ -98,9 +82,9 @@ export function rewriteDocLink(href: string, context: DocLinkContext): string {
 async function highlightDocsCode(code: string, lang?: string): Promise<string> {
   const normalizedLang = lang?.trim() || DEFAULT_LANGUAGE
   try {
-    return await codeToHtml(code, { lang: normalizedLang, themes: DOCS_THEMES, defaultColor: 'light' })
+    return await codeToHtml(code, { lang: normalizedLang, themes: MARKDOWN_CODE_THEMES, defaultColor: 'light' })
   } catch {
-    return await codeToHtml(code, { lang: DEFAULT_LANGUAGE, themes: DOCS_THEMES, defaultColor: 'light' })
+    return await codeToHtml(code, { lang: DEFAULT_LANGUAGE, themes: MARKDOWN_CODE_THEMES, defaultColor: 'light' })
   }
 }
 
@@ -114,7 +98,7 @@ export async function renderMarkdownToHtml(
     // Trusted repo content, rendered at build time — the sanitizer would
     // only strip the raw HTML some docs legitimately embed.
     sanitize: false,
-    alertLabels: DOCS_ALERT_LABELS,
+    alertLabels: SITE_ALERT_LABELS,
     rewriteLink: linkContext ? (href) => rewriteDocLink(href, linkContext) : undefined,
     highlight: highlightDocsCode,
   })

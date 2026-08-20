@@ -31,7 +31,9 @@ export interface MarkdownRendererOptions {
   /**
    * Label text per alert type (default: `Note`, `Tip`, `Important`,
    * `Warning`, `Caution`). For i18n or a different vocabulary — several
-   * types may share one label. Class names are unaffected.
+   * types may share one label. Class names are unaffected. Labels render as
+   * text (HTML-escaped); an explicit empty string suppresses the label text,
+   * while omitted types keep their default label.
    */
   alertLabels?: Partial<Record<AlertType, string>>
   /** Heading `id` attributes via the hardened slugger. Default true. */
