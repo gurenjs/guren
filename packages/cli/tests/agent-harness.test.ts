@@ -178,6 +178,9 @@ describe('installAgentHarness', () => {
 
     expect(result.stale).toEqual(['.claude/rules/leftover.md'])
     expect(result.pruned).toBe(false)
+    // the result distinguishes "--prune --dry-run" from a plain "--dry-run"
+    expect(result.pruneRequested).toBe(true)
+    expect(result.mode).toBe('sync')
     expect(await readFile(join(tempDir, '.claude/rules/leftover.md'), 'utf8')).toBe('old rule\n')
   })
 

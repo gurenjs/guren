@@ -79,8 +79,17 @@ export interface AgentHarnessResult {
   replaced: string[]
   /** Planned files whose on-disk contents already matched — nothing written. */
   unchanged: string[]
+  /**
+   * The run's own parameters, echoed so the result describes the run without
+   * a side channel: the reporter phrases its advice per mode, and a
+   * `--prune --dry-run` is only distinguishable from a plain `--dry-run`
+   * through `pruneRequested` (`pruned` is false in both).
+   */
+  mode: AgentHarnessMode
   /** True when `dryRun` held: nothing was written or deleted. */
   dryRun: boolean
+  /** True when the run was asked to prune (whether or not anything was, or dryRun held). */
+  pruneRequested: boolean
   skipped: string[]
   /**
    * Sync only: files inside the framework-managed namespaces
@@ -230,18 +239,14 @@ async function detectInstalledComponents(
  */
 async function isSameFile(cwd: string, left: string, right: string): Promise<boolean> {
   const probe = (relPath: string) =>
-    lstat(join(cwd, relPath), { bigint: true }).then(
-      (stats) => ({ stats, code: undefined }),
-      (error: unknown) => ({ stats: undefined, code: (error as NodeJS.ErrnoException)?.code }),
+    lstat(join(cwd, relPath), { bigint: true }).catch((error: unknown) =>
+      (error as NodeJS.ErrnoException)?.code === 'ENOENT' ? ('missing' as const) : ('unknown' as const),
     )
   const [leftStat, rightStat] = await Promise.all([probe(left), probe(right)])
-  if (leftStat.stats && rightStat.stats) {
-    return leftStat.stats.dev === rightStat.stats.dev && leftStat.stats.ino === rightStat.stats.ino
+  if (typeof leftStat !== 'string' && typeof rightStat !== 'string') {
+    return leftStat.dev === rightStat.dev && leftStat.ino === rightStat.ino
   }
-  if (leftStat.code === 'ENOENT' || rightStat.code === 'ENOENT') {
-    return false
-  }
-  return true
+  return leftStat !== 'missing' && rightStat !== 'missing'
 }
 
 /**
@@ -400,13 +405,8 @@ export async function installAgentHarness(options: AgentHarnessOptions = {}): Pr
     // Already at the planned contents — writing would change nothing, so
     // don't, and don't report it as a write either. What's left in `written`
     // is the run's actual delta, which is what makes `replaced` trustworthy:
-    // every overwrite it names really discarded something.
-    //
-    // A direct read, not `readIfExists`: the `exists` gate already answered
-    // the existence question, and the compare wants "differs" for a file it
-    // cannot read — on a real run that failure then surfaces at the write; on
-    // a dry run the file is reported as a would-replace, the conservative
-    // claim for content nothing could inspect.
+    // every overwrite it names really discarded something. An unreadable file
+    // counts as differing — the write is where the real failure surfaces.
     //
     // The comparison ignores line-ending differences. A checkout that
     // normalizes to CRLF (core.autocrlf, editor hooks) would otherwise list
@@ -415,7 +415,11 @@ export async function installAgentHarness(options: AgentHarnessOptions = {}): Pr
     // CRLF-only variant counts as up to date and is left as the checkout
     // made it.
     const existing = exists ? await readFile(destPath, 'utf8').catch(() => null) : null
-    if (existing !== null && normalizeLineEndings(existing) === normalizeLineEndings(file.content)) {
+    if (
+      existing !== null &&
+      (existing === file.content ||
+        normalizeLineEndings(existing) === normalizeLineEndings(file.content))
+    ) {
       unchanged.push(file.path)
       continue
     }
@@ -457,7 +461,9 @@ export async function installAgentHarness(options: AgentHarnessOptions = {}): Pr
     written,
     replaced,
     unchanged,
+    mode,
     dryRun,
+    pruneRequested: Boolean(options.prune),
     skipped,
     stale,
     pruned,
