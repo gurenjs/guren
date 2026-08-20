@@ -69,6 +69,12 @@ is `ignoredEdges`: `@guren/cli` and `@guren/core` depend on each other, so core'
 edge on cli is dropped to break the cycle. Any *other* cycle fails the build with
 an explicit error.
 
+The same module also answers "what version did this manifest declare at a git
+rev" (`manifestAtRev` / `versionOf`), which is how the release gates in
+`scripts/` tell a version that moved from one that did not. `versionOf` carries
+the rule that an unreadable manifest is *not* a version — a gate that lets one
+stand in for a number silently stops gating.
+
 **Stale `.d.ts` issue:** If DTS build fails (e.g., `@guren/core` cannot find `@guren/server` types), old `dist/` artifacts are likely interfering. Run:
 ```bash
 bun run build:clean   # remove each package's dist/ then build
