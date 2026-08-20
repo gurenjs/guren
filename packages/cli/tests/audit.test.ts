@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
 import { authMiddlewareVerdict, describeMethod, runAudit, LINK_BUILDER_PATTERN, type AuditReport } from '../src/audit'
@@ -2288,6 +2288,27 @@ export default function registerRoutes(router: any) {
       const authz = report.findings.find(f => f.key === 'authz:DELETE /posts/:id')
       expect(authz).toBeDefined()
       expect(authz!.status).toBe('warn')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+})
+
+describe('audit ignore config discovery', () => {
+  it('reports a config/audit.ts that exists only as a dangling symlink', async () => {
+    // Discovery used `fileExists`, which reads a dangling symlink as absent,
+    // so an ignore config the user really put there was skipped without a
+    // word — and the audit ran with none of the entries it was told about,
+    // reporting a result shaped by rules it never read.
+    const workspace = await createTempWorkspace('guren-cli-audit-config-dangling-')
+
+    try {
+      await mkdir(join(workspace.dir, 'config'), { recursive: true })
+      await symlink(join(workspace.dir, 'config/nowhere.ts'), join(workspace.dir, 'config/audit.ts'))
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      expect(report.findings.some((f) => f.key === 'audit-config:load')).toBe(true)
     } finally {
       await workspace.cleanup()
     }

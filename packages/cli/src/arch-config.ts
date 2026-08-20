@@ -1,6 +1,6 @@
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { fileExists } from './discovery'
+import { findFirstLoadable } from './discovery'
 import type { ArchRuleSet } from './arch/index'
 
 export interface LoadedArchConfig {
@@ -48,11 +48,6 @@ export async function loadArchConfig(cwd: string): Promise<LoadedArchConfig> {
 }
 
 async function resolveConfigFile(cwd: string): Promise<string | undefined> {
-  for (const candidate of CANDIDATE_FILES) {
-    if (await fileExists(cwd, candidate)) {
-      return resolve(cwd, candidate)
-    }
-  }
-
-  return undefined
+  const found = await findFirstLoadable(cwd, CANDIDATE_FILES)
+  return found === null ? undefined : resolve(cwd, found)
 }

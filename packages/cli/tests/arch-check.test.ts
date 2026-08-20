@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
 import { runArchCheck } from '../src/arch-check'
@@ -572,6 +572,27 @@ export default {
       })
       // OrderService.ts (the violating file) wasn't in the changed set, so it's never scanned.
       expect(results.some((r) => r.filePath === 'app/Domain/OrderService.ts')).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+})
+
+describe('runArchCheck config discovery', () => {
+  it('reports a guren.arch.ts that exists only as a dangling symlink', async () => {
+    // Discovery used `fileExists`, which reads a dangling symlink as absent —
+    // so a rules file the user really put there was skipped and the gate
+    // returned no results, which reads exactly like "no violations". An
+    // architecture check that could not load its rules is not a passing one.
+    const workspace = await createTempWorkspace('guren-cli-arch-dangling-')
+
+    try {
+      await symlink(join(workspace.dir, 'nowhere.ts'), join(workspace.dir, 'guren.arch.ts'))
+
+      const results = await runArchCheck({ cwd: workspace.dir, cache: new ParseCache() })
+
+      expect(results).not.toEqual([])
+      expect(results.some((result) => /failed to load/i.test(result.message))).toBe(true)
     } finally {
       await workspace.cleanup()
     }

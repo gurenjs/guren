@@ -1,4 +1,4 @@
-import { readdir, access, readFile, stat } from 'node:fs/promises'
+import { readdir, access, lstat, readFile, stat } from 'node:fs/promises'
 import { resolve, join, extname, relative, sep, posix } from 'node:path'
 import { collectionName } from './inflect'
 import { escapeRegExp } from './utils'
@@ -84,6 +84,35 @@ export function moduleNameFor(cwd: string, filePath: string): string | null {
   return moduleNameFromRelPath(toPosixRelative(cwd, filePath))
 }
 
+/**
+ * Whether the path is *definitely* not there.
+ *
+ * The question {@link fileExists} answers is "can I read this", and it is the
+ * right one for a scaffolder deciding whether to write. It is the wrong one
+ * for a loader that degrades a missing file to an empty result: `access()`
+ * reports a dangling symlink as `ENOENT`, and `existsSync` reports `EACCES`
+ * and `ENOTDIR` as "no" — so a real, broken configuration reads as "you have
+ * none", which is the confident wrong answer these loaders exist to avoid.
+ * Non-ENOENT outcomes therefore answer `false` here: the caller attempts the
+ * load, and the loader's own error is what gets reported.
+ *
+ * `lstat`, not `access`: a dangling symlink is something the user put there,
+ * so it belongs in the loader's hands too.
+ */
+export async function isDefinitelyAbsent(cwd: string, relativePath: string): Promise<boolean> {
+  try {
+    await lstat(resolve(cwd, relativePath))
+    return false
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT'
+  }
+}
+
+/**
+ * Whether the path can be read: follows symlinks, throws on anything but
+ * ENOENT. A loader that must not crash on a broken filesystem wants
+ * {@link isDefinitelyAbsent} instead.
+ */
 export async function fileExists(cwd: string, relativePath: string): Promise<boolean> {
   try {
     await access(resolve(cwd, relativePath))
@@ -108,6 +137,20 @@ export async function fileExists(cwd: string, relativePath: string): Promise<boo
 export async function findFirstExisting(cwd: string, candidates: readonly string[]): Promise<string | null> {
   const results = await Promise.all(candidates.map((candidate) => fileExists(cwd, candidate)))
   const index = results.indexOf(true)
+  return index === -1 ? null : candidates[index]
+}
+
+/**
+ * {@link findFirstExisting} for a *loader*: the first candidate that is not
+ * {@link isDefinitelyAbsent}, so a broken-but-present config reaches the
+ * import and is diagnosed rather than skipped.
+ *
+ * Preference order lives here for the same reason it does there: it decides
+ * which file the whole command then reads.
+ */
+export async function findFirstLoadable(cwd: string, candidates: readonly string[]): Promise<string | null> {
+  const results = await Promise.all(candidates.map((candidate) => isDefinitelyAbsent(cwd, candidate)))
+  const index = results.indexOf(false)
   return index === -1 ? null : candidates[index]
 }
 

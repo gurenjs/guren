@@ -21,7 +21,7 @@ import {
   type DiscoveredModel,
   type ModelRelationship,
 } from './model-parser'
-import { loadRouteDefinitions, DEFAULT_ROUTES_FILE } from './load-routes'
+import { loadRouteDefinitions, resolveRoutesFile } from './load-routes'
 import { parseSourceFile } from './parse-cache'
 import {
   routeDefinitionToContextRoute,
@@ -232,10 +232,13 @@ export async function generateEntityContext(
 
   let routesError: string | undefined
   const loadEntityRoutes = async (): Promise<ContextRoute[]> => {
+    const target = await resolveRoutesFile(cwd, options.routesFile)
+    if (target.silentlyAbsent) return []
+
     try {
       const provenance: Array<string | null> = []
       const definitions = await loadRouteDefinitions(
-        resolve(cwd, options.routesFile ?? DEFAULT_ROUTES_FILE),
+        resolve(cwd, target.path),
         cwd,
         undefined,
         provenance,

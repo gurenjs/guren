@@ -140,6 +140,28 @@ export const users = sqliteTable('users', {
 `
 
 /**
+ * A routes file that genuinely resolves `@guren/core` at runtime.
+ *
+ * `Router` is used as a *value*, twice over on purpose. An import used only
+ * in type position is erased by the transpiler, so such a fixture never
+ * resolves the package at all and cannot detect anything about how it
+ * resolved — and the `instanceof` holds only if the fixture got the same
+ * class the loading process passed in, which a separately-resolved copy
+ * would not be.
+ *
+ * One copy because two tests are each other's control: linked via
+ * {@link linkWorkspaceCore} it must load, unlinked it must fail to resolve.
+ * The pair proves nothing unless both run the same fixture.
+ */
+export const CORE_RESOLVING_ROUTES_FIXTURE = `import { Router } from '@guren/core'
+
+export function registerWebRoutes(router: Router): void {
+  if (!(router instanceof Router)) throw new Error('resolved a different @guren/core')
+  router.get('/posts', () => new Response('ok')).name('posts.index')
+}
+`
+
+/**
  * The `routes/web.ts` the two app templates scaffold.
  *
  * The blog one is the shape that broke every route-wiring patch: it names the
@@ -366,6 +388,38 @@ export async function writeWorkspaceFiles(
  */
 export async function createTempWorkspace(prefix: string): Promise<TempWorkspace> {
   const dir = await mkdtemp(join(tmpdir(), prefix))
+
+  // Bun's last resort for a bare specifier it cannot resolve is to *install*
+  // it — from the global cache, and from npm when the cache misses. A fixture
+  // here has no node_modules, so every `@guren/*` import in a file a CLI
+  // process actually loads resolves to whatever the machine happens to have
+  // installed, or to whatever npm serves today (measured: `@guren/core@1.7.0`
+  // from ~/.bun/install/cache on one machine, a fresh 1.8.0 download on a
+  // cache miss, and a hard failure on a runner that cannot reach the
+  // registry). Disabling it makes an unlinked fixture fail loudly instead of
+  // silently binding the *published* package and calling that a test of this
+  // checkout. Use `linkWorkspaceCore()` for fixtures that need the real thing.
+  //
+  // Here rather than in a bunfig of our own, because bunfig lookup is cwd-only
+  // (it does not walk up — verified from examples/blog and web/) and this is
+  // the cwd the tests spawn CLI processes with. The test *runner* needs no
+  // such setting: `bun run` auto-installs and `bun test` does not, so an
+  // in-process fixture import cannot reach an ambient copy either way — a
+  // canary in tests/fixture-resolution-guard.test.ts pins that, since a Bun
+  // that changed it would expose every in-process fixture at once.
+  //
+  // Written *before* the chdir, deliberately: an await between chdir and the
+  // return is a suspension point where a timed-out test abandons the helper
+  // with cwd moved and no `cleanup()` to move it back — which the cwd guard
+  // then reports against whichever file happened to be running.
+  //
+  // One consequence to know about: the workspace is therefore never *empty*.
+  // `create-app` refuses to scaffold into a non-empty directory (its check is
+  // `readdir(dir).length === 0`), so a test pointing `guren new` at one of
+  // these needs `--force` — the error it gets otherwise names the directory
+  // and nothing about this file.
+  await writeFile(join(dir, 'bunfig.toml'), '[install]\nauto = "disable"\n')
+
   const originalCwd = process.cwd()
   process.chdir(dir)
 
@@ -465,6 +519,37 @@ export async function runCliBin(
     stderr: 'ignore',
   })
   return proc.exited
+}
+
+/**
+ * {@link runCliBin}, capturing both streams instead of discarding them.
+ *
+ * `NODE_ENV` is dropped rather than inherited: Bun's test runner sets it to
+ * `test`, which drops consola to the warn level in the child and hides the
+ * info-level output these assertions inspect — so a test would read the
+ * environment rather than the command. Deleting it is what a plain terminal
+ * invocation looks like; setting it to `production` would also unhide the
+ * output but flips every gate in the framework that keys on production.
+ */
+export async function runCliBinCaptured(
+  args: string[],
+  cwd: string,
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  assertWorkspaceBuilt([SERVER_DIST_ENTRY])
+
+  const { NODE_ENV: _testEnv, ...env } = process.env
+  const proc = Bun.spawn(['bun', CLI_BIN_PATH, ...args], {
+    cwd,
+    env,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  })
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ])
+  return { stdout, stderr, exitCode }
 }
 
 /**

@@ -280,6 +280,47 @@ describe('context entity argument', () => {
     }
   })
 
+  it('reports a --routes path that is not there, rather than reporting no routes', async () => {
+    // The other side of the absent-file split. A named file that is not there
+    // is a typo or a wrong --app, not the shape an api-only app has, and #482
+    // exists precisely so that reads as an error rather than as an entity
+    // with no routes.
+    const workspace = await createTempWorkspace('guren-cli-entity-routes-typo-')
+    try {
+      await writeModelFixture(workspace.dir)
+
+      const { exitCode, stdout } = await runBin(
+        ['context', '--routes', 'routes/nope.ts', 'User'],
+        workspace.dir,
+      )
+
+      expect(exitCode).toBe(0)
+      expect(stdout).toContain('Routes could not be read:')
+      expect(stdout).not.toContain('No routes reference this entity.')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('reports nothing when the app simply has no routes file', async () => {
+    // The other half of the split: "could not be read" has to stay rare
+    // enough to mean something. An api-only or mid-scaffold app has no routes
+    // file at all, and `guren context` (whole-project) says so plainly — the
+    // two commands must not disagree about the same app.
+    const workspace = await createTempWorkspace('guren-cli-entity-routes-absent-')
+    try {
+      await writeModelFixture(workspace.dir)
+
+      const { exitCode, stdout } = await runBin(['context', 'User'], workspace.dir)
+
+      expect(exitCode).toBe(0)
+      expect(stdout).toContain('No routes reference this entity.')
+      expect(stdout).not.toContain('Routes could not be read:')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('takes the last value of a repeated --routes, which exited 0 reporting no routes', async () => {
     const workspace = await createTempWorkspace('guren-cli-context-routes-repeated-')
     try {
