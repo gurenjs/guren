@@ -2,7 +2,9 @@
 
 **Author:** 7nohe
 **Date:** 2026-08-20
-**Status:** Draft
+**Status:** Accepted (2026-08-20 — accepted by the project maintainer under
+author authority; the standard two-week discussion window was waived for this
+solo-maintained change)
 
 > Additive: a new plugin package, no changes to existing public APIs, and no
 > changes to `@guren/server` on the critical path. The plugin wraps existing
