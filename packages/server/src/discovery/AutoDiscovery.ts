@@ -40,6 +40,14 @@ export interface DiscoveryResult {
  * Auto-discovery engine that scans application directories and discovers
  * framework components (providers, listeners, jobs, events).
  *
+ * Standalone by design: nothing in `Application` runs this scan, so
+ * registration stays explicit — `createApp({ providers: [...] })`, and
+ * `defineModule` lists for modules — which is what `guren check` verifies
+ * and what bundle-deploy targets (Workers, Vercel, Lambda) require, since a
+ * runtime directory scan finds nothing in a bundle. A caller that wants
+ * discovery runs the scan itself and feeds each result into the matching
+ * registry, as the example below does.
+ *
  * Uses `Bun.Glob` to scan directories and dynamic `import()` to load modules.
  *
  * @example

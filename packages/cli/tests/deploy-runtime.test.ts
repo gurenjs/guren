@@ -630,9 +630,9 @@ const discovery = new AutoDiscovery({ basePath: 'app' })
     })
   })
 
-  // ApplicationOptions.discover is declared but never read anywhere in
-  // @guren/server, so it has no runtime effect — writing `discover: true`
-  // does not activate filesystem provider discovery and must not warn.
+  // ApplicationOptions no longer declares `discover` (it was accepted and
+  // silently ignored, then removed), but an older app may still carry the
+  // key — inert then and now, so it must not read as discovery.
   it('does not warn on the inert discover: true option', async () => {
     const files = {
       'src/app.ts': `import { createApp } from '@guren/core'\nexport const app = createApp({ discover: true })\n`,
