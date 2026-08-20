@@ -28,7 +28,9 @@ import {
  *
  * Files fall into two groups:
  * - Managed (rules, skills, subagents, hooks) — owned by the framework,
- *   `agent:sync` overwrites them with the latest version.
+ *   `agent:sync` overwrites them with the latest version. Overwrites are
+ *   never silent: a file whose contents differed is reported in `replaced`,
+ *   and `dryRun` answers what a sync would touch before it does.
  * - User-owned (CLAUDE.md, AGENTS.md, settings, MCP client configs) —
  *   written once, never overwritten by `agent:sync` (only by
  *   `agent:init --force`).
@@ -54,10 +56,40 @@ export interface AgentHarnessOptions {
    * candidate first, and deletion stays an explicit opt-in.
    */
   prune?: boolean
+  /**
+   * Report what the run would write, replace, and prune without touching the
+   * filesystem. The answer to "will this sync lose my edits?" before the sync,
+   * not after.
+   */
+  dryRun?: boolean
 }
 
 export interface AgentHarnessResult {
+  /** Planned files written (or, under `dryRun`, that would be). A file whose
+   * on-disk contents already match the plan is reported in `unchanged`
+   * instead, so this list is the actual delta, not the whole plan. */
   written: string[]
+  /**
+   * The subset of `written` that existed with different contents before the
+   * run — where sync discarded something, whether an older template version
+   * or a local edit. The two cannot be told apart (nothing records which
+   * template version a file came from), which is exactly why the replacement
+   * has to be called out rather than folded into `written`.
+   */
+  replaced: string[]
+  /** Planned files whose on-disk contents already matched — nothing written. */
+  unchanged: string[]
+  /**
+   * The run's own parameters, echoed so the result describes the run without
+   * a side channel: the reporter phrases its advice per mode, and a
+   * `--prune --dry-run` is only distinguishable from a plain `--dry-run`
+   * through `pruneRequested` (`pruned` is false in both).
+   */
+  mode: AgentHarnessMode
+  /** True when `dryRun` held: nothing was written or deleted. */
+  dryRun: boolean
+  /** True when the run was asked to prune (whether or not anything was, or dryRun held). */
+  pruneRequested: boolean
   skipped: string[]
   /**
    * Sync only: files inside the framework-managed namespaces
@@ -84,6 +116,11 @@ export interface AgentHarnessResult {
    * into them — it reports the snippet to add by hand instead.
    */
   mcpMergeHints: Array<{ path: string; snippet: string }>
+}
+
+/** `\r\n` → `\n`, for the up-to-date comparison in the write loop. */
+function normalizeLineEndings(value: string): string {
+  return value.replaceAll('\r\n', '\n')
 }
 
 function toTitleCase(value: string): string {
@@ -187,22 +224,29 @@ async function detectInstalledComponents(
  * because a Windows file ID is 64 bits and would not survive a `number` — two
  * distinct NTFS files could compare equal and spare a real leftover.
  *
- * A failed `lstat` leaves the two indistinguishable, so it answers "same": the
- * entry is left alone rather than deleted on a claim that could not be
- * established. Nothing is lost by that on the one plausible path — a directory
- * readable but not searchable lists its names and refuses to stat them, and
- * `rm` would be refused there too.
+ * One name that plainly does not exist (ENOENT) answers "different": two
+ * names, one of which has no directory entry, cannot be one entry — and on a
+ * dry run the planned side may legitimately not exist yet, which is exactly
+ * when the real `--prune` *would* report the scanned leftover. Answering
+ * "same" there made `--prune --dry-run` preview a stale list the real run
+ * would not produce.
+ *
+ * Any other `lstat` failure leaves the two indistinguishable, so it answers
+ * "same": the entry is left alone rather than deleted on a claim that could
+ * not be established. Nothing is lost by that on the one plausible path — a
+ * directory readable but not searchable lists its names and refuses to stat
+ * them, and `rm` would be refused there too.
  */
 async function isSameFile(cwd: string, left: string, right: string): Promise<boolean> {
-  try {
-    const [leftStat, rightStat] = await Promise.all([
-      lstat(join(cwd, left), { bigint: true }),
-      lstat(join(cwd, right), { bigint: true }),
-    ])
+  const probe = (relPath: string) =>
+    lstat(join(cwd, relPath), { bigint: true }).catch((error: unknown) =>
+      (error as NodeJS.ErrnoException)?.code === 'ENOENT' ? ('missing' as const) : ('unknown' as const),
+    )
+  const [leftStat, rightStat] = await Promise.all([probe(left), probe(right)])
+  if (typeof leftStat !== 'string' && typeof rightStat !== 'string') {
     return leftStat.dev === rightStat.dev && leftStat.ino === rightStat.ino
-  } catch {
-    return true
   }
+  return leftStat !== 'missing' && rightStat !== 'missing'
 }
 
 /**
@@ -210,10 +254,10 @@ async function isSameFile(cwd: string, left: string, right: string): Promise<boo
  * plan does not write. Planned files (managed or user-owned) are excluded
  * via the full planned path set, so a future planner change cannot turn its
  * own output into a prune candidate. A scanned entry that matches a planned
- * path by case alone is settled by `isSameFile` rather than by string — every
- * planned path exists on disk once the write loop has run (it either wrote the
- * file or skipped it because it was already there), so the identity check has
- * both sides to compare.
+ * path by case alone is settled by `isSameFile` rather than by string. After
+ * a real write loop both sides exist to compare; under `dryRun` the planned
+ * side may not, and `isSameFile` answers "different" for a missing name so
+ * the dry run previews the same stale list the real run would produce.
  *
  * Exported for tests: `retiredSkills` defaults to `RETIRED_CANONICAL_SKILLS`,
  * which is empty, so the retired-name path has no other way to be exercised.
@@ -321,6 +365,7 @@ export async function installAgentHarness(options: AgentHarnessOptions = {}): Pr
   const cwd = resolve(options.cwd ?? process.cwd())
   const mode = options.mode ?? 'init'
   const force = Boolean(options.force)
+  const dryRun = Boolean(options.dryRun)
   const appTitle = await resolveAppTitle(cwd)
   const templates = await loadAgentTemplates()
 
@@ -331,6 +376,8 @@ export async function installAgentHarness(options: AgentHarnessOptions = {}): Pr
       : componentsForTargets(['claude'])
 
   const written: string[] = []
+  const replaced: string[] = []
+  const unchanged: string[] = []
   const skipped: string[] = []
   const mcpMergeHints: AgentHarnessResult['mcpMergeHints'] = []
 
@@ -355,16 +402,43 @@ export async function installAgentHarness(options: AgentHarnessOptions = {}): Pr
       continue
     }
 
-    await mkdir(dirname(destPath), { recursive: true })
-    await writeFile(destPath, file.content, 'utf8')
+    // Already at the planned contents — writing would change nothing, so
+    // don't, and don't report it as a write either. What's left in `written`
+    // is the run's actual delta, which is what makes `replaced` trustworthy:
+    // every overwrite it names really discarded something. An unreadable file
+    // counts as differing — the write is where the real failure surfaces.
+    //
+    // The comparison ignores line-ending differences. A checkout that
+    // normalizes to CRLF (core.autocrlf, editor hooks) would otherwise list
+    // every managed file under the replaced warning on every sync, forever —
+    // noise that trains users to ignore the one warning that matters. A
+    // CRLF-only variant counts as up to date and is left as the checkout
+    // made it.
+    const existing = exists ? await readFile(destPath, 'utf8').catch(() => null) : null
+    if (
+      existing !== null &&
+      (existing === file.content ||
+        normalizeLineEndings(existing) === normalizeLineEndings(file.content))
+    ) {
+      unchanged.push(file.path)
+      continue
+    }
+
+    if (!dryRun) {
+      await mkdir(dirname(destPath), { recursive: true })
+      await writeFile(destPath, file.content, 'utf8')
+    }
     written.push(file.path)
+    if (exists) {
+      replaced.push(file.path)
+    }
   }
 
   // Stale cleanup is a sync concern: init installs into places it has never
   // written, so "not in the plan" carries no leftover signal there.
   const stale =
     mode === 'sync' ? await findStaleManagedFiles(cwd, components, plan) : []
-  const pruned = Boolean(options.prune) && stale.length > 0
+  const pruned = Boolean(options.prune) && !dryRun && stale.length > 0
   if (pruned) {
     for (const relPath of stale) {
       await rm(join(cwd, relPath), { force: true })
@@ -385,6 +459,11 @@ export async function installAgentHarness(options: AgentHarnessOptions = {}): Pr
 
   return {
     written,
+    replaced,
+    unchanged,
+    mode,
+    dryRun,
+    pruneRequested: Boolean(options.prune),
     skipped,
     stale,
     pruned,

@@ -104,6 +104,86 @@ describe('installAgentHarness', () => {
     expect(await readFile(join(tempDir, '.claude/rules/orm-models.md'), 'utf8')).not.toBe('stale\n')
   })
 
+  it('sync reports an overwritten managed file as replaced, an untouched one as unchanged', async () => {
+    await installAgentHarness({ cwd: tempDir, mode: 'init' })
+    await writeFile(join(tempDir, '.claude/rules/orm-models.md'), 'locally edited\n', 'utf8')
+
+    const result = await installAgentHarness({ cwd: tempDir, mode: 'sync' })
+
+    expect(result.replaced).toEqual(['.claude/rules/orm-models.md'])
+    expect(result.written).toEqual(['.claude/rules/orm-models.md'])
+    // every other managed file already matches the template — no writes, no
+    // "Wrote" lines claiming otherwise
+    expect(result.unchanged).toContain('.claude/rules/docs-and-spec.md')
+    expect(result.unchanged).not.toContain('.claude/rules/orm-models.md')
+  })
+
+  it('sync recreating a deleted managed file is a write, not a replacement', async () => {
+    await installAgentHarness({ cwd: tempDir, mode: 'init' })
+    await rm(join(tempDir, '.claude/rules/orm-models.md'))
+
+    const result = await installAgentHarness({ cwd: tempDir, mode: 'sync' })
+
+    expect(result.written).toContain('.claude/rules/orm-models.md')
+    expect(result.replaced).toEqual([])
+  })
+
+  it('sync --dry-run reports the replacement without performing it', async () => {
+    await installAgentHarness({ cwd: tempDir, mode: 'init' })
+    await writeFile(join(tempDir, '.claude/rules/orm-models.md'), 'locally edited\n', 'utf8')
+    await rm(join(tempDir, '.claude/rules/docs-and-spec.md'))
+
+    const result = await installAgentHarness({ cwd: tempDir, mode: 'sync', dryRun: true })
+
+    expect(result.dryRun).toBe(true)
+    expect(result.replaced).toEqual(['.claude/rules/orm-models.md'])
+    expect(result.written).toContain('.claude/rules/docs-and-spec.md')
+    // nothing actually touched: the edit survives, the deleted file stays gone
+    expect(await readFile(join(tempDir, '.claude/rules/orm-models.md'), 'utf8')).toBe('locally edited\n')
+    await expect(access(join(tempDir, '.claude/rules/docs-and-spec.md'))).rejects.toThrow()
+  })
+
+  it('treats a CRLF-only variant of a managed file as up to date', async () => {
+    await installAgentHarness({ cwd: tempDir, mode: 'init' })
+    const lf = await readFile(join(tempDir, '.claude/rules/orm-models.md'), 'utf8')
+    // what a core.autocrlf checkout (or an editor hook) leaves behind — not a
+    // local edit, and warning about it on every sync would drown the warning
+    // that matters
+    await writeFile(join(tempDir, '.claude/rules/orm-models.md'), lf.replaceAll('\n', '\r\n'), 'utf8')
+
+    const result = await installAgentHarness({ cwd: tempDir, mode: 'sync' })
+
+    expect(result.replaced).toEqual([])
+    expect(result.unchanged).toContain('.claude/rules/orm-models.md')
+    // left as the checkout made it, not rewritten back to LF
+    expect(await readFile(join(tempDir, '.claude/rules/orm-models.md'), 'utf8')).toContain('\r\n')
+  })
+
+  it('init --force --dry-run previews the replacement without performing it', async () => {
+    await installAgentHarness({ cwd: tempDir, mode: 'init' })
+    await writeFile(join(tempDir, 'CLAUDE.md'), '# Customized\n', 'utf8')
+
+    const result = await installAgentHarness({ cwd: tempDir, mode: 'init', force: true, dryRun: true })
+
+    expect(result.dryRun).toBe(true)
+    expect(result.replaced).toContain('CLAUDE.md')
+    expect(await readFile(join(tempDir, 'CLAUDE.md'), 'utf8')).toBe('# Customized\n')
+  })
+
+  it('sync --prune --dry-run reports stale files but deletes nothing', async () => {
+    await installAgentHarness({ cwd: tempDir, mode: 'init' })
+    await writeFile(join(tempDir, '.claude/rules/leftover.md'), 'old rule\n', 'utf8')
+
+    const result = await installAgentHarness({ cwd: tempDir, mode: 'sync', prune: true, dryRun: true })
+
+    expect(result.stale).toEqual(['.claude/rules/leftover.md'])
+    expect(result.pruned).toBe(false)
+    // the result distinguishes "--prune --dry-run" from a plain "--dry-run"
+    expect(result.pruneRequested).toBe(true)
+    expect(result.mode).toBe('sync')
+    expect(await readFile(join(tempDir, '.claude/rules/leftover.md'), 'utf8')).toBe('old rule\n')
+  })
+
   it('sync writes user-owned files when missing', async () => {
     const result = await installAgentHarness({ cwd: tempDir, mode: 'sync' })
 
@@ -545,6 +625,28 @@ describe('installAgentHarness', () => {
       expect(result.stale).toContain('.claude/rules/ORM-MODELS.md')
       await expect(access(join(tempDir, '.claude/rules/ORM-MODELS.md'))).rejects.toThrow()
     }
+  })
+
+  it('dry-run previews the same stale answer the real prune would produce for a case-only leftover', async () => {
+    await installAgentHarness({ cwd: tempDir, mode: 'init' })
+    const caseInsensitive = await filesystemIsCaseInsensitive(tempDir)
+    await rename(
+      join(tempDir, '.claude/rules/orm-models.md'),
+      join(tempDir, '.claude/rules/ORM-MODELS.md'),
+    )
+
+    // under dryRun the planned orm-models.md is NOT written first, so the
+    // identity check must not collapse "planned side missing" into "same"
+    const result = await installAgentHarness({ cwd: tempDir, mode: 'sync', prune: true, dryRun: true })
+
+    if (caseInsensitive) {
+      expect(result.stale).not.toContain('.claude/rules/ORM-MODELS.md')
+    } else {
+      expect(result.stale).toContain('.claude/rules/ORM-MODELS.md')
+    }
+    // and nothing was touched either way
+    await access(join(tempDir, '.claude/rules/ORM-MODELS.md'))
+    expect(result.pruned).toBe(false)
   })
 
   it('sync --prune scans only the namespaces of the components being synced', async () => {
