@@ -271,13 +271,13 @@ Inertiaのページは `modules/<name>/` 配下にコロケーションされま
 ```bash
 # Claude Code
 claude plugin marketplace add gurenjs/agent-skills
-claude plugin install guren@gurenjs --scope project
+claude plugin install guren@gurenjs --scope user
 
 # Cursor・Codex・Copilot・OpenCode・Gemini CLI など(Agent Skills CLI)
 npx skills add gurenjs/agent-skills
 ```
 
-このプラグインは [Agent Plugins v1](https://agent-plugins.org) にも準拠しているので、ルートの `plugin.json` を読むクライアントならそのリポジトリから直接インストールできます。中身は `guren-new-app`(Guren を説明し、`bunx create-guren-app` で雛形を作り、引き渡す)と `guren-harness`(`bunx guren agent:init --target <agents>` を実行し、`guren context` → 編集 → `guren check` → `guren audit` のループを説明する)の2本です。ハーネスの rules や skills は意図的にコピーしていません。それらはアプリ自身の CLI が入れるもので、アプリの版数と揃い続けます。リポジトリは各リリース時に `packages/cli/templates/agent-catalog/` から生成されるので、変更はそちらへ送ってください(`gurenjs/agent-skills` へは送らないでください)。
+インストールは user scope です。これらのスキルはプロジェクトが存在する*前*の段階のためのもので、何を作る場合でも同じ2本だからです。project scope にすると、たまたま居たリポジトリの設定に書き込まれ、すでにハーネスが入っているアプリの共同作業者にまで on-ramp を配ることになります。このプラグインは [Agent Plugins v1](https://agent-plugins.org) にも準拠しているので、ルートの `plugin.json` を読むクライアントならそのリポジトリから直接インストールできます。中身は `guren-new-app`(Guren を説明し、`bunx create-guren-app` で雛形を作り、引き渡す)と `guren-harness`(`bunx guren agent:init --target <agents>` を実行し、`guren context` → 編集 → `guren check` → `guren audit` のループを説明する)の2本です。ハーネスの rules や skills は意図的にコピーしていません。それらはアプリ自身の CLI が入れるもので、アプリの版数と揃い続けます。リポジトリは各リリース時に `packages/cli/templates/agent-catalog/` から生成されるので、変更はそちらへ送ってください(`gurenjs/agent-skills` へは送らないでください)。
 
 | コマンド | 説明 | 例 |
 |---------|------|-----|

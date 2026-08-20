@@ -273,13 +273,13 @@ The harness above lives inside an app's `@guren/cli`, so it only exists once an 
 ```bash
 # Claude Code
 claude plugin marketplace add gurenjs/agent-skills
-claude plugin install guren@gurenjs --scope project
+claude plugin install guren@gurenjs --scope user
 
 # Cursor, Codex, Copilot, OpenCode, Gemini CLI and others (Agent Skills CLI)
 npx skills add gurenjs/agent-skills
 ```
 
-The plugin also conforms to [Agent Plugins v1](https://agent-plugins.org), so any client that reads a root `plugin.json` can install it from that repository directly. It ships `guren-new-app` (explains Guren, scaffolds an app with `bunx create-guren-app`, hands off) and `guren-harness` (runs `bunx guren agent:init --target <agents>` and explains the `guren context` → edit → `guren check` → `guren audit` loop). It deliberately does **not** copy the harness's rules or skills: those are installed by the app's own CLI and stay version-matched to it. The repository is generated from `packages/cli/templates/agent-catalog/` on each release; send changes there, not to `gurenjs/agent-skills`.
+Install it at user scope: these skills are for the step *before* a project exists, and they are the same two skills whatever you are building — project scope would write them into whichever repository you happened to be standing in, and share an on-ramp with collaborators of an app that already has the harness. The plugin also conforms to [Agent Plugins v1](https://agent-plugins.org), so any client that reads a root `plugin.json` can install it from that repository directly. It ships `guren-new-app` (explains Guren, scaffolds an app with `bunx create-guren-app`, hands off) and `guren-harness` (runs `bunx guren agent:init --target <agents>` and explains the `guren context` → edit → `guren check` → `guren audit` loop). It deliberately does **not** copy the harness's rules or skills: those are installed by the app's own CLI and stay version-matched to it. The repository is generated from `packages/cli/templates/agent-catalog/` on each release; send changes there, not to `gurenjs/agent-skills`.
 
 | Command | Description | Example |
 |---------|-------------|---------|
