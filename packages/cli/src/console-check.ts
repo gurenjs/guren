@@ -1,4 +1,5 @@
 import { resolve } from 'node:path'
+import type { File } from '@babel/types'
 import {
   discoverCommandFiles,
   excludeBarrelFiles,
@@ -7,6 +8,7 @@ import {
   toPosixRelative,
   moduleNameFor,
 } from './discovery'
+import { extractClassDeclaration } from './model-parser'
 import { camelCase, escapeRegExp, referencesIdentifier } from './utils'
 import { ParseCache } from './parse-cache'
 import { check, type CheckResult } from './check-result'
@@ -50,6 +52,36 @@ async function readEntrySource(cache: ParseCache, absPath: string): Promise<Entr
     }))
 
   return { body, imports }
+}
+
+/**
+ * Whether the file's AST declares something registrable as a console command:
+ * a class extending another class, or one carrying the `make:command` surface
+ * (a `signature` or `handle` member). The superclass name is deliberately not
+ * matched against `Command` — apps subclass their own bases, and an aliased
+ * import would defeat a name check anyway.
+ *
+ * This is what keeps a constants or helper module living next to the commands
+ * out of the registration check: it exports no command, so there is nothing to
+ * hand to `registerMany()` and the warning it would get could never be
+ * resolved.
+ */
+function declaresCommand(ast: File): boolean {
+  for (const node of ast.program.body) {
+    const classDecl = extractClassDeclaration(node)
+    if (!classDecl) continue
+    if (classDecl.superClass) return true
+    const hasSurface = classDecl.body.body.some((member) => {
+      if (!('key' in member) || member.key == null) return false
+      const name
+        = member.key.type === 'Identifier' ? member.key.name
+        : member.key.type === 'StringLiteral' ? member.key.value
+        : null
+      return name === 'signature' || name === 'handle'
+    })
+    if (hasSurface) return true
+  }
+  return false
 }
 
 /**
@@ -118,14 +150,25 @@ export function registersCommandsOf(body: string, bindings: string[]): boolean {
  * class, not that the kernel ends up with it. `warn`, never `fail`, since a
  * name reference is not proof of registration in the other direction either.
  *
+ * Only files that {@link declaresCommand} — a helper module beside the
+ * commands has no command to register, so demanding a registration for it
+ * produces a warning that can never be satisfied. A file that fails to parse
+ * cannot be shown to declare no command, so it stays in the check rather than
+ * silently dropping out.
+ *
  * Not filtered by `--changed`, unlike `runCheck`'s file-scanning checks: what
  * decides the outcome is the *entrypoint's* content, so the edit that breaks
  * registration is usually to a file that isn't the command's. Filtering by
  * changed command files would report nothing for exactly that edit. The cost
- * is a directory walk over `app/Console/Commands` plus one read per entry.
+ * is a directory walk over `app/Console/Commands` plus one parse per entry.
  */
 export async function checkConsoleCommandRegistration(cwd: string, cache: ParseCache): Promise<CheckResult[]> {
-  const commandFiles = excludeBarrelFiles(await discoverCommandFiles(cwd))
+  const discovered = excludeBarrelFiles(await discoverCommandFiles(cwd))
+  const commandFiles: string[] = []
+  for (const filePath of discovered) {
+    const parsed = await cache.get(filePath)
+    if (parsed === null || declaresCommand(parsed.ast)) commandFiles.push(filePath)
+  }
   if (commandFiles.length === 0) return []
 
   const results: CheckResult[] = []

@@ -137,6 +137,90 @@ kernel.registerMany([])`,
     }
   })
 
+  it('ignores a non-command module living next to the commands', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-console-helper-')
+
+    try {
+      await writeRootCommand(workspace.dir)
+      await mkdir(join(workspace.dir, 'app/Console/Commands'), { recursive: true })
+      // A shared-constants module has no command to register, so no check
+      // should ever ask for one.
+      await writeFile(
+        join(workspace.dir, 'app/Console/Commands/shared-config.ts'),
+        `export const TABLES = ['users', 'posts'] as const
+export type TableName = (typeof TABLES)[number]`,
+        'utf8',
+      )
+      await mkdir(join(workspace.dir, 'src'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'src/console.ts'),
+        `import { ConsoleKernel } from '@guren/core'
+import SendDigestCommand from '../app/Console/Commands/SendDigestCommand.js'
+
+export const kernel = new ConsoleKernel()
+kernel.registerMany([SendDigestCommand])`,
+        'utf8',
+      )
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      expect(report.checks.find(c => c.key === 'console-command:SendDigestCommand')!.status).toBe('pass')
+      expect(report.checks.some(c => c.key === 'console-command:SharedConfig')).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('does not demand a console entrypoint for a directory holding only helpers', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-console-helper-only-')
+
+    try {
+      await mkdir(join(workspace.dir, 'app/Console/Commands'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'app/Console/Commands/shared-config.ts'),
+        `export const TABLES = ['users'] as const`,
+        'utf8',
+      )
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      expect(report.checks.some(c => c.key.startsWith('console-command:'))).toBe(false)
+      expect(report.checks.some(c => c.key.startsWith('console-entry:'))).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('keeps an unparseable command file in the check', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-console-unparseable-command-')
+
+    try {
+      // Cannot be shown to declare no command, so the conservative reading is
+      // the old one: ask for a registration.
+      await mkdir(join(workspace.dir, 'app/Console/Commands'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'app/Console/Commands/BrokenCommand.ts'),
+        'export default class BrokenCommand extends Command {',
+        'utf8',
+      )
+      await mkdir(join(workspace.dir, 'src'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'src/console.ts'),
+        `import { ConsoleKernel } from '@guren/core'
+
+export const kernel = new ConsoleKernel()
+kernel.registerMany([])`,
+        'utf8',
+      )
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      expect(report.checks.find(c => c.key === 'console-command:BrokenCommand')!.status).toBe('warn')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('contributes nothing when the project has no console commands', async () => {
     const workspace = await createTempWorkspace('guren-cli-check-console-none-')
 
