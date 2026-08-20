@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
-import { CLI_BIN_PATH, SERVER_DIST_ENTRY, assertWorkspaceBuilt, createTempWorkspace } from './helpers'
+import { CLI_BIN_PATH, SERVER_DIST_ENTRY, assertWorkspaceBuilt, createTempWorkspace, linkWorkspaceCore } from './helpers'
 
 /**
  * Spawn the real bin: `bin.ts` exports nothing and builds its commands at
@@ -82,6 +82,9 @@ export class Post extends defineModel(posts) {}
 const CUSTOM_ROUTES_FILE = 'routes/custom.ts'
 
 async function writeRoutesFixture(dir: string): Promise<void> {
+  await linkWorkspaceCore(dir)
+  // this fixture is imported, not just parsed: `guren context` loads the
+  // routes file to read its definitions, so its `@guren/core` has to resolve
   await mkdir(join(dir, 'app/Http/Controllers'), { recursive: true })
   await mkdir(join(dir, 'routes'), { recursive: true })
   await writeFile(
@@ -247,6 +250,31 @@ describe('context entity argument', () => {
       expect(exitCode).toBe(0)
       expect(stdout).toContain('## Model — app/Models/User.ts')
       expect(stdout).not.toContain('modules/billing/app/Models/User.ts')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('says the routes file could not be read, rather than reporting no routes', async () => {
+    // the shape that hid a broken environment: an unloadable routes file used
+    // to render exactly what an entity with no routes renders, so a machine
+    // that could not resolve the fixture's imports produced a confident,
+    // wrong answer instead of an error
+    const workspace = await createTempWorkspace('guren-cli-context-routes-broken-')
+    try {
+      await writeModelFixture(workspace.dir)
+      await writeRoutesFixture(workspace.dir)
+      await writeFile(
+        join(workspace.dir, CUSTOM_ROUTES_FILE),
+        "import { nothing } from 'package-that-is-not-installed'\nexport function registerWebRoutes(): void { nothing() }\n",
+        'utf8',
+      )
+
+      const { exitCode, stdout } = await runBin(['context', '--routes', CUSTOM_ROUTES_FILE, 'User'], workspace.dir)
+
+      expect(exitCode).toBe(0)
+      expect(stdout).toContain('Routes could not be read:')
+      expect(stdout).not.toContain('No routes reference this entity.')
     } finally {
       await workspace.cleanup()
     }

@@ -88,6 +88,8 @@ export interface EntityContext {
   /** Reverse relationship edges: other models whose relationships target this entity. */
   referencedBy: Array<{ model: string; relationship: string; type: string }>
   routes: ContextRoute[]
+  /** Why the routes file could not be loaded, when it could not be. */
+  routesError?: string
   controller?: { className: string; filePath: string; actions: string[] }
   pages: EntityPage[]
   resource?: string
@@ -228,6 +230,7 @@ export async function generateEntityContext(
       .sort()
   }
 
+  let routesError: string | undefined
   const loadEntityRoutes = async (): Promise<ContextRoute[]> => {
     try {
       const provenance: Array<string | null> = []
@@ -246,8 +249,13 @@ export async function generateEntityContext(
           return duplicated ? provenance[index] === match.module : true
         })
         .map(routeDefinitionToContextRoute)
-    } catch {
-      // Routes may not be loadable (missing deps, etc.) — degrade to a route-less bundle.
+    } catch (error) {
+      // A routes file that cannot be loaded is not a routes file with nothing
+      // in it. Reported rather than swallowed: the two used to render the same
+      // "No routes reference this entity.", so an app whose routes failed to
+      // import read as an app whose entity has no routes — and every reader of
+      // this bundle, agent or human, would have believed it.
+      routesError = error instanceof Error ? error.message : String(error)
       return []
     }
   }
@@ -355,6 +363,7 @@ export async function generateEntityContext(
     },
     referencedBy,
     routes,
+    routesError,
     controller: controllerBundle.controller,
     pages: controllerBundle.pages,
     resource,
@@ -406,6 +415,9 @@ export function renderEntityContextMarkdown(ctx: EntityContext): string {
       const cells = [route.method, route.path, route.name ?? '', action, route.params ?? '', route.body ?? '']
       lines.push(`| ${cells.map(escapeMarkdownTableCell).join(' | ')} |`)
     }
+  } else if (ctx.routesError) {
+    lines.push(`Routes could not be read: ${ctx.routesError}`)
+    lines.push('This is not the same as the entity having no routes — the list above is incomplete.')
   } else {
     lines.push('No routes reference this entity.')
   }
