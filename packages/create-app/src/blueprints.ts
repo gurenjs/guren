@@ -237,60 +237,40 @@ async function scaffoldEnvFiles(destination: string): Promise<void> {
   await writeFile(envPath, envContent.endsWith('\n') ? envContent : `${envContent}\n`, 'utf8')
 }
 
-/* ---------- Database-specific file generators ---------- */
+/* ---------- Database-specific files ---------- */
 
-// `seederContext` is the alias a seeder in this app must be annotated with:
-// the bare `SeederContext` is PostgreSQL-shaped and rejects a MySQL or SQLite
-// schema. The generated config re-exports it under one driver-independent name
-// so the seeders themselves stay portable.
-const DATABASE_DEFAULTS = {
-  postgres: { url: 'postgres://guren:guren@localhost:54322/guren', dialect: 'postgresql', dep: { postgres: '^3.4.3' }, factory: 'createPostgresDatabase', seederContext: 'PostgresSeederContext' },
-  mysql:    { url: 'mysql://guren:guren@localhost:33306/guren',    dialect: 'mysql',      dep: { mysql2: '^3.11.3' },  factory: 'createMySqlDatabase',    seederContext: 'MySqlSeederContext' },
-  sqlite:   { url: './data/guren.db',                              dialect: 'sqlite',     dep: null,                   factory: 'createSqliteDatabase',   seederContext: 'SqliteSeederContext' },
+export const DATABASE_DEFAULTS = {
+  postgres: { url: 'postgres://guren:guren@localhost:54322/guren', dialect: 'postgresql', dep: { postgres: '^3.4.3' } },
+  mysql:    { url: 'mysql://guren:guren@localhost:33306/guren',    dialect: 'mysql',      dep: { mysql2: '^3.11.3' } },
+  sqlite:   { url: './data/guren.db',                              dialect: 'sqlite',     dep: null },
 } as const satisfies Record<
   DatabaseDriver,
-  { url: string; dialect: string; dep: Record<string, string> | null; factory: string; seederContext: string }
+  { url: string; dialect: string; dep: Record<string, string> | null }
 >
 
-function generateDatabaseConfig(driver: DatabaseDriver): string {
-  const { url, factory, seederContext } = DATABASE_DEFAULTS[driver]
-
-  // SQLite is configured by file path rather than connection string, so it is
-  // the one driver that carries a resolver (and the test-database rule).
-  const body =
-    driver === 'sqlite'
-      ? `// \`bun test\` sets NODE_ENV=test automatically, so the test suite reads and
-// writes a separate SQLite file and never touches the development database —
-// this takes priority over DATABASE_URL, which .env sets unconditionally.
-// Override the test DB path itself with TEST_DATABASE_URL if needed (e.g. to
-// shard parallel CI runs); DATABASE_URL is still authoritative outside tests.
-function resolveDatabaseFilename(): string {
-  if (process.env.NODE_ENV === 'test') {
-    return process.env.TEST_DATABASE_URL ?? './data/guren.test.db'
-  }
-  return process.env.DATABASE_URL ?? '${url}'
+/**
+ * `config/database.ts` ships as one real source file per driver, copied
+ * verbatim — no tokens, and `templates/database` is not a `TemplateName`
+ * layer, so only the selected driver's file reaches the app. The full
+ * rationale lives in this package's CLAUDE.md;
+ * `tests/database-config-template.test.ts` pins the files to this path and to
+ * the `DATABASE_DEFAULTS` constants they hardcode.
+ */
+export function databaseConfigTemplatePath(driver: DatabaseDriver): string {
+  return join(TEMPLATES_ROOT, 'database', driver, 'config/database.ts')
 }
 
-const database = ${factory}({
-  migrationsFolder: new URL('../db/migrations', import.meta.url),
-  seedersFolder: new URL('../db/seeders', import.meta.url),
-  filename: resolveDatabaseFilename,
-})`
-      : `const database = ${factory}({
-  migrationsFolder: new URL('../db/migrations', import.meta.url),
-  seedersFolder: new URL('../db/seeders', import.meta.url),
-  connectionString: () => process.env.DATABASE_URL ?? '${url}',
-})`
-
-  return `import { ${factory}, type ${seederContext} } from '@guren/orm'
-
-${body}
-
-export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase, resetDatabase, migrationStatus } = database
-
-/** Annotate seeders with this: \`defineSeeder(async ({ db }: AppSeederContext) => {})\`. */
-export type AppSeederContext = ${seederContext}
-`
+async function loadDatabaseConfig(driver: DatabaseDriver): Promise<string> {
+  try {
+    return await readFile(databaseConfigTemplatePath(driver), 'utf8')
+  } catch (cause) {
+    throw new Error(
+      `Could not read the ${driver} database config template at "${databaseConfigTemplatePath(driver)}". ` +
+      'This build of create-guren-app may be incomplete — please report it at ' +
+      'https://github.com/gurenjs/guren/issues and try `npm create guren-app@latest` meanwhile.',
+      { cause },
+    )
+  }
 }
 
 // Each dialect imports from its own `@guren/orm/drizzle/<dialect>` barrel —
@@ -474,12 +454,13 @@ async function applyDatabaseConfig(destination: string, driver: DatabaseDriver):
   // Resolved before the writes below so a template missing the selected driver's
   // schema fails while `db/schema.ts` still holds whatever the copy left there.
   const schema = await resolveSchema(destination, driver)
+  const databaseConfig = await loadDatabaseConfig(driver)
 
   // Write all DB-variant files in parallel — including SQLite, since an overlay
   // template may ship a schema written for one driver that has to be replaced
   // with the driver the user actually selected.
   await Promise.all([
-    writeFile(join(destination, 'config/database.ts'), generateDatabaseConfig(driver), 'utf8'),
+    writeFile(join(destination, 'config/database.ts'), databaseConfig, 'utf8'),
     writeFile(join(destination, 'db/schema.ts'), schema, 'utf8'),
     // Independent of the write above: the selected variant's contents are
     // already in `schema`, and no variant shares a path with db/schema.ts.

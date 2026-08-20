@@ -27,6 +27,19 @@ Scaffolding CLI that copies templates from `templates/default` and replaces toke
 - **`applyDatabaseConfig` overwrites `db/schema.ts`.** A template needing more
   than the generic `users` table ships `db/schema.<driver>.ts` per driver
   instead; the scaffolder selects one and deletes the others.
+- **`config/database.ts` ships as real per-driver sources** under
+  `templates/database/<driver>/config/database.ts`, copied verbatim (no
+  tokens) — `templates/database` is not a blueprint layer and is never copied
+  wholesale. Each variant imports its own dialect's factory and re-exports
+  that dialect's seeder context as `AppSeederContext` (the bare
+  `SeederContext` is PostgreSQL-shaped and rejects a MySQL or SQLite schema —
+  the alias is what keeps the shipped seeders portable). The files hardcode
+  the same URL `DATABASE_DEFAULTS` feeds into `.env` and `drizzle.config.ts`;
+  `tests/database-config-template.test.ts` pins that alignment, plus parse,
+  the driver↔factory pairing, the verbatim copy, and tarball inclusion. Like
+  every template here, these files are excluded from typecheck (they resolve
+  `@guren/*` from npm); the starter smokes typecheck them inside a real
+  scaffold.
 - **Advertise nothing without a smoke.** Each blueprint gets a
   `smoke:starter:<name>` script and a CI step — `bun run typecheck` and
   `bun run build` inside a real scaffold are the only things that catch a
