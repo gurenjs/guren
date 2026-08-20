@@ -15,6 +15,10 @@ import {
   type DocLocale,
 } from './docs-config.js'
 
+// The code surface is themeless ink (Guren UI): app.css always applies the
+// dark palette from the `--shiki-dark` custom properties and pins the
+// background to the ink token. The output stays dual-theme so it is
+// interchangeable with the blog pipeline's stored HTML (PostRenderer.ts).
 const DOCS_THEMES = {
   light: 'rose-pine-dawn',
   dark: 'rose-pine-moon',
@@ -24,15 +28,17 @@ const ALERT_DIRECTIVE_PATTERN = /^\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s
 
 type AlertType = 'note' | 'tip' | 'important' | 'warning' | 'caution'
 
+// Callouts render as diagnostic rows (Guren UI): GitHub's five directives
+// map onto the note / ok / rule / never key vocabulary of `guren check`.
 const ALERT_METADATA: Record<
   AlertType,
   { label: string; classSuffix: string }
 > = {
-  note: { label: 'Note', classSuffix: 'note' },
-  tip: { label: 'Tip', classSuffix: 'tip' },
-  important: { label: 'Important', classSuffix: 'important' },
-  warning: { label: 'Warning', classSuffix: 'warning' },
-  caution: { label: 'Caution', classSuffix: 'caution' },
+  note: { label: 'note', classSuffix: 'note' },
+  tip: { label: 'ok', classSuffix: 'tip' },
+  important: { label: 'rule', classSuffix: 'important' },
+  warning: { label: 'rule', classSuffix: 'warning' },
+  caution: { label: 'never', classSuffix: 'caution' },
 }
 
 export interface DocLinkContext {
