@@ -46,7 +46,7 @@ export default function BlogShow({ post }: Props) {
           <article className="docs-article">
             <header className="mb-12">
               {post.publishedAt && (
-                <p className="mb-3 text-sm text-docs-text-muted">{formatDate(post.publishedAt)}</p>
+                <p className="docs-mono mb-3 text-sm text-docs-text-secondary">{formatDate(post.publishedAt)}</p>
               )}
               <h1 className="mb-4 text-[2.75rem] font-extrabold leading-[1.1] tracking-tight text-docs-heading">
                 {post.title}
@@ -69,10 +69,7 @@ export default function BlogShow({ post }: Props) {
             <p className="mb-10 text-lg leading-relaxed text-docs-text-secondary">
               The post you are looking for doesn't exist or has been unpublished.
             </p>
-            <Link
-              href="/blog"
-              className="inline-flex items-center gap-2 rounded-full bg-docs-accent px-6 py-3 font-semibold text-white no-underline transition hover:scale-105"
-            >
+            <Link href="/blog" className="docs-btn-primary px-6 py-3">
               Back to the blog
             </Link>
           </section>

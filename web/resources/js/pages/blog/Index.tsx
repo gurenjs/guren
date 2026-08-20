@@ -64,7 +64,7 @@ export default function BlogIndex({ posts }: Props) {
           <div className="flex flex-col gap-8">
             {posts.map((post) => (
               <article key={post.slug} className="border-b border-docs-border pb-8">
-                <p className="mb-2 text-sm text-docs-text-muted">{formatDate(post.publishedAt)}</p>
+                <p className="docs-mono mb-2 text-sm text-docs-text-secondary">{formatDate(post.publishedAt)}</p>
                 <h2 className="mb-2 text-2xl font-bold text-docs-heading">
                   <Link href={`/blog/${post.slug}`} className="no-underline hover:underline">
                     {post.title}
