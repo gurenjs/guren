@@ -465,7 +465,6 @@ export interface ApplicationOptions {
    * is registered automatically.
    */
   readonly i18n?: I18nPluginOptions
-  readonly discover?: boolean
   readonly routes?: RouteRegistration
   /**
    * Application modules (RFC 0002) — each module's providers are appended

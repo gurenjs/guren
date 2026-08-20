@@ -165,9 +165,9 @@ interface ExtractedSignal {
  *
  * ScryptHasher counts as password authentication because constructing one is
  * only ever done to hash a password (seeders do this). AutoDiscovery maps to
- * `discovery`; `ApplicationOptions.discover` is deliberately not a signal —
- * it is declared but never read anywhere in @guren/server, so warning about
- * it would flag a config key that has no effect.
+ * `discovery`; a `discover: true` option in `createApp()` is deliberately not
+ * a signal — the option never had an effect (`ApplicationOptions` no longer
+ * declares it), so a leftover in an older app is inert, not discovery.
  */
 const CONSTRUCTED_SIGNALS: Record<string, SignalKind> = {
   ScryptHasher: 'passwordAuth',
