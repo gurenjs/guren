@@ -221,6 +221,8 @@ rules: [
 ]
 ```
 
+`includeTypeImports` covers the rules you declare in `guren.arch.ts`. The zero-config module boundary rules that activate for a `modules/` directory take no options and always analyse runtime imports only.
+
 Two flags make this practical for AI coding agents and large apps:
 
 ```bash

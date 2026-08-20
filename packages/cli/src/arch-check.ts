@@ -11,6 +11,7 @@ import {
   IMPORTABLE_EXTENSIONS,
 } from './discovery'
 import { matchesAnyGlob } from './glob-match'
+import { literalString, walk } from './ast-walk'
 import { loadArchConfig } from './arch-config'
 import type { ArchLayers, ArchRule, ArchRuleSet } from './arch/index'
 import type { ParseCache } from './parse-cache'
@@ -78,6 +79,10 @@ export async function runArchCheck(options: RunArchCheckOptions): Promise<CheckR
  * `export * from '../modules/<name>/db/schema'`, which the RFC's literal
  * "except index.ts" wording would otherwise flag as a violation of its own
  * generator's output.
+ *
+ * Always runtime imports only: these rules take no options, so a set-wide
+ * `includeTypeImports` in `guren.arch.ts` deliberately does not reach them
+ * — the `ArchRuleSet` JSDoc and the CLI guide both say so.
  */
 async function evaluateDerivedModuleRules(
   cwd: string,
@@ -157,6 +162,12 @@ async function evaluateArchRules(
   const rules = config.rules
   const results: CheckResult[] = []
 
+  // The effective flag is a property of the rule set, constant for the run —
+  // resolved once here so no later call site re-derives the
+  // `rule ?? set ?? false` cascade and drifts.
+  const ruleIncludesTypes = (rule: ArchRule): boolean =>
+    rule.includeTypeImports ?? config.includeTypeImports ?? false
+
   const files = await importableFiles()
   let filesChecked = 0
 
@@ -172,32 +183,30 @@ async function evaluateArchRules(
 
     // Type-only specifiers are only extracted (and the type-position walk
     // only paid for) when some applicable rule will actually judge them.
-    const ruleIncludesTypes = (rule: ArchRule): boolean =>
-      rule.includeTypeImports ?? config.includeTypeImports ?? false
     const wantsTypes = applicableRules.some(ruleIncludesTypes)
 
     const specifiers = extractImportSpecifiers(parsed.ast.program.body, wantsTypes)
     if (specifiers.length === 0) continue
 
     filesChecked += 1
-    const resolvedImports = await Promise.all(
-      specifiers.map(async (entry) => ({
-        ...(await resolveImportSpecifier(cwd, absPath, entry.specifier)),
-        typeOnly: entry.typeOnly,
-      })),
+    const resolvedImports = dedupeResolvedImports(
+      await Promise.all(
+        specifiers.map(async (entry) => ({
+          ...(await resolveImportSpecifier(cwd, absPath, entry.specifier, entry.typeOnly)),
+          typeOnly: entry.typeOnly,
+        })),
+      ),
     )
     const fromLabel = classifyLayer(relPath, layers) ?? relPath
 
-    const reportedUnresolved = new Set<string>()
     for (const imp of resolvedImports) {
-      if (imp.kind !== 'unresolved' || reportedUnresolved.has(imp.specifier)) continue
-      reportedUnresolved.add(imp.specifier)
+      if (imp.kind !== 'unresolved') continue
       results.push(
         check(
           `arch:unresolved:${relPath}:${imp.specifier}`,
           'Architecture boundary',
           'warn',
-          `${relPath} imports '${imp.specifier}', which could not be resolved to a project file.`,
+          `${relPath} ${imp.typeOnly ? 'imports (type-only)' : 'imports'} '${imp.specifier}', which could not be resolved to a project file.`,
           undefined,
           relPath,
         ),
@@ -297,6 +306,31 @@ type ResolvedImport =
   | { specifier: string; kind: 'file'; fileRelPath: string }
   | { specifier: string; kind: 'unresolved' }
 
+/**
+ * One entry per resolved target, runtime beating type-only: a file that
+ * imports a module for real and also names it in a type position has one
+ * boundary crossing, and it is a runtime one. Keyed on the *resolved*
+ * identity, not the specifier — `'./Post.js'` and `'./Post'` are two
+ * spellings of one file, and keying on the string would let a type-only
+ * duplicate survive next to its runtime twin.
+ */
+function dedupeResolvedImports(
+  imports: Array<ResolvedImport & { typeOnly: boolean }>,
+): Array<ResolvedImport & { typeOnly: boolean }> {
+  const byTarget = new Map<string, ResolvedImport & { typeOnly: boolean }>()
+  for (const imp of imports) {
+    const key =
+      imp.kind === 'file' ? `file:${imp.fileRelPath}`
+      : imp.kind === 'package' ? `pkg:${imp.packageName}`
+      : `unresolved:${imp.specifier}`
+    const existing = byTarget.get(key)
+    if (!existing || (existing.typeOnly && !imp.typeOnly)) {
+      byTarget.set(key, imp)
+    }
+  }
+  return [...byTarget.values()]
+}
+
 function isBareSpecifier(specifier: string): boolean {
   return !specifier.startsWith('.') && !specifier.startsWith('@/')
 }
@@ -311,6 +345,7 @@ async function resolveImportSpecifier(
   cwd: string,
   importerAbsPath: string,
   specifier: string,
+  typeOnly = false,
 ): Promise<ResolvedImport> {
   if (isBareSpecifier(specifier)) {
     return { specifier, kind: 'package', packageName: packageNameFromSpecifier(specifier) }
@@ -337,6 +372,10 @@ async function resolveImportSpecifier(
     join(base, 'index.ts'),
     join(base, 'index.tsx'),
     join(base, 'index.js'),
+    // A declaration file can satisfy only a type-only import, so the
+    // candidates exist only on that path — for a runtime import a lone
+    // `.d.ts` on disk really is unresolved.
+    ...(typeOnly ? [`${base}.d.ts`, join(base, 'index.d.ts')] : []),
   ]
 
   for (const candidate of candidates) {
@@ -402,58 +441,28 @@ function extractImportSpecifiers(body: Statement[], includeTypeOnly = false): Ex
 
   for (const node of body) {
     if (node.type === 'ImportDeclaration') {
-      specifiers.push({ specifier: node.source.value, typeOnly: node.importKind === 'type' })
+      const typeOnly = node.importKind === 'type'
+      if (typeOnly && !includeTypeOnly) continue
+      specifiers.push({ specifier: node.source.value, typeOnly })
     } else if (
       (node.type === 'ExportNamedDeclaration' || node.type === 'ExportAllDeclaration') &&
       node.source
     ) {
-      specifiers.push({ specifier: node.source.value, typeOnly: node.exportKind === 'type' })
+      const typeOnly = node.exportKind === 'type'
+      if (typeOnly && !includeTypeOnly) continue
+      specifiers.push({ specifier: node.source.value, typeOnly })
     }
   }
 
-  if (!includeTypeOnly) {
-    return specifiers.filter((entry) => !entry.typeOnly)
+  if (includeTypeOnly) {
+    // `import('...').X` in a type position is the one specifier form living
+    // outside the top-level statements, so it needs the shared AST walker.
+    walk(body, (node) => {
+      if (node.type !== 'TSImportType') return
+      const spec = literalString(node.argument)
+      if (spec !== null) specifiers.push({ specifier: spec, typeOnly: true })
+    })
   }
 
-  collectTsImportTypes(body, specifiers)
-
-  // One entry per specifier, runtime beating type-only: a file that imports
-  // a module for real and also names it in a type position has one boundary
-  // crossing, and it is a runtime one.
-  const bySpecifier = new Map<string, ExtractedSpecifier>()
-  for (const entry of specifiers) {
-    const existing = bySpecifier.get(entry.specifier)
-    if (!existing || (existing.typeOnly && !entry.typeOnly)) {
-      bySpecifier.set(entry.specifier, entry)
-    }
-  }
-  return [...bySpecifier.values()]
-}
-
-/**
- * `import('...').X` in type positions, anywhere in the file. `@babel/parser`
- * ships no traversal API and the node can sit arbitrarily deep in a type
- * annotation, so this is a structural walk: every nested object or array is
- * visited, and `TSImportType` nodes contribute their literal argument. The
- * AST is a tree (no parent links), so plain recursion terminates.
- */
-function collectTsImportTypes(node: unknown, out: ExtractedSpecifier[]): void {
-  if (Array.isArray(node)) {
-    for (const item of node) collectTsImportTypes(item, out)
-    return
-  }
-  if (node === null || typeof node !== 'object') return
-
-  const candidate = node as { type?: unknown; argument?: { type?: unknown; value?: unknown } }
-  if (
-    candidate.type === 'TSImportType' &&
-    candidate.argument?.type === 'StringLiteral' &&
-    typeof candidate.argument.value === 'string'
-  ) {
-    out.push({ specifier: candidate.argument.value, typeOnly: true })
-  }
-
-  for (const value of Object.values(node)) {
-    if (value !== null && typeof value === 'object') collectTsImportTypes(value, out)
-  }
+  return specifiers
 }

@@ -185,7 +185,13 @@ whole-declaration type imports/exports and `import('...').X` in type
 positions (the latter requires a full-AST walk, paid only by files
 where some applicable rule opted in). The default behavior is
 unchanged, and dynamic `import()` *expressions* remain out of scope as
-frozen above.
+frozen above. The opt-in covers only the explicit `guren.arch.ts`
+rules: the derived module boundary rules of Part 2 are deliberately
+option-free (no user-authorable vocabulary), so they stay runtime-only
+even under a set-wide `includeTypeImports` — documented at the option
+rather than left as a silent gap. For a type-only import, the resolver
+additionally accepts `.d.ts` / `index.d.ts` targets, which only a type
+import can legally name.
 
 #### CLI surface
 

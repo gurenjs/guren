@@ -316,7 +316,7 @@ export default {
     }
   })
 
-  const TYPE_IMPORTS_LAYOUT = async (dir: string, archConfig: string): Promise<void> => {
+  const writeTypeImportsLayout = async (dir: string, archConfig: string): Promise<void> => {
     await writeFile(join(dir, 'guren.arch.ts'), archConfig, 'utf8')
     await mkdir(join(dir, 'app/Domain'), { recursive: true })
     await mkdir(join(dir, 'app/Http/Controllers'), { recursive: true })
@@ -330,7 +330,7 @@ export default {
   it('flags a type-only import when the rule sets includeTypeImports', async () => {
     const workspace = await createTempWorkspace('guren-cli-arch-type-optin-')
     try {
-      await TYPE_IMPORTS_LAYOUT(
+      await writeTypeImportsLayout(
         workspace.dir,
         `export default {
   layers: { domain: 'app/Domain/**', http: 'app/Http/**' },
@@ -356,7 +356,7 @@ export default {
   it('honors a set-wide includeTypeImports default, with the rule able to opt back out', async () => {
     const workspace = await createTempWorkspace('guren-cli-arch-type-global-')
     try {
-      await TYPE_IMPORTS_LAYOUT(
+      await writeTypeImportsLayout(
         workspace.dir,
         `export default {
   layers: { domain: 'app/Domain/**', queries: 'src/queries/**', http: 'app/Http/**' },
@@ -392,7 +392,7 @@ export default {
   it('sees an import(...) in a type position once type imports are included', async () => {
     const workspace = await createTempWorkspace('guren-cli-arch-type-importtype-')
     try {
-      await TYPE_IMPORTS_LAYOUT(
+      await writeTypeImportsLayout(
         workspace.dir,
         `export default {
   layers: { domain: 'app/Domain/**', http: 'app/Http/**' },
@@ -419,7 +419,7 @@ export default {
   it('leaves an import(...) type position invisible without the opt-in, as documented', async () => {
     const workspace = await createTempWorkspace('guren-cli-arch-type-importtype-off-')
     try {
-      await TYPE_IMPORTS_LAYOUT(workspace.dir, ARCH_CONFIG)
+      await writeTypeImportsLayout(workspace.dir, ARCH_CONFIG)
       await writeFile(
         join(workspace.dir, 'app/Domain/OrderService.ts'),
         `export interface DashboardData {\n  rows: import('../Http/Controllers/PostController').PostDto[]\n}`,
@@ -433,10 +433,44 @@ export default {
     }
   })
 
-  it('reports one runtime violation when the same module is imported both ways', async () => {
-    const workspace = await createTempWorkspace('guren-cli-arch-type-dedupe-')
+  it('resolves a type-only import to a lone .d.ts and judges it', async () => {
+    const workspace = await createTempWorkspace('guren-cli-arch-type-dts-')
     try {
-      await TYPE_IMPORTS_LAYOUT(
+      await writeTypeImportsLayout(
+        workspace.dir,
+        `export default {
+  layers: { domain: 'app/Domain/**', http: 'app/Http/**' },
+  rules: [{ from: 'domain', disallow: ['http'], includeTypeImports: true }],
+}`,
+      )
+      // the target exists only as a declaration file — legal for a type
+      // import, and previously classified 'unresolved' (a spurious warn, and
+      // a silently missed violation)
+      await writeFile(
+        join(workspace.dir, 'app/Http/Controllers/env.d.ts'),
+        `export interface Env { url: string }`,
+        'utf8',
+      )
+      await writeFile(
+        join(workspace.dir, 'app/Domain/OrderService.ts'),
+        `import type { Env } from '../Http/Controllers/env'\nexport class OrderService {\n  env?: Env\n}`,
+        'utf8',
+      )
+
+      const results = await runArchCheck({ cwd: workspace.dir, cache: new ParseCache() })
+      const violation = results.find((r) => r.filePath === 'app/Domain/OrderService.ts')
+      expect(violation).toBeDefined()
+      expect(violation!.status).toBe('fail')
+      expect(results.some((r) => r.key.startsWith('arch:unresolved:'))).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('labels an unresolved type-only import as such', async () => {
+    const workspace = await createTempWorkspace('guren-cli-arch-type-unresolved-')
+    try {
+      await writeTypeImportsLayout(
         workspace.dir,
         `export default {
   layers: { domain: 'app/Domain/**', http: 'app/Http/**' },
@@ -445,7 +479,61 @@ export default {
       )
       await writeFile(
         join(workspace.dir, 'app/Domain/OrderService.ts'),
-        `import { PostController } from '../Http/Controllers/PostController'\n`
+        `import type { Missing } from './DoesNotExist'\nexport class OrderService {\n  x?: Missing\n}`,
+        'utf8',
+      )
+
+      const results = await runArchCheck({ cwd: workspace.dir, cache: new ParseCache() })
+      const unresolved = results.find((r) => r.key.startsWith('arch:unresolved:'))
+      expect(unresolved).toBeDefined()
+      expect(unresolved!.status).toBe('warn')
+      expect(unresolved!.message).toContain('(type-only)')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('a set-wide includeTypeImports does not reach the derived module rules, as documented', async () => {
+    const workspace = await createTempWorkspace('guren-cli-arch-type-modules-')
+    try {
+      await writeFile(
+        join(workspace.dir, 'guren.arch.ts'),
+        `export default { includeTypeImports: true, rules: [] }`,
+        'utf8',
+      )
+      await mkdir(join(workspace.dir, 'modules/billing'), { recursive: true })
+      await mkdir(join(workspace.dir, 'modules/orders/db'), { recursive: true })
+      await writeFile(join(workspace.dir, 'modules/orders/db/rows.ts'), `export interface Row { id: number }`, 'utf8')
+      // a type-only reach into another module's internals — runtime-only by
+      // design for the zero-config rules, whatever the set-wide flag says
+      await writeFile(
+        join(workspace.dir, 'modules/billing/service.ts'),
+        `import type { Row } from '../orders/db/rows'\nexport const rows: Row[] = []`,
+        'utf8',
+      )
+
+      const results = await runArchCheck({ cwd: workspace.dir, cache: new ParseCache() })
+      expect(results.some((r) => r.key.startsWith('arch:module-boundary:'))).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('reports one runtime violation when the same module is imported both ways', async () => {
+    const workspace = await createTempWorkspace('guren-cli-arch-type-dedupe-')
+    try {
+      await writeTypeImportsLayout(
+        workspace.dir,
+        `export default {
+  layers: { domain: 'app/Domain/**', http: 'app/Http/**' },
+  rules: [{ from: 'domain', disallow: ['http'], includeTypeImports: true }],
+}`,
+      )
+      // different spellings of one file: NodeNext-style .js for the runtime
+      // import, extensionless for the type import — still one crossing
+      await writeFile(
+        join(workspace.dir, 'app/Domain/OrderService.ts'),
+        `import { PostController } from '../Http/Controllers/PostController.js'\n`
         + `import type { PostDto } from '../Http/Controllers/PostController'\n`
         + `export class OrderService {\n  dto?: PostDto\n  ctrl = PostController\n}`,
         'utf8',

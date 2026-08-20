@@ -53,6 +53,10 @@ export interface ArchRuleSet {
   /**
    * Default for {@link ArchRule.includeTypeImports} across every rule in
    * this set; a rule's own setting wins.
+   *
+   * Covers only the rules declared here. The zero-config module boundary
+   * rules derived from a `modules/` directory are deliberately option-free
+   * and always analyse runtime imports only.
    * @default false
    */
   includeTypeImports?: boolean
