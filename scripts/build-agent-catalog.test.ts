@@ -490,6 +490,29 @@ describe('audit: changeset gate', () => {
     expect(await assertChangesetGate(base, repo)).toEqual([])
   })
 
+  it('falls back to a two-dot diff when there is no merge base', async () => {
+    // What a shallow CI checkout looks like: the base was fetched by SHA to
+    // depth 1, so it shares no history with HEAD and `git merge-base` has no
+    // answer. The fallback must be the base tip — an empty left side would
+    // make the diff `HEAD..HEAD`, which reports no files and passes this gate
+    // on every such run.
+    const { repo, base } = await baseRepo()
+    git(repo, 'checkout', '--quiet', '--orphan', 'unrelated')
+    await commit(repo, 'unrelated root', {
+      [CLI_MANIFEST]: manifest('2.7.1'),
+      'packages/cli/templates/agent-catalog/README.md.tpl': 'after\n',
+    })
+    // the two premises, pinned: git really has no merge base to offer here,
+    // and an empty rev would not be a loud failure but a silent pass
+    expect(Bun.spawnSync(['git', 'merge-base', base, 'HEAD'], { cwd: repo }).success).toBe(false)
+    const emptyLeftSide = Bun.spawnSync(['git', 'diff', '--name-only', '..HEAD'], { cwd: repo })
+    expect(emptyLeftSide.success).toBe(true)
+    expect(emptyLeftSide.stdout.toString().trim()).toBe('')
+    const problems = await assertChangesetGate(base, repo)
+    expect(problems).toHaveLength(1)
+    expect(problems[0]).toContain('README.md.tpl')
+  })
+
   it('reports a base ref it cannot resolve rather than passing', async () => {
     const { repo } = await baseRepo()
     const problems = await assertChangesetGate('refs/does-not-exist', repo)

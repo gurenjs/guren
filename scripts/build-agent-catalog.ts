@@ -434,8 +434,13 @@ export async function assertChangesetGate(base: string, repo: string = repoRoot)
   // diff the file list came from: on a stale branch `base`'s tip can carry a
   // *newer* version than HEAD, which would exempt a run the merge base would
   // have gated.
+  // Empty output counts as a failure, not as a rev. Today's git exits
+  // non-zero when there is no merge base, so this is belt-and-braces — but
+  // the failure it prevents is silent rather than loud: an empty left side
+  // makes `git diff ..HEAD` a diff of HEAD against itself, which reports no
+  // files and passes this gate rather than reporting that it could not run.
   const mergeBase = Bun.spawnSync(['git', 'merge-base', base, 'HEAD'], { cwd: repo })
-  const diffBase = mergeBase.success ? mergeBase.stdout.toString().trim() : base
+  const diffBase = (mergeBase.success && mergeBase.stdout.toString().trim()) || base
   const diff = Bun.spawnSync(['git', 'diff', '--name-only', `${diffBase}..HEAD`], { cwd: repo })
   if (!diff.success) {
     return [`could not diff against ${base}: ${diff.stderr.toString().trim()} — fetch the base ref before running --check`]
