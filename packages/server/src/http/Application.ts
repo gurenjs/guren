@@ -329,9 +329,15 @@ function registerProcessTeardown(onSignal: () => void, onExit: () => void): () =
   process.on('exit', onExit)
 
   return () => {
-    process.off('SIGINT', onSignal)
-    process.off('SIGTERM', onSignal)
-    process.off('exit', onExit)
+    // Detach via the EventEmitter surface: bun-types 1.4.0 declares `off` on
+    // Process with only a "memoryPressure" overload, which shadows the generic
+    // `off` Process used to inherit — so signal names stop compiling there.
+    // (`on`/`once` are unaffected: @types/node declares those per event, and
+    // interface merging keeps every overload.)
+    const emitter: NodeJS.EventEmitter = process
+    emitter.off('SIGINT', onSignal)
+    emitter.off('SIGTERM', onSignal)
+    emitter.off('exit', onExit)
   }
 }
 
