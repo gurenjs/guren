@@ -4,6 +4,7 @@ import { SITE_DESCRIPTION, pageTitle } from '../../../../config/site.js'
 import { Footer } from '../../components/Footer.js'
 import { Header } from '../../components/Header.js'
 import { Seo } from '../../components/Seo.js'
+import { ChevronRightIcon } from '../../components/icons.js'
 import { breadcrumbJsonLd, techArticleJsonLd } from '../../lib/structured-data.js'
 import { docsTheme } from './theme.js'
 
@@ -160,6 +161,11 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
   const docPath = doc ? `${basePath}/${doc.category}/${doc.slug}` : basePath
   const nav = buildPrevNext(categories, active, basePath)
   const toc = useTableOfContents(doc)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+
+  useEffect(() => {
+    setSidebarOpen(false)
+  }, [active?.category, active?.slug])
 
   // Copy button effect
   useEffect(() => {
@@ -240,44 +246,57 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
       <main className={`docs-layout ${toc.items.length > 0 ? 'docs-layout--toc' : ''}`}>
         {/* Sidebar */}
         <aside className="docs-sidebar">
-          {categories.map((group) => (
-            <section key={group.category} className="mb-8">
-              <h2 className="mb-4 pl-2 text-xs font-bold uppercase tracking-widest text-docs-heading">
-                {group.title}
-              </h2>
-              {group.sections.map((section) => (
-                <div key={`${group.category}-${section.title}`} className="mb-5">
-                  <h3 className="mb-2 pl-2 text-[0.7rem] font-semibold uppercase tracking-widest text-docs-text-muted">
-                    {section.title}
-                  </h3>
-                  <nav className="flex flex-col gap-0.5">
-                    {section.docs.map((entry) => {
-                      const isActive = active?.category === group.category && active?.slug === entry.slug
-                      return (
-                        <Link
-                          key={`${group.category}-${entry.slug}`}
-                          href={`${basePath}/${group.category}/${entry.slug}`}
-                          className={`docs-nav-link ${isActive ? 'docs-nav-link--active' : ''}`}
-                          style={{
-                            padding: '0.4rem 0.6rem',
-                            borderRadius: '6px',
-                            textDecoration: 'none',
-                            color: isActive ? docsTheme.accent.strong : docsTheme.text.secondary,
-                            backgroundColor: isActive ? docsTheme.accent.tint : 'transparent',
-                            fontWeight: isActive ? 600 : 400,
-                            fontSize: '0.925rem',
-                            borderLeft: isActive ? `2px solid ${docsTheme.accent.strong}` : '2px solid transparent',
-                          }}
-                        >
-                          {entry.title}
-                        </Link>
-                      )
-                    })}
-                  </nav>
-                </div>
-              ))}
-            </section>
-          ))}
+          <button
+            type="button"
+            onClick={() => setSidebarOpen((open) => !open)}
+            aria-expanded={sidebarOpen}
+            className="flex w-full items-center justify-between gap-2 rounded-lg border border-docs-border bg-docs-panel px-4 py-3 text-left text-sm font-semibold text-docs-text lg:hidden"
+          >
+            <span className="truncate">{doc?.title ?? (locale === 'ja' ? 'ドキュメント' : 'Documentation')}</span>
+            <ChevronRightIcon
+              className={`size-4 shrink-0 text-docs-text-muted transition-transform ${sidebarOpen ? 'rotate-90' : ''}`}
+            />
+          </button>
+          <div className={`${sidebarOpen ? 'mt-4 block' : 'hidden'} lg:block`}>
+            {categories.map((group) => (
+              <section key={group.category} className="mb-8">
+                <h2 className="mb-4 pl-2 text-xs font-bold uppercase tracking-widest text-docs-heading">
+                  {group.title}
+                </h2>
+                {group.sections.map((section) => (
+                  <div key={`${group.category}-${section.title}`} className="mb-5">
+                    <h3 className="mb-2 pl-2 text-[0.7rem] font-semibold uppercase tracking-widest text-docs-text-muted">
+                      {section.title}
+                    </h3>
+                    <nav className="flex flex-col gap-0.5">
+                      {section.docs.map((entry) => {
+                        const isActive = active?.category === group.category && active?.slug === entry.slug
+                        return (
+                          <Link
+                            key={`${group.category}-${entry.slug}`}
+                            href={`${basePath}/${group.category}/${entry.slug}`}
+                            className={`docs-nav-link ${isActive ? 'docs-nav-link--active' : ''}`}
+                            style={{
+                              padding: '0.4rem 0.6rem',
+                              borderRadius: '6px',
+                              textDecoration: 'none',
+                              color: isActive ? docsTheme.accent.strong : docsTheme.text.secondary,
+                              backgroundColor: isActive ? docsTheme.accent.tint : 'transparent',
+                              fontWeight: isActive ? 600 : 400,
+                              fontSize: '0.925rem',
+                              borderLeft: isActive ? `2px solid ${docsTheme.accent.strong}` : '2px solid transparent',
+                            }}
+                          >
+                            {entry.title}
+                          </Link>
+                        )
+                      })}
+                    </nav>
+                  </div>
+                ))}
+              </section>
+            ))}
+          </div>
         </aside>
 
         {/* Article */}
