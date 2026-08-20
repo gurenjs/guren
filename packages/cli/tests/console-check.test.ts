@@ -191,6 +191,127 @@ kernel.registerMany([SendDigestCommand])`,
     }
   })
 
+  it('keeps a re-export shim in the check', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-console-shim-')
+
+    try {
+      // the implementation moved out, a shim stayed behind — the file still
+      // surfaces a command, so an emptied registerMany([]) must still warn
+      await mkdir(join(workspace.dir, 'app/Console/lib'), { recursive: true })
+      await writeFile(join(workspace.dir, 'app/Console/lib/impl.ts'), COMMAND_SOURCE, 'utf8')
+      await mkdir(join(workspace.dir, 'app/Console/Commands'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'app/Console/Commands/SendDigestCommand.ts'),
+        `export { default as SendDigestCommand } from '../lib/impl.js'`,
+        'utf8',
+      )
+      await mkdir(join(workspace.dir, 'src'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'src/console.ts'),
+        `import { ConsoleKernel } from '@guren/core'
+
+export const kernel = new ConsoleKernel()
+kernel.registerMany([])`,
+        'utf8',
+      )
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      expect(report.checks.find(c => c.key === 'console-command:SendDigestCommand')!.status).toBe('warn')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('keeps a class-expression command in the check', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-console-classexpr-')
+
+    try {
+      await mkdir(join(workspace.dir, 'app/Console/Commands'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'app/Console/Commands/SendDigestCommand.ts'),
+        `import { Command } from '@guren/core'
+const SendDigestCommand = class extends Command {
+  static signature = 'send-digest'
+  async handle(): Promise<void> {}
+}
+export default SendDigestCommand`,
+        'utf8',
+      )
+      await mkdir(join(workspace.dir, 'src'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'src/console.ts'),
+        `import { ConsoleKernel } from '@guren/core'
+
+export const kernel = new ConsoleKernel()
+kernel.registerMany([])`,
+        'utf8',
+      )
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      expect(report.checks.find(c => c.key === 'console-command:SendDigestCommand')!.status).toBe('warn')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('does not treat a computed member key as command surface', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-console-computed-')
+
+    try {
+      // `[handle]` names whatever the variable holds, not the literal
+      // `handle` — a helper class shaped like this is not a command
+      await mkdir(join(workspace.dir, 'app/Console/Commands'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'app/Console/Commands/formatting.ts'),
+        `const handle = Symbol('handle')
+export class TableFormatter {
+  [handle](): void {}
+}`,
+        'utf8',
+      )
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      expect(report.checks.some(c => c.key.startsWith('console-command:'))).toBe(false)
+      expect(report.checks.some(c => c.key.startsWith('console-entry:'))).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('still warns for a colocated subclass helper — the documented limit of the predicate', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-console-error-helper-')
+
+    try {
+      // any superclass counts as command evidence (aliased imports defeat a
+      // name match), so an extends-Error helper stays in the check; this test
+      // pins that as a known, deliberate tradeoff rather than an accident
+      await mkdir(join(workspace.dir, 'app/Console/Commands'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'app/Console/Commands/CommandTimeoutError.ts'),
+        `export class CommandTimeoutError extends Error {}`,
+        'utf8',
+      )
+      await mkdir(join(workspace.dir, 'src'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'src/console.ts'),
+        `import { ConsoleKernel } from '@guren/core'
+
+export const kernel = new ConsoleKernel()
+kernel.registerMany([])`,
+        'utf8',
+      )
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      expect(report.checks.find(c => c.key === 'console-command:CommandTimeoutError')!.status).toBe('warn')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('keeps an unparseable command file in the check', async () => {
     const workspace = await createTempWorkspace('guren-cli-check-console-unparseable-command-')
 
@@ -216,6 +337,9 @@ kernel.registerMany([])`,
       const report = await runCheck({ cwd: workspace.dir })
 
       expect(report.checks.find(c => c.key === 'console-command:BrokenCommand')!.status).toBe('warn')
+      // the file *was* checked (conservatively), so the coverage report must
+      // not simultaneously claim it was skipped
+      expect(report.checks.some(c => c.key === 'scan-coverage')).toBe(false)
     } finally {
       await workspace.cleanup()
     }

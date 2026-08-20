@@ -69,7 +69,14 @@ export class Post extends defineModel(posts) {}`,
       await writeFile(join(workspace.dir, 'app/Jobs/SendEmail.ts'), 'export class SendEmail {}', 'utf8')
       await writeFile(
         join(workspace.dir, 'app/Console/Commands/SendDigestCommand.ts'),
-        'export default class SendDigestCommand {}',
+        `export default class SendDigestCommand {\n  static signature = 'send-digest'\n}`,
+        'utf8',
+      )
+      // a helper module beside the commands is not a command — the listing
+      // shares the registration check's predicate, so the two cannot disagree
+      await writeFile(
+        join(workspace.dir, 'app/Console/Commands/shared-config.ts'),
+        `export const TABLES = ['users'] as const`,
         'utf8',
       )
       await writeFile(join(workspace.dir, 'package.json'), '{}', 'utf8')
@@ -81,6 +88,7 @@ export class Post extends defineModel(posts) {}`,
       expect(ctx.events).toContain('PostCreated')
       expect(ctx.jobs).toContain('SendEmail')
       expect(ctx.commands).toContain('SendDigestCommand')
+      expect(ctx.commands).not.toContain('SharedConfig')
     } finally {
       await workspace.cleanup()
     }

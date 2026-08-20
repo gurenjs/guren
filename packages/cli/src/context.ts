@@ -11,12 +11,13 @@ import {
   discoverListenerFiles,
   discoverValidatorFiles,
   discoverPolicyFiles,
-  discoverCommandFiles,
   classNameFromPath,
   readIfExists,
   excludeBarrelFiles,
 } from './discovery'
 import { GUREN_API_DIGEST } from './api-digest'
+import { discoverDeclaredCommandFiles } from './console-check'
+import { ParseCache } from './parse-cache'
 import { parseModelFile, type ModelInfo } from './model-parser'
 import { loadContextRoutes, escapeMarkdownTableCell, type ContextRoute } from './context-route'
 import { listInertiaPageIds } from './inertia-pages'
@@ -97,7 +98,11 @@ export async function generateContext(options: ContextOptions = {}): Promise<Pro
     toNames(discoverListenerFiles),
     toNames(discoverValidatorFiles),
     toNames(discoverPolicyFiles),
-    toNames(discoverCommandFiles),
+    // through the same predicate the registration check uses, so the context
+    // map cannot list a helper module as a command the check knows isn't one
+    discoverDeclaredCommandFiles(cwd, new ParseCache()).then((files) =>
+      files.map(classNameFromPath).sort(),
+    ),
   ])
 
   return {
