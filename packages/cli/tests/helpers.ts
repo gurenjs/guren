@@ -55,6 +55,24 @@ export async function writeInstalledPackage(
 }
 
 /**
+ * Point a fixture app's `@guren/core` at this checkout.
+ *
+ * A fixture that gets imported rather than only parsed — `guren context`
+ * loads `routes/*.ts` for real — needs the import to resolve from a temp
+ * directory that has no node_modules. Bun resolves that by walking up from
+ * the file and then falling back to its global install cache, so on a machine
+ * that has ever installed Guren the fixture silently binds to the *published*
+ * package (verified: `~/.bun/install/cache/@guren/core@1.7.0/dist/index.js`),
+ * and on a machine that has not, the import throws. Either way the test is
+ * measuring the environment. This makes it measure the workspace.
+ */
+export async function linkWorkspaceCore(baseDir: string): Promise<void> {
+  const linkPath = join(baseDir, 'node_modules', '@guren', 'core')
+  await mkdir(dirname(linkPath), { recursive: true })
+  await symlink(join(repoRoot, 'packages', 'core'), linkPath, 'dir')
+}
+
+/**
  * Write a fake locally-installed package the way Bun materializes `file:`,
  * `link:`, and `workspace:` dependencies: node_modules/<name> is a real
  * directory tree whose files are individual symlinks into the source
