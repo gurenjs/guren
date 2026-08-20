@@ -1,5 +1,17 @@
 # @guren/cli
 
+## 2.8.0
+
+### Minor Changes
+
+- f6f16fd: `guren agent:sync` no longer overwrites managed files silently. Files already matching the latest template are skipped and reported as up to date (line-ending-only differences count as up to date, so a CRLF checkout is not warned about forever); a file whose contents differed — an older version or a local edit — is listed as replaced, with a warning that local edits to framework-managed files do not survive a sync. A new `--dry-run` flag on both `agent:sync` and `agent:init` reports what a run would write, replace, or prune without changing any file; combined with `--prune` it says what would be removed, and the closing hint repeats the flags the preview ran with. `AgentHarnessResult` gains `replaced`, `unchanged`, `mode`, `dryRun`, and `pruneRequested` fields, and `written` now reports only the files actually written.
+- 1e44a1d: `guren check --arch` can now enforce boundaries at the type level. Type-only imports (`import type`, `export type ... from`, and `import('...').X` in a type position) still compile away and are skipped by default, but a rule — or the whole rule set — can opt in with `includeTypeImports: true`, and the `defineArchRules` JSDoc now states the default explicitly. Violations found this way are labeled `(type-only)` in the report.
+
+### Patch Changes
+
+- 49b1d04: Exempt the agent-catalog changeset gate on a moved `@guren/cli` version rather than on a manifest-only diff. A push or squash carrying both a catalog change with its changeset and the `changeset version` commit that consumes it no longer fails the gate, and a manifest edit that leaves the version alone is now gated rather than waved through.
+- 352a76f: `guren check` no longer demands a console registration for files under `app/Console/Commands/` that declare no command. A constants or helper module living next to the commands used to produce a warning that could never be resolved. The registration check now covers only files that could surface a command: a class (declaration or expression) with a superclass or a `signature`/`handle` member, a re-export with a source, or a default-exported identifier or call. Files that fail to parse stay in the check, since they cannot be shown to declare no command — and are no longer double-reported as "skipped" by the coverage summary. `guren context` lists commands through the same predicate, so the two commands agree about what a helper module is.
+
 ## 2.7.1
 
 ### Patch Changes
