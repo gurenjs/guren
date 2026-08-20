@@ -374,11 +374,13 @@ export function moduleRoutesEntryCandidates(moduleDir: string): string[] {
 }
 
 /**
- * Console command classes (`make:command` output). Unlike controllers or
- * jobs, nothing loads these by scanning the directory at runtime —
- * registration with a `ConsoleKernel` is explicit — so this discovery exists
- * for tooling only: `guren context` lists them, and `guren check` warns about
- * any that no console entrypoint references.
+ * Files under the console-command directories (`make:command` output). Unlike
+ * controllers or jobs, nothing loads these by scanning the directory at
+ * runtime — registration with a `ConsoleKernel` is explicit — so this
+ * discovery exists for tooling only. Path-based and content-blind: both
+ * consumers (`guren context`'s listing and `guren check`'s registration
+ * warnings) go through `discoverDeclaredCommandFiles` in `console-check.ts`,
+ * which filters this walk to files that actually declare a command.
  */
 export function discoverCommandFiles(appRoot: string): Promise<string[]> {
   return discoverDir(appRoot, 'app/Console/Commands')

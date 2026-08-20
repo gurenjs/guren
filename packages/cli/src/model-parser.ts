@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import type { Statement, Expression, ClassDeclaration, ClassBody, ClassProperty, CallExpression, Node, ObjectProperty } from '@babel/types'
+import { memberKeyName } from './ast-walk'
 import { extractDocsTags } from './docs-index'
 import { discoverModelFiles, toPosixRelative, moduleNameFromRelPath } from './discovery'
 import { parseSourceFile } from './parse-cache'
@@ -122,10 +123,7 @@ function isAuthenticatableBase(node: Node): boolean {
 
 /** The name of an object property key, for both `{ base: X }` and `{ 'base': X }`. */
 function propertyKeyName(property: ObjectProperty): string | undefined {
-  if (property.computed) return undefined
-  if (property.key.type === 'Identifier') return property.key.name
-  if (property.key.type === 'StringLiteral') return property.key.value
-  return undefined
+  return memberKeyName(property)
 }
 
 /**

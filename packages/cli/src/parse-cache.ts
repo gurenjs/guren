@@ -152,9 +152,12 @@ export class ParseCache {
 
   /**
    * Full outcome, distinguishing an unreadable file from an unparseable one.
-   * Exposed for tests only (promise-identity is how the read-once guarantee is
-   * verified) — production callers want `get()` or `source()`, which record
-   * `skippedFiles()` against the contract they actually needed.
+   * For callers whose AST is *optional* — a check that treats "could not
+   * parse" as a conservative include, not a gap in coverage — and for tests
+   * (promise-identity is how the read-once guarantee is verified). Callers
+   * that *need* an AST or the source want `get()` or `source()`, which record
+   * `skippedFiles()` against the contract they actually needed; recording a
+   * skip here would report a file as "not checked" that the caller did check.
    */
   read(filePath: string): Promise<ParseOutcome> {
     let pending = this.cache.get(filePath)

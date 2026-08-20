@@ -36,6 +36,24 @@ export function walk(value: unknown, visit: (node: BabelNode) => boolean | void)
 }
 
 /**
+ * The name a non-computed Identifier or string-literal key spells — the one
+ * rule for reading a member's name off an object property or a class member,
+ * shared by every scanner that asks (model, schema, deploy-runtime, console
+ * command surface). Computed keys answer `undefined`: `[x]` names whatever
+ * `x` holds at runtime, which a static scan cannot know, so treating
+ * `[signature]` as the literal name `signature` would be a guess.
+ */
+export function memberKeyName(member: {
+  computed?: boolean
+  key: { type: string; name?: string; value?: unknown }
+}): string | undefined {
+  if (member.computed) return undefined
+  if (member.key.type === 'Identifier') return member.key.name
+  if (member.key.type === 'StringLiteral' && typeof member.key.value === 'string') return member.key.value
+  return undefined
+}
+
+/**
  * The string a node spells statically, or `null` when it does not spell one.
  *
  * A no-substitution template literal counts, because ``router.get(`/posts`,

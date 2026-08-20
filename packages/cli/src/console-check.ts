@@ -1,4 +1,5 @@
 import { resolve } from 'node:path'
+import type { ClassDeclaration, ClassExpression, File } from '@babel/types'
 import {
   discoverCommandFiles,
   excludeBarrelFiles,
@@ -7,6 +8,7 @@ import {
   toPosixRelative,
   moduleNameFor,
 } from './discovery'
+import { memberKeyName, walk } from './ast-walk'
 import { camelCase, escapeRegExp, referencesIdentifier } from './utils'
 import { ParseCache } from './parse-cache'
 import { check, type CheckResult } from './check-result'
@@ -51,6 +53,88 @@ async function readEntrySource(cache: ParseCache, absPath: string): Promise<Entr
 
   return { body, imports }
 }
+
+/**
+ * Whether the file could put a console command in front of a kernel. This is
+ * what keeps a constants or helper module living next to the commands out of
+ * the registration check: it surfaces no command, so there is nothing to hand
+ * to `registerMany()` and the warning it would get could never be resolved.
+ *
+ * Exclusion needs positive evidence of *absence*, so anything that could
+ * surface a command counts:
+ * - a class — declaration or expression, at any depth — extending another
+ *   class or carrying the `make:command` surface (a `signature` or `handle`
+ *   member). The superclass name is deliberately not matched against
+ *   `Command`: apps subclass their own bases, and an aliased import defeats
+ *   a name check. The cost is that a colocated `extends Error` helper still
+ *   warns — accepted, because the reverse mistake (a real command with an
+ *   unrecognizable base silently leaving the check) reports nothing at all.
+ * - a re-export with a source (`export { X } from './impl'`) or a
+ *   default-exported identifier or call — shims and factories surface
+ *   commands declared elsewhere, and the old path-based check covered them.
+ *
+ * What remains excluded is a module of imports, constants, functions, types,
+ * and local named exports — the shape issue #479 reported.
+ *
+ * Note the fail direction is the opposite of `app-surface.ts`, deliberately:
+ * there, "cannot tell" answers false because the cost of a wrong yes is
+ * refusing commands that would have worked; here the cost is only a `warn`,
+ * so "cannot tell" stays in the check.
+ */
+function declaresCommand(ast: File): boolean {
+  for (const node of ast.program.body) {
+    if ((node.type === 'ExportNamedDeclaration' || node.type === 'ExportAllDeclaration') && node.source) {
+      return true
+    }
+    // any default-exported expression counts unless its shape provably cannot
+    // surface a command — the same evidence-of-absence direction as the class
+    // branch below, so `export default new SendDigestCommand()` stays in while
+    // `export default TABLES` in an object-literal helper does not
+    if (
+      node.type === 'ExportDefaultDeclaration' &&
+      node.declaration.type !== 'ClassDeclaration' &&
+      !INERT_DEFAULT_EXPORTS.has(node.declaration.type)
+    ) {
+      return true
+    }
+  }
+
+  let declares = false
+  walk(ast.program, (node) => {
+    if (declares) return false
+    if (node.type !== 'ClassDeclaration' && node.type !== 'ClassExpression') return
+    const classNode = node as unknown as ClassDeclaration | ClassExpression
+    declares =
+      classNode.superClass != null ||
+      classNode.body.body.some((member) => {
+        if (!('key' in member)) return false
+        const name = memberKeyName(member)
+        return name === 'signature' || name === 'handle'
+      })
+  })
+  return declares
+}
+
+/**
+ * Default-export shapes that cannot evaluate to a registrable command class:
+ * literals, object/array/template expressions, and plain functions. A
+ * `ClassDeclaration` is absent on purpose — the class walk judges those by
+ * their own evidence.
+ */
+const INERT_DEFAULT_EXPORTS = new Set([
+  'StringLiteral',
+  'NumericLiteral',
+  'BooleanLiteral',
+  'BigIntLiteral',
+  'NullLiteral',
+  'RegExpLiteral',
+  'TemplateLiteral',
+  'ObjectExpression',
+  'ArrayExpression',
+  'ArrowFunctionExpression',
+  'FunctionDeclaration',
+  'TSDeclareFunction',
+])
 
 /**
  * Local names `entry` imports from inside `modules/<moduleName>/`. The
@@ -99,6 +183,27 @@ export function registersCommandsOf(body: string, bindings: string[]): boolean {
 }
 
 /**
+ * The command files the registration check covers and `guren context` lists —
+ * the one rule for "this file holds a command", shared so the two commands
+ * cannot disagree about what a helper module is. Discovery walks the
+ * directories; {@link declaresCommand} judges the contents.
+ *
+ * A file that fails to parse (or read) cannot be shown to declare no command,
+ * so it stays in rather than silently dropping out. That path goes through
+ * `cache.read()`, not `get()`: an AST is optional here, so a parse failure
+ * must not be recorded as "skipped and not checked" — the file *is* checked,
+ * conservatively.
+ */
+export async function discoverDeclaredCommandFiles(cwd: string, cache: ParseCache): Promise<string[]> {
+  const discovered = excludeBarrelFiles(await discoverCommandFiles(cwd))
+  const outcomes = await Promise.all(discovered.map((filePath) => cache.read(filePath)))
+  return discovered.filter((_, index) => {
+    const outcome = outcomes[index]!
+    return outcome.status !== 'parsed' || declaresCommand(outcome.ast)
+  })
+}
+
+/**
  * Verifies every class under `app/Console/Commands` is referenced by the
  * console entrypoint that would register it. Nothing scans that directory at
  * runtime — a `ConsoleKernel` only knows the commands it was handed, so a
@@ -118,14 +223,18 @@ export function registersCommandsOf(body: string, bindings: string[]): boolean {
  * class, not that the kernel ends up with it. `warn`, never `fail`, since a
  * name reference is not proof of registration in the other direction either.
  *
+ * Only files that {@link declaresCommand}; that predicate's doc owns the
+ * reasoning for what is excluded and which way uncertainty falls.
+ *
  * Not filtered by `--changed`, unlike `runCheck`'s file-scanning checks: what
  * decides the outcome is the *entrypoint's* content, so the edit that breaks
  * registration is usually to a file that isn't the command's. Filtering by
  * changed command files would report nothing for exactly that edit. The cost
- * is a directory walk over `app/Console/Commands` plus one read per entry.
+ * is a directory walk over `app/Console/Commands` plus one parse per command
+ * file and per entrypoint.
  */
 export async function checkConsoleCommandRegistration(cwd: string, cache: ParseCache): Promise<CheckResult[]> {
-  const commandFiles = excludeBarrelFiles(await discoverCommandFiles(cwd))
+  const commandFiles = await discoverDeclaredCommandFiles(cwd, cache)
   if (commandFiles.length === 0) return []
 
   const results: CheckResult[] = []

@@ -7,6 +7,7 @@ import type {
   ObjectProperty,
   Statement,
 } from '@babel/types'
+import { memberKeyName } from './ast-walk'
 import { listAppRoots } from './discovery'
 import { parseSourceFile } from './parse-cache'
 
@@ -138,10 +139,7 @@ function unwrapColumnChain(
 
 /** The name of an object property key, for both `{ k: v }` and `{ 'k': v }`. */
 function propertyKeyName(property: ObjectProperty): string | undefined {
-  if (property.computed) return undefined
-  if (property.key.type === 'Identifier') return property.key.name
-  if (property.key.type === 'StringLiteral') return property.key.value
-  return undefined
+  return memberKeyName(property)
 }
 
 /**
