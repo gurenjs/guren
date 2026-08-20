@@ -4,8 +4,8 @@ import { SITE_DESCRIPTION, pageTitle } from '../../../../config/site.js'
 import { Footer } from '../../components/Footer.js'
 import { Header } from '../../components/Header.js'
 import { Seo } from '../../components/Seo.js'
+import { ChevronRightIcon } from '../../components/icons.js'
 import { breadcrumbJsonLd, techArticleJsonLd } from '../../lib/structured-data.js'
-import { docsTheme } from './theme.js'
 
 type DocSummary = {
   slug: string
@@ -160,6 +160,11 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
   const docPath = doc ? `${basePath}/${doc.category}/${doc.slug}` : basePath
   const nav = buildPrevNext(categories, active, basePath)
   const toc = useTableOfContents(doc)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+
+  useEffect(() => {
+    setSidebarOpen(false)
+  }, [active?.category, active?.slug])
 
   // Copy button effect
   useEffect(() => {
@@ -240,44 +245,47 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
       <main className={`docs-layout ${toc.items.length > 0 ? 'docs-layout--toc' : ''}`}>
         {/* Sidebar */}
         <aside className="docs-sidebar">
-          {categories.map((group) => (
-            <section key={group.category} className="mb-8">
-              <h2 className="mb-4 pl-2 text-xs font-bold uppercase tracking-widest text-docs-heading">
-                {group.title}
-              </h2>
-              {group.sections.map((section) => (
-                <div key={`${group.category}-${section.title}`} className="mb-5">
-                  <h3 className="mb-2 pl-2 text-[0.7rem] font-semibold uppercase tracking-widest text-docs-text-muted">
-                    {section.title}
-                  </h3>
-                  <nav className="flex flex-col gap-0.5">
-                    {section.docs.map((entry) => {
-                      const isActive = active?.category === group.category && active?.slug === entry.slug
-                      return (
-                        <Link
-                          key={`${group.category}-${entry.slug}`}
-                          href={`${basePath}/${group.category}/${entry.slug}`}
-                          className={`docs-nav-link ${isActive ? 'docs-nav-link--active' : ''}`}
-                          style={{
-                            padding: '0.4rem 0.6rem',
-                            borderRadius: '6px',
-                            textDecoration: 'none',
-                            color: isActive ? docsTheme.accent.strong : docsTheme.text.secondary,
-                            backgroundColor: isActive ? docsTheme.accent.tint : 'transparent',
-                            fontWeight: isActive ? 600 : 400,
-                            fontSize: '0.925rem',
-                            borderLeft: isActive ? `2px solid ${docsTheme.accent.strong}` : '2px solid transparent',
-                          }}
-                        >
-                          {entry.title}
-                        </Link>
-                      )
-                    })}
-                  </nav>
-                </div>
-              ))}
-            </section>
-          ))}
+          <button
+            type="button"
+            onClick={() => setSidebarOpen((open) => !open)}
+            aria-expanded={sidebarOpen}
+            className="flex w-full items-center justify-between gap-2 rounded-lg border border-docs-border bg-docs-panel px-4 py-3 text-left text-sm font-semibold text-docs-text lg:hidden"
+          >
+            <span className="truncate">{doc?.title ?? (locale === 'ja' ? 'ドキュメント' : 'Documentation')}</span>
+            <ChevronRightIcon
+              className={`size-4 shrink-0 text-docs-text-muted transition-transform ${sidebarOpen ? 'rotate-90' : ''}`}
+            />
+          </button>
+          <div className={`${sidebarOpen ? 'mt-4 block' : 'hidden'} lg:block`}>
+            {categories.map((group) => (
+              <section key={group.category} className="mb-8">
+                <h2 className="docs-kicker mb-4 pl-2 text-xs text-docs-heading">
+                  {group.title}
+                </h2>
+                {group.sections.map((section) => (
+                  <div key={`${group.category}-${section.title}`} className="mb-5">
+                    <h3 className="docs-kicker mb-2 pl-2 text-[0.7rem] text-docs-text-secondary">
+                      {section.title}
+                    </h3>
+                    <nav className="flex flex-col gap-0.5">
+                      {section.docs.map((entry) => {
+                        const isActive = active?.category === group.category && active?.slug === entry.slug
+                        return (
+                          <Link
+                            key={`${group.category}-${entry.slug}`}
+                            href={`${basePath}/${group.category}/${entry.slug}`}
+                            className={`docs-nav-link ${isActive ? 'docs-nav-link--active' : ''}`}
+                          >
+                            {entry.title}
+                          </Link>
+                        )
+                      })}
+                    </nav>
+                  </div>
+                ))}
+              </section>
+            ))}
+          </div>
         </aside>
 
         {/* Article */}
@@ -286,11 +294,11 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
             <>
               <header className="mb-12">
                 <div className="mb-4 flex items-center gap-3">
-                  <span className="rounded bg-docs-accent-tint px-2 py-1 text-xs font-bold uppercase tracking-widest text-docs-accent">
+                  <span className="docs-kicker rounded-full bg-docs-accent-tint px-2.5 py-1 text-xs text-docs-accent">
                     {docLabel}
                   </span>
                   <span className="text-sm text-docs-text-muted">/</span>
-                  <span className="text-sm font-medium text-docs-text-muted">{doc.category}</span>
+                  <span className="docs-mono text-sm text-docs-text-secondary">{doc.category}</span>
                 </div>
                 <h1 className="mb-4 text-[2.75rem] font-extrabold leading-[1.1] tracking-tight text-docs-heading">
                   {doc.title}
@@ -339,10 +347,7 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
               <p className="mb-10 text-lg leading-relaxed text-docs-text-secondary">
                 The page you are looking for doesn't exist or has been moved.
               </p>
-              <Link
-                href={basePath}
-                className="inline-flex items-center gap-2 rounded-full bg-docs-accent px-6 py-3 font-semibold text-white no-underline transition hover:scale-105"
-              >
+              <Link href={basePath} className="docs-btn-primary px-6 py-3">
                 Back to Documentation
               </Link>
             </section>
@@ -352,7 +357,7 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
         {/* Table of Contents */}
         {toc.items.length > 0 && (
           <aside className="docs-toc">
-            <p className="mb-3 text-xs font-bold uppercase tracking-widest text-docs-text-muted">
+            <p className="docs-kicker mb-3 text-xs text-docs-text-secondary">
               On this page
             </p>
             <nav className="flex flex-col gap-1">

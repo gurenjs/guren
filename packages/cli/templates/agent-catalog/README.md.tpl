@@ -10,8 +10,14 @@ Cursor, Codex, GitHub Copilot, OpenCode and other coding agents.
 
 ```bash
 claude plugin marketplace add gurenjs/agent-skills
-claude plugin install guren@gurenjs --scope project
+claude plugin install guren@gurenjs --scope user
 ```
+
+User scope on purpose: these skills are for the step *before* a project
+exists, and they are the same two skills whatever you are building. Project
+scope would write them into whichever repository you happened to be standing
+in, and share an on-ramp with collaborators of an app that already has the
+harness installed.
 
 **Cursor, Codex, Copilot, OpenCode, Gemini CLI and others** (Agent Skills CLI)
 

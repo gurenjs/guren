@@ -53,38 +53,105 @@ html {
   scroll-behavior: smooth;
 }
 
+/* ─── Guren UI tokens (gurenjs/guren-ui dist/tokens.css) ───
+   The design system was derived from these docs themes, so the values match
+   what the site already shipped; --docs-* below are aliases kept for the
+   existing markup. Fonts stay on the site's own policy (no self-hosted
+   family is introduced here). */
 :root {
-  --docs-surface-page: #ffffff;
-  --docs-surface-panel: #ffffff;
-  --docs-surface-raised: #fffafa;
-  --docs-border-soft: #e5e7eb;
-  --docs-border-strong: #d1d5db;
-  --docs-text-primary: #1f2937;
-  --docs-text-secondary: #4b5563;
-  --docs-text-muted: #9ca3af;
-  --docs-heading: #111827;
-  --docs-accent: #db1b1b;
-  --docs-accent-strong: #991b1b;
-  --docs-accent-tint: #fff1f2;
-  --docs-shadow-card: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
-  --docs-shadow-floating: 0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -2px rgba(0, 0, 0, 0.025);
+  --g-font-mono: 'JetBrains Mono', 'SFMono-Regular', ui-monospace, monospace;
+
+  /* surfaces */
+  --g-page: #ffffff;
+  --g-panel: #ffffff;
+  --g-raised: #fffafa;
+  --g-ink: #1a1212;             /* terminal surface — dark in both themes */
+  --g-line: #e5e7eb;
+  --g-line-strong: #d1d5db;
+
+  /* text */
+  --g-heading: #111827;
+  --g-text: #1f2937;
+  --g-text-2: #4b5563;
+  --g-muted: #9ca3af;
+
+  /* the red budget */
+  --g-accent: #db1b1b;          /* crimson-600 — primary fills only */
+  --g-accent-down: #b91c1c;
+  --g-accent-text: #991b1b;     /* crimson-800 — links, accent text */
+  --g-accent-tint: #fff1f2;
+  --g-on-accent: #fff5f5;       /* crimson-50 on accent fills */
+
+  /* signals — text-safe value + chip value + wash */
+  --g-ok: #286983;
+  --g-ok-chip: #56949f;
+  --g-ok-tint: rgba(86, 148, 159, 0.12);
+  --g-warn: #b45309;
+  --g-warn-chip: #ea9d34;
+  --g-warn-tint: rgba(234, 157, 52, 0.14);
+  --g-danger: #b91c1c;
+  --g-danger-chip: #f23a3a;
+  --g-danger-tint: #fff1f2;
+
+  /* the one structural device */
+  --g-tick: linear-gradient(180deg, #ff3c28, #8b0000);
+
+  /* geometry */
+  --g-r-ctl: 8px;
+  --g-r-card: 12px;
+  --g-shadow-card: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+  --g-shadow-float: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -2px rgba(0, 0, 0, 0.04);
+
+  /* legacy aliases — the pre-Guren-UI names the markup still reads */
+  --docs-surface-page: var(--g-page);
+  --docs-surface-panel: var(--g-panel);
+  --docs-surface-raised: var(--g-raised);
+  --docs-border-soft: var(--g-line);
+  --docs-border-strong: var(--g-line-strong);
+  --docs-text-primary: var(--g-text);
+  --docs-text-secondary: var(--g-text-2);
+  --docs-text-muted: var(--g-muted);
+  --docs-heading: var(--g-heading);
+  --docs-accent: var(--g-accent);
+  --docs-accent-strong: var(--g-accent-text);
+  --docs-accent-tint: var(--g-accent-tint);
+  --docs-shadow-card: var(--g-shadow-card);
+  --docs-shadow-floating: var(--g-shadow-float);
 }
 
 :root.dark {
-  --docs-surface-page: #1a1a2e;
-  --docs-surface-panel: #1e1e34;
-  --docs-surface-raised: #232340;
-  --docs-border-soft: #2e2e4a;
-  --docs-border-strong: #3d3d5c;
-  --docs-text-primary: #e0def4;
-  --docs-text-secondary: #908caa;
-  --docs-text-muted: #6e6a86;
-  --docs-heading: #e0def4;
-  --docs-accent: #eb6f92;
-  --docs-accent-strong: #eb6f92;
-  --docs-accent-tint: rgba(235, 111, 146, 0.12);
-  --docs-shadow-card: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.2);
-  --docs-shadow-floating: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -2px rgba(0, 0, 0, 0.25);
+  --g-page: #1a1a2e;
+  --g-panel: #1e1e34;
+  --g-raised: #232340;
+  --g-line: #2e2e4a;
+  --g-line-strong: #3d3d5c;
+
+  --g-heading: #e0def4;
+  --g-text: #e0def4;
+  --g-text-2: #908caa;
+  --g-muted: #6e6a86;
+
+  /* fills stay crimson in both themes; accent TEXT moves to rose, the docs'
+     own dark accent — crimson measures 4.42:1 on this ground. */
+  --g-accent-text: #eb6f92;
+  --g-accent-tint: rgba(235, 111, 146, 0.12);
+
+  --g-ok: #9ccfd8;
+  --g-ok-chip: #9ccfd8;
+  --g-ok-tint: rgba(156, 207, 216, 0.10);
+  --g-warn: #f6c177;
+  --g-warn-chip: #f6c177;
+  --g-warn-tint: rgba(246, 193, 119, 0.10);
+  --g-danger: #ffa5a5;
+  --g-danger-chip: #f23a3a;
+  --g-danger-tint: rgba(242, 58, 58, 0.12);
+
+  --g-shadow-card: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.2);
+  --g-shadow-float: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -2px rgba(0, 0, 0, 0.25);
+
+  /* accent as text is rose in the dark theme (the fill alias stays crimson
+     via --g-accent; markup that paints fills was moved to .docs-btn-primary) */
+  --docs-accent: var(--g-accent-text);
 }
 
 body {
@@ -100,6 +167,14 @@ body.docs-theme {
 
 /* ─── Docs nav links ─── */
 .docs-nav-link {
+  position: relative;
+  display: block;
+  padding: 0.4rem 0.6rem;
+  border-radius: var(--g-r-ctl);
+  font-size: 0.925rem;
+  font-weight: 400;
+  color: var(--docs-text-secondary);
+  text-decoration: none;
   outline: 2px solid transparent;
   outline-offset: 2px;
   transition: background-color 150ms ease, color 150ms ease, outline-color 150ms ease;
@@ -107,8 +182,8 @@ body.docs-theme {
 
 .docs-nav-link:hover,
 .docs-nav-link:focus-visible {
-  color: var(--docs-accent-strong) !important;
-  background-color: var(--docs-accent-tint) !important;
+  color: var(--docs-heading);
+  background-color: var(--docs-accent-tint);
 }
 
 .docs-nav-link:focus-visible {
@@ -116,9 +191,84 @@ body.docs-theme {
 }
 
 .docs-nav-link--active {
-  font-weight: 700 !important;
-  color: var(--docs-accent-strong) !important;
-  background-color: var(--docs-accent-tint) !important;
+  font-weight: 700;
+  color: var(--docs-heading);
+  background-color: var(--docs-accent-tint);
+}
+
+/* the ember tick — one per screen, and the nav current place wins it */
+.docs-nav-link--active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 7px;
+  bottom: 7px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--g-tick);
+}
+
+/* the same 3px logo-gradient fragment, standalone — for a page title when no
+   nav current place is on screen */
+.docs-tick {
+  display: inline-block;
+  width: 3px;
+  height: 0.9em;
+  border-radius: 2px;
+  background: var(--g-tick);
+}
+
+/* ─── Machine-issued text: mono labels and values ─── */
+.docs-kicker {
+  font-family: var(--g-font-mono);
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.docs-mono {
+  font-family: var(--g-font-mono);
+}
+
+/* ─── Buttons — the red budget: one crimson fill per screen, in both themes.
+   Destructive is outline + explicit verb, never a second red fill. ─── */
+.docs-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: var(--g-r-ctl);
+  background: var(--g-accent);
+  color: var(--g-on-accent);
+  font-weight: 700;
+  text-decoration: none;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.docs-btn-primary:hover {
+  background: var(--g-accent-down);
+}
+
+.docs-btn-primary:focus-visible {
+  outline: 2px solid var(--g-accent);
+  outline-offset: 2px;
+}
+
+.docs-btn-danger {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--g-r-ctl);
+  background: transparent;
+  border: 1px solid var(--g-danger-chip);
+  color: var(--g-danger);
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.docs-btn-danger:hover {
+  background: var(--g-danger-tint);
 }
 
 .docs-primary-link {
@@ -313,18 +463,32 @@ body.docs-theme {
   border-bottom-color: var(--docs-accent-strong);
 }
 
+/* The code surface has no theme: ink in light and dark alike (the same
+   terminal surface CodeBlock.tsx paints), syntax from rose-pine-moon.
+   !important beats the theme background shiki inlines on the element. */
 .shiki {
-  border-radius: 0.75rem;
-  border: 1px solid var(--docs-border-soft);
+  border-radius: var(--g-r-card);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   padding: 1rem 1.25rem;
   overflow-x: auto;
-  background: var(--docs-surface-raised);
+  background-color: var(--g-ink) !important;
   font-size: 0.9rem;
   line-height: 1.5;
 }
 
 .shiki code {
-  font-family: "JetBrains Mono", "SFMono-Regular", ui-monospace, "SFMono", monospace;
+  font-family: var(--g-font-mono);
+}
+
+/* Both markdown pipelines emit dual-theme shiki HTML with the dark palette
+   in `--shiki-dark` custom properties (the blog stores that HTML at save
+   time, so the shape cannot change per theme). The themeless ink surface
+   always shows the dark palette — in light mode too. Scoped to
+   .docs-content: the landing page highlights with a single dark theme that
+   carries no `--shiki-dark` vars. */
+.docs-content .shiki,
+.docs-content .shiki span {
+  color: var(--shiki-dark) !important;
 }
 
 .docs-content :not(pre) > code {
@@ -337,96 +501,80 @@ body.docs-theme {
   font-weight: 500;
 }
 
-/* ─── Alerts ─── */
+/* ─── Callouts — the diagnostic row, not a box. Same anatomy as guren check
+   output: a mono key in a fixed gutter, a hairline, ordinary body text.
+   Keys: note / ok / rule / never (the renderer maps GitHub's five
+   directives onto them). ─── */
 .docs-alert {
-  border-radius: 0.75rem;
-  padding: 1rem 1.25rem;
-  border-left: 4px solid;
-  background: var(--docs-surface-raised);
+  display: grid;
+  grid-template-columns: 84px 1fr;
+  gap: 14px;
+  padding: 10px 2px;
   margin: 1.25rem 0;
+  border-top: 1px solid var(--docs-border-soft);
+  border-bottom: 1px solid var(--docs-border-soft);
+}
+
+/* stacked rows share one hairline */
+.docs-alert + .docs-alert {
+  border-top: 0;
+  margin-top: -1.25rem;
 }
 
 .docs-alert__label {
-  margin: 0 0 0.5rem;
-  font-size: 0.85rem;
+  margin: 0;
+  font-family: var(--g-font-mono);
+  font-size: 0.8rem;
   font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
+  line-height: 1.9;
+  text-align: right;
 }
 
 .docs-alert__body {
   font-size: 0.95rem;
+  color: var(--docs-text-primary);
 }
 
 .docs-alert__body > :first-child { margin-top: 0; }
 .docs-alert__body > :last-child { margin-bottom: 0; }
 
-.docs-alert--note { border-color: #3b82f6; background: #eff6ff; }
-.docs-alert--note .docs-alert__label { color: #1d4ed8; }
+.docs-alert--note .docs-alert__label,
+.docs-alert--tip .docs-alert__label { color: var(--g-ok); }
 
-.docs-alert--tip { border-color: #10b981; background: #ecfdf5; }
-.docs-alert--tip .docs-alert__label { color: #047857; }
+.docs-alert--important .docs-alert__label,
+.docs-alert--warning .docs-alert__label { color: var(--g-warn); }
 
-.docs-alert--important { border-color: #f59e0b; background: #fffbeb; }
-.docs-alert--important .docs-alert__label { color: #b45309; }
+.docs-alert--caution .docs-alert__label { color: var(--g-danger); }
 
-.docs-alert--warning { border-color: #f97316; background: #fff7ed; }
-.docs-alert--warning .docs-alert__label { color: #c2410c; }
-
-.docs-alert--caution { border-color: #ef4444; background: #fef2f2; }
-.docs-alert--caution .docs-alert__label { color: #b91c1c; }
-
-:root.dark .docs-alert--note { border-color: #60a5fa; background: rgba(59, 130, 246, 0.1); }
-:root.dark .docs-alert--note .docs-alert__label { color: #93bbfd; }
-
-:root.dark .docs-alert--tip { border-color: #34d399; background: rgba(16, 185, 129, 0.1); }
-:root.dark .docs-alert--tip .docs-alert__label { color: #6ee7b7; }
-
-:root.dark .docs-alert--important { border-color: #fbbf24; background: rgba(245, 158, 11, 0.1); }
-:root.dark .docs-alert--important .docs-alert__label { color: #fcd34d; }
-
-:root.dark .docs-alert--warning { border-color: #fb923c; background: rgba(249, 115, 22, 0.1); }
-:root.dark .docs-alert--warning .docs-alert__label { color: #fdba74; }
-
-:root.dark .docs-alert--caution { border-color: #f87171; background: rgba(239, 68, 68, 0.1); }
-:root.dark .docs-alert--caution .docs-alert__label { color: #fca5a5; }
-
-/* Shiki dual-theme: show dark colors in dark mode */
-:root.dark .shiki,
-:root.dark .shiki span {
-  color: var(--shiki-dark) !important;
-  background-color: var(--shiki-dark-bg) !important;
-}
-
-/* ─── Copy button ─── */
+/* ─── Copy button — sits on the themeless ink surface, so it is themeless
+   too ─── */
 .docs-copy-btn {
   position: absolute;
   top: 0.35rem;
   right: 0.35rem;
-  border: 1px solid var(--docs-border-soft);
-  background: var(--docs-surface-page);
-  color: var(--docs-text-secondary);
-  border-radius: 0.375rem;
+  border: 1px solid rgba(255, 245, 245, 0.25);
+  background: rgba(255, 245, 245, 0.08);
+  color: rgba(255, 245, 245, 0.75);
+  border-radius: var(--g-r-ctl);
   padding: 0.2rem 0.4rem;
+  font-family: var(--g-font-mono);
   font-size: 0.7rem;
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
   transition: all 0.2s;
   opacity: 0;
   z-index: 10;
 }
 
-pre:hover .docs-copy-btn {
+pre:hover .docs-copy-btn,
+.docs-copy-btn:focus-visible {
   opacity: 1;
 }
 
 .docs-copy-btn:hover {
-  background: var(--docs-surface-raised);
-  color: var(--docs-text-primary);
-  border-color: var(--docs-border-strong);
+  background: rgba(255, 245, 245, 0.16);
+  color: #fff5f5;
+  border-color: rgba(255, 245, 245, 0.4);
 }
 
 /* ─── Media in docs ─── */
@@ -450,14 +598,21 @@ pre:hover .docs-copy-btn {
 }
 
 .docs-content table thead tr {
-  border-bottom: 2px solid var(--docs-border-soft);
+  border-bottom: 1px solid var(--docs-border-strong);
 }
 
+/* table headers are machine-issued values: mono, small, uppercase.
+   text-2 rather than the g-table muted: docs tables sit on the page ground,
+   where muted measures 2.5:1 — below text duty. */
 .docs-content table th {
-  font-weight: 600;
+  font-family: var(--g-font-mono);
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   text-align: left;
   padding: 0.75rem 1rem;
-  color: var(--docs-heading);
+  color: var(--docs-text-secondary);
 }
 
 .docs-content table td {
@@ -499,7 +654,7 @@ pre:hover .docs-copy-btn {
 /* ─── Prev/Next pagination ─── */
 .docs-pagination-link {
   transition: all 0.2s ease;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  box-shadow: var(--g-shadow-card);
 }
 
 .docs-pagination-link:hover {

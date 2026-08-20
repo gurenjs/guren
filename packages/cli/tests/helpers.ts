@@ -55,6 +55,24 @@ export async function writeInstalledPackage(
 }
 
 /**
+ * Point a fixture app's `@guren/core` at this checkout.
+ *
+ * A fixture that gets imported rather than only parsed — `guren context`
+ * loads `routes/*.ts` for real — needs the import to resolve from a temp
+ * directory that has no node_modules. Bun resolves that by walking up from
+ * the file and then falling back to its global install cache, so on a machine
+ * that has ever installed Guren the fixture silently binds to the *published*
+ * package (verified: `~/.bun/install/cache/@guren/core@1.7.0/dist/index.js`),
+ * and on a machine that has not, the import throws. Either way the test is
+ * measuring the environment. This makes it measure the workspace.
+ */
+export async function linkWorkspaceCore(baseDir: string): Promise<void> {
+  const linkPath = join(baseDir, 'node_modules', '@guren', 'core')
+  await mkdir(dirname(linkPath), { recursive: true })
+  await symlink(join(repoRoot, 'packages', 'core'), linkPath, 'dir')
+}
+
+/**
  * Write a fake locally-installed package the way Bun materializes `file:`,
  * `link:`, and `workspace:` dependencies: node_modules/<name> is a real
  * directory tree whose files are individual symlinks into the source
@@ -183,6 +201,42 @@ export const API_ONLY_APP_FILES: Record<string, string> = {
 
 export async function seedApiOnlyApp(dir: string): Promise<void> {
   await writeWorkspaceFiles(dir, API_ONLY_APP_FILES)
+}
+
+/**
+ * The counterpart to {@link API_ONLY_APP_FILES}: a minimal app the Inertia
+ * scaffolders accept. The schema deliberately has no `users` table (makeAuth
+ * patches one in, and tests assert on the patch), `src/app.ts` imports the
+ * registrar so provider wiring has something to patch, and `Home.tsx` keeps a
+ * real `Props` interface — the scaffold-typecheck pages.gen fixture includes
+ * its extracted props, so changing it means regenerating that fixture.
+ */
+export const INERTIA_APP_FILES: Record<string, string> = {
+  'src/app.ts': `import { createApp } from '@guren/core'
+import registerWebRoutes from '../routes/web.js'
+
+const app = createApp({
+  routes: registerWebRoutes,
+})
+
+export default app
+`,
+  'routes/web.ts': DEFAULT_ROUTES_FIXTURE,
+  'db/schema.ts': `import { pgTable, serial, text, timestamp } from '@guren/orm/drizzle/pg'
+
+export const posts = pgTable('posts', {
+  id: serial('id').primaryKey(),
+  title: text('title').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+`,
+  'resources/js/pages/Home.tsx': `interface Props { message: string }
+export default function Home({ message }: Props) { return <h1>{message}</h1> }
+`,
+}
+
+export async function seedInertiaApp(dir: string): Promise<void> {
+  await writeWorkspaceFiles(dir, INERTIA_APP_FILES)
 }
 
 /** One page component, for tests about an app that acquired one it cannot render. */

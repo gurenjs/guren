@@ -1,7 +1,7 @@
 import { writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { consola } from 'consola'
-import { assertCwdUnsupported, writeScaffoldFiles, type WriterOptions } from './utils'
+import { assertCwdUnsupported, writeScaffoldFiles, type ScaffoldFileEntry, type WriterOptions } from './utils'
 import { assertNotApiOnly } from './app-surface'
 import {
   addCreateAppOption,
@@ -18,6 +18,12 @@ import { readIfExists } from './discovery'
 import { APP_ENTRY_CANDIDATES, resolveAppEntry, wireAppProvider, wireProvider } from './provider-registrar'
 import { wireRouteRegistrar } from './route-registrar'
 import { makeMigration } from './make-migration'
+import { loadScaffoldTemplate } from './scaffold-templates'
+
+/** `path` is both the template path under `templates/scaffold/auth/` and the written app path. */
+function authFile(path: string): ScaffoldFileEntry {
+  return { path, contents: loadScaffoldTemplate(`auth/${path}`) }
+}
 
 // Passwordless apps keep show() (the OAuth button page) and destroy()
 // (logout) but have no credential exchange at all — there is no POST /login
@@ -121,136 +127,6 @@ ${sendVerification}
 }
 `
 }
-
-const forgotPasswordControllerTemplate = `import { Controller, createPasswordResetToken, buildPasswordResetUrl } from '@guren/core'
-import { ForgotPasswordSchema } from '../../Validators/ForgotPasswordValidator.js'
-import { User } from '../../../Models/User.js'
-import { passwordResetStore } from '../../../Auth/PasswordResetStore.js'
-import { appUrl } from '../../../Auth/AppUrl.js'
-import { sendPasswordResetMail } from '../../../Mail/PasswordResetMail.js'
-import { pages } from '@/.guren/pages.gen'
-
-const STATUS_MESSAGE = "If an account exists for that email, we've sent a password reset link."
-
-export default class ForgotPasswordController extends Controller {
-  async show(): Promise<Response> {
-    return this.inertia(pages.auth.ForgotPassword, {}, { title: 'Forgot password' })
-  }
-
-  async store(): Promise<Response> {
-    const { email } = await this.validateBody(ForgotPasswordSchema)
-
-    // Resolved before the lookup on purpose: a misconfigured APP_URL throws,
-    // and throwing only for addresses that turned out to exist would answer
-    // the question the generic status message below refuses to.
-    const resetBaseUrl = \`\${appUrl(this.request)}/reset-password\`
-
-    // Always respond with the same status message whether or not the
-    // account exists, to avoid leaking which emails are registered. The
-    // mail send is deliberately not awaited: the transport round-trip only
-    // happens for known accounts, so awaiting it would let response timing
-    // (or a transport failure) reveal which emails exist.
-    const [user] = await User.where({ email })
-    if (user) {
-      const { token } = await createPasswordResetToken(email, passwordResetStore)
-      const resetUrl = buildPasswordResetUrl(resetBaseUrl, token, email)
-      void sendPasswordResetMail(this.make('mail'), email, resetUrl).catch((error) => {
-        console.error('Failed to send password reset email:', error)
-      })
-    }
-
-    return this.inertia(pages.auth.ForgotPassword, { status: STATUS_MESSAGE }, { title: 'Forgot password' })
-  }
-}
-`
-
-const resetPasswordControllerTemplate = `import { Controller, ValidationException, verifyPasswordResetToken } from '@guren/core'
-import { ResetPasswordSchema } from '../../Validators/ResetPasswordValidator.js'
-import { User } from '../../../Models/User.js'
-import { passwordResetStore } from '../../../Auth/PasswordResetStore.js'
-import { pages } from '@/.guren/pages.gen'
-
-const INVALID_TOKEN_MESSAGE = 'This password reset link is invalid or has expired.'
-
-export default class ResetPasswordController extends Controller {
-  async show(): Promise<Response> {
-    const token = this.request.query('token') ?? ''
-    const email = this.request.query('email') ?? ''
-    return this.inertia(pages.auth.ResetPassword, { token, email }, { title: 'Reset password' })
-  }
-
-  async store(): Promise<Response> {
-    const { token, password } = await this.validateBody(ResetPasswordSchema)
-
-    const email = await verifyPasswordResetToken(token, passwordResetStore)
-    if (!email) {
-      throw ValidationException.withMessages({ token: INVALID_TOKEN_MESSAGE })
-    }
-
-    const [user] = await User.where({ email })
-    if (!user) {
-      throw ValidationException.withMessages({ token: INVALID_TOKEN_MESSAGE })
-    }
-
-    // AuthenticatableModel hashes the virtual \`password\` field into
-    // \`passwordHash\` before persisting — see app/Models/User.ts.
-    await User.update({ id: user.id }, { password })
-    await passwordResetStore.deleteForEmail(email)
-
-    return this.redirect('/login')
-  }
-}
-`
-
-const verifyEmailControllerTemplate = `import { Controller, createEmailVerificationToken, completeEmailVerification, buildVerificationUrl } from '@guren/core'
-import { User, type UserRecord } from '../../../Models/User.js'
-import { emailVerificationStore } from '../../../Auth/EmailVerificationStore.js'
-import { appUrl } from '../../../Auth/AppUrl.js'
-import { sendEmailVerificationMail } from '../../../Mail/EmailVerificationMail.js'
-import { pages } from '@/.guren/pages.gen'
-
-const EXPIRED_MESSAGE = 'This verification link is invalid or has expired. Request a new one below.'
-
-export default class VerifyEmailController extends Controller {
-  async notice(): Promise<Response> {
-    const user = await this.auth.userOrFail<UserRecord>()
-    if (user.emailVerifiedAt) {
-      return this.redirect('/dashboard')
-    }
-
-    return this.inertia(pages.auth.VerifyEmail, {}, { title: 'Verify email' })
-  }
-
-  async resend(): Promise<Response> {
-    const user = await this.auth.userOrFail<UserRecord>()
-
-    if (!user.emailVerifiedAt) {
-      const { token } = await createEmailVerificationToken(user.email, emailVerificationStore)
-      const verifyUrl = buildVerificationUrl(\`\${appUrl(this.request)}/verify-email/confirm\`, token, user.email)
-      await sendEmailVerificationMail(this.make('mail'), user.email, verifyUrl)
-    }
-
-    return this.inertia(pages.auth.VerifyEmail, {
-      status: 'A new verification link has been sent to your email address.',
-    }, { title: 'Verify email' })
-  }
-
-  async confirm(): Promise<Response> {
-    const token = this.request.query('token') ?? ''
-
-    const verifiedEmail = await completeEmailVerification(token, emailVerificationStore, async (email) => {
-      await User.update({ email }, { emailVerifiedAt: new Date() })
-      return email
-    })
-
-    if (!verifiedEmail) {
-      return this.inertia(pages.auth.VerifyEmail, { status: EXPIRED_MESSAGE }, { title: 'Verify email' })
-    }
-
-    return this.redirect('/dashboard')
-  }
-}
-`
 
 const OAUTH_PROVIDER_FACTORIES: Record<string, string> = {
   github: 'createGitHubOAuthProviderConfig',
@@ -413,25 +289,6 @@ export default class OAuthController extends Controller {
 }
 `
 }
-
-const dashboardControllerTemplate = `import { Controller } from '@guren/core'
-import type { UserRecord } from '../../Models/User.js'
-import { pages } from '@/.guren/pages.gen'
-
-export default class DashboardController extends Controller {
-  async index(): Promise<Response> {
-    const currentUser = await this.auth.user<UserRecord | null>()
-    const user = currentUser
-      ? {
-          id: currentUser.id,
-          name: currentUser.name,
-          email: currentUser.email,
-        }
-      : null
-    return this.inertia(pages.dashboard.Index, { user }, { title: 'Dashboard' })
-  }
-}
-`
 
 /**
  * When OAuth is the only way in, the stored email is a copy of what the
@@ -617,271 +474,6 @@ export class User extends defineModel(users, {
 `
 }
 
-const authProviderTemplate = `import { ServiceProvider, shareInertiaProps, AUTH_CONTEXT_KEY } from '@guren/core'
-import type { AuthContext, AuthManager } from '@guren/core'
-import { User } from '../Models/User.js'
-
-export default class AuthProvider extends ServiceProvider {
-  register(): void {
-    const auth = this.container.make<AuthManager>('auth')
-    auth.useModel(User, {
-      usernameColumn: 'email',
-      passwordColumn: 'passwordHash',
-      rememberTokenColumn: 'rememberToken',
-      credentialsPasswordField: 'password',
-    })
-  }
-
-  boot(): void {
-    // Nothing shares the signed-in user with the frontend by default, so every
-    // page would render as a guest. Layout.tsx reads this to choose between
-    // "Sign in" and the Log out control.
-    //
-    // shareInertiaProps merges over resolvers registered earlier instead of
-    // replacing them, so the framework's flashed \`errors\` still come through.
-    // Passing this.container scopes the props to this app.
-    shareInertiaProps(async (ctx) => {
-      const auth = ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
-      return { auth: { user: await auth?.user() } }
-    }, this.container)
-  }
-}
-`
-
-const mailConfigTemplate = `import type { MailConfig } from '@guren/core'
-
-// Defaults to the \`log\` driver, which prints outgoing emails to the
-// console instead of sending them — nothing to configure for local
-// development. Set MAIL_DRIVER=smtp (and the SMTP_* variables below)
-// once you're ready to send real email.
-export const mailConfig: MailConfig = {
-  default: process.env.MAIL_DRIVER ?? 'log',
-  from: {
-    email: process.env.MAIL_FROM_ADDRESS ?? 'noreply@example.com',
-    name: process.env.MAIL_FROM_NAME ?? 'Guren',
-  },
-  transports: {
-    log: { driver: 'log' },
-    smtp: {
-      driver: 'smtp',
-      host: process.env.SMTP_HOST ?? 'localhost',
-      port: Number(process.env.SMTP_PORT ?? 587),
-      auth: {
-        user: process.env.SMTP_USER ?? '',
-        pass: process.env.SMTP_PASS ?? '',
-      },
-    },
-  },
-}
-`
-
-const mailProviderTemplate = `import { ServiceProvider, createMailManager } from '@guren/core'
-import { mailConfig } from '../../config/mail.js'
-
-export default class MailProvider extends ServiceProvider {
-  register(): void {
-    this.container.singleton('mail', () => createMailManager(mailConfig))
-  }
-}
-`
-
-const appUrlTemplate = `/**
- * Absolute base URL for links that leave the app (password reset, email
- * verification).
- *
- * Deliberately not derived from the request in production. A request URL is
- * reconstructed from the \`Host\` header, which any client can forge, so a
- * forged host would make the app mail a genuine single-use token to a link
- * pointing at the attacker's own server. \`APP_URL\` is the only trustworthy
- * source, and production fails closed rather than falling back to the request.
- */
-export function appUrl(request: { url: string }): string {
-  const configured = process.env.APP_URL?.trim()
-
-  if (configured) {
-    // Parsed rather than concatenated: a malformed APP_URL has to fail here,
-    // where every caller hits it, not later inside one particular link build.
-    // Dropping any query/fragment and the trailing slash keeps the result
-    // safe to append a path to.
-    const parsed = new URL(configured)
-    return \`\${parsed.origin}\${parsed.pathname.replace(/\\/+$/, '')}\`
-  }
-
-  if (process.env.NODE_ENV === 'production') {
-    throw new Error(
-      'APP_URL is not set. Set it to the public base URL of this app (for example ' +
-        'https://example.com): links sent by email must not be derived from the request host.',
-    )
-  }
-
-  return new URL(request.url).origin
-}
-`
-
-const passwordResetStoreTemplate = `import { MemoryPasswordResetStore } from '@guren/core'
-
-// Swap for a Redis-backed store (see @guren/core/redis) in production
-// or any multi-instance deployment — this in-memory store does not
-// survive restarts and is not shared across processes.
-export const passwordResetStore = new MemoryPasswordResetStore()
-`
-
-const passwordResetMailTemplate = `import { mail, type MailManager } from '@guren/core'
-
-export async function sendPasswordResetMail(manager: MailManager, email: string, resetUrl: string): Promise<void> {
-  await mail(manager)
-    .to(email)
-    .subject('Reset your password')
-    .html(\`
-      <h1>Reset your password</h1>
-      <p>Click the link below to choose a new password. This link expires in 1 hour.</p>
-      <p><a href="\${resetUrl}">\${resetUrl}</a></p>
-      <p>If you didn't request this, you can safely ignore this email.</p>
-    \`)
-    .text(\`
-Reset your password
-
-Click the link below to choose a new password. This link expires in 1 hour.
-
-\${resetUrl}
-
-If you didn't request this, you can safely ignore this email.
-    \`)
-    .send()
-}
-`
-
-const emailVerificationStoreTemplate = `import { MemoryEmailVerificationStore } from '@guren/core'
-
-// Swap for a Redis-backed store (see @guren/core/redis) in production
-// or any multi-instance deployment — this in-memory store does not
-// survive restarts and is not shared across processes.
-export const emailVerificationStore = new MemoryEmailVerificationStore()
-`
-
-const emailVerificationMailTemplate = `import { mail, type MailManager } from '@guren/core'
-
-export async function sendEmailVerificationMail(manager: MailManager, email: string, verifyUrl: string): Promise<void> {
-  await mail(manager)
-    .to(email)
-    .subject('Verify your email address')
-    .html(\`
-      <h1>Verify your email address</h1>
-      <p>Click the link below to verify your email address.</p>
-      <p><a href="\${verifyUrl}">\${verifyUrl}</a></p>
-      <p>If you didn't create an account, you can safely ignore this email.</p>
-    \`)
-    .text(\`
-Verify your email address
-
-Click the link below to verify your email address.
-
-\${verifyUrl}
-
-If you didn't create an account, you can safely ignore this email.
-    \`)
-    .send()
-}
-`
-
-const loginValidatorTemplate = `import { z } from 'zod'
-
-export const LoginSchema = z.object({
-  // Lowercased to match how registration stores emails — a case-sensitive
-  // lookup would otherwise reject the same address typed with different casing.
-  email: z
-    .string()
-    .trim()
-    .min(1, 'Email is required.')
-    .toLowerCase()
-    .pipe(z.email('The email address is badly formatted.')),
-  password: z
-    .string()
-    .min(1, 'Password is required.'),
-  remember: z
-    .union([
-      z.boolean(),
-      z
-        .string()
-        .transform((value) => ['true', 'on', '1'].includes(value.toLowerCase())),
-    ])
-    .optional()
-    .transform((value) => Boolean(value))
-    .default(false),
-})
-
-export type LoginInput = z.infer<typeof LoginSchema>
-`
-
-const registerValidatorTemplate = `import { z } from 'zod'
-
-export const RegisterSchema = z
-  .object({
-    name: z
-      .string()
-      .trim()
-      .min(1, 'Name is required.')
-      .max(120, 'Name must be 120 characters or fewer.'),
-    // Lowercased so it round-trips correctly through the password-reset and
-    // email-verification token helpers, which normalize emails to lowercase
-    // internally before matching against stored records.
-    email: z
-      .string()
-      .trim()
-      .min(1, 'Email is required.')
-      .toLowerCase()
-      .pipe(z.email('The email address is badly formatted.')),
-    password: z
-      .string()
-      .min(8, 'Password must be at least 8 characters.'),
-    passwordConfirmation: z
-      .string()
-      .min(1, 'Please confirm your password.'),
-  })
-  .refine((data) => data.password === data.passwordConfirmation, {
-    message: 'Passwords do not match.',
-    path: ['passwordConfirmation'],
-  })
-
-export type RegisterInput = z.infer<typeof RegisterSchema>
-`
-
-const forgotPasswordValidatorTemplate = `import { z } from 'zod'
-
-export const ForgotPasswordSchema = z.object({
-  // Lowercased to match how registration stores emails and how the
-  // password-reset token helpers normalize emails internally.
-  email: z
-    .string()
-    .trim()
-    .min(1, 'Email is required.')
-    .toLowerCase()
-    .pipe(z.email('The email address is badly formatted.')),
-})
-
-export type ForgotPasswordInput = z.infer<typeof ForgotPasswordSchema>
-`
-
-const resetPasswordValidatorTemplate = `import { z } from 'zod'
-
-export const ResetPasswordSchema = z
-  .object({
-    token: z.string().min(1, 'Reset token is required.'),
-    password: z
-      .string()
-      .min(8, 'Password must be at least 8 characters.'),
-    passwordConfirmation: z
-      .string()
-      .min(1, 'Please confirm your password.'),
-  })
-  .refine((data) => data.password === data.passwordConfirmation, {
-    message: 'Passwords do not match.',
-    path: ['passwordConfirmation'],
-  })
-
-export type ResetPasswordInput = z.infer<typeof ResetPasswordSchema>
-`
-
 function buildProfileValidatorTemplate({ includePassword, providerOwnedEmail }: AuthFeatures): string {
   // Omitted rather than made read-only in the UI alone: Zod strips unknown
   // keys, so leaving the field out is what actually stops a hand-crafted
@@ -919,52 +511,6 @@ export const ProfileUpdateSchema = z.object({
 export type ProfileUpdateInput = z.infer<typeof ProfileUpdateSchema>
 `
 }
-
-const layoutTemplate = `import { Link, usePage } from '@inertiajs/react'
-import type { PropsWithChildren } from 'react'
-
-export default function Layout({ children }: PropsWithChildren) {
-  const { props } = usePage<{ auth?: { user?: { name?: string } } }>()
-  const user = props.auth?.user
-  const navButtonClass =
-    'rounded border border-emerald-500 px-3 py-1 text-emerald-200 transition hover:bg-emerald-500 hover:text-slate-950'
-
-  return (
-    <div className="min-h-screen bg-slate-950 text-slate-100">
-      <header className="border-b border-slate-800 bg-slate-900/60 backdrop-blur">
-        <div className="mx-auto flex max-w-4xl items-center justify-between px-6 py-4">
-          <Link href="/" className="text-lg font-semibold text-emerald-300">
-            Guren
-          </Link>
-          <nav className="flex items-center gap-4 text-sm text-slate-300">
-            <Link href="/" className="transition hover:text-emerald-200">
-              Home
-            </Link>
-            <Link href="/dashboard" className="transition hover:text-emerald-200">
-              Dashboard
-            </Link>
-            {user ? (
-              // Inertia's HTTP client copies the XSRF-TOKEN cookie into the
-              // request header. A native <form> does not, so CSRF protection
-              // would answer 403 and leave the session signed in.
-              <Link href="/logout" method="post" as="button" className={navButtonClass}>
-                Log out
-              </Link>
-            ) : (
-              <Link href="/login" className={navButtonClass}>
-                Sign in
-              </Link>
-            )}
-          </nav>
-        </div>
-      </header>
-      <main className="mx-auto max-w-2xl px-6 py-12">
-        {children}
-      </main>
-    </div>
-  )
-}
-`
 
 const OAUTH_PROVIDER_LABELS: Record<string, string> = {
   github: 'GitHub',
@@ -1313,256 +859,6 @@ ${buildOAuthButtonsTemplate(oauthProviders)}
 }
 `
 }
-
-const forgotPasswordViewTemplate = `import { Head, useForm } from '@inertiajs/react'
-import { useId } from 'react'
-import Layout from '../../components/Layout.js'
-import type { ValidationErrors } from '@guren/core'
-
-interface Props {
-  errors?: ValidationErrors<'email'>
-  status?: string
-}
-
-type ForgotPasswordFormData = {
-  email: string
-}
-
-export default function ForgotPassword({ errors = {}, status }: Props) {
-  const form = useForm<ForgotPasswordFormData>({ email: '' })
-
-  const emailId = useId()
-
-  return (
-    <Layout>
-      <Head title="Forgot password" />
-      <section className="rounded-lg border border-slate-800 bg-slate-900/40 p-8 shadow-xl shadow-emerald-500/5">
-        <h1 className="text-2xl font-semibold text-emerald-300">Forgot your password?</h1>
-        <p className="mt-2 text-sm text-slate-400">
-          Enter your email and we&apos;ll send you a link to reset your password.
-        </p>
-
-        {status ? (
-          <p className="mt-4 rounded border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-sm text-emerald-200">
-            {status}
-          </p>
-        ) : null}
-
-        {errors.message && (
-          <p className="mt-4 rounded border border-rose-500/60 bg-rose-500/10 px-4 py-2 text-sm text-rose-200">
-            {errors.message}
-          </p>
-        )}
-
-        <form
-          className="mt-6 space-y-4"
-          onSubmit={(event) => {
-            event.preventDefault()
-            form.post('/forgot-password')
-          }}
-        >
-          <div>
-            <label htmlFor={emailId} className="block text-sm font-medium text-slate-200">
-              Email
-            </label>
-            <input
-              id={emailId}
-              type="email"
-              value={form.data.email}
-              onChange={(event) => form.setData('email', event.target.value)}
-              required
-              className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none ring-emerald-400 transition focus:border-emerald-400 focus:ring"
-            />
-            {errors.email && <p className="mt-1 text-sm text-rose-300">{errors.email}</p>}
-          </div>
-
-          <button
-            type="submit"
-            disabled={form.processing}
-            className="w-full rounded bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400 disabled:opacity-50"
-          >
-            Send reset link
-          </button>
-        </form>
-      </section>
-    </Layout>
-  )
-}
-`
-
-const resetPasswordViewTemplate = `import { Head, useForm } from '@inertiajs/react'
-import { useId } from 'react'
-import Layout from '../../components/Layout.js'
-import type { ValidationErrors } from '@guren/core'
-
-interface Props {
-  token: string
-  email: string
-  errors?: ValidationErrors<'token' | 'password' | 'passwordConfirmation'>
-}
-
-type ResetPasswordFormData = {
-  token: string
-  password: string
-  passwordConfirmation: string
-}
-
-export default function ResetPassword({ token, email, errors = {} }: Props) {
-  const form = useForm<ResetPasswordFormData>({
-    token,
-    password: '',
-    passwordConfirmation: '',
-  })
-
-  const passwordId = useId()
-  const passwordConfirmationId = useId()
-
-  return (
-    <Layout>
-      <Head title="Reset password" />
-      <section className="rounded-lg border border-slate-800 bg-slate-900/40 p-8 shadow-xl shadow-emerald-500/5">
-        <h1 className="text-2xl font-semibold text-emerald-300">Reset your password</h1>
-        {email ? (
-          <p className="mt-2 text-sm text-slate-400">
-            Choose a new password for {email}.
-          </p>
-        ) : null}
-
-        {errors.token && (
-          <p className="mt-4 rounded border border-rose-500/60 bg-rose-500/10 px-4 py-2 text-sm text-rose-200">
-            {errors.token}
-          </p>
-        )}
-
-        <form
-          className="mt-6 space-y-4"
-          onSubmit={(event) => {
-            event.preventDefault()
-            form.post('/reset-password')
-          }}
-        >
-          <div>
-            <label htmlFor={passwordId} className="block text-sm font-medium text-slate-200">
-              New password
-            </label>
-            <input
-              id={passwordId}
-              type="password"
-              value={form.data.password}
-              onChange={(event) => form.setData('password', event.target.value)}
-              required
-              className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none ring-emerald-400 transition focus:border-emerald-400 focus:ring"
-            />
-            {errors.password && <p className="mt-1 text-sm text-rose-300">{errors.password}</p>}
-          </div>
-
-          <div>
-            <label htmlFor={passwordConfirmationId} className="block text-sm font-medium text-slate-200">
-              Confirm new password
-            </label>
-            <input
-              id={passwordConfirmationId}
-              type="password"
-              value={form.data.passwordConfirmation}
-              onChange={(event) => form.setData('passwordConfirmation', event.target.value)}
-              required
-              className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none ring-emerald-400 transition focus:border-emerald-400 focus:ring"
-            />
-            {errors.passwordConfirmation && (
-              <p className="mt-1 text-sm text-rose-300">{errors.passwordConfirmation}</p>
-            )}
-          </div>
-
-          <button
-            type="submit"
-            disabled={form.processing}
-            className="w-full rounded bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400 disabled:opacity-50"
-          >
-            Reset password
-          </button>
-        </form>
-      </section>
-    </Layout>
-  )
-}
-`
-
-const verifyEmailViewTemplate = `import { Head, useForm } from '@inertiajs/react'
-import Layout from '../../components/Layout.js'
-
-interface Props {
-  status?: string
-}
-
-export default function VerifyEmail({ status }: Props) {
-  const form = useForm({})
-
-  return (
-    <Layout>
-      <Head title="Verify email" />
-      <section className="rounded-lg border border-slate-800 bg-slate-900/40 p-8 shadow-xl shadow-emerald-500/5">
-        <h1 className="text-2xl font-semibold text-emerald-300">Verify your email</h1>
-        <p className="mt-2 text-sm text-slate-400">
-          We sent a verification link to your email address. Click it to activate your account.
-        </p>
-
-        {status ? (
-          <p className="mt-4 rounded border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-sm text-emerald-200">
-            {status}
-          </p>
-        ) : null}
-
-        <form
-          className="mt-6"
-          onSubmit={(event) => {
-            event.preventDefault()
-            form.post('/verify-email')
-          }}
-        >
-          <button
-            type="submit"
-            disabled={form.processing}
-            className="w-full rounded bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400 disabled:opacity-50"
-          >
-            Resend verification email
-          </button>
-        </form>
-      </section>
-    </Layout>
-  )
-}
-`
-
-const dashboardViewTemplate = `import Layout from '../../components/Layout.js'
-
-interface Props {
-  user?: { id: number; name: string; email: string } | null
-}
-
-export default function Dashboard({ user }: Props) {
-  return (
-    <Layout>
-      <section className="space-y-6">
-        <header>
-          <h1 className="text-3xl font-semibold text-emerald-300">Dashboard</h1>
-          <p className="mt-2 text-sm text-slate-400">This page is protected by the auth middleware.</p>
-        </header>
-
-        {user ? (
-          <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-6 shadow-lg shadow-emerald-500/10">
-            <h2 className="text-xl font-medium text-slate-100">Signed in as {user.name}</h2>
-            <p className="mt-2 text-sm text-slate-300">Email: {user.email}</p>
-          </div>
-        ) : (
-          <div className="rounded border border-rose-500/60 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
-            You are not signed in.
-          </div>
-        )}
-      </section>
-    </Layout>
-  )
-}
-`
 
 function buildProfileViewTemplate({ includePassword, providerOwnedEmail }: AuthFeatures): string {
   const errorFields = providerOwnedEmail
@@ -2222,26 +1518,26 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
 
   const files = [
     { path: 'app/Http/Controllers/Auth/LoginController.ts', contents: buildLoginControllerTemplate(includePassword) },
-    { path: 'app/Http/Controllers/DashboardController.ts', contents: dashboardControllerTemplate },
+    authFile('app/Http/Controllers/DashboardController.ts'),
     { path: 'app/Http/Controllers/ProfileController.ts', contents: buildProfileControllerTemplate(features) },
     { path: 'app/Models/User.ts', contents: buildUserModelTemplate(passwordOnlySignUp) },
-    { path: 'app/Providers/AuthProvider.ts', contents: authProviderTemplate },
+    authFile('app/Providers/AuthProvider.ts'),
     { path: 'app/Http/Validators/ProfileValidator.ts', contents: buildProfileValidatorTemplate(features) },
-    { path: 'resources/js/components/Layout.tsx', contents: layoutTemplate },
+    authFile('resources/js/components/Layout.tsx'),
     {
       path: 'resources/js/pages/auth/Login.tsx',
       contents: includePassword
         ? buildLoginViewTemplate(includeExtras, includeExtras, oauthProviders)
         : buildOAuthOnlyLoginViewTemplate(oauthProviders),
     },
-    { path: 'resources/js/pages/dashboard/Index.tsx', contents: dashboardViewTemplate },
+    authFile('resources/js/pages/dashboard/Index.tsx'),
     { path: 'resources/js/pages/profile/Edit.tsx', contents: buildProfileViewTemplate(features) },
     { path: 'routes/auth.ts', contents: buildRoutesTemplate(features) },
   ]
 
   if (includePassword) {
     files.push(
-      { path: 'app/Http/Validators/LoginValidator.ts', contents: loginValidatorTemplate },
+      authFile('app/Http/Validators/LoginValidator.ts'),
       // The demo user only exists to be signed in as with a password. Without
       // password login it is an unreachable row — and seeding it would hash a
       // password with scrypt, the exact cost --oauth-only avoids. The seeder is
@@ -2254,29 +1550,29 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
     files.push(
       // Every flow that mails an absolute link routes through this, so that
       // none of them build one from the request host.
-      { path: 'app/Auth/AppUrl.ts', contents: appUrlTemplate },
+      authFile('app/Auth/AppUrl.ts'),
       { path: 'app/Http/Controllers/Auth/RegisterController.ts', contents: buildRegisterControllerTemplate(includeVerify) },
-      { path: 'app/Http/Validators/RegisterValidator.ts', contents: registerValidatorTemplate },
+      authFile('app/Http/Validators/RegisterValidator.ts'),
       { path: 'resources/js/pages/auth/Register.tsx', contents: buildRegisterViewTemplate(oauthProviders) },
-      { path: 'app/Http/Controllers/Auth/ForgotPasswordController.ts', contents: forgotPasswordControllerTemplate },
-      { path: 'app/Http/Controllers/Auth/ResetPasswordController.ts', contents: resetPasswordControllerTemplate },
-      { path: 'app/Http/Validators/ForgotPasswordValidator.ts', contents: forgotPasswordValidatorTemplate },
-      { path: 'app/Http/Validators/ResetPasswordValidator.ts', contents: resetPasswordValidatorTemplate },
-      { path: 'resources/js/pages/auth/ForgotPassword.tsx', contents: forgotPasswordViewTemplate },
-      { path: 'resources/js/pages/auth/ResetPassword.tsx', contents: resetPasswordViewTemplate },
-      { path: 'app/Auth/PasswordResetStore.ts', contents: passwordResetStoreTemplate },
-      { path: 'app/Mail/PasswordResetMail.ts', contents: passwordResetMailTemplate },
-      { path: 'app/Providers/MailProvider.ts', contents: mailProviderTemplate },
-      { path: 'config/mail.ts', contents: mailConfigTemplate },
+      authFile('app/Http/Controllers/Auth/ForgotPasswordController.ts'),
+      authFile('app/Http/Controllers/Auth/ResetPasswordController.ts'),
+      authFile('app/Http/Validators/ForgotPasswordValidator.ts'),
+      authFile('app/Http/Validators/ResetPasswordValidator.ts'),
+      authFile('resources/js/pages/auth/ForgotPassword.tsx'),
+      authFile('resources/js/pages/auth/ResetPassword.tsx'),
+      authFile('app/Auth/PasswordResetStore.ts'),
+      authFile('app/Mail/PasswordResetMail.ts'),
+      authFile('app/Providers/MailProvider.ts'),
+      authFile('config/mail.ts'),
     )
   }
 
   if (includeVerify) {
     files.push(
-      { path: 'app/Http/Controllers/Auth/VerifyEmailController.ts', contents: verifyEmailControllerTemplate },
-      { path: 'resources/js/pages/auth/VerifyEmail.tsx', contents: verifyEmailViewTemplate },
-      { path: 'app/Auth/EmailVerificationStore.ts', contents: emailVerificationStoreTemplate },
-      { path: 'app/Mail/EmailVerificationMail.ts', contents: emailVerificationMailTemplate },
+      authFile('app/Http/Controllers/Auth/VerifyEmailController.ts'),
+      authFile('resources/js/pages/auth/VerifyEmail.tsx'),
+      authFile('app/Auth/EmailVerificationStore.ts'),
+      authFile('app/Mail/EmailVerificationMail.ts'),
     )
   }
 

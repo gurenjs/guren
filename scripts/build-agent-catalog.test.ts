@@ -1,11 +1,13 @@
-import { describe, expect, it } from 'bun:test'
+import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
 
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 import {
   CATALOG_INPUTS,
+  CLI_MANIFEST,
+  assertChangesetGate,
   assertCommandsAndFlags,
   assertMinCli,
   assertPortableManifest,
@@ -317,5 +319,258 @@ describe('claude plugin validate', () => {
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
+  })
+})
+
+/**
+ * The changeset gate, against throwaway repositories.
+ *
+ * Everything above tests the gate's *parser*; none of it ran the gate, which
+ * needs real commits to diff. That left its actual decisions — including the
+ * exemption, the one branch a release commit depends on — pinned by nothing.
+ * These build a repository per case and point `assertChangesetGate` at it.
+ *
+ * The fixture only has to carry what the gate reads: the paths in
+ * `CATALOG_INPUTS`, the CLI manifest's `version`, and `.changeset/`. Content
+ * is irrelevant to it, so the templates here are one line each.
+ */
+describe('audit: changeset gate', () => {
+  let scratch: string
+  let repoCount = 0
+
+  beforeAll(async () => {
+    scratch = await mkdtemp(join(tmpdir(), 'guren-catalog-gate-'))
+  })
+  afterAll(async () => {
+    await rm(scratch, { recursive: true, force: true })
+  })
+
+  /**
+   * Every git call is hardened against the machine it runs on: a global
+   * `core.hooksPath` reaches repositories created here (publish-agent-catalog
+   * disables it the same way, and its comment has the full hazard list), a
+   * global `commit.gpgsign` would make a commit *prompt* — and a hang in
+   * bun:test is charged to the following test, so it would not even look
+   * like this one — and a CI runner has no committer identity to inherit.
+   */
+  const HERMETIC = [
+    '-c', 'core.hooksPath=',
+    '-c', 'commit.gpgsign=false',
+    '-c', 'user.name=Guren gate test',
+    '-c', 'user.email=gate-test@guren.dev',
+  ]
+
+  function git(repo: string, ...args: string[]): string {
+    const proc = Bun.spawnSync(['git', ...HERMETIC, ...args], { cwd: repo })
+    if (!proc.success) {
+      throw new Error(`git ${args.join(' ')} failed: ${proc.stderr.toString().trim()}`)
+    }
+    return proc.stdout.toString().trim()
+  }
+
+  /** A path under `scratch` no other case has used. */
+  const newRepoDir = (suffix = '') => join(scratch, `repo-${++repoCount}${suffix}`)
+
+  const manifest = (version: string, extra: Record<string, unknown> = {}) =>
+    `${JSON.stringify({ name: '@guren/cli', version, ...extra }, null, 2)}\n`
+
+  /** Write files (null deletes), then commit. Returns the new HEAD sha. */
+  async function commit(repo: string, message: string, changes: Record<string, string | null>): Promise<string> {
+    for (const [path, content] of Object.entries(changes)) {
+      const full = join(repo, path)
+      if (content === null) {
+        await rm(full, { force: true })
+        continue
+      }
+      await mkdir(dirname(full), { recursive: true })
+      await writeFile(full, content, 'utf8')
+    }
+    git(repo, 'add', '-A')
+    git(repo, 'commit', '--quiet', '-m', message)
+    return git(repo, 'rev-parse', 'HEAD')
+  }
+
+  /**
+   * A repository at the state before the change under test: a CLI manifest, a
+   * catalog template, and an empty `.changeset/`. Returns the repo path and
+   * the sha to use as the gate's base.
+   */
+  async function baseRepo(version = '2.7.1'): Promise<{ repo: string; base: string }> {
+    const repo = newRepoDir()
+    await mkdir(repo, { recursive: true })
+    git(repo, 'init', '--quiet', '--initial-branch=main')
+    const base = await commit(repo, 'base', {
+      [CLI_MANIFEST]: manifest(version),
+      'packages/cli/templates/agent-catalog/README.md.tpl': 'before\n',
+      '.changeset/README.md': 'changesets live here\n',
+    })
+    return { repo, base }
+  }
+
+  const CHANGESET = '---\n"@guren/cli": patch\n---\n\ncatalog wording\n'
+  const CHANGESET_FILE = '.changeset/tidy-pandas-shout.md'
+  const TEMPLATE = 'packages/cli/templates/agent-catalog/README.md.tpl'
+
+  /** The feature PR: a catalog template edit, with or without its changeset. */
+  const rewordCatalog = (repo: string, withChangeset: boolean) =>
+    commit(repo, 'reword the catalog', {
+      [TEMPLATE]: 'after\n',
+      ...(withChangeset ? { [CHANGESET_FILE]: CHANGESET } : {}),
+    })
+
+  /** What `changeset version` commits: the bump, and the changeset consumed. */
+  const versionPackages = (repo: string, version: string) =>
+    commit(repo, `chore: version packages to ${version}`, {
+      [CLI_MANIFEST]: manifest(version),
+      [CHANGESET_FILE]: null,
+    })
+
+  it('passes when nothing it watches changed', async () => {
+    const { repo, base } = await baseRepo()
+    await commit(repo, 'unrelated', { 'web/index.md': 'docs\n' })
+    expect(await assertChangesetGate(base, repo)).toEqual([])
+  })
+
+  it('fails on a catalog change with no @guren/cli changeset', async () => {
+    const { repo, base } = await baseRepo()
+    await rewordCatalog(repo, false)
+    const problems = await assertChangesetGate(base, repo)
+    expect(problems).toHaveLength(1)
+    expect(problems[0]).toContain('README.md.tpl')
+    expect(problems[0]).toContain('@guren/cli')
+  })
+
+  it('passes on a catalog change that carries one — the rule a feature PR can satisfy', async () => {
+    const { repo, base } = await baseRepo()
+    await rewordCatalog(repo, true)
+    expect(await assertChangesetGate(base, repo)).toEqual([])
+  })
+
+  it('passes when the CLI version moved, even with a catalog change in the same range', async () => {
+    // The A-then-B push: a catalog change with its changeset, and then the
+    // `changeset version` commit that consumes it. The old manifest-only
+    // exemption did not match (two inputs touched) and no changeset survives
+    // in the tree to be found, so this range was a false red. Nothing here
+    // can publish under an unchanged version: 2.7.1 → 2.8.0.
+    const { repo, base } = await baseRepo('2.7.1')
+    await rewordCatalog(repo, true)
+    await versionPackages(repo, '2.8.0')
+    expect(await assertChangesetGate(base, repo)).toEqual([])
+  })
+
+  it('passes on the release commit whose only touched input is the manifest', async () => {
+    // The ordinary `changeset version` push, where no catalog template rides
+    // along: one input touched, and the version moved. Without this case a
+    // rule reading `touched.length > 1 && baseVersion !== headVersion` would
+    // satisfy every other test here and turn every plain release commit red.
+    const { repo, base } = await baseRepo('2.7.1')
+    await versionPackages(repo, '2.8.0')
+    expect(await assertChangesetGate(base, repo)).toEqual([])
+  })
+
+  it('reads the base version from the merge base, not from a base that moved on', async () => {
+    // A branch that forked before a release: its own range moves nothing, but
+    // the base ref it is compared against has since advanced to 2.8.0.
+    // Reading the base *tip* would see 2.7.1 vs 2.8.0 and exempt a catalog
+    // change that publishes under an unchanged version.
+    const { repo, base } = await baseRepo('2.7.1')
+    git(repo, 'checkout', '--quiet', '-b', 'feature')
+    await rewordCatalog(repo, false)
+    git(repo, 'checkout', '--quiet', 'main')
+    await versionPackages(repo, '2.8.0')
+    git(repo, 'checkout', '--quiet', 'feature')
+    // the premise: the base ref's tip and the merge base disagree about the version
+    expect(git(repo, 'show', `main:${CLI_MANIFEST}`)).toContain('2.8.0')
+    expect(git(repo, 'merge-base', 'main', 'HEAD')).toBe(base)
+
+    const problems = await assertChangesetGate('main', repo)
+    expect(problems).toHaveLength(1)
+    expect(problems[0]).toContain('README.md.tpl')
+  })
+
+  it('fails on a manifest edit that does not move the version', async () => {
+    // The branch the version rule replaces. The old exemption was "the CLI
+    // manifest was the only file touched", which waved this through — a
+    // manifest change is not a version change, and this one publishes the
+    // payload under 2.7.1 all over again.
+    const { repo, base } = await baseRepo('2.7.1')
+    await commit(repo, 'add a keyword', {
+      [CLI_MANIFEST]: manifest('2.7.1', { keywords: ['guren'] }),
+    })
+    const problems = await assertChangesetGate(base, repo)
+    expect(problems).toHaveLength(1)
+    expect(problems[0]).toContain(CLI_MANIFEST)
+  })
+
+  it('does not exempt a version it could not read, and says so', async () => {
+    // No manifest on the base side: the comparison cannot be made, so the
+    // exemption is not granted. An unavailable check is not a green one —
+    // and a silent pass here would be worse than CI's ungated fallback,
+    // which at least annotates itself.
+    const repo = newRepoDir()
+    await mkdir(repo, { recursive: true })
+    git(repo, 'init', '--quiet', '--initial-branch=main')
+    const base = await commit(repo, 'base without a CLI package', { 'web/index.md': 'docs\n' })
+    await commit(repo, 'add the CLI and a catalog template', {
+      [CLI_MANIFEST]: manifest('2.7.1'),
+      [TEMPLATE]: 'after\n',
+    })
+    const problems = await assertChangesetGate(base, repo)
+    expect(problems).toHaveLength(1)
+    expect(problems[0]).toContain('could not be read')
+
+    // …but it is not a red on its own: a changeset still satisfies the gate,
+    // so an unreadable version cannot fail a PR that did the right thing.
+    await commit(repo, 'add the changeset', { [CHANGESET_FILE]: CHANGESET })
+    expect(await assertChangesetGate(base, repo)).toEqual([])
+  })
+
+  it('falls back to a two-dot diff when there is no merge base', async () => {
+    // What a shallow CI checkout looks like: the base was fetched by SHA to
+    // depth 1, so it shares no history with HEAD and `git merge-base` has no
+    // answer. The fallback must be the base tip — an empty left side would
+    // make the diff `HEAD..HEAD`, which reports no files and passes this gate
+    // on every such run.
+    const { repo, base } = await baseRepo()
+    git(repo, 'checkout', '--quiet', '--orphan', 'unrelated')
+    await commit(repo, 'unrelated root', {
+      [CLI_MANIFEST]: manifest('2.7.1'),
+      [TEMPLATE]: 'after\n',
+    })
+    expect(Bun.spawnSync(['git', 'merge-base', base, 'HEAD'], { cwd: repo }).success).toBe(false)
+    const emptyLeftSide = Bun.spawnSync(['git', 'diff', '--name-only', '..HEAD'], { cwd: repo })
+    expect(emptyLeftSide.success).toBe(true)
+    expect(emptyLeftSide.stdout.toString().trim()).toBe('')
+    const problems = await assertChangesetGate(base, repo)
+    expect(problems).toHaveLength(1)
+    expect(problems[0]).toContain('README.md.tpl')
+  })
+
+  it('exempts the release commit through a shallow-fetched base ref — the shape CI runs', async () => {
+    // The push event, reproduced: a depth-1 checkout of the tip, and the
+    // previous tip fetched by SHA into refs/audit-base at depth 1. There is
+    // no merge base, so the gate diffs against the ref name — and then has to
+    // read `packages/cli/package.json` out of it. Nothing else here exercises
+    // `git show <shallow-ref>:<path>`, and if that could not resolve, every
+    // release commit would be red for the reason this change removed.
+    const { repo: origin, base } = await baseRepo('2.7.1')
+    await rewordCatalog(origin, true)
+    await versionPackages(origin, '2.8.0')
+    // servers refuse a by-SHA want unless they allow it; GitHub does
+    git(origin, 'config', 'uploadpack.allowAnySHA1InWant', 'true')
+
+    const shallow = newRepoDir('-shallow')
+    git(scratch, 'clone', '--quiet', '--depth', '1', `file://${origin}`, shallow)
+    git(shallow, 'fetch', '--no-tags', '--depth=1', 'origin', `${base}:refs/audit-base`)
+    expect(Bun.spawnSync(['git', 'merge-base', 'refs/audit-base', 'HEAD'], { cwd: shallow }).success).toBe(false)
+
+    expect(await assertChangesetGate('refs/audit-base', shallow)).toEqual([])
+  })
+
+  it('reports a base ref it cannot resolve rather than passing', async () => {
+    const { repo } = await baseRepo()
+    const problems = await assertChangesetGate('refs/does-not-exist', repo)
+    expect(problems).toHaveLength(1)
+    expect(problems[0]).toContain('could not diff against refs/does-not-exist')
   })
 })

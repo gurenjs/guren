@@ -71,8 +71,10 @@ export default function DocsIndex({ categories, locale, locales = [], basePath }
       <main className="min-h-[calc(100vh-70px)] bg-docs-page text-docs-text" style={{ fontFamily: 'system-ui, sans-serif' }}>
         <div className="mx-auto max-w-[1200px] px-6 pt-16 pb-24">
           <header className="mb-20 max-w-[800px]">
-            <p className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-widest text-docs-accent">
-              <span className="inline-block h-px w-5 bg-docs-accent" />
+            {/* the ember tick — this screen has no current-place nav, so the
+                page title block carries the one tick */}
+            <p className="docs-kicker mb-4 flex items-center gap-2.5 text-sm text-docs-accent">
+              <span className="docs-tick" aria-hidden="true" />
               {copy.eyebrow}
             </p>
             <h1 className="mb-6 text-[3.5rem] font-extrabold leading-[1.1] tracking-tight text-docs-heading">
@@ -107,7 +109,7 @@ export default function DocsIndex({ categories, locale, locales = [], basePath }
                   <div className="grid gap-12">
                     {group.sections.map((section) => (
                       <div key={`${group.category}-${section.title}`}>
-                        <h3 className="mb-5 text-sm font-bold uppercase tracking-widest text-docs-text-muted">
+                        <h3 className="docs-kicker mb-5 text-sm text-docs-text-secondary">
                           {section.title}
                         </h3>
                         <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}>

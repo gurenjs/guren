@@ -51,7 +51,7 @@ Run `bun run codegen` after adding features to regenerate types. When you are re
 
 ## What you get
 
-- **Agent-ready by default** — `guren context` hands an agent the project map with API signatures, `guren check` and `guren audit` verify its work mechanically, and every new app ships an agent harness. In a [public, blind-scored evaluation](https://github.com/gurenjs/framework-comparison/tree/main/agent-eval), every agent trial shipped a working feature
+- **Agent-ready by default** — `guren context` hands an agent the project map with API signatures, `guren check` and `guren audit` verify its work mechanically, and every new app ships an agent harness — and before you have an app, the Guren skills are one `npx skills add gurenjs/agent-skills` (or `claude plugin marketplace add gurenjs/agent-skills`) away. In a [public, blind-scored evaluation](https://github.com/gurenjs/framework-comparison/tree/main/agent-eval), every agent trial shipped a working feature
 - **Laravel-style MVC** — routes, controllers, and an Eloquent-inspired Model API
 - **Inertia.js + React** — SPA-like UX without a separate frontend app
 - **Drizzle ORM** — swap database backends through an adapter (PostgreSQL / MySQL / SQLite)

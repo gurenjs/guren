@@ -12,7 +12,12 @@ Ships the Citty-based CLI (`guren` bin) with generators and database helpers. Ge
 
 ## Conventions
 - Keep templates minimal and framework-agnostic; they should not hardwire project-specific paths beyond `app/`, `routes/` defaults
-- Utilities live in `camelCase.ts` modules; generator templates should be string literals with trailing newline
+- Utilities live in `camelCase.ts` modules
+- Generator templates come in two forms, chosen by whether the contents depend on flags or fields:
+  - **Fully static files** live under `templates/scaffold/<scaffold>/` as real `.ts`/`.tsx` sources, loaded via `loadScaffoldTemplate()` (`scaffold-templates.ts`). The tree mirrors the generated app (template path = written path), so `bun run typecheck:templates` (`tsconfig.templates.json`) typechecks them as an app-shaped project against the workspace packages, with companion stubs in `tests/fixtures/scaffold-typecheck/` for the files a generator builds dynamically. Note the limit: this checks against workspace *source*, so a template using a not-yet-released `@guren/*` API still passes — that class of drift belongs to `smoke:starter:npm`.
+  - **Flag- or field-dependent output** stays a `build*Template()` function beside its generator, as a template literal with trailing newline. Don't move these to files: placeholder/engine syntax would make them unparseable, losing exactly what the file form exists for.
+  - Several auth scaffold templates are byte-identical to their `packages/create-app/templates/blog/` counterparts, and that identity is pinned by `tests/scaffold-blog-sync.test.ts` — a change to one side must land on both. Files that differ from the blueprint on purpose (the blog is a showcase app) pin only their behaviour-critical shared snippet instead, like `SHARE_INERTIA_AUTH_PROPS_SNIPPET` in `tests/make-auth.test.ts`; the sync test's header states the policy and how to diverge a pair deliberately.
+  - Either way, `tests/scaffold-output.test.ts` renders representative outputs and requires them to parse. Its covered set derives from `builtinSubCommands`, so a new `make:*` command fails that gate until it joins the matrix (new flags still need a matrix entry by hand) or names its reason in `SKIPPED_GENERATORS`. Note the asymmetry: static templates are *typechecked*, builder output is only parse-checked.
 - Ensure new commands reuse `toWriterOptions` and shared logging via `consola`
 - Keep `runtime.ts` as the single entry for boot helpers; extend `MaybeApplication` instead of reaching into app internals from commands
 - When touching route type output, regenerate `examples/blog/types/generated/routes.d.ts` to verify compatibility

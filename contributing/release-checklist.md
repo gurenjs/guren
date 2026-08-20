@@ -42,6 +42,7 @@ only on the PR's CI and here. Start the databases first: `bun run db:up` and
 - [ ] Create a git tag following semver
 - [ ] Create GitHub release with changelog excerpt
 - [ ] Verify npm publish succeeds for all packages
+- [ ] If `@guren/cli` moved: `bun run publish:agent-catalog` (renders the agent catalog, audits it, and pushes it to `gurenjs/agent-skills` over your own git credentials — no token; a no-op when the published tree is already byte-identical). The same version with different bytes is *not* a no-op: it publishes a corrective commit, which copies already installed under that version do not pick up until `@guren/cli` moves again. The command needs the Claude Code CLI on your PATH to validate the manifests, and refuses to publish without it; `--skip-validate` is the override once you have validated by hand. The nightly `Published Package Drift` workflow turns red if this is forgotten.
 - [ ] Verify `bunx create-guren-app` works with the new version
 - [ ] Run `bunx guren upgrade --canary` on an older app to verify upgrade path
 

@@ -160,13 +160,12 @@ jobs:
       # unremediable case, and no one can make a collected SHA fetchable again.
       #
       # The release commit stays green. `changeset version` empties .changeset
-      # and bumps versions; the only catalog input it moves is
-      # packages/cli/package.json, since the sync-template-deps pass that
-      # follows writes under packages/create-app/templates and never under
-      # packages/cli/templates. assertChangesetGate exempts a diff whose
-      # touched inputs are the CLI manifest alone, which is that commit — it
-      # reaches main as its own squash merge, so the push diff is that commit
-      # and nothing else.
+      # and bumps versions, so the diff it produces has no changeset left in
+      # the tree to find; assertChangesetGate exempts it on the moved
+      # @guren/cli version instead. Why that is the right key, and why it is
+      # an exemption rather than a demand a feature PR would have to satisfy,
+      # is argued where the branch lives — see the comment on the exemption
+      # in scripts/build-agent-catalog.ts.
       - name: Agent catalog audit
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
