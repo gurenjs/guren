@@ -18,22 +18,24 @@ import { generatePageTypes } from '../src/pages-types'
  * workspace, regenerates `.guren/pages.gen.ts` the way `guren codegen` would,
  * and typechecks everything the scaffold wrote as one program.
  *
- * Two combos rather than the full authCombos matrix: each program compiles the
- * workspace packages from source and costs COLD_TSC_TIMEOUT-scale time, and
- * these two reach the builder branches the other combos can't:
+ * Three combos rather than the full authCombos matrix: each program compiles
+ * the workspace packages from source and costs COLD_TSC_TIMEOUT-scale time,
+ * and these three reach every builder branch the others can't:
  *
  *  - oauth + verify: password login with a validator import, register with
- *    verification, the verify-aware OAuth callback, the password profile, the
- *    seeder, and every mail/verification view.
- *  - oauth-only: the passwordless login controller, the provider-owned-email
- *    profile controller/validator/view, the OAuth-only login view, and a
+ *    verification, the verify-aware OAuth callback, the password profile with
+ *    an editable email, the seeder, and every mail/verification view.
+ *  - oauth without verify: the provider-owned-email profile
+ *    controller/validator/view in their with-password shape, and register
+ *    without verification.
+ *  - oauth-only: the passwordless login controller and OAuth-only login view,
+ *    the provider-owned-email profile with no password section, and a
  *    passwordless user model.
  *
- * Branches only the remaining combos hit (a no-OAuth login view, a register
- * view without provider buttons, `buildRegisterControllerTemplate(false)`)
- * differ from the compiled ones by omission, and stay covered by the parse
- * gate; the `--verify` render of the User model is compiled separately as the
- * scaffold-typecheck fixture.
+ * Branches only the remaining combos hit (a login or register view without
+ * provider buttons, the minimal login) differ from the compiled ones by
+ * omission, and stay covered by the parse gate; the `--verify` render of the
+ * User model is compiled separately as the scaffold-typecheck fixture.
  */
 
 const cliRoot = join(import.meta.dir, '..')
@@ -65,6 +67,14 @@ function renderedScaffoldCompilerOptions(workspaceDir: string): ts.CompilerOptio
     throw new Error(ts.flattenDiagnosticMessageText(configFile.error.messageText, ' '))
   }
   const parsed = ts.parseJsonConfigFileContent(configFile.config, ts.sys, cliRoot)
+  // A config that no longer parses (broken extends, invalid option) comes
+  // back as weakened defaults, not an exception — which this gate would then
+  // quietly compile against.
+  if (parsed.errors.length > 0) {
+    throw new Error(parsed.errors
+      .map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, ' '))
+      .join('\n'))
+  }
 
   return {
     ...parsed.options,
@@ -103,6 +113,11 @@ const compiledCombos: Array<[string, MakeAuthOptions, string[]]> = [
     ['app/Http/Controllers/Auth/RegisterController.ts', 'db/seeders/UsersSeeder.ts'],
   ],
   [
+    'oauth',
+    { oauth: 'github,google,discord' },
+    ['app/Http/Controllers/Auth/RegisterController.ts', 'app/Http/Controllers/ProfileController.ts'],
+  ],
+  [
     'oauth-only',
     { oauth: 'github,google', oauthOnly: true },
     ['app/Http/Controllers/ProfileController.ts', 'resources/js/pages/auth/Login.tsx'],
@@ -129,8 +144,13 @@ describe('rendered make:auth output typechecks', () => {
           await writeFile(join(workspace.dir, 'pages-probe.ts'), PAGES_PROBE, 'utf8')
 
           const rootNames = await collectFiles(workspace.dir, IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES)
-          // A gate over an empty file list is green for the wrong reason.
-          expect(rootNames.length).toBeGreaterThan(expectedWrites.length)
+          // Everything the scaffold wrote must reach the program — a walk
+          // that skipped the generated subtrees would leave the compile green
+          // for the wrong reason.
+          const collected = rootNames.map((file) => toPosixRelative(workspace.dir, file))
+          for (const path of created) {
+            expect(collected).toContain(path)
+          }
 
           expect(checkTypes(rootNames, renderedScaffoldCompilerOptions(workspace.dir))).toEqual([])
         } finally {
