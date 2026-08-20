@@ -2272,7 +2272,19 @@ const guidelinesCommand = defineCommand({
 
 function reportAgentHarnessResult(result: AgentHarnessResult): void {
   for (const file of result.written) {
-    consola.success(`Wrote ${file}`)
+    consola.success(`${result.dryRun ? 'Would write' : 'Wrote'} ${file}`)
+  }
+  if (result.replaced.length > 0) {
+    // The one destructive step, so it gets the one warning: these files held
+    // something else — an older template version or a local edit, which
+    // nothing on disk can tell apart.
+    consola.warn(
+      `${result.replaced.length} of those ${result.dryRun ? 'would replace' : 'replaced'} existing contents: ${result.replaced.join(', ')}\n` +
+        'Local edits to framework-managed files do not survive agent:sync. Keep project-specific rules in files of your own — sync never touches files it does not ship.',
+    )
+  }
+  if (result.unchanged.length > 0) {
+    consola.info(`${result.unchanged.length} managed file(s) already up to date.`)
   }
   if (result.skipped.length > 0) {
     consola.info(`Skipped ${result.skipped.length} existing file(s): ${result.skipped.join(', ')}`)
@@ -2360,6 +2372,10 @@ const agentSyncCommand = defineCommand({
       description:
         'Delete files in framework-managed directories that are no longer part of the harness. Without this flag they are only reported.',
     },
+    'dry-run': {
+      type: 'boolean',
+      description: 'Report what the sync would write, replace, or prune without changing any file.',
+    },
     app: {
       type: 'string',
       description: 'Application root directory.',
@@ -2371,9 +2387,14 @@ const agentSyncCommand = defineCommand({
       mode: 'sync',
       targets: args.target ? parseTargetArg(args.target) : undefined,
       prune: Boolean(args.prune),
+      dryRun: Boolean(args['dry-run']),
     })
     reportAgentHarnessResult(result)
-    consola.success('Agent harness synced to the latest framework version.')
+    consola.success(
+      result.dryRun
+        ? 'Dry run — nothing was written. Run `bunx guren agent:sync` to apply.'
+        : 'Agent harness synced to the latest framework version.',
+    )
   },
 })
 

@@ -28,7 +28,9 @@ import {
  *
  * Files fall into two groups:
  * - Managed (rules, skills, subagents, hooks) — owned by the framework,
- *   `agent:sync` overwrites them with the latest version.
+ *   `agent:sync` overwrites them with the latest version. Overwrites are
+ *   never silent: a file whose contents differed is reported in `replaced`,
+ *   and `dryRun` answers what a sync would touch before it does.
  * - User-owned (CLAUDE.md, AGENTS.md, settings, MCP client configs) —
  *   written once, never overwritten by `agent:sync` (only by
  *   `agent:init --force`).
@@ -54,10 +56,31 @@ export interface AgentHarnessOptions {
    * candidate first, and deletion stays an explicit opt-in.
    */
   prune?: boolean
+  /**
+   * Report what the run would write, replace, and prune without touching the
+   * filesystem. The answer to "will this sync lose my edits?" before the sync,
+   * not after.
+   */
+  dryRun?: boolean
 }
 
 export interface AgentHarnessResult {
+  /** Planned files written (or, under `dryRun`, that would be). A file whose
+   * on-disk contents already match the plan is reported in `unchanged`
+   * instead, so this list is the actual delta, not the whole plan. */
   written: string[]
+  /**
+   * The subset of `written` that existed with different contents before the
+   * run — where sync discarded something, whether an older template version
+   * or a local edit. The two cannot be told apart (nothing records which
+   * template version a file came from), which is exactly why the replacement
+   * has to be called out rather than folded into `written`.
+   */
+  replaced: string[]
+  /** Planned files whose on-disk contents already matched — nothing written. */
+  unchanged: string[]
+  /** True when `dryRun` held: nothing was written or deleted. */
+  dryRun: boolean
   skipped: string[]
   /**
    * Sync only: files inside the framework-managed namespaces
@@ -321,6 +344,7 @@ export async function installAgentHarness(options: AgentHarnessOptions = {}): Pr
   const cwd = resolve(options.cwd ?? process.cwd())
   const mode = options.mode ?? 'init'
   const force = Boolean(options.force)
+  const dryRun = Boolean(options.dryRun)
   const appTitle = await resolveAppTitle(cwd)
   const templates = await loadAgentTemplates()
 
@@ -331,6 +355,8 @@ export async function installAgentHarness(options: AgentHarnessOptions = {}): Pr
       : componentsForTargets(['claude'])
 
   const written: string[] = []
+  const replaced: string[] = []
+  const unchanged: string[] = []
   const skipped: string[] = []
   const mcpMergeHints: AgentHarnessResult['mcpMergeHints'] = []
 
@@ -355,16 +381,33 @@ export async function installAgentHarness(options: AgentHarnessOptions = {}): Pr
       continue
     }
 
-    await mkdir(dirname(destPath), { recursive: true })
-    await writeFile(destPath, file.content, 'utf8')
+    // Already at the planned contents — writing would change nothing, so
+    // don't, and don't report it as a write either. What's left in `written`
+    // is the run's actual delta, which is what makes `replaced` trustworthy:
+    // every overwrite it names really discarded something. An unreadable file
+    // reads as differing, so the failure surfaces at the write below, where it
+    // always did.
+    const existing = exists ? await readIfExists(cwd, file.path).catch(() => null) : null
+    if (existing === file.content) {
+      unchanged.push(file.path)
+      continue
+    }
+
+    if (!dryRun) {
+      await mkdir(dirname(destPath), { recursive: true })
+      await writeFile(destPath, file.content, 'utf8')
+    }
     written.push(file.path)
+    if (exists) {
+      replaced.push(file.path)
+    }
   }
 
   // Stale cleanup is a sync concern: init installs into places it has never
   // written, so "not in the plan" carries no leftover signal there.
   const stale =
     mode === 'sync' ? await findStaleManagedFiles(cwd, components, plan) : []
-  const pruned = Boolean(options.prune) && stale.length > 0
+  const pruned = Boolean(options.prune) && !dryRun && stale.length > 0
   if (pruned) {
     for (const relPath of stale) {
       await rm(join(cwd, relPath), { force: true })
@@ -385,6 +428,9 @@ export async function installAgentHarness(options: AgentHarnessOptions = {}): Pr
 
   return {
     written,
+    replaced,
+    unchanged,
+    dryRun,
     skipped,
     stale,
     pruned,
