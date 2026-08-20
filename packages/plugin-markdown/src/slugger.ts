@@ -51,7 +51,7 @@ export function createSlugger(): (text: string) => string {
     let slug = stripped
       .toLowerCase()
       .trim()
-      .replace(/[\s]+/g, '-')
+      .replace(/\s+/g, '-')
       .replace(/[^\p{L}\p{N}\-]/gu, '')
       .replace(/-+/g, '-')
       .replace(/^-|-$/g, '')

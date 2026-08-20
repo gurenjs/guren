@@ -1,6 +1,6 @@
 import { definePlugin, type ServiceProviderConstructor } from '@guren/core'
 
-import { createMarkdownRenderer, type MarkdownRenderer, type MarkdownRendererOptions } from './renderer'
+import { createMarkdownRenderer, type MarkdownRendererOptions } from './renderer'
 
 /** Configuration for the markdown plugin — the renderer options, verbatim. */
 export type MarkdownPluginConfig = MarkdownRendererOptions
@@ -28,5 +28,3 @@ const factory = definePlugin<MarkdownPluginConfig>({
 export function markdownPlugin(config: MarkdownPluginConfig = {}): ServiceProviderConstructor {
   return factory(config)
 }
-
-export type { MarkdownRenderer }

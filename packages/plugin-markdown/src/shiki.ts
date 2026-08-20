@@ -56,8 +56,15 @@ export interface CreateShikiHighlightOptions {
 export function createShikiHighlight(options: CreateShikiHighlightOptions): HighlightFn {
   const { themes, langs = [], langModules, themeModules } = options
 
-  let highlighterPromise: Promise<HighlighterCore> | undefined
-  const loadHighlighter = (): Promise<HighlighterCore> => {
+  interface LoadedHighlighter {
+    highlighter: HighlighterCore
+    // Snapshot of getLoadedLanguages(): the grammar set is fixed at creation
+    // time, and shiki rebuilds the array on every call — per fence otherwise.
+    loadedLangs: Set<string>
+  }
+
+  let highlighterPromise: Promise<LoadedHighlighter> | undefined
+  const loadHighlighter = (): Promise<LoadedHighlighter> => {
     highlighterPromise ??= createHighlighterCore({
       themes:
         themeModules ??
@@ -68,16 +75,17 @@ export function createShikiHighlight(options: CreateShikiHighlightOptions): High
         langModules ??
         langs.map((name) => import(`shiki/dist/langs/${name}.mjs`) as unknown as LanguageInput),
       engine: createJavaScriptRegexEngine(),
-    })
+    }).then((highlighter) => ({
+      highlighter,
+      loadedLangs: new Set(highlighter.getLoadedLanguages()),
+    }))
     return highlighterPromise
   }
 
   return async (code: string, lang?: string): Promise<string> => {
-    const highlighter = await loadHighlighter()
+    const { highlighter, loadedLangs } = await loadHighlighter()
     const requested = lang?.trim().toLowerCase() || PLAIN_LANGUAGE
-    const resolved = highlighter.getLoadedLanguages().includes(requested)
-      ? requested
-      : PLAIN_LANGUAGE
+    const resolved = loadedLangs.has(requested) ? requested : PLAIN_LANGUAGE
     return highlighter.codeToHtml(code, {
       lang: resolved,
       themes: { light: themes.light, dark: themes.dark },

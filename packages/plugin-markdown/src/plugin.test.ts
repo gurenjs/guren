@@ -1,7 +1,8 @@
 import { describe, test, expect } from 'bun:test'
 import { Container, ProviderManager, type ServiceProviderConstructor } from '@guren/core'
 
-import { markdownPlugin, type MarkdownRenderer } from './plugin'
+import { markdownPlugin } from './plugin'
+import type { MarkdownRenderer } from './renderer'
 
 async function bootWith(providers: ServiceProviderConstructor[]) {
   const container = new Container()

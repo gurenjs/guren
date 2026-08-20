@@ -3,19 +3,45 @@
  * docs pipeline (RFC 0012) with framework-neutral class names. The package
  * ships a reference stylesheet (`@guren/plugin-markdown/styles.css`) but
  * applies no styling itself.
+ *
+ * This module is the single source of the alert vocabulary: the type set,
+ * the directive pattern, the emitted markup, and the class names the default
+ * sanitizer admits are all derived from `ALERT_LABELS` and
+ * `ALERT_CLASS_PREFIX` here. (`styles.css` necessarily keeps a manual copy.)
  */
-import type { Tokens } from 'marked'
+import type { MarkedExtension, Tokens } from 'marked'
 
-export const ALERT_DIRECTIVE_PATTERN = /^\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*/iu
+export const ALERT_CLASS_PREFIX = 'guren-markdown-alert'
 
-export type AlertType = 'note' | 'tip' | 'important' | 'warning' | 'caution'
-
-export const ALERT_LABELS: Record<AlertType, string> = {
+const ALERT_LABELS = {
   note: 'Note',
   tip: 'Tip',
   important: 'Important',
   warning: 'Warning',
   caution: 'Caution',
+} as const
+
+export type AlertType = keyof typeof ALERT_LABELS
+
+const ALERT_TYPES = Object.keys(ALERT_LABELS) as AlertType[]
+
+const ALERT_DIRECTIVE_PATTERN = new RegExp(
+  `^\\s*\\[!(${ALERT_TYPES.join('|')})\\]\\s*`,
+  'iu',
+)
+
+type AlertBlockquote = Tokens.Blockquote & { alertType?: AlertType }
+
+/** The class values the default sanitizer must admit for alert markup. */
+export function alertAllowedClasses(): { div: string[]; p: string[] } {
+  return {
+    div: [
+      ALERT_CLASS_PREFIX,
+      ...ALERT_TYPES.map((type) => `${ALERT_CLASS_PREFIX}--${type}`),
+      `${ALERT_CLASS_PREFIX}__body`,
+    ],
+    p: [`${ALERT_CLASS_PREFIX}__label`],
+  }
 }
 
 /**
@@ -23,14 +49,14 @@ export const ALERT_LABELS: Record<AlertType, string> = {
  * and removes it from the paragraph's text/tokens so it does not render.
  * Returns the alert type, or null when the blockquote is a plain quote.
  */
-export function extractAlertType(paragraph: Tokens.Paragraph): AlertType | null {
+function extractAlertType(paragraph: Tokens.Paragraph): AlertType | null {
   const match = paragraph.text.match(ALERT_DIRECTIVE_PATTERN)
   if (!match) {
     return null
   }
 
   const normalizedType = match[1].toLowerCase() as AlertType
-  paragraph.text = paragraph.text.replace(ALERT_DIRECTIVE_PATTERN, '').trimStart()
+  paragraph.text = paragraph.text.slice(match[0].length).trimStart()
 
   if (paragraph.tokens?.length) {
     const firstToken = paragraph.tokens[0]
@@ -46,11 +72,36 @@ export function extractAlertType(paragraph: Tokens.Paragraph): AlertType | null 
   return normalizedType
 }
 
-export function renderAlertHtml(alertType: AlertType, contentHtml: string): string {
-  return `<div class="guren-markdown-alert guren-markdown-alert--${alertType}">
-  <p class="guren-markdown-alert__label">${ALERT_LABELS[alertType]}</p>
-  <div class="guren-markdown-alert__body">
-${contentHtml}
+/**
+ * The whole alert mechanism as one marked extension: directive detection in
+ * `walkTokens` (which tags the blockquote token and drops an emptied first
+ * paragraph) and the matching blockquote renderer. Captures no per-render
+ * state — one instance is safe to share across concurrent renders, since
+ * token mutation is scoped to each parse.
+ */
+export function alertsExtension(): MarkedExtension {
+  return {
+    walkTokens(token) {
+      if (token.type !== 'blockquote' || !token.tokens?.length) return
+      const first = token.tokens[0]
+      if (first.type !== 'paragraph') return
+      const alertType = extractAlertType(first as Tokens.Paragraph)
+      if (!alertType) return
+      ;(token as AlertBlockquote).alertType = alertType
+      if (!first.text.trim()) token.tokens.shift()
+    },
+    renderer: {
+      blockquote(token: Tokens.Blockquote) {
+        const content = this.parser.parse(token.tokens ?? [])
+        const alertType = (token as AlertBlockquote).alertType
+        if (!alertType) return `<blockquote>\n${content}</blockquote>\n`
+        return `<div class="${ALERT_CLASS_PREFIX} ${ALERT_CLASS_PREFIX}--${alertType}">
+  <p class="${ALERT_CLASS_PREFIX}__label">${ALERT_LABELS[alertType]}</p>
+  <div class="${ALERT_CLASS_PREFIX}__body">
+${content}
   </div>
 </div>`
+      },
+    },
+  }
 }

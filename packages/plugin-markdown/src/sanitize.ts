@@ -1,5 +1,7 @@
 import type sanitizeHtml from 'sanitize-html'
 
+import { alertAllowedClasses } from './alerts'
+
 /**
  * Default allowlist applied to rendered HTML (RFC 0012). Ported from
  * guren.dev's blog pipeline: the output is commonly injected with
@@ -10,7 +12,7 @@ import type sanitizeHtml from 'sanitize-html'
  *
  * Extended beyond the ported allowlist only for this package's own output:
  * heading `id`s (the anchors feature) and the alert wrapper markup, whose
- * class values are pinned to the exact names `renderAlertHtml` emits.
+ * admissible class values are derived from `alerts.ts`.
  *
  * Returned as a fresh object per call so one renderer's `sanitize` callback
  * can mutate its copy without bleeding into other renderers.
@@ -37,20 +39,10 @@ export function defaultSanitizeOptions(): sanitizeHtml.IOptions {
       td: ['align'],
     },
     // The alert wrapper markup — class attributes on div/p are admitted only
-    // for these exact values (allowedClasses filters them; `class` itself
-    // must stay out of allowedAttributes for div/p or every class passes).
-    allowedClasses: {
-      div: [
-        'guren-markdown-alert',
-        'guren-markdown-alert--note',
-        'guren-markdown-alert--tip',
-        'guren-markdown-alert--important',
-        'guren-markdown-alert--warning',
-        'guren-markdown-alert--caution',
-        'guren-markdown-alert__body',
-      ],
-      p: ['guren-markdown-alert__label'],
-    },
+    // for the exact values alerts.ts emits, derived there so the two cannot
+    // drift (allowedClasses filters them; `class` itself must stay out of
+    // allowedAttributes for div/p or every class passes).
+    allowedClasses: alertAllowedClasses(),
     allowedSchemes: ['http', 'https', 'mailto'],
     allowedSchemesAppliedToAttributes: ['href', 'src'],
     // `//host/path` inherits the page scheme but still points off-origin —

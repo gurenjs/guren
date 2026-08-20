@@ -2,7 +2,7 @@ import { Marked, type MarkedExtension, type Tokens } from 'marked'
 import { markedHighlight } from 'marked-highlight'
 import sanitizeHtml from 'sanitize-html'
 
-import { extractAlertType, renderAlertHtml, type AlertType } from './alerts'
+import { alertsExtension } from './alerts'
 import { defaultSanitizeOptions } from './sanitize'
 import { createSlugger } from './slugger'
 
@@ -38,8 +38,6 @@ export interface MarkdownRenderer {
   render(markdown: string): Promise<string>
 }
 
-type AlertBlockquote = Tokens.Blockquote & { alertType?: AlertType }
-
 /**
  * Builds a markdown → HTML renderer with the RFC 0012 defaults: GFM,
  * sanitized output, alerts, and heading anchors.
@@ -66,57 +64,55 @@ export function createMarkdownRenderer(options: MarkdownRendererOptions = {}): M
         ? sanitize(defaultSanitizeOptions())
         : defaultSanitizeOptions()
 
+  // Extensions that capture no per-render state, built once and shared:
+  // marked's use() only reads them, and token mutation is scoped to each
+  // parse. Only the heading renderer is per-render (it owns the slug map).
+  const staticExtensions: MarkedExtension[] = []
+  if (highlight) {
+    staticExtensions.push(
+      markedHighlight({
+        async: true,
+        // The wrapper is load-bearing: HighlightFn may return a plain
+        // string, while the async marked-highlight overload requires a
+        // Promise.
+        highlight: async (code: string, lang?: string) => highlight(code, lang),
+      }),
+    )
+  }
+  if (alerts) {
+    staticExtensions.push(alertsExtension())
+  }
+  if (rewriteLink) {
+    staticExtensions.push({
+      walkTokens(token) {
+        if (token.type === 'link' && typeof token.href === 'string') {
+          token.href = rewriteLink(token.href)
+        }
+      },
+    })
+  }
+
   return {
     async render(markdown: string): Promise<string> {
-      const slugify = createSlugger()
       const instance = new Marked()
-      instance.setOptions({ gfm, breaks: false, async: true })
-
-      if (highlight) {
-        instance.use(
-          markedHighlight({
-            async: true,
-            highlight: async (code: string, lang?: string) => highlight(code, lang),
-          }),
-        )
+      instance.setOptions({ gfm, breaks: false })
+      for (const extension of staticExtensions) {
+        instance.use(extension)
       }
 
-      const renderer: NonNullable<MarkedExtension['renderer']> = {}
       if (anchors) {
-        renderer.heading = function ({ tokens, depth }: Tokens.Heading) {
-          const text = this.parser.parseInline(tokens)
-          return `<h${depth} id="${slugify(text)}">${text}</h${depth}>\n`
-        }
-      }
-      if (alerts) {
-        renderer.blockquote = function (token: Tokens.Blockquote) {
-          const content = this.parser.parse(token.tokens ?? [])
-          const alertType = (token as AlertBlockquote).alertType
-          if (!alertType) return `<blockquote>\n${content}</blockquote>\n`
-          return renderAlertHtml(alertType, content)
-        }
+        const slugify = createSlugger()
+        instance.use({
+          renderer: {
+            heading({ tokens, depth }: Tokens.Heading) {
+              const text = this.parser.parseInline(tokens)
+              return `<h${depth} id="${slugify(text)}">${text}</h${depth}>\n`
+            },
+          },
+        })
       }
 
-      instance.use({
-        walkTokens(token) {
-          if (rewriteLink && token.type === 'link' && typeof token.href === 'string') {
-            token.href = rewriteLink(token.href)
-            return
-          }
-          if (!alerts) return
-          if (token.type !== 'blockquote' || !token.tokens?.length) return
-          const first = token.tokens[0]
-          if (first.type !== 'paragraph') return
-          const alertType = extractAlertType(first as Tokens.Paragraph)
-          if (!alertType) return
-          ;(token as AlertBlockquote).alertType = alertType
-          if (!first.text.trim()) token.tokens.shift()
-        },
-        renderer,
-      })
-
-      const rendered = await instance.parse(markdown, { async: true })
-      const html = typeof rendered === 'string' ? rendered : ''
+      const html = await instance.parse(markdown, { async: true })
       return sanitizeOptions ? sanitizeHtml(html, sanitizeOptions) : html
     },
   }
