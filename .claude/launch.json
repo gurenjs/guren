@@ -4,9 +4,8 @@
     {
       "name": "web-docs",
       "runtimeExecutable": "bash",
-      "runtimeArgs": ["-c", "cd web && GUREN_VITE_PORT=5273 exec bun bin/serve.ts"],
-      "port": 3333,
-      "autoPort": true
+      "runtimeArgs": ["-c", "cd web && exec bun bin/serve.ts"],
+      "port": 3333
     },
     {
       "name": "blog",
