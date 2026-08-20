@@ -56,8 +56,36 @@ function remotes(): string[] {
   return [`git@github.com:${PUBLISH_REPO}.git`, `https://github.com/${PUBLISH_REPO}.git`]
 }
 
+/**
+ * `core.hooksPath` pointed at nothing, on every git command this script runs.
+ * The clone is fresh, but hooks are not: a maintainer's global `core.hooksPath`
+ * (or an `init.templateDir` that installs into the new clone) applies to it,
+ * and those hooks run at exactly the moments this script's guarantee depends
+ * on — `post-checkout` after the clone, `pre-commit` between the staged-tree
+ * check and the tree that gets committed, `post-commit` before the push. The
+ * rest of the maintainer's configuration is deliberately left alone: their
+ * credential helper and SSH setup are how this pushes at all.
+ */
+const NO_HOOKS = ['-c', 'core.hooksPath=']
+
+/**
+ * Does this remote name the public repository? A local path is never it, however
+ * it is spelled — a bare repo at `/tmp/gurenjs/agent-skills.git` is a test
+ * remote, not GitHub — and the owner/repo pair is compared case-insensitively
+ * because GitHub treats it that way while a substring check would not.
+ */
+export function isPublishRepo(remote: string): boolean {
+  if (remote.startsWith('/') || remote.startsWith('.') || remote.startsWith('file:')) return false
+  const address = remote.replace(/^[a-z+]+:\/\//iu, '').replace(/^[^@/]+@/u, '')
+  const [host, ...rest] = address.split(/[:/]/u)
+  const path = rest.join('/').replace(/\.git$/u, '')
+  // the host too: a different server offering a path of the same name is
+  // somebody's mirror, not the repository this script may not publish to
+  return host?.toLowerCase() === 'github.com' && path.toLowerCase() === PUBLISH_REPO.toLowerCase()
+}
+
 function git(cwd: string, args: string[]): { ok: boolean; out: string; stdout: string } {
-  const run = Bun.spawnSync(['git', ...args], { cwd })
+  const run = Bun.spawnSync(['git', ...NO_HOOKS, ...args], { cwd })
   return {
     ok: run.success,
     out: (run.stdout.toString() + run.stderr.toString()).trim(),
@@ -86,9 +114,18 @@ class PublishRefusal extends Error {}
  * path set and then blob by blob.
  */
 async function stagedTreeProblems(cloneDir: string, files: readonly RenderedFile[]): Promise<string[]> {
-  const listed = git(cloneDir, ['ls-files', '--cached', '-z'])
+  // --stage, so the mode comes with the path: a tree records `100755` and
+  // `120000` as surely as it records bytes, and a publish that turned a
+  // rendered file into an executable or a symlink would pass a comparison
+  // that only read its content.
+  const listed = git(cloneDir, ['ls-files', '--stage', '-z'])
   if (!listed.ok) return [`git ls-files failed after staging: ${listed.out}`]
-  const stagedPaths = listed.stdout.split('\0').filter(Boolean)
+  const entries = listed.stdout.split('\0').filter(Boolean).map((line) => {
+    const [meta = '', path = ''] = line.split('\t')
+    const [mode = '', , stage = ''] = meta.split(' ')
+    return { mode, stage, path }
+  })
+  const stagedPaths = entries.map((entry) => entry.path)
   const staged = new Set(stagedPaths)
   const rendered = new Set(files.map((file) => file.path))
   const problems = [
@@ -96,6 +133,10 @@ async function stagedTreeProblems(cloneDir: string, files: readonly RenderedFile
     ...[...rendered].filter((p) => !staged.has(p)).map((p) => `rendered but not staged: ${p}`),
   ].sort()
   if (problems.length > 0) return problems
+  for (const entry of entries) {
+    if (entry.mode !== '100644') problems.push(`staged as ${entry.mode}, not a plain file: ${entry.path}`)
+    if (entry.stage !== '0') problems.push(`staged unmerged (stage ${entry.stage}): ${entry.path}`)
+  }
   for (const file of files) {
     const blob = git(cloneDir, ['show', `:${file.path}`])
     if (!blob.ok) {
@@ -130,7 +171,7 @@ async function main(): Promise<void> {
   // that happens to redirect it today: a second way to point somewhere else
   // would leave a proxy check green while the hole it closes reopened
   const override = process.env.GUREN_CATALOG_VERSION_OVERRIDE
-  if (override && remotes().some((remote) => remote.includes(PUBLISH_REPO))) {
+  if (override && remotes().some(isPublishRepo)) {
     fail(
       `Refusing to publish: GUREN_CATALOG_VERSION_OVERRIDE=${override} is set. It is a test hook for a local remote, not a way to publish a version @guren/cli does not have.`,
     )
@@ -186,6 +227,16 @@ async function main(): Promise<void> {
     // the tip this run is allowed to move: the push leases it, so a remote
     // that changed under us — including one somebody force-rolled backwards,
     // which an ordinary fast-forward would happily restore — is refused
+    // asked again of the clone, because the URL this run resolved is not
+    // necessarily the one git will push to: a global `remote.origin.pushurl`
+    // applies to any repository whose remote is named origin, including this
+    // fresh one.
+    const pushUrl = git(cloneDir, ['remote', 'get-url', '--push', 'origin']).stdout.trim()
+    if (override && isPublishRepo(pushUrl)) {
+      fail(
+        `Refusing to publish: GUREN_CATALOG_VERSION_OVERRIDE=${override} is set and this clone pushes to ${pushUrl}.`,
+      )
+    }
     const baseOid = git(cloneDir, ['rev-parse', 'HEAD']).stdout.trim()
     const publishedVersion = await pluginVersionIn(cloneDir)
     console.log(
@@ -222,6 +273,12 @@ async function main(): Promise<void> {
         `Refusing to publish: the staged tree is not the tree that was audited.\n${staged.map((p) => `  ${p}`).join('\n')}`,
       )
     }
+    // the index just verified, named. Everything after this point — the
+    // prompt, the commit — is checked against this OID rather than trusted to
+    // have left it alone.
+    const verifiedTree = git(cloneDir, ['write-tree'])
+    if (!verifiedTree.ok) fail(`git write-tree failed in the clone:\n${verifiedTree.out}`)
+    const verifiedTreeOid = verifiedTree.stdout.trim()
     const status = git(cloneDir, ['status', '--porcelain'])
     if (status.out === '') {
       // the same-version no-op: most releases do not move @guren/cli, and a
@@ -258,11 +315,33 @@ async function main(): Promise<void> {
     const message = `Publish @guren/cli ${nextVersion}`
     const commit = git(cloneDir, ['commit', '--quiet', '-m', message])
     if (!commit.ok) fail(`git commit failed:\n${commit.out}`)
-    // leased to the tip that was cloned: any other value means the remote
-    // moved while this ran, and the answer is always to re-run rather than to
-    // overwrite. A plain push would reject a divergent remote but would
-    // happily fast-forward a deliberate rollback back into place.
-    const push = git(cloneDir, ['push', '--quiet', `--force-with-lease=${PUBLISH_BRANCH}:${baseOid}`, 'origin', PUBLISH_BRANCH])
+
+    // what actually got committed, checked rather than assumed: the tree must
+    // be the one verified above, and its one parent the tip that was cloned.
+    const head = git(cloneDir, ['rev-parse', 'HEAD'])
+    if (!head.ok) fail(`git rev-parse HEAD failed in the clone:\n${head.out}`)
+    const commitOid = head.stdout.trim()
+    const tree = git(cloneDir, ['rev-parse', `${commitOid}^{tree}`]).stdout.trim()
+    const parents = git(cloneDir, ['rev-list', '--parents', '-n', '1', commitOid]).stdout.trim().split(' ').slice(1)
+    if (tree !== verifiedTreeOid || parents.length !== 1 || parents[0] !== baseOid) {
+      fail(
+        `Refusing to publish: the commit is not the one this run built (tree ${tree}, parents ${parents.join(' ') || 'none'}; expected tree ${verifiedTreeOid} on ${baseOid}).`,
+      )
+    }
+
+    // that commit by OID, not a branch name that something could have moved,
+    // onto a remote leased to the tip that was cloned: any other value there
+    // means the remote changed while this ran, and the answer is always to
+    // re-run rather than to overwrite. A plain push would reject a divergent
+    // remote but would happily fast-forward a deliberate rollback back into
+    // place.
+    const push = git(cloneDir, [
+      'push',
+      '--quiet',
+      `--force-with-lease=${PUBLISH_BRANCH}:${baseOid}`,
+      'origin',
+      `${commitOid}:refs/heads/${PUBLISH_BRANCH}`,
+    ])
     if (!push.ok) fail(`git push failed (the remote moved since this run cloned it; re-run to publish onto its new tip):\n${push.out}`)
     console.log(`Published: ${message}`)
   } finally {

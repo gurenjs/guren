@@ -1,9 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { diffPublished } from './build-agent-catalog.ts'
+import { isPublishRepo } from './publish-agent-catalog.ts'
 import { repoRoot } from './workspace-packages.ts'
 
 /**
@@ -86,6 +87,35 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await rm(scratch, { recursive: true, force: true })
+})
+
+describe('isPublishRepo', () => {
+  // what decides whether a run is pointed at the public repository. Unit
+  // tested because the guard that uses it cannot be mutation tested: making
+  // it answer wrongly, with the override set, is a run that clones and
+  // pushes to the real gurenjs/agent-skills.
+  it('recognizes the real repository however it is addressed', () => {
+    for (const remote of [
+      'git@github.com:gurenjs/agent-skills.git',
+      'https://github.com/gurenjs/agent-skills.git',
+      'https://github.com/gurenjs/agent-skills',
+      'ssh://git@github.com/GurenJS/Agent-Skills.git',
+    ]) {
+      expect(isPublishRepo(remote)).toBe(true)
+    }
+  })
+
+  it('never mistakes a local path for it, however the path is spelled', () => {
+    for (const remote of [
+      '/tmp/gurenjs/agent-skills.git',
+      './gurenjs/agent-skills.git',
+      'file:///tmp/gurenjs/agent-skills.git',
+      'git@github.com:gurenjs/agent-skills-fork.git',
+      'https://example.com/gurenjs/agent-skills.git',
+    ]) {
+      expect(isPublishRepo(remote)).toBe(false)
+    }
+  })
 })
 
 describe('publish-agent-catalog', () => {
@@ -316,14 +346,79 @@ describe('publish-agent-catalog', () => {
     expect(git(check, 'rev-list', '--count', 'main')).toBe('1')
   })
 
+  it('runs no hook the maintainer has configured globally', async () => {
+    // core.hooksPath is global, so it applies to this fresh clone too, and
+    // its hooks run at the moments the provenance guarantee depends on:
+    // post-checkout after the clone, pre-commit between the staged-tree check
+    // and the tree that gets committed, post-commit before the push
+    const hooks = join(scratch, 'global-hooks')
+    await mkdir(hooks, { recursive: true })
+    const marker = join(scratch, 'hook-ran')
+    for (const hook of ['post-checkout', 'pre-commit', 'post-commit']) {
+      await Bun.write(join(hooks, hook), `#!/bin/sh\necho ${hook} >> ${marker}\n`)
+      await chmod(join(hooks, hook), 0o755)
+    }
+    const remote = await seedRemote('hooked.git')
+
+    const result = run(remote, {
+      GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: 'core.hooksPath',
+      GIT_CONFIG_VALUE_0: hooks,
+    })
+
+    expect(result.code).toBe(0)
+    expect(result.out).toContain('Published:')
+    expect(await Bun.file(marker).exists()).toBe(false)
+  })
+
   it('refuses the generator version override against the real remote', () => {
     // the override is a test hook. Left in a maintainer's environment it
-    // would publish a version @guren/cli does not have, under the real name
-    const result = spawnPublish('', { GUREN_CATALOG_VERSION_OVERRIDE: '99.0.0' }, ['--yes', '--skip-validate'])
+    // would publish a version @guren/cli does not have, under the real name.
+    // The remote is named rather than left empty: an empty one is falsy, so
+    // it would also refuse under the older guard that only asked whether the
+    // variable was set, and the test could not tell the two apart.
+    const result = spawnPublish('https://github.com/gurenjs/agent-skills.git', { GUREN_CATALOG_VERSION_OVERRIDE: '99.0.0' }, [
+      '--yes',
+      '--skip-validate',
+    ])
 
     expect(result.code).toBe(1)
     expect(result.out).toContain('GUREN_CATALOG_VERSION_OVERRIDE=99.0.0')
     // refused before it could reach the network at all
     expect(result.out).not.toContain('Could not clone')
+  })
+
+  it('allows the override against a local remote whose path merely reads like the real one', async () => {
+    // the destination is decided by what the remote is, not by whether its
+    // spelling contains the repository name: a bare repo under a directory
+    // called gurenjs/agent-skills is a test remote
+    await mkdir(join(scratch, 'gurenjs'), { recursive: true })
+    const remote = await seedRemote(join('gurenjs', 'agent-skills.git'))
+    const result = run(remote, { GUREN_CATALOG_VERSION_OVERRIDE: '99.0.0' })
+
+    expect(result.code).toBe(0)
+    expect(result.out).toContain('Publishing @guren/cli 99.0.0')
+  })
+
+  it('--skip-validate does not run the validator, rather than forgiving its verdict', async () => {
+    // a `claude` on PATH that fails loudly if it is ever invoked. Without
+    // --skip-validate the script would run it and refuse; with it, the
+    // publish must not touch it at all.
+    const bin = join(scratch, 'fake-bin')
+    await mkdir(bin, { recursive: true })
+    const marker = join(scratch, 'validator-was-run')
+    await Bun.write(join(bin, 'claude'), `#!/bin/sh\ntouch ${marker}\necho 'validation failed' >&2\nexit 1\n`)
+    await chmod(join(bin, 'claude'), 0o755)
+    const remote = await seedRemote('skip-validate.git')
+
+    const skipped = spawnPublish(remote, { PATH: `${bin}:${process.env.PATH ?? ''}` }, ['--yes', '--skip-validate'])
+    expect(skipped.code).toBe(0)
+    expect(await Bun.file(marker).exists()).toBe(false)
+
+    // and without the flag the same fake validator refuses the publish
+    const validated = spawnPublish(remote, { PATH: `${bin}:${process.env.PATH ?? ''}` }, ['--yes'])
+    expect(validated.code).toBe(1)
+    expect(validated.out).toContain('claude plugin validate --strict failed')
+    expect(await Bun.file(marker).exists()).toBe(true)
   })
 })
