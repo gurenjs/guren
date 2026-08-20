@@ -1,0 +1,26 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "rootDirs": [
+      "templates/scaffold/auth",
+      "tests/fixtures/scaffold-typecheck/auth"
+    ],
+    "paths": {
+      "@/.guren/pages.gen": ["tests/fixtures/scaffold-typecheck/auth/.guren/pages.gen.ts"],
+      "@guren/core": ["../core/src/index.ts"],
+      "@guren/core/*": ["../core/src/*"],
+      "@guren/server": ["../server/src/index.ts"],
+      "@guren/server/*": ["../server/src/*"],
+      "@guren/orm": ["../orm/src/index.ts"],
+      "@guren/orm/*": ["../orm/src/*"],
+      "@guren/inertia-client": ["../inertia-client/src/index.ts"],
+      "@guren/inertia-client/*": ["../inertia-client/src/*"]
+    }
+  },
+  "include": [
+    "templates/scaffold/**/*",
+    "tests/fixtures/scaffold-typecheck/**/*"
+  ],
+  "exclude": []
+}

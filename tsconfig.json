@@ -82,6 +82,8 @@
     "types/**/*"
   ],
   "exclude": [
-    "packages/create-app/templates"
+    "packages/create-app/templates",
+    "packages/cli/templates/scaffold",
+    "packages/cli/tests/fixtures/scaffold-typecheck"
   ]
 }
