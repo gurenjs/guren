@@ -163,7 +163,7 @@ Design points:
 ```typescript
 import { createShikiHighlight } from '@guren/plugin-markdown/shiki'
 
-const highlight = await createShikiHighlight({
+const highlight = createShikiHighlight({
   themes: { light: 'rose-pine-dawn', dark: 'rose-pine-moon' },
   // Explicit grammar list — the Workers-safe fine-grained bundle is the
   // default shape, not the opt-in.
@@ -175,7 +175,11 @@ const renderer = createMarkdownRenderer({ highlight })
 
 `createShikiHighlight` builds a `shiki/core` highlighter with
 `createJavaScriptRegexEngine()` and the requested grammars/themes, lazily and
-once (the `PostRenderer.ts` pattern). It renders dual-theme output
+once (the `PostRenderer.ts` pattern). **Amended in implementation:** the
+factory is synchronous and returns the highlight function immediately (the
+highlighter loads on first use), and grammar names resolve via runtime
+dynamic import — bundle-static targets (Workers) pass explicit
+`langModules`/`themeModules` imports instead of names. It renders dual-theme output
 (`defaultColor: 'light'`, dark palette in `--shiki-dark` custom properties)
 so the sanitizer default and the highlighter agree with each other out of the
 box. Unknown or unloaded languages fall back to plain text rather than
@@ -200,19 +204,23 @@ createApp({
 })
 ```
 
-The provider registers the configured renderer as a deferred container
+The provider registers the configured renderer as a ~~deferred~~ container
 singleton:
 
 ```typescript
 const factory = definePlugin<MarkdownPluginConfig>({
   name: 'markdown',
-  deferred: true,
-  provides: ['markdown'],
   register(container, config) {
     container.singleton('markdown', () => createMarkdownRenderer(config))
   },
 })
 ```
+
+**Amended in implementation:** the provider is not deferred. A deferred
+service cannot be resolved with a plain synchronous `container.make()` until
+its loader has been awaited (`ProviderManager.loadDeferredProvider`), and
+constructing the renderer is trivial — the expensive work happens per render
+— so deferral bought nothing and broke the obvious resolution path.
 
 Controllers resolve it with `this.container.make<MarkdownRenderer>('markdown')`.
 The plugin form exists for the `guren plugin @guren/plugin-markdown` install

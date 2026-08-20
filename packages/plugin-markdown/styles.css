@@ -1,0 +1,66 @@
+/*
+ * Reference stylesheet for @guren/plugin-markdown (RFC 0012).
+ * Optional — the renderer emits framework-neutral class names and applies no
+ * styling itself. Import from your bundler entry:
+ *
+ *   import '@guren/plugin-markdown/styles.css'
+ *
+ * Covers the two things rendered markdown needs CSS for: blockquote alerts
+ * and dual-theme shiki code blocks (dark palette carried in --shiki-dark
+ * custom properties).
+ */
+
+.guren-markdown-alert {
+  border-left: 0.25rem solid var(--guren-markdown-alert-accent, #59636e);
+  padding: 0.5rem 1rem;
+  margin: 1rem 0;
+}
+
+.guren-markdown-alert__label {
+  color: var(--guren-markdown-alert-accent, #59636e);
+  font-weight: 600;
+  margin: 0 0 0.25rem;
+}
+
+.guren-markdown-alert__body > :first-child {
+  margin-top: 0;
+}
+
+.guren-markdown-alert__body > :last-child {
+  margin-bottom: 0;
+}
+
+.guren-markdown-alert--note {
+  --guren-markdown-alert-accent: #316dca;
+}
+
+.guren-markdown-alert--tip {
+  --guren-markdown-alert-accent: #1a7f37;
+}
+
+.guren-markdown-alert--important {
+  --guren-markdown-alert-accent: #8250df;
+}
+
+.guren-markdown-alert--warning {
+  --guren-markdown-alert-accent: #9a6700;
+}
+
+.guren-markdown-alert--caution {
+  --guren-markdown-alert-accent: #cf222e;
+}
+
+/*
+ * Dual-theme shiki: light palette is inline, dark palette switches on here.
+ * Only the color pair — the default sanitizer admits exactly --shiki-dark
+ * and --shiki-dark-bg, so referencing the font-style/weight/decoration
+ * variables would force those properties to their initial values wherever
+ * the variables were stripped.
+ */
+@media (prefers-color-scheme: dark) {
+  .shiki,
+  .shiki span {
+    color: var(--shiki-dark) !important;
+    background-color: var(--shiki-dark-bg) !important;
+  }
+}
