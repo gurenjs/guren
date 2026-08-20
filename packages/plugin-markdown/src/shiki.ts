@@ -65,20 +65,32 @@ export function createShikiHighlight(options: CreateShikiHighlightOptions): High
 
   let highlighterPromise: Promise<LoadedHighlighter> | undefined
   const loadHighlighter = (): Promise<LoadedHighlighter> => {
-    highlighterPromise ??= createHighlighterCore({
-      themes:
-        themeModules ??
-        [themes.light, themes.dark].map(
-          (name) => import(`shiki/dist/themes/${name}.mjs`) as unknown as ThemeInput,
-        ),
-      langs:
-        langModules ??
-        langs.map((name) => import(`shiki/dist/langs/${name}.mjs`) as unknown as LanguageInput),
-      engine: createJavaScriptRegexEngine(),
-    }).then((highlighter) => ({
-      highlighter,
-      loadedLangs: new Set(highlighter.getLoadedLanguages()),
-    }))
+    if (!highlighterPromise) {
+      const attempt = createHighlighterCore({
+        themes:
+          themeModules ??
+          [themes.light, themes.dark].map(
+            (name) => import(`shiki/dist/themes/${name}.mjs`) as unknown as ThemeInput,
+          ),
+        langs:
+          langModules ??
+          langs.map((name) => import(`shiki/dist/langs/${name}.mjs`) as unknown as LanguageInput),
+        engine: createJavaScriptRegexEngine(),
+      }).then((highlighter) => ({
+        highlighter,
+        loadedLangs: new Set(highlighter.getLoadedLanguages()),
+      }))
+      // A rejected attempt must not stay cached — a transient load failure
+      // would otherwise disable highlighting for the renderer's lifetime.
+      // Guarded by attempt identity so a later retry cannot be cleared by
+      // this attempt's failure callback.
+      attempt.catch(() => {
+        if (highlighterPromise === attempt) {
+          highlighterPromise = undefined
+        }
+      })
+      highlighterPromise = attempt
+    }
     return highlighterPromise
   }
 

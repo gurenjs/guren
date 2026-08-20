@@ -32,13 +32,15 @@ function stripHtmlTagsOnce(html: string): string {
 
 /**
  * Returns a slugify function whose uniqueness state is scoped to one render:
- * repeated headings get `-1`, `-2`, … suffixes. A heading that slugs to
- * nothing (all punctuation, all markup) falls back to `heading`, which the
- * same uniqueness counter then disambiguates — deterministic, unlike the
+ * repeated headings get `-1`, `-2`, … suffixes, skipping over suffixes a
+ * literal heading already claimed (`Setup`, `Setup-1`, `Setup` yields
+ * `setup`, `setup-1`, `setup-2`). A heading that slugs to nothing (all
+ * punctuation, all markup) falls back to `heading`, which the same
+ * uniqueness mechanism then disambiguates — deterministic, unlike the
  * random suffix the ported implementation used.
  */
 export function createSlugger(): (text: string) => string {
-  const seenSlugs = new Map<string, number>()
+  const usedSlugs = new Set<string>()
 
   return (text: string): string => {
     let stripped = text
@@ -57,11 +59,14 @@ export function createSlugger(): (text: string) => string {
       .replace(/^-|-$/g, '')
     slug = slug || 'heading'
 
-    const count = seenSlugs.get(slug) ?? 0
-    seenSlugs.set(slug, count + 1)
-    if (count > 0) {
-      slug = `${slug}-${count}`
+    if (usedSlugs.has(slug)) {
+      let suffix = 1
+      while (usedSlugs.has(`${slug}-${suffix}`)) {
+        suffix++
+      }
+      slug = `${slug}-${suffix}`
     }
+    usedSlugs.add(slug)
     return slug
   }
 }

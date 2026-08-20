@@ -149,6 +149,11 @@ Design points:
   gain.
 - **`highlight` is just a function** `(code, lang) => Promise<string>` wired
   through `marked-highlight`. The root export has no dependency on shiki.
+  **Amended in implementation:** a highlight result beginning with `<pre` is
+  emitted as the complete code block instead of being wrapped in the default
+  `<pre><code>` again — `marked-highlight` alone double-wraps block-level
+  highlighters like shiki (caught in Codex review; properly escaped inner
+  HTML can never start with a literal `<`, so the check cannot misfire).
 - **Alerts and the slugger are ported in-house code, not new dependencies.**
   Both are small (~60 lines each), already written, and already hardened in
   `web/`. Porting them avoids adding single-maintainer packages

@@ -1,4 +1,5 @@
 import { describe, test, expect } from 'bun:test'
+import type { ThemeInput } from 'shiki/core'
 
 import { createMarkdownRenderer } from './renderer'
 import { createShikiHighlight } from './shiki'
@@ -35,16 +36,39 @@ describe('createShikiHighlight', () => {
     expect(html).toContain('--shiki-dark')
   })
 
-  test('should survive the default sanitizer end to end', async () => {
+  test('should survive the default sanitizer end to end without double wrapping', async () => {
     const renderer = createMarkdownRenderer({
       highlight: createShikiHighlight({ themes: THEMES, langs: ['typescript'] }),
     })
     const html = await renderer.render('```typescript\nconst a = 1\n```')
 
     // The sanitizer must keep shiki's wrapper, classes, and color styles.
-    expect(html).toContain('<pre')
     expect(html).toContain('shiki')
     expect(html).toContain('color:#')
     expect(html).toContain('--shiki-dark')
+    // shiki returns a complete <pre> block; the renderer must emit it as-is
+    // instead of nesting it inside marked's default <pre><code>.
+    expect(html.startsWith('<pre')).toBe(true)
+    expect(html).not.toContain('<pre><code class="language-')
+  })
+
+  test('should retry after a transient highlighter load failure', async () => {
+    let calls = 0
+    const failOnce = () => {
+      calls++
+      return calls === 1
+        ? Promise.reject(new Error('transient chunk failure'))
+        : import('shiki/dist/themes/rose-pine-dawn.mjs')
+    }
+    const highlight = createShikiHighlight({
+      themes: THEMES,
+      themeModules: [failOnce as ThemeInput, import('shiki/dist/themes/rose-pine-moon.mjs')],
+      langModules: [import('shiki/dist/langs/json.mjs')],
+    })
+
+    await expect(highlight('{"a": 1}', 'json')).rejects.toThrow('transient chunk failure')
+    // The failed attempt must not stay cached: the next call reloads.
+    const html = await highlight('{"a": 1}', 'json')
+    expect(html).toContain('shiki')
   })
 })

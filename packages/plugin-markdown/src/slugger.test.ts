@@ -25,6 +25,13 @@ describe('createSlugger', () => {
     expect(slugify('Setup')).toBe('setup-2')
   })
 
+  test('should skip suffixes a literal heading already claimed', () => {
+    const slugify = createSlugger()
+    expect(slugify('Setup')).toBe('setup')
+    expect(slugify('Setup-1')).toBe('setup-1')
+    expect(slugify('Setup')).toBe('setup-2')
+  })
+
   test('should fall back to a deterministic slug for empty headings', () => {
     const slugify = createSlugger()
     expect(slugify('!!!')).toBe('heading')

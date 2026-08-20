@@ -156,13 +156,24 @@ describe('createMarkdownRenderer', () => {
       expect(html).toContain('href="https://example.com/"')
     })
 
-    test('should highlight fenced code through the highlight hook', async () => {
+    test('should emit a complete <pre> block from the highlighter unwrapped', async () => {
       const renderer = createMarkdownRenderer({
         highlight: async (code, lang) => `<pre class="hl" data-lang="${lang ?? ''}">${code}</pre>`,
       })
       const html = await renderer.render('```ts\nconst a = 1\n```')
       expect(html).toContain('class="hl"')
       expect(html).toContain('const a = 1')
+      // A block-shaped result must not gain a second <pre><code> wrapper.
+      expect(html).not.toContain('<pre><code')
+    })
+
+    test('should wrap inner-HTML highlighter results in the default pre/code', async () => {
+      const renderer = createMarkdownRenderer({
+        highlight: (code) => `<span class="tok">${code}</span>`,
+      })
+      const html = await renderer.render('```ts\nconst a = 1\n```')
+      expect(html).toContain('<pre><code class="language-ts">')
+      expect(html).toContain('class="tok"')
     })
 
     test('should render fences as plain pre/code without a highlighter', async () => {

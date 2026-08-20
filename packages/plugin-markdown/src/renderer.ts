@@ -8,9 +8,11 @@ import { createSlugger } from './slugger'
 
 /**
  * Code-fence highlighter. Receives the fence body and the (possibly absent)
- * language tag, returns HTML for the whole block. `createShikiHighlight`
- * from `@guren/plugin-markdown/shiki` produces one; any compatible function
- * works.
+ * language tag. A result that begins with `<pre` is treated as a complete
+ * code block and emitted as-is (shiki's shape — properly escaped inner HTML
+ * can never start with a literal `<`); anything else is wrapped in the
+ * default `<pre><code>`. `createShikiHighlight` from
+ * `@guren/plugin-markdown/shiki` produces one; any compatible function works.
  */
 export type HighlightFn = (code: string, lang?: string) => string | Promise<string>
 
@@ -77,6 +79,18 @@ export function createMarkdownRenderer(options: MarkdownRendererOptions = {}): M
         // Promise.
         highlight: async (code: string, lang?: string) => highlight(code, lang),
       }),
+      {
+        renderer: {
+          // Block-level highlighters (shiki) return a complete <pre> block;
+          // wrapping that in the default <pre><code> again nests two code
+          // blocks. Emit it unwrapped; anything else falls through to the
+          // default renderer (`false`), which marked-highlight has already
+          // marked as escaped.
+          code({ text }: Tokens.Code) {
+            return text.startsWith('<pre') ? `${text}\n` : false
+          },
+        },
+      },
     )
   }
   if (alerts) {
