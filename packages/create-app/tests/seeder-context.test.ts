@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { DATABASE_DRIVERS, scaffoldAppBlueprint, type DatabaseDriver } from '../src/blueprints'
+import { DATABASE_DRIVERS, databaseConfigTemplatePath, scaffoldAppBlueprint, type DatabaseDriver } from '../src/blueprints'
 import { createTempWorkspace } from './helpers'
 
 /**
@@ -17,22 +17,17 @@ const EXPECTED_CONTEXT = {
   sqlite: 'SqliteSeederContext',
 } as const satisfies Record<DatabaseDriver, string>
 
-describe('generated config/database.ts seeder context', () => {
+// Asserted on the shipped template sources rather than a scaffolded app: the
+// verbatim-copy test in database-config-template.test.ts already pins that a
+// scaffold delivers these files byte-for-byte, so scaffolding again here
+// would only re-derive that.
+describe('shipped config/database.ts seeder context', () => {
   for (const driver of DATABASE_DRIVERS) {
     it(`re-exports ${EXPECTED_CONTEXT[driver]} as AppSeederContext for --db ${driver}`, async () => {
-      const workspace = await createTempWorkspace(`guren-seeder-context-${driver}-`)
+      const config = await readFile(databaseConfigTemplatePath(driver), 'utf8')
 
-      try {
-        const dest = join(workspace.dir, 'test-app')
-        await scaffoldAppBlueprint({ destination: dest, renderingMode: 'spa', database: driver })
-
-        const config = await readFile(join(dest, 'config/database.ts'), 'utf8')
-
-        expect(config).toContain(`type ${EXPECTED_CONTEXT[driver]} } from '@guren/orm'`)
-        expect(config).toContain(`export type AppSeederContext = ${EXPECTED_CONTEXT[driver]}`)
-      } finally {
-        await workspace.cleanup()
-      }
+      expect(config).toContain(`type ${EXPECTED_CONTEXT[driver]} } from '@guren/orm'`)
+      expect(config).toContain(`export type AppSeederContext = ${EXPECTED_CONTEXT[driver]}`)
     })
   }
 })

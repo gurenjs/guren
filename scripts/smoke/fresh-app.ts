@@ -398,8 +398,8 @@ async function assertFeatureScaffolds(appDir: string): Promise<void> {
  * Resolving the template's own ranges is the whole point, so this fails
  * whenever a template has started using an API that exists only in this
  * repository — invisible to the other install modes and to the root
- * `typecheck`, which excludes `templates` and never sees `config/database.ts`
- * at all (it is emitted as a string from `blueprints.ts`).
+ * `typecheck`, which excludes `templates` (that now covers `config/database.ts`
+ * too, shipped as per-driver sources under `templates/database/`).
  */
 async function runPublishedDependencyDrift(
   appDir: string,
