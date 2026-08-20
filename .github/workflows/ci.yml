@@ -161,17 +161,11 @@ jobs:
       #
       # The release commit stays green. `changeset version` empties .changeset
       # and bumps versions, so the diff it produces has no changeset left in
-      # the tree to find. assertChangesetGate exempts it on the version
-      # instead: the @guren/cli version moved, and the harm the gate names —
-      # a payload published under an unchanged version — cannot occur when it
-      # did. That is deliberately wider than the "the CLI manifest was the
-      # only file touched" rule it replaces, and subsumes it: the exemption
-      # holds even when a catalog template rides in the same push or squash
-      # as the version commit, which the narrow rule turned into a false red.
-      # Do not re-add the narrow branch beside it. Note the direction, which
-      # is what keeps RFC 0011 §5 satisfied: the version is an *exemption*,
-      # never a demand — a feature PR still satisfies this gate the only way
-      # it can, by adding a changeset.
+      # the tree to find; assertChangesetGate exempts it on the moved
+      # @guren/cli version instead. Why that is the right key, and why it is
+      # an exemption rather than a demand a feature PR would have to satisfy,
+      # is argued where the branch lives — see the comment on the exemption
+      # in scripts/build-agent-catalog.ts.
       - name: Agent catalog audit
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then

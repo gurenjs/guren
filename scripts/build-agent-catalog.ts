@@ -247,9 +247,9 @@ export function assertTargets(files: readonly RenderedFile[]): string[] {
 export async function assertMinCli(): Promise<string[]> {
   const ctx = await readContext()
   // `compareVersions` returns NaN when either side is not an exact version —
-  // a prerelease workspace version, a partial pin. `NaN > 0` is false, so a
-  // comparison that could not be made would otherwise read as "not ahead"
-  // and pass the gate it exists to be.
+  // a range, a partial pin (a prerelease *is* exact, and orders normally).
+  // `NaN > 0` is false, so a comparison that could not be made would
+  // otherwise read as "not ahead" and pass the gate it exists to be.
   const order = compareVersions(ctx.minCli, ctx.cliVersion)
   if (Number.isNaN(order)) {
     return [`Cannot order MIN_CLI_FOR_TARGETS ${ctx.minCli} against the workspace @guren/cli ${ctx.cliVersion}`]
@@ -405,17 +405,6 @@ function versionOf(manifest: string): string | undefined {
 }
 
 /**
- * The CLI version at `rev`, read from git rather than from the working tree.
- * `undefined` means it could not be read — a missing manifest, unparseable
- * JSON, no `version` field — which callers must not treat as "the version
- * moved".
- */
-function cliVersionAt(rev: string, repo: string): string | undefined {
-  const show = Bun.spawnSync(['git', 'show', `${rev}:${CLI_MANIFEST}`], { cwd: repo })
-  return show.success ? versionOf(show.stdout.toString()) : undefined
-}
-
-/**
  * Sources changed ⇒ a `@guren/cli` changeset is present, unless the CLI
  * version itself moved. Compared against `base` (a ref or SHA). Callers on
  * shallow checkouts must fetch it first.
@@ -461,26 +450,39 @@ export async function assertChangesetGate(base: string, repo: string = repoRoot)
   // not bump versions in this repo, and a gate that asked them to would be
   // asking for a number `changeset version` writes (RFC 0011 §5).
   //
+  // This replaced an exemption for a diff whose touched inputs were the CLI
+  // manifest alone. The two are not nested: this one is wider where it
+  // matters (a catalog template may ride in the same push or squash as the
+  // version commit, which the old rule turned into a false red) and narrower
+  // where the old one was too loose (a manifest edit that leaves the version
+  // alone is gated, because it republishes the payload under the version it
+  // already had). Do not re-add the old branch beside this one.
+  //
   // The head side is the working tree, matching how `.changeset/` is read
-  // below and how `renderCatalog` reads the version it publishes. Read off
-  // disk rather than through `readContext()`, which applies
-  // GUREN_CATALOG_VERSION_OVERRIDE — a stray env var must not be able to
-  // manufacture an exemption. Compared as strings, because the claim is
-  // literally "the same version string": `compareVersions` returns NaN on a
-  // prerelease or a partial pin, and `NaN !== 0` would exempt every one of
-  // them.
-  const baseVersion = cliVersionAt(diffBase, repo)
+  // below and how `renderCatalog` reads the version it publishes — so a
+  // maintainer running `--check` part-way through `changeset version`, files
+  // written and not yet committed, is judged on what a publish from that
+  // checkout would carry. The cost is that this half of the comparison is
+  // only as trustworthy as the tree is clean: a step that rewrote the
+  // manifest without committing it could manufacture an exemption. CI has no
+  // such step, and its checkout is clean. Read off disk rather than through
+  // `readContext()`, which applies GUREN_CATALOG_VERSION_OVERRIDE — a stray
+  // env var must not be able to manufacture one either.
+  //
+  // Compared as strings, because the claim is literally "the same version
+  // string". `compareVersions` answers a different question: it returns NaN
+  // for anything that is not an exact version, and orders `1.0.0+build`
+  // equal to `1.0.0` — two spellings that publish as two different payload
+  // versions.
+  const show = Bun.spawnSync(['git', 'show', `${diffBase}:${CLI_MANIFEST}`], { cwd: repo })
+  const baseVersion = show.success ? versionOf(show.stdout.toString()) : undefined
   const headVersion = versionOf(await readFile(join(repo, CLI_MANIFEST), 'utf8').catch(() => ''))
   if (baseVersion !== undefined && headVersion !== undefined && baseVersion !== headVersion) return []
   // A side that could not be read is not an exemption — that would be a
   // silent ungating living inside the audit, where the run still prints
   // "passed" and no CI annotation covers it. It falls through to the
   // changeset check instead, so a PR that has a changeset still passes, and
-  // says so in the failure below when one is missing.
-  const unreadable =
-    baseVersion === undefined || headVersion === undefined
-      ? ` The @guren/cli version could not be read on ${baseVersion === undefined ? `the base side (${diffBase})` : 'the working tree'}, so the version-moved exemption could not be evaluated.`
-      : ''
+  // the reason is reported only when one is missing.
 
   const changesetDir = join(repo, '.changeset')
   let names: string[] = []
@@ -497,10 +499,16 @@ export async function assertChangesetGate(base: string, repo: string = repoRoot)
       return [`could not read .changeset/${name}: ${error instanceof Error ? error.message : String(error)}`]
     }
   }
+  const unreadable = [
+    baseVersion === undefined ? `the base side (${diffBase})` : undefined,
+    headVersion === undefined ? 'the working tree' : undefined,
+  ].filter(Boolean)
   return [
     `catalog inputs changed (${touched.join(', ')}) but no .changeset/*.md names "@guren/cli". ` +
       'The plugin version is the CLI version and a payload published under an unchanged version is one every installed copy skips forever; add a @guren/cli changeset.' +
-      unreadable,
+      (unreadable.length > 0
+        ? ` The @guren/cli version could not be read on ${unreadable.join(' or ')}, so the version-moved exemption could not be evaluated.`
+        : ''),
   ]
 }
 

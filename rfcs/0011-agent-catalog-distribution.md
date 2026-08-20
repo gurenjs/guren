@@ -658,14 +658,16 @@ Automated, in CI on every PR:
    unrecognized top-level field is fatal to conforming clients (§4).
 4. Mutation checks in the implementation PR, proving 1 can fail: name a
    nonexistent target; name an unregistered command. **Amended in
-   implementation:** the two changeset-gate mutations in this list are *not*
-   automated. `assertChangesetGate` needs a git base ref, so the test suite
-   covers its frontmatter parser and its input list rather than the rule
-   itself; the gate was verified by hand on the implementation branch (with
-   the `@guren/cli` changesets hidden it fails with the full changed-input
-   list) and it runs on every PR. Listed here as manual coverage, because a
-   verification list that names checks nobody wrote is worse than a shorter
-   one.
+   implementation:** the changeset gate was first listed here as *manual*
+   coverage — `assertChangesetGate` needs a git base ref, so the suite covered
+   its frontmatter parser and its input list rather than the rule itself. That
+   gap is now closed: the gate's decisions are exercised against throwaway
+   repositories built per case (`scripts/build-agent-catalog.test.ts`,
+   `audit: changeset gate`), including the release commit's exemption, a
+   catalog change without a changeset, a manifest edit that does not move the
+   version, an unreadable base version, and the shallow-fetched base ref CI
+   itself resolves. Each was confirmed to fail against the implementation it
+   is meant to reject.
 
 Manual, once before the first publish and after any payload change:
 
