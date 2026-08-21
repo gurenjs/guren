@@ -1,5 +1,23 @@
 # @guren/server
 
+## 2.10.0
+
+### Minor Changes
+
+- b0625ee: Remove `ApplicationOptions.discover`. The option was accepted and silently ignored since it was introduced — nothing in `Application` ever read it, so no discovery ran and no behavior exists to migrate. This ships as a minor deliberately: it is a type-surface bug fix, not an API removal. JavaScript apps are unaffected either way, and TypeScript code passing `discover: true` now gets a compile error naming the truth instead of a silent no-op. The `AutoDiscovery` class remains available as a standalone scanner; its docs now state that registration in Guren is explicit and show how to feed scan results into the registries yourself.
+- 1ebda4b: Serve Vite's content-hashed build assets (`/public/assets/*` in production) with `Cache-Control: public, max-age=31536000, immutable`. Their filenames change on every content change, so browsers can cache them forever instead of re-downloading on each visit. Files elsewhere under `public/` keep stable names and are served without a caching header, unchanged; the dev-mode route stays uncached so HMR keeps working. The prefix follows a custom `publicRoute` (e.g. `/static/*` → `/static/assets/*`).
+- 532879c: A route `params` schema failure is now 422 on both handler kinds. It used to depend on how the route was handled: a controller action reported 422, while a functional typed handler given the identical schema and request reported 400.
+
+  422 is the framework's validation status. `ValidationException` is 422, the `validateBody` / `validateQuery` / `validateParams` helpers the guides document throw it — including the guides' explicit "422 on invalid params" — and the `query` and `body` halves of these same contract options were already 422 on both paths. Only `params` was spelled 400, and only the functional path ever put that number on the wire; the controller path built a 400 response and discarded it to throw `ValidationException` instead. The status is what clients branch on: `InertiaServiceProvider` renders `ValidationException` into `form.errors`, and a 400 skips that entirely, so a form posting to a functional handler saw its params errors silently dropped.
+
+  This ships as a minor rather than a major deliberately. The affected surface is narrow — functional typed handlers that declare a `params` schema — and the change moves behavior toward what the documentation already promises rather than away from it, so code written against the documented contract keeps working and code written against the old number was reading an inconsistency. Update any client or test asserting 400 on a params failure to expect 422.
+
+  The response body still differs in shape between the two paths: a controller action returns `{ message, errors: { field: [...] } }` and a functional handler `{ errors: { field: "..." } }`. That difference is not specific to `params` — it already applies to `query` and `body` — and is unchanged here.
+
+### Patch Changes
+
+- 19310c6: Keep the SIGINT/SIGTERM/exit teardown compiling under bun-types 1.4.0, which declares `process.off` with only a `"memoryPressure"` overload and thereby shadows the generic `EventEmitter.off` the signal names relied on. Runtime behavior is unchanged.
+
 ## 2.9.0
 
 ### Minor Changes
