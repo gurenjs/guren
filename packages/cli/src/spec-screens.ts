@@ -1,13 +1,13 @@
 import { resolve } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import type { ClassDeclaration } from '@babel/types'
-import { discoverControllerFiles, classNameFromPath, toPosixRelative, fileExists } from './discovery'
+import { discoverControllerFiles, classNameFromPath, toPosixRelative } from './discovery'
 import {
   routeDefinitionToContextRoute,
   escapeMarkdownTableCell,
   type ContextRoute,
 } from './context-route'
-import { loadRouteDefinitions, DEFAULT_ROUTES_FILE } from './load-routes'
+import { loadRouteDefinitions, resolveRoutesFile, type RoutesFileTarget } from './load-routes'
 import { extractClassDeclaration } from './model-parser'
 import { parseSourceFile } from './parse-cache'
 import {
@@ -140,12 +140,17 @@ interface RouteGraph {
  * throws is not: the resulting document would look identical to one for an
  * app that genuinely has no routes, so it is flagged degraded and must
  * never be written or byte-compared.
+ *
+ * A named `--routes` that is not there is degraded too, not silent: it would
+ * otherwise regenerate a routeless document and the drift gate would compare
+ * it, reporting drift that regenerating could only "fix" by deleting real
+ * content. `resolveRoutesFile()` owns that distinction.
  */
-async function loadRouteGraph(cwd: string, relRoutesFile: string): Promise<RouteGraph> {
-  if (!(await fileExists(cwd, relRoutesFile))) return { routes: [] }
+async function loadRouteGraph(cwd: string, target: RoutesFileTarget): Promise<RouteGraph> {
+  if (target.silentlyAbsent) return { routes: [] }
 
   try {
-    const definitions = await loadRouteDefinitions(resolve(cwd, relRoutesFile), cwd)
+    const definitions = await loadRouteDefinitions(resolve(cwd, target.path), cwd)
     return { routes: definitions.map(routeDefinitionToContextRoute) }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
@@ -171,12 +176,13 @@ function renderRoute(route: ContextRoute): string {
  * cell instead of being misfiled as unrouted.
  */
 export async function generateScreensSpec(cwd: string, routesFile?: string): Promise<SpecArtifact> {
+  const target = await resolveRoutesFile(cwd, routesFile)
   // Rendered into the document, so it has to be app-root-relative and POSIX —
   // an absolute path would differ per machine and break the drift gate.
-  const relRoutesFile = toPosixRelative(cwd, resolve(cwd, routesFile ?? DEFAULT_ROUTES_FILE))
+  const relRoutesFile = toPosixRelative(cwd, resolve(cwd, target.path))
 
   const [graph, pagesByController, pageIdsOnDisk] = await Promise.all([
-    loadRouteGraph(cwd, relRoutesFile),
+    loadRouteGraph(cwd, target),
     collectPagesByController(cwd),
     listInertiaPageIds(cwd),
   ])

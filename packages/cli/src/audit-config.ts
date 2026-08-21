@@ -1,6 +1,6 @@
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { fileExists } from './discovery'
+import { findFirstLoadable } from './discovery'
 
 export interface AuditIgnoreEntry {
   /** Must match `AuditFinding.key` exactly (no globs). */
@@ -97,11 +97,6 @@ async function resolveConfigFile(cwd: string, configFile?: string): Promise<stri
     return resolve(cwd, configFile)
   }
 
-  for (const candidate of CANDIDATE_FILES) {
-    if (await fileExists(cwd, candidate)) {
-      return resolve(cwd, candidate)
-    }
-  }
-
-  return undefined
+  const found = await findFirstLoadable(cwd, CANDIDATE_FILES)
+  return found === null ? undefined : resolve(cwd, found)
 }

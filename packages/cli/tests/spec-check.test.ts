@@ -144,4 +144,32 @@ export class Post extends defineModel(posts) {}
 
     expect(results.map((r) => r.key)).toEqual(['spec-drift:screens.md'])
   })
+
+  it('degrades the screens view when the routes path cannot even be probed', async () => {
+    // Its own workspace: this one is deliberately broken, and the shared
+    // fixture above is restored between tests rather than rebuilt.
+    //
+    // The drift gate reads a routes file it cannot load as `degraded` and
+    // skips the byte comparison — diffing hollow content would report drift
+    // that regenerating could only "fix" by destroying the committed view.
+    // That only holds if the existence probe reaches the loader: a `routes`
+    // that is a regular file makes the probe throw ENOTDIR, which used to
+    // escape `runSpecCheck` as a stack trace instead of this warning.
+    const broken = await createTempWorkspace('guren-cli-spec-check-notdir-')
+
+    try {
+      await writeFile(join(broken.dir, 'package.json'), '{}', 'utf8')
+      await writeFile(join(broken.dir, 'routes'), 'not a directory', 'utf8')
+      await mkdir(join(broken.dir, 'docs/spec'), { recursive: true })
+      await writeFile(join(broken.dir, 'docs/spec/screens.md'), '# stale\n', 'utf8')
+
+      const results = await runSpecCheck({ cwd: broken.dir })
+      const screens = results.find((r) => r.key === 'spec-drift:screens.md')
+
+      expect(screens?.status).toBe('warn')
+      expect(screens?.message).toContain('route graph failed to load')
+    } finally {
+      await broken.cleanup()
+    }
+  })
 })

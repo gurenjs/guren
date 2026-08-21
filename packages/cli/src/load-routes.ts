@@ -2,8 +2,8 @@ import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { consola } from 'consola'
 import { Router, mountModuleRoutes, type GurenModule, type RouteDefinition } from '@guren/core'
-import { listModuleNames } from './discovery'
-import { REGISTRAR_EXPORT_NAMES, REGISTRAR_PATTERN } from './route-registrar'
+import { isDefinitelyAbsent, listModuleNames } from './discovery'
+import { DEFAULT_ROUTES_FILE, REGISTRAR_EXPORT_NAMES, REGISTRAR_PATTERN } from './route-registrar'
 
 type RouteRegistrar = (router: Router) => void | Promise<void>
 
@@ -11,6 +11,48 @@ type RouteRegistrar = (router: Router) => void | Promise<void>
 // importing it from here; the constant lives beside the registrar name
 // contract, which the scaffolders need without pulling in `@guren/core`.
 export { DEFAULT_ROUTES_FILE } from './route-registrar'
+
+export interface RoutesFileTarget {
+  /** The path to load, as given or as defaulted. */
+  path: string
+  /**
+   * Nothing to load, and that is a legitimate shape rather than a failure —
+   * so the caller degrades to a route-less view in silence.
+   */
+  silentlyAbsent: boolean
+}
+
+/**
+ * Which routes file to load, and whether its absence is an answer or a
+ * failure.
+ *
+ * Two rules in one place because they only make sense together. An app with
+ * no routes file at all is legitimate — api-only, mid-scaffold — and reports
+ * nothing; `guren check` is where a missing entry file is diagnosed. But a
+ * caller that *named* the file is a different question: a path that is not
+ * there is a typo or a wrong app root, and reporting "no routes" for it is
+ * the confident wrong answer #482 exists to prevent.
+ *
+ * An empty value names nothing, so `--routes=` is the default path, not a
+ * file called "". Left to each call site, that distinction went wrong the
+ * same way twice: `--health=` applied named-file strictness to the default
+ * *search*, and `--routes=` resolved to the app root and reported
+ * `Cannot find module '<app root>'` — a diagnostic naming a directory the
+ * user never typed.
+ *
+ * Every caller that degrades a missing routes file asks through here, because
+ * `guren context`, `guren context <Entity>` and `spec:generate` must not
+ * disagree about the same app — and have: #482 fixed the entity bundle's
+ * half of this rule and left the other two spelling it themselves.
+ */
+export async function resolveRoutesFile(
+  cwd: string,
+  routesFile?: string,
+): Promise<RoutesFileTarget> {
+  const path = routesFile || DEFAULT_ROUTES_FILE
+
+  return { path, silentlyAbsent: !routesFile && (await isDefinitelyAbsent(cwd, path)) }
+}
 
 function resolveRegistrar(moduleExports: Record<string, unknown>): RouteRegistrar | undefined {
   for (const name of REGISTRAR_EXPORT_NAMES) {

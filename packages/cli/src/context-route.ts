@@ -1,6 +1,6 @@
 import { resolve } from 'node:path'
 import type { RouteDefinition } from '@guren/core'
-import { loadRouteDefinitions, DEFAULT_ROUTES_FILE } from './load-routes'
+import { loadRouteDefinitions, resolveRoutesFile } from './load-routes'
 import { schemaToTypeString } from './schema-type-extractor'
 
 /**
@@ -74,15 +74,30 @@ export function escapeMarkdownTableCell(value: string): string {
  * Every route as a `ContextRoute`, or `[]` when the routes file can't be
  * loaded (missing deps, mid-scaffold app, etc.) — context commands degrade
  * to a route-less view instead of failing.
+ *
+ * `loadErrors`, when passed, receives the reason the load failed. Pass it
+ * unless the caller has nothing to render it into: an app whose routes file
+ * throws produces the same empty list as an app with no routes at all, so a
+ * caller that drops the reason publishes a confident-looking "no routes"
+ * that nobody can tell apart from a real one — the defect this degradation
+ * had for as long as it swallowed the error outright.
+ *
+ * When there is nothing to load and that is a legitimate shape rather than a
+ * failure, the empty list carries no reason — see `resolveRoutesFile()`.
  */
-export async function loadContextRoutes(cwd: string, routesFile?: string): Promise<ContextRoute[]> {
+export async function loadContextRoutes(
+  cwd: string,
+  routesFile?: string,
+  loadErrors?: string[],
+): Promise<ContextRoute[]> {
+  const target = await resolveRoutesFile(cwd, routesFile)
+  if (target.silentlyAbsent) return []
+
   try {
-    const definitions = await loadRouteDefinitions(
-      resolve(cwd, routesFile ?? DEFAULT_ROUTES_FILE),
-      cwd,
-    )
+    const definitions = await loadRouteDefinitions(resolve(cwd, target.path), cwd)
     return definitions.map(routeDefinitionToContextRoute)
-  } catch {
+  } catch (error) {
+    loadErrors?.push(error instanceof Error ? error.message : String(error))
     return []
   }
 }

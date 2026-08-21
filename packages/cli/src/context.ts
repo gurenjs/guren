@@ -26,6 +26,8 @@ export interface ProjectContext {
   framework: { name: string; version: string }
   models: ModelInfo[]
   routes: ContextRoute[]
+  /** Why `routes` is empty, when it is empty because the load failed. */
+  routesError?: string
   pages: string[]
   controllers: string[]
   resources: string[]
@@ -73,6 +75,8 @@ export async function generateContext(options: ContextOptions = {}): Promise<Pro
 
   // Every source below is independent — one barrier instead of a dozen
   // serialized directory walks (plus the route-graph import).
+  const routeLoadErrors: string[] = []
+
   const [
     models,
     routes,
@@ -88,7 +92,7 @@ export async function generateContext(options: ContextOptions = {}): Promise<Pro
     commands,
   ] = await Promise.all([
     collectModels(),
-    loadContextRoutes(cwd, options.routesFile),
+    loadContextRoutes(cwd, options.routesFile, routeLoadErrors),
     listInertiaPageIds(cwd),
     toNames(discoverControllerFiles),
     toNames(discoverResourceFiles),
@@ -109,6 +113,7 @@ export async function generateContext(options: ContextOptions = {}): Promise<Pro
     framework: { name: 'Guren', version },
     models,
     routes,
+    routesError: routeLoadErrors[0],
     pages,
     controllers,
     resources,
@@ -167,6 +172,13 @@ export function renderContextMarkdown(ctx: ProjectContext): string {
       const cells = [route.method, route.path, route.name ?? '', controller]
       lines.push(`| ${cells.map(escapeMarkdownTableCell).join(' | ')} |`)
     }
+  } else if (ctx.routesError) {
+    // An unreadable routes file is not an app with no routes. Both used to
+    // render `## Routes (0)` / `No routes loaded.` and exit 0, so the reader
+    // of a context map — an agent, most often — had no way to tell a real
+    // answer from a failed one.
+    lines.push(`Routes could not be read: ${ctx.routesError}`)
+    lines.push('This is not the same as the app having no routes — the list above is incomplete.')
   } else {
     lines.push('No routes loaded.')
   }

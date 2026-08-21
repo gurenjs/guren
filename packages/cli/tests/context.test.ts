@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
 import { GUREN_API_DIGEST } from '../src/api-digest'
 import { generateContext, renderContextMarkdown } from '../src/context'
-import { createTempWorkspace } from './helpers'
+import { CORE_RESOLVING_ROUTES_FIXTURE, createTempWorkspace, linkWorkspaceCore } from './helpers'
 
 describe('generateContext', () => {
   it('discovers models from app/Models', async () => {
@@ -89,6 +89,117 @@ export class Post extends defineModel(posts) {}`,
       expect(ctx.jobs).toContain('SendEmail')
       expect(ctx.commands).toContain('SendDigestCommand')
       expect(ctx.commands).not.toContain('SharedConfig')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('says the routes file could not be read, rather than reporting none', async () => {
+    // The shape #482 fixed for `guren context <Entity>`, in the project-wide
+    // map: an unloadable routes file used to render exactly what an app with
+    // no routes renders — `## Routes (0)` / `No routes loaded.`, exit 0 — so
+    // a reader could not tell a real answer from a failed one.
+    const workspace = await createTempWorkspace('guren-cli-context-routes-broken-')
+
+    try {
+      await mkdir(join(workspace.dir, 'routes'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'routes/web.ts'),
+        "import { nothing } from 'package-that-is-not-installed'\nexport function registerWebRoutes(): void { nothing() }\n",
+        'utf8',
+      )
+      await writeFile(join(workspace.dir, 'package.json'), '{}', 'utf8')
+
+      const ctx = await generateContext({ cwd: workspace.dir })
+
+      expect(ctx.routes).toEqual([])
+      expect(ctx.routesError).toContain('package-that-is-not-installed')
+      // The renderer's three branches are mutually exclusive, so covering the
+      // `routesError` one here is enough — the other two are covered by the
+      // absent-file and named-typo cases below.
+      expect(renderContextMarkdown(ctx)).toContain('Routes could not be read:')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('reports a routes path that cannot even be probed, rather than crashing', async () => {
+    // The absent-vs-unreadable split is a filesystem probe, and only ENOENT
+    // answers "absent". A `routes` that is a regular file makes the probe
+    // throw ENOTDIR (an unreadable parent throws EACCES); a probe that let
+    // that escape would crash `guren context --json` with a stack trace
+    // instead of the diagnostic, and one that read it as "absent" would print
+    // the confident "No routes loaded." the split exists to prevent.
+    const workspace = await createTempWorkspace('guren-cli-context-routes-notdir-')
+
+    try {
+      await writeFile(join(workspace.dir, 'package.json'), '{}', 'utf8')
+      await writeFile(join(workspace.dir, 'routes'), 'not a directory', 'utf8')
+
+      const ctx = await generateContext({ cwd: workspace.dir })
+
+      expect(ctx.routes).toEqual([])
+      expect(ctx.routesError).toBeDefined()
+      expect(renderContextMarkdown(ctx)).toContain('Routes could not be read:')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('reports a routesFile that was named but is not there', async () => {
+    // Absence is only a legitimate shape on the default path. A caller that
+    // named the file gets the same diagnostic as any other unreadable one.
+    const workspace = await createTempWorkspace('guren-cli-context-routes-typo-')
+
+    try {
+      await writeFile(join(workspace.dir, 'package.json'), '{}', 'utf8')
+
+      const ctx = await generateContext({ cwd: workspace.dir, routesFile: 'routes/nope.ts' })
+
+      expect(ctx.routes).toEqual([])
+      expect(ctx.routesError).toContain('nope.ts')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('keeps reporting no routes for an app that genuinely has none', async () => {
+    const workspace = await createTempWorkspace('guren-cli-context-routes-absent-')
+
+    try {
+      await writeFile(join(workspace.dir, 'package.json'), '{}', 'utf8')
+
+      const ctx = await generateContext({ cwd: workspace.dir })
+
+      expect(ctx.routes).toEqual([])
+      expect(ctx.routesError).toBeUndefined()
+      expect(renderContextMarkdown(ctx)).toContain('No routes loaded.')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('loads a routes file that imports @guren/core from this checkout', async () => {
+    // The positive control for the above: proving the error path works is
+    // worth nothing unless the success path is reached through the workspace.
+    // A fixture with no node_modules otherwise resolves `@guren/core` by
+    // Bun's auto-install fallback — the global cache, then npm — which is how
+    // a green test comes to be measuring the published package, or the
+    // registry, instead of this checkout.
+    const workspace = await createTempWorkspace('guren-cli-context-routes-linked-')
+
+    try {
+      await linkWorkspaceCore(workspace.dir)
+      await mkdir(join(workspace.dir, 'routes'), { recursive: true })
+      // The same fixture the resolution guard runs unlinked — the two are
+      // each other's control, so they have to be one fixture.
+      await writeFile(join(workspace.dir, 'routes/web.ts'), CORE_RESOLVING_ROUTES_FIXTURE, 'utf8')
+      await writeFile(join(workspace.dir, 'package.json'), '{}', 'utf8')
+
+      const ctx = await generateContext({ cwd: workspace.dir })
+
+      expect(ctx.routesError).toBeUndefined()
+      expect(ctx.routes.map((route) => route.name)).toEqual(['posts.index'])
     } finally {
       await workspace.cleanup()
     }
