@@ -2,7 +2,8 @@
 
 **Author:** 7nohe
 **Date:** 2026-08-21
-**Status:** Draft
+**Status:** Accepted (2026-08-21; maintainer decision, standard two-week
+discussion window deliberately compressed — solo-maintainer project)
 
 ## Problem
 

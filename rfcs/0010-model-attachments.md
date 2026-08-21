@@ -2,13 +2,13 @@
 
 **Author:** 7nohe
 **Date:** 2026-08-15
-**Status:** Draft
+**Status:** Superseded by RFC 0013
 
-> **Note (2026-08-21):** Proposed to be superseded by RFC 0013
-> (`0013-attachments-and-image-variants.md`), a deliberately smaller
-> design built on Bun 1.4's native `Bun.Image`. If RFC 0013 is accepted,
-> this document's status becomes `Superseded by RFC 0013` in the same
-> change; it stays in `rfcs/` as design research for the layers RFC 0013
+> **Note (2026-08-21):** Superseded by RFC 0013
+> (`0013-attachments-and-image-variants.md`, accepted 2026-08-21), a
+> deliberately smaller design built on Bun 1.4's native `Bun.Image` that
+> adopts this document's `Attachable` mixin as its model API. This
+> document stays in `rfcs/` as design research for the layers RFC 0013
 > defers (signed proxy delivery, direct upload, blob deduplication), each
 > of which needs a fresh RFC revalidating its assumptions against the
 > one-table schema before implementation.
