@@ -188,7 +188,10 @@ describe('Application routing integration', () => {
 
     expect(success.status).toBe(200)
     expect(await success.json()).toEqual({ id: 42, draft: 'true' })
-    expect(failure.status).toBe(400)
+    // 422: a params schema failure is a validation failure, the same as the
+    // `query` and `body` halves of the contract and the same as what the
+    // controller-action path has always reported.
+    expect(failure.status).toBe(422)
     const failureBody = await failure.json() as { errors?: Record<string, string> }
     expect(failureBody.errors?.id).toContain('number')
   })

@@ -56,11 +56,12 @@ describe('route contract failure modes', () => {
     expect(JSON.parse(body)).toEqual({ post: { id: 7 } })
   })
 
-  // 422, not 400: the contract middleware builds a 400 response and then
-  // discards it to throw ValidationException instead, so the status argument
-  // never reaches the wire on this path. The functional-handler path below
-  // returns its response directly and really is 400 — the same mismatch has
-  // two statuses depending on the handler kind.
+  // 422 on both handler kinds, which is what the finding message promises.
+  // These two used to disagree: the contract middleware built a 400 response
+  // and discarded it to throw ValidationException (422) instead, while the
+  // functional-handler path returned its 400 to the client. The status is what
+  // clients branch on — an Inertia form reads 422 to populate `form.errors`
+  // and ignores a 400 — so the pair is pinned together here.
   test('a required params key the path does not declare fails a controller action with 422', async () => {
     const { status, body } = await get(
       (router) => router.get(
@@ -75,7 +76,7 @@ describe('route contract failure modes', () => {
     expect(body).toContain('postId')
   })
 
-  test('the same key fails a functional handler with 400', async () => {
+  test('the same key fails a functional handler with 422', async () => {
     const { status, body } = await get(
       (router) => router.get(
         '/posts/:id',
@@ -85,8 +86,40 @@ describe('route contract failure modes', () => {
       '/posts/7',
     )
 
-    expect(status).toBe(400)
+    expect(status).toBe(422)
     expect(body).toContain('postId')
+  })
+
+  // The sibling segments were already 422 on both kinds. Pinned alongside
+  // params so a later change cannot re-split one of them unnoticed.
+  test('a query schema failure is 422 on both handler kinds', async () => {
+    const contract = { query: z.object({ page: z.coerce.number() }) }
+
+    const action = await get(
+      (router) => router.get('/posts', contract, [ParamsController, 'show']),
+      '/posts?page=nope',
+    )
+    const functional = await get(
+      (router) => router.get('/posts', contract, ({ query }) => Response.json({ query })),
+      '/posts?page=nope',
+    )
+
+    expect(action.status).toBe(422)
+    expect(functional.status).toBe(422)
+  })
+
+  test('params that satisfy the schema still reach a functional handler', async () => {
+    const { status, body } = await get(
+      (router) => router.get(
+        '/posts/:postId',
+        { params: z.object({ postId: z.coerce.number() }) },
+        ({ params }) => Response.json({ params }),
+      ),
+      '/posts/7',
+    )
+
+    expect(status).toBe(200)
+    expect(JSON.parse(body)).toEqual({ params: { postId: 7 } })
   })
 
   test('a defaulted params key the path does not declare fails nothing at all', async () => {
