@@ -213,7 +213,7 @@ describe('runDoctor', () => {
       expect(packageJson.scripts.typecheck).toBe('tsc --noEmit')
       expect(packageJson.scripts.codegen).toBe('bunx guren codegen --routes routes/web.ts --out types/generated/routes.d.ts --force')
       expect(tsconfig.include).toContain('.guren/**/*')
-      expect(tsconfig.compilerOptions?.baseUrl).toBe('.')
+      expect(tsconfig.compilerOptions?.baseUrl).toBeUndefined()
       expect(tsconfig.compilerOptions?.paths?.['@/*']).toEqual(['./*'])
       expect(report.fixableChecks.some((check) => check.key === 'scripts')).toBe(false)
       expect(report.fixableChecks.some((check) => check.key === 'tsconfig')).toBe(false)
@@ -710,7 +710,7 @@ describe('runDoctor', () => {
       }
 
       expect(tsconfig.compilerOptions.strict).toBe(true)
-      expect(tsconfig.compilerOptions.baseUrl).toBe('.')
+      expect(tsconfig.compilerOptions.baseUrl).toBeUndefined()
       expect(tsconfig.compilerOptions.paths?.['#lib/*']).toEqual(['./lib/*'])
       expect(tsconfig.compilerOptions.paths?.['@/*']).toEqual(['./*'])
       expect(tsconfig.include).toEqual(['.guren/**/*'])

@@ -1,13 +1,15 @@
 {
   "extends": "../../tsconfig.json",
   "compilerOptions": {
+    // Inherited `baseUrl` would point at the repo root (see the root tsconfig
+    // for why it is still there); re-anchor it so `paths` below stay local.
     "baseUrl": ".",
     "rootDirs": [
       "templates/scaffold/auth",
       "tests/fixtures/scaffold-typecheck/auth"
     ],
     "paths": {
-      "@/.guren/pages.gen": ["tests/fixtures/scaffold-typecheck/auth/.guren/pages.gen.ts"],
+      "@/.guren/pages.gen": ["./tests/fixtures/scaffold-typecheck/auth/.guren/pages.gen.ts"],
       "@guren/core": ["../core/src/index.ts"],
       "@guren/core/*": ["../core/src/*"],
       "@guren/server": ["../server/src/index.ts"],

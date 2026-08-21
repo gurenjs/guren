@@ -1,7 +1,7 @@
 import chalk from 'chalk'
 import figlet from 'figlet'
 import standard from 'figlet/importable-fonts/Standard.js'
-import packageJson from '../../package.json' assert { type: 'json' }
+import packageJson from '../../package.json' with { type: 'json' }
 
 figlet.parseFont('Standard', standard)
 

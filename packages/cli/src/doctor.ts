@@ -434,7 +434,10 @@ async function detectTsconfig(context: DoctorRuleContext): Promise<DoctorCheck> 
   )
 }
 
-const TSCONFIG_ALIAS_FIX = 'Set `"baseUrl": "."` and `"paths": { "@/*": ["./*"] }` in compilerOptions so `@/.guren/*` and `@/app/*` imports resolve.'
+// Path mappings resolve relative to the tsconfig directory when `baseUrl` is
+// omitted, and TypeScript 7 rejects `baseUrl` outright (TS5102), so the fix
+// never writes one.
+const TSCONFIG_ALIAS_FIX = 'Set `"paths": { "@/*": ["./*"] }` in compilerOptions (no `baseUrl`) so `@/.guren/*` and `@/app/*` imports resolve.'
 
 async function detectTsconfigAlias(context: DoctorRuleContext): Promise<DoctorCheck> {
   const tsconfig = await readJsonIfExists<TsconfigShape>(context.cwd, 'tsconfig.json')
@@ -478,7 +481,7 @@ async function createTsconfigAliasAutofix(_context: DoctorRuleContext, check: Do
   return {
     key: check.key,
     title: check.title,
-    summary: 'Add `"baseUrl": "."` and `"paths": { "@/*": ["./*"] }` to tsconfig.json.',
+    summary: 'Add `"paths": { "@/*": ["./*"] }` to tsconfig.json.',
     async apply(cwd: string) {
       const current = await readJsonIfExists<TsconfigShape>(cwd, 'tsconfig.json')
       if (!current.exists || current.parseError || !current.value) {
@@ -487,7 +490,6 @@ async function createTsconfigAliasAutofix(_context: DoctorRuleContext, check: Do
 
       const nextConfig = { ...current.value }
       const compilerOptions = { ...nextConfig.compilerOptions }
-      compilerOptions.baseUrl ??= '.'
       compilerOptions.paths = { ...compilerOptions.paths }
       compilerOptions.paths['@/*'] ??= ['./*']
       nextConfig.compilerOptions = compilerOptions
