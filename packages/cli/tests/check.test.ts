@@ -2029,3 +2029,46 @@ export function registerBillingRoutes(router: Router): void {
     expect(modifiers(report)).toEqual([])
   })
 })
+
+/**
+ * Wiring only. The comparison itself is covered by
+ * `route-contract-check.test.ts`, which drives the check directly with real
+ * zod schemas; a temp workspace cannot import zod (or any value from
+ * `@guren/core`), so the fixture here binds a locally declared class instead.
+ */
+describe('runCheck route contracts', () => {
+  const ROUTES_WITH_STRAY_BIND = `import type { Router } from '@guren/core'
+
+class Post {
+  static findOrFail() {
+    return Promise.resolve({})
+  }
+}
+
+export function registerWebRoutes(router: Router): void {
+  router.group('/posts', (posts) => {
+    posts.get('/:id', { bind: { slug: Post } }, () => new Response('ok'))
+  })
+}
+`
+
+  const contracts = (report: CheckReport): CheckResult[] =>
+    report.checks.filter((c) => c.key.startsWith('route-contract'))
+
+  it('reports a bind key the route path does not declare', async () => {
+    const report = await withWorkspace({ 'routes/web.ts': ROUTES_WITH_STRAY_BIND })
+
+    const results = contracts(report)
+    expect(results).toHaveLength(1)
+    expect(results[0]?.status).toBe('fail')
+    // The joined path, not the '/:id' the call site wrote: the check reads
+    // registered definitions precisely so group prefixes are already applied.
+    expect(results[0]?.message).toContain('/posts/:id')
+  })
+
+  it('does not run under --arch', async () => {
+    const report = await withWorkspace({ 'routes/web.ts': ROUTES_WITH_STRAY_BIND }, { arch: true })
+
+    expect(contracts(report)).toEqual([])
+  })
+})

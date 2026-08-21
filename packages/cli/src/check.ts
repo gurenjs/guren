@@ -27,6 +27,15 @@ import {
 import { checkConsoleCommandRegistration } from './console-check'
 import { checkRoutePathParams, discoverRoutePathFiles } from './route-path-check'
 import { affectsRouteWiring, checkRouteRegistrarWiring } from './routes-check'
+import { checkRouteContracts } from './route-contract-check'
+
+/**
+ * Any file that could hold a route's params schema — which is any importable
+ * source file, since a schema is usually imported into `routes/` from
+ * somewhere else. Stated as the honest input set rather than an allow-list of
+ * conventional directories, the way the modules spec view declares its own.
+ */
+const SOURCE_FILE_PATTERN = /\.(ts|tsx|mts|js|jsx|mjs)$/
 import { checkSchemaTimestamps } from './schema-check'
 import { parseSchemaTables, schemaPathFor, type SchemaTable } from './schema-parser'
 import { ParseCache } from './parse-cache'
@@ -266,6 +275,30 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
       // paying for a scan of routes/ and every module.
       const routePathFiles = filterChanged(await discoverRoutePathFiles(cwd, options.routesFile))
       checks.push(...(await checkRoutePathParams({ cwd, cache, files: routePathFiles })))
+    }
+
+    // 7.7. Check each route's `params` schema keys and `bind` keys against the
+    // parameters its path declares. Runs on loaded definitions, not the AST:
+    // the registered path is the joined one (group prefixes, resource
+    // expansions), and a params schema is usually imported from elsewhere, so
+    // its keys are not in the routes file to read.
+    //
+    // Deliberately outside 7.5's `routesChanged` gate: a params schema can be
+    // declared in any source file, so every file pattern narrower than "all
+    // sources" would be a guess that reads as coverage. Under --changed it
+    // gates on exactly that — the same honest input set the modules spec view
+    // declares — which still skips a docs- or lang-only run, the case where
+    // this would otherwise import the whole app for nothing. The edit-hook
+    // fast path is --arch, which skips this suite entirely.
+    //
+    // In an app with docs/spec/, check 10 loads the same route graph for the
+    // screens view. Accepted rather than threaded through a SpecViewDescriptor
+    // signature change: whichever runs first pays the module evaluation, and
+    // the second call re-runs only the registrar (`load-routes.ts` documents
+    // why nothing is re-evaluated).
+    const sourceChanged = !changedFiles || [...changedFiles].some((file) => SOURCE_FILE_PATTERN.test(file))
+    if (sourceChanged) {
+      checks.push(...(await checkRouteContracts({ cwd, routesFile: options.routesFile })))
     }
 
     // 8. Check Postgres timestamp columns carry a time zone. Content-activated
