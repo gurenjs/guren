@@ -16,31 +16,13 @@ import {
   MemoryStorageDriver,
   StorageManager,
   ValidationException,
-  type AttachmentVariantRecord,
   type ConfigureAttachmentsOptions,
   type ImageProcessor,
 } from '../src/index'
 import { sanitizeFilename, setActiveAttachmentEngine } from '../src/attachments/engine'
 import { ulid } from '../src/attachments/ulid'
+import { ATTACHMENTS_DDL, attachmentsTable } from './attachments-table'
 import { isoBmffHeader, PNG_1X1, pngWithDeclaredDimensions } from './image-sniff.test'
-
-const attachmentsTable = sqliteTable('attachments', {
-  id: text('id').primaryKey(),
-  attachableType: text('attachable_type').notNull(),
-  attachableId: text('attachable_id').notNull(),
-  collection: text('collection').notNull().default('default'),
-  disk: text('disk').notNull(),
-  path: text('path').notNull(),
-  name: text('name').notNull(),
-  contentType: text('content_type').notNull(),
-  size: integer('size').notNull(),
-  width: integer('width'),
-  height: integer('height'),
-  variants: text('variants', { mode: 'json' }).$type<Record<string, AttachmentVariantRecord>>(),
-  placeholder: text('placeholder'),
-  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
-  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
-})
 
 const posts = sqliteTable('posts', {
   id: integer('id').primaryKey(),
@@ -107,23 +89,7 @@ describe('attachments', () => {
   beforeEach(() => {
     sqlite = new Database(':memory:')
     sqlite.exec(`
-      CREATE TABLE attachments (
-        id text primary key,
-        attachable_type text not null,
-        attachable_id text not null,
-        collection text not null default 'default',
-        disk text not null,
-        path text not null,
-        name text not null,
-        content_type text not null,
-        size integer not null,
-        width integer,
-        height integer,
-        variants text,
-        placeholder text,
-        created_at integer not null,
-        updated_at integer not null
-      );
+      ${ATTACHMENTS_DDL}
       CREATE TABLE posts (id integer primary key, title text not null);
     `)
     DrizzleAdapter.configure(drizzle({ client: sqlite }) as never)
@@ -298,7 +264,7 @@ describe('attachments', () => {
       // must never leave the record attachment-less). A crash in that window
       // leaves two rows — reads must prefer the newer one, not the stale one.
       const { Attachment } = configure()
-      const stale = await Post.attach(1, 'cover', PNG_1X1, { name: 'stale.png' })
+      await Post.attach(1, 'cover', PNG_1X1, { name: 'stale.png' })
       const newerId = ulid()
       await Attachment.forceCreate({
         id: newerId,
@@ -321,7 +287,6 @@ describe('attachments', () => {
       const [loaded] = await Post.withAttachments([{ id: 1 }], ['cover'])
       expect(loaded!.cover?.name).toBe('fresh.png')
       expect(await Post.attachmentUrl(1, 'cover')).toContain('fresh.png')
-      void stale
     })
 
     test('should sanitize traversal-shaped filenames', async () => {

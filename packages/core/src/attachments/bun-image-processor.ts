@@ -73,18 +73,20 @@ class BunImageProcessor implements ImageProcessor {
       image.resize(width, spec.height, { fit })
     }
 
+    const encodeOptions = spec.quality != null ? { quality: spec.quality } : undefined
     switch (spec.format) {
       case 'jpeg':
-        image.jpeg(spec.quality != null ? { quality: spec.quality } : undefined)
+        image.jpeg(encodeOptions)
         break
       case 'png':
+        // PNG is lossless: `quality` has no meaning and `png()` takes no options.
         image.png()
         break
       case 'webp':
-        image.webp(spec.quality != null ? { quality: spec.quality } : undefined)
+        image.webp(encodeOptions)
         break
       case 'avif':
-        image.avif(spec.quality != null ? { quality: spec.quality } : undefined)
+        image.avif(encodeOptions)
         break
       case undefined:
         break

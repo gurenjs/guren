@@ -142,78 +142,52 @@ export function Attachable<
   declaration: TDecl & CollisionFreeDeclaration<TBase, TDecl>,
 ): TBase & AttachableStatic<TBase, TDecl> {
   const AttachableModel = class extends (Base as typeof Model) {} as unknown as TBase &
-    AttachableStatic<TBase, TDecl> & { attachments: TDecl }
-
-  AttachableModel.attachments = declaration
+    AttachableStatic<TBase, TDecl>
 
   const decl = declaration as unknown as AttachmentsDeclaration
 
-  ;(AttachableModel as { attach: unknown }).attach = function (
-    this: typeof Model,
-    recordId: AttachableRecordId,
-    collection: string,
-    source: AttachmentSource,
-    options?: AttachOptions,
-  ) {
-    return resolveAttachmentEngine(`${this.name}.attach()`).attach(
-      this,
-      decl,
-      recordId,
-      collection,
-      source,
-      options,
-    )
-  }
+  // Assigned untyped: the statics are declared by `AttachableStatic` with
+  // generics the runtime bodies cannot restate. `this` is the model class the
+  // static was called on, so subclasses report their own name in errors.
+  Object.assign(AttachableModel, {
+    attachments: declaration,
 
-  ;(AttachableModel as { detach: unknown }).detach = function (
-    this: typeof Model,
-    recordId: AttachableRecordId,
-    collection: string,
-    attachmentId?: string,
-  ) {
-    return resolveAttachmentEngine(`${this.name}.detach()`).detach(
-      this,
-      decl,
-      recordId,
-      collection,
-      attachmentId,
-    )
-  }
+    attach(
+      this: typeof Model,
+      recordId: AttachableRecordId,
+      collection: string,
+      source: AttachmentSource,
+      options?: AttachOptions,
+    ) {
+      const engine = resolveAttachmentEngine(`${this.name}.attach()`)
+      return engine.attach(this, decl, recordId, collection, source, options)
+    },
 
-  ;(AttachableModel as { withAttachments: unknown }).withAttachments = function (
-    this: typeof Model,
-    records: readonly PlainObject[],
-    names: readonly string[],
-  ) {
-    return resolveAttachmentEngine(`${this.name}.withAttachments()`).withAttachments(
-      this,
-      decl,
-      records,
-      names,
-    )
-  }
+    detach(this: typeof Model, recordId: AttachableRecordId, collection: string, attachmentId?: string) {
+      const engine = resolveAttachmentEngine(`${this.name}.detach()`)
+      return engine.detach(this, decl, recordId, collection, attachmentId)
+    },
 
-  ;(AttachableModel as { attachmentUrl: unknown }).attachmentUrl = function (
-    this: typeof Model,
-    record: PlainObject | AttachableRecordId,
-    collection: string,
-    options?: { variant?: string },
-  ) {
-    return resolveAttachmentEngine(`${this.name}.attachmentUrl()`).attachmentUrl(
-      this,
-      decl,
-      record,
-      collection,
-      options,
-    )
-  }
+    withAttachments(this: typeof Model, records: readonly PlainObject[], names: readonly string[]) {
+      const engine = resolveAttachmentEngine(`${this.name}.withAttachments()`)
+      return engine.withAttachments(this, decl, records, names)
+    },
 
-  ;(AttachableModel as { purgeAttachments: unknown }).purgeAttachments = function (
-    this: typeof Model,
-    recordId: AttachableRecordId,
-  ) {
-    return resolveAttachmentEngine(`${this.name}.purgeAttachments()`).purgeAttachments(this, recordId)
-  }
+    attachmentUrl(
+      this: typeof Model,
+      record: PlainObject | AttachableRecordId,
+      collection: string,
+      options?: { variant?: string },
+    ) {
+      const engine = resolveAttachmentEngine(`${this.name}.attachmentUrl()`)
+      return engine.attachmentUrl(this, decl, record, collection, options)
+    },
+
+    purgeAttachments(this: typeof Model, recordId: AttachableRecordId) {
+      const engine = resolveAttachmentEngine(`${this.name}.purgeAttachments()`)
+      return engine.purgeAttachments(this, recordId)
+    },
+  })
 
   return AttachableModel
 }

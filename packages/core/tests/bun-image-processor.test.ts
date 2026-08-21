@@ -9,11 +9,11 @@ import {
   DrizzleAdapter,
   hasOneAttached,
   StorageManager,
-  type AttachmentVariantRecord,
 } from '../src/index'
 import { resolveDefaultImageProcessor } from '../src/attachments/bun-image-processor'
 import { setActiveAttachmentEngine } from '../src/attachments/engine'
 import { sniffImage } from '../src/attachments/image-sniff'
+import { ATTACHMENTS_DDL, attachmentsTable } from './attachments-table'
 import { PNG_1X1 } from './image-sniff.test'
 
 /**
@@ -67,24 +67,6 @@ describeBunImage('BunImageProcessor', () => {
   })
 })
 
-const attachmentsTable = sqliteTable('attachments', {
-  id: text('id').primaryKey(),
-  attachableType: text('attachable_type').notNull(),
-  attachableId: text('attachable_id').notNull(),
-  collection: text('collection').notNull().default('default'),
-  disk: text('disk').notNull(),
-  path: text('path').notNull(),
-  name: text('name').notNull(),
-  contentType: text('content_type').notNull(),
-  size: integer('size').notNull(),
-  width: integer('width'),
-  height: integer('height'),
-  variants: text('variants', { mode: 'json' }).$type<Record<string, AttachmentVariantRecord>>(),
-  placeholder: text('placeholder'),
-  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
-  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
-})
-
 const photos = sqliteTable('photos', {
   id: integer('id').primaryKey(),
   title: text('title').notNull(),
@@ -100,25 +82,7 @@ describeBunImage('attachments end-to-end with the default processor', () => {
 
   beforeEach(() => {
     sqlite = new Database(':memory:')
-    sqlite.exec(`
-      CREATE TABLE attachments (
-        id text primary key,
-        attachable_type text not null,
-        attachable_id text not null,
-        collection text not null default 'default',
-        disk text not null,
-        path text not null,
-        name text not null,
-        content_type text not null,
-        size integer not null,
-        width integer,
-        height integer,
-        variants text,
-        placeholder text,
-        created_at integer not null,
-        updated_at integer not null
-      );
-    `)
+    sqlite.exec(ATTACHMENTS_DDL)
     DrizzleAdapter.configure(drizzle({ client: sqlite }) as never)
     storage = new StorageManager({
       default: 'media',

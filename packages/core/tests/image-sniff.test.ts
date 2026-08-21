@@ -18,7 +18,7 @@ export function pngWithDeclaredDimensions(width: number, height: number) {
   return bytes
 }
 
-export function jpegHeader(width: number, height: number) {
+function jpegHeader(width: number, height: number) {
   // SOI, APP0 (JFIF), SOF0 carrying the dimensions.
   return new Uint8Array([
     0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00,
@@ -28,7 +28,7 @@ export function jpegHeader(width: number, height: number) {
   ])
 }
 
-export function gifHeader(width: number, height: number) {
+function gifHeader(width: number, height: number) {
   const bytes = new Uint8Array(13)
   bytes.set([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]) // GIF89a
   bytes[6] = width & 0xff
@@ -42,7 +42,7 @@ function fourCC(value: string): number[] {
   return [...value].map((c) => c.charCodeAt(0))
 }
 
-export function webpLosslessHeader(width: number, height: number) {
+function webpLosslessHeader(width: number, height: number) {
   const w = width - 1
   const h = height - 1
   const b0 = w & 0xff

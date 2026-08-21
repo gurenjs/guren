@@ -231,17 +231,7 @@ export class AttachmentEngine {
     names: readonly string[],
   ): Promise<PlainObject[]> {
     for (const name of names) this.specFor(model, declaration, name)
-    const ids = records.map((record) => String(record.id))
-    const rows =
-      ids.length === 0 || names.length === 0
-        ? []
-        : sortById(
-            (await this.model.where({
-              attachableType: model.name,
-              attachableId: ids,
-              collection: [...names],
-            })) as PlainObject[],
-          )
+    const rows = await this.rowsForPage(model, records, names)
 
     const dataByRecord = new Map<string, Map<string, AttachmentData[]>>()
     for (const raw of rows) {
@@ -250,9 +240,15 @@ export class AttachmentEngine {
       if (!spec) continue
       const data = await this.toData(row, spec)
       let byCollection = dataByRecord.get(row.attachableId)
-      if (!byCollection) dataByRecord.set(row.attachableId, (byCollection = new Map()))
+      if (!byCollection) {
+        byCollection = new Map()
+        dataByRecord.set(row.attachableId, byCollection)
+      }
       let list = byCollection.get(row.collection)
-      if (!list) byCollection.set(row.collection, (list = []))
+      if (!list) {
+        list = []
+        byCollection.set(row.collection, list)
+      }
       list.push(data)
     }
 
@@ -380,15 +376,16 @@ export class AttachmentEngine {
     // HEIC is rejected by signature alone: decoding it is an OS-codec
     // property (works on a macOS dev machine, fails on Linux production),
     // and the default must not let that skew pass silently.
-    const heicPolicy = spec.accepts?.heic ?? 'reject'
-    if (sniffed.format === 'heic' && heicPolicy === 'reject') {
-      throw new HttpException(
-        415,
-        "HEIC/HEIF uploads are not accepted. Declare accepts: { heic: 'convert' } on the collection to convert them where the runtime supports it.",
-      )
-    }
-    if (sniffed.format === 'heic' && !this.processor) {
-      throw new HttpException(415, 'HEIC/HEIF conversion is not available on this runtime.')
+    if (sniffed.format === 'heic') {
+      if ((spec.accepts?.heic ?? 'reject') === 'reject') {
+        throw new HttpException(
+          415,
+          "HEIC/HEIF uploads are not accepted. Declare accepts: { heic: 'convert' } on the collection to convert them where the runtime supports it.",
+        )
+      }
+      if (!this.processor) {
+        throw new HttpException(415, 'HEIC/HEIF conversion is not available on this runtime.')
+      }
     }
 
     // Gate 2: header-declared dimensions, before any pixel buffer exists.
@@ -502,6 +499,26 @@ export class AttachmentEngine {
       }
     }
     return variants
+  }
+
+  /**
+   * The single indexed query behind `withAttachments()`. An empty `records`
+   * or `names` short-circuits: either would send an empty `IN ()` list to the
+   * adapter rather than matching nothing.
+   */
+  private async rowsForPage(
+    model: typeof Model,
+    records: readonly PlainObject[],
+    names: readonly string[],
+  ): Promise<PlainObject[]> {
+    const ids = records.map((record) => String(record.id))
+    if (ids.length === 0 || names.length === 0) return []
+    const rows = (await this.model.where({
+      attachableType: model.name,
+      attachableId: ids,
+      collection: [...names],
+    })) as PlainObject[]
+    return sortById(rows)
   }
 
   private async rowsFor(
@@ -651,7 +668,6 @@ async function normalizeSource(source: AttachmentSource, nameOverride?: string):
  */
 export function sanitizeFilename(name: string): string {
   const base = name.split(/[/\\]/).pop() ?? ''
-  // eslint-disable-next-line no-control-regex
   const cleaned = base.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 200)
   if (cleaned === '' || /^\.+$/.test(cleaned)) return 'file'
   return cleaned
@@ -675,6 +691,8 @@ function sortById(rows: PlainObject[]): PlainObject[] {
   return [...rows].sort((a, b) => {
     const left = String(a.id)
     const right = String(b.id)
-    return left < right ? -1 : left > right ? 1 : 0
+    if (left < right) return -1
+    if (left > right) return 1
+    return 0
   })
 }
