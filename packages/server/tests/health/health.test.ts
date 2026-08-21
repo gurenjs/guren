@@ -590,8 +590,11 @@ describe('StorageCheck', () => {
 // ============================================================
 
 describe('MemoryCheck', () => {
+  // Both thresholds pinned: the defaults (512/1024) compare against this test
+  // process's own heap, which crosses 1 GB mid-suite under `--isolate` on a
+  // single process — the unhealthy branch would fire and flip the verdict.
   it('should return healthy when memory is below threshold', async () => {
-    const check = new MemoryCheck({ thresholdMb: 10000 })
+    const check = new MemoryCheck({ thresholdMb: 10000, criticalThresholdMb: 20000 })
     const result = await check.check()
 
     expect(result.status).toBe('healthy')
@@ -601,7 +604,7 @@ describe('MemoryCheck', () => {
   })
 
   it('should return degraded when memory exceeds threshold', async () => {
-    const check = new MemoryCheck({ thresholdMb: 0 })
+    const check = new MemoryCheck({ thresholdMb: 0, criticalThresholdMb: 20000 })
     const result = await check.check()
 
     expect(result.status).toBe('degraded')
