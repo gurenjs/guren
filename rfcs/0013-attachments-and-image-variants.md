@@ -540,6 +540,31 @@ can migrate incrementally — the old column and an attachment row can
 coexist until the app switches its reads (bulk adoption of existing
 objects into attachments is deferred scope, see §6 "bytes only").
 
+## Follow-ups (deferred scope, in intended order)
+
+Deferring is sequencing, not abandonment. Each item below revives a
+layer RFC 0010 designed, as its own RFC, revalidated against this RFC's
+shipped schema:
+
+1. **Signed delivery route** (revives RFC 0010 §3) — the first planned
+   follow-up, because it closes v1's one real capability gap: private
+   attachments on `local` and on R2 without `presign` (§7). The v1
+   schema is deliberately sufficient for it already: the row carries
+   `id`, `disk`, and `path`, so the route is "verify signature → load
+   row → stream from disk", and existing attachments become
+   private-capable **with no schema migration** — only the URL that
+   `attachmentService.url()` hands out changes. The framework's unused
+   `signUrl`/`verifySignedUrl` machinery (RFC 0010's finding) is still
+   the intended signer. It is split out because it is the
+   security-review-heavy surface: signature scheme, inline/attachment
+   allowlists, `Content-Type` hardening, streaming.
+2. **Direct upload** (revives RFC 0010 §4) — browser-to-bucket presigned
+   PUT where the disk supports it; depends on the signed-id shape the
+   delivery route introduces.
+3. **Blob deduplication** (RFC 0010's two-table split) — the only
+   follow-up that needs a migration; revisit when a real workload wants
+   one upload shared across records.
+
 ## Open Questions
 
 1. **HEIC conversion default target.** When `accepts: { heic: 'convert' }`
