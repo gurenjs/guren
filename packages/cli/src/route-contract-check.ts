@@ -5,8 +5,8 @@ import {
   isZod3Schema,
   objectShape,
   pipeSide,
-  PRESENCE_WRAPPERS,
-  TRANSPARENT_WRAPPERS,
+  pipeSides,
+  SINGLE_CHILD_WRAPPERS,
   typeOf,
   ZOD3_UNSUPPORTED_MESSAGE,
   type ZodSchemaLike,
@@ -14,7 +14,6 @@ import {
 import { check, type CheckResult } from './check-result'
 import { fileExists } from './discovery'
 import { DEFAULT_ROUTES_FILE, loadRouteDefinitions } from './load-routes'
-import { isOptional } from './schema-type-extractor'
 import { extractPathParamNames } from './utils'
 
 export interface RouteContractCheckOptions {
@@ -22,55 +21,102 @@ export interface RouteContractCheckOptions {
   /** Routes entry file, POSIX-relative to `cwd`. Defaults to `routes/web.ts`. */
   routesFile?: string
   /**
-   * Route definitions already loaded by the caller. Supplied so a full
-   * `guren check` evaluates the route graph once instead of once per suite;
-   * omitted, this loads them itself.
+   * Definitions to check instead of loading them. A test seam, not a
+   * shared-load path: the one production caller (`runCheck`) deliberately does
+   * not pass it, because a second `loadRouteDefinitions()` in the same process
+   * re-runs only the registrar — the module graph is already evaluated and is
+   * never re-evaluated (see `load-routes.ts`).
    */
   definitions?: RouteDefinition[]
 }
 
 /**
- * How deep {@link objectNode} follows wrappers before giving up. A params
- * schema is a flat object under at most a couple of wrappers, so any depth
- * beyond this is a cycle (`z.lazy` reads its inner schema from `_def.getter`,
- * which {@link innerSchema} cannot see, but nothing rules out a future node
- * shape that loops) rather than a schema worth reading.
+ * The schema a wrapper wraps, on the side a *request* carries. Membership
+ * comes from `SINGLE_CHILD_WRAPPERS` rather than a list of this file's own:
+ * a wrapper name known to one walker and not another silently changes an
+ * answer, which is the whole reason that set lives in `zod-compat`.
  */
-const MAX_UNWRAP_DEPTH = 16
-
-/**
- * The `object` node inside a params schema, looking through the wrappers that
- * do not change what keys exist. `.pipe()` is read on its input side, because
- * a path parameter's presence is decided by what the *request* carries.
- *
- * Returns undefined for anything that is not ultimately an object — a union of
- * objects, say. That is a schema this check cannot read, not a schema that
- * passes: {@link readParamKeys} turns it into a reported skip.
- */
-function objectNode(schema: ZodSchemaLike, depth = 0): ZodSchemaLike | undefined {
-  if (depth > MAX_UNWRAP_DEPTH) return undefined
-
-  const type = typeOf(schema)
-  if (type === 'object') return schema
-
+function unwrapSingleChild(schema: ZodSchemaLike): ZodSchemaLike | undefined {
   const def = schema._def ?? {}
-
-  if (TRANSPARENT_WRAPPERS.has(type) || PRESENCE_WRAPPERS.has(type)) {
-    const inner = innerSchema(def)
-    return inner ? objectNode(inner, depth + 1) : undefined
-  }
+  const type = typeOf(schema)
 
   if (type === 'pipe') {
-    const side = pipeSide(def, 'input')
-    return side ? objectNode(side, depth + 1) : undefined
+    return pipeSide(def, 'input')
   }
 
-  return undefined
+  return SINGLE_CHILD_WRAPPERS.has(type) ? innerSchema(def) : undefined
+}
+
+/**
+ * The `object` node inside a params schema, looking through every wrapper
+ * that does not change which keys exist.
+ *
+ * Returns undefined for anything that is not ultimately an object — a union
+ * of objects, say. That is a schema this check cannot read, not a schema that
+ * passes: {@link readParamKeys} turns it into a reported skip.
+ */
+function objectNode(schema: ZodSchemaLike): ZodSchemaLike | undefined {
+  if (typeOf(schema) === 'object') {
+    return schema
+  }
+
+  const nested = unwrapSingleChild(schema)
+  return nested ? objectNode(nested) : undefined
+}
+
+/**
+ * Whether a request may leave this key out without the schema rejecting it.
+ *
+ * A third copy of a question two walkers already answer, and deliberately so:
+ * `zod-compat` hosts the wrapper vocabulary but refuses to host this, because
+ * each caller is asking something slightly different. The CLI's type renderer
+ * reads only the side of a `.pipe()` it renders, which is right for naming a
+ * type and wrong here — it calls `z.string().optional().pipe(z.string())`
+ * omissible, when in fact the second stage rejects a missing value and every
+ * request without the key gets a 400. This check errs the other way on
+ * purpose: an approximation that over-reports severity costs a reader one
+ * look, and one that under-reports files a real 400 as advice.
+ */
+function permitsOmission(schema: ZodSchemaLike): boolean {
+  const def = schema._def ?? {}
+
+  switch (typeOf(schema)) {
+    case 'optional':
+      return true
+
+    // Both fill the missing value in, so nothing rejects the request.
+    // `.default()` is the case worth naming: the controller reads a value
+    // that has nothing to do with the URL.
+    case 'default':
+    case 'prefault':
+    // Swallows any failure, a missing value included.
+    case 'catch':
+      return true
+
+    // Re-requires a key an inner wrapper made omissible, so the walk stops
+    // here rather than reading what it wraps.
+    case 'nonoptional':
+      return false
+
+    // A pipeline runs both stages, so the key may be omitted only if neither
+    // rejects a missing value. Still an approximation in the safe direction:
+    // a transforming stage can supply a value the next stage accepts, which
+    // this reports as required.
+    case 'pipe': {
+      const { from, to } = pipeSides(def)
+      if (!from) return false
+      return to ? permitsOmission(from) && permitsOmission(to) : permitsOmission(from)
+    }
+
+    default: {
+      const nested = unwrapSingleChild(schema)
+      return nested ? permitsOmission(nested) : false
+    }
+  }
 }
 
 interface ParamKey {
   name: string
-  /** Whether a request may leave this key out without the schema rejecting it. */
   omissible: boolean
 }
 
@@ -100,6 +146,12 @@ function readParamKeys(schema: unknown): ParamKeysResult {
     return { unreadable: `the params schema is a '${typeOf(zodSchema)}' node, not an object` }
   }
 
+  // Re-checked here because a wrapper can hide a v3 node from the entry gate:
+  // `z.optional(v3Object)` is a v4 wrapper around a v3 object.
+  if (isZod3Schema(node)) {
+    return { unreadable: ZOD3_UNSUPPORTED_MESSAGE }
+  }
+
   const shape = objectShape(node)
   if (!shape) {
     return { unreadable: 'the params schema exposes no property shape' }
@@ -108,19 +160,19 @@ function readParamKeys(schema: unknown): ParamKeysResult {
   return {
     keys: Object.entries(shape).map(([name, value]) => ({
       name,
-      // 'input' because a path parameter that the path never supplies is a key
-      // missing from what the request carries, which is the input side.
-      omissible: isOptional(value, 'input'),
+      omissible: permitsOmission(value),
     })),
   }
 }
 
-function formatList(names: string[]): string {
-  return names.map((name) => `'${name}'`).join(', ')
+function formatList(names: Iterable<string>): string {
+  return [...names].map((name) => `'${name}'`).join(', ')
 }
 
-function routeLabel(route: RouteDefinition): string {
-  return `${route.method} ${route.path}`
+/** The shared tail of every finding: rename the declaration, or widen the path. */
+function renameSuggestion(what: string, pathParams: Set<string>): string {
+  const target = pathParams.size > 0 ? formatList(pathParams) : 'the path declares none'
+  return `Rename the ${what} to a parameter in the path (${target}), or add the parameter to the path.`
 }
 
 /**
@@ -134,8 +186,9 @@ function routeLabel(route: RouteDefinition): string {
  */
 function checkRoute(route: RouteDefinition): CheckResult[] {
   const pathParams = new Set(extractPathParamNames(route.path))
-  const label = routeLabel(route)
   const results: CheckResult[] = []
+  const undeclared = (names: string[]): string =>
+    `${formatList(names)}, which '${route.path}' does not declare. `
 
   // Router-level `bind(param, Model)` entries are filtered by path parameter
   // before they reach a definition, so anything left over here came from the
@@ -149,14 +202,12 @@ function checkRoute(route: RouteDefinition): CheckResult[] {
     results.push(
       check(
         `route-contract-bind:${route.method}:${route.path}`,
-        `${label} model binding`,
+        `${route.method} ${route.path} model binding`,
         'fail',
-        `bind names ${formatList(strayBindings)}, which '${route.path}' does not declare. `
+        `bind names ${undeclared(strayBindings)}`
         + 'A binding for a parameter the path does not carry is skipped at request time, and the '
         + 'controller\'s this.model() then throws "No model binding found".',
-        `Rename the bind key to a parameter in the path (${
-          pathParams.size > 0 ? formatList([...pathParams]) : 'the path declares none'
-        }), or add the parameter to the path.`,
+        renameSuggestion('bind key', pathParams),
       ),
     )
   }
@@ -164,12 +215,13 @@ function checkRoute(route: RouteDefinition): CheckResult[] {
   const paramsSchema = route.schemas?.params
   if (!paramsSchema) return results
 
+  const title = `${route.method} ${route.path} params schema`
   const parsed = readParamKeys(paramsSchema)
   if ('unreadable' in parsed) {
     results.push(
       check(
         `route-contract-params:${route.method}:${route.path}`,
-        `${label} params schema`,
+        title,
         'warn',
         `Skipped: ${parsed.unreadable}.`,
         'Declare route params with a z.object() so the keys can be compared against the path.',
@@ -178,26 +230,22 @@ function checkRoute(route: RouteDefinition): CheckResult[] {
     return results
   }
 
-  const stray = parsed.keys.filter((key) => !pathParams.has(key.name))
-  if (stray.length === 0) return results
-
   // Split by severity rather than reported together: a required key is a
   // guaranteed 400 on every request, while an omissible one never fails at
-  // all — and `.default()`, the worst of the two, quietly hands the
+  // all — and `.default()`, the worse of the two, quietly hands the
   // controller a value that has nothing to do with the URL.
+  const stray = parsed.keys.filter((key) => !pathParams.has(key.name))
+  const suggestion = renameSuggestion('schema key', pathParams)
   const required = stray.filter((key) => !key.omissible).map((key) => key.name)
   const omissible = stray.filter((key) => key.omissible).map((key) => key.name)
-  const suggestion = `Rename the schema key to a parameter in the path (${
-    pathParams.size > 0 ? formatList([...pathParams]) : 'the path declares none'
-  }), or add the parameter to the path.`
 
   if (required.length > 0) {
     results.push(
       check(
         `route-contract-params:${route.method}:${route.path}`,
-        `${label} params schema`,
+        title,
         'fail',
-        `The params schema requires ${formatList(required)}, which '${route.path}' does not declare. `
+        `The params schema requires ${undeclared(required)}`
         + 'The key is never present, so every request to this route fails validation with 400.',
         suggestion,
       ),
@@ -208,9 +256,9 @@ function checkRoute(route: RouteDefinition): CheckResult[] {
     results.push(
       check(
         `route-contract-params-optional:${route.method}:${route.path}`,
-        `${label} params schema`,
+        title,
         'warn',
-        `The params schema declares ${formatList(omissible)}, which '${route.path}' does not declare. `
+        `The params schema declares ${undeclared(omissible)}`
         + 'The key is optional, so nothing fails at request time: the controller reads undefined, or the '
         + 'schema default, in place of a value from the URL.',
         suggestion,
@@ -233,8 +281,7 @@ function checkRoute(route: RouteDefinition): CheckResult[] {
  * to read.
  *
  * Reports nothing when every declaration matches except a single summary
- * pass, which is what distinguishes a clean run from one that never
- * happened.
+ * pass, which is what distinguishes a clean run from one that never happened.
  */
 export async function checkRouteContracts(options: RouteContractCheckOptions): Promise<CheckResult[]> {
   const { cwd, routesFile = DEFAULT_ROUTES_FILE } = options
@@ -255,7 +302,7 @@ export async function checkRouteContracts(options: RouteContractCheckOptions): P
           'Route contracts',
           'warn',
           `Skipped: the route graph failed to load: ${message}`,
-          `Fix the error, then run: bunx guren check`,
+          'Fix the error, then run: bunx guren check',
           routesFile,
         ),
       ]

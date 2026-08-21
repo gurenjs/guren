@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
-import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { z } from 'zod'
 import { Router, type RouteDefinition } from '@guren/core'
 import { checkRouteContracts } from '../src/route-contract-check'
+import { writeWorkspaceFiles } from './helpers'
 
 const controller = () => new Response('ok')
 
@@ -81,6 +82,23 @@ describe('checkRouteContracts', () => {
       expect(results.every((r) => r.status === 'pass')).toBe(true)
     })
 
+    // A pipeline runs both stages: the first accepts a missing value, the
+    // second rejects it, so the request really does 400. Reading only one
+    // side of the pipe — which the type renderer's presence walker does,
+    // because it is answering a different question — would file this as
+    // advice.
+    it('treats a piped key its second stage rejects as required', async () => {
+      const results = await run([
+        route({
+          path: '/posts/:id',
+          schemas: { params: z.object({ postId: z.string().optional().pipe(z.string()) }) },
+        }),
+      ])
+
+      expect(results).toHaveLength(1)
+      expect(results[0]?.status).toBe('fail')
+    })
+
     it('looks through wrappers to find the object', async () => {
       const results = await run([
         route({
@@ -90,6 +108,20 @@ describe('checkRouteContracts', () => {
       ])
 
       expect(results[0]?.status).toBe('fail')
+    })
+
+    // `nullable` is in the shared wrapper vocabulary, so this walk must look
+    // through it for the same reason every sibling walker does: two walkers
+    // disagreeing about membership is how one silently reports a different
+    // set of keys than the other.
+    it('looks through a nullable wrapper rather than calling it unreadable', async () => {
+      const results = await run([
+        route({ path: '/posts/:id', schemas: { params: z.object({ postId: z.string() }).nullable() } }),
+      ])
+
+      expect(results).toHaveLength(1)
+      expect(results[0]?.status).toBe('fail')
+      expect(results[0]?.message).toContain("'postId'")
     })
   })
 
@@ -162,7 +194,7 @@ describe('checkRouteContracts', () => {
         }, controller)
       })
 
-      const results = await checkRouteContracts({ cwd: '/nonexistent', definitions: router.definitions() })
+      const results = await run(router.definitions())
 
       expect(results.every((r) => r.status === 'pass')).toBe(true)
     })
@@ -171,7 +203,7 @@ describe('checkRouteContracts', () => {
       const router = new Router()
       router.get('/posts/:id', { bind: { slug: Post } }, controller)
 
-      const results = await checkRouteContracts({ cwd: '/nonexistent', definitions: router.definitions() })
+      const results = await run(router.definitions())
 
       expect(results).toHaveLength(1)
       expect(results[0]?.status).toBe('fail')
@@ -184,7 +216,7 @@ describe('checkRouteContracts', () => {
       router.get('/posts/:id', controller)
       router.get('/health', controller)
 
-      const results = await checkRouteContracts({ cwd: '/nonexistent', definitions: router.definitions() })
+      const results = await run(router.definitions())
 
       expect(results.every((r) => r.status === 'pass')).toBe(true)
     })
@@ -195,7 +227,6 @@ describe('checkRouteContracts', () => {
 
     beforeEach(async () => {
       tempDir = await mkdtemp(join(tmpdir(), 'guren-route-contracts-'))
-      await mkdir(join(tempDir, 'routes'), { recursive: true })
     })
 
     afterEach(async () => {
@@ -207,7 +238,7 @@ describe('checkRouteContracts', () => {
     })
 
     it('reports a skip when the routes file throws, rather than reading as clean', async () => {
-      await writeFile(join(tempDir, 'routes/web.ts'), 'throw new Error("boom")\n')
+      await writeWorkspaceFiles(tempDir, { 'routes/web.ts': 'throw new Error("boom")\n' })
 
       const results = await checkRouteContracts({ cwd: tempDir })
 
