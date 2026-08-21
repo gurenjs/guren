@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, readdir, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, readdir, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import process from 'node:process'
@@ -28,6 +28,82 @@ const INSTALL_MODES = ['vendored', 'packed', 'npm'] as const
 type InstallMode = (typeof INSTALL_MODES)[number]
 
 const repoRoot = resolve(import.meta.dir, '../..')
+
+// The feature blueprints a default-blueprint app gets, in the order the
+// scaffolders expect. Shared by the vendored and the npm paths so the
+// published-drift gate cannot fall behind the set this smoke otherwise claims
+// to cover: every one of these emits template code importing @guren/core, and
+// a bare scaffold contains none of it.
+//
+// --force on mail: `add auth` also scaffolds app/Providers/MailProvider.ts
+// (password reset needs a mail manager) — the mail blueprint's own, more
+// complete MailProvider (memory transport, setMailManager wiring)
+// intentionally supersedes it, so the assertions can verify its shape.
+const DEFAULT_BLUEPRINT_FEATURES: readonly (readonly string[])[] = [
+  ['auth'],
+  ['resource', 'posts'],
+  ['queue'],
+  ['mail', '--force'],
+  ['events'],
+  ['cache'],
+  ['notifications'],
+  ['storage'],
+  ['broadcasting'],
+  ['schedule'],
+]
+
+/**
+ * Run the feature blueprints through *this checkout's* CLI.
+ *
+ * Which CLI is not an implementation detail, and npm mode is where it decides
+ * whether the gate can fail at all: the app's own installed `guren` ships the
+ * published blueprints, so using it would emit published templates against
+ * published packages — consistent by construction, and a gate that can only
+ * pass. Templates from here, dependencies from the registry, is the mismatch
+ * the drift check exists to measure.
+ */
+async function addDefaultBlueprintFeatures(
+  appDir: string,
+  runtimeEnv: Record<string, string>,
+): Promise<void> {
+  for (const feature of DEFAULT_BLUEPRINT_FEATURES) {
+    await run(
+      ['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'add', ...feature],
+      appDir,
+      // The CLI runs from source while the app resolves @guren/orm from its own
+      // node_modules, so two copies legitimately coexist in *this* process. The
+      // warning describes the scaffolder, not the app under test; scoped to
+      // these calls so a genuine duplicate in the app stays loud.
+      { ...runtimeEnv, GUREN_QUIET_DUPLICATE_ORM: '1' },
+    )
+  }
+}
+
+/**
+ * A tsconfig `include` entry naming a dot-prefixed directory on its own
+ * (`".guren"`) matches no files: TypeScript expands the bare name to a
+ * wildcard, and its wildcard matcher skips dot-prefixed path segments. The app
+ * still typechecks, because every generated file something imports arrives
+ * through the import graph anyway — which is exactly what hides the dead entry.
+ * What goes unchecked is the generated files nothing imports (`data.gen.ts`,
+ * `channels.gen.ts`, `translations.gen.ts`). Nothing at runtime tells the two
+ * forms apart, so the form is pinned here.
+ */
+async function assertGeneratedDirsAreTypechecked(appDir: string): Promise<void> {
+  const include = (JSON.parse(await readFile(join(appDir, 'tsconfig.json'), 'utf8')) as {
+    include?: string[]
+  }).include ?? []
+  assert(include.length > 0, 'Scaffolded app tsconfig declares no include list.')
+  for (const entry of include) {
+    const segments = entry.split('/')
+    const named = segments[0] === '.' ? segments[1] : segments[0]
+    assert(
+      !named?.startsWith('.') || entry.includes('*'),
+      `Scaffolded app tsconfig includes "${entry}", which matches no files: ` +
+        `a bare dot-prefixed directory needs an explicit glob (e.g. "${named}/**/*").`,
+    )
+  }
+}
 
 async function run(cmd: string[], cwd: string, envOverrides?: Record<string, string>): Promise<void> {
   console.log(`\n$ (${cwd}) ${cmd.join(' ')}`)
@@ -393,39 +469,63 @@ async function assertFeatureScaffolds(appDir: string): Promise<void> {
 }
 
 /**
- * Install the scaffolded app from the registry and typecheck it.
+ * Install the scaffolded app from the registry, scaffold its features with this
+ * checkout's CLI, and typecheck the result.
  *
  * Resolving the template's own ranges is the whole point, so this fails
  * whenever a template has started using an API that exists only in this
  * repository — invisible to the other install modes and to the root
  * `typecheck`, which excludes `templates` (that now covers `config/database.ts`
  * too, shipped as per-driver sources under `templates/database/`).
+ *
+ * "Template" here means every template, not just the base scaffold. The
+ * feature blueprints in `packages/cli/src/blueprints.ts` and `make-auth.ts`
+ * emit far more `@guren/core` imports than the bare app does, and they are
+ * ordinary source in this checkout, so they drift ahead of the registry the
+ * same way. They are scaffolded with the checkout's CLI for the reason spelled
+ * out on addDefaultBlueprintFeatures().
+ *
+ * What this deliberately does not run: `bun run build` (Vite), `bun test`,
+ * `guren check`, `guren audit`. The claim being gated is "an app scaffolded
+ * from the current templates builds against what is on npm right now" — the
+ * vendored mode owns the rest, and the closing summary names every skip so a
+ * green run says what it proved.
  */
 async function runPublishedDependencyDrift(
   appDir: string,
   blueprint: string,
   runtimeEnv: Record<string, string>,
 ): Promise<void> {
-  const packageJson = JSON.parse(await readFile(join(appDir, 'package.json'), 'utf8')) as DependencyManifest
-  const gurenDependencies = Object.entries(declaredDependencies(packageJson))
-    .filter(([name]) => name.startsWith('@guren/'))
+  // The mirror of what the vendored modes assert, through the same predicate:
+  // if this mode ever degraded into one of them it would keep passing while
+  // checking nothing, so the local specs are asserted away rather than assumed
+  // absent. Re-run after scaffolding, since a blueprint is free to add a
+  // dependency and a local one would silently take the app off the registry.
+  const assertPublishedRanges = async (stage: string): Promise<[string, string][]> => {
+    const packageJson = JSON.parse(await readFile(join(appDir, 'package.json'), 'utf8')) as DependencyManifest
+    const gurenDependencies = Object.entries(declaredDependencies(packageJson))
+      .filter(([name]) => name.startsWith('@guren/'))
 
-  assert(gurenDependencies.length > 0, 'Scaffolded app declares no @guren/* dependencies to resolve from npm.')
-  for (const [name, range] of gurenDependencies) {
-    // The mirror of what the vendored modes assert, through the same predicate:
-    // if this mode ever degraded into one of them it would keep passing while
-    // checking nothing, so the local specs are asserted away rather than
-    // assumed absent.
     assert(
-      !isLocalSpecifier(range),
-      `npm install mode requires ${name} to keep its published range, got "${range}".`,
+      gurenDependencies.length > 0,
+      `Scaffolded app declares no @guren/* dependencies to resolve from npm (${stage}).`,
     )
+    for (const [name, range] of gurenDependencies) {
+      assert(
+        !isLocalSpecifier(range),
+        `npm install mode requires ${name} to keep its published range, got "${range}" (${stage}).`,
+      )
+    }
+    return gurenDependencies
   }
+
+  await assertPublishedRanges('as scaffolded')
 
   // The scaffolder already installed, but it only warns on failure — this is
   // the install whose exit code can fail the job.
   await run(['bun', 'install'], appDir, runtimeEnv)
 
+  const gurenDependencies = await assertPublishedRanges('after install')
   const resolved: string[] = []
   for (const [name, range] of gurenDependencies) {
     const installed = JSON.parse(
@@ -435,18 +535,85 @@ async function runPublishedDependencyDrift(
   }
   console.log(`\nResolved from npm:\n  ${resolved.join('\n  ')}`)
 
+  const scaffoldsFeatures = blueprint === 'default'
+  if (scaffoldsFeatures) {
+    await addDefaultBlueprintFeatures(appDir, runtimeEnv)
+    await assertPublishedRanges('after scaffolding features')
+    await run(['bun', 'install'], appDir, runtimeEnv)
+    // Reused from the vendored path rather than reinvented: these fail loudly
+    // if a blueprint stopped emitting what it claims to, which is what keeps
+    // the widened typecheck below from quietly shrinking back to a bare app.
+    await assertCanonicalScaffolds(appDir)
+    await assertFeatureScaffolds(appDir)
+  }
+
+  // Skipped for blog for the reason spelled out in its vendored branch below.
+  const runsCodegen = blueprint !== 'blog'
+
+  let checkedFiles: string[]
   try {
-    // Skipped for blog for the reason spelled out in its vendored branch below.
-    if (blueprint !== 'blog') {
+    if (runsCodegen) {
       await run(['bun', 'run', 'codegen'], appDir, runtimeEnv)
     }
-    await run(['bun', 'run', 'typecheck'], appDir, runtimeEnv)
+    checkedFiles = await typecheckApp(appDir, runtimeEnv)
   } catch (error) {
     console.error('\nThe scaffolded app does not build against the published packages listed above.')
     throw error
   }
 
-  console.log(`\nPublished dependency drift check passed (${blueprint}): ${appDir}`)
+  console.log([
+    '',
+    `Published dependency drift check passed (${blueprint}): ${appDir}`,
+    'What this run covered:',
+    `  blueprint            ${blueprint}`,
+    `  feature blueprints   ${scaffoldsFeatures
+      ? DEFAULT_BLUEPRINT_FEATURES.map((feature) => feature[0]).join(', ')
+      : `none — the ${blueprint} blueprint ships its own and adds no features`}`,
+    `  codegen              ${runsCodegen ? 'ran' : 'skipped — blog typechecks the .guren stubs it ships'}`,
+    `  typechecked          ${checkedFiles.length} app files (tsc --noEmit)`,
+    '  not covered          bun run build, bun test, guren check, guren audit — the vendored smoke owns those',
+  ].join('\n'))
+}
+
+/**
+ * Typecheck the app through its own `typecheck` script, and report which of its
+ * files tsc actually read.
+ *
+ * `--listFiles` rides along on the one compile rather than costing a second:
+ * the count is what tells a reader whether a green run proved anything, and a
+ * tsconfig that narrows — or an `include` entry that matches nothing, see
+ * assertGeneratedDirsAreTypechecked() — shrinks it visibly instead of silently.
+ * runCapture() is not reusable here because it discards stdout on failure, and
+ * stdout is where tsc writes its diagnostics.
+ */
+async function typecheckApp(appDir: string, runtimeEnv: Record<string, string>): Promise<string[]> {
+  const cmd = ['bun', 'run', 'typecheck', '--listFiles']
+  console.log(`\n$ (${appDir}) ${cmd.join(' ')}`)
+  const proc = Bun.spawn({
+    cmd,
+    cwd: appDir,
+    stdout: 'pipe',
+    stderr: 'inherit',
+    env: { ...process.env, ...runtimeEnv },
+  })
+  const output = await new Response(proc.stdout).text()
+  const exitCode = await proc.exited
+  if (exitCode !== 0) {
+    console.error(output)
+    throw new Error(`Command failed with exit code ${exitCode}: ${cmd.join(' ')}`)
+  }
+
+  const appPrefixes = [appDir, await realpath(appDir)]
+  const checkedFiles = output
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => appPrefixes.some((prefix) => line.startsWith(`${prefix}/`)))
+    .filter((line) => !line.includes('/node_modules/'))
+  assert(
+    checkedFiles.length > 0,
+    'tsc read none of the app\'s own files — the scaffolded tsconfig covers nothing.',
+  )
+  return checkedFiles
 }
 
 function resolveInstallMode(): InstallMode {
@@ -463,11 +630,13 @@ function resolveInstallMode(): InstallMode {
 async function main(): Promise<void> {
   const installMode = resolveInstallMode()
 
-  // npm mode deliberately touches no build output of this checkout — the app
-  // it scaffolds is meant to be the one a user gets from the registry.
-  if (installMode !== 'npm') {
-    await ensureBuiltPackages()
-  }
+  // Every mode needs the workspace built. What npm mode keeps off this checkout
+  // is what the *app* resolves — its @guren/* come from the registry, and
+  // runPublishedDependencyDrift() asserts that on both sides of scaffolding.
+  // The scaffolder and the `guren add` blueprints are tools that emit the
+  // templates under test, and the CLI reaches @guren/server through dist/, so
+  // building them is what lets the gate fail rather than what weakens it.
+  await ensureBuiltPackages()
 
   const blueprint = process.env.GUREN_SMOKE_BLUEPRINT ?? 'default'
   const tempRoot = await mkdtemp(join(tmpdir(), `guren-fresh-app-${blueprint}-`))
@@ -494,6 +663,7 @@ async function main(): Promise<void> {
     await run(createArgs, repoRoot, runtimeEnv)
 
     await assertCoreFirstStarter(appDir)
+    await assertGeneratedDirsAreTypechecked(appDir)
 
     if (installMode === 'npm') {
       await runPublishedDependencyDrift(appDir, blueprint, runtimeEnv)
@@ -531,21 +701,7 @@ async function main(): Promise<void> {
 
     if (blueprint === 'default') {
       // Default blueprint: add all features
-      await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'add', 'auth'], appDir, runtimeEnv)
-      await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'add', 'resource', 'posts'], appDir, runtimeEnv)
-      await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'add', 'queue'], appDir, runtimeEnv)
-      // --force: `add auth` now also scaffolds app/Providers/MailProvider.ts
-      // (password reset needs a mail manager) — the mail blueprint's own,
-      // more complete MailProvider (memory transport, setMailManager wiring)
-      // intentionally supersedes it here so the assertions below can verify
-      // its shape.
-      await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'add', 'mail', '--force'], appDir, runtimeEnv)
-      await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'add', 'events'], appDir, runtimeEnv)
-      await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'add', 'cache'], appDir, runtimeEnv)
-      await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'add', 'notifications'], appDir, runtimeEnv)
-      await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'add', 'storage'], appDir, runtimeEnv)
-      await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'add', 'broadcasting'], appDir, runtimeEnv)
-      await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'add', 'schedule'], appDir, runtimeEnv)
+      await addDefaultBlueprintFeatures(appDir, runtimeEnv)
       await assertCoreFirstStarter(appDir, { checkDependencies: false })
       await assertCanonicalScaffolds(appDir)
       await assertFeatureScaffolds(appDir)

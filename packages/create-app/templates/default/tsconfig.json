@@ -23,12 +23,19 @@
     "jsx": "react-jsx"
   },
   "include": [
-    ".guren",
-    "src",
-    "app",
-    "db",
-    "routes",
-    "resources/js",
-    "types"
+    ".guren/**/*",
+    "src/**/*",
+    "app/**/*",
+    "config/**/*",
+    "db/**/*",
+    "routes/**/*",
+    "resources/js/**/*",
+    "types/**/*",
+    "bin/**/*",
+    "tests/**/*",
+    "*.ts"
+  ],
+  "exclude": [
+    "node_modules"
   ]
 }
