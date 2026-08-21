@@ -15,6 +15,14 @@ concurrency:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    # Trial lanes report but never block a PR: the parallel runner they trial
+    # can lose a spawnSync child's exit (oven-sh/bun#34069's race, observed on
+    # this suite as a burst of exactly-at-timeout failures in the git-heavy
+    # files, roughly 1 run in 2 on macOS and far rarer here) — data worth
+    # collecting, not worth gating merges on. The flag lives on the matrix
+    # entry, not on a version literal, so promoting a trial version to primary
+    # cannot silently flip which lane gates.
+    continue-on-error: ${{ matrix.trial == true }}
     strategy:
       fail-fast: false
       matrix:
@@ -45,6 +53,7 @@ jobs:
           # `--parallel` and died on "Unknown flag".
           - bun-version: '1.4.0'
             redis: true
+            trial: true
             test-bun-flags: '-- -- --parallel --timeout 30000'
     services:
       redis:
