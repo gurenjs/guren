@@ -12,5 +12,5 @@ Browser-side bootstrap for Inertia + React, consumed by `@guren/server` dev asse
 - Prefer hooks-friendly API surface; stick to default ESM exports
 
 ## Build
-- Build with `bun run --cwd packages/inertia-client build` (tsup config in repo)
+- Build with `bun run --cwd packages/inertia-client build` (tsdown config in repo)
 - Update `package.json` if additional entry points are introduced; ensure CDN-based consumers can tree-shake

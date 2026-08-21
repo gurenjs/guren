@@ -155,7 +155,7 @@ bunx guren make:controller Invoice --module billing  # Most make:* commands acce
 ### File Organization
 - Test files: `*.test.ts` alongside source files
 - Index exports: Each package has `src/index.ts` as main entry
-- Type declarations: Generated via tsup build
+- Type declarations: Generated via tsdown build (`@guren/server` emits them with `tsc -p tsconfig.build.json`)
 
 ### Naming
 - **Classes:** PascalCase (e.g., `UserController`, `PostModel`)

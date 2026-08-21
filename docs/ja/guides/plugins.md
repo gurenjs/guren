@@ -23,8 +23,8 @@ bun init
   "name": "guren-plugin-analytics",
   "version": "0.1.0",
   "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "dist/index.mjs",
+  "types": "dist/index.d.mts",
   "gurenPlugin": {
     "compatibility": ">=1.0.0"
   },
@@ -135,7 +135,7 @@ export type { AnalyticsConfig } from './plugin'
 {
   "gurenPlugin": {
     "commands": {
-      "entry": "./dist/commands.js",
+      "entry": "./dist/commands.mjs",
       "names": ["analytics:flush"]
     }
   }
@@ -203,16 +203,16 @@ bun test src/plugin.test.ts
 
 ## ステップ6: ビルドする
 
-`tsup`を使用したビルドスクリプトを追加します:
+[`tsdown`](https://tsdown.dev)を使用したビルドスクリプトを追加します(上の`main`/`types`に合わせて`dist/index.mjs`と`dist/index.d.mts`を出力します):
 
 ```json
 {
   "scripts": {
-    "build": "tsup src/index.ts --format esm --dts",
+    "build": "tsdown src/index.ts --dts",
     "test": "bun test"
   },
   "devDependencies": {
-    "tsup": "^8.0.0"
+    "tsdown": "^0.22.0"
   }
 }
 ```

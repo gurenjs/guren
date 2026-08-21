@@ -23,8 +23,8 @@ Set up your `package.json`:
   "name": "guren-plugin-analytics",
   "version": "0.1.0",
   "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "dist/index.mjs",
+  "types": "dist/index.d.mts",
   "gurenPlugin": {
     "compatibility": ">=1.0.0"
   },
@@ -135,7 +135,7 @@ Plugins can add commands to the `guren` CLI by declaring them in the manifest:
 {
   "gurenPlugin": {
     "commands": {
-      "entry": "./dist/commands.js",
+      "entry": "./dist/commands.mjs",
       "names": ["analytics:flush"]
     }
   }
@@ -203,16 +203,16 @@ bun test src/plugin.test.ts
 
 ## Step 6: Build
 
-Add a build script using `tsup`:
+Add a build script using [`tsdown`](https://tsdown.dev) (it emits `dist/index.mjs` and `dist/index.d.mts`, matching the `main`/`types` above):
 
 ```json
 {
   "scripts": {
-    "build": "tsup src/index.ts --format esm --dts",
+    "build": "tsdown src/index.ts --dts",
     "test": "bun test"
   },
   "devDependencies": {
-    "tsup": "^8.0.0"
+    "tsdown": "^0.22.0"
   }
 }
 ```

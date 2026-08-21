@@ -1,7 +1,7 @@
 /**
  * Test-only helpers for the hot-reload registry.
  *
- * Not reachable from any tsup entry point, so it never ships — it lives beside
+ * Not reachable from any tsdown entry point, so it never ships — it lives beside
  * the code it exercises because both test files in this directory need it and
  * `@guren/server` has no shared test-support module.
  */

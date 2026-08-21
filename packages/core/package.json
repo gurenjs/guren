@@ -54,7 +54,7 @@
     "guren": "./dist/bin.js"
   },
   "scripts": {
-    "build": "tsup",
+    "build": "bun --bun tsdown",
     "dev": "bun --watch src/index.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
@@ -67,7 +67,7 @@
   "devDependencies": {
     "@types/node": "^20.14.10",
     "drizzle-orm": "1.0.0-rc.4",
-    "tsup": "^8.5.0",
+    "tsdown": "^0.22.14",
     "typescript": "^5.4.0"
   }
 }

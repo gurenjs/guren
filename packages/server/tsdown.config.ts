@@ -1,4 +1,4 @@
-import { defineConfig } from 'tsup'
+import { defineConfig } from 'tsdown'
 
 const sharedExternal = [
   'bun:sqlite',
@@ -39,15 +39,17 @@ export default defineConfig({
     'src/support/expiry.ts',
   ],
   format: ['esm'],
-  // Multiple entry points MUST share chunks: with splitting disabled each
-  // entry bundles its own copy of module-level state (job registry, mail
-  // manager global, queue driver global), so state set through one entry
-  // is invisible through another (e.g. registerJob via the root entry +
-  // Worker via ./queue never saw each other's registry).
-  splitting: true,
+  platform: 'node',
+  // Multiple entry points MUST share chunks (tsdown's default): with every
+  // entry bundling its own copy of module-level state (job registry, mail
+  // manager global, queue driver global), state set through one entry is
+  // invisible through another (e.g. registerJob via the root entry + Worker
+  // via ./queue never saw each other's registry).
+  // Declarations come from `tsc -p tsconfig.build.json` (see the build
+  // script), not from the bundler.
   dts: false,
+  fixedExtension: false,
   outDir: 'dist',
   clean: true,
-  tsconfig: 'tsconfig.json',
-  external: sharedExternal,
+  deps: { neverBundle: sharedExternal },
 })

@@ -855,7 +855,7 @@ export { createTypedBroadcaster } from './broadcasting/typed'
 export { createRedisClient } from './redis/client'
 // MCP: available via '@guren/server/mcp' subpath import.
 // Not re-exported here to avoid pulling @modelcontextprotocol/sdk
-// types into the main DTS bundle (causes OOM in tsup).
+// types into the main DTS bundle (it is not public API).
 // Docs viewer (RFC 0005): dev-only, loopback-guarded OKF bundle UI.
 // Not re-exported here for the same reason as MCP above — `Application`
 // mounts it by dynamic relative import, and nothing outside the package

@@ -1,4 +1,4 @@
-import { defineConfig } from 'tsup'
+import { defineConfig } from 'tsdown'
 
 export default defineConfig({
   entry: [
@@ -12,8 +12,9 @@ export default defineConfig({
     'src/internal/zod-compat.ts',
   ],
   format: ['esm'],
+  platform: 'node',
   dts: true,
+  fixedExtension: false,
   outDir: 'dist',
   clean: true,
-  tsconfig: 'tsconfig.json',
 })

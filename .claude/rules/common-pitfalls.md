@@ -79,7 +79,7 @@ Lessons learned from code review cycles. Check these before submitting changes.
 ## ESM Compatibility
 
 - **No `require()` in ESM packages.** Use top-level `import` or dynamic `import()`. Bun tolerates `require()` but Node ESM does not.
-- **Keep `"type": "module"` and `format: ['esm']` in tsup config.**
+- **Keep `"type": "module"` and `format: ['esm']` in tsdown config, with `fixedExtension: false`** — every `exports` map names `dist/*.js` / `dist/*.d.ts`, and tsdown otherwise emits `.mjs` / `.d.mts` on the node platform.
 
 ## E2E Tests
 
