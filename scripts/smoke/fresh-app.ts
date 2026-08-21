@@ -35,12 +35,23 @@ const repoRoot = resolve(import.meta.dir, '../..')
 // to cover: every one of these emits template code importing @guren/core, and
 // a bare scaffold contains none of it.
 //
+// It cannot be *derived* from the CLI's registry — `resource` needs a name and
+// `mail` needs a flag, which a list of names cannot carry — so it is checked
+// against it instead, by assertCoversEveryBlueprint(). That every blueprint
+// appears here is not this list happening to be long: `admin` and `oauth` were
+// absent from every smoke in the tree until that check was written.
+//
+// admin and oauth after auth: `add admin` guards /admin and redirects to the
+// sign-in page `add auth` scaffolds.
+//
 // --force on mail: `add auth` also scaffolds app/Providers/MailProvider.ts
 // (password reset needs a mail manager) — the mail blueprint's own, more
 // complete MailProvider (memory transport, setMailManager wiring)
 // intentionally supersedes it, so the assertions can verify its shape.
 const DEFAULT_BLUEPRINT_FEATURES: readonly (readonly string[])[] = [
   ['auth'],
+  ['admin'],
+  ['oauth'],
   ['resource', 'posts'],
   ['queue'],
   ['mail', '--force'],
@@ -51,6 +62,31 @@ const DEFAULT_BLUEPRINT_FEATURES: readonly (readonly string[])[] = [
   ['broadcasting'],
   ['schedule'],
 ]
+
+/**
+ * Fail when the CLI grows a blueprint this smoke does not scaffold.
+ *
+ * The registry has a tripwire of its own — packages/cli/tests/blueprints.test.ts
+ * pins it to an exact list — which is precisely why this drift was silent:
+ * whoever adds a blueprint is routed there, updates that array, and nothing
+ * points back here. This is the pointer back.
+ *
+ * Imported dynamically because packages/cli/src/blueprints reaches
+ * @guren/server through untracked dist/. A top-level import would evaluate
+ * before main() runs ensureBuiltPackages(), turning a missing build into a
+ * module-resolution error instead of the message that names the fix.
+ */
+async function assertCoversEveryBlueprint(): Promise<void> {
+  const { listBlueprints } = await import('../../packages/cli/src/blueprints')
+  const covered = new Set(DEFAULT_BLUEPRINT_FEATURES.map(([name]) => name))
+  const missing = listBlueprints().filter((name) => !covered.has(name))
+  assert(
+    missing.length === 0,
+    `The default blueprint smoke does not scaffold: ${missing.join(', ')}. ` +
+      'Add them to DEFAULT_BLUEPRINT_FEATURES — a blueprint no smoke scaffolds ' +
+      'is template code no gate typechecks against the published packages.',
+  )
+}
 
 /**
  * Run the feature blueprints through *this checkout's* CLI.
@@ -75,39 +111,6 @@ async function addDefaultBlueprintFeatures(
       // warning describes the scaffolder, not the app under test; scoped to
       // these calls so a genuine duplicate in the app stays loud.
       { ...runtimeEnv, GUREN_QUIET_DUPLICATE_ORM: '1' },
-    )
-  }
-}
-
-/**
- * A tsconfig `include` entry naming a dot-prefixed directory on its own
- * (`".guren"`) matches no files: TypeScript expands the bare name to a
- * wildcard, and its wildcard matcher skips dot-prefixed path segments. The app
- * still typechecks, because every generated file something imports arrives
- * through the import graph anyway — which is exactly what hides the dead entry.
- * What goes unchecked is the generated files nothing imports (`data.gen.ts`,
- * `channels.gen.ts`, `translations.gen.ts`). Nothing at runtime tells the two
- * forms apart, so the form is pinned here.
- *
- * Scope, measured rather than assumed: naming the dot segment in the pattern is
- * what rescues it, at any depth — `".guren/**\/*"` and `"types/.gen/**\/*"`
- * both match. So this only has to reject the leading bare form. The case it
- * cannot see is a dot-directory a *wildcard* would have to discover
- * (`"types/**\/*"` silently skips `types/.gen/`); that is invisible in the
- * tsconfig alone, and no template does it today.
- */
-async function assertGeneratedDirsAreTypechecked(appDir: string): Promise<void> {
-  const include = (JSON.parse(await readFile(join(appDir, 'tsconfig.json'), 'utf8')) as {
-    include?: string[]
-  }).include ?? []
-  assert(include.length > 0, 'Scaffolded app tsconfig declares no include list.')
-  for (const entry of include) {
-    const segments = entry.split('/')
-    const named = segments[0] === '.' ? segments[1] : segments[0]
-    assert(
-      !named?.startsWith('.') || entry.includes('*'),
-      `Scaffolded app tsconfig includes "${entry}", which matches no files: ` +
-        `a bare dot-prefixed directory needs an explicit glob (e.g. "${named}/**/*").`,
     )
   }
 }
@@ -145,6 +148,10 @@ async function runCapture(cmd: string[], cwd: string, envOverrides?: Record<stri
   const output = await new Response(proc.stdout).text()
   const exitCode = await proc.exited
   if (exitCode !== 0) {
+    // Piped stdout is the diagnostic for anything that reports there rather
+    // than on stderr — `tsc` writes every error to stdout — so a failure has
+    // to hand it back before throwing, or the log shows only the exit code.
+    console.error(output)
     throw new Error(`Command failed with exit code ${exitCode}: ${cmd.join(' ')}`)
   }
   return output
@@ -583,43 +590,45 @@ async function runPublishedDependencyDrift(
 }
 
 /**
- * Typecheck the app through its own `typecheck` script, and report which of its
- * files tsc actually read.
+ * Typecheck the app through its own `typecheck` script, and assert tsc actually
+ * read the files it was supposed to.
  *
- * `--listFiles` rides along on the one compile rather than costing a second:
- * the count is what tells a reader whether a green run proved anything, and a
- * tsconfig that narrows — or an `include` entry that matches nothing, see
- * assertGeneratedDirsAreTypechecked() — shrinks it visibly instead of silently.
- * runCapture() is not reusable here because it discards stdout on failure, and
- * stdout is where tsc writes its diagnostics.
+ * `--listFiles` rides along on the one compile rather than costing a second,
+ * and it is what makes this an *outcome* check rather than a claim about
+ * tsconfig syntax. The bug it exists for: `"include": [".guren"]` matches no
+ * files, because TypeScript expands a bare directory name to a wildcard and its
+ * wildcard matcher skips dot-prefixed segments. Generated files something
+ * imports still arrive through the import graph — which is exactly what hides
+ * it — so the ones nothing imports are the tell. Asking tsc which files it read
+ * catches every reformulation of that mistake, not just the one spelling a
+ * syntax check could reject.
  */
 async function typecheckApp(appDir: string, runtimeEnv: Record<string, string>): Promise<string[]> {
-  const cmd = ['bun', 'run', 'typecheck', '--listFiles']
-  console.log(`\n$ (${appDir}) ${cmd.join(' ')}`)
-  const proc = Bun.spawn({
-    cmd,
-    cwd: appDir,
-    stdout: 'pipe',
-    stderr: 'inherit',
-    env: { ...process.env, ...runtimeEnv },
-  })
-  const output = await new Response(proc.stdout).text()
-  const exitCode = await proc.exited
-  if (exitCode !== 0) {
-    console.error(output)
-    throw new Error(`Command failed with exit code ${exitCode}: ${cmd.join(' ')}`)
-  }
+  const output = await runCapture(['bun', 'run', 'typecheck', '--listFiles'], appDir, runtimeEnv)
 
-  const appPrefixes = [appDir, await realpath(appDir)]
+  // tsc reports realpaths, and macOS hands out a /var -> /private/var symlink
+  // for the temp dir, so compare against the resolved prefix.
+  const appRoot = await realpath(appDir)
   const checkedFiles = output
     .split('\n')
     .map((line) => line.trim())
-    .filter((line) => appPrefixes.some((prefix) => line.startsWith(`${prefix}/`)))
-    .filter((line) => !line.includes('/node_modules/'))
+    .filter((line) => line.startsWith(`${appRoot}/`) && !line.includes('/node_modules/'))
+    .map((line) => line.slice(appRoot.length + 1))
   assert(
     checkedFiles.length > 0,
-    'tsc read none of the app\'s own files — the scaffolded tsconfig covers nothing.',
+    "tsc read none of the app's own files — the scaffolded tsconfig covers nothing.",
   )
+
+  const generated = (await readdir(join(appDir, '.guren')).catch(() => [] as string[]))
+    .filter((name) => name.endsWith('.gen.ts'))
+  const unchecked = generated.filter((name) => !checkedFiles.includes(join('.guren', name)))
+  assert(
+    unchecked.length === 0,
+    `tsc never read ${unchecked.map((name) => `.guren/${name}`).join(', ')} — ` +
+      "the app's tsconfig does not cover its own generated files. A bare " +
+      '".guren" include entry is the usual cause; it needs an explicit glob.',
+  )
+
   return checkedFiles
 }
 
@@ -644,6 +653,7 @@ async function main(): Promise<void> {
   // templates under test, and the CLI reaches @guren/server through dist/, so
   // building them is what lets the gate fail rather than what weakens it.
   await ensureBuiltPackages()
+  await assertCoversEveryBlueprint()
 
   const blueprint = process.env.GUREN_SMOKE_BLUEPRINT ?? 'default'
   const tempRoot = await mkdtemp(join(tmpdir(), `guren-fresh-app-${blueprint}-`))
@@ -670,7 +680,6 @@ async function main(): Promise<void> {
     await run(createArgs, repoRoot, runtimeEnv)
 
     await assertCoreFirstStarter(appDir)
-    await assertGeneratedDirsAreTypechecked(appDir)
 
     if (installMode === 'npm') {
       await runPublishedDependencyDrift(appDir, blueprint, runtimeEnv)
@@ -742,7 +751,7 @@ async function main(): Promise<void> {
     // Worker blueprint has a known scaffold export mismatch (named vs default).
     // TODO: fix blueprint templates to use consistent exports, then remove this skip.
     if (blueprint !== 'worker') {
-      await run(['bun', 'run', 'typecheck'], appDir, runtimeEnv)
+      await typecheckApp(appDir, runtimeEnv)
     }
 
     // Worker blueprint: skip Vite build (scaffold-only validation is sufficient)
