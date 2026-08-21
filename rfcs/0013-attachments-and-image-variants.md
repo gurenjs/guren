@@ -410,14 +410,27 @@ These rules exist because each one closes a measured hole:
   ≈ 208 MB for one pixel buffer, so admitting 100–200 MP by default would
   be unsafe on ordinary app servers. Photography/archival apps raise it
   deliberately and should isolate their image workers.
-  - **On a processor-less runtime this validation is deferred, not
-    skipped.** A Workers app (or any `queued: true` attach) has no
-    processor in the request path, so the original is stored first and the
-    queue worker performs the decode — a rejected image is detected
-    *after* acceptance: the job purges the attachment and records the
-    failure instead of a synchronous 415/422. Apps that need synchronous
-    rejection on Workers must inject an in-Worker `ImageProcessor` (e.g.
-    one backed by the Cloudflare Images binding).
+  - **Gates (1) and (2) are pure JS and run on every runtime.** Neither
+    the byte cap nor the header-dimension check needs `Bun.Image`: magic
+    bytes and header dimensions for the §6 inline-allowlist formats (PNG
+    IHDR, JPEG SOF, GIF, WebP, AVIF/HEIC `ftyp` boxes) are parsed by a
+    small dependency-free sniffer in core. So even a Workers app rejects
+    **synchronously**: 413 on oversized bytes, 422 on oversized header
+    dimensions, 415 on a HEIC signature (no decode needed), 422 on
+    non-image magic bytes under `image: 'require'`.
+  - **Only gate (3), the full decode, defers on a processor-less
+    runtime.** A Workers app (or any `queued: true` attach) performs the
+    decode in the queue worker, so the one class that survives synchronous
+    checks — bytes whose header lies or is truncated — is detected *after*
+    acceptance: the job purges the attachment and marks the §1 status
+    record `failed`. Apps that want full-decode rejection in the request
+    path on Workers inject an in-Worker `ImageProcessor`: the Cloudflare
+    Images binding (per-transform billing) or a WASM codec build
+    (photon/jSquash-class; bundle-size and CPU-time costs make it a
+    documented recipe, not a default). Refusing `image: 'require'`
+    uploads outright on processor-less runtimes was considered and
+    rejected — it contradicts §5's graceful degrade, and the residual
+    exposure (a stored-then-purged lying file) does not warrant it.
 - **HEIC/HEIF input is rejected by default with 415.** Decoding works on
   macOS dev machines and fails on Linux production — the default must not
   let that skew pass silently. `accepts: { heic: 'convert' }` opts in:
