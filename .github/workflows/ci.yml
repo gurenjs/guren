@@ -23,7 +23,7 @@ jobs:
     # entry, not on a version literal, so promoting a trial version to primary
     # cannot silently flip which lane gates.
     continue-on-error: ${{ matrix.trial == true }}
-    # Measured ceiling for a healthy lane is 5m0s (1.3.14) / 4m7s (1.4.0)
+    # Measured ceiling for a healthy lane is 5m00s (1.3.14) / 4m42s (1.4.0)
     # across 30 runs, cache misses included, so this is an anti-wedge
     # backstop rather than an assertion about how fast the job ought to be.
     # The per-step cap on `Run tests` below is the one that fires first for

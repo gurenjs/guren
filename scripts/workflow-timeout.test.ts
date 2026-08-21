@@ -19,6 +19,12 @@ import { repoRoot } from './workspace-packages.ts'
  * The numbers themselves are measured (see the comment on each cap) and set
  * well above the observed ceiling on purpose. A cap tight enough to turn a slow
  * runner red is a cap someone deletes, and then there is no cap.
+ *
+ * Parsed rather than pattern-matched, because the distinction the whole gate
+ * rests on is structural: `timeout-minutes` on a *step* caps that step only,
+ * and a line-level search would read a workflow whose jobs are all uncapped as
+ * covered. Two steps in ci.yml are even named `Run tests`, so "the cap near the
+ * step with this name" is not a question text matching can answer either.
  */
 const WORKFLOW_DIR = join(repoRoot, '.github/workflows')
 
@@ -28,84 +34,44 @@ const WORKFLOW_DIR = join(repoRoot, '.github/workflows')
  */
 const MAX_REASONABLE_MINUTES = 60
 
+type Step = { name?: string; 'timeout-minutes'?: unknown }
+type Job = { 'timeout-minutes'?: unknown; steps?: Step[] }
+
 function workflowFiles(): string[] {
   return [...new Bun.Glob('*.{yml,yaml}').scanSync({ cwd: WORKFLOW_DIR })].sort()
 }
 
-/**
- * Job id -> the lines of its block, for the one top-level `jobs:` mapping.
- *
- * Indentation is the whole point: `timeout-minutes` on a *step* sits deeper and
- * caps that step only, so a line-level search would read a workflow whose jobs
- * are all uncapped as covered. Job ids are the keys at exactly two spaces
- * inside `jobs:` — the `on:` block has two-space keys too (`push:`,
- * `schedule:`), hence scoping to the section rather than to the file.
- */
-export function jobBlocks(source: string): Map<string, string[]> {
-  const lines = source.split('\n')
-  const blocks = new Map<string, string[]>()
-  let inJobs = false
-  let current: string[] | undefined
-
-  for (const line of lines) {
-    if (/^jobs:\s*$/.test(line)) {
-      inJobs = true
-      continue
-    }
-    if (!inJobs) continue
-
-    // A key back at column 0 ends the jobs mapping.
-    if (/^\S/.test(line)) break
-
-    const job = /^ {2}([A-Za-z_][\w-]*):\s*(?:#.*)?$/.exec(line)
-    if (job) {
-      current = []
-      blocks.set(job[1]!, current)
-      continue
-    }
-    current?.push(line)
+function jobsOf(file: string): Record<string, Job> {
+  const parsed = Bun.YAML.parse(readFileSync(join(WORKFLOW_DIR, file), 'utf8')) as {
+    jobs?: Record<string, Job>
   }
-
-  return blocks
-}
-
-/** The job-level `timeout-minutes` of a job block, if it declares one. */
-export function jobTimeout(block: string[]): number | undefined {
-  for (const line of block) {
-    const match = /^ {4}timeout-minutes:\s*(\d+)\s*(?:#.*)?$/.exec(line)
-    if (match) return Number(match[1])
-  }
-  return undefined
+  return parsed.jobs ?? {}
 }
 
 describe('workflow job timeouts', () => {
-  const workflows = workflowFiles().map((file) => ({
-    file,
-    jobs: jobBlocks(readFileSync(join(WORKFLOW_DIR, file), 'utf8')),
-  }))
+  const workflows = workflowFiles().map((file) => ({ file, jobs: jobsOf(file) }))
 
   it('finds jobs in every workflow', () => {
     // Everything below is measured against this, so a workflow whose jobs this
     // stops recognising has to fail loudly rather than vacuously pass.
     for (const { file, jobs } of workflows) {
-      expect([file, jobs.size > 0]).toEqual([file, true])
+      expect([file, Object.keys(jobs).length > 0]).toEqual([file, true])
     }
   })
 
-  it.each(workflows.flatMap(({ file, jobs }) => [...jobs.keys()].map((job) => [file, job] as const)))(
-    '%s: %s caps its runtime',
-    (file, job) => {
-      const minutes = jobTimeout(workflows.find((w) => w.file === file)!.jobs.get(job)!)
-      expect(minutes).toBeDefined()
-      expect(minutes!).toBeGreaterThan(0)
-      expect(minutes!).toBeLessThanOrEqual(MAX_REASONABLE_MINUTES)
-    },
-  )
+  it.each(
+    workflows.flatMap(({ file, jobs }) =>
+      Object.keys(jobs).map((job) => [file, job] as const),
+    ),
+  )('%s: %s caps its runtime', (file, job) => {
+    const minutes = workflows.find((w) => w.file === file)!.jobs[job]!['timeout-minutes']
+    expect(typeof minutes).toBe('number')
+    expect(minutes as number).toBeGreaterThan(0)
+    expect(minutes as number).toBeLessThanOrEqual(MAX_REASONABLE_MINUTES)
+  })
 })
 
 describe("CI's trial lane", () => {
-  const ci = readFileSync(join(WORKFLOW_DIR, 'ci.yml'), 'utf8')
-
   it('caps the test step, not only the job', () => {
     /*
      * The trial lane is non-blocking through `continue-on-error`, which is
@@ -116,12 +82,17 @@ describe("CI's trial lane", () => {
      * timeout fails the step, and a failed step fails the job, which
      * `continue-on-error` then masks by the documented path.
      *
-     * `Run tests` is also where the wedge actually happens, so this cap is the
-     * one that fires first; the job cap stays as the backstop for a hang
-     * anywhere else.
+     * `Run tests` in build-and-test is also where the wedge actually happens,
+     * so this cap is the one that fires first; the job cap stays as the
+     * backstop for a hang anywhere else. It has to be *that* step: web-app has
+     * a step by the same name, and a cap landing there would leave the one
+     * that wedges uncapped.
      */
-    const step = /^ {6}- name: Run tests\n {8}timeout-minutes: (\d+)$/m.exec(ci)
-    expect(step).not.toBeNull()
-    expect(Number(step![1])).toBeGreaterThan(0)
+    const steps = jobsOf('ci.yml')['build-and-test']?.steps ?? []
+    const runTests = steps.filter((step) => step.name === 'Run tests')
+
+    expect(runTests).toHaveLength(1)
+    expect(typeof runTests[0]!['timeout-minutes']).toBe('number')
+    expect(runTests[0]!['timeout-minutes'] as number).toBeGreaterThan(0)
   })
 })
