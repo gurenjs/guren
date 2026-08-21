@@ -195,8 +195,14 @@ function zodToType(z: ZodSchemaLike, io: SchemaIo): string {
 /**
  * Whether a field may be omitted — the presence half of the input/output split
  * that `zodToType` handles for types.
+ *
+ * Exported for `route-contract-check.ts`, which asks the same question of a
+ * params schema key: a key the path never supplies is a key omitted from the
+ * request. Shared rather than re-derived because the approximations below
+ * (`.catch()` on the input side, and reading only the rendered side of a
+ * `.pipe()`) are the part a second implementation would get subtly different.
  */
-function isOptional(z: ZodSchemaLike, io: SchemaIo): boolean {
+export function isOptional(z: ZodSchemaLike, io: SchemaIo): boolean {
   const t = typeOf(z)
   const def = z._def ?? {}
   const look = (s: unknown): boolean => (s ? isOptional(s as ZodSchemaLike, io) : false)

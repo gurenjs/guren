@@ -27,6 +27,7 @@ import {
 import { checkConsoleCommandRegistration } from './console-check'
 import { checkRoutePathParams, discoverRoutePathFiles } from './route-path-check'
 import { affectsRouteWiring, checkRouteRegistrarWiring } from './routes-check'
+import { checkRouteContracts } from './route-contract-check'
 import { checkSchemaTimestamps } from './schema-check'
 import { parseSchemaTables, schemaPathFor, type SchemaTable } from './schema-parser'
 import { ParseCache } from './parse-cache'
@@ -267,6 +268,25 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
       const routePathFiles = filterChanged(await discoverRoutePathFiles(cwd, options.routesFile))
       checks.push(...(await checkRoutePathParams({ cwd, cache, files: routePathFiles })))
     }
+
+    // 7.7. Check each route's `params` schema keys and `bind` keys against the
+    // parameters its path declares. Runs on loaded definitions, not the AST:
+    // the registered path is the joined one (group prefixes, resource
+    // expansions), and a params schema is usually imported from elsewhere, so
+    // its keys are not in the routes file to read.
+    //
+    // Deliberately outside 7.5's `routesChanged` gate and unfiltered under
+    // --changed. A params schema can be declared in any source file, so every
+    // file pattern narrower than "all sources" would be a guess that reads as
+    // coverage — the same trap the modules spec view avoids by declaring all
+    // source files as its inputs. The edit-hook fast path is --arch, which
+    // skips this whole suite.
+    //
+    // This re-imports the route graph that check 10 loads for the screens spec
+    // view, in apps that have a docs/spec/ directory. Accepted rather than
+    // threaded through: sharing one load means changing the SpecViewDescriptor
+    // contract, and the cost is a second module evaluation, not a second scan.
+    checks.push(...(await checkRouteContracts({ cwd, routesFile: options.routesFile })))
 
     // 8. Check Postgres timestamp columns carry a time zone. Content-activated
     // and dialect-gated: apps with no schema, or a non-Postgres one, contribute
