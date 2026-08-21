@@ -37,6 +37,10 @@ describe('checkRouteContracts', () => {
       expect(results).toHaveLength(1)
       expect(results[0]?.status).toBe('fail')
       expect(results[0]?.message).toContain("'postId'")
+      // Both statuses, because the same mismatch produces 422 from a
+      // controller action and 400 from a functional handler — pinned in
+      // packages/server/tests/route-contract-runtime.test.ts.
+      expect(results[0]?.message).toContain('422')
       expect(results[0]?.message).toContain('400')
       expect(results[0]?.suggestion).toContain("'id'")
     })

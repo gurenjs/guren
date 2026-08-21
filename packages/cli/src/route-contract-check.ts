@@ -230,10 +230,13 @@ function checkRoute(route: RouteDefinition): CheckResult[] {
     return results
   }
 
-  // Split by severity rather than reported together: a required key is a
-  // guaranteed 400 on every request, while an omissible one never fails at
-  // all — and `.default()`, the worse of the two, quietly hands the
-  // controller a value that has nothing to do with the URL.
+  // Split by severity rather than reported together: a required key rejects
+  // every request, while an omissible one never fails at all — and
+  // `.default()`, the worse of the two, quietly hands the controller a value
+  // that has nothing to do with the URL. Both statuses are pinned by
+  // `packages/server/tests/route-contract-runtime.test.ts`; they differ by
+  // handler kind because the contract middleware throws ValidationException
+  // where the functional path returns its own response.
   const stray = parsed.keys.filter((key) => !pathParams.has(key.name))
   const suggestion = renameSuggestion('schema key', pathParams)
   const required = stray.filter((key) => !key.omissible).map((key) => key.name)
@@ -246,7 +249,8 @@ function checkRoute(route: RouteDefinition): CheckResult[] {
         title,
         'fail',
         `The params schema requires ${undeclared(required)}`
-        + 'The key is never present, so every request to this route fails validation with 400.',
+        + 'The key is never present, so every request to this route fails validation before the handler '
+        + 'runs: 422 from a controller action, 400 from a functional handler.',
         suggestion,
       ),
     )
