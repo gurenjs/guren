@@ -1,10 +1,16 @@
 name: Published Package Drift
 
-# Scaffolds a starter app and installs its @guren/* dependencies from npm
-# instead of from this checkout, then typechecks it. Every other smoke mode
+# Scaffolds a starter app, scaffolds its feature blueprints with this
+# checkout's CLI, installs the app's @guren/* dependencies from npm instead of
+# from this checkout, and typechecks the result. Every other smoke mode
 # (`smoke:starter`, `smoke:starter:packed`) rewrites those dependencies to
 # local builds, so none of them can see a template that has started using an
 # API which only exists in the repository.
+#
+# Templates from here, dependencies from the registry, is the whole mechanism.
+# Both halves matter: scaffolding with the *app's* installed `guren` would emit
+# published templates against published packages — consistent by construction,
+# and a gate that can only pass.
 #
 # This deliberately lives outside ci.yml and nightly-canary.yml. It is expected
 # to be red between a template-facing change and the release that publishes
@@ -21,11 +27,16 @@ on:
 jobs:
   drift:
     runs-on: ubuntu-latest
-    # Deliberately generous, and not derived from the measured max: these
-    # runs finish in 4-7s and report success, which is too fast for a real
-    # npm install plus typecheck. Until that is looked into, a number based
-    # on them would be a number based on a gate that is not doing its work.
-    timeout-minutes: 30
+    # The 4-7s that made the old cap unusable was real work on a tiny app, not
+    # a skipped install — but it was a *bare* scaffold, with the ten `guren add`
+    # blueprints unchecked. Now that the job scaffolds those too and builds the
+    # workspace, the number is derived like every other cap here. Measured:
+    # setup-and-build 4-11s on a dist-cache hit and 58-78s on a miss (from
+    # ci.yml's build-and-test, which shares the cache); the smoke itself 21s,
+    # 12s and 19s locally for default, api and blog, against 4-7s on CI before
+    # the widening. Worst realistic run is well under 3m, and the npm registry
+    # is the variable.
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       # `worker` is absent for the same reason fresh-app.ts skips its typecheck:
@@ -39,16 +50,16 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: oven-sh/setup-bun@v2
+      # The scaffolder and the `guren add` blueprints run from source, and the
+      # CLI reaches @guren/server through dist/ — so this job needs the
+      # workspace built, and the same action ci.yml uses shares its dist cache.
+      # That does not weaken the gate: what stays off this checkout is what the
+      # *app* resolves, which fresh-app.ts asserts on both sides of scaffolding.
+      # The tools that emit the templates under test are what let it fail.
+      - name: Set up Bun and build packages
+        uses: ./.github/actions/setup-and-build
         with:
           bun-version: '1.3.14'
-
-      # The scaffolder itself runs from source and needs the workspace's own
-      # dependencies. There is no `bun run build` step on purpose: npm mode
-      # touches no build output of this checkout, since the app under test has
-      # to resolve everything from the registry.
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
 
       - name: ${{ matrix.smoke }}
         run: bun run ${{ matrix.smoke }}
@@ -67,11 +78,10 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      # Unlike the npm-mode job above, this one *does* need the workspace
-      # built: rendering imports packages/cli/src/commands.ts to read the
-      # command registry, and that module's dependency graph reaches
-      # @guren/server, whose exports point at untracked dist/. Same action
-      # ci.yml uses, so the dist cache is shared.
+      # Built for its own reason, not the npm-mode job's: rendering imports
+      # packages/cli/src/commands.ts to read the command registry, and that
+      # module's dependency graph reaches @guren/server, whose exports point at
+      # untracked dist/. Same action, so the two share the dist cache.
       - name: Set up Bun and build packages
         uses: ./.github/actions/setup-and-build
         with:
