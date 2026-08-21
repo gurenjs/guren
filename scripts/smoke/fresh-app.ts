@@ -88,6 +88,13 @@ async function addDefaultBlueprintFeatures(
  * What goes unchecked is the generated files nothing imports (`data.gen.ts`,
  * `channels.gen.ts`, `translations.gen.ts`). Nothing at runtime tells the two
  * forms apart, so the form is pinned here.
+ *
+ * Scope, measured rather than assumed: naming the dot segment in the pattern is
+ * what rescues it, at any depth — `".guren/**\/*"` and `"types/.gen/**\/*"`
+ * both match. So this only has to reject the leading bare form. The case it
+ * cannot see is a dot-directory a *wildcard* would have to discover
+ * (`"types/**\/*"` silently skips `types/.gen/`); that is invisible in the
+ * tsconfig alone, and no template does it today.
  */
 async function assertGeneratedDirsAreTypechecked(appDir: string): Promise<void> {
   const include = (JSON.parse(await readFile(join(appDir, 'tsconfig.json'), 'utf8')) as {
