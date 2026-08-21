@@ -26,8 +26,18 @@ jobs:
         include:
           - bun-version: '1.3.14'
             redis: true
+          # The trial lane also trials `bun test --parallel` (1.4-only flag):
+          # forwarded through test:bun, workers = the runner's 4 cores. Linux
+          # only by design — on macOS ARM64 the same suite trips
+          # oven-sh/bun#34069 (spawnSync loses a child exit; a worker spins at
+          # 100% CPU forever) in ~2 of 5 runs, but that spin lives in the
+          # kqueue path, which Linux's epoll event loop does not share. The
+          # timeout raise absorbs the tests that spawn real subprocesses
+          # (git choreography, tsc gates) running 4-wide on 4 cores, where 5s
+          # is only enough for an idle machine.
           - bun-version: '1.4.0'
             redis: true
+            test-bun-flags: '-- --parallel --timeout 30000'
     services:
       redis:
         image: redis:7-alpine
@@ -229,8 +239,12 @@ jobs:
       - name: Bundle budget audit
         run: bun run audit:bundle-budgets
 
+      # `bun run test` inlined so the trial lane's flags reach test:bun only;
+      # the example apps keep their own per-app runs either way.
       - name: Run tests
-        run: bun run test
+        run: |
+          bun run test:bun ${{ matrix.test-bun-flags }}
+          bun run test:examples
 
       - name: Testing package tests (vitest)
         run: bun run test:testing
