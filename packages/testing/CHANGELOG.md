@@ -1,5 +1,11 @@
 # @guren/testing
 
+## 1.6.0
+
+### Minor Changes
+
+- a70e741: `createControllerModuleMock()` now includes a `definePlugin` stub mirroring the real factory shape, so controllers that (transitively) import a plugin package load under a mocked `@guren/core`.
+
 ## 1.5.0
 
 ### Minor Changes

@@ -18,13 +18,13 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@guren/cli": "^2.8.0",
+    "@guren/cli": "^2.9.0",
     "@guren/core": "^1.8.0",
     "@guren/orm": "^2.6.0",
     "drizzle-orm": "1.0.0-rc.4"
   },
   "devDependencies": {
-    "@guren/testing": "^1.5.0",
+    "@guren/testing": "^1.6.0",
     "bun-types": "^1.3.1",
     "drizzle-kit": "1.0.0-rc.4",
     "typescript": "^5.4.0"
