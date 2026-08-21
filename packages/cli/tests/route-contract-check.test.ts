@@ -37,16 +37,15 @@ describe('checkRouteContracts', () => {
       expect(results).toHaveLength(1)
       expect(results[0]?.status).toBe('fail')
       expect(results[0]?.message).toContain("'postId'")
-      // Both statuses, because the same mismatch produces 422 from a
-      // controller action and 400 from a functional handler — pinned in
+      // The status, because the message promises it: 422 whichever handler
+      // kind the route uses — pinned in
       // packages/server/tests/route-contract-runtime.test.ts.
       expect(results[0]?.message).toContain('422')
-      expect(results[0]?.message).toContain('400')
       expect(results[0]?.suggestion).toContain("'id'")
     })
 
     // The two halves are split because their consequences differ: a required
-    // key is a guaranteed 400, an omissible one never fails at all.
+    // key is a guaranteed 422, an omissible one never fails at all.
     it('warns rather than fails for an optional stray key', async () => {
       const results = await run([
         route({ path: '/posts/:id', schemas: { params: z.object({ postId: z.string().optional() }) } }),
@@ -87,7 +86,7 @@ describe('checkRouteContracts', () => {
     })
 
     // A pipeline runs both stages: the first accepts a missing value, the
-    // second rejects it, so the request really does 400. Reading only one
+    // second rejects it, so the request really does 422. Reading only one
     // side of the pipe — which the type renderer's presence walker does,
     // because it is answering a different question — would file this as
     // advice.

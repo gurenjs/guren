@@ -73,9 +73,9 @@ function objectNode(schema: ZodSchemaLike): ZodSchemaLike | undefined {
  * reads only the side of a `.pipe()` it renders, which is right for naming a
  * type and wrong here — it calls `z.string().optional().pipe(z.string())`
  * omissible, when in fact the second stage rejects a missing value and every
- * request without the key gets a 400. This check errs the other way on
+ * request without the key gets a 422. This check errs the other way on
  * purpose: an approximation that over-reports severity costs a reader one
- * look, and one that under-reports files a real 400 as advice.
+ * look, and one that under-reports files a real 422 as advice.
  */
 function permitsOmission(schema: ZodSchemaLike): boolean {
   const def = schema._def ?? {}
@@ -249,8 +249,8 @@ function checkRoute(route: RouteDefinition): CheckResult[] {
         title,
         'fail',
         `The params schema requires ${undeclared(required)}`
-        + 'The key is never present, so every request to this route fails validation before the handler '
-        + 'runs: 422 from a controller action, 400 from a functional handler.',
+        + 'The key is never present, so every request to this route fails validation with a 422 before '
+        + 'the handler runs.',
         suggestion,
       ),
     )

@@ -1114,7 +1114,7 @@ function createContractHandler<
   handler: TypedRouteHandler<TParamsSchema, TQuerySchema, TBodySchema, TOutputSchema>,
 ): (ctx: Context) => Promise<RouteResult> {
   return async (ctx) => {
-    const params = parseRouteSegment(options.params, ctx.req.param(), 400)
+    const params = parseRouteSegment(options.params, ctx.req.param(), 422)
     if (params instanceof Response) {
       return params
     }
@@ -1218,6 +1218,21 @@ function validationErrorResponse(error: ValidationErrorLike, status: number): Re
   })
 }
 
+/**
+ * Validate one request segment, throwing `ValidationException` (422) on failure.
+ *
+ * The controller-action path reports failures as exceptions rather than
+ * responses so `ExceptionHandler` renders them: JSON for API requests, and a
+ * redirect carrying the error bag for Inertia ones. `validateBody`,
+ * `validateQuery` and `validateParams` on `Controller` report the same way.
+ */
+function throwOnInvalid(schema: ValidationSchema<unknown>, data: unknown): void {
+  const result = schema.safeParse(data)
+  if (!result.success) {
+    throw ValidationException.withMessages(formatValidationErrors(result.error))
+  }
+}
+
 function createContractValidationMiddleware(route: RegisteredRoute): MiddlewareHandler | null {
   // Only apply contract validation for controller actions with schemas
   if (!isControllerAction(route.handler)) {
@@ -1233,22 +1248,11 @@ function createContractValidationMiddleware(route: RegisteredRoute): MiddlewareH
     // Validate params and query in middleware. Body validation is left to the
     // controller's validateBody() to avoid consuming the request stream twice.
     if (schemas.params) {
-      const result = parseRouteSegment(schemas.params, c.req.param(), 400)
-      if (result instanceof Response) {
-        throw ValidationException.withMessages(
-          formatValidationErrors((schemas.params.safeParse(c.req.param()) as any).error),
-        )
-      }
+      throwOnInvalid(schemas.params, c.req.param())
     }
 
     if (schemas.query) {
-      const query = flattenRequestQueries(c)
-      const result = parseRouteSegment(schemas.query, query, 422)
-      if (result instanceof Response) {
-        throw ValidationException.withMessages(
-          formatValidationErrors((schemas.query.safeParse(query) as any).error),
-        )
-      }
+      throwOnInvalid(schemas.query, flattenRequestQueries(c))
     }
 
     await next()
