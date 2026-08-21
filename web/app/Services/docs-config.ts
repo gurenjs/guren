@@ -67,6 +67,7 @@ const GUIDE_SECTIONS: readonly DocSectionConfig[] = [
       'health-checks',
       'i18n',
       'api-resources',
+      'markdown',
     ],
   },
   {
