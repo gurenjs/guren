@@ -37,6 +37,9 @@ permissions:
 jobs:
   snapshot:
     runs-on: ubuntu-latest
+    # Measured max 18s. The cap is here for a stalled call to the GitHub
+    # traffic API, not for the work.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
