@@ -42,13 +42,21 @@ jobs:
             redis: true
           # The trial lane also trials `bun test --parallel` (1.4-only flag):
           # forwarded through test-packages.ts, workers = the runner's 4
-          # cores. Linux only by design — on macOS ARM64 the same suite trips
-          # oven-sh/bun#34069 (spawnSync loses a child exit; a worker spins at
-          # 100% CPU forever) in ~2 of 5 runs, but that spin lives in the
-          # kqueue path, which Linux's epoll event loop does not share. The
-          # timeout raise absorbs the tests that spawn real subprocesses
-          # (git choreography, tsc gates) running 4-wide on 4 cores, where 5s
-          # is only enough for an idle machine.
+          # cores. The timeout raise absorbs the tests that spawn real
+          # subprocesses (git choreography, tsc gates) running 4-wide on 4
+          # cores, where 5s is only enough for an idle machine.
+          #
+          # The flag was expected to be safe on Linux: macOS ARM64 trips
+          # oven-sh/bun#34069 on this suite (spawnSync loses a child exit; a
+          # worker spins at 100% CPU forever) in ~2 of 5 runs, and that spin
+          # lives in the kqueue path, which epoll does not share. Measured on
+          # this runner, that reasoning does not hold. The lane went from ~91%
+          # green over the 25 runs before the flag (20 success / 2 failure) to
+          # ~36% over the 11 after it (4 success / 4 failure / 3 hangs). Every
+          # failure is the same file, scripts/publish-agent-catalog.test.ts,
+          # at exactly 30000ms; the hangs are the wedge itself. So the flag is
+          # applied on pushes only — see the `Run tests` step, which is where
+          # that condition lives and why.
           #
           # Two dashes because `bun <file>` swallows one *leading* `--` before
           # argv reaches the script; the survivor is the separator
@@ -268,6 +276,23 @@ jobs:
       # flag string crosses exactly one `--`-swallowing layer — see the
       # matrix comment above.
       #
+      # The flags are applied on pushes only. `--parallel` costs the lane most
+      # of its green (numbers on the matrix entry above), and a lane that is
+      # red on two runs in three is one everybody learns to scroll past —
+      # which would also cost the 1.4.0 promotion soak, the other thing this
+      # lane is for and the half that passes. On a pull request it therefore
+      # runs plain, and `--parallel` keeps collecting on main at 11-12 runs a
+      # day, off everyone's PR checks. The consequence is worth stating: for
+      # this lane a green PR no longer predicts a green push. It gates neither.
+      #
+      # The condition lives here rather than on the matrix entry because
+      # `matrix` is not available in a job-level `if`, so the lane cannot be
+      # skipped per entry; and while the context tables say `github` is
+      # available inside `strategy`, a `run:` is somewhere both are
+      # unambiguously available, which is worth more than the tidier spelling.
+      # Delete the condition and keep `matrix.test-bun-flags` once bun#34069
+      # closes.
+      #
       # The step is capped as well as the job because this is the step that
       # hangs: oven-sh/bun#34069 wedged the trial lane here on four runs in
       # one day (32489029613, 32492123122, 32494964369, 32496297560), each
@@ -281,7 +306,7 @@ jobs:
       - name: Run tests
         timeout-minutes: 15
         run: |
-          bun scripts/test-packages.ts ${{ matrix.test-bun-flags }}
+          bun scripts/test-packages.ts ${{ github.event_name == 'push' && matrix.test-bun-flags || '' }}
           bun run test:examples
 
       - name: Testing package tests (vitest)
