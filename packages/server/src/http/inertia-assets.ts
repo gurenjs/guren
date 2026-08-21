@@ -85,12 +85,21 @@ export function configureInertiaAssets(app: Application, options: InertiaAssetsO
 
   const publicRoute = options.publicRoute ?? '/public/*'
   const rewriteRequestPath = createStaticRewrite(publicRoute)
+  const hashedAssetsPrefix = `${publicRouteBase(publicRoute)}/assets/`
 
   app.use(
     publicRoute,
     serveStatic({
       root: publicDir,
       rewriteRequestPath,
+      // Vite writes content-hashed filenames under `assets/`, so those
+      // responses can be cached forever. Files elsewhere in public/ keep
+      // stable names and must stay revalidatable.
+      onFound: (_path, ctx) => {
+        if (ctx.req.path.startsWith(hashedAssetsPrefix)) {
+          ctx.header('Cache-Control', 'public, max-age=31536000, immutable')
+        }
+      },
     }),
   )
 
@@ -111,6 +120,13 @@ export function configureInertiaAssets(app: Application, options: InertiaAssetsO
       console.warn('Unable to resolve @guren/inertia-client for production serving.', error)
     }
   }
+}
+
+/** The route base ahead of the wildcard, as {@link createStaticRewrite} sees it. */
+function publicRouteBase(route: string): string {
+  const wildcardIndex = route.indexOf('*')
+  const base = wildcardIndex >= 0 ? route.slice(0, wildcardIndex) : route
+  return trimTrailingSlashes(base)
 }
 
 /**
