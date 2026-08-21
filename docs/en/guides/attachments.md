@@ -65,6 +65,30 @@ export const attachments = pgTable('attachments', {
 }, (t) => [index('attachments_attachable_idx').on(t.attachableType, t.attachableId, t.collection)])
 ```
 
+**MySQL:**
+
+```ts
+import { index, int, json, mysqlTable, text, timestamp, varchar } from 'drizzle-orm/mysql-core'
+
+export const attachments = mysqlTable('attachments', {
+  id: varchar('id', { length: 26 }).primaryKey(),
+  attachableType: varchar('attachable_type', { length: 255 }).notNull(),
+  attachableId: varchar('attachable_id', { length: 255 }).notNull(),
+  collection: varchar('collection', { length: 255 }).notNull().default('default'),
+  disk: varchar('disk', { length: 255 }).notNull(),
+  path: varchar('path', { length: 1024 }).notNull(),
+  name: varchar('name', { length: 255 }).notNull(),
+  contentType: varchar('content_type', { length: 255 }).notNull(),
+  size: int('size').notNull(),
+  width: int('width'),
+  height: int('height'),
+  variants: json('variants').$type<Record<string, AttachmentVariantRecord>>(),
+  placeholder: text('placeholder'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (t) => [index('attachments_attachable_idx').on(t.attachableType, t.attachableId, t.collection)])
+```
+
 **SQLite:**
 
 ```ts
@@ -213,6 +237,10 @@ Other rules that hold everywhere:
   production, and the default must not let that skew pass silently. Opt in
   with `accepts: { heic: 'convert' }`: the upload is decoded and stored as
   JPEG, and still answers 415 on runtimes whose codecs cannot decode it.
+  The rejection applies whenever the image pipeline runs — `image: 'allow'`
+  collections included, so an iPhone HEIC photo is 415 there too unless the
+  collection opts into `'convert'`; only collections with no `image` policy
+  at all store HEIC bytes as opaque files.
 - **Filenames are sanitized** (no path separators or control characters)
   before becoming part of an object key.
 - **Serving inherits your app's rules.** Attachments add no serving route:

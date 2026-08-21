@@ -129,20 +129,31 @@ function sniffWebp(bytes: Uint8Array): SniffedImage | null {
 const AVIF_BRANDS = new Set(['avif', 'avis'])
 const HEIC_BRANDS = new Set(['heic', 'heix', 'hevc', 'hevx', 'heim', 'heis', 'hevm', 'hevs'])
 
+/**
+ * Real `ftyp` boxes list a handful of compatible brands. The declared box
+ * size is attacker-controlled, so the scan is capped — walking an
+ * arbitrarily long brand list on unvalidated input is an allocation/CPU
+ * primitive, not a parser feature.
+ */
+const MAX_FTYP_BRANDS = 16
+
+function classifyBrand(brand: string): 'avif' | 'heic' | null {
+  if (AVIF_BRANDS.has(brand)) return 'avif'
+  if (HEIC_BRANDS.has(brand)) return 'heic'
+  return null
+}
+
 /** AVIF and HEIC/HEIF share the ISO BMFF container; the `ftyp` brands tell them apart. */
 function sniffIsoBmff(bytes: Uint8Array): SniffedImage | null {
   if (bytes.length < 16 || ascii(bytes, 4, 4) !== 'ftyp') return null
   const boxSize = u32be(bytes, 0)
   if (boxSize < 16 || boxSize > bytes.length) return null
 
-  const brands = [ascii(bytes, 8, 4)]
-  for (let offset = 16; offset + 4 <= boxSize; offset += 4) {
-    brands.push(ascii(bytes, offset, 4))
+  let format = classifyBrand(ascii(bytes, 8, 4))
+  const scanEnd = Math.min(boxSize, 16 + MAX_FTYP_BRANDS * 4)
+  for (let offset = 16; format === null && offset + 4 <= scanEnd; offset += 4) {
+    format = classifyBrand(ascii(bytes, offset, 4))
   }
-
-  let format: 'avif' | 'heic' | null = null
-  if (brands.some((brand) => AVIF_BRANDS.has(brand))) format = 'avif'
-  else if (brands.some((brand) => HEIC_BRANDS.has(brand))) format = 'heic'
   if (!format) return null
 
   const dimensions = findIspe(bytes, 0, bytes.length, 0)

@@ -116,4 +116,27 @@ describe('sniffImage', () => {
   test('should not classify an unknown ftyp brand as an image', () => {
     expect(sniffImage(isoBmffHeader('mp42'))).toBeNull()
   })
+
+  test('should cap the ftyp brand scan on an attacker-sized box', () => {
+    // A giant declared ftyp box must not turn the brand walk into an
+    // allocation/CPU primitive: only the leading brands are scanned.
+    const size = 8 * 1024 * 1024
+    const bytes = new Uint8Array(size)
+    const view = new DataView(bytes.buffer)
+    view.setUint32(0, size)
+    bytes.set([0x66, 0x74, 0x79, 0x70], 4) // 'ftyp'
+    bytes.set([0x6d, 0x70, 0x34, 0x32], 8) // major brand 'mp42'
+    // A recognizable brand placed far past the scan cap must not be reached.
+    bytes.set([0x61, 0x76, 0x69, 0x66], 1024 * 1024) // 'avif'
+    const started = performance.now()
+    expect(sniffImage(bytes)).toBeNull()
+    expect(performance.now() - started).toBeLessThan(200)
+  })
+
+  test('should classify a compatible brand within the scan cap', () => {
+    // major 'mif1' (ambiguous) + compatible 'avif' in the normal position.
+    const bytes = new Uint8Array(isoBmffHeader('mif1'))
+    bytes.set([0x61, 0x76, 0x69, 0x66], 16) // overwrite first compatible brand with 'avif'
+    expect(sniffImage(bytes)).toEqual({ format: 'avif' })
+  })
 })

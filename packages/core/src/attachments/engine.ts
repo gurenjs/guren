@@ -262,7 +262,8 @@ export class AttachmentEngine {
       for (const name of names) {
         const spec = declaration[name]!
         const list = byCollection?.get(name) ?? []
-        attached[name] = spec.kind === 'many' ? list : (list[0] ?? null)
+        // hasOne resolves to the newest row (see attachmentUrl on why).
+        attached[name] = spec.kind === 'many' ? list : (list[list.length - 1] ?? null)
       }
       return attached
     })
@@ -291,7 +292,9 @@ export class AttachmentEngine {
     if (recordId == null) return null
 
     const rows = sortById(await this.rowsFor(model, recordId, { collection }))
-    const raw = rows[0]
+    // hasOne reads the *newest* row: a crash between attach()'s write-new
+    // and purge-old steps leaves two rows, and the stale one must not win.
+    const raw = spec.kind === 'one' ? rows[rows.length - 1] : rows[0]
     if (!raw) return null
     const row = this.toRecord(raw)
 
@@ -667,7 +670,11 @@ function errorCode(error: unknown): string | undefined {
   return undefined
 }
 
-/** ULIDs sort lexicographically by creation time. */
+/** ULIDs sort lexicographically by creation time; compare code units, not locales. */
 function sortById(rows: PlainObject[]): PlainObject[] {
-  return [...rows].sort((a, b) => String(a.id).localeCompare(String(b.id)))
+  return [...rows].sort((a, b) => {
+    const left = String(a.id)
+    const right = String(b.id)
+    return left < right ? -1 : left > right ? 1 : 0
+  })
 }

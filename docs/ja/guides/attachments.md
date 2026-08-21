@@ -59,6 +59,30 @@ export const attachments = pgTable('attachments', {
 }, (t) => [index('attachments_attachable_idx').on(t.attachableType, t.attachableId, t.collection)])
 ```
 
+**MySQL:**
+
+```ts
+import { index, int, json, mysqlTable, text, timestamp, varchar } from 'drizzle-orm/mysql-core'
+
+export const attachments = mysqlTable('attachments', {
+  id: varchar('id', { length: 26 }).primaryKey(),
+  attachableType: varchar('attachable_type', { length: 255 }).notNull(),
+  attachableId: varchar('attachable_id', { length: 255 }).notNull(),
+  collection: varchar('collection', { length: 255 }).notNull().default('default'),
+  disk: varchar('disk', { length: 255 }).notNull(),
+  path: varchar('path', { length: 1024 }).notNull(),
+  name: varchar('name', { length: 255 }).notNull(),
+  contentType: varchar('content_type', { length: 255 }).notNull(),
+  size: int('size').notNull(),
+  width: int('width'),
+  height: int('height'),
+  variants: json('variants').$type<Record<string, AttachmentVariantRecord>>(),
+  placeholder: text('placeholder'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (t) => [index('attachments_attachable_idx').on(t.attachableType, t.attachableId, t.collection)])
+```
+
 **SQLite:**
 
 ```ts
@@ -175,7 +199,7 @@ const loaded = await Post.with('attachments').get() // 全コレクションの�
 どの環境でも守られるルール:
 
 - **バイト列のみ。** `attach()` が受け付けるのは `File | Blob | Uint8Array` だけです。ファイルシステムのパス文字列は任意ファイル読み取りの入口になるため、型でも実行時でも拒否されます。
-- **HEIC/HEIF はデフォルトで 415 拒否。** HEIC のデコードは OS コーデック依存で、macOS の開発機では動き Linux の本番では失敗する、というずれを既定で見逃すわけにはいきません。`accepts: { heic: 'convert' }` でオプトインすると、デコードして JPEG として保存します。コーデックがデコードできないランタイムではやはり 415 を返します。
+- **HEIC/HEIF はデフォルトで 415 拒否。** HEIC のデコードは OS コーデック依存で、macOS の開発機では動き Linux の本番では失敗する、というずれを既定で見逃すわけにはいきません。`accepts: { heic: 'convert' }` でオプトインすると、デコードして JPEG として保存します。コーデックがデコードできないランタイムではやはり 415 を返します。この拒否は画像パイプラインが走るとき常に適用されます。`image: 'allow'` のコレクションも対象で、iPhone の HEIC 写真は `'convert'` にオプトインしない限り 415 になります。HEIC のバイト列を不透明ファイルとして保存するのは、`image` ポリシーを持たないコレクションだけです。
 - **ファイル名はサニタイズされます**(パス区切りや制御文字の除去)。オブジェクトキーの一部になるためです。
 - **配信はアプリの既存ルールに従います。** アタッチメントは配信ルートを追加しません。public ディスクは `disk.url()`、private ディスクは `disk.temporaryUrl()` で配信します。ユーザーのアップロードを自分のドメインで配信するディスクでは、正しい `Content-Type` と `X-Content-Type-Options: nosniff` ヘッダを必ず付けてください。インライン表示される SVG はスクリプトになりえます。
 

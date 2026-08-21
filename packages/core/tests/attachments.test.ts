@@ -21,6 +21,7 @@ import {
   type ImageProcessor,
 } from '../src/index'
 import { sanitizeFilename, setActiveAttachmentEngine } from '../src/attachments/engine'
+import { ulid } from '../src/attachments/ulid'
 import { isoBmffHeader, PNG_1X1, pngWithDeclaredDimensions } from './image-sniff.test'
 
 const attachmentsTable = sqliteTable('attachments', {
@@ -290,6 +291,37 @@ describe('attachments', () => {
 
       const [loaded] = await Post.withAttachments([{ id: 1 }], ['images'])
       expect(loaded!.images).toHaveLength(2)
+    })
+
+    test('should resolve hasOne reads to the newest row after a crash mid-replace', async () => {
+      // attach() writes the new row before purging the old one (a failed put
+      // must never leave the record attachment-less). A crash in that window
+      // leaves two rows — reads must prefer the newer one, not the stale one.
+      const { Attachment } = configure()
+      const stale = await Post.attach(1, 'cover', PNG_1X1, { name: 'stale.png' })
+      const newerId = ulid()
+      await Attachment.forceCreate({
+        id: newerId,
+        attachableType: 'Post',
+        attachableId: '1',
+        collection: 'cover',
+        disk: 'media',
+        path: `attachments/${newerId}/fresh.png`,
+        name: 'fresh.png',
+        contentType: 'image/png',
+        size: PNG_1X1.byteLength,
+        width: 1,
+        height: 1,
+        variants: null,
+        placeholder: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+
+      const [loaded] = await Post.withAttachments([{ id: 1 }], ['cover'])
+      expect(loaded!.cover?.name).toBe('fresh.png')
+      expect(await Post.attachmentUrl(1, 'cover')).toContain('fresh.png')
+      void stale
     })
 
     test('should sanitize traversal-shaped filenames', async () => {
