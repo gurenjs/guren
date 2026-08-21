@@ -591,7 +591,10 @@ describe('StorageCheck', () => {
 
 describe('MemoryCheck', () => {
   it('should return healthy when memory is below threshold', async () => {
-    const check = new MemoryCheck({ thresholdMb: 10000 })
+    // Pin criticalThresholdMb too: its 1024MB default sits below thresholdMb
+    // here, and a test process whose heapUsed crosses 1GB would report
+    // "unhealthy" regardless of thresholdMb.
+    const check = new MemoryCheck({ thresholdMb: 10000, criticalThresholdMb: 20000 })
     const result = await check.check()
 
     expect(result.status).toBe('healthy')
@@ -601,7 +604,9 @@ describe('MemoryCheck', () => {
   })
 
   it('should return degraded when memory exceeds threshold', async () => {
-    const check = new MemoryCheck({ thresholdMb: 0 })
+    // criticalThresholdMb must stay above any real heapUsed, or crossing the
+    // 1024MB default turns this "degraded" into "unhealthy".
+    const check = new MemoryCheck({ thresholdMb: 0, criticalThresholdMb: 100000 })
     const result = await check.check()
 
     expect(result.status).toBe('degraded')
