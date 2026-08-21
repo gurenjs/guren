@@ -15,6 +15,13 @@
 //
 // Positional arguments select packages by directory name or package name.
 // Everything after a bare `--` is forwarded to `bun test` verbatim.
+//
+// One forwarded flag to distrust: `--changed` selects test files by git diff,
+// but packages/cli's tests load @guren/server through the workspace symlink's
+// dist/ (see .claude/rules/common-pitfalls.md, "Stale Build Artifacts"), a
+// dependency git cannot see — so a change under packages/server/src selects
+// the server tests and silently skips the cli tests that would exercise it.
+// For server-touching changes, run the full sweep or name the packages.
 
 import { closeSync, mkdtempSync, openSync, readSync, rmSync, writeSync } from 'node:fs'
 import { tmpdir } from 'node:os'
