@@ -28,7 +28,7 @@ Use the following structure when drafting an RFC.
 
 **Author:** <your name or GitHub handle>
 **Date:** <YYYY-MM-DD>
-**Status:** Draft | Discussion | Accepted | Rejected | Withdrawn
+**Status:** Draft | Discussion | Accepted | Rejected | Withdrawn | Superseded
 
 ## Problem
 
@@ -76,6 +76,8 @@ The RFC enters a discussion period of at least two weeks. During this time:
 ### 3. Decision
 
 The project maintainer(s) make the final call on whether to accept or reject the RFC. The decision is recorded in the RFC document by updating its status field. Accepted RFCs are merged into the `rfcs/` directory.
+
+When a newer RFC replaces an older one (accepted or still draft), the older document is marked `Superseded` with a pointer to its successor — in the same change that accepts the successor, so the directory never carries two live proposals for the same feature. Superseded RFCs remain in `rfcs/` as historical and design context.
 
 ### 4. Implementation
 

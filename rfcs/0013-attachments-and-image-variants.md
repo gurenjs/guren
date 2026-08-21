@@ -37,8 +37,17 @@ reasons:
    reference for the deferred layers (its verified code constraints are
    reused below and still hold).
 
-If this RFC is accepted, RFC 0010 should be marked **Superseded** with a
-pointer here.
+Status handling (PEP-style `Replaces`/`Superseded-By` pairing): while this
+RFC is in discussion, RFC 0010 stays `Draft` but carries a prominent
+"proposed to be superseded by RFC 0013" note, so two live drafts never
+read as two viable proposals. If this RFC is accepted, RFC 0010 is marked
+**Superseded by RFC 0013** in the same change — the document itself stays
+in `rfcs/` as design research for the deferred layers. Those layers get
+*fresh* RFCs when revived, citing both documents and revalidating their
+assumptions: in particular, blob dedup cannot be implemented "from
+RFC 0010" verbatim once this RFC's one-table schema ships. (`Superseded`
+is added to the status vocabulary in `contributing/rfc-process.md`, which
+previously ended at `Withdrawn`.)
 
 ### Verified constraints
 
@@ -135,13 +144,20 @@ export const attachments = pgTable('attachments', {
 
 ```ts
 interface AttachmentVariantRecord {
-  path: string          // object key of the generated variant
-  width: number
-  height: number
-  format: 'jpeg' | 'png' | 'webp' | 'avif'
-  size: number
+  status: 'pending' | 'ready' | 'failed' | 'unavailable'
+  path?: string         // object key of the generated variant (status 'ready')
+  width?: number
+  height?: number
+  format?: 'jpeg' | 'png' | 'webp' | 'avif'
+  size?: number
 }
 ```
+
+`attach()` seeds one entry per **declared** variant immediately —
+`pending` when generation is queued, `unavailable` when the runtime has no
+processor — and the generator flips it to `ready` (or `failed`). Recording
+declared names, not just generated ones, is what lets §7 distinguish "not
+yet generated" (fall back) from "never declared" (throw) after a reload.
 
 Notes:
 
@@ -183,7 +199,8 @@ export const { attachmentService, Attachment } = configureAttachments({
   table: attachments,
   storage: () => container.make('storage'),   // StorageManager, resolved lazily
   disk: 'media',                              // default disk for new attachments
-  maxPixels: 24_000_000,                      // decode cap (decompression-bomb defense)
+  maxPixels: 52_000_000,                      // decode cap (decompression-bomb defense, §6)
+  maxImageBytes: 50_000_000,                  // encoded-input cap before decode (Open Question 3)
   queue: () => container.make('queue'),       // optional; enables queued: true
 })
 ```
@@ -299,8 +316,9 @@ export interface ImageProcessor {
 - **Non-Bun runtimes** (Node/Lambda via `NodeHasher`-style deployments,
   Workers) get no default processor. Behaviour is then:
   - `variants` requested + no processor → the attachment is stored, the
-    variants are **skipped with a logged warning**, `variants` stays
-    empty (graceful degrade; `url(att, 'thumb')` falls back per §6).
+    variants are **skipped with a logged warning** and recorded as
+    `unavailable` in the §1 status record (graceful degrade;
+    `url(att, 'thumb')` falls back per §7).
   - Apps can inject any `ImageProcessor` (e.g. a sharp-backed one) via
     `configureAttachments({ processor })`. The framework ships the
     interface and the Bun default only; a `sharp` implementation is a
@@ -320,12 +338,25 @@ These rules exist because each one closes a measured hole:
   user-influenced string ever reaches it; the service simply never calls
   it. (Adopting an object that already exists on a disk — RFC 0010's
   `{ path, disk }` source — is deferred with the rest of that scope.)
-- **Validation is a full decode.** When `image: 'require'` or `variants`
-  are requested, `probe()` decodes under `maxPixels` before any bytes hit
-  storage; sniffed content types and client-declared MIME are recorded but
-  never trusted for the image/not-image decision. `maxPixels` has no
-  "unlimited" setting; the config default is **24,000,000 px** (≈ a 6000×
-  4000 photo; Open Question 4).
+- **Validation is a full decode, but bomb defense happens before it.**
+  When `image: 'require'` or `variants` are requested, the pipeline is:
+  (1) reject encoded input larger than `maxImageBytes` (cheapest gate;
+  pixel count and upload size defend against different attacks);
+  (2) reject header-declared dimensions exceeding `maxPixels` *before*
+  decoding — the decoder allocates from those dimensions, so this is the
+  gate that actually prevents the allocation (sharp's `limitInputPixels`
+  works the same way and documents the same trust assumption on header
+  metadata); (3) full decode as the validation authority — sniffed content
+  types and client-declared MIME are recorded but never trusted for the
+  image/not-image decision, and a check that ran only *after* a full
+  decode would be validation, not bomb protection. `maxPixels` has no
+  "unlimited" setting; the config default is **52,000,000 px**. For
+  calibration: sharp defaults to ~268 MP, Pillow warns at ~89 MP and hard-
+  errors at ~179 MP, and phones ship optional 48 MP output (iPhone HEIF/
+  ProRAW) — 52 MP admits those files while a 52 MP RGBA decode is already
+  ≈ 208 MB for one pixel buffer, so admitting 100–200 MP by default would
+  be unsafe on ordinary app servers. Photography/archival apps raise it
+  deliberately and should isolate their image workers.
   - **On a processor-less runtime this validation is deferred, not
     skipped.** A Workers app (or any `queued: true` attach) has no
     processor in the request path, so the original is stored first and the
@@ -361,12 +392,20 @@ These rules exist because each one closes a measured hole:
   this matches the one driver that cannot do per-object visibility (R2 is
   per-bucket) instead of pretending otherwise. One attachment = one disk =
   one visibility.
-- `url(att, 'thumb')` for a variant that exists serves the variant's key.
-  For a variant that is **declared but not yet generated** (queued, or
-  skipped on a processor-less runtime) it **falls back to the original's
-  URL**: pages keep rendering, at the cost of bytes, and the `placeholder`
-  LQIP covers the perceived-latency gap. The alternative (404 or a
-  blocking generate-on-demand route) is Open Question 3.
+- `url(att, 'thumb')` for a `ready` variant serves the variant's key. For
+  a variant that is **declared but not yet generated** (`pending`,
+  `failed`, or `unavailable` in the §1 status record) it **falls back to
+  the original's URL**: pages keep rendering, at the cost of bytes, the
+  `placeholder` LQIP covers the perceived-latency gap, and a later render
+  picks up the variant automatically. A variant name that was **never
+  declared** throws — the status record is what makes the two cases
+  distinguishable after a reload. Precedent supports the fallback:
+  Rails ActiveStorage answers this with blocking generate-on-demand
+  behind its serving route (structurally unavailable in v1, and a
+  processor failure there is an error, not a fallback), while Spatie
+  Media Library's default `getUrl()` returns a dead URL for queued
+  conversions and its documented remedy, `getAvailableUrl()`, is exactly
+  this fallback-to-original — v1 promotes that remedy to the default.
 - Known limitations carried from RFC 0010, both consequences of deferring
   the signed proxy route (RFC 0010 §3): `LocalDriver.temporaryUrl()`
   returns a plain public URL, so "private on the local disk" is not
@@ -511,18 +550,16 @@ objects into attachments is deferred scope, see §6 "bytes only").
    `collections: { cover: { variants: {...}, image: 'require' } }` so
    `attach()` calls don't repeat specs? Leaning yes but v1.x, not v1.0 —
    it is additive.
-3. **Pending-variant URL semantics.** Fall back to the original (proposed:
-   pages always render, bytes cost) vs. 404 vs. a blocking
-   generate-on-demand route (RFC 0010 §6's `materialize`). The fallback is
-   the simplest honest behaviour; generate-on-demand can arrive with the
-   serving route later.
-4. **`maxPixels` default.** 24 MP covers current phone cameras; is that
-   the right ceiling for a framework default, and should `probe()` also
-   cap *encoded* input bytes (cheaper first line) before decode?
-5. **Queue worker ergonomics on Workers.** The Redis-queue + separate Bun
+3. **`maxImageBytes` default.** The encoded-input cap before decode is
+   settled as a mechanism (§6); is 50 MB the right number for a framework
+   default? (Resolved in this draft: pending-variant URLs fall back to
+   the original with per-variant status records (§7), and `maxPixels`
+   defaults to 52 MP (§6) — both after comparing Rails/Spatie behaviour
+   and sharp/Pillow limits.)
+4. **Queue worker ergonomics on Workers.** The Redis-queue + separate Bun
    worker split works today but has no scaffold; does Part 2 ship a
    `bin/queue-worker.ts` template, or is that `guren add` material?
-6. **`guren context` / spec integration.** Should `spec:generate`'s ER
+5. **`guren context` / spec integration.** Should `spec:generate`'s ER
    view render attachment edges (it reads `db/schema.ts`, so the table
    appears already), and should `guren context <Entity>` list collections?
    Codegen (`.guren/attachments.gen.ts`) was central to RFC 0010's typed
