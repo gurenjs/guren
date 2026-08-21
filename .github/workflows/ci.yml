@@ -27,17 +27,25 @@ jobs:
           - bun-version: '1.3.14'
             redis: true
           # The trial lane also trials `bun test --parallel` (1.4-only flag):
-          # forwarded through test:bun, workers = the runner's 4 cores. Linux
-          # only by design — on macOS ARM64 the same suite trips
+          # forwarded through test-packages.ts, workers = the runner's 4
+          # cores. Linux only by design — on macOS ARM64 the same suite trips
           # oven-sh/bun#34069 (spawnSync loses a child exit; a worker spins at
           # 100% CPU forever) in ~2 of 5 runs, but that spin lives in the
           # kqueue path, which Linux's epoll event loop does not share. The
           # timeout raise absorbs the tests that spawn real subprocesses
           # (git choreography, tsc gates) running 4-wide on 4 cores, where 5s
           # is only enough for an idle machine.
+          #
+          # Two dashes because `bun <file>` swallows one *leading* `--` before
+          # argv reaches the script; the survivor is the separator
+          # test-packages.ts forwards the rest after. Going through
+          # `bun run test:bun` instead stacks a second swallowing layer (the
+          # script is itself `bun run ./scripts/test-packages.ts`), which is
+          # how the first version of this lane fed the harness a bare
+          # `--parallel` and died on "Unknown flag".
           - bun-version: '1.4.0'
             redis: true
-            test-bun-flags: '-- --parallel --timeout 30000'
+            test-bun-flags: '-- -- --parallel --timeout 30000'
     services:
       redis:
         image: redis:7-alpine
@@ -239,11 +247,14 @@ jobs:
       - name: Bundle budget audit
         run: bun run audit:bundle-budgets
 
-      # `bun run test` inlined so the trial lane's flags reach test:bun only;
-      # the example apps keep their own per-app runs either way.
+      # `bun run test` inlined so the trial lane's flags reach the package
+      # suites only; the example apps keep their own per-app runs either way.
+      # The harness is invoked directly (not via `bun run test:bun`) so the
+      # flag string crosses exactly one `--`-swallowing layer — see the
+      # matrix comment above.
       - name: Run tests
         run: |
-          bun run test:bun ${{ matrix.test-bun-flags }}
+          bun scripts/test-packages.ts ${{ matrix.test-bun-flags }}
           bun run test:examples
 
       - name: Testing package tests (vitest)
