@@ -23,6 +23,9 @@ jobs:
   analyze:
     name: Analyze
     runs-on: ubuntu-latest
+    # Measured max 2m18s over 10 runs. The extra room is for the CodeQL
+    # action itself, whose database build is not this repo's to tune.
+    timeout-minutes: 20
     permissions:
       security-events: write
       contents: read
