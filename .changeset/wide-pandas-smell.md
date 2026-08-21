@@ -14,7 +14,13 @@ all. `config/`, `bin/`, `tests/`, `drizzle.config.ts`, and `vite.config.ts`
 were outside the list too.
 
 The api-only template already used the explicit-glob form, so its generated
-files were covered — but its list omitted the `tests/` and `drizzle.config.ts`
-it ships, so those went unchecked there for a different reason. Both templates
-now cover everything they scaffold, and `bun run typecheck` in a scaffolded app
-reads all of it.
+files were covered — but its list omitted the `drizzle.config.ts` it ships, so
+that went unchecked there for a different reason. It now covers that too.
+
+`tests/` is covered in the default template but deliberately not yet in
+api-only: the test file api-only ships passes `providers: [DatabaseProvider]`
+to `TestApp.create()`, and `@guren/testing` types that parameter as
+`new (...args: unknown[]) => ProviderLike`, which no real `ServiceProvider`
+subclass satisfies. That is a defect in the testing package's published type,
+not in the template, and widening the include here before it is fixed would
+only make the starter smokes red.
