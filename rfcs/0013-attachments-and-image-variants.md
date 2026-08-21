@@ -37,6 +37,14 @@ reasons:
    reference for the deferred layers (its verified code constraints are
    reused below and still hold).
 
+What is *kept* from RFC 0010 is its model-facing API: the `Attachable`
+typed mixin (§3), because the declaration-on-the-model shape is what both
+Rails (`has_one_attached`) and Spatie Media Library converged on, and it
+is the shape Guren's static-first, compile-time-checked conventions
+demand. The replacement is in everything under it: one table instead of
+two, `Bun.Image` instead of `sharp`, driver URLs instead of a signed
+serving route.
+
 Status handling (PEP-style `Replaces`/`Superseded-By` pairing): while this
 RFC is in discussion, RFC 0010 stays `Draft` but carries a prominent
 "proposed to be superseded by RFC 0013" note, so two live drafts never
@@ -165,7 +173,7 @@ Notes:
   deduplication and N:M sharing of one upload across records — neither is a
   v1 requirement, and both cost a join on every read and a reference count
   on every delete. A future dedup layer can be added behind the same
-  service API (Alternatives).
+  model API (Alternatives).
 - **`variants` is a JSON column, not rows.** Variant metadata is small,
   read together with its attachment, and never queried independently. The
   record shape is versioned by the service, so adding fields (e.g. a
@@ -188,50 +196,89 @@ deletion a single `disk.deleteDirectory(`attachments/${id}`)` — no key
 bookkeeping beyond the row itself. Filenames are sanitized (no path
 separators, RFC 5987 encoding where needed) before becoming part of a key.
 
-### 3. Service API
+### 3. Model API — declarations live on the model (typed mixin)
+
+This is the shape both reference frameworks converged on: Rails declares
+`has_one_attached :cover` as a model macro, Spatie Media Library declares
+collections and conversions on the model class. Guren's equivalent —
+records are plain objects, statics are the API — is RFC 0010's
+`Attachable` mixin, which this RFC adopts on top of the single-table
+engine:
+
+```ts
+// app/Models/Post.ts
+import { Attachable, hasOneAttached, hasManyAttached } from '@guren/core'
+
+export class Post extends Attachable(defineModel(posts), {
+  cover: hasOneAttached({
+    image: 'require',                          // §6: full-decode validation, 422 on non-image
+    variants: { thumb: { width: 320 }, og: { width: 1200 } },
+  }),
+  images: hasManyAttached({ image: 'require' }),
+  draftPdf: hasOneAttached(),                  // opaque bytes; width/height/placeholder null
+}) {}
+```
+
+The declaration passed into the mixin is inferred as generics — the same
+mechanism `defineModel(table, { fillable })` already relies on — so
+collection names, one/many kinds, and variant names are all compile-time
+facts. What the types enforce:
+
+- `Post.attach(id, 'covr', file)` — error: the collection argument is
+  `keyof` the declaration.
+- `Post.attachmentUrl(post, 'cover', { variant: 'thumb' })` — `variant`
+  accepts only the names declared on `cover`; `images` declared none, so
+  any variant there is an error.
+- `Post.withAttachments(records, ['cover', 'images'])` returns
+  `{ cover: AttachmentData | null; images: AttachmentData[] }` —
+  `hasOne` is nullable-single, `hasMany` is an array.
+- Declaration keys are checked against the table's column names (the
+  `RecordKey<TTable>` helper `hidden`/`visible` already use), so an
+  attachment named after a real column fails to compile.
+
+The mixin statics, all delegating to an internal engine wired by
+`configureAttachments()` (a clear boot-time error if it was never called):
+
+| Static | Purpose |
+|---|---|
+| `Post.attach(recordId, 'cover', source, opts?)` | `source` is bytes only (`File \| Blob \| Uint8Array`, §6). `hasOne` replaces (old row + objects purged), `hasMany` appends. `opts`: `{ name?, disk?, queued? }` — the *specs* (variants, `image`, HEIC policy) come from the declaration, not the call site. |
+| `Post.detach(recordId, 'images', attachmentId?)` | Removes row + objects; the third argument is rejected on a `hasOne`. |
+| `Post.withAttachments(records, names)` | Batch loader for a page of records (one indexed query per call). |
+| `Post.attachmentUrl(record \| id, 'cover', { variant? })` | §7 URL rules, variant fallback included. |
+| `Post.purgeAttachments(recordId)` | Explicit purge for destroy actions (§8). |
+
+Because the declaration is a static argument in the class heritage
+clause, it is **statically readable**: `model-parser.ts` already unwraps
+mixins around `defineModel` (this is how `SoftDeletes` is handled), so
+`guren check`, `guren context Post`, and a future
+`.guren/attachments.gen.ts` can all see collections and variants without
+executing app code — the property that made Guren's other surfaces
+agent-checkable.
+
+Infrastructure wiring stays in config, once per app
+(`DatabaseSessionStore` precedent — the app owns the table):
 
 ```ts
 // config/attachments.ts
 import { configureAttachments } from '@guren/core'
 import { attachments } from '@/db/schema'
 
-export const { attachmentService, Attachment } = configureAttachments({
+export const { Attachment } = configureAttachments({
   table: attachments,
   storage: () => container.make('storage'),   // StorageManager, resolved lazily
   disk: 'media',                              // default disk for new attachments
   maxPixels: 52_000_000,                      // decode cap (decompression-bomb defense, §6)
-  maxImageBytes: 50_000_000,                  // encoded-input cap before decode (Open Question 3)
+  maxImageBytes: 50_000_000,                  // encoded-input cap before decode (Open Question 2)
   queue: () => container.make('queue'),       // optional; enables queued: true
 })
 ```
 
-`configureAttachments` follows the `DatabaseSessionStore` precedent: the
-app owns the table, the framework returns the service and a ready-made
-model class (`Attachment = defineModel(table)` with `morphTo('attachable',
-'attachable')` pre-declared). The app-local name `Attachment` lives in app
-namespace; the framework itself exports no bare `Attachment`.
+`Attachment` is a ready-made model (`defineModel(table)` with
+`morphTo('attachable', 'attachable')` pre-declared) for morph relations
+and advanced queries; the app-local name lives in app namespace — the
+framework itself exports no bare `Attachment` (collision constraint).
 
 ```ts
-interface AttachmentService {
-  attach(
-    model: { constructor: typeof Model } | ModelRef,   // record + class, or (Model, id) pair
-    source: File | Blob | Uint8Array,                  // bytes only — never a path string
-    options?: {
-      collection?: string          // default 'default'
-      disk?: string                // default from config
-      name?: string                // override stored filename
-      variants?: Record<string, VariantSpec>
-      queued?: boolean             // generate variants via the queue (default false)
-      image?: 'require' | 'allow' | 'forbid'   // default 'allow' (see §6)
-    },
-  ): Promise<AttachmentRecord>
-
-  for(model, collection?): Promise<AttachmentRecord[]>   // query helper (filters by collection)
-  detach(attachmentId: string): Promise<void>            // row + objects
-  purgeFor(model): Promise<number>                       // all attachments of one record
-  url(att: AttachmentRecord, variant?: string): string | Promise<string>
-}
-
 interface VariantSpec {
   width?: number
   height?: number
@@ -241,7 +288,7 @@ interface VariantSpec {
 }
 ```
 
-Controller usage is `this.file()` → `attach()`, one call:
+Controller usage is `this.file()` → `Post.attach()`, one call:
 
 ```ts
 async store() {
@@ -249,23 +296,29 @@ async store() {
   const post = await Post.create(data)
   const cover = await this.file('cover')
   if (cover) {
-    await attachmentService.attach(
-      { model: Post, id: post.id },
-      cover,
-      { collection: 'cover', variants: { thumb: { width: 320 }, og: { width: 1200 } } },
-    )
+    await Post.attach(post.id, 'cover', cover)
   }
   return this.redirect(`/posts/${post.id}`)
 }
 ```
 
-### 4. Model integration — zero ORM changes
+**Contained typing risk.** The mixin generics were the identified
+implementation risk when RFC 0010 was drafted. Two things contain it now:
+the engine underneath is plain and untyped-generic (single table, service
+internals), so the mixin is a *typing facade* that can ship with the core
+enforcement set (collection names, kinds, variant names) first — the
+column-collision check can land as a `guren check` rule instead of a
+type-level constraint if the `RecordKey` interaction fights back; and the
+inference pattern (options argument inferred through the factory) is the
+one `defineModel`'s typed options already proved out.
+
+### 4. Relation integration — zero ORM changes
 
 The table follows the morph convention, so the existing relation machinery
-just works:
+also works, unchanged, for apps that want the raw rows:
 
 ```ts
-export class Post extends defineModel(posts) {
+export class Post extends Attachable(defineModel(posts), { /* … */ }) {
   static relations = {
     attachments: Post.morphMany('attachments', Attachment, 'attachable'),
   }
@@ -274,11 +327,11 @@ export class Post extends defineModel(posts) {
 const posts = await Post.with('attachments').get()   // eager-loads all attachments
 ```
 
-`morphMany` has no per-relation `where`, so it loads *all* collections of a
-record; per-collection reads go through `attachmentService.for(post,
-'cover')` (a straight indexed query). Adding relation-level constraints to
-the ORM is a general win but explicitly out of scope here (it was RFC 0010
-Open Question 1; it stays open).
+`morphMany` has no per-relation `where`, so it loads *all* collections of
+a record; the typed per-collection path is `Post.withAttachments()`
+(§3). Adding relation-level constraints to the ORM is a general win but
+explicitly out of scope here (it was RFC 0010 Open Question 1; it stays
+open).
 
 `AttachmentData` — the resource-facing shape `{ id, collection, name,
 contentType, size, width, height, url, placeholder, variants: Record<string,
@@ -385,8 +438,9 @@ These rules exist because each one closes a measured hole:
 
 ### 7. URLs, visibility, and pending variants
 
-- `attachmentService.url(att)` → `disk.url(att.path)` on a **public**
-  disk, `disk.temporaryUrl(att.path, expiry)` on a **private** one.
+- `Post.attachmentUrl(record, 'cover')` → `disk.url(att.path)` on a
+  **public** disk, `disk.temporaryUrl(att.path, expiry)` on a **private**
+  one.
   Public/private is declared **per disk** in the attachments config
   (`disks: { media: 'public', docs: 'private' }`), not per attachment —
   this matches the one driver that cannot do per-object visibility (R2 is
@@ -419,10 +473,10 @@ These rules exist because each one closes a measured hole:
 
 - **No DB-level cascade is possible** — the polymorphic
   `attachableType`/`attachableId` pair cannot carry a foreign key. Deletion
-  is explicit: `attachmentService.purgeFor(model)` in the destroy action
+  is explicit: `Post.purgeAttachments(id)` in the destroy action
   (rows first is wrong here — see below), plus a sweeper.
 - **Order: objects are deleted via prefix, rows after.**
-  `detach`/`purgeFor` call `disk.deleteDirectory(`attachments/${id}`)`
+  `detach`/`purgeAttachments` call `disk.deleteDirectory(`attachments/${id}`)`
   then delete the row. A crash between the two leaves a row pointing at
   nothing, which the next `url()` surfaces loudly; the reverse would leave
   invisible orphaned objects that only a bucket audit finds. A sweeper
@@ -434,14 +488,16 @@ These rules exist because each one closes a measured hole:
   where clause). A best-effort `deleting` hook may purge when the where
   clause carries the primary key, but the contract is explicit-plus-sweep.
 - SoftDeletes: soft-deleting leaves attachments in place (restore must
-  work); `forceDelete` paths call `purgeFor`.
+  work); `forceDelete` paths call `purgeAttachments`.
 
 ### 9. Package placement, exports, releases
 
 - **Code lives in `@guren/core`** (`packages/core/src/attachments/`),
-  exports: `configureAttachments`, `AttachmentService`, `ImageProcessor`,
-  `AttachmentRecord`, `AttachmentData`, `VariantSpec`. Rationale
-  unchanged from RFC 0010: the service needs `@guren/orm` (`defineModel`,
+  exports: `configureAttachments`, `Attachable`, `hasOneAttached`,
+  `hasManyAttached`, `ImageProcessor`, `AttachmentRecord`,
+  `AttachmentData`, `VariantSpec` (the engine behind the mixin statics is
+  internal, not exported). Rationale
+  unchanged from RFC 0010: the layer needs `@guren/orm` (`defineModel`,
   `Model.morphMap`) and `@guren/server` (storage, queue) at once, and
   `@guren/core` is the established home for exactly that glue
   (`DatabaseSessionStore`). `@guren/server` must not depend on
@@ -469,13 +525,17 @@ These rules exist because each one closes a measured hole:
 
 ### Implementation plan
 
-1. **Part 1 — core:** table snippet + `configureAttachments` +
-   `AttachmentService` (attach/for/detach/purgeFor/url) + `ImageProcessor`
-   + `BunImageProcessor` (probe/process/placeholder, HEIC policy,
-   maxPixels) + docs (`docs/{en,ja}/guides/attachments.md`, storage guide
-   cross-link). Tests: service against `local`/`memory` disks; processor
-   tests gated on `'Image' in Bun` so the suite stays green on Bun 1.3
-   CI lanes.
+1. **Part 1 — core:** table snippet + `configureAttachments` + the
+   `Attachable` mixin with its statics
+   (attach/detach/withAttachments/attachmentUrl/purgeAttachments) typed on
+   the declaration (core enforcement set first: names, kinds, variant
+   names) + `ImageProcessor` + `BunImageProcessor`
+   (probe/process/placeholder, HEIC policy, maxPixels) + docs
+   (`docs/{en,ja}/guides/attachments.md`, storage guide cross-link).
+   Tests: the statics against `local`/`memory` disks, plus type-level
+   tests for the declaration inference (the `defineModel` typed-options
+   suite is the template); processor tests gated on `'Image' in Bun` so
+   the suite stays green on Bun 1.3 CI lanes.
 2. **Part 2 — queue path:** `GenerateVariantsJob`, `queued: true`, the
    pending-variant URL fallback, Workers guidance in the Cloudflare guide.
 3. **Part 3 — lifecycle tooling:** `attachments:prune` console command,
@@ -491,18 +551,28 @@ independent once Part 1 lands.
 
 ## Alternatives Considered
 
-- **RFC 0010 as proposed** (two tables, `Attachable` mixin, signed proxy
-  delivery, direct upload, `sharp`/Cloudflare transformers). Strictly more
-  capable, and its design work is not wasted — but every additional layer
-  (blob dedup, signed routes, presigned uploads) is separable from the
-  core need and none has a user today. Shipping the small core first also
-  de-risks the mixin-typing work: the service API here can later grow a
-  typed mixin facade without schema changes.
+- **RFC 0010 as proposed** (two tables, signed proxy delivery, direct
+  upload, `sharp`/Cloudflare transformers). Strictly more capable, and
+  its design work is not wasted — this RFC adopts its `Attachable` mixin
+  outright — but every additional layer (blob dedup, signed routes,
+  presigned uploads) is separable from the core need and none has a user
+  today; they return in the Follow-ups order.
+- **A standalone `AttachmentService` as the public API** (an earlier
+  revision of this draft: `attachmentService.attach({ model: Post, id },
+  file, { collection: 'cover', variants })`). Smaller to implement — it
+  skips the mixin generics — but it is the wrong shape three times over:
+  collection names are unchecked strings (a `'covr'` typo survives to
+  runtime, against the framework's compile-time-safety positioning),
+  declarations scatter across call sites where `guren check`, codegen,
+  and `guren context` cannot see them, and neither reference framework
+  works this way (Rails: `has_one_attached :cover` on the model; Spatie:
+  collections declared on the model). The service survives as the
+  internal engine under the mixin statics.
 - **Two tables (blob/attachment split).** Buys deduplication and sharing
   of one blob across records; costs a join per read and reference counting
-  per delete. No current requirement needs it; the service API hides the
-  storage schema, so a dedup layer can be introduced later behind the same
-  calls (with a migration).
+  per delete. No current requirement needs it; the model API sits above
+  the storage schema, so a dedup layer can be introduced later behind the
+  same statics (with a migration).
 - **`sharp` as the default processor.** Platform-native dependency, large
   install, and redundant on the framework's primary runtime now that
   `Bun.Image` exists. Kept as an injection point (`ImageProcessor`), not a
@@ -553,7 +623,7 @@ shipped schema:
    `id`, `disk`, and `path`, so the route is "verify signature → load
    row → stream from disk", and existing attachments become
    private-capable **with no schema migration** — only the URL that
-   `attachmentService.url()` hands out changes. The framework's unused
+   `attachmentUrl()` hands out changes. The framework's unused
    `signUrl`/`verifySignedUrl` machinery (RFC 0010's finding) is still
    the intended signer. It is split out because it is the
    security-review-heavy surface: signature scheme, inline/attachment
@@ -571,22 +641,20 @@ shipped schema:
    succeeds, convert to JPEG always, or to the first declared variant
    format? Leaning JPEG for the stored original (predictable), variants
    follow their specs.
-2. **Per-collection config presets.** Should `configureAttachments` accept
-   `collections: { cover: { variants: {...}, image: 'require' } }` so
-   `attach()` calls don't repeat specs? Leaning yes but v1.x, not v1.0 —
-   it is additive.
-3. **`maxImageBytes` default.** The encoded-input cap before decode is
+2. **`maxImageBytes` default.** The encoded-input cap before decode is
    settled as a mechanism (§6); is 50 MB the right number for a framework
    default? (Resolved in this draft: pending-variant URLs fall back to
-   the original with per-variant status records (§7), and `maxPixels`
+   the original with per-variant status records (§7), `maxPixels`
    defaults to 52 MP (§6) — both after comparing Rails/Spatie behaviour
-   and sharp/Pillow limits.)
-4. **Queue worker ergonomics on Workers.** The Redis-queue + separate Bun
+   and sharp/Pillow limits — and per-collection specs live on the model
+   declaration (§3), which also answered the earlier presets question.)
+3. **Queue worker ergonomics on Workers.** The Redis-queue + separate Bun
    worker split works today but has no scaffold; does Part 2 ship a
    `bin/queue-worker.ts` template, or is that `guren add` material?
-5. **`guren context` / spec integration.** Should `spec:generate`'s ER
+4. **`guren context` / spec integration.** Should `spec:generate`'s ER
    view render attachment edges (it reads `db/schema.ts`, so the table
    appears already), and should `guren context <Entity>` list collections?
-   Codegen (`.guren/attachments.gen.ts`) was central to RFC 0010's typed
-   mixin; with a service API it is optional and deferred until the typed
-   facade question returns.
+   The §3 declaration is statically readable via `model-parser.ts`, so a
+   `.guren/attachments.gen.ts` (cross-boundary maps for pages, resources,
+   and `guren check`) is mechanically feasible — Part 4 material; the
+   open part is scope, not feasibility.
