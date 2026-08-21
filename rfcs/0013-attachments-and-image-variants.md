@@ -326,6 +326,14 @@ These rules exist because each one closes a measured hole:
   never trusted for the image/not-image decision. `maxPixels` has no
   "unlimited" setting; the config default is **24,000,000 px** (≈ a 6000×
   4000 photo; Open Question 4).
+  - **On a processor-less runtime this validation is deferred, not
+    skipped.** A Workers app (or any `queued: true` attach) has no
+    processor in the request path, so the original is stored first and the
+    queue worker performs the decode — a rejected image is detected
+    *after* acceptance: the job purges the attachment and records the
+    failure instead of a synchronous 415/422. Apps that need synchronous
+    rejection on Workers must inject an in-Worker `ImageProcessor` (e.g.
+    one backed by the Cloudflare Images binding).
 - **HEIC/HEIF input is rejected by default with 415.** Decoding works on
   macOS dev machines and fails on Linux production — the default must not
   let that skew pass silently. `accepts: { heic: 'convert' }` opts in:
@@ -359,10 +367,14 @@ These rules exist because each one closes a measured hole:
   URL**: pages keep rendering, at the cost of bytes, and the `placeholder`
   LQIP covers the perceived-latency gap. The alternative (404 or a
   blocking generate-on-demand route) is Open Question 3.
-- Known limitation carried from RFC 0010: `LocalDriver.temporaryUrl()`
+- Known limitations carried from RFC 0010, both consequences of deferring
+  the signed proxy route (RFC 0010 §3): `LocalDriver.temporaryUrl()`
   returns a plain public URL, so "private on the local disk" is not
-  actually private. The signed proxy route that fixes this is RFC 0010 §3
-  material and stays out of v1; the docs state the limitation plainly.
+  actually private; and `R2Driver` can only presign when `presign`
+  credentials are configured (RFC 0009 §1.2) — without them
+  `temporaryUrl()` throws, so **private attachments on R2 require the
+  `presign` option** until the proxy route arrives. The docs state both
+  limitations plainly.
 
 ### 8. Lifecycle and deletion
 
