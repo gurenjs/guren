@@ -8,6 +8,10 @@ on:
 jobs:
   canary-validate:
     runs-on: ubuntu-latest
+    # Measured max 6m0s. Generous for the same reason as the release gate:
+    # it is a superset of CI, builds from scratch every night, and adds the
+    # deploy-bundle probes and benchmarks on top.
+    timeout-minutes: 45
     services:
       redis:
         image: redis:7-alpine
@@ -157,6 +161,9 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest
+    # Measured max 6m48s — higher than CI's e2e because this one installs
+    # the Playwright browsers unconditionally, with no cache to hit.
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:17-alpine
@@ -215,6 +222,8 @@ jobs:
 
   web-app:
     runs-on: ubuntu-latest
+    # Measured max 2m36s.
+    timeout-minutes: 20
 
     steps:
       # ----------------------------------------------------------------

@@ -21,6 +21,11 @@ on:
 jobs:
   drift:
     runs-on: ubuntu-latest
+    # Deliberately generous, and not derived from the measured max: these
+    # runs finish in 4-7s and report success, which is too fast for a real
+    # npm install plus typecheck. Until that is looked into, a number based
+    # on them would be a number based on a gate that is not doing its work.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       # `worker` is absent for the same reason fresh-app.ts skips its typecheck:
@@ -57,6 +62,8 @@ jobs:
   # is expected, the same way the npm drift above is.
   agent-catalog:
     runs-on: ubuntu-latest
+    # Measured max 18s; it fetches the published catalog over the network.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
 

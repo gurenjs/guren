@@ -8,6 +8,10 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # Measured max 6m30s over 15 releases. Deliberately looser than CI's
+    # caps: this job legitimately runs the scaffolding smokes, and a
+    # release cut short by a tight cap costs more than a wedged runner.
+    timeout-minutes: 45
     services:
       redis:
         image: redis:7-alpine
