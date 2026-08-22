@@ -20,7 +20,7 @@ export interface TaskResourceData extends Record<string, unknown> {
   owner?: { id: number | undefined; name: string | undefined }
 }
 
-export class TaskResource extends Resource<TaskRecord | TaskWithOwner> {
+export class TaskResource extends Resource<TaskRecord | TaskWithOwner, TaskResourceData> {
   toArray(): TaskResourceData {
     const task = this.resource
     return {

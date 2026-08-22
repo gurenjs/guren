@@ -128,12 +128,19 @@ Use `AuthorizationException.deny(...)` for manual ownership checks that don't go
 ```typescript
 import { Resource } from '@guren/core'
 
-export class PostResource extends Resource<PostRecord> {
-  toArray() {                       // abstract — must implement; typed toArray is exported as Data.Post by codegen
+export interface PostResourceData extends Record<string, unknown> {
+  id: PostRecord['id']
+  title: string
+}
+
+// Resource<TRecord, TPayload> — the second argument makes toJSON() report the
+// payload type too; it defaults to Record<string, unknown> when omitted.
+export class PostResource extends Resource<PostRecord, PostResourceData> {
+  toArray(): PostResourceData {     // abstract — must implement; the annotated type is exported as Data.Post by codegen
     return { id: this.resource.id, title: this.resource.title }
   }
 }
-new PostResource(post).toJSON()          // toArray() + additional() data
+new PostResource(post).toJSON()          // PostResourceData: toArray() + additional() data
 PostResource.collection(posts)           // ResourceData[]
 new PostResource(post).additional({ meta: 1 })
 this.when(cond, value)                   // conditional field inside toArray()

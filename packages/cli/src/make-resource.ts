@@ -10,17 +10,13 @@ export interface ${className}Data extends Record<string, unknown> {
   id: ${modelName}Record['id']
 }
 
-export class ${className} extends Resource<${modelName}Record> {
+export class ${className} extends Resource<${modelName}Record, ${className}Data> {
   toArray(): ${className}Data {
     return {
       id: this.resource.id,
       // Map the remaining ${modelName}Record columns here. Only call
       // .toISOString() on Date columns — text timestamps are already strings.
     }
-  }
-
-  override toJSON(): ${className}Data {
-    return super.toJSON() as ${className}Data
   }
 }
 `

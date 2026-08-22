@@ -14,13 +14,19 @@ describe('makeResource', () => {
       expect(content).toContain(
         "import type { CommentRecord } from '../../Models/Comment.js'",
       )
-      expect(content).toContain('export class CommentResource extends Resource<CommentRecord>')
+      expect(content).toContain(
+        'export class CommentResource extends Resource<CommentRecord, CommentResourceData>',
+      )
       expect(content).toContain('export interface CommentResourceData extends Record<string, unknown>')
       // id type is derived from the record, not hardcoded — a UUID/text primary
       // key must not be forced through an incorrect `number` cast.
       expect(content).toContain("id: CommentRecord['id']")
       expect(content).toContain('id: this.resource.id,')
       expect(content).not.toContain('as number')
+      // The payload type is the class's second type argument, so `toJSON()`
+      // reports it without an override whose only body is a cast.
+      expect(content).not.toContain('super.toJSON()')
+      expect(content).not.toContain('override toJSON')
       expect(content).not.toContain('this.resource.createdAt?.toISOString()')
     } finally {
       await workspace.cleanup()
@@ -34,7 +40,7 @@ describe('makeResource', () => {
 
       const content = await readFile(result, 'utf8')
       expect(content).toContain("import type { PostRecord } from '../../Models/Post.js'")
-      expect(content).toContain('extends Resource<PostRecord>')
+      expect(content).toContain('extends Resource<PostRecord, PostResourceData>')
     } finally {
       await workspace.cleanup()
     }

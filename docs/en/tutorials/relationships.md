@@ -131,18 +131,14 @@ export interface CommentResourceData extends Record<string, unknown> {
   author: { name: string } | null
 }
 
-export class CommentResource extends Resource<CommentWithAuthor> {
+export class CommentResource extends Resource<CommentWithAuthor, CommentResourceData> {
   toArray(): CommentResourceData {
     return {
-      id: this.resource.id as number,
-      body: this.resource.body as string,
-      createdAt: this.resource.createdAt as string,
+      id: this.resource.id,
+      body: this.resource.body,
+      createdAt: this.resource.createdAt,
       author: this.resource.author ? { name: this.resource.author.name } : null,
     }
-  }
-
-  override toJSON(): CommentResourceData {
-    return super.toJSON() as CommentResourceData
   }
 }
 ```

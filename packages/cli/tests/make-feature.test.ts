@@ -172,8 +172,11 @@ describe('makeFeature', () => {
         'utf8',
       )
       expect(resource).toContain('startsAt: string')
+      // No cast on the way in: `new Date()` takes the `Date`, string or number
+      // the three dialects hand back, and casting would only hide a column
+      // that turns out to be none of them.
       expect(resource).toContain(
-        'startsAt: new Date(this.resource.startsAt as string | number | Date).toISOString()',
+        'startsAt: new Date(this.resource.startsAt).toISOString()',
       )
 
       const newPage = await readFile(join(workspace.dir, 'resources/js/pages/events/New.tsx'), 'utf8')
@@ -181,6 +184,45 @@ describe('makeFeature', () => {
       expect(newPage).toContain('value={form.data.startsAt.slice(0, 10)}')
       expect(newPage).toContain("setData('startsAt', event.target.value)")
       expect(newPage).toContain("startsAt: ''")
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  // The record is `typeof table.$inferSelect`, so every column is already
+  // typed and a cast on the way out can only lie: `as string` swallows a
+  // column that turns out to be nullable, and `as number` hard-codes a key an
+  // app with a UUID does not have. `json` is the one column no dialect types
+  // for us — `jsonb()`, `json()` and `text({ mode: 'json' })` all infer
+  // `unknown` — so it is the one that keeps its assertion.
+  it('reads columns off the record without casting, json excepted', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-casts-')
+
+    try {
+      await makeFeature('Event', { fields: 'title:string,body:text?,meta:json,seats:number?' })
+
+      const resource = await readFile(
+        join(workspace.dir, 'app/Http/Resources/EventResource.ts'),
+        'utf8',
+      )
+
+      expect(resource).toContain("id: EventRecord['id']")
+      expect(resource).toContain('id: this.resource.id,')
+      expect(resource).toContain('title: this.resource.title,')
+      expect(resource).toContain('body: this.resource.body ?? null,')
+      expect(resource).toContain('seats: this.resource.seats ?? null,')
+      expect(resource).toContain('meta: this.resource.meta as Record<string, unknown>,')
+
+      expect(resource).not.toContain('as number')
+      expect(resource).not.toContain('as string')
+
+      // The payload type is the class's second type argument, so `toJSON()`
+      // reports it without an override whose only body is a cast.
+      expect(resource).toContain(
+        'export class EventResource extends Resource<EventRecord, EventResourceData>',
+      )
+      expect(resource).not.toContain('super.toJSON()')
+      expect(resource).not.toContain('override toJSON')
     } finally {
       await workspace.cleanup()
     }

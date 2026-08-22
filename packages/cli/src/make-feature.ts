@@ -230,20 +230,38 @@ function tsFieldType(field: FieldDefinition): string {
 /**
  * How a resource reads one column off its record.
  *
+ * The record is `typeof table.$inferSelect`, so every column already carries
+ * its own type and reading one needs no cast. Casting anyway is not merely
+ * redundant: `as string` on a column the app later makes nullable swallows the
+ * `null`, and the resource keeps compiling while it lies to the frontend. A
+ * cast on the primary key is worse still, since it hard-codes the `number` an
+ * app with a UUID key does not have.
+ *
+ * `json` is the one exception, in every dialect: `jsonb()`, `json()` and
+ * `text({ mode: 'json' })` all infer `unknown` unless the schema pins a
+ * `$type`, so the declared `Record<string, unknown>` has to be asserted.
+ *
  * A `date` column serializes to the ISO string `tsFieldType` declares, so it is
- * converted rather than cast. It goes through `new Date()` because the driver
+ * converted rather than read. It goes through `new Date()` because the driver
  * decides what it hands back: Postgres `timestamp` yields a `Date`, but SQLite
  * — the default scaffold — stores dates in a `text` column and yields a string.
+ * `new Date()` accepts all three, so the conversion needs no cast either.
+ *
+ * A nullable column keeps its `?? null`. `$inferSelect` alone makes it a no-op,
+ * but the record the author widens later — a `WithRelations` union, a partial
+ * select — can carry `undefined`, which the declared `T | null` would reject.
  */
 function resourceFieldExpression(field: FieldDefinition): string {
   const access = `this.resource.${field.name}`
   if (field.type === 'date') {
-    const iso = `new Date(${access} as string | number | Date).toISOString()`
+    const iso = `new Date(${access}).toISOString()`
     return field.nullable ? `${access} == null ? null : ${iso}` : iso
   }
-  return field.nullable
-    ? `(${access} as ${tsFieldType(field)}) ?? null`
-    : `${access} as ${tsFieldType(field)}`
+  if (field.type === 'json') {
+    const asserted = `${access} as ${tsFieldType(field)}`
+    return field.nullable ? `(${asserted}) ?? null` : asserted
+  }
+  return field.nullable ? `${access} ?? null` : access
 }
 
 /** The empty value a form starts a field at, matching its wire type. */
@@ -269,13 +287,17 @@ function formValue(field: FieldDefinition, formVar: string): string {
 }
 
 function generateResource(singular: string, fields: FieldDefinition[]): string {
+  // The key's type is read off the record rather than declared, the same rule
+  // `make:resource` follows: `guren add resource` writes an auto-increment
+  // `id`, but `make:feature` leaves the table to the author, and a hard-coded
+  // `number` is wrong the moment they reach for a UUID.
   const dataFields = [
-    '  id: number',
+    `  id: ${singular}Record['id']`,
     ...fields.map((f) => `  ${f.name}: ${tsFieldType(f)}`),
   ].join('\n')
 
   const toArrayFields = [
-    '      id: this.resource.id as number,',
+    '      id: this.resource.id,',
     ...fields.map((f) => `      ${f.name}: ${resourceFieldExpression(f)},`),
   ].join('\n')
 
@@ -286,15 +308,11 @@ export interface ${singular}ResourceData extends Record<string, unknown> {
 ${dataFields}
 }
 
-export class ${singular}Resource extends Resource<${singular}Record> {
+export class ${singular}Resource extends Resource<${singular}Record, ${singular}ResourceData> {
   toArray(): ${singular}ResourceData {
     return {
 ${toArrayFields}
     }
-  }
-
-  override toJSON(): ${singular}ResourceData {
-    return super.toJSON() as ${singular}ResourceData
   }
 }
 `

@@ -8,7 +8,7 @@ export interface UserResourceData extends Record<string, unknown> {
   createdAt: string
 }
 
-export class UserResource extends Resource<UserRecord> {
+export class UserResource extends Resource<UserRecord, UserResourceData> {
   toArray(): UserResourceData {
     return {
       id: this.resource.id,

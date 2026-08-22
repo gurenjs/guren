@@ -3,8 +3,21 @@ import type { ResourceData, ResourceClass } from './types'
 /**
  * Abstract base class for API resources.
  * Transforms model data into API response format.
+ *
+ * `TData` names the payload `toArray()` builds, so `toJSON()` reports it too:
+ * `class PostResource extends Resource<PostRecord, PostResourceData>`. Without
+ * it every subclass had to restate the payload in an override whose only body
+ * was `return super.toJSON() as PostResourceData` — a cast that says nothing a
+ * type parameter cannot, and one nothing checks against the `toArray()` right
+ * above it.
+ *
+ * It defaults to `ResourceData` so `Resource<T>` and those overrides keep
+ * compiling: an override narrowing the return type stays assignable to the
+ * base. The polymorphic alternative (`toJSON(): ReturnType<this['toArray']>`)
+ * needs no parameter at all but rejects every existing override, which is a
+ * breaking change for code the scaffolds have been emitting all along.
  */
-export abstract class Resource<T> {
+export abstract class Resource<T, TData extends ResourceData = ResourceData> {
   /**
    * The underlying resource.
    */
@@ -23,12 +36,12 @@ export abstract class Resource<T> {
    * Transform the resource into an array/object.
    * Must be implemented by subclasses.
    */
-  abstract toArray(): ResourceData
+  abstract toArray(): TData
 
   /**
    * Transform the resource to JSON.
    */
-  toJSON(): ResourceData {
+  toJSON(): TData {
     return {
       ...this.toArray(),
       ...this.additionalData,
@@ -131,8 +144,8 @@ export function collect<T, R extends Resource<T>>(
 /**
  * Simple resource wrapper for objects without transformation.
  */
-export class JsonResource<T extends Record<string, unknown>> extends Resource<T> {
-  toArray(): ResourceData {
+export class JsonResource<T extends Record<string, unknown>> extends Resource<T, T> {
+  toArray(): T {
     return { ...this.resource }
   }
 }

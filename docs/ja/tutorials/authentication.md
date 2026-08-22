@@ -231,20 +231,16 @@ export interface PostResourceData extends Record<string, unknown> {
   author: { id: number; name: string } | null
 }
 
-export class PostResource extends Resource<PostWithAuthor> {
+export class PostResource extends Resource<PostWithAuthor, PostResourceData> {
   toArray(): PostResourceData {
     return {
-      id: this.resource.id as number,
-      title: this.resource.title as string,
-      body: this.resource.body as string,
+      id: this.resource.id,
+      title: this.resource.title,
+      body: this.resource.body,
       author: this.resource.author
         ? { id: this.resource.author.id, name: this.resource.author.name }
         : null,
     }
-  }
-
-  override toJSON(): PostResourceData {
-    return super.toJSON() as PostResourceData
   }
 }
 ```

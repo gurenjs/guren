@@ -52,7 +52,13 @@ const DEFAULT_BLUEPRINT_FEATURES: readonly (readonly string[])[] = [
   ['auth'],
   ['admin'],
   ['oauth'],
-  ['resource', 'posts'],
+  // Every field type, and a nullable one, because this is the only gate that
+  // *compiles* what `generateResource()` and the page builders emit per type:
+  // `json` infers `unknown` off the schema, `date` arrives as a Date or a
+  // string depending on the driver, and a nullable column has to survive the
+  // round trip through a form. Bare `add resource` scaffolds two plain
+  // strings, which exercises none of them.
+  ['resource', 'posts', '--fields', 'title:string,body:text?,views:number,published:boolean,publishedAt:date,meta:json'],
   ['queue'],
   ['mail', '--force'],
   ['events'],
