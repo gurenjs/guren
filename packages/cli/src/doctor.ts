@@ -439,7 +439,15 @@ async function detectTsconfig(context: DoctorRuleContext): Promise<DoctorCheck> 
 // `baseUrl` is reported as something to remove, never written.
 const TSCONFIG_ALIAS_FIX = 'Set `"paths": { "@/*": ["./*"] }` in compilerOptions and remove `baseUrl` so `@/.guren/*` and `@/app/*` imports resolve on every TypeScript version.'
 
-const isRootBaseUrl = (baseUrl: string | undefined): boolean => baseUrl === '.' || baseUrl === './'
+// Compares resolved paths rather than enumerating spellings: `.`, `./`, `./.`,
+// `''`, and an absolute path equal to the project root all name the same
+// directory, and a literal list silently drops the ones it forgot into the
+// "repoints the alias" branch — a wrong message plus a `baseUrl` TypeScript 7
+// rejects, left in place because the autofix declined to touch it. The
+// `typeof` guard keeps a malformed tsconfig (`"baseUrl": 1`) a warn instead of
+// a `resolve()` TypeError, and covers the omitted case in the same expression.
+const isRootBaseUrl = (cwd: string, baseUrl: unknown): boolean =>
+  typeof baseUrl === 'string' && resolve(cwd, baseUrl) === resolve(cwd)
 
 async function detectTsconfigAlias(context: DoctorRuleContext): Promise<DoctorCheck> {
   const tsconfig = await readJsonIfExists<TsconfigShape>(context.cwd, 'tsconfig.json')
@@ -453,7 +461,7 @@ async function detectTsconfigAlias(context: DoctorRuleContext): Promise<DoctorCh
   const baseUrl = compilerOptions?.baseUrl
   // Path mappings resolve relative to baseUrl (or the tsconfig directory when
   // baseUrl is omitted), so `./*` only means "project root" for a root baseUrl.
-  const baseUrlIsRoot = baseUrl === undefined || isRootBaseUrl(baseUrl)
+  const baseUrlIsRoot = baseUrl === undefined || isRootBaseUrl(context.cwd, baseUrl)
   const targetsRoot = aliasTargets.some((target) => target === './*' || target === '*')
   const mapsToRoot = targetsRoot && baseUrlIsRoot
   const ok = mapsToRoot && baseUrl === undefined
@@ -496,7 +504,7 @@ async function createTsconfigAliasAutofix(_context: DoctorRuleContext, check: Do
 
       const nextConfig = { ...current.value }
       const compilerOptions = { ...nextConfig.compilerOptions }
-      if (isRootBaseUrl(compilerOptions.baseUrl)) {
+      if (isRootBaseUrl(cwd, compilerOptions.baseUrl)) {
         delete compilerOptions.baseUrl
       }
       compilerOptions.paths = { ...compilerOptions.paths }
