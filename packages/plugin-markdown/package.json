@@ -1,6 +1,6 @@
 {
   "name": "@guren/plugin-markdown",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -41,7 +41,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@guren/core": "^1.7.0",
+    "@guren/core": "^1.8.1",
     "@types/sanitize-html": "^2.16.1",
     "marked": "^18.0.10",
     "marked-highlight": "^2.2.4",

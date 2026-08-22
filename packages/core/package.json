@@ -1,6 +1,6 @@
 {
   "name": "@guren/core",
-  "version": "1.8.0",
+  "version": "1.8.1",
   "type": "module",
   "sideEffects": [
     "./src/bin.ts",
@@ -64,9 +64,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@guren/cli": "^2.7.0",
-    "@guren/orm": "^2.6.0",
-    "@guren/server": "^2.9.0"
+    "@guren/cli": "^2.9.1",
+    "@guren/orm": "^2.6.1",
+    "@guren/server": "^2.10.1"
   },
   "devDependencies": {
     "@types/node": "^20.14.10",
