@@ -327,6 +327,6 @@ bunx cdk deploy
 ```
 
 > [!WARNING]
-> `lambda:build` を自前のバンドラーに置き換える場合は、識別子マングリングを無効にしてください。Guren はキュー投入されたジョブ（既定でクラス名となる wire name）、永続化された通知の種別、HTTP 例外の名前といった永続レコードにクラス名を保存するため、マングルすると前回のデプロイが書き込んだレコードを解決できなくなります。`bun build` では `--minify` ではなく `--minify-whitespace --minify-syntax` を、`esbuild` では `minifyIdentifiers: false` を、`tsdown` / `rolldown` では `minify: true` ではなく `minify: { compress: true, mangle: false }` を指定します。Bun では `--keep-names` / `keepNames` は代替になりません。Bun 1.3.14 時点でフラグは受け付けられますが、クラス名はマングルされたままです。`lambda:build` はこの設定を済ませてあります。
+> `lambda:build` を自前のバンドラーに置き換える場合は、識別子マングリングを無効にしてください。Guren はキュー投入されたジョブ（既定でクラス名となる wire name）、永続化された通知の種別、HTTP 例外の名前といった永続レコードにクラス名を保存するため、マングルすると前回のデプロイが書き込んだレコードを解決できなくなります。`bun build` では `--minify` ではなく `--minify-whitespace --minify-syntax` を、`esbuild` では `minifyIdentifiers: false` を、`tsdown` / `rolldown` では `mangle: false` だけでは不十分です(compressが1箇所でしか使われないクラスを無名クラス式にインライン化し、`name` が `""` になります)。`minify: true` ではなく `minify: { compress: { keepNames: { class: true, function: true } }, mangle: false }` を指定します。Bun では `--keep-names` / `keepNames` は代替になりません。Bun 1.3.14 時点でフラグは受け付けられますが、クラス名はマングルされたままです。`lambda:build` はこの設定を済ませてあります。
 >
 > どうしてもマングルする場合は、すべてのジョブに `jobName` を、すべての通知に明示的な `type` を宣言し、永続レコード上の識別子をクラス名から切り離す必要があります（[ジョブ名を固定する](./queue.md#ジョブ名を固定する) を参照）。どちらも未宣言ならクラス名が既定値になり、例外名は常にクラス名から導出されます。識別子を保持するほうが安全な既定であることに変わりはありません。

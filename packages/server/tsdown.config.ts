@@ -11,6 +11,11 @@ const sharedExternal = [
   'zod',
 ]
 
+// tsdown defaults cover format (esm), outDir (dist), clean and platform
+// (node). rolldown always shares chunks between entries, and this package
+// depends on that: the job registry, mail manager and queue driver are
+// module-level state, so a copy per entry would make registerJob via the
+// root entry invisible to a Worker imported via ./queue.
 export default defineConfig({
   entry: [
     'src/index.ts',
@@ -38,18 +43,14 @@ export default defineConfig({
     // rules from here so the two packages cannot drift apart.
     'src/support/expiry.ts',
   ],
-  format: ['esm'],
-  platform: 'node',
-  // Multiple entry points MUST share chunks (tsdown's default): with every
-  // entry bundling its own copy of module-level state (job registry, mail
-  // manager global, queue driver global), state set through one entry is
-  // invisible through another (e.g. registerJob via the root entry + Worker
-  // via ./queue never saw each other's registry).
-  // Declarations come from `tsc -p tsconfig.build.json` (see the build
-  // script), not from the bundler.
-  dts: false,
+  // The root tsconfig promises ES2022 output; without a target tsdown lowers
+  // no syntax (it reads engines.node, which no package declares).
+  target: 'es2022',
+  // The exports map names dist/*.js; tsdown would emit .mjs on node.
   fixedExtension: false,
-  outDir: 'dist',
-  clean: true,
+  // Declarations come from `tsc -p tsconfig.build.json` (see the build
+  // script): unbundled, one .d.ts per module, which keeps the MCP SDK types
+  // behind the ./mcp subpath instead of in one root bundle.
+  dts: false,
   deps: { neverBundle: sharedExternal },
 })
