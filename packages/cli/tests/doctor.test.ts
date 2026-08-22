@@ -90,7 +90,7 @@ describe('runDoctor', () => {
       await writeFile(
         join(workspace.dir, 'tsconfig.json'),
         JSON.stringify({
-          compilerOptions: { baseUrl: '.', paths: { '@/*': ['./*'] } },
+          compilerOptions: { paths: { '@/*': ['./*'] } },
           include: ['src/**/*', '.guren/**/*'],
         }, null, 2),
         'utf8',
@@ -213,7 +213,7 @@ describe('runDoctor', () => {
       expect(packageJson.scripts.typecheck).toBe('tsc --noEmit')
       expect(packageJson.scripts.codegen).toBe('bunx guren codegen --routes routes/web.ts --out types/generated/routes.d.ts --force')
       expect(tsconfig.include).toContain('.guren/**/*')
-      expect(tsconfig.compilerOptions?.baseUrl).toBe('.')
+      expect(tsconfig.compilerOptions?.baseUrl).toBeUndefined()
       expect(tsconfig.compilerOptions?.paths?.['@/*']).toEqual(['./*'])
       expect(report.fixableChecks.some((check) => check.key === 'scripts')).toBe(false)
       expect(report.fixableChecks.some((check) => check.key === 'tsconfig')).toBe(false)
@@ -663,7 +663,7 @@ describe('runDoctor', () => {
       await writeFile(
         join(workspace.dir, 'tsconfig.json'),
         JSON.stringify({
-          compilerOptions: { baseUrl: '.', paths: { '@/*': ['./app/*'] } },
+          compilerOptions: { paths: { '@/*': ['./app/*'] } },
           include: ['.guren/**/*'],
         }, null, 2),
         'utf8',
@@ -710,10 +710,52 @@ describe('runDoctor', () => {
       }
 
       expect(tsconfig.compilerOptions.strict).toBe(true)
-      expect(tsconfig.compilerOptions.baseUrl).toBe('.')
+      expect(tsconfig.compilerOptions.baseUrl).toBeUndefined()
       expect(tsconfig.compilerOptions.paths?.['#lib/*']).toEqual(['./lib/*'])
       expect(tsconfig.compilerOptions.paths?.['@/*']).toEqual(['./*'])
       expect(tsconfig.include).toEqual(['.guren/**/*'])
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('warns on a root baseUrl and the autofix removes it', async () => {
+    // TypeScript 7 rejects `baseUrl` (TS5102); every app scaffolded before
+    // the option was dropped from the template still carries `"."`.
+    const workspace = await createTempWorkspace('guren-cli-doctor-alias-root-baseurl-')
+
+    try {
+      await writeFile(
+        join(workspace.dir, 'package.json'),
+        JSON.stringify({ name: 'doctor-alias-root-baseurl' }, null, 2),
+        'utf8',
+      )
+      await writeFile(
+        join(workspace.dir, 'tsconfig.json'),
+        JSON.stringify({
+          compilerOptions: { baseUrl: '.', paths: { '@/*': ['./*'] } },
+          include: ['.guren/**/*'],
+        }, null, 2),
+        'utf8',
+      )
+
+      const report = await runDoctor({ cwd: workspace.dir, json: true })
+      const aliasCheck = report.checks.find((check) => check.key === 'tsconfig-alias')
+
+      expect(aliasCheck?.status).toBe('warn')
+      expect(aliasCheck?.message).toContain('TS5102')
+      expect(aliasCheck?.canAutofix).toBe(true)
+
+      const { evaluations } = await getDoctorRuleEvaluations({ cwd: workspace.dir })
+      const aliasEval = evaluations.find((evaluation) => evaluation.check.key === 'tsconfig-alias')
+      await aliasEval!.autofix!.apply(workspace.dir)
+
+      const tsconfig = JSON.parse(await Bun.file(join(workspace.dir, 'tsconfig.json')).text()) as {
+        compilerOptions: { baseUrl?: string; paths?: Record<string, string[]> }
+      }
+
+      expect(tsconfig.compilerOptions.baseUrl).toBeUndefined()
+      expect(tsconfig.compilerOptions.paths?.['@/*']).toEqual(['./*'])
     } finally {
       await workspace.cleanup()
     }

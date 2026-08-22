@@ -9,7 +9,6 @@
     "resolveJsonModule": true,
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
-    "baseUrl": ".",
     "paths": {
       "@guren/core": [
         "../packages/core/src/index.ts"

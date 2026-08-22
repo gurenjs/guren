@@ -16,64 +16,69 @@
     "types": [
       "bun-types"
     ],
+    // TypeScript 7 rejects `baseUrl` (TS5102); the `paths` targets below are
+    // already relative so they keep resolving from this directory once it
+    // goes. It stays only because tsup's DTS build resolves `paths` against
+    // the package's cwd without it, which breaks every package that reaches
+    // a sibling through these mappings. Drop it together with tsup.
     "baseUrl": ".",
     "paths": {
       "@guren/core": [
-        "packages/core/src/index.ts"
+        "./packages/core/src/index.ts"
       ],
       "@guren/core/*": [
-        "packages/core/src/*"
+        "./packages/core/src/*"
       ],
       "@guren/server": [
-        "packages/server/src/index.ts"
+        "./packages/server/src/index.ts"
       ],
       "@guren/server/*": [
-        "packages/server/src/*"
+        "./packages/server/src/*"
       ],
       "@guren/orm": [
-        "packages/orm/src/index.ts"
+        "./packages/orm/src/index.ts"
       ],
       "@guren/orm/*": [
-        "packages/orm/src/*"
+        "./packages/orm/src/*"
       ],
       "@guren/cli": [
-        "packages/cli/src/index.ts"
+        "./packages/cli/src/index.ts"
       ],
       "@guren/cli/*": [
-        "packages/cli/src/*"
+        "./packages/cli/src/*"
       ],
       "@guren/cli/vite": [
-        "packages/cli/src/vite/index.ts"
+        "./packages/cli/src/vite/index.ts"
       ],
       "@guren/openapi": [
-        "packages/openapi/src/index.ts"
+        "./packages/openapi/src/index.ts"
       ],
       "@guren/openapi/*": [
-        "packages/openapi/src/*"
+        "./packages/openapi/src/*"
       ],
       "@guren/inertia-client": [
-        "packages/inertia-client/src/index.ts"
+        "./packages/inertia-client/src/index.ts"
       ],
       "@guren/inertia-client/*": [
-        "packages/inertia-client/src/*"
+        "./packages/inertia-client/src/*"
       ],
       "@guren/plugin-vercel": [
-        "packages/plugin-vercel/src/index.ts"
+        "./packages/plugin-vercel/src/index.ts"
       ],
       "@guren/plugin-vercel/*": [
-        "packages/plugin-vercel/src/*"
+        "./packages/plugin-vercel/src/*"
       ],
       "@guren/testing": [
-        "packages/testing/src/index.ts"
+        "./packages/testing/src/index.ts"
       ],
       "@guren/testing/*": [
-        "packages/testing/src/*"
+        "./packages/testing/src/*"
       ],
       "vite": [
-        "node_modules/vite"
+        "./node_modules/vite"
       ],
       "vite/*": [
-        "node_modules/vite/*"
+        "./node_modules/vite/*"
       ]
     }
   },
