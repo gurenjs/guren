@@ -13,10 +13,13 @@ import { join } from 'node:path'
  *
  * The array form is what prevents that, but only while its entries name real
  * files, and that is the part nothing else checks. `./dist/instance-guard.js`
- * looks like the obvious entry and is wrong: tsup inlines the guard into the
+ * looks like the obvious entry and is wrong: tsdown bundles the guard into the
  * barrel, so that path matches nothing and the guard survives only by luck.
- * Making it a separate tsup entry does not help either — the guard then lands
- * in a content-hashed chunk no entry can name stably.
+ * The right entry is whatever the build actually emits, and the entry list in
+ * tsdown.config.ts is what decides that: giving the guard its own entry does
+ * emit a stably named `./dist/instance-guard.js`, but in the same move stops
+ * `./dist/index.js` carrying the guard, so one correct entry is simply traded
+ * for the other. The declaration follows the build; it never leads it.
  *
  * A wrong path fails open in the worst way: everything builds, every test
  * passes, and the loss appears only in someone else's bundled app as a warning
@@ -64,7 +67,7 @@ describe('@guren/orm sideEffects declaration', () => {
 
     // Whether dist was built at all, decided once from the barrel rather than
     // per entry. Skipping each missing dist file individually is fail-open: it
-    // is precisely how `./dist/instance-guard.js` — a path tsup never emits —
+    // is precisely how `./dist/instance-guard.js` — a path this build never emits —
     // would read as "not built yet" and pass forever.
     const distBuilt = readIfPresent(join(ORM_ROOT, 'dist/index.js')) !== null
 
@@ -94,7 +97,7 @@ describe('@guren/orm sideEffects declaration', () => {
         : `packages/orm/package.json "sideEffects" names entries that do not carry ` +
             `instance-guard:\n  ${wrong.join('\n  ')}\n` +
             `An entry matching nothing silently stops protecting the duplicate-copy warning in ` +
-            `bundled apps. tsup inlines the guard into dist/index.js, so that — not ` +
+            `bundled apps. tsdown bundles the guard into dist/index.js, so that — not ` +
             `dist/instance-guard.js — is the dist entry.`,
     ).toEqual([])
   })
