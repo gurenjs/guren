@@ -15,4 +15,6 @@ This is what a serverless cold start pays for on every invocation. Measured agai
 
 `@guren/server` is `false`: it has no module-scope side effects at all — no bare imports, no global mutation, no prototype patching outside function bodies.
 
+Both declarations are pinned by source-level tests, because nothing at runtime can check them: `bun test` never bundles, so a regression here would stay green everywhere and surface only in a bundled serverless build. One fails if a bare import appears under `packages/server/src`; the other fails if an entry in the ORM's array stops naming a file that carries the guard.
+
 No API changes, and nothing changes for unbundled apps — `sideEffects` is only read by bundlers.
