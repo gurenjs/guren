@@ -4,7 +4,20 @@ import { TestResponse } from './http'
 
 type BootCallback = (app: Hono) => void | Promise<void>
 type ProviderLike = { register?(): unknown; boot?(): unknown }
-type ProviderConstructor = new (...args: unknown[]) => ProviderLike
+/**
+ * Constructor shape for a provider class passed to `TestApp.create()`.
+ *
+ * The parameters are `any[]`, not `unknown[]`: constructor parameters are
+ * contravariant, so `unknown[]` rejects every real `ServiceProvider`
+ * subclass — their inherited constructor takes a concrete `Container`.
+ *
+ * It stays structural rather than reusing `@guren/server`'s
+ * `ServiceProviderConstructor` so the published `.d.ts` needs nothing to
+ * resolve: an app that only depends on `@guren/core` would otherwise widen
+ * this to `any` under `skipLibCheck` and check nothing at all.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type ProviderConstructor = new (...args: any[]) => ProviderLike
 type RouteRegistration = (router: Router) => void | Promise<void>
 type ApplicationLike = {
   boot(): Promise<void>
