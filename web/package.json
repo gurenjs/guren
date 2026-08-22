@@ -44,7 +44,7 @@
     "mermaid": "^11.16.1",
     "shiki": "^4.4.3",
     "tailwindcss": "^4.2.2",
-    "typescript": "^5.4.0",
+    "typescript": "^7.0.2",
     "vite": "^8.0.0",
     "vitest": "^3.2.6",
     "wrangler": "^4.118.0"

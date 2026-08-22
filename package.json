@@ -81,9 +81,11 @@
     "web"
   ],
   "devDependencies": {
+    "@babel/parser": "^7.24.7",
+    "@babel/types": "^7.29.0",
     "@changesets/cli": "^2.31.1",
     "bun-types": "^1.4.0",
-    "typescript": "^5.9.3",
+    "typescript": "^7.0.2",
     "vitest": "^3.2.7",
     "vite": "^8.2.0",
     "zod": "^4.4.3"

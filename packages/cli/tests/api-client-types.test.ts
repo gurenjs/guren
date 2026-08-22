@@ -3,7 +3,6 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import ts from 'typescript'
 import { z } from 'zod'
 import { checkTypes, COLD_TSC_TIMEOUT, GENERATED_MODULE_COMPILER_OPTIONS } from './helpers'
 import { buildApiClientContent, type RouteDefinitionLike } from '../src/api-client-types'
@@ -335,7 +334,7 @@ export const paramsRequired: ApiRequestOptions<'posts.show'> = {}
 export const unionParamsRequired: ApiRequestOptions<'posts.index' | 'posts.show'> = {}
 `
 
-const compilerOptions: ts.CompilerOptions = GENERATED_MODULE_COMPILER_OPTIONS
+const compilerOptions = GENERATED_MODULE_COMPILER_OPTIONS
 
 /**
  * The emitted module's types are only exercised where a call site exists —

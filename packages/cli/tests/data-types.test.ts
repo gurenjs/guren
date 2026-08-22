@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import ts from 'typescript'
 import { generateDataTypes } from '../src/data-types'
 import { makeResource } from '../src/make-resource'
 import { checkTypes, COLD_TSC_TIMEOUT, writeWorkspaceFiles } from './helpers'
@@ -198,7 +197,7 @@ describe('generateDataTypes discovers module resources', () => {
           strict: true,
           noEmit: true,
           skipLibCheck: true,
-          target: ts.ScriptTarget.ES2022,
+          target: 'ES2022',
           types: [],
         }),
       ).toEqual([])
@@ -606,7 +605,7 @@ describe('generateDataTypes reads a type body by brace depth', () => {
           strict: true,
           noEmit: true,
           skipLibCheck: true,
-          target: ts.ScriptTarget.ES2022,
+          target: 'ES2022',
           types: [],
         }),
       ).toEqual([])

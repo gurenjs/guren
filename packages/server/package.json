@@ -149,7 +149,7 @@
     "@types/node": "^20.14.10",
     "@types/nodemailer": "^8.0.1",
     "tsdown": "^0.22.14",
-    "typescript": "^5.4.0",
+    "typescript": "^7.0.2",
     "vite": "^8.0.0"
   }
 }

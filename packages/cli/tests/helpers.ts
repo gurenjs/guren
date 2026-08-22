@@ -1,10 +1,9 @@
 import { mock } from 'bun:test'
 import { consola as realConsola } from 'consola'
-import { existsSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
-import ts from 'typescript'
 
 const repoRoot = resolve(import.meta.dir, '../../..')
 
@@ -466,6 +465,13 @@ export function assertWorkspaceBuilt(artifacts: string[]): void {
 export const COLD_TSC_TIMEOUT = 180_000
 
 /**
+ * The `compilerOptions` object of a tsconfig.json, as `tsc` reads it. Kept as
+ * plain JSON rather than the compiler API's enums: TypeScript 7 ships no
+ * JavaScript API, so every compile gate here drives the `tsc` binary.
+ */
+export type TsconfigCompilerOptions = Record<string, unknown>
+
+/**
  * Base compiler options for compiling a generated module plus its usage probe
  * in a temp directory. Spread and extend rather than mutate — several compile
  * gates share it.
@@ -474,34 +480,89 @@ export const COLD_TSC_TIMEOUT = 180_000
  * directories, so a TMPDIR inside a workspace would silently pull in — and
  * type-check — every @types package it finds there.
  */
-export const GENERATED_MODULE_COMPILER_OPTIONS: ts.CompilerOptions = {
+export const GENERATED_MODULE_COMPILER_OPTIONS: TsconfigCompilerOptions = {
   strict: true,
   noEmit: true,
   skipLibCheck: true,
-  target: ts.ScriptTarget.ES2022,
-  module: ts.ModuleKind.ESNext,
-  moduleResolution: ts.ModuleResolutionKind.Bundler,
-  lib: ['lib.es2022.d.ts', 'lib.dom.d.ts'],
+  target: 'ES2022',
+  module: 'ESNext',
+  moduleResolution: 'Bundler',
+  lib: ['es2022', 'dom'],
   types: [],
 }
 
+const TSC_BIN = join(repoRoot, 'node_modules/typescript/bin/tsc')
+
 /**
- * Type-check `rootNames` in-process and return each diagnostic as a
+ * Resolve a tsconfig the way `tsc` does (`extends` chains, defaults) and
+ * return its compilerOptions with every relative path (`paths` targets,
+ * `rootDir`, `typeRoots`, …) made absolute against the config's directory, so the result can be handed to
+ * {@link checkTypes}, which writes its own tsconfig elsewhere.
+ */
+export function resolvedCompilerOptions(configPath: string): TsconfigCompilerOptions {
+  const result = Bun.spawnSync([process.execPath, TSC_BIN, '--showConfig', '-p', configPath], {
+    cwd: dirname(configPath),
+    stdout: 'pipe',
+    stderr: 'pipe',
+  })
+  // A config that no longer parses (broken extends, invalid option) must fail
+  // here, not come back as weakened defaults this gate then compiles against.
+  if (result.exitCode !== 0) {
+    throw new Error(`tsc --showConfig failed for ${configPath}:\n${result.stdout}${result.stderr}`)
+  }
+  const { compilerOptions = {} } = JSON.parse(result.stdout.toString()) as {
+    compilerOptions?: TsconfigCompilerOptions
+  }
+  const configDir = dirname(configPath)
+  const absolute = (target: string): string => resolve(configDir, target)
+  const paths = compilerOptions.paths as Record<string, string[]> | undefined
+  if (paths) {
+    compilerOptions.paths = Object.fromEntries(
+      Object.entries(paths).map(([alias, targets]) => [alias, targets.map(absolute)]),
+    )
+  }
+  for (const key of ['rootDir', 'outDir', 'declarationDir', 'baseUrl'] as const) {
+    if (typeof compilerOptions[key] === 'string') compilerOptions[key] = absolute(compilerOptions[key])
+  }
+  for (const key of ['rootDirs', 'typeRoots'] as const) {
+    if (Array.isArray(compilerOptions[key])) compilerOptions[key] = (compilerOptions[key] as string[]).map(absolute)
+  }
+  return compilerOptions
+}
+
+/**
+ * Type-check `rootNames` with `tsc` and return each diagnostic as a
  * `file:line TSxxxx: message` string — the compile gate for generated output.
  * An accepted `@ts-expect-error` probe surfaces as TS2578, so zero diagnostics
  * proves both polarities: valid usage compiled AND every bad-usage probe
  * errored.
+ *
+ * The tsconfig is written to its own temp directory: `rootNames` and every
+ * path in `compilerOptions` must therefore be absolute.
  */
-export function checkTypes(rootNames: string[], compilerOptions: ts.CompilerOptions): string[] {
-  const program = ts.createProgram(rootNames, compilerOptions)
-  return ts.getPreEmitDiagnostics(program).map((diagnostic) => {
-    const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, ' ')
-    if (!diagnostic.file || diagnostic.start === undefined) {
-      return `TS${diagnostic.code}: ${message}`
+export function checkTypes(rootNames: string[], compilerOptions: TsconfigCompilerOptions): string[] {
+  const dir = mkdtempSync(join(tmpdir(), 'guren-check-types-'))
+  try {
+    const configPath = join(dir, 'tsconfig.json')
+    writeFileSync(configPath, JSON.stringify({ compilerOptions, files: rootNames }))
+    const result = Bun.spawnSync([process.execPath, TSC_BIN, '-p', configPath, '--pretty', 'false'], {
+      cwd: dir,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    const output = `${result.stdout}${result.stderr}`
+    const diagnostics = [...output.matchAll(/^(?:(.+?)\((\d+),\d+\): )?error (TS\d+): (.*)$/gm)].map(
+      ([, file, line, code, message]) => (file ? `${basename(file)}:${line} ${code}: ${message}` : `${code}: ${message}`),
+    )
+    // Exit 1 with no parseable diagnostic (a crashed compiler, an unreadable
+    // config) must not read as "zero diagnostics".
+    if (result.exitCode !== 0 && diagnostics.length === 0) {
+      throw new Error(`tsc exited ${result.exitCode} without diagnostics:\n${output}`)
     }
-    const { line } = diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start)
-    return `${basename(diagnostic.file.fileName)}:${line + 1} TS${diagnostic.code}: ${message}`
-  })
+    return diagnostics
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 }
 
 /** Spawn the CLI bin as a subprocess and return its exit code. */
