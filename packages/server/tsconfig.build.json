@@ -1,17 +1,13 @@
 {
-  "extends": "./tsconfig.json",
+  "extends": ["./tsconfig.json", "../../tsconfig.build-base.json"],
   "compilerOptions": {
+    // Declarations come from tsc here, not from tsdown (see the build
+    // script); this is the one config in the workspace that emits.
     "noEmit": false,
+    "declaration": true,
     "emitDeclarationOnly": true,
-    "rootDir": "src",
-    // The root tsconfig maps @guren/* to package sources, which would pull
-    // sibling packages into this program and break rootDir. Clearing paths
-    // (as packages/core's tsconfig does) resolves @guren/orm through
-    // node_modules to its built declarations instead — the build runs in
-    // dependency order, so orm's dist exists. '@guren/cli' builds after
-    // server and may not resolve at all; its two dynamic import() sites
-    // already carry @ts-ignore and cast the module to local interfaces.
-    "paths": {}
+    "outDir": "dist",
+    "rootDir": "src"
   },
   "include": ["src/**/*"],
   "exclude": ["src/**/*.test.ts"]

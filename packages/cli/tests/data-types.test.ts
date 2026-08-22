@@ -2,10 +2,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import ts from 'typescript'
 import { generateDataTypes } from '../src/data-types'
 import { makeResource } from '../src/make-resource'
-import { checkTypes, COLD_TSC_TIMEOUT, writeWorkspaceFiles } from './helpers'
+import { checkTypes, TSC_TIMEOUT, writeWorkspaceFiles } from './helpers'
 
 /**
  * A Resource shaped the way `make:resource` scaffolds one — the explicit
@@ -198,12 +197,12 @@ describe('generateDataTypes discovers module resources', () => {
           strict: true,
           noEmit: true,
           skipLibCheck: true,
-          target: ts.ScriptTarget.ES2022,
+          target: 'ES2022',
           types: [],
         }),
       ).toEqual([])
     },
-    COLD_TSC_TIMEOUT,
+    TSC_TIMEOUT,
   )
 
   it('emits definitions in a deterministic order, root before modules', async () => {
@@ -606,12 +605,12 @@ describe('generateDataTypes reads a type body by brace depth', () => {
           strict: true,
           noEmit: true,
           skipLibCheck: true,
-          target: ts.ScriptTarget.ES2022,
+          target: 'ES2022',
           types: [],
         }),
       ).toEqual([])
     },
-    COLD_TSC_TIMEOUT,
+    TSC_TIMEOUT,
   )
 
   it('reads a plain local interface named by the annotation', async () => {

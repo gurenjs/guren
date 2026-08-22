@@ -1,0 +1,15 @@
+{
+  // The fragment every package's tsconfig.build.json layers over its own
+  // tsconfig.json — the config tsdown reads. The root config maps @guren/* to
+  // sibling package sources, which would pull them into the program; the
+  // native declaration emitter then writes their .d.ts beside the sources
+  // instead of into its output directory, because they sit outside the
+  // package's rootDir. Clearing paths resolves siblings through node_modules
+  // to their built declarations — the build runs in dependency order, so
+  // they exist. A sibling the package never declared is unresolvable that
+  // way, and tsgo --noCheck would emit `any` for it silently; `bun run
+  // typecheck:build-configs` checks these configs with checking on.
+  "compilerOptions": {
+    "paths": {}
+  }
+}

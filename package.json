@@ -61,7 +61,8 @@
     "test:testing": "bun run --cwd packages/testing test",
     "test:examples": "bun run --cwd examples/blog test && bun run --cwd examples/api test && bun run --cwd web test",
     "test": "bun run test:bun && bun run test:examples",
-    "typecheck": "tsc --noEmit && bun run typecheck:scaffold-templates && bun run typecheck:blog && bun run typecheck:api",
+    "typecheck": "tsc --noEmit && bun run typecheck:build-configs && bun run typecheck:scaffold-templates && bun run typecheck:blog && bun run typecheck:api",
+    "typecheck:build-configs": "bun run ./scripts/check-build-configs.ts",
     "typecheck:scaffold-templates": "bun run --cwd packages/cli typecheck:templates",
     "typecheck:blog": "bun run --cwd examples/blog typecheck",
     "typecheck:api": "bun run --cwd examples/api typecheck",
@@ -81,9 +82,11 @@
     "web"
   ],
   "devDependencies": {
+    "@babel/parser": "^7.24.7",
+    "@babel/types": "^7.29.0",
     "@changesets/cli": "^2.31.1",
     "bun-types": "^1.4.0",
-    "typescript": "^5.9.3",
+    "typescript": "^7.0.2",
     "vitest": "^3.2.7",
     "vite": "^8.2.0",
     "zod": "^4.4.3"

@@ -3,8 +3,7 @@ import { mkdtemp, rm, readFile, mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { pathToFileURL } from 'node:url'
-import ts from 'typescript'
-import { checkTypes, COLD_TSC_TIMEOUT, GENERATED_MODULE_COMPILER_OPTIONS } from './helpers'
+import { checkTypes, TSC_TIMEOUT, GENERATED_MODULE_COMPILER_OPTIONS } from './helpers'
 import {
   buildDeclarationContent,
   buildRouteModuleContent,
@@ -235,20 +234,17 @@ describe('buildRouteModuleContent', () => {
         files.push(path)
       }
 
-      const program = ts.createProgram(files, {
-        ...GENERATED_MODULE_COMPILER_OPTIONS,
-        noUnusedLocals: true,
-        noUnusedParameters: true,
-      })
-      const diagnostics = ts.getPreEmitDiagnostics(program)
-
       expect(
-        diagnostics.map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n')),
+        checkTypes(files, {
+          ...GENERATED_MODULE_COMPILER_OPTIONS,
+          noUnusedLocals: true,
+          noUnusedParameters: true,
+        }),
       ).toEqual([])
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
-  }, COLD_TSC_TIMEOUT)
+  }, TSC_TIMEOUT)
 })
 
 /**
@@ -324,7 +320,7 @@ describe('generated route() with Hono path modifiers', () => {
 
   it('compiles the usage probe against the emitted module', () => {
     expect(checkTypes([usageFile], routesCompilerOptions)).toEqual([])
-  }, COLD_TSC_TIMEOUT)
+  }, TSC_TIMEOUT)
 })
 
 const ROUTES_USAGE_PROBE = `import { route, routes } from './routes.gen'
@@ -355,4 +351,4 @@ void route('files.show', { slug: 'intro' })
 void route('items.show')
 `
 
-const routesCompilerOptions: ts.CompilerOptions = GENERATED_MODULE_COMPILER_OPTIONS
+const routesCompilerOptions = GENERATED_MODULE_COMPILER_OPTIONS

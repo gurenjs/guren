@@ -2,8 +2,7 @@ import { describe, test, expect, beforeAll, afterAll } from 'bun:test'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import ts from 'typescript'
-import { assertWorkspaceBuilt, checkTypes, COLD_TSC_TIMEOUT } from './helpers'
+import { assertWorkspaceBuilt, checkTypes, TSC_TIMEOUT, type TsconfigCompilerOptions } from './helpers'
 import { buildTranslationTypesContent } from '../src/i18n-types'
 
 /**
@@ -53,13 +52,13 @@ export function probe(): void {
 }
 `
 
-const compilerOptions: ts.CompilerOptions = {
+const compilerOptions: TsconfigCompilerOptions = {
   strict: true,
   noEmit: true,
   skipLibCheck: true,
-  target: ts.ScriptTarget.ES2022,
-  module: ts.ModuleKind.ESNext,
-  moduleResolution: ts.ModuleResolutionKind.Bundler,
+  target: 'ES2022',
+  module: 'ESNext',
+  moduleResolution: 'Bundler',
   types: [],
   paths: {
     '@guren/core': [coreTypes],
@@ -108,7 +107,7 @@ describe('generated translation key augmentation', () => {
     // bad-key probe errored (an accepted bad key surfaces as TS2578,
     // "unused @ts-expect-error").
     expect(check([generatedFile, serverProbeFile, clientProbeFile])).toEqual([])
-  }, COLD_TSC_TIMEOUT)
+  }, TSC_TIMEOUT)
 
   test('without the generated file the same probes fail (the gate can catch a broken augmentation)', () => {
     const diagnostics = check([serverProbeFile, clientProbeFile])
@@ -119,5 +118,5 @@ describe('generated translation key augmentation', () => {
     }
     expect(diagnostics.filter((d) => d.startsWith('server-probe.ts'))).toHaveLength(2)
     expect(diagnostics.filter((d) => d.startsWith('client-probe.ts'))).toHaveLength(2)
-  }, COLD_TSC_TIMEOUT)
+  }, TSC_TIMEOUT)
 })

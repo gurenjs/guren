@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import ts from 'typescript'
-import { checkTypes, COLD_TSC_TIMEOUT, createTempWorkspace, seedInertiaApp } from './helpers'
+import { checkTypes, TSC_TIMEOUT, createTempWorkspace, resolvedCompilerOptions, seedInertiaApp, type TsconfigCompilerOptions } from './helpers'
 import { collectFiles, IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES, toPosixRelative } from '../src/discovery'
 import { makeAuth, type MakeAuthOptions } from '../src/make-auth'
 import { generatePageTypes } from '../src/pages-types'
@@ -19,8 +18,8 @@ import { generatePageTypes } from '../src/pages-types'
  * and typechecks everything the scaffold wrote as one program.
  *
  * Three combos rather than the full authCombos matrix: each program compiles
- * the workspace packages from source and costs COLD_TSC_TIMEOUT-scale time,
- * and these three reach every builder branch the others can't:
+ * the workspace packages from source (about half a second each with the
+ * native compiler), and these three reach every builder branch the others can't:
  *
  *  - oauth + verify: password login with a validator import, register with
  *    verification, the verify-aware OAuth callback, the password profile with
@@ -60,30 +59,17 @@ const cliRoot = join(import.meta.dir, '..')
  *    `process.env` and nothing else, so node's globals from this package's
  *    @types stand in.
  */
-function renderedScaffoldCompilerOptions(workspaceDir: string): ts.CompilerOptions {
-  const configPath = join(cliRoot, 'tsconfig.templates.json')
-  const configFile = ts.readConfigFile(configPath, ts.sys.readFile)
-  if (configFile.error) {
-    throw new Error(ts.flattenDiagnosticMessageText(configFile.error.messageText, ' '))
-  }
-  const parsed = ts.parseJsonConfigFileContent(configFile.config, ts.sys, cliRoot)
-  // A config that no longer parses (broken extends, invalid option) comes
-  // back as weakened defaults, not an exception — which this gate would then
-  // quietly compile against.
-  if (parsed.errors.length > 0) {
-    throw new Error(parsed.errors
-      .map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, ' '))
-      .join('\n'))
-  }
+function renderedScaffoldCompilerOptions(workspaceDir: string): TsconfigCompilerOptions {
+  const parsed = resolvedCompilerOptions(join(cliRoot, 'tsconfig.templates.json'))
 
   return {
-    ...parsed.options,
+    ...parsed,
     // The two fixture dirs the static gate overlays; meaningless here.
     rootDirs: undefined,
     typeRoots: [join(cliRoot, '../../node_modules'), join(cliRoot, 'node_modules/@types')],
     types: ['bun-types', 'node'],
     paths: {
-      ...parsed.options.paths,
+      ...parsed.paths,
       '@/.guren/pages.gen': [join(workspaceDir, '.guren/pages.gen.ts')],
       zod: [join(cliRoot, 'node_modules/zod')],
       '@inertiajs/react': [join(cliRoot, 'node_modules/@inertiajs/react')],
@@ -157,7 +143,7 @@ describe('rendered make:auth output typechecks', () => {
           await workspace.cleanup()
         }
       },
-      COLD_TSC_TIMEOUT,
+      TSC_TIMEOUT,
     )
   }
 })

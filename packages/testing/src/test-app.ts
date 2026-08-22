@@ -406,6 +406,7 @@ export class TestApp {
     let Application: ApplicationConstructor | undefined
 
     try {
+      // @ts-ignore -- optional, undeclared dependency (it aggregates the @guren/server peer): unresolvable under tsconfig.build.json; the cast carries the type
       ;({ Application } = await import('@guren/core') as { Application: ApplicationConstructor })
     } catch {
       try {

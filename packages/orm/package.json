@@ -77,6 +77,6 @@
     "mysql2": "^3.11.3",
     "postgres": "^3.4.3",
     "tsdown": "^0.22.14",
-    "typescript": "^5.4.0"
+    "typescript": "^7.0.2"
   }
 }

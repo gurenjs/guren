@@ -13,7 +13,10 @@
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 
-import ts from 'typescript'
+import { parse } from '@babel/parser'
+import * as t from '@babel/types'
+
+import { walk } from '../packages/cli/src/ast-walk'
 
 function collectDtsFiles(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -39,32 +42,28 @@ function resolveRewrite(filePath: string, specifier: string): string | null {
 }
 
 /** String-literal specifier nodes: import/export declarations and import types. */
-function collectSpecifierNodes(sourceFile: ts.SourceFile): ts.StringLiteral[] {
-  const literals: ts.StringLiteral[] = []
-  const visit = (node: ts.Node): void => {
+function collectSpecifierNodes(text: string, filePath: string): t.StringLiteral[] {
+  const ast = parse(text, {
+    sourceType: 'module',
+    sourceFilename: filePath,
+    // Declarations can carry decorators and `accessor` fields; without these
+    // plugins Babel throws on them where the old TypeScript parser did not.
+    plugins: [['typescript', { dts: true }], 'decorators', 'decoratorAutoAccessors'],
+  })
+  const literals: t.StringLiteral[] = []
+  walk(ast, (node) => {
+    const n = node as unknown as t.Node
     if (
-      (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) &&
-      node.moduleSpecifier !== undefined &&
-      ts.isStringLiteral(node.moduleSpecifier)
+      (t.isImportDeclaration(n) || t.isExportNamedDeclaration(n) || t.isExportAllDeclaration(n)) &&
+      n.source != null
     ) {
-      literals.push(node.moduleSpecifier)
-    } else if (
-      ts.isImportTypeNode(node) &&
-      ts.isLiteralTypeNode(node.argument) &&
-      ts.isStringLiteral(node.argument.literal)
-    ) {
-      literals.push(node.argument.literal)
-    } else if (
-      ts.isCallExpression(node) &&
-      node.expression.kind === ts.SyntaxKind.ImportKeyword &&
-      node.arguments.length === 1 &&
-      ts.isStringLiteral(node.arguments[0]!)
-    ) {
-      literals.push(node.arguments[0] as ts.StringLiteral)
+      literals.push(n.source)
+    } else if (t.isTSImportType(n) && t.isStringLiteral(n.argument)) {
+      literals.push(n.argument)
+    } else if (t.isCallExpression(n) && t.isImport(n.callee) && n.arguments.length === 1 && t.isStringLiteral(n.arguments[0])) {
+      literals.push(n.arguments[0])
     }
-    ts.forEachChild(node, visit)
-  }
-  visit(sourceFile)
+  })
   return literals
 }
 
@@ -73,17 +72,15 @@ let rewrittenFiles = 0
 
 for (const filePath of collectDtsFiles(distDir)) {
   const text = readFileSync(filePath, 'utf8')
-  const sourceFile = ts.createSourceFile(filePath, text, ts.ScriptTarget.Latest, true)
   const edits: Array<{ start: number; end: number; replacement: string }> = []
-  for (const literal of collectSpecifierNodes(sourceFile)) {
-    const rewritten = resolveRewrite(filePath, literal.text)
+  for (const literal of collectSpecifierNodes(text, filePath)) {
+    const rewritten = resolveRewrite(filePath, literal.value)
     if (rewritten === null) continue
+    if (literal.start == null || literal.end == null) {
+      throw new Error(`fix-dts-extensions: specifier without a source range in ${filePath}`)
+    }
     // Replace only the contents between the quotes.
-    edits.push({
-      start: literal.getStart(sourceFile) + 1,
-      end: literal.getEnd() - 1,
-      replacement: rewritten,
-    })
+    edits.push({ start: literal.start + 1, end: literal.end - 1, replacement: rewritten })
   }
   if (edits.length === 0) continue
   let updated = text
