@@ -1,14 +1,10 @@
 import { defineConfig } from 'tsdown'
 
-// tsdown defaults cover format (esm), outDir (dist), clean, platform (node)
-// and dts (on when package.json declares `types`). The two settings below
-// are not defaults: the exports map names dist/*.js and dist/*.d.ts, while
-// tsdown would emit .mjs/.d.mts on the node platform; and without a target
-// tsdown lowers no syntax at all (it reads engines.node, which no package
-// declares), whereas the root tsconfig promises ES2022 output.
+import { tsdownPreset } from '../../scripts/tsdown-preset'
+
 export default defineConfig({
+  ...tsdownPreset,
   entry: ['src/index.ts', 'src/drizzle.ts', 'src/drizzle/pg.ts', 'src/drizzle/mysql.ts', 'src/drizzle/sqlite.ts'],
-  target: 'es2022',
-  fixedExtension: false,
-  deps: { neverBundle: ['bun:sqlite', 'drizzle-orm/bun-sqlite', 'drizzle-orm/bun-sqlite/migrator', 'drizzle-orm/mysql2', 'drizzle-orm/mysql2/migrator'] },
+  // Not a Node builtin, so rolldown would warn about it as unresolved.
+  deps: { neverBundle: ['bun:sqlite'] },
 })

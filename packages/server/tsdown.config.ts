@@ -1,22 +1,13 @@
 import { defineConfig } from 'tsdown'
 
-const sharedExternal = [
-  'bun:sqlite',
-  'drizzle-orm/bun-sqlite',
-  'drizzle-orm/bun-sqlite/migrator',
-  '@aws-sdk/client-sqs',
-  '@modelcontextprotocol/sdk',
-  '@guren/cli',
-  '@guren/orm',
-  'zod',
-]
+import { tsdownPreset } from '../../scripts/tsdown-preset'
 
-// tsdown defaults cover format (esm), outDir (dist), clean and platform
-// (node). rolldown always shares chunks between entries, and this package
-// depends on that: the job registry, mail manager and queue driver are
-// module-level state, so a copy per entry would make registerJob via the
-// root entry invisible to a Worker imported via ./queue.
+// rolldown always shares chunks between entries, and this package depends on
+// that: the job registry, mail manager and queue driver are module-level
+// state, so a copy per entry would make registerJob via the root entry
+// invisible to a Worker imported via ./queue.
 export default defineConfig({
+  ...tsdownPreset,
   entry: [
     'src/index.ts',
     'src/auth/index.ts',
@@ -43,14 +34,11 @@ export default defineConfig({
     // rules from here so the two packages cannot drift apart.
     'src/support/expiry.ts',
   ],
-  // The root tsconfig promises ES2022 output; without a target tsdown lowers
-  // no syntax (it reads engines.node, which no package declares).
-  target: 'es2022',
-  // The exports map names dist/*.js; tsdown would emit .mjs on node.
-  fixedExtension: false,
   // Declarations come from `tsc -p tsconfig.build.json` (see the build
   // script): unbundled, one .d.ts per module, which keeps the MCP SDK types
   // behind the ./mcp subpath instead of in one root bundle.
   dts: false,
-  deps: { neverBundle: sharedExternal },
+  // Both undeclared: @guren/cli is reached by dynamic import and would
+  // otherwise be bundled through the root tsconfig paths; zod is the app's.
+  deps: { neverBundle: ['@guren/cli', 'zod'] },
 })

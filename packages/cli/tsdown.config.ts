@@ -1,14 +1,10 @@
 import { defineConfig } from 'tsdown'
 
-// tsdown defaults cover format (esm), outDir (dist), clean, platform (node)
-// and dts (on when package.json declares `types`). The two settings below
-// are not defaults: the exports map names dist/*.js and dist/*.d.ts, while
-// tsdown would emit .mjs/.d.mts on the node platform; and without a target
-// tsdown lowers no syntax at all (it reads engines.node, which no package
-// declares), whereas the root tsconfig promises ES2022 output.
+import { tsdownPreset } from '../../scripts/tsdown-preset'
+
 export default defineConfig({
+  ...tsdownPreset,
   entry: ['src/index.ts', 'src/bin.ts', 'src/vite/index.ts', 'src/arch/index.ts'],
-  target: 'es2022',
-  fixedExtension: false,
-  deps: { neverBundle: ['@guren/core', '@guren/openapi'] },
+  // Optional: reached only by a dynamic import, and undeclared on purpose.
+  deps: { neverBundle: ['@guren/openapi'] },
 })
