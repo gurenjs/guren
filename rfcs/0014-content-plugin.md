@@ -205,13 +205,27 @@ reframes Open Question 3 entirely.
 ### The proposed implementation was executed, not just written
 
 The `stringify` and `ContentController.view()` bodies quoted in "Proposed
-Solution" were compiled with `tsc` 7.0.2 under the app-shaped tsconfig and
-run on Bun 1.3.14 against a page with a nested async child and a
-`<script>`-bearing prop. Result: status 200, `content-type: text/html;
-charset=utf-8`, output beginning `<!doctype html>`, the script tag escaped,
-no `__INERTIA_PAGE__`, the async child rendered, and `{ doctype: false,
-status: 404, headers }` all honoured. They are transcribed here from a
-working fixture rather than sketched.
+Solution" are transcribed from working fixtures, not sketched. Two runs, and
+what each did and did not cover:
+
+- **Rendering behaviour**, on Bun 1.3.14 against a page with a nested async
+  child and a `<script>`-bearing prop: status 200, `content-type: text/html;
+  charset=utf-8`, output beginning `<!doctype html>`, the script tag escaped,
+  no `__INERTIA_PAGE__`, the async child rendered, and `{ doctype: false,
+  status: 404, headers }` all honoured. Compiled with `tsc` 7.0.2 under a
+  tsconfig carrying the create-app template's `jsx: "react-jsx"` and strict
+  settings, but not identical to it: the fixture adds `lib` and
+  `allowImportingTsExtensions` and omits `types: ["bun-types", "vite/client"]`,
+  none of which bear on JSX resolution. This fixture used a local stand-in
+  base class, so it proves the rendering contract, not the inheritance.
+- **Inheritance from the real base**, in-repo against `@guren/core`'s actual
+  `Controller`: `class ContentController extends Controller` with the `view()`
+  body above type-checks clean, and a subclass instantiated **without
+  `setContext()`** returns the expected response. This matters because
+  `Controller`'s `ctx` getter throws when no context has been set; `view()`
+  never reads `ctx`, so a content controller is usable outside the router's
+  normal lifecycle. Nothing in `Controller`'s private state or its
+  `setContainer()` DI contract obstructs the subclass.
 
 ## Proposed Solution
 
@@ -288,6 +302,17 @@ Three consequences, each of which was a hazard in the first draft:
 
 The range starts at `4.12.0` to match `@guren/server`'s own `^4.12.29`
 without pinning the plugin to a patch the server may move off.
+
+One case this deliberately tolerates: an app pinned to hono 4.x after
+`@guren/server` moves to 5.x would load two hono copies, the app's pragma
+resolving one and the server's `Hono` instance the other. Unlike the drizzle
+hazard cited above, that is **benign here** — `view()` shares no runtime state
+across the boundary. It calls the app's own component, which was compiled
+against the app's own hono, and reduces the result through `toString()`, a
+structural contract rather than an identity check. Nothing in this plugin
+does `instanceof JSXNode` or reads a hono module-level singleton. If a future
+version adds `createContext`-based features, that stops being true and the
+peer range should be narrowed to track the server's.
 
 ### `contentPlugin()`
 
