@@ -101,5 +101,9 @@ async function readPackageMetadata(appRoot: string): Promise<PackageMetadata> {
 }
 
 async function defaultOpenApiImporter(): Promise<OpenApiModule> {
+  // @guren/openapi is optional and not a declared dependency, so the build
+  // config (tsconfig.build.json, no path mappings) cannot resolve it; the
+  // module is typed by the local OpenApiModule interface either way.
+  // @ts-ignore -- unresolvable under tsconfig.build.json
   return import('@guren/openapi') as Promise<OpenApiModule>
 }

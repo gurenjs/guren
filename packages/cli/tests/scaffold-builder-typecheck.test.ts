@@ -18,7 +18,8 @@ import { generatePageTypes } from '../src/pages-types'
  * and typechecks everything the scaffold wrote as one program.
  *
  * Three combos rather than the full authCombos matrix: each program compiles
- * the workspace packages from source and costs COLD_TSC_TIMEOUT-scale time,
+ * the workspace packages from source (about half a second each with the native
+ * compiler),
  * and these three reach every builder branch the others can't:
  *
  *  - oauth + verify: password login with a validator import, register with

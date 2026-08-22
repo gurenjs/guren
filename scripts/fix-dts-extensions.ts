@@ -44,7 +44,9 @@ function collectSpecifierNodes(text: string, filePath: string): t.StringLiteral[
   const ast = parse(text, {
     sourceType: 'module',
     sourceFilename: filePath,
-    plugins: [['typescript', { dts: true }]],
+    // Declarations can carry decorators and `accessor` fields; without these
+    // plugins Babel throws on them where the old TypeScript parser did not.
+    plugins: [['typescript', { dts: true }], 'decorators', 'decoratorAutoAccessors'],
   })
   const literals: t.StringLiteral[] = []
   const visit = (node: t.Node): void => {

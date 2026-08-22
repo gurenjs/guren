@@ -22,6 +22,7 @@ import {
   collectPackages,
   dependencySchedule,
   parseArgs,
+  repoRoot,
   selectPackages,
   sortByDependencies,
   type WorkspacePackage,
@@ -70,8 +71,39 @@ async function build(pkg: WorkspacePackage, stream: boolean): Promise<number> {
     return exitCode
   }
 
+  const strays = strayDeclarations()
+  if (strays.length > 0) {
+    console.error(
+      `[build] declaration files appeared beside package sources while ${pkg.name} built — a program reached outside its own package ` +
+        `(a sibling pulled in through the root tsconfig paths; see the TypeScript 7 section of .claude/rules/common-pitfalls.md):\n` +
+        strays.map((file) => `  ${file}`).join('\n'),
+    )
+    return 1
+  }
+
   console.log(`[build] ${pkg.name} done in ${Date.now() - started}ms`)
   return 0
+}
+
+/**
+ * Untracked `.d.ts` files under any package's src/. The native declaration
+ * emitter writes the declarations of files outside its `--rootDir` next to
+ * their sources instead of into its output directory, silently; tracked
+ * `.d.ts` (hand-written ambient types) are not strays.
+ */
+function strayDeclarations(): string[] {
+  const result = Bun.spawnSync(
+    ['git', 'ls-files', '--others', '--exclude-standard', '--', 'packages/*/src/**'],
+    { cwd: repoRoot, stdout: 'pipe', stderr: 'pipe' },
+  )
+  if (result.exitCode !== 0) {
+    console.warn(`[build] could not list untracked files (git exited ${result.exitCode}); stray declaration check skipped`)
+    return []
+  }
+  return result.stdout
+    .toString()
+    .split('\n')
+    .filter((file) => file.endsWith('.d.ts') && /^packages\/[^\/]+\/src\//.test(file))
 }
 
 /**

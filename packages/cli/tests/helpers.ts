@@ -456,13 +456,13 @@ export function assertWorkspaceBuilt(artifacts: string[]): void {
   )
 }
 
-// Each checkTypes() call builds a full tsc program. On a warm TypeScript
-// cache that takes a few seconds, but in a fresh worktree (cold node_modules,
-// no incremental state) a single probe has been measured at 10–25s normally
-// and 70s right after a full monorepo build — far past bun:test's 5s default.
-// checkTypes() is synchronous, so a timeout cannot interrupt it anyway; the
-// limit only needs to sit above the slowest observed cold start, not near it.
-export const COLD_TSC_TIMEOUT = 180_000
+// Each checkTypes() call spawns the native tsc. The scaffold gate, the
+// slowest caller (it compiles the workspace packages from source), measures
+// about 0.5s per case and the whole five-file compile suite under 2s; the
+// limit sits well above that so a wedged spawn still fails in reasonable time
+// rather than being charged to the next test (Bun bills a timeout to whatever
+// runs next). checkTypes() is synchronous, so the timeout cannot interrupt it.
+export const COLD_TSC_TIMEOUT = 30_000
 
 /**
  * The `compilerOptions` object of a tsconfig.json, as `tsc` reads it. Kept as
@@ -495,18 +495,22 @@ const TSC_BIN = join(repoRoot, 'node_modules/typescript/bin/tsc')
 
 /**
  * Resolve a tsconfig the way `tsc` does (`extends` chains, defaults) and
- * return its compilerOptions with every relative path (`paths` targets,
- * `rootDir`, `typeRoots`, …) made absolute against the config's directory, so the result can be handed to
+ * return its compilerOptions with the relative paths it can carry (`paths`
+ * targets, `rootDir`, `rootDirs`, `typeRoots`) made absolute against the
+ * config's directory, so the result can be handed to
  * {@link checkTypes}, which writes its own tsconfig elsewhere.
  */
 export function resolvedCompilerOptions(configPath: string): TsconfigCompilerOptions {
-  const result = Bun.spawnSync([process.execPath, TSC_BIN, '--showConfig', '-p', configPath], {
-    cwd: dirname(configPath),
-    stdout: 'pipe',
-    stderr: 'pipe',
-  })
-  // A config that no longer parses (broken extends, invalid option) must fail
+  const spawnOptions = { cwd: dirname(configPath), stdout: 'pipe', stderr: 'pipe' } as const
+  // A config that no longer parses (broken extends, unknown option) must fail
   // here, not come back as weakened defaults this gate then compiles against.
+  // --showConfig itself exits 0 and prints whatever it could read, so the
+  // config diagnostics come from a separate no-check run.
+  const probe = Bun.spawnSync([process.execPath, TSC_BIN, '-p', configPath, '--listFilesOnly', '--pretty', 'false'], spawnOptions)
+  if (probe.exitCode !== 0) {
+    throw new Error(`tsc rejected ${configPath}:\n${probe.stdout}${probe.stderr}`)
+  }
+  const result = Bun.spawnSync([process.execPath, TSC_BIN, '--showConfig', '-p', configPath], spawnOptions)
   if (result.exitCode !== 0) {
     throw new Error(`tsc --showConfig failed for ${configPath}:\n${result.stdout}${result.stderr}`)
   }
@@ -521,9 +525,7 @@ export function resolvedCompilerOptions(configPath: string): TsconfigCompilerOpt
       Object.entries(paths).map(([alias, targets]) => [alias, targets.map(absolute)]),
     )
   }
-  for (const key of ['rootDir', 'outDir', 'declarationDir', 'baseUrl'] as const) {
-    if (typeof compilerOptions[key] === 'string') compilerOptions[key] = absolute(compilerOptions[key])
-  }
+  if (typeof compilerOptions.rootDir === 'string') compilerOptions.rootDir = absolute(compilerOptions.rootDir)
   for (const key of ['rootDirs', 'typeRoots'] as const) {
     if (Array.isArray(compilerOptions[key])) compilerOptions[key] = (compilerOptions[key] as string[]).map(absolute)
   }
