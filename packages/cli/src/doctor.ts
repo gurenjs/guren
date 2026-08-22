@@ -435,9 +435,11 @@ async function detectTsconfig(context: DoctorRuleContext): Promise<DoctorCheck> 
 }
 
 // Path mappings resolve relative to the tsconfig directory when `baseUrl` is
-// omitted, and TypeScript 7 rejects `baseUrl` outright (TS5102), so the fix
-// never writes one.
-const TSCONFIG_ALIAS_FIX = 'Set `"paths": { "@/*": ["./*"] }` in compilerOptions (no `baseUrl`) so `@/.guren/*` and `@/app/*` imports resolve.'
+// omitted, and TypeScript 7 rejects `baseUrl` outright (TS5102), so a root
+// `baseUrl` is reported as something to remove, never written.
+const TSCONFIG_ALIAS_FIX = 'Set `"paths": { "@/*": ["./*"] }` in compilerOptions and remove `baseUrl` so `@/.guren/*` and `@/app/*` imports resolve on every TypeScript version.'
+
+const isRootBaseUrl = (baseUrl: string | undefined): boolean => baseUrl === '.' || baseUrl === './'
 
 async function detectTsconfigAlias(context: DoctorRuleContext): Promise<DoctorCheck> {
   const tsconfig = await readJsonIfExists<TsconfigShape>(context.cwd, 'tsconfig.json')
@@ -451,25 +453,29 @@ async function detectTsconfigAlias(context: DoctorRuleContext): Promise<DoctorCh
   const baseUrl = compilerOptions?.baseUrl
   // Path mappings resolve relative to baseUrl (or the tsconfig directory when
   // baseUrl is omitted), so `./*` only means "project root" for a root baseUrl.
-  const baseUrlIsRoot = baseUrl === undefined || baseUrl === '.' || baseUrl === './'
+  const baseUrlIsRoot = baseUrl === undefined || isRootBaseUrl(baseUrl)
   const targetsRoot = aliasTargets.some((target) => target === './*' || target === '*')
   const mapsToRoot = targetsRoot && baseUrlIsRoot
+  const ok = mapsToRoot && baseUrl === undefined
 
-  const message = mapsToRoot
+  const message = ok
     ? 'tsconfig.json maps `@/*` to the project root.'
-    : aliasTargets.length === 0
-      ? 'tsconfig.json does not define the `@/*` path alias.'
-      : !targetsRoot
-        ? `tsconfig.json maps \`@/*\` to ${JSON.stringify(aliasTargets)} instead of the project root (\`["./*"]\`). Scaffolded code imports \`@/.guren/*\` and \`@/app/*\` relative to the project root; adjust existing \`@/\` imports when changing the mapping.`
-        : `tsconfig.json maps \`@/*\` to \`["./*"]\` but \`baseUrl\` is ${JSON.stringify(baseUrl)}, so the alias resolves under that directory instead of the project root.`
+    : mapsToRoot
+      ? 'tsconfig.json maps `@/*` to the project root but sets `baseUrl`, which TypeScript 7 rejects (TS5102). `paths` resolves from the tsconfig directory without it.'
+      : aliasTargets.length === 0
+        ? 'tsconfig.json does not define the `@/*` path alias.'
+        : !targetsRoot
+          ? `tsconfig.json maps \`@/*\` to ${JSON.stringify(aliasTargets)} instead of the project root (\`["./*"]\`). Scaffolded code imports \`@/.guren/*\` and \`@/app/*\` relative to the project root; adjust existing \`@/\` imports when changing the mapping.`
+          : `tsconfig.json maps \`@/*\` to \`["./*"]\` but \`baseUrl\` is ${JSON.stringify(baseUrl)}, so the alias resolves under that directory instead of the project root.`
 
-  return createCheck('tsconfig-alias', 'Path Alias', mapsToRoot ? 'pass' : 'warn', message, {
+  return createCheck('tsconfig-alias', 'Path Alias', ok ? 'pass' : 'warn', message, {
     fix: TSCONFIG_ALIAS_FIX,
     manualFix: TSCONFIG_ALIAS_FIX,
-    // Only safe to autofix when the alias is absent and no custom baseUrl would
-    // repoint it — rewriting existing settings could break imports that rely on
-    // the old resolution.
-    canAutofix: aliasTargets.length === 0 && baseUrlIsRoot,
+    // Only safe to autofix when no custom baseUrl repoints the mapping and the
+    // alias is either absent or already root — rewriting a different mapping
+    // could break imports that rely on the old resolution. Dropping a root
+    // baseUrl changes nothing: `paths` resolves from the same directory.
+    canAutofix: baseUrlIsRoot && (aliasTargets.length === 0 || targetsRoot),
   })
 }
 
@@ -481,7 +487,7 @@ async function createTsconfigAliasAutofix(_context: DoctorRuleContext, check: Do
   return {
     key: check.key,
     title: check.title,
-    summary: 'Add `"paths": { "@/*": ["./*"] }` to tsconfig.json.',
+    summary: 'Add `"paths": { "@/*": ["./*"] }` to tsconfig.json and remove a root `baseUrl`.',
     async apply(cwd: string) {
       const current = await readJsonIfExists<TsconfigShape>(cwd, 'tsconfig.json')
       if (!current.exists || current.parseError || !current.value) {
@@ -490,6 +496,9 @@ async function createTsconfigAliasAutofix(_context: DoctorRuleContext, check: Do
 
       const nextConfig = { ...current.value }
       const compilerOptions = { ...nextConfig.compilerOptions }
+      if (isRootBaseUrl(compilerOptions.baseUrl)) {
+        delete compilerOptions.baseUrl
+      }
       compilerOptions.paths = { ...compilerOptions.paths }
       compilerOptions.paths['@/*'] ??= ['./*']
       nextConfig.compilerOptions = compilerOptions
