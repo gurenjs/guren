@@ -1,5 +1,32 @@
 # create-guren-app
 
+## 1.8.9
+
+### Patch Changes
+
+- d61c043: Cover `tests/` in the api-only template's TypeScript `include`.
+
+  The api-only starter ships `tests/app.test.ts`, and it was the one file the
+  template's own `typecheck` script never read. That was deliberate: the test
+  passes `providers: [DatabaseProvider]` to `TestApp.create()`, and
+  `@guren/testing` typed that parameter as `new (...args: unknown[]) => ProviderLike`
+  — a shape no real `ServiceProvider` subclass satisfies, because constructor
+  parameters are contravariant and the inherited constructor takes a concrete
+  `Container`. Widening the include before that was fixed would only have made
+  the starter smokes red.
+
+  `@guren/testing@1.6.1` fixes it, so the include can now cover what it always
+  should have. The default template already listed `tests/`; the two templates
+  agree again.
+
+- 8871c4c: Build with tsdown instead of tsup, and emit declarations with the native TypeScript 7 compiler. The public file layout of every package is unchanged (same `dist/*.js` / `dist/*.d.ts` entry names, shebangs, and `exports`); only the internal chunk names differ. tsup is unmaintained and its declaration bundler needs the JavaScript compiler API that TypeScript 7 no longer ships.
+- 49f7edb: Keep scaffolded apps and the framework compiling under TypeScript 7.
+
+  - Scaffolded `tsconfig.json` no longer sets `baseUrl`, which TypeScript 7 rejects (TS5102); `paths` already resolves from the tsconfig directory without it.
+  - `guren doctor` warns on a root `baseUrl` (TypeScript 7 rejects it), and its autofix removes one while adding the `@/*` alias.
+  - A `resources/js/vite-env.d.ts` declares the virtual `@vite/client` module, since TypeScript 6+ checks that side-effect imports resolve.
+  - The dev banner's JSON import uses the standard `with { type: 'json' }` attribute instead of the removed `assert` form.
+
 ## 1.8.8
 
 ### Patch Changes

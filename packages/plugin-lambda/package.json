@@ -1,6 +1,6 @@
 {
   "name": "@guren/plugin-lambda",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -45,7 +45,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@guren/core": "^1.6.2",
+    "@guren/core": "^1.8.1",
     "citty": "^0.1.6"
   },
   "peerDependencies": {
