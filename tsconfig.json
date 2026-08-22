@@ -16,12 +16,6 @@
     "types": [
       "bun-types"
     ],
-    // TypeScript 7 rejects `baseUrl` (TS5102); the `paths` targets below are
-    // already relative so they keep resolving from this directory once it
-    // goes. It stays only because tsup's DTS build resolves `paths` against
-    // the package's cwd without it, which breaks every package that reaches
-    // a sibling through these mappings. Drop it together with tsup.
-    "baseUrl": ".",
     "paths": {
       "@guren/core": [
         "./packages/core/src/index.ts"

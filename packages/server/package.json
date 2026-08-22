@@ -108,7 +108,7 @@
     }
   },
   "scripts": {
-    "build": "tsup && tsc -p tsconfig.build.json && bun ../../scripts/fix-dts-extensions.ts dist",
+    "build": "bun --bun tsdown && tsc -p tsconfig.build.json && bun ../../scripts/fix-dts-extensions.ts dist",
     "dev": "bun --watch src/index.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test"
@@ -148,7 +148,7 @@
     "@types/ioredis": "^5.0.0",
     "@types/node": "^20.14.10",
     "@types/nodemailer": "^8.0.1",
-    "tsup": "^8.5.0",
+    "tsdown": "^0.22.14",
     "typescript": "^5.4.0",
     "vite": "^8.0.0"
   }

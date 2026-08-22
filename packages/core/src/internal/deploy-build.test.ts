@@ -236,7 +236,7 @@ describe('the built artifact', () => {
   test('should import nothing but node builtins', () => {
     // The module documents this, and the plugins rely on it: importing it must
     // not drag the framework runtime into a developer's build. It holds today
-    // only because this tsup entry happens to share no code with core's
+    // only because this entry happens to share no code with core's
     // others — the day one does, ESM splitting emits a chunk and the property
     // disappears with nothing else to notice.
     const built = join(import.meta.dir, '../../dist/internal/deploy-build.js')
@@ -244,16 +244,14 @@ describe('the built artifact', () => {
       throw new Error(`Expected ${built}; run \`bun run build core\` before this test.`)
     }
 
-    // Every import form, not just `from "..."`: a side-effect import or a
-    // dynamic `import()` of a bundled chunk would otherwise slip past while the
-    // builtin `from` imports kept the assertion green.
-    const source = readFileSync(built, 'utf8')
-    const specifiers = [
-      ...source.matchAll(/from\s*["']([^"']+)["']/g),
-      ...source.matchAll(/(?:^|[^.\w])import\s*["']([^"']+)["']/g),
-      ...source.matchAll(/\bimport\s*\(\s*["']([^"']+)["']/g),
-      ...source.matchAll(/\brequire\s*\(\s*["']([^"']+)["']/g),
-    ].map(([, specifier]) => specifier)
+    // A real parse rather than regexes: the bundler keeps JSDoc blocks, and
+    // the module's own prose quotes `import pgClient from "postgres"` as the
+    // line a developer's bundle fails on. scanImports reports every form —
+    // static, side-effect, dynamic `import()` and `require()` — so a bundled
+    // chunk cannot slip past while the builtin imports keep the assertion green.
+    const specifiers = new Bun.Transpiler({ loader: 'js' })
+      .scanImports(readFileSync(built, 'utf8'))
+      .map((entry) => entry.path)
 
     expect(specifiers.length).toBeGreaterThan(0)
     for (const specifier of specifiers) {

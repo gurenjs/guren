@@ -36,7 +36,7 @@
     "./styles.css": "./styles.css"
   },
   "scripts": {
-    "build": "tsup",
+    "build": "bun --bun tsdown",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
@@ -58,7 +58,7 @@
   "devDependencies": {
     "@types/node": "^20.14.10",
     "shiki": "^4.4.3",
-    "tsup": "^8.5.0",
+    "tsdown": "^0.22.14",
     "typescript": "^5.4.0"
   }
 }

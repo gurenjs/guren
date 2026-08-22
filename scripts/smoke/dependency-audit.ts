@@ -34,8 +34,9 @@ const IGNORED_ADVISORIES: IgnoredAdvisory[] = [
     id: 'GHSA-g7r4-m6w7-qqqr',
     reason:
       'esbuild 0.27.x arbitrary file read: Windows-only, dev-server-only, low severity. ' +
-      'Fixed in 0.28.1, but vite/tsup/drizzle-kit all pin ^0.27 so the fix is unreachable ' +
-      'until they move. Nothing published or scaffolded runs the esbuild dev server.',
+      'Fixed in 0.28.1. The only holder is vite 8\'s optional esbuild peer ' +
+      '(`bun pm why esbuild`), resolved at 0.27.7 in the lockfile. Nothing published ' +
+      'or scaffolded runs the esbuild dev server.',
   },
 ]
 

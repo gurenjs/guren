@@ -11,7 +11,7 @@
  * Deliberately imports nothing from the framework itself: a plugin's build
  * step should not drag the runtime into a developer's build process. Only
  * `node:` builtins belong here, and `deploy-build.test.ts` asserts it of the
- * built artifact — the property would otherwise break silently the day tsup
+ * built artifact — the property would otherwise break silently the day the bundler
  * splits a shared chunk out of this entry.
  *
  * What does *not* belong here: anything a platform legitimately decides for

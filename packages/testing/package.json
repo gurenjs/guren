@@ -31,8 +31,8 @@
     }
   },
   "scripts": {
-    "build": "tsup",
-    "dev": "tsup --watch",
+    "build": "bun --bun tsdown",
+    "dev": "bun --bun tsdown --watch",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
@@ -49,7 +49,7 @@
   "devDependencies": {
     "@types/react": "^19.0.0",
     "vitest": "^3.2.6",
-    "tsup": "^8.5.0",
+    "tsdown": "^0.22.14",
     "typescript": "^5.4.0"
   },
   "peerDependenciesMeta": {

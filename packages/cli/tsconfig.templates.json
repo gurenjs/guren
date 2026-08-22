@@ -1,9 +1,6 @@
 {
   "extends": "../../tsconfig.json",
   "compilerOptions": {
-    // Inherited `baseUrl` would point at the repo root (see the root tsconfig
-    // for why it is still there); re-anchor it so `paths` below stay local.
-    "baseUrl": ".",
     "rootDirs": [
       "templates/scaffold/auth",
       "tests/fixtures/scaffold-typecheck/auth"

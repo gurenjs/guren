@@ -30,7 +30,7 @@ runs:
     # build command, the lockfile, the root tsconfig the packages extend, the
     # build scripts (build order affects DTS output), and the Bun version —
     # so a hit means dist/ is byte-for-byte what a fresh build would produce.
-    # The negations drop files verified NOT to feed tsup (tests, templates
+    # The negations drop files verified NOT to feed tsdown (tests, templates
     # read at runtime, changelogs, a stray tarball), so test-only or
     # template-only changes keep hitting the cache.
     - name: Restore built packages
@@ -38,7 +38,7 @@ runs:
       uses: actions/cache@v4
       with:
         path: packages/*/dist
-        key: dist-${{ runner.os }}-bun${{ inputs.bun-version }}-${{ hashFiles('packages/**', '!packages/**/*.test.ts', '!packages/*/templates/**', '!packages/*/tests/**', '!packages/**/CHANGELOG.md', '!packages/**/*.tgz', 'package.json', 'bun.lock', 'tsconfig.json', 'scripts/build-packages.ts', 'scripts/workspace-packages.ts') }}
+        key: dist-${{ runner.os }}-bun${{ inputs.bun-version }}-${{ hashFiles('packages/**', '!packages/**/*.test.ts', '!packages/*/templates/**', '!packages/*/tests/**', '!packages/**/CHANGELOG.md', '!packages/**/*.tgz', 'package.json', 'bun.lock', 'tsconfig.json', 'scripts/build-packages.ts', 'scripts/workspace-packages.ts', 'scripts/tsdown-preset.ts') }}
 
     - name: Install dependencies
       shell: bash

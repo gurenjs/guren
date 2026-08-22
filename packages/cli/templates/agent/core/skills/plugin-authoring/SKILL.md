@@ -47,15 +47,15 @@ mkdir guren-plugin-<name> && cd guren-plugin-<name> && bun init
   "name": "guren-plugin-<name>",
   "version": "0.1.0",
   "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "dist/index.mjs",
+  "types": "dist/index.d.mts",
   "gurenPlugin": { "compatibility": ">=1.0.0" },
   "peerDependencies": { "@guren/core": ">=1.0.0" },
   "devDependencies": {
     "@guren/core": "^1.0.0",
     "@guren/testing": "^1.0.0",
     "typescript": "^5.0.0",
-    "tsup": "^8.0.0"
+    "tsdown": "^0.22.0"
   }
 }
 ```
@@ -109,7 +109,7 @@ The manifest is pure data — installers never execute plugin code from it.
 ### 4. Optional: contribute a `guren` CLI command
 
 ```json
-{ "gurenPlugin": { "commands": { "entry": "./dist/commands.js", "names": ["my-plugin:sync"] } } }
+{ "gurenPlugin": { "commands": { "entry": "./dist/commands.mjs", "names": ["my-plugin:sync"] } } }
 ```
 
 ```typescript
@@ -152,7 +152,7 @@ bunx guren plugin guren-plugin-<name>
 ### 7. Build and publish
 
 ```json
-{ "scripts": { "build": "tsup src/index.ts --format esm --dts" } }
+{ "scripts": { "build": "tsdown src/index.ts --dts" } }
 ```
 
 ```bash

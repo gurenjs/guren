@@ -10,7 +10,7 @@ Testing utilities for `@guren/server` controllers and Inertia page components.
 
 ## Structure
 - `src/` hosts TypeScript source; `index.ts` re-exports public helpers from modules such as `controller.ts`, `inertia.ts`, and `vitest.ts`
-- Compiled artifacts emitted to `dist/` via `tsup` — never edit `dist/` manually
+- Compiled artifacts emitted to `dist/` via `tsdown` — never edit `dist/` manually
 - Keep package-scoped fixtures under `src/__fixtures__` if needed; co-locate helper-specific tests beside the helper
 
 ## Conventions
@@ -19,6 +19,6 @@ Testing utilities for `@guren/server` controllers and Inertia page components.
 - When helpers wrap external APIs (e.g., Inertia), mock only the minimal surface and assert through public behavior
 
 ## Build & Tests
-- `bun run --cwd packages/testing build` — runs `tsup` and refreshes `dist/`
+- `bun run --cwd packages/testing build` — runs `tsdown` and refreshes `dist/`
 - `bun run --cwd packages/testing dev` — watches `src/` and rebuilds on save
 - `bun run --cwd packages/testing typecheck` — validates declaration output

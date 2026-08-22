@@ -853,9 +853,10 @@ export { SqsDriver, createSqsAdapter } from './queue/drivers/SqsDriver'
 export { createTypedBroadcaster } from './broadcasting/typed'
 // Redis: client factory
 export { createRedisClient } from './redis/client'
-// MCP: available via '@guren/server/mcp' subpath import.
-// Not re-exported here to avoid pulling @modelcontextprotocol/sdk
-// types into the main DTS bundle (causes OOM in tsup).
+// MCP: public via the '@guren/server/mcp' subpath, deliberately not
+// re-exported here: @guren/core re-exports this barrel wholesale, so a
+// re-export would pull @modelcontextprotocol/sdk's types into every app's
+// root import (and once blew up the old DTS bundler).
 // Docs viewer (RFC 0005): dev-only, loopback-guarded OKF bundle UI.
 // Not re-exported here for the same reason as MCP above — `Application`
 // mounts it by dynamic relative import, and nothing outside the package
