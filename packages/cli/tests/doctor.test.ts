@@ -761,6 +761,88 @@ describe('runDoctor', () => {
     }
   })
 
+  // A root `baseUrl` has more than one spelling. These reach the same
+  // `mapsToRoot` branch as `"."` above, so they must warn with the TS5102
+  // message and autofix; a literal comparison drops them into the "repoints
+  // the alias" branch, which reports the wrong cause and refuses to fix it.
+  it.each([
+    ['an absolute path equal to the project root', (dir: string) => dir],
+    ['a redundant `./.`', () => './.'],
+    // Whatever an older TypeScript made of `""`, TS7 rejects `baseUrl` for
+    // any value, so warn-and-remove is the outcome either way.
+    ['an empty string', () => ''],
+  ])('warns on a root baseUrl written as %s and the autofix removes it', async (_label, buildBaseUrl) => {
+    const workspace = await createTempWorkspace('guren-cli-doctor-alias-root-baseurl-alt-')
+
+    try {
+      await writeFile(
+        join(workspace.dir, 'package.json'),
+        JSON.stringify({ name: 'doctor-alias-root-baseurl-alt' }, null, 2),
+        'utf8',
+      )
+      await writeFile(
+        join(workspace.dir, 'tsconfig.json'),
+        JSON.stringify({
+          // Derived from `workspace.dir` — the same string passed as `cwd`
+          // below. A realpath would add macOS's `/private` prefix to one side
+          // of the comparison only.
+          compilerOptions: { baseUrl: buildBaseUrl(workspace.dir), paths: { '@/*': ['./*'] } },
+          include: ['.guren/**/*'],
+        }, null, 2),
+        'utf8',
+      )
+
+      const report = await runDoctor({ cwd: workspace.dir, json: true })
+      const aliasCheck = report.checks.find((check) => check.key === 'tsconfig-alias')
+
+      expect(aliasCheck?.status).toBe('warn')
+      expect(aliasCheck?.message).toContain('TS5102')
+      expect(aliasCheck?.canAutofix).toBe(true)
+
+      const { evaluations } = await getDoctorRuleEvaluations({ cwd: workspace.dir })
+      const aliasEval = evaluations.find((evaluation) => evaluation.check.key === 'tsconfig-alias')
+      await aliasEval!.autofix!.apply(workspace.dir)
+
+      const tsconfig = JSON.parse(await Bun.file(join(workspace.dir, 'tsconfig.json')).text()) as {
+        compilerOptions: { baseUrl?: string; paths?: Record<string, string[]> }
+      }
+
+      expect(tsconfig.compilerOptions.baseUrl).toBeUndefined()
+      expect(tsconfig.compilerOptions.paths?.['@/*']).toEqual(['./*'])
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+  it('warns instead of crashing on a non-string baseUrl', async () => {
+    // The root-baseUrl comparison resolves paths, and `resolve()` throws on a
+    // non-string. A hand-edited tsconfig has to stay a warn, not take down the
+    // whole doctor run.
+    const workspace = await createTempWorkspace('guren-cli-doctor-alias-baseurl-nonstring-')
+
+    try {
+      await writeFile(
+        join(workspace.dir, 'package.json'),
+        JSON.stringify({ name: 'doctor-alias-baseurl-nonstring' }, null, 2),
+        'utf8',
+      )
+      await writeFile(
+        join(workspace.dir, 'tsconfig.json'),
+        JSON.stringify({
+          compilerOptions: { baseUrl: 1, paths: { '@/*': ['./*'] } },
+          include: ['.guren/**/*'],
+        }, null, 2),
+        'utf8',
+      )
+
+      const report = await runDoctor({ cwd: workspace.dir, json: true })
+      const aliasCheck = report.checks.find((check) => check.key === 'tsconfig-alias')
+
+      expect(aliasCheck?.status).toBe('warn')
+      expect(aliasCheck?.canAutofix).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
   it('warns when a custom baseUrl repoints a root @/* mapping', async () => {
     const workspace = await createTempWorkspace('guren-cli-doctor-alias-baseurl-')
 
