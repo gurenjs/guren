@@ -89,8 +89,10 @@ Read from `hono@4.13.1` as resolved by `packages/server`:
   `Context` as types. It does **not** export `Props`. The first draft's
   `import { createElement, type FC, type Props } from 'hono/jsx'` fails to
   compile with `TS2614: Module '"hono/jsx"' has no exported member 'Props'`
-  (verified with `tsc` 7.0.2). `Props` lives in the internal `hono/jsx/base`
-  module, which `contributing/plugin-contract.md` forbids importing.
+  (verified with `tsc` 7.0.2). `Props` is declared in `hono/jsx/base`, which
+  hono's own `exports` map does not publish — there is `./jsx`,
+  `./jsx/jsx-runtime`, `./jsx/streaming` and friends, but no `./jsx/base`. So
+  it is unreachable, not merely discouraged.
 - `renderToReadableStream` lives at `hono/jsx/streaming`, not `hono/jsx`.
 
 ### `hono` is not reliably resolvable from application code
@@ -142,11 +144,47 @@ Verified to produce byte-identical output to `createElement(...).toString()`
 for sync roots, async roots, `Child[]` returns, nested async children,
 `memo()`-wrapped components, and `ErrorBoundary` fallbacks.
 
-- Auto-escaping is confirmed: `{'<script>alert(1)</script>'}` renders as
-  `&lt;script&gt;alert(1)&lt;/script&gt;`. This is the property that retires
-  the hand-rolled `escapeHtml()`.
 - hono/jsx emits **no doctype**. `view()` must prepend `<!doctype html>` or
   every page renders in quirks mode. The first draft did not.
+
+### What auto-escaping does and does not cover
+
+This matters more than the byte counts, because the RFC's pitch is that
+`view()` retires a hand-rolled `escapeHtml()`. Measured:
+
+| input | rendered |
+|---|---|
+| `{'<script>alert(1)</script>'}` as a text child | `&lt;script&gt;alert(1)&lt;/script&gt;` |
+| `href={'" onmouseover="alert(1)'}` | `href="&quot; onmouseover=&quot;alert(1)"` |
+| `href={'javascript:alert(1)'}` | **`href="javascript:alert(1)"` — passed through** |
+
+So hono/jsx prevents **tag and attribute breakout**, which is exactly the
+class of bug a forgotten `escapeHtml()` causes, and that claim stands. It
+does **not** sanitize URL schemes: a `javascript:` or `vbscript:` href built
+from user data is emitted verbatim. An earlier draft of this RFC's test plan
+asserted such URLs would be "escaped"; that was wrong, and the plugin must
+instead document scheme validation as the caller's job (or offer a helper).
+`@guren/plugin-markdown`'s sanitizer already restricts `href`/`src` to
+`http`/`https`/`mailto`, which is the right precedent to point at.
+
+One further silent shape, found while enumerating the type-safety gaps
+below: a React-shaped element placed as an **expression child** inside a hono
+element (`<div>{reactElement}</div>`) type-checks, because intrinsic props
+are `Record<string, any>`, and renders as **`<div></div>`** — the content is
+dropped with no error at compile time or runtime.
+
+### Async context degrades silently without AsyncLocalStorage
+
+`hono/jsx/context.js` falls back to a module-level variable when
+`AsyncLocalStorage` is unavailable, and warns that `useContext()` **after an
+`await` in an async component returns the context default value** during SSR.
+A content page whose async child reads a locale or theme context would
+silently render the wrong value rather than fail.
+
+Guren's own Cloudflare path is not exposed: `packages/plugin-cloudflare`
+writes the `nodejs_compat` flag, and `web/wrangler.jsonc` carries it. But an
+app that hand-rolls its Workers config, or any runtime without ALS, is. The
+plugin should document this rather than discover it in production.
 
 ### JSX pragma behaviour under TypeScript 7
 
@@ -278,6 +316,51 @@ export abstract class ContentController extends Controller {
 `stringify` is the reduction verified above, living in its own module so it
 can be unit-tested against all four `FunctionComponentResult` shapes without
 constructing a controller.
+
+### What `view()` deliberately does not do, and why that is the open design risk
+
+`view()` returns a doctype plus whatever the component rendered. That is a
+much thinner contract than `this.inertia()`, and the difference is not
+cosmetic. `InertiaEngine` assembles a whole document: the `<html lang>`
+attribute, `<head>`, critical CSS, stylesheet links, an import map, and
+`<body>` class attributes. `Controller.inertia()` additionally resolves
+shared Inertia props and the request locale before rendering.
+
+Under this proposal all of that becomes the app's `Layout` component's job,
+and three specific capabilities have no replacement at all:
+
+1. **Head hoisting.** Inertia's `<Head>` lets a component nested deep in the
+   tree contribute `<title>`, `<meta>`, canonical links, and JSON-LD to the
+   document head. hono/jsx is a single top-to-bottom string buffer with no
+   portal primitive, so every such value must be threaded to the Layout as an
+   explicit prop. The RFC's own example threads a bare `title` and nothing
+   else, which understates the work.
+2. **Locale.** `Controller`'s `locale`, `t`, and `tc` helpers read the
+   request context, and `inertia()` passes the resolved locale through as
+   `lang`. `view()` never touches `ctx`, so a content page gets no locale
+   unless the controller passes one in as a prop.
+3. **Assets.** Nothing injects the stylesheet or import map that the Vite
+   pipeline produces for Inertia pages.
+
+For the motivating application this was acceptable: it had already
+hand-written a `renderPage()` that owned the whole document. For a framework
+API it is the weakest part of this proposal, and it is the thing the
+discussion window should decide. Three options, in increasing scope:
+
+- **(a) Document it as the Layout's job.** Ship `view()` as specified, with a
+  reference `Layout` in the README showing head, lang, and asset wiring. The
+  app owns the document, the plugin owns escaping and the response.
+- **(b) Add a `head` option** to `ViewOptions` — a typed record of title,
+  meta, links, and JSON-LD that `view()` serialises into `<head>`, with the
+  component rendering only `<body>` content. Solves head composition without
+  a portal, at the cost of a second, non-JSX way to express markup.
+- **(c) Add a `document` seam**: `view()` takes an optional outer component
+  receiving `{ lang, head, body }`, and the plugin resolves `lang` from the
+  request context the way `inertia()` does.
+
+**Recommendation: (a) for v1, with (c) sketched as the growth path.** But
+this is a genuine open question and is added to the list below as Open
+Question 4.
 
 ### Dependency shape
 
@@ -521,10 +604,27 @@ assertion in layer 2 is the durable, machine-checkable form of the same
 claim.
 
 **Escaping tests belong here too** and should be treated as a security
-suite, not a formatting one: script tags, `javascript:` URLs, and attribute
-breakouts passed as props, each asserted escaped. `dangerouslySetInnerHTML`
-remains the documented opt-out, and the README must say that content reaching
-it should have gone through `@guren/plugin-markdown`'s sanitizer first.
+suite, not a formatting one. Two groups, and the split is the point:
+
+- **Asserted escaped**, because hono/jsx guarantees it: script tags as text
+  children, and attribute breakout attempts (`" onmouseover="…`).
+- **Asserted *not* escaped**, pinning the real boundary: a `javascript:`
+  href passes through verbatim. A test that freezes this stops a future
+  reader from assuming `view()` sanitizes URLs. The README must say scheme
+  validation is the caller's job and point at
+  `@guren/plugin-markdown`'s `http`/`https`/`mailto` allowlist.
+
+`dangerouslySetInnerHTML` remains the documented opt-out, and the README must
+say that content reaching it should have gone through
+`@guren/plugin-markdown`'s sanitizer first.
+
+**Error handling** needs one test and one decision the RFC currently ducks:
+`view()` has no `try`/`catch`, so a component that throws or a rejected
+`stringify()` propagates to whatever `ExceptionHandler` catches at the router
+boundary. That is probably correct — it matches how a throwing controller
+action already behaves — but it should be asserted rather than assumed, and
+it becomes a genuine design question for the `renderToReadableStream` follow-up,
+where bytes already flushed cannot be retracted.
 
 ### Correspondence to `@guren/plugin-markdown`
 
@@ -626,10 +726,20 @@ page are the duplicate.
 The two page types are not equally good targets, and the difference is the
 useful part:
 
-- **`resources/js/pages/blog/Show.tsx` is the ideal first migration.** 82
-  lines, no `useState`, no `useEffect`, no event handlers — it imports `Head`,
-  `Link`, and three presentational components. It hydrates for nothing. This
-  is exactly the shape `view()` is for.
+- **`resources/js/pages/blog/Show.tsx` is the best first migration, but it is
+  not a drop-in.** 82 lines, no `useState`, no `useEffect`, no event handlers
+  — it hydrates for nothing, which is the shape `view()` is for. The catch,
+  and it is the head-composition gap above made concrete: the page renders
+  `<Seo>`, which uses Inertia's `<Head>` to hoist a title, description,
+  canonical link, RSS alternate, OpenGraph and Twitter tags, and JSON-LD into
+  the document head from three levels down the tree. `view()` has no
+  equivalent. Migrating this page therefore *requires* settling Open Question
+  4 first and rewriting `Seo` as explicit Layout props.
+
+  That is not a reason to pick a different target — it is the most useful
+  thing the dogfooding could surface, and finding it before the plugin ships
+  is the point. But the migration is "design head composition, then port",
+  not "swap `inertia()` for `view()`".
 - **`resources/js/pages/Docs/Show.tsx` is not a v1 target**, despite carrying
   the larger payload. It runs a scroll-spy table of contents, a mobile
   sidebar toggle, and Inertia `<Link>` SPA navigation. Migrating it means
@@ -656,9 +766,11 @@ Revised order:
 
 ## Open Questions
 
-The three questions below were opened in the first draft. Each now has a
+Questions 1 to 3 were opened in the first draft, and each now has a
 conclusion grounded in the measurements above; they are recorded as
 recommendations for the discussion period rather than as settled decisions.
+Question 4 was **opened by review**, not answered — it is the one thing that
+should block acceptance until it is settled.
 
 ### 1. Convention for distinguishing hydrating from non-hydrating JSX
 
@@ -672,14 +784,29 @@ component, a React component reaching `view()`, and an `FC`-annotated content
 component imported into a React page. Adding a `guren check` rule for those
 would duplicate the compiler.
 
-Exactly one shape compiles silently: a **pragma'd component with no `FC`
-annotation, imported into a React Inertia page**. It slips through because
-hono's `JSX.Element` is `HtmlEscapedString | Promise<HtmlEscapedString>` and
-`HtmlEscapedString` is a `String` subtype, which React accepts as a
-`ReactNode`. The consequence is a server-only component silently pulled into
-the client bundle.
+**Two** shapes compile silently. An earlier revision claimed one; a review
+pass found the second, so treat this enumeration as "the ones found so far"
+rather than exhaustive:
 
-Two cheap, existing mechanisms close it, and neither is new code:
+1. A **pragma'd component with no `FC` annotation, imported into a React
+   Inertia page**. It slips through because hono's `JSX.Element` is
+   `HtmlEscapedString | Promise<HtmlEscapedString>` and `HtmlEscapedString`
+   is a `String` subtype, which React accepts as a `ReactNode`. The
+   consequence is a server-only component pulled into the client bundle.
+2. A **React element placed as an expression child of a hono element**
+   (`<div>{reactElement}</div>`). Intrinsic props are `Record<string, any>`,
+   so nothing objects, and the child renders as **empty output** — content
+   silently disappears. Note the neighbouring cases *are* caught: a React
+   element assigned to a `Child`-typed binding is `TS2322`, and a React
+   component used as a tag under the hono pragma is `TS2786`.
+
+The directory rule below closes (1). It does **not** close (2), which is a
+within-file mistake no boundary rule can see; only the missing-import error
+a developer gets when the React component lives in a tree the content view
+should not reach. This is a real, if narrow, residual risk and the RFC does
+not claim otherwise.
+
+Two cheap, existing mechanisms, and neither is new code:
 
 - **The directory split is load-bearing for an independent reason.** Content
   views must live outside `resources/js/pages/` because
@@ -761,3 +888,33 @@ What may deserve a separate, narrow proposal later: re-exporting the `FC`
 write `import type { FC } from '@guren/plugin-content'` and only the pragma
 mentions hono. That keeps one name in app code pointing at the framework
 while leaving the runtime coupling where it belongs.
+
+### 4. What is `view()`'s document contract? (opened by review, unresolved)
+
+**No conclusion. This is the question the discussion window exists for.**
+
+`view()` as specified returns a doctype plus the component's output, while
+`this.inertia()` assembles `<html lang>`, `<head>`, critical CSS, stylesheet
+links, an import map, and `<body>` attributes, and resolves the request
+locale and shared props on the way. The gap covers head hoisting, locale, and
+asset injection — see "What `view()` deliberately does not do" above for the
+three candidate designs (document it as the Layout's job; add a typed `head`
+option; add a `document` seam that also resolves `lang` from the request).
+
+Two things make this concrete rather than theoretical:
+
+- The RFC's own nominated dogfooding target, `web/resources/js/pages/blog/Show.tsx`,
+  **cannot be migrated without answering it**: its `<Seo>` component hoists a
+  canonical link, RSS alternate, OpenGraph and Twitter tags, and JSON-LD into
+  the head from three levels down.
+- The Problem section argues `view()` should exist so apps stop hand-writing
+  `renderPage()`. If `view()` leaves the entire document to the app, it has
+  moved the hand-written part rather than removed it — and the honest reply
+  is that it still removes the dangerous part, escaping, which is a smaller
+  claim than the current framing makes.
+
+My inclination is (a) for v1 plus a reference `Layout`, because the head data
+a content page needs is known at the controller and threading it as props is
+ordinary TypeScript rather than a new mechanism. But a reviewer who thinks
+`view()` without head composition is not worth shipping has a real case, and
+that case should be made here before this is accepted.
