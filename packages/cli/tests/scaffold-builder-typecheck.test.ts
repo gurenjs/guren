@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { checkTypes, COLD_TSC_TIMEOUT, createTempWorkspace, resolvedCompilerOptions, seedInertiaApp, type TsconfigCompilerOptions } from './helpers'
+import { checkTypes, TSC_TIMEOUT, createTempWorkspace, resolvedCompilerOptions, seedInertiaApp, type TsconfigCompilerOptions } from './helpers'
 import { collectFiles, IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES, toPosixRelative } from '../src/discovery'
 import { makeAuth, type MakeAuthOptions } from '../src/make-auth'
 import { generatePageTypes } from '../src/pages-types'
@@ -18,9 +18,8 @@ import { generatePageTypes } from '../src/pages-types'
  * and typechecks everything the scaffold wrote as one program.
  *
  * Three combos rather than the full authCombos matrix: each program compiles
- * the workspace packages from source (about half a second each with the native
- * compiler),
- * and these three reach every builder branch the others can't:
+ * the workspace packages from source (about half a second each with the
+ * native compiler), and these three reach every builder branch the others can't:
  *
  *  - oauth + verify: password login with a validator import, register with
  *    verification, the verify-aware OAuth callback, the password profile with
@@ -67,14 +66,10 @@ function renderedScaffoldCompilerOptions(workspaceDir: string): TsconfigCompiler
     ...parsed,
     // The two fixture dirs the static gate overlays; meaningless here.
     rootDirs: undefined,
-    // Nothing is emitted, but TypeScript 7 still requires every source under
-    // rootDir, and this program spans the rendered temp workspace and the
-    // workspace packages: only the filesystem root contains both.
-    rootDir: '/',
     typeRoots: [join(cliRoot, '../../node_modules'), join(cliRoot, 'node_modules/@types')],
     types: ['bun-types', 'node'],
     paths: {
-      ...(parsed.paths as Record<string, string[]>),
+      ...parsed.paths,
       '@/.guren/pages.gen': [join(workspaceDir, '.guren/pages.gen.ts')],
       zod: [join(cliRoot, 'node_modules/zod')],
       '@inertiajs/react': [join(cliRoot, 'node_modules/@inertiajs/react')],
@@ -148,7 +143,7 @@ describe('rendered make:auth output typechecks', () => {
           await workspace.cleanup()
         }
       },
-      COLD_TSC_TIMEOUT,
+      TSC_TIMEOUT,
     )
   }
 })

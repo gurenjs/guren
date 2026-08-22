@@ -12,9 +12,6 @@
     "resolveJsonModule": true,
     "allowJs": false,
     "noEmit": true,
-    // TypeScript 7 defaults rootDir to the config directory; `paths` below pull
-    // sibling packages into every program, so anchor it at the repo root.
-    "rootDir": ".",
     "allowImportingTsExtensions": true,
     "types": [
       "bun-types"

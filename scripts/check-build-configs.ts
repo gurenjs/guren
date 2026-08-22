@@ -10,37 +10,34 @@
  * makes that class of drift fail.
  *
  * Only packages with a `tsconfig.build.json` are covered — the ones whose
- * sources import a sibling. Run after `bun run build` (the configs resolve
- * siblings through dist/).
+ * sources import a sibling. Run after `bun run build`: the configs resolve
+ * siblings through dist/, so on an unbuilt checkout every sibling import
+ * reports TS2307.
  *
  * Usage: bun scripts/check-build-configs.ts
  */
 import { existsSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 
-import { collectPackages } from './workspace-packages'
+import { collectPackages, repoRoot } from './workspace-packages'
 
-const repoRoot = resolve(import.meta.dir, '..')
 const tsc = join(repoRoot, 'node_modules/typescript/bin/tsc')
 
 let failures = 0
 for (const pkg of await collectPackages()) {
   const config = join(pkg.dir, 'tsconfig.build.json')
   if (!existsSync(config)) continue
-  // `--emitDeclarationOnly false` so a config that emits (server's) can still
-  // be checked without writing anything.
-  const result = Bun.spawnSync(
-    [process.execPath, tsc, '-p', config, '--noEmit', '--emitDeclarationOnly', 'false', '--pretty', 'false'],
-    { cwd: pkg.dir, stdout: 'pipe', stderr: 'pipe' },
-  )
-  if (result.exitCode === 0) {
+  const { exitCode } = Bun.spawnSync([process.execPath, tsc, '-p', config, '--noEmit', '--pretty', 'false'], {
+    cwd: pkg.dir,
+    stdout: 'inherit',
+    stderr: 'inherit',
+  })
+  if (exitCode === 0) {
     console.log(`[check-build-configs] ${pkg.name} ok`)
     continue
   }
   failures += 1
-  console.error(`[check-build-configs] ${pkg.name}: tsc -p tsconfig.build.json exited ${result.exitCode}`)
-  process.stdout.write(result.stdout)
-  process.stderr.write(result.stderr)
+  console.error(`[check-build-configs] ${pkg.name}: tsc -p tsconfig.build.json exited ${exitCode} (unbuilt siblings show up as TS2307; run \`bun run build\` first)`)
 }
 
 process.exit(failures === 0 ? 0 : 1)

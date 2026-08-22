@@ -16,6 +16,8 @@ import { dirname, join, resolve } from 'node:path'
 import { parse } from '@babel/parser'
 import * as t from '@babel/types'
 
+import { walk } from '../packages/cli/src/ast-walk'
+
 function collectDtsFiles(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const full = join(dir, entry.name)
@@ -49,32 +51,19 @@ function collectSpecifierNodes(text: string, filePath: string): t.StringLiteral[
     plugins: [['typescript', { dts: true }], 'decorators', 'decoratorAutoAccessors'],
   })
   const literals: t.StringLiteral[] = []
-  const visit = (node: t.Node): void => {
+  walk(ast, (node) => {
+    const n = node as unknown as t.Node
     if (
-      (t.isImportDeclaration(node) || t.isExportNamedDeclaration(node) || t.isExportAllDeclaration(node)) &&
-      node.source != null
+      (t.isImportDeclaration(n) || t.isExportNamedDeclaration(n) || t.isExportAllDeclaration(n)) &&
+      n.source != null
     ) {
-      literals.push(node.source)
-    } else if (t.isTSImportType(node) && t.isStringLiteral(node.argument)) {
-      literals.push(node.argument)
-    } else if (
-      t.isCallExpression(node) &&
-      t.isImport(node.callee) &&
-      node.arguments.length === 1 &&
-      t.isStringLiteral(node.arguments[0])
-    ) {
-      literals.push(node.arguments[0])
+      literals.push(n.source)
+    } else if (t.isTSImportType(n) && t.isStringLiteral(n.argument)) {
+      literals.push(n.argument)
+    } else if (t.isCallExpression(n) && t.isImport(n.callee) && n.arguments.length === 1 && t.isStringLiteral(n.arguments[0])) {
+      literals.push(n.arguments[0])
     }
-    for (const key of t.VISITOR_KEYS[node.type] ?? []) {
-      const child = (node as unknown as Record<string, t.Node | t.Node[] | null | undefined>)[key]
-      if (Array.isArray(child)) {
-        for (const item of child) if (item) visit(item)
-      } else if (child) {
-        visit(child)
-      }
-    }
-  }
-  visit(ast)
+  })
   return literals
 }
 

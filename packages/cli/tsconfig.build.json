@@ -1,12 +1,3 @@
 {
-  // The tsconfig tsdown reads. The root config maps @guren/* to sibling
-  // package sources, which would pull them into this program; the native
-  // declaration emitter then writes their .d.ts beside the sources instead
-  // of into its output directory, because they sit outside this package's
-  // rootDir. Clearing paths resolves siblings through node_modules to their
-  // built declarations — the build runs in dependency order, so they exist.
-  "extends": "./tsconfig.json",
-  "compilerOptions": {
-    "paths": {}
-  }
+  "extends": ["./tsconfig.json", "../../tsconfig.build-base.json"]
 }

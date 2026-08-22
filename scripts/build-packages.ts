@@ -71,16 +71,6 @@ async function build(pkg: WorkspacePackage, stream: boolean): Promise<number> {
     return exitCode
   }
 
-  const strays = strayDeclarations()
-  if (strays.length > 0) {
-    console.error(
-      `[build] declaration files appeared beside package sources while ${pkg.name} built — a program reached outside its own package ` +
-        `(a sibling pulled in through the root tsconfig paths; see the TypeScript 7 section of .claude/rules/common-pitfalls.md):\n` +
-        strays.map((file) => `  ${file}`).join('\n'),
-    )
-    return 1
-  }
-
   console.log(`[build] ${pkg.name} done in ${Date.now() - started}ms`)
   return 0
 }
@@ -89,21 +79,19 @@ async function build(pkg: WorkspacePackage, stream: boolean): Promise<number> {
  * Untracked `.d.ts` files under any package's src/. The native declaration
  * emitter writes the declarations of files outside its `--rootDir` next to
  * their sources instead of into its output directory, silently; tracked
- * `.d.ts` (hand-written ambient types) are not strays.
+ * `.d.ts` (hand-written ambient types) are not strays. Checked once after
+ * every build has finished: with builds running in parallel, the package
+ * that finished last is not necessarily the one whose program strayed.
  */
 function strayDeclarations(): string[] {
   const result = Bun.spawnSync(
-    ['git', 'ls-files', '--others', '--exclude-standard', '--', 'packages/*/src/**'],
+    ['git', 'ls-files', '--others', '--exclude-standard', '--', ':(glob)packages/*/src/**/*.d.ts'],
     { cwd: repoRoot, stdout: 'pipe', stderr: 'pipe' },
   )
   if (result.exitCode !== 0) {
-    console.warn(`[build] could not list untracked files (git exited ${result.exitCode}); stray declaration check skipped`)
-    return []
+    throw new Error(`[build] could not list untracked files (git exited ${result.exitCode}): ${result.stderr}`)
   }
-  return result.stdout
-    .toString()
-    .split('\n')
-    .filter((file) => file.endsWith('.d.ts') && /^packages\/[^\/]+\/src\//.test(file))
+  return result.stdout.toString().split('\n').filter(Boolean)
 }
 
 /**
@@ -195,3 +183,13 @@ if (limit > 1) console.log(`[build] up to ${limit} packages in parallel`)
 
 const exitCode = await buildAll(targets, limit, allPackages)
 if (exitCode !== 0) process.exit(exitCode)
+
+const strays = strayDeclarations()
+if (strays.length > 0) {
+  console.error(
+    '[build] declaration files appeared beside package sources — a program reached outside its own package ' +
+      '(a sibling pulled in through the root tsconfig paths; see tsconfig.build-base.json):\n' +
+      strays.map((file) => `  ${file}`).join('\n'),
+  )
+  process.exit(1)
+}

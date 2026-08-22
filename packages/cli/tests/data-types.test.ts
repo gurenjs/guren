@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { generateDataTypes } from '../src/data-types'
 import { makeResource } from '../src/make-resource'
-import { checkTypes, COLD_TSC_TIMEOUT, writeWorkspaceFiles } from './helpers'
+import { checkTypes, TSC_TIMEOUT, writeWorkspaceFiles } from './helpers'
 
 /**
  * A Resource shaped the way `make:resource` scaffolds one — the explicit
@@ -202,7 +202,7 @@ describe('generateDataTypes discovers module resources', () => {
         }),
       ).toEqual([])
     },
-    COLD_TSC_TIMEOUT,
+    TSC_TIMEOUT,
   )
 
   it('emits definitions in a deterministic order, root before modules', async () => {
@@ -610,7 +610,7 @@ describe('generateDataTypes reads a type body by brace depth', () => {
         }),
       ).toEqual([])
     },
-    COLD_TSC_TIMEOUT,
+    TSC_TIMEOUT,
   )
 
   it('reads a plain local interface named by the annotation', async () => {

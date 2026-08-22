@@ -406,10 +406,7 @@ export class TestApp {
     let Application: ApplicationConstructor | undefined
 
     try {
-      // @guren/core is not a dependency of this package (it aggregates the
-      // @guren/server peer), so tsconfig.build.json cannot resolve it; the
-      // cast carries the type.
-      // @ts-ignore -- unresolvable under tsconfig.build.json
+      // @ts-ignore -- optional, undeclared dependency (it aggregates the @guren/server peer): unresolvable under tsconfig.build.json; the cast carries the type
       ;({ Application } = await import('@guren/core') as { Application: ApplicationConstructor })
     } catch {
       try {

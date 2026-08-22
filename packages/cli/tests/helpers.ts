@@ -462,14 +462,20 @@ export function assertWorkspaceBuilt(artifacts: string[]): void {
 // limit sits well above that so a wedged spawn still fails in reasonable time
 // rather than being charged to the next test (Bun bills a timeout to whatever
 // runs next). checkTypes() is synchronous, so the timeout cannot interrupt it.
-export const COLD_TSC_TIMEOUT = 30_000
+export const TSC_TIMEOUT = 30_000
 
 /**
  * The `compilerOptions` object of a tsconfig.json, as `tsc` reads it. Kept as
  * plain JSON rather than the compiler API's enums: TypeScript 7 ships no
  * JavaScript API, so every compile gate here drives the `tsc` binary.
  */
-export type TsconfigCompilerOptions = Record<string, unknown>
+export interface TsconfigCompilerOptions {
+  paths?: Record<string, string[]>
+  rootDir?: string
+  rootDirs?: string[]
+  typeRoots?: string[]
+  [option: string]: unknown
+}
 
 /**
  * Base compiler options for compiling a generated module plus its usage probe
@@ -508,7 +514,8 @@ export function resolvedCompilerOptions(configPath: string): TsconfigCompilerOpt
   // config diagnostics come from a separate no-check run.
   const probe = Bun.spawnSync([process.execPath, TSC_BIN, '-p', configPath, '--listFilesOnly', '--pretty', 'false'], spawnOptions)
   if (probe.exitCode !== 0) {
-    throw new Error(`tsc rejected ${configPath}:\n${probe.stdout}${probe.stderr}`)
+    const diagnostics = `${probe.stdout}${probe.stderr}`.split('\n').filter((line) => /error TS\d+/.test(line))
+    throw new Error(`tsc rejected ${configPath}:\n${diagnostics.join('\n')}`)
   }
   const result = Bun.spawnSync([process.execPath, TSC_BIN, '--showConfig', '-p', configPath], spawnOptions)
   if (result.exitCode !== 0) {
@@ -519,16 +526,14 @@ export function resolvedCompilerOptions(configPath: string): TsconfigCompilerOpt
   }
   const configDir = dirname(configPath)
   const absolute = (target: string): string => resolve(configDir, target)
-  const paths = compilerOptions.paths as Record<string, string[]> | undefined
-  if (paths) {
+  if (compilerOptions.paths) {
     compilerOptions.paths = Object.fromEntries(
-      Object.entries(paths).map(([alias, targets]) => [alias, targets.map(absolute)]),
+      Object.entries(compilerOptions.paths).map(([alias, targets]) => [alias, targets.map(absolute)]),
     )
   }
-  if (typeof compilerOptions.rootDir === 'string') compilerOptions.rootDir = absolute(compilerOptions.rootDir)
-  for (const key of ['rootDirs', 'typeRoots'] as const) {
-    if (Array.isArray(compilerOptions[key])) compilerOptions[key] = (compilerOptions[key] as string[]).map(absolute)
-  }
+  if (compilerOptions.rootDir) compilerOptions.rootDir = absolute(compilerOptions.rootDir)
+  if (compilerOptions.rootDirs) compilerOptions.rootDirs = compilerOptions.rootDirs.map(absolute)
+  if (compilerOptions.typeRoots) compilerOptions.typeRoots = compilerOptions.typeRoots.map(absolute)
   return compilerOptions
 }
 
