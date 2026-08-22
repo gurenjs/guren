@@ -19,7 +19,12 @@
  * `deps.neverBundle` is per package and lists only what the package imports
  * without declaring: declared dependencies and peers are external by default,
  * while an undeclared sibling would be resolved to its source through the
- * root tsconfig paths and bundled in.
+ * root tsconfig paths and bundled in. Prefer *declaring* an optional sibling
+ * as an optional peer over listing it here — that makes it external anyway and
+ * additionally gives `tsconfig.build.json` (`paths: {}`) real types for it
+ * instead of `any`. This list is for what cannot be declared: a peer that
+ * would close a build-order cycle (`@guren/server` → `@guren/cli`) and
+ * non-package specifiers (`bun:sqlite`).
  */
 export const tsdownPreset = {
   target: 'es2022',

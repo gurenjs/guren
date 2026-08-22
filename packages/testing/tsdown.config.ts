@@ -8,7 +8,4 @@ export default defineConfig({
   tsconfig: 'tsconfig.build.json',
   format: ['esm', 'cjs'],
   sourcemap: true,
-  // Reached by dynamic import as a fallback and undeclared on purpose (the
-  // declared peer is @guren/server, which it aggregates).
-  deps: { neverBundle: ['@guren/core'] },
 })

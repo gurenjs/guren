@@ -58,7 +58,13 @@
     "consola": "^3.4.2"
   },
   "peerDependencies": {
+    "@guren/openapi": ">=1.3.0",
     "vite": ">=7.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@guren/openapi": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@babel/types": "^7.29.0",

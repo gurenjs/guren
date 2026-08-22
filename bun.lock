@@ -94,8 +94,12 @@
         "zod": "^4.4.3",
       },
       "peerDependencies": {
+        "@guren/openapi": ">=1.3.0",
         "vite": ">=7.0.0",
       },
+      "optionalPeers": [
+        "@guren/openapi",
+      ],
     },
     "packages/core": {
       "name": "@guren/core",
@@ -304,6 +308,7 @@
         "vitest": "^3.2.6",
       },
       "peerDependencies": {
+        "@guren/core": ">=1.8.0",
         "@guren/server": ">=2.2.0",
         "@inertiajs/react": "^3.6.1",
         "@testing-library/react": "^14.0.0 || ^15.0.0 || ^16.0.0",
@@ -312,6 +317,7 @@
         "vitest": "^3.2.6",
       },
       "optionalPeers": [
+        "@guren/core",
         "@inertiajs/react",
         "@testing-library/react",
         "react",
