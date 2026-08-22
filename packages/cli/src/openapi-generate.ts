@@ -101,6 +101,5 @@ async function readPackageMetadata(appRoot: string): Promise<PackageMetadata> {
 }
 
 async function defaultOpenApiImporter(): Promise<OpenApiModule> {
-  // @ts-ignore -- optional, undeclared dependency: unresolvable under tsconfig.build.json (paths: {}); the cast carries the type
-  return import('@guren/openapi') as Promise<OpenApiModule>
+  return import('@guren/openapi')
 }

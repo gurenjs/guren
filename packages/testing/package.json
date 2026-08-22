@@ -39,6 +39,7 @@
   },
   "dependencies": {},
   "peerDependencies": {
+    "@guren/core": ">=1.8.0",
     "@guren/server": ">=2.2.0",
     "@inertiajs/react": "^3.6.1",
     "@testing-library/react": "^14.0.0 || ^15.0.0 || ^16.0.0",
@@ -53,6 +54,9 @@
     "typescript": "^7.0.2"
   },
   "peerDependenciesMeta": {
+    "@guren/core": {
+      "optional": true
+    },
     "vitest": {
       "optional": true
     },

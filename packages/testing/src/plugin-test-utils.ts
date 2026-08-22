@@ -1,4 +1,4 @@
-import type { Application } from '@guren/server'
+import type { Application, ServiceProviderConstructor } from '@guren/server'
 
 /**
  * Create a minimal test application for plugin integration testing.
@@ -16,10 +16,10 @@ import type { Application } from '@guren/server'
 export async function createPluginTestApp(
   providers: unknown[]
 ): Promise<Application> {
-  // @ts-ignore -- @guren/core is not a dependency; see test-app.ts
   const { createApp } = await import('@guren/core')
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const app = (createApp as any)({ providers })
+  // Callers pass provider classes without having to name the framework type,
+  // which `createApp` does demand; a real provider satisfies both.
+  const app = createApp({ providers: providers as ServiceProviderConstructor[] })
   await app.boot()
   return app
 }

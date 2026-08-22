@@ -1,5 +1,5 @@
 import type { Hono } from 'hono'
-import type { I18nPluginOptions, Router } from '@guren/server'
+import type { I18nPluginOptions, Router, ServiceProviderConstructor } from '@guren/server'
 import { TestResponse } from './http'
 
 type BootCallback = (app: Hono) => void | Promise<void>
@@ -23,9 +23,17 @@ type ApplicationLike = {
   boot(): Promise<void>
   fetch(request: Request): Response | Promise<Response>
 }
+/**
+ * The `Application` constructor as this file calls it — kept structural for the
+ * same reason as {@link ProviderConstructor}, but faithful to the real
+ * signature so the dynamic imports below are type-checked rather than widened
+ * to `any`. `providers` therefore names `ServiceProviderConstructor`, not the
+ * looser shape `TestAppOptions` accepts; the one place those two meet is the
+ * `new Application(...)` call, which says so.
+ */
 type ApplicationConstructor = new (options: {
   boot?: BootCallback
-  providers?: ProviderConstructor[]
+  providers?: ServiceProviderConstructor[]
   routes?: RouteRegistration
   auth?: Record<string, unknown>
   i18n?: I18nPluginOptions
@@ -406,13 +414,12 @@ export class TestApp {
     let Application: ApplicationConstructor | undefined
 
     try {
-      // @ts-ignore -- optional, undeclared dependency (it aggregates the @guren/server peer): unresolvable under tsconfig.build.json; the cast carries the type
-      ;({ Application } = await import('@guren/core') as { Application: ApplicationConstructor })
+      ;({ Application } = await import('@guren/core'))
     } catch {
       try {
         // @guren/core is not always installed (it aggregates @guren/server);
         // fall back to the peer dependency, which exports the same Application.
-        ;({ Application } = await import('@guren/server') as { Application: ApplicationConstructor })
+        ;({ Application } = await import('@guren/server'))
       } catch {
         // Fallback: use a plain Hono app when @guren/server is not available.
         const { Hono } = await import('hono')
@@ -428,7 +435,11 @@ export class TestApp {
 
     const application = new Application({
       boot: options.boot,
-      providers: options.providers,
+      // `TestAppOptions` accepts the structural `ProviderConstructor` (see
+      // above) where `ApplicationOptions` demands a `ServiceProvider`
+      // subclass. Every real provider satisfies both, and the widening is
+      // confined to this one property instead of blanketing the import.
+      providers: options.providers as ServiceProviderConstructor[] | undefined,
       routes: options.routes,
       auth: options.auth,
       i18n: options.i18n,
