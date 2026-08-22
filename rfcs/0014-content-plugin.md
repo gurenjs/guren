@@ -607,12 +607,52 @@ requires migrating all public routes at once, and `this.inertia()` remains
 the right choice for any route that needs interactive or hydrated UI (the
 motivating app keeps its `/admin/posts` editor on Inertia).
 
-Post-release, in order:
+### Dogfooding target: guren.dev's blog, before any release
 
-1. Migrate the motivating application onto the plugin, deleting its
-   `renderPage()` and `escapeHtml()`. This is the dogfooding gate before
-   recommending it publicly.
-2. Only then: reference the plugin from docs, guides, or any template.
+`web/` in this repository has the same defect, measured against production on
+2026-08-22. Both `DocsController` and the blog's `BlogController` pass
+rendered HTML as an Inertia prop (`doc`, `bodyHtml`), so it ships twice:
+
+| `https://guren.dev/docs/guides/authentication` | raw | gzip |
+|---|---|---|
+| as shipped | 401,989 | 51,579 |
+| with the `__INERTIA_PAGE__` blob removed | 253,541 | 34,221 |
+| **saving** | **148,448 (36.9%)** | **17,358 (33.7%)** |
+
+The gzip figure is the one that matters, and it does not collapse the way
+duplicated content usually does: a third of the transferred bytes on a docs
+page are the duplicate.
+
+The two page types are not equally good targets, and the difference is the
+useful part:
+
+- **`resources/js/pages/blog/Show.tsx` is the ideal first migration.** 82
+  lines, no `useState`, no `useEffect`, no event handlers — it imports `Head`,
+  `Link`, and three presentational components. It hydrates for nothing. This
+  is exactly the shape `view()` is for.
+- **`resources/js/pages/Docs/Show.tsx` is not a v1 target**, despite carrying
+  the larger payload. It runs a scroll-spy table of contents, a mobile
+  sidebar toggle, and Inertia `<Link>` SPA navigation. Migrating it means
+  reimplementing those without a client framework, which is an islands
+  problem this RFC does not solve. Recording it here so the payload number
+  above is not mistaken for a migration plan.
+
+Doing this inside `web/` is strictly better than waiting for the external
+application, for a reason specific to this repository: `web/` resolves
+`@guren/*` from the workspace, so it can adopt the plugin **before** the npm
+release rather than after it. It also exercises the peer-dependency claim
+directly — `web/` is one of the packages that cannot resolve `hono/jsx`
+today, so it must add `hono` to its own dependencies exactly as the RFC tells
+application authors to.
+
+Revised order:
+
+1. Implement the plugin; migrate `web/modules/blog`'s show page onto it
+   inside this repository, workspace-resolved. This is the dogfooding gate.
+2. Release.
+3. Migrate the motivating external application, deleting its `renderPage()`
+   and `escapeHtml()`.
+4. Only then: reference the plugin from docs, guides, or any template.
 
 ## Open Questions
 
