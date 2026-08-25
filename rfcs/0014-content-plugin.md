@@ -59,7 +59,7 @@ extension point that merely lacked a controller-side entry. That is wrong,
 and the reason is in the next section: `ViewEngine` structurally cannot carry
 this feature. The hand-written `renderPage()` bypass was forced, not lazy.
 
-## Verified constraints (2026-08-22)
+## Verified constraints (2026-08-22 → 2026-08-25)
 
 Every claim below was read out of this repository's sources or measured with
 a fixture, not assumed. The first draft of this RFC was written against
@@ -204,6 +204,25 @@ Two conditions and one trap:
   It needs `dangerouslySetInnerHTML` with `<` escaped as `\u003c`, the same
   treatment every framework gives inline JSON.
 
+De-duplication is subtler than hoisting, and it shapes what a reference
+`Layout` may put in its `<head>`. Measured on both 4.13.0 and 4.13.1:
+
+- **Literal children of the Layout's `<head>` do not participate at all.**
+  They stay in place, and hoisted duplicates are appended after them. A
+  Layout that hard-codes a default `<title>` therefore ends up with **two**
+  title elements when a page contributes its own — and browsers use the
+  *first*, so the Layout's default silently shadows the page's title.
+- **Hoisted `<meta>` tags dedupe by `name`** (also `httpEquiv`/`charset`/
+  `itemProp`), first-rendered wins.
+- **Hoisted `<title>` elements never dedupe** — `deDupeKeyMap.title` is
+  empty. The most recently rendered one is placed first (so a browser shows
+  it), but the markup carries every title rendered.
+
+The practical rule for the reference `Layout`: its `<head>` carries only what
+pages never restate — charset, viewport, the stylesheet — and the title and
+description belong to the page component (or arrive as Layout props). Never
+as literal `<head>` defaults, because nothing will replace them.
+
 This substantially shrinks Open Question 4. `<Seo>`'s title, description,
 canonical link, RSS alternate, OpenGraph and Twitter tags are all
 `<title>`/`<meta>`/`<link>`, so they hoist unchanged; only its JSON-LD block
@@ -219,7 +238,11 @@ set the peer range to `>=4.12.0 <5.0.0` on the reasoning that it should match
 `@guren/server`'s `^4.12.29`; that range admits versions whose component
 contract the design does not describe. The floor is **`>=4.13.0`**, and it
 must be tested against 4.13.0 itself rather than only the 4.13.1/4.13.3
-copies this workspace happens to resolve.
+copies this workspace happens to resolve. **Done (2026-08-25):** the full
+fixture matrix — the escaping cases including raw strings and promises in a
+`Child[]`, nested async, `memo`, a context-provider root, and the
+`<title>`/`<meta>`/`<link>` hoisting checks — passes against an installed
+`hono@4.13.0` exactly.
 
 Note `audit:plugin-compat` does not cover this: it audits the `@guren/core`
 `compatibility` claim, not third-party peer ranges.
@@ -315,7 +338,9 @@ reframes Open Question 3 entirely.
   `gurenPlugin.compatibility`.
 - `defineArchRules()` from `@guren/cli/arch` supports
   `{ from, disallow, includeTypeImports, severity }` over project-relative
-  globs — the mechanism that closes the one residual type-safety gap above.
+  globs — the mechanism that closes the first of the two residual
+  type-safety gaps above (the second, a React element as an expression child,
+  is within-file and no boundary rule can see it).
 
 ### The proposed implementation was executed, not just written
 
@@ -441,8 +466,10 @@ hand-written a `renderPage()` that owned the whole document. Four options,
 in increasing scope:
 
 - **(a) Document it as the Layout's job.** Ship `view()` as specified, with a
-  reference `Layout` in the README showing head, lang, and asset wiring. The
-  app owns the document, the plugin owns escaping and the response.
+  reference `Layout` in the README showing the document skeleton, `lang`, and
+  stylesheet wiring — and, per the dedupe measurements above, a `<head>` that
+  carries only what pages never restate. The app owns the document, the
+  plugin owns escaping and the response; native hoisting owns the metadata.
 - **(b) Add a `head` option** to `ViewOptions` — a typed record of title,
   meta, links, and JSON-LD that `view()` serialises into `<head>`, with the
   component rendering only `<body>` content. Solves head composition without
@@ -602,10 +629,14 @@ value rather than a codegen-resolved string key, there is no generation step
 and no window in which the types can go stale. `guren check`'s route ↔
 controller ↔ page consistency check has nothing new to verify for this path.
 
-The first draft justified a `props as Props` cast inside `view()`. With the
-direct-call implementation there is no cast at all: `component` is `FC<P>`
-and `props` is `P`, so `component(props)` is checked normally. The looseness
-of `createElement`'s own signature never enters the picture.
+The safety boundary is `view()`'s own generic signature — `component` is
+`FC<P>` and `props` is `P`, checked at the call site. Inside `view()`, the
+two `as never` casts bridge to `createElement`'s deliberately loose internal
+signature (`Props = Record<string, any>`, unexported); they widen an
+already-checked value and can hide no mismatch the call site would have
+caught. (An intermediate revision invoked the component directly and claimed
+the design needed no cast at all — true, but that form was rejected for the
+escaping hole documented above.)
 
 ### JSX import source
 
@@ -776,7 +807,7 @@ where bytes already flushed cannot be retracted.
 | `definePlugin()` wrapper | `markdownPlugin()` | `contentPlugin()` |
 | container binding | `'markdown'` (singleton) | `'content.config'` (instance) |
 | deferred | no, deliberately | no, same reason |
-| heavy optional dep | `shiki`, optional peer + subpath | `hono`, required peer, type-only |
+| heavy optional dep | `shiki`, optional peer + subpath | `hono`, required peer, runtime import |
 | manifest `provider` | absent (factory) | absent (factory) |
 | `compatibility` | `>=1.0.0 <2.0.0` | `>=1.0.0 <2.0.0` |
 
@@ -1069,7 +1100,14 @@ input for v1.** With hoisting native, a reference `Layout` is a short document
 skeleton rather than a metadata framework, and (d) can be added later without
 breaking `view()`'s signature — it is middleware, not a contract change.
 
-The case a reviewer should make here is about assets: whether shipping v1
-without a framework-supported way to inject the Vite stylesheet and import map
-is acceptable, or whether a generic asset descriptor should be factored out of
-`autoConfigureInertiaAssets` first.
+The case a reviewer should make here is about assets, and it has a wrinkle
+the earlier framing missed: **any framework-supported asset story requires
+touching `@guren/server`**, because the resolver and its `GUREN_INERTIA_*`
+contract live there — which contradicts this RFC's "no changes to
+`@guren/server`" premise. So the real choice is between (i) v1 states plainly
+that assets are an application input, preserving the additive premise, and
+(ii) a companion `@guren/server` change factors a generic asset descriptor out
+of `autoConfigureInertiaAssets`, and this RFC stops being purely additive.
+The resolved stylesheet value Inertia computes is already generic in nature;
+only its name and plumbing are Inertia-specific. (i) is the lean for v1, with
+(ii) as the follow-up the dogfooding will either justify or kill.
