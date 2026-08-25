@@ -83,9 +83,13 @@ export interface ConfigureAttachmentsOptions {
    * The app's QueueManager, resolved lazily (e.g.
    * `() => container.make('queue')`). Enables `attach(..., { queued: true })`:
    * the engine materializes the manager's default driver and dispatches
-   * `GenerateVariantsJob` on it. Without this option, `queued: true` falls
-   * back to the globally configured queue driver and throws a clear error
-   * when there is none.
+   * `GenerateVariantsJob` on it. Materializing the default driver installs
+   * it as the process-wide dispatch target (`QueueManager` semantics), so
+   * pass the same manager the rest of the app dispatches through — a
+   * second manager here would redirect every later `Job.dispatch()` in the
+   * process. Without this option, `queued: true` falls back to the
+   * globally configured queue driver and throws a clear error when there
+   * is none.
    */
   queue?: () => unknown
   /**
@@ -642,13 +646,20 @@ export class AttachmentEngine {
     }
 
     const sniffed = sniffImage(bytes.subarray(0, SNIFF_WINDOW_BYTES))
+    let supersededPath: string | null = null
     if (sniffed?.format === 'heic' && payload.heic === 'convert') {
       const converted = await this.processor.process(bytes, { format: 'jpeg' })
       const name = replaceExtension(row.name, 'jpg')
       const path = `attachments/${row.id}/${name}`
       await disk.put(path, Buffer.from(converted.bytes), { contentType: 'image/jpeg' })
+      // The old object is deleted only after the row commit below repoints
+      // to the new one: deleting first would leave the row referencing
+      // nothing if anything past this line failed — and the retry would
+      // then find no bytes and settle 'failed', a silent broken link. A
+      // leaked superseded object is the recoverable failure; a row
+      // pointing at nothing is not.
       if (path !== row.path) {
-        await disk.delete(row.path)
+        supersededPath = row.path
       }
       bytes = converted.bytes
       updates.name = name
@@ -690,6 +701,16 @@ export class AttachmentEngine {
       return
     }
     await this.model.forceUpdate({ id: row.id }, updates)
+
+    if (supersededPath) {
+      try {
+        await disk.delete(supersededPath)
+      } catch {
+        // The row already points at the converted object; a superseded
+        // original that failed to delete is a leak for the sweeper, not a
+        // job failure.
+      }
+    }
   }
 
   /** `GenerateVariantsJob.failed()`: settle `pending` records after the last retry. */

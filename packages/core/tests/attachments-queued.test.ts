@@ -208,6 +208,30 @@ describe('attachments queued generation', () => {
     expect(await storage.disk('media').exists(record.path)).toBe(false)
   })
 
+  test('should repoint the row before deleting the superseded HEIC original', async () => {
+    // A delete that fails must not fail the job: by then the row already
+    // points at the converted object, and the superseded original is a
+    // leak for the sweeper — the reverse order would risk a row pointing
+    // at nothing.
+    const record = await Post.attach(1, 'photo', new File([isoBmffHeader('heic')], 'shot.heic'), {
+      queued: true,
+    })
+    const disk = storage.disk('media')
+    const originalDelete = disk.delete.bind(disk)
+    disk.delete = async (path: string) => {
+      if (path === record.path) throw new Error('delete refused')
+      return originalDelete(path)
+    }
+
+    await runQueuedJob()
+
+    const row = (await rowOf(record.id))!
+    expect(row.path).toBe(`attachments/${record.id}/shot.jpg`)
+    expect(await disk.exists(String(row.path))).toBe(true)
+    // The superseded original leaked (delete refused) — but the link is intact.
+    expect(await disk.exists(record.path)).toBe(true)
+  })
+
   test('should accept queued HEIC convert even when the request process has no processor', async () => {
     configure({ processor: null })
     const record = await Post.attach(1, 'photo', isoBmffHeader('heic'), { queued: true, name: 'shot.heic' })
