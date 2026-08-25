@@ -384,6 +384,48 @@ async destroy() {
   place (restore must work); call `purgeAttachments()` on `forceDelete`
   paths.
 
+### Sweeping orphans: `attachments:prune`
+
+The contract is explicit-plus-sweep: whatever slips past the explicit purge
+— records deleted through paths that never called `purgeAttachments()`,
+storage prefixes left behind by crashed or raced jobs — is reclaimed by the
+`AttachmentsPruneCommand` sweeper. Register it in the console kernel:
+
+```ts
+// src/console.ts
+import { AttachmentsPruneCommand } from '@guren/core'
+kernel.register(AttachmentsPruneCommand)
+```
+
+```bash
+bunx guren attachments:prune             # remove rows whose record no longer exists
+bunx guren attachments:prune --objects   # also remove attachments/ prefixes no row references
+bunx guren attachments:prune --dry-run   # report without deleting
+```
+
+Orphan rows are detected by resolving each `attachableType` through
+`Model.morphMap` and querying for the owning records — so register every
+model that declares attachments:
+
+```ts
+Model.morphMap = { Post, User }
+```
+
+The sweep deletes only on positive evidence: a type missing from the morph
+map, a failing existence query, or an unlistable disk is reported and left
+alone — an outage must never turn into a mass deletion. Run it from a
+scheduled job or CI on whatever cadence fits the app.
+
+### What the agent commands verify
+
+- `bunx guren check` validates that `configureAttachments()` binds a table
+  your `db/schema.ts` actually exports — the layer takes the table untyped,
+  so a renamed schema export would otherwise only fail at runtime, on the
+  first attach.
+- `bunx guren audit` treats uploads handed to a typed `attach()` as
+  validated (the declaration-driven pipeline is the validation); an action
+  that reads other body input still needs `validateBody()`.
+
 ## Testing
 
 Use the `memory` storage driver and configure against your test database:

@@ -271,6 +271,31 @@ const BODY_ACCESS_PATTERN = new RegExp(
   `${RAW_BODY_READ_PATTERN.source}|\\bthis\\s*\\.\\s*${accessorCallPattern(controllerMembers('body-payload'))}`,
 )
 
+/**
+ * The body reads that are *only* file uploads. Subtracting them from
+ * BODY_ACCESS_PATTERN is what lets the attach() rule below recognize an
+ * action whose whole body consumption is upload bytes.
+ */
+const FILE_READ_PATTERN = new RegExp(`\\bthis\\s*\\.\\s*${accessorCallPattern(['file', 'files'])}`)
+
+/** Every body read that is not a file upload (nor validation/incidental). */
+const NON_FILE_BODY_ACCESS_PATTERN = new RegExp(
+  `${RAW_BODY_READ_PATTERN.source}|\\bthis\\s*\\.\\s*${accessorCallPattern(
+    controllerMembers('body-payload').filter((name) => name !== 'file' && name !== 'files'),
+  )}`,
+)
+
+/**
+ * A typed attachment write: `Post.attach(...)` (RFC 0013). The receiver must
+ * be PascalCase — model classes are, and requiring it keeps a stray
+ * `emitter.attach(handler)` from counting as upload validation. The attach
+ * pipeline validates per the model's declaration (byte cap, header
+ * dimensions, full decode, HEIC policy), which is why an action whose only
+ * body reads are file()/files() feeding it needs no validateBody() to be a
+ * clean pass.
+ */
+const MODEL_ATTACH_PATTERN = /\b[A-Z][A-Za-z0-9_]*\s*\.\s*attach\s*(?:<[^()]*>)?\s*\(/
+
 const BODY_INCIDENTAL_PATTERN = new RegExp(
   `\\bthis\\s*\\.\\s*${accessorCallPattern(controllerMembers('body-incidental'))}`,
 )
@@ -679,6 +704,24 @@ async function auditRoutes(
             hasControllerValidation
               ? `Controller validates body in ${controllerKey}.`
               : 'Body schema validated at route level.',
+          ),
+        )
+      } else if (
+        methodInfo &&
+        readsBody &&
+        !NON_FILE_BODY_ACCESS_PATTERN.test(methodInfo.body) &&
+        FILE_READ_PATTERN.test(methodInfo.body) &&
+        MODEL_ATTACH_PATTERN.test(methodInfo.body)
+      ) {
+        // Uploads handed to Model.attach() are validated by the attachment
+        // declaration's pipeline; with no other body reads there is nothing
+        // left for validateBody() to check.
+        findings.push(
+          finding(
+            `validation:${routeLabel}`,
+            routeLabel,
+            'pass',
+            `${controllerKey} reads only file uploads and hands them to a typed attach(), whose declaration-driven pipeline validates them.`,
           ),
         )
       } else if (methodInfo && !readsBody) {

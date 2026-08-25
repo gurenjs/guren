@@ -96,7 +96,7 @@ export type { DatabaseSessionStoreOptions } from './session-store.js'
 export { DatabaseOAuthStateStore } from './oauth-state-store.js'
 // Attachments (RFC 0013) — core-native exports; no bare `Attachment` (it
 // would collide with the mail/notification/Slack attachment vocabulary).
-export { Attachable, configureAttachments, GenerateVariantsJob, hasManyAttached, hasOneAttached } from './attachments/index.js'
+export { Attachable, AttachmentsPruneCommand, configureAttachments, GenerateVariantsJob, hasManyAttached, hasOneAttached } from './attachments/index.js'
 export type {
   AttachableRecordId,
   AttachableStatic,
@@ -111,6 +111,8 @@ export type {
   ConfigureAttachmentsOptions,
   ConfiguredAttachments,
   GenerateVariantsPayload,
+  PruneOptions,
+  PruneReport,
   HeicPolicy,
   ImagePolicy,
   ImageProcessor,

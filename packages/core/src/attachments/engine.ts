@@ -114,6 +114,31 @@ export interface GenerateVariantsPayload {
   variants?: Record<string, VariantSpec>
 }
 
+export interface PruneOptions {
+  /** Also delete `attachments/` storage prefixes that no row references. */
+  objects?: boolean
+  /** Report what would be removed without deleting anything. */
+  dryRun?: boolean
+}
+
+export interface PruneReport {
+  /** Rows examined. */
+  scannedRows: number
+  /** Rows whose owning record no longer exists (deleted unless dry-run). */
+  orphanRows: Array<{ id: string; attachableType: string; attachableId: string }>
+  /**
+   * Morph types that could not be verified and were left untouched: types
+   * missing from `Model.morphMap`, or whose existence query failed. A type
+   * that cannot be checked is never treated as absent — that would turn an
+   * outage into a mass deletion.
+   */
+  skippedTypes: Array<{ type: string; reason: string }>
+  /** Per disk, storage prefixes under `attachments/` with no row (with `objects`). */
+  orphanObjectPrefixes: Array<{ disk: string; prefix: string }>
+  /** Disks that could not be listed and were left untouched (with `objects`). */
+  skippedDisks: Array<{ disk: string; reason: string }>
+}
+
 const DEFAULT_MAX_PIXELS = 52_000_000
 /**
  * Header sniffing only ever needs the first bytes; capping the window keeps
@@ -846,6 +871,124 @@ export class AttachmentEngine {
     const ids = rows.map((row) => String(row.id))
     if (ids.length > 0) {
       await this.model.where({ id: ids }).delete()
+    }
+  }
+
+  /**
+   * The sweeper behind `attachments:prune` (RFC 0013 §8): no DB cascade can
+   * exist for a polymorphic pair, so deletion is explicit-plus-sweep. Rows
+   * are removed only on *positive* evidence the record is gone — the owning
+   * type resolved through `Model.morphMap` and the record queried and found
+   * missing. Anything unverifiable (type not in the morph map, a failing
+   * query, an unlistable disk) is reported and left alone.
+   */
+  async pruneOrphans(options: PruneOptions = {}): Promise<PruneReport> {
+    const rows = (await this.model.where({})) as PlainObject[]
+    const report: PruneReport = {
+      scannedRows: rows.length,
+      orphanRows: [],
+      skippedTypes: [],
+      orphanObjectPrefixes: [],
+      skippedDisks: [],
+    }
+
+    const byType = new Map<string, PlainObject[]>()
+    for (const row of rows) {
+      const type = String(row.attachableType)
+      let group = byType.get(type)
+      if (!group) byType.set(type, (group = []))
+      group.push(row)
+    }
+
+    const morphMap = Model.morphMap ?? {}
+    const orphans: PlainObject[] = []
+    for (const [type, group] of byType) {
+      const relatedModel = morphMap[type]
+      if (!relatedModel) {
+        report.skippedTypes.push({
+          type,
+          reason: `'${type}' is not in Model.morphMap — set Model.morphMap = { ${type} } so its records can be checked.`,
+        })
+        continue
+      }
+      const ids = Array.from(new Set(group.map((row) => String(row.attachableId))))
+      // The morph column stores ids as text while the owning table's key may
+      // be numeric; query both spellings so a representation mismatch can
+      // never make a live record look deleted.
+      const lookupValues = ids.flatMap((id) => (/^\d+$/.test(id) ? [id, Number(id)] : [id]))
+      let existing: Set<string>
+      try {
+        const records = (await relatedModel.where({ id: lookupValues })) as PlainObject[]
+        existing = new Set(records.map((record) => String(record.id)))
+      } catch (error) {
+        report.skippedTypes.push({
+          type,
+          reason: `querying ${type} failed (${error instanceof Error ? error.message : String(error)}) — a record that cannot be checked is not a deleted one.`,
+        })
+        continue
+      }
+      for (const row of group) {
+        if (!existing.has(String(row.attachableId))) {
+          orphans.push(row)
+          report.orphanRows.push({
+            id: String(row.id),
+            attachableType: type,
+            attachableId: String(row.attachableId),
+          })
+        }
+      }
+    }
+
+    if (!options.dryRun && orphans.length > 0) {
+      await this.purgeRows(orphans)
+    }
+
+    if (options.objects) {
+      await this.pruneOrphanObjects(rows, orphans, report, options.dryRun === true)
+    }
+
+    return report
+  }
+
+  /** With `--objects`: storage prefixes under `attachments/` that no surviving row references. */
+  private async pruneOrphanObjects(
+    rows: PlainObject[],
+    removedRows: PlainObject[],
+    report: PruneReport,
+    dryRun: boolean,
+  ): Promise<void> {
+    const removed = new Set(removedRows.map((row) => String(row.id)))
+    const liveIds = new Set(
+      rows.map((row) => String(row.id)).filter((id) => !removed.has(id)),
+    )
+
+    const diskNames = new Set<string>([
+      this.defaultDisk,
+      ...Object.keys(this.diskVisibility),
+      ...rows.map((row) => String(row.disk)),
+    ])
+
+    for (const diskName of diskNames) {
+      let prefixes: string[]
+      let disk: StorageDriver
+      try {
+        disk = this.storage().disk(diskName)
+        prefixes = await disk.directories('attachments')
+      } catch (error) {
+        report.skippedDisks.push({
+          disk: diskName,
+          reason: error instanceof Error ? error.message : String(error),
+        })
+        continue
+      }
+      for (const prefix of prefixes) {
+        const id = prefix.split('/').pop() ?? prefix
+        if (liveIds.has(id)) continue
+        report.orphanObjectPrefixes.push({ disk: diskName, prefix })
+        if (!dryRun) {
+          await disk.deleteDirectory(prefix)
+        }
+      }
     }
   }
 
