@@ -1,4 +1,4 @@
-// Generated from app/Http/Resources — DO NOT EDIT
+// Generated from app/Http/Resources (and modules/*/app/Http/Resources) — DO NOT EDIT
 // Run `guren codegen` to regenerate.
 
 /**
