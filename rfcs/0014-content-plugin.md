@@ -17,11 +17,16 @@ props)`. That is the right choice for interactive, stateful UI — but it has a
 measured cost for public, read-mostly content pages (blog posts, docs,
 marketing pages) that don't need client-side hydration at all.
 
-`InertiaEngine` always emits `<script>window.__INERTIA_PAGE__ = {...}</script>`
-in `<head>`, whether or not SSR is enabled. When SSR is enabled, the same
-content is *also* rendered into `<body>` as HTML — so a large prop (an
-article body, most obviously) ships twice: once as escaped JSON, once as
-HTML. Measured on 2026-08-22 while migrating a real Guren app off Inertia
+On an initial HTML document request, `InertiaEngine` always emits
+`<script>window.__INERTIA_PAGE__ = {...}</script>` in `<head>`, whether or
+not SSR is enabled. (`X-Inertia` visits and JSON-preferring requests return
+serialized JSON instead, and are not what this RFC is about — a content page
+is reached by a fresh navigation or a crawler.) When SSR is enabled *and
+succeeds*, the same content is **additionally** rendered into `<body>` as
+HTML, so a large prop (an article body, most obviously) ships twice: once as
+escaped JSON, once as HTML. SSR that fails — no renderer, invalid output, a
+thrown error — falls back to the empty CSR shell, which leaves the JSON copy
+alone rather than doubling it. Measured on 2026-08-22 while migrating a real Guren app off Inertia
 for its public pages (a personal blog: 21 posts, Shiki syntax highlighting).
 These numbers come from that application, not from a fixture in this
 repository, and are reproducible only there:
@@ -128,10 +133,13 @@ Measured against `hono@4.13.3` with Bun 1.3.14:
   draft's `const html = await element.toString()` produces this. It happens to
   survive `new Response()`, but it is not the declared `string`.
 
-The form that is correct for all four `FunctionComponentResult` shapes is an
-explicit recursive reduction that awaits `toString()` and re-primitivises:
+Two earlier revisions of this RFC proposed reducing the result **by hand**, so
+that the plugin could invoke the component directly and keep `hono` a
+type-only import:
 
 ```typescript
+// REJECTED — this reduction has a stored-XSS hole. Kept here because the
+// reasoning that produced it is easy to repeat.
 async function stringify(node: unknown): Promise<string> {
   const value = await node
   if (Array.isArray(value)) return (await Promise.all(value.map(stringify))).join('')
@@ -140,12 +148,49 @@ async function stringify(node: unknown): Promise<string> {
 }
 ```
 
-Verified to produce byte-identical output to `createElement(...).toString()`
-for sync roots, async roots, `Child[]` returns, nested async children,
-`memo()`-wrapped components, and `ErrorBoundary` fallbacks.
+`Child` legally includes `string` and `Promise<string>`, and hono escapes
+those when it walks children itself. The hand-written reducer calls
+`String()` on them instead, so a component returning a raw string inside a
+`Child[]` emits it **unescaped**:
+
+| component returns | hand-reduced | `createElement(...).toString()` |
+|---|---|---|
+| `['<script>alert(1)</script>', <p>ok</p>]` | `<script>alert(1)</script><p>ok</p>` | `&lt;script&gt;alert(1)&lt;/script&gt;<p>ok</p>` |
+| `[Promise.resolve('<b>raw</b>'), <p>ok</p>]` | `<b>raw</b><p>ok</p>` | `&lt;b&gt;raw&lt;/b&gt;<p>ok</p>` |
+
+That is a stored-XSS path in the one API whose entire selling point is that
+it escapes by default, and no earlier fixture caught it because they only
+ever put `JSXNode`s in the array. **The correct form is to let hono own the
+reduction**, which also removes every trap listed above:
+
+```typescript
+async function render<P>(component: FC<P>, props: P): Promise<string> {
+  return String(await createElement(component as never, props as never).toString())
+}
+```
+
+Verified to return a primitive `string` with correct escaping for: sync
+roots, async roots, `Child[]` containing raw strings and promises, nested
+async children, `null`, `memo()`, `ErrorBoundary`, and a root that is itself
+a context provider.
 
 - hono/jsx emits **no doctype**. `view()` must prepend `<!doctype html>` or
   every page renders in quirks mode. The first draft did not.
+
+### The peer floor cannot be `4.12.0`
+
+`FunctionComponentResult` — the four-shape union this RFC quotes throughout —
+**was introduced in hono 4.13.0**. Unpacked from the registry: `hono@4.12.29`
+declares no such type and its `FC` returns the narrower
+`HtmlEscapedString | Promise<HtmlEscapedString> | null`. An earlier revision
+set the peer range to `>=4.12.0 <5.0.0` on the reasoning that it should match
+`@guren/server`'s `^4.12.29`; that range admits versions whose component
+contract the design does not describe. The floor is **`>=4.13.0`**, and it
+must be tested against 4.13.0 itself rather than only the 4.13.1/4.13.3
+copies this workspace happens to resolve.
+
+Note `audit:plugin-compat` does not cover this: it audits the `@guren/core`
+`compatibility` claim, not third-party peer ranges.
 
 ### What auto-escaping does and does not cover
 
@@ -242,9 +287,11 @@ reframes Open Question 3 entirely.
 
 ### The proposed implementation was executed, not just written
 
-The `stringify` and `ContentController.view()` bodies quoted in "Proposed
-Solution" are transcribed from working fixtures, not sketched. Two runs, and
-what each did and did not cover:
+The `ContentController.view()` body quoted in "Proposed Solution" is
+transcribed from working fixtures, not sketched. Three runs, and what each did
+and did not cover. Note the first two were run against the **rejected**
+direct-call form; they are reported here because they establish the response
+contract, which the correction did not change:
 
 - **Rendering behaviour**, on Bun 1.3.14 against a page with a nested async
   child and a `<script>`-bearing prop: status 200, `content-type: text/html;
@@ -256,6 +303,11 @@ what each did and did not cover:
   `allowImportingTsExtensions` and omits `types: ["bun-types", "vite/client"]`,
   none of which bear on JSX resolution. This fixture used a local stand-in
   base class, so it proves the rendering contract, not the inheritance.
+- **The corrected `createElement` render**, on Bun 1.3.14: returns a primitive
+  `string` with correct escaping for sync roots, async roots, `Child[]`
+  containing raw strings and promises, nested async children, `null`,
+  `memo()`, `ErrorBoundary`, and a root that is itself a context provider.
+  This is the run that found the rejected reduction's escaping hole.
 - **Inheritance from the real base**, in-repo against `@guren/core`'s actual
   `Controller`: `class ContentController extends Controller` with the `view()`
   body above type-checks clean, and a subclass instantiated **without
@@ -286,8 +338,7 @@ tooling for a new language.
 ```typescript
 // packages/plugin-content/src/ContentController.ts — plain .ts, no JSX syntax
 import { Controller } from '@guren/core'
-import type { FC } from 'hono/jsx'
-import { stringify } from './stringify.js'
+import { createElement, type FC } from 'hono/jsx'
 
 export interface ViewOptions {
   status?: number
@@ -298,11 +349,11 @@ export interface ViewOptions {
 
 export abstract class ContentController extends Controller {
   protected async view<P>(component: FC<P>, props: P, options: ViewOptions = {}): Promise<Response> {
-    // Call the component directly rather than via `createElement`. The result
-    // is identical for every shape measured (sync, async, `Child[]`, nested
-    // async, `memo`, `ErrorBoundary`), and it keeps `hono` a type-only import
-    // here — see "Dependency shape" below for why that matters.
-    const body = await stringify(component(props))
+    // Build a real hono element and let hono reduce it. Invoking the
+    // component directly and reducing by hand looks equivalent and is not:
+    // it skips hono's escaping of raw strings inside a `Child[]`. See
+    // "Stringifying a component tree" above.
+    const body = String(await createElement(component as never, props as never).toString())
     const headers = new Headers(options.headers)
     if (!headers.has('content-type')) headers.set('content-type', 'text/html; charset=utf-8')
     return new Response((options.doctype === false ? '' : '<!doctype html>') + body, {
@@ -313,9 +364,13 @@ export abstract class ContentController extends Controller {
 }
 ```
 
-`stringify` is the reduction verified above, living in its own module so it
-can be unit-tested against all four `FunctionComponentResult` shapes without
-constructing a controller.
+The two `as never` casts are load-bearing and unavoidable: `createElement`'s
+declared parameter type is `Props = Record<string, any>`, which `hono/jsx`
+does not export, so there is no name to cast to. The safety boundary is
+`view()`'s own generic signature — `component` is `FC<P>` and `props` is `P`,
+checked at the call site — and the casts only bridge to hono's deliberately
+loose internal signature. An earlier revision claimed the design needed no
+cast at all; that was true only of the direct-call form this RFC now rejects.
 
 ### What `view()` deliberately does not do, and why that is the open design risk
 
@@ -356,46 +411,69 @@ discussion window should decide. Three options, in increasing scope:
   a portal, at the cost of a second, non-JSX way to express markup.
 - **(c) Add a `document` seam**: `view()` takes an optional outer component
   receiving `{ lang, head, body }`, and the plugin resolves `lang` from the
-  request context the way `inertia()` does.
+  request context the way `inertia()` does. **Incomplete as sketched**: by the
+  time `body` is a string, rendering it as `{body}` in hono JSX escapes the
+  whole page, so it needs `raw()` or a retained node — and the seam says
+  nothing about where `head` comes from, so it does not by itself solve
+  hoisting.
+- **(d) Bridge hono's own `jsxRenderer()`.** hono ships a
+  `hono/jsx-renderer` middleware that installs a request-scoped renderer,
+  supplies a Layout, adds the doctype, and preserves the render context. A
+  plugin provider can attach middleware through the container's `hono`
+  binding, and `ContentController` can reach the request via `this.ctx`. This
+  is the option with the least invented surface and it was missing from the
+  first three; it deserves a serious look during discussion.
 
-**Recommendation: (a) for v1, with (c) sketched as the growth path.** But
-this is a genuine open question and is added to the list below as Open
-Question 4.
+**No recommendation, deliberately.** An earlier revision recommended (a);
+option (d) had not been considered at that point and may dominate it. See
+Open Question 4.
+
+**Assets are more constrained than any of these admit.** The existing
+manifest resolver is Inertia-specific: it hard-codes `resources/js/app.tsx`
+and publishes only `GUREN_INERTIA_*` values. A reference Layout cannot
+demonstrate framework-supported asset injection without hard-coding URLs or
+reaching into Inertia-named internals. Either a generic Vite asset descriptor
+gets factored out, or v1 states plainly that assets are an application input.
 
 ### Dependency shape
 
-`hono` is declared as a **peer dependency** of the plugin, and the plugin
-imports it **type-only**:
+`hono` is declared as a **peer dependency**, and the plugin imports it at
+**runtime** (`createElement`), not type-only:
 
 ```json
-"peerDependencies": { "hono": ">=4.12.0 <5.0.0" }
+"peerDependencies": { "hono": ">=4.13.0 <5.0.0" }
 ```
 
-Three consequences, each of which was a hazard in the first draft:
+An earlier revision made this a type-only import and argued that the plugin
+therefore shipped no hono runtime code, so two copies could never meet inside
+it. That argument is gone with the direct-call design that motivated it: the
+plugin must build a real hono element to get hono's escaping, so it imports
+hono for real. What survives, and why a peer is still the right mechanism:
 
-- The plugin ships **no hono runtime code**, so two copies of hono cannot
-  meet inside it. `component(props)` calls the app's own component, which was
-  compiled against the app's own hono via its pragma.
-- The peer range is explicit rather than relying on hoisting, so the plugin
-  works under bun's isolated linker and under pnpm, not only under npm's
-  hoisted layout. This is what `examples/blog` failing to resolve `hono/jsx`
-  is telling us.
-- The published `.d.ts` references `hono/jsx`'s `FC`, which a consumer must
-  be able to resolve — a declared peer is exactly what guarantees that.
+- **The peer range is explicit rather than relying on hoisting**, so the
+  plugin resolves under bun's isolated linker and under pnpm, not only under
+  npm's hoisted layout. `examples/blog` failing to resolve `hono/jsx` is what
+  makes this necessary rather than pedantic.
+- **A peer resolves to the application's own copy**, which is exactly what the
+  two-copies concern demands. A plain `dependencies` entry would let the
+  plugin install a second hono beside the app's, and now that the plugin
+  builds `JSXNode`s that the app's components populate, a split really would
+  matter — hono's context machinery and its escaping helpers are
+  module-scoped. This is the drizzle hazard, and the peer is the fix.
+- **The published `.d.ts` references `hono/jsx`'s `FC`**, which a consumer
+  must be able to resolve. A declared peer guarantees that.
 
-The range starts at `4.12.0` to match `@guren/server`'s own `^4.12.29`
-without pinning the plugin to a patch the server may move off.
+The floor is `4.13.0` because that is where `FunctionComponentResult` appears
+(see "The peer floor cannot be `4.12.0`"). Note this is *higher* than
+`@guren/server`'s own `^4.12.29`, which is fine — they are independent
+ranges over the same package, and any install satisfying both lands on
+4.13.0 or later.
 
-One case this deliberately tolerates: an app pinned to hono 4.x after
-`@guren/server` moves to 5.x would load two hono copies, the app's pragma
-resolving one and the server's `Hono` instance the other. Unlike the drizzle
-hazard cited above, that is **benign here** — `view()` shares no runtime state
-across the boundary. It calls the app's own component, which was compiled
-against the app's own hono, and reduces the result through `toString()`, a
-structural contract rather than an identity check. Nothing in this plugin
-does `instanceof JSXNode` or reads a hono module-level singleton. If a future
-version adds `createContext`-based features, that stops being true and the
-peer range should be narrowed to track the server's.
+Neither npm nor bun installs a peer dependency silently in every
+configuration, and a peer outside its range is a warning rather than a hard
+failure. The plugin should therefore fail loudly at first use if
+`createElement` is missing or the resolved hono is too old, rather than
+producing subtly wrong output. That check is cheap and belongs in v1.
 
 ### `contentPlugin()`
 
@@ -524,8 +602,7 @@ packages/plugin-content/
     ├── index.ts            # export { contentPlugin, ContentController, type ... }
     ├── plugin.ts           # definePlugin() factory           ~ plugin-markdown/src/plugin.ts
     ├── ContentController.ts# the Controller subclass          (no counterpart)
-    ├── stringify.ts        # FunctionComponentResult reduction (no counterpart)
-    ├── stringify.test.ts
+    ├── render.test.ts       # escaping + result-shape matrix
     ├── ContentController.test.ts
     └── plugin.test.ts      #                                  ~ plugin-markdown/src/plugin.test.ts
 ```
@@ -549,12 +626,28 @@ beside the sibling's sources and `scripts/build-packages.ts` fails the build.
   "gurenPlugin": {
     "compatibility": ">=1.0.0 <2.0.0"
   },
+  "files": ["dist"],
   "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "scripts": {
+    "build": "bun --bun tsdown",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
   "dependencies": { "@guren/core": "^1.8.1" },
-  "peerDependencies": { "hono": ">=4.12.0 <5.0.0" },
+  "peerDependencies": { "hono": ">=4.13.0 <5.0.0" },
   "devDependencies": { "hono": "^4.13.1", "tsdown": "^0.22.14", "typescript": "^7.0.2" }
 }
 ```
+
+**The `scripts` block is not boilerplate — omitting it silently disables the
+package.** `scripts/build-packages.ts` filters the workspace to packages with
+a `scripts.build`, and `scripts/test-packages.ts` to those with a
+`scripts.test`. An earlier revision of this RFC showed a manifest with no
+`scripts` at all while claiming build and test discovery are automatic. Both
+claims are true, and together they meant the package and all three of its
+test files would have been skipped without a single error. Confirm by
+checking the package appears in **both** `bun run build:list` and
+`bun run test:bun:list` before trusting a green run.
 
 `compatibility` tracks the `@guren/core` 1.x line, matching
 `@guren/plugin-markdown` and the deploy plugins; `audit:plugin-compat`
@@ -581,12 +674,19 @@ run in-package without a dependency on `@guren/testing`.
 
 Three test layers:
 
-1. **`stringify.test.ts` — the unit that carries the runtime traps.** One
-   case per `FunctionComponentResult` shape: sync root, async root, `Child[]`
-   return, `null`, plus nested async children (the `TypeError: No default
-   value` regression), `memo()`, and `ErrorBoundary`. Each asserts a
-   primitive `string` result, not just a matching value — the boxed-`String`
-   wart is invisible to `toEqual`.
+1. **`render.test.ts` — the shape matrix, and the security regression.** One
+   case per `FunctionComponentResult` shape: sync root, async root, `Child[]`,
+   `null`, plus nested async children, `memo()`, `ErrorBoundary`, and a root
+   that is itself a context provider. Each asserts a **primitive** `string`
+   result, not just a matching value — the boxed-`String` wart is invisible to
+   `toEqual`.
+
+   The load-bearing case is **a raw string inside a `Child[]`**
+   (`() => ['<script>alert(1)</script>', <p>ok</p>]`), asserted **escaped**.
+   That is the exact input that made the rejected hand-written reduction a
+   stored-XSS path, and it went unnoticed through three revisions because
+   every earlier fixture put only `JSXNode`s in the array. Include the
+   `Promise<string>`-in-array variant beside it.
 2. **`ContentController.test.ts` — the response contract.** `view()` returns
    `text/html; charset=utf-8`, starts with `<!doctype html>`, honours
    `status`/`headers`/`doctype: false`, and **contains no
@@ -620,7 +720,7 @@ say that content reaching it should have gone through
 
 **Error handling** needs one test and one decision the RFC currently ducks:
 `view()` has no `try`/`catch`, so a component that throws or a rejected
-`stringify()` propagates to whatever `ExceptionHandler` catches at the router
+render propagates to whatever `ExceptionHandler` catches at the router
 boundary. That is probably correct — it matches how a throwing controller
 action already behaves — but it should be asserted rather than assumed, and
 it becomes a genuine design question for the `renderToReadableStream` follow-up,
@@ -684,12 +784,14 @@ would otherwise be correctly red. Same constraint RFC 0012 recorded.
   Simpler signature, but it forces every controller to become `.tsx` and to
   carry the `hono/jsx` pragma, and it loses the call-site prop inference that
   makes `view(Component, props)` type-check. Rejected.
-- **Build the element with `createElement` inside `view()`.** Produces
-  byte-identical output for every shape measured, but requires a runtime
-  `hono` import in the plugin, which reintroduces the two-copies hazard and
-  the `props as Props` cast. Direct invocation is strictly less coupled.
-  Should a future hono release make direct invocation lossy, this is the
-  drop-in fallback.
+- **Invoke the component directly and reduce the result by hand**, keeping
+  `hono` a type-only import. Proposed by two earlier revisions of this RFC and
+  **rejected on a security defect**: the hand-written reduction does not
+  escape raw strings inside a `Child[]`, so a component returning
+  `['<script>…', <p/>]` emits the script tag verbatim. Reimplementing hono's
+  escaping, callback, and render-context semantics to get the coupling back
+  is not a trade worth making in the one API whose promise is that it escapes
+  by default. See "Stringifying a component tree".
 - **A bespoke Blade/ERB-style template language** (`.guren` files, `@if`/
   `@foreach` directives, `@extends`/`@yield` layout inheritance, a compiler
   to JS). Rejected: it requires building and maintaining a parser, compiler,
@@ -898,8 +1000,10 @@ while leaving the runtime coupling where it belongs.
 links, an import map, and `<body>` attributes, and resolves the request
 locale and shared props on the way. The gap covers head hoisting, locale, and
 asset injection — see "What `view()` deliberately does not do" above for the
-three candidate designs (document it as the Layout's job; add a typed `head`
-option; add a `document` seam that also resolves `lang` from the request).
+four candidate designs: (a) document it as the Layout's job; (b) a typed
+`head` option; (c) a `document` seam resolving `lang` from the request, which
+is incomplete as sketched; (d) bridge hono's own `jsxRenderer()` middleware,
+which already does layout, doctype, and render-context preservation.
 
 Two things make this concrete rather than theoretical:
 
@@ -913,8 +1017,12 @@ Two things make this concrete rather than theoretical:
   is that it still removes the dangerous part, escaping, which is a smaller
   claim than the current framing makes.
 
-My inclination is (a) for v1 plus a reference `Layout`, because the head data
-a content page needs is known at the controller and threading it as props is
-ordinary TypeScript rather than a new mechanism. But a reviewer who thinks
-`view()` without head composition is not worth shipping has a real case, and
-that case should be made here before this is accepted.
+An earlier revision recommended (a) plus a reference `Layout`. That
+recommendation is **withdrawn**: option (d) was not on the list at the time,
+and reusing hono's own renderer plausibly dominates writing a Layout
+convention of our own. Assets complicate (a) further — the framework has no
+non-Inertia asset descriptor to point a reference Layout at.
+
+The case a reviewer should make here: whether `view()` without head
+composition is worth shipping at all. If it is not, (d) is the cheapest route
+to a version that is.
