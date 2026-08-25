@@ -111,10 +111,10 @@ export type {
   ConfigureAttachmentsOptions,
   ConfiguredAttachments,
   GenerateVariantsPayload,
-  PruneOptions,
-  PruneReport,
   HeicPolicy,
   ImagePolicy,
   ImageProcessor,
+  PruneOptions,
+  PruneReport,
   VariantSpec,
 } from './attachments/index.js'

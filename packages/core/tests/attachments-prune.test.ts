@@ -27,6 +27,26 @@ class Post extends Attachable(defineModel(prunePosts), {
   draftPdf: hasOneAttached(),
 }) {}
 
+/**
+ * A ULID whose timestamp half is two hours old — past the one-hour grace
+ * window `--objects` gives a rowless prefix, so the sweep treats it as debris
+ * rather than an attach in flight.
+ *
+ * Hand-encoded rather than `ulid(twoHoursAgo)` because the generator is
+ * monotonic: it clamps a backdated timestamp to the last one it issued, so
+ * any earlier attach() in this suite would hand back a *fresh* id instead.
+ */
+function staleUlid(): string {
+  const ENCODING = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'
+  let time = Date.now() - 2 * 60 * 60 * 1000
+  let encoded = ''
+  for (let i = 0; i < 10; i++) {
+    encoded = ENCODING[time % 32]! + encoded
+    time = Math.floor(time / 32)
+  }
+  return `${encoded}${'A'.repeat(16)}`
+}
+
 describe('attachments prune', () => {
   let sqlite: Database
   let storage: StorageManager
@@ -177,14 +197,7 @@ describe('attachments prune', () => {
     // through the storage manager is what still finds it.
     const { MemoryStorageDriver } = await import('../src/index')
     storage.registerDisk('archive', () => new MemoryStorageDriver({ url: 'https://archive.test' }))
-    const ENC = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'
-    let t = Date.now() - 2 * 60 * 60 * 1000
-    let chars = ''
-    for (let i = 0; i < 10; i++) {
-      chars = ENC[t % 32]! + chars
-      t = Math.floor(t / 32)
-    }
-    const staleId = `${chars}${'A'.repeat(16)}`
+    const staleId = staleUlid()
     await storage.disk('archive').put(`attachments/${staleId}/left.bin`, Buffer.from('x'))
 
     const report = await engine().pruneOrphans({ objects: true })
@@ -264,17 +277,7 @@ describe('attachments prune', () => {
   })
 
   test('should sweep a rowless prefix whose ULID is older than the grace window', async () => {
-    const ENC = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'
-    const encodeTime = (time: number) => {
-      let t = time
-      let chars = ''
-      for (let i = 0; i < 10; i++) {
-        chars = ENC[t % 32]! + chars
-        t = Math.floor(t / 32)
-      }
-      return chars
-    }
-    const staleId = `${encodeTime(Date.now() - 2 * 60 * 60 * 1000)}${'A'.repeat(16)}`
+    const staleId = staleUlid()
     await storage.disk('media').put(`attachments/${staleId}/leftover.png`, Buffer.from('x'))
 
     const report = await engine().pruneOrphans({ objects: true })

@@ -31,7 +31,8 @@ export class AttachmentsPruneCommand extends Command {
   async handle(): Promise<void> {
     const engine = resolveAttachmentEngine('attachments:prune')
     const dryRun = this.hasOption('dry-run')
-    const report = await engine.pruneOrphans({ objects: this.hasOption('objects'), dryRun })
+    const objects = this.hasOption('objects')
+    const report = await engine.pruneOrphans({ objects, dryRun })
 
     const verb = dryRun ? 'would be removed' : 'removed'
     this.info(`Scanned ${report.scannedRows} attachment row(s).`)
@@ -49,7 +50,7 @@ export class AttachmentsPruneCommand extends Command {
       this.warn(`Skipped '${skipped.type}': ${skipped.reason}`)
     }
 
-    if (this.hasOption('objects')) {
+    if (objects) {
       if (report.orphanObjectPrefixes.length === 0) {
         this.info('No orphaned storage prefixes.')
       } else {

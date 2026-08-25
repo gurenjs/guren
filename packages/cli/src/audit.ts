@@ -272,16 +272,26 @@ const BODY_ACCESS_PATTERN = new RegExp(
 )
 
 /**
+ * The `body-payload` members that read upload bytes rather than fields. Named
+ * once because the two patterns below partition `body-payload` by it: a member
+ * spelled into only one of them would be a body read that counts as neither.
+ * It stays a hand list rather than a `ControllerMemberKind` of its own —
+ * uploads *are* body payload, and moving them to another kind would change
+ * what BODY_ACCESS_PATTERN sees.
+ */
+const FILE_UPLOAD_MEMBERS: readonly string[] = ['file', 'files']
+
+/**
  * The body reads that are *only* file uploads. Subtracting them from
  * BODY_ACCESS_PATTERN is what lets the attach() rule below recognize an
  * action whose whole body consumption is upload bytes.
  */
-const FILE_READ_PATTERN = new RegExp(`\\bthis\\s*\\.\\s*${accessorCallPattern(['file', 'files'])}`)
+const FILE_READ_PATTERN = new RegExp(`\\bthis\\s*\\.\\s*${accessorCallPattern(FILE_UPLOAD_MEMBERS)}`)
 
 /** Every body read that is not a file upload (nor validation/incidental). */
 const NON_FILE_BODY_ACCESS_PATTERN = new RegExp(
   `${RAW_BODY_READ_PATTERN.source}|\\bthis\\s*\\.\\s*${accessorCallPattern(
-    controllerMembers('body-payload').filter((name) => name !== 'file' && name !== 'files'),
+    controllerMembers('body-payload').filter((name) => !FILE_UPLOAD_MEMBERS.includes(name)),
   )}`,
 )
 

@@ -896,8 +896,11 @@ export class AttachmentEngine {
       await disk.deleteDirectory(`attachments/${String(row.id)}`)
     }
     const ids = rows.map((row) => String(row.id))
-    if (ids.length > 0) {
-      await this.model.where({ id: ids }).delete()
+    // Chunked like the prune lookups: a sweep can hand this thousands of
+    // ids, and one unbounded IN would blow dialect bind-parameter limits —
+    // after the objects above are already gone.
+    for (let start = 0; start < ids.length; start += PRUNE_LOOKUP_CHUNK) {
+      await this.model.where({ id: ids.slice(start, start + PRUNE_LOOKUP_CHUNK) }).delete()
     }
   }
 
@@ -926,9 +929,9 @@ export class AttachmentEngine {
     const byType = new Map<string, PlainObject[]>()
     for (const row of rows) {
       const type = String(row.attachableType)
-      let group = byType.get(type)
-      if (!group) byType.set(type, (group = []))
-      group.push(row)
+      const group = byType.get(type)
+      if (group) group.push(row)
+      else byType.set(type, [row])
     }
 
     const morphMap = Model.morphMap ?? {}

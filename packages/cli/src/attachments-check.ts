@@ -1,5 +1,5 @@
 import { dirname, relative, resolve } from 'node:path'
-import type { CallExpression, ImportDeclaration, ObjectExpression } from '@babel/types'
+import type { CallExpression } from '@babel/types'
 import { walk } from './ast-walk'
 import { check, type CheckResult } from './check-result'
 import { collectFiles, listAppRoots } from './discovery'
@@ -94,9 +94,8 @@ export async function checkAttachmentsConfig(options: {
     // The schema declares exported names, so an `import { attachments as att }`
     // must be judged by 'attachments', never by 'att'.
     const importsByLocal = new Map<string, { source: string; imported: string }>()
-    for (const statement of parsed.ast.program.body) {
-      if (statement.type !== 'ImportDeclaration') continue
-      const declaration = statement as ImportDeclaration
+    for (const declaration of parsed.ast.program.body) {
+      if (declaration.type !== 'ImportDeclaration') continue
       for (const specifier of declaration.specifiers) {
         if (specifier.type === 'ImportSpecifier') {
           const imported =
@@ -125,7 +124,7 @@ export async function checkAttachmentsConfig(options: {
 
       const argument = call.arguments[0]
       if (!argument || argument.type !== 'ObjectExpression') return
-      const tableProperty = (argument as ObjectExpression).properties.find(
+      const tableProperty = argument.properties.find(
         (property) =>
           property.type === 'ObjectProperty' &&
           !property.computed &&
@@ -145,28 +144,31 @@ export async function checkAttachmentsConfig(options: {
       if (schemaModule === undefined) return
 
       const tableName = importEntry.imported
-      const importSource = importEntry.source
+      const key = `attachments-config:${relPath}`
+      const title = 'configureAttachments table'
       // Judged against the schema module the import resolves to, not the
       // union of every schema: a module config importing its own schema
       // must not pass because the root happens to declare the name.
       const declared = schemaTables.some(
         (table) => table.identifier === tableName && table.module === schemaModule,
       )
+      if (declared) {
+        results.push(
+          check(key, title, 'pass', `configureAttachments() binds schema table '${tableName}'.`),
+        )
+        return
+      }
       results.push(
         check(
-          `attachments-config:${relPath}`,
-          'configureAttachments table',
-          declared ? 'pass' : 'fail',
-          declared
-            ? `configureAttachments() binds schema table '${tableName}'.`
-            : `configureAttachments() in ${relPath} binds '${tableName}' from ${importSource}, but no schema `
-              + `module declares a table with that export. The layer takes the table untyped, so this only `
-              + `fails at runtime, on the first attach.`,
-          declared
-            ? undefined
-            : `Export '${tableName}' from ${schemaPathFor(schemaModule)} (the attachments guide has the snippet `
-              + `per dialect), or point configureAttachments() at the table your schema does export.`,
-          declared ? undefined : relPath,
+          key,
+          title,
+          'fail',
+          `configureAttachments() in ${relPath} binds '${tableName}' from ${importEntry.source}, but no schema `
+            + `module declares a table with that export. The layer takes the table untyped, so this only `
+            + `fails at runtime, on the first attach.`,
+          `Export '${tableName}' from ${schemaPathFor(schemaModule)} (the attachments guide has the snippet `
+            + `per dialect), or point configureAttachments() at the table your schema does export.`,
+          relPath,
         ),
       )
     })
