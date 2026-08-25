@@ -97,6 +97,48 @@ describe('runAudit — uploads through the attachments pipeline', () => {
     }
   })
 
+  it('still fails when the method also writes to storage directly', async () => {
+    const workspace = await createTempWorkspace('guren-cli-audit-attach-put-')
+    try {
+      await writeController(
+        workspace.dir,
+        `    const cover = await this.file('cover')
+    await Post.attach(1, 'cover', somethingElse)
+    await storage.disk().put('raw/cover.bin', Buffer.from(await cover.arrayBuffer()))
+    return null`,
+      )
+      await writeRoutes(workspace.dir)
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      // Co-occurrence is not data flow: a raw put() beside the attach()
+      // may be storing the unvalidated upload, so the pass is withheld.
+      const validation = report.findings.find((f) => f.key === 'validation:POST /uploads')
+      expect(validation!.status).toBe('fail')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('counts request.arrayBuffer() as an unvalidated body read', async () => {
+    const workspace = await createTempWorkspace('guren-cli-audit-arraybuffer-')
+    try {
+      await writeController(
+        workspace.dir,
+        `    const raw = await this.request.arrayBuffer()
+    return null`,
+      )
+      await writeRoutes(workspace.dir)
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      const validation = report.findings.find((f) => f.key === 'validation:POST /uploads')
+      expect(validation!.status).toBe('fail')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('does not count a lowercase attach() receiver as validation', async () => {
     const workspace = await createTempWorkspace('guren-cli-audit-attach-lowercase-')
     try {

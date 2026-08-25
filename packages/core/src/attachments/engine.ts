@@ -20,7 +20,7 @@ import type {
   ImageProcessor,
   VariantSpec,
 } from './types.js'
-import { ulid } from './ulid.js'
+import { ulid, ulidTime } from './ulid.js'
 
 export interface AttachOptions {
   /** Filename to store (defaults to the `File`'s own name). */
@@ -149,6 +149,33 @@ const DEFAULT_MAX_PIXELS = 52_000_000
 const SNIFF_WINDOW_BYTES = 262_144
 const DEFAULT_MAX_IMAGE_BYTES = 50_000_000
 const DEFAULT_URL_EXPIRES_IN = 5 * 60 * 1000
+/**
+ * How recently minted a storage prefix may be before `--objects` refuses to
+ * touch it. attach() writes the object *before* the row, so a prefix without
+ * a row is either debris — or an attach in flight. The prefix id is a ULID,
+ * so its age is readable; anything younger than this window is skipped and
+ * picked up by the next sweep if it really was abandoned.
+ */
+const PRUNE_OBJECTS_GRACE_MS = 60 * 60 * 1000
+/** Existence lookups are chunked to stay inside every dialect's bind-parameter limits. */
+const PRUNE_LOOKUP_CHUNK = 500
+
+/**
+ * The spellings under which an id may appear on either side of the prune
+ * comparison: as stored (lowercased — UUID hex case is not identity) and,
+ * for numeric values, the canonical numeric form ('01' and 1 are the same
+ * key). Used symmetrically so a representation mismatch always errs toward
+ * "the record exists".
+ */
+function idSpellings(value: unknown): string[] {
+  const raw = String(value).toLowerCase()
+  const spellings = [raw]
+  if (/^\d+$/.test(raw)) {
+    const canonical = String(Number(raw))
+    if (canonical !== raw) spellings.push(canonical)
+  }
+  return spellings
+}
 
 const IMAGE_MIME: Record<string, string> = {
   jpeg: 'image/jpeg',
@@ -883,7 +910,11 @@ export class AttachmentEngine {
    * query, an unlistable disk) is reported and left alone.
    */
   async pruneOrphans(options: PruneOptions = {}): Promise<PruneReport> {
-    const rows = (await this.model.where({})) as PlainObject[]
+    // Unscoped on purpose: configureAttachments() hands this model to the
+    // app, which may add global scopes (a tenant filter, say). A scoped
+    // snapshot would hide other tenants' rows from `liveIds` and --objects
+    // would then sweep prefixes that are very much referenced.
+    const rows = (await this.model.withoutGlobalScopes()) as PlainObject[]
     const report: PruneReport = {
       scannedRows: rows.length,
       orphanRows: [],
@@ -912,30 +943,50 @@ export class AttachmentEngine {
         continue
       }
       const ids = Array.from(new Set(group.map((row) => String(row.attachableId))))
-      // The morph column stores ids as text while the owning table's key may
-      // be numeric; query both spellings so a representation mismatch can
-      // never make a live record look deleted.
-      const lookupValues = ids.flatMap((id) => (/^\d+$/.test(id) ? [id, Number(id)] : [id]))
-      let existing: Set<string>
-      try {
-        const records = (await relatedModel.where({ id: lookupValues })) as PlainObject[]
-        existing = new Set(records.map((record) => String(record.id)))
-      } catch (error) {
-        report.skippedTypes.push({
-          type,
-          reason: `querying ${type} failed (${error instanceof Error ? error.message : String(error)}) — a record that cannot be checked is not a deleted one.`,
-        })
-        continue
-      }
-      for (const row of group) {
-        if (!existing.has(String(row.attachableId))) {
-          orphans.push(row)
-          report.orphanRows.push({
-            id: String(row.id),
-            attachableType: type,
-            attachableId: String(row.attachableId),
+      const existing = new Set<string>()
+      const unverifiable = new Set<string>()
+      // Bounded chunks: one IN over every id (twice, with both spellings)
+      // blows dialect parameter limits on large tables, and the catch would
+      // then skip the whole type — leaving its real orphans unswept forever.
+      for (let start = 0; start < ids.length; start += PRUNE_LOOKUP_CHUNK) {
+        const chunk = ids.slice(start, start + PRUNE_LOOKUP_CHUNK)
+        // The morph column stores ids as text while the owning table's key
+        // may be numeric; query both spellings so a representation mismatch
+        // can never make a live record look deleted. Number() is lossy above
+        // 2^53; harmless because the string spelling rides alongside.
+        const lookupValues = chunk.flatMap((id) => (/^\d+$/.test(id) ? [id, Number(id)] : [id]))
+        try {
+          // Existence is a primary-key fact, so every global scope is
+          // dropped: a SoftDeletes filter would make a soft-deleted
+          // (restorable!) record's attachments look orphaned, and a tenant
+          // filter would let one tenant's sweep delete another's.
+          const records = (await relatedModel
+            .withoutGlobalScopes()
+            .where({ id: lookupValues })) as PlainObject[]
+          for (const record of records) {
+            for (const spelling of idSpellings(record.id)) existing.add(spelling)
+          }
+        } catch (error) {
+          for (const id of chunk) unverifiable.add(id)
+          report.skippedTypes.push({
+            type,
+            reason: `querying ${type} failed (${error instanceof Error ? error.message : String(error)}) — records that cannot be checked are not deleted ones.`,
           })
         }
+      }
+      for (const row of group) {
+        const stored = String(row.attachableId)
+        if (unverifiable.has(stored)) continue
+        // Membership through the same normalization on both sides: '01' in
+        // the morph column must match an integer key of 1, and a UUID must
+        // match regardless of hex case.
+        if (idSpellings(stored).some((spelling) => existing.has(spelling))) continue
+        orphans.push(row)
+        report.orphanRows.push({
+          id: String(row.id),
+          attachableType: type,
+          attachableId: stored,
+        })
       }
     }
 
@@ -962,7 +1013,17 @@ export class AttachmentEngine {
       rows.map((row) => String(row.id)).filter((id) => !removed.has(id)),
     )
 
+    // Every disk the sweep can know about: the registered set (a disk used
+    // once via attach({ disk }) whose only write crashed pre-row would
+    // otherwise never be examined), plus config and row-referenced names.
+    let registered: string[] = []
+    try {
+      registered = this.storage().getDiskNames()
+    } catch {
+      // A storage manager that cannot enumerate simply contributes nothing.
+    }
     const diskNames = new Set<string>([
+      ...registered,
       this.defaultDisk,
       ...Object.keys(this.diskVisibility),
       ...rows.map((row) => String(row.disk)),
@@ -984,9 +1045,24 @@ export class AttachmentEngine {
       for (const prefix of prefixes) {
         const id = prefix.split('/').pop() ?? prefix
         if (liveIds.has(id)) continue
+        // A rowless prefix minted moments ago is an attach() in flight (the
+        // object is written before the row), not debris — leave it for a
+        // later sweep. Non-ULID names carry no timestamp and cannot be a
+        // mid-flight attach, so they are swept.
+        const mintedAt = ulidTime(id)
+        if (mintedAt !== null && Date.now() - mintedAt < PRUNE_OBJECTS_GRACE_MS) continue
         report.orphanObjectPrefixes.push({ disk: diskName, prefix })
         if (!dryRun) {
-          await disk.deleteDirectory(prefix)
+          try {
+            await disk.deleteDirectory(prefix)
+          } catch (error) {
+            // One failing prefix must not abort the sweep of everything
+            // after it — the rows are already gone by this point.
+            report.skippedDisks.push({
+              disk: diskName,
+              reason: `deleting ${prefix} failed: ${error instanceof Error ? error.message : String(error)}`,
+            })
+          }
         }
       }
     }

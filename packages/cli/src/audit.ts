@@ -261,7 +261,7 @@ function accessorCallPattern(names: readonly string[]): string {
 const VALIDATE_BODY_PATTERN = new RegExp(accessorCallPattern(controllerMembers('body-validation')))
 
 /** Reading the body without going through the controller's helpers at all. */
-const RAW_BODY_READ_PATTERN = /\b(req|request)\s*\.\s*(json|formData|parseBody|text|body|raw)\b|\bparseRequestPayload\s*\(/
+const RAW_BODY_READ_PATTERN = /\b(req|request)\s*\.\s*(json|formData|parseBody|text|body|raw|arrayBuffer|blob)\b|\bparseRequestPayload\s*\(/
 
 /**
  * `this.` is required on the controller-accessor half: the members are
@@ -295,6 +295,16 @@ const NON_FILE_BODY_ACCESS_PATTERN = new RegExp(
  * clean pass.
  */
 const MODEL_ATTACH_PATTERN = /\b[A-Z][A-Za-z0-9_]*\s*\.\s*attach\s*(?:<[^()]*>)?\s*\(/
+
+/**
+ * A raw storage write in the same method disqualifies the attach-aware pass:
+ * this rule proves co-occurrence, not data flow, so an action that reads an
+ * upload, attach()es something, and *also* put()s bytes may be storing the
+ * unvalidated upload through the raw path. Erring toward the existing fail
+ * costs a validateBody() nudge; erring toward pass costs an unvalidated
+ * upload — the audit takes the first.
+ */
+const STORAGE_WRITE_PATTERN = /\.\s*put(?:File)?\s*\(/
 
 const BODY_INCIDENTAL_PATTERN = new RegExp(
   `\\bthis\\s*\\.\\s*${accessorCallPattern(controllerMembers('body-incidental'))}`,
@@ -711,7 +721,8 @@ async function auditRoutes(
         readsBody &&
         !NON_FILE_BODY_ACCESS_PATTERN.test(methodInfo.body) &&
         FILE_READ_PATTERN.test(methodInfo.body) &&
-        MODEL_ATTACH_PATTERN.test(methodInfo.body)
+        MODEL_ATTACH_PATTERN.test(methodInfo.body) &&
+        !STORAGE_WRITE_PATTERN.test(methodInfo.body)
       ) {
         // Uploads handed to Model.attach() are validated by the attachment
         // declaration's pipeline; with no other body reads there is nothing

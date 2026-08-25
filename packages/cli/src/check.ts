@@ -313,10 +313,12 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     // 8.5. Check configureAttachments() binds a table the schema declares
     // (RFC 0013). The layer takes the table untyped (session-store
     // convention), so a renamed schema export only fails at runtime on the
-    // first attach. Content-activated per file and changed-filtered like
-    // checks 1-4 — the config call can only move by editing the file that
-    // holds it.
-    const attachmentsFiles = filterChanged(await discoverAttachmentsConfigFiles(cwd))
+    // first attach. Not changed-filtered, like check 8: the failure this
+    // catches originates in db/schema.ts, not in the file holding the config
+    // call, so filtering by the config file would hide exactly the schema
+    // rename this exists for. The string pre-filter inside the check keeps
+    // the full scan cheap.
+    const attachmentsFiles = await discoverAttachmentsConfigFiles(cwd)
     checks.push(
       ...(await checkAttachmentsConfig({ cwd, cache, files: attachmentsFiles, schemaTables })),
     )

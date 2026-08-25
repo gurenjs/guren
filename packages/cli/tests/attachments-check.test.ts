@@ -68,6 +68,29 @@ export const { Attachment } = configureAttachments({
     }
   })
 
+  it('judges an aliased import by its exported name', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-attachments-alias-')
+    try {
+      const config = `import { configureAttachments } from '@guren/core'
+import { attachments as att } from '../db/schema.js'
+
+export const { Attachment } = configureAttachments({
+  table: att,
+  storage: () => ({}) as never,
+  disk: 'media',
+})`
+      await writeApp(workspace.dir, { schema: SCHEMA_WITH_ATTACHMENTS, config })
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      const result = report.checks.find((c) => c.key.startsWith('attachments-config:'))
+      expect(result).toBeDefined()
+      expect(result!.status).toBe('pass')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('stays silent when the table cannot be traced to a schema import', async () => {
     const workspace = await createTempWorkspace('guren-cli-check-attachments-opaque-')
     try {
@@ -99,6 +122,28 @@ export const { Attachment } = configureAttachments({
       const report = await runCheck({ cwd: workspace.dir })
 
       expect(report.checks.find((c) => c.key.startsWith('attachments-config:'))).toBeUndefined()
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('fails a module config whose own schema lacks the table, even when the root declares it', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-attachments-module-miss-')
+    try {
+      // Root declares `attachments`, but the module config imports the
+      // module's schema — which does not. Existence is per schema module.
+      await writeApp(workspace.dir, { schema: SCHEMA_WITH_ATTACHMENTS })
+      await mkdir(join(workspace.dir, 'modules/media/db'), { recursive: true })
+      await writeFile(join(workspace.dir, 'modules/media/db/schema.ts'), SCHEMA_WITHOUT_ATTACHMENTS, 'utf8')
+      await mkdir(join(workspace.dir, 'modules/media/config'), { recursive: true })
+      await writeFile(join(workspace.dir, 'modules/media/config/attachments.ts'), configSource(), 'utf8')
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      const result = report.checks.find((c) => c.key.startsWith('attachments-config:'))
+      expect(result).toBeDefined()
+      expect(result!.status).toBe('fail')
+      expect(result!.suggestion).toContain('modules/media/db/schema.ts')
     } finally {
       await workspace.cleanup()
     }

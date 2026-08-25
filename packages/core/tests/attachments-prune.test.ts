@@ -93,6 +93,106 @@ describe('attachments prune', () => {
     expect(await Attachment.where({ id: kept.id }).first()).not.toBeNull()
   })
 
+  test('should keep attachments of a soft-deleted record so restore still works', async () => {
+    const { SoftDeletes } = await import('../src/index')
+    const softPosts = sqliteTable('prune_posts_soft', {
+      id: integer('id').primaryKey(),
+      title: text('title').notNull(),
+      deletedAt: integer('deleted_at', { mode: 'timestamp_ms' }),
+    })
+    sqlite.exec('CREATE TABLE prune_posts_soft (id integer primary key, title text not null, deleted_at integer)')
+    class SoftPost extends SoftDeletes(defineModel(softPosts)) {}
+    Object.defineProperty(SoftPost, 'name', { value: 'Post' })
+    Model.morphMap = { Post: SoftPost }
+
+    await SoftPost.forceCreate({ id: 1, title: 'trashed later' })
+    const kept = await Post.attach(1, 'cover', PNG_1X1)
+    await SoftPost.delete({ id: 1 }) // soft delete: the record must stay restorable
+    expect(await SoftPost.where({ id: 1 }).first()).toBeNull() // the scope hides it...
+
+    const report = await engine().pruneOrphans()
+
+    // ...but existence is a primary-key fact: the sweep must see through
+    // the softDelete scope, or restoring the record would find its
+    // attachments gone.
+    expect(report.orphanRows).toEqual([])
+    expect(await Attachment.where({ id: kept.id }).first()).not.toBeNull()
+    expect(await storage.disk('media').exists(kept.path)).toBe(true)
+  })
+
+  test('should not mistake a zero-padded morph id for a missing record', async () => {
+    // '01' in the morph column, integer key 1 in the table: the membership
+    // test must normalize both sides, or a live record's attachment is
+    // swept over a spelling difference.
+    await Post.forceCreate({ id: 1, title: 'alive' })
+    const kept = await Post.attach('01', 'cover', PNG_1X1)
+
+    const report = await engine().pruneOrphans()
+
+    expect(report.orphanRows).toEqual([])
+    expect(await Attachment.where({ id: kept.id }).first()).not.toBeNull()
+  })
+
+  test('should sweep every orphan of a type larger than one lookup chunk', async () => {
+    // 600 ids exceeds the 500-per-query chunk: the loop must page through
+    // rather than issuing one unbounded IN (or skipping the whole type).
+    await Post.forceCreate({ id: 1, title: 'alive' })
+    const now = new Date()
+    const rows = []
+    for (let i = 0; i < 600; i++) {
+      rows.push(`('u${i}', 'Post', '${i + 1000}', 'cover', 'media', 'attachments/u${i}/x.png', 'x.png', 'image/png', 1, ${now.getTime()}, ${now.getTime()})`)
+    }
+    sqlite.exec(
+      `INSERT INTO attachments (id, attachable_type, attachable_id, collection, disk, path, name, content_type, size, created_at, updated_at) VALUES ${rows.join(',')}`,
+    )
+    const kept = await Post.attach(1, 'cover', PNG_1X1)
+
+    const report = await engine().pruneOrphans()
+
+    expect(report.orphanRows).toHaveLength(600)
+    expect(report.skippedTypes).toEqual([])
+    expect(await Attachment.where({ id: kept.id }).first()).not.toBeNull()
+  })
+
+  test('should see rows an app-added global scope on Attachment would hide', async () => {
+    // configureAttachments() hands the Attachment model to the app, which
+    // may scope it. The maintenance snapshot must stay unscoped, or
+    // --objects sweeps prefixes whose rows the scope hid.
+    await Post.forceCreate({ id: 1, title: 'alive' })
+    const kept = await Post.attach(1, 'cover', PNG_1X1)
+    ;(Attachment as unknown as { addGlobalScope(name: string, fn: unknown): void }).addGlobalScope(
+      'tenant',
+      (q: { where: (field: string, value: unknown) => unknown }) => q.where('collection', 'no-such-collection'),
+    )
+
+    const report = await engine().pruneOrphans({ objects: true })
+
+    expect(report.orphanObjectPrefixes).toEqual([])
+    expect(await storage.disk('media').exists(kept.path)).toBe(true)
+  })
+
+  test('should examine registered disks even when no row references them', async () => {
+    // A crash after writing to a secondary disk but before the row insert
+    // leaves a prefix no row (and no config entry) mentions — enumeration
+    // through the storage manager is what still finds it.
+    const { MemoryStorageDriver } = await import('../src/index')
+    storage.registerDisk('archive', () => new MemoryStorageDriver({ url: 'https://archive.test' }))
+    const ENC = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'
+    let t = Date.now() - 2 * 60 * 60 * 1000
+    let chars = ''
+    for (let i = 0; i < 10; i++) {
+      chars = ENC[t % 32]! + chars
+      t = Math.floor(t / 32)
+    }
+    const staleId = `${chars}${'A'.repeat(16)}`
+    await storage.disk('archive').put(`attachments/${staleId}/left.bin`, Buffer.from('x'))
+
+    const report = await engine().pruneOrphans({ objects: true })
+
+    expect(report.orphanObjectPrefixes).toEqual([{ disk: 'archive', prefix: `attachments/${staleId}` }])
+    expect(await storage.disk('archive').exists(`attachments/${staleId}/left.bin`)).toBe(false)
+  })
+
   test('should report what a dry run would remove without deleting', async () => {
     const orphan = await Post.attach(99, 'cover', PNG_1X1)
 
@@ -119,7 +219,7 @@ describe('attachments prune', () => {
     // A record that cannot be checked is not a deleted one: an outage must
     // not become a mass deletion.
     class Broken extends Model {}
-    Broken.where = () => {
+    Broken.withoutGlobalScopes = () => {
       throw new Error('database is down')
     }
     Object.defineProperty(Broken, 'name', { value: 'Post' })
@@ -148,6 +248,39 @@ describe('attachments prune', () => {
     ])
     expect(await storage.disk('media').exists('attachments/01STRAYPREFIXFROMACRASH00/leftover.bin')).toBe(false)
     expect(await storage.disk('media').exists(kept.path)).toBe(true)
+  })
+
+  test('should leave a freshly minted rowless prefix alone (attach in flight)', async () => {
+    // attach() writes the object before the row: a prefix without a row that
+    // was minted moments ago is an attach in progress, not debris.
+    const { ulid } = await import('../src/attachments/ulid')
+    const freshId = ulid()
+    await storage.disk('media').put(`attachments/${freshId}/inflight.png`, Buffer.from('x'))
+
+    const report = await engine().pruneOrphans({ objects: true })
+
+    expect(report.orphanObjectPrefixes).toEqual([])
+    expect(await storage.disk('media').exists(`attachments/${freshId}/inflight.png`)).toBe(true)
+  })
+
+  test('should sweep a rowless prefix whose ULID is older than the grace window', async () => {
+    const ENC = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'
+    const encodeTime = (time: number) => {
+      let t = time
+      let chars = ''
+      for (let i = 0; i < 10; i++) {
+        chars = ENC[t % 32]! + chars
+        t = Math.floor(t / 32)
+      }
+      return chars
+    }
+    const staleId = `${encodeTime(Date.now() - 2 * 60 * 60 * 1000)}${'A'.repeat(16)}`
+    await storage.disk('media').put(`attachments/${staleId}/leftover.png`, Buffer.from('x'))
+
+    const report = await engine().pruneOrphans({ objects: true })
+
+    expect(report.orphanObjectPrefixes).toEqual([{ disk: 'media', prefix: `attachments/${staleId}` }])
+    expect(await storage.disk('media').exists(`attachments/${staleId}/leftover.png`)).toBe(false)
   })
 
   test('should keep prefixes of rows whose deletion was skipped', async () => {
@@ -179,7 +312,7 @@ describe('attachments prune', () => {
     await command.handle()
 
     const output = lines.join('\n')
-    expect(output).toContain('1 orphaned row(s) would remove')
+    expect(output).toContain('1 orphaned row(s) would be removed')
     expect(output).toContain('Dry run: nothing was deleted.')
   })
 })

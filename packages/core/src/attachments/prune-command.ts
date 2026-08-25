@@ -33,7 +33,7 @@ export class AttachmentsPruneCommand extends Command {
     const dryRun = this.hasOption('dry-run')
     const report = await engine.pruneOrphans({ objects: this.hasOption('objects'), dryRun })
 
-    const verb = dryRun ? 'would remove' : 'removed'
+    const verb = dryRun ? 'would be removed' : 'removed'
     this.info(`Scanned ${report.scannedRows} attachment row(s).`)
 
     if (report.orphanRows.length === 0) {
