@@ -349,6 +349,21 @@ export class UserResource extends Resource<User> {
 
 The interface must be declared in the resource's own file — one imported from a shared types module is not read. A Resource codegen cannot extract a type from is named in a `guren codegen` warning rather than dropped in silence, so a missing `Data.*` member always says why.
 
+The payload type does not have to be a plain interface. An **exported** alias whose shape codegen cannot copy — one derived from a Zod schema, an intersection, a merged interface — is emitted as a reference to the declaration itself, so one schema can be the single source of truth for the runtime contract and the payload type alike:
+
+```ts
+export const UserResourceSchema = z.object({ id: z.number(), name: z.string() })
+export type UserResourceData = z.infer<typeof UserResourceSchema>
+
+export class UserResource extends Resource<User> {
+  toArray(): UserResourceData {
+    return UserResourceSchema.parse(this.resource)
+  }
+}
+```
+
+The declaration must be exported — `data.gen.ts` names it through the resource's module — and a generic type stays unsupported either way, since a reference has no type arguments to pass it.
+
 ### Resources inside modules
 
 Codegen scans `app/Http/Resources` at the project root and inside every `modules/<name>/` directory. A module's Resource is emitted under a name qualified with its module, so `modules/billing/app/Http/Resources/InvoiceResource.ts` becomes `Data.BillingInvoice`. The qualifier is always applied, never only on collision — that way a type's name depends solely on where its class lives, and adding a second `InvoiceResource` elsewhere cannot rename one the frontend already imports.
