@@ -177,6 +177,38 @@ a context provider.
 - hono/jsx emits **no doctype**. `view()` must prepend `<!doctype html>` or
   every page renders in quirks mode. The first draft did not.
 
+### hono/jsx hoists `<title>`, `<meta>` and `<link>` into `<head>` on its own
+
+Three revisions of this RFC asserted that hono/jsx "is a single top-to-bottom
+string buffer with no portal primitive", so head data must be threaded to the
+Layout as explicit props. **That is wrong.** hono/jsx implements React-19-style
+metadata hoisting (`jsx/intrinsic-element/components.js`, `insertIntoHead`),
+and it works through plain `createElement` with no middleware:
+
+| element rendered deep inside `<body>` | lands in `<head>` |
+|---|---|
+| `<title>` | **yes** |
+| `<meta>` | **yes** |
+| `<link>` (incl. `rel="canonical"`, RSS `alternate`) | **yes** |
+| `<script type="application/ld+json">` | no — stays in place |
+| `<style>` | no — stays in place |
+
+Two conditions and one trap:
+
+- The rendered output must **contain a `<head>`**. The implementation looks
+  for `</head>` in the buffer, so a fragment gets no hoisting: a `<title>`
+  inside a `<div>` renders as `<div><title>…`. A content component that
+  renders a whole document is fine; one that renders a body fragment is not.
+- JSON-LD passed as a **text child is HTML-escaped**, which breaks it:
+  `{"@type":"Article"}` becomes `{&quot;@type&quot;:&quot;Article&quot;}`.
+  It needs `dangerouslySetInnerHTML` with `<` escaped as `\u003c`, the same
+  treatment every framework gives inline JSON.
+
+This substantially shrinks Open Question 4. `<Seo>`'s title, description,
+canonical link, RSS alternate, OpenGraph and Twitter tags are all
+`<title>`/`<meta>`/`<link>`, so they hoist unchanged; only its JSON-LD block
+needs the `dangerouslySetInnerHTML` treatment.
+
 ### The peer floor cannot be `4.12.0`
 
 `FunctionComponentResult` — the four-shape union this RFC quotes throughout —
@@ -384,23 +416,29 @@ shared Inertia props and the request locale before rendering.
 Under this proposal all of that becomes the app's `Layout` component's job,
 and three specific capabilities have no replacement at all:
 
-1. **Head hoisting.** Inertia's `<Head>` lets a component nested deep in the
-   tree contribute `<title>`, `<meta>`, canonical links, and JSON-LD to the
-   document head. hono/jsx is a single top-to-bottom string buffer with no
-   portal primitive, so every such value must be threaded to the Layout as an
-   explicit prop. The RFC's own example threads a bare `title` and nothing
-   else, which understates the work.
+1. **Head hoisting — mostly a non-issue, corrected.** Earlier revisions listed
+   this as the hardest gap. Measured, hono/jsx hoists `<title>`, `<meta>`, and
+   `<link>` into `<head>` from anywhere in the tree by itself (see "hono/jsx
+   hoists…" above). What remains is narrow: `<script>` and `<style>` do not
+   hoist, JSON-LD needs `dangerouslySetInnerHTML`, and the component must
+   render a document containing a `<head>` rather than a bare fragment. Those
+   are documentation items, not design gaps.
 2. **Locale.** `Controller`'s `locale`, `t`, and `tc` helpers read the
    request context, and `inertia()` passes the resolved locale through as
    `lang`. `view()` never touches `ctx`, so a content page gets no locale
-   unless the controller passes one in as a prop.
+   unless the controller passes one in as a prop. This is the real remaining
+   gap, and it is small: `view()` could resolve `lang` the way `inertia()`
+   does.
 3. **Assets.** Nothing injects the stylesheet or import map that the Vite
-   pipeline produces for Inertia pages.
+   pipeline produces. The existing resolver is Inertia-specific — it
+   hard-codes `resources/js/app.tsx` and publishes only `GUREN_INERTIA_*`
+   values — so there is no framework-supported way for a content Layout to
+   ask for its assets today. This, not head composition, is the question with
+   real design weight.
 
 For the motivating application this was acceptable: it had already
-hand-written a `renderPage()` that owned the whole document. For a framework
-API it is the weakest part of this proposal, and it is the thing the
-discussion window should decide. Three options, in increasing scope:
+hand-written a `renderPage()` that owned the whole document. Four options,
+in increasing scope:
 
 - **(a) Document it as the Layout's job.** Ship `view()` as specified, with a
   reference `Layout` in the README showing head, lang, and asset wiring. The
@@ -418,11 +456,15 @@ discussion window should decide. Three options, in increasing scope:
   hoisting.
 - **(d) Bridge hono's own `jsxRenderer()`.** hono ships a
   `hono/jsx-renderer` middleware that installs a request-scoped renderer,
-  supplies a Layout, adds the doctype, and preserves the render context. A
-  plugin provider can attach middleware through the container's `hono`
-  binding, and `ContentController` can reach the request via `this.ctx`. This
-  is the option with the least invented surface and it was missing from the
-  first three; it deserves a serious look during discussion.
+  supplies a Layout, adds the doctype, exposes the request through
+  `useRequestContext()`, and has a `stream` option. A plugin provider can
+  attach middleware through the container's `hono` binding. Prototyped and
+  working end to end (doctype, `<html lang>`, typed Layout props via
+  `ContextRenderer` augmentation, escaping, and hoisting all correct).
+  **But note what it does *not* contribute:** hoisting works identically
+  without it. Its real value is a Layout convention, request access inside
+  components, and streaming — so it competes with (a) on ergonomics, not on
+  capability.
 
 **No recommendation, deliberately.** An earlier revision recommended (a);
 option (d) had not been considered at that point and may dominate it. See
@@ -830,18 +872,20 @@ useful part:
 
 - **`resources/js/pages/blog/Show.tsx` is the best first migration, but it is
   not a drop-in.** 82 lines, no `useState`, no `useEffect`, no event handlers
-  — it hydrates for nothing, which is the shape `view()` is for. The catch,
-  and it is the head-composition gap above made concrete: the page renders
+  — it hydrates for nothing, which is the shape `view()` is for. The catch is
   `<Seo>`, which uses Inertia's `<Head>` to hoist a title, description,
   canonical link, RSS alternate, OpenGraph and Twitter tags, and JSON-LD into
-  the document head from three levels down the tree. `view()` has no
-  equivalent. Migrating this page therefore *requires* settling Open Question
-  4 first and rewriting `Seo` as explicit Layout props.
+  the document head from three levels down the tree.
 
-  That is not a reason to pick a different target — it is the most useful
-  thing the dogfooding could surface, and finding it before the plugin ships
-  is the point. But the migration is "design head composition, then port",
-  not "swap `inertia()` for `view()`".
+  An earlier revision called that a blocker. Measurement says otherwise:
+  hono/jsx hoists `<title>`, `<meta>`, and `<link>` natively, so all of
+  `<Seo>` ports unchanged **except** its JSON-LD block, which must switch to
+  `dangerouslySetInnerHTML` because hono escapes text children and would
+  otherwise emit `{&quot;@type&quot;…}`. The page must also return a document
+  with a `<head>` rather than the fragment it renders today, since hoisting
+  needs somewhere to hoist to.
+
+  Bounded work, and still the right first target.
 - **`resources/js/pages/Docs/Show.tsx` is not a v1 target**, despite carrying
   the larger payload. It runs a scroll-spy table of contents, a mobile
   sidebar toggle, and Inertia `<Link>` SPA navigation. Migrating it means
@@ -995,34 +1039,37 @@ while leaving the runtime coupling where it belongs.
 
 **No conclusion. This is the question the discussion window exists for.**
 
-`view()` as specified returns a doctype plus the component's output, while
-`this.inertia()` assembles `<html lang>`, `<head>`, critical CSS, stylesheet
-links, an import map, and `<body>` attributes, and resolves the request
-locale and shared props on the way. The gap covers head hoisting, locale, and
-asset injection — see "What `view()` deliberately does not do" above for the
-four candidate designs: (a) document it as the Layout's job; (b) a typed
-`head` option; (c) a `document` seam resolving `lang` from the request, which
-is incomplete as sketched; (d) bridge hono's own `jsxRenderer()` middleware,
-which already does layout, doctype, and render-context preservation.
+**Scope note: this question is much smaller than two revisions ago.** It was
+opened on the belief that head hoisting had no replacement. Measurement showed
+hono/jsx hoists `<title>`, `<meta>`, and `<link>` natively, so what actually
+remains is **locale** (small — `view()` can resolve `lang` from the request the
+way `inertia()` does) and **assets** (the only part with real design weight,
+because the existing manifest resolver is Inertia-specific).
+
+Four candidate designs are described under "What `view()` deliberately does
+not do": (a) document it as the Layout's job; (b) a typed `head` option;
+(c) a `document` seam, incomplete as sketched; (d) bridge hono's
+`jsxRenderer()`, prototyped and working, though it does not contribute
+hoisting.
 
 Two things make this concrete rather than theoretical:
 
-- The RFC's own nominated dogfooding target, `web/resources/js/pages/blog/Show.tsx`,
-  **cannot be migrated without answering it**: its `<Seo>` component hoists a
-  canonical link, RSS alternate, OpenGraph and Twitter tags, and JSON-LD into
-  the head from three levels down.
+- The RFC's nominated dogfooding target, `web/resources/js/pages/blog/Show.tsx`,
+  turns out to be **mostly portable**: its `<Seo>` emits `<title>`, `<meta>`,
+  and `<link>` tags, all of which hoist unchanged. Only its JSON-LD block
+  needs rework, and only because hono escapes text children.
 - The Problem section argues `view()` should exist so apps stop hand-writing
   `renderPage()`. If `view()` leaves the entire document to the app, it has
   moved the hand-written part rather than removed it — and the honest reply
   is that it still removes the dangerous part, escaping, which is a smaller
   claim than the current framing makes.
 
-An earlier revision recommended (a) plus a reference `Layout`. That
-recommendation is **withdrawn**: option (d) was not on the list at the time,
-and reusing hono's own renderer plausibly dominates writing a Layout
-convention of our own. Assets complicate (a) further — the framework has no
-non-Inertia asset descriptor to point a reference Layout at.
+**Leaning: (a) plus `lang` resolution, with assets stated as an application
+input for v1.** With hoisting native, a reference `Layout` is a short document
+skeleton rather than a metadata framework, and (d) can be added later without
+breaking `view()`'s signature — it is middleware, not a contract change.
 
-The case a reviewer should make here: whether `view()` without head
-composition is worth shipping at all. If it is not, (d) is the cheapest route
-to a version that is.
+The case a reviewer should make here is about assets: whether shipping v1
+without a framework-supported way to inject the Vite stylesheet and import map
+is acceptable, or whether a generic asset descriptor should be factored out of
+`autoConfigureInertiaAssets` first.
