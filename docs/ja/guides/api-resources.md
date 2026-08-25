@@ -349,6 +349,21 @@ export class UserResource extends Resource<User> {
 
 interface は Resource 自身のファイルで宣言してください。共通の型モジュールから import したものは読み取られません。型を抽出できなかった Resource は黙って捨てられるのではなく `guren codegen` の警告で名指しされるので、`Data.*` が生成されない理由は必ず表示されます。
 
+ペイロード型はプレーンな interface である必要はありません。本体をコピーできない形の**エクスポート済み**エイリアス、たとえば Zod スキーマ由来の型や交差型、宣言マージされた interface は、宣言そのものへの参照として出力されます。これにより、1 つのスキーマをランタイムのコントラクトとペイロード型の両方の単一の情報源にできます:
+
+```ts
+export const UserResourceSchema = z.object({ id: z.number(), name: z.string() })
+export type UserResourceData = z.infer<typeof UserResourceSchema>
+
+export class UserResource extends Resource<User> {
+  toArray(): UserResourceData {
+    return UserResourceSchema.parse(this.resource)
+  }
+}
+```
+
+`data.gen.ts` は Resource のモジュール越しに宣言を名前で参照するため、宣言はエクスポートされている必要があります。また、参照には渡す型引数がないため、ジェネリック型はどちらの方式でも対象外です。
+
 ### モジュール内の Resource
 
 コード生成はプロジェクトルートの `app/Http/Resources` に加えて、各 `modules/<name>/` の中も走査します。モジュールの Resource はモジュール名を冠した名前で出力され、`modules/billing/app/Http/Resources/InvoiceResource.ts` は `Data.BillingInvoice` になります。この修飾は衝突したときだけでなく常に付きます。そうすることで型名は「クラスがどこにあるか」だけで決まり、別の場所に2つ目の `InvoiceResource` を追加してもフロントエンドが既にインポートしている型名が変わることはありません。

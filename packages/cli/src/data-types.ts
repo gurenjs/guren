@@ -5,11 +5,19 @@
  * `modules/<name>/` (RFC 0002) — for classes extending `Resource`, extracts
  * the return type of `toArray()` (or an explicit `interface XxxData`), and
  * emits a `data.gen.ts` file that exports a `Data` namespace.
+ *
+ * A payload type whose body cannot be copied — `z.infer<typeof Schema>`, an
+ * intersection, a merged interface — is emitted as an import-type *reference*
+ * to its own declaration instead, provided the file exports it. Copy first,
+ * reference second: a copy works for unexported declarations and keeps
+ * data.gen.ts self-describing, and a pure fallback cannot change any output
+ * that was already being emitted.
  */
 import { readFile } from 'node:fs/promises'
-import { dirname, relative, resolve } from 'node:path'
+import { dirname, join, relative, resolve } from 'node:path'
+import type { File } from '@babel/types'
 import { RESOURCES_DIR, discoverResourceFiles, moduleNameFromRelPath, toPosixRelative } from './discovery'
-import { isIdentifier, pascalCase, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
+import { isIdentifier, pascalCase, relativeImportPath, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
 import { parseSourceFile } from './parse-cache'
 
 export interface ResourceDefinition {
@@ -27,7 +35,11 @@ export interface ResourceDefinition {
    * rename an existing type out from under the frontend importing it.
    */
   dataName: string | null
-  /** Raw TypeScript type body for toArray() return — `null` if none was found. */
+  /**
+   * Right-hand side of the emitted `export type` — a brace body copied from
+   * the source, or an `import('…').Name` reference to a declaration that
+   * could not be copied. `null` if neither was possible.
+   */
   rawType: string | null
   /** Type imports required by this data type */
   imports: string[]
@@ -228,15 +240,17 @@ async function extractResourceType(
   const source = await readFile(filePath, 'utf-8')
 
   // Match class name: `export class PostResource extends Resource<...>`.
-  // Gated ahead of collectTypeImports(), which is a full Babel parse and the
-  // bulk of the per-file cost: every path below discards the imports when this
+  // Gated ahead of parseSourceFile(), which is a full Babel parse and the
+  // bulk of the per-file cost: every path below discards its results when this
   // misses, and the scan now covers modules/*/ too.
   const classMatch = source.match(/export\s+class\s+(\w+Resource)\s+extends\s+Resource/)
   if (!classMatch) return null
 
-  const imports = collectTypeImports(source, filePath).map((statement) =>
+  const ast = parseSourceFile(source, filePath)
+  const imports = collectTypeImports(ast, source).map((statement) =>
     rewriteImportStatement(statement, dirname(filePath), outputDirectory),
   )
+  const declaredTypes = collectTopLevelTypeDeclarations(ast)
 
   const className = classMatch[1]
   const baseName = className.replace(/Resource$/, '')
@@ -245,6 +259,25 @@ async function extractResourceType(
   // class lives — see ResourceDefinition.dataName.
   const dataName = module ? `${pascalCase(module)}${baseName}` : baseName
   const common = { className, dataName, imports, module, filePath: relPath }
+
+  // A declaration that cannot be copied may still be *referencable*: an
+  // import-type reference hands the frontend the declaration itself — unlike
+  // a guessed body, it cannot be wrong. The file's type imports are dropped on
+  // that path: the reference resolves inside the resource's own module, which
+  // resolves its own imports, and two roots' same-named imports must not
+  // collide in the shared import block.
+  const resolveUnreadable = (
+    read: Extract<ObjectTypeRead, { kind: 'unreadable' }>,
+    warningPrefix: string,
+  ): ResourceDefinition => {
+    const reference = readTypeReference(declaredTypes, read.typeName, filePath, outputDirectory)
+    if (reference.rawType !== null) {
+      return { ...common, imports: [], rawType: reference.rawType }
+    }
+    warnings.push(warningPrefix + describeUnreadable(read, reference.exportWouldFix))
+    return { ...common, rawType: null }
+  }
+
   // Comments and string literals are blanked out before anything is matched
   // against the source. Both routinely carry text that looks like a
   // declaration or an unbalanced brace and is neither — a commented-out draft
@@ -267,17 +300,20 @@ async function extractResourceType(
       return { ...common, rawType: annotated.body }
     }
 
-    // The annotation names a type this file does not hand over. Which of the
-    // two reasons it is decides what the author has to change, so say which:
-    // a declaration that is simply elsewhere is a different fix from one that
-    // is right here in a form that cannot be copied.
+    if (annotated.kind === 'unreadable') {
+      return resolveUnreadable(
+        annotated,
+        `Resource ${className} (${relPath}) annotates toArray(): ${typeName} and `,
+      )
+    }
+
+    // The annotation names a type this file does not hand over: a declaration
+    // that is simply elsewhere is a different fix from one that is right here
+    // in a form that cannot be copied, so say which.
     warnings.push(
-      annotated.kind === 'unreadable'
-        ? `Resource ${className} (${relPath}) annotates toArray(): ${typeName} and `
-          + describeUnreadable(annotated)
-        : `Resource ${className} (${relPath}) annotates toArray(): ${typeName}, but no `
-          + `interface or type ${typeName} is declared in that file — omitted from data.gen.ts. `
-          + "Only the resource's own source is read, so move the declaration into it.",
+      `Resource ${className} (${relPath}) annotates toArray(): ${typeName}, but no `
+      + `interface or type ${typeName} is declared in that file — omitted from data.gen.ts. `
+      + "Only the resource's own source is read, so move the declaration into it.",
     )
     return { ...common, rawType: null }
   }
@@ -286,8 +322,7 @@ async function extractResourceType(
   // unreadable is a different sentence again, and the one Strategy 1 alone can
   // reach.
   if (named.kind === 'unreadable') {
-    warnings.push(`Resource ${className} (${relPath}) ${describeUnreadable(named)}`)
-    return { ...common, rawType: null }
+    return resolveUnreadable(named, `Resource ${className} (${relPath}) `)
   }
 
   // Nothing recognised described the payload. Reported anyway, with no type:
@@ -326,6 +361,11 @@ async function extractResourceType(
  * used to yield *some* brace body — the wrong one — which is worse than
  * yielding none: the frontend gets a type that compiles and lies. Refusing
  * costs one `Data` member; guessing costs the trust in all of them.
+ *
+ * An unreadable declaration is not always a lost member: when the file
+ * *exports* it, the caller falls back to an import-type reference
+ * ({@link readTypeReference}), which cannot lie the way a guessed body can —
+ * it names the declaration instead of restating it.
  */
 type ObjectTypeRead =
   | { kind: 'body'; body: string }
@@ -358,7 +398,12 @@ function readObjectType(source: string, masked: string, namePattern: string): Ob
     // `[^{;]*` for the heritage clause, so `extends Record<string, unknown>`
     // is stepped over; `;` bounds it so an aliasless declaration cannot run
     // into a later statement's brace.
-    `^(?:export\\s+)?(?:interface|type)\\s+(${namePattern})\\b\\s*(?:(=)\\s*|(extends[^{;]*))?\\{`,
+    //
+    // `declare` is admitted so this reader and the AST index in
+    // collectTopLevelTypeDeclarations() agree on what counts as declared here
+    // — a modifier only one of them saw would split the verdict between
+    // "copy this" and "no such declaration".
+    `^(?:export\\s+)?(?:declare\\s+)?(?:interface|type)\\s+(${namePattern})\\b\\s*(?:(=)\\s*|(extends[^{;]*))?\\{`,
     'mu',
   )
   const match = declaration.exec(masked)
@@ -367,7 +412,7 @@ function readObjectType(source: string, masked: string, namePattern: string): Ob
     // an intersection, a generic. Distinguishing this from "not declared here"
     // is what lets the caller say which of the two it is.
     const anyDeclaration = new RegExp(
-      `^(?:export\\s+)?(?:interface|type)\\s+(${namePattern})\\b(\\s*<)?`,
+      `^(?:export\\s+)?(?:declare\\s+)?(?:interface|type)\\s+(${namePattern})\\b(\\s*<)?`,
       'mu',
     ).exec(masked)
     if (!anyDeclaration) return { kind: 'none' }
@@ -421,7 +466,7 @@ function readObjectType(source: string, masked: string, namePattern: string): Ob
   // same-named type inside a namespace or a function body is not a second
   // block and must not cost this one its type.
   const declarations = masked.match(
-    new RegExp(`^(?:export\\s+)?(?:interface|type)\\s+${typeName}\\b`, 'gmu'),
+    new RegExp(`^(?:export\\s+)?(?:declare\\s+)?(?:interface|type)\\s+${typeName}\\b`, 'gmu'),
   )
   if (declarations && declarations.length > 1) {
     return {
@@ -455,11 +500,22 @@ function countOccurrences(haystack: string, needle: string): number {
   return haystack.split(needle).length - 1
 }
 
-/** The half of an unreadable-declaration warning that does not name the Resource. */
-function describeUnreadable(read: { typeName: string; reason: string; fix?: string }): string {
+/**
+ * The half of an unreadable-declaration warning that does not name the
+ * Resource. `exportWouldFix` is the caller's knowledge that the declaration
+ * only missed the reference fallback for being unexported — the one-word fix,
+ * which the default advice would otherwise never mention.
+ */
+function describeUnreadable(
+  read: { typeName: string; reason: string; fix?: string },
+  exportWouldFix: boolean,
+): string {
+  const inline = `a single non-generic \`interface ${read.typeName} { … }\` or `
+    + `\`type ${read.typeName} = { … }\` with its members inline.`
   const fix = read.fix
-    ?? `Write ${read.typeName} as a single non-generic \`interface ${read.typeName} { … }\` or `
-      + `\`type ${read.typeName} = { … }\` with its members inline.`
+    ?? (exportWouldFix
+      ? `Export ${read.typeName} so data.gen.ts can reference the declaration itself, or write it as ${inline}`
+      : `Write ${read.typeName} as ${inline}`)
 
   return `declares ${read.typeName} in that file, but it ${read.reason} — omitted from `
     + `data.gen.ts. ${fix}`
@@ -618,8 +674,117 @@ function maskTemplateExpression(
   return source.length
 }
 
-function collectTypeImports(source: string, filePath: string): string[] {
-  const ast = parseSourceFile(source, filePath)
+/**
+ * Outcome of trying to emit a payload type as an import-type reference.
+ *
+ * The gate is *exportedness, proven from the AST*: a reference to an
+ * unexported name is a TS2694 that takes the whole artifact — every other
+ * resource's type with it — out of compilation, and the `export` keyword on
+ * the declaration line is not the test (`export type { X }` exports without
+ * one). `exportWouldFix` is true only when exporting the declaration is all
+ * that stands in the way — what lets the warning say "export it", the
+ * one-word fix, instead of "rewrite the shape".
+ */
+type TypeReferenceRead =
+  | { rawType: string }
+  | { rawType: null; exportWouldFix: boolean }
+
+interface TypeDeclarationInfo {
+  /** Name the declaration is exported under, or `null` when it is not exported. */
+  exportedName: string | null
+  /** Whether any declaration of this name takes type parameters. */
+  generic: boolean
+}
+
+/**
+ * Every top-level `interface`/`type` declaration in the file, keyed by local
+ * name. Local declarations only — an `export … from` re-export forwards a
+ * declaration this file does not hold, whose genericity this parse cannot
+ * see, so it stays out on purpose.
+ */
+function collectTopLevelTypeDeclarations(ast: File | null): Map<string, TypeDeclarationInfo> {
+  const declarations = new Map<string, TypeDeclarationInfo>()
+  if (!ast) return declarations
+
+  for (const node of ast.program.body) {
+    const exported = node.type === 'ExportNamedDeclaration'
+    const declaration = node.type === 'ExportNamedDeclaration' ? node.declaration : node
+    if (declaration?.type !== 'TSTypeAliasDeclaration' && declaration?.type !== 'TSInterfaceDeclaration') {
+      continue
+    }
+    // Declaration merging: one generic block makes the merged type generic,
+    // and one exported block exports it.
+    const info = declarations.get(declaration.id.name) ?? { exportedName: null, generic: false }
+    info.generic ||= declaration.typeParameters != null
+    if (exported) info.exportedName ??= declaration.id.name
+    declarations.set(declaration.id.name, info)
+  }
+
+  // Export lists (`export type { X }`, `export { X as Y }`) in a second pass,
+  // so a list above its declaration still finds it. Only identifier names are
+  // recorded — the dotted reference cannot spell `export { X as 'wire name' }`
+  // — and skipping the rest here is what keeps a plainly-named specifier of
+  // the same declaration in play, whichever order the list spells them in.
+  for (const node of ast.program.body) {
+    if (node.type !== 'ExportNamedDeclaration' || node.declaration || node.source) continue
+    for (const specifier of node.specifiers) {
+      if (specifier.type !== 'ExportSpecifier') continue
+      const info = declarations.get(specifier.local.name)
+      if (!info) continue
+      const exported = specifier.exported.type === 'Identifier'
+        ? specifier.exported.name
+        : specifier.exported.value
+      if (!isIdentifier(exported)) continue
+      info.exportedName ??= exported
+    }
+  }
+
+  return declarations
+}
+
+/**
+ * An `import('…').Name` reference to `typeName`'s own declaration, for a
+ * payload {@link readObjectType} declared unreadable.
+ *
+ * A generic stays refused even when exported: a reference must pass type
+ * arguments a payload reference has nowhere to get — and the existing warning
+ * already names the type parameters as the thing in the way.
+ */
+function readTypeReference(
+  declared: Map<string, TypeDeclarationInfo>,
+  typeName: string,
+  filePath: string,
+  outputDirectory: string,
+): TypeReferenceRead {
+  const info = declared.get(typeName)
+  if (!info || info.generic) return { rawType: null, exportWouldFix: false }
+
+  const specifier = importTypeSpecifier(filePath, outputDirectory)
+  if (specifier === null) return { rawType: null, exportWouldFix: false }
+  if (info.exportedName === null) return { rawType: null, exportWouldFix: true }
+
+  return { rawType: `import('${specifier}').${info.exportedName}` }
+}
+
+/**
+ * Module specifier for an import-type reference from `data.gen.ts` to
+ * `filePath`, or `null` for a file an extensionless specifier does not
+ * resolve to (`.mts`, `.mjs` — and `.js`/`.mjs` cannot declare types anyway).
+ * The `.d.ts` guard looks unreachable — discovery skips those files — but it
+ * sits here because this is the site that slices: stripping only `.ts` from
+ * one would emit a specifier ending in `.d`, silently.
+ * Extensionless because that is the shape this repo's generators *choose*
+ * (api-client.gen.ts's `'./data.gen'`); the `.js` suffixes seen in generated
+ * imports are author-written statements copied verbatim, not a convention.
+ */
+function importTypeSpecifier(filePath: string, outputDirectory: string): string | null {
+  if (!filePath.endsWith('.ts') || filePath.endsWith('.d.ts')) return null
+  // Only data.gen.ts's directory matters here; the basename rides along
+  // because relativeImportPath answers for a file, not a directory.
+  return relativeImportPath(join(outputDirectory, 'data.gen.ts'), filePath.slice(0, -'.ts'.length))
+}
+
+function collectTypeImports(ast: File | null, source: string): string[] {
   if (!ast) return []
 
   const imports: string[] = []

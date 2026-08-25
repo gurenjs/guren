@@ -30,11 +30,11 @@ function resourceFixture(className: string, fields: string): string {
  * `toArray()` annotated as `returnType` when one is given. For the cases where
  * the declaration is the subject and the class around it is only scaffolding.
  */
-function postResourceFile(declarations: string, returnType?: string): string {
+function postResourceFile(declarations: string, returnType?: string, className = 'PostResource'): string {
   return (
     "import { Resource } from '@guren/core'\n\n"
     + `${declarations}\n\n`
-    + 'export class PostResource extends Resource<Record<string, unknown>> {\n'
+    + `export class ${className} extends Resource<Record<string, unknown>> {\n`
     + `  toArray()${returnType ? `: ${returnType}` : ''} {\n`
     + '    return {} as never\n'
     + '  }\n'
@@ -372,111 +372,23 @@ describe('generateDataTypes reports Resource classes it could not extract', () =
     expect(warnings[0]).toContain('move the declaration into it')
   })
 
-  it('says so when the annotated type is here but is not an object type', async () => {
+  it('refuses an uncopyable type that is not exported, and says export fixes it', async () => {
     await writeWorkspaceFiles(appRoot, {
-      // An intersection has no body to copy into the namespace. The
-      // declaration is right here, so telling the author to write one would
-      // send them looking for something they can already see.
+      // A reference to an unexported name is a TS2694 that takes the whole
+      // artifact out of compilation — the failure mode dropping a definition
+      // exists to avoid. But here "export it" is the one-word fix, and the
+      // default rewrite-the-shape advice would never mention it.
       'app/Http/Resources/PostResource.ts': postResourceFile(
-        "import type { PostRecord } from '../../Models/Post.js'\n\n"
-        + 'export type PostPayload = PostRecord & { extra: string }',
+        'type PostPayload = { id: number } & { title: string }',
         'PostPayload',
       ),
     })
 
-    const { warnings } = await generateDataTypes({ appRoot, force: true })
-
-    expect(warnings).toHaveLength(1)
-    expect(warnings[0]).toContain('declares PostPayload in that file')
-    expect(warnings[0]).toContain('is not a plain object type')
-    expect(warnings[0]).not.toContain('move the declaration into it')
-  })
-
-  it('refuses a declaration whose extends clause holds an object type', async () => {
-    await writeWorkspaceFiles(appRoot, {
-      // `extends[^{;]*` stops at the generic argument's brace, so the type
-      // emitted was the argument — a payload the route never sends, with
-      // nothing said about it.
-      'app/Http/Resources/PostResource.ts': postResourceFile(
-        'export interface PostResourceData extends Record<string, { nested: true }> {\n'
-        + '  id: number\n}',
-        'PostResourceData',
-      ),
-    })
-
     const { definitions, warnings } = await generateDataTypes({ appRoot, force: true })
 
     expect(definitions.map((d) => d.rawType)).toEqual([null])
     expect(warnings).toHaveLength(1)
-    expect(warnings[0]).toContain('`extends` clause containing an object type')
-  })
-
-  it('refuses a type merged across two declarations', async () => {
-    await writeWorkspaceFiles(appRoot, {
-      'app/Http/Resources/PostResource.ts': postResourceFile(
-        'export interface PostResourceData {\n  id: number\n}\n\n'
-        + 'export interface PostResourceData {\n  title: string\n}',
-        'PostResourceData',
-      ),
-    })
-
-    const { definitions, warnings } = await generateDataTypes({ appRoot, force: true })
-
-    // Emitting the first block alone drops `title` from a payload that
-    // carries it — a type that compiles and is wrong.
-    expect(definitions.map((d) => d.rawType)).toEqual([null])
-    expect(warnings).toHaveLength(1)
-    expect(warnings[0]).toContain('declared more than once')
-  })
-
-  it('refuses an alias that composes its object body with another type', async () => {
-    await writeWorkspaceFiles(appRoot, {
-      // The shape the "write `type X = { … }`" advice sits next to, so
-      // getting it wrong silently is the likeliest way this misleads.
-      'app/Http/Resources/PostResource.ts': postResourceFile(
-        'export type PostResourceData = { id: number } & { title: string }',
-        'PostResourceData',
-      ),
-    })
-
-    const { definitions, warnings } = await generateDataTypes({ appRoot, force: true })
-
-    expect(definitions.map((d) => d.rawType)).toEqual([null])
-    expect(warnings).toHaveLength(1)
-    expect(warnings[0]).toContain('one operand of a larger type')
-  })
-
-  it('refuses an alias that uses its body as an operand', async () => {
-    await writeWorkspaceFiles(appRoot, {
-      // `{ … }[]` is an array of the body and `{ … }['k']` is one member of
-      // it. Emitting the body itself describes neither.
-      'app/Http/Resources/PostResource.ts': postResourceFile(
-        'export type PostResourceData = { id: number }[]',
-        'PostResourceData',
-      ),
-    })
-
-    const { definitions, warnings } = await generateDataTypes({ appRoot, force: true })
-
-    expect(definitions.map((d) => d.rawType)).toEqual([null])
-    expect(warnings).toHaveLength(1)
-    expect(warnings[0]).toContain('one operand of a larger type')
-  })
-
-  it('refuses an alias indexed into, rather than emitting what it indexes', async () => {
-    await writeWorkspaceFiles(appRoot, {
-      'app/Http/Resources/PostResource.ts': postResourceFile(
-        "export type PostResourceData = { payload: { id: number } }['payload']",
-        'PostResourceData',
-      ),
-    })
-
-    const { definitions, warnings } = await generateDataTypes({ appRoot, force: true })
-
-    // The outer body is the *container*; emitting it types the route with a
-    // wrapper the server never sends.
-    expect(definitions.map((d) => d.rawType)).toEqual([null])
-    expect(warnings[0]).toContain('one operand of a larger type')
+    expect(warnings[0]).toContain('Export PostPayload so data.gen.ts can reference the declaration')
   })
 
   it('tells the author to close an unterminated body instead of rewriting it', async () => {
@@ -564,6 +476,219 @@ describe('generateDataTypes reports Resource classes it could not extract', () =
     expect(warnings).toEqual([])
     expect(definitions.map((d) => d.dataName)).toEqual(['Post'])
   })
+})
+
+describe('generateDataTypes references exported types it cannot copy', () => {
+  let appRoot: string
+
+  beforeEach(async () => {
+    appRoot = await mkdtemp(join(tmpdir(), 'guren-cli-data-types-ref-'))
+  })
+
+  afterEach(async () => {
+    await rm(appRoot, { recursive: true, force: true })
+  })
+
+  const POST_REFERENCE = "import('../app/Http/Resources/PostResource').PostResourceData"
+
+  // One row per uncopyable-but-referencable shape: same fixture scaffolding,
+  // same two assertions, so the list of shapes reads as a list. Each shape
+  // used to be refused; the rationale for why a *copy* would be wrong rides
+  // with its row.
+  const REFERENCED_SHAPES: Array<[title: string, declarations: string]> = [
+    [
+      // `extends[^{;]*` stops at the generic argument's brace, so a copy would
+      // emit the argument — a payload the route never sends. The reference
+      // resolves the interface, heritage and all.
+      'a declaration whose extends clause holds an object type',
+      'export interface PostResourceData extends Record<string, { nested: true }> {\n'
+      + '  id: number\n}',
+    ],
+    [
+      // Copying either block alone drops the other's members — a type that
+      // compiles and is wrong. The reference resolves to the merged type.
+      'a type merged across two declarations',
+      'export interface PostResourceData {\n  id: number\n}\n\n'
+      + 'export interface PostResourceData {\n  title: string\n}',
+    ],
+    [
+      'an alias that composes its object body with another type',
+      'export type PostResourceData = { id: number } & { title: string }',
+    ],
+    [
+      // `{ … }[]` is an array of the body and `{ … }['k']` is one member of
+      // it. Copying the body describes neither; the reference names the alias.
+      'an alias that uses its body as an operand',
+      'export type PostResourceData = { id: number }[]',
+    ],
+    [
+      'an alias indexed into, rather than emitting what it indexes',
+      "export type PostResourceData = { payload: { id: number } }['payload']",
+    ],
+    [
+      // `declare` breaks a reader that expects `interface|type` right after
+      // the optional `export` — and a modifier only one of the two readers
+      // admits would split the verdict between them.
+      'a declare-modified alias',
+      'export declare type PostResourceData = { id: number } & { title: string }',
+    ],
+  ]
+
+  for (const [title, declarations] of REFERENCED_SHAPES) {
+    it(`references ${title}`, async () => {
+      await writeWorkspaceFiles(appRoot, {
+        'app/Http/Resources/PostResource.ts': postResourceFile(declarations, 'PostResourceData'),
+      })
+
+      const { definitions, warnings } = await generateDataTypes({ appRoot, force: true })
+
+      expect(warnings).toEqual([])
+      expect(definitions.map((d) => d.rawType)).toEqual([POST_REFERENCE])
+    })
+  }
+
+  it('prefers a plainly-named export specifier over an unspellable alias', async () => {
+    await writeWorkspaceFiles(appRoot, {
+      // The dotted reference cannot spell `'wire-name'`; the second specifier
+      // exports the same declaration under its own name and must win however
+      // the list orders them.
+      'app/Http/Resources/PostResource.ts': postResourceFile(
+        'type PostPayload = { id: number } & { title: string }\n\n'
+        + "export type { PostPayload as 'wire-name', PostPayload }",
+        'PostPayload',
+      ),
+    })
+
+    const { definitions, warnings } = await generateDataTypes({ appRoot, force: true })
+
+    expect(warnings).toEqual([])
+    expect(definitions.map((d) => d.rawType)).toEqual([
+      "import('../app/Http/Resources/PostResource').PostPayload",
+    ])
+  })
+
+  it(
+    'emits a reference tsc can compile and resolve',
+    async () => {
+      await writeWorkspaceFiles(appRoot, {
+        // Self-contained on purpose (no @guren/core import): tsc follows the
+        // reference into this file, so everything it imports must resolve.
+        'app/Http/Resources/PostResource.ts':
+          'declare class Resource<T> { constructor(resource: T) }\n\n'
+          + 'export type PostResourceData = { id: number } & { title: string }\n\n'
+          + 'export class PostResource extends Resource<Record<string, unknown>> {\n'
+          + '  toArray(): PostResourceData {\n'
+          + '    return {} as never\n'
+          + '  }\n'
+          + '}\n',
+      })
+
+      const { outputPath, definitions, warnings } = await generateDataTypes({ appRoot, force: true })
+
+      expect(warnings).toEqual([])
+      expect(definitions.map((d) => d.rawType)).toEqual([POST_REFERENCE])
+      expect(
+        checkTypes([outputPath], {
+          strict: true,
+          noEmit: true,
+          skipLibCheck: true,
+          target: 'ES2022',
+          types: [],
+        }),
+      ).toEqual([])
+    },
+    TSC_TIMEOUT,
+  )
+
+  it('references an exported annotated type it cannot copy', async () => {
+    await writeWorkspaceFiles(appRoot, {
+      // An intersection has no body to copy into the namespace — but the
+      // declaration is exported, so a reference to it cannot be wrong the way
+      // a guessed body could.
+      'app/Http/Resources/PostResource.ts': postResourceFile(
+        "import type { PostRecord } from '../../Models/Post.js'\n\n"
+        + 'export type PostPayload = PostRecord & { extra: string }',
+        'PostPayload',
+      ),
+    })
+
+    const { definitions, warnings } = await generateDataTypes({ appRoot, force: true })
+
+    expect(warnings).toEqual([])
+    expect(definitions.map((d) => d.rawType)).toEqual([
+      "import('../app/Http/Resources/PostResource').PostPayload",
+    ])
+    // The file's type imports must not ride along: the reference resolves
+    // inside the resource's own module, and a same-named import from another
+    // root would collide in the shared import block.
+    expect(definitions.map((d) => d.imports)).toEqual([[]])
+    expect(await readFile(join(appRoot, '.guren/data.gen.ts'), 'utf8')).not.toContain('PostRecord')
+  })
+
+  it('references the annotated type when it is an exported z.infer alias', async () => {
+    await writeWorkspaceFiles(appRoot, {
+      // The motivating case: one zod schema as the single source of truth for
+      // the runtime contract (`output:`) and the Resource's payload type.
+      'app/Http/Resources/TaskResource.ts':
+        "import { Resource } from '@guren/core'\n"
+        + "import { z } from 'zod'\n\n"
+        + 'export const TaskResourceSchema = z.object({ id: z.number(), title: z.string() })\n'
+        + 'export type TaskResourceData = z.infer<typeof TaskResourceSchema>\n\n'
+        + 'export class TaskResource extends Resource<Record<string, unknown>> {\n'
+        + '  toArray(): TaskResourceData {\n'
+        + '    return {} as never\n'
+        + '  }\n'
+        + '}\n',
+    })
+
+    const { definitions, warnings } = await generateDataTypes({ appRoot, force: true })
+
+    expect(warnings).toEqual([])
+    expect(definitions.map((d) => [d.dataName, d.rawType])).toEqual([
+      ['Task', "import('../app/Http/Resources/TaskResource').TaskResourceData"],
+    ])
+  })
+
+  it('references a module resource through its modules/ path', async () => {
+    await writeWorkspaceFiles(appRoot, {
+      'modules/billing/app/Http/Resources/InvoiceResource.ts': postResourceFile(
+        'export type InvoiceResourceData = { total: number } & { currency: string }',
+        'InvoiceResourceData',
+        'InvoiceResource',
+      ),
+    })
+
+    const { definitions, warnings } = await generateDataTypes({ appRoot, force: true })
+
+    expect(warnings).toEqual([])
+    expect(definitions.map((d) => [d.dataName, d.rawType])).toEqual([
+      [
+        'BillingInvoice',
+        "import('../modules/billing/app/Http/Resources/InvoiceResource').InvoiceResourceData",
+      ],
+    ])
+  })
+
+  it('references a type exported through an export list', async () => {
+    await writeWorkspaceFiles(appRoot, {
+      // `export type { X }` exports without an `export` keyword on the
+      // declaration line — which is why exportedness is read from the AST, not
+      // from the line the declaration sits on.
+      'app/Http/Resources/PostResource.ts': postResourceFile(
+        'type PostPayload = { id: number } & { title: string }\n\n'
+        + 'export type { PostPayload }',
+        'PostPayload',
+      ),
+    })
+
+    const { definitions, warnings } = await generateDataTypes({ appRoot, force: true })
+
+    expect(warnings).toEqual([])
+    expect(definitions.map((d) => d.rawType)).toEqual([
+      "import('../app/Http/Resources/PostResource').PostPayload",
+    ])
+  })
+
 })
 
 /**
@@ -730,14 +855,18 @@ describe('generateDataTypes reads a type body by brace depth', () => {
     expect(definitions.map((d) => d.rawType)).toEqual(['{\n  id: number\n}'])
   })
 
-  it('ignores a same-named alias that declares no object type', async () => {
+  it('references a same-named alias that declares no object type', async () => {
     // `type PostResourceData = string` has no body; walking forward to the
-    // next `{` would hand back the class declaration below it.
+    // next `{` would hand back the class declaration below it. Exported, the
+    // alias is referenced instead — the convention says this name *is* the
+    // payload, and the reference takes the author's declaration at its word.
     await writeResource('export type PostResourceData = string')
 
     const { definitions, warnings } = await generateDataTypes({ appRoot, force: true })
 
-    expect(definitions.map((d) => d.rawType)).toEqual([null])
-    expect(warnings).toHaveLength(1)
+    expect(warnings).toEqual([])
+    expect(definitions.map((d) => d.rawType)).toEqual([
+      "import('../app/Http/Resources/PostResource').PostResourceData",
+    ])
   })
 })
