@@ -517,7 +517,10 @@ export function createControllerModuleMock() {
     }
   }
 
-  class Resource<T = Record<string, unknown>> {
+  // Second parameter mirrors the real `Resource<T, TData>`: the mock is what a
+  // test file's `extends Resource<PostRecord, PostResourceData>` resolves to,
+  // so a mirror stuck on one parameter rejects the shape the scaffolds emit.
+  class Resource<T = Record<string, unknown>, TData extends Record<string, unknown> = Record<string, unknown>> {
     public resource: T
     public additionalData: Record<string, unknown> = {}
 
@@ -525,11 +528,11 @@ export function createControllerModuleMock() {
       this.resource = resource
     }
 
-    toArray(): Record<string, unknown> {
-      return { ...(this.resource as Record<string, unknown>) }
+    toArray(): TData {
+      return { ...(this.resource as Record<string, unknown>) } as TData
     }
 
-    toJSON(): Record<string, unknown> {
+    toJSON(): TData {
       return {
         ...this.toArray(),
         ...this.additionalData,

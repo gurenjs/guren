@@ -172,8 +172,10 @@ describe('makeFeature', () => {
         'utf8',
       )
       expect(resource).toContain('startsAt: string')
+      // Read without a cast: this renderer does not own the column, so the
+      // conversion has to take whatever the author's schema yields.
       expect(resource).toContain(
-        'startsAt: new Date(this.resource.startsAt as string | number | Date).toISOString()',
+        'startsAt: new Date(this.resource.startsAt).toISOString()',
       )
 
       const newPage = await readFile(join(workspace.dir, 'resources/js/pages/events/New.tsx'), 'utf8')
@@ -181,6 +183,39 @@ describe('makeFeature', () => {
       expect(newPage).toContain('value={form.data.startsAt.slice(0, 10)}')
       expect(newPage).toContain("setData('startsAt', event.target.value)")
       expect(newPage).toContain("startsAt: ''")
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  // Pins the emitted read per field type; the rule and its exceptions are
+  // stated once, at `resourceFieldExpression()`.
+  it('reads columns off the record without casting, json excepted', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-casts-')
+
+    try {
+      await makeFeature('Event', { fields: 'title:string,body:text?,meta:json,seats:number?' })
+
+      const resource = await readFile(
+        join(workspace.dir, 'app/Http/Resources/EventResource.ts'),
+        'utf8',
+      )
+
+      expect(resource).toContain("id: EventRecord['id']")
+      expect(resource).toContain('id: this.resource.id,')
+      expect(resource).toContain('title: this.resource.title,')
+      expect(resource).toContain('body: this.resource.body ?? null,')
+      expect(resource).toContain('seats: this.resource.seats ?? null,')
+      expect(resource).toContain('meta: this.resource.meta as Record<string, unknown>,')
+
+      // The #123 rule for the key, kept as a negative because a regression
+      // would land on a line the positives above do not name.
+      expect(resource).not.toContain('as number')
+
+      expect(resource).toContain(
+        'export class EventResource extends Resource<EventRecord, EventResourceData>',
+      )
+      expect(resource).not.toContain('override toJSON')
     } finally {
       await workspace.cleanup()
     }

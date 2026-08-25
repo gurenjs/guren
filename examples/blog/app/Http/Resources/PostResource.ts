@@ -18,7 +18,7 @@ export interface PostResourceData extends Record<string, unknown> {
   author?: PostAuthorSummary
 }
 
-export class PostResource extends Resource<PostRecord | PostWithAuthor> {
+export class PostResource extends Resource<PostRecord | PostWithAuthor, PostResourceData> {
   toArray(): PostResourceData {
     const post = this.resource
 
@@ -37,9 +37,5 @@ export class PostResource extends Resource<PostRecord | PostWithAuthor> {
         name: (post as PostWithAuthor).author?.name,
       })) as PostAuthorSummary | undefined,
     }
-  }
-
-  override toJSON(): PostResourceData {
-    return super.toJSON() as PostResourceData
   }
 }

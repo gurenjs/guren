@@ -197,12 +197,12 @@ export interface PostResourceData extends Record<string, unknown> {
   body: string
 }
 
-export class PostResource extends Resource<PostRecord> {
+export class PostResource extends Resource<PostRecord, PostResourceData> {
   toArray(): PostResourceData {
     return {
-      id: this.resource.id as number,
-      title: this.resource.title as string,
-      body: this.resource.body as string,
+      id: this.resource.id,
+      title: this.resource.title,
+      body: this.resource.body,
     }
   }
   // ...

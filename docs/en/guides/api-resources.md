@@ -340,12 +340,14 @@ export interface UserResourceData {
   name: string
 }
 
-export class UserResource extends Resource<User> {
+export class UserResource extends Resource<User, UserResourceData> {
   toArray(): UserResourceData {
     return { id: this.resource.id, name: this.resource.name }
   }
 }
 ```
+
+The second type argument is the payload type, and passing it makes `toJSON()` report the same type. It defaults to `Record<string, unknown>`, so declare it whenever the result of `toJSON()` is handed straight to a page or an API client.
 
 The interface must be declared in the resource's own file — one imported from a shared types module is not read. A Resource codegen cannot extract a type from is named in a `guren codegen` warning rather than dropped in silence, so a missing `Data.*` member always says why.
 

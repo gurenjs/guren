@@ -340,12 +340,14 @@ export interface UserResourceData {
   name: string
 }
 
-export class UserResource extends Resource<User> {
+export class UserResource extends Resource<User, UserResourceData> {
   toArray(): UserResourceData {
     return { id: this.resource.id, name: this.resource.name }
   }
 }
 ```
+
+2 つ目の型引数はペイロードの型で、これを渡すと `toJSON()` も同じ型を返します。省略した場合は `Record<string, unknown>` になるので、`toJSON()` の戻り値をそのままページや API クライアントに渡すなら指定してください。
 
 interface は Resource 自身のファイルで宣言してください。共通の型モジュールから import したものは読み取られません。型を抽出できなかった Resource は黙って捨てられるのではなく `guren codegen` の警告で名指しされるので、`Data.*` が生成されない理由は必ず表示されます。
 

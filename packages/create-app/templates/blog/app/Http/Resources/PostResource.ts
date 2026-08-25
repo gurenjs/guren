@@ -16,25 +16,21 @@ export interface PostResourceData extends Record<string, unknown> {
   author?: PostAuthorSummary
 }
 
-export class PostResource extends Resource<PostRecord | PostWithAuthor> {
+export class PostResource extends Resource<PostRecord | PostWithAuthor, PostResourceData> {
   toArray(): PostResourceData {
     const post = this.resource
 
     return {
-      id: post.id as number,
-      title: post.title as string,
-      excerpt: post.excerpt as string,
-      body: post.body as string,
-      authorId: post.authorId as number,
-      createdAt: new Date(post.createdAt as string | Date).toISOString(),
+      id: post.id,
+      title: post.title,
+      excerpt: post.excerpt,
+      body: post.body,
+      authorId: post.authorId,
+      createdAt: new Date(post.createdAt).toISOString(),
       author: this.whenLoaded('author', () => ({
         id: (post as PostWithAuthor).author?.id,
         name: (post as PostWithAuthor).author?.name,
       })) as PostAuthorSummary | undefined,
     }
-  }
-
-  override toJSON(): PostResourceData {
-    return super.toJSON() as PostResourceData
   }
 }

@@ -3,8 +3,28 @@ import type { ResourceData, ResourceClass } from './types'
 /**
  * Abstract base class for API resources.
  * Transforms model data into API response format.
+ *
+ * `TData` names the payload `toArray()` builds, so `toJSON()` reports it too:
+ * `class PostResource extends Resource<PostRecord, PostResourceData>`. Without
+ * it every subclass had to restate the payload in an override whose only body
+ * was `return super.toJSON() as PostResourceData` — a cast that says nothing a
+ * type parameter cannot, and one nothing checks against the `toArray()` right
+ * above it.
+ *
+ * It defaults to `ResourceData` so `Resource<T>` and those overrides keep
+ * compiling: an override narrowing the return type stays assignable to the
+ * base. The polymorphic alternative (`toJSON(): ReturnType<this['toArray']>`)
+ * needs no parameter at all but rejects every existing override, which is a
+ * breaking change for code the scaffolds have been emitting all along.
+ *
+ * `TData` is a claim about `toArray()`, not about `toJSON()`'s every key:
+ * `additional()` takes arbitrary `ResourceData` and is spread *after* the
+ * payload, so a key that collides overwrites a typed field while the return
+ * type still reads `TData`. That hole is not new — it is what the
+ * `super.toJSON() as PostResourceData` override asserted past — but the type
+ * parameter does not close it. `additional()` is for keys beside the payload.
  */
-export abstract class Resource<T> {
+export abstract class Resource<T, TData extends ResourceData = ResourceData> {
   /**
    * The underlying resource.
    */
@@ -23,12 +43,12 @@ export abstract class Resource<T> {
    * Transform the resource into an array/object.
    * Must be implemented by subclasses.
    */
-  abstract toArray(): ResourceData
+  abstract toArray(): TData
 
   /**
    * Transform the resource to JSON.
    */
-  toJSON(): ResourceData {
+  toJSON(): TData {
     return {
       ...this.toArray(),
       ...this.additionalData,

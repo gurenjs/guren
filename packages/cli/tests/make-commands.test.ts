@@ -373,7 +373,7 @@ describe('CLI make:* commands', () => {
     it('uses custom model name', async () => {
       const result = await makeResource('UserProfile', { model: 'Profile' })
       const content = fs.readFileSync(result, 'utf-8')
-      expect(content).toContain('Resource<ProfileRecord>')
+      expect(content).toContain('Resource<ProfileRecord, UserProfileResourceData>')
       expect(content).toContain("import type { ProfileRecord } from '../../Models/Profile.js'")
     })
 
