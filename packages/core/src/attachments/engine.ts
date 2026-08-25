@@ -1,6 +1,7 @@
 import { Model, type PlainObject } from '@guren/orm'
 import {
   getQueueDriver,
+  setQueueDriver,
   HttpException,
   ValidationException,
   type StorageDriver,
@@ -232,7 +233,7 @@ export class AttachmentEngine {
 
     await disk.put(path, Buffer.from(inspection.bytes), { contentType })
 
-    const variants = await this.buildVariants(spec, id, diskName, disk, inspection)
+    const variants = await this.buildVariants(spec, id, disk, inspection)
 
     const now = new Date()
     const row = await this.model.forceCreate({
@@ -253,25 +254,33 @@ export class AttachmentEngine {
       updatedAt: now,
     })
 
-    if (replaced.length > 0) {
-      await this.purgeRows(replaced)
-    }
-
     if (inspection.deferred) {
       try {
         await this.dispatchGeneration({
           attachmentId: id,
           image: spec.image,
           heic: spec.accepts?.heic,
-          variants: spec.variants,
+          // Snapshot, not a reference: an in-memory queue keeps the payload
+          // object alive, and a later mutation of the model declaration must
+          // not rewrite a job that is already in flight.
+          variants: spec.variants ? structuredClone(spec.variants) : undefined,
         })
       } catch (error) {
-        // The row exists but no job will ever finish it: settle the pending
-        // records so nothing looks in-flight forever, then surface the
-        // queue failure to the caller.
-        await this.settleDeferred(this.toRecord(row), 'failed')
+        // No job will ever finish this provisionally accepted upload — and
+        // on an image: 'require' collection the full decode never ran, so
+        // leaving the row would keep serving unvalidated bytes forever.
+        // Undo the accept (the replaced attachment below is still intact)
+        // and surface the queue failure to the caller.
+        await this.purgeRows([row as PlainObject])
         throw error
       }
+    }
+
+    // Purged only after a deferred attach is durably enqueued: replacing
+    // first would destroy the previous attachment even when the dispatch
+    // fails and the new one is rolled back.
+    if (replaced.length > 0) {
+      await this.purgeRows(replaced)
     }
 
     return this.toRecord(row)
@@ -549,11 +558,10 @@ export class AttachmentEngine {
    * declared" after a reload.
    */
   private async buildVariants(
-    spec: AttachmentCollectionSpec,
+    spec: Pick<AttachmentCollectionSpec, 'variants'>,
     id: string,
-    diskName: string,
     disk: StorageDriver,
-    inspection: ImageInspection,
+    inspection: Pick<ImageInspection, 'bytes' | 'decoded' | 'deferred'>,
   ): Promise<Record<string, AttachmentVariantRecord> | null> {
     const declared = Object.entries(spec.variants ?? {}) as Array<[string, VariantSpec]>
     if (declared.length === 0) return null
@@ -612,6 +620,14 @@ export class AttachmentEngine {
     if (!this.processor) {
       // A worker without an image processor cannot finish the job — settle
       // rather than retry forever; URLs keep falling back to the original.
+      // The one exception is a HEIC original accepted only because the
+      // collection promised conversion: the synchronous path answers 415
+      // for it on processor-less runtimes, so an image-required collection
+      // must not keep serving it once the promise turns out unkeepable.
+      if (payload.heic === 'convert' && payload.image === 'require' && row.contentType === 'image/heic') {
+        await this.purgeRows([raw])
+        return
+      }
       await this.settleDeferred(row, 'unavailable')
       return
     }
@@ -670,21 +686,10 @@ export class AttachmentEngine {
       updates.height = converted.height
     }
 
-    const variants = await this.buildVariants(
-      { kind: 'one', variants: payload.variants },
-      row.id,
-      row.disk,
-      disk,
-      {
-        width: (updates.width as number | null) ?? null,
-        height: (updates.height as number | null) ?? null,
-        placeholder: (updates.placeholder as string | null) ?? null,
-        contentType: null,
-        decoded: true,
-        bytes,
-        name: row.name,
-      },
-    )
+    const variants = await this.buildVariants({ variants: payload.variants }, row.id, disk, {
+      bytes,
+      decoded: true,
+    })
     if (variants) {
       updates.variants = variants
     }
@@ -715,21 +720,29 @@ export class AttachmentEngine {
 
   /** `GenerateVariantsJob.failed()`: settle `pending` records after the last retry. */
   async markDeferredFailed(attachmentId: string): Promise<void> {
-    const raw = (await this.model.where({ id: attachmentId }).first()) as PlainObject | null
-    if (!raw) return
-    await this.settleDeferred(this.toRecord(raw), 'failed')
+    await this.settleDeferred({ id: attachmentId }, 'failed')
   }
 
-  /** Flip every `pending` variant to a terminal status so nothing looks in-flight forever. */
+  /**
+   * Flip every `pending` variant to a terminal status so nothing looks
+   * in-flight forever. Works on a *fresh* read of the row, never a caller's
+   * snapshot: under at-least-once delivery a duplicate execution can hold a
+   * stale copy whose `pending` entries would otherwise clobber the variants
+   * a completed run already marked `ready`.
+   */
   private async settleDeferred(
-    row: AttachmentRecord,
+    row: Pick<AttachmentRecord, 'id'>,
     status: 'failed' | 'unavailable',
     options: { clearImageMetadata?: boolean } = {},
   ): Promise<void> {
+    const fresh = (await this.model.where({ id: row.id }).first()) as PlainObject | null
+    if (!fresh) return
+    const current = this.toRecord(fresh)
+
     const updates: PlainObject = { updatedAt: new Date() }
-    if (row.variants) {
-      let changed = false
-      const variants = { ...row.variants }
+    let changed = false
+    if (current.variants) {
+      const variants = { ...current.variants }
       for (const [name, entry] of Object.entries(variants)) {
         if (entry.status === 'pending') {
           variants[name] = { status }
@@ -744,7 +757,9 @@ export class AttachmentEngine {
       updates.width = null
       updates.height = null
       updates.placeholder = null
+      changed = true
     }
+    if (!changed) return
     await this.model.forceUpdate({ id: row.id }, updates)
   }
 
@@ -758,15 +773,18 @@ export class AttachmentEngine {
       throw new Error('Attachments queue dispatch is not wired. Call configureAttachments() before attaching.')
     }
     if (this.queue) {
-      const manager = this.queue()
-      if (!manager || typeof (manager as { driver?: unknown }).driver !== 'function') {
+      const manager = this.queue() as { driver?: () => unknown } | null | undefined
+      if (typeof manager?.driver !== 'function') {
         throw new Error(
           'configureAttachments({ queue }) must resolve to a QueueManager (an object with a driver() method).',
         )
       }
-      // Materializing the default driver also installs it as the global
-      // dispatch target, which is what Job.dispatch() sends through.
-      ;(manager as { driver: () => unknown }).driver()
+      // Job.dispatch() sends through the module-global driver, and
+      // QueueManager.driver() installs its default there only on *first*
+      // resolution — the cached branch does not. Reassert it on every
+      // dispatch, or a job could land on whichever driver another manager
+      // installed since, where no worker of ours ever pops.
+      setQueueDriver(manager.driver() as Parameters<typeof setQueueDriver>[0])
       return
     }
     if (!getQueueDriver()) {

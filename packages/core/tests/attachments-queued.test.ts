@@ -16,11 +16,11 @@ import {
   StorageManager,
   SyncQueueDriver,
   type ConfigureAttachmentsOptions,
-  type ImageProcessor,
   type Model,
 } from '../src/index'
 import { setActiveAttachmentEngine } from '../src/attachments/engine'
 import { GenerateVariantsJob } from '../src/attachments/generate-variants-job'
+import { fakeProcessor } from './attachments-processor'
 import { ATTACHMENTS_DDL, attachmentsTable } from './attachments-table'
 import { isoBmffHeader, PNG_1X1 } from './image-sniff.test'
 
@@ -36,35 +36,6 @@ class Post extends Attachable(defineModel(posts), {
   banner: hasOneAttached({ image: 'allow' }),
   draftPdf: hasOneAttached(),
 }) {}
-
-function fakeProcessor(overrides: Partial<ImageProcessor> = {}): ImageProcessor {
-  return {
-    async probe(input) {
-      if (input.length >= 24 && input[0] === 0x89 && input[1] === 0x50) {
-        const view = new DataView(input.buffer, input.byteOffset)
-        return {
-          width: view.getUint32(16),
-          height: view.getUint32(20),
-          format: 'png',
-          placeholder: 'data:image/png;base64,lqip',
-        }
-      }
-      if (input.length > 11 && String.fromCharCode(...input.slice(4, 8)) === 'ftyp') {
-        return { width: 5, height: 5, format: 'heic', placeholder: 'data:image/png;base64,lqip' }
-      }
-      throw Object.assign(new Error('decode failed'), { code: 'ERR_IMAGE_DECODE_FAILED' })
-    },
-    async process(_input, spec) {
-      return {
-        bytes: new Uint8Array([1, 2, 3, 4]),
-        width: spec.width ?? 7,
-        height: spec.height ?? 7,
-        format: spec.format ?? 'jpeg',
-      }
-    },
-    ...overrides,
-  }
-}
 
 describe('attachments queued generation', () => {
   let sqlite: Database
@@ -144,13 +115,15 @@ describe('attachments queued generation', () => {
     // Earlier tests installed a global driver; clear it so the fallback
     // genuinely has nothing to dispatch through.
     setQueueDriver(null as unknown as Parameters<typeof setQueueDriver>[0])
-    expect(() => Post.attach(1, 'cover', PNG_1X1, { queued: true })).toThrow('queued: true requires a queue')
+    await expect(Post.attach(1, 'cover', PNG_1X1, { queued: true })).rejects.toThrow(
+      'queued: true requires a queue',
+    )
     expect(await Attachment.where({ attachableId: '1' })).toEqual([])
   })
 
   test('should reject a queue option that is not a QueueManager', async () => {
     configure({ queue: () => ({ notADriver: true }) })
-    expect(() => Post.attach(1, 'cover', PNG_1X1, { queued: true })).toThrow('QueueManager')
+    await expect(Post.attach(1, 'cover', PNG_1X1, { queued: true })).rejects.toThrow('QueueManager')
   })
 
   test('should purge a lying image on a require collection when the deferred decode fails', async () => {
@@ -232,17 +205,6 @@ describe('attachments queued generation', () => {
     expect(await disk.exists(record.path)).toBe(true)
   })
 
-  test('should accept queued HEIC convert even when the request process has no processor', async () => {
-    configure({ processor: null })
-    const record = await Post.attach(1, 'photo', isoBmffHeader('heic'), { queued: true, name: 'shot.heic' })
-    expect(record.contentType).toBe('image/heic')
-
-    await runQueuedJob() // worker also has no processor here
-
-    const row = (await rowOf(record.id))!
-    expect(row.contentType).toBe('image/heic') // untouched, settled below
-  })
-
   test('should settle pending variants as unavailable on a worker without a processor', async () => {
     configure({ processor: null })
     const record = await Post.attach(1, 'cover', PNG_1X1, { queued: true, name: 'cover.png' })
@@ -283,7 +245,7 @@ describe('attachments queued generation', () => {
     expect(await Attachment.where({ attachableId: '1' })).toEqual([])
   })
 
-  test('should settle pending as failed when the dispatch itself fails', async () => {
+  test('should undo the provisional accept when the dispatch itself fails', async () => {
     const brokenDriver = {
       async push() {
         throw new Error('redis is down')
@@ -299,10 +261,61 @@ describe('attachments queued generation', () => {
     )
     expect(error.message).toContain('redis is down')
 
+    // No job will ever validate these bytes — the row and object are gone,
+    // not left serving an undecoded upload forever.
+    expect(await Attachment.where({ attachableId: '1' })).toEqual([])
+  })
+
+  test('should keep the previous hasOne attachment when a replacing dispatch fails', async () => {
+    const first = await Post.attach(1, 'cover', PNG_1X1, { queued: true, name: 'first.png' })
+    await runQueuedJob()
+
+    const brokenDriver = {
+      async push() {
+        throw new Error('redis is down')
+      },
+    }
+    configure({
+      queue: () =>
+        new QueueManager({ default: 'broken', drivers: { broken: () => brokenDriver as never } }),
+    })
+    const error = await Post.attach(1, 'cover', PNG_1X1, { queued: true, name: 'second.png' }).catch(
+      (e) => e,
+    )
+    expect(error.message).toContain('redis is down')
+
+    // The replace is rolled back: the first attachment is still there.
+    expect(await rowOf(first.id)).not.toBeNull()
+    expect(await storage.disk('media').exists(first.path)).toBe(true)
     const rows = (await Attachment.where({ attachableId: '1' })) as Array<Record<string, unknown>>
     expect(rows).toHaveLength(1)
-    const variants = rows[0]!.variants as Record<string, { status: string }>
-    expect(variants.thumb!.status).toBe('failed')
+  })
+
+  test('should purge a require HEIC convert on a worker that cannot convert at all', async () => {
+    configure({ processor: null })
+    const record = await Post.attach(1, 'photo', isoBmffHeader('heic'), { queued: true, name: 'shot.heic' })
+
+    await runQueuedJob()
+
+    // The sync path only accepted this because conversion was promised; a
+    // worker without any processor cannot keep it, and photo requires an
+    // image — so the HEIC must not stay live.
+    expect(await rowOf(record.id)).toBeNull()
+    expect(await storage.disk('media').exists(record.path)).toBe(false)
+  })
+
+  test('should not clobber ready variants when a stale settlement lands afterwards', async () => {
+    const record = await Post.attach(1, 'cover', PNG_1X1, { queued: true, name: 'cover.png' })
+    await runQueuedJob()
+
+    // A duplicate delivery's failure path settles on a fresh read: with no
+    // pending entries left, it must leave the completed variants alone.
+    const job = new GenerateVariantsJob()
+    await job.failed({ attachmentId: record.id }, new Error('duplicate delivery crashed'))
+
+    const row = (await rowOf(record.id))!
+    const variants = row.variants as Record<string, { status: string }>
+    expect(variants.thumb!.status).toBe('ready')
   })
 
   test('should clean up its own objects when the row vanished mid-job', async () => {
