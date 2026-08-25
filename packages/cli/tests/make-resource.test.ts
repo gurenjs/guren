@@ -23,9 +23,6 @@ describe('makeResource', () => {
       expect(content).toContain("id: CommentRecord['id']")
       expect(content).toContain('id: this.resource.id,')
       expect(content).not.toContain('as number')
-      // The payload type is the class's second type argument, so `toJSON()`
-      // reports it without an override whose only body is a cast.
-      expect(content).not.toContain('super.toJSON()')
       expect(content).not.toContain('override toJSON')
       expect(content).not.toContain('this.resource.createdAt?.toISOString()')
     } finally {

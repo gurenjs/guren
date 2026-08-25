@@ -233,19 +233,20 @@ function tsFieldType(field: FieldDefinition): string {
  * The record is `typeof table.$inferSelect`, so every column already carries
  * its own type and reading one needs no cast. Casting anyway is not merely
  * redundant: `as string` on a column the app later makes nullable swallows the
- * `null`, and the resource keeps compiling while it lies to the frontend. A
- * cast on the primary key is worse still, since it hard-codes the `number` an
- * app with a UUID key does not have.
+ * `null`, and the resource keeps compiling while it lies to the frontend.
  *
  * `json` is the one exception, in every dialect: `jsonb()`, `json()` and
  * `text({ mode: 'json' })` all infer `unknown` unless the schema pins a
- * `$type`, so the declared `Record<string, unknown>` has to be asserted.
+ * `$type`, so the declared `Record<string, unknown>` has to be asserted. The
+ * assertion is unconditional, so an author who pinned a `$type` of their own
+ * gets it flattened back to `Record<string, unknown>` in the payload.
  *
  * A `date` column serializes to the ISO string `tsFieldType` declares, so it is
- * converted rather than read. It goes through `new Date()` because the driver
- * decides what it hands back: Postgres `timestamp` yields a `Date`, but SQLite
- * — the default scaffold — stores dates in a `text` column and yields a string.
- * `new Date()` accepts all three, so the conversion needs no cast either.
+ * converted rather than read. It goes through `new Date()` rather than a cast
+ * because this renderer does not own the column: `guren add resource` writes
+ * the table (and gets a `Date` in all three dialects — see `ColumnMapping` in
+ * blueprints.ts), but `make:feature` leaves it to the author, whose `text`
+ * column yields a string. `new Date()` takes either.
  *
  * A nullable column keeps its `?? null`. `$inferSelect` alone makes it a no-op,
  * but the record the author widens later — a `WithRelations` union, a partial

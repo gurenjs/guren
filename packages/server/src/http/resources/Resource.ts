@@ -16,6 +16,13 @@ import type { ResourceData, ResourceClass } from './types'
  * base. The polymorphic alternative (`toJSON(): ReturnType<this['toArray']>`)
  * needs no parameter at all but rejects every existing override, which is a
  * breaking change for code the scaffolds have been emitting all along.
+ *
+ * `TData` is a claim about `toArray()`, not about `toJSON()`'s every key:
+ * `additional()` takes arbitrary `ResourceData` and is spread *after* the
+ * payload, so a key that collides overwrites a typed field while the return
+ * type still reads `TData`. That hole is not new — it is what the
+ * `super.toJSON() as PostResourceData` override asserted past — but the type
+ * parameter does not close it. `additional()` is for keys beside the payload.
  */
 export abstract class Resource<T, TData extends ResourceData = ResourceData> {
   /**
@@ -144,8 +151,8 @@ export function collect<T, R extends Resource<T>>(
 /**
  * Simple resource wrapper for objects without transformation.
  */
-export class JsonResource<T extends Record<string, unknown>> extends Resource<T, T> {
-  toArray(): T {
+export class JsonResource<T extends Record<string, unknown>> extends Resource<T> {
+  toArray(): ResourceData {
     return { ...this.resource }
   }
 }

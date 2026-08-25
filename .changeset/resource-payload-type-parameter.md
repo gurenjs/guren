@@ -22,4 +22,10 @@ whose only body was `return super.toJSON() as PostResourceData`, a cast nothing
 checked against the `toArray()` right above it.
 
 The parameter defaults to `ResourceData`, so `Resource<T>` and existing
-overrides keep compiling unchanged. `JsonResource<T>` now reports `T`.
+overrides keep compiling unchanged. `JsonResource<T>` deliberately stays on the
+default: narrowing it to `T` would reject a subclass whose `toArray()` returns a
+subset, which is a break no minor should carry.
+
+`TData` describes `toArray()`. `additional()` still takes arbitrary
+`ResourceData` and is spread after the payload, so a colliding key can still
+overwrite a typed field — use it for keys beside the payload, not inside it.

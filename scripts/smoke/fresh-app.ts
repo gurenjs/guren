@@ -2,6 +2,7 @@ import { mkdtemp, mkdir, readFile, readdir, realpath, rm } from 'node:fs/promise
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import process from 'node:process'
+import { FIELD_TYPES } from '../../packages/cli/src/fields'
 import { DATABASE_DRIVERS } from '../../packages/create-app/src/blueprints'
 import { fileExists } from '../../packages/create-app/src/utils'
 import { auditBlueprintTemplates, auditConsoleWiring, auditStarterTemplate } from './starter-template-audit'
@@ -29,6 +30,32 @@ type InstallMode = (typeof INSTALL_MODES)[number]
 
 const repoRoot = resolve(import.meta.dir, '../..')
 
+/**
+ * The `--fields` the resource blueprint is scaffolded with.
+ *
+ * Derived from `FIELD_TYPES` rather than written out, because this smoke is
+ * the only gate that *compiles* what `generateResource()` and the page
+ * builders emit per type — everything else about a field type fails at the
+ * type level (`tsFieldType`'s and `ColumnMapping`'s `Record<FieldType, …>`),
+ * but the rendered code is builder output that is otherwise only
+ * parse-checked. A hand-written list would keep passing, and keep claiming
+ * full coverage, the day a seventh type is added.
+ *
+ * `DEFAULT_FIELDS` already covers a plain read and a nullable one, so a bare
+ * `add resource` is not nothing — what it misses is number, boolean, date and
+ * json, and json is the only type drizzle leaves as `unknown`.
+ *
+ * Nullable *and* not, per type, because nullability is a second axis rather
+ * than a seventh type: a nullable `date` is a `== null` ternary and a nullable
+ * `json` a parenthesised assertion, neither of which their non-nullable form
+ * compiles. Twelve fields cost file size, not file count — `makeFeature()`
+ * writes the same seven files whatever it is given.
+ */
+const RESOURCE_FIELDS = FIELD_TYPES.flatMap((type) => [
+  `${type}Field:${type}`,
+  `nullable${type[0].toUpperCase()}${type.slice(1)}Field:${type}?`,
+]).join(',')
+
 // The feature blueprints a default-blueprint app gets, in the order the
 // scaffolders expect. Shared by the vendored and the npm paths so the
 // published-drift gate cannot fall behind the set this smoke otherwise claims
@@ -52,13 +79,7 @@ const DEFAULT_BLUEPRINT_FEATURES: readonly (readonly string[])[] = [
   ['auth'],
   ['admin'],
   ['oauth'],
-  // Every field type, and a nullable one, because this is the only gate that
-  // *compiles* what `generateResource()` and the page builders emit per type:
-  // `json` infers `unknown` off the schema, `date` arrives as a Date or a
-  // string depending on the driver, and a nullable column has to survive the
-  // round trip through a form. Bare `add resource` scaffolds two plain
-  // strings, which exercises none of them.
-  ['resource', 'posts', '--fields', 'title:string,body:text?,views:number,published:boolean,publishedAt:date,meta:json'],
+  ['resource', 'posts', '--fields', RESOURCE_FIELDS],
   ['queue'],
   ['mail', '--force'],
   ['events'],
