@@ -2,8 +2,9 @@
 
 **Author:** 7nohe
 **Date:** 2026-08-22 (revised 2026-08-25)
-**Status:** Draft (discussion opens with the PR; minimum two-week window per
-`contributing/rfc-process.md`)
+**Status:** Accepted (2026-08-25 — accepted by the project maintainer under
+author authority; the standard two-week discussion window was waived for this
+solo-maintained change, as with RFC 0012)
 
 > Additive **minor** to `@guren/server` and `@guren/core`: a `view()` method on
 > the existing `Controller`, a `viteAsset()` helper, and `./jsx-runtime` /
@@ -527,8 +528,7 @@ remains the right choice for interactive routes (the motivating app keeps its
 ## Resolved Questions
 
 Settled by maintainer decision on 2026-08-25, grounded in the measurements
-above. The discussion window can still surface objections; these record the
-current commitments and their reasoning.
+above.
 
 1. **Hydrating vs. server-only JSX convention** — directory split
    (`app/View/`, forced independently by codegen's `pagesDir` claim) plus a
