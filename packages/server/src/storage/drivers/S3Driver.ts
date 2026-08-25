@@ -326,46 +326,64 @@ export class S3Driver implements StorageDriver {
     return metadata
   }
 
-  async files(directory: string): Promise<string[]> {
+  /**
+   * Run ListObjectsV2 to exhaustion, following `NextContinuationToken` —
+   * a single request returns at most 1000 entries, so a one-page read
+   * silently truncates larger listings.
+   */
+  private async listAll(input: Record<string, unknown>): Promise<{
+    contents: Array<{ Key?: string }>
+    commonPrefixes: Array<{ Prefix?: string }>
+  }> {
     const client = await this.getClient()
     const { ListObjectsV2Command } = await importAwsModule('@aws-sdk/client-s3') as {
       ListObjectsV2Command: new (input: unknown) => unknown
     }
 
+    const contents: Array<{ Key?: string }> = []
+    const commonPrefixes: Array<{ Prefix?: string }> = []
+    let continuationToken: string | undefined
+
+    do {
+      const command = new ListObjectsV2Command(
+        continuationToken ? { ...input, ContinuationToken: continuationToken } : input
+      )
+      const response = await client.send(command) as {
+        Contents?: Array<{ Key?: string }>
+        CommonPrefixes?: Array<{ Prefix?: string }>
+        IsTruncated?: boolean
+        NextContinuationToken?: string
+      }
+      contents.push(...(response.Contents ?? []))
+      commonPrefixes.push(...(response.CommonPrefixes ?? []))
+      continuationToken = response.IsTruncated ? response.NextContinuationToken : undefined
+    } while (continuationToken)
+
+    return { contents, commonPrefixes }
+  }
+
+  async files(directory: string): Promise<string[]> {
     const prefix = this.prefixKey(directory)
-    const command = new ListObjectsV2Command({
+    const { contents } = await this.listAll({
       Bucket: this.bucket,
       Prefix: prefix ? `${prefix}/` : '',
       Delimiter: '/',
     })
 
-    const response = await client.send(command) as {
-      Contents?: Array<{ Key?: string }>
-    }
-
-    return (response.Contents ?? [])
+    return contents
       .map((item) => item.Key?.replace(this.prefix ? `${this.prefix}/` : '', '') ?? '')
       .filter((key) => key && !key.endsWith('/'))
   }
 
   async directories(directory: string): Promise<string[]> {
-    const client = await this.getClient()
-    const { ListObjectsV2Command } = await importAwsModule('@aws-sdk/client-s3') as {
-      ListObjectsV2Command: new (input: unknown) => unknown
-    }
-
     const prefix = this.prefixKey(directory)
-    const command = new ListObjectsV2Command({
+    const { commonPrefixes } = await this.listAll({
       Bucket: this.bucket,
       Prefix: prefix ? `${prefix}/` : '',
       Delimiter: '/',
     })
 
-    const response = await client.send(command) as {
-      CommonPrefixes?: Array<{ Prefix?: string }>
-    }
-
-    return (response.CommonPrefixes ?? [])
+    return commonPrefixes
       .map((item) =>
         item.Prefix?.replace(this.prefix ? `${this.prefix}/` : '', '').replace(/\/$/, '') ?? ''
       )
@@ -373,22 +391,13 @@ export class S3Driver implements StorageDriver {
   }
 
   async allFiles(directory: string): Promise<string[]> {
-    const client = await this.getClient()
-    const { ListObjectsV2Command } = await importAwsModule('@aws-sdk/client-s3') as {
-      ListObjectsV2Command: new (input: unknown) => unknown
-    }
-
     const prefix = this.prefixKey(directory)
-    const command = new ListObjectsV2Command({
+    const { contents } = await this.listAll({
       Bucket: this.bucket,
       Prefix: prefix ? `${prefix}/` : '',
     })
 
-    const response = await client.send(command) as {
-      Contents?: Array<{ Key?: string }>
-    }
-
-    return (response.Contents ?? [])
+    return contents
       .map((item) => item.Key?.replace(this.prefix ? `${this.prefix}/` : '', '') ?? '')
       .filter((key) => key && !key.endsWith('/'))
   }
