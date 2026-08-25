@@ -94,3 +94,24 @@ export type { DatabaseApiTokenStoreOptions } from './api-token-store.js'
 export { DatabaseSessionStore } from './session-store.js'
 export type { DatabaseSessionStoreOptions } from './session-store.js'
 export { DatabaseOAuthStateStore } from './oauth-state-store.js'
+// Attachments (RFC 0013) — core-native exports; no bare `Attachment` (it
+// would collide with the mail/notification/Slack attachment vocabulary).
+export { Attachable, configureAttachments, hasManyAttached, hasOneAttached } from './attachments/index.js'
+export type {
+  AttachableRecordId,
+  AttachableStatic,
+  AttachOptions,
+  AttachedCollectionOptions,
+  AttachmentCollectionSpec,
+  AttachmentData,
+  AttachmentRecord,
+  AttachmentSource,
+  AttachmentsDeclaration,
+  AttachmentVariantRecord,
+  ConfigureAttachmentsOptions,
+  ConfiguredAttachments,
+  HeicPolicy,
+  ImagePolicy,
+  ImageProcessor,
+  VariantSpec,
+} from './attachments/index.js'

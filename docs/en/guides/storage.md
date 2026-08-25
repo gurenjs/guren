@@ -341,6 +341,12 @@ Two things to know about this shape:
 
 ## File Uploads
 
+> For uploads that belong to a model — a post's cover image, a user's
+> avatar — the [attachments layer](./attachments.md) handles naming,
+> storage, image validation, thumbnail variants, and cleanup in one call
+> (`Post.attach(post.id, 'cover', file)`). The recipes below are the
+> lower-level, path-oriented storage API.
+
 ### Handling Form Uploads
 
 ```ts
