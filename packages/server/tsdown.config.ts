@@ -10,6 +10,8 @@ export default defineConfig({
   ...tsdownPreset,
   entry: [
     'src/index.ts',
+    'src/jsx-runtime.ts',
+    'src/jsx-dev-runtime.ts',
     'src/auth/index.ts',
     'src/authorization/index.ts',
     'src/broadcasting/index.ts',

@@ -1,7 +1,6 @@
 import { serveStatic } from 'hono/bun'
 import { dirname, resolve, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { readFileSync } from 'node:fs'
 import type { Application } from './Application'
 import {
   createStaticRewrite,
@@ -16,6 +15,7 @@ import { parseImportMap } from '../support/import-map'
 import { DEFAULT_DEV_STYLES_ENTRY } from '../support/inertia-defaults'
 import { trimTrailingSlashes } from '../support/trim-slashes'
 import { hash } from '../encryption/Hash'
+import { loadViteManifest, getManifestFile, getManifestCss, type ViteManifest } from './vite-manifest'
 
 export interface InertiaAssetsOptions extends DevAssetsOptions {
   /** Default stylesheet entry embedded into Inertia responses. */
@@ -370,52 +370,6 @@ function normalizeDevServerUrl(value: string): string {
   return stripped.length > 0 ? stripped : '/'
 }
 
-type ViteManifestEntryObject = {
-  file: string
-  css?: string[]
-  assets?: string[]
-  imports?: string[]
-  dynamicImports?: string[]
-}
-
-type ViteManifestValue = ViteManifestEntryObject | string[]
-
-type ViteManifest = Record<string, ViteManifestValue> & { __path__?: string; __raw__?: string }
-
-function loadViteManifest(candidatePaths: string[], label: 'client' | 'SSR'): ViteManifest | undefined {
-  const command = label === 'SSR' ? 'bunx vite build --ssr' : 'bunx vite build'
-
-  for (const manifestPath of candidatePaths) {
-    try {
-      const raw = readFileSync(manifestPath, 'utf8')
-      const manifest = JSON.parse(raw) as ViteManifest
-      Object.defineProperty(manifest, '__path__', {
-        value: manifestPath,
-        enumerable: false,
-      })
-      Object.defineProperty(manifest, '__raw__', {
-        value: raw,
-        enumerable: false,
-      })
-      return manifest
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-        console.warn(`Unable to load ${label} Vite manifest at ${manifestPath}.`, error)
-        return undefined
-      }
-    }
-  }
-
-  if (candidatePaths.length) {
-    console.warn(
-      `Unable to load ${label} Vite manifest. Checked paths:\n${candidatePaths
-        .map((p) => `  - ${p}`)
-        .join('\n')}\nRun \`${command}\` before starting in production.`,
-    )
-  }
-
-  return undefined
-}
 
 function deriveAssetRoot(manifest: ViteManifest | undefined, fallback: string): string | undefined {
   if (!manifest?.__path__) {
@@ -423,38 +377,6 @@ function deriveAssetRoot(manifest: ViteManifest | undefined, fallback: string): 
   }
 
   return resolve(dirname(manifest.__path__), '..')
-}
-
-function getManifestFile(
-  entry: ViteManifestValue | string | undefined,
-): string | undefined {
-  if (!entry) {
-    return undefined
-  }
-
-  if (Array.isArray(entry)) {
-    return entry[0]
-  }
-
-  if (typeof entry === 'string') {
-    return entry
-  }
-
-  if ('file' in entry && typeof entry.file === 'string') {
-    return entry.file
-  }
-
-  return undefined
-}
-
-function getManifestCss(
-  entry: ViteManifestValue | string | undefined,
-): string[] | undefined {
-  if (!entry || Array.isArray(entry) || typeof entry === 'string') {
-    return undefined
-  }
-
-  return entry.css
 }
 
 function resolveResourcesDir(options: InertiaAssetsOptions, moduleDir?: string): string | undefined {

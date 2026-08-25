@@ -6,6 +6,8 @@ export default defineConfig({
   ...tsdownPreset,
   entry: [
     'src/index.ts',
+    'src/jsx-runtime.ts',
+    'src/jsx-dev-runtime.ts',
     'src/bin.ts',
     'src/runtime.ts',
     'src/vite.ts',

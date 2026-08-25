@@ -224,6 +224,7 @@ export const CONTROLLER_MEMBER_KINDS: Readonly<Record<string, ControllerMemberKi
   authorize: 'non-body',
   can: 'non-body',
   inertia: 'non-body',
+  view: 'non-body',
   locale: 'non-body',
   t: 'non-body',
   tc: 'non-body',
