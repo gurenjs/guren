@@ -37,6 +37,7 @@ import { checkRouteContracts } from './route-contract-check'
  */
 const SOURCE_FILE_PATTERN = /\.(ts|tsx|mts|js|jsx|mjs)$/
 import { checkSchemaTimestamps } from './schema-check'
+import { checkAttachmentsConfig, discoverAttachmentsConfigFiles } from './attachments-check'
 import { parseSchemaTables, schemaPathFor, type SchemaTable } from './schema-parser'
 import { ParseCache } from './parse-cache'
 import { extractInertiaPageRefs, resolveInertiaPageFile, expectedInertiaPagePath } from './inertia-pages'
@@ -308,6 +309,19 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     // touched.
     const schemaTimestampResults = checkSchemaTimestamps(schemaTables)
     checks.push(...schemaTimestampResults)
+
+    // 8.5. Check configureAttachments() binds a table the schema declares
+    // (RFC 0013). The layer takes the table untyped (session-store
+    // convention), so a renamed schema export only fails at runtime on the
+    // first attach. Not changed-filtered, like check 8: the failure this
+    // catches originates in db/schema.ts, not in the file holding the config
+    // call, so filtering by the config file would hide exactly the schema
+    // rename this exists for. The string pre-filter inside the check keeps
+    // the full scan cheap.
+    const attachmentsFiles = await discoverAttachmentsConfigFiles(cwd)
+    checks.push(
+      ...(await checkAttachmentsConfig({ cwd, cache, files: attachmentsFiles, schemaTables })),
+    )
   }
 
   // 9. Doc-link checks (docs/ frontmatter + @docs tags, RFC 0004). Runs in

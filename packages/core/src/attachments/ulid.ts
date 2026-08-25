@@ -13,6 +13,20 @@
 
 const ENCODING = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'
 
+/**
+ * The millisecond timestamp encoded in a ULID's first 10 characters, or
+ * `null` for anything that is not a 26-character Crockford string. The
+ * prune sweep uses it to leave recently-minted prefixes alone.
+ */
+export function ulidTime(id: string): number | null {
+  if (!/^[0-9A-HJKMNP-TV-Z]{26}$/.test(id)) return null
+  let time = 0
+  for (let i = 0; i < 10; i++) {
+    time = time * 32 + ENCODING.indexOf(id[i]!)
+  }
+  return time
+}
+
 let lastTime = -1
 // The 16 random characters as base32 digit values (0-31 each).
 const lastRandom = new Uint8Array(16)

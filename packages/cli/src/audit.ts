@@ -261,7 +261,7 @@ function accessorCallPattern(names: readonly string[]): string {
 const VALIDATE_BODY_PATTERN = new RegExp(accessorCallPattern(controllerMembers('body-validation')))
 
 /** Reading the body without going through the controller's helpers at all. */
-const RAW_BODY_READ_PATTERN = /\b(req|request)\s*\.\s*(json|formData|parseBody|text|body|raw)\b|\bparseRequestPayload\s*\(/
+const RAW_BODY_READ_PATTERN = /\b(req|request)\s*\.\s*(json|formData|parseBody|text|body|raw|arrayBuffer|blob)\b|\bparseRequestPayload\s*\(/
 
 /**
  * `this.` is required on the controller-accessor half: the members are
@@ -270,6 +270,51 @@ const RAW_BODY_READ_PATTERN = /\b(req|request)\s*\.\s*(json|formData|parseBody|t
 const BODY_ACCESS_PATTERN = new RegExp(
   `${RAW_BODY_READ_PATTERN.source}|\\bthis\\s*\\.\\s*${accessorCallPattern(controllerMembers('body-payload'))}`,
 )
+
+/**
+ * The `body-payload` members that read upload bytes rather than fields. Named
+ * once because the two patterns below partition `body-payload` by it: a member
+ * spelled into only one of them would be a body read that counts as neither.
+ * It stays a hand list rather than a `ControllerMemberKind` of its own —
+ * uploads *are* body payload, and moving them to another kind would change
+ * what BODY_ACCESS_PATTERN sees.
+ */
+const FILE_UPLOAD_MEMBERS: readonly string[] = ['file', 'files']
+
+/**
+ * The body reads that are *only* file uploads. Subtracting them from
+ * BODY_ACCESS_PATTERN is what lets the attach() rule below recognize an
+ * action whose whole body consumption is upload bytes.
+ */
+const FILE_READ_PATTERN = new RegExp(`\\bthis\\s*\\.\\s*${accessorCallPattern(FILE_UPLOAD_MEMBERS)}`)
+
+/** Every body read that is not a file upload (nor validation/incidental). */
+const NON_FILE_BODY_ACCESS_PATTERN = new RegExp(
+  `${RAW_BODY_READ_PATTERN.source}|\\bthis\\s*\\.\\s*${accessorCallPattern(
+    controllerMembers('body-payload').filter((name) => !FILE_UPLOAD_MEMBERS.includes(name)),
+  )}`,
+)
+
+/**
+ * A typed attachment write: `Post.attach(...)` (RFC 0013). The receiver must
+ * be PascalCase — model classes are, and requiring it keeps a stray
+ * `emitter.attach(handler)` from counting as upload validation. The attach
+ * pipeline validates per the model's declaration (byte cap, header
+ * dimensions, full decode, HEIC policy), which is why an action whose only
+ * body reads are file()/files() feeding it needs no validateBody() to be a
+ * clean pass.
+ */
+const MODEL_ATTACH_PATTERN = /\b[A-Z][A-Za-z0-9_]*\s*\.\s*attach\s*(?:<[^()]*>)?\s*\(/
+
+/**
+ * A raw storage write in the same method disqualifies the attach-aware pass:
+ * this rule proves co-occurrence, not data flow, so an action that reads an
+ * upload, attach()es something, and *also* put()s bytes may be storing the
+ * unvalidated upload through the raw path. Erring toward the existing fail
+ * costs a validateBody() nudge; erring toward pass costs an unvalidated
+ * upload — the audit takes the first.
+ */
+const STORAGE_WRITE_PATTERN = /\.\s*put(?:File)?\s*\(/
 
 const BODY_INCIDENTAL_PATTERN = new RegExp(
   `\\bthis\\s*\\.\\s*${accessorCallPattern(controllerMembers('body-incidental'))}`,
@@ -679,6 +724,25 @@ async function auditRoutes(
             hasControllerValidation
               ? `Controller validates body in ${controllerKey}.`
               : 'Body schema validated at route level.',
+          ),
+        )
+      } else if (
+        methodInfo &&
+        readsBody &&
+        !NON_FILE_BODY_ACCESS_PATTERN.test(methodInfo.body) &&
+        FILE_READ_PATTERN.test(methodInfo.body) &&
+        MODEL_ATTACH_PATTERN.test(methodInfo.body) &&
+        !STORAGE_WRITE_PATTERN.test(methodInfo.body)
+      ) {
+        // Uploads handed to Model.attach() are validated by the attachment
+        // declaration's pipeline; with no other body reads there is nothing
+        // left for validateBody() to check.
+        findings.push(
+          finding(
+            `validation:${routeLabel}`,
+            routeLabel,
+            'pass',
+            `${controllerKey} reads only file uploads and hands them to a typed attach(), whose declaration-driven pipeline validates them.`,
           ),
         )
       } else if (methodInfo && !readsBody) {

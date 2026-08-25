@@ -291,6 +291,35 @@ async destroy() {
 - モデルの delete フックはパージの仕組みとして*使いません*。フックは一部の削除経路でしか発火せず、受け取るのも行ではなく where 句です。destroy アクションで `purgeAttachments()` を明示的に呼んでください。
 - `SoftDeletes` と併用する場合、ソフトデリートはアタッチメントをそのまま残します(restore が機能する必要があるため)。`forceDelete` の経路で `purgeAttachments()` を呼んでください。
 
+### 孤児の掃除: `attachments:prune`
+
+契約は「明示的削除+スイープ」です。明示的なパージをすり抜けたもの、つまり `purgeAttachments()` を呼ばない経路で削除されたレコードの残骸や、クラッシュ・競合したジョブが残したストレージプレフィックスは、`AttachmentsPruneCommand` スイーパーが回収します。コンソールカーネルに登録してください:
+
+```ts
+// src/console.ts
+import { AttachmentsPruneCommand } from '@guren/core'
+kernel.register(AttachmentsPruneCommand)
+```
+
+```bash
+bunx guren attachments:prune             # レコードが存在しない行を削除
+bunx guren attachments:prune --objects   # どの行からも参照されない attachments/ プレフィックスも削除
+bunx guren attachments:prune --dry-run   # 削除せずに報告のみ
+```
+
+孤児行は、各 `attachableType` を `Model.morphMap` で解決して所有レコードを問い合わせることで検出します。アタッチメントを宣言するモデルはすべて登録してください:
+
+```ts
+Model.morphMap = { Post, User }
+```
+
+スイープは肯定的な証拠があるときだけ削除します。morph map にない型、失敗した存在確認クエリ、リストできないディスクは報告して手を付けません。障害を大量削除に変えてはならないからです。スケジュールジョブや CI から、アプリに合った頻度で実行してください。
+
+### エージェントコマンドが検証すること
+
+- `bunx guren check` は、`configureAttachments()` が `db/schema.ts` の実際にエクスポートされたテーブルを束縛していることを検証します。レイヤーはテーブルを型なしで受け取るため、スキーマエクスポートのリネームは本来、最初の attach 時の実行時エラーでしか発覚しません。
+- `bunx guren audit` は、型付きの `attach()` に渡されるアップロードを検証済みとして扱います(宣言駆動のパイプラインが検証そのものです)。他のボディ入力を読むアクションには引き続き `validateBody()` が必要です。
+
 ## テスト
 
 `memory` ストレージドライバを使い、テスト用データベースに対して設定します:
