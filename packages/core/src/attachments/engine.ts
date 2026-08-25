@@ -1,14 +1,22 @@
 import { Model, type PlainObject } from '@guren/orm'
-import { HttpException, ValidationException, type StorageDriver, type StorageManager } from '@guren/server'
+import {
+  getQueueDriver,
+  setQueueDriver,
+  HttpException,
+  ValidationException,
+  type StorageDriver,
+  type StorageManager,
+} from '@guren/server'
 import { decodeJsonColumn, toDate } from '../store-utils.js'
 import { resolveDefaultImageProcessor } from './bun-image-processor.js'
-import type { AttachmentCollectionSpec, AttachmentsDeclaration } from './declaration.js'
+import type { AttachmentCollectionSpec, AttachmentsDeclaration, HeicPolicy } from './declaration.js'
 import { sniffImage } from './image-sniff.js'
 import type {
   AttachmentData,
   AttachmentRecord,
   AttachmentSource,
   AttachmentVariantRecord,
+  ImagePolicy,
   ImageProcessor,
   VariantSpec,
 } from './types.js'
@@ -19,6 +27,15 @@ export interface AttachOptions {
   name?: string
   /** Disk to store on, overriding the configured default. */
   disk?: string
+  /**
+   * Defer the full decode and variant generation to the queue: the request
+   * path runs only the synchronous gates (byte cap, header dimensions, HEIC
+   * signature), stores the original, seeds declared variants as `pending`,
+   * and dispatches `GenerateVariantsJob`. Until the worker runs, variant
+   * URLs fall back to the original. Requires a queue — either
+   * `configureAttachments({ queue })` or an already-booted QueueManager.
+   */
+  queued?: boolean
 }
 
 export interface ConfigureAttachmentsOptions {
@@ -64,9 +81,16 @@ export interface ConfigureAttachmentsOptions {
    */
   processor?: ImageProcessor | null
   /**
-   * The app's queue manager, resolved lazily. Reserved for queued variant
-   * generation (a follow-up release); accepted now so config written today
-   * keeps working then.
+   * The app's QueueManager, resolved lazily (e.g.
+   * `() => container.make('queue')`). Enables `attach(..., { queued: true })`:
+   * the engine materializes the manager's default driver and dispatches
+   * `GenerateVariantsJob` on it. Materializing the default driver installs
+   * it as the process-wide dispatch target (`QueueManager` semantics), so
+   * pass the same manager the rest of the app dispatches through — a
+   * second manager here would redirect every later `Job.dispatch()` in the
+   * process. Without this option, `queued: true` falls back to the
+   * globally configured queue driver and throws a clear error when there
+   * is none.
    */
   queue?: () => unknown
   /**
@@ -75,6 +99,19 @@ export interface ConfigureAttachmentsOptions {
    * @default 300_000 (5 minutes)
    */
   urlExpiresIn?: number
+}
+
+/**
+ * What `GenerateVariantsJob` needs to finish a deferred attach. The specs
+ * are snapshotted at dispatch time (they come from the model declaration,
+ * never the call site), so an in-flight job is unaffected by later
+ * declaration edits and the worker needs no model registry to resolve them.
+ */
+export interface GenerateVariantsPayload {
+  attachmentId: string
+  image?: ImagePolicy
+  heic?: HeicPolicy
+  variants?: Record<string, VariantSpec>
 }
 
 const DEFAULT_MAX_PIXELS = 52_000_000
@@ -119,6 +156,8 @@ interface ImageInspection {
   contentType: string | null
   /** Whether a full decode succeeded (variants can be generated). */
   decoded: boolean
+  /** Whether decode and variant generation were deferred to the queue. */
+  deferred?: boolean
   bytes: Uint8Array
   name: string
 }
@@ -132,6 +171,8 @@ export class AttachmentEngine {
   private readonly maxImageBytes: number
   private readonly processor: ImageProcessor | null
   private readonly urlExpiresIn: number
+  private readonly queue?: () => unknown
+  private dispatchJob: ((payload: GenerateVariantsPayload) => Promise<unknown>) | null = null
 
   constructor(options: ConfigureAttachmentsOptions) {
     const table = options.table
@@ -148,6 +189,12 @@ export class AttachmentEngine {
     this.processor =
       options.processor !== undefined ? options.processor : resolveDefaultImageProcessor(this.maxPixels)
     this.urlExpiresIn = options.urlExpiresIn ?? DEFAULT_URL_EXPIRES_IN
+    this.queue = options.queue
+  }
+
+  /** Wired by `configureAttachments()`; kept out of the constructor so this module never imports the job (which imports this module). */
+  setJobDispatcher(dispatch: (payload: GenerateVariantsPayload) => Promise<unknown>): void {
+    this.dispatchJob = dispatch
   }
 
   async attach(
@@ -161,7 +208,14 @@ export class AttachmentEngine {
     const spec = this.specFor(model, declaration, collection)
     const normalized = await normalizeSource(source, options.name)
 
-    const inspection = await this.inspectImage(spec, collection, normalized)
+    const queued = options.queued === true
+    if (queued) {
+      // Fail before any byte is written: a missing queue must not leave a
+      // stored original whose variants nobody will ever generate.
+      this.ensureQueueDispatchable()
+    }
+
+    const inspection = await this.inspectImage(spec, collection, normalized, queued)
 
     const id = ulid()
     const name = inspection.name
@@ -179,7 +233,7 @@ export class AttachmentEngine {
 
     await disk.put(path, Buffer.from(inspection.bytes), { contentType })
 
-    const variants = await this.buildVariants(spec, id, diskName, disk, inspection)
+    const variants = await this.buildVariants(spec, id, disk, inspection)
 
     const now = new Date()
     const row = await this.model.forceCreate({
@@ -200,6 +254,31 @@ export class AttachmentEngine {
       updatedAt: now,
     })
 
+    if (inspection.deferred) {
+      try {
+        await this.dispatchGeneration({
+          attachmentId: id,
+          image: spec.image,
+          heic: spec.accepts?.heic,
+          // Snapshot, not a reference: an in-memory queue keeps the payload
+          // object alive, and a later mutation of the model declaration must
+          // not rewrite a job that is already in flight.
+          variants: spec.variants ? structuredClone(spec.variants) : undefined,
+        })
+      } catch (error) {
+        // No job will ever finish this provisionally accepted upload — and
+        // on an image: 'require' collection the full decode never ran, so
+        // leaving the row would keep serving unvalidated bytes forever.
+        // Undo the accept (the replaced attachment below is still intact)
+        // and surface the queue failure to the caller.
+        await this.purgeRows([row as PlainObject])
+        throw error
+      }
+    }
+
+    // Purged only after a deferred attach is durably enqueued: replacing
+    // first would destroy the previous attachment even when the dispatch
+    // fails and the new one is rolled back.
     if (replaced.length > 0) {
       await this.purgeRows(replaced)
     }
@@ -336,6 +415,7 @@ export class AttachmentEngine {
     spec: AttachmentCollectionSpec,
     collection: string,
     source: NormalizedSource,
+    defer = false,
   ): Promise<ImageInspection> {
     const opaque: ImageInspection = {
       width: null,
@@ -383,7 +463,7 @@ export class AttachmentEngine {
           "HEIC/HEIF uploads are not accepted. Declare accepts: { heic: 'convert' } on the collection to convert them where the runtime supports it.",
         )
       }
-      if (!this.processor) {
+      if (!this.processor && !defer) {
         throw new HttpException(415, 'HEIC/HEIF conversion is not available on this runtime.')
       }
     }
@@ -397,6 +477,24 @@ export class AttachmentEngine {
           `Image dimensions ${sniffed.width}x${sniffed.height} exceed the maximum of ${this.maxPixels} pixels.`,
         ],
       })
+    }
+
+    // Deferred attach: gate 3 and variant generation run in the queue
+    // worker, even when this process has a processor — that is the point of
+    // queued: true. Dimensions come from the header until the job updates
+    // them; the one class that survives the synchronous checks (bytes whose
+    // header lies) is detected after acceptance, by the job.
+    if (defer) {
+      return {
+        width: sniffed.width ?? null,
+        height: sniffed.height ?? null,
+        placeholder: null,
+        contentType: IMAGE_MIME[sniffed.format] ?? null,
+        decoded: false,
+        deferred: true,
+        bytes: source.bytes,
+        name: source.name,
+      }
     }
 
     // Gate 3: the full decode is the validation authority. Without a
@@ -460,17 +558,20 @@ export class AttachmentEngine {
    * declared" after a reload.
    */
   private async buildVariants(
-    spec: AttachmentCollectionSpec,
+    spec: Pick<AttachmentCollectionSpec, 'variants'>,
     id: string,
-    diskName: string,
     disk: StorageDriver,
-    inspection: ImageInspection,
+    inspection: Pick<ImageInspection, 'bytes' | 'decoded' | 'deferred'>,
   ): Promise<Record<string, AttachmentVariantRecord> | null> {
     const declared = Object.entries(spec.variants ?? {}) as Array<[string, VariantSpec]>
     if (declared.length === 0) return null
 
     const variants: Record<string, AttachmentVariantRecord> = {}
     for (const [name, variantSpec] of declared) {
+      if (inspection.deferred) {
+        variants[name] = { status: 'pending' }
+        continue
+      }
       if (!this.processor) {
         variants[name] = { status: 'unavailable' }
         continue
@@ -499,6 +600,203 @@ export class AttachmentEngine {
       }
     }
     return variants
+  }
+
+  // --- deferred (queued) generation -----------------------------------------
+
+  /**
+   * Worker-side completion of a deferred attach (`GenerateVariantsJob`):
+   * run the full decode that the request path skipped, convert a HEIC
+   * original where the collection opted in, generate the declared variants,
+   * and settle every `pending` status record. Safe against races — a row or
+   * object purged while the job sat in the queue is simply nothing to do.
+   */
+  async generateVariants(payload: GenerateVariantsPayload): Promise<void> {
+    const raw = (await this.model.where({ id: payload.attachmentId }).first()) as PlainObject | null
+    if (!raw) return
+    const row = this.toRecord(raw)
+    const disk = this.storage().disk(row.disk)
+
+    if (!this.processor) {
+      // A worker without an image processor cannot finish the job — settle
+      // rather than retry forever; URLs keep falling back to the original.
+      // The one exception is a HEIC original accepted only because the
+      // collection promised conversion: the synchronous path answers 415
+      // for it on processor-less runtimes, so an image-required collection
+      // must not keep serving it once the promise turns out unkeepable.
+      if (payload.heic === 'convert' && payload.image === 'require' && row.contentType === 'image/heic') {
+        await this.purgeRows([raw])
+        return
+      }
+      await this.settleDeferred(row, 'unavailable')
+      return
+    }
+
+    const stored = await disk.get(row.path)
+    if (!stored) {
+      await this.settleDeferred(row, 'failed')
+      return
+    }
+    let bytes: Uint8Array = new Uint8Array(stored)
+
+    let probed: { width: number; height: number; format: string; placeholder?: string }
+    try {
+      probed = await this.processor.probe(bytes, { maxPixels: this.maxPixels })
+    } catch {
+      // The synchronous gates accepted this upload on header evidence; the
+      // full decode is the authority and it said no. Acceptance on an
+      // image-required collection was provisional — purge it (RFC 0013 §6);
+      // an image-optional collection keeps the bytes as an opaque file.
+      if (payload.image === 'require') {
+        await this.purgeRows([raw])
+        return
+      }
+      await this.settleDeferred(row, 'failed', { clearImageMetadata: true })
+      return
+    }
+
+    const updates: PlainObject = {
+      width: probed.width,
+      height: probed.height,
+      placeholder: probed.placeholder ?? null,
+    }
+
+    const sniffed = sniffImage(bytes.subarray(0, SNIFF_WINDOW_BYTES))
+    let supersededPath: string | null = null
+    if (sniffed?.format === 'heic' && payload.heic === 'convert') {
+      const converted = await this.processor.process(bytes, { format: 'jpeg' })
+      const name = replaceExtension(row.name, 'jpg')
+      const path = `attachments/${row.id}/${name}`
+      await disk.put(path, Buffer.from(converted.bytes), { contentType: 'image/jpeg' })
+      // The old object is deleted only after the row commit below repoints
+      // to the new one: deleting first would leave the row referencing
+      // nothing if anything past this line failed — and the retry would
+      // then find no bytes and settle 'failed', a silent broken link. A
+      // leaked superseded object is the recoverable failure; a row
+      // pointing at nothing is not.
+      if (path !== row.path) {
+        supersededPath = row.path
+      }
+      bytes = converted.bytes
+      updates.name = name
+      updates.path = path
+      updates.contentType = 'image/jpeg'
+      updates.size = converted.bytes.byteLength
+      updates.width = converted.width
+      updates.height = converted.height
+    }
+
+    const variants = await this.buildVariants({ variants: payload.variants }, row.id, disk, {
+      bytes,
+      decoded: true,
+    })
+    if (variants) {
+      updates.variants = variants
+    }
+    updates.updatedAt = new Date()
+
+    // The attachment can be replaced or detached while this job was
+    // generating: its purge deletes the prefix, and the puts above would
+    // silently recreate orphan objects under it. Re-check the row and clean
+    // up after ourselves instead of leaving objects only a bucket audit
+    // would find.
+    const still = await this.model.where({ id: row.id }).first()
+    if (!still) {
+      await disk.deleteDirectory(`attachments/${row.id}`)
+      return
+    }
+    await this.model.forceUpdate({ id: row.id }, updates)
+
+    if (supersededPath) {
+      try {
+        await disk.delete(supersededPath)
+      } catch {
+        // The row already points at the converted object; a superseded
+        // original that failed to delete is a leak for the sweeper, not a
+        // job failure.
+      }
+    }
+  }
+
+  /** `GenerateVariantsJob.failed()`: settle `pending` records after the last retry. */
+  async markDeferredFailed(attachmentId: string): Promise<void> {
+    await this.settleDeferred({ id: attachmentId }, 'failed')
+  }
+
+  /**
+   * Flip every `pending` variant to a terminal status so nothing looks
+   * in-flight forever. Works on a *fresh* read of the row, never a caller's
+   * snapshot: under at-least-once delivery a duplicate execution can hold a
+   * stale copy whose `pending` entries would otherwise clobber the variants
+   * a completed run already marked `ready`.
+   */
+  private async settleDeferred(
+    row: Pick<AttachmentRecord, 'id'>,
+    status: 'failed' | 'unavailable',
+    options: { clearImageMetadata?: boolean } = {},
+  ): Promise<void> {
+    const fresh = (await this.model.where({ id: row.id }).first()) as PlainObject | null
+    if (!fresh) return
+    const current = this.toRecord(fresh)
+
+    const updates: PlainObject = { updatedAt: new Date() }
+    let changed = false
+    if (current.variants) {
+      const variants = { ...current.variants }
+      for (const [name, entry] of Object.entries(variants)) {
+        if (entry.status === 'pending') {
+          variants[name] = { status }
+          changed = true
+        }
+      }
+      if (changed) {
+        updates.variants = variants
+      }
+    }
+    if (options.clearImageMetadata) {
+      updates.width = null
+      updates.height = null
+      updates.placeholder = null
+      changed = true
+    }
+    if (!changed) return
+    await this.model.forceUpdate({ id: row.id }, updates)
+  }
+
+  /**
+   * A queued attach needs somewhere to dispatch to: the configured
+   * QueueManager's default driver, or — when no `queue` option was given —
+   * whatever queue driver the app has already booted globally.
+   */
+  private ensureQueueDispatchable(): void {
+    if (!this.dispatchJob) {
+      throw new Error('Attachments queue dispatch is not wired. Call configureAttachments() before attaching.')
+    }
+    if (this.queue) {
+      const manager = this.queue() as { driver?: () => unknown } | null | undefined
+      if (typeof manager?.driver !== 'function') {
+        throw new Error(
+          'configureAttachments({ queue }) must resolve to a QueueManager (an object with a driver() method).',
+        )
+      }
+      // Job.dispatch() sends through the module-global driver, and
+      // QueueManager.driver() installs its default there only on *first*
+      // resolution — the cached branch does not. Reassert it on every
+      // dispatch, or a job could land on whichever driver another manager
+      // installed since, where no worker of ours ever pops.
+      setQueueDriver(manager.driver() as Parameters<typeof setQueueDriver>[0])
+      return
+    }
+    if (!getQueueDriver()) {
+      throw new Error(
+        "attach() with queued: true requires a queue. Pass configureAttachments({ queue: () => queueManager }) or boot the app's queue before attaching.",
+      )
+    }
+  }
+
+  private async dispatchGeneration(payload: GenerateVariantsPayload): Promise<void> {
+    this.ensureQueueDispatchable()
+    await this.dispatchJob!(payload)
   }
 
   /**

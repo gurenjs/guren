@@ -1,9 +1,11 @@
 import type { Model } from '@guren/orm'
+import { registerJob } from '@guren/server'
 import {
   AttachmentEngine,
   setActiveAttachmentEngine,
   type ConfigureAttachmentsOptions,
 } from './engine.js'
+import { GenerateVariantsJob } from './generate-variants-job.js'
 
 export type { ConfigureAttachmentsOptions } from './engine.js'
 
@@ -40,6 +42,12 @@ export interface ConfiguredAttachments {
  */
 export function configureAttachments(options: ConfigureAttachmentsOptions): ConfiguredAttachments {
   const engine = new AttachmentEngine(options)
+  // Wired here rather than inside the engine so engine.ts never imports the
+  // job module (which imports engine.ts for the active-engine lookup).
+  engine.setJobDispatcher((payload) => GenerateVariantsJob.dispatch(payload))
+  // Registering at configure time is what lets any worker process that boots
+  // the app's config resolve queued GenerateVariantsJob messages.
+  registerJob(GenerateVariantsJob)
   setActiveAttachmentEngine(engine)
   return { Attachment: engine.model }
 }

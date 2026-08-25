@@ -34,8 +34,8 @@ export interface VariantSpec {
  * distinguish "not yet generated" (fall back to the original) from "never
  * declared" (throw) after a reload.
  *
- * - `pending`  — generation is queued (queued generation ships in a later
- *   release; the status exists so rows stay forward-compatible)
+ * - `pending`  — generation is queued (`attach(..., { queued: true })`)
+ *   and a worker has not finished it yet
  * - `ready`    — the variant object exists at `path`
  * - `failed`   — generation was attempted and failed
  * - `unavailable` — the runtime has no image processor
