@@ -146,7 +146,7 @@ Additional options:
 | `maxPixels` | `52_000_000` | Decode cap in pixels (decompression-bomb defense). |
 | `maxImageBytes` | `50_000_000` | Encoded-input cap in bytes, checked before any decode. |
 | `processor` | Bun-native | Custom `ImageProcessor`, or `null` to disable image decoding. |
-| `queue` | — | Reserved for queued variant generation (a future release). |
+| `queue` | — | The app's QueueManager, resolved lazily; enables `attach(..., { queued: true })`. |
 | `urlExpiresIn` | 5 minutes | Lifetime of `temporaryUrl()` links for private disks. |
 
 ## Working with attachments
@@ -269,7 +269,7 @@ actually implements; a crop mode can be added without breaking changes).
 
 Every *declared* variant gets a status entry on the attachment row —
 `ready`, `failed`, `unavailable` (no processor on this runtime), or
-`pending` (reserved for queued generation). `attachmentUrl(post, 'cover',
+`pending` (queued generation, below). `attachmentUrl(post, 'cover',
 { variant: 'thumb' })` serves a `ready` variant's own URL and **falls back
 to the original's URL** for anything else, so pages keep rendering; a
 variant name that was never declared throws instead of silently serving the
@@ -292,6 +292,47 @@ Whether a specific format (HEIC, AVIF) can be decoded or encoded is a
 property of the OS codecs, discovered at call time — expect 415 responses
 for formats the deployed runtime cannot handle, and test uploads on the
 runtime you deploy to.
+
+### Queued generation
+
+`attach(..., { queued: true })` moves the image work off the request path:
+the request runs only the synchronous gates (byte cap, header dimensions,
+HEIC signature), stores the original, seeds every declared variant as
+`pending`, and dispatches `GenerateVariantsJob`. A worker then runs the
+deferred full decode, converts HEIC originals where the collection opted
+in, generates the variants, and flips the status records to `ready` (or
+`failed`). Until it does, variant URLs fall back to the original and the
+`placeholder` stays `null`.
+
+```ts
+// config/attachments.ts
+export const { Attachment } = configureAttachments({
+  table: attachments,
+  storage: () => storage,
+  disk: 'media',
+  queue: () => queueManager,   // the app's QueueManager, resolved lazily
+})
+
+// anywhere
+await Post.attach(post.id, 'cover', file, { queued: true })
+```
+
+What to know:
+
+- `configureAttachments()` registers the job, so any worker process that
+  boots the app's config (`bunx guren queue:work`) can process it.
+  Point the worker at a runtime with an image processor — Bun with
+  `Bun.Image`, or a custom `configureAttachments({ processor })`; a worker
+  without one settles the variants as `unavailable`.
+- Without the `queue` option, `queued: true` dispatches through the app's
+  already-booted queue driver, and throws a clear error before writing
+  anything when there is none.
+- The full decode moves to the worker, so the one class the synchronous
+  gates cannot catch — bytes whose header lies — is detected *after*
+  acceptance: on an `image: 'require'` collection the job purges the
+  attachment; on other collections the bytes stay as an opaque file.
+- On Cloudflare Workers this is the only mode that generates variants; see
+  the [Cloudflare guide](./cloudflare.md#attachments-on-workers).
 
 ## URLs and visibility
 

@@ -134,7 +134,7 @@ export const { Attachment } = configureAttachments({
 | `maxPixels` | `52_000_000` | デコード時のピクセル数上限(展開爆弾対策)。 |
 | `maxImageBytes` | `50_000_000` | デコード前に検査するエンコード済み入力のバイト数上限。 |
 | `processor` | Bun ネイティブ | カスタム `ImageProcessor`。`null` で画像デコードを無効化。 |
-| `queue` | なし | キュー化されたバリアント生成(将来のリリース)のための予約。 |
+| `queue` | なし | アプリの QueueManager を遅延解決で渡す。`attach(..., { queued: true })` を有効化。 |
 | `urlExpiresIn` | 5分 | private ディスクの `temporaryUrl()` リンクの有効期間。 |
 
 ## アタッチメントの操作
@@ -219,7 +219,7 @@ cover: hasOneAttached({
 
 `fit` は `'fill'` と `'inside'` に対応します(Bun ネイティブのプロセッサが実際に実装している範囲です。crop モードは互換性を壊さずに追加できます)。
 
-*宣言済み*のバリアントはすべて、アタッチメント行にステータスエントリを持ちます: `ready`、`failed`、`unavailable`(このランタイムにプロセッサがない)、`pending`(キュー化生成のための予約)。`attachmentUrl(post, 'cover', { variant: 'thumb' })` は `ready` のバリアントならそのバリアント自身の URL を返し、それ以外は**オリジナルの URL にフォールバック**します。ページは描画され続け、後の描画が自動的にバリアントを拾います。宣言されていないバリアント名は、黙ってオリジナルを返すのではなく throw します。
+*宣言済み*のバリアントはすべて、アタッチメント行にステータスエントリを持ちます: `ready`、`failed`、`unavailable`(このランタイムにプロセッサがない)、`pending`(キュー化生成、後述)。`attachmentUrl(post, 'cover', { variant: 'thumb' })` は `ready` のバリアントならそのバリアント自身の URL を返し、それ以外は**オリジナルの URL にフォールバック**します。ページは描画され続け、後の描画が自動的にバリアントを拾います。宣言されていないバリアント名は、黙ってオリジナルを返すのではなく throw します。
 
 ### ランタイムとプロセッサ
 
@@ -230,6 +230,30 @@ cover: hasOneAttached({
 - `configureAttachments({ processor })` で任意の `ImageProcessor` 実装(たとえば sharp ベース)を注入できます
 
 特定フォーマット(HEIC、AVIF)のデコード/エンコード可否は OS コーデックの性質で、呼び出し時に判明します。デプロイ先のランタイムが扱えないフォーマットには 415 が返ることを想定し、アップロードは実際にデプロイするランタイムでテストしてください。
+
+### キュー化された生成
+
+`attach(..., { queued: true })` は画像処理をリクエストパスから外します。リクエストは同期ゲート(バイト数上限、ヘッダ寸法、HEIC シグネチャ)だけを実行してオリジナルを保存し、宣言済みバリアントをすべて `pending` として記録し、`GenerateVariantsJob` をディスパッチします。その後ワーカーが、先送りされたフルデコード、オプトイン済みコレクションの HEIC 変換、バリアント生成を行い、ステータスを `ready`(または `failed`)へ更新します。それまでの間、バリアント URL はオリジナルへフォールバックし、`placeholder` は `null` のままです。
+
+```ts
+// config/attachments.ts
+export const { Attachment } = configureAttachments({
+  table: attachments,
+  storage: () => storage,
+  disk: 'media',
+  queue: () => queueManager,   // アプリの QueueManager を遅延解決で渡す
+})
+
+// どこからでも
+await Post.attach(post.id, 'cover', file, { queued: true })
+```
+
+押さえておくこと:
+
+- `configureAttachments()` がジョブを登録するため、アプリの config を起動するワーカープロセス(`bunx guren queue:work`)はそのまま処理できます。ワーカーは画像プロセッサのあるランタイム(`Bun.Image` を持つ Bun、または `configureAttachments({ processor })` のカスタム実装)で動かしてください。プロセッサのないワーカーはバリアントを `unavailable` として確定させます。
+- `queue` オプションなしの場合、`queued: true` はアプリが起動済みのキュードライバ経由でディスパッチします。何もなければ、書き込みを行う前に明確なエラーを投げます。
+- フルデコードはワーカーへ移るため、同期ゲートが捕まえられない唯一のクラス、つまりヘッダで嘘をつくバイト列は受理*後*に検出されます: `image: 'require'` コレクションではジョブがアタッチメントをパージし、それ以外のコレクションでは不透明ファイルとして残ります。
+- Cloudflare Workers ではこれがバリアントを生成する唯一のモードです。[Cloudflare ガイド](./cloudflare.md#workers-でのアタッチメント)を参照してください。
 
 ## URL と可視性
 

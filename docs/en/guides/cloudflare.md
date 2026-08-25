@@ -194,6 +194,17 @@ Three things follow from how R2 differs from S3:
 
 To reach the same bucket from a Bun process — a script, or a non-Workers deployment — use the S3-compatible endpoint with the S3 driver instead: `endpoint: 'https://<ACCOUNT_ID>.r2.cloudflarestorage.com'`, `region: 'auto'`, and an R2 API token, as shown in the [Storage guide](./storage.md#s3-compatible-services).
 
+### Attachments on Workers
+
+The [attachments layer](./attachments.md) works on Workers with one split: Workers has no image decoder, so image work happens in a queue worker instead of the request path.
+
+- **The synchronous gates still run in the Worker.** Oversized bytes (413), header dimensions over `maxPixels` (422), the HEIC signature (415), and non-image bytes on an `image: 'require'` collection (422) are all rejected in the request — they are pure JavaScript, no decoder involved.
+- **Attach with `queued: true`.** The Worker stores the original, seeds declared variants as `pending`, and dispatches `GenerateVariantsJob` on the Redis-backed queue (`RedisQueueDriver` — the same store the queue guide already requires on Workers). Variant URLs fall back to the original until the job completes.
+- **Run the worker on Bun.** A separate Bun process (`Bun.Image` present) processes the queue: it runs the deferred full decode, converts HEIC where the collection opted in, and generates the variants. `configureAttachments()` registers the job, so any worker that boots the app's config can process it — no extra wiring.
+- **Private attachments on R2 require `presign`** (the `temporaryUrl()` rule above); public ones serve from the bucket's custom domain with zero Worker CPU.
+
+The one class the synchronous gates cannot catch — bytes whose header lies — is detected by the worker after acceptance: on an `image: 'require'` collection the job purges the attachment; elsewhere the bytes stay as an opaque file.
+
 ## Secrets
 
 `APP_KEY` is required — sessions and CSRF are signed with it, and the worker throws during startup without it, before serving a single request.
