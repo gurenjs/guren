@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test'
-import { readFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { ensureGurenUiTokens } from '../src/guren-css'
 
 const repoRoot = join(import.meta.dir, '../../..')
 
@@ -26,57 +28,79 @@ it('the scaffold guren.css matches the create-app template copy', async () => {
   expect(scaffold).toBe(blueprint)
 })
 
+async function makeApp(appCss?: string): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), 'guren-css-'))
+  await mkdir(join(root, 'resources/css'), { recursive: true })
+  if (appCss !== undefined) {
+    await writeFile(join(root, 'resources/css/app.css'), appCss, 'utf8')
+  }
+  return root
+}
+
 describe('ensureGurenUiTokens', () => {
   it('writes guren.css and adds the app.css import once', async () => {
-    const { mkdtemp, mkdir, readFile: read, writeFile } = await import('node:fs/promises')
-    const { tmpdir } = await import('node:os')
-    const { ensureGurenUiTokens } = await import('../src/guren-css')
-
-    const root = await mkdtemp(join(tmpdir(), 'guren-css-'))
-    await mkdir(join(root, 'resources/css'), { recursive: true })
-    await writeFile(join(root, 'resources/css/app.css'), "@import 'tailwindcss';\n", 'utf8')
+    const root = await makeApp("@import 'tailwindcss';\n")
 
     await ensureGurenUiTokens(root)
 
-    const tokens = await read(join(root, 'resources/css/guren.css'), 'utf8')
+    const tokens = await readFile(join(root, 'resources/css/guren.css'), 'utf8')
     expect(tokens).toContain('--g-accent')
-    const appCss = await read(join(root, 'resources/css/app.css'), 'utf8')
+    const appCss = await readFile(join(root, 'resources/css/app.css'), 'utf8')
     expect(appCss).toBe("@import 'tailwindcss';\n@import './guren.css';\n")
 
     // Second run must not duplicate the import or clobber an edited sheet.
     await writeFile(join(root, 'resources/css/guren.css'), '/* user edited */\n', 'utf8')
     await ensureGurenUiTokens(root)
-    expect(await read(join(root, 'resources/css/guren.css'), 'utf8')).toBe('/* user edited */\n')
-    expect(await read(join(root, 'resources/css/app.css'), 'utf8')).toBe(
+    expect(await readFile(join(root, 'resources/css/guren.css'), 'utf8')).toBe('/* user edited */\n')
+    expect(await readFile(join(root, 'resources/css/app.css'), 'utf8')).toBe(
       "@import 'tailwindcss';\n@import './guren.css';\n",
     )
   })
 
   it('prepends the import when app.css has no @import lines', async () => {
-    const { mkdtemp, mkdir, readFile: read, writeFile } = await import('node:fs/promises')
-    const { tmpdir } = await import('node:os')
-    const { ensureGurenUiTokens } = await import('../src/guren-css')
-
-    const root = await mkdtemp(join(tmpdir(), 'guren-css-'))
-    await mkdir(join(root, 'resources/css'), { recursive: true })
-    await writeFile(join(root, 'resources/css/app.css'), 'body { margin: 0; }\n', 'utf8')
+    const root = await makeApp('body { margin: 0; }\n')
 
     await ensureGurenUiTokens(root)
 
-    expect(await read(join(root, 'resources/css/app.css'), 'utf8')).toBe(
+    expect(await readFile(join(root, 'resources/css/app.css'), 'utf8')).toBe(
       "@import './guren.css';\nbody { margin: 0; }\n",
     )
   })
 
-  it('leaves a missing app.css alone but still writes the tokens', async () => {
-    const { mkdtemp, readFile: read } = await import('node:fs/promises')
-    const { tmpdir } = await import('node:os')
-    const { ensureGurenUiTokens } = await import('../src/guren-css')
-
-    const root = await mkdtemp(join(tmpdir(), 'guren-css-'))
+  it('keeps a multiline @import statement intact', async () => {
+    const root = await makeApp("@import url(\n  'tailwindcss'\n);\nbody { margin: 0; }\n")
 
     await ensureGurenUiTokens(root)
 
-    expect(await read(join(root, 'resources/css/guren.css'), 'utf8')).toContain('--g-accent')
+    expect(await readFile(join(root, 'resources/css/app.css'), 'utf8')).toBe(
+      "@import url(\n  'tailwindcss'\n);\n@import './guren.css';\nbody { margin: 0; }\n",
+    )
+  })
+
+  it('recognizes the import without the ./ prefix and does not duplicate it', async () => {
+    const before = "@import 'tailwindcss';\n@import 'guren.css';\n"
+    const root = await makeApp(before)
+
+    await ensureGurenUiTokens(root)
+
+    expect(await readFile(join(root, 'resources/css/app.css'), 'utf8')).toBe(before)
+  })
+
+  it('treats a commented-out guren.css import as absent', async () => {
+    const root = await makeApp("@import 'tailwindcss';\n/* @import './guren.css'; */\nbody { margin: 0; }\n")
+
+    await ensureGurenUiTokens(root)
+
+    expect(await readFile(join(root, 'resources/css/app.css'), 'utf8')).toBe(
+      "@import 'tailwindcss';\n@import './guren.css';\n/* @import './guren.css'; */\nbody { margin: 0; }\n",
+    )
+  })
+
+  it('leaves a missing app.css alone but still writes the tokens', async () => {
+    const root = await makeApp()
+
+    await ensureGurenUiTokens(root)
+
+    expect(await readFile(join(root, 'resources/css/guren.css'), 'utf8')).toContain('--g-accent')
   })
 })

@@ -18,12 +18,33 @@ import { readIfExists } from './discovery'
 import { APP_ENTRY_CANDIDATES, resolveAppEntry, wireAppProvider, wireProvider } from './provider-registrar'
 import { wireRouteRegistrar } from './route-registrar'
 import { makeMigration } from './make-migration'
-import { ensureGurenUiTokens } from './guren-css'
+import { ensureGurenUiTokens, FIELD_LABEL_CLASS, FORM_INPUT_CLASS, PRIMARY_SUBMIT_CLASS } from './guren-css'
 import { loadScaffoldTemplate } from './scaffold-templates'
 
 /** `path` is both the template path under `templates/scaffold/auth/` and the written app path. */
 function authFile(path: string): ScaffoldFileEntry {
   return { path, contents: loadScaffoldTemplate(`auth/${path}`) }
+}
+
+/** The page heading with the ember tick — the one structural device, once per
+    screen. `indent` is the emitted indentation of the `<h1>` line, so every
+    builder renders the identical block at its own depth. */
+function tickHeading(title: string, indent: string): string {
+  return `<h1 className="flex items-center gap-3 text-2xl font-bold text-g-heading">
+${indent}  <span aria-hidden className="h-6 w-[3px] shrink-0 rounded-full bg-[image:var(--g-tick)]" />
+${indent}  ${title}
+${indent}</h1>`
+}
+
+/** A flash/error message as a diagnostic row: mono key in a fixed gutter, a
+    hairline, ordinary body text — the shape of `guren check` output, no
+    tinted box. The tone doubles as the printed key. */
+function calloutRow(tone: 'ok' | 'error', body: string, indent: string, { flush = false } = {}): string {
+  const color = tone === 'ok' ? 'text-g-ok' : 'text-g-danger'
+  return `<p className="${flush ? '' : 'mt-4 '}flex gap-3 border-y border-g-line py-2.5 text-sm">
+${indent}  <span className="w-10 shrink-0 text-right font-mono text-xs font-bold leading-5 ${color}">${tone}</span>
+${indent}  <span className="text-g-text">${body}</span>
+${indent}</p>`
 }
 
 // Passwordless apps keep show() (the OAuth button page) and destroy()
@@ -579,19 +600,13 @@ export default function Login({ errors = {} }: Props) {
     <Layout>
       <Head title="Sign in" />
       <section className="rounded-g-card border border-g-line bg-g-panel p-8 shadow-g-card">
-        <h1 className="flex items-center gap-3 text-2xl font-bold text-g-heading">
-          <span aria-hidden className="h-6 w-[3px] shrink-0 rounded-full bg-[image:var(--g-tick)]" />
-          Sign in
-        </h1>
+        ${tickHeading('Sign in', '        ')}
         <p className="mt-2 text-sm text-g-text-2">
           Choose a provider to continue.
         </p>
 
         {errors.message && (
-          <p className="mt-4 flex gap-3 border-y border-g-line py-2.5 text-sm">
-            <span className="w-10 shrink-0 text-right font-mono text-xs font-bold leading-5 text-g-danger">error</span>
-            <span className="text-g-text">{errors.message}</span>
-          </p>
+          ${calloutRow('error', '{errors.message}', '          ')}
         )}
 ${buildOAuthButtonsTemplate(providers, { divider: false })}
       </section>
@@ -654,19 +669,13 @@ export default function Login({ email = '', errors = {} }: Props) {
     <Layout>
       <Head title="Sign in" />
       <section className="rounded-g-card border border-g-line bg-g-panel p-8 shadow-g-card">
-        <h1 className="flex items-center gap-3 text-2xl font-bold text-g-heading">
-          <span aria-hidden className="h-6 w-[3px] shrink-0 rounded-full bg-[image:var(--g-tick)]" />
-          Sign in
-        </h1>
+        ${tickHeading('Sign in', '        ')}
         <p className="mt-2 text-sm text-g-text-2">
           Use your account credentials to continue.
         </p>
 
         {errors.message && (
-          <p className="mt-4 flex gap-3 border-y border-g-line py-2.5 text-sm">
-            <span className="w-10 shrink-0 text-right font-mono text-xs font-bold leading-5 text-g-danger">error</span>
-            <span className="text-g-text">{errors.message}</span>
-          </p>
+          ${calloutRow('error', '{errors.message}', '          ')}
         )}
 
         <form
@@ -677,7 +686,7 @@ export default function Login({ email = '', errors = {} }: Props) {
           }}
         >
           <div>
-            <label htmlFor={emailId} className="block text-sm font-bold text-g-heading">
+            <label htmlFor={emailId} className="${FIELD_LABEL_CLASS}">
               Email
             </label>
             <input
@@ -686,13 +695,13 @@ export default function Login({ email = '', errors = {} }: Props) {
               value={form.data.email}
               onChange={(event) => form.setData('email', event.target.value)}
               required
-              className="mt-1 w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:border-transparent focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent"
+              className="mt-1 ${FORM_INPUT_CLASS}"
             />
             {errors.email && <p className="mt-1 text-sm text-g-danger">{errors.email}</p>}
           </div>
 
           <div>
-            <label htmlFor={passwordId} className="block text-sm font-bold text-g-heading">
+            <label htmlFor={passwordId} className="${FIELD_LABEL_CLASS}">
               Password
             </label>
             <input
@@ -701,7 +710,7 @@ export default function Login({ email = '', errors = {} }: Props) {
               value={form.data.password}
               onChange={(event) => form.setData('password', event.target.value)}
               required
-              className="mt-1 w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:border-transparent focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent"
+              className="mt-1 ${FORM_INPUT_CLASS}"
             />
             {errors.password && <p className="mt-1 text-sm text-g-danger">{errors.password}</p>}
           </div>
@@ -719,7 +728,7 @@ export default function Login({ email = '', errors = {} }: Props) {
             <button
               type="submit"
               disabled={form.processing}
-              className="w-full rounded-g-ctl bg-g-accent px-4 py-2 text-sm font-bold text-g-on-accent transition hover:bg-g-accent-down disabled:cursor-not-allowed disabled:opacity-45"
+              className="${PRIMARY_SUBMIT_CLASS}"
             >
               Sign in
           </button>
@@ -767,19 +776,13 @@ export default function Register({ errors = {} }: Props) {
     <Layout>
       <Head title="Sign up" />
       <section className="rounded-g-card border border-g-line bg-g-panel p-8 shadow-g-card">
-        <h1 className="flex items-center gap-3 text-2xl font-bold text-g-heading">
-          <span aria-hidden className="h-6 w-[3px] shrink-0 rounded-full bg-[image:var(--g-tick)]" />
-          Create an account
-        </h1>
+        ${tickHeading('Create an account', '        ')}
         <p className="mt-2 text-sm text-g-text-2">
           Sign up to get started.
         </p>
 
         {errors.message && (
-          <p className="mt-4 flex gap-3 border-y border-g-line py-2.5 text-sm">
-            <span className="w-10 shrink-0 text-right font-mono text-xs font-bold leading-5 text-g-danger">error</span>
-            <span className="text-g-text">{errors.message}</span>
-          </p>
+          ${calloutRow('error', '{errors.message}', '          ')}
         )}
 
         <form
@@ -790,7 +793,7 @@ export default function Register({ errors = {} }: Props) {
           }}
         >
           <div>
-            <label htmlFor={nameId} className="block text-sm font-bold text-g-heading">
+            <label htmlFor={nameId} className="${FIELD_LABEL_CLASS}">
               Name
             </label>
             <input
@@ -799,13 +802,13 @@ export default function Register({ errors = {} }: Props) {
               value={form.data.name}
               onChange={(event) => form.setData('name', event.target.value)}
               required
-              className="mt-1 w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:border-transparent focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent"
+              className="mt-1 ${FORM_INPUT_CLASS}"
             />
             {errors.name && <p className="mt-1 text-sm text-g-danger">{errors.name}</p>}
           </div>
 
           <div>
-            <label htmlFor={emailId} className="block text-sm font-bold text-g-heading">
+            <label htmlFor={emailId} className="${FIELD_LABEL_CLASS}">
               Email
             </label>
             <input
@@ -814,13 +817,13 @@ export default function Register({ errors = {} }: Props) {
               value={form.data.email}
               onChange={(event) => form.setData('email', event.target.value)}
               required
-              className="mt-1 w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:border-transparent focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent"
+              className="mt-1 ${FORM_INPUT_CLASS}"
             />
             {errors.email && <p className="mt-1 text-sm text-g-danger">{errors.email}</p>}
           </div>
 
           <div>
-            <label htmlFor={passwordId} className="block text-sm font-bold text-g-heading">
+            <label htmlFor={passwordId} className="${FIELD_LABEL_CLASS}">
               Password
             </label>
             <input
@@ -829,13 +832,13 @@ export default function Register({ errors = {} }: Props) {
               value={form.data.password}
               onChange={(event) => form.setData('password', event.target.value)}
               required
-              className="mt-1 w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:border-transparent focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent"
+              className="mt-1 ${FORM_INPUT_CLASS}"
             />
             {errors.password && <p className="mt-1 text-sm text-g-danger">{errors.password}</p>}
           </div>
 
           <div>
-            <label htmlFor={passwordConfirmationId} className="block text-sm font-bold text-g-heading">
+            <label htmlFor={passwordConfirmationId} className="${FIELD_LABEL_CLASS}">
               Confirm password
             </label>
             <input
@@ -844,7 +847,7 @@ export default function Register({ errors = {} }: Props) {
               value={form.data.passwordConfirmation}
               onChange={(event) => form.setData('passwordConfirmation', event.target.value)}
               required
-              className="mt-1 w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:border-transparent focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent"
+              className="mt-1 ${FORM_INPUT_CLASS}"
             />
             {errors.passwordConfirmation && (
               <p className="mt-1 text-sm text-g-danger">{errors.passwordConfirmation}</p>
@@ -854,7 +857,7 @@ export default function Register({ errors = {} }: Props) {
           <button
             type="submit"
             disabled={form.processing}
-            className="w-full rounded-g-ctl bg-g-accent px-4 py-2 text-sm font-bold text-g-on-accent transition hover:bg-g-accent-down disabled:cursor-not-allowed disabled:opacity-45"
+            className="${PRIMARY_SUBMIT_CLASS}"
           >
             Create account
           </button>
@@ -892,7 +895,7 @@ function buildProfileViewTemplate({ includePassword, providerOwnedEmail }: AuthF
   const emailInput = providerOwnedEmail
     ? `
           <div>
-            <label className="block text-sm font-bold text-g-heading">Email</label>
+            <label className="${FIELD_LABEL_CLASS}">Email</label>
             <p className="mt-1 w-full rounded-g-ctl border border-g-line bg-g-raised px-3 py-2 text-g-muted">
               {profile.email}
             </p>
@@ -900,12 +903,12 @@ function buildProfileViewTemplate({ includePassword, providerOwnedEmail }: AuthF
           </div>`
     : `
           <div>
-            <label className="block text-sm font-bold text-g-heading">Email</label>
+            <label className="${FIELD_LABEL_CLASS}">Email</label>
             <input
               type="email"
               value={form.data.email}
               onChange={(event) => form.setData('email', event.target.value)}
-              className="mt-1 w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:border-transparent focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent"
+              className="mt-1 ${FORM_INPUT_CLASS}"
             />
             {form.errors.email ? <p className="mt-1 text-sm text-g-danger">{form.errors.email}</p> : null}
           </div>`
@@ -920,12 +923,12 @@ function buildProfileViewTemplate({ includePassword, providerOwnedEmail }: AuthF
   const passwordInput = includePassword
     ? `
           <div>
-            <label className="block text-sm font-bold text-g-heading">New password</label>
+            <label className="${FIELD_LABEL_CLASS}">New password</label>
             <input
               type="password"
               value={form.data.password}
               onChange={(event) => form.setData('password', event.target.value)}
-              className="mt-1 w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:border-transparent focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent"
+              className="mt-1 ${FORM_INPUT_CLASS}"
             />
             {form.errors.password ? <p className="mt-1 text-sm text-g-danger">{form.errors.password}</p> : null}
           </div>
@@ -965,28 +968,22 @@ export default function ProfileEdit({ profile, status }: Props) {
       <Head title="Profile" />
       <section className="space-y-6 rounded-g-card border border-g-line bg-g-panel p-8 shadow-g-card">
         <header>
-          <h1 className="flex items-center gap-3 text-2xl font-bold text-g-heading">
-            <span aria-hidden className="h-6 w-[3px] shrink-0 rounded-full bg-[image:var(--g-tick)]" />
-            Profile
-          </h1>
+          ${tickHeading('Profile', '          ')}
           <p className="mt-2 text-sm text-g-text-2">${description}</p>
         </header>
 
         {status ? (
-          <p className="flex gap-3 border-y border-g-line py-2.5 text-sm">
-            <span className="w-10 shrink-0 text-right font-mono text-xs font-bold leading-5 text-g-ok">ok</span>
-            <span className="text-g-text">{status}</span>
-          </p>
+          ${calloutRow('ok', '{status}', '          ', { flush: true })}
         ) : null}
 
         <form className="space-y-4" onSubmit={handleSubmit}>
           <div>
-            <label className="block text-sm font-bold text-g-heading">Name</label>
+            <label className="${FIELD_LABEL_CLASS}">Name</label>
             <input
               type="text"
               value={form.data.name}
               onChange={(event) => form.setData('name', event.target.value)}
-              className="mt-1 w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:border-transparent focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent"
+              className="mt-1 ${FORM_INPUT_CLASS}"
             />
             {form.errors.name ? <p className="mt-1 text-sm text-g-danger">{form.errors.name}</p> : null}
           </div>
@@ -995,7 +992,7 @@ ${passwordInput}
           <button
             type="submit"
             disabled={form.processing}
-            className="w-full rounded-g-ctl bg-g-accent px-4 py-2 text-sm font-bold text-g-on-accent transition hover:bg-g-accent-down disabled:cursor-not-allowed disabled:opacity-45"
+            className="${PRIMARY_SUBMIT_CLASS}"
           >
             Save changes
           </button>
