@@ -1,8 +1,7 @@
 import type { WriterOptions } from './utils'
 import { scaffoldFile } from './utils'
+import { MODELS_DIR } from './discovery'
 import { schemaIdentifierFor } from './inflect'
-
-const MODELS_DIR = 'app/Models'
 
 function modelTemplate(className: string): string {
   const schemaIdentifier = schemaIdentifierFor(className)

@@ -169,7 +169,6 @@ export class Post extends Attachable(defineModel(posts), {
     const result = parseModelSource(source, '/app/Models/Post.ts')
 
     expect(result).not.toBeNull()
-    expect(result!.attachmentsUnreadable).toBe(false)
     expect(result!.attachments).toEqual([
       { name: 'cover', kind: 'one', variants: ['thumb', 'og'] },
       { name: 'images', kind: 'many', variants: [] },
@@ -194,7 +193,7 @@ export class Post extends SoftDeletes(Attachable(defineModel(posts), {
     expect(result!.hasSoftDeletes).toBe(true)
   })
 
-  it('reports empty attachments for models without the mixin', () => {
+  it('reports null attachments for models without the mixin', () => {
     const source = `
 import { defineModel } from '@guren/orm'
 import { posts } from '../../db/schema.js'
@@ -203,8 +202,37 @@ export class Post extends defineModel(posts) {}
 `
     const result = parseModelSource(source, '/app/Models/Post.ts')
 
+    expect(result!.attachments).toBeNull()
+  })
+
+  it('keeps an empty Attachable declaration distinct from no mixin at all', () => {
+    // Attachable(Base, {}) is a real Attachable model at runtime
+    // (Post.attachments = {}), so it must not read as non-attachable.
+    const source = `
+import { Attachable } from '@guren/core'
+import { defineModel } from '@guren/orm'
+import { posts } from '../../db/schema.js'
+
+export class Post extends Attachable(defineModel(posts), {}) {}
+`
+    const result = parseModelSource(source, '/app/Models/Post.ts')
+
     expect(result!.attachments).toEqual([])
-    expect(result!.attachmentsUnreadable).toBe(false)
+  })
+
+  it('unwraps transparent TypeScript expressions around the declaration', () => {
+    const source = `
+import { Attachable, hasOneAttached, type AttachmentsDeclaration } from '@guren/core'
+import { defineModel } from '@guren/orm'
+import { posts } from '../../db/schema.js'
+
+export class Post extends Attachable(defineModel(posts), {
+  cover: hasOneAttached({ variants: { thumb: { width: 320 } } as const }),
+} satisfies AttachmentsDeclaration) {}
+`
+    const result = parseModelSource(source, '/app/Models/Post.ts')
+
+    expect(result!.attachments).toEqual([{ name: 'cover', kind: 'one', variants: ['thumb'] }])
   })
 
   it('marks a declaration with a spread as unreadable instead of reading it partially', () => {
@@ -221,8 +249,7 @@ export class Post extends Attachable(defineModel(posts), {
 `
     const result = parseModelSource(source, '/app/Models/Post.ts')
 
-    expect(result!.attachments).toEqual([])
-    expect(result!.attachmentsUnreadable).toBe(true)
+    expect(result!.attachments).toBe('unreadable')
   })
 
   it('marks a collection whose options are built elsewhere as unreadable', () => {
@@ -240,8 +267,7 @@ export class Post extends Attachable(defineModel(posts), {
 `
     const result = parseModelSource(source, '/app/Models/Post.ts')
 
-    expect(result!.attachments).toEqual([])
-    expect(result!.attachmentsUnreadable).toBe(true)
+    expect(result!.attachments).toBe('unreadable')
   })
 
   it('marks a declaration that is not an object literal as unreadable', () => {
@@ -255,7 +281,6 @@ export class Post extends Attachable(defineModel(posts), declaration) {}
 `
     const result = parseModelSource(source, '/app/Models/Post.ts')
 
-    expect(result!.attachments).toEqual([])
-    expect(result!.attachmentsUnreadable).toBe(true)
+    expect(result!.attachments).toBe('unreadable')
   })
 })

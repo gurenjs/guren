@@ -28,20 +28,19 @@ export interface ModelInfo {
   usesAuth: boolean
   hasSoftDeletes: boolean
   /**
-   * Attachment collections declared via `Attachable(Base, { ... })` in the
-   * heritage clause. Empty when the model is not Attachable — and also when
-   * it is but the declaration is not statically readable, which
-   * {@link ModelInfo.attachmentsUnreadable} distinguishes.
-   */
-  attachments: ModelAttachmentCollection[]
-  /**
-   * True when the class wraps `Attachable(...)` but its declaration could not
+   * The `Attachable(Base, { ... })` declaration in the heritage clause:
+   * `null` when the model is not Attachable, the collections otherwise
+   * (empty for `Attachable(Base, {})`, which is still an Attachable model),
+   * and `'unreadable'` when the mixin is present but its declaration cannot
    * be read (a spread, a computed key, an options object built elsewhere).
-   * A partial read is worse than none here for the same reason as the
-   * allowlist checks: a map claiming `cover` is the only collection makes
-   * every consumer reject the `gallery` the runtime accepts.
+   * One field rather than an array+flag pair so "attachable at all" —
+   * what `guren check` asks — is not conflated with "zero collections",
+   * and a partial read is never representable: a map claiming `cover` is
+   * the only collection makes every consumer reject the `gallery` the
+   * runtime accepts (the same reason the allowlist checks resolve to
+   * undefined).
    */
-  attachmentsUnreadable: boolean
+  attachments: ModelAttachmentCollection[] | 'unreadable' | null
   /** `@docs <path>` tags in the model source (code-side doc links). */
   docsTags: string[]
 }
@@ -87,7 +86,6 @@ export function parseModelSource(source: string, filePath: string): ModelInfo | 
   const callRelationships = extractRelationshipsFromCalls(ast.program.body, className, source)
 
   const relationships = mergeRelationships(bodyRelationships, callRelationships)
-  const { collections: attachments, unreadable: attachmentsUnreadable } = extractModelAttachments(classDecl)
 
   return {
     className,
@@ -96,8 +94,7 @@ export function parseModelSource(source: string, filePath: string): ModelInfo | 
     relationships,
     usesAuth,
     hasSoftDeletes,
-    attachments,
-    attachmentsUnreadable,
+    attachments: extractModelAttachments(classDecl),
     docsTags: extractDocsTags(source),
   }
 }
@@ -159,7 +156,7 @@ function propertyKeyName(property: ObjectProperty): string | undefined {
  * model written that way must not read as bindless.
  */
 function defineModelTableArgument(node: Node): string | undefined {
-  const firstArg = findDefineModelCall(node)?.arguments[0]
+  const firstArg = findMixinCall(node, 'defineModel')?.arguments[0]
   return firstArg?.type === 'Identifier' ? firstArg.name : undefined
 }
 
@@ -252,31 +249,37 @@ function staticStringArrayProperty(classDecl: ClassDeclaration, name: string): s
 }
 
 /**
- * The `defineModel(...)` call in an extends clause, however wrapped —
- * `defineModel(posts)` directly or through a mixin such as
- * `SoftDeletes(defineModel(posts))`.
+ * The expression under any transparent TypeScript wrapping — `x as const`,
+ * `x satisfies T`, `x!`, `<T>x`, `(x)`. These change nothing about what the
+ * runtime receives, so every heritage-clause reader unwraps them before
+ * judging shape; treating `{...} as const` as unreadable would misreport a
+ * fully static declaration.
  */
-function findDefineModelCall(node: Node): CallExpression | null {
-  if (node.type !== 'CallExpression') return null
-  if (node.callee.type === 'Identifier' && node.callee.name === 'defineModel') return node
-  for (const argument of node.arguments) {
-    const nested = findDefineModelCall(argument)
-    if (nested) return nested
+function unwrapExpression(node: Node): Node {
+  let current = node
+  while (
+    current.type === 'TSAsExpression' ||
+    current.type === 'TSSatisfiesExpression' ||
+    current.type === 'TSNonNullExpression' ||
+    current.type === 'TSTypeAssertion' ||
+    current.type === 'ParenthesizedExpression'
+  ) {
+    current = current.expression
   }
-  return null
+  return current
 }
 
 /**
- * The named mixin call in an extends clause, however wrapped —
- * `Attachable(defineModel(posts), {...})` directly or inside another mixin,
- * as in `SoftDeletes(Attachable(...))`. The recursion twin of
- * {@link findDefineModelCall}; matching is by name only, like the other
- * heritage-clause checks — an aliased import is not resolved.
+ * The named call in an extends clause, however wrapped — `defineModel(posts)`
+ * or `Attachable(defineModel(posts), {...})` directly, or inside another
+ * mixin such as `SoftDeletes(Attachable(...))`. Matching is by name only,
+ * like the other heritage-clause checks — an aliased import is not resolved.
  */
-export function findMixinCall(node: Node, mixinName: string): CallExpression | null {
-  if (node.type !== 'CallExpression') return null
-  if (node.callee.type === 'Identifier' && node.callee.name === mixinName) return node
-  for (const argument of node.arguments) {
+function findMixinCall(node: Node, mixinName: string): CallExpression | null {
+  const unwrapped = unwrapExpression(node)
+  if (unwrapped.type !== 'CallExpression') return null
+  if (unwrapped.callee.type === 'Identifier' && unwrapped.callee.name === mixinName) return unwrapped
+  for (const argument of unwrapped.arguments) {
     const nested = findMixinCall(argument, mixinName)
     if (nested) return nested
   }
@@ -285,31 +288,30 @@ export function findMixinCall(node: Node, mixinName: string): CallExpression | n
 
 /**
  * The class's attachment declaration — the second argument of the
- * `Attachable(...)` call in its heritage clause (RFC 0013). `unreadable`
- * reports a declaration this could not fully parse; the collections are
- * then empty rather than partial, because a partial map misreports the
- * model's contract (see {@link ModelInfo.attachmentsUnreadable}).
+ * `Attachable(...)` call in its heritage clause (RFC 0013). `'unreadable'`
+ * reports a declaration this could not fully parse rather than a partial
+ * collection list, because a partial map misreports the model's contract
+ * (see {@link ModelInfo.attachments}).
  */
-export function extractModelAttachments(classDecl: ClassDeclaration): {
-  collections: ModelAttachmentCollection[]
-  unreadable: boolean
-} {
+export function extractModelAttachments(
+  classDecl: ClassDeclaration,
+): ModelAttachmentCollection[] | 'unreadable' | null {
   const call = classDecl.superClass ? findMixinCall(classDecl.superClass, 'Attachable') : null
-  if (!call) return { collections: [], unreadable: false }
+  if (!call) return null
 
-  const declaration = call.arguments[1]
-  if (declaration?.type !== 'ObjectExpression') return { collections: [], unreadable: true }
+  const declaration = call.arguments[1] === undefined ? undefined : unwrapExpression(call.arguments[1])
+  if (declaration?.type !== 'ObjectExpression') return 'unreadable'
 
   const collections: ModelAttachmentCollection[] = []
   for (const property of declaration.properties) {
-    if (property.type !== 'ObjectProperty') return { collections: [], unreadable: true }
+    if (property.type !== 'ObjectProperty') return 'unreadable'
     const name = memberKeyName(property)
-    if (!name) return { collections: [], unreadable: true }
-    const spec = parseAttachmentSpec(property.value)
-    if (!spec) return { collections: [], unreadable: true }
+    if (!name) return 'unreadable'
+    const spec = parseAttachmentSpec(unwrapExpression(property.value))
+    if (!spec) return 'unreadable'
     collections.push({ name, ...spec })
   }
-  return { collections, unreadable: false }
+  return collections
 }
 
 /**
@@ -326,7 +328,7 @@ function parseAttachmentSpec(node: Node): { kind: 'one' | 'many'; variants: stri
     : null
   if (!kind) return null
 
-  const options = node.arguments[0]
+  const options = node.arguments[0] === undefined ? undefined : unwrapExpression(node.arguments[0])
   if (options === undefined) return { kind, variants: [] }
   if (options.type !== 'ObjectExpression') return null
 
@@ -336,7 +338,7 @@ function parseAttachmentSpec(node: Node): { kind: 'one' | 'many'; variants: stri
     const key = memberKeyName(property)
     if (!key) return null
     if (key !== 'variants') continue
-    const names = attachmentVariantNames(property.value)
+    const names = attachmentVariantNames(unwrapExpression(property.value))
     if (!names) return null
     variants = names
   }
@@ -364,7 +366,7 @@ function attachmentVariantNames(node: Node): string[] | null {
  */
 export function findDefineModelOption(classDecl: ClassDeclaration, name: string): ObjectProperty | null {
   if (!classDecl.superClass) return null
-  const call = findDefineModelCall(classDecl.superClass)
+  const call = findMixinCall(classDecl.superClass, 'defineModel')
   const options = call?.arguments[1]
   if (options?.type !== 'ObjectExpression') return null
   for (const property of options.properties) {

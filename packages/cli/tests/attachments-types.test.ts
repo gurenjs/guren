@@ -109,6 +109,47 @@ export class Doc extends Attachable(defineModel(docs), {
     expect(content).not.toContain('Doc')
   })
 
+  test('emits an entry for an empty Attachable declaration', async () => {
+    // Attachable(Base, {}) is still an Attachable model at runtime, so it
+    // must appear in the map (and in AttachableModelName) rather than read
+    // as an app without attachments.
+    const dir = await makeApp({
+      'app/Models/Note.ts': `import { Attachable } from '@guren/core'
+import { defineModel } from '@guren/orm'
+import { notes } from '../../db/schema.js'
+
+export class Note extends Attachable(defineModel(notes), {}) {}
+`,
+    })
+
+    const { outputPath, models, warnings } = await generateAttachmentTypes({ appRoot: dir })
+
+    expect(warnings).toEqual([])
+    expect(models).toEqual(['Note'])
+    const content = await readFile(outputPath!, 'utf-8')
+    expect(content).toContain('Note: {}')
+  })
+
+  test('keeps an existing file when models were skipped with warnings', async () => {
+    // Removal is on positive evidence only: an unparsable model file may
+    // hide an Attachable declaration, and deleting the module out from
+    // under its importers on uncertainty is worse than an outdated map
+    // plus the warning.
+    const stale = "export interface AttachmentsMap { Post: { cover: 'one' } }\n"
+    const dir = await makeApp({
+      '.guren/attachments.gen.ts': stale,
+      'app/Models/Post.ts': 'import { Attachable } from "@guren/core"\nexport class {{{ Attachable',
+    })
+
+    const { outputPath, models, warnings } = await generateAttachmentTypes({ appRoot: dir })
+
+    expect(outputPath).toBeNull()
+    expect(models).toEqual([])
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('could not be read as a model')
+    expect(await readFile(join(dir, '.guren/attachments.gen.ts'), 'utf-8')).toBe(stale)
+  })
+
   test('skips a class name declared attachable in more than one location', async () => {
     const files = {
       'app/Models/Post.ts': POST_MODEL,
@@ -126,7 +167,7 @@ export class Post extends Attachable(defineModel(posts), {
     const { outputPath, models, warnings } = await generateAttachmentTypes({ appRoot: dir })
 
     // Neither entry is truthful when the runtime keys both classes as
-    // 'Post', so nothing is emitted and the removal path applies.
+    // 'Post', so nothing is emitted.
     expect(models).toEqual([])
     expect(outputPath).toBeNull()
     expect(warnings).toHaveLength(1)

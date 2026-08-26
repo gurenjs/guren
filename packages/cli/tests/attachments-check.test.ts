@@ -231,6 +231,34 @@ export const { Attachment } = configureAttachments({
     }
   })
 
+  it('sees a configureAttachments call made through a namespace import', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-attachable-namespace-')
+    try {
+      await writeModel(workspace.dir)
+      await mkdir(join(workspace.dir, 'config'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'config/attachments.ts'),
+        `import * as core from '@guren/core'
+import { posts } from '../db/schema.js'
+
+export const { Attachment } = core.configureAttachments({
+  table: posts,
+  storage: () => ({}) as never,
+  disk: 'media',
+})`,
+        'utf8',
+      )
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      const result = report.checks.find((c) => c.key.startsWith('attachments-model:'))
+      expect(result).toBeDefined()
+      expect(result!.status).toBe('pass')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('does not treat a mention of configureAttachments in a comment as a config', async () => {
     const workspace = await createTempWorkspace('guren-cli-check-attachable-comment-')
     try {

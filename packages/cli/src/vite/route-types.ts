@@ -55,6 +55,11 @@ const DEFAULT_WATCH_FILE = 'routes/web.ts'
 const DEFAULT_PAGES_DIR = 'resources/js/pages'
 // Fixed by convention across codegen and check (see cli/src/i18n-types.ts).
 const DEFAULT_LANG_DIR = 'lang'
+// Models feed attachments.gen.ts: an edited Attachable(...) declaration must
+// regenerate the map, root and module models alike. Matched on the
+// POSIX-relative path (unlike the options-derived dirs below, this one is
+// static), which also keeps the test separator-safe on Windows.
+const MODELS_PATTERN = new RegExp(`^(?:modules/[^/]+/)?${escapeRegExp(MODELS_DIR)}(?:/|$)`, 'u')
 
 /**
  * The one place plugin path options are defaulted: `shouldRegenerate` (what to
@@ -188,25 +193,24 @@ export function routeTypesPlugin(options: RouteTypesPluginOptions = {}): Plugin 
     // shape rather than by listing `modules/`, so a module created mid-session
     // needs no restart.
     const moduleResources = new RegExp(`^modules/[^/]+/${escapeRegExp(paths.resourcesDir)}(?:/|$)`, 'u')
-    // Models feed attachments.gen.ts: an edited Attachable(...) declaration
-    // must regenerate the map, root and module models alike.
-    const modelsDir = resolve(root, MODELS_DIR)
-    const moduleModels = new RegExp(`^modules/[^/]+/${escapeRegExp(MODELS_DIR)}(?:/|$)`, 'u')
     const langDir = resolve(root, DEFAULT_LANG_DIR)
     const changedFile = resolve(file)
-    const relativeFile = toPosixRelative(root, changedFile)
 
-    return (
+    if (
       changedFile === watchFile ||
       changedFile.startsWith(`${pagesDir}/`) || changedFile === pagesDir ||
       changedFile.startsWith(`${resourcesDir}/`) || changedFile === resourcesDir ||
-      moduleResources.test(relativeFile) ||
-      changedFile.startsWith(`${modelsDir}/`) || changedFile === modelsDir ||
-      moduleModels.test(relativeFile) ||
       // Codegen only reads lang/<locale>/*.json — other files under lang/
       // (notes, fixtures) never affect the generated union.
       (changedFile.startsWith(`${langDir}/`) && changedFile.endsWith('.json'))
-    )
+    ) {
+      return true
+    }
+
+    // Relativized only when the cheap absolute-prefix checks above miss —
+    // this runs on every watcher event.
+    const relativeFile = toPosixRelative(root, changedFile)
+    return moduleResources.test(relativeFile) || MODELS_PATTERN.test(relativeFile)
   }
 
   return {
