@@ -296,9 +296,11 @@ export function createControllerModuleMock() {
       return this.parsedBody
     }
 
-    private multipartBody: Promise<FormData | null> | undefined
+    // Public like parsedBody above: TS4094 forbids private members on the
+    // exported anonymous class type this factory returns.
+    public multipartBody?: Promise<FormData | null>
 
-    private readMultipart(): Promise<FormData | null> {
+    public readMultipart(): Promise<FormData | null> {
       if (!this.multipartBody) {
         const request = this.ctx.req.raw
         const contentType = request.headers.get('Content-Type') ?? ''
