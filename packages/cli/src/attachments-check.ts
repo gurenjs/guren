@@ -54,6 +54,48 @@ function schemaModuleFor(cwd: string, filePath: string, specifier: string): stri
 }
 
 /**
+ * Whether the app (or one of its modules) wires the attachments layer: a
+ * `configureAttachments` imported from `@guren/core` that is actually called.
+ *
+ * For scaffolders (`make:feature --attach`) that would otherwise emit models
+ * whose `Attachable` statics all throw at first use — the guidance to run
+ * `guren add attachments` first has to come from the scaffold, not from the
+ * app's first crashed request. Positive evidence only, like the check below:
+ * a file that cannot be read or parsed contributes nothing, so an app this
+ * cannot see into is refused rather than scaffolded broken.
+ */
+export async function appConfiguresAttachments(appRoot: string, cache: ParseCache): Promise<boolean> {
+  for (const filePath of await discoverAttachmentsConfigFiles(appRoot)) {
+    const source = await cache.source(filePath)
+    if (!source || !source.includes('configureAttachments')) continue
+
+    const parsed = await cache.get(filePath)
+    if (!parsed) continue
+
+    let configureLocal: string | null = null
+    for (const declaration of parsed.ast.program.body) {
+      if (declaration.type !== 'ImportDeclaration' || declaration.source.value !== '@guren/core') continue
+      for (const specifier of declaration.specifiers) {
+        if (specifier.type !== 'ImportSpecifier') continue
+        const imported =
+          specifier.imported.type === 'Identifier' ? specifier.imported.name : specifier.imported.value
+        if (imported === 'configureAttachments') configureLocal = specifier.local.name
+      }
+    }
+    if (!configureLocal) continue
+
+    let called = false
+    walk(parsed.ast, (node) => {
+      if (node.type !== 'CallExpression') return
+      const call = node as unknown as CallExpression
+      if (call.callee.type === 'Identifier' && call.callee.name === configureLocal) called = true
+    })
+    if (called) return true
+  }
+  return false
+}
+
+/**
  * Flags a `configureAttachments()` whose `table` is not a table the app's
  * `db/schema.ts` declares (RFC 0013 Part 3). The attachments layer takes the
  * table as `unknown` (the session-store convention), so nothing at typecheck

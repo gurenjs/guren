@@ -139,6 +139,28 @@ export const { Attachment } = configureAttachments({
 | `queue` | なし | アプリの QueueManager を遅延解決で渡す。`attach(..., { queued: true })` を有効化。 |
 | `urlExpiresIn` | 5分 | private ディスクの `temporaryUrl()` リンクの有効期間。 |
 
+### アタッチメント付きフィーチャーのスキャフォールド
+
+レイヤーの導入後は、`make:feature`（および `guren add resource`）で
+アタッチメント対応のフィーチャー一式をスキャフォールドできます:
+
+```bash
+bunx guren make:feature Post --fields "title:string,body:text" --attach "cover:one,images:many"
+```
+
+`--attach` はカンマ区切りの `name:kind` ペア（`one` または `many`、省略時は
+`one`）を受け取ります。生成されるモデルは各コレクションに
+`image: 'require'` を付けた `Attachable` ミックスインでラップされ（画像以外の
+アップロードにはコレクションごとにこのオプションを外してください）、store
+アクションは同名の multipart フィールドを `this.file()` / `this.files()` で
+読んで `Post.attach()` を呼び、destroy アクションは行の削除前に
+`Post.purgeAttachments()` を呼びます。アプリに `configureAttachments()` が
+ない場合、このコマンドはスキャフォールドを拒否します。先に
+`bunx guren add attachments` を実行してください。生成された New/Edit
+ページへの `<input type="file">` の追加は手動で行います（Inertia の
+`useForm` はフォームデータに `File` が含まれると自動的に multipart POST に
+切り替わります）。
+
 ## アタッチメントの操作
 
 すべての static メソッドは宣言に対して型付けされます。コレクション名やバリアント名の打ち間違いは実行時の事故ではなくコンパイルエラーになります。

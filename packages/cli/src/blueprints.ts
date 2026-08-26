@@ -28,6 +28,12 @@ export interface RunBlueprintOptions extends WriterOptions {
   /** Comma-separated field definitions for the resource blueprint, e.g. "title:string,body:text?". */
   fields?: string
   /**
+   * Comma-separated attachment collections for the resource blueprint, e.g.
+   * "cover:one,images:many". Passed through to `makeFeature`, which refuses
+   * it on an app without `configureAttachments()`.
+   */
+  attach?: string
+  /**
    * Skip the scaffold's authentication checks. Defaults to false (auth required).
    *
    * Scope differs per blueprint: the resource blueprint guards its mutating
@@ -673,6 +679,7 @@ export default class BroadcastProvider extends ServiceProvider {
       const created = await makeFeature(singular, {
         force: Boolean(options.force),
         fields: options.fields,
+        attach: options.attach,
         publicAccess: options.publicAccess,
         announce: false,
       })

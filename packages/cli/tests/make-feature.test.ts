@@ -3,8 +3,8 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
 import { makeFeature, buildRouteRegistrationHint } from '../src/make-feature'
-import { parseFieldsString } from '../src/fields'
-import { API_ONLY_REFUSAL, API_ROUTES_FIXTURE, createTempWorkspace, DEFAULT_ROUTES_FIXTURE, seedApiOnlyApp } from './helpers'
+import { parseAttachString, parseFieldsString } from '../src/fields'
+import { API_ONLY_REFUSAL, API_ROUTES_FIXTURE, createTempWorkspace, DEFAULT_ROUTES_FIXTURE, seedApiOnlyApp, seedAttachmentsConfig } from './helpers'
 
 describe('parseFieldsString', () => {
   it('parses simple fields', () => {
@@ -59,6 +59,135 @@ describe('parseFieldsString', () => {
   it('defaults type to string when omitted', () => {
     const fields = parseFieldsString('title')
     expect(fields[0].type).toBe('string')
+  })
+})
+
+describe('parseAttachString', () => {
+  it('parses collections with kinds', () => {
+    expect(parseAttachString('cover:one,images:many')).toEqual([
+      { name: 'cover', kind: 'one' },
+      { name: 'images', kind: 'many' },
+    ])
+  })
+
+  it('defaults the kind to one when omitted', () => {
+    expect(parseAttachString('cover')).toEqual([{ name: 'cover', kind: 'one' }])
+  })
+
+  it('returns no collections for an empty string', () => {
+    expect(parseAttachString('')).toEqual([])
+    expect(parseAttachString('  ')).toEqual([])
+  })
+
+  it('handles whitespace', () => {
+    expect(parseAttachString(' cover : one , images : many ')).toEqual([
+      { name: 'cover', kind: 'one' },
+      { name: 'images', kind: 'many' },
+    ])
+  })
+
+  it('throws for an invalid kind', () => {
+    expect(() => parseAttachString('cover:two')).toThrow('Invalid attachment kind')
+  })
+
+  it('throws for an empty or non-identifier name', () => {
+    expect(() => parseAttachString(':one')).toThrow('Invalid attachment definition')
+    expect(() => parseAttachString('cover-image:one')).toThrow('Invalid attachment name')
+  })
+
+  // A repeated collection is a duplicate object key in the generated
+  // Attachable declaration — the second silently wins, so it is refused.
+  it('throws for a duplicate collection', () => {
+    expect(() => parseAttachString('cover:one,cover:many')).toThrow('Duplicate attachment collection')
+  })
+})
+
+describe('makeFeature --attach', () => {
+  it('wraps the model in Attachable and wires store/destroy', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-attach-')
+
+    try {
+      await seedAttachmentsConfig(workspace.dir)
+      await makeFeature('Post', { fields: 'title:string', attach: 'cover:one,images:many' })
+
+      const model = await readFile(join(workspace.dir, 'app/Models/Post.ts'), 'utf8')
+      expect(model).toContain("import { Attachable, defineModel, hasManyAttached, hasOneAttached } from '@guren/core'")
+      expect(model).toContain('export class Post extends Attachable(defineModel(posts), {')
+      expect(model).toContain("  cover: hasOneAttached({ image: 'require' }),")
+      expect(model).toContain("  images: hasManyAttached({ image: 'require' }),")
+
+      const controller = await readFile(
+        join(workspace.dir, 'app/Http/Controllers/PostController.ts'),
+        'utf8',
+      )
+      const storeBody = controller.slice(controller.indexOf('async store'), controller.indexOf('async edit'))
+      expect(storeBody).toContain("const cover = await this.file('cover')")
+      expect(storeBody).toContain("await Post.attach(post.id, 'cover', cover)")
+      expect(storeBody).toContain("for (const file of await this.files('images'))")
+      expect(storeBody).toContain("await Post.attach(post.id, 'images', file)")
+      // Attach runs after create (it needs the id) and before the redirect.
+      expect(storeBody.indexOf('Post.create(data)')).toBeLessThan(storeBody.indexOf("this.file('cover')"))
+      expect(storeBody.indexOf("Post.attach(post.id, 'images'")).toBeLessThan(storeBody.indexOf('this.redirect'))
+
+      // Deletion is explicit (RFC 0013 §8): purge before the row goes away.
+      const destroyBody = controller.slice(controller.indexOf('async destroy'))
+      expect(destroyBody).toContain('await Post.purgeAttachments(post.id)')
+      expect(destroyBody.indexOf('Post.purgeAttachments')).toBeLessThan(destroyBody.indexOf('Post.delete'))
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('refuses --attach when the app has no configureAttachments()', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-attach-missing-')
+
+    try {
+      await expect(
+        makeFeature('Post', { fields: 'title:string', attach: 'cover:one' }),
+      ).rejects.toThrow(/guren add attachments/)
+
+      // Refused before the first write — no half-scaffolded feature.
+      expect(existsSync(join(workspace.dir, 'app/Http/Validators/PostValidator.ts'))).toBe(false)
+      expect(existsSync(join(workspace.dir, 'app/Models/Post.ts'))).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('refuses a collection name that collides with a field', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-attach-collision-')
+
+    try {
+      await seedAttachmentsConfig(workspace.dir)
+      await expect(
+        makeFeature('Post', { fields: 'cover:string', attach: 'cover:one' }),
+      ).rejects.toThrow(/collides/)
+      await expect(
+        makeFeature('Post', { fields: 'title:string', attach: 'post:one' }),
+      ).rejects.toThrow(/collides/)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('leaves the model and controller unchanged without --attach', async () => {
+    const workspace = await createTempWorkspace('guren-cli-feature-no-attach-')
+
+    try {
+      await makeFeature('Post', { fields: 'title:string' })
+
+      const model = await readFile(join(workspace.dir, 'app/Models/Post.ts'), 'utf8')
+      expect(model).not.toContain('Attachable')
+
+      const controller = await readFile(
+        join(workspace.dir, 'app/Http/Controllers/PostController.ts'),
+        'utf8',
+      )
+      expect(controller).not.toContain('attach')
+      expect(controller).not.toContain('purgeAttachments')
+    } finally {
+      await workspace.cleanup()
+    }
   })
 })
 

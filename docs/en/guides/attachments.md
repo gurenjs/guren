@@ -156,6 +156,26 @@ Additional options:
 | `queue` | — | The app's QueueManager, resolved lazily; enables `attach(..., { queued: true })`. |
 | `urlExpiresIn` | 5 minutes | Lifetime of `temporaryUrl()` links for private disks. |
 
+### Scaffolding a feature with attachments
+
+Once the layer is installed, `make:feature` (and `guren add resource`) can
+scaffold a whole attachment-aware feature:
+
+```bash
+bunx guren make:feature Post --fields "title:string,body:text" --attach "cover:one,images:many"
+```
+
+`--attach` takes comma-separated `name:kind` pairs (`one` or `many`; the kind
+defaults to `one`). The generated model is wrapped in the `Attachable` mixin
+with `image: 'require'` on every collection — drop that option per collection
+for non-image uploads — the store action reads matching multipart fields via
+`this.file()` / `this.files()` and calls `Post.attach()`, and the destroy
+action calls `Post.purgeAttachments()` before deleting the row. The command
+refuses to scaffold when the app has no `configureAttachments()`; run
+`bunx guren add attachments` first. Add `<input type="file">` fields to the
+generated New/Edit pages yourself — Inertia's `useForm` switches to a
+multipart POST automatically when the form data contains a `File`.
+
 ## Working with attachments
 
 All statics are typed against the declaration — a typo in a collection name
