@@ -74,7 +74,16 @@ export function readManifest(
   return undefined
 }
 
-/** The two layouts `readManifest` accepts, in preference order. */
+/**
+ * The two layouts `readManifest` accepts, in preference order: `.vite/` first,
+ * because Vite >= 5 writes it there and a flat `manifest.json` beside it is
+ * most likely stale output of an older config. `@guren/server`'s runtime
+ * lookup (`clientManifestCandidates` in `http/vite-manifest.ts`) prefers the
+ * same layout — the orders must agree, or an app with both files resolves
+ * different asset versions locally than after a deploy; the server's
+ * `tests/http/vite-manifest.test.ts` pins the agreement (the rule cannot be
+ * shared as code, since this module imports nothing beyond node builtins).
+ */
 function manifestPaths(dir: string): [string, string] {
   return [resolve(dir, '.vite/manifest.json'), resolve(dir, 'manifest.json')]
 }
