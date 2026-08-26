@@ -1,12 +1,18 @@
 import { describe, expect, it, mock } from 'bun:test'
 
 // The AWS SDK is an optional peer that is not installed in this workspace.
-// The driver only needs the command class as a carrier for its input, so a
-// bare stand-in is enough — the logic under test (following continuation
-// tokens, mapping keys) is the driver's own, exercised through an injected
-// client that scripts the paged responses.
+// The driver only needs the command classes as carriers for their input, so
+// bare stand-ins are enough — the logic under test (following continuation
+// tokens, batching deletes, mapping keys) is the driver's own, exercised
+// through an injected client that scripts the responses. Note bun never
+// restores mock.module, so this replacement outlives this file; the module
+// is otherwise absent here, so the only behavior it can mask in another
+// test is the missing-optional-dependency error.
 mock.module('@aws-sdk/client-s3', () => ({
   ListObjectsV2Command: class {
+    constructor(readonly input: Record<string, unknown>) {}
+  },
+  DeleteObjectsCommand: class {
     constructor(readonly input: Record<string, unknown>) {}
   },
 }))
@@ -126,12 +132,55 @@ describe('S3Driver listing pagination', () => {
     expect(client.inputs).toHaveLength(1)
   })
 
-  it('stops when a truncated response carries no continuation token', async () => {
-    const { driver, client } = makeDriver([
+  it('lists from the disk prefix root without doubling the slash', async () => {
+    const { driver, client } = makeDriver(
+      [{ Contents: [{ Key: 'app/a.txt' }] }],
+      { prefix: 'app' },
+    )
+
+    expect(await driver.allFiles('')).toEqual(['a.txt'])
+    expect(client.inputs[0]?.Prefix).toBe('app/')
+  })
+
+  it('throws instead of returning an incomplete listing when a truncated response carries no token', async () => {
+    const { driver } = makeDriver([
       { Contents: [{ Key: 'a.txt' }], IsTruncated: true },
     ])
 
-    expect(await driver.allFiles('')).toEqual(['a.txt'])
-    expect(client.inputs).toHaveLength(1)
+    await expect(driver.allFiles('')).rejects.toThrow(/IsTruncated without an advancing/)
+  })
+
+  it('throws instead of looping when a truncated response repeats the previous token', async () => {
+    const { driver, client } = makeDriver([
+      { Contents: [{ Key: 'a.txt' }], IsTruncated: true, NextContinuationToken: 'token-1' },
+      { Contents: [{ Key: 'b.txt' }], IsTruncated: true, NextContinuationToken: 'token-1' },
+    ])
+
+    await expect(driver.allFiles('')).rejects.toThrow(/IsTruncated without an advancing/)
+    expect(client.inputs).toHaveLength(2)
+  })
+})
+
+describe('S3Driver deleteMany batching', () => {
+  it('splits deletes into DeleteObjects requests of at most 1000 keys', async () => {
+    const client = {
+      inputs: [] as Array<Record<string, unknown>>,
+      async send(command: unknown): Promise<unknown> {
+        const input = (command as { input: Record<string, unknown> }).input
+        this.inputs.push(input)
+        const objects = (input.Delete as { Objects: unknown[] }).Objects
+        return { Deleted: objects }
+      },
+    }
+    const driver = new S3Driver({ client, bucket: 'bucket' })
+
+    const paths = Array.from({ length: 1001 }, (_, index) => `file-${index}.txt`)
+    expect(await driver.deleteMany(paths)).toBe(1001)
+
+    expect(client.inputs).toHaveLength(2)
+    const batchSizes = client.inputs.map(
+      (input) => (input.Delete as { Objects: unknown[] }).Objects.length,
+    )
+    expect(batchSizes).toEqual([1000, 1])
   })
 })
