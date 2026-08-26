@@ -253,6 +253,31 @@ describe('createGurenControllerModule', () => {
     expect(files.map((file) => file.name)).toEqual(['a.png', 'b.png'])
   })
 
+  it('file() returns null when the first part of the field is empty, like the real Controller', async () => {
+    const { Controller } = createControllerModuleMock()
+
+    class UploadController extends Controller {
+      async handle() {
+        return this.file('cover')
+      }
+    }
+
+    // A browser submits every same-named input, filled or not — the real
+    // Controller.file() takes part 0 first and only then checks it is a
+    // non-empty File, so a leading empty part means null.
+    const formData = new FormData()
+    formData.append('cover', new File([], 'empty.png', { type: 'image/png' }))
+    formData.append('cover', new File([new Uint8Array([1])], 'real.png', { type: 'image/png' }))
+
+    const controller = new UploadController()
+    controller.setContext(createControllerContext('http://example.com/posts', {
+      method: 'POST',
+      body: formData,
+    }) as unknown as ControllerContext)
+
+    expect(await controller.handle()).toBeNull()
+  })
+
   it('file() returns null for non-multipart requests', async () => {
     const { Controller } = createControllerModuleMock()
 

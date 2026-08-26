@@ -296,24 +296,34 @@ export function createControllerModuleMock() {
       return this.parsedBody
     }
 
+    private multipartBody: Promise<FormData | null> | undefined
+
+    private readMultipart(): Promise<FormData | null> {
+      if (!this.multipartBody) {
+        const request = this.ctx.req.raw
+        const contentType = request.headers.get('Content-Type') ?? ''
+        // Clone for the same reason as parseRequestPayload: both may read the
+        // body of the same request, mirroring Hono's parse cache — and the
+        // memo keeps repeated file()/files() calls to one parse.
+        this.multipartBody = contentType.includes('multipart/form-data')
+          ? request.clone().formData()
+          : Promise.resolve(null)
+      }
+      return this.multipartBody
+    }
+
     public async file(name: string): Promise<File | null> {
-      const files = await this.files(name)
-      return files[0] ?? null
+      // Mirrors the real Controller.file(): take the FIRST part of the field,
+      // then require it to be a non-empty File — a leading empty part means
+      // null, not "skip to the next one".
+      const formData = await this.readMultipart()
+      const candidate = formData?.getAll(name)[0]
+      return candidate instanceof File && candidate.size > 0 ? candidate : null
     }
 
     public async files(name: string): Promise<File[]> {
-      const request = this.ctx.req.raw
-      const contentType = request.headers.get('Content-Type') ?? ''
-
-      if (!contentType.includes('multipart/form-data')) {
-        return []
-      }
-
-      // Clone for the same reason as parseRequestPayload: both may read the
-      // body of the same request, mirroring Hono's parse cache.
-      const formData = await request.clone().formData()
-      return formData
-        .getAll(name)
+      const formData = await this.readMultipart()
+      return (formData?.getAll(name) ?? [])
         .filter((value): value is File => value instanceof File && value.size > 0)
     }
 
