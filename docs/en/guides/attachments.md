@@ -35,6 +35,13 @@ async store() {
 
 ## Setup
 
+> `bunx guren add attachments` performs this whole section for you: it adds
+> the table to `db/schema.ts` for your dialect, writes
+> `config/attachments.ts`, wires an `AttachmentsProvider`, registers the
+> [`attachments:prune`](#sweeping-orphans-attachmentsprune) command, and
+> installs the storage blueprint if the app has none. The steps below are
+> the manual equivalent.
+
 ### 1. Add the `attachments` table
 
 Your app owns the table (the same convention as the sessions table): add the

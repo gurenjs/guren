@@ -1,3 +1,4 @@
+import { addAttachments } from './add-attachments'
 import { assertNotApiOnly } from './app-surface'
 import { fileExists, readIfExists } from './discovery'
 import { makeAuth } from './make-auth'
@@ -49,6 +50,22 @@ async function scaffoldFeatureFiles(
 }
 
 const blueprintRegistry: Record<string, BlueprintDefinition> = {
+  attachments: {
+    description: 'Install the attachments layer: schema table, config, provider, and the prune command.',
+    run: async (options) => {
+      const writerOptions: WriterOptions = { force: Boolean(options.force) }
+      const created: string[] = []
+      // Attachments store bytes on a StorageManager disk; an app that never
+      // ran the storage blueprint has no 'storage' binding to resolve.
+      if (!(await fileExists(process.cwd(), 'app/Providers/StorageProvider.ts'))) {
+        const { consola } = await import('consola')
+        consola.info('No StorageProvider found — installing the storage blueprint first.')
+        created.push(...(await blueprintRegistry.storage!.run(options)))
+      }
+      created.push(...(await addAttachments(writerOptions)))
+      return created
+    },
+  },
   admin: {
     description: 'Install a starter admin dashboard with dedicated routes and controller.',
     run: async (options) => {
