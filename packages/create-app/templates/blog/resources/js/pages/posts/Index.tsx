@@ -54,7 +54,10 @@ export default function PostsIndex({ data, pagination }: Props) {
     <Layout>
       <Head title="Posts" />
       <section className="space-y-6">
-        <h1 className="text-3xl font-semibold text-emerald-300">Posts</h1>
+        <h1 className="flex items-center gap-3 text-3xl font-bold text-g-heading">
+          <span aria-hidden className="h-7 w-[3px] shrink-0 rounded-full bg-[image:var(--g-tick)]" />
+          Posts
+        </h1>
 
         <form className="flex gap-2" onSubmit={search}>
           <input
@@ -62,21 +65,21 @@ export default function PostsIndex({ data, pagination }: Props) {
             value={keywords}
             onChange={(event) => setKeywords(event.target.value)}
             placeholder="Search posts…"
-            className="w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none ring-emerald-400 transition focus:border-emerald-400 focus:ring"
+            className="w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:border-transparent focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent"
           />
           <button
             type="submit"
             disabled={searching}
-            className="rounded border border-emerald-500 px-4 py-2 text-sm text-emerald-200 transition hover:bg-emerald-500/10 disabled:opacity-50"
+            className="rounded-g-ctl border border-g-line-strong bg-g-panel px-4 py-2 text-sm font-bold text-g-text transition hover:border-g-muted disabled:cursor-not-allowed disabled:opacity-45"
           >
             Search
           </button>
         </form>
 
-        {error !== null && <p className="text-sm text-rose-400">{error}</p>}
+        {error !== null && <p className="text-sm text-g-danger">{error}</p>}
 
         {results !== null && (
-          <p className="text-sm text-slate-400">
+          <p className="text-sm text-g-text-2">
             {results.length} {results.length === 1 ? 'result' : 'results'} ·{' '}
             <button
               type="button"
@@ -85,7 +88,7 @@ export default function PostsIndex({ data, pagination }: Props) {
                 setResults(null)
                 setError(null)
               }}
-              className="text-emerald-300 transition hover:text-emerald-200"
+              className="text-g-accent-text transition hover:underline"
             >
               Clear
             </button>
@@ -94,28 +97,28 @@ export default function PostsIndex({ data, pagination }: Props) {
 
         <div className="space-y-4">
           {posts.map((post) => (
-            <article key={post.id} className="rounded-lg border border-slate-800 bg-slate-900/40 p-5">
+            <article key={post.id} className="rounded-g-card border border-g-line bg-g-panel p-5 shadow-g-card">
               <Link
                 href={route('posts.show', { id: post.id })}
-                className="text-lg font-medium text-slate-100 transition hover:text-emerald-200"
+                className="text-lg font-bold text-g-heading transition hover:text-g-accent-text"
               >
                 {post.title}
               </Link>
-              <p className="mt-2 text-sm text-slate-400">{post.excerpt}</p>
+              <p className="mt-2 text-sm text-g-text-2">{post.excerpt}</p>
               {post.author ? (
-                <p className="mt-3 text-xs uppercase tracking-wide text-slate-500">by {post.author.name}</p>
+                <p className="mt-3 font-mono text-xs uppercase tracking-wide text-g-muted">by {post.author.name}</p>
               ) : null}
             </article>
           ))}
         </div>
 
         {results === null && pagination?.links?.pages && (
-          <nav className="flex gap-2">
+          <nav className="flex gap-2 font-mono text-sm">
             {pagination.links.pages.map((page) => (
               <Link
                 key={page.page}
                 href={page.url ?? '#'}
-                className="rounded border border-slate-800 px-3 py-1 text-sm text-slate-300 transition hover:border-emerald-500 hover:text-emerald-200"
+                className="rounded-g-ctl border border-g-line px-3 py-1 text-g-text-2 transition hover:border-g-line-strong hover:text-g-heading"
               >
                 {page.page}
               </Link>

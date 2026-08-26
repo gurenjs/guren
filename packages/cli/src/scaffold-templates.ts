@@ -32,8 +32,13 @@ import type { ScaffoldFileEntry } from './utils'
  */
 const scaffoldTemplateDir = fileURLToPath(new URL('../templates/scaffold', import.meta.url))
 
-/** Read one shipped template, `relativePath` in POSIX form (`auth/config/mail.ts`). */
-function loadScaffoldTemplate(relativePath: string): string {
+/**
+ * Read one shipped template, `relativePath` in POSIX form
+ * (`auth/config/mail.ts`). For TypeScript templates prefer
+ * {@link scaffoldTemplateFile}; this is the raw read, for assets that are not
+ * scaffold entries (guren-css.ts loads `guren-ui/resources/css/guren.css`).
+ */
+export function loadScaffoldTemplate(relativePath: string): string {
   return readFileSync(join(scaffoldTemplateDir, ...relativePath.split('/')), 'utf8')
 }
 
