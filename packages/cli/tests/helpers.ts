@@ -260,6 +260,27 @@ export async function seedInertiaApp(dir: string): Promise<void> {
   await writeWorkspaceFiles(dir, INERTIA_APP_FILES)
 }
 
+/**
+ * The shape `guren add attachments` leaves behind, reduced to what the
+ * `make:feature --attach` preflight reads: a `configureAttachments` imported
+ * from `@guren/core` and actually called. Parsed only, never executed — the
+ * storage thunk throwing is what keeps that honest.
+ */
+export async function seedAttachmentsConfig(dir: string): Promise<void> {
+  await writeWorkspaceFiles(dir, {
+    'config/attachments.ts': `import { configureAttachments } from '@guren/core'
+import { attachments } from '../db/schema.js'
+
+export const { Attachment } = configureAttachments({
+  table: attachments,
+  storage: () => {
+    throw new Error('unused in tests')
+  },
+})
+`,
+  })
+}
+
 /** One page component, for tests about an app that acquired one it cannot render. */
 export const PAGE_COMPONENT_FIXTURE = 'export default function Home() { return null }\n'
 

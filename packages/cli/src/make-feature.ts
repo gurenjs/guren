@@ -1,13 +1,15 @@
 import { consola } from 'consola'
 import { assertNotApiOnly } from './app-surface'
+import { appConfiguresAttachments } from './attachments-check'
 import { camelCase, kebabCase, pagesAccessor, pascalCase, safeModuleName, writeRoot, writeScaffoldFiles, writerOptionsFrom, type WriterOptions } from './utils'
 import { pluralize } from './inflect'
 import { makeModel } from './make-model'
 import { makePolicy } from './make-policy'
 import { makeTest } from './make-test'
 import { makeValidator } from './make-validator'
-import { parseFieldsString, type FieldDefinition, type FieldType } from './fields'
+import { parseAttachString, parseFieldsString, type AttachmentDefinition, type FieldDefinition, type FieldType } from './fields'
 import { ensureGurenUiTokens, FORM_INPUT_CLASS, PRIMARY_BUTTON_CLASS } from './guren-css'
+import { ParseCache } from './parse-cache'
 import { schemaPathFor } from './schema-parser'
 
 /**
@@ -23,6 +25,12 @@ export const API_ONLY_FEATURE_ALTERNATIVE = 'Scaffold a JSON controller with gur
 
 export interface MakeFeatureOptions extends WriterOptions {
   fields?: string
+  /**
+   * Comma-separated attachment collections (`"cover:one,images:many"`).
+   * Wraps the generated model in the `Attachable` mixin and wires the store
+   * and destroy actions; refused when the app has no `configureAttachments()`.
+   */
+  attach?: string
   withTest?: boolean
   withFactory?: boolean
   /** Skip authentication checks in mutating actions. Defaults to false (auth required). */
@@ -35,6 +43,7 @@ export interface MakeFeatureOptions extends WriterOptions {
 
 export async function makeFeature(name: string, options: MakeFeatureOptions = {}): Promise<string[]> {
   const fields = parseFieldsString(options.fields ?? '')
+  const attachments = parseAttachString(options.attach ?? '')
   const singular = pascalCase(name)
   const collection = pluralize(singular)
   const routeName = kebabCase(collection)
@@ -43,6 +52,21 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   const withAuth = !options.publicAccess
   const withPolicy = Boolean(options.withPolicy)
   const writerOptions: WriterOptions = writerOptionsFrom(options)
+
+  // A collection sharing a name with a column is a compile error in the
+  // generated model (the mixin rejects declaration keys that shadow columns),
+  // and one sharing a name with an identifier the generated store action
+  // already binds or references would shadow it — both are usage errors this
+  // can say outright instead of shipping as a file that does not compile.
+  const reserved = reservedAttachmentNames(fields, singular, variableName)
+  for (const attachment of attachments) {
+    if (reserved.has(attachment.name)) {
+      throw new Error(
+        `Attachment collection "${attachment.name}" collides with a column of the ${singular} table `
+        + `or an identifier the generated controller already uses. Pick another name.`,
+      )
+    }
+  }
 
   // `--module <name>` moves app/ output under modules/<name>/ (handled by
   // scaffoldFile for makeModel/makePolicy/makeTest below), but pages are
@@ -64,6 +88,20 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
     instead: API_ONLY_FEATURE_ALTERNATIVE,
   })
 
+  // Also before the first write: `--attach` output is only usable on an app
+  // that wired the attachments layer — the mixin's statics throw at first use
+  // otherwise. Refusing here, with the fix named, beats scaffolding a feature
+  // that crashes on its first upload (RFC 0013 Part 4).
+  if (attachments.length > 0 && !(await appConfiguresAttachments(writeRoot(options), new ParseCache()))) {
+    throw new Error(
+      'guren make:feature --attach scaffolds a model wired to the attachments layer, but this app has no '
+      + 'configureAttachments() call. Run `bunx guren add attachments` first, then re-run this command. '
+      + 'If your app wires attachments in a shape this cannot detect (a namespace import, a wrapper), '
+      + 'scaffold without --attach and add the Attachable mixin to the model by hand. '
+      + 'Nothing was scaffolded.',
+    )
+  }
+
   // Composed rather than emitted inline — the same way makeModel/makePolicy/
   // makeTest are below — so the schema names the generated controller imports
   // and the ones `make:validator` writes cannot drift apart.
@@ -76,7 +114,7 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
     },
     {
       path: `${appPrefix}app/Http/Controllers/${singular}Controller.ts`,
-      contents: generateController(singular, collection, routeName, routeVar, variableName, fields, withAuth, withPolicy, moduleName),
+      contents: generateController(singular, collection, routeName, routeVar, variableName, fields, withAuth, withPolicy, moduleName, attachments),
     },
     {
       path: `resources/js/pages/${pagePrefix}${routeName}/Index.tsx`,
@@ -103,7 +141,7 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   created.unshift(validatorPath)
 
   // Create model
-  const modelPath = await makeModel(singular, writerOptions)
+  const modelPath = await makeModel(singular, { ...writerOptions, attachments })
   created.push(modelPath)
 
   // Optionally create policy
@@ -157,6 +195,18 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
     consola.info('')
     consola.info(`  Note: store/update/destroy call this.auth.userOrFail() — unauthenticated requests get 401.`)
     consola.info(`  Use --public to scaffold without authentication checks.`)
+  }
+  if (attachments.length > 0) {
+    const fieldNames = attachments.map((attachment) => `"${attachment.name}"`).join(', ')
+    consola.info('')
+    consola.info(`  Attachments: store() reads the multipart field(s) ${fieldNames} via this.file()/this.files().`)
+    consola.info(`  Add matching <input type="file"> fields to the New page (Inertia's useForm posts multipart`)
+    consola.info(`  automatically when the form data contains a File). Uploads are validated as images and 422`)
+    consola.info(`  on anything else — drop image: 'require' in the model for opaque bytes like PDFs.`)
+    consola.info(`  update() does not touch attachments; to accept uploads from the Edit page, add the same`)
+    consola.info(`  this.file() + ${singular}.attach() lines there (hasOne replaces, hasMany appends).`)
+    consola.info(`  destroy() calls ${singular}.purgeAttachments() before deleting the row — attachment rows`)
+    consola.info(`  have no foreign key, so deletion stays explicit.`)
   }
   if (moduleName) {
     consola.info('')
@@ -216,6 +266,32 @@ export function buildRouteRegistrationHint(options: {
 }
 
 // --- Template generators ---
+
+/**
+ * Names an attachment collection may not take, derived from what the
+ * generated code binds where the attach lines land — kept beside the
+ * templates so a renamed store local moves this set in the same edit.
+ *
+ * `createdAt`/`updatedAt` are reserved even though `make:feature` never sees
+ * the table: the resource blueprint always appends both columns, most
+ * hand-written tables carry them too, and a declaration key that shadows a
+ * column is a compile error in the mixin. `data`, the record variable, the
+ * model class, and its payload schema are all in scope before the attach
+ * lines in the generated store action, so a collection reusing one of them
+ * would shadow a binding the earlier lines already used.
+ */
+function reservedAttachmentNames(fields: FieldDefinition[], singular: string, variableName: string): Set<string> {
+  return new Set([
+    ...fields.map((field) => field.name),
+    'id',
+    'createdAt',
+    'updatedAt',
+    'data',
+    variableName,
+    singular,
+    `${singular}PayloadSchema`,
+  ])
+}
 
 // Keyed by `FieldType` rather than `string`, so adding a field type fails to
 // compile here instead of silently falling through to a string default.
@@ -334,6 +410,7 @@ function generateController(
   withAuth: boolean,
   withPolicy: boolean,
   moduleName: string | undefined,
+  attachments: AttachmentDefinition[],
 ): string {
   const authGuard = withAuth ? '    await this.auth.userOrFail()\n' : ''
   const createGuard = withPolicy ? `    await this.authorize('create', ${singular})\n` : ''
@@ -349,6 +426,27 @@ function generateController(
   const redirectPrefix = moduleName ? `/${moduleName}` : ''
   const destroyGuard = withPolicy
     ? `    await this.authorize('delete', [${singular}, ${variableName}])\n`
+    : ''
+  // The RFC 0013 §8 store shape: create first, then one attach per collection
+  // — `this.file()` returns null for an absent multipart field, so a form
+  // that never uploads still stores the record.
+  const storeAttach = attachments
+    .map((attachment) =>
+      attachment.kind === 'one'
+        ? `    const ${attachment.name} = await this.file('${attachment.name}')\n`
+          + `    if (${attachment.name}) {\n`
+          + `      await ${singular}.attach(${variableName}.id, '${attachment.name}', ${attachment.name})\n`
+          + `    }\n`
+        : `    for (const file of await this.files('${attachment.name}')) {\n`
+          + `      await ${singular}.attach(${variableName}.id, '${attachment.name}', file)\n`
+          + `    }\n`)
+    .join('')
+  // Deletion is explicit (RFC 0013 §8): the polymorphic attachment rows carry
+  // no foreign key, and model delete hooks fire on only some delete paths —
+  // so the destroy action purges before deleting the row. After the
+  // authorization guard, deliberately: purging is destructive.
+  const destroyPurge = attachments.length > 0
+    ? `    await ${singular}.purgeAttachments(${variableName}.id)\n`
     : ''
   return `import { Controller, paginate, type PaginatedPageProps } from '@guren/core'
 import { pages } from '@/.guren/pages.gen'
@@ -389,7 +487,7 @@ export default class ${singular}Controller extends Controller {
   async store(): Promise<Response> {
 ${authGuard}${createGuard}    const data = await this.validateBody(${singular}PayloadSchema)
     const ${variableName} = await ${singular}.create(data)
-    return this.redirect('${redirectPrefix}/${routeName}/' + ${variableName}?.id)
+${storeAttach}    return this.redirect('${redirectPrefix}/${routeName}/' + ${variableName}?.id)
   }
 
   async edit(): Promise<Response> {
@@ -411,7 +509,7 @@ ${updateGuard}    const data = await this.validateBody(${singular}PayloadSchema)
   async destroy(): Promise<Response> {
 ${authGuard}    const { id } = this.validateParams(${singular}IdParamSchema)
     const ${variableName} = await ${singular}.findOrFail(id)
-${destroyGuard}    await ${singular}.delete({ id: ${variableName}.id })
+${destroyGuard}${destroyPurge}    await ${singular}.delete({ id: ${variableName}.id })
     return this.redirect('${redirectPrefix}/${routeName}')
   }
 }

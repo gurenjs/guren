@@ -8,6 +8,7 @@ import {
   assertWorkspaceBuilt,
   createTempWorkspace,
   seedApiOnlyApp,
+  seedAttachmentsConfig,
   seedInertiaApp,
 } from './helpers'
 import { parseSourceFile } from '../src/parse-cache'
@@ -194,6 +195,16 @@ describe('generated sources parse', () => {
   it('make:feature public, in a module', async () => {
     await expectAllOutputsParse('guren-parse-feature-module-', () =>
       makeFeature('Invoice', { fields: 'title:string,paidAt:date?', publicAccess: true, root: 'billing' }))
+  })
+
+  // Seeded with a configureAttachments() config because the flag refuses an
+  // app without one — the seed itself is parsed by the gate too.
+  it('make:feature with attachments', async () => {
+    await expectAllOutputsParse(
+      'guren-parse-feature-attach-',
+      () => makeFeature('Post', { fields: 'title:string', attach: 'cover:one,images:many' }),
+      seedAttachmentsConfig,
+    )
   })
 
   it('make:controller (Inertia dialect)', async () => {
