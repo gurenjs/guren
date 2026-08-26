@@ -45,3 +45,30 @@ describe('NODE_ENV gate form', () => {
     expect(offenders).toEqual([])
   })
 })
+
+describe('GUREN_VITE_MANIFEST read form', () => {
+  // The Vercel plugin injects the client manifest by substituting the read
+  // with `define: { 'process.env.GUREN_VITE_MANIFEST': ... }` — the same
+  // exact-expression matching as the NODE_ENV rule above, so the same two
+  // drifts would silently disarm it: an optional chain or an indexed read
+  // (different expressions, no substitution), or a second read site somewhere
+  // else (never substituted, answering undefined on serverless). The rule
+  // lives in vite-manifest.ts; this pins both the form and the single site.
+  test('the manifest injection is read once, in vite-manifest.ts, as the literal expression', async () => {
+    const readers: string[] = []
+
+    for (const file of await sourceFiles(SRC)) {
+      // Test files exercise the variable freely; only shipped code is bundled.
+      if (file.endsWith('.test.ts')) continue
+
+      const source = await readFile(file, 'utf8')
+      const reads = source.match(/process\.env\s*[?.[]+\s*['"]?GUREN_VITE_MANIFEST/g) ?? []
+      if (reads.length === 0) continue
+
+      readers.push(file.slice(SRC.length + 1))
+      expect(reads).toEqual(['process.env.GUREN_VITE_MANIFEST'])
+    }
+
+    expect(readers).toEqual(['http/vite-manifest.ts'])
+  })
+})

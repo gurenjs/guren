@@ -125,6 +125,26 @@ describe('buildLambdaOutput', () => {
     expect(wrapper.indexOf('GUREN_INERTIA_ENTRY')).toBeLessThan(wrapper.indexOf('await import'))
   })
 
+  test('should bake the client manifest for viteAsset() into the wrapper, never into env.json', async () => {
+    scaffoldApp(root)
+
+    await buildLambdaOutput({ rootDir: root, skipAppBuild: true })
+
+    // The function bundle ships no public/assets/manifest.json, so viteAsset()
+    // resolves from the GUREN_VITE_MANIFEST injection.
+    const wrapper = readFileSync(join(root, '.lambda/handler.ts'), 'utf8')
+    const manifestJson = JSON.stringify({
+      'resources/js/app.tsx': { file: 'app-Abc123.js', css: ['app-Def456.css'] },
+    })
+    expect(wrapper).toContain(`process.env.GUREN_VITE_MANIFEST ??= ${JSON.stringify(manifestJson)}`)
+    expect(wrapper.indexOf('GUREN_VITE_MANIFEST')).toBeLessThan(wrapper.indexOf('await import'))
+
+    // env.json feeds Lambda function configuration, which is capped at 4KB
+    // total — a real manifest there would fail deploys, so it must stay out.
+    const env = JSON.parse(readFileSync(join(root, '.lambda/env.json'), 'utf8')) as Record<string, string>
+    expect(env.GUREN_VITE_MANIFEST).toBeUndefined()
+  })
+
   test('should bundle an ESM function with NODE_ENV inlined to production', async () => {
     scaffoldApp(root)
 

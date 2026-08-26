@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   assertOutputDirOutsideRoot,
+  clientManifestJson,
   DATABASE_FACTORIES,
   detectDatabaseDialects,
   DEV_ONLY_MODULES,
@@ -153,6 +154,49 @@ describe('readManifest', () => {
 
   test('should return undefined when nothing is found', () => {
     expect(readManifest(join(dir, 'a.json'), join(dir, 'b.json'))).toBeUndefined()
+  })
+})
+
+describe('clientManifestJson', () => {
+  let dir: string
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'guren-client-manifest-'))
+  })
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test('should serialize the client manifest from either Vite layout under public/assets', () => {
+    mkdirSync(join(dir, 'assets/.vite'), { recursive: true })
+    writeFileSync(
+      join(dir, 'assets/.vite/manifest.json'),
+      JSON.stringify({ 'resources/css/app.css': { file: 'app-Abc123.css' } }, null, 2),
+    )
+
+    // Re-serialized from the parsed object: the payload is compact JSON, not
+    // the pretty-printed bytes on disk.
+    expect(clientManifestJson(dir)).toBe(
+      JSON.stringify({ 'resources/css/app.css': { file: 'app-Abc123.css' } }),
+    )
+  })
+
+  test('should answer even when the manifest has no client entry', () => {
+    // resolveClientAssetEnv warns and returns {} for this app (no
+    // resources/js/app.tsx), but a content-page app's viteAsset() calls still
+    // need the manifest — the two helpers deliberately answer differently.
+    mkdirSync(join(dir, 'assets'), { recursive: true })
+    writeFileSync(
+      join(dir, 'assets/manifest.json'),
+      JSON.stringify({ 'resources/css/app.css': { file: 'app-CssOnly.css' } }),
+    )
+
+    expect(clientManifestJson(dir)).toContain('app-CssOnly.css')
+  })
+
+  test('should return undefined when no manifest exists', () => {
+    expect(clientManifestJson(dir)).toBeUndefined()
   })
 })
 

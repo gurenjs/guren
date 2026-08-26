@@ -218,6 +218,28 @@ export function resolveClientAssetEnv(
 }
 
 /**
+ * The client build manifest as JSON text, for the deploy targets' runtime
+ * manifest injection (`GUREN_VITE_MANIFEST`): `viteAsset()` resolves
+ * content-page asset URLs from the client manifest at render time, and a
+ * bundled function or worker has no `public/assets/manifest.json` to read.
+ * How the payload reaches the runtime is per-plugin (a generated-entry
+ * assignment, a bundler `define`); *what* the payload is, is this.
+ *
+ * Separate from `resolveClientAssetEnv` because that helper answers only for
+ * the client *entry*: a content-page app can have a manifest of CSS build
+ * inputs and no `resources/js/app.tsx` at all, and its `viteAsset()` calls
+ * still need the whole manifest.
+ *
+ * Re-serialized from the parsed object rather than passed through as raw
+ * text, so the payload is exactly what `readManifest` accepted — a file that
+ * failed to parse here is never shipped to fail again at first render.
+ */
+export function clientManifestJson(publicDir: string): string | undefined {
+  const read = readManifest(...manifestPaths(resolve(publicDir, 'assets')))
+  return read ? JSON.stringify(read.manifest) : undefined
+}
+
+/**
  * Absolute path of the built SSR entry chunk, or undefined when the app has no
  * SSR build. Verifying that the chunk actually exports a renderer is left to
  * the caller: the platforms disagree on whether importing it during a build is

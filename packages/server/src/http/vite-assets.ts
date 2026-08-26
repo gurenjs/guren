@@ -3,6 +3,7 @@ import {
   loadViteManifest,
   getManifestFile,
   clientManifestCandidates,
+  injectedClientManifest,
   isViteProduction,
   normalizeDevServerUrl,
   DEFAULT_DEV_SERVER_URL,
@@ -25,11 +26,13 @@ export interface ViteAssetOptions {
 }
 
 let defaultCandidates: string[] | undefined
+let injectedManifest: ViteManifest | null | undefined
 const manifestCache = new Map<string, ViteManifest | null>()
 
 /** @internal Test seam — clears the memoized manifest reads. */
 export function __resetViteAssetCache(): void {
   defaultCandidates = undefined
+  injectedManifest = undefined
   manifestCache.clear()
 }
 
@@ -59,12 +62,14 @@ export function __resetViteAssetCache(): void {
  * `vite.config.ts` (`build.rollupOptions.input`) so Vite emits and records
  * it.
  *
- * **Serverless caveat:** production resolution reads the manifest from the
- * filesystem, which bundled deploy targets (Cloudflare Workers, Vercel,
- * Lambda) do not ship — their deploy plugins resolve assets at build time
- * for Inertia and do not yet feed this helper. On those targets `viteAsset`
- * throws at first render until the deploy plugins gain a build-time manifest
- * injection; track that as the follow-up before using `view()` there.
+ * **Serverless targets:** production resolution prefers a build-time
+ * injected manifest over the filesystem — when `GUREN_VITE_MANIFEST` holds
+ * the client manifest JSON, entries resolve from it and no file is read. The
+ * deploy plugins (`@guren/plugin-cloudflare`, `@guren/plugin-vercel`,
+ * `@guren/plugin-lambda`) populate it during their build step, so `view()`
+ * pages work on targets whose runtime never sees
+ * `public/assets/manifest.json`. An explicit `manifestPaths` still reads the
+ * named files — a caller stating paths is asking for exactly those.
  */
 export function viteAsset(entry: string, options: ViteAssetOptions = {}): string {
   const normalizedEntry = trimSlashes(entry)
@@ -75,23 +80,35 @@ export function viteAsset(entry: string, options: ViteAssetOptions = {}): string
     return `${base}/${normalizedEntry}`
   }
 
-  const candidates = options.manifestPaths
-    ? options.manifestPaths.map((path) => resolve(path))
-    : (defaultCandidates ??= clientManifestCandidates())
-  const cacheKey = candidates.join('\n')
-  let manifest = manifestCache.get(cacheKey)
-  if (manifest === undefined) {
-    manifest = loadViteManifest(candidates, 'client', { warnOnMissing: false }) ?? null
-    manifestCache.set(cacheKey, manifest)
+  let manifest: ViteManifest | null = null
+
+  if (!options.manifestPaths) {
+    if (injectedManifest === undefined) {
+      injectedManifest = injectedClientManifest() ?? null
+    }
+    manifest = injectedManifest
   }
 
   if (!manifest) {
-    throw new Error(
-      `viteAsset(): no Vite manifest found. Checked:\n${candidates
-        .map((path) => `  - ${path}`)
-        .join('\n')}\n` +
-        'Run `bunx vite build` before starting in production, or pass { manifestPaths } pointing at the build output.',
-    )
+    const candidates = options.manifestPaths
+      ? options.manifestPaths.map((path) => resolve(path))
+      : (defaultCandidates ??= clientManifestCandidates())
+    const cacheKey = candidates.join('\n')
+    let loaded = manifestCache.get(cacheKey)
+    if (loaded === undefined) {
+      loaded = loadViteManifest(candidates, 'client', { warnOnMissing: false }) ?? null
+      manifestCache.set(cacheKey, loaded)
+    }
+    manifest = loaded
+
+    if (!manifest) {
+      throw new Error(
+        `viteAsset(): no Vite manifest found. Checked:\n${candidates
+          .map((path) => `  - ${path}`)
+          .join('\n')}\n` +
+          'Run `bunx vite build` before starting in production, or pass { manifestPaths } pointing at the build output.',
+      )
+    }
   }
 
   const file = getManifestFile(manifest[normalizedEntry])

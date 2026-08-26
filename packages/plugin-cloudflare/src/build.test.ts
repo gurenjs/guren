@@ -70,6 +70,20 @@ describe('buildCloudflareOutput', () => {
     expect(worker).toContain('export default createWorkersHandler(app)')
   })
 
+  test('should bake the client manifest JSON into the worker for viteAsset()', async () => {
+    // Workers has no filesystem, so viteAsset()'s production lookup can only
+    // be answered by the GUREN_VITE_MANIFEST injection.
+    scaffoldApp(root)
+
+    await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
+
+    const worker = readFileSync(join(root, '.cloudflare/worker.js'), 'utf8')
+    const manifestJson = JSON.stringify({
+      'resources/js/app.tsx': { file: 'app-Abc123.js', css: ['app-Def456.css'] },
+    })
+    expect(worker).toContain(`process.env.GUREN_VITE_MANIFEST = ${JSON.stringify(manifestJson)}`)
+  })
+
   test('should copy public files into the assets directory', async () => {
     scaffoldApp(root)
 

@@ -6,9 +6,10 @@ import { trimTrailingSlashes } from '../support/trim-slashes'
  * The one rule for how Vite build output is found and addressed, shared
  * between the Inertia asset wiring (`inertia-assets.ts`) and the content-page
  * `viteAsset()` helper (`vite-assets.ts`, RFC 0014): what counts as a
- * manifest, where one may live, which URL prefix serves the hashed files,
- * and what "the dev server is on" means. Factored out so the two consumers
- * cannot drift on any of it.
+ * manifest, where one may live (a filesystem path, or the build-time
+ * `GUREN_VITE_MANIFEST` injection for runtimes without one), which URL prefix
+ * serves the hashed files, and what "the dev server is on" means. Factored
+ * out so the two consumers cannot drift on any of it.
  */
 
 /** Where `configureInertiaAssets` serves hashed build output from. */
@@ -54,6 +55,59 @@ export function clientManifestCandidates(baseDir?: string): string[] {
     resolve(root, 'public/assets/manifest.json'),
     resolve(root, 'public/assets/.vite/manifest.json'),
   ]
+}
+
+/**
+ * `__path__` label for a manifest injected through {@link injectedClientManifest},
+ * so "entry not in the manifest" errors name the real source instead of a
+ * filesystem path that was never read.
+ */
+export const INJECTED_CLIENT_MANIFEST_SOURCE = 'GUREN_VITE_MANIFEST (injected by the deploy build)'
+
+/**
+ * The client manifest a deploy build injected for runtimes that do not ship
+ * `public/assets/manifest.json`: `GUREN_VITE_MANIFEST` holds the manifest
+ * *JSON text* (not a path). The deploy plugins populate it during their build
+ * step — Workers and Lambda as an assignment in their generated entry module,
+ * Vercel by substituting the read at bundle time.
+ *
+ * Fails loudly on a value that is set but not a manifest: falling through to
+ * the filesystem would end in "run `bunx vite build`", a diagnosis pointing
+ * away from the variable that is actually broken.
+ */
+export function injectedClientManifest(): ViteManifest | undefined {
+  // Read as this one exact member expression on purpose: the Vercel plugin
+  // substitutes it with a bundler `define`, which matches nothing else — an
+  // optional chain or an indexed read silently opts back into a runtime read
+  // that serverless bundles cannot answer. Same rule as the NODE_ENV gates;
+  // pinned at the source level by tests/env-gate-form.test.ts.
+  const raw = process.env.GUREN_VITE_MANIFEST
+  if (typeof raw !== 'string' || raw.length === 0) {
+    return undefined
+  }
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch (error) {
+    throw new Error(
+      'GUREN_VITE_MANIFEST is set but is not valid JSON. It must hold the Vite client manifest text (deploy plugins inject it at build time), not a path.',
+      { cause: error },
+    )
+  }
+
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error(
+      'GUREN_VITE_MANIFEST is set but does not hold a manifest object. It must hold the Vite client manifest text (deploy plugins inject it at build time), not a path.',
+    )
+  }
+
+  const manifest = parsed as ViteManifest
+  Object.defineProperty(manifest, '__path__', {
+    value: INJECTED_CLIENT_MANIFEST_SOURCE,
+    enumerable: false,
+  })
+  return manifest
 }
 
 export type ViteManifestEntryObject = {

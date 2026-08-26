@@ -3,6 +3,7 @@ import { basename, extname, resolve } from 'node:path'
 import { definePlugin, type ServiceProviderConstructor } from '@guren/core'
 import {
   assertOutputDirOutsideRoot,
+  clientManifestJson,
   DEV_ONLY_MODULES,
   MCP_SDK_SUBPATH_PREFIX,
   renderDevOnlyStub,
@@ -148,7 +149,16 @@ export async function buildVercelOutput(options: BuildVercelOutputOptions = {}):
     ),
   )
 
-  await bundleFunction({ entrypoint, funcDir, root, dialects: options.databaseDialects })
+  await bundleFunction({
+    entrypoint,
+    funcDir,
+    root,
+    dialects: options.databaseDialects,
+    // Inlined into the bundle rather than added to the function environment:
+    // Vercel caps environment configuration size, which a real app's manifest
+    // can exceed, and the bundle has no such limit.
+    viteManifest: clientManifestJson(publicDir),
+  })
 
   if (existsSync(ssrDir)) {
     cpSync(ssrDir, resolve(funcDir, '.guren/ssr'), { recursive: true })
@@ -240,6 +250,7 @@ async function bundleFunction(input: {
   funcDir: string
   root: string
   dialects: readonly DatabaseDialect[] | undefined
+  viteManifest: string | undefined
 }): Promise<void> {
   const stubs = stubbedModules(input.root, input.dialects)
   // Derived from the stubs actually rendered so it stays the only enumeration
@@ -273,6 +284,15 @@ async function bundleFunction(input: {
       // `bun build` inlines `process.env.NODE_ENV` at bundle time (defaulting
       // to "development"), so pin it to "production" for the deployed function.
       'process.env.NODE_ENV': '"production"',
+      // viteAsset() resolves content-page assets from the client manifest at
+      // render time; substitute the read with the manifest JSON so the
+      // function needs neither the file nor environment configuration. A
+      // `define` matches one exact expression — @guren/server pins the read's
+      // form at the source level (tests/env-gate-form.test.ts) so this cannot
+      // silently stop matching.
+      ...(input.viteManifest
+        ? { 'process.env.GUREN_VITE_MANIFEST': JSON.stringify(input.viteManifest) }
+        : {}),
     },
     plugins: [
       {

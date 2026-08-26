@@ -95,6 +95,41 @@ describe('@guren/plugin-vercel', () => {
       expect(config.environment.GUREN_INERTIA_STYLES).toBe('/assets/app-Custom999.css')
     })
 
+    it('inlines the client manifest into the bundle for viteAsset()', async () => {
+      // The function directory ships no public/assets/manifest.json, and the
+      // function environment is size-capped — so the build substitutes the
+      // exact expression `process.env.GUREN_VITE_MANIFEST` with the manifest
+      // JSON via `define`. The fixture reads that expression the same way
+      // @guren/server's vite-manifest.ts does (its form is pinned by a server
+      // source test), so an inlined read here proves the mechanism.
+      const app = scaffoldApp(root, {
+        entrypoint: 'src/vercel.ts',
+        source:
+          'export const manifest = process.env.GUREN_VITE_MANIFEST\n' + DEFAULT_ENTRYPOINT_SOURCE,
+      })
+      mkdirSync(join(root, 'public/assets/.vite'), { recursive: true })
+      writeFileSync(
+        join(root, 'public/assets/.vite/manifest.json'),
+        JSON.stringify({ 'resources/css/app.css': { file: 'app-1nl1ned.css' } }),
+      )
+
+      await buildVercelOutput(app)
+
+      const bundle = readFileSync(
+        join(app.outputDir, 'functions/index.func/vercel.js'),
+        'utf8',
+      )
+      expect(bundle).toContain('app-1nl1ned.css')
+      expect(bundle).not.toContain('process.env.GUREN_VITE_MANIFEST')
+
+      // And never through the environment, where the payload would count
+      // against Vercel's configuration size limits.
+      const config = JSON.parse(
+        readFileSync(join(app.outputDir, 'functions/index.func/.vc-config.json'), 'utf8'),
+      ) as { environment: Record<string, string> }
+      expect(config.environment.GUREN_VITE_MANIFEST).toBeUndefined()
+    })
+
     it('points GUREN_INERTIA_SSR_MANIFEST at the layout the SSR build produced', async () => {
       // Older Vite configs emit a flat manifest.json; naming the .vite path
       // unconditionally leaves the runtime loading a file that is not there.
