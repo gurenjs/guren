@@ -6,7 +6,7 @@ import type { RequestPayload, VisitOptions } from '@inertiajs/core'
 export {}
 
 declare namespace Guren {
-  export type RouteMethod = 'GET' | 'PATCH' | 'POST' | 'PUT'
+  export type RouteMethod = 'DELETE' | 'GET' | 'PATCH' | 'POST' | 'PUT'
 
   export type RoutePath =
     '/'

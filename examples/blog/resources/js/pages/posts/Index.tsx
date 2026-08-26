@@ -82,6 +82,21 @@ export default function Index({ data: posts, pagination }: Props) {
                         {post.author?.name ?? 'Unknown'}
                       </p>
                     </div>
+                    {post.cover && (
+                      <img
+                        src={post.cover.variants.thumb?.url ?? post.cover.url}
+                        alt=""
+                        data-testid="post-cover-thumb"
+                        loading="lazy"
+                        className="mt-4 h-20 w-32 shrink-0 rounded-md object-cover ring-1 ring-stone-100 sm:mt-1"
+                        // ThumbHash LQIP behind the thumb while it loads.
+                        style={
+                          post.cover.placeholder
+                            ? { backgroundImage: `url(${post.cover.placeholder})`, backgroundSize: 'cover' }
+                            : undefined
+                        }
+                      />
+                    )}
                   </Link>
                 </article>
               ))}

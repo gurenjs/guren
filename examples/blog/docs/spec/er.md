@@ -15,6 +15,23 @@ This is a minimal, diff-able view. For interactive exploration of the Drizzle sc
 
 ```mermaid
 erDiagram
+  attachments {
+    text id PK
+    text attachableType
+    text attachableId
+    text collection
+    text disk
+    text path
+    text name
+    text contentType
+    integer size
+    integer width
+    integer height
+    jsonb variants
+    text placeholder
+    timestamp createdAt
+    timestamp updatedAt
+  }
   posts {
     serial id PK
     text title
@@ -35,6 +52,26 @@ erDiagram
   posts }o--|| users : authorId
   users ||--o{ posts : posts
 ```
+
+## attachments
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| id | text | primary key |
+| attachableType | text | not null |
+| attachableId | text | not null |
+| collection | text | not null |
+| disk | text | not null |
+| path | text | not null |
+| name | text | not null |
+| contentType | text | not null |
+| size | integer | not null |
+| width | integer |  |
+| height | integer |  |
+| variants | jsonb |  |
+| placeholder | text |  |
+| createdAt | timestamp | not null |
+| updatedAt | timestamp | not null |
 
 ## posts
 

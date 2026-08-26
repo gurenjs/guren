@@ -1,4 +1,5 @@
 import { defineModel, type BelongsToRecord } from '@guren/orm'
+import { Attachable, hasOneAttached } from '@guren/core'
 import { posts } from '../../db/schema.js'
 import type { UserRecord } from './User.js'
 
@@ -6,7 +7,12 @@ export type PostRecord = typeof posts.$inferSelect
 export type NewPostRecord = typeof posts.$inferInsert
 export type PostAuthorSummary = Pick<UserRecord, 'id' | 'name'>
 
-export class Post extends defineModel(posts) {
+export class Post extends Attachable(defineModel(posts), {
+  cover: hasOneAttached({
+    image: 'require',
+    variants: { thumb: { width: 320 } },
+  }),
+}) {
   static fillable = ['title', 'excerpt', 'body', 'authorId']
 
   static override relationTypes: { author: BelongsToRecord<PostAuthorSummary> } = {

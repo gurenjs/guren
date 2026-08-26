@@ -3,17 +3,22 @@ import { usePage, type InertiaFormProps } from '@inertiajs/react'
 import Layout from './Layout.js'
 import { AlertCircle } from 'lucide-react'
 import type { ApiRoutes } from '@/.guren/api-client.gen'
+import type { AttachmentData } from '@guren/core'
 
-export type PostFormValues = ApiRoutes['posts.store']['body']
+// `cover` rides along as a multipart file next to the typed route body —
+// Inertia switches the request to FormData as soon as the data holds a File.
+export type PostFormValues = ApiRoutes['posts.store']['body'] & { cover?: File | null }
 
 type PostFormProps = {
   form: InertiaFormProps<PostFormValues>
   onSubmit: (data: PostFormValues) => void
   onCancel: () => void
+  onDelete?: () => void
   mode: 'create' | 'edit'
+  currentCover?: AttachmentData | null
 }
 
-export default function PostForm({ form, onSubmit, onCancel, mode }: PostFormProps) {
+export default function PostForm({ form, onSubmit, onCancel, onDelete, mode, currentCover = null }: PostFormProps) {
   const { data, setData, errors: formErrors, clearErrors, setError, processing } = form
   const { props } = usePage<{ errors?: Record<string, string | undefined> }>()
   const generalError = (formErrors as Record<string, string | undefined>).message
@@ -63,9 +68,42 @@ export default function PostForm({ form, onSubmit, onCancel, mode }: PostFormPro
       body: String(formData.get('body') ?? ''),
     }
 
+    const cover = formData.get('cover')
+    if (cover instanceof File && cover.size > 0) {
+      payload.cover = cover
+    }
+
     setData(payload)
     onSubmit(payload)
   }
+
+  const [coverPreview, setCoverPreview] = React.useState<string | null>(null)
+
+  React.useEffect(() => {
+    return () => {
+      if (coverPreview) {
+        URL.revokeObjectURL(coverPreview)
+      }
+    }
+  }, [coverPreview])
+
+  const handleCoverChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] ?? null
+    setData('cover', file)
+    setCoverPreview((previous) => {
+      if (previous) {
+        URL.revokeObjectURL(previous)
+      }
+      return file ? URL.createObjectURL(file) : null
+    })
+
+    if ((formErrors as Record<string, string | undefined>).cover) {
+      clearErrors('cover' as keyof PostFormValues)
+    }
+  }
+
+  const coverError = (formErrors as Record<string, string | undefined>).cover
+  const shownCover = coverPreview ?? currentCover?.variants.thumb?.url ?? currentCover?.url ?? null
 
   const handleChange = (field: keyof PostFormValues) => (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
@@ -128,6 +166,46 @@ export default function PostForm({ form, onSubmit, onCancel, mode }: PostFormPro
               )}
             </div>
 
+            {/* Cover Field */}
+            <div className="space-y-2">
+              <label htmlFor="cover" className="block text-sm font-medium text-stone-700">
+                Cover image
+              </label>
+              {shownCover && (
+                <img
+                  src={shownCover}
+                  alt="Cover preview"
+                  data-testid="cover-preview"
+                  className="h-40 w-full rounded-md object-cover ring-1 ring-stone-200"
+                  style={
+                    currentCover?.placeholder && !coverPreview
+                      ? { backgroundImage: `url(${currentCover.placeholder})`, backgroundSize: 'cover' }
+                      : undefined
+                  }
+                />
+              )}
+              <input
+                type="file"
+                id="cover"
+                name="cover"
+                accept="image/*"
+                onChange={handleCoverChange}
+                className="block w-full text-sm text-stone-500 file:mr-4 file:rounded-md file:border-0 file:bg-stone-100 file:px-4 file:py-2 file:text-sm file:font-medium file:text-stone-700 hover:file:bg-stone-200"
+                disabled={processing}
+              />
+              <p className="text-xs text-stone-400">
+                {mode === 'edit' && currentCover
+                  ? 'Choosing a new image replaces the current cover.'
+                  : 'Optional. Images only — a 320px thumbnail is generated automatically.'}
+              </p>
+              {coverError && (
+                <p className="flex items-center gap-1 text-sm text-red-600">
+                  <AlertCircle className="h-3.5 w-3.5" />
+                  {coverError}
+                </p>
+              )}
+            </div>
+
             {/* Excerpt Field */}
             <div className="space-y-2">
               <label htmlFor="excerpt" className="block text-sm font-medium text-stone-700">
@@ -182,6 +260,16 @@ export default function PostForm({ form, onSubmit, onCancel, mode }: PostFormPro
 
             {/* Form Actions */}
             <div className="flex flex-col-reverse gap-3 border-t border-stone-100 pt-6 sm:flex-row sm:justify-end">
+              {onDelete && (
+                <button
+                  type="button"
+                  onClick={onDelete}
+                  disabled={processing}
+                  className="inline-flex items-center justify-center rounded-md bg-white px-5 py-2.5 text-sm font-medium text-red-600 ring-1 ring-inset ring-red-200 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 sm:mr-auto"
+                >
+                  Delete Post
+                </button>
+              )}
               <button
                 type="button"
                 onClick={onCancel}

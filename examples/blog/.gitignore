@@ -6,6 +6,7 @@ node_modules/
 test-results/
 playwright-report/
 e2e/.auth/
-storage/app/public/
+storage/app/
+public/storage/
 # Written by the Vercel build audit; removed when it finishes.
 src/.vercel-audit-entry.ts

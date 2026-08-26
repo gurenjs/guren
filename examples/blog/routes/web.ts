@@ -26,6 +26,7 @@ export function registerWebRoutes(baseRouter: Router): void {
       authed.post('/', { name: 'posts.store', body: PostPayloadSchema }, [PostController, 'store'])
       authed.put('/:id', { bind: { id: Post }, name: 'posts.update', body: PostPayloadSchema }, [PostController, 'update'])
       authed.patch('/:id', { bind: { id: Post }, name: 'posts.patch', body: PostPayloadSchema }, [PostController, 'update'])
+      authed.delete('/:id', { bind: { id: Post }, name: 'posts.destroy' }, [PostController, 'destroy'])
     })
   })
 }

@@ -42,6 +42,26 @@ export default function Show({ post }: Props) {
           <div className="mt-6 h-0.5 w-12 bg-guren-600" />
         </header>
 
+        {post.cover && (
+          <figure className="mt-10">
+            <img
+              src={post.cover.url}
+              alt={`Cover for ${post.title}`}
+              data-testid="post-cover"
+              width={post.cover.width ?? undefined}
+              height={post.cover.height ?? undefined}
+              loading="lazy"
+              className="w-full rounded-lg object-cover ring-1 ring-stone-100"
+              // The ThumbHash LQIP paints behind the image until it loads.
+              style={
+                post.cover.placeholder
+                  ? { backgroundImage: `url(${post.cover.placeholder})`, backgroundSize: 'cover' }
+                  : undefined
+              }
+            />
+          </figure>
+        )}
+
         <div className="mt-10">
           <p className="text-xl leading-relaxed text-stone-500">{post.excerpt}</p>
 

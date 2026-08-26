@@ -1,4 +1,5 @@
-import { pgTable, serial, text, timestamp, uniqueIndex, integer } from '@guren/orm/drizzle/pg'
+import { index, integer, jsonb, pgTable, serial, text, timestamp, uniqueIndex } from '@guren/orm/drizzle/pg'
+import type { AttachmentVariantRecord } from '@guren/core'
 
 export const users = pgTable(
   'users',
@@ -31,3 +32,21 @@ export const schema = {
 }
 
 export type BlogSchema = typeof schema
+
+export const attachments = pgTable('attachments', {
+  id: text('id').primaryKey(),
+  attachableType: text('attachable_type').notNull(),
+  attachableId: text('attachable_id').notNull(),
+  collection: text('collection').notNull().default('default'),
+  disk: text('disk').notNull(),
+  path: text('path').notNull(),
+  name: text('name').notNull(),
+  contentType: text('content_type').notNull(),
+  size: integer('size').notNull(),
+  width: integer('width'),
+  height: integer('height'),
+  variants: jsonb('variants').$type<Record<string, AttachmentVariantRecord>>(),
+  placeholder: text('placeholder'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [index('attachments_attachable_idx').on(t.attachableType, t.attachableId, t.collection)])

@@ -6,7 +6,8 @@ export default function New() {
   const form = useForm<PostFormValues>({
     title: '',
     excerpt: '',
-    body: ''
+    body: '',
+    cover: null
   })
 
   const handleSubmit = (data: PostFormValues) => {
