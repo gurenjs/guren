@@ -126,7 +126,13 @@ export default class AttachmentsProvider extends ServiceProvider {
 }
 `
 
-const ATTACHMENTS_TABLE_PATTERN = /export const attachments = (?:pgTable|sqliteTable|mysqlTable)\(/
+/**
+ * Any exported `attachments` binding counts as "the app already has one":
+ * builder spellings vary (`pgTable`, a pgSchema's `.table()`, re-exports),
+ * and appending a second `export const attachments` next to any of them is
+ * a compile error at best and a second physical table at worst.
+ */
+const ATTACHMENTS_TABLE_PATTERN = /\bexport\s+(?:const|let)\s+attachments\b|\bexport\s*\{[^}]*\battachments\b/
 
 /**
  * `guren add attachments`: append the attachments table to `db/schema.ts`
@@ -142,15 +148,22 @@ export async function addAttachments(options: WriterOptions): Promise<string[]> 
 
   await patchSchema()
 
-  created.push(
-    ...(await writeScaffoldFiles(
-      [
-        { path: 'config/attachments.ts', contents: CONFIG_FILE },
-        { path: 'app/Providers/AttachmentsProvider.ts', contents: PROVIDER_FILE },
-      ],
-      options,
-    )),
-  )
+  // Skipped per file rather than thrown: a re-run (or a run after a partial
+  // one) should repair whatever is missing — wire the provider, register the
+  // command — not abort on the first file that already exists.
+  const scaffolds = [
+    { path: 'config/attachments.ts', contents: CONFIG_FILE },
+    { path: 'app/Providers/AttachmentsProvider.ts', contents: PROVIDER_FILE },
+  ]
+  const pending: typeof scaffolds = []
+  for (const entry of scaffolds) {
+    if (!options.force && (await fileExists(process.cwd(), entry.path))) {
+      consola.info(`${entry.path} already exists — left unchanged (use --force to overwrite).`)
+    } else {
+      pending.push(entry)
+    }
+  }
+  created.push(...(await writeScaffoldFiles(pending, options)))
 
   await wireProviders([{ name: 'AttachmentsProvider' }])
   await registerPruneCommand()
@@ -178,11 +191,37 @@ async function patchSchema(): Promise<void> {
 
   const dialect = detectSchemaDialect(existing)
   let content = SCHEMA_IMPORTS[dialect](existing)
-  content = insertImport(content, VARIANT_RECORD_IMPORT) ?? content
+  // Identifier-guarded: insertImport() only recognizes the exact statement,
+  // so a schema that already imports the type among others would end up
+  // with a duplicate binding.
+  if (!content.includes('AttachmentVariantRecord')) {
+    content = insertImport(content, VARIANT_RECORD_IMPORT) ?? content
+  }
   content = `${content.trimEnd()}\n\n${ATTACHMENTS_TABLE_BLOCKS[dialect]}`
 
   await writeFile(resolve(process.cwd(), schemaRelative), content, 'utf8')
   consola.info(`Added the attachments table to ${schemaRelative} (${dialect}).`)
+}
+
+/**
+ * Whether the app already binds a 'storage' service somewhere — the real
+ * prerequisite question. The conventional file name alone answers it in
+ * neither direction: a custom CloudStorageProvider binds storage without
+ * that file, and installing a second manager over it would shadow it.
+ */
+export async function appBindsStorage(): Promise<boolean> {
+  const { collectFiles, listAppRoots } = await import('./discovery')
+  const { resolve: resolvePath } = await import('node:path')
+  const roots = await listAppRoots(process.cwd())
+  const groups = await Promise.all(
+    roots.flatMap((root) => ['app', 'src'].map((dir) => collectFiles(resolvePath(root.dir, dir)))),
+  )
+  const bindingPattern = /\b(?:instance|singleton|bind)\(\s*['"]storage['"]/
+  for (const filePath of groups.flat()) {
+    const source = await readIfExists(process.cwd(), filePath)
+    if (source && bindingPattern.test(source)) return true
+  }
+  return false
 }
 
 async function registerPruneCommand(): Promise<void> {
@@ -199,6 +238,14 @@ async function registerPruneCommand(): Promise<void> {
     return
   }
 
+  // Read before patching: once the registration lands in the array, the
+  // identifier is in the file, and "already imported?" can no longer be told
+  // apart from "just registered". addImport() only recognizes the exact
+  // statement, so an import merged into another '@guren/core' line would
+  // otherwise get a duplicate binding appended.
+  const beforePatch = (await readIfExists(process.cwd(), CONSOLE_ENTRY)) ?? ''
+  const alreadyImported = beforePatch.includes(className)
+
   // Patch the registration before the import, so a failure here can't leave
   // an unused import behind (the same order make:command uses).
   const registration = await addToArrayArgument(CONSOLE_ENTRY, 'registerMany', className)
@@ -209,7 +256,9 @@ async function registerPruneCommand(): Promise<void> {
     return
   }
 
-  await addImport(CONSOLE_ENTRY, `import { ${className} } from '@guren/core'`)
+  if (!alreadyImported) {
+    await addImport(CONSOLE_ENTRY, `import { ${className} } from '@guren/core'`)
+  }
 
   if (registration.modified) {
     consola.success(`Registered ${className} in ${CONSOLE_ENTRY}`)

@@ -120,4 +120,47 @@ describe('guren add attachments', () => {
 
     expect(await readFile(resolve('app/Providers/StorageProvider.ts'), 'utf8')).toBe(custom)
   })
+
+  it('does not install a second storage manager over a custom binding', async () => {
+    await seedApp(PG_SCHEMA_FIXTURE)
+    await mkdir('app/Providers', { recursive: true })
+    // Storage bound under an unconventional file name: the prerequisite must
+    // judge by the binding, not by the conventional filename.
+    await writeFile(
+      'app/Providers/CloudStorageProvider.ts',
+      `export default class CloudStorageProvider {
+  register(): void {
+    this.container.instance('storage', createCloudManager())
+  }
+}\n`,
+    )
+
+    await runBlueprint('attachments', {})
+
+    expect(existsSync(resolve('app/Providers/StorageProvider.ts'))).toBe(false)
+    expect(existsSync(resolve('config/attachments.ts'))).toBe(true)
+  })
+
+  it('repairs instead of throwing on a second run', async () => {
+    await seedApp(PG_SCHEMA_FIXTURE)
+    await runBlueprint('attachments', {})
+    const schemaAfterFirst = await readFile(resolve('db/schema.ts'), 'utf8')
+
+    await runBlueprint('attachments', {})
+
+    expect(await readFile(resolve('db/schema.ts'), 'utf8')).toBe(schemaAfterFirst)
+    const consoleFile = await readFile(resolve('src/console.ts'), 'utf8')
+    // Registered and imported exactly once.
+    expect(consoleFile.split('AttachmentsPruneCommand').length - 1).toBe(2)
+  })
+
+  it('treats any exported attachments binding as an existing table', async () => {
+    const withSchemaTable = `${PG_SCHEMA_FIXTURE}\nconst media = pgSchema('media')\nexport const attachments = media.table('attachments', {})\n`
+    await seedApp(withSchemaTable)
+
+    await runBlueprint('attachments', {})
+
+    const schema = await readFile(resolve('db/schema.ts'), 'utf8')
+    expect(schema.split('export const attachments').length - 1).toBe(1)
+  })
 })

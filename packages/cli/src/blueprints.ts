@@ -1,4 +1,4 @@
-import { addAttachments } from './add-attachments'
+import { addAttachments, appBindsStorage } from './add-attachments'
 import { assertNotApiOnly } from './app-surface'
 import { fileExists, readIfExists } from './discovery'
 import { makeAuth } from './make-auth'
@@ -56,10 +56,14 @@ const blueprintRegistry: Record<string, BlueprintDefinition> = {
       const writerOptions: WriterOptions = { force: Boolean(options.force) }
       const created: string[] = []
       // Attachments store bytes on a StorageManager disk; an app that never
-      // ran the storage blueprint has no 'storage' binding to resolve.
-      if (!(await fileExists(process.cwd(), 'app/Providers/StorageProvider.ts'))) {
+      // set one up has no 'storage' binding to resolve. Judged by looking
+      // for a binding anywhere in the app's sources, not by the presence of
+      // one conventional file — a custom CloudStorageProvider must not get
+      // a second manager installed over it.
+      const hasConventionalProvider = await fileExists(process.cwd(), 'app/Providers/StorageProvider.ts')
+      if (!hasConventionalProvider && !(await appBindsStorage())) {
         const { consola } = await import('consola')
-        consola.info('No StorageProvider found — installing the storage blueprint first.')
+        consola.info("No 'storage' binding found — installing the storage blueprint first.")
         created.push(...(await blueprintRegistry.storage!.run(options)))
       }
       created.push(...(await addAttachments(writerOptions)))
@@ -539,7 +543,10 @@ const disks = {
   local: { driver: 'local', root: './storage/app' },
   // Declared public because it is: everything under it is served. A local
   // disk has no per-object visibility, so this is where that is decided.
-  public: { driver: 'local', root: './storage/app/public', visibility: 'public' },
+  // Rooted inside public/ so the root asset server serves these files and
+  // disk.url() returns a URL that actually resolves (images and the other
+  // allowlisted extensions; add a route for anything else).
+  public: { driver: 'local', root: './public/storage', url: '/storage', visibility: 'public' },
 } as const
 
 const selected = process.env.STORAGE_DISK ?? 'local'
