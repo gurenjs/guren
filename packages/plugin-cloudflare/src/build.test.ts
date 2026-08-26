@@ -20,6 +20,11 @@ async function captureWarnings(run: () => Promise<void>): Promise<string> {
   return warnings.join('\n')
 }
 
+/** The client manifest `scaffoldApp` writes — assertions derive from this. */
+const CLIENT_MANIFEST = {
+  'resources/js/app.tsx': { file: 'app-Abc123.js', css: ['app-Def456.css'] },
+}
+
 function scaffoldApp(root: string, options: { ssr?: boolean; renderExport?: string } = {}): void {
   const { ssr = true, renderExport = 'export const render = () => ({ body: "", head: [] })' } = options
 
@@ -30,9 +35,7 @@ function scaffoldApp(root: string, options: { ssr?: boolean; renderExport?: stri
   mkdirSync(join(root, 'public/assets/.vite'), { recursive: true })
   writeFileSync(join(root, 'public/robots.txt'), 'User-agent: *\n')
   writeFileSync(join(root, 'public/assets/app-Abc123.js'), 'console.log("client")\n')
-  writeJson(join(root, 'public/assets/.vite/manifest.json'), {
-    'resources/js/app.tsx': { file: 'app-Abc123.js', css: ['app-Def456.css'] },
-  })
+  writeJson(join(root, 'public/assets/.vite/manifest.json'), CLIENT_MANIFEST)
 
   if (ssr) {
     mkdirSync(join(root, '.guren/ssr/.vite'), { recursive: true })
@@ -64,10 +67,30 @@ describe('buildCloudflareOutput', () => {
     expect(worker).toContain("import { setInertiaSsrRenderer } from '@guren/core'")
     expect(worker).toContain('import * as ssrModule from "../.guren/ssr/ssr-Xyz789.js"')
     expect(worker).toContain('import app from "../src/app.ts"')
-    expect(worker).toContain('process.env.GUREN_INERTIA_ENTRY = "/assets/app-Abc123.js"')
-    expect(worker).toContain('process.env.GUREN_INERTIA_STYLES = "/assets/app-Def456.css"')
     expect(worker).toContain('setInertiaSsrRenderer(ssrModule.render)')
     expect(worker).toContain('export default createWorkersHandler(app)')
+
+    // The env assignments live in a module the worker imports *first*: a
+    // statement in worker.js itself would run after the app's module graph
+    // evaluated, so a module-scope viteAsset() call would see no manifest.
+    const workerEnv = readFileSync(join(root, '.cloudflare/worker-env.js'), 'utf8')
+    expect(workerEnv).toContain('process.env.GUREN_INERTIA_ENTRY = "/assets/app-Abc123.js"')
+    expect(workerEnv).toContain('process.env.GUREN_INERTIA_STYLES = "/assets/app-Def456.css"')
+    expect(worker.indexOf("import './worker-env.js'")).toBeGreaterThanOrEqual(0)
+    expect(worker.indexOf("import './worker-env.js'")).toBeLessThan(worker.indexOf('import app'))
+  })
+
+  test('should bake the client manifest JSON into the worker for viteAsset()', async () => {
+    // Workers has no filesystem, so viteAsset()'s production lookup can only
+    // be answered by the GUREN_VITE_MANIFEST injection.
+    scaffoldApp(root)
+
+    await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
+
+    const workerEnv = readFileSync(join(root, '.cloudflare/worker-env.js'), 'utf8')
+    expect(workerEnv).toContain(
+      `process.env.GUREN_VITE_MANIFEST = ${JSON.stringify(JSON.stringify(CLIENT_MANIFEST))}`,
+    )
   })
 
   test('should copy public files into the assets directory', async () => {
@@ -160,9 +183,9 @@ describe('buildCloudflareOutput', () => {
       skipAppBuild: true,
     })
 
-    const worker = readFileSync(join(root, '.cloudflare/worker.js'), 'utf8')
-    expect(worker).toContain('process.env.GUREN_INERTIA_ENTRY = "/assets/app-Custom999.js"')
-    expect(worker).toContain('process.env.GUREN_INERTIA_STYLES = "/assets/app-Custom999.css"')
+    const workerEnv = readFileSync(join(root, '.cloudflare/worker-env.js'), 'utf8')
+    expect(workerEnv).toContain('process.env.GUREN_INERTIA_ENTRY = "/assets/app-Custom999.js"')
+    expect(workerEnv).toContain('process.env.GUREN_INERTIA_STYLES = "/assets/app-Custom999.css"')
   })
 
   test('should scaffold wrangler.jsonc once and never overwrite it', async () => {

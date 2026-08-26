@@ -2,6 +2,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node
 import { resolve } from 'node:path'
 import {
   DEV_ONLY_MODULES,
+  clientManifestJson,
   importSpecifier,
   MCP_SDK_SUBPATH_PREFIX,
   renderDevOnlyStub,
@@ -174,8 +175,17 @@ export async function buildLambdaOutput(options: BuildLambdaOutputOptions = {}):
   stageStaticAssets(publicDir, resolve(out, 'assets'))
 
   const env = buildLambdaEnvironment(assetEnv, ssrFile, ssrDir)
+  // viteAsset() resolves content-page assets from the client manifest at
+  // render time, and the function bundle ships no public/assets/manifest.json
+  // — so the manifest is baked into the wrapper with the other defaults.
+  // Merged here, past the env.json write below, never into `env` itself:
+  // Lambda caps function environment configuration at 4KB total, which a real
+  // app's manifest alone can exceed — as wrapper code it rides in the bundle
+  // instead.
+  const viteManifest = clientManifestJson(publicDir)
+  const bakedEnv = viteManifest ? { ...env, GUREN_VITE_MANIFEST: viteManifest } : env
   const wrapperPath = resolve(out, `${LAMBDA_HANDLER_MODULE}.ts`)
-  writeFileSync(wrapperPath, renderHandlerModule({ out, entrypoint, env }))
+  writeFileSync(wrapperPath, renderHandlerModule({ out, entrypoint, env: bakedEnv }))
 
   await bundleHandler(wrapperPath, funcDir, stubsFor(root, options.databaseDialects))
 

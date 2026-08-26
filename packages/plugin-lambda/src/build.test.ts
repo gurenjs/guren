@@ -29,6 +29,11 @@ function probeHttpExport(root: string): string {
   return result.stdout.toString().trim()
 }
 
+/** The client manifest `scaffoldApp` writes — assertions derive from this. */
+const CLIENT_MANIFEST = {
+  'resources/js/app.tsx': { file: 'app-Abc123.js', css: ['app-Def456.css'] },
+}
+
 interface ScaffoldOptions {
   ssr?: boolean
   renderExport?: string
@@ -61,9 +66,7 @@ function scaffoldApp(root: string, options: ScaffoldOptions = {}): void {
   mkdirSync(join(root, 'public/assets/.vite'), { recursive: true })
   writeFileSync(join(root, 'public/robots.txt'), 'User-agent: *\n')
   writeFileSync(join(root, 'public/assets/app-Abc123.js'), 'console.log("client")\n')
-  writeJson(join(root, 'public/assets/.vite/manifest.json'), {
-    'resources/js/app.tsx': { file: 'app-Abc123.js', css: ['app-Def456.css'] },
-  })
+  writeJson(join(root, 'public/assets/.vite/manifest.json'), CLIENT_MANIFEST)
 
   mkdirSync(join(root, 'db/migrations/20260101000000_init'), { recursive: true })
   writeFileSync(join(root, 'db/migrations/20260101000000_init/migration.sql'), 'CREATE TABLE posts (id serial);\n')
@@ -123,6 +126,25 @@ describe('buildLambdaOutput', () => {
     // The env assignments must precede the app import — static imports would
     // hoist past them.
     expect(wrapper.indexOf('GUREN_INERTIA_ENTRY')).toBeLessThan(wrapper.indexOf('await import'))
+  })
+
+  test('should bake the client manifest for viteAsset() into the wrapper, never into env.json', async () => {
+    scaffoldApp(root)
+
+    await buildLambdaOutput({ rootDir: root, skipAppBuild: true })
+
+    // The function bundle ships no public/assets/manifest.json, so viteAsset()
+    // resolves from the GUREN_VITE_MANIFEST injection.
+    const wrapper = readFileSync(join(root, '.lambda/handler.ts'), 'utf8')
+    expect(wrapper).toContain(
+      `process.env.GUREN_VITE_MANIFEST ??= ${JSON.stringify(JSON.stringify(CLIENT_MANIFEST))}`,
+    )
+    expect(wrapper.indexOf('GUREN_VITE_MANIFEST')).toBeLessThan(wrapper.indexOf('await import'))
+
+    // env.json feeds Lambda function configuration, which is capped at 4KB
+    // total — a real manifest there would fail deploys, so it must stay out.
+    const env = JSON.parse(readFileSync(join(root, '.lambda/env.json'), 'utf8')) as Record<string, string>
+    expect(env.GUREN_VITE_MANIFEST).toBeUndefined()
   })
 
   test('should bundle an ESM function with NODE_ENV inlined to production', async () => {

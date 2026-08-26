@@ -3,9 +3,11 @@ import {
   loadViteManifest,
   getManifestFile,
   clientManifestCandidates,
+  injectedClientManifest,
   isViteProduction,
   normalizeDevServerUrl,
   DEFAULT_DEV_SERVER_URL,
+  INJECTED_CLIENT_MANIFEST_SOURCE,
   PUBLIC_ASSETS_URL_PREFIX,
   type ViteManifest,
 } from './vite-manifest'
@@ -34,6 +36,35 @@ export function __resetViteAssetCache(): void {
 }
 
 /**
+ * One manifest resolution, memoized until {@link __resetViteAssetCache}.
+ * `null` records "looked and found nothing" so absence is not re-probed per
+ * render. The injected manifest shares the cache under its fixed source
+ * label, which cannot collide with the other keys — those are joined
+ * absolute paths.
+ */
+function memoizedManifest(key: string, load: () => ViteManifest | undefined): ViteManifest | null {
+  let manifest = manifestCache.get(key)
+  if (manifest === undefined) {
+    manifest = load() ?? null
+    manifestCache.set(key, manifest)
+  }
+  return manifest
+}
+
+/** The production tail: hashed output file → served URL, or the loud throw. */
+function manifestAssetUrl(manifest: ViteManifest, normalizedEntry: string): string {
+  const file = getManifestFile(manifest[normalizedEntry])
+  if (!file) {
+    throw new Error(
+      `viteAsset(): "${normalizedEntry}" is not in the Vite manifest at ${manifest.__path__ ?? 'an unknown path'}. ` +
+        'Declare it as a build input in vite.config.ts (build.rollupOptions.input) so Vite emits and records it.',
+    )
+  }
+
+  return `${PUBLIC_ASSETS_URL_PREFIX}${trimSlashes(file)}`
+}
+
+/**
  * Resolve the public URL of a Vite build input, for server-rendered content
  * pages (RFC 0014). The URL is environment-dependent and this helper owns
  * both branches:
@@ -59,12 +90,14 @@ export function __resetViteAssetCache(): void {
  * `vite.config.ts` (`build.rollupOptions.input`) so Vite emits and records
  * it.
  *
- * **Serverless caveat:** production resolution reads the manifest from the
- * filesystem, which bundled deploy targets (Cloudflare Workers, Vercel,
- * Lambda) do not ship — their deploy plugins resolve assets at build time
- * for Inertia and do not yet feed this helper. On those targets `viteAsset`
- * throws at first render until the deploy plugins gain a build-time manifest
- * injection; track that as the follow-up before using `view()` there.
+ * **Serverless targets:** production resolution prefers a build-time
+ * injected manifest over the filesystem — when `GUREN_VITE_MANIFEST` holds
+ * the client manifest JSON, entries resolve from it and no file is read. The
+ * deploy plugins (`@guren/plugin-cloudflare`, `@guren/plugin-vercel`,
+ * `@guren/plugin-lambda`) populate it during their build step, so `view()`
+ * pages work on targets whose runtime never sees
+ * `public/assets/manifest.json`. An explicit `manifestPaths` still reads the
+ * named files — a caller stating paths is asking for exactly those.
  */
 export function viteAsset(entry: string, options: ViteAssetOptions = {}): string {
   const normalizedEntry = trimSlashes(entry)
@@ -75,15 +108,19 @@ export function viteAsset(entry: string, options: ViteAssetOptions = {}): string
     return `${base}/${normalizedEntry}`
   }
 
+  if (!options.manifestPaths) {
+    const injected = memoizedManifest(INJECTED_CLIENT_MANIFEST_SOURCE, injectedClientManifest)
+    if (injected) {
+      return manifestAssetUrl(injected, normalizedEntry)
+    }
+  }
+
   const candidates = options.manifestPaths
     ? options.manifestPaths.map((path) => resolve(path))
     : (defaultCandidates ??= clientManifestCandidates())
-  const cacheKey = candidates.join('\n')
-  let manifest = manifestCache.get(cacheKey)
-  if (manifest === undefined) {
-    manifest = loadViteManifest(candidates, 'client', { warnOnMissing: false }) ?? null
-    manifestCache.set(cacheKey, manifest)
-  }
+  const manifest = memoizedManifest(candidates.join('\n'), () =>
+    loadViteManifest(candidates, 'client', { warnOnMissing: false }),
+  )
 
   if (!manifest) {
     throw new Error(
@@ -94,13 +131,5 @@ export function viteAsset(entry: string, options: ViteAssetOptions = {}): string
     )
   }
 
-  const file = getManifestFile(manifest[normalizedEntry])
-  if (!file) {
-    throw new Error(
-      `viteAsset(): "${normalizedEntry}" is not in the Vite manifest at ${manifest.__path__ ?? 'an unknown path'}. ` +
-        'Declare it as a build input in vite.config.ts (build.rollupOptions.input) so Vite emits and records it.',
-    )
-  }
-
-  return `${PUBLIC_ASSETS_URL_PREFIX}${trimSlashes(file)}`
+  return manifestAssetUrl(manifest, normalizedEntry)
 }

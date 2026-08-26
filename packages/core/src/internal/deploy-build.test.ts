@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   assertOutputDirOutsideRoot,
+  clientManifestJson,
   DATABASE_FACTORIES,
   detectDatabaseDialects,
   DEV_ONLY_MODULES,
@@ -153,6 +154,88 @@ describe('readManifest', () => {
 
   test('should return undefined when nothing is found', () => {
     expect(readManifest(join(dir, 'a.json'), join(dir, 'b.json'))).toBeUndefined()
+  })
+})
+
+describe('clientManifestJson', () => {
+  let dir: string
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'guren-client-manifest-'))
+  })
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test('should serialize the client manifest from either Vite layout under public/assets', () => {
+    mkdirSync(join(dir, 'assets/.vite'), { recursive: true })
+    writeFileSync(
+      join(dir, 'assets/.vite/manifest.json'),
+      JSON.stringify({ 'resources/css/app.css': { file: 'app-Abc123.css' } }, null, 2),
+    )
+
+    // Re-serialized from the parsed object: the payload is compact JSON, not
+    // the pretty-printed bytes on disk.
+    expect(clientManifestJson(dir)).toBe(
+      JSON.stringify({ 'resources/css/app.css': { file: 'app-Abc123.css' } }),
+    )
+  })
+
+  test('should answer even when the manifest has no client entry', () => {
+    // resolveClientAssetEnv warns and returns {} for this app (no
+    // resources/js/app.tsx), but a content-page app's viteAsset() calls still
+    // need the manifest — the two helpers deliberately answer differently.
+    mkdirSync(join(dir, 'assets'), { recursive: true })
+    writeFileSync(
+      join(dir, 'assets/manifest.json'),
+      JSON.stringify({ 'resources/css/app.css': { file: 'app-CssOnly.css' } }),
+    )
+
+    expect(clientManifestJson(dir)).toContain('app-CssOnly.css')
+  })
+
+  test('should trim entries to the fields the runtime reads (file, css)', () => {
+    // The payload ships inside executable code, and a real manifest is
+    // dominated by per-chunk graph metadata nothing at runtime consumes.
+    mkdirSync(join(dir, 'assets'), { recursive: true })
+    writeFileSync(
+      join(dir, 'assets/manifest.json'),
+      JSON.stringify({
+        'resources/js/app.tsx': {
+          file: 'app-Abc123.js',
+          css: ['app-Def456.css'],
+          src: 'resources/js/app.tsx',
+          isEntry: true,
+          imports: ['_chunk-AAA.js', '_chunk-BBB.js'],
+          dynamicImports: ['_lazy-CCC.js'],
+        },
+        '_chunk-AAA.js': { file: 'chunk-AAA.js', imports: ['_chunk-BBB.js'] },
+      }),
+    )
+
+    expect(clientManifestJson(dir)).toBe(
+      JSON.stringify({
+        'resources/js/app.tsx': { file: 'app-Abc123.js', css: ['app-Def456.css'] },
+        '_chunk-AAA.js': { file: 'chunk-AAA.js' },
+      }),
+    )
+  })
+
+  test('should report parseable-but-not-a-manifest JSON as no manifest at build time', () => {
+    // Baking `null` or an array in would only be rejected at first render,
+    // by injectedClientManifest() — the build is where the file is fixable.
+    mkdirSync(join(dir, 'assets'), { recursive: true })
+
+    writeFileSync(join(dir, 'assets/manifest.json'), 'null')
+    expect(clientManifestJson(dir)).toBeUndefined()
+
+    writeFileSync(join(dir, 'assets/manifest.json'), '["not", "a", "manifest"]')
+    expect(clientManifestJson(dir)).toBeUndefined()
+  })
+
+  test('should return undefined when no manifest exists', () => {
+    expect(clientManifestJson(dir)).toBeUndefined()
   })
 })
 
