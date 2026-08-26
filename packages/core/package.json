@@ -52,6 +52,14 @@
     "./internal/zod-compat": {
       "types": "./dist/internal/zod-compat.d.ts",
       "default": "./dist/internal/zod-compat.js"
+    },
+    "./jsx-runtime": {
+      "types": "./dist/jsx-runtime.d.ts",
+      "default": "./dist/jsx-runtime.js"
+    },
+    "./jsx-dev-runtime": {
+      "types": "./dist/jsx-dev-runtime.d.ts",
+      "default": "./dist/jsx-dev-runtime.js"
     }
   },
   "bin": {

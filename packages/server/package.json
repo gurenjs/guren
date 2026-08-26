@@ -105,6 +105,14 @@
     "./support/expiry": {
       "types": "./dist/support/expiry.d.ts",
       "default": "./dist/support/expiry.js"
+    },
+    "./jsx-runtime": {
+      "types": "./dist/jsx-runtime.d.ts",
+      "default": "./dist/jsx-runtime.js"
+    },
+    "./jsx-dev-runtime": {
+      "types": "./dist/jsx-dev-runtime.d.ts",
+      "default": "./dist/jsx-dev-runtime.js"
     }
   },
   "scripts": {
@@ -119,7 +127,7 @@
     "chalk": "^5.3.0",
     "consola": "^3.4.2",
     "figlet": "^1.7.0",
-    "hono": "^4.12.29",
+    "hono": "^4.13.0",
     "ioredis": "^5.11.1",
     "nodemailer": "^9.0.1"
   },

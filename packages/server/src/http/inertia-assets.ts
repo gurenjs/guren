@@ -1,7 +1,6 @@
 import { serveStatic } from 'hono/bun'
 import { dirname, resolve, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { readFileSync } from 'node:fs'
 import type { Application } from './Application'
 import {
   createStaticRewrite,
@@ -16,6 +15,17 @@ import { parseImportMap } from '../support/import-map'
 import { DEFAULT_DEV_STYLES_ENTRY } from '../support/inertia-defaults'
 import { trimTrailingSlashes } from '../support/trim-slashes'
 import { hash } from '../encryption/Hash'
+import {
+  loadViteManifest,
+  getManifestFile,
+  getManifestCss,
+  clientManifestCandidates,
+  isViteProduction,
+  normalizeDevServerUrl,
+  DEFAULT_DEV_SERVER_URL,
+  PUBLIC_ASSETS_URL_PREFIX,
+  type ViteManifest,
+} from './vite-manifest'
 
 export interface InertiaAssetsOptions extends DevAssetsOptions {
   /** Default stylesheet entry embedded into Inertia responses. */
@@ -213,11 +223,10 @@ export function autoConfigureInertiaAssets(app: Application, options: AutoConfig
     return
   }
 
-  const isProduction =
-    (process.env.NODE_ENV ?? 'development') === 'production' && typeof process.env.VITE_DEV_SERVER_URL !== 'string'
+  const isProduction = isViteProduction()
 
   if (!isProduction) {
-    const devServerUrl = options.devServerUrl ?? process.env.VITE_DEV_SERVER_URL ?? 'http://localhost:5173'
+    const devServerUrl = options.devServerUrl ?? process.env.VITE_DEV_SERVER_URL ?? DEFAULT_DEV_SERVER_URL
     const normalizedDevServerUrl = normalizeDevServerUrl(devServerUrl)
     setEnvIfUserDidNotProvide('GUREN_INERTIA_ENTRY', `${normalizedDevServerUrl}/resources/js/dev-entry.ts`)
     setEnvIfUserDidNotProvide('GUREN_INERTIA_STYLES', options.stylesEntry ?? DEFAULT_DEV_STYLES_ENTRY)
@@ -241,11 +250,10 @@ export function autoConfigureInertiaAssets(app: Application, options: AutoConfig
   }
 
   const clientManifest = loadViteManifest(
-    [
-      resolve(moduleDir, '../public/assets/manifest.json'),
-      resolve(moduleDir, '../public/assets/.vite/manifest.json'),
-    ],
+    clientManifestCandidates(resolve(moduleDir, '..')),
     'client',
+    // The build-id hash below reads the raw text; nothing else does.
+    { includeRaw: true },
   )
 
   const clientEntry = clientManifest?.['resources/js/app.tsx']
@@ -260,13 +268,13 @@ export function autoConfigureInertiaAssets(app: Application, options: AutoConfig
   }
 
   if (clientEntryFile) {
-    setEnvIfUserDidNotProvide('GUREN_INERTIA_ENTRY', `/public/assets/${clientEntryFile.replace(/^\//u, '')}`)
+    setEnvIfUserDidNotProvide('GUREN_INERTIA_ENTRY', `${PUBLIC_ASSETS_URL_PREFIX}${clientEntryFile.replace(/^\//u, '')}`)
   }
 
   if (clientCssFiles?.length) {
     setEnvIfUserDidNotProvide(
       'GUREN_INERTIA_STYLES',
-      clientCssFiles.map((href) => `/public/assets/${href.replace(/^\//u, '')}`).join(','),
+      clientCssFiles.map((href) => `${PUBLIC_ASSETS_URL_PREFIX}${href.replace(/^\//u, '')}`).join(','),
     )
   }
 
@@ -356,105 +364,12 @@ function resolveDevSsrEntry(options: InertiaAssetsOptions): string | undefined {
   return resolve(resourcesDir, 'js/ssr.tsx')
 }
 
-function normalizeDevServerUrl(value: string): string {
-  if (!value) {
-    return value
-  }
-
-  const trimmed = value.trim()
-  if (!trimmed) {
-    return trimmed
-  }
-
-  const stripped = trimTrailingSlashes(trimmed)
-  return stripped.length > 0 ? stripped : '/'
-}
-
-type ViteManifestEntryObject = {
-  file: string
-  css?: string[]
-  assets?: string[]
-  imports?: string[]
-  dynamicImports?: string[]
-}
-
-type ViteManifestValue = ViteManifestEntryObject | string[]
-
-type ViteManifest = Record<string, ViteManifestValue> & { __path__?: string; __raw__?: string }
-
-function loadViteManifest(candidatePaths: string[], label: 'client' | 'SSR'): ViteManifest | undefined {
-  const command = label === 'SSR' ? 'bunx vite build --ssr' : 'bunx vite build'
-
-  for (const manifestPath of candidatePaths) {
-    try {
-      const raw = readFileSync(manifestPath, 'utf8')
-      const manifest = JSON.parse(raw) as ViteManifest
-      Object.defineProperty(manifest, '__path__', {
-        value: manifestPath,
-        enumerable: false,
-      })
-      Object.defineProperty(manifest, '__raw__', {
-        value: raw,
-        enumerable: false,
-      })
-      return manifest
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-        console.warn(`Unable to load ${label} Vite manifest at ${manifestPath}.`, error)
-        return undefined
-      }
-    }
-  }
-
-  if (candidatePaths.length) {
-    console.warn(
-      `Unable to load ${label} Vite manifest. Checked paths:\n${candidatePaths
-        .map((p) => `  - ${p}`)
-        .join('\n')}\nRun \`${command}\` before starting in production.`,
-    )
-  }
-
-  return undefined
-}
-
 function deriveAssetRoot(manifest: ViteManifest | undefined, fallback: string): string | undefined {
   if (!manifest?.__path__) {
     return fallback
   }
 
   return resolve(dirname(manifest.__path__), '..')
-}
-
-function getManifestFile(
-  entry: ViteManifestValue | string | undefined,
-): string | undefined {
-  if (!entry) {
-    return undefined
-  }
-
-  if (Array.isArray(entry)) {
-    return entry[0]
-  }
-
-  if (typeof entry === 'string') {
-    return entry
-  }
-
-  if ('file' in entry && typeof entry.file === 'string') {
-    return entry.file
-  }
-
-  return undefined
-}
-
-function getManifestCss(
-  entry: ViteManifestValue | string | undefined,
-): string[] | undefined {
-  if (!entry || Array.isArray(entry) || typeof entry === 'string') {
-    return undefined
-  }
-
-  return entry.css
 }
 
 function resolveResourcesDir(options: InertiaAssetsOptions, moduleDir?: string): string | undefined {
