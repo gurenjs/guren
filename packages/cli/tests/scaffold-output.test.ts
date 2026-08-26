@@ -65,8 +65,9 @@ const SKIPPED_GENERATORS: Record<string, string> = {
 /** Exercises every FIELD_TYPES member plus a nullable — guarded below. */
 const ALL_FIELDS = 'title:string,count:number,published:boolean,body:text,postedAt:date,meta:json,subtitle:string?'
 
-const AUTH_TEMPLATE_ROOT = join(import.meta.dir, '../templates/scaffold/auth')
 const SCAFFOLD_TEMPLATE_ROOT = join(import.meta.dir, '../templates/scaffold')
+const AUTH_TEMPLATE_ROOT = join(SCAFFOLD_TEMPLATE_ROOT, 'auth')
+const SCAFFOLD_FIXTURE_ROOT = join(import.meta.dir, 'fixtures/scaffold-typecheck')
 
 /** The fixture files carry an explanatory header the rendered output lacks. */
 function stripLeadingComments(source: string): string {
@@ -76,6 +77,11 @@ function stripLeadingComments(source: string): string {
     start++
   }
   return lines.slice(start).join('\n')
+}
+
+/** Every importable file under `root`, as POSIX paths relative to it. */
+async function relativeSourcePaths(root: string): Promise<string[]> {
+  return (await collectFiles(root, IMPORTABLE_EXTENSIONS)).map((file) => toPosixRelative(root, file))
 }
 
 /**
@@ -170,8 +176,7 @@ describe('generated sources parse', () => {
 
   for (const [label, options] of authCombos) {
     it(`make:auth ${label}`, async () => {
-      const templatePaths = (await collectFiles(AUTH_TEMPLATE_ROOT, IMPORTABLE_EXTENSIONS)).map((file) =>
-        toPosixRelative(AUTH_TEMPLATE_ROOT, file))
+      const templatePaths = await relativeSourcePaths(AUTH_TEMPLATE_ROOT)
       await expectAllOutputsParse(
         `guren-parse-auth-${label}-`,
         async () => {
@@ -191,8 +196,7 @@ describe('generated sources parse', () => {
   // order): a template no combo writes is dead weight that still typechecks
   // and ships, so it would otherwise read as live code forever.
   it('every shipped auth template is written by some flag combination', async () => {
-    const templatePaths = (await collectFiles(AUTH_TEMPLATE_ROOT, IMPORTABLE_EXTENSIONS)).map((file) =>
-      toPosixRelative(AUTH_TEMPLATE_ROOT, file))
+    const templatePaths = await relativeSourcePaths(AUTH_TEMPLATE_ROOT)
     expect(templatePaths.length).toBeGreaterThan(0)
     expect(templatePaths.filter((path) => !writtenAuthTemplatePaths.has(path))).toEqual([])
   })
@@ -258,7 +262,7 @@ describe('shipped templates reach published users', () => {
     expect(await proc.exited).toBe(0)
     expect(listing).toContain('dist/bin.js')
 
-    const templatePaths = (await collectFiles(join(import.meta.dir, '../templates/scaffold'), IMPORTABLE_EXTENSIONS))
+    const templatePaths = (await collectFiles(SCAFFOLD_TEMPLATE_ROOT, IMPORTABLE_EXTENSIONS))
       .map((file) => toPosixRelative(join(import.meta.dir, '..'), file))
     expect(templatePaths.length).toBeGreaterThan(0)
     expect(templatePaths.filter((path) => !listing.includes(path))).toEqual([])
@@ -271,7 +275,7 @@ describe('scaffold-typecheck fixture stays pinned to the builders', () => {
   // companions are renders of make-auth's *builders* (plus the real codegen
   // for pages.gen), so a builder change has to land in the fixture too — this
   // is the test that says so, instead of the fixture silently drifting.
-  const fixtureRoot = join(import.meta.dir, 'fixtures/scaffold-typecheck/auth')
+  const fixtureRoot = join(SCAFFOLD_FIXTURE_ROOT, 'auth')
 
   it('User model, users table, and pages.gen match a --verify render', async () => {
     const workspace = await createTempWorkspace('guren-parse-auth-fixture-pin-')
@@ -307,10 +311,7 @@ describe('attachments scaffold-typecheck fixture stays pinned to the builder', (
   // otherwise the templates keep typechecking against a table the blueprint
   // no longer writes.
   it('attachments table matches what the blueprint appends to a pg schema', async () => {
-    const fixtureSchema = await readFile(
-      join(import.meta.dir, 'fixtures/scaffold-typecheck/attachments/db/schema.ts'),
-      'utf8',
-    )
+    const fixtureSchema = await readFile(join(SCAFFOLD_FIXTURE_ROOT, 'attachments/db/schema.ts'), 'utf8')
     const tableStart = fixtureSchema.indexOf('export const attachments')
     expect(tableStart).toBeGreaterThan(-1)
     const fixtureTable = fixtureSchema.slice(tableStart)
@@ -328,6 +329,14 @@ describe('attachments scaffold-typecheck fixture stays pinned to the builder', (
       const renderedStart = rendered.indexOf('export const attachments')
       expect(renderedStart).toBeGreaterThan(-1)
       expect(rendered.slice(renderedStart).trimEnd()).toBe(fixtureTable.trimEnd())
+
+      // The shared byte-identity gate below exempts attachments (its run
+      // installs the storage blueprint, which that workspace also runs), so
+      // its two templates get the same written-byte-identical guarantee here.
+      for (const path of ['config/attachments.ts', 'app/Providers/AttachmentsProvider.ts']) {
+        expect(await readFile(join(workspace.dir, path), 'utf8'))
+          .toBe(await readFile(join(SCAFFOLD_TEMPLATE_ROOT, 'attachments', path), 'utf8'))
+      }
     } finally {
       await workspace.cleanup()
     }
@@ -355,10 +364,7 @@ describe('blueprint companion fixtures stay pinned to their builders', () => {
 
   for (const [blueprint, path, render] of companionPins) {
     it(`${blueprint}: ${path} matches its builder's render`, async () => {
-      const fixture = await readFile(
-        join(import.meta.dir, 'fixtures/scaffold-typecheck', blueprint, path),
-        'utf8',
-      )
+      const fixture = await readFile(join(SCAFFOLD_FIXTURE_ROOT, blueprint, path), 'utf8')
       const workspace = await createTempWorkspace('guren-companion-pin-')
       try {
         await render()
@@ -369,22 +375,50 @@ describe('blueprint companion fixtures stay pinned to their builders', () => {
       }
     })
   }
+
+  // The reverse direction: a fixture added for typechecking but pinned by
+  // nothing drifts silently the first time its builder changes. Exemptions
+  // carry their reason and must name fixtures that exist.
+  const PINNED_ELSEWHERE: Record<string, string> = {
+    'auth/': 'pinned by the auth fixture pin above, plus real codegen for pages.gen',
+    'attachments/db/schema.ts': 'pinned by the attachments fixture pin above',
+  }
+
+  it('every companion fixture is pinned to a builder, or names why not', async () => {
+    const fixturePaths = await relativeSourcePaths(SCAFFOLD_FIXTURE_ROOT)
+    const pinned = new Set(companionPins.map(([blueprint, path]) => `${blueprint}/${path}`))
+
+    const unpinned = fixturePaths.filter((path) =>
+      !pinned.has(path) && !Object.keys(PINNED_ELSEWHERE).some((prefix) => path === prefix || path.startsWith(prefix)))
+    expect(unpinned).toEqual([])
+
+    const stale = Object.keys(PINNED_ELSEWHERE).filter((prefix) =>
+      !fixturePaths.some((path) => path === prefix || path.startsWith(prefix)))
+    expect(stale).toEqual([])
+  })
 })
 
 describe('blueprint scaffold templates are written by their blueprints', () => {
-  // The auth reachability gate above covers templates/scaffold/auth, and the
-  // attachments pin covers templates/scaffold/attachments. This covers the
-  // rest: every other file under templates/scaffold/<blueprint>/ must land in
-  // an app byte-identical when that blueprint runs — a template no blueprint
-  // writes is dead weight that still typechecks and ships, and a blueprint
-  // that post-processes what it loads has drifted from the tree the
-  // typecheck:templates gate certifies.
-  const COVERED_ELSEWHERE = new Set(['auth', 'attachments'])
+  // Every file under templates/scaffold/<blueprint>/ must land in an app
+  // byte-identical when that blueprint runs — a template no blueprint writes
+  // is dead weight that still typechecks and ships, and a blueprint that
+  // post-processes what it loads has drifted from the tree the
+  // typecheck:templates gate certifies. Exemptions carry their reason,
+  // SKIPPED_GENERATORS-style, and must name template dirs that exist.
+  const COVERED_ELSEWHERE: Record<string, string> = {
+    auth: 'flag-dependent scaffold; every template is covered by the auth reachability gate above',
+    attachments: 'its run installs the storage blueprint, which this shared workspace also runs; '
+      + 'its templates are byte-pinned by the attachments fixture pin above',
+  }
+
+  it('exempts only template dirs that exist', async () => {
+    const dirs = new Set((await relativeSourcePaths(SCAFFOLD_TEMPLATE_ROOT)).map((path) => path.split('/')[0]))
+    expect(Object.keys(COVERED_ELSEWHERE).filter((name) => !dirs.has(name))).toEqual([])
+  })
 
   it('every shipped blueprint template lands byte-identical', async () => {
-    const templatePaths = (await collectFiles(SCAFFOLD_TEMPLATE_ROOT, IMPORTABLE_EXTENSIONS))
-      .map((file) => toPosixRelative(SCAFFOLD_TEMPLATE_ROOT, file))
-      .filter((path) => !COVERED_ELSEWHERE.has(path.split('/')[0]))
+    const templatePaths = (await relativeSourcePaths(SCAFFOLD_TEMPLATE_ROOT))
+      .filter((path) => !(path.split('/')[0] in COVERED_ELSEWHERE))
     expect(templatePaths.length).toBeGreaterThan(0)
 
     const blueprints = [...new Set(templatePaths.map((path) => path.split('/')[0]))].sort()

@@ -29,7 +29,6 @@
   ],
   "exclude": [
     "templates/scaffold/attachments",
-    "tests/fixtures/scaffold-typecheck/attachments",
-    "templates/scaffold/mail"
+    "tests/fixtures/scaffold-typecheck/attachments"
   ]
 }

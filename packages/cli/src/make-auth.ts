@@ -18,11 +18,10 @@ import { readIfExists } from './discovery'
 import { APP_ENTRY_CANDIDATES, resolveAppEntry, wireAppProvider, wireProvider } from './provider-registrar'
 import { wireRouteRegistrar } from './route-registrar'
 import { makeMigration } from './make-migration'
-import { loadScaffoldTemplate } from './scaffold-templates'
+import { scaffoldTemplateFile } from './scaffold-templates'
 
-/** `path` is both the template path under `templates/scaffold/auth/` and the written app path. */
 function authFile(path: string): ScaffoldFileEntry {
-  return { path, contents: loadScaffoldTemplate(`auth/${path}`) }
+  return scaffoldTemplateFile('auth', path)
 }
 
 // Passwordless apps keep show() (the OAuth button page) and destroy()

@@ -8,20 +8,16 @@ import { API_ONLY_FEATURE_ALTERNATIVE, buildRouteRegistrationHint, makeFeature }
 import { parseFieldsString, type FieldDefinition, type FieldType } from './fields'
 import { collectionSlug, schemaIdentifierFor, singularize, tableNameFor } from './inflect'
 import { schemaPathFor } from './schema-parser'
-import { makeController } from './make-controller'
 import { makeEvent } from './make-event'
 import { makeJob } from './make-job'
 import { makeListener } from './make-listener'
 import { makeMail } from './make-mail'
-import { makeModel } from './make-model'
 import { makeNotification } from './make-notification'
-import { makeRoute } from './make-route'
-import { makeView } from './make-view'
 import { detectSchemaDialect, ensureMysqlImports, ensurePgImports, ensureSqliteImports, insertImport } from './patch-helpers'
 import { wireProviders } from './provider-registrar'
 import { DEFAULT_ROUTES_FILE, findRouteRegistrar, wireRouteRegistrar } from './route-registrar'
-import { loadScaffoldTemplate } from './scaffold-templates'
-import { assertCwdUnsupported, camelCase, pascalCase, writeScaffoldFiles, type ScaffoldFileEntry, type WriterOptions } from './utils'
+import { scaffoldTemplateFile } from './scaffold-templates'
+import { assertCwdUnsupported, camelCase, pascalCase, writeScaffoldFiles, type WriterOptions } from './utils'
 import { readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
@@ -42,18 +38,6 @@ export interface RunBlueprintOptions extends WriterOptions {
 export interface BlueprintDefinition {
   description: string
   run: (options: RunBlueprintOptions) => Promise<string[]>
-}
-
-async function scaffoldFeatureFiles(
-  files: Array<{ path: string; contents: string }>,
-  options: WriterOptions,
-): Promise<string[]> {
-  return writeScaffoldFiles(files, options)
-}
-
-/** `path` is both the template path under `templates/scaffold/<blueprint>/` and the written app path. */
-function blueprintFile(blueprint: string, path: string): ScaffoldFileEntry {
-  return { path, contents: loadScaffoldTemplate(`${blueprint}/${path}`) }
 }
 
 const blueprintRegistry: Record<string, BlueprintDefinition> = {
@@ -100,7 +84,7 @@ const blueprintRegistry: Record<string, BlueprintDefinition> = {
       // writes into the router shared with routes/web.ts, so it would silently
       // replace an alias the app configured with different options.
       const routeGuard = withAuth ? `, requireAuthenticated({ redirectTo: '/login' })` : ''
-      const created = await scaffoldFeatureFiles([
+      const created = await writeScaffoldFiles([
         {
           path: 'app/Http/Controllers/Admin/AdminDashboardController.ts',
           contents: `import { Controller } from '@guren/core'
@@ -122,7 +106,7 @@ ${controllerGuard}    return this.inertia(pages.admin.Dashboard, {
 }
 `,
         },
-        blueprintFile('admin', 'resources/js/pages/admin/Dashboard.tsx'),
+        scaffoldTemplateFile('admin', 'resources/js/pages/admin/Dashboard.tsx'),
         {
           path: 'routes/admin.ts',
           contents: `import { Router${withAuth ? ', requireAuthenticated' : ''} } from '@guren/core'
@@ -158,10 +142,10 @@ export default registerAdminRoutes
     // the file is absent — the scaffold genuinely works on an API-only app.
     run: async (options) => {
       const writerOptions: WriterOptions = { force: Boolean(options.force) }
-      const created = await scaffoldFeatureFiles([
-        blueprintFile('oauth', 'app/Providers/OAuthProvider.ts'),
-        blueprintFile('oauth', 'app/Http/Controllers/Auth/OAuthController.ts'),
-        blueprintFile('oauth', 'routes/oauth.ts'),
+      const created = await writeScaffoldFiles([
+        scaffoldTemplateFile('oauth', 'app/Providers/OAuthProvider.ts'),
+        scaffoldTemplateFile('oauth', 'app/Http/Controllers/Auth/OAuthController.ts'),
+        scaffoldTemplateFile('oauth', 'routes/oauth.ts'),
       ], writerOptions)
 
       await wireProviders([
@@ -178,9 +162,9 @@ export default registerAdminRoutes
     description: 'Install the default cache provider and an example cache service.',
     run: async (options) => {
       const writerOptions: WriterOptions = { force: Boolean(options.force) }
-      const created = await scaffoldFeatureFiles([
-        blueprintFile('cache', 'app/Providers/CacheProvider.ts'),
-        blueprintFile('cache', 'app/Services/ApplicationCache.ts'),
+      const created = await writeScaffoldFiles([
+        scaffoldTemplateFile('cache', 'app/Providers/CacheProvider.ts'),
+        scaffoldTemplateFile('cache', 'app/Services/ApplicationCache.ts'),
       ], writerOptions)
 
       await wireProviders([
@@ -197,8 +181,8 @@ export default registerAdminRoutes
       const writerOptions: WriterOptions = { force: Boolean(options.force) }
       const eventPath = await makeEvent('OrderPlaced', writerOptions)
       const listenerPath = await makeListener('SendOrderReceipt', { ...writerOptions, event: 'OrderPlaced' })
-      const created = await scaffoldFeatureFiles([
-        blueprintFile('events', 'app/Providers/EventProvider.ts'),
+      const created = await writeScaffoldFiles([
+        scaffoldTemplateFile('events', 'app/Providers/EventProvider.ts'),
       ], writerOptions)
 
       await wireProviders([
@@ -214,8 +198,8 @@ export default registerAdminRoutes
     run: async (options) => {
       const writerOptions: WriterOptions = { force: Boolean(options.force) }
       const mailPath = await makeMail('WelcomeEmail', writerOptions)
-      const created = await scaffoldFeatureFiles([
-        blueprintFile('mail', 'app/Providers/MailProvider.ts'),
+      const created = await writeScaffoldFiles([
+        scaffoldTemplateFile('mail', 'app/Providers/MailProvider.ts'),
       ], writerOptions)
 
       await wireProviders([
@@ -231,8 +215,8 @@ export default registerAdminRoutes
     run: async (options) => {
       const writerOptions: WriterOptions = { force: Boolean(options.force) }
       const jobPath = await makeJob('ProcessWelcomeSequence', writerOptions)
-      const created = await scaffoldFeatureFiles([
-        blueprintFile('queue', 'app/Providers/QueueProvider.ts'),
+      const created = await writeScaffoldFiles([
+        scaffoldTemplateFile('queue', 'app/Providers/QueueProvider.ts'),
       ], writerOptions)
 
       await wireProviders([
@@ -248,8 +232,8 @@ export default registerAdminRoutes
     run: async (options) => {
       const writerOptions: WriterOptions = { force: Boolean(options.force) }
       const notificationPath = await makeNotification('WelcomeUser', writerOptions)
-      const created = await scaffoldFeatureFiles([
-        blueprintFile('notifications', 'app/Providers/NotificationProvider.ts'),
+      const created = await writeScaffoldFiles([
+        scaffoldTemplateFile('notifications', 'app/Providers/NotificationProvider.ts'),
       ], writerOptions)
 
       await wireProviders([
@@ -264,9 +248,9 @@ export default registerAdminRoutes
     description: 'Install storage infrastructure with local/public disks (switchable via STORAGE_DISK) and a sample storage service.',
     run: async (options) => {
       const writerOptions: WriterOptions = { force: Boolean(options.force) }
-      const created = await scaffoldFeatureFiles([
-        blueprintFile('storage', 'app/Providers/StorageProvider.ts'),
-        blueprintFile('storage', 'app/Services/FileStorage.ts'),
+      const created = await writeScaffoldFiles([
+        scaffoldTemplateFile('storage', 'app/Providers/StorageProvider.ts'),
+        scaffoldTemplateFile('storage', 'app/Services/FileStorage.ts'),
       ], writerOptions)
 
       await wireProviders([
@@ -287,8 +271,8 @@ export default registerAdminRoutes
         channel: 'users.{id}.feed',
         private: true,
       })
-      const created = await scaffoldFeatureFiles([
-        blueprintFile('broadcasting', 'app/Providers/BroadcastProvider.ts'),
+      const created = await writeScaffoldFiles([
+        scaffoldTemplateFile('broadcasting', 'app/Providers/BroadcastProvider.ts'),
       ], writerOptions)
 
       await wireProviders([
@@ -345,8 +329,8 @@ export default registerAdminRoutes
     description: 'Install a schedule kernel with a sample recurring task.',
     run: async (options) => {
       const writerOptions: WriterOptions = { force: Boolean(options.force) }
-      const created = await scaffoldFeatureFiles([
-        blueprintFile('schedule', 'app/Console/Kernel.ts'),
+      const created = await writeScaffoldFiles([
+        scaffoldTemplateFile('schedule', 'app/Console/Kernel.ts'),
       ], writerOptions)
 
       await wireProviders([{ name: 'CoreSchedulingServiceProvider', importStatement: "import { SchedulingServiceProvider as CoreSchedulingServiceProvider } from '@guren/core'" }])

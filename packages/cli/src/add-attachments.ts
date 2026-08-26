@@ -14,7 +14,7 @@ import {
   type SchemaDialect,
 } from './patch-helpers'
 import { wireProviders } from './provider-registrar'
-import { loadScaffoldTemplate } from './scaffold-templates'
+import { scaffoldTemplateFile } from './scaffold-templates'
 import { writeScaffoldFiles, type ScaffoldFileEntry, type WriterOptions } from './utils'
 
 const CONSOLE_ENTRY = 'src/console.ts'
@@ -92,9 +92,8 @@ const SCHEMA_IMPORTS: Record<SchemaDialect, (content: string) => string> = {
 
 const VARIANT_RECORD_IMPORT = "import type { AttachmentVariantRecord } from '@guren/core'"
 
-/** `path` is both the template path under `templates/scaffold/attachments/` and the written app path. */
 function attachmentsFile(path: string): ScaffoldFileEntry {
-  return { path, contents: loadScaffoldTemplate(`attachments/${path}`) }
+  return scaffoldTemplateFile('attachments', path)
 }
 
 /**
