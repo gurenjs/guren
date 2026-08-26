@@ -2,6 +2,7 @@ import {
   type InertiaResponse,
   type ResolvedSharedInertiaProps,
   Controller,
+  HttpException,
   paginate,
   type PaginatedPageProps,
 } from '@guren/core'
@@ -44,19 +45,10 @@ export default class PostController extends Controller {
   async show(): Promise<InertiaResponse<'posts/Show', PostShowInertiaProps> | Response> {
     const { id } = this.validateParams(PostIdParamSchema)
     const post = await Post.findWithOrFail(id, 'author')
+    // withAttachments maps records 1:1, so the destructured entry always exists.
     const [withCover] = await Post.withAttachments([post], ['cover'])
-    const resource = new PostResource(withCover ?? post).toJSON()
-    const payload = {
-      id: resource.id,
-      title: resource.title,
-      excerpt: resource.excerpt,
-      body: resource.body,
-      cover: resource.cover,
-      author: resource.author,
-      notificationArtifactPath: resource.notificationArtifactPath,
-      broadcastChannels: resource.broadcastChannels,
-    }
-    return this.inertia(pages.posts.Show, { post: payload }, { title: `${post.title} | Guren Blog` })
+    const resource = new PostResource(withCover!).toJSON()
+    return this.inertia(pages.posts.Show, { post: resource }, { title: `${post.title} | Guren Blog` })
   }
 
   async create(): Promise<Response> {
@@ -70,16 +62,18 @@ export default class PostController extends Controller {
     const post = await Post.create({ ...data, authorId: authUser.id })
 
     if (post) {
+      // Invalidate and announce before the attach: a rejected cover throws,
+      // and the created post must not be left uncached and unannounced.
+      const cacheService = this.#cacheService()
+      await cacheService.invalidatePost(post.id)
+      await this.make('events').emit(new PostCreated(post, authUser))
+
       const cover = await this.file('cover')
       if (cover) {
         // Validation (image: 'require') and thumbnail generation happen here;
         // a non-image answers 422 with the error keyed on 'cover'.
         await Post.attach(post.id, 'cover', cover)
       }
-
-      const cacheService = this.#cacheService()
-      await cacheService.invalidatePost(post.id)
-      await this.make('events').emit(new PostCreated(post, authUser))
     }
 
     return this.redirect(post?.id ? `/posts/${post.id}` : '/posts')
@@ -93,7 +87,7 @@ export default class PostController extends Controller {
 
     return this.inertia(
       pages.posts.Edit,
-      { post: formPost, postId: post.id, cover: withCover?.cover ?? null },
+      { post: formPost, postId: post.id, cover: withCover!.cover },
       { title: `Edit ${formPost.title} | Guren Blog` },
     )
   }
@@ -105,6 +99,11 @@ export default class PostController extends Controller {
 
     await Post.update({ id: post.id }, { ...data, authorId: post.authorId })
 
+    // Invalidate before the attach: a rejected cover throws, and the row is
+    // already updated — the cached list must not keep serving the old fields.
+    const cacheService = this.#cacheService()
+    await cacheService.invalidatePost(post.id)
+
     const cover = await this.file('cover')
     if (cover) {
       // hasOne replaces: the previous cover row and its stored objects are
@@ -112,15 +111,19 @@ export default class PostController extends Controller {
       await Post.attach(post.id, 'cover', cover)
     }
 
-    const cacheService = this.#cacheService()
-    await cacheService.invalidatePost(post.id)
-
     return this.redirect(`/posts/${post.id}`)
   }
 
   async destroy(): Promise<Response> {
     const { id } = this.validateParams(PostIdParamSchema)
     const post = await Post.findOrFail(id) as BoundPost
+
+    // Deletion is irreversible and also purges stored objects — only the
+    // author may do it.
+    const authUser = await this.auth.userOrFail<UserRecord>()
+    if (post.authorId !== authUser.id) {
+      throw new HttpException(403, 'You can only delete your own posts.')
+    }
 
     // The polymorphic attachable pair cannot carry a foreign key, so there is
     // no database cascade — purge explicitly, objects first, rows after.

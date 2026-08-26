@@ -610,7 +610,7 @@ describe('PostController', () => {
       mockFindOrFail.mockResolvedValue(samplePost)
       mockPurgeAttachments.mockResolvedValue(undefined)
       mockDelete.mockResolvedValue(undefined)
-      const auth = createAuthStub()
+      const auth = createAuthStub({ id: samplePost.authorId, name: 'John Doe' })
       const ctx = createControllerContext('http://blog.test/posts/1', {
         method: 'DELETE',
       }, {
@@ -634,9 +634,26 @@ describe('PostController', () => {
       expect(mockInvalidatePost).toHaveBeenCalledWith(1)
     })
 
+    it('returns 403 when the requester is not the author', async () => {
+      mockFindOrFail.mockResolvedValue(samplePost)
+      const auth = createAuthStub({ id: samplePost.authorId + 1, name: 'Someone Else' })
+      const ctx = createControllerContext('http://blog.test/posts/1', {
+        method: 'DELETE',
+      }, {
+        cache: { store: vi.fn() },
+        events: { emit: mockEmit },
+      }) as unknown as Context
+      setRouteParams(ctx, { id: '1' })
+
+      const controller = createControllerWithAuth(PostController, auth, ctx)
+      await expect(controller.destroy()).rejects.toMatchObject({ statusCode: 403 })
+      expect(mockPurgeAttachments).not.toHaveBeenCalled()
+      expect(mockDelete).not.toHaveBeenCalled()
+    })
+
     it('returns 404 for non-existent post', async () => {
       mockFindOrFail.mockRejectedValue(Object.assign(new Error('Post not found'), { statusCode: 404 }))
-      const auth = createAuthStub()
+      const auth = createAuthStub({ id: 1, name: 'John Doe' })
       const ctx = createControllerContext('http://blog.test/posts/999', {
         method: 'DELETE',
       }, {

@@ -6,7 +6,9 @@ import type { AttachmentData } from '@guren/core'
 import { route } from '@/.guren/routes.gen'
 
 interface Props {
-  post: PostFormValues | null
+  // The server sends the text fields only — the current cover arrives as its
+  // own AttachmentData prop, never mixed into the form values.
+  post: Omit<PostFormValues, 'cover'> | null
   postId: number
   cover?: AttachmentData | null
   errors?: RouteErrors<PostFormValues> & { message?: string }
@@ -16,8 +18,7 @@ export default function Edit({ post, postId, cover = null, errors = {} }: Props)
   const form = useForm<PostFormValues>({
     title: post?.title ?? '',
     excerpt: post?.excerpt ?? '',
-    body: post?.body ?? '',
-    cover: null
+    body: post?.body ?? ''
   })
 
   const handleSubmit = (data: PostFormValues) => {

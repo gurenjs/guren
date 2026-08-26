@@ -26,13 +26,6 @@ export const posts = pgTable('posts', {
     .references(() => users.id),
 })
 
-export const schema = {
-  posts,
-  users,
-}
-
-export type BlogSchema = typeof schema
-
 export const attachments = pgTable('attachments', {
   id: text('id').primaryKey(),
   attachableType: text('attachable_type').notNull(),
@@ -50,3 +43,11 @@ export const attachments = pgTable('attachments', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [index('attachments_attachable_idx').on(t.attachableType, t.attachableId, t.collection)])
+
+export const schema = {
+  attachments,
+  posts,
+  users,
+}
+
+export type BlogSchema = typeof schema

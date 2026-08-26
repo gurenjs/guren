@@ -1,9 +1,11 @@
 import { test, expect, type Page } from '@playwright/test'
 import { fileURLToPath } from 'node:url'
+import { gotoHydrated, waitForHydrated } from './helpers.js'
 
 const coverFixture = fileURLToPath(new URL('./fixtures/cover.png', import.meta.url))
 
-async function createPost(page: Page, title: string, options: { cover?: boolean } = {}) {
+/** Creates a post and returns its show-page URL. */
+async function createPost(page: Page, title: string, options: { cover?: boolean } = {}): Promise<string> {
   await page.goto('/posts')
   await expect(page.getByRole('heading', { name: 'Posts' })).toBeVisible()
 
@@ -12,9 +14,7 @@ async function createPost(page: Page, title: string, options: { cover?: boolean 
     page.getByRole('link', { name: 'New post' }).click(),
   ])
   await expect(page.getByRole('heading', { name: 'New Post' })).toBeVisible()
-  // Fills that land before Inertia hydration get clobbered by React's
-  // reconciliation — same gotcha as the auth pages (see helpers.ts).
-  await page.waitForSelector('main[data-hydrated="true"]')
+  await waitForHydrated(page)
 
   await page.getByLabel('Title').fill(title)
   await page.getByLabel('Excerpt').fill('An excerpt for the E2E test post.')
@@ -30,6 +30,17 @@ async function createPost(page: Page, title: string, options: { cover?: boolean 
   await page.getByRole('button', { name: 'Create Post' }).click()
   await expect(page).toHaveURL(/\/posts(?:\/\d+)?$/)
   await expect(page.getByText(title)).toBeVisible()
+
+  // store() redirects to the show page; if we landed on the index instead,
+  // click through so callers always get the post's own URL.
+  if (/\/posts$/.test(page.url())) {
+    await Promise.all([
+      page.waitForURL(/\/posts\/\d+$/),
+      page.getByRole('link', { name: new RegExp(title) }).click(),
+    ])
+  }
+
+  return page.url()
 }
 
 test.describe('Posts — public', () => {
@@ -58,14 +69,7 @@ test.describe('Posts — authenticated CRUD', () => {
 
   test('create a post with a cover image', async ({ page }) => {
     const title = `E2E Cover Post ${Date.now()}`
-    await createPost(page, title, { cover: true })
-
-    if (/\/posts$/.test(page.url())) {
-      await Promise.all([
-        page.waitForURL(/\/posts\/\d+$/),
-        page.getByRole('link', { name: new RegExp(title) }).click(),
-      ])
-    }
+    const postUrl = await createPost(page, title, { cover: true })
 
     // The show page renders the stored attachment from the public disk.
     const cover = page.getByTestId('post-cover')
@@ -79,27 +83,20 @@ test.describe('Posts — authenticated CRUD', () => {
       .toBeGreaterThan(0)
 
     // The edit form shows the current cover and replacing hint.
-    await page.goto(`${page.url()}/edit`)
+    await gotoHydrated(page, `${postUrl}/edit`)
     await expect(page.getByTestId('cover-preview')).toBeVisible()
     await expect(page.getByText('Choosing a new image replaces the current cover.')).toBeVisible()
   })
 
   test('delete a post removes it and its attachments', async ({ page }) => {
     const title = `E2E Deletable Post ${Date.now()}`
-    await createPost(page, title, { cover: true })
-
-    if (/\/posts$/.test(page.url())) {
-      await Promise.all([
-        page.waitForURL(/\/posts\/\d+$/),
-        page.getByRole('link', { name: new RegExp(title) }).click(),
-      ])
-    }
+    const postUrl = await createPost(page, title, { cover: true })
 
     const coverSrc = await page.getByTestId('post-cover').getAttribute('src')
     expect(coverSrc).toMatch(/\/storage\/attachments\//)
-    const postUrl = page.url()
 
-    await page.goto(`${postUrl}/edit`)
+    // The Delete button's confirm dialog only exists once React has hydrated.
+    await gotoHydrated(page, `${postUrl}/edit`)
     page.once('dialog', (dialog) => dialog.accept())
     await Promise.all([
       page.waitForURL(/\/posts$/),
@@ -119,16 +116,9 @@ test.describe('Posts — authenticated CRUD', () => {
     const originalTitle = `Editable E2E Post ${Date.now()}`
     const updatedTitle = `${originalTitle} Updated`
 
-    await createPost(page, originalTitle)
+    const postUrl = await createPost(page, originalTitle)
 
-    if (/\/posts$/.test(page.url())) {
-      await Promise.all([
-        page.waitForURL(/\/posts\/\d+$/),
-        page.getByRole('link', { name: new RegExp(originalTitle) }).click(),
-      ])
-    }
-
-    await page.goto(`${page.url()}/edit`)
+    await gotoHydrated(page, `${postUrl}/edit`)
 
     await expect(page.getByRole('heading', { name: 'Edit Post' })).toBeVisible()
 

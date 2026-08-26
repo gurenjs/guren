@@ -1,5 +1,6 @@
 import { Link } from '@inertiajs/react'
 import Layout from '../../components/Layout.js'
+import AttachmentImage from '../../components/AttachmentImage.js'
 import { ArrowLeft } from 'lucide-react'
 import type { PostResourceData } from '@/app/Http/Resources/PostResource'
 import { route } from '@/.guren/routes.gen'
@@ -44,20 +45,13 @@ export default function Show({ post }: Props) {
 
         {post.cover && (
           <figure className="mt-10">
-            <img
-              src={post.cover.url}
+            {/* Eager: this is the page's LCP element — lazy-loading it would
+                defer the fetch past layout. */}
+            <AttachmentImage
+              attachment={post.cover}
               alt={`Cover for ${post.title}`}
-              data-testid="post-cover"
-              width={post.cover.width ?? undefined}
-              height={post.cover.height ?? undefined}
-              loading="lazy"
+              testId="post-cover"
               className="w-full rounded-lg object-cover ring-1 ring-stone-100"
-              // The ThumbHash LQIP paints behind the image until it loads.
-              style={
-                post.cover.placeholder
-                  ? { backgroundImage: `url(${post.cover.placeholder})`, backgroundSize: 'cover' }
-                  : undefined
-              }
             />
           </figure>
         )}

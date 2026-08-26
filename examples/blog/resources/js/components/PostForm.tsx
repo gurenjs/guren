@@ -1,6 +1,7 @@
 import React from 'react'
 import { usePage, type InertiaFormProps } from '@inertiajs/react'
 import Layout from './Layout.js'
+import AttachmentImage from './AttachmentImage.js'
 import { AlertCircle } from 'lucide-react'
 import type { ApiRoutes } from '@/.guren/api-client.gen'
 import type { AttachmentData } from '@guren/core'
@@ -22,6 +23,18 @@ export default function PostForm({ form, onSubmit, onCancel, onDelete, mode, cur
   const { data, setData, errors: formErrors, clearErrors, setError, processing } = form
   const { props } = usePage<{ errors?: Record<string, string | undefined> }>()
   const generalError = (formErrors as Record<string, string | undefined>).message
+
+  const [coverPreview, setCoverPreview] = React.useState<string | null>(null)
+
+  // The effect cleanup owns every revoke: it runs with the previous URL both
+  // when a new file is picked and on unmount.
+  React.useEffect(() => {
+    return () => {
+      if (coverPreview) {
+        URL.revokeObjectURL(coverPreview)
+      }
+    }
+  }, [coverPreview])
 
   React.useEffect(() => {
     const serverErrors = props.errors ?? {}
@@ -77,25 +90,11 @@ export default function PostForm({ form, onSubmit, onCancel, onDelete, mode, cur
     onSubmit(payload)
   }
 
-  const [coverPreview, setCoverPreview] = React.useState<string | null>(null)
-
-  React.useEffect(() => {
-    return () => {
-      if (coverPreview) {
-        URL.revokeObjectURL(coverPreview)
-      }
-    }
-  }, [coverPreview])
-
+  // The submitted file comes from the form's own FormData in handleSubmit —
+  // form state never holds it, only the preview URL lives in React state.
   const handleCoverChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] ?? null
-    setData('cover', file)
-    setCoverPreview((previous) => {
-      if (previous) {
-        URL.revokeObjectURL(previous)
-      }
-      return file ? URL.createObjectURL(file) : null
-    })
+    setCoverPreview(file ? URL.createObjectURL(file) : null)
 
     if ((formErrors as Record<string, string | undefined>).cover) {
       clearErrors('cover' as keyof PostFormValues)
@@ -103,7 +102,6 @@ export default function PostForm({ form, onSubmit, onCancel, onDelete, mode, cur
   }
 
   const coverError = (formErrors as Record<string, string | undefined>).cover
-  const shownCover = coverPreview ?? currentCover?.variants.thumb?.url ?? currentCover?.url ?? null
 
   const handleChange = (field: keyof PostFormValues) => (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
@@ -171,17 +169,20 @@ export default function PostForm({ form, onSubmit, onCancel, onDelete, mode, cur
               <label htmlFor="cover" className="block text-sm font-medium text-stone-700">
                 Cover image
               </label>
-              {shownCover && (
+              {coverPreview ? (
                 <img
-                  src={shownCover}
+                  src={coverPreview}
                   alt="Cover preview"
                   data-testid="cover-preview"
                   className="h-40 w-full rounded-md object-cover ring-1 ring-stone-200"
-                  style={
-                    currentCover?.placeholder && !coverPreview
-                      ? { backgroundImage: `url(${currentCover.placeholder})`, backgroundSize: 'cover' }
-                      : undefined
-                  }
+                />
+              ) : currentCover && (
+                <AttachmentImage
+                  attachment={currentCover}
+                  variant="thumb"
+                  alt="Current cover"
+                  testId="cover-preview"
+                  className="h-40 w-full rounded-md object-cover ring-1 ring-stone-200"
                 />
               )}
               <input
