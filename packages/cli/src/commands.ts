@@ -2709,6 +2709,7 @@ const addCommand = defineCommand({
   },
   subCommands: {
     admin: addAdminCommand,
+    attachments: createAddBlueprintCommand('attachments', 'Install the attachments layer: schema table, config, provider, and the prune command.'),
     auth: addAuthCommand,
     oauth: createAddBlueprintCommand('oauth', 'Install OAuth scaffolding with provider presets and callback routes.'),
     broadcasting: createAddBlueprintCommand('broadcasting', 'Install broadcasting scaffolding with sample public and private channels.'),
