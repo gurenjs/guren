@@ -195,6 +195,45 @@ describe('clientManifestJson', () => {
     expect(clientManifestJson(dir)).toContain('app-CssOnly.css')
   })
 
+  test('should trim entries to the fields the runtime reads (file, css)', () => {
+    // The payload ships inside executable code, and a real manifest is
+    // dominated by per-chunk graph metadata nothing at runtime consumes.
+    mkdirSync(join(dir, 'assets'), { recursive: true })
+    writeFileSync(
+      join(dir, 'assets/manifest.json'),
+      JSON.stringify({
+        'resources/js/app.tsx': {
+          file: 'app-Abc123.js',
+          css: ['app-Def456.css'],
+          src: 'resources/js/app.tsx',
+          isEntry: true,
+          imports: ['_chunk-AAA.js', '_chunk-BBB.js'],
+          dynamicImports: ['_lazy-CCC.js'],
+        },
+        '_chunk-AAA.js': { file: 'chunk-AAA.js', imports: ['_chunk-BBB.js'] },
+      }),
+    )
+
+    expect(clientManifestJson(dir)).toBe(
+      JSON.stringify({
+        'resources/js/app.tsx': { file: 'app-Abc123.js', css: ['app-Def456.css'] },
+        '_chunk-AAA.js': { file: 'chunk-AAA.js' },
+      }),
+    )
+  })
+
+  test('should report parseable-but-not-a-manifest JSON as no manifest at build time', () => {
+    // Baking `null` or an array in would only be rejected at first render,
+    // by injectedClientManifest() — the build is where the file is fixable.
+    mkdirSync(join(dir, 'assets'), { recursive: true })
+
+    writeFileSync(join(dir, 'assets/manifest.json'), 'null')
+    expect(clientManifestJson(dir)).toBeUndefined()
+
+    writeFileSync(join(dir, 'assets/manifest.json'), '["not", "a", "manifest"]')
+    expect(clientManifestJson(dir)).toBeUndefined()
+  })
+
   test('should return undefined when no manifest exists', () => {
     expect(clientManifestJson(dir)).toBeUndefined()
   })

@@ -147,22 +147,6 @@ describe('viteAsset', () => {
       expect(() => viteAsset('resources/css/app.css')).toThrow(/does not hold a manifest object/)
     })
 
-    test('should memoize the injected manifest until the cache is reset', () => {
-      productionEnv()
-      process.env.GUREN_VITE_MANIFEST = JSON.stringify({
-        'resources/css/app.css': { file: 'app-0ld000.css' },
-      })
-      expect(viteAsset('resources/css/app.css')).toBe('/public/assets/app-0ld000.css')
-
-      process.env.GUREN_VITE_MANIFEST = JSON.stringify({
-        'resources/css/app.css': { file: 'app-n3w000.css' },
-      })
-      expect(viteAsset('resources/css/app.css')).toBe('/public/assets/app-0ld000.css')
-
-      __resetViteAssetCache()
-      expect(viteAsset('resources/css/app.css')).toBe('/public/assets/app-n3w000.css')
-    })
-
     test('should cache the manifest read per path set', () => {
       productionEnv()
       const manifestPath = writeManifest({

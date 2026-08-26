@@ -7,6 +7,7 @@ import {
   isViteProduction,
   normalizeDevServerUrl,
   DEFAULT_DEV_SERVER_URL,
+  INJECTED_CLIENT_MANIFEST_SOURCE,
   PUBLIC_ASSETS_URL_PREFIX,
   type ViteManifest,
 } from './vite-manifest'
@@ -26,14 +27,41 @@ export interface ViteAssetOptions {
 }
 
 let defaultCandidates: string[] | undefined
-let injectedManifest: ViteManifest | null | undefined
 const manifestCache = new Map<string, ViteManifest | null>()
 
 /** @internal Test seam — clears the memoized manifest reads. */
 export function __resetViteAssetCache(): void {
   defaultCandidates = undefined
-  injectedManifest = undefined
   manifestCache.clear()
+}
+
+/**
+ * One manifest resolution, memoized until {@link __resetViteAssetCache}.
+ * `null` records "looked and found nothing" so absence is not re-probed per
+ * render. The injected manifest shares the cache under its fixed source
+ * label, which cannot collide with the other keys — those are joined
+ * absolute paths.
+ */
+function memoizedManifest(key: string, load: () => ViteManifest | undefined): ViteManifest | null {
+  let manifest = manifestCache.get(key)
+  if (manifest === undefined) {
+    manifest = load() ?? null
+    manifestCache.set(key, manifest)
+  }
+  return manifest
+}
+
+/** The production tail: hashed output file → served URL, or the loud throw. */
+function manifestAssetUrl(manifest: ViteManifest, normalizedEntry: string): string {
+  const file = getManifestFile(manifest[normalizedEntry])
+  if (!file) {
+    throw new Error(
+      `viteAsset(): "${normalizedEntry}" is not in the Vite manifest at ${manifest.__path__ ?? 'an unknown path'}. ` +
+        'Declare it as a build input in vite.config.ts (build.rollupOptions.input) so Vite emits and records it.',
+    )
+  }
+
+  return `${PUBLIC_ASSETS_URL_PREFIX}${trimSlashes(file)}`
 }
 
 /**
@@ -80,44 +108,28 @@ export function viteAsset(entry: string, options: ViteAssetOptions = {}): string
     return `${base}/${normalizedEntry}`
   }
 
-  let manifest: ViteManifest | null = null
-
   if (!options.manifestPaths) {
-    if (injectedManifest === undefined) {
-      injectedManifest = injectedClientManifest() ?? null
+    const injected = memoizedManifest(INJECTED_CLIENT_MANIFEST_SOURCE, injectedClientManifest)
+    if (injected) {
+      return manifestAssetUrl(injected, normalizedEntry)
     }
-    manifest = injectedManifest
   }
+
+  const candidates = options.manifestPaths
+    ? options.manifestPaths.map((path) => resolve(path))
+    : (defaultCandidates ??= clientManifestCandidates())
+  const manifest = memoizedManifest(candidates.join('\n'), () =>
+    loadViteManifest(candidates, 'client', { warnOnMissing: false }),
+  )
 
   if (!manifest) {
-    const candidates = options.manifestPaths
-      ? options.manifestPaths.map((path) => resolve(path))
-      : (defaultCandidates ??= clientManifestCandidates())
-    const cacheKey = candidates.join('\n')
-    let loaded = manifestCache.get(cacheKey)
-    if (loaded === undefined) {
-      loaded = loadViteManifest(candidates, 'client', { warnOnMissing: false }) ?? null
-      manifestCache.set(cacheKey, loaded)
-    }
-    manifest = loaded
-
-    if (!manifest) {
-      throw new Error(
-        `viteAsset(): no Vite manifest found. Checked:\n${candidates
-          .map((path) => `  - ${path}`)
-          .join('\n')}\n` +
-          'Run `bunx vite build` before starting in production, or pass { manifestPaths } pointing at the build output.',
-      )
-    }
-  }
-
-  const file = getManifestFile(manifest[normalizedEntry])
-  if (!file) {
     throw new Error(
-      `viteAsset(): "${normalizedEntry}" is not in the Vite manifest at ${manifest.__path__ ?? 'an unknown path'}. ` +
-        'Declare it as a build input in vite.config.ts (build.rollupOptions.input) so Vite emits and records it.',
+      `viteAsset(): no Vite manifest found. Checked:\n${candidates
+        .map((path) => `  - ${path}`)
+        .join('\n')}\n` +
+        'Run `bunx vite build` before starting in production, or pass { manifestPaths } pointing at the build output.',
     )
   }
 
-  return `${PUBLIC_ASSETS_URL_PREFIX}${trimSlashes(file)}`
+  return manifestAssetUrl(manifest, normalizedEntry)
 }

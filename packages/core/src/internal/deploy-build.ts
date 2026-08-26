@@ -80,6 +80,16 @@ function manifestPaths(dir: string): [string, string] {
 }
 
 /**
+ * The one statement of where an app's *client* manifest lives: under
+ * `<publicDir>/assets`, in either Vite layout. `resolveClientAssetEnv` and
+ * `clientManifestJson` both answer from this read — stating the composition
+ * twice is how the two would come to look in different places.
+ */
+function readClientManifest(publicDir: string): Manifest | undefined {
+  return readManifest(...manifestPaths(resolve(publicDir, 'assets')))?.manifest
+}
+
+/**
  * Resolve symlinks in the parts of `path` that exist, keeping the trailing
  * components that do not. `realpathSync` throws on a path that is not there
  * yet, and an output directory usually is not on a first build.
@@ -201,7 +211,7 @@ export function resolveClientAssetEnv(
   clientEntryKey: string,
   label: string,
 ): ClientAssetEnv {
-  const manifest = readManifest(...manifestPaths(resolve(publicDir, 'assets')))?.manifest
+  const manifest = readClientManifest(publicDir)
 
   const entry = manifest?.[clientEntryKey]
   if (!entry?.file) {
@@ -230,13 +240,48 @@ export function resolveClientAssetEnv(
  * inputs and no `resources/js/app.tsx` at all, and its `viteAsset()` calls
  * still need the whole manifest.
  *
- * Re-serialized from the parsed object rather than passed through as raw
- * text, so the payload is exactly what `readManifest` accepted — a file that
- * failed to parse here is never shipped to fail again at first render.
+ * The payload is trimmed to the fields the runtime rule reads — `file` and
+ * `css` per entry (`getManifestFile`/`getManifestCss` in @guren/server's
+ * vite-manifest.ts) — because it ships inside executable code: a large app's
+ * manifest is dominated by per-chunk `imports`/`dynamicImports` graph
+ * metadata nothing consumes, and Workers caps bundle size. Trimming also
+ * validates the shape at build time, so a parseable-but-not-a-manifest file
+ * (`null`, an array) is reported as "no manifest" here instead of being baked
+ * in to fail at first render. String and array entry forms pass through
+ * untrimmed — the runtime accepts them, and the two paths must not diverge.
  */
 export function clientManifestJson(publicDir: string): string | undefined {
-  const read = readManifest(...manifestPaths(resolve(publicDir, 'assets')))
-  return read ? JSON.stringify(read.manifest) : undefined
+  const manifest: unknown = readClientManifest(publicDir)
+  if (manifest === undefined) {
+    return undefined
+  }
+  if (typeof manifest !== 'object' || manifest === null || Array.isArray(manifest)) {
+    return undefined
+  }
+
+  const trimmed: Record<string, unknown> = {}
+  for (const [key, entry] of Object.entries(manifest)) {
+    if (typeof entry === 'string' || Array.isArray(entry)) {
+      trimmed[key] = entry
+      continue
+    }
+    if (typeof entry !== 'object' || entry === null) {
+      continue
+    }
+
+    const kept: { file?: string; css?: string[] } = {}
+    if (typeof entry.file === 'string') {
+      kept.file = entry.file
+    }
+    if (Array.isArray(entry.css) && entry.css.length > 0) {
+      kept.css = entry.css
+    }
+    if (kept.file !== undefined || kept.css !== undefined) {
+      trimmed[key] = kept
+    }
+  }
+
+  return JSON.stringify(trimmed)
 }
 
 /**

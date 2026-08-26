@@ -29,6 +29,11 @@ function probeHttpExport(root: string): string {
   return result.stdout.toString().trim()
 }
 
+/** The client manifest `scaffoldApp` writes — assertions derive from this. */
+const CLIENT_MANIFEST = {
+  'resources/js/app.tsx': { file: 'app-Abc123.js', css: ['app-Def456.css'] },
+}
+
 interface ScaffoldOptions {
   ssr?: boolean
   renderExport?: string
@@ -61,9 +66,7 @@ function scaffoldApp(root: string, options: ScaffoldOptions = {}): void {
   mkdirSync(join(root, 'public/assets/.vite'), { recursive: true })
   writeFileSync(join(root, 'public/robots.txt'), 'User-agent: *\n')
   writeFileSync(join(root, 'public/assets/app-Abc123.js'), 'console.log("client")\n')
-  writeJson(join(root, 'public/assets/.vite/manifest.json'), {
-    'resources/js/app.tsx': { file: 'app-Abc123.js', css: ['app-Def456.css'] },
-  })
+  writeJson(join(root, 'public/assets/.vite/manifest.json'), CLIENT_MANIFEST)
 
   mkdirSync(join(root, 'db/migrations/20260101000000_init'), { recursive: true })
   writeFileSync(join(root, 'db/migrations/20260101000000_init/migration.sql'), 'CREATE TABLE posts (id serial);\n')
@@ -133,10 +136,9 @@ describe('buildLambdaOutput', () => {
     // The function bundle ships no public/assets/manifest.json, so viteAsset()
     // resolves from the GUREN_VITE_MANIFEST injection.
     const wrapper = readFileSync(join(root, '.lambda/handler.ts'), 'utf8')
-    const manifestJson = JSON.stringify({
-      'resources/js/app.tsx': { file: 'app-Abc123.js', css: ['app-Def456.css'] },
-    })
-    expect(wrapper).toContain(`process.env.GUREN_VITE_MANIFEST ??= ${JSON.stringify(manifestJson)}`)
+    expect(wrapper).toContain(
+      `process.env.GUREN_VITE_MANIFEST ??= ${JSON.stringify(JSON.stringify(CLIENT_MANIFEST))}`,
+    )
     expect(wrapper.indexOf('GUREN_VITE_MANIFEST')).toBeLessThan(wrapper.indexOf('await import'))
 
     // env.json feeds Lambda function configuration, which is capped at 4KB

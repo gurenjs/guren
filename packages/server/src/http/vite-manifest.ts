@@ -64,6 +64,19 @@ export function clientManifestCandidates(baseDir?: string): string[] {
  */
 export const INJECTED_CLIENT_MANIFEST_SOURCE = 'GUREN_VITE_MANIFEST (injected by the deploy build)'
 
+const INJECTED_MANIFEST_HINT =
+  'It must hold the Vite client manifest text (deploy plugins inject it at build time), not a path.'
+
+/**
+ * Attach one of the manifest's non-enumerable bookkeeping fields.
+ * `enumerable: false` is the invariant both stamping sites must agree on — a
+ * stamped field must never leak into `Object.keys` or a re-serialization of
+ * the manifest.
+ */
+function defineHidden(manifest: ViteManifest, key: '__path__' | '__raw__', value: string): void {
+  Object.defineProperty(manifest, key, { value, enumerable: false })
+}
+
 /**
  * The client manifest a deploy build injected for runtimes that do not ship
  * `public/assets/manifest.json`: `GUREN_VITE_MANIFEST` holds the manifest
@@ -90,23 +103,19 @@ export function injectedClientManifest(): ViteManifest | undefined {
   try {
     parsed = JSON.parse(raw)
   } catch (error) {
-    throw new Error(
-      'GUREN_VITE_MANIFEST is set but is not valid JSON. It must hold the Vite client manifest text (deploy plugins inject it at build time), not a path.',
-      { cause: error },
-    )
+    throw new Error(`GUREN_VITE_MANIFEST is set but is not valid JSON. ${INJECTED_MANIFEST_HINT}`, {
+      cause: error,
+    })
   }
 
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     throw new Error(
-      'GUREN_VITE_MANIFEST is set but does not hold a manifest object. It must hold the Vite client manifest text (deploy plugins inject it at build time), not a path.',
+      `GUREN_VITE_MANIFEST is set but does not hold a manifest object. ${INJECTED_MANIFEST_HINT}`,
     )
   }
 
   const manifest = parsed as ViteManifest
-  Object.defineProperty(manifest, '__path__', {
-    value: INJECTED_CLIENT_MANIFEST_SOURCE,
-    enumerable: false,
-  })
+  defineHidden(manifest, '__path__', INJECTED_CLIENT_MANIFEST_SOURCE)
   return manifest
 }
 
@@ -149,15 +158,9 @@ export function loadViteManifest(
     try {
       const raw = readFileSync(manifestPath, 'utf8')
       const manifest = JSON.parse(raw) as ViteManifest
-      Object.defineProperty(manifest, '__path__', {
-        value: manifestPath,
-        enumerable: false,
-      })
+      defineHidden(manifest, '__path__', manifestPath)
       if (options.includeRaw) {
-        Object.defineProperty(manifest, '__raw__', {
-          value: raw,
-          enumerable: false,
-        })
+        defineHidden(manifest, '__raw__', raw)
       }
       return manifest
     } catch (error) {
