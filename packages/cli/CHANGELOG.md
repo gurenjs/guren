@@ -1,5 +1,53 @@
 # @guren/cli
 
+## 2.10.0
+
+### Minor Changes
+
+- b637f7e: Teach the agent commands about attachments (RFC 0013 Part 3):
+  `guren check` now fails when `configureAttachments()` binds a table its
+  `db/schema.ts` does not export (the layer takes the table untyped, so this
+  otherwise only surfaces at runtime), and `guren audit` recognizes uploads
+  handed to a typed `attach()` as validated by the attachment declaration's
+  pipeline instead of demanding `validateBody()` for them.
+- 4fd7ca9: Emit payload types data.gen.ts cannot copy as import-type references
+
+  A Resource whose payload type is exported but has no copyable object body — a
+  `z.infer<typeof Schema>` alias, an intersection, a merged interface — is now
+  emitted as `export type X = import('../app/Http/Resources/XResource').XData`
+  instead of being omitted with a warning. One zod schema can therefore serve as
+  the single source of truth for a route's `output:` contract and its Resource's
+  `Data.*` type. Unexported and generic declarations stay refused; the
+  unexported warning now says that exporting the declaration fixes it.
+
+- ca7f360: Stop casting record columns in scaffolded resources
+
+  `make:feature`, `guren add resource` and `make:resource` wrote
+  `id: this.resource.id as number` and `title: this.resource.title as string`
+  into every generated resource. The record is `typeof table.$inferSelect`, so
+  each column is already typed and the casts only hid mistakes: `as string` on a
+  column that is later made nullable swallows the `null` while the resource keeps
+  compiling, and `as number` hard-codes a primary key an app with a UUID does not
+  have. The key's type is now read off the record (`id: PostRecord['id']`).
+
+  `json` columns keep their assertion, in every dialect: `jsonb()`, `json()` and
+  `text({ mode: 'json' })` all infer `unknown` unless the schema pins a `$type`.
+
+  Generated resources also declare their payload as the `Resource` class's second
+  type argument instead of overriding `toJSON()` to cast. That argument arrives in
+  the `@guren/core` released alongside this one, so upgrade `@guren/core` and
+  `@guren/cli` together — `bunx guren upgrade` does that, and a lone CLI upgrade
+  would scaffold a resource the installed core cannot type.
+
+### Patch Changes
+
+- Updated dependencies [6832953]
+- Updated dependencies [02930f4]
+- Updated dependencies [b637f7e]
+- Updated dependencies [ca7f360]
+  - @guren/core@1.9.0
+  - @guren/server@2.11.0
+
 ## 2.9.1
 
 ### Patch Changes
