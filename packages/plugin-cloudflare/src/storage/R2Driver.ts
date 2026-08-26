@@ -378,8 +378,8 @@ export class R2Driver implements StorageDriver {
 
   /**
    * Follows `cursor` until `truncated` is false. A single `list()` call is
-   * capped at 1000 keys, so a one-page read (what `S3Driver.allFiles` does)
-   * silently truncates larger directories.
+   * capped at 1000 keys, so a one-page read silently truncates larger
+   * directories.
    */
   private async *pages(options: R2ListOptionsLike): AsyncGenerator<R2ObjectsLike> {
     const bucket = this.bucket()

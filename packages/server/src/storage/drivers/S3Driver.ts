@@ -208,15 +208,21 @@ export class S3Driver implements StorageDriver {
       DeleteObjectsCommand: new (input: unknown) => unknown
     }
 
-    const command = new DeleteObjectsCommand({
-      Bucket: this.bucket,
-      Delete: {
-        Objects: paths.map((path) => ({ Key: this.prefixKey(path) })),
-      },
-    })
+    // DeleteObjects accepts at most 1000 keys per request; a larger payload
+    // is rejected outright, deleting nothing.
+    let deleted = 0
+    for (let index = 0; index < paths.length; index += 1000) {
+      const command = new DeleteObjectsCommand({
+        Bucket: this.bucket,
+        Delete: {
+          Objects: paths.slice(index, index + 1000).map((path) => ({ Key: this.prefixKey(path) })),
+        },
+      })
 
-    const response = await client.send(command) as { Deleted?: unknown[] }
-    return response.Deleted?.length ?? 0
+      const response = await client.send(command) as { Deleted?: unknown[] }
+      deleted += response.Deleted?.length ?? 0
+    }
+    return deleted
   }
 
   async copy(from: string, to: string): Promise<string> {
@@ -326,46 +332,92 @@ export class S3Driver implements StorageDriver {
     return metadata
   }
 
-  async files(directory: string): Promise<string[]> {
+  /**
+   * Run ListObjectsV2 to exhaustion, following `NextContinuationToken` —
+   * a single request returns at most 1000 entries, so a one-page read
+   * silently truncates larger listings.
+   */
+  private async listAll(input: Record<string, unknown>): Promise<{
+    contents: Array<{ Key?: string }>
+    commonPrefixes: Array<{ Prefix?: string }>
+  }> {
     const client = await this.getClient()
     const { ListObjectsV2Command } = await importAwsModule('@aws-sdk/client-s3') as {
       ListObjectsV2Command: new (input: unknown) => unknown
     }
 
+    const contents: Array<{ Key?: string }> = []
+    const commonPrefixes: Array<{ Prefix?: string }> = []
+    let continuationToken: string | undefined
+
+    do {
+      const command = new ListObjectsV2Command(
+        continuationToken ? { ...input, ContinuationToken: continuationToken } : input
+      )
+      const response = await client.send(command) as {
+        Contents?: Array<{ Key?: string }>
+        CommonPrefixes?: Array<{ Prefix?: string }>
+        IsTruncated?: boolean
+        NextContinuationToken?: string
+      }
+      contents.push(...(response.Contents ?? []))
+      commonPrefixes.push(...(response.CommonPrefixes ?? []))
+      if (response.IsTruncated) {
+        // A truncated page whose token is missing or repeats the last one
+        // cannot advance: returning what we have would silently truncate,
+        // and re-sending the same token would loop forever. S3-compatible
+        // endpoints are exactly where such malformed pages show up.
+        const next = response.NextContinuationToken
+        if (!next || next === continuationToken) {
+          throw new Error(
+            'S3 listing reported IsTruncated without an advancing NextContinuationToken; refusing to return an incomplete listing.'
+          )
+        }
+        continuationToken = next
+      } else {
+        continuationToken = undefined
+      }
+    } while (continuationToken)
+
+    return { contents, commonPrefixes }
+  }
+
+  /**
+   * The ListObjectsV2 `Prefix` for a directory: the prefixed key with exactly
+   * one trailing slash, or empty for the bucket (or disk prefix) root —
+   * naively appending `/` to `prefixKey('')` on a prefixed disk yields
+   * `prefix//`, which matches nothing.
+   */
+  private listingPrefix(directory: string): string {
     const prefix = this.prefixKey(directory)
-    const command = new ListObjectsV2Command({
+    let end = prefix.length
+    while (end > 0 && prefix.charCodeAt(end - 1) === 0x2f /* '/' */) {
+      end--
+    }
+    const trimmed = prefix.slice(0, end)
+    return trimmed ? `${trimmed}/` : ''
+  }
+
+  async files(directory: string): Promise<string[]> {
+    const { contents } = await this.listAll({
       Bucket: this.bucket,
-      Prefix: prefix ? `${prefix}/` : '',
+      Prefix: this.listingPrefix(directory),
       Delimiter: '/',
     })
 
-    const response = await client.send(command) as {
-      Contents?: Array<{ Key?: string }>
-    }
-
-    return (response.Contents ?? [])
+    return contents
       .map((item) => item.Key?.replace(this.prefix ? `${this.prefix}/` : '', '') ?? '')
       .filter((key) => key && !key.endsWith('/'))
   }
 
   async directories(directory: string): Promise<string[]> {
-    const client = await this.getClient()
-    const { ListObjectsV2Command } = await importAwsModule('@aws-sdk/client-s3') as {
-      ListObjectsV2Command: new (input: unknown) => unknown
-    }
-
-    const prefix = this.prefixKey(directory)
-    const command = new ListObjectsV2Command({
+    const { commonPrefixes } = await this.listAll({
       Bucket: this.bucket,
-      Prefix: prefix ? `${prefix}/` : '',
+      Prefix: this.listingPrefix(directory),
       Delimiter: '/',
     })
 
-    const response = await client.send(command) as {
-      CommonPrefixes?: Array<{ Prefix?: string }>
-    }
-
-    return (response.CommonPrefixes ?? [])
+    return commonPrefixes
       .map((item) =>
         item.Prefix?.replace(this.prefix ? `${this.prefix}/` : '', '').replace(/\/$/, '') ?? ''
       )
@@ -373,22 +425,12 @@ export class S3Driver implements StorageDriver {
   }
 
   async allFiles(directory: string): Promise<string[]> {
-    const client = await this.getClient()
-    const { ListObjectsV2Command } = await importAwsModule('@aws-sdk/client-s3') as {
-      ListObjectsV2Command: new (input: unknown) => unknown
-    }
-
-    const prefix = this.prefixKey(directory)
-    const command = new ListObjectsV2Command({
+    const { contents } = await this.listAll({
       Bucket: this.bucket,
-      Prefix: prefix ? `${prefix}/` : '',
+      Prefix: this.listingPrefix(directory),
     })
 
-    const response = await client.send(command) as {
-      Contents?: Array<{ Key?: string }>
-    }
-
-    return (response.Contents ?? [])
+    return contents
       .map((item) => item.Key?.replace(this.prefix ? `${this.prefix}/` : '', '') ?? '')
       .filter((key) => key && !key.endsWith('/'))
   }
