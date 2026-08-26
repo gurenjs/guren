@@ -16,47 +16,60 @@ export default function Home({ message }: Props) {
   return (
     <>
       <Head title="__APP_TITLE__" />
-      <main className="min-h-screen bg-gradient-to-b from-gray-950 to-gray-900 text-gray-100">
+      <main className="min-h-screen bg-g-page font-sans text-g-text">
         <div className="mx-auto max-w-3xl px-6 py-20">
-          <div className="mb-4 inline-block rounded-full bg-indigo-500/10 px-3 py-1 text-sm text-indigo-400">
+          <p className="mb-5 font-mono text-xs tracking-[0.18em] uppercase text-g-text-2">
             Powered by Bun + Hono
-          </div>
-          <h1 className="mb-4 text-5xl font-bold tracking-tight">{message}</h1>
-          <p className="mb-12 text-lg text-gray-400">
+          </p>
+          <h1 className="mb-4 flex items-center gap-4 text-5xl font-bold tracking-tight text-g-heading">
+            <span aria-hidden className="h-10 w-[3px] shrink-0 rounded-full bg-[image:var(--g-tick)]" />
+            {message}
+          </h1>
+          <p className="mb-8 text-lg text-g-text-2">
             The Laravel of TypeScript. Edit{' '}
-            <code className="rounded bg-gray-800 px-1.5 py-0.5 text-sm text-indigo-300">
+            <code className="rounded bg-g-ink px-1.5 py-0.5 font-mono text-sm text-g-on-ink">
               resources/js/pages/Home.tsx
             </code>{' '}
             to get started.
           </p>
 
+          <div className="mb-12 flex flex-wrap gap-3">
+            <a
+              href="https://guren.dev/docs"
+              className="inline-flex items-center rounded-g-ctl bg-g-accent px-4 py-2 text-sm font-bold text-g-on-accent transition hover:bg-g-accent-down"
+            >
+              Documentation
+            </a>
+            <a
+              href="https://github.com/gurenjs/guren"
+              className="inline-flex items-center rounded-g-ctl border border-g-line-strong bg-g-panel px-4 py-2 text-sm font-bold text-g-text transition hover:border-g-muted"
+            >
+              GitHub
+            </a>
+          </div>
+
           <div className="grid gap-4 sm:grid-cols-2">
             {features.map((f) => (
-              <div key={f.title} className="rounded-lg border border-gray-800 bg-gray-900/50 p-5">
-                <h3 className="mb-1 font-semibold text-gray-100">{f.title}</h3>
-                <p className="text-sm text-gray-400">{f.desc}</p>
+              <div
+                key={f.title}
+                className="rounded-g-card border border-g-line bg-g-panel p-5 shadow-g-card"
+              >
+                <h3 className="mb-1 font-bold text-g-heading">{f.title}</h3>
+                <p className="text-sm text-g-text-2">{f.desc}</p>
               </div>
             ))}
           </div>
 
-          <div className="mt-12 rounded-lg border border-gray-800 bg-gray-900/50 p-6">
-            <h2 className="mb-3 text-lg font-semibold">Next steps</h2>
-            <div className="space-y-2 font-mono text-sm text-gray-400">
-              <p><span className="text-gray-500">$</span> bunx guren add auth</p>
-              <p><span className="text-gray-500">$</span> bunx guren add resource posts</p>
-              <p><span className="text-gray-500">$</span> bunx guren make:model Post</p>
+          <div className="mt-12 rounded-g-card bg-g-ink p-6">
+            <h2 className="mb-3 font-mono text-xs tracking-[0.18em] uppercase text-g-on-ink-muted">
+              Next steps
+            </h2>
+            <div className="space-y-2 font-mono text-sm text-g-on-ink">
+              <p><span className="text-g-on-ink-muted">$</span> bunx guren add auth</p>
+              <p><span className="text-g-on-ink-muted">$</span> bunx guren add resource posts</p>
+              <p><span className="text-g-on-ink-muted">$</span> bunx guren make:model Post</p>
             </div>
           </div>
-
-          <p className="mt-8 text-center text-sm text-gray-600">
-            <a href="https://guren.dev/docs" className="text-indigo-400 hover:text-indigo-300">
-              Documentation
-            </a>
-            {' · '}
-            <a href="https://github.com/user/guren" className="text-indigo-400 hover:text-indigo-300">
-              GitHub
-            </a>
-          </p>
         </div>
       </main>
     </>
