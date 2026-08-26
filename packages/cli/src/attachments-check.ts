@@ -2,7 +2,8 @@ import { dirname, relative, resolve } from 'node:path'
 import type { CallExpression } from '@babel/types'
 import { walk } from './ast-walk'
 import { check, type CheckResult } from './check-result'
-import { collectFiles, listAppRoots } from './discovery'
+import { collectFiles, discoverModelFiles, listAppRoots } from './discovery'
+import { findMixinCall, firstClassDeclaration } from './model-parser'
 import type { ParseCache } from './parse-cache'
 import { schemaPathFor, type SchemaTable } from './schema-parser'
 
@@ -51,6 +52,104 @@ function schemaModuleFor(cwd: string, filePath: string, specifier: string): stri
   const moduleMatch = /^modules\/([^/]+)\/db\/schema$/.exec(rel)
   if (moduleMatch) return moduleMatch[1]!
   return undefined
+}
+
+/**
+ * Whether the file makes a `configureAttachments()` call under its
+ * `@guren/core` import binding. The same provenance rule as the table check
+ * below: a comment or a string merely containing the name does not count.
+ */
+async function fileCallsConfigureAttachments(cache: ParseCache, filePath: string): Promise<boolean> {
+  const source = await cache.source(filePath)
+  if (!source || !source.includes('configureAttachments')) return false
+
+  const parsed = await cache.get(filePath)
+  if (!parsed) return false
+
+  let configureLocal: string | null = null
+  for (const declaration of parsed.ast.program.body) {
+    if (declaration.type !== 'ImportDeclaration' || declaration.source.value !== '@guren/core') continue
+    for (const specifier of declaration.specifiers) {
+      if (specifier.type !== 'ImportSpecifier') continue
+      const imported =
+        specifier.imported.type === 'Identifier' ? specifier.imported.name : specifier.imported.value
+      if (imported === 'configureAttachments') configureLocal = specifier.local.name
+    }
+  }
+  if (!configureLocal) return false
+
+  let found = false
+  walk(parsed.ast, (node) => {
+    if (node.type !== 'CallExpression') return
+    const call = node as unknown as CallExpression
+    if (call.callee.type === 'Identifier' && call.callee.name === configureLocal) found = true
+  })
+  return found
+}
+
+/**
+ * Flags models that mix in `Attachable(...)` in an app with no
+ * `configureAttachments()` call anywhere (RFC 0013). The mixin's statics
+ * resolve the configured layer lazily, at first use — so a model can build,
+ * typecheck, and boot with no attachments config at all, and the miss only
+ * surfaces as a runtime error on the first `attach()`.
+ *
+ * Presence-only on purpose: which table the config binds is the
+ * {@link checkAttachmentsConfig} rule above; this one asks the prior
+ * question of whether a config exists to bind anything.
+ */
+export async function checkAttachableModels(options: {
+  cwd: string
+  cache: ParseCache
+  /** Candidate config files, from {@link discoverAttachmentsConfigFiles}. */
+  configFiles: string[]
+}): Promise<CheckResult[]> {
+  const { cwd, cache, configFiles } = options
+
+  const attachableModels: Array<{ className: string; relPath: string }> = []
+  for (const filePath of await discoverModelFiles(cwd)) {
+    // Same cheap pre-filter as the table check: only files naming the mixin
+    // are worth parsing.
+    const source = await cache.source(filePath)
+    if (!source || !source.includes('Attachable')) continue
+
+    const parsed = await cache.get(filePath)
+    if (!parsed) continue
+
+    const classDecl = firstClassDeclaration(parsed.ast.program.body)
+    if (!classDecl?.id?.name || !classDecl.superClass) continue
+    if (!findMixinCall(classDecl.superClass, 'Attachable')) continue
+
+    attachableModels.push({ className: classDecl.id.name, relPath: relative(cwd, filePath) })
+  }
+  if (attachableModels.length === 0) return []
+
+  let configured = false
+  for (const filePath of configFiles) {
+    if (await fileCallsConfigureAttachments(cache, filePath)) {
+      configured = true
+      break
+    }
+  }
+
+  return attachableModels.map(({ className, relPath }) => {
+    const key = `attachments-model:${relPath}`
+    const title = 'Attachable model wiring'
+    if (configured) {
+      return check(key, title, 'pass', `${className} declares attachments and configureAttachments() is present.`)
+    }
+    return check(
+      key,
+      title,
+      'fail',
+      `${className} in ${relPath} mixes in Attachable(...), but no configureAttachments() call was found in `
+        + `config/, src/, or app/. The mixin resolves the attachments layer at first use, so this only fails `
+        + `at runtime, on the first attach.`,
+      `Run \`guren add attachments\` to install the schema table, config, and provider, or add a `
+        + `configureAttachments() call (config/attachments.ts is the documented home).`,
+      relPath,
+    )
+  })
 }
 
 /**

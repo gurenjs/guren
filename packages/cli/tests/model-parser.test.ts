@@ -150,4 +150,112 @@ Post.hasMany('comments', () => import('./Comment.js'), 'postId', 'id')
     expect(result!.relationships.find(r => r.name === 'author')?.type).toBe('belongsTo')
     expect(result!.relationships.find(r => r.name === 'comments')?.type).toBe('hasMany')
   })
+
+  it('extracts attachment collections from the Attachable(...) declaration', () => {
+    const source = `
+import { Attachable, hasOneAttached, hasManyAttached } from '@guren/core'
+import { defineModel } from '@guren/orm'
+import { posts } from '../../db/schema.js'
+
+export class Post extends Attachable(defineModel(posts), {
+  cover: hasOneAttached({
+    image: 'require',
+    variants: { thumb: { width: 320 }, og: { width: 1200, height: 630 } },
+  }),
+  images: hasManyAttached({ image: 'require' }),
+  draftPdf: hasOneAttached(),
+}) {}
+`
+    const result = parseModelSource(source, '/app/Models/Post.ts')
+
+    expect(result).not.toBeNull()
+    expect(result!.attachmentsUnreadable).toBe(false)
+    expect(result!.attachments).toEqual([
+      { name: 'cover', kind: 'one', variants: ['thumb', 'og'] },
+      { name: 'images', kind: 'many', variants: [] },
+      { name: 'draftPdf', kind: 'one', variants: [] },
+    ])
+    expect(result!.tableName).toBe('posts')
+  })
+
+  it('reads the Attachable declaration through an outer mixin', () => {
+    const source = `
+import { Attachable, hasOneAttached, SoftDeletes } from '@guren/core'
+import { defineModel } from '@guren/orm'
+import { posts } from '../../db/schema.js'
+
+export class Post extends SoftDeletes(Attachable(defineModel(posts), {
+  cover: hasOneAttached(),
+})) {}
+`
+    const result = parseModelSource(source, '/app/Models/Post.ts')
+
+    expect(result!.attachments).toEqual([{ name: 'cover', kind: 'one', variants: [] }])
+    expect(result!.hasSoftDeletes).toBe(true)
+  })
+
+  it('reports empty attachments for models without the mixin', () => {
+    const source = `
+import { defineModel } from '@guren/orm'
+import { posts } from '../../db/schema.js'
+
+export class Post extends defineModel(posts) {}
+`
+    const result = parseModelSource(source, '/app/Models/Post.ts')
+
+    expect(result!.attachments).toEqual([])
+    expect(result!.attachmentsUnreadable).toBe(false)
+  })
+
+  it('marks a declaration with a spread as unreadable instead of reading it partially', () => {
+    const source = `
+import { Attachable, hasOneAttached } from '@guren/core'
+import { defineModel } from '@guren/orm'
+import { posts } from '../../db/schema.js'
+import { sharedCollections } from './shared.js'
+
+export class Post extends Attachable(defineModel(posts), {
+  cover: hasOneAttached(),
+  ...sharedCollections,
+}) {}
+`
+    const result = parseModelSource(source, '/app/Models/Post.ts')
+
+    expect(result!.attachments).toEqual([])
+    expect(result!.attachmentsUnreadable).toBe(true)
+  })
+
+  it('marks a collection whose options are built elsewhere as unreadable', () => {
+    // The options object may carry variants the parser cannot see, so the
+    // whole model is skipped rather than emitted with variants: never.
+    const source = `
+import { Attachable, hasOneAttached } from '@guren/core'
+import { defineModel } from '@guren/orm'
+import { posts } from '../../db/schema.js'
+import { coverOptions } from './options.js'
+
+export class Post extends Attachable(defineModel(posts), {
+  cover: hasOneAttached(coverOptions),
+}) {}
+`
+    const result = parseModelSource(source, '/app/Models/Post.ts')
+
+    expect(result!.attachments).toEqual([])
+    expect(result!.attachmentsUnreadable).toBe(true)
+  })
+
+  it('marks a declaration that is not an object literal as unreadable', () => {
+    const source = `
+import { Attachable } from '@guren/core'
+import { defineModel } from '@guren/orm'
+import { posts } from '../../db/schema.js'
+import { declaration } from './declaration.js'
+
+export class Post extends Attachable(defineModel(posts), declaration) {}
+`
+    const result = parseModelSource(source, '/app/Models/Post.ts')
+
+    expect(result!.attachments).toEqual([])
+    expect(result!.attachmentsUnreadable).toBe(true)
+  })
 })

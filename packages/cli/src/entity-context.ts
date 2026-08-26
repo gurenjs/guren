@@ -19,6 +19,7 @@ import {
   extractClassDeclaration,
   discoverParsedModels,
   type DiscoveredModel,
+  type ModelAttachmentCollection,
   type ModelRelationship,
 } from './model-parser'
 import { loadRouteDefinitions, resolveRoutesFile } from './load-routes'
@@ -82,6 +83,10 @@ export interface EntityContext {
     tableName?: string
     columns?: string[]
     relationships: ModelRelationship[]
+    /** Attachment collections declared via `Attachable(...)` (RFC 0013). */
+    attachments: ModelAttachmentCollection[]
+    /** True when `Attachable(...)` is present but its declaration could not be statically read. */
+    attachmentsUnreadable: boolean
     usesAuth: boolean
     hasSoftDeletes: boolean
   }
@@ -361,6 +366,8 @@ export async function generateEntityContext(
       tableName: match.info.tableName,
       columns,
       relationships: match.info.relationships,
+      attachments: match.info.attachments,
+      attachmentsUnreadable: match.info.attachmentsUnreadable,
       usesAuth: match.info.usesAuth,
       hasSoftDeletes: match.info.hasSoftDeletes,
     },
@@ -397,6 +404,14 @@ export function renderEntityContextMarkdown(ctx: EntityContext): string {
   for (const rel of ctx.model.relationships) {
     const target = rel.relatedModel ? ` → ${rel.relatedModel}` : ''
     lines.push(`- ${rel.type}: \`${rel.name}\`${target}`)
+  }
+  for (const collection of ctx.model.attachments) {
+    const method = collection.kind === 'one' ? 'hasOneAttached' : 'hasManyAttached'
+    const variants = collection.variants.length > 0 ? ` (variants: ${collection.variants.join(', ')})` : ''
+    lines.push(`- ${method}: \`${collection.name}\`${variants}`)
+  }
+  if (ctx.model.attachmentsUnreadable) {
+    lines.push('- Attachments: declared via Attachable(...), but not statically readable — the list above omits them.')
   }
   lines.push('')
 

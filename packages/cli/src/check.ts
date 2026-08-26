@@ -37,7 +37,7 @@ import { checkRouteContracts } from './route-contract-check'
  */
 const SOURCE_FILE_PATTERN = /\.(ts|tsx|mts|js|jsx|mjs)$/
 import { checkSchemaTimestamps } from './schema-check'
-import { checkAttachmentsConfig, discoverAttachmentsConfigFiles } from './attachments-check'
+import { checkAttachableModels, checkAttachmentsConfig, discoverAttachmentsConfigFiles } from './attachments-check'
 import { parseSchemaTables, schemaPathFor, type SchemaTable } from './schema-parser'
 import { ParseCache } from './parse-cache'
 import { extractInertiaPageRefs, resolveInertiaPageFile, expectedInertiaPagePath } from './inertia-pages'
@@ -322,6 +322,12 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     checks.push(
       ...(await checkAttachmentsConfig({ cwd, cache, files: attachmentsFiles, schemaTables })),
     )
+
+    // 8.6. The prior question: a model mixing in Attachable(...) in an app
+    // with no configureAttachments() call at all. Same runtime-only failure
+    // shape as 8.5, and content-activated the same way — apps without
+    // Attachable models contribute nothing.
+    checks.push(...(await checkAttachableModels({ cwd, cache, configFiles: attachmentsFiles })))
   }
 
   // 9. Doc-link checks (docs/ frontmatter + @docs tags, RFC 0004). Runs in

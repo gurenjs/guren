@@ -57,6 +57,7 @@ import { generateRouteTypes } from './routes-types'
 import { describePageManifestSuppression, generatePageTypes, type PageManifestPlan } from './pages-types'
 import { generateTranslationTypes } from './i18n-types'
 import { generateDataTypes } from './data-types'
+import { generateAttachmentTypes } from './attachments-types'
 import { generateApiClientTypes } from './api-client-types'
 import { generateOpenApiSpec } from './openapi-generate'
 import { generateChannelTypes } from './channel-types'
@@ -1187,6 +1188,25 @@ const codegenCommand = defineCommand({
     })
     if (translationsOutputPath) {
       consola.success(`Translation keys generated at ${translationsOutputPath} (${keyCount} keys)`)
+    }
+
+    // Attachment maps only exist for apps with Attachable models; the
+    // generator removes a stale file otherwise, like translations above.
+    const {
+      outputPath: attachmentsOutputPath,
+      models: attachableModels,
+      warnings: attachmentWarnings,
+    } = await generateAttachmentTypes({
+      appRoot: args.app,
+      ...writerOptions,
+    })
+    for (const warning of attachmentWarnings) {
+      consola.warn(warning)
+    }
+    if (attachmentsOutputPath) {
+      consola.success(
+        `Attachment types generated at ${attachmentsOutputPath} (${attachableModels.length} ${attachableModels.length === 1 ? 'model' : 'models'})`,
+      )
     }
 
     // Route/API artifacts default to routes/web.ts; skip only when no routes file exists.

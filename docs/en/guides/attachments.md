@@ -423,12 +423,41 @@ map, a failing existence query, or an unlistable disk is reported and left
 alone — an outage must never turn into a mass deletion. Run it from a
 scheduled job or CI on whatever cadence fits the app.
 
+### Generated types: `.guren/attachments.gen.ts`
+
+The model itself is typed by the mixin's generics, but pages, resources, and
+upload clients cannot see `typeof Post.attachments`. `guren codegen` reads
+each model's `Attachable(...)` declaration and generates a cross-boundary
+map (the Vite plugin regenerates it whenever a file under `app/Models/` —
+or a module's — changes):
+
+```ts
+// .guren/attachments.gen.ts — generated, do not edit
+export interface AttachmentsMap {
+  Post: { cover: 'one'; images: 'many' }
+}
+export interface AttachmentVariantsMap {
+  Post: { cover: 'og' | 'thumb'; images: never }
+}
+export type AttachableModelName = keyof AttachmentsMap
+export type AttachmentName<M extends keyof AttachmentsMap> = keyof AttachmentsMap[M]
+```
+
+Apps without `Attachable` models get no file. The generator reads the
+declaration statically, so one it cannot fully parse — a spread, an options
+object built elsewhere — is skipped with a warning rather than emitted
+partially; keep declarations inline object literals to stay in the map.
+
 ### What the agent commands verify
 
 - `bunx guren check` validates that `configureAttachments()` binds a table
   your `db/schema.ts` actually exports — the layer takes the table untyped,
   so a renamed schema export would otherwise only fail at runtime, on the
   first attach.
+- `bunx guren check` also flags models mixing in `Attachable(...)` when the
+  app has no `configureAttachments()` call at all — the mixin resolves the
+  layer at first use, so the missing config would otherwise only fail at
+  runtime too.
 - `bunx guren audit` treats uploads handed to a typed `attach()` as
   validated (the declaration-driven pipeline is the validation); an action
   that reads other body input still needs `validateBody()`.

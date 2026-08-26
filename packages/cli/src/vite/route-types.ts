@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { HmrContext, Logger, Plugin, ResolvedConfig, ViteDevServer } from 'vite'
-import { RESOURCES_DIR, toPosixRelative } from '../discovery'
+import { MODELS_DIR, RESOURCES_DIR, toPosixRelative } from '../discovery'
 import { escapeRegExp } from '../utils'
 
 export interface RouteTypesPluginOptions {
@@ -188,14 +188,21 @@ export function routeTypesPlugin(options: RouteTypesPluginOptions = {}): Plugin 
     // shape rather than by listing `modules/`, so a module created mid-session
     // needs no restart.
     const moduleResources = new RegExp(`^modules/[^/]+/${escapeRegExp(paths.resourcesDir)}(?:/|$)`, 'u')
+    // Models feed attachments.gen.ts: an edited Attachable(...) declaration
+    // must regenerate the map, root and module models alike.
+    const modelsDir = resolve(root, MODELS_DIR)
+    const moduleModels = new RegExp(`^modules/[^/]+/${escapeRegExp(MODELS_DIR)}(?:/|$)`, 'u')
     const langDir = resolve(root, DEFAULT_LANG_DIR)
     const changedFile = resolve(file)
+    const relativeFile = toPosixRelative(root, changedFile)
 
     return (
       changedFile === watchFile ||
       changedFile.startsWith(`${pagesDir}/`) || changedFile === pagesDir ||
       changedFile.startsWith(`${resourcesDir}/`) || changedFile === resourcesDir ||
-      moduleResources.test(toPosixRelative(root, changedFile)) ||
+      moduleResources.test(relativeFile) ||
+      changedFile.startsWith(`${modelsDir}/`) || changedFile === modelsDir ||
+      moduleModels.test(relativeFile) ||
       // Codegen only reads lang/<locale>/*.json — other files under lang/
       // (notes, fixtures) never affect the generated union.
       (changedFile.startsWith(`${langDir}/`) && changedFile.endsWith('.json'))

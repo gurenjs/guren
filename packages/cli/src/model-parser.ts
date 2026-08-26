@@ -11,6 +11,15 @@ export interface ModelRelationship {
   relatedModel?: string
 }
 
+/** One collection of the model's `Attachable(Base, { ... })` declaration (RFC 0013). */
+export interface ModelAttachmentCollection {
+  name: string
+  /** `'one'` for `hasOneAttached(...)`, `'many'` for `hasManyAttached(...)`. */
+  kind: 'one' | 'many'
+  /** Declared variant names, in declaration order. Empty when none. */
+  variants: string[]
+}
+
 export interface ModelInfo {
   className: string
   filePath: string
@@ -18,6 +27,21 @@ export interface ModelInfo {
   relationships: ModelRelationship[]
   usesAuth: boolean
   hasSoftDeletes: boolean
+  /**
+   * Attachment collections declared via `Attachable(Base, { ... })` in the
+   * heritage clause. Empty when the model is not Attachable — and also when
+   * it is but the declaration is not statically readable, which
+   * {@link ModelInfo.attachmentsUnreadable} distinguishes.
+   */
+  attachments: ModelAttachmentCollection[]
+  /**
+   * True when the class wraps `Attachable(...)` but its declaration could not
+   * be read (a spread, a computed key, an options object built elsewhere).
+   * A partial read is worse than none here for the same reason as the
+   * allowlist checks: a map claiming `cover` is the only collection makes
+   * every consumer reject the `gallery` the runtime accepts.
+   */
+  attachmentsUnreadable: boolean
   /** `@docs <path>` tags in the model source (code-side doc links). */
   docsTags: string[]
 }
@@ -63,6 +87,7 @@ export function parseModelSource(source: string, filePath: string): ModelInfo | 
   const callRelationships = extractRelationshipsFromCalls(ast.program.body, className, source)
 
   const relationships = mergeRelationships(bodyRelationships, callRelationships)
+  const { collections: attachments, unreadable: attachmentsUnreadable } = extractModelAttachments(classDecl)
 
   return {
     className,
@@ -71,6 +96,8 @@ export function parseModelSource(source: string, filePath: string): ModelInfo | 
     relationships,
     usesAuth,
     hasSoftDeletes,
+    attachments,
+    attachmentsUnreadable,
     docsTags: extractDocsTags(source),
   }
 }
@@ -237,6 +264,96 @@ function findDefineModelCall(node: Node): CallExpression | null {
     if (nested) return nested
   }
   return null
+}
+
+/**
+ * The named mixin call in an extends clause, however wrapped —
+ * `Attachable(defineModel(posts), {...})` directly or inside another mixin,
+ * as in `SoftDeletes(Attachable(...))`. The recursion twin of
+ * {@link findDefineModelCall}; matching is by name only, like the other
+ * heritage-clause checks — an aliased import is not resolved.
+ */
+export function findMixinCall(node: Node, mixinName: string): CallExpression | null {
+  if (node.type !== 'CallExpression') return null
+  if (node.callee.type === 'Identifier' && node.callee.name === mixinName) return node
+  for (const argument of node.arguments) {
+    const nested = findMixinCall(argument, mixinName)
+    if (nested) return nested
+  }
+  return null
+}
+
+/**
+ * The class's attachment declaration — the second argument of the
+ * `Attachable(...)` call in its heritage clause (RFC 0013). `unreadable`
+ * reports a declaration this could not fully parse; the collections are
+ * then empty rather than partial, because a partial map misreports the
+ * model's contract (see {@link ModelInfo.attachmentsUnreadable}).
+ */
+export function extractModelAttachments(classDecl: ClassDeclaration): {
+  collections: ModelAttachmentCollection[]
+  unreadable: boolean
+} {
+  const call = classDecl.superClass ? findMixinCall(classDecl.superClass, 'Attachable') : null
+  if (!call) return { collections: [], unreadable: false }
+
+  const declaration = call.arguments[1]
+  if (declaration?.type !== 'ObjectExpression') return { collections: [], unreadable: true }
+
+  const collections: ModelAttachmentCollection[] = []
+  for (const property of declaration.properties) {
+    if (property.type !== 'ObjectProperty') return { collections: [], unreadable: true }
+    const name = memberKeyName(property)
+    if (!name) return { collections: [], unreadable: true }
+    const spec = parseAttachmentSpec(property.value)
+    if (!spec) return { collections: [], unreadable: true }
+    collections.push({ name, ...spec })
+  }
+  return { collections, unreadable: false }
+}
+
+/**
+ * One collection's `hasOneAttached(...)` / `hasManyAttached(...)` call, or
+ * null for any other shape. An options argument that is not an object
+ * literal — or one carrying a spread or computed key — is unreadable rather
+ * than "no variants": the variants may be hiding inside it.
+ */
+function parseAttachmentSpec(node: Node): { kind: 'one' | 'many'; variants: string[] } | null {
+  if (node.type !== 'CallExpression' || node.callee.type !== 'Identifier') return null
+  const kind =
+    node.callee.name === 'hasOneAttached' ? 'one'
+    : node.callee.name === 'hasManyAttached' ? 'many'
+    : null
+  if (!kind) return null
+
+  const options = node.arguments[0]
+  if (options === undefined) return { kind, variants: [] }
+  if (options.type !== 'ObjectExpression') return null
+
+  let variants: string[] = []
+  for (const property of options.properties) {
+    if (property.type !== 'ObjectProperty') return null
+    const key = memberKeyName(property)
+    if (!key) return null
+    if (key !== 'variants') continue
+    const names = attachmentVariantNames(property.value)
+    if (!names) return null
+    variants = names
+  }
+  return { kind, variants }
+}
+
+/** Keys of a `variants: { thumb: {...}, og: {...} }` object literal, or null when not fully readable. */
+function attachmentVariantNames(node: Node): string[] | null {
+  if (node.type !== 'ObjectExpression') return null
+  const names: string[] = []
+  for (const property of node.properties) {
+    if (property.type !== 'ObjectProperty') return null
+    const name = memberKeyName(property)
+    if (!name) return null
+    names.push(name)
+  }
+  return names
 }
 
 /**

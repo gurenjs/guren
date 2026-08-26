@@ -172,3 +172,127 @@ export const { Attachment } = configureAttachments({
     }
   })
 })
+
+describe('runCheck — Attachable models without configureAttachments', () => {
+  const ATTACHABLE_MODEL = `import { Attachable, hasOneAttached } from '@guren/core'
+import { defineModel } from '@guren/orm'
+import { posts } from '../../db/schema.js'
+
+export class Post extends Attachable(defineModel(posts), {
+  cover: hasOneAttached(),
+}) {}
+`
+
+  const CONFIG = `import { configureAttachments } from '@guren/core'
+import { posts } from '../db/schema.js'
+
+export const { Attachment } = configureAttachments({
+  table: posts,
+  storage: () => ({}) as never,
+  disk: 'media',
+})`
+
+  async function writeModel(dir: string, relPath = 'app/Models/Post.ts', source = ATTACHABLE_MODEL): Promise<void> {
+    await mkdir(join(dir, relPath, '..'), { recursive: true })
+    await writeFile(join(dir, relPath), source, 'utf8')
+  }
+
+  it('fails an Attachable model when no configureAttachments() call exists', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-attachable-missing-')
+    try {
+      await writeModel(workspace.dir)
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      const result = report.checks.find((c) => c.key.startsWith('attachments-model:'))
+      expect(result).toBeDefined()
+      expect(result!.status).toBe('fail')
+      expect(result!.message).toContain('Post')
+      expect(result!.suggestion).toContain('guren add attachments')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('passes an Attachable model when a configureAttachments() call exists', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-attachable-configured-')
+    try {
+      await writeModel(workspace.dir)
+      await mkdir(join(workspace.dir, 'config'), { recursive: true })
+      await writeFile(join(workspace.dir, 'config/attachments.ts'), CONFIG, 'utf8')
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      const result = report.checks.find((c) => c.key.startsWith('attachments-model:'))
+      expect(result).toBeDefined()
+      expect(result!.status).toBe('pass')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('does not treat a mention of configureAttachments in a comment as a config', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-attachable-comment-')
+    try {
+      await writeModel(workspace.dir)
+      await mkdir(join(workspace.dir, 'config'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'config/notes.ts'),
+        '// TODO: call configureAttachments() here\nexport const notes = true\n',
+        'utf8',
+      )
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      const result = report.checks.find((c) => c.key.startsWith('attachments-model:'))
+      expect(result).toBeDefined()
+      expect(result!.status).toBe('fail')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('contributes nothing to apps without Attachable models', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-attachable-none-')
+    try {
+      await writeModel(
+        workspace.dir,
+        'app/Models/Post.ts',
+        `import { defineModel } from '@guren/orm'
+import { posts } from '../../db/schema.js'
+
+export class Post extends defineModel(posts) {}
+`,
+      )
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      expect(report.checks.find((c) => c.key.startsWith('attachments-model:'))).toBeUndefined()
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('sees an Attachable model inside a module', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-attachable-module-')
+    try {
+      await writeModel(workspace.dir, 'modules/media/app/Models/Clip.ts', `import { Attachable, hasManyAttached } from '@guren/core'
+import { defineModel } from '@guren/orm'
+import { clips } from '../../db/schema.js'
+
+export class Clip extends Attachable(defineModel(clips), {
+  stills: hasManyAttached(),
+}) {}
+`)
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      const result = report.checks.find((c) => c.key.startsWith('attachments-model:'))
+      expect(result).toBeDefined()
+      expect(result!.status).toBe('fail')
+      expect(result!.message).toContain('Clip')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+})
