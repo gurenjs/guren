@@ -7,7 +7,7 @@ import { makePolicy } from './make-policy'
 import { makeTest } from './make-test'
 import { makeValidator } from './make-validator'
 import { parseFieldsString, type FieldDefinition, type FieldType } from './fields'
-import { ensureGurenUiTokens } from './guren-css'
+import { ensureGurenUiTokens, FORM_INPUT_CLASS, PRIMARY_BUTTON_CLASS } from './guren-css'
 import { schemaPathFor } from './schema-parser'
 
 /**
@@ -448,7 +448,7 @@ export default function ${collection}Index({ data, pagination }: Props) {
             <span aria-hidden className="h-7 w-[3px] shrink-0 rounded-full bg-[image:var(--g-tick)]" />
             ${collection}
           </h1>
-          <Link href={route('${routeName}.create')} className="rounded-g-ctl bg-g-accent px-4 py-2 text-sm font-bold text-g-on-accent transition hover:bg-g-accent-down">New ${singular}</Link>
+          <Link href={route('${routeName}.create')} className="${PRIMARY_BUTTON_CLASS}">New ${singular}</Link>
         </div>
         <div className="space-y-4">
           {data.map((${variableName}) => (
@@ -549,7 +549,7 @@ ${state.hooks}  return (
       <div className="mx-auto max-w-3xl px-6 py-12">
         <form className="space-y-4" onSubmit={(submitEvent) => { submitEvent.preventDefault(); form.post(route('${routeName}.store')) }}>
 ${formFields}
-          <button type="submit" className="rounded-g-ctl bg-g-accent px-4 py-2 text-sm font-bold text-g-on-accent transition hover:bg-g-accent-down">Create</button>
+          <button type="submit" className="${PRIMARY_BUTTON_CLASS}">Create</button>
         </form>
       </div>
     </main>
@@ -590,7 +590,7 @@ ${state.hooks}  return (
       <div className="mx-auto max-w-3xl px-6 py-12">
         <form className="space-y-4" onSubmit={(submitEvent) => { submitEvent.preventDefault(); form.put(route('${routeName}.update', { id: ${variableName}.id })) }}>
 ${formFields}
-          <button type="submit" className="rounded-g-ctl bg-g-accent px-4 py-2 text-sm font-bold text-g-on-accent transition hover:bg-g-accent-down">Save</button>
+          <button type="submit" className="${PRIMARY_BUTTON_CLASS}">Save</button>
         </form>
       </div>
     </main>
@@ -598,9 +598,6 @@ ${formFields}
 }
 `
 }
-
-const FORM_INPUT_CLASS =
-  'w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:border-transparent focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent'
 
 function generateFormField(field: FieldDefinition, formVar: string): string {
   const value = formValue(field, formVar)
