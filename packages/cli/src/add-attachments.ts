@@ -14,6 +14,7 @@ import {
   type SchemaDialect,
 } from './patch-helpers'
 import { wireProviders } from './provider-registrar'
+import { loadScaffoldTemplate } from './scaffold-templates'
 import { writeScaffoldFiles, type WriterOptions } from './utils'
 
 const CONSOLE_ENTRY = 'src/console.ts'
@@ -91,40 +92,7 @@ const SCHEMA_IMPORTS: Record<SchemaDialect, (content: string) => string> = {
 
 const VARIANT_RECORD_IMPORT = "import type { AttachmentVariantRecord } from '@guren/core'"
 
-const CONFIG_FILE = `import { configureAttachments, getContainer } from '@guren/core'
-import { attachments } from '../db/schema'
 
-/**
- * Wires the attachments layer once at boot (AttachmentsProvider imports this
- * module). \`Attachment\` is the app-local model over the attachments table —
- * use it for morph relations and advanced queries; the typed day-to-day API
- * lives on your models via the Attachable mixin.
- *
- * See the attachments guide for declarations, image validation, variants,
- * and queued generation.
- */
-export const { Attachment } = configureAttachments({
-  table: attachments,
-  storage: () => getContainer().make('storage'),
-  // Where new attachments are stored, and how their URLs are built: 'public'
-  // disks serve via disk.url(), 'private' ones via disk.temporaryUrl().
-  disk: 'public',
-  disks: { public: 'public' },
-})
-`
-
-const PROVIDER_FILE = `import { ServiceProvider } from '@guren/core'
-// The import is the wiring: config/attachments.ts calls configureAttachments()
-// at module scope, and loading it from a provider guarantees that happens at
-// boot — before the first attach(), in web and worker processes alike.
-import '@/config/attachments'
-
-export default class AttachmentsProvider extends ServiceProvider {
-  register(): void {
-    // Everything is wired by the config import above.
-  }
-}
-`
 
 /**
  * Any exported `attachments` binding counts as "the app already has one":
@@ -151,10 +119,13 @@ export async function addAttachments(options: WriterOptions): Promise<string[]> 
   // Skipped per file rather than thrown: a re-run (or a run after a partial
   // one) should repair whatever is missing — wire the provider, register the
   // command — not abort on the first file that already exists.
-  const scaffolds = [
-    { path: 'config/attachments.ts', contents: CONFIG_FILE },
-    { path: 'app/Providers/AttachmentsProvider.ts', contents: PROVIDER_FILE },
-  ]
+  // Shipped as real sources under templates/scaffold/attachments so
+  // typecheck:templates compiles them on every run — a string here is a file
+  // no tsconfig covers.
+  const scaffolds = ['config/attachments.ts', 'app/Providers/AttachmentsProvider.ts'].map((path) => ({
+    path,
+    contents: loadScaffoldTemplate(`attachments/${path}`),
+  }))
   const pending: typeof scaffolds = []
   for (const entry of scaffolds) {
     if (!options.force && (await fileExists(process.cwd(), entry.path))) {

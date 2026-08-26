@@ -7,6 +7,8 @@
     ],
     "paths": {
       "@/.guren/pages.gen": ["./tests/fixtures/scaffold-typecheck/auth/.guren/pages.gen.ts"],
+      "@/config/attachments": ["./templates/scaffold/attachments/config/attachments.ts"],
+      "@/db/schema": ["./tests/fixtures/scaffold-typecheck/attachments/db/schema.ts"],
       "@guren/core": ["../core/src/index.ts"],
       "@guren/core/*": ["../core/src/*"],
       "@guren/server": ["../server/src/index.ts"],

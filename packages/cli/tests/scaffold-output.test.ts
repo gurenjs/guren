@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { readFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   CLI_DIST_BIN,
@@ -13,6 +13,7 @@ import { parseSourceFile } from '../src/parse-cache'
 import { collectFiles, IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES, toPosixRelative } from '../src/discovery'
 import { builtinSubCommands } from '../src/commands'
 import { makeAuth, type MakeAuthOptions } from '../src/make-auth'
+import { runBlueprint } from '../src/blueprints'
 import { makeFeature } from '../src/make-feature'
 import { makeChannel } from '../src/make-channel'
 import { makeCommand } from '../src/make-command'
@@ -295,3 +296,37 @@ describe('scaffold-typecheck fixture stays pinned to the builders', () => {
     }
   })
 })
+
+describe('attachments scaffold-typecheck fixture stays pinned to the builder', () => {
+  // tsconfig.templates.json typechecks templates/scaffold/attachments against
+  // tests/fixtures/scaffold-typecheck/attachments/db/schema.ts. That
+  // companion is a render of the blueprint's Postgres schema patch, so a
+  // change to ATTACHMENTS_TABLE_BLOCKS.pg has to land in the fixture too —
+  // otherwise the templates keep typechecking against a table the blueprint
+  // no longer writes.
+  it('attachments table matches what the blueprint appends to a pg schema', async () => {
+    const fixtureSchema = await readFile(
+      join(import.meta.dir, 'fixtures/scaffold-typecheck/attachments/db/schema.ts'),
+      'utf8',
+    )
+    const tableStart = fixtureSchema.indexOf('export const attachments')
+    expect(tableStart).toBeGreaterThan(-1)
+    const fixtureTable = fixtureSchema.slice(tableStart)
+
+    const workspace = await createTempWorkspace('guren-attachments-fixture-pin-')
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'db/schema.ts'),
+        "import { pgTable, serial, text } from '@guren/orm/drizzle/pg'\n\nexport const posts = pgTable('posts', {\n  id: serial('id').primaryKey(),\n})\n",
+      )
+      await runBlueprint('attachments', {})
+
+      const rendered = await readFile(join(workspace.dir, 'db/schema.ts'), 'utf8')
+      expect(rendered).toContain(fixtureTable.trimEnd())
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+})
+

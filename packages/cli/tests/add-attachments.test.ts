@@ -55,7 +55,7 @@ describe('guren add attachments', () => {
 
     const config = await readFile(resolve('config/attachments.ts'), 'utf8')
     expect(config).toContain('configureAttachments({')
-    expect(config).toContain("import { attachments } from '../db/schema'")
+    expect(config).toContain("import { attachments } from '@/db/schema'")
 
     expect(existsSync(resolve('app/Providers/AttachmentsProvider.ts'))).toBe(true)
     const appFile = await readFile(resolve('src/app.ts'), 'utf8')
