@@ -45,15 +45,21 @@ export function normalizeDevServerUrl(value: string): string {
 
 /**
  * Candidate client-manifest locations under a project root, in preference
- * order. `baseDir` defaults to the working directory (`viteAsset()`'s
- * anchor); the Inertia wiring passes the root it derives from the app entry
- * module.
+ * order: `.vite/manifest.json` first, because Vite >= 5 writes it there — a
+ * flat `manifest.json` beside it is most likely a stale leftover from an
+ * older Vite config. The deploy plugins locate the same pair through
+ * `@guren/core`'s deploy-build helpers, and the two orders must agree, or an
+ * app with both layouts resolves different asset versions locally than after
+ * a serverless deploy; `tests/http/vite-manifest.test.ts` pins the agreement.
+ *
+ * `baseDir` defaults to the working directory (`viteAsset()`'s anchor); the
+ * Inertia wiring passes the root it derives from the app entry module.
  */
 export function clientManifestCandidates(baseDir?: string): string[] {
   const root = baseDir ?? process.cwd()
   return [
-    resolve(root, 'public/assets/manifest.json'),
     resolve(root, 'public/assets/.vite/manifest.json'),
+    resolve(root, 'public/assets/manifest.json'),
   ]
 }
 

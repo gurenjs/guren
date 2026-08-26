@@ -290,16 +290,19 @@ export function autoConfigureInertiaAssets(app: Application, options: AutoConfig
     return
   }
 
+  // Within each directory, `.vite/manifest.json` outranks the flat layout for
+  // the same reason `clientManifestCandidates` puts it first: Vite >= 5
+  // writes `.vite/`, so a flat file beside it is most likely stale.
   const ssrManifestPaths = [
     options.ssrManifest,
-    resolve(moduleDir, `../${ssrOutDir}/manifest.json`),
     resolve(moduleDir, `../${ssrOutDir}/.vite/manifest.json`),
+    resolve(moduleDir, `../${ssrOutDir}/manifest.json`),
     resolve(moduleDir, `../${ssrOutDir}/ssr-manifest.json`),
-    resolve(moduleDir, '../build/ssr/manifest.json'),
     resolve(moduleDir, '../build/ssr/.vite/manifest.json'),
+    resolve(moduleDir, '../build/ssr/manifest.json'),
     resolve(moduleDir, '../build/ssr/ssr-manifest.json'),
-    resolve(moduleDir, '../public/assets/.ssr/manifest.json'),
     resolve(moduleDir, '../public/assets/.ssr/.vite/manifest.json'),
+    resolve(moduleDir, '../public/assets/.ssr/manifest.json'),
     resolve(moduleDir, '../public/assets/.ssr/ssr-manifest.json'),
     resolve(moduleDir, '../public/assets/.vite/ssr-manifest.json'),
   ].filter((value): value is string => Boolean(value))
