@@ -390,7 +390,12 @@ export class S3Driver implements StorageDriver {
    */
   private listingPrefix(directory: string): string {
     const prefix = this.prefixKey(directory)
-    return prefix ? `${prefix.replace(/\/+$/, '')}/` : ''
+    let end = prefix.length
+    while (end > 0 && prefix.charCodeAt(end - 1) === 0x2f /* '/' */) {
+      end--
+    }
+    const trimmed = prefix.slice(0, end)
+    return trimmed ? `${trimmed}/` : ''
   }
 
   async files(directory: string): Promise<string[]> {
