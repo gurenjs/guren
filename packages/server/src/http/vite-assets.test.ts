@@ -9,9 +9,11 @@ describe('viteAsset', () => {
   const savedNodeEnv = process.env.NODE_ENV
   const savedDevServerUrl = process.env.VITE_DEV_SERVER_URL
 
+  // No cache reset in the lifecycle hooks: every test's manifestPaths point
+  // into a fresh temp dir, so cache keys never collide across tests. The one
+  // test that needs a reset (cache semantics) calls it inline.
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), 'guren-vite-assets-'))
-    __resetViteAssetCache()
   })
 
   afterEach(() => {
@@ -22,7 +24,6 @@ describe('viteAsset', () => {
     } else {
       process.env.VITE_DEV_SERVER_URL = savedDevServerUrl
     }
-    __resetViteAssetCache()
   })
 
   const productionEnv = () => {

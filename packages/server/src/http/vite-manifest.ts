@@ -1,11 +1,60 @@
 import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { trimTrailingSlashes } from '../support/trim-slashes'
 
 /**
- * Vite manifest reading, shared between the Inertia asset wiring
- * (`inertia-assets.ts`) and the content-page `viteAsset()` helper
- * (`vite-assets.ts`, RFC 0014). Factored out so the two cannot drift on
- * what counts as a manifest or where one may live.
+ * The one rule for how Vite build output is found and addressed, shared
+ * between the Inertia asset wiring (`inertia-assets.ts`) and the content-page
+ * `viteAsset()` helper (`vite-assets.ts`, RFC 0014): what counts as a
+ * manifest, where one may live, which URL prefix serves the hashed files,
+ * and what "the dev server is on" means. Factored out so the two consumers
+ * cannot drift on any of it.
  */
+
+/** Where `configureInertiaAssets` serves hashed build output from. */
+export const PUBLIC_ASSETS_URL_PREFIX = '/public/assets/'
+
+/** The Vite default the framework assumes when no dev-server URL is set. */
+export const DEFAULT_DEV_SERVER_URL = 'http://localhost:5173'
+
+/**
+ * Production for *asset* purposes: `NODE_ENV` says so and no dev server is
+ * configured — a configured dev server means dev asset serving even when
+ * `NODE_ENV` is `production` (E2E runs do exactly this).
+ */
+export function isViteProduction(
+  devServerUrl: string | undefined = process.env.VITE_DEV_SERVER_URL,
+): boolean {
+  return (process.env.NODE_ENV ?? 'development') === 'production' && typeof devServerUrl !== 'string'
+}
+
+export function normalizeDevServerUrl(value: string): string {
+  if (!value) {
+    return value
+  }
+
+  const trimmed = value.trim()
+  if (!trimmed) {
+    return trimmed
+  }
+
+  const stripped = trimTrailingSlashes(trimmed)
+  return stripped.length > 0 ? stripped : '/'
+}
+
+/**
+ * Candidate client-manifest locations under a project root, in preference
+ * order. `baseDir` defaults to the working directory (`viteAsset()`'s
+ * anchor); the Inertia wiring passes the root it derives from the app entry
+ * module.
+ */
+export function clientManifestCandidates(baseDir?: string): string[] {
+  const root = baseDir ?? process.cwd()
+  return [
+    resolve(root, 'public/assets/manifest.json'),
+    resolve(root, 'public/assets/.vite/manifest.json'),
+  ]
+}
 
 export type ViteManifestEntryObject = {
   file: string
@@ -26,6 +75,12 @@ export interface LoadViteManifestOptions {
    * — a warning can scroll past, a missing stylesheet URL cannot.
    */
   warnOnMissing?: boolean
+  /**
+   * Retain the raw manifest text as `__raw__` on the result. Off by default:
+   * only the Inertia wiring hashes it (for the build id), and long-lived
+   * caches should not pin hundreds of KB of JSON text nothing reads.
+   */
+  includeRaw?: boolean
 }
 
 export function loadViteManifest(
@@ -44,10 +99,12 @@ export function loadViteManifest(
         value: manifestPath,
         enumerable: false,
       })
-      Object.defineProperty(manifest, '__raw__', {
-        value: raw,
-        enumerable: false,
-      })
+      if (options.includeRaw) {
+        Object.defineProperty(manifest, '__raw__', {
+          value: raw,
+          enumerable: false,
+        })
+      }
       return manifest
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {

@@ -11,7 +11,9 @@ export type {
 } from './http/Application'
 export { parseRequestPayload, formatValidationErrors } from './http/request'
 export { Controller } from './mvc/Controller'
-export type { InertiaResponse, InferInertiaProps, ControllerInertiaProps, AuthPayload, ViewOptions } from './mvc/Controller'
+export type { InertiaResponse, InferInertiaProps, ControllerInertiaProps, AuthPayload } from './mvc/Controller'
+export { renderDocument } from './mvc/view'
+export type { ViewOptions } from './mvc/view'
 // Content rendering (RFC 0014): the component types app View files annotate
 // with, and the asset resolver their Layouts link stylesheets through.
 export type { FC, PropsWithChildren } from 'hono/jsx'

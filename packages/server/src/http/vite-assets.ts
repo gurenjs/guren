@@ -1,10 +1,20 @@
 import { resolve } from 'node:path'
-import { loadViteManifest, getManifestFile, type ViteManifest } from './vite-manifest'
-import { trimTrailingSlashes } from '../support/trim-slashes'
+import {
+  loadViteManifest,
+  getManifestFile,
+  clientManifestCandidates,
+  isViteProduction,
+  normalizeDevServerUrl,
+  DEFAULT_DEV_SERVER_URL,
+  PUBLIC_ASSETS_URL_PREFIX,
+  type ViteManifest,
+} from './vite-manifest'
+import { trimSlashes } from '../support/trim-slashes'
 
 /**
- * Options for {@link viteAsset}. Both fields exist for tests and unusual
- * layouts; ordinary applications call `viteAsset(entry)` with no options.
+ * Options for {@link viteAsset}. Ordinary applications call
+ * `viteAsset(entry)` with no options; `manifestPaths` exists for tests and
+ * unusual layouts.
  */
 export interface ViteAssetOptions {
   /**
@@ -12,19 +22,14 @@ export interface ViteAssetOptions {
    * directory). Defaults to the standard build output locations.
    */
   manifestPaths?: string[]
-  /** Dev-server URL override. Defaults to `VITE_DEV_SERVER_URL`. */
-  devServerUrl?: string
 }
 
-const DEFAULT_MANIFEST_PATHS = [
-  'public/assets/manifest.json',
-  'public/assets/.vite/manifest.json',
-]
-
+let defaultCandidates: string[] | undefined
 const manifestCache = new Map<string, ViteManifest | null>()
 
 /** @internal Test seam — clears the memoized manifest reads. */
 export function __resetViteAssetCache(): void {
+  defaultCandidates = undefined
   manifestCache.clear()
 }
 
@@ -53,21 +58,26 @@ export function __resetViteAssetCache(): void {
  * no manifest key of its own — declare it as an explicit build input in
  * `vite.config.ts` (`build.rollupOptions.input`) so Vite emits and records
  * it.
+ *
+ * **Serverless caveat:** production resolution reads the manifest from the
+ * filesystem, which bundled deploy targets (Cloudflare Workers, Vercel,
+ * Lambda) do not ship — their deploy plugins resolve assets at build time
+ * for Inertia and do not yet feed this helper. On those targets `viteAsset`
+ * throws at first render until the deploy plugins gain a build-time manifest
+ * injection; track that as the follow-up before using `view()` there.
  */
 export function viteAsset(entry: string, options: ViteAssetOptions = {}): string {
-  const normalizedEntry = entry.replace(/^\/+/u, '')
-  const devServerUrl = options.devServerUrl ?? process.env.VITE_DEV_SERVER_URL
-  // Mirrors autoConfigureInertiaAssets: a configured dev server means dev
-  // asset serving even when NODE_ENV says production.
-  const isProduction =
-    (process.env.NODE_ENV ?? 'development') === 'production' && typeof devServerUrl !== 'string'
+  const normalizedEntry = trimSlashes(entry)
+  const devServerUrl = process.env.VITE_DEV_SERVER_URL
 
-  if (!isProduction) {
-    const base = trimTrailingSlashes((devServerUrl ?? 'http://localhost:5173').trim())
+  if (!isViteProduction(devServerUrl)) {
+    const base = normalizeDevServerUrl(devServerUrl ?? DEFAULT_DEV_SERVER_URL)
     return `${base}/${normalizedEntry}`
   }
 
-  const candidates = (options.manifestPaths ?? DEFAULT_MANIFEST_PATHS).map((path) => resolve(path))
+  const candidates = options.manifestPaths
+    ? options.manifestPaths.map((path) => resolve(path))
+    : (defaultCandidates ??= clientManifestCandidates())
   const cacheKey = candidates.join('\n')
   let manifest = manifestCache.get(cacheKey)
   if (manifest === undefined) {
@@ -92,5 +102,5 @@ export function viteAsset(entry: string, options: ViteAssetOptions = {}): string
     )
   }
 
-  return `/public/assets/${file.replace(/^\/+/u, '')}`
+  return `${PUBLIC_ASSETS_URL_PREFIX}${trimSlashes(file)}`
 }

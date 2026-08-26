@@ -1,5 +1,6 @@
 import type { Context } from 'hono'
-import { createElement, type FC } from 'hono/jsx'
+import type { FC } from 'hono/jsx'
+import { renderDocument, type ViewOptions } from './view'
 import { inertia, type InertiaOptions } from './inertia/InertiaEngine'
 import { resolveSharedInertiaProps, type ResolvedSharedInertiaProps } from './inertia/shared'
 import { AUTH_CONTEXT_KEY } from '../http/middleware/auth'
@@ -91,17 +92,6 @@ export type ControllerInertiaProps<TController extends Controller, TAction exten
 export interface RedirectOptions {
   status?: number
   headers?: HeadersInit
-}
-
-/** Options for {@link Controller.view} (RFC 0014). */
-export interface ViewOptions {
-  status?: number
-  headers?: HeadersInit
-  /**
-   * Prepend `<!doctype html>` and require a full document (an `<html>` root).
-   * Pass `false` for an intentional fragment response — no doctype, no check.
-   */
-  doctype?: boolean
 }
 
 type InertiaResponseOptions = Omit<InertiaOptions, 'url' | 'request'> & { url?: string }
@@ -330,6 +320,12 @@ export class Controller {
    * (RFC 0014). Takes the component and its props separately so controllers
    * stay plain `.ts` and the props are type-checked at the call site.
    *
+   * Escaping covers markup: text children and attribute values are escaped,
+   * so tag and attribute breakout cannot occur. It does **not** validate URL
+   * schemes — a `javascript:` href built from user data is emitted verbatim.
+   * Sanitize user-supplied URLs upstream (e.g. `@guren/plugin-markdown`'s
+   * allowlist) before they reach a View.
+   *
    * @example
    * ```typescript
    * async show() {
@@ -338,32 +334,8 @@ export class Controller {
    * }
    * ```
    */
-  protected async view<P>(component: FC<P>, props: P, options: ViewOptions = {}): Promise<Response> {
-    // Build a real hono element and let hono reduce it. Invoking the
-    // component directly and reducing the result by hand looks equivalent
-    // and is not: it skips hono's escaping of raw strings inside a `Child[]`
-    // (a stored-XSS hole caught in the RFC 0014 review).
-    const body = String(await createElement(component as never, props as never).toString())
-
-    if (options.doctype !== false && !/^\s*<html[\s>]/iu.test(body)) {
-      const name = component.displayName ?? (component as { name?: string }).name ?? 'component'
-      throw new Error(
-        `view(): ${name} rendered a fragment, not a document. ` +
-          'Wrap the page in your Layout (an <html> root), or pass { doctype: false } ' +
-          'for an intentional fragment response. Without <html>/<head>, <title> and ' +
-          '<meta> tags are not hoisted and the page ships unstyled.',
-      )
-    }
-
-    const headers = new Headers(options.headers)
-    if (!headers.has('content-type')) {
-      headers.set('content-type', 'text/html; charset=utf-8')
-    }
-
-    return new Response((options.doctype === false ? '' : '<!doctype html>') + body, {
-      status: options.status ?? 200,
-      headers,
-    })
+  protected view<P>(component: FC<P>, props: P, options?: ViewOptions): Promise<Response> {
+    return renderDocument(component, props, options)
   }
 
   protected async inertia<TPage extends InertiaPageContractLike>(

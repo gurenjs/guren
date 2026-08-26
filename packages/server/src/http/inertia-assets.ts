@@ -15,7 +15,17 @@ import { parseImportMap } from '../support/import-map'
 import { DEFAULT_DEV_STYLES_ENTRY } from '../support/inertia-defaults'
 import { trimTrailingSlashes } from '../support/trim-slashes'
 import { hash } from '../encryption/Hash'
-import { loadViteManifest, getManifestFile, getManifestCss, type ViteManifest } from './vite-manifest'
+import {
+  loadViteManifest,
+  getManifestFile,
+  getManifestCss,
+  clientManifestCandidates,
+  isViteProduction,
+  normalizeDevServerUrl,
+  DEFAULT_DEV_SERVER_URL,
+  PUBLIC_ASSETS_URL_PREFIX,
+  type ViteManifest,
+} from './vite-manifest'
 
 export interface InertiaAssetsOptions extends DevAssetsOptions {
   /** Default stylesheet entry embedded into Inertia responses. */
@@ -213,11 +223,10 @@ export function autoConfigureInertiaAssets(app: Application, options: AutoConfig
     return
   }
 
-  const isProduction =
-    (process.env.NODE_ENV ?? 'development') === 'production' && typeof process.env.VITE_DEV_SERVER_URL !== 'string'
+  const isProduction = isViteProduction()
 
   if (!isProduction) {
-    const devServerUrl = options.devServerUrl ?? process.env.VITE_DEV_SERVER_URL ?? 'http://localhost:5173'
+    const devServerUrl = options.devServerUrl ?? process.env.VITE_DEV_SERVER_URL ?? DEFAULT_DEV_SERVER_URL
     const normalizedDevServerUrl = normalizeDevServerUrl(devServerUrl)
     setEnvIfUserDidNotProvide('GUREN_INERTIA_ENTRY', `${normalizedDevServerUrl}/resources/js/dev-entry.ts`)
     setEnvIfUserDidNotProvide('GUREN_INERTIA_STYLES', options.stylesEntry ?? DEFAULT_DEV_STYLES_ENTRY)
@@ -241,11 +250,10 @@ export function autoConfigureInertiaAssets(app: Application, options: AutoConfig
   }
 
   const clientManifest = loadViteManifest(
-    [
-      resolve(moduleDir, '../public/assets/manifest.json'),
-      resolve(moduleDir, '../public/assets/.vite/manifest.json'),
-    ],
+    clientManifestCandidates(resolve(moduleDir, '..')),
     'client',
+    // The build-id hash below reads the raw text; nothing else does.
+    { includeRaw: true },
   )
 
   const clientEntry = clientManifest?.['resources/js/app.tsx']
@@ -260,13 +268,13 @@ export function autoConfigureInertiaAssets(app: Application, options: AutoConfig
   }
 
   if (clientEntryFile) {
-    setEnvIfUserDidNotProvide('GUREN_INERTIA_ENTRY', `/public/assets/${clientEntryFile.replace(/^\//u, '')}`)
+    setEnvIfUserDidNotProvide('GUREN_INERTIA_ENTRY', `${PUBLIC_ASSETS_URL_PREFIX}${clientEntryFile.replace(/^\//u, '')}`)
   }
 
   if (clientCssFiles?.length) {
     setEnvIfUserDidNotProvide(
       'GUREN_INERTIA_STYLES',
-      clientCssFiles.map((href) => `/public/assets/${href.replace(/^\//u, '')}`).join(','),
+      clientCssFiles.map((href) => `${PUBLIC_ASSETS_URL_PREFIX}${href.replace(/^\//u, '')}`).join(','),
     )
   }
 
@@ -355,21 +363,6 @@ function resolveDevSsrEntry(options: InertiaAssetsOptions): string | undefined {
 
   return resolve(resourcesDir, 'js/ssr.tsx')
 }
-
-function normalizeDevServerUrl(value: string): string {
-  if (!value) {
-    return value
-  }
-
-  const trimmed = value.trim()
-  if (!trimmed) {
-    return trimmed
-  }
-
-  const stripped = trimTrailingSlashes(trimmed)
-  return stripped.length > 0 ? stripped : '/'
-}
-
 
 function deriveAssetRoot(manifest: ViteManifest | undefined, fallback: string): string | undefined {
   if (!manifest?.__path__) {

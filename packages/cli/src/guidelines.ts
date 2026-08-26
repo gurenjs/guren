@@ -38,7 +38,8 @@ export async function generateGuidelines(options: GuidelinesOptions = {}): Promi
     lines.push(`- Controllers: ${allSingular ? 'singular' : 'plural'} resource name (e.g., ${controllers[0]})`)
   }
   lines.push(`- Models: PascalCase, singular (e.g., Post, User)`)
-  lines.push(`- Views: nested folders under resources/js/pages/ (e.g., Posts/Index.tsx)`)
+  lines.push(`- Inertia pages: nested folders under resources/js/pages/ (e.g., Posts/Index.tsx)`)
+  lines.push(`- Server-rendered content Views (Controller.view()): app/View/ with the @jsxImportSource @guren/core pragma — never under resources/js/pages/`)
   lines.push('')
 
   // Auth setup
@@ -139,7 +140,7 @@ export async function generateGuidelines(options: GuidelinesOptions = {}): Promi
   lines.push('## When Creating New Features')
   lines.push('1. Create model in `app/Models/`')
   lines.push('2. Create controller in `app/Http/Controllers/`')
-  lines.push('3. Create views in `resources/js/pages/{Feature}/`')
+  lines.push('3. Create Inertia pages in `resources/js/pages/{Feature}/` (server-rendered content Views go in `app/View/`)')
   lines.push('4. Create validator in `app/Http/Validators/` (`bunx guren make:validator <Name> --fields "..."`)')
   lines.push('5. Create resource in `app/Http/Resources/`')
   lines.push('6. Register routes in `routes/web.ts`')
