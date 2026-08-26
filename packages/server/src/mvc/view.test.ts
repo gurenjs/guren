@@ -79,6 +79,17 @@ describe('renderDocument', () => {
       expect(res.status).toBe(200)
       expect((await res.text()).startsWith('<!doctype html><!--banner--><html>')).toBe(true)
     })
+
+    test('should scan adversarial comment runs in linear time (CodeQL js/redos regression)', async () => {
+      // The regex form of this guard backtracked exponentially on
+      // '<!--' + '--><!--' * n with no closing root. ~30k repetitions hung
+      // for minutes; the linear scanner must reject it instantly.
+      const Adversarial: FC<Record<string, never>> = () =>
+        [raw('<!--' + '--><!--'.repeat(30_000))] as never
+      const started = performance.now()
+      await expect(renderDocument(Adversarial, {})).rejects.toThrow(/rendered a fragment/)
+      expect(performance.now() - started).toBeLessThan(1_000)
+    })
   })
 
   describe('rendering shapes', () => {

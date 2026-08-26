@@ -15,6 +15,35 @@ export type ViewOptions = ResponseInit & {
 }
 
 /**
+ * Does the rendered output begin with an `<html>` root, allowing leading
+ * whitespace and complete comments? A hand-rolled linear scan rather than a
+ * regex: the equivalent pattern (`(?:\s|<!--.*?-->)*<html`) backtracks
+ * exponentially on adversarial comment runs (CodeQL js/redos), and the body
+ * being scanned can embed user-influenced raw markup.
+ */
+function startsWithHtmlRoot(body: string): boolean {
+  let i = 0
+  while (i < body.length) {
+    const ch = body.charCodeAt(i)
+    // \t \n \v \f \r or space
+    if (ch === 32 || (ch >= 9 && ch <= 13)) {
+      i++
+      continue
+    }
+    if (body.startsWith('<!--', i)) {
+      const end = body.indexOf('-->', i + 4)
+      if (end === -1) return false
+      i = end + 3
+      continue
+    }
+    break
+  }
+  if (body.slice(i, i + 5).toLowerCase() !== '<html') return false
+  const next = body.charCodeAt(i + 5)
+  return next === 62 /* > */ || next === 32 || (next >= 9 && next <= 13)
+}
+
+/**
  * Render a `hono/jsx` component to a plain server-rendered HTML `Response` —
  * the engine behind `Controller.view()` (RFC 0014), separated the way
  * `inertia()` is from `Controller.inertia()`.
@@ -30,8 +59,7 @@ export async function renderDocument<P>(
   // stored-XSS hole caught in the RFC 0014 review).
   const body = String(await jsx(component as never, props as never, undefined).toString())
 
-  // Leading whitespace and comments are legal ahead of the root element.
-  if (options.doctype !== false && !/^(?:\s|<!--[\s\S]*?-->)*<html[\s>]/iu.test(body)) {
+  if (options.doctype !== false && !startsWithHtmlRoot(body)) {
     const name = component.displayName ?? (component as { name?: string }).name ?? 'component'
     throw new Error(
       `view(): ${name} rendered a fragment, not a document. ` +
