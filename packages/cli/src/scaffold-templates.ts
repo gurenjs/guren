@@ -7,9 +7,13 @@ import { fileURLToPath } from 'node:url'
  * `templates/scaffold/` instead of template literals in the generator
  * modules. The tree mirrors the generated app: a template's path relative to
  * `templates/scaffold/<scaffold>/` is exactly the path the generator writes
- * it to, so relative imports between templates resolve in place and
- * `tsconfig.templates.json` can typecheck the whole tree as one app-shaped
- * project.
+ * it to, so relative imports between templates resolve in place and the
+ * `tsconfig.templates*.json` projects can typecheck the tree as app-shaped
+ * code. Scaffolds whose files share a relative path live in separate
+ * projects (`rootDirs` merges every listed scaffold into one virtual root,
+ * so `auth` and `mail` cannot both ship `app/Providers/MailProvider.ts` in
+ * the same project) — a new colliding scaffold gets its own
+ * `tsconfig.templates-<name>.json`, chained into `typecheck:templates`.
  *
  * Only fully static files live here. Anything whose contents vary by flags or
  * fields stays a builder function next to its generator — a template engine

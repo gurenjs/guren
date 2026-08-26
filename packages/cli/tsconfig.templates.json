@@ -3,7 +3,13 @@
   "compilerOptions": {
     "rootDirs": [
       "templates/scaffold/auth",
-      "tests/fixtures/scaffold-typecheck/auth"
+      "tests/fixtures/scaffold-typecheck/auth",
+      "templates/scaffold/broadcasting",
+      "tests/fixtures/scaffold-typecheck/broadcasting",
+      "templates/scaffold/events",
+      "tests/fixtures/scaffold-typecheck/events",
+      "templates/scaffold/queue",
+      "tests/fixtures/scaffold-typecheck/queue"
     ],
     "paths": {
       "@/.guren/pages.gen": ["./tests/fixtures/scaffold-typecheck/auth/.guren/pages.gen.ts"],
@@ -23,6 +29,7 @@
   ],
   "exclude": [
     "templates/scaffold/attachments",
-    "tests/fixtures/scaffold-typecheck/attachments"
+    "tests/fixtures/scaffold-typecheck/attachments",
+    "templates/scaffold/mail"
   ]
 }

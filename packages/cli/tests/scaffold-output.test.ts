@@ -66,6 +66,17 @@ const SKIPPED_GENERATORS: Record<string, string> = {
 const ALL_FIELDS = 'title:string,count:number,published:boolean,body:text,postedAt:date,meta:json,subtitle:string?'
 
 const AUTH_TEMPLATE_ROOT = join(import.meta.dir, '../templates/scaffold/auth')
+const SCAFFOLD_TEMPLATE_ROOT = join(import.meta.dir, '../templates/scaffold')
+
+/** The fixture files carry an explanatory header the rendered output lacks. */
+function stripLeadingComments(source: string): string {
+  const lines = source.split('\n')
+  let start = 0
+  while (start < lines.length && (lines[start].startsWith('//') || lines[start] === '')) {
+    start++
+  }
+  return lines.slice(start).join('\n')
+}
 
 /**
  * Every .ts/.tsx in the workspace that fails to parse (empty = green).
@@ -262,16 +273,6 @@ describe('scaffold-typecheck fixture stays pinned to the builders', () => {
   // is the test that says so, instead of the fixture silently drifting.
   const fixtureRoot = join(import.meta.dir, 'fixtures/scaffold-typecheck/auth')
 
-  /** The fixture files carry an explanatory header the rendered output lacks. */
-  function stripLeadingComments(source: string): string {
-    const lines = source.split('\n')
-    let start = 0
-    while (start < lines.length && (lines[start].startsWith('//') || lines[start] === '')) {
-      start++
-    }
-    return lines.slice(start).join('\n')
-  }
-
   it('User model, users table, and pages.gen match a --verify render', async () => {
     const workspace = await createTempWorkspace('guren-parse-auth-fixture-pin-')
     try {
@@ -327,6 +328,78 @@ describe('attachments scaffold-typecheck fixture stays pinned to the builder', (
       const renderedStart = rendered.indexOf('export const attachments')
       expect(renderedStart).toBeGreaterThan(-1)
       expect(rendered.slice(renderedStart).trimEnd()).toBe(fixtureTable.trimEnd())
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+})
+
+describe('blueprint companion fixtures stay pinned to their builders', () => {
+  // tsconfig.templates.json typechecks the events/queue/broadcasting provider
+  // templates against the companions in tests/fixtures/scaffold-typecheck/
+  // <blueprint>/. Those companions are renders of the make:* builders each
+  // blueprint runs before writing its provider, so a builder change has to
+  // land in the fixture too — this is the test that says so, instead of the
+  // fixture silently drifting.
+  //
+  // Whole-file toBe, not toContain: a suffix the builder grows (a new method,
+  // a changed override) must fail here rather than leave the templates
+  // typechecking against a file the blueprint no longer writes.
+  const companionPins: Array<[string, string, () => Promise<unknown>]> = [
+    ['events', 'app/Events/OrderPlaced.ts', () => makeEvent('OrderPlaced', {})],
+    ['events', 'app/Listeners/SendOrderReceiptListener.ts', () => makeListener('SendOrderReceipt', { event: 'OrderPlaced' })],
+    ['queue', 'app/Jobs/ProcessWelcomeSequenceJob.ts', () => makeJob('ProcessWelcomeSequence', {})],
+    ['broadcasting', 'app/Broadcasting/OrdersChannel.ts', () => makeChannel('Orders', { channel: 'orders' })],
+    ['broadcasting', 'app/Broadcasting/UserFeedChannel.ts', () => makeChannel('UserFeed', { channel: 'users.{id}.feed', private: true })],
+  ]
+
+  for (const [blueprint, path, render] of companionPins) {
+    it(`${blueprint}: ${path} matches its builder's render`, async () => {
+      const fixture = await readFile(
+        join(import.meta.dir, 'fixtures/scaffold-typecheck', blueprint, path),
+        'utf8',
+      )
+      const workspace = await createTempWorkspace('guren-companion-pin-')
+      try {
+        await render()
+        const rendered = await readFile(join(workspace.dir, path), 'utf8')
+        expect(rendered).toBe(stripLeadingComments(fixture))
+      } finally {
+        await workspace.cleanup()
+      }
+    })
+  }
+})
+
+describe('blueprint scaffold templates are written by their blueprints', () => {
+  // The auth reachability gate above covers templates/scaffold/auth, and the
+  // attachments pin covers templates/scaffold/attachments. This covers the
+  // rest: every other file under templates/scaffold/<blueprint>/ must land in
+  // an app byte-identical when that blueprint runs — a template no blueprint
+  // writes is dead weight that still typechecks and ships, and a blueprint
+  // that post-processes what it loads has drifted from the tree the
+  // typecheck:templates gate certifies.
+  const COVERED_ELSEWHERE = new Set(['auth', 'attachments'])
+
+  it('every shipped blueprint template lands byte-identical', async () => {
+    const templatePaths = (await collectFiles(SCAFFOLD_TEMPLATE_ROOT, IMPORTABLE_EXTENSIONS))
+      .map((file) => toPosixRelative(SCAFFOLD_TEMPLATE_ROOT, file))
+      .filter((path) => !COVERED_ELSEWHERE.has(path.split('/')[0]))
+    expect(templatePaths.length).toBeGreaterThan(0)
+
+    const blueprints = [...new Set(templatePaths.map((path) => path.split('/')[0]))].sort()
+
+    const workspace = await createTempWorkspace('guren-blueprint-template-pin-')
+    try {
+      await seedInertiaApp(workspace.dir)
+      for (const blueprint of blueprints) {
+        await runBlueprint(blueprint, {})
+      }
+      for (const path of templatePaths) {
+        const appPath = path.split('/').slice(1).join('/')
+        const written = await readFile(join(workspace.dir, appPath), 'utf8')
+        expect(written).toBe(await readFile(join(SCAFFOLD_TEMPLATE_ROOT, path), 'utf8'))
+      }
     } finally {
       await workspace.cleanup()
     }
