@@ -46,7 +46,10 @@ code as of 2026-08-26.
 The v1 schema needs **no migration**: the `attachments` row already
 carries `id` (ULID), `disk`, and `path`, so the route is "verify
 signature → load row → stream from disk", and `urlFor` above is the
-single seam that changes.
+seam where the URL policy lives. (Its call sites — `attachmentUrl()`,
+`toData()` — gain row context, since a route URL needs the id,
+filename, and requested variant that `urlFor(disk, path)` never sees;
+the schema and the model API stay untouched.)
 
 ### Relationship to RFC 0010 and RFC 0013
 
@@ -117,6 +120,13 @@ These shape the design more than any preference does:
   by the app (route registrar) or by app-invoked configuration
   (`configureInertiaAssets`). The delivery route follows the
   app-registered shape.
+- **Route tooling invokes registrars bootless.** `routes:types`,
+  `guren check`, audit, and OpenAPI import the routes file and call
+  the registrar against a bare `Router` with **no providers booted**
+  (`packages/cli/src/load-routes.ts`, `loadRouteDefinitions`). A
+  registrar that throws when configuration is absent breaks every
+  inspection tool before it can see the route. Registration must be
+  configuration-independent; configuration errors belong to boot.
 - **The route addresses variants as `(attachmentId, variantName)`.**
   Variants have object keys (`attachments/{id}/variants/{name}.{ext}`)
   but no rows; every *declared* variant has a status entry in the
@@ -168,38 +178,62 @@ like:
 Request handling, in order (cheapest first):
 
 1. `verifySignedUrl(pathAndQuery, keyring, { requireExpiration: true })`
-   — one HMAC, no I/O. Fail → **404** (not 403: don't confirm the id
-   exists).
+   — at most one HMAC per keyring key, no I/O. Fail → **404** (not
+   403: don't confirm the id exists).
 2. Load the row by `:id`. Missing → 404.
 3. Resolve the object key: no `variant` → `row.path`; `variant` set →
-   the row's `variants[name]`. A name with **no entry** (never
-   declared) → 404. An entry that is not `ready` → serve the
-   **original** (the same fallback `attachmentUrl()` applies at
-   generation time, so a URL signed before generation completes still
-   works after it fails).
+   the row's `variants[name]` when that entry is `ready`, else the
+   **original**. The valid signature is itself the proof that the
+   variant was declared when the URL was minted — `attachmentUrl()`
+   throws on undeclared names *before* signing — so the route never
+   404s on variant state. An entry that is missing entirely (a
+   variant declared on the model after this row was attached: RFC 0013
+   seeds entries at attach time, so pre-existing rows have none),
+   `pending`, `failed`, or `unavailable` all get the same
+   fall-back-to-original semantics RFC 0013 §7 shipped. Anything else
+   would break the no-migration promise for exactly the rows it was
+   made about.
 4. Serve per the disk's delivery mode (§3): redirect or proxy.
 
 The route is a plain GET: no CSRF interaction, no session requirement
 — the signature is the authorization (§8, T9 for what that does and
-does not mean).
+does not mean). `HEAD` comes with it whether we like it or not: Hono
+dispatches every HEAD through the GET handler and discards the body
+(`hono-base` `#dispatch`), so the handler checks the method and skips
+body acquisition (no storage read, headers only) on HEAD. That check
+is mandatory, not an enhancement — without it every HEAD performs the
+full DB-and-storage work for a body Hono throws away.
 
 ### 2. Signing: `signUrl` fixes, keyring, expiry
 
 **The signer is `signUrl`/`verifySignedUrl`, as RFC 0013 named — with
-two additive fixes to `@guren/server` that this RFC owns:**
+three additive fixes to `@guren/server` that this RFC owns:**
 
-1. **Relative input.** `signUrl`/`verifySignedUrl` accept app-relative
-   input (`/attachments/…`) by parsing against a fixed placeholder
-   base when `value` starts with `/`. The canonical form is already
-   `${pathname}${search}`, so the placeholder never leaks into the
-   signature; absolute URLs keep working unchanged. Without this fix
-   the call RFC 0010 §3 specified throws.
+1. **Relative input — and relative output.** `signUrl`/
+   `verifySignedUrl` accept app-relative input (`/attachments/…`) by
+   parsing against a fixed placeholder base when `value` starts with
+   `/`. The canonical form is already `${pathname}${search}`, so the
+   placeholder never leaks into the *signature* — but it must not
+   leak into the *return value* either: for relative input, `signUrl`
+   serializes `${pathname}${search}` instead of `url.toString()`
+   (which would return `https://placeholder.invalid/attachments/…`).
+   Tests assert the output shape, not just a sign/verify round-trip —
+   a leaked placeholder URL still round-trips. Absolute URLs keep
+   working unchanged. Without this fix the call RFC 0010 §3 specified
+   throws.
 2. **Deterministic canonicalization.** The query-parameter sort uses
    `localeCompare` (`signed-url.ts:19`), which is locale/ICU-dependent
    — sign and verify on different runtimes could disagree for
    multi-parameter URLs. It becomes a plain code-unit comparison.
    Zero production callers means zero compatibility impact; this is
    the last moment the fix is free.
+3. **Strict `expires` validation.** Verification today checks only
+   `Number(expires) < now` (`signed-url.ts:53`), so `expires=NaN` and
+   `expires=Infinity` both pass forever — and `signUrl(..., {
+   expiresIn: NaN })` happily produces the former. The verifier
+   accepts only a finite positive safe-integer timestamp (anything
+   else fails closed), and `signUrl` rejects a non-finite
+   `expiresIn`.
 
 **Keyring.** The delivery routes and `attachmentUrl()` sign and verify
 with `deriveAppKeyring(getAppKeyringFromEnv(), 'attachment-delivery')`,
@@ -232,11 +266,26 @@ canonical form.
 Behind the verified signature, the route picks one of two behaviours
 per disk:
 
-- **Redirect** — 302 to `disk.temporaryUrl(key, remaining)`, with
-  `Cache-Control: no-store` on the redirect itself (the `Location`
-  carries credentials). The bucket serves the bytes: zero app
-  bandwidth, and Range/If-None-Match work at the bucket. For S3 and
-  R2-with-`presign`.
+- **Redirect** — 302 to a presigned URL **minted per request**:
+  `disk.temporaryUrl(key, expiresAt, { responseContentDisposition,
+  responseContentType })`, where `expiresAt` is an absolute `Date` at
+  `min(remaining signed lifetime, driver cap)`. Minting per request
+  is what lets a long-lived route URL (an emailed link) coexist with
+  R2's 7-day presign ceiling — the inner presign is always fresh and
+  short. `Cache-Control: no-store` on the redirect itself (the
+  `Location` carries credentials). The bucket serves the bytes: zero
+  app bandwidth, and Range and conditional requests work at the
+  bucket. For S3 and R2-with-`presign`.
+
+  The third argument is a new **additive optional options bag on
+  `temporaryUrl`** — S3 maps it to `ResponseContentDisposition` /
+  `ResponseContentType` on the presigned `GetObjectCommand`, R2 to
+  the standard `response-content-disposition` /
+  `response-content-type` signed query parameters in `sigv4.ts`. It
+  is how the §4 disposition policy survives the redirect instead of
+  being silently dropped at the bucket. A third-party driver that
+  ignores the bag serves its own object metadata; apps that need the
+  disposition guarantee on such a disk force `serve: 'proxy'`.
 - **Proxy** — the app streams the object body itself with the
   hardened headers of §4. For `local`, `memory`, R2 on the binding
   alone, and any driver that cannot presign.
@@ -257,7 +306,7 @@ So: **(a) an additive, optional self-declaration on the driver**,
 ```ts
 // packages/server/src/storage/types.ts (additive)
 interface StorageDriver {
-  // …existing 20 methods…
+  // …existing methods…
   /** Capabilities the delivery layer may rely on. Absent ⇒ all false. */
   capabilities?: { presignedGet?: boolean }
 }
@@ -303,9 +352,13 @@ from the app's own origin:
   forced to `attachment` regardless of the signed `disposition`
   parameter. The parameter can force `attachment` for an allowlisted
   type; nothing can force `inline` for a non-allowlisted one. The
-  content type is the row's recorded one (validated at attach time by
-  RFC 0013 §6 where `image` rules apply; still never trusted beyond
-  the allowlist decision).
+  served content type is the row's recorded one for the original, and
+  **the MIME type derived from `AttachmentVariantRecord.format` for a
+  `ready` variant** — variants are transcoded (a PNG original can
+  have JPEG/WebP/AVIF variants; generation records `format`, not a
+  content type), so serving variant bytes under the original's type
+  with `nosniff` would be self-sabotage. Neither is trusted beyond
+  the allowlist decision.
 - **`X-Content-Type-Options: nosniff`** on every proxied response —
   the recorded type is the served type, and the browser must not
   second-guess it.
@@ -318,10 +371,14 @@ from the app's own origin:
   attach pipeline already applies before the name becomes a key.
 - **Caching.** `Cache-Control: private, max-age=<remaining signed
   lifetime>` — cacheable in the browser, never in shared caches, and
-  never beyond the signature's own validity. `ETag:
-  "att-{id}-{variant|original}"` with `If-None-Match` → 304: attachment
-  objects are write-once under their ULID prefix (replace mints a new
-  row), so id + variant identifies the bytes.
+  never beyond the signature's own validity. `ETag` is derived from
+  the **resolved object**, not the request: hash of
+  `{resolved path}:{size}`, with `If-None-Match` → 304. An
+  `id + variant` validator would *not* be a byte identity — a
+  `pending` variant resolves to original bytes today and variant
+  bytes tomorrow, and queued HEIC conversion rewrites `path` and the
+  bytes under the same row id — but the resolved key + size moves in
+  both cases, so the validator moves with the bytes.
 - **No `Accept-Ranges` in v1** (see §5).
 
 Redirect mode needs none of this (the bucket's presigned response is
@@ -341,13 +398,22 @@ getStream?(path: string, options?: { range?: { start: number; end?: number } }):
   Promise<ReadableStream<Uint8Array> | null>
 ```
 
-- `LocalDriver`: `node:fs` `createReadStream` → `Readable.toWeb` —
-  works on Bun and Node, no Bun-only API in `@guren/server` (per the
-  package's Bun-isolation rule).
-- `R2Driver`: `obj.body` (already a `ReadableStream`); the binding's
-  `get(key, { range })` maps directly onto the options bag.
-- `S3Driver`: the SDK response `Body` stream; `Range` header maps onto
-  the options bag.
+- `LocalDriver`: `node:fs` open/stat **first**, then stream →
+  `Readable.toWeb` — works on Bun and Node, no Bun-only API in
+  `@guren/server` (per the package's Bun-isolation rule). The
+  explicit open is what makes the promised `null` for a missing file
+  honest: a naïve `createReadStream()` returns before its async open
+  fails.
+- `R2Driver`: `obj.body`, cast at the same boundary where the driver
+  already absorbs the workerd-vs-global stream type mismatch (it
+  deliberately types `body` loosely because Cloudflare's
+  `ReadableStream` is not assignable to the global one); the
+  binding's `get(key, { range })` maps directly onto the options bag.
+- `S3Driver`: `Body.transformToWebStream()` — the SDK body is not
+  itself a web stream on Node; the `Range` header maps onto the
+  options bag. The interface contract is explicit: every implementer
+  **normalizes to the global web `ReadableStream`** at its own
+  boundary.
 - `MemoryDriver`: not implemented; the route falls back to buffered
   `get()` wherever `getStream` is absent — the same graceful-degrade
   contract as every optional capability here.
@@ -400,8 +466,19 @@ export function registerWebRoutes(router: Router): void {
   `configureInertiaAssets` is app-invoked. The route handler ships as
   a framework controller, so the route↔controller integrity checks
   see a real target.
-- `registerAttachmentRoutes` throws a clear boot-time error when
-  `configureAttachments()` was never called or `delivery` is absent.
+- `registerAttachmentRoutes` **never throws at registration time**:
+  the route-inspection tools (`routes:types`, `guren check`, audit,
+  OpenAPI) invoke registrars against a bare `Router` with no
+  providers booted (`load-routes.ts`), so a config-dependent throw
+  would break every one of them before the route was visible.
+  Registration is pure; the controller resolves the engine lazily at
+  request time (a clear 500 with a config-pointing message if it is
+  missing), and "delivery not configured" is a boot-time error in the
+  engine wiring plus the `guren check` rule below.
+- The route name defaults to `attachments.show` and is configurable
+  (`delivery.routeName`). `Router.name()` silently overwrites a
+  duplicate named route, so the docs reserve the default name and the
+  check rule warns on a collision.
 - The inverse hole is a `guren check` rule: `delivery` configured (or
   any disk `'private'` while `delivery` is set) but no reachable
   `registerAttachmentRoutes(...)` call in the mounted registrar —
@@ -422,18 +499,22 @@ With `delivery` configured, the §1 `urlFor` seam becomes:
 This applies identically to `AttachmentData.url` and every
 `variants[name].url` in resource payloads — the not-`ready` variant
 fallback keeps pointing at the original, now through the route. Public
-attachments never touch the route in generated URLs; the route will
-still *serve* a public-disk attachment if handed a validly signed URL
-for one (harmless, and it gives apps forced-download links for public
-files without a second mechanism).
+attachments never touch the route in generated URLs, and v1 ships no
+API that mints a signed URL for a public-disk attachment — a
+forced-download helper for public files is possible on this
+foundation, but it is a follow-up, not a side effect.
 
 **Uniform-route rule, adopted from RFC 0010 §3:** the signed route URL
 is *the* private URL on every driver. S3-private apps switch from
 direct presigned URLs to route-then-302 — one extra request, in
-exchange for `Content-Disposition` control, the inline allowlist on
-what lands same-origin, one revocation point (key rotation), and one
-URL shape to reason about. Apps that measured the hop and want the old
-behaviour say `serve: 'direct'` per disk.
+exchange for `Content-Disposition` control (carried into the presign
+via the `temporaryUrl` response-override bag, §3), one place to
+reason about keys and expiry, and one URL shape. The §4 inline
+allowlist is a *same-origin* defense and applies where same-origin is
+at stake — proxy responses; a redirect hands the browser to the
+bucket's origin, where an inline SVG is not the app's XSS problem.
+Apps that measured the hop and want the old behaviour say
+`serve: 'direct'` per disk.
 
 ### 8. Threat model
 
@@ -446,14 +527,16 @@ closed:
 | T2 | **Replay after expiry** | `expires` is signed and mandatory (`requireExpiration: true`); verification rejects past timestamps before any I/O. |
 | T3 | **Enumeration / IDOR** | The id is a ULID (unguessable before insert) *and* no response differs before signature verification — invalid signature, unknown id, and undeclared variant are all 404. The signature, not the id's secrecy, is the boundary. |
 | T4 | **Key compromise blast radius** | HKDF purpose `'attachment-delivery'`: a leaked delivery key forges delivery URLs and nothing else — not sessions, not CSRF, not password-reset links, and not the future direct-upload tokens (separate purpose). Rotation rides `APP_KEY`/`APP_PREVIOUS_KEYS` (verify walks previous keys). |
-| T5 | **Stored XSS via uploads served same-origin** (SVG/HTML with scripts) | Inline allowlist forces non-listed types to `attachment`; `nosniff` pins the recorded type; `CSP: sandbox` de-origins whatever renders inline anyway. |
-| T6 | **Host-header poisoning of generated or verified URLs** | URLs are generated path-relative and signatures canonicalize to path+query — the `Host` header is never read on either side. The deliberate flip side: a signed URL verifies on any hostname the app answers on (multi-domain and proxied deployments keep working; the signature never gates *which* origin, only *what*). |
+| T5 | **Stored XSS via uploads served same-origin** (SVG/HTML with scripts) | Inline allowlist forces non-listed types to `attachment`; `nosniff` pins the recorded type; `CSP: sandbox` de-origins whatever renders inline anyway. Scope: this is the *proxy* path's defense — a redirect lands on the bucket's origin, where same-origin is not at stake and the disposition still travels via the presign response-override (§3). |
+| T6 | **Host-header poisoning of generated or verified URLs** | URLs are generated path-relative and signatures canonicalize to path+query — the `Host` header is never read on either side. The deliberate flip side: a signed URL verifies on any hostname the app answers on (multi-domain and proxied deployments keep working; the signature never gates *which* origin, only *what*). The assumption this rests on, stated explicitly: **one `APP_KEY` = one authorization domain** — the same assumption sessions and CSRF already ride, so a deployment sharing keys across tenants or environments is already broken in worse ways than attachment URLs. An app genuinely serving multiple security domains from one keyring can be given a signed, *configured* audience claim later (still no request-header trust); not in v1. |
 | T7 | **Path traversal / key injection** | The object key comes from the row (written by the attach pipeline's sanitizer), never from the request. The `:filename` segment is decorative for `Content-Disposition` only, single-segment by route shape, and signed. |
 | T8 | **Cache poisoning / leak via shared caches** | Proxy: `Cache-Control: private`, max-age capped at remaining signature lifetime. Redirect: `no-store` (the `Location` is a credential). Signed query params make cache keys unique per grant anyway. |
-| T9 | **"Signed URL" misread as revocable authorization** | Stated contract: this is a capability URL — anyone holding it reads the bytes until expiry. Revocation is key rotation (all URLs) or short expiry. Per-request authorization (`authorize(row, ctx)` callback) is deliberately **not** in v1, unchanged from RFC 0010 §3: apps needing it wrap `attachmentUrl()` in their own controller behind their own middleware and hand out short-lived URLs. Revisit if the wrapper turns out to be the common case. |
-| T10 | **Resource exhaustion through the proxy** | Verification is one HMAC before any DB or storage I/O, so garbage URLs cost microseconds. Streaming (`getStream`) keeps large bodies out of memory where drivers support it; the buffered fallback is bounded by the app's own upload caps for attachment-created objects. The route composes with the framework's rate limiting like any app route (app-registered, so `.middleware(...)` applies). |
+| T9 | **"Signed URL" misread as revocable authorization** | Stated contract: this is a capability URL — anyone holding it reads the bytes until expiry. Revocation means **removing** the compromised key: rotation alone revokes nothing while the old key sits in `APP_PREVIOUS_KEYS`, because verification deliberately walks previous keys — and a browser-cached response stays usable until its `max-age` ends regardless. Per-request authorization (`authorize(row, ctx)` callback) is deliberately **not** in v1, unchanged from RFC 0010 §3: apps needing it wrap `attachmentUrl()` in their own controller behind their own middleware and hand out short-lived URLs. Revisit if the wrapper turns out to be the common case. |
+| T10 | **Resource exhaustion through the proxy** | Verification costs at most one HMAC per keyring key before any DB or storage I/O, so garbage URLs are cheap to reject, and streaming (`getStream`) keeps large bodies out of app memory where drivers implement it. **Partially open, stated honestly:** the buffered fallback has no framework-level size bound for opaque (non-image) collections — `maxImageBytes` gates only the image-policied attach path — and streaming caps memory, not bandwidth, open-stream concurrency, or storage read cost for a repeatedly fetched valid link. The route ships no rate limiter of its own; it composes with app middleware (`.middleware(...)`), and the docs tell bandwidth-sensitive apps to rate-limit the prefix and prefer redirect-capable disks. |
 | T11 | **Open redirect** | The 302 `Location` is exclusively `disk.temporaryUrl()` output — driver-built from row data, no request input. |
 | T12 | **Signature-verification bypass via canonicalization disagreement** | The `localeCompare` sort is replaced by code-unit comparison (§2) so signer and verifier can never canonicalize differently across runtimes/locales. |
+| T13 | **Signed-URL leakage via logs, referrers, history** | The signature is a bearer credential in a query string. Route responses set `Referrer-Policy: no-referrer` (the app-wide default `strict-origin-when-cross-origin` still sends the full URL on same-origin navigation, and apps can weaken it); expiry bounds the damage window — one reason the default lifetime is minutes, not days; the docs require query redaction in access logs for the route prefix and note browser-history exposure. |
+| T14 | **"Private" disk whose backing store is itself public** | The route is a lock on the app path only — it cannot un-publish an S3/R2 bucket configured public or a local directory the app still serves statically. `disks` visibility is policy metadata, not proof: nothing at attach time verifies the bucket's actual ACL or the static mounts. Adoption therefore includes closing the direct path (Migration Path spells out the local two-step), and a `guren check` candidate rule flags a `'private'` disk whose storage config carries a public `url`/`publicUrl` or whose local root sits under the app's public directory. |
 
 Non-goals restated as such: the route does not authenticate users
 (T9), does not make `disks` visibility per-object (RFC 0013's
@@ -472,9 +555,11 @@ attachment shown to a user is a private attachment that user can save.
 
 Release order per the templates-resolve-from-npm rule: server first
 (the additive driver/signer surface), then core + plugin (both consume
-it; the plugin's `compatibility` range must admit the new core line),
-then cli/templates/docs adoption. No template may reference
-`registerAttachmentRoutes` before the core release ships it.
+it; the plugin's current `compatibility` range already admits a minor
+core line — `audit:plugin-compat` re-verifies at release rather than
+this RFC assuming), then cli/templates/docs adoption. No template may
+reference `registerAttachmentRoutes` before the core release ships
+it.
 
 Semver: everything is additive — server minor, core minor, plugin
 minor. No breaking change; `serve: 'direct'` preserves any behaviour
@@ -585,9 +670,7 @@ Additive and opt-in; nothing changes until an app both configures
    fast. Is a documented `{ expiresIn }` override enough, or should
    `delivery` grow a named preset (e.g. `linkExpiresIn`) so apps
    stop inventing magic numbers?
-3. **`HEAD` support.** Cheap to add (same handler, no body) and
-   useful for clients checking freshness; is it v1 or noise?
-4. **Route naming.** `attachments.show` under `/attachments` is
+3. **Route naming.** `attachments.show` under `/attachments` is
    proposed; RFC 0010 used `/storage`. `/attachments` avoids
    colliding with `LocalDriver`'s conventional `/storage` public
    base URL — is there a reason to prefer matching Rails'
