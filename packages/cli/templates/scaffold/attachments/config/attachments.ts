@@ -1,5 +1,5 @@
 import { configureAttachments, getContainer } from '@guren/core'
-import { attachments } from '@/db/schema'
+import { attachments } from '../db/schema'
 
 /**
  * Wires the attachments layer once at boot (AttachmentsProvider imports this

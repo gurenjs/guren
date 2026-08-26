@@ -1,7 +1,7 @@
 import { writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { consola } from 'consola'
-import { readIfExists, fileExists } from './discovery'
+import { collectFiles, fileExists, listAppRoots, readIfExists } from './discovery'
 import {
   addImport,
   addToArrayArgument,
@@ -15,7 +15,7 @@ import {
 } from './patch-helpers'
 import { wireProviders } from './provider-registrar'
 import { loadScaffoldTemplate } from './scaffold-templates'
-import { writeScaffoldFiles, type WriterOptions } from './utils'
+import { writeScaffoldFiles, type ScaffoldFileEntry, type WriterOptions } from './utils'
 
 const CONSOLE_ENTRY = 'src/console.ts'
 
@@ -92,7 +92,10 @@ const SCHEMA_IMPORTS: Record<SchemaDialect, (content: string) => string> = {
 
 const VARIANT_RECORD_IMPORT = "import type { AttachmentVariantRecord } from '@guren/core'"
 
-
+/** `path` is both the template path under `templates/scaffold/attachments/` and the written app path. */
+function attachmentsFile(path: string): ScaffoldFileEntry {
+  return { path, contents: loadScaffoldTemplate(`attachments/${path}`) }
+}
 
 /**
  * Any exported `attachments` binding counts as "the app already has one":
@@ -119,14 +122,8 @@ export async function addAttachments(options: WriterOptions): Promise<string[]> 
   // Skipped per file rather than thrown: a re-run (or a run after a partial
   // one) should repair whatever is missing — wire the provider, register the
   // command — not abort on the first file that already exists.
-  // Shipped as real sources under templates/scaffold/attachments so
-  // typecheck:templates compiles them on every run — a string here is a file
-  // no tsconfig covers.
-  const scaffolds = ['config/attachments.ts', 'app/Providers/AttachmentsProvider.ts'].map((path) => ({
-    path,
-    contents: loadScaffoldTemplate(`attachments/${path}`),
-  }))
-  const pending: typeof scaffolds = []
+  const scaffolds = ['config/attachments.ts', 'app/Providers/AttachmentsProvider.ts'].map(attachmentsFile)
+  const pending: ScaffoldFileEntry[] = []
   for (const entry of scaffolds) {
     if (!options.force && (await fileExists(process.cwd(), entry.path))) {
       consola.info(`${entry.path} already exists — left unchanged (use --force to overwrite).`)
@@ -181,11 +178,9 @@ async function patchSchema(): Promise<void> {
  * that file, and installing a second manager over it would shadow it.
  */
 export async function appBindsStorage(): Promise<boolean> {
-  const { collectFiles, listAppRoots } = await import('./discovery')
-  const { resolve: resolvePath } = await import('node:path')
   const roots = await listAppRoots(process.cwd())
   const groups = await Promise.all(
-    roots.flatMap((root) => ['app', 'src'].map((dir) => collectFiles(resolvePath(root.dir, dir)))),
+    roots.flatMap((root) => ['app', 'src'].map((dir) => collectFiles(resolve(root.dir, dir)))),
   )
   const bindingPattern = /\b(?:instance|singleton|bind)\(\s*['"]storage['"]/
   for (const filePath of groups.flat()) {

@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   CLI_DIST_BIN,
+  PG_SCHEMA_FIXTURE,
   SERVER_DIST_ENTRY,
   assertWorkspaceBuilt,
   createTempWorkspace,
@@ -298,8 +299,8 @@ describe('scaffold-typecheck fixture stays pinned to the builders', () => {
 })
 
 describe('attachments scaffold-typecheck fixture stays pinned to the builder', () => {
-  // tsconfig.templates.json typechecks templates/scaffold/attachments against
-  // tests/fixtures/scaffold-typecheck/attachments/db/schema.ts. That
+  // tsconfig.templates-attachments.json typechecks templates/scaffold/attachments
+  // against tests/fixtures/scaffold-typecheck/attachments/db/schema.ts. That
   // companion is a render of the blueprint's Postgres schema patch, so a
   // change to ATTACHMENTS_TABLE_BLOCKS.pg has to land in the fixture too —
   // otherwise the templates keep typechecking against a table the blueprint
@@ -316,14 +317,16 @@ describe('attachments scaffold-typecheck fixture stays pinned to the builder', (
     const workspace = await createTempWorkspace('guren-attachments-fixture-pin-')
     try {
       await mkdir(join(workspace.dir, 'db'), { recursive: true })
-      await writeFile(
-        join(workspace.dir, 'db/schema.ts'),
-        "import { pgTable, serial, text } from '@guren/orm/drizzle/pg'\n\nexport const posts = pgTable('posts', {\n  id: serial('id').primaryKey(),\n})\n",
-      )
+      await writeFile(join(workspace.dir, 'db/schema.ts'), PG_SCHEMA_FIXTURE)
       await runBlueprint('attachments', {})
 
       const rendered = await readFile(join(workspace.dir, 'db/schema.ts'), 'utf8')
-      expect(rendered).toContain(fixtureTable.trimEnd())
+      // The block is appended at end of file, so the tails must be *equal*:
+      // toContain would keep passing if the builder grew a suffix
+      // (.enableRLS(), a second index) the fixture never learned about.
+      const renderedStart = rendered.indexOf('export const attachments')
+      expect(renderedStart).toBeGreaterThan(-1)
+      expect(rendered.slice(renderedStart).trimEnd()).toBe(fixtureTable.trimEnd())
     } finally {
       await workspace.cleanup()
     }

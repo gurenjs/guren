@@ -1,3 +1,4 @@
+import { consola } from 'consola'
 import { addAttachments, appBindsStorage } from './add-attachments'
 import { assertNotApiOnly } from './app-surface'
 import { fileExists, readIfExists } from './discovery'
@@ -62,7 +63,6 @@ const blueprintRegistry: Record<string, BlueprintDefinition> = {
       // a second manager installed over it.
       const hasConventionalProvider = await fileExists(process.cwd(), 'app/Providers/StorageProvider.ts')
       if (!hasConventionalProvider && !(await appBindsStorage())) {
-        const { consola } = await import('consola')
         consola.info("No 'storage' binding found — installing the storage blueprint first.")
         created.push(...(await blueprintRegistry.storage!.run(options)))
       }
