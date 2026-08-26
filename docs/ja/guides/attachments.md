@@ -31,6 +31,8 @@ async store() {
 
 ## セットアップ
 
+> `bunx guren add attachments` を実行すると、このセクション全体を自動で行います: ダイアレクトに合わせて `db/schema.ts` にテーブルを追加し、`config/attachments.ts` を書き、`AttachmentsProvider` を配線し、[`attachments:prune`](#孤児の掃除-attachmentsprune) コマンドを登録します(StorageProvider がないアプリには storage ブループリントも導入します)。以下は同じ内容を手動で行う手順です。
+
 ### 1. `attachments` テーブルを追加する
 
 テーブルはアプリが所有します(セッションテーブルと同じ流儀です)。使用するダイアレクトのスニペットを `db/schema.ts` に追加し、マイグレーションを実行してください。

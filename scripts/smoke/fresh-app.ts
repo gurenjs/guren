@@ -86,6 +86,10 @@ const DEFAULT_BLUEPRINT_FEATURES: readonly (readonly string[])[] = [
   ['cache'],
   ['notifications'],
   ['storage'],
+  // After storage on purpose: with the storage provider already present,
+  // attachments exercises its own scaffolds rather than re-running the
+  // storage prerequisite.
+  ['attachments'],
   ['broadcasting'],
   ['schedule'],
 ]
@@ -492,8 +496,8 @@ async function assertFeatureScaffolds(appDir: string): Promise<void> {
   assert(storageProvider.includes('createStorageManager'), 'Storage blueprint must create a storage manager.')
   assert(storageProvider.includes("this.container.instance('storage'"), 'Storage blueprint must bind storage into the container.')
   assert(
-    storageProvider.includes("public: { driver: 'local', root: './storage/app/public', visibility: 'public' }"),
-    "Storage blueprint must expose a public disk that declares itself public — a local disk has no per-object visibility, so an undeclared 'public' disk reports 'private' and refuses put({ visibility: 'public' }).",
+    storageProvider.includes("public: { driver: 'local', root: './public/storage', url: '/storage', visibility: 'public' }"),
+    "Storage blueprint must expose a public disk that declares itself public and carries a served URL — a local disk has no per-object visibility (an undeclared 'public' disk reports 'private' and refuses put({ visibility: 'public' })), and without url + a root inside public/ every disk.url() points at nothing the app serves.",
   )
   assert(storageProvider.includes('STORAGE_DISK'), 'Storage blueprint must select its disk from STORAGE_DISK.')
 

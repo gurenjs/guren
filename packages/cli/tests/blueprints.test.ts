@@ -78,6 +78,7 @@ describe('blueprints', () => {
   it('lists the available scaffold blueprints', () => {
     expect(listBlueprints()).toEqual([
       'admin',
+      'attachments',
       'auth',
       'broadcasting',
       'cache',
