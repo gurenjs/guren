@@ -18,23 +18,26 @@ export default function PostShow({ post }: Props) {
       <Head title={post.title} />
       <article className="space-y-6">
         <header className="space-y-2">
-          <h1 className="text-3xl font-semibold text-emerald-300">{post.title}</h1>
-          <p className="text-sm text-slate-500">
+          <h1 className="flex items-center gap-3 text-3xl font-bold text-g-heading">
+            <span aria-hidden className="h-7 w-[3px] shrink-0 rounded-full bg-[image:var(--g-tick)]" />
+            {post.title}
+          </h1>
+          <p className="text-sm text-g-muted">
             {post.author ? `by ${post.author.name} · ` : ''}
             {new Date(post.createdAt).toLocaleDateString()}
           </p>
-          <p className="text-slate-400">{post.excerpt}</p>
+          <p className="text-g-text-2">{post.excerpt}</p>
         </header>
 
-        <div className="whitespace-pre-wrap text-slate-200">{post.body}</div>
+        <div className="whitespace-pre-wrap text-g-text">{post.body}</div>
 
-        <footer className="flex gap-4 border-t border-slate-800 pt-6 text-sm">
-          <Link href={route('posts.index')} className="text-slate-300 transition hover:text-emerald-200">
+        <footer className="flex items-center gap-4 border-t border-g-line pt-6 text-sm">
+          <Link href={route('posts.index')} className="text-g-text-2 transition hover:text-g-heading">
             ← All posts
           </Link>
           {canManage ? (
             <>
-              <Link href={route('posts.edit', { id: post.id })} className="text-emerald-300 transition hover:text-emerald-200">
+              <Link href={route('posts.edit', { id: post.id })} className="text-g-accent-text transition hover:underline">
                 Edit
               </Link>
               <Link
@@ -42,7 +45,7 @@ export default function PostShow({ post }: Props) {
                 method="delete"
                 as="button"
                 onBefore={() => window.confirm('Delete this post?')}
-                className="text-rose-400 transition hover:text-rose-300"
+                className="rounded-g-ctl border border-g-danger-chip px-3 py-1 font-bold text-g-danger transition hover:bg-g-danger-tint"
               >
                 Delete
               </Link>

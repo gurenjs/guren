@@ -21,5 +21,8 @@
     "templates/scaffold/**/*",
     "tests/fixtures/scaffold-typecheck/**/*"
   ],
-  "exclude": []
+  "exclude": [
+    "templates/scaffold/attachments",
+    "tests/fixtures/scaffold-typecheck/attachments"
+  ]
 }

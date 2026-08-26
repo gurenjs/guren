@@ -8,6 +8,7 @@ import { makePolicy } from './make-policy'
 import { makeTest } from './make-test'
 import { makeValidator } from './make-validator'
 import { parseAttachString, parseFieldsString, type AttachmentDefinition, type FieldDefinition, type FieldType } from './fields'
+import { ensureGurenUiTokens, FORM_INPUT_CLASS, PRIMARY_BUTTON_CLASS } from './guren-css'
 import { ParseCache } from './parse-cache'
 import { schemaPathFor } from './schema-parser'
 
@@ -132,6 +133,10 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
       contents: generateEditPage(singular, routeName, variableName, fields),
     },
   ], writerOptions)
+
+  // The pages above style with the Guren UI tokens (bg-g-page, …) — make
+  // sure the app actually loads them.
+  await ensureGurenUiTokens(writeRoot(writerOptions))
 
   created.unshift(validatorPath)
 
@@ -534,28 +539,33 @@ interface Props extends PaginatedPageProps<${singular}ResourceData> {}
 
 export default function ${collection}Index({ data, pagination }: Props) {
   return (
-    <main className="mx-auto max-w-3xl space-y-6 px-6 py-12">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-semibold">${collection}</h1>
-        <Link href={route('${routeName}.create')} className="rounded bg-black px-4 py-2 text-white">New ${singular}</Link>
-      </div>
-      <div className="space-y-4">
-        {data.map((${variableName}) => (
-          <article key={${variableName}.id} className="rounded border p-4">
-            <Link href={route('${routeName}.show', { id: ${variableName}.id })} className="text-xl font-medium">{${variableName}.${titleField}}</Link>
-${summaryField ? `            <p className="mt-2 text-sm text-zinc-600">{${variableName}.${summaryField} ?? ''}</p>` : ''}
-          </article>
-        ))}
-      </div>
-      {pagination?.links?.pages && (
-        <nav className="flex gap-2">
-          {pagination.links.pages.map((page) => (
-            <Link key={page.page} href={page.url ?? '#'} className="rounded border px-3 py-1">
-              {page.page}
-            </Link>
+    <main className="min-h-screen bg-g-page font-sans text-g-text">
+      <div className="mx-auto max-w-3xl space-y-6 px-6 py-12">
+        <div className="flex items-center justify-between">
+          <h1 className="flex items-center gap-3 text-3xl font-bold text-g-heading">
+            <span aria-hidden className="h-7 w-[3px] shrink-0 rounded-full bg-[image:var(--g-tick)]" />
+            ${collection}
+          </h1>
+          <Link href={route('${routeName}.create')} className="${PRIMARY_BUTTON_CLASS}">New ${singular}</Link>
+        </div>
+        <div className="space-y-4">
+          {data.map((${variableName}) => (
+            <article key={${variableName}.id} className="rounded-g-card border border-g-line bg-g-panel p-4 shadow-g-card">
+              <Link href={route('${routeName}.show', { id: ${variableName}.id })} className="text-xl font-bold text-g-heading transition hover:text-g-accent-text">{${variableName}.${titleField}}</Link>
+${summaryField ? `              <p className="mt-2 text-sm text-g-text-2">{${variableName}.${summaryField} ?? ''}</p>` : ''}
+            </article>
           ))}
-        </nav>
-      )}
+        </div>
+        {pagination?.links?.pages && (
+          <nav className="flex gap-2 font-mono text-sm">
+            {pagination.links.pages.map((page) => (
+              <Link key={page.page} href={page.url ?? '#'} className="rounded-g-ctl border border-g-line px-3 py-1 text-g-text-2 transition hover:border-g-line-strong hover:text-g-heading">
+                {page.page}
+              </Link>
+            ))}
+          </nav>
+        )}
+      </div>
     </main>
   )
 }
@@ -571,13 +581,13 @@ function generateShowPage(
 ): string {
   const fieldRenders = fields.map((f) => {
     if (f.type === 'boolean') {
-      return `      <p><strong>${f.name}:</strong> {${variableName}.${f.name} ? 'Yes' : 'No'}</p>`
+      return `        <p><strong>${f.name}:</strong> {${variableName}.${f.name} ? 'Yes' : 'No'}</p>`
     }
     if (f.type === 'json') {
       // An object is not renderable as a React child.
-      return `      <p><strong>${f.name}:</strong> {JSON.stringify(${variableName}.${f.name})}</p>`
+      return `        <p><strong>${f.name}:</strong> {JSON.stringify(${variableName}.${f.name})}</p>`
     }
-    return `      <p><strong>${f.name}:</strong> {${variableName}.${f.name}${f.nullable ? " ?? ''" : ''}}</p>`
+    return `        <p><strong>${f.name}:</strong> {${variableName}.${f.name}${f.nullable ? " ?? ''" : ''}}</p>`
   }).join('\n')
 
   return `import { Link } from '@inertiajs/react'
@@ -590,20 +600,22 @@ interface Props {
 
 export default function ${singular}Show({ ${variableName} }: Props) {
   return (
-    <main className="mx-auto max-w-3xl space-y-6 px-6 py-12">
-      <Link href={route('${routeName}.index')}>Back</Link>
+    <main className="min-h-screen bg-g-page font-sans text-g-text">
+      <div className="mx-auto max-w-3xl space-y-6 px-6 py-12">
+        <Link href={route('${routeName}.index')} className="text-sm text-g-accent-text transition hover:underline">Back</Link>
 ${fieldRenders}
-      <div className="flex gap-4">
-        <Link href={route('${routeName}.edit', { id: ${variableName}.id })}>Edit</Link>
-        <Link
-          href={route('${routeName}.destroy', { id: ${variableName}.id })}
-          method="delete"
-          as="button"
-          onBefore={() => window.confirm('Delete this ${variableName}?')}
-          className="text-red-600"
-        >
-          Delete
-        </Link>
+        <div className="flex items-center gap-4">
+          <Link href={route('${routeName}.edit', { id: ${variableName}.id })} className="text-g-accent-text transition hover:underline">Edit</Link>
+          <Link
+            href={route('${routeName}.destroy', { id: ${variableName}.id })}
+            method="delete"
+            as="button"
+            onBefore={() => window.confirm('Delete this ${variableName}?')}
+            className="rounded-g-ctl border border-g-danger-chip px-3 py-1 text-sm font-bold text-g-danger transition hover:bg-g-danger-tint"
+          >
+            Delete
+          </Link>
+        </div>
       </div>
     </main>
   )
@@ -631,11 +643,13 @@ type ${singular}FormData = RouteBody<ApiRoutes, '${routeName}.store'>
 export default function New${singular}() {
   const form = useForm<${singular}FormData>({ ${defaults} })
 ${state.hooks}  return (
-    <main className="mx-auto max-w-3xl px-6 py-12">
-      <form className="space-y-4" onSubmit={(submitEvent) => { submitEvent.preventDefault(); form.post(route('${routeName}.store')) }}>
+    <main className="min-h-screen bg-g-page font-sans text-g-text">
+      <div className="mx-auto max-w-3xl px-6 py-12">
+        <form className="space-y-4" onSubmit={(submitEvent) => { submitEvent.preventDefault(); form.post(route('${routeName}.store')) }}>
 ${formFields}
-        <button type="submit" className="rounded bg-black px-4 py-2 text-white">Create</button>
-      </form>
+          <button type="submit" className="${PRIMARY_BUTTON_CLASS}">Create</button>
+        </form>
+      </div>
     </main>
   )
 }
@@ -670,11 +684,13 @@ interface Props {
 export default function Edit${singular}({ ${variableName} }: Props) {
   const form = useForm<${singular}FormData>({ ${defaults} })
 ${state.hooks}  return (
-    <main className="mx-auto max-w-3xl px-6 py-12">
-      <form className="space-y-4" onSubmit={(submitEvent) => { submitEvent.preventDefault(); form.put(route('${routeName}.update', { id: ${variableName}.id })) }}>
+    <main className="min-h-screen bg-g-page font-sans text-g-text">
+      <div className="mx-auto max-w-3xl px-6 py-12">
+        <form className="space-y-4" onSubmit={(submitEvent) => { submitEvent.preventDefault(); form.put(route('${routeName}.update', { id: ${variableName}.id })) }}>
 ${formFields}
-        <button type="submit" className="rounded bg-black px-4 py-2 text-white">Save</button>
-      </form>
+          <button type="submit" className="${PRIMARY_BUTTON_CLASS}">Save</button>
+        </form>
+      </div>
     </main>
   )
 }
@@ -684,45 +700,45 @@ ${formFields}
 function generateFormField(field: FieldDefinition, formVar: string): string {
   const value = formValue(field, formVar)
   if (field.type === 'boolean') {
-    return `        <label className="flex items-center gap-2">
-          <input type="checkbox" checked={${value}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.checked)} />
-          ${field.name}
-        </label>`
+    return `          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={${value}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.checked)} className="h-4 w-4 rounded accent-g-accent" />
+            ${field.name}
+          </label>`
   }
   if (field.type === 'text') {
-    return `        <textarea value={${value}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} placeholder="${field.name}" className="w-full rounded border px-3 py-2" />`
+    return `          <textarea value={${value}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} placeholder="${field.name}" className="${FORM_INPUT_CLASS}" />`
   }
   if (field.type === 'number') {
-    return `        <input type="number" value={${value}} onChange={(event) => ${formVar}.setData('${field.name}', Number(event.target.value))} placeholder="${field.name}" className="w-full rounded border px-3 py-2" />`
+    return `          <input type="number" value={${value}} onChange={(event) => ${formVar}.setData('${field.name}', Number(event.target.value))} placeholder="${field.name}" className="${FORM_INPUT_CLASS}" />`
   }
   if (field.type === 'date') {
     // The value arrives as an ISO timestamp but `type="date"` only renders a
     // bare `YYYY-MM-DD`, and shows nothing at all for anything longer.
-    return `        <input type="date" value={${value}.slice(0, 10)} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} className="w-full rounded border px-3 py-2" />`
+    return `          <input type="date" value={${value}.slice(0, 10)} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} className="${FORM_INPUT_CLASS}" />`
   }
   if (field.type === 'json') {
     // Uncontrolled: a controlled textarea driven by the parsed object would
     // reject every keystroke that leaves the JSON temporarily invalid. The
     // flag is what keeps that from being silent — without it, submitting
     // half-typed JSON would quietly send the last value that parsed.
-    return `        <textarea
-          defaultValue={jsonText.${field.name}}
-          onChange={(event) => {
-            try {
-              ${formVar}.setData('${field.name}', JSON.parse(event.target.value))
-              setJsonErrors((prev) => ({ ...prev, ${field.name}: false }))
-            } catch {
-              setJsonErrors((prev) => ({ ...prev, ${field.name}: true }))
-            }
-          }}
-          placeholder="${field.name}"
-          className="w-full rounded border px-3 py-2 font-mono text-sm"
-        />
-        {jsonErrors.${field.name} && (
-          <p className="text-sm text-red-600">${field.name} is not valid JSON — fix it or the last valid value is submitted.</p>
-        )}`
+    return `          <textarea
+            defaultValue={jsonText.${field.name}}
+            onChange={(event) => {
+              try {
+                ${formVar}.setData('${field.name}', JSON.parse(event.target.value))
+                setJsonErrors((prev) => ({ ...prev, ${field.name}: false }))
+              } catch {
+                setJsonErrors((prev) => ({ ...prev, ${field.name}: true }))
+              }
+            }}
+            placeholder="${field.name}"
+            className="${FORM_INPUT_CLASS} font-mono text-sm"
+          />
+          {jsonErrors.${field.name} && (
+            <p className="text-sm text-g-danger">${field.name} is not valid JSON — fix it or the last valid value is submitted.</p>
+          )}`
   }
-  return `        <input value={${value}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} placeholder="${field.name}" className="w-full rounded border px-3 py-2" />`
+  return `          <input value={${value}} onChange={(event) => ${formVar}.setData('${field.name}', event.target.value)} placeholder="${field.name}" className="${FORM_INPUT_CLASS}" />`
 }
 
 /**

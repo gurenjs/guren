@@ -9,19 +9,23 @@ export default function Dashboard({ user }: Props) {
     <Layout>
       <section className="space-y-6">
         <header>
-          <h1 className="text-3xl font-semibold text-emerald-300">Dashboard</h1>
-          <p className="mt-2 text-sm text-slate-400">This page is protected by the auth middleware.</p>
+          <h1 className="flex items-center gap-3 text-3xl font-bold text-g-heading">
+            <span aria-hidden className="h-7 w-[3px] shrink-0 rounded-full bg-[image:var(--g-tick)]" />
+            Dashboard
+          </h1>
+          <p className="mt-2 text-sm text-g-text-2">This page is protected by the auth middleware.</p>
         </header>
 
         {user ? (
-          <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-6 shadow-lg shadow-emerald-500/10">
-            <h2 className="text-xl font-medium text-slate-100">Signed in as {user.name}</h2>
-            <p className="mt-2 text-sm text-slate-300">Email: {user.email}</p>
+          <div className="rounded-g-card border border-g-line bg-g-panel p-6 shadow-g-card">
+            <h2 className="text-xl font-bold text-g-heading">Signed in as {user.name}</h2>
+            <p className="mt-2 text-sm text-g-text-2">Email: {user.email}</p>
           </div>
         ) : (
-          <div className="rounded border border-rose-500/60 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
-            You are not signed in.
-          </div>
+          <p className="flex gap-3 border-y border-g-line py-2.5 text-sm">
+            <span className="w-10 shrink-0 text-right font-mono text-xs font-bold leading-5 text-g-danger">error</span>
+            <span className="text-g-text">You are not signed in.</span>
+          </p>
         )}
       </section>
     </Layout>

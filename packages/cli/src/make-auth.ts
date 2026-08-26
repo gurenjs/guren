@@ -18,11 +18,33 @@ import { readIfExists } from './discovery'
 import { APP_ENTRY_CANDIDATES, resolveAppEntry, wireAppProvider, wireProvider } from './provider-registrar'
 import { wireRouteRegistrar } from './route-registrar'
 import { makeMigration } from './make-migration'
+import { ensureGurenUiTokens, FIELD_LABEL_CLASS, FORM_INPUT_CLASS, PRIMARY_SUBMIT_CLASS } from './guren-css'
 import { loadScaffoldTemplate } from './scaffold-templates'
 
 /** `path` is both the template path under `templates/scaffold/auth/` and the written app path. */
 function authFile(path: string): ScaffoldFileEntry {
   return { path, contents: loadScaffoldTemplate(`auth/${path}`) }
+}
+
+/** The page heading with the ember tick — the one structural device, once per
+    screen. `indent` is the emitted indentation of the `<h1>` line, so every
+    builder renders the identical block at its own depth. */
+function tickHeading(title: string, indent: string): string {
+  return `<h1 className="flex items-center gap-3 text-2xl font-bold text-g-heading">
+${indent}  <span aria-hidden className="h-6 w-[3px] shrink-0 rounded-full bg-[image:var(--g-tick)]" />
+${indent}  ${title}
+${indent}</h1>`
+}
+
+/** A flash/error message as a diagnostic row: mono key in a fixed gutter, a
+    hairline, ordinary body text — the shape of `guren check` output, no
+    tinted box. The tone doubles as the printed key. */
+function calloutRow(tone: 'ok' | 'error', body: string, indent: string, { flush = false } = {}): string {
+  const color = tone === 'ok' ? 'text-g-ok' : 'text-g-danger'
+  return `<p className="${flush ? '' : 'mt-4 '}flex gap-3 border-y border-g-line py-2.5 text-sm">
+${indent}  <span className="w-10 shrink-0 text-right font-mono text-xs font-bold leading-5 ${color}">${tone}</span>
+${indent}  <span className="text-g-text">${body}</span>
+${indent}</p>`
 }
 
 // Passwordless apps keep show() (the OAuth button page) and destroy()
@@ -523,7 +545,7 @@ function buildOAuthButtonLinks(providers: string[]): string {
     .map(
       (provider) => `          <a
             href="/auth/${provider}"
-            className="flex w-full items-center justify-center rounded border border-slate-700 bg-slate-950 px-4 py-2 text-sm font-medium text-slate-100 transition hover:border-emerald-400 hover:text-emerald-200"
+            className="flex w-full items-center justify-center rounded-g-ctl border border-g-line-strong bg-g-panel px-4 py-2 text-sm font-bold text-g-text transition hover:border-g-muted"
           >
             Continue with ${OAUTH_PROVIDER_LABELS[provider]}
           </a>`,
@@ -543,10 +565,10 @@ function buildOAuthButtonsTemplate(providers: string[], { divider = true } = {})
 
   const dividerBlock = divider
     ? `
-          <div className="flex items-center gap-3 text-xs uppercase tracking-wide text-slate-500">
-            <span className="h-px flex-1 bg-slate-800" />
+          <div className="flex items-center gap-3 text-xs uppercase tracking-wide text-g-muted">
+            <span className="h-px flex-1 bg-g-line" />
             Or continue with
-            <span className="h-px flex-1 bg-slate-800" />
+            <span className="h-px flex-1 bg-g-line" />
           </div>`
     : ''
 
@@ -577,16 +599,14 @@ export default function Login({ errors = {} }: Props) {
   return (
     <Layout>
       <Head title="Sign in" />
-      <section className="rounded-lg border border-slate-800 bg-slate-900/40 p-8 shadow-xl shadow-emerald-500/5">
-        <h1 className="text-2xl font-semibold text-emerald-300">Sign in</h1>
-        <p className="mt-2 text-sm text-slate-400">
+      <section className="rounded-g-card border border-g-line bg-g-panel p-8 shadow-g-card">
+        ${tickHeading('Sign in', '        ')}
+        <p className="mt-2 text-sm text-g-text-2">
           Choose a provider to continue.
         </p>
 
         {errors.message && (
-          <p className="mt-4 rounded border border-rose-500/60 bg-rose-500/10 px-4 py-2 text-sm text-rose-200">
-            {errors.message}
-          </p>
+          ${calloutRow('error', '{errors.message}', '          ')}
         )}
 ${buildOAuthButtonsTemplate(providers, { divider: false })}
       </section>
@@ -599,9 +619,9 @@ ${buildOAuthButtonsTemplate(providers, { divider: false })}
 function buildLoginViewTemplate(includeRegister: boolean, includeReset: boolean, oauthProviders: string[] = []): string {
   const signUpLink = includeRegister
     ? `
-        <p className="mt-2 text-center text-sm text-slate-400">
+        <p className="mt-2 text-center text-sm text-g-text-2">
           Don&apos;t have an account?{' '}
-          <Link href="/register" className="text-emerald-300 transition hover:text-emerald-200">
+          <Link href="/register" className="text-g-accent-text transition hover:underline">
             Sign up
           </Link>
         </p>`
@@ -609,13 +629,13 @@ function buildLoginViewTemplate(includeRegister: boolean, includeReset: boolean,
 
   const forgotPasswordText = includeReset
     ? `
-        <p className="mt-6 text-center text-sm text-slate-400">
-          <Link href="/forgot-password" className="text-emerald-300 transition hover:text-emerald-200">
+        <p className="mt-6 text-center text-sm text-g-text-2">
+          <Link href="/forgot-password" className="text-g-accent-text transition hover:underline">
             Forgot your password?
           </Link>
         </p>`
     : `
-        <p className="mt-6 text-center text-sm text-slate-400">
+        <p className="mt-6 text-center text-sm text-g-text-2">
           Forgot your password? Contact your administrator.
         </p>`
 
@@ -648,16 +668,14 @@ export default function Login({ email = '', errors = {} }: Props) {
   return (
     <Layout>
       <Head title="Sign in" />
-      <section className="rounded-lg border border-slate-800 bg-slate-900/40 p-8 shadow-xl shadow-emerald-500/5">
-        <h1 className="text-2xl font-semibold text-emerald-300">Sign in</h1>
-        <p className="mt-2 text-sm text-slate-400">
+      <section className="rounded-g-card border border-g-line bg-g-panel p-8 shadow-g-card">
+        ${tickHeading('Sign in', '        ')}
+        <p className="mt-2 text-sm text-g-text-2">
           Use your account credentials to continue.
         </p>
 
         {errors.message && (
-          <p className="mt-4 rounded border border-rose-500/60 bg-rose-500/10 px-4 py-2 text-sm text-rose-200">
-            {errors.message}
-          </p>
+          ${calloutRow('error', '{errors.message}', '          ')}
         )}
 
         <form
@@ -668,7 +686,7 @@ export default function Login({ email = '', errors = {} }: Props) {
           }}
         >
           <div>
-            <label htmlFor={emailId} className="block text-sm font-medium text-slate-200">
+            <label htmlFor={emailId} className="${FIELD_LABEL_CLASS}">
               Email
             </label>
             <input
@@ -677,13 +695,13 @@ export default function Login({ email = '', errors = {} }: Props) {
               value={form.data.email}
               onChange={(event) => form.setData('email', event.target.value)}
               required
-              className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none ring-emerald-400 transition focus:border-emerald-400 focus:ring"
+              className="mt-1 ${FORM_INPUT_CLASS}"
             />
-            {errors.email && <p className="mt-1 text-sm text-rose-300">{errors.email}</p>}
+            {errors.email && <p className="mt-1 text-sm text-g-danger">{errors.email}</p>}
           </div>
 
           <div>
-            <label htmlFor={passwordId} className="block text-sm font-medium text-slate-200">
+            <label htmlFor={passwordId} className="${FIELD_LABEL_CLASS}">
               Password
             </label>
             <input
@@ -692,17 +710,17 @@ export default function Login({ email = '', errors = {} }: Props) {
               value={form.data.password}
               onChange={(event) => form.setData('password', event.target.value)}
               required
-              className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none ring-emerald-400 transition focus:border-emerald-400 focus:ring"
+              className="mt-1 ${FORM_INPUT_CLASS}"
             />
-            {errors.password && <p className="mt-1 text-sm text-rose-300">{errors.password}</p>}
+            {errors.password && <p className="mt-1 text-sm text-g-danger">{errors.password}</p>}
           </div>
 
-          <label className="flex items-center gap-2 text-sm text-slate-300">
+          <label className="flex items-center gap-2 text-sm text-g-text">
             <input
               type="checkbox"
               checked={form.data.remember}
               onChange={(event) => form.setData('remember', event.target.checked)}
-              className="h-4 w-4 rounded border-slate-700 bg-slate-950 text-emerald-400 focus:ring-emerald-400"
+              className="h-4 w-4 rounded accent-g-accent"
             />
             Remember me
           </label>
@@ -710,7 +728,7 @@ export default function Login({ email = '', errors = {} }: Props) {
             <button
               type="submit"
               disabled={form.processing}
-              className="w-full rounded bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400"
+              className="${PRIMARY_SUBMIT_CLASS}"
             >
               Sign in
           </button>
@@ -757,16 +775,14 @@ export default function Register({ errors = {} }: Props) {
   return (
     <Layout>
       <Head title="Sign up" />
-      <section className="rounded-lg border border-slate-800 bg-slate-900/40 p-8 shadow-xl shadow-emerald-500/5">
-        <h1 className="text-2xl font-semibold text-emerald-300">Create an account</h1>
-        <p className="mt-2 text-sm text-slate-400">
+      <section className="rounded-g-card border border-g-line bg-g-panel p-8 shadow-g-card">
+        ${tickHeading('Create an account', '        ')}
+        <p className="mt-2 text-sm text-g-text-2">
           Sign up to get started.
         </p>
 
         {errors.message && (
-          <p className="mt-4 rounded border border-rose-500/60 bg-rose-500/10 px-4 py-2 text-sm text-rose-200">
-            {errors.message}
-          </p>
+          ${calloutRow('error', '{errors.message}', '          ')}
         )}
 
         <form
@@ -777,7 +793,7 @@ export default function Register({ errors = {} }: Props) {
           }}
         >
           <div>
-            <label htmlFor={nameId} className="block text-sm font-medium text-slate-200">
+            <label htmlFor={nameId} className="${FIELD_LABEL_CLASS}">
               Name
             </label>
             <input
@@ -786,13 +802,13 @@ export default function Register({ errors = {} }: Props) {
               value={form.data.name}
               onChange={(event) => form.setData('name', event.target.value)}
               required
-              className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none ring-emerald-400 transition focus:border-emerald-400 focus:ring"
+              className="mt-1 ${FORM_INPUT_CLASS}"
             />
-            {errors.name && <p className="mt-1 text-sm text-rose-300">{errors.name}</p>}
+            {errors.name && <p className="mt-1 text-sm text-g-danger">{errors.name}</p>}
           </div>
 
           <div>
-            <label htmlFor={emailId} className="block text-sm font-medium text-slate-200">
+            <label htmlFor={emailId} className="${FIELD_LABEL_CLASS}">
               Email
             </label>
             <input
@@ -801,13 +817,13 @@ export default function Register({ errors = {} }: Props) {
               value={form.data.email}
               onChange={(event) => form.setData('email', event.target.value)}
               required
-              className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none ring-emerald-400 transition focus:border-emerald-400 focus:ring"
+              className="mt-1 ${FORM_INPUT_CLASS}"
             />
-            {errors.email && <p className="mt-1 text-sm text-rose-300">{errors.email}</p>}
+            {errors.email && <p className="mt-1 text-sm text-g-danger">{errors.email}</p>}
           </div>
 
           <div>
-            <label htmlFor={passwordId} className="block text-sm font-medium text-slate-200">
+            <label htmlFor={passwordId} className="${FIELD_LABEL_CLASS}">
               Password
             </label>
             <input
@@ -816,13 +832,13 @@ export default function Register({ errors = {} }: Props) {
               value={form.data.password}
               onChange={(event) => form.setData('password', event.target.value)}
               required
-              className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none ring-emerald-400 transition focus:border-emerald-400 focus:ring"
+              className="mt-1 ${FORM_INPUT_CLASS}"
             />
-            {errors.password && <p className="mt-1 text-sm text-rose-300">{errors.password}</p>}
+            {errors.password && <p className="mt-1 text-sm text-g-danger">{errors.password}</p>}
           </div>
 
           <div>
-            <label htmlFor={passwordConfirmationId} className="block text-sm font-medium text-slate-200">
+            <label htmlFor={passwordConfirmationId} className="${FIELD_LABEL_CLASS}">
               Confirm password
             </label>
             <input
@@ -831,25 +847,25 @@ export default function Register({ errors = {} }: Props) {
               value={form.data.passwordConfirmation}
               onChange={(event) => form.setData('passwordConfirmation', event.target.value)}
               required
-              className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none ring-emerald-400 transition focus:border-emerald-400 focus:ring"
+              className="mt-1 ${FORM_INPUT_CLASS}"
             />
             {errors.passwordConfirmation && (
-              <p className="mt-1 text-sm text-rose-300">{errors.passwordConfirmation}</p>
+              <p className="mt-1 text-sm text-g-danger">{errors.passwordConfirmation}</p>
             )}
           </div>
 
           <button
             type="submit"
             disabled={form.processing}
-            className="w-full rounded bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400 disabled:opacity-50"
+            className="${PRIMARY_SUBMIT_CLASS}"
           >
             Create account
           </button>
         </form>
 ${buildOAuthButtonsTemplate(oauthProviders)}
-        <p className="mt-6 text-center text-sm text-slate-400">
+        <p className="mt-6 text-center text-sm text-g-text-2">
           Already have an account?{' '}
-          <Link href="/login" className="text-emerald-300 transition hover:text-emerald-200">
+          <Link href="/login" className="text-g-accent-text transition hover:underline">
             Sign in
           </Link>
         </p>
@@ -879,22 +895,22 @@ function buildProfileViewTemplate({ includePassword, providerOwnedEmail }: AuthF
   const emailInput = providerOwnedEmail
     ? `
           <div>
-            <label className="block text-sm font-medium text-slate-200">Email</label>
-            <p className="mt-1 w-full rounded border border-slate-800 bg-slate-900 px-3 py-2 text-slate-400">
+            <label className="${FIELD_LABEL_CLASS}">Email</label>
+            <p className="mt-1 w-full rounded-g-ctl border border-g-line bg-g-raised px-3 py-2 text-g-muted">
               {profile.email}
             </p>
-            <p className="mt-1 text-xs text-slate-500">Managed by your sign-in provider.</p>
+            <p className="mt-1 text-xs text-g-muted">Managed by your sign-in provider.</p>
           </div>`
     : `
           <div>
-            <label className="block text-sm font-medium text-slate-200">Email</label>
+            <label className="${FIELD_LABEL_CLASS}">Email</label>
             <input
               type="email"
               value={form.data.email}
               onChange={(event) => form.setData('email', event.target.value)}
-              className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none ring-emerald-400 transition focus:border-emerald-400 focus:ring"
+              className="mt-1 ${FORM_INPUT_CLASS}"
             />
-            {form.errors.email ? <p className="mt-1 text-sm text-rose-300">{form.errors.email}</p> : null}
+            {form.errors.email ? <p className="mt-1 text-sm text-g-danger">{form.errors.email}</p> : null}
           </div>`
   const passwordFormField = includePassword
     ? `
@@ -907,14 +923,14 @@ function buildProfileViewTemplate({ includePassword, providerOwnedEmail }: AuthF
   const passwordInput = includePassword
     ? `
           <div>
-            <label className="block text-sm font-medium text-slate-200">New password</label>
+            <label className="${FIELD_LABEL_CLASS}">New password</label>
             <input
               type="password"
               value={form.data.password}
               onChange={(event) => form.setData('password', event.target.value)}
-              className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none ring-emerald-400 transition focus:border-emerald-400 focus:ring"
+              className="mt-1 ${FORM_INPUT_CLASS}"
             />
-            {form.errors.password ? <p className="mt-1 text-sm text-rose-300">{form.errors.password}</p> : null}
+            {form.errors.password ? <p className="mt-1 text-sm text-g-danger">{form.errors.password}</p> : null}
           </div>
 `
     : ''
@@ -950,35 +966,33 @@ export default function ProfileEdit({ profile, status }: Props) {
   return (
     <Layout>
       <Head title="Profile" />
-      <section className="space-y-6 rounded-lg border border-slate-800 bg-slate-900/40 p-8 shadow-xl shadow-emerald-500/5">
+      <section className="space-y-6 rounded-g-card border border-g-line bg-g-panel p-8 shadow-g-card">
         <header>
-          <h1 className="text-2xl font-semibold text-emerald-300">Profile</h1>
-          <p className="mt-2 text-sm text-slate-400">${description}</p>
+          ${tickHeading('Profile', '          ')}
+          <p className="mt-2 text-sm text-g-text-2">${description}</p>
         </header>
 
         {status ? (
-          <p className="rounded border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-sm text-emerald-200">
-            {status}
-          </p>
+          ${calloutRow('ok', '{status}', '          ', { flush: true })}
         ) : null}
 
         <form className="space-y-4" onSubmit={handleSubmit}>
           <div>
-            <label className="block text-sm font-medium text-slate-200">Name</label>
+            <label className="${FIELD_LABEL_CLASS}">Name</label>
             <input
               type="text"
               value={form.data.name}
               onChange={(event) => form.setData('name', event.target.value)}
-              className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none ring-emerald-400 transition focus:border-emerald-400 focus:ring"
+              className="mt-1 ${FORM_INPUT_CLASS}"
             />
-            {form.errors.name ? <p className="mt-1 text-sm text-rose-300">{form.errors.name}</p> : null}
+            {form.errors.name ? <p className="mt-1 text-sm text-g-danger">{form.errors.name}</p> : null}
           </div>
 ${emailInput}
 ${passwordInput}
           <button
             type="submit"
             disabled={form.processing}
-            className="w-full rounded bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400 disabled:opacity-50"
+            className="${PRIMARY_SUBMIT_CLASS}"
           >
             Save changes
           </button>
@@ -1584,6 +1598,10 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
   }
 
   const created = await writeScaffoldFiles(files, options)
+
+  // The pages above style with the Guren UI tokens (bg-g-page, …) — make
+  // sure the app actually loads them.
+  await ensureGurenUiTokens()
 
   await updateSchema(features)
   await updatePageContracts()

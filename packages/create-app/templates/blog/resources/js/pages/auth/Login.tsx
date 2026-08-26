@@ -27,15 +27,19 @@ export default function Login({ email = '', errors = {} }: Props) {
   return (
     <Layout>
       <Head title="Sign in" />
-      <section className="rounded-lg border border-slate-800 bg-slate-900/40 p-8 shadow-xl shadow-emerald-500/5">
-        <h1 className="text-2xl font-semibold text-emerald-300">Sign in</h1>
-        <p className="mt-2 text-sm text-slate-400">
+      <section className="rounded-g-card border border-g-line bg-g-panel p-8 shadow-g-card">
+        <h1 className="flex items-center gap-3 text-2xl font-bold text-g-heading">
+          <span aria-hidden className="h-6 w-[3px] shrink-0 rounded-full bg-[image:var(--g-tick)]" />
+          Sign in
+        </h1>
+        <p className="mt-2 text-sm text-g-text-2">
           Use your account credentials to continue.
         </p>
 
         {errors.message && (
-          <p className="mt-4 rounded border border-rose-500/60 bg-rose-500/10 px-4 py-2 text-sm text-rose-200">
-            {errors.message}
+          <p className="mt-4 flex gap-3 border-y border-g-line py-2.5 text-sm">
+            <span className="w-10 shrink-0 text-right font-mono text-xs font-bold leading-5 text-g-danger">error</span>
+            <span className="text-g-text">{errors.message}</span>
           </p>
         )}
 
@@ -47,7 +51,7 @@ export default function Login({ email = '', errors = {} }: Props) {
           }}
         >
           <div>
-            <label htmlFor={emailId} className="block text-sm font-medium text-slate-200">
+            <label htmlFor={emailId} className="block text-sm font-bold text-g-heading">
               Email
             </label>
             <input
@@ -56,13 +60,13 @@ export default function Login({ email = '', errors = {} }: Props) {
               value={form.data.email}
               onChange={(event) => form.setData('email', event.target.value)}
               required
-              className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none ring-emerald-400 transition focus:border-emerald-400 focus:ring"
+              className="mt-1 w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:border-transparent focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent"
             />
-            {errors.email && <p className="mt-1 text-sm text-rose-300">{errors.email}</p>}
+            {errors.email && <p className="mt-1 text-sm text-g-danger">{errors.email}</p>}
           </div>
 
           <div>
-            <label htmlFor={passwordId} className="block text-sm font-medium text-slate-200">
+            <label htmlFor={passwordId} className="block text-sm font-bold text-g-heading">
               Password
             </label>
             <input
@@ -71,17 +75,17 @@ export default function Login({ email = '', errors = {} }: Props) {
               value={form.data.password}
               onChange={(event) => form.setData('password', event.target.value)}
               required
-              className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none ring-emerald-400 transition focus:border-emerald-400 focus:ring"
+              className="mt-1 w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:border-transparent focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent"
             />
-            {errors.password && <p className="mt-1 text-sm text-rose-300">{errors.password}</p>}
+            {errors.password && <p className="mt-1 text-sm text-g-danger">{errors.password}</p>}
           </div>
 
-          <label className="flex items-center gap-2 text-sm text-slate-300">
+          <label className="flex items-center gap-2 text-sm text-g-text">
             <input
               type="checkbox"
               checked={form.data.remember}
               onChange={(event) => form.setData('remember', event.target.checked)}
-              className="h-4 w-4 rounded border-slate-700 bg-slate-950 text-emerald-400 focus:ring-emerald-400"
+              className="h-4 w-4 rounded accent-g-accent"
             />
             Remember me
           </label>
@@ -89,16 +93,16 @@ export default function Login({ email = '', errors = {} }: Props) {
             <button
               type="submit"
               disabled={form.processing}
-              className="w-full rounded bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400"
+              className="w-full rounded-g-ctl bg-g-accent px-4 py-2 text-sm font-bold text-g-on-accent transition hover:bg-g-accent-down disabled:cursor-not-allowed disabled:opacity-45"
             >
               Sign in
           </button>
         </form>
 
 
-        <p className="mt-6 text-center text-sm text-slate-400">
+        <p className="mt-6 text-center text-sm text-g-text-2">
           Don&apos;t have an account?{' '}
-          <Link href="/register" className="text-emerald-300 transition hover:text-emerald-200">
+          <Link href="/register" className="text-g-accent-text transition hover:underline">
             Sign up
           </Link>
         </p>

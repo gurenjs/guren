@@ -1,7 +1,7 @@
 import { writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { consola } from 'consola'
-import { readIfExists, fileExists } from './discovery'
+import { collectFiles, fileExists, listAppRoots, readIfExists } from './discovery'
 import {
   addImport,
   addToArrayArgument,
@@ -14,7 +14,8 @@ import {
   type SchemaDialect,
 } from './patch-helpers'
 import { wireProviders } from './provider-registrar'
-import { writeScaffoldFiles, type WriterOptions } from './utils'
+import { loadScaffoldTemplate } from './scaffold-templates'
+import { writeScaffoldFiles, type ScaffoldFileEntry, type WriterOptions } from './utils'
 
 const CONSOLE_ENTRY = 'src/console.ts'
 
@@ -91,40 +92,10 @@ const SCHEMA_IMPORTS: Record<SchemaDialect, (content: string) => string> = {
 
 const VARIANT_RECORD_IMPORT = "import type { AttachmentVariantRecord } from '@guren/core'"
 
-const CONFIG_FILE = `import { configureAttachments, getContainer } from '@guren/core'
-import { attachments } from '../db/schema'
-
-/**
- * Wires the attachments layer once at boot (AttachmentsProvider imports this
- * module). \`Attachment\` is the app-local model over the attachments table —
- * use it for morph relations and advanced queries; the typed day-to-day API
- * lives on your models via the Attachable mixin.
- *
- * See the attachments guide for declarations, image validation, variants,
- * and queued generation.
- */
-export const { Attachment } = configureAttachments({
-  table: attachments,
-  storage: () => getContainer().make('storage'),
-  // Where new attachments are stored, and how their URLs are built: 'public'
-  // disks serve via disk.url(), 'private' ones via disk.temporaryUrl().
-  disk: 'public',
-  disks: { public: 'public' },
-})
-`
-
-const PROVIDER_FILE = `import { ServiceProvider } from '@guren/core'
-// The import is the wiring: config/attachments.ts calls configureAttachments()
-// at module scope, and loading it from a provider guarantees that happens at
-// boot — before the first attach(), in web and worker processes alike.
-import '@/config/attachments'
-
-export default class AttachmentsProvider extends ServiceProvider {
-  register(): void {
-    // Everything is wired by the config import above.
-  }
+/** `path` is both the template path under `templates/scaffold/attachments/` and the written app path. */
+function attachmentsFile(path: string): ScaffoldFileEntry {
+  return { path, contents: loadScaffoldTemplate(`attachments/${path}`) }
 }
-`
 
 /**
  * Any exported `attachments` binding counts as "the app already has one":
@@ -151,11 +122,8 @@ export async function addAttachments(options: WriterOptions): Promise<string[]> 
   // Skipped per file rather than thrown: a re-run (or a run after a partial
   // one) should repair whatever is missing — wire the provider, register the
   // command — not abort on the first file that already exists.
-  const scaffolds = [
-    { path: 'config/attachments.ts', contents: CONFIG_FILE },
-    { path: 'app/Providers/AttachmentsProvider.ts', contents: PROVIDER_FILE },
-  ]
-  const pending: typeof scaffolds = []
+  const scaffolds = ['config/attachments.ts', 'app/Providers/AttachmentsProvider.ts'].map(attachmentsFile)
+  const pending: ScaffoldFileEntry[] = []
   for (const entry of scaffolds) {
     if (!options.force && (await fileExists(process.cwd(), entry.path))) {
       consola.info(`${entry.path} already exists — left unchanged (use --force to overwrite).`)
@@ -210,11 +178,9 @@ async function patchSchema(): Promise<void> {
  * that file, and installing a second manager over it would shadow it.
  */
 export async function appBindsStorage(): Promise<boolean> {
-  const { collectFiles, listAppRoots } = await import('./discovery')
-  const { resolve: resolvePath } = await import('node:path')
   const roots = await listAppRoots(process.cwd())
   const groups = await Promise.all(
-    roots.flatMap((root) => ['app', 'src'].map((dir) => collectFiles(resolvePath(root.dir, dir)))),
+    roots.flatMap((root) => ['app', 'src'].map((dir) => collectFiles(resolve(root.dir, dir)))),
   )
   const bindingPattern = /\b(?:instance|singleton|bind)\(\s*['"]storage['"]/
   for (const filePath of groups.flat()) {
