@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'bun:test'
-import { readFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   CLI_DIST_BIN,
+  PG_SCHEMA_FIXTURE,
   SERVER_DIST_ENTRY,
   assertWorkspaceBuilt,
   createTempWorkspace,
@@ -13,6 +14,7 @@ import { parseSourceFile } from '../src/parse-cache'
 import { collectFiles, IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES, toPosixRelative } from '../src/discovery'
 import { builtinSubCommands } from '../src/commands'
 import { makeAuth, type MakeAuthOptions } from '../src/make-auth'
+import { runBlueprint } from '../src/blueprints'
 import { makeFeature } from '../src/make-feature'
 import { makeChannel } from '../src/make-channel'
 import { makeCommand } from '../src/make-command'
@@ -295,3 +297,39 @@ describe('scaffold-typecheck fixture stays pinned to the builders', () => {
     }
   })
 })
+
+describe('attachments scaffold-typecheck fixture stays pinned to the builder', () => {
+  // tsconfig.templates-attachments.json typechecks templates/scaffold/attachments
+  // against tests/fixtures/scaffold-typecheck/attachments/db/schema.ts. That
+  // companion is a render of the blueprint's Postgres schema patch, so a
+  // change to ATTACHMENTS_TABLE_BLOCKS.pg has to land in the fixture too —
+  // otherwise the templates keep typechecking against a table the blueprint
+  // no longer writes.
+  it('attachments table matches what the blueprint appends to a pg schema', async () => {
+    const fixtureSchema = await readFile(
+      join(import.meta.dir, 'fixtures/scaffold-typecheck/attachments/db/schema.ts'),
+      'utf8',
+    )
+    const tableStart = fixtureSchema.indexOf('export const attachments')
+    expect(tableStart).toBeGreaterThan(-1)
+    const fixtureTable = fixtureSchema.slice(tableStart)
+
+    const workspace = await createTempWorkspace('guren-attachments-fixture-pin-')
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(join(workspace.dir, 'db/schema.ts'), PG_SCHEMA_FIXTURE)
+      await runBlueprint('attachments', {})
+
+      const rendered = await readFile(join(workspace.dir, 'db/schema.ts'), 'utf8')
+      // The block is appended at end of file, so the tails must be *equal*:
+      // toContain would keep passing if the builder grew a suffix
+      // (.enableRLS(), a second index) the fixture never learned about.
+      const renderedStart = rendered.indexOf('export const attachments')
+      expect(renderedStart).toBeGreaterThan(-1)
+      expect(rendered.slice(renderedStart).trimEnd()).toBe(fixtureTable.trimEnd())
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+})
+

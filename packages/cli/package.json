@@ -47,7 +47,7 @@
     "dev": "bun --watch src/index.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "typecheck:templates": "tsc -p tsconfig.templates.json"
+    "typecheck:templates": "tsc -p tsconfig.templates.json && tsc -p tsconfig.templates-attachments.json"
   },
   "dependencies": {
     "@babel/parser": "^7.24.7",
