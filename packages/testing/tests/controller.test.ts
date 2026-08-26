@@ -196,6 +196,82 @@ describe('createGurenControllerModule', () => {
     expect(payload).toEqual({})
   })
 
+  it('file() returns an uploaded multipart file and composes with validateBody()', async () => {
+    const { Controller } = createControllerModuleMock()
+
+    class UploadController extends Controller {
+      async handle() {
+        const data = await this.validateBody({
+          safeParse: (input: unknown) => ({ success: true as const, data: input as { title: string } }),
+        })
+        const cover = await this.file('cover')
+        const missing = await this.file('missing')
+        return { data, cover, missing }
+      }
+    }
+
+    const formData = new FormData()
+    formData.append('title', 'Hello')
+    formData.append('cover', new File([new Uint8Array([1, 2, 3])], 'cover.png', { type: 'image/png' }))
+
+    const controller = new UploadController()
+    controller.setContext(createControllerContext('http://example.com/posts', {
+      method: 'POST',
+      body: formData,
+    }) as unknown as ControllerContext)
+
+    const result = await controller.handle()
+
+    expect(result.data.title).toBe('Hello')
+    expect(result.cover).toBeInstanceOf(File)
+    expect(result.cover?.name).toBe('cover.png')
+    expect(result.missing).toBeNull()
+  })
+
+  it('files() returns every file of a repeated multipart field', async () => {
+    const { Controller } = createControllerModuleMock()
+
+    class UploadController extends Controller {
+      async handle() {
+        return this.files('images')
+      }
+    }
+
+    const formData = new FormData()
+    formData.append('images', new File([new Uint8Array([1])], 'a.png', { type: 'image/png' }))
+    formData.append('images', new File([new Uint8Array([2])], 'b.png', { type: 'image/png' }))
+    formData.append('images', new File([], 'empty.png', { type: 'image/png' }))
+
+    const controller = new UploadController()
+    controller.setContext(createControllerContext('http://example.com/posts', {
+      method: 'POST',
+      body: formData,
+    }) as unknown as ControllerContext)
+
+    const files = await controller.handle()
+
+    expect(files.map((file) => file.name)).toEqual(['a.png', 'b.png'])
+  })
+
+  it('file() returns null for non-multipart requests', async () => {
+    const { Controller } = createControllerModuleMock()
+
+    class UploadController extends Controller {
+      async handle() {
+        return this.file('cover')
+      }
+    }
+
+    const controller = new UploadController()
+    controller.setContext(createControllerContext('http://example.com/posts', {
+      method: 'POST',
+      body: JSON.stringify({ title: 'Hello' }),
+      headers: { 'Content-Type': 'application/json' },
+    }) as unknown as ControllerContext)
+
+    expect(await controller.handle()).toBeNull()
+  })
+
   it('formatValidationErrors formats Zod-like error', () => {
     const module = createGurenControllerModule()
     const error = {

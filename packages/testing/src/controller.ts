@@ -175,7 +175,10 @@ export function createGurenControllerModule() {
   return {
     Controller,
     parseRequestPayload: async (ctx: ControllerContext) => {
-      const request = ctx.req.raw
+      // Clone so the raw body stays readable — the real runtime caches the
+      // parsed body in Hono, letting validateBody() and file() compose on one
+      // request; here the clone is what preserves that property.
+      const request = ctx.req.raw.clone()
       const contentType = request.headers.get('Content-Type') ?? ''
 
       if (contentType.includes('application/json')) {
@@ -291,6 +294,27 @@ export function createControllerModuleMock() {
 
       this.parsedBody = ((await module.parseRequestPayload(this.ctx)) ?? {}) as Record<string, unknown>
       return this.parsedBody
+    }
+
+    public async file(name: string): Promise<File | null> {
+      const files = await this.files(name)
+      return files[0] ?? null
+    }
+
+    public async files(name: string): Promise<File[]> {
+      const request = this.ctx.req.raw
+      const contentType = request.headers.get('Content-Type') ?? ''
+
+      if (!contentType.includes('multipart/form-data')) {
+        return []
+      }
+
+      // Clone for the same reason as parseRequestPayload: both may read the
+      // body of the same request, mirroring Hono's parse cache.
+      const formData = await request.clone().formData()
+      return formData
+        .getAll(name)
+        .filter((value): value is File => value instanceof File && value.size > 0)
     }
 
     public async input<T = unknown>(key: string, defaultValue?: T): Promise<T | undefined> {
