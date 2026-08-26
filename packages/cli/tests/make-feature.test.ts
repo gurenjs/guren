@@ -95,6 +95,20 @@ describe('parseAttachString', () => {
     expect(() => parseAttachString('cover-image:one')).toThrow('Invalid attachment name')
   })
 
+  // A hasOne collection becomes `const <name>` in the generated store action,
+  // so a reserved word is a file that does not parse.
+  it('throws for a reserved-word name', () => {
+    expect(() => parseAttachString('await:one')).toThrow('reserved word')
+    expect(() => parseAttachString('class:many')).toThrow('reserved word')
+  })
+
+  // Extra or empty segments are typos that a silent default would mask.
+  it('throws for malformed kind segments', () => {
+    expect(() => parseAttachString('cover:many:typo')).toThrow('Invalid attachment definition')
+    expect(() => parseAttachString('cover::many')).toThrow('Invalid attachment definition')
+    expect(() => parseAttachString('cover:')).toThrow('Invalid attachment kind')
+  })
+
   // A repeated collection is a duplicate object key in the generated
   // Attachable declaration — the second silently wins, so it is refused.
   it('throws for a duplicate collection', () => {
@@ -164,6 +178,15 @@ describe('makeFeature --attach', () => {
       ).rejects.toThrow(/collides/)
       await expect(
         makeFeature('Post', { fields: 'title:string', attach: 'post:one' }),
+      ).rejects.toThrow(/collides/)
+      // Shadowing the model class puts the store action's own `Post.create`
+      // in a temporal dead zone; createdAt is a column every resource
+      // blueprint table (and most hand-written ones) carries.
+      await expect(
+        makeFeature('Post', { fields: 'title:string', attach: 'Post:one' }),
+      ).rejects.toThrow(/collides/)
+      await expect(
+        makeFeature('Post', { fields: 'title:string', attach: 'createdAt:one' }),
       ).rejects.toThrow(/collides/)
     } finally {
       await workspace.cleanup()

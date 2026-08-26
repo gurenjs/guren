@@ -2490,7 +2490,7 @@ const makeFeatureCommand = defineCommand({
   async run({ args }) {
     await makeFeature(args.name as string, {
       fields: args.fields,
-      attach: typeof args.attach === 'string' ? args.attach : undefined,
+      attach: args.attach,
       force: Boolean(args.force),
       root: args.module,
       withTest: Boolean(args.test),

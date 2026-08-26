@@ -173,8 +173,11 @@ for non-image uploads — the store action reads matching multipart fields via
 action calls `Post.purgeAttachments()` before deleting the row. The command
 refuses to scaffold when the app has no `configureAttachments()`; run
 `bunx guren add attachments` first. Add `<input type="file">` fields to the
-generated New/Edit pages yourself — Inertia's `useForm` switches to a
-multipart POST automatically when the form data contains a `File`.
+generated New page yourself — Inertia's `useForm` switches to a multipart
+POST automatically when the form data contains a `File`. The generated
+`update()` does not touch attachments; to accept uploads from the Edit page
+too, add the same `this.file()` + `Post.attach()` lines there (`hasOne`
+replaces, `hasMany` appends).
 
 ## Working with attachments
 

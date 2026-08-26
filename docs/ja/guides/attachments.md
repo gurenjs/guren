@@ -156,10 +156,13 @@ bunx guren make:feature Post --fields "title:string,body:text" --attach "cover:o
 読んで `Post.attach()` を呼び、destroy アクションは行の削除前に
 `Post.purgeAttachments()` を呼びます。アプリに `configureAttachments()` が
 ない場合、このコマンドはスキャフォールドを拒否します。先に
-`bunx guren add attachments` を実行してください。生成された New/Edit
+`bunx guren add attachments` を実行してください。生成された New
 ページへの `<input type="file">` の追加は手動で行います（Inertia の
 `useForm` はフォームデータに `File` が含まれると自動的に multipart POST に
-切り替わります）。
+切り替わります）。生成された `update()` はアタッチメントに触れません。
+Edit ページからのアップロードも受け付けるには、同じ `this.file()` と
+`Post.attach()` の行を `update()` にも追加してください（`hasOne` は置換、
+`hasMany` は追加になります）。
 
 ## アタッチメントの操作
 

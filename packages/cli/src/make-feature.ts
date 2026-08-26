@@ -54,15 +54,15 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
 
   // A collection sharing a name with a column is a compile error in the
   // generated model (the mixin rejects declaration keys that shadow columns),
-  // and one sharing a name with the store action's own locals would generate
-  // a redeclared binding — both are usage errors this can say outright
-  // instead of shipping as a file that does not compile.
-  const reservedAttachmentNames = new Set([...fields.map((field) => field.name), 'id', 'data', variableName])
+  // and one sharing a name with an identifier the generated store action
+  // already binds or references would shadow it — both are usage errors this
+  // can say outright instead of shipping as a file that does not compile.
+  const reserved = reservedAttachmentNames(fields, singular, variableName)
   for (const attachment of attachments) {
-    if (reservedAttachmentNames.has(attachment.name)) {
+    if (reserved.has(attachment.name)) {
       throw new Error(
-        `Attachment collection "${attachment.name}" collides with a field, the record's id, or the `
-        + `generated store action's own variables ("data", "${variableName}"). Pick another name.`,
+        `Attachment collection "${attachment.name}" collides with a column of the ${singular} table `
+        + `or an identifier the generated controller already uses. Pick another name.`,
       )
     }
   }
@@ -95,6 +95,8 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
     throw new Error(
       'guren make:feature --attach scaffolds a model wired to the attachments layer, but this app has no '
       + 'configureAttachments() call. Run `bunx guren add attachments` first, then re-run this command. '
+      + 'If your app wires attachments in a shape this cannot detect (a namespace import, a wrapper), '
+      + 'scaffold without --attach and add the Attachable mixin to the model by hand. '
       + 'Nothing was scaffolded.',
     )
   }
@@ -193,8 +195,11 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
     const fieldNames = attachments.map((attachment) => `"${attachment.name}"`).join(', ')
     consola.info('')
     consola.info(`  Attachments: store() reads the multipart field(s) ${fieldNames} via this.file()/this.files().`)
-    consola.info(`  Add matching <input type="file"> fields to the New/Edit pages (Inertia's useForm posts`)
-    consola.info(`  multipart automatically when the form data contains a File).`)
+    consola.info(`  Add matching <input type="file"> fields to the New page (Inertia's useForm posts multipart`)
+    consola.info(`  automatically when the form data contains a File). Uploads are validated as images and 422`)
+    consola.info(`  on anything else — drop image: 'require' in the model for opaque bytes like PDFs.`)
+    consola.info(`  update() does not touch attachments; to accept uploads from the Edit page, add the same`)
+    consola.info(`  this.file() + ${singular}.attach() lines there (hasOne replaces, hasMany appends).`)
     consola.info(`  destroy() calls ${singular}.purgeAttachments() before deleting the row — attachment rows`)
     consola.info(`  have no foreign key, so deletion stays explicit.`)
   }
@@ -256,6 +261,32 @@ export function buildRouteRegistrationHint(options: {
 }
 
 // --- Template generators ---
+
+/**
+ * Names an attachment collection may not take, derived from what the
+ * generated code binds where the attach lines land — kept beside the
+ * templates so a renamed store local moves this set in the same edit.
+ *
+ * `createdAt`/`updatedAt` are reserved even though `make:feature` never sees
+ * the table: the resource blueprint always appends both columns, most
+ * hand-written tables carry them too, and a declaration key that shadows a
+ * column is a compile error in the mixin. `data`, the record variable, the
+ * model class, and its payload schema are all in scope before the attach
+ * lines in the generated store action, so a collection reusing one of them
+ * would shadow a binding the earlier lines already used.
+ */
+function reservedAttachmentNames(fields: FieldDefinition[], singular: string, variableName: string): Set<string> {
+  return new Set([
+    ...fields.map((field) => field.name),
+    'id',
+    'createdAt',
+    'updatedAt',
+    'data',
+    variableName,
+    singular,
+    `${singular}PayloadSchema`,
+  ])
+}
 
 // Keyed by `FieldType` rather than `string`, so adding a field type fails to
 // compile here instead of silently falling through to a string default.

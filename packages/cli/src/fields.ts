@@ -9,6 +9,8 @@
  * `make:validator`, so a definition owned by either would be a cycle.
  */
 
+import { isIdentifier } from './utils'
+
 export const FIELD_TYPES = ['string', 'number', 'boolean', 'text', 'date', 'json'] as const
 
 export type FieldType = (typeof FIELD_TYPES)[number]
@@ -47,7 +49,7 @@ export function parseFieldsString(fieldsStr: string): FieldDefinition[] {
     // The name becomes an object key, a property access and a state key in the
     // generated code, so anything that is not an identifier produces a file
     // that cannot be parsed — better to say so than to emit it.
-    if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name)) {
+    if (!isIdentifier(name)) {
       throw new Error(`Invalid field name "${name}". Use a valid identifier, e.g. "publishedAt".`)
     }
 
@@ -67,6 +69,22 @@ export interface AttachmentDefinition {
   name: string
   kind: AttachmentKind
 }
+
+/**
+ * Names `isIdentifier` accepts that still cannot be bound with `const` — a
+ * hasOne collection becomes exactly that in the generated store action
+ * (`const cover = await this.file('cover')`), so a reserved word there is a
+ * file that does not parse. Field names deliberately skip this list: they
+ * only ever appear as object keys and property accesses, where reserved
+ * words are legal.
+ */
+const RESERVED_WORDS = new Set([
+  'await', 'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default', 'delete',
+  'do', 'else', 'enum', 'export', 'extends', 'false', 'finally', 'for', 'function', 'if',
+  'implements', 'import', 'in', 'instanceof', 'interface', 'let', 'new', 'null', 'package',
+  'private', 'protected', 'public', 'return', 'static', 'super', 'switch', 'this', 'throw',
+  'true', 'try', 'typeof', 'var', 'void', 'while', 'with', 'yield',
+])
 
 /**
  * `--attach "cover:one,images:many"`, mirroring `--fields`' shape: comma
@@ -89,15 +107,25 @@ export function parseAttachString(attachStr: string): AttachmentDefinition[] {
   return attachStr.split(',').map((entry) => {
     const parts = entry.trim().split(':')
     const name = parts[0]?.trim()
-    const kind = parts[1]?.trim() || 'one'
+    // The default applies only to a genuinely omitted kind — an empty or
+    // extra segment (`cover:`, `cover::many`, `cover:many:typo`) is a typo
+    // that silently defaulting would mask.
+    const kind = parts.length > 1 ? parts[1]?.trim() : 'one'
 
-    if (!name) throw new Error(`Invalid attachment definition: "${entry}"`)
+    if (!name || parts.length > 2) throw new Error(`Invalid attachment definition: "${entry}"`)
 
     // Same rule as field names, for the same reason: the name becomes an
     // object key in the model declaration, a variable in the generated store
     // action, and a multipart field name.
-    if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name)) {
+    if (!isIdentifier(name)) {
       throw new Error(`Invalid attachment name "${name}". Use a valid identifier, e.g. "coverImage".`)
+    }
+
+    if (RESERVED_WORDS.has(name)) {
+      throw new Error(
+        `Invalid attachment name "${name}": a reserved word cannot be bound as the variable the `
+        + `generated store action needs. Pick another name.`,
+      )
     }
 
     if (!ATTACHMENT_KINDS.includes(kind as AttachmentKind)) {

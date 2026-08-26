@@ -22,26 +22,22 @@ function attachableFactory(kind: AttachmentDefinition['kind']): string {
 function modelTemplate(className: string, attachments: AttachmentDefinition[]): string {
   const schemaIdentifier = schemaIdentifierFor(className)
 
-  if (attachments.length === 0) {
-    return `import { defineModel } from '@guren/core'
-import { ${schemaIdentifier} } from '../../db/schema.js'
-
-export type ${className}Record = typeof ${schemaIdentifier}.$inferSelect
-export type New${className}Record = typeof ${schemaIdentifier}.$inferInsert
-
-export class ${className} extends defineModel(${schemaIdentifier}) {
-}
-`
-  }
-
+  // This scaffold's own default, not the framework's: every collection gets
+  // `image: 'require'` (full-decode validation, 422 on non-image) because
+  // safe-by-default matches the rest of the CLI's posture, and the option
+  // sits in the generated file for the author to delete. Drop it per
+  // collection for opaque bytes (PDFs, archives) — `hasOneAttached()` with
+  // no options.
   const factories = [...new Set(attachments.map((attachment) => attachableFactory(attachment.kind)))]
-  const imports = ['Attachable', 'defineModel', ...factories].sort().join(', ')
-  // `image: 'require'` is the RFC 0013 default for scaffolds: uploads are
-  // full-decode validated as images (422 otherwise). Drop it per collection
-  // for opaque bytes (PDFs, archives) — `hasOneAttached()` with no options.
+  const imports = attachments.length === 0
+    ? 'defineModel'
+    : ['Attachable', 'defineModel', ...factories].sort().join(', ')
   const declaration = attachments
     .map((attachment) => `  ${attachment.name}: ${attachableFactory(attachment.kind)}({ image: 'require' }),`)
     .join('\n')
+  const heritage = attachments.length === 0
+    ? `defineModel(${schemaIdentifier})`
+    : `Attachable(defineModel(${schemaIdentifier}), {\n${declaration}\n})`
 
   return `import { ${imports} } from '@guren/core'
 import { ${schemaIdentifier} } from '../../db/schema.js'
@@ -49,9 +45,7 @@ import { ${schemaIdentifier} } from '../../db/schema.js'
 export type ${className}Record = typeof ${schemaIdentifier}.$inferSelect
 export type New${className}Record = typeof ${schemaIdentifier}.$inferInsert
 
-export class ${className} extends Attachable(defineModel(${schemaIdentifier}), {
-${declaration}
-}) {
+export class ${className} extends ${heritage} {
 }
 `
 }
