@@ -548,7 +548,7 @@ attachment shown to a user is a private attachment that user can save.
 
 | Package | Adds |
 |---|---|
-| `@guren/server` | `signUrl`/`verifySignedUrl` relative-input support + canonicalization fix; `StorageDriver.getStream?` + `capabilities?`; `LocalDriver.getStream`, `S3Driver.getStream`, `S3Driver.capabilities` |
+| `@guren/server` | the three §2 signer fixes (relative input/output, code-unit canonicalization, strict `expires`); `StorageDriver.getStream?` + `capabilities?` + the §3 `temporaryUrl` response-override options; `LocalDriver.getStream`, `S3Driver.getStream`, `S3Driver.capabilities`, S3 response overrides *(row amended in Part 1: the original omitted the strict-`expires` fix and the `temporaryUrl` bag that §2/§3 already specified)* |
 | `@guren/core` | `delivery` option on `configureAttachments`; `registerAttachmentRoutes` + the delivery controller; `urlFor` switch; **core-native export** → explicit `packages/core/src/index.ts` wiring + a core changeset (allowlist rule) |
 | `@guren/plugin-cloudflare` | `R2Driver.getStream`, `R2Driver.capabilities` (from `presign` presence); Cloudflare guide: "private attachments on the binding, no `presign` needed" |
 | `@guren/cli` | `guren check` rule (§6); scaffold template comment update (`packages/cli/templates/scaffold/attachments/config/attachments.ts`) |
@@ -568,11 +568,14 @@ an app wants to keep.
 
 ### Implementation plan
 
-1. **Part 1 — server:** signer fixes (relative input, code-unit sort)
-   + `getStream?`/`capabilities?` on the interface + Local/S3
-   implementations. Tests: sign/verify round-trips relative and
-   absolute, cross-locale canonicalization, stream vs. buffered
-   parity per driver.
+1. **Part 1 — server:** the §2 signer fixes (relative input/output,
+   code-unit sort, strict `expires`) + `getStream?`/`capabilities?`
+   and the §3 `temporaryUrl` response-override options on the
+   interface + Local/S3 implementations. Tests: sign/verify
+   round-trips relative and absolute, output shape (no placeholder
+   origin), canonicalization order pins, malformed-`expires`
+   rejection, stream vs. buffered parity per driver, response
+   overrides reaching the presigned command.
 2. **Part 2 — core:** `delivery` config + `registerAttachmentRoutes`
    + the controller (verify → load → resolve variant → redirect/proxy
    with §4 headers) + `urlFor` switch + `AttachmentData` passthrough.

@@ -8,10 +8,12 @@ import {
   rm,
   copyFile,
   rename,
+  open,
 } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
+import { Readable } from 'node:stream'
 import { join, dirname, relative, resolve, sep } from 'node:path'
-import type { StorageDriver, LocalDriverOptions, PutOptions, FileMetadata } from '../types'
+import type { StorageDriver, LocalDriverOptions, PutOptions, FileMetadata, GetStreamOptions } from '../types'
 import { warnOnce } from '../../support/warn-once'
 
 /**
@@ -93,6 +95,34 @@ export class LocalDriver implements StorageDriver {
   async getAsString(path: string): Promise<string | null> {
     const content = await this.get(path)
     return content ? content.toString('utf-8') : null
+  }
+
+  async getStream(path: string, options?: GetStreamOptions): Promise<ReadableStream<Uint8Array> | null> {
+    const fullPath = this.fullPath(path)
+
+    // Open before returning: a bare createReadStream() hands back a stream
+    // whose open fails asynchronously, which cannot honour the contract's
+    // `null` for a missing file.
+    let handle: Awaited<ReturnType<typeof open>>
+    try {
+      handle = await open(fullPath, 'r')
+    } catch {
+      return null
+    }
+
+    const stats = await handle.stat()
+    if (!stats.isFile()) {
+      await handle.close()
+      return null
+    }
+
+    // autoClose (default) closes the handle when the stream ends or errors.
+    const nodeStream = handle.createReadStream(
+      options?.range ? { start: options.range.start, end: options.range.end } : undefined,
+    )
+    // node:stream/web's ReadableStream is a distinct type from the global
+    // one; the runtime object is the same — normalize at this boundary.
+    return Readable.toWeb(nodeStream) as unknown as ReadableStream<Uint8Array>
   }
 
   async exists(path: string): Promise<boolean> {

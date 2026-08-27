@@ -1,4 +1,12 @@
-import type { StorageDriver, S3DriverOptions, PutOptions, FileMetadata } from '../types'
+import type {
+  StorageDriver,
+  S3DriverOptions,
+  PutOptions,
+  FileMetadata,
+  GetStreamOptions,
+  TemporaryUrlOptions,
+  StorageDriverCapabilities,
+} from '../types'
 import { assertVisibilitySupported, cannedAcl, putAclFields } from './s3-acl'
 
 /**
@@ -26,6 +34,10 @@ interface S3Client {
  * ```
  */
 export class S3Driver implements StorageDriver {
+  // S3's temporaryUrl() is a real SigV4 presign the bucket enforces —
+  // declared, not probed (RFC 0015 §3).
+  readonly capabilities: StorageDriverCapabilities = { presignedGet: true }
+
   private client: S3Client | null = null
   private readonly bucket: string
   private readonly region: string
@@ -157,6 +169,36 @@ export class S3Driver implements StorageDriver {
     return content ? content.toString('utf-8') : null
   }
 
+  async getStream(path: string, options?: GetStreamOptions): Promise<ReadableStream<Uint8Array> | null> {
+    const client = await this.getClient()
+    const { GetObjectCommand } = await importAwsModule('@aws-sdk/client-s3') as {
+      GetObjectCommand: new (input: unknown) => unknown
+    }
+
+    try {
+      const command = new GetObjectCommand({
+        Bucket: this.bucket,
+        Key: this.prefixKey(path),
+        ...(options?.range
+          ? { Range: `bytes=${options.range.start}-${options.range.end ?? ''}` }
+          : {}),
+      })
+
+      const response = await client.send(command) as {
+        Body?: { transformToWebStream(): ReadableStream<Uint8Array> }
+      }
+
+      // The SDK body is not itself a web stream on Node; the contract is a
+      // global web ReadableStream, so normalize at the driver boundary.
+      return response.Body ? response.Body.transformToWebStream() : null
+    } catch (error: unknown) {
+      if (error && typeof error === 'object' && 'name' in error && error.name === 'NoSuchKey') {
+        return null
+      }
+      throw error
+    }
+  }
+
   async exists(path: string): Promise<boolean> {
     const client = await this.getClient()
     const { HeadObjectCommand } = await importAwsModule('@aws-sdk/client-s3') as {
@@ -251,7 +293,7 @@ export class S3Driver implements StorageDriver {
     return `${this.baseUrl}/${this.prefixKey(path)}`
   }
 
-  async temporaryUrl(path: string, expiration: Date): Promise<string> {
+  async temporaryUrl(path: string, expiration: Date, options?: TemporaryUrlOptions): Promise<string> {
     const client = await this.getClient()
     const { GetObjectCommand } = await importAwsModule('@aws-sdk/client-s3') as {
       GetObjectCommand: new (input: unknown) => unknown
@@ -263,6 +305,12 @@ export class S3Driver implements StorageDriver {
     const command = new GetObjectCommand({
       Bucket: this.bucket,
       Key: this.prefixKey(path),
+      ...(options?.responseContentDisposition
+        ? { ResponseContentDisposition: options.responseContentDisposition }
+        : {}),
+      ...(options?.responseContentType
+        ? { ResponseContentType: options.responseContentType }
+        : {}),
     })
 
     const expiresIn = Math.max(1, Math.floor((expiration.getTime() - Date.now()) / 1000))

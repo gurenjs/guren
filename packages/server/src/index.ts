@@ -439,6 +439,9 @@ export type {
   StorageDriverFactory,
   PutOptions,
   FileMetadata,
+  TemporaryUrlOptions,
+  GetStreamOptions,
+  StorageDriverCapabilities,
 } from './storage'
 // Scheduling
 export {

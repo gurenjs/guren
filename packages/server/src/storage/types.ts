@@ -54,9 +54,53 @@ export interface FileMetadata {
 }
 
 /**
+ * Response-override options for temporary (presigned) URLs — RFC 0015 §3.
+ *
+ * Drivers that presign map these onto the backend's `response-*` overrides
+ * (S3: `ResponseContentDisposition` / `ResponseContentType` on the presigned
+ * `GetObjectCommand`) so Content-Disposition and Content-Type policy
+ * survives a redirect to the bucket. A driver that cannot honour them
+ * ignores them and serves its own object metadata — a caller that needs the
+ * guarantee must proxy the bytes instead.
+ */
+export interface TemporaryUrlOptions {
+  responseContentDisposition?: string
+  responseContentType?: string
+}
+
+/**
+ * Streaming-read options. `range` is byte-inclusive (`start`..`end`, `end`
+ * omitted = to end of file), matching HTTP Range semantics.
+ */
+export interface GetStreamOptions {
+  range?: { start: number; end?: number }
+}
+
+/**
+ * Capabilities a driver positively declares — RFC 0015 §3. Absent means
+ * none: a capability not declared is treated as unavailable (fail-closed),
+ * never probed. Probing cannot work here: `LocalDriver.temporaryUrl()`
+ * succeeds and returns a plain public URL, so a try/catch probe would
+ * misclassify exactly the disk that must not redirect.
+ */
+export interface StorageDriverCapabilities {
+  /**
+   * `temporaryUrl()` returns a URL whose bearer-signature the backend
+   * itself enforces (S3-style presign) — not merely a URL. `LocalDriver`
+   * must NOT declare this: its `temporaryUrl()` is the plain public URL.
+   */
+  presignedGet?: boolean
+}
+
+/**
  * Storage driver interface.
  */
 export interface StorageDriver {
+  /**
+   * Capabilities the delivery layer may rely on. Absent ⇒ none declared.
+   */
+  readonly capabilities?: StorageDriverCapabilities
+
   /**
    * Put a file into storage.
    * @param path File path
@@ -135,8 +179,26 @@ export interface StorageDriver {
    * Get a temporary (signed) URL for a file.
    * @param path File path
    * @param expiration Expiration date
+   * @param options Response overrides for presigning drivers (ignored by
+   *                drivers that cannot honour them — see TemporaryUrlOptions)
    */
-  temporaryUrl(path: string, expiration: Date): Promise<string>
+  temporaryUrl(path: string, expiration: Date, options?: TemporaryUrlOptions): Promise<string>
+
+  /**
+   * Read a file as a stream. Optional — callers fall back to buffered
+   * `get()` where absent.
+   *
+   * Contract: resolves `null` for a missing file, verified *before* the
+   * stream is returned (a stream whose open fails after return cannot
+   * honour that), and the result is normalized to the global web
+   * `ReadableStream` at the driver's own boundary (`Readable.toWeb`,
+   * `Body.transformToWebStream()`, or a cast where the runtime's stream
+   * type is structurally compatible).
+   *
+   * @param path File path
+   * @param options Optional byte range
+   */
+  getStream?(path: string, options?: GetStreamOptions): Promise<ReadableStream<Uint8Array> | null>
 
   /**
    * Get the file size in bytes.

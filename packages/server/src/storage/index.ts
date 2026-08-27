@@ -9,6 +9,9 @@ export type {
   S3DriverOptions,
   MemoryDriverOptions,
   DriverConfig,
+  TemporaryUrlOptions,
+  GetStreamOptions,
+  StorageDriverCapabilities,
 } from './types'
 
 export { LocalDriver } from './drivers/LocalDriver'
