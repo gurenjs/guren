@@ -104,7 +104,7 @@ describe('database schema templates', () => {
 
         return {
           driver,
-          exports: transpiler.scan(source).exports.toSorted(),
+          exports: [...transpiler.scan(source).exports].sort(),
           columns: [...source.matchAll(/^ {2}(\w+):/gmu)].map((match) => match[1]),
         }
       }),
@@ -134,7 +134,7 @@ describe('database schema templates', () => {
     expect(layers.length).toBeGreaterThan(0)
 
     for (const layer of layers) {
-      const files = await readdir(join(TEMPLATES_ROOT, layer, 'db')).catch(() => [])
+      const files = await readdir(join(TEMPLATES_ROOT, layer, 'db')).catch((): string[] => [])
 
       expect({ layer, plainSchema: files.includes('schema.ts') }).toEqual({ layer, plainSchema: false })
     }

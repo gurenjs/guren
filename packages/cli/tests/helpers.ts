@@ -303,6 +303,21 @@ export async function readApiOnlyTemplateFile(relativePath: string): Promise<str
 }
 
 /**
+ * The generic `db/schema.ts` a scaffolded app is given, as
+ * `create-guren-app` ships it.
+ *
+ * Not a file any *template* carries: `applyDatabaseConfig` writes this one
+ * over whatever the copy left there, picking it by driver, so the api-only
+ * template ships no `db/schema.ts` of its own to read. Reading the real
+ * fallback rather than the template is also what makes the fixture true —
+ * the template's dead copy declared an empty `schema`, and no scaffolded app
+ * has ever had that.
+ */
+export async function readShippedSchemaFile(driver: 'postgres' | 'mysql' | 'sqlite' = 'sqlite'): Promise<string> {
+  return readFile(join(import.meta.dir, `../../create-app/templates/database/${driver}/db/schema.ts`), 'utf8')
+}
+
+/**
  * The api-only starter as shipped, reduced to the two files
  * `isConfirmedApiOnlyApp` reads — for tests that only need the predicate to
  * recognize a real starter rather than the whole app on disk.
