@@ -11,7 +11,7 @@ describeR2DriverConformance('R2Driver (FakeR2Bucket)', {
     for (const key of fake.keys()) await fake.delete(key)
     fake.calls.length = 0
   },
-  streamingCopy: true,
+  streamingBody: true,
 })
 
 // What only the fake can observe: which calls the driver makes, and how it
@@ -130,5 +130,58 @@ describe('R2Driver against the binding', () => {
       expect(url.searchParams.get('X-Amz-Credential')).toMatch(/^AKIDEXAMPLE\/\d{8}\/auto\/s3\/aws4_request$/)
       expect(url.searchParams.get('X-Amz-Signature')).toMatch(/^[0-9a-f]{64}$/)
     })
+  })
+})
+
+describe('R2Driver delivery surface (RFC 0015)', () => {
+  test('declares presignedGet iff presign credentials are configured', () => {
+    const presign = { accountId: 'acct', bucket: 'b', accessKeyId: 'k', secretAccessKey: 's' }
+    const { driver: bindingOnly } = createDriver()
+    const withPresign = new R2Driver({ binding: () => new FakeR2Bucket(), presign })
+
+    expect(bindingOnly.capabilities).toBeUndefined()
+    expect(withPresign.capabilities).toEqual({ presignedGet: true })
+  })
+
+  test('getStream maps the inclusive range onto R2 offset/length', async () => {
+    const { bucket, driver } = createDriver({ prefix: 'media' })
+    await driver.put('range.bin', Buffer.from('0123456789'))
+    bucket.calls.length = 0
+
+    await driver.getStream('range.bin', { range: { start: 2, end: 5 } })
+    await driver.getStream('range.bin', { range: { start: 7 } })
+    await driver.getStream('range.bin')
+
+    expect(bucket.calls[0]).toEqual({
+      method: 'get',
+      args: ['media/range.bin', { range: { offset: 2, length: 4 } }],
+    })
+    expect(bucket.calls[1]).toEqual({
+      method: 'get',
+      args: ['media/range.bin', { range: { offset: 7 } }],
+    })
+    expect(bucket.calls[2]).toEqual({ method: 'get', args: ['media/range.bin'] })
+  })
+
+  test('temporaryUrl signs the response overrides into the presigned query', async () => {
+    const presign = { accountId: 'acct123', bucket: 'my-bucket', accessKeyId: 'AKIDEXAMPLE', secretAccessKey: 'secret' }
+    const driver = new R2Driver({ binding: () => new FakeR2Bucket(), presign })
+
+    const url = new URL(
+      await driver.temporaryUrl('doc.pdf', new Date(Date.now() + 3600 * 1000), {
+        responseContentDisposition: 'attachment; filename="doc.pdf"',
+        responseContentType: 'application/pdf',
+      }),
+    )
+
+    expect(url.searchParams.get('response-content-disposition')).toBe('attachment; filename="doc.pdf"')
+    expect(url.searchParams.get('response-content-type')).toBe('application/pdf')
+    // Present before X-Amz-Signature was computed, so they are signed query
+    // parameters — stripping or altering them invalidates the URL.
+    expect(url.searchParams.get('X-Amz-Signature')).toMatch(/^[0-9a-f]{64}$/)
+
+    const plain = new URL(await driver.temporaryUrl('doc.pdf', new Date(Date.now() + 3600 * 1000)))
+    expect(plain.searchParams.has('response-content-disposition')).toBe(false)
+    expect(plain.searchParams.has('response-content-type')).toBe(false)
   })
 })

@@ -7,11 +7,12 @@ export interface R2ConformanceHarness {
   /** Empties the bucket between tests. */
   reset(bucket: R2BucketLike): Promise<void>
   /**
-   * Whether `copy()`/`move()` can run in this harness. The driver pipes
-   * `get().body` into `put()`; Miniflare's binding proxy cannot marshal that
-   * stream, so its harness runs those two methods inside workerd instead.
+   * Whether methods that hand `get().body` onward can run in this harness:
+   * `copy()`/`move()` pipe it into `put()`, `getStream()` returns it to the
+   * caller. Miniflare's binding proxy cannot marshal that stream, so its
+   * harness runs all three inside workerd instead.
    */
-  streamingCopy: boolean
+  streamingBody: boolean
 }
 
 /**
@@ -75,6 +76,30 @@ export function describeR2DriverConformance(name: string, harness: R2Conformance
       })
     })
 
+    describe.skipIf(!harness.streamingBody)('getStream', () => {
+      test('streams the same bytes get() returns', async () => {
+        await driver.put('stream.bin', Buffer.from('stream me, byte for byte'))
+        const stream = await driver.getStream('stream.bin')
+        expect(stream).not.toBeNull()
+        expect(Buffer.from(await new Response(stream!).arrayBuffer()).toString()).toBe(
+          'stream me, byte for byte',
+        )
+      })
+
+      test('honours an inclusive byte range', async () => {
+        await driver.put('range.bin', Buffer.from('0123456789'))
+        const middle = await driver.getStream('range.bin', { range: { start: 2, end: 5 } })
+        expect(Buffer.from(await new Response(middle!).arrayBuffer()).toString()).toBe('2345')
+
+        const tail = await driver.getStream('range.bin', { range: { start: 7 } })
+        expect(Buffer.from(await new Response(tail!).arrayBuffer()).toString()).toBe('789')
+      })
+
+      test('returns null for a missing key', async () => {
+        expect(await driver.getStream('missing.bin')).toBeNull()
+      })
+    })
+
     test('putFile throws: Workers has no filesystem', async () => {
       await expect(driver.putFile('a.txt', '/tmp/a.txt')).rejects.toThrow(/no filesystem/)
     })
@@ -102,7 +127,7 @@ export function describeR2DriverConformance(name: string, harness: R2Conformance
       })
     })
 
-    describe.skipIf(!harness.streamingCopy)('copy/move', () => {
+    describe.skipIf(!harness.streamingBody)('copy/move', () => {
       test('copies bytes and metadata to the new key', async () => {
         await driver.put('src.txt', 'content', { contentType: 'text/plain', metadata: { k: 'v' } })
         expect(await driver.copy('src.txt', 'dst.txt')).toBe('dst.txt')

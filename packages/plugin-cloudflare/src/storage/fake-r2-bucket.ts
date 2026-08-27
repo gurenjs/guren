@@ -1,5 +1,6 @@
 import type {
   R2BucketLike,
+  R2GetOptionsLike,
   R2ListOptionsLike,
   R2ObjectBodyLike,
   R2ObjectLike,
@@ -50,11 +51,19 @@ export class FakeR2Bucket implements R2BucketLike {
     return stored ? this.toObject(key, stored) : null
   }
 
-  async get(key: string): Promise<R2ObjectBodyLike | null> {
-    this.calls.push({ method: 'get', args: [key] })
+  async get(key: string, options?: R2GetOptionsLike): Promise<R2ObjectBodyLike | null> {
+    this.calls.push({ method: 'get', args: options ? [key, options] : [key] })
     const stored = this.objects.get(key)
     if (!stored) return null
-    const bytes = stored.bytes
+    // A range affects only the body/readers, like the real binding; the
+    // object's `size` stays the full object size.
+    const range = options?.range
+    const bytes = range
+      ? stored.bytes.subarray(
+          range.offset,
+          range.length !== undefined ? range.offset + range.length : undefined,
+        )
+      : stored.bytes
     return {
       ...this.toObject(key, stored),
       body: new Blob([new Uint8Array(bytes)]).stream(),

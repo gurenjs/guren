@@ -13,11 +13,13 @@ const bucketIsBucketLike: Assignable<R2Bucket, R2BucketLike> = true
 // driver hands to put()/list() must be a legal option for the real binding.
 type PutOptionsOf<B> = B extends { put(key: string, value: never, options?: infer O): unknown } ? O : never
 type ListOptionsOf<B> = B extends { list(options?: infer O): unknown } ? O : never
+type GetOptionsOf<B> = B extends { get(key: string, options?: infer O): unknown } ? O : never
 const putOptionsFit: Assignable<PutOptionsOf<R2BucketLike>, PutOptionsOf<R2Bucket>> = true
 const listOptionsFit: Assignable<ListOptionsOf<R2BucketLike>, ListOptionsOf<R2Bucket>> = true
+const getOptionsFit: Assignable<GetOptionsOf<R2BucketLike>, GetOptionsOf<R2Bucket>> = true
 
 describe('R2BucketLike', () => {
   test('is satisfied by @cloudflare/workers-types R2Bucket (checked at typecheck time)', () => {
-    expect(bucketIsBucketLike && putOptionsFit && listOptionsFit).toBe(true)
+    expect(bucketIsBucketLike && putOptionsFit && listOptionsFit && getOptionsFit).toBe(true)
   })
 })

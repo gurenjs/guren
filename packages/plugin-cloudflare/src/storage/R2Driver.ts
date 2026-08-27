@@ -1,4 +1,11 @@
-import type { FileMetadata, PutOptions, StorageDriver } from '@guren/core'
+import type {
+  FileMetadata,
+  GetStreamOptions,
+  PutOptions,
+  StorageDriver,
+  StorageDriverCapabilities,
+  TemporaryUrlOptions,
+} from '@guren/core'
 import { presignGetUrl } from './sigv4'
 
 /**
@@ -71,9 +78,14 @@ export interface R2PutOptionsLike {
 
 export type R2PutValue = R2StreamLike | R2BlobLike | ArrayBuffer | ArrayBufferView | string | null
 
+export interface R2GetOptionsLike {
+  /** R2's offset/length range form (the driver never sends `suffix`). */
+  range?: { offset: number; length?: number }
+}
+
 export interface R2BucketLike {
   head(key: string): Promise<R2ObjectLike | null>
-  get(key: string): Promise<R2ObjectBodyLike | null>
+  get(key: string, options?: R2GetOptionsLike): Promise<R2ObjectBodyLike | null>
   put(key: string, value: R2PutValue, options?: R2PutOptionsLike): Promise<R2ObjectLike | null>
   delete(keys: string | string[]): Promise<void>
   list(options?: R2ListOptionsLike): Promise<R2ObjectsLike>
@@ -142,6 +154,13 @@ const DELETE_CONCURRENCY = 6
  * ```
  */
 export class R2Driver implements StorageDriver {
+  /**
+   * Declared iff `presign` credentials were configured — a config fact,
+   * never a probe (RFC 0015 §3): without them `temporaryUrl()` throws, and
+   * the delivery route must know that *before* handing out a redirect.
+   */
+  readonly capabilities?: StorageDriverCapabilities
+
   private readonly resolveBinding: () => unknown
   private readonly publicUrl?: string
   private readonly prefix: string
@@ -154,6 +173,9 @@ export class R2Driver implements StorageDriver {
     this.prefix = trimSlashes(options.prefix ?? '')
     this.diskVisibility = options.visibility ?? (options.publicUrl ? 'public' : 'private')
     this.presign = options.presign
+    if (options.presign) {
+      this.capabilities = { presignedGet: true }
+    }
   }
 
   private bucket(): R2BucketLike {
@@ -220,6 +242,26 @@ export class R2Driver implements StorageDriver {
   async getAsString(path: string): Promise<string | null> {
     const object = await this.bucket().get(this.key(path))
     return object ? object.text() : null
+  }
+
+  async getStream(path: string, options?: GetStreamOptions): Promise<ReadableStream<Uint8Array> | null> {
+    const key = this.key(path)
+    // HTTP-style inclusive start..end maps onto R2's offset/length form.
+    const object = options?.range
+      ? await this.bucket().get(key, {
+          range: {
+            offset: options.range.start,
+            ...(options.range.end !== undefined
+              ? { length: options.range.end - options.range.start + 1 }
+              : {}),
+          },
+        })
+      : await this.bucket().get(key)
+    if (!object) return null
+    // workers-types declares its own ReadableStream, deliberately not the
+    // global one (see R2StreamLike); the runtime object is the same —
+    // normalize at this boundary (RFC 0015 §5).
+    return object.body as unknown as ReadableStream<Uint8Array>
   }
 
   async exists(path: string): Promise<boolean> {
@@ -290,7 +332,7 @@ export class R2Driver implements StorageDriver {
     return `${this.publicUrl}/${encodeKey(this.key(path))}`
   }
 
-  async temporaryUrl(path: string, expiration: Date): Promise<string> {
+  async temporaryUrl(path: string, expiration: Date, options?: TemporaryUrlOptions): Promise<string> {
     if (!this.presign) {
       throw new Error(
         'R2Driver.temporaryUrl() cannot sign URLs through the R2 binding. Either configure ' +
@@ -304,8 +346,20 @@ export class R2Driver implements StorageDriver {
         `R2Driver.temporaryUrl(): R2 presigned URLs may be valid for at most 7 days (requested ${expiresIn}s).`,
       )
     }
+    const url = new URL(
+      `https://${this.presign.accountId}.r2.cloudflarestorage.com/${this.presign.bucket}/${encodeKey(this.key(path))}`,
+    )
+    // Response overrides ride as query parameters, which presignGetUrl signs
+    // along with everything else — how Content-Disposition/Content-Type
+    // policy survives a redirect to the bucket (RFC 0015 §3).
+    if (options?.responseContentDisposition) {
+      url.searchParams.set('response-content-disposition', options.responseContentDisposition)
+    }
+    if (options?.responseContentType) {
+      url.searchParams.set('response-content-type', options.responseContentType)
+    }
     return presignGetUrl({
-      url: `https://${this.presign.accountId}.r2.cloudflarestorage.com/${this.presign.bucket}/${encodeKey(this.key(path))}`,
+      url: url.toString(),
       accessKeyId: this.presign.accessKeyId,
       secretAccessKey: this.presign.secretAccessKey,
       // R2's S3 API is single-region.
