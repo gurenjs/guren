@@ -33,7 +33,7 @@ describe('Blog StorageProvider', () => {
       default: 'local',
       disks: {
         local: { driver: 'local', root: './storage/app' },
-        public: { driver: 'local', root: './storage/app/public', visibility: 'public' },
+        public: { driver: 'local', root: './public/storage', url: '/storage', visibility: 'public' },
       },
     })
   })

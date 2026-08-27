@@ -175,7 +175,10 @@ export function createGurenControllerModule() {
   return {
     Controller,
     parseRequestPayload: async (ctx: ControllerContext) => {
-      const request = ctx.req.raw
+      // Clone so the raw body stays readable — the real runtime caches the
+      // parsed body in Hono, letting validateBody() and file() compose on one
+      // request; here the clone is what preserves that property.
+      const request = ctx.req.raw.clone()
       const contentType = request.headers.get('Content-Type') ?? ''
 
       if (contentType.includes('application/json')) {
@@ -291,6 +294,39 @@ export function createControllerModuleMock() {
 
       this.parsedBody = ((await module.parseRequestPayload(this.ctx)) ?? {}) as Record<string, unknown>
       return this.parsedBody
+    }
+
+    // Public like parsedBody above: TS4094 forbids private members on the
+    // exported anonymous class type this factory returns.
+    public multipartBody?: Promise<FormData | null>
+
+    public readMultipart(): Promise<FormData | null> {
+      if (!this.multipartBody) {
+        const request = this.ctx.req.raw
+        const contentType = request.headers.get('Content-Type') ?? ''
+        // Clone for the same reason as parseRequestPayload: both may read the
+        // body of the same request, mirroring Hono's parse cache — and the
+        // memo keeps repeated file()/files() calls to one parse.
+        this.multipartBody = contentType.includes('multipart/form-data')
+          ? request.clone().formData()
+          : Promise.resolve(null)
+      }
+      return this.multipartBody
+    }
+
+    public async file(name: string): Promise<File | null> {
+      // Mirrors the real Controller.file(): take the FIRST part of the field,
+      // then require it to be a non-empty File — a leading empty part means
+      // null, not "skip to the next one".
+      const formData = await this.readMultipart()
+      const candidate = formData?.getAll(name)[0]
+      return candidate instanceof File && candidate.size > 0 ? candidate : null
+    }
+
+    public async files(name: string): Promise<File[]> {
+      const formData = await this.readMultipart()
+      return (formData?.getAll(name) ?? [])
+        .filter((value): value is File => value instanceof File && value.size > 0)
     }
 
     public async input<T = unknown>(key: string, defaultValue?: T): Promise<T | undefined> {

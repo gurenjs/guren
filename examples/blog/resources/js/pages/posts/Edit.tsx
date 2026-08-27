@@ -2,15 +2,19 @@ import { useForm } from '@inertiajs/react'
 import Layout from '../../components/Layout.js'
 import PostForm, { type PostFormValues } from '../../components/PostForm.js'
 import type { RouteErrors } from '@guren/inertia-client/typed-forms'
+import type { AttachmentData } from '@guren/core'
 import { route } from '@/.guren/routes.gen'
 
 interface Props {
-  post: PostFormValues | null
+  // The server sends the text fields only — the current cover arrives as its
+  // own AttachmentData prop, never mixed into the form values.
+  post: Omit<PostFormValues, 'cover'> | null
   postId: number
+  cover?: AttachmentData | null
   errors?: RouteErrors<PostFormValues> & { message?: string }
 }
 
-export default function Edit({ post, postId, errors = {} }: Props) {
+export default function Edit({ post, postId, cover = null, errors = {} }: Props) {
   const form = useForm<PostFormValues>({
     title: post?.title ?? '',
     excerpt: post?.excerpt ?? '',
@@ -26,6 +30,12 @@ export default function Edit({ post, postId, errors = {} }: Props) {
     if (window.confirm('編集をキャンセルしますか？変更内容は失われます。')) {
       form.reset()
       window.history.back()
+    }
+  }
+
+  const handleDelete = () => {
+    if (window.confirm('この投稿を削除しますか？カバー画像も一緒に削除されます。')) {
+      form.delete(route('posts.destroy', { id: postId }))
     }
   }
 
@@ -52,6 +62,8 @@ export default function Edit({ post, postId, errors = {} }: Props) {
       form={form}
       onSubmit={handleSubmit}
       onCancel={handleCancel}
+      onDelete={handleDelete}
+      currentCover={cover}
     />
   )
 }

@@ -6,7 +6,9 @@ export default class StorageProvider extends ServiceProvider {
       default: 'local',
       disks: {
         local: { driver: 'local', root: './storage/app' },
-        public: { driver: 'local', root: './storage/app/public', visibility: 'public' },
+        // Rooted inside public/ so the root asset server serves these files
+        // and disk.url() returns a URL that actually resolves.
+        public: { driver: 'local', root: './public/storage', url: '/storage', visibility: 'public' },
       },
     }))
   }

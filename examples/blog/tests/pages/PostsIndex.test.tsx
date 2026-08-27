@@ -8,6 +8,7 @@ const samplePosts = [
     title: 'Post One',
     excerpt: 'Excerpt',
     body: 'Body',
+    cover: null,
     notificationArtifactPath: 'notifications/posts/1.json',
     broadcastChannels: {
       public: 'announcements',

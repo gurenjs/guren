@@ -1,5 +1,6 @@
 import { Link } from '@inertiajs/react'
 import Layout from '../../components/Layout.js'
+import AttachmentImage from '../../components/AttachmentImage.js'
 import { ArrowLeft } from 'lucide-react'
 import type { PostResourceData } from '@/app/Http/Resources/PostResource'
 import { route } from '@/.guren/routes.gen'
@@ -41,6 +42,19 @@ export default function Show({ post }: Props) {
 
           <div className="mt-6 h-0.5 w-12 bg-guren-600" />
         </header>
+
+        {post.cover && (
+          <figure className="mt-10">
+            {/* Eager: this is the page's LCP element — lazy-loading it would
+                defer the fetch past layout. */}
+            <AttachmentImage
+              attachment={post.cover}
+              alt={`Cover for ${post.title}`}
+              testId="post-cover"
+              className="w-full rounded-lg object-cover ring-1 ring-stone-100"
+            />
+          </figure>
+        )}
 
         <div className="mt-10">
           <p className="text-xl leading-relaxed text-stone-500">{post.excerpt}</p>
