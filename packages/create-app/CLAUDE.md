@@ -26,7 +26,10 @@ Scaffolding CLI that copies templates from `templates/default` and replaces toke
   blueprint does not ship makes scaffolding throw.
 - **`applyDatabaseConfig` overwrites `db/schema.ts`.** A template needing more
   than the generic `users` table ships `db/schema.<driver>.ts` per driver
-  instead; the scaffolder selects one and deletes the others.
+  instead; the scaffolder selects one and deletes the others. A template
+  shipping *some* variants but not the selected driver throws — falling back
+  to the generic schema there would scaffold an app whose models reference
+  tables that do not exist.
 - **`config/database.ts` ships as real per-driver sources** under
   `templates/database/<driver>/config/database.ts`, copied verbatim (no
   tokens) — `templates/database` is not a blueprint layer and is never copied
@@ -54,6 +57,15 @@ Scaffolding CLI that copies templates from `templates/default` and replaces toke
   `guren make:module` comment those copies carry never reaches a scaffolded
   app. Folding that comment into the three variants here is the fix; until
   then, do not edit the template copies expecting users to see it.
+- **The generic `db/schema.ts` ships the same way**, as
+  `templates/database/<driver>/db/schema.ts` — the fallback used only when a
+  template ships no `db/schema.<driver>.ts` variant of its own. The unsuffixed
+  name is what separates the two: suffixed means "this template brings its own
+  schema". Each file imports from its dialect's `@guren/orm/drizzle/<dialect>`
+  barrel, the same modules `guren add auth` / `add resource` merge new columns
+  into; `tests/database-schema-template.test.ts` pins parse, that barrel
+  pairing, the verbatim copy, tarball inclusion, and both branches around the
+  fallback.
 - **Advertise nothing without a smoke.** Each blueprint gets a
   `smoke:starter:<name>` script and a CI step — `bun run typecheck` and
   `bun run build` inside a real scaffold are the only things that catch a

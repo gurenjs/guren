@@ -273,42 +273,33 @@ async function loadDatabaseConfig(driver: DatabaseDriver): Promise<string> {
   }
 }
 
-// Each dialect imports from its own `@guren/orm/drizzle/<dialect>` barrel —
-// the same modules `guren add auth` / `add resource` merge new columns into.
-function generateSchema(driver: DatabaseDriver): string {
-  if (driver === 'postgres') {
-    return `import { pgTable, serial, text, timestamp } from '@guren/orm/drizzle/pg'
+/**
+ * The generic single-`users`-table schema, one real source per driver under
+ * `templates/database/<driver>/db/schema.ts` — the same verbatim-copy shape
+ * `config/database.ts` uses, and for the same reason (a string-emitted file
+ * is a file no tsconfig covers). Each dialect imports from its own
+ * `@guren/orm/drizzle/<dialect>` barrel, the same modules `guren add auth` /
+ * `add resource` merge new columns into.
+ *
+ * Named `db/schema.ts`, not `db/schema.<driver>.ts`: the suffixed name means
+ * "a template ships its own schema" (see `schemaVariantPath`), and these are
+ * the fallback for templates that ship none.
+ */
+export function databaseSchemaTemplatePath(driver: DatabaseDriver): string {
+  return join(TEMPLATES_ROOT, 'database', driver, 'db/schema.ts')
+}
 
-export const users = pgTable('users', {
-  id: serial('id').primaryKey(),
-  name: text('name').notNull(),
-  email: text('email').notNull(),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-})
-`
+async function loadFallbackSchema(driver: DatabaseDriver): Promise<string> {
+  try {
+    return await readFile(databaseSchemaTemplatePath(driver), 'utf8')
+  } catch (cause) {
+    throw new Error(
+      `Could not read the ${driver} database schema template at "${databaseSchemaTemplatePath(driver)}". ` +
+      'This build of create-guren-app may be incomplete — please report it at ' +
+      'https://github.com/gurenjs/guren/issues and try `npm create guren-app@latest` meanwhile.',
+      { cause },
+    )
   }
-
-  if (driver === 'mysql') {
-    return `import { mysqlTable, int, varchar, timestamp } from '@guren/orm/drizzle/mysql'
-
-export const users = mysqlTable('users', {
-  id: int('id').primaryKey().autoincrement(),
-  name: varchar('name', { length: 255 }).notNull(),
-  email: varchar('email', { length: 255 }).notNull(),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-})
-`
-  }
-
-  return `import { sqliteTable, integer, text } from '@guren/orm/drizzle/sqlite'
-
-export const users = sqliteTable('users', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
-  name: text('name').notNull(),
-  email: text('email').notNull(),
-  createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
-})
-`
 }
 
 /**
@@ -336,7 +327,7 @@ async function resolveSchema(destination: string, driver: DatabaseDriver): Promi
   )).filter((name) => name !== null)
 
   if (shipped.length === 0) {
-    return generateSchema(driver)
+    return await loadFallbackSchema(driver)
   }
 
   if (!shipped.includes(driver)) {
