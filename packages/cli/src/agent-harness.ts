@@ -13,6 +13,7 @@ import {
   type AgentTarget,
   type HarnessComponent,
   type PlannedFile,
+  type RetiredNames,
   type TemplateFiles,
 } from './agent-targets'
 
@@ -96,8 +97,8 @@ export interface AgentHarnessResult {
    * (`managedNamespaces`) that the current plan no longer writes — what a
    * renamed or removed canonical rule/skill leaves behind, in every root it
    * fanned out to. Reported so the user can decide; deleted only with
-   * `prune`. A user file under a colliding name lands here too, which is why
-   * the default is report-only.
+   * `prune`. A file of the project's own lands here only under a name the
+   * framework itself ships, which is why the default is report-only.
    */
   stale: string[]
   /** True when `prune` deleted the files listed in `stale` (always false without it). */
@@ -259,16 +260,17 @@ async function isSameFile(cwd: string, left: string, right: string): Promise<boo
  * side may not, and `isSameFile` answers "different" for a missing name so
  * the dry run previews the same stale list the real run would produce.
  *
- * Exported for tests: `retiredSkills` defaults to `RETIRED_CANONICAL_SKILLS`,
- * which is empty, so the retired-name path has no other way to be exercised.
- * The seam belongs here rather than on `AgentHarnessOptions`, which is a
- * published type — a test hook there would outlive the reason for it.
+ * Exported for tests: `retired` defaults to `RETIRED_CANONICAL_RULES` /
+ * `RETIRED_CANONICAL_SKILLS`, both empty, so the retired-name path has no
+ * other way to be exercised. The seam belongs here rather than on
+ * `AgentHarnessOptions`, which is a published type — a test hook there would
+ * outlive the reason for it.
  */
 export async function findStaleManagedFiles(
   cwd: string,
   components: HarnessComponent[],
   plan: readonly PlannedFile[],
-  retiredSkills?: readonly string[],
+  retired: RetiredNames = {},
 ): Promise<string[]> {
   const plannedPaths = new Set(plan.map((file) => file.path))
   const plannedByLowerPath = new Map(plan.map((file) => [file.path.toLowerCase(), file.path]))
@@ -337,11 +339,18 @@ export async function findStaleManagedFiles(
   }
 
   const everything = (): boolean => true
-  for (const namespace of managedNamespaces(components, plan, retiredSkills)) {
+  for (const namespace of managedNamespaces(components, plan, retired)) {
     switch (namespace.kind) {
-      case 'tree':
-        await walk(namespace.dir, true, everything)
+      case 'files': {
+        // matched case-insensitively so that a case-only rename of a claimed
+        // rule is still reached; whether the entry is a second file or the
+        // one the write loop just refreshed is `isSameFile`'s call, not a
+        // name comparison's. Top level only: a directory a project made
+        // under the rules root is not read, let alone claimed.
+        const claimed = new Set(namespace.names.map((name) => name.toLowerCase()))
+        await walk(namespace.dir, false, (entry) => claimed.has(entry.name.toLowerCase()))
         break
+      }
       case 'pattern':
         await walk(
           namespace.dir,
