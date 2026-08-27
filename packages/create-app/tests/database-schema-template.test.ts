@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'bun:test'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   DATABASE_DRIVERS,
   databaseSchemaTemplatePath,
   scaffoldAppBlueprint,
+  TEMPLATES_ROOT,
   templateDir,
   type DatabaseDriver,
 } from '../src/blueprints'
@@ -29,6 +30,15 @@ const EXPECTED_SCHEMA_MODULE = {
   sqlite: '@guren/orm/drizzle/sqlite',
 } as const satisfies Record<DatabaseDriver, string>
 
+/**
+ * The blueprints that ship no `db/schema.<driver>.ts` variant and so take the
+ * fallback. `api` earns its place beside `default`: nothing else in its
+ * template lives under `db/`, so it is the only blueprint that proves
+ * `applyDatabaseConfig` creates that directory rather than relying on a file
+ * the template happened to ship.
+ */
+const FALLBACK_BLUEPRINTS = ['default', 'api'] as const
+
 const transpiler = new Bun.Transpiler({ loader: 'ts' })
 
 describe('database schema templates', () => {
@@ -47,20 +57,22 @@ describe('database schema templates', () => {
       ])
     })
 
-    it(`scaffolds the ${driver} fallback schema verbatim`, async () => {
-      const workspace = await createTempWorkspace(`guren-db-schema-${driver}-`)
+    for (const blueprint of FALLBACK_BLUEPRINTS) {
+      it(`scaffolds the ${driver} fallback schema verbatim into a ${blueprint} app`, async () => {
+        const workspace = await createTempWorkspace(`guren-db-schema-${blueprint}-${driver}-`)
 
-      try {
-        const dest = join(workspace.dir, 'test-app')
-        await scaffoldAppBlueprint({ destination: dest, renderingMode: 'spa', database: driver })
+        try {
+          const dest = join(workspace.dir, 'test-app')
+          await scaffoldAppBlueprint({ blueprint, destination: dest, renderingMode: 'spa', database: driver })
 
-        const scaffolded = await readFile(join(dest, 'db/schema.ts'), 'utf8')
+          const scaffolded = await readFile(join(dest, 'db/schema.ts'), 'utf8')
 
-        expect(scaffolded).toBe(await readFile(databaseSchemaTemplatePath(driver), 'utf8'))
-      } finally {
-        await workspace.cleanup()
-      }
-    })
+          expect(scaffolded).toBe(await readFile(databaseSchemaTemplatePath(driver), 'utf8'))
+        } finally {
+          await workspace.cleanup()
+        }
+      })
+    }
 
     it(`prefers a template's own ${driver} schema variant over the fallback`, async () => {
       const workspace = await createTempWorkspace(`guren-db-schema-variant-${driver}-`)
@@ -106,6 +118,26 @@ describe('database schema templates', () => {
     // agrees with itself, and the comparison above would still pass.
     expect(shapes[0].exports).toEqual(['users'])
     expect(shapes[0].columns).toEqual(['id', 'name', 'email', 'createdAt'])
+  })
+
+  it('ships no plain db/schema.ts from any template', async () => {
+    // `applyDatabaseConfig` overwrites `db/schema.ts` unconditionally, so a
+    // template carrying one is dead weight that still reads as the canonical
+    // place to edit the generic schema — `templates/default` shipped a
+    // byte-identical copy of the sqlite fallback, and a column added there
+    // would have reached no scaffolded app with every gate green. Only
+    // `db/schema.<driver>.ts` is a live thing for a template to ship.
+    const layers = (await readdir(TEMPLATES_ROOT, { withFileTypes: true }))
+      .filter((entry) => entry.isDirectory() && entry.name !== 'database')
+      .map((entry) => entry.name)
+
+    expect(layers.length).toBeGreaterThan(0)
+
+    for (const layer of layers) {
+      const files = await readdir(join(TEMPLATES_ROOT, layer, 'db')).catch(() => [])
+
+      expect({ layer, plainSchema: files.includes('schema.ts') }).toEqual({ layer, plainSchema: false })
+    }
   })
 
   it('refuses to fall back when a template ships variants but not the selected driver', async () => {

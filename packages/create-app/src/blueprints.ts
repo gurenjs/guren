@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { cp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, relative } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
@@ -425,6 +425,12 @@ async function applyDatabaseConfig(destination: string, driver: DatabaseDriver):
   const schema = await resolveSchema(destination, driver)
   const databaseConfig = await loadDatabaseConfig(driver)
   const drizzleConfig = await loadDrizzleConfig(driver)
+
+  // This function is the only source of `db/schema.ts`, so it owns the
+  // directory too: a template ships one only to have it overwritten, and
+  // `api-only` has nothing else under `db/` — git would not carry the empty
+  // directory and the write below would ENOENT for every user.
+  await mkdir(join(destination, 'db'), { recursive: true })
 
   // Write all DB-variant files in parallel — including SQLite, since an overlay
   // template may ship a schema written for one driver that has to be replaced
