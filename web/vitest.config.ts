@@ -8,27 +8,24 @@ export default defineConfig({
   resolve: {
     alias: [
       { find: '@', replacement: rootDir },
+      // Exact-match root entries first, then one capture-group rule per
+      // package for subpaths. The replacement must re-append the captured
+      // path itself: path.resolve() strips trailing slashes, so a bare
+      // prefix-replacement silently yields src<subpath> (no separator) —
+      // the trap the old exact-match patches existed to dodge. Extensionless
+      // on purpose: vite's resolver then handles both `src/foo.ts` and
+      // `src/foo/index.ts`.
       { find: /^@guren\/testing$/, replacement: resolveFromRoot('../packages/testing/src/index.ts') },
-      { find: /^@guren\/testing\//, replacement: resolveFromRoot('../packages/testing/src/') },
+      { find: /^@guren\/testing\/(.+)$/, replacement: resolveFromRoot('../packages/testing/src') + '/$1' },
       { find: /^@guren\/server$/, replacement: resolveFromRoot('../packages/server/src/index.ts') },
-      // Exact match must precede the prefix rule below, which consumes the
-      // separator without restoring it and would yield 'srcsupport/expiry'.
-      {
-        find: /^@guren\/server\/support\/expiry$/,
-        replacement: resolveFromRoot('../packages/server/src/support/expiry.ts'),
-      },
-      { find: /^@guren\/server\//, replacement: resolveFromRoot('../packages/server/src/') },
+      { find: /^@guren\/server\/(.+)$/, replacement: resolveFromRoot('../packages/server/src') + '/$1' },
       { find: /^@guren\/core$/, replacement: resolveFromRoot('../packages/core/src/index.ts') },
-      { find: /^@guren\/core\//, replacement: resolveFromRoot('../packages/core/src/') },
+      { find: /^@guren\/core\/(.+)$/, replacement: resolveFromRoot('../packages/core/src') + '/$1' },
       { find: /^@guren\/orm$/, replacement: resolveFromRoot('../packages/orm/src/index.ts') },
-      {
-        find: /^@guren\/orm\/drizzle\/(.+)$/,
-        replacement: resolveFromRoot('../packages/orm/src/drizzle/$1.ts'),
-      },
-      { find: /^@guren\/orm\//, replacement: resolveFromRoot('../packages/orm/src/') },
+      { find: /^@guren\/orm\/(.+)$/, replacement: resolveFromRoot('../packages/orm/src') + '/$1' },
       { find: /^@guren\/plugin-cloudflare$/, replacement: resolveFromRoot('../packages/plugin-cloudflare/src/index.ts') },
       { find: /^guren$/, replacement: resolveFromRoot('../packages/core/src/index.ts') },
-      { find: /^guren\//, replacement: resolveFromRoot('../packages/core/src/') },
+      { find: /^guren\/(.+)$/, replacement: resolveFromRoot('../packages/core/src') + '/$1' },
     ],
   },
   test: {

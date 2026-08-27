@@ -73,12 +73,14 @@ export default function AdminPosts({ posts }: Props) {
                 {posts.map((post) => (
                   <tr key={post.id} className="border-b border-docs-border">
                     <td className="px-3 py-3">
-                      <Link
+                      {/* Plain anchor: the public post page is server-rendered HTML
+                          now (RFC 0014); an Inertia visit would reject it. */}
+                      <a
                         href={`/blog/${post.slug}`}
                         className="font-semibold text-docs-heading no-underline hover:underline"
                       >
                         {post.title}
-                      </Link>
+                      </a>
                     </td>
                     <td className="px-3 py-3">
                       {post.publishedAt ? (

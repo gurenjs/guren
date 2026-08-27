@@ -379,8 +379,12 @@ child** of a hono element, which renders as empty output. The first is closed
 by a documented `guren.arch.ts` rule —
 
 ```typescript
-{ from: 'resources/js/pages/**', disallow: 'app/View/**', includeTypeImports: true }
+{ from: 'resources/js/pages/**', disallow: ['app/View/**', 'modules/*/app/View/**'], includeTypeImports: true }
 ```
+
+*(Amended during dogfooding: the original rule named only `app/View/**`;
+guren.dev's blog migration created the first module-local
+`modules/blog/app/View/`, which that glob does not match.)*
 
 — the second is within-file and no boundary rule can see it; the scaffold
 emitting explicit `: FC<Props>` annotations is the practical mitigation. The

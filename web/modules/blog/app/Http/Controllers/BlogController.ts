@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { pageTitle } from '../../../../../config/site.js'
 import { Post, type PostRecord } from '../../Models/Post.js'
 import { isPublished, listPublishedPosts } from '../../Services/published-posts.js'
+import { PostNotFoundPage, ShowPage } from '../../View/ShowPage.js'
 import { pages } from '@/.guren/pages.gen.js'
 
 const SlugParamSchema = z.object({
@@ -32,29 +33,25 @@ export default class BlogController extends Controller {
     )
   }
 
+  // The public post page is server-rendered HTML (`Controller.view()`,
+  // RFC 0014) rather than Inertia: the article body used to ship twice —
+  // once as escaped `__INERTIA_PAGE__` JSON, once as SSR HTML — and the
+  // page hydrates nothing worth a framework.
   async show(): Promise<Response> {
     const { slug } = this.validateParams(SlugParamSchema)
     const record = await Post.where({ slug }).first()
     const visible = record !== null && (isPublished(record) || (await this.viewerAuthenticated()))
 
     if (!record || !visible) {
-      return this.inertia(
-        pages.blog.Show,
-        { post: null },
-        { title: pageTitle('Post not found'), status: 404 },
-      )
+      return this.view(PostNotFoundPage, {}, { status: 404 })
     }
 
-    return this.inertia(
-      pages.blog.Show,
-      {
-        post: {
-          ...toSummary(record),
-          bodyHtml: record.bodyHtml,
-        },
+    return this.view(ShowPage, {
+      post: {
+        ...toSummary(record),
+        bodyHtml: record.bodyHtml,
       },
-      { title: pageTitle(record.title) },
-    )
+    })
   }
 
   // Read through the auth context key directly instead of `this.auth`: the

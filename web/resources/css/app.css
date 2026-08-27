@@ -673,3 +673,10 @@ pre:hover .docs-copy-btn,
   border-color: var(--docs-accent-strong) !important;
 }
 
+/* Color-mode toggle icons on server-rendered content pages (app/View/Header):
+   no client framework to swap them, so visibility keys off html.dark like the
+   rest of the theme. */
+.cm-sun { display: none; }
+.cm-moon { display: block; }
+html.dark .cm-sun { display: block; }
+html.dark .cm-moon { display: none; }

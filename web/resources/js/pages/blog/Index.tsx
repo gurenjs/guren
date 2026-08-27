@@ -1,5 +1,5 @@
 import { Link } from '@inertiajs/react'
-import { SITE_DESCRIPTION, pageTitle } from '../../../../config/site.js'
+import { SITE_DESCRIPTION, pageTitle, formatPostDate } from '../../../../config/site.js'
 import { Footer } from '../../components/Footer.js'
 import { Header } from '../../components/Header.js'
 import { Seo } from '../../components/Seo.js'
@@ -14,15 +14,6 @@ type BlogPostSummary = {
 
 interface Props {
   posts: BlogPostSummary[]
-}
-
-function formatDate(iso: string | null): string {
-  if (!iso) return ''
-  return new Date(iso).toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  })
 }
 
 export default function BlogIndex({ posts }: Props) {
@@ -64,11 +55,13 @@ export default function BlogIndex({ posts }: Props) {
           <div className="flex flex-col gap-8">
             {posts.map((post) => (
               <article key={post.slug} className="border-b border-docs-border pb-8">
-                <p className="docs-mono mb-2 text-sm text-docs-text-secondary">{formatDate(post.publishedAt)}</p>
+                <p className="docs-mono mb-2 text-sm text-docs-text-secondary">{formatPostDate(post.publishedAt)}</p>
                 <h2 className="mb-2 text-2xl font-bold text-docs-heading">
-                  <Link href={`/blog/${post.slug}`} className="no-underline hover:underline">
+                  {/* Plain anchor: the post page is server-rendered HTML now (RFC 0014),
+                      and an Inertia visit to it would reject the non-Inertia response. */}
+                  <a href={`/blog/${post.slug}`} className="no-underline hover:underline">
                     {post.title}
-                  </Link>
+                  </a>
                 </h2>
                 {post.description && (
                   <p className="leading-relaxed text-docs-text-secondary">{post.description}</p>

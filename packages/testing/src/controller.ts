@@ -90,7 +90,35 @@ export function createControllerContext(
   }
 }
 
+
+
+/**
+ * `@guren/server` is loaded lazily and memoized: this module is the factory
+ * behind `vi.mock('@guren/core', …)` — and the testing package's own suite
+ * mocks `@guren/server` with it — so a top-level import of either specifier
+ * is circular under vitest's hoisting (TDZ on the hoisted binding). The
+ * documented app pattern mocks `@guren/core`, which leaves `@guren/server`
+ * real; a suite that mocks `@guren/server` itself gets a mock in which
+ * `view()`/`viteAsset` are unavailable — circular by construction.
+ */
+type ServerModule = typeof import('@guren/server')
+let loadedServer: ServerModule | undefined
+let serverModulePromise: Promise<ServerModule> | undefined
+
+function loadServer(): Promise<ServerModule> {
+  serverModulePromise ??= import('@guren/server').then((mod) => {
+    loadedServer = mod
+    return mod
+  })
+  return serverModulePromise
+}
+
 export function createGurenControllerModule() {
+  // Prime the memo now: continuations on one promise run in registration
+  // order, so by the time an awaited view() render invokes a component that
+  // calls the sync viteAsset below, the memo is already populated.
+  void loadServer()
+
   class Controller {
     public context: ControllerContext | undefined
 
@@ -170,10 +198,45 @@ export function createGurenControllerModule() {
         },
       })
     }
+
+    /**
+     * Delegates to the real `renderDocument()` from `@guren/server` — the
+     * same engine `Controller.view()` uses — so the mock cannot drift on
+     * escaping, the fragment guard, or response shaping. Importing
+     * `@guren/server` here is established practice (`queue.ts` does), and
+     * only the `@guren/core` specifier is replaced by `vi.mock`.
+     */
+    async view(
+      component: ((props: never) => unknown) & { displayName?: string; name?: string },
+      props: unknown,
+      options: ResponseInit & { doctype?: boolean } = {},
+    ): Promise<Response> {
+      const { renderDocument } = await loadServer()
+      return renderDocument(component as never, props as never, options)
+    }
   }
 
   return {
     Controller,
+    /**
+     * The real `viteAsset()` from `@guren/server`: under vitest
+     * (`NODE_ENV` is never `production`) it takes the dev branch and returns
+     * deterministic dev-server URLs; a test that forces production gets the
+     * real manifest lookup — including the missing-entry throw — rather
+     * than a fiction that hides a forgotten build input. Sync by contract,
+     * so it reads the lazily-primed memo (populated before any `view()`
+     * render reaches a component; see `loadServer`).
+     */
+    viteAsset: (entry: string, options?: { manifestPaths?: string[] }): string => {
+      if (!loadedServer) {
+        throw new Error(
+          'viteAsset(): the mock resolves @guren/server lazily — render through ' +
+            'view(), or `await Promise.resolve()` once after creating the mock, ' +
+            'before calling viteAsset() directly.',
+        )
+      }
+      return loadedServer.viteAsset(entry, options)
+    },
     parseRequestPayload: async (ctx: ControllerContext) => {
       // Clone so the raw body stays readable — the real runtime caches the
       // parsed body in Hono, letting validateBody() and file() compose on one
