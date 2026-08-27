@@ -153,6 +153,7 @@ if (await this.has('email')) {
 | ヘルパー | 用途 |
 |--------|---------|
 | `this.inertia(component, props, options?)` | `resources/js/pages/<component>.tsx` を使って Inertia ページをレンダリングします。`Promise<Response>` を返すため、コントローラーアクションは `async` にして `return` で直接返してください。 |
+| `this.view(component, props, options?)` | `app/View/` のコンポーネントをサーバーレンダリング HTML として返します。公開・読み取り中心のページ向けです。詳細は[サーバーレンダリングビュー](./views.md)を参照してください。 |
 | `this.json(data, init?)` | ステータス 200 で JSON を返します。 |
 | `this.created(data)` | ステータス 201 で JSON を返します。 |
 | `this.accepted(data)` | ステータス 202 で JSON を返します。 |

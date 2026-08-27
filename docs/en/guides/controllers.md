@@ -96,6 +96,7 @@ export default class PostsController extends Controller {
 |--------|--------|-------------|
 | `this.json(data)` | 200 | Return JSON |
 | `this.inertia(component, props)` | 200 | Render an Inertia page |
+| `this.view(component, props)` | 200 | Render a server-rendered HTML page ([Server-Rendered Views](./views.md)) |
 | `this.created(data)` | 201 | JSON with 201 status |
 | `this.accepted(data)` | 202 | JSON with 202 status |
 | `this.redirect(url)` | 302 | HTTP redirect |
