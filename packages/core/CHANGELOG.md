@@ -1,5 +1,42 @@
 # @guren/core
 
+## 1.10.0
+
+### Minor Changes
+
+- 104c9b6: First-class content rendering (RFC 0014): `Controller.view(component, props)`
+  renders a `hono/jsx` component to plain server-rendered HTML — the
+  non-hydrating counterpart to `this.inertia()` for public content pages, with
+  auto-escaping, native `<title>`/`<meta>`/`<link>` head hoisting, and a loud
+  error when a page forgets its Layout (pass `{ doctype: false }` for
+  intentional fragments).
+
+  Alongside it: `viteAsset(entry)` resolves Vite asset URLs (dev server in
+  development, hashed manifest output in production, throws when neither
+  resolves), and new `@guren/core/jsx-runtime` / `@guren/core/jsx-dev-runtime`
+  subpaths let View files compile with `/** @jsxImportSource @guren/core */` —
+  applications never declare hono themselves. `@guren/server`'s hono floor
+  moves to `^4.13.0`, where the component result contract `view()` renders was
+  introduced.
+
+### Patch Changes
+
+- 451755c: Build-time Vite manifest injection for serverless targets: `viteAsset()` now
+  resolves production entries from `GUREN_VITE_MANIFEST` (the client manifest
+  JSON) before reading the filesystem, and all three deploy plugins populate it
+  during their build step — Cloudflare Workers and Lambda in their generated
+  entry module, Vercel by substituting the read at bundle time. Content pages
+  rendered with `Controller.view()` work on deploy targets whose runtime never
+  sees `public/assets/manifest.json`.
+- Updated dependencies [a19ff6f]
+- Updated dependencies [104c9b6]
+- Updated dependencies [6fc3156]
+- Updated dependencies [d8abe78]
+- Updated dependencies [d1b1eb6]
+- Updated dependencies [451755c]
+  - @guren/cli@2.11.0
+  - @guren/server@2.12.0
+
 ## 1.9.0
 
 ### Minor Changes
