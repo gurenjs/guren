@@ -274,15 +274,13 @@ Other rules that hold everywhere:
   at all store HEIC bytes as opaque files.
 - **Filenames are sanitized** (no path separators or control characters)
   before becoming part of an object key.
-- **Serving is hardened where the framework serves.** With the signed
-  delivery route enabled ([URLs and visibility](#urls-and-visibility)),
-  proxied responses carry an inline allowlist (SVG and HTML are forced to
-  `attachment` — an inline SVG served as a same-origin page is a script),
-  `X-Content-Type-Options: nosniff`, `Content-Security-Policy: sandbox`,
-  and `Referrer-Policy: no-referrer`. Public disks still serve via
-  `disk.url()` under your own rules: if such a disk serves user uploads
-  over your own domain, make sure it sends correct `Content-Type` and
-  `nosniff` headers itself.
+- **Serving is hardened where the framework serves.** The signed delivery
+  route's proxy responses carry the hardening set listed under
+  [URLs and visibility](#urls-and-visibility). Public disks still serve
+  via `disk.url()` under your own rules: if such a disk serves user
+  uploads over your own domain, make sure it sends correct `Content-Type`
+  and `X-Content-Type-Options: nosniff` headers itself — an inline SVG
+  served as a same-origin page is a script.
 
 ## Variants
 
@@ -409,7 +407,11 @@ export function registerWebRoutes(router: Router): void {
 URL** (`/attachments/{id}/{filename}?expires=…&signature=…`) — HMAC-signed
 with a key derived for attachment delivery only, expiring after
 `urlExpiresIn` (override per URL with `{ expiresIn }`; force a download
-with `{ disposition: 'attachment' }`). The route verifies the signature
+with `{ disposition: 'attachment' }` — guaranteed on proxy responses,
+while a redirecting disk depends on its backend honouring the presigned
+response overrides, which R2 does not: see the
+[Cloudflare guide](./cloudflare.md#attachments-on-workers)). The route
+verifies the signature
 (any failure is a uniform 404), resolves the variant at serve time — a
 declared-but-not-ready variant serves the original, and the same URL
 starts serving the variant once generation completes — and then either:
@@ -436,6 +438,13 @@ authorization (anyone holding an unexpired URL can read the bytes — wrap
 cannot un-publish a backing store that is itself public. On a local disk,
 also stop serving the private disk's directory statically — registering
 the route without closing the public mount is a lock on an open door.
+
+Two operational notes: the signature is a bearer credential in a query
+string, so redact query parameters for the route prefix in access logs
+(browser history holds them too — one reason the default lifetime is
+minutes, not days); and the proxy path serves bytes through your app, so
+bandwidth-sensitive apps should rate-limit the prefix with the usual
+route middleware and prefer redirect-capable disks.
 
 ### Without `delivery` (the v1 behaviour)
 

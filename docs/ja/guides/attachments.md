@@ -229,7 +229,7 @@ const loaded = await Post.with('attachments').get() // 全コレクションの�
 - **バイト列のみ。** `attach()` が受け付けるのは `File | Blob | Uint8Array` だけです。ファイルシステムのパス文字列は任意ファイル読み取りの入口になるため、型でも実行時でも拒否されます。
 - **HEIC/HEIF はデフォルトで 415 拒否。** HEIC のデコードは OS コーデック依存で、macOS の開発機では動き Linux の本番では失敗する、というずれを既定で見逃すわけにはいきません。`accepts: { heic: 'convert' }` でオプトインすると、デコードして JPEG として保存します。コーデックがデコードできないランタイムではやはり 415 を返します。この拒否は画像パイプラインが走るとき常に適用されます。`image: 'allow'` のコレクションも対象で、iPhone の HEIC 写真は `'convert'` にオプトインしない限り 415 になります。HEIC のバイト列を不透明ファイルとして保存するのは、`image` ポリシーを持たないコレクションだけです。
 - **ファイル名はサニタイズされます**(パス区切りや制御文字の除去)。オブジェクトキーの一部になるためです。
-- **フレームワークが配信する箇所は強化済みです。** 署名配信ルート([URL と可視性](#url-と可視性))を有効にすると、proxy 応答には inline allowlist(SVG と HTML は `attachment` に強制。同一オリジンのページとして表示される SVG はスクリプトになりえます)、`X-Content-Type-Options: nosniff`、`Content-Security-Policy: sandbox`、`Referrer-Policy: no-referrer` が付きます。public ディスクは従来どおり `disk.url()` でアプリ側のルールに従って配信されるため、自分のドメインでユーザーのアップロードを配信する場合は正しい `Content-Type` と `nosniff` ヘッダを自分で付けてください。
+- **フレームワークが配信する箇所は強化済みです。** 署名配信ルートの proxy 応答には[URL と可視性](#url-と可視性)に挙げた強化ヘッダ一式が付きます。public ディスクは従来どおり `disk.url()` でアプリ側のルールに従って配信されるため、自分のドメインでユーザーのアップロードを配信する場合は正しい `Content-Type` と `X-Content-Type-Options: nosniff` ヘッダを自分で付けてください。同一オリジンのページとして表示される SVG はスクリプトになりえます。
 
 ## バリアント
 
@@ -317,7 +317,7 @@ export function registerWebRoutes(router: Router): void {
 }
 ```
 
-private ディスクの `attachmentUrl()` は**パス相対の署名付き URL**(`/attachments/{id}/{filename}?expires=…&signature=…`)を返すようになります。アタッチメント配信専用に導出した鍵で HMAC 署名され、`urlExpiresIn` 後に失効します(URL 単位の上書きは `{ expiresIn }`、ダウンロード強制は `{ disposition: 'attachment' }`)。ルートは署名を検証し(失敗はすべて同一の 404)、variant を配信時に解決し(宣言済みだが未生成の variant はオリジナルを配信し、生成完了後は同じ URL が variant を配信し始めます)、その上で:
+private ディスクの `attachmentUrl()` は**パス相対の署名付き URL**(`/attachments/{id}/{filename}?expires=…&signature=…`)を返すようになります。アタッチメント配信専用に導出した鍵で HMAC 署名され、`urlExpiresIn` 後に失効します(URL 単位の上書きは `{ expiresIn }`、ダウンロード強制は `{ disposition: 'attachment' }`。ただし強制が保証されるのは proxy 応答で、リダイレクトするディスクではバックエンドが presigned の response override を尊重するかに依存します。R2 は尊重しません: [Cloudflare ガイド](./cloudflare.md#attachments-on-workers)参照)。ルートは署名を検証し(失敗はすべて同一の 404)、variant を配信時に解決し(宣言済みだが未生成の variant はオリジナルを配信し、生成完了後は同じ URL が variant を配信し始めます)、その上で:
 
 - ドライバが `capabilities.presignedGet` を宣言するディスク(S3、`presign` 付き R2)では短寿命の presigned URL へ **302 リダイレクト**します。バケットがバイト列を配信し、アプリの帯域を使いません。
 - それ以外では強化ヘッダ付きで**プロキシ配信**します(inline allowlist、`nosniff`、`Content-Security-Policy: sandbox`、`Referrer-Policy: no-referrer`、ETag/304)。これにより **local ディスク上の private が本当に private になり**、**R2 の private ディスクが `presign` クレデンシャル無しのバインディングだけで動きます**。
@@ -325,6 +325,8 @@ private ディスクの `attachmentUrl()` は**パス相対の署名付き URL**
 ディスク単位の上書きは `disks` のオブジェクト形式で行います: `{ docs: { visibility: 'private', serve: 'proxy' } }`。`serve` は `'auto'`(デフォルト)、`'redirect'`、`'proxy'`、`'direct'`(ルートを使わず従来の `temporaryUrl()` URL を維持)です。`guren check` は `delivery` 設定時にルートがマウントされているかを検証し、presign できないドライバのディスクへの `serve: 'redirect'` も検出します。
 
 ルートがやらないことが2つあります。これは capability URL でありリクエスト単位の認可ではありません(失効前の URL を持つ相手は誰でも読めます。取り消し可能なアクセスが必要なら `attachmentUrl()` を自分のコントローラでラップしてください)。また、裏のストア自体が公開されている状態を非公開にはできません。local ディスクでは private ディスクのディレクトリの静的配信も止めてください。公開マウントを閉じずにルートを登録するのは、開いたドアに鍵を付けるようなものです。
+
+運用上の注意が2つ: 署名はクエリ文字列に乗る bearer クレデンシャルなので、アクセスログではルートプレフィックスのクエリパラメータをリダクトしてください(ブラウザ履歴にも残ります。デフォルト寿命が日単位でなく分単位である理由のひとつです)。また proxy 経路はアプリ経由でバイト列を配信するため、帯域に敏感なアプリは通常のルートミドルウェアでプレフィックスをレート制限し、redirect 可能なディスクを優先してください。
 
 ### `delivery` 無し(v1 の挙動)
 

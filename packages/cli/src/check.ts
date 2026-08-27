@@ -346,7 +346,9 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     // fail-closed downgrade to proxy), so the static gate is the only
     // place they surface before traffic. Content-activated by the cheap
     // AST scan inside; gated like 7.7 under --changed because the wiring
-    // half loads the app's route definitions.
+    // half loads the app's route definitions — a deliberate divergence
+    // from 8.5's not-filtered rule, accepted because sourceChanged is
+    // only false on docs/lang-only runs.
     if (sourceChanged) {
       checks.push(
         ...(await checkAttachmentsDelivery({
