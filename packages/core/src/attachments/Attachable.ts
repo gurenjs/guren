@@ -87,17 +87,24 @@ export interface AttachableStatic<TBase extends typeof Model, TDecl extends Decl
   ): Promise<Array<TRecord & AttachedProps<TDecl, K>>>
 
   /**
-   * URL for a collection's attachment: `disk.url()` on public disks,
-   * `disk.temporaryUrl()` on private ones. A declared-but-not-ready variant
-   * falls back to the original's URL; a variant name that was never
-   * declared throws. Returns `null` when nothing is attached.
+   * URL for a collection's attachment: `disk.url()` on public disks; on
+   * private ones a signed delivery-route URL when `delivery` is configured
+   * (RFC 0015), else `disk.temporaryUrl()`. A declared-but-not-ready
+   * variant falls back to the original; a variant name that was never
+   * declared throws. `expiresIn` (ms) overrides the configured
+   * `urlExpiresIn` for this one URL. Returns `null` when nothing is
+   * attached.
    */
   attachmentUrl<K extends keyof TDecl & string>(
     record: PlainObject | AttachableRecordId,
     collection: K,
     // NoInfer: without it, `variant` becomes a second inference site for K
     // and widens it to whichever union of collections admits the name.
-    options?: { variant?: VariantNamesOf<TDecl[NoInfer<K>]> },
+    options?: {
+      variant?: VariantNamesOf<TDecl[NoInfer<K>]>
+      expiresIn?: number
+      disposition?: 'inline' | 'attachment'
+    },
   ): Promise<string | null>
 
   /**
@@ -177,7 +184,7 @@ export function Attachable<
       this: typeof Model,
       record: PlainObject | AttachableRecordId,
       collection: string,
-      options?: { variant?: string },
+      options?: { variant?: string; expiresIn?: number; disposition?: 'inline' | 'attachment' },
     ) {
       const engine = resolveAttachmentEngine(`${this.name}.attachmentUrl()`)
       return engine.attachmentUrl(this, decl, record, collection, options)

@@ -1,9 +1,15 @@
+import { createHash } from 'node:crypto'
 import { Model, type PlainObject } from '@guren/orm'
 import {
+  deriveAppKeyring,
+  getAppKeyringFromEnv,
   getQueueDriver,
   setQueueDriver,
+  signUrl,
+  verifySignedUrl,
   HttpException,
   ValidationException,
+  type AppKeyring,
   type StorageDriver,
   type StorageManager,
 } from '@guren/server'
@@ -53,12 +59,22 @@ export interface ConfigureAttachmentsOptions {
   /** Default disk name for new attachments. */
   disk: string
   /**
-   * Per-disk visibility: `'public'` disks serve via `disk.url()`, `'private'`
-   * ones via `disk.temporaryUrl()`. Per disk, not per attachment, because at
-   * least one driver (R2) has no per-object visibility. Undeclared disks
-   * default to `'public'`.
+   * Per-disk visibility (and, with the object form, how a private disk's
+   * bytes are served — RFC 0015 §3). `'public'` disks serve via
+   * `disk.url()`; `'private'` ones serve through the signed delivery route
+   * when `delivery` is configured, else via `disk.temporaryUrl()`. Per
+   * disk, not per attachment, because at least one driver (R2) has no
+   * per-object visibility. Undeclared disks default to `'public'`.
    */
-  disks?: Record<string, 'public' | 'private'>
+  disks?: Record<string, DiskDeliveryConfig>
+  /**
+   * Signed delivery route configuration (RFC 0015). Presence switches
+   * private-disk URLs from `disk.temporaryUrl()` to signed route URLs; the
+   * route itself is mounted by `registerAttachmentRoutes(router)` in the
+   * app's route registrar. Without this option nothing changes — v1
+   * behaviour and its documented limitations stand.
+   */
+  delivery?: DeliveryOptions
   /**
    * Decode cap in pixels (decompression-bomb defense). Header-declared and
    * decoded dimensions above this are rejected before a pixel buffer is
@@ -113,6 +129,54 @@ export interface GenerateVariantsPayload {
   heic?: HeicPolicy
   variants?: Record<string, VariantSpec>
 }
+
+/**
+ * How a private disk's bytes are served behind the signed route
+ * (RFC 0015 §3):
+ * - `'auto'` (default): redirect when the driver positively declares
+ *   `capabilities.presignedGet`, else proxy. Declared, never probed —
+ *   `LocalDriver.temporaryUrl()` succeeds with a plain public URL, so a
+ *   probe would misclassify exactly the disk that must not redirect.
+ * - `'redirect'` / `'proxy'`: force one behaviour.
+ * - `'direct'`: bypass the route entirely — v1's raw `temporaryUrl()`
+ *   URLs, for disks that measured the extra hop and want it gone.
+ */
+export type DeliveryServeMode = 'auto' | 'redirect' | 'proxy' | 'direct'
+
+export type DiskDeliveryConfig =
+  | 'public'
+  | 'private'
+  | { visibility: 'public' | 'private'; serve?: DeliveryServeMode }
+
+export interface DeliveryOptions {
+  /**
+   * Route prefix the delivery URLs live under.
+   * @default '/attachments'
+   */
+  prefix?: string
+  /**
+   * Named-route name `registerAttachmentRoutes` registers under.
+   * `Router.name()` silently overwrites duplicates, so the default is
+   * reserved for the framework.
+   * @default 'attachments.show'
+   */
+  routeName?: string
+}
+
+/** What the delivery controller hands the engine per request. */
+export interface DeliveryRequest {
+  /** Full request URL (path + query carry the signature). */
+  url: URL
+  /** The `:id` route parameter. */
+  id: string
+  variant?: string
+  disposition?: string
+  ifNoneMatch?: string
+  method: string
+}
+
+export const DEFAULT_DELIVERY_PREFIX = '/attachments'
+export const DEFAULT_DELIVERY_ROUTE_NAME = 'attachments.show'
 
 export interface PruneOptions {
   /** Also delete `attachments/` storage prefixes that no row references. */
@@ -218,7 +282,9 @@ export class AttachmentEngine {
   readonly model: typeof Model
   private readonly storage: () => StorageManager
   private readonly defaultDisk: string
-  private readonly diskVisibility: Record<string, 'public' | 'private'>
+  private readonly diskDelivery: Record<string, { visibility: 'public' | 'private'; serve: DeliveryServeMode }>
+  private readonly delivery: { prefix: string; routeName: string } | null
+  private deliveryKeys: AppKeyring | null = null
   private readonly maxPixels: number
   private readonly maxImageBytes: number
   private readonly processor: ImageProcessor | null
@@ -235,7 +301,13 @@ export class AttachmentEngine {
 
     this.storage = options.storage
     this.defaultDisk = options.disk
-    this.diskVisibility = options.disks ?? {}
+    this.diskDelivery = normalizeDiskDelivery(options.disks ?? {})
+    this.delivery = options.delivery
+      ? {
+          prefix: normalizeDeliveryPrefix(options.delivery.prefix ?? DEFAULT_DELIVERY_PREFIX),
+          routeName: options.delivery.routeName ?? DEFAULT_DELIVERY_ROUTE_NAME,
+        }
+      : null
     this.maxPixels = options.maxPixels ?? DEFAULT_MAX_PIXELS
     this.maxImageBytes = options.maxImageBytes ?? DEFAULT_MAX_IMAGE_BYTES
     this.processor =
@@ -401,7 +473,7 @@ export class AttachmentEngine {
     declaration: AttachmentsDeclaration,
     recordOrId: PlainObject | string | number,
     collection: string,
-    options: { variant?: string } = {},
+    options: { variant?: string; expiresIn?: number; disposition?: 'inline' | 'attachment' } = {},
   ): Promise<string | null> {
     const spec = this.specFor(model, declaration, collection)
     const variant = options.variant
@@ -425,15 +497,11 @@ export class AttachmentEngine {
     if (!raw) return null
     const row = this.toRecord(raw)
 
-    if (variant !== undefined) {
-      const entry = row.variants?.[variant]
-      if (entry?.status === 'ready' && entry.path) {
-        return this.urlFor(row.disk, entry.path)
-      }
-      // pending / failed / unavailable: serve the original so pages keep
-      // rendering; a later render picks the variant up automatically.
-    }
-    return this.urlFor(row.disk, row.path)
+    return this.urlForRow(row, {
+      variant,
+      expiresIn: options.expiresIn,
+      disposition: options.disposition,
+    })
   }
 
   async purgeAttachments(model: typeof Model, recordId: string | number): Promise<void> {
@@ -1028,7 +1096,7 @@ export class AttachmentEngine {
     const diskNames = new Set<string>([
       ...registered,
       this.defaultDisk,
-      ...Object.keys(this.diskVisibility),
+      ...Object.keys(this.diskDelivery),
       ...rows.map((row) => String(row.disk)),
     ])
 
@@ -1072,32 +1140,196 @@ export class AttachmentEngine {
   }
 
   private visibilityOf(diskName: string): 'public' | 'private' {
-    return this.diskVisibility[diskName] ?? 'public'
+    return this.diskDelivery[diskName]?.visibility ?? 'public'
   }
 
-  private async urlFor(diskName: string, path: string): Promise<string> {
-    const disk = this.storage().disk(diskName)
-    if (this.visibilityOf(diskName) === 'private') {
-      return disk.temporaryUrl(path, new Date(Date.now() + this.urlExpiresIn))
+  private serveModeFor(diskName: string): DeliveryServeMode {
+    return this.diskDelivery[diskName]?.serve ?? 'auto'
+  }
+
+  /** The normalized delivery route config, for `registerAttachmentRoutes`. */
+  get deliveryRoute(): { prefix: string; routeName: string } | null {
+    return this.delivery
+  }
+
+  private deliveryKeyring(): AppKeyring {
+    // Lazy, like the framework's five other purposes: the env is read at
+    // first use, and the derived keyring is scoped so a leaked delivery key
+    // forges delivery URLs and nothing else.
+    if (!this.deliveryKeys) {
+      this.deliveryKeys = deriveAppKeyring(getAppKeyringFromEnv(), 'attachment-delivery')
+    }
+    return this.deliveryKeys
+  }
+
+  /**
+   * The one URL policy (RFC 0015 §7): public disks stay on `disk.url()`
+   * untouched; private disks hand out signed route URLs when `delivery` is
+   * configured (and the disk did not opt out with `serve: 'direct'`), else
+   * the v1 `temporaryUrl()` behaviour with its documented limitations.
+   */
+  private async urlForRow(
+    row: AttachmentRecord,
+    options: { variant?: string; expiresIn?: number; disposition?: 'inline' | 'attachment' },
+  ): Promise<string> {
+    const isPrivate = this.visibilityOf(row.disk) === 'private'
+    if (isPrivate && this.delivery && this.serveModeFor(row.disk) !== 'direct') {
+      return this.signDeliveryUrl(row, options)
+    }
+
+    // Generation-time variant fallback, as v1 shipped it: a declared-but-
+    // not-ready variant resolves to the original's key.
+    const entry = options.variant ? row.variants?.[options.variant] : undefined
+    const path = entry?.status === 'ready' && entry.path ? entry.path : row.path
+    const disk = this.storage().disk(row.disk)
+    if (isPrivate) {
+      return disk.temporaryUrl(path, new Date(Date.now() + (options.expiresIn ?? this.urlExpiresIn)))
     }
     return disk.url(path)
   }
 
+  /**
+   * Path-relative on purpose: the `Host` header never participates in URL
+   * construction (RFC 0015 T6); emails prefix the app's canonical URL
+   * themselves. The variant rides as a signed query parameter and is
+   * resolved at *serve* time, so the same URL starts serving the variant
+   * once generation completes.
+   */
+  private signDeliveryUrl(
+    row: AttachmentRecord,
+    options: { variant?: string; expiresIn?: number; disposition?: 'inline' | 'attachment' },
+  ): string {
+    const params = new URLSearchParams()
+    if (options.variant) params.set('variant', options.variant)
+    // Signed like everything else; §4's allowlist still wins — the
+    // parameter can force `attachment`, never `inline`.
+    if (options.disposition) params.set('disposition', options.disposition)
+    const query = params.size > 0 ? `?${params}` : ''
+    const path = `${this.delivery!.prefix}/${encodeURIComponent(row.id)}/${encodeURIComponent(row.name)}`
+    return signUrl(`${path}${query}`, this.deliveryKeyring(), {
+      expiresIn: options.expiresIn ?? this.urlExpiresIn,
+    })
+  }
+
+  /**
+   * Serve one delivery-route request (RFC 0015 §1): verify → load →
+   * resolve → redirect or proxy. Everything before the row load is one
+   * HMAC per keyring key, and every failure is the same 404 — invalid
+   * signature, expired URL, and unknown id must be indistinguishable.
+   */
+  async handleDeliveryRequest(request: DeliveryRequest): Promise<Response> {
+    const notFound = () =>
+      new Response('Not Found', { status: 404, headers: { 'X-Content-Type-Options': 'nosniff' } })
+
+    // Without delivery config this engine never signed anything; uniform 404.
+    if (!this.delivery) return notFound()
+
+    const signedPart = `${request.url.pathname}${request.url.search}`
+    if (!verifySignedUrl(signedPart, this.deliveryKeyring(), { requireExpiration: true })) {
+      return notFound()
+    }
+
+    const raw = (await this.model.find(request.id)) as PlainObject | null
+    if (!raw) return notFound()
+    const row = this.toRecord(raw)
+
+    // The valid signature proves the variant was declared when the URL was
+    // minted (attachmentUrl throws on undeclared names before signing), so
+    // variant state never 404s: anything not `ready` — including an entry
+    // missing entirely on a row attached before the variant was declared —
+    // serves the original (RFC 0015 §1).
+    const entry = request.variant ? row.variants?.[request.variant] : undefined
+    const target =
+      entry?.status === 'ready' && entry.path
+        ? {
+            path: entry.path,
+            contentType: (entry.format && IMAGE_MIME[entry.format]) || 'application/octet-stream',
+            size: entry.size ?? null,
+          }
+        : { path: row.path, contentType: row.contentType, size: row.size }
+
+    // `expires` passed verification, so it is a plain integer in seconds.
+    const remainingMs = Math.max(
+      0,
+      Number(request.url.searchParams.get('expires')) * 1000 - Date.now(),
+    )
+
+    const disposition = contentDispositionFor(target.contentType, request.disposition, row.name)
+    const disk = this.storage().disk(row.disk)
+    const mode = this.serveModeFor(row.disk)
+    // 'direct' disks never mint route URLs, but a signed URL that reaches
+    // us anyway (minted before the config change) is served like 'auto'.
+    const redirect =
+      mode === 'redirect' || (mode !== 'proxy' && disk.capabilities?.presignedGet === true)
+
+    if (redirect) {
+      // Minted per request and capped: a long-lived route URL must not
+      // force a long presign (R2 rejects > 7 days) — the inner URL is
+      // always fresh and short.
+      const inner = new Date(Date.now() + Math.min(Math.max(remainingMs, 1_000), this.urlExpiresIn))
+      const location = await disk.temporaryUrl(target.path, inner, {
+        responseContentDisposition: disposition,
+        responseContentType: target.contentType,
+      })
+      return new Response(null, {
+        status: 302,
+        headers: {
+          Location: location,
+          // The Location is a bearer credential.
+          'Cache-Control': 'no-store',
+          'Referrer-Policy': 'no-referrer',
+        },
+      })
+    }
+
+    const etag = deliveryEtag(target.path, target.size)
+    const headers: Record<string, string> = {
+      'Content-Type': target.contentType,
+      'Content-Disposition': disposition,
+      'X-Content-Type-Options': 'nosniff',
+      // Belt over the allowlist's braces: even if an inline type turns out
+      // to carry active content in some engine, it executes with no origin.
+      'Content-Security-Policy': 'sandbox',
+      'Referrer-Policy': 'no-referrer',
+      // Browser-cacheable, never in shared caches, never beyond the
+      // signature's own validity.
+      'Cache-Control': `private, max-age=${Math.floor(remainingMs / 1000)}`,
+      ETag: etag,
+    }
+
+    if (request.ifNoneMatch === etag) {
+      return new Response(null, { status: 304, headers })
+    }
+
+    if (target.size != null) headers['Content-Length'] = String(target.size)
+
+    // Hono dispatches HEAD through the GET handler and drops the body;
+    // without this branch every HEAD would pay for the storage read.
+    if (request.method === 'HEAD') {
+      return new Response(null, { headers })
+    }
+
+    const body = disk.getStream ? await disk.getStream(target.path) : await disk.get(target.path)
+    // A row pointing at nothing (crash between object delete and row
+    // delete) surfaces as 404, same as v1's loud url() failure.
+    if (!body) return notFound()
+    return new Response(body as BodyInit, { headers })
+  }
+
   private async toData(row: AttachmentRecord, spec: AttachmentCollectionSpec): Promise<AttachmentData> {
-    const originalUrl = await this.urlFor(row.disk, row.path)
+    const originalUrl = await this.urlForRow(row, {})
     const variants: AttachmentData['variants'] = {}
     for (const name of Object.keys(spec.variants ?? {})) {
       const entry = row.variants?.[name]
-      if (entry?.status === 'ready' && entry.path) {
-        variants[name] = {
-          url: await this.urlFor(row.disk, entry.path),
-          width: entry.width ?? null,
-          height: entry.height ?? null,
-        }
-      } else {
-        // Declared but not (yet) generated: fall back to the original so
-        // pages keep rendering; the placeholder LQIP covers the gap.
-        variants[name] = { url: originalUrl, width: null, height: null }
+      const ready = entry?.status === 'ready' && entry.path
+      // Not-ready variants fall back to the original so pages keep
+      // rendering (the placeholder LQIP covers the gap): on a public disk
+      // that resolution happens here, on a delivery-route disk the URL
+      // carries the variant and the route resolves at serve time.
+      variants[name] = {
+        url: await this.urlForRow(row, { variant: name }),
+        width: ready ? (entry.width ?? null) : null,
+        height: ready ? (entry.height ?? null) : null,
       }
     }
     return {
@@ -1145,6 +1377,16 @@ let activeEngine: AttachmentEngine | null = null
 /** Install the engine `configureAttachments()` built. Last call wins; `null` unconfigures (tests). */
 export function setActiveAttachmentEngine(engine: AttachmentEngine | null): void {
   activeEngine = engine
+}
+
+/**
+ * The active engine, or `null` when `configureAttachments()` has not run —
+ * the delivery route resolves it per request precisely so its registration
+ * stays configuration-independent (bootless route tooling invokes
+ * registrars with no providers booted).
+ */
+export function getActiveAttachmentEngine(): AttachmentEngine | null {
+  return activeEngine
 }
 
 export function resolveAttachmentEngine(caller: string): AttachmentEngine {
@@ -1215,4 +1457,76 @@ function sortById(rows: PlainObject[]): PlainObject[] {
     if (left > right) return 1
     return 0
   })
+}
+
+function normalizeDiskDelivery(
+  disks: Record<string, DiskDeliveryConfig>,
+): Record<string, { visibility: 'public' | 'private'; serve: DeliveryServeMode }> {
+  const normalized: Record<string, { visibility: 'public' | 'private'; serve: DeliveryServeMode }> = {}
+  for (const [name, config] of Object.entries(disks)) {
+    normalized[name] =
+      typeof config === 'string'
+        ? { visibility: config, serve: 'auto' }
+        : { visibility: config.visibility, serve: config.serve ?? 'auto' }
+  }
+  return normalized
+}
+
+function normalizeDeliveryPrefix(prefix: string): string {
+  const trimmed = prefix.replace(/\/+$/, '')
+  if (!trimmed.startsWith('/')) {
+    throw new Error(`configureAttachments: delivery.prefix must start with '/', got '${prefix}'.`)
+  }
+  return trimmed
+}
+
+/**
+ * Content types allowed to render inline (RFC 0015 §4). Everything else —
+ * notably image/svg+xml and text/html — is forced to `attachment`: the
+ * `disposition` parameter can force `attachment` for a listed type, but
+ * nothing can force `inline` for an unlisted one.
+ */
+const INLINE_CONTENT_TYPES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+  'image/avif',
+  'application/pdf',
+  'video/mp4',
+  'audio/mpeg',
+  'text/plain',
+])
+
+function contentDispositionFor(
+  contentType: string,
+  requested: string | undefined,
+  filename: string,
+): string {
+  const kind =
+    requested === 'attachment' || !INLINE_CONTENT_TYPES.has(contentType) ? 'attachment' : 'inline'
+  // Plain-ASCII fallback plus the RFC 5987 form for everything else; the
+  // stored name is already sanitized (no separators, no control chars).
+  const fallback = filename.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_')
+  return `${kind}; filename="${fallback}"; filename*=UTF-8''${encodeRfc5987(filename)}`
+}
+
+/** RFC 5987 attr-char escaping: encodeURIComponent leaves !'()* unescaped. */
+function encodeRfc5987(value: string): string {
+  return encodeURIComponent(value).replace(
+    /[!'()*]/g,
+    (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
+  )
+}
+
+/**
+ * A validator over the *resolved object*, not the request: `id + variant`
+ * is not a byte identity (a pending variant resolves to original bytes
+ * today and variant bytes tomorrow; queued HEIC conversion rewrites the
+ * path under the same row id), but the resolved key + size move in both
+ * cases, so the validator moves with the bytes.
+ */
+function deliveryEtag(path: string, size: number | null): string {
+  const digest = createHash('sha256').update(`${path}:${size ?? ''}`).digest('base64url').slice(0, 20)
+  return `"${digest}"`
 }

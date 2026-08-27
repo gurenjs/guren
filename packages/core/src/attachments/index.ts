@@ -2,7 +2,16 @@ export { Attachable } from './Attachable.js'
 export type { AttachableRecordId, AttachableStatic } from './Attachable.js'
 export { configureAttachments } from './configure.js'
 export type { ConfigureAttachmentsOptions, ConfiguredAttachments } from './configure.js'
-export type { AttachOptions, GenerateVariantsPayload, PruneOptions, PruneReport } from './engine.js'
+export type {
+  AttachOptions,
+  DeliveryOptions,
+  DeliveryServeMode,
+  DiskDeliveryConfig,
+  GenerateVariantsPayload,
+  PruneOptions,
+  PruneReport,
+} from './engine.js'
+export { AttachmentDeliveryController, registerAttachmentRoutes } from './delivery.js'
 export { AttachmentsPruneCommand } from './prune-command.js'
 export { GenerateVariantsJob } from './generate-variants-job.js'
 export { hasManyAttached, hasOneAttached } from './declaration.js'
