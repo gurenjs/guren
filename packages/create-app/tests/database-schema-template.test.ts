@@ -5,7 +5,7 @@ import {
   DATABASE_DRIVERS,
   databaseSchemaTemplatePath,
   scaffoldAppBlueprint,
-  TEMPLATES_ROOT,
+  templateDir,
   type DatabaseDriver,
 } from '../src/blueprints'
 import { createTempWorkspace } from './helpers'
@@ -72,13 +72,41 @@ describe('database schema templates', () => {
         const scaffolded = await readFile(join(dest, 'db/schema.ts'), 'utf8')
 
         expect(scaffolded).toBe(
-          await readFile(join(TEMPLATES_ROOT, 'blog', `db/schema.${driver}.ts`), 'utf8'),
+          await readFile(join(templateDir('blog'), `db/schema.${driver}.ts`), 'utf8'),
         )
       } finally {
         await workspace.cleanup()
       }
     })
   }
+
+  it('declares the same table across every driver', async () => {
+    // Three files where the generator had three branches of one function, so
+    // cross-driver drift is no longer visible on sight — and only sqlite is
+    // scaffolded by the packed and npm smokes, which is how a column added to
+    // one file alone would reach postgres and mysql users unnoticed. Compared
+    // dialect-agnostically: the builders differ by design, the shape must not.
+    const shapes = await Promise.all(
+      DATABASE_DRIVERS.map(async (driver) => {
+        const source = await readFile(databaseSchemaTemplatePath(driver), 'utf8')
+
+        return {
+          driver,
+          exports: transpiler.scan(source).exports.toSorted(),
+          columns: [...source.matchAll(/^ {2}(\w+):/gmu)].map((match) => match[1]),
+        }
+      }),
+    )
+
+    for (const shape of shapes) {
+      expect({ ...shape, driver: 'any' }).toEqual({ ...shapes[0], driver: 'any' })
+    }
+
+    // Pinned literally too: an edit that drops a column from all three files
+    // agrees with itself, and the comparison above would still pass.
+    expect(shapes[0].exports).toEqual(['users'])
+    expect(shapes[0].columns).toEqual(['id', 'name', 'email', 'createdAt'])
+  })
 
   it('refuses to fall back when a template ships variants but not the selected driver', async () => {
     const workspace = await createTempWorkspace('guren-db-schema-partial-')
