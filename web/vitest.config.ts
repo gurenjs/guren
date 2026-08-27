@@ -17,8 +17,26 @@ export default defineConfig({
         find: /^@guren\/server\/support\/expiry$/,
         replacement: resolveFromRoot('../packages/server/src/support/expiry.ts'),
       },
+      {
+        find: /^@guren\/server\/jsx-runtime$/,
+        replacement: resolveFromRoot('../packages/server/src/jsx-runtime.ts'),
+      },
+      {
+        find: /^@guren\/server\/jsx-dev-runtime$/,
+        replacement: resolveFromRoot('../packages/server/src/jsx-dev-runtime.ts'),
+      },
       { find: /^@guren\/server\//, replacement: resolveFromRoot('../packages/server/src/') },
       { find: /^@guren\/core$/, replacement: resolveFromRoot('../packages/core/src/index.ts') },
+      // Content-view JSX runtimes (RFC 0014): exact matches for the same
+      // separator-eating reason as support/expiry above.
+      {
+        find: /^@guren\/core\/jsx-runtime$/,
+        replacement: resolveFromRoot('../packages/core/src/jsx-runtime.ts'),
+      },
+      {
+        find: /^@guren\/core\/jsx-dev-runtime$/,
+        replacement: resolveFromRoot('../packages/core/src/jsx-dev-runtime.ts'),
+      },
       { find: /^@guren\/core\//, replacement: resolveFromRoot('../packages/core/src/') },
       { find: /^@guren\/orm$/, replacement: resolveFromRoot('../packages/orm/src/index.ts') },
       {

@@ -51,6 +51,38 @@ Optional third arg: `InertiaResponseOptions` (e.g. `{ status: 422 }`).
 
 **No global shared props by default.** `shareInertiaProps(resolverFn)` (from `@guren/core`) can inject data (e.g. `auth.user`) into every Inertia response, but a fresh scaffold never calls it. `usePage<{ auth: {...} }>()` on the frontend silently resolves to `undefined` — it type-checks but is wrong at runtime. Pass everything a page needs explicitly through `this.inertia(page, { ... })` and declare it in that page's `interface Props`; only reach for `usePage()` for props you have actually wired up via `shareInertiaProps`.
 
+## Server-rendered content pages (`this.view()`)
+
+The non-hydrating counterpart to `this.inertia()` for public, read-mostly
+pages (blog posts, docs, marketing) — plain SSR HTML, no client framework,
+no Inertia page-payload script in the document:
+
+```typescript
+import { ShowPage } from '../../View/ShowPage.js'
+return this.view(ShowPage, { post })                       // props compile-checked at the call site
+return this.view(ShowPage, { post: null }, { status: 404 })
+```
+
+- **View components live in `app/View/*.tsx`, never under `resources/js/pages/`**
+  (codegen claims that directory for Inertia pages). They start with the
+  pragma `/** @jsxImportSource @guren/core */` and import
+  `type { FC, PropsWithChildren }` and `viteAsset` from `@guren/core` — the
+  app never declares `hono`.
+- **Head metadata hoists natively**: `<title>`, `<meta>`, and `<link>`
+  rendered anywhere in the page land in `<head>`. The Layout's own `<head>`
+  must carry only what pages never restate (charset, viewport, stylesheet) —
+  a hard-coded default `<title>` there silently shadows every page's.
+- **`viteAsset('resources/css/app.css')`** resolves the stylesheet URL in
+  both dev and production; the CSS file must be an explicit Vite build input.
+- **A page that forgets its Layout throws** a descriptive error instead of
+  shipping an unstyled document; pass `{ doctype: false }` for intentional
+  fragments.
+- **Escaping covers markup, not URL schemes** — a `javascript:` href from
+  user data passes through verbatim; sanitize upstream
+  (`@guren/plugin-markdown`'s allowlist).
+- Inline JSON-LD needs `dangerouslySetInnerHTML` with `<` escaped as
+  `\u003c` (text children are HTML-escaped).
+
 ## Route model binding
 
 ```typescript
@@ -120,6 +152,7 @@ Use `AuthorizationException.deny(...)` for manual ownership checks that don't go
 ## Response helpers
 
 - `this.json(data, init?)` / `this.text(body, init?)`
+- `this.view(Component, props, options?)` — server-rendered content page (see the section above)
 - `this.redirect(url, { status?, headers? })` — defaults 302 for GET, **303 for non-GET** (correct for Inertia form posts)
 - `await this.files('avatar')` → `File[]` (uploaded files, empties filtered)
 

@@ -87,18 +87,21 @@ describe('BlogController', () => {
     })
   })
 
+  // show() renders plain server HTML via Controller.view() (RFC 0014), so
+  // these assert on the document rather than an Inertia payload.
   describe('show', () => {
-    it('should return 404 for an unknown slug', async () => {
+    it('should return a 404 document for an unknown slug', async () => {
       stubFindBySlug(null)
 
       const controller = new BlogController()
       controller.setContext(createBlogContext('http://guren.dev/blog/missing', { slug: 'missing' }))
 
       const response = await controller.show()
-      const { payload } = await readInertiaResponse(response)
+      const html = await response.text()
 
       expect(response.status).toBe(404)
-      expect(payload.props.post).toBeNull()
+      expect(html).toContain('Post not found')
+      expect(html).toMatch(/<head>[\s\S]*noindex[\s\S]*<\/head>/)
     })
 
     it('should hide unpublished posts from guests', async () => {
@@ -121,23 +124,32 @@ describe('BlogController', () => {
       )
 
       const response = await controller.show()
-      const { payload } = await readInertiaResponse(response)
+      const html = await response.text()
 
       expect(response.status).toBe(200)
-      expect((payload.props.post as { slug: string }).slug).toBe('draft')
+      expect(html).toContain('<h1>Hello</h1>')
     })
 
-    it('should render a published post for guests', async () => {
+    it('should render a published post as a full document without an Inertia payload', async () => {
       stubFindBySlug(makePost())
 
       const controller = new BlogController()
       controller.setContext(createBlogContext('http://guren.dev/blog/hello-world', { slug: 'hello-world' }))
 
       const response = await controller.show()
-      const { payload } = await readInertiaResponse(response)
+      const html = await response.text()
 
       expect(response.status).toBe(200)
-      expect((payload.props.post as { bodyHtml: string }).bodyHtml).toBe('<h1>Hello</h1>')
+      expect(response.headers.get('content-type')).toBe('text/html; charset=utf-8')
+      expect(html.startsWith('<!doctype html><html lang="en">')).toBe(true)
+      // The stored article HTML lands exactly once — the doubled payload
+      // (escaped JSON + SSR HTML) was the reason this page left Inertia.
+      expect(html.split('<h1>Hello</h1>').length - 1).toBe(1)
+      expect(html).not.toContain('__INERTIA_PAGE__')
+      expect(html).not.toContain('data-page')
+      // Metadata hoisted into <head> from the Seo component in the body.
+      expect(html).toMatch(/<head>[\s\S]*Hello World[\s\S]*<\/head>/)
+      expect(html).toMatch(/<head>[\s\S]*rel="canonical"[\s\S]*<\/head>/)
     })
   })
 })

@@ -11,6 +11,15 @@ const devPort = Number.parseInt(process.env.GUREN_VITE_PORT ?? '', 10)
 
 export default defineConfig(({ command }) => ({
   publicDir: false,
+  build: {
+    rollupOptions: {
+      // The Guren plugin sets the Inertia entry only when no input is
+      // declared, so listing it here keeps it while adding the stylesheet as
+      // its own build input — content pages resolve it by manifest key via
+      // viteAsset('resources/css/app.css') (RFC 0014).
+      input: ['resources/js/app.tsx', 'resources/css/app.css'],
+    },
+  },
   ...(Number.isInteger(devPort) ? { server: { port: devPort, strictPort: true } } : {}),
   plugins: [
     // The `guren` package is not on npm, so the plugin's default
