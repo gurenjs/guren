@@ -178,6 +178,17 @@ describe('planComponents', () => {
     expect(rule?.content).toContain('globs: tests/**,app/**')
   })
 
+  it('throws when a canonical rule is nested — no claim can reach one', () => {
+    const templates = fakeTemplates()
+    templates.delete('core/rules/testing.md')
+    templates.set('core/rules/http/auth.md', FAKE_RULE)
+    // the native projections would fold it into guren-http/auth.mdc, and
+    // every prune claim scans a directory's top level only
+    expect(() => planComponents(['claude'], templates, 'My App')).toThrow(
+      'Agent harness rule http/auth.md must be a flat file',
+    )
+  })
+
   it('throws when a rule file has no parseable frontmatter instead of shipping an empty scope', () => {
     const templates = fakeTemplates()
     templates.set('core/rules/testing.md', '# No frontmatter\n')

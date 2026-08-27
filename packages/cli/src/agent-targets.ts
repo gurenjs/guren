@@ -232,11 +232,11 @@ function claimedRuleNames(
     if (!file.managed || !file.path.startsWith(prefix)) {
       continue
     }
+    // nested rules are refused when the plan is built; this is the claim's
+    // own guard on the same invariant, and on a retired name beside it
     const name = file.path.slice(prefix.length)
-    if (name && !name.includes('/')) {
-      assertClaimName(name, 'rule')
-      names.add(name)
-    }
+    assertClaimName(name, 'rule')
+    names.add(name)
   }
   return [...names].sort()
 }
@@ -477,6 +477,17 @@ export function planComponents(
   const addCanonical = (root: '.claude' | '.agents'): void => {
     const dirs = canonicalDirs(root)
     for (const [rel, content] of under('core/rules/')) {
+      // A rule has to be a flat file, and nothing else in the planner says so:
+      // the native projections fold the path into one filename
+      // (`guren-http/auth.mdc`), and both the pattern claim and the canonical
+      // roots' `files` claim scan a directory's top level only. A nested rule
+      // would install fine and then be unreachable by every claim that exists
+      // to clean it up — so it fails here instead, on the release that adds it.
+      if (rel.includes('/')) {
+        throw new Error(
+          `Agent harness rule ${rel} must be a flat file — a nested rule cannot be claimed for pruning`,
+        )
+      }
       add({ path: `${dirs.rules}/${rel}`, content: render(content), managed: true })
     }
     for (const [rel, content] of under('core/skills/')) {

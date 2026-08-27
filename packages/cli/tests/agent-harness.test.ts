@@ -545,8 +545,10 @@ describe('installAgentHarness', () => {
     // whole-root claim deleted exactly the file the tool asked for
     await installAgentHarness({ cwd: tempDir, mode: 'init' })
     await writeFile(join(tempDir, '.claude/rules/team-conventions.md'), 'user rule\n', 'utf8')
+    // the nested file carries a shipped rule's filename: the claim is
+    // top-level only, so a walk that turned recursive would delete it
     await mkdir(join(tempDir, '.claude/rules/team'), { recursive: true })
-    await writeFile(join(tempDir, '.claude/rules/team/layering.md'), 'nested user rule\n', 'utf8')
+    await writeFile(join(tempDir, '.claude/rules/team/testing.md'), 'nested user rule\n', 'utf8')
 
     const result = await installAgentHarness({ cwd: tempDir, mode: 'sync', prune: true })
 
@@ -555,12 +557,12 @@ describe('installAgentHarness', () => {
     expect(result.stale).toEqual([])
     expect(result.pruned).toBe(false)
     expect(await readFile(join(tempDir, '.claude/rules/team-conventions.md'), 'utf8')).toBe('user rule\n')
-    expect(await readFile(join(tempDir, '.claude/rules/team/layering.md'), 'utf8')).toBe(
+    expect(await readFile(join(tempDir, '.claude/rules/team/testing.md'), 'utf8')).toBe(
       'nested user rule\n',
     )
   })
 
-  it('sync --prune deletes a user file that collides with a shipped rule name — why deletion is opt-in', async () => {
+  it('a user file under a claimed rule name is still the framework\'s to remove — why deletion is opt-in', async () => {
     await installAgentHarness({ cwd: tempDir, mode: 'init' })
     // a retired name is claimed the same way a planned one is, so a file of
     // the project's own under that name is still the framework's to remove
@@ -588,6 +590,12 @@ describe('installAgentHarness', () => {
     const result = await installAgentHarness({ cwd: tempDir, mode: 'sync', prune: true })
 
     expect(result.stale).toEqual([])
+    // a claimed name behind the link is out of reach too — the containment
+    // check is what stops here, not the claim
+    const plan = planComponents(['claude'], await loadAgentTemplates(), 'My App')
+    expect(await findStaleManagedFiles(tempDir, ['claude'], plan, { rules: ['legacy.md'] })).toEqual(
+      [],
+    )
     expect(await readFile(join(outside, 'rules/legacy.md'), 'utf8')).toBe('not ours to delete\n')
     await rm(outside, { recursive: true, force: true })
   })
@@ -628,6 +636,12 @@ describe('installAgentHarness', () => {
     const result = await installAgentHarness({ cwd: tempDir, mode: 'sync', prune: true })
 
     expect(result.stale).toEqual([])
+    // and it is the link that stops the walk, not the name: the same file
+    // under a claimed name is still not reached
+    const plan = planComponents(['claude'], await loadAgentTemplates(), 'My App')
+    expect(await findStaleManagedFiles(tempDir, ['claude'], plan, { rules: ['legacy.md'] })).toEqual(
+      [],
+    )
     expect(await readFile(join(tempDir, 'shared-rules/legacy.md'), 'utf8')).toBe('external\n')
   })
 
