@@ -472,7 +472,7 @@ describe('File uploads', () => {
 
 4. **Use appropriate visibility**: Default to private; only make files public when necessary.
 
-5. **Use pre-signed URLs**: For private files, generate temporary URLs instead of making them public.
+5. **Use pre-signed URLs**: For private files, generate temporary URLs instead of making them public. For model attachments, the [signed delivery route](./attachments.md#urls-and-visibility) covers this on every driver — local disks and binding-only R2 included.
 
 6. **Organize with directories**: Use meaningful directory structures (`avatars/`, `documents/`, etc.).
 

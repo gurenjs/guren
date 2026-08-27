@@ -37,7 +37,12 @@ import { checkRouteContracts } from './route-contract-check'
  */
 const SOURCE_FILE_PATTERN = /\.(ts|tsx|mts|js|jsx|mjs)$/
 import { checkSchemaTimestamps } from './schema-check'
-import { checkAttachableModels, checkAttachmentsConfig, discoverAttachmentsConfigFiles } from './attachments-check'
+import {
+  checkAttachableModels,
+  checkAttachmentsConfig,
+  checkAttachmentsDelivery,
+  discoverAttachmentsConfigFiles,
+} from './attachments-check'
 import { parseSchemaTables, schemaPathFor, type SchemaTable } from './schema-parser'
 import { ParseCache } from './parse-cache'
 import { extractInertiaPageRefs, resolveInertiaPageFile, expectedInertiaPagePath } from './inertia-pages'
@@ -333,6 +338,25 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     checks.push(
       ...(await checkAttachableModels({ cwd, cache, files: allModelFiles, configFiles: attachmentsFiles })),
     )
+
+    // 8.7. Delivery-route wiring (RFC 0015): a `delivery` config with no
+    // registerAttachmentRoutes() route in the loaded definitions, and a
+    // serve: 'redirect' disk whose storage driver can never presign. Both
+    // failures are invisible at runtime by design (uniform 404s; a
+    // fail-closed downgrade to proxy), so the static gate is the only
+    // place they surface before traffic. Content-activated by the cheap
+    // AST scan inside; gated like 7.7 under --changed because the wiring
+    // half loads the app's route definitions.
+    if (sourceChanged) {
+      checks.push(
+        ...(await checkAttachmentsDelivery({
+          cwd,
+          cache,
+          files: attachmentsFiles,
+          routesFile: options.routesFile,
+        })),
+      )
+    }
   }
 
   // 9. Doc-link checks (docs/ frontmatter + @docs tags, RFC 0004). Runs in

@@ -1,7 +1,9 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
+import { checkAttachmentsDelivery } from '../src/attachments-check'
 import { runCheck } from '../src/check'
+import { ParseCache } from '../src/parse-cache'
 import { createTempWorkspace } from './helpers'
 
 describe('runCheck — configureAttachments table binding', () => {
@@ -319,6 +321,154 @@ export class Clip extends Attachable(defineModel(clips), {
       expect(result).toBeDefined()
       expect(result!.status).toBe('fail')
       expect(result!.message).toContain('Clip')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+})
+
+describe('checkAttachmentsDelivery — delivery route wiring (RFC 0015)', () => {
+  const DELIVERY_CONTROLLER_DEFINITION = [{ controller: { name: 'AttachmentDeliveryController' } }]
+
+  function deliveryConfig(extra = ''): string {
+    return `import { configureAttachments } from '@guren/core'
+
+export const { Attachment } = configureAttachments({
+  table: {} as never,
+  storage: () => ({}) as never,
+  disk: 'media',
+  delivery: {},${extra}
+})`
+  }
+
+  async function writeConfig(dir: string, source: string, name = 'config/attachments.ts'): Promise<string> {
+    const filePath = join(dir, name)
+    await mkdir(join(dir, 'config'), { recursive: true })
+    await writeFile(filePath, source, 'utf8')
+    return filePath
+  }
+
+  it('passes when delivery is configured and the route is registered', async () => {
+    const workspace = await createTempWorkspace('guren-cli-delivery-pass-')
+    try {
+      const file = await writeConfig(workspace.dir, deliveryConfig())
+      const results = await checkAttachmentsDelivery({
+        cwd: workspace.dir,
+        cache: new ParseCache(),
+        files: [file],
+        definitions: DELIVERY_CONTROLLER_DEFINITION,
+      })
+
+      const result = results.find((c) => c.key.startsWith('attachments-delivery:'))
+      expect(result?.status).toBe('pass')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('fails when delivery is configured but no delivery route is registered', async () => {
+    const workspace = await createTempWorkspace('guren-cli-delivery-fail-')
+    try {
+      const file = await writeConfig(workspace.dir, deliveryConfig())
+      const results = await checkAttachmentsDelivery({
+        cwd: workspace.dir,
+        cache: new ParseCache(),
+        files: [file],
+        definitions: [],
+      })
+
+      const result = results.find((c) => c.key.startsWith('attachments-delivery:'))
+      expect(result?.status).toBe('fail')
+      expect(result?.message).toContain('registerAttachmentRoutes')
+      expect(result?.suggestion).toContain('routes/web.ts')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('emits nothing without a delivery option, including delivery: undefined', async () => {
+    const workspace = await createTempWorkspace('guren-cli-delivery-off-')
+    try {
+      const plain = await writeConfig(
+        workspace.dir,
+        `import { configureAttachments } from '@guren/core'
+export const { Attachment } = configureAttachments({ table: {} as never, storage: () => ({}) as never, disk: 'media' })`,
+      )
+      const off = await writeConfig(
+        workspace.dir,
+        `import { configureAttachments } from '@guren/core'
+export const { Attachment } = configureAttachments({ table: {} as never, storage: () => ({}) as never, disk: 'media', delivery: undefined })`,
+        'config/attachments-off.ts',
+      )
+
+      const results = await checkAttachmentsDelivery({
+        cwd: workspace.dir,
+        cache: new ParseCache(),
+        files: [plain, off],
+        definitions: [],
+      })
+
+      expect(results).toEqual([])
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it("fails serve: 'redirect' on a disk whose storage driver cannot presign", async () => {
+    const workspace = await createTempWorkspace('guren-cli-delivery-redirect-')
+    try {
+      const config = await writeConfig(
+        workspace.dir,
+        deliveryConfig(`\n  disks: { vault: { visibility: 'private', serve: 'redirect' } },`),
+      )
+      const storage = await writeConfig(
+        workspace.dir,
+        `export const storageConfig = { default: 'vault', disks: { vault: { driver: 'local', root: './storage' } } }`,
+        'config/storage.ts',
+      )
+
+      const results = await checkAttachmentsDelivery({
+        cwd: workspace.dir,
+        cache: new ParseCache(),
+        files: [config, storage],
+        definitions: DELIVERY_CONTROLLER_DEFINITION,
+      })
+
+      const result = results.find((c) => c.key.startsWith('attachments-serve-redirect:'))
+      expect(result?.status).toBe('fail')
+      expect(result?.message).toContain("'local'")
+      expect(result?.suggestion).toContain("serve: 'proxy'")
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it("passes serve: 'redirect' on an s3 disk and skips disks it cannot resolve", async () => {
+    const workspace = await createTempWorkspace('guren-cli-delivery-redirect-ok-')
+    try {
+      const config = await writeConfig(
+        workspace.dir,
+        deliveryConfig(
+          `\n  disks: { media: { visibility: 'private', serve: 'redirect' }, mystery: { visibility: 'private', serve: 'redirect' } },`,
+        ),
+      )
+      const storage = await writeConfig(
+        workspace.dir,
+        `export const storageConfig = { disks: { media: { driver: 's3', bucket: 'b' } } }`,
+        'config/storage.ts',
+      )
+
+      const results = await checkAttachmentsDelivery({
+        cwd: workspace.dir,
+        cache: new ParseCache(),
+        files: [config, storage],
+        definitions: DELIVERY_CONTROLLER_DEFINITION,
+      })
+
+      const media = results.find((c) => c.key.endsWith(':media'))
+      expect(media?.status).toBe('pass')
+      // 'mystery' has no statically readable driver: skipped, never guessed.
+      expect(results.find((c) => c.key.endsWith(':mystery'))).toBeUndefined()
     } finally {
       await workspace.cleanup()
     }
