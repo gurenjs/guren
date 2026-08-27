@@ -245,18 +245,21 @@ export class R2Driver implements StorageDriver {
   }
 
   async getStream(path: string, options?: GetStreamOptions): Promise<ReadableStream<Uint8Array> | null> {
-    const key = this.key(path)
-    // HTTP-style inclusive start..end maps onto R2's offset/length form.
-    const object = options?.range
-      ? await this.bucket().get(key, {
-          range: {
-            offset: options.range.start,
-            ...(options.range.end !== undefined
-              ? { length: options.range.end - options.range.start + 1 }
-              : {}),
-          },
-        })
-      : await this.bucket().get(key)
+    // HTTP-style inclusive start..end maps onto R2's offset/length form. An
+    // unsatisfiable range is R2's rejection to propagate, not ours to mask —
+    // only a missing key means null.
+    const range = options?.range
+    const object = await this.bucket().get(
+      this.key(path),
+      range
+        ? {
+            range: {
+              offset: range.start,
+              ...(range.end !== undefined ? { length: range.end - range.start + 1 } : {}),
+            },
+          }
+        : undefined,
+    )
     if (!object) return null
     // workers-types declares its own ReadableStream, deliberately not the
     // global one (see R2StreamLike); the runtime object is the same —
@@ -346,20 +349,19 @@ export class R2Driver implements StorageDriver {
         `R2Driver.temporaryUrl(): R2 presigned URLs may be valid for at most 7 days (requested ${expiresIn}s).`,
       )
     }
-    const url = new URL(
-      `https://${this.presign.accountId}.r2.cloudflarestorage.com/${this.presign.bucket}/${encodeKey(this.key(path))}`,
-    )
-    // Response overrides ride as query parameters, which presignGetUrl signs
-    // along with everything else — how Content-Disposition/Content-Type
-    // policy survives a redirect to the bucket (RFC 0015 §3).
-    if (options?.responseContentDisposition) {
-      url.searchParams.set('response-content-disposition', options.responseContentDisposition)
-    }
-    if (options?.responseContentType) {
-      url.searchParams.set('response-content-type', options.responseContentType)
-    }
+    // The response overrides are deliberately NOT forwarded: R2's S3 API
+    // does not implement GetObject's response-* query parameters (its
+    // compatibility matrix lists only conditional/Range/PartNumber/SSE-C,
+    // and community reports confirm the header is not set), so signing them
+    // in would *look* like disposition policy survives the redirect while
+    // R2 serves the object's own metadata. TemporaryUrlOptions' contract
+    // covers this: a driver that cannot honour the overrides ignores them,
+    // and callers needing the guarantee use `serve: 'proxy'`. `put()`
+    // already records Content-Type in httpMetadata, so the redirect's type
+    // is still the recorded one.
+    void options
     return presignGetUrl({
-      url: url.toString(),
+      url: `https://${this.presign.accountId}.r2.cloudflarestorage.com/${this.presign.bucket}/${encodeKey(this.key(path))}`,
       accessKeyId: this.presign.accessKeyId,
       secretAccessKey: this.presign.secretAccessKey,
       // R2's S3 API is single-region.

@@ -134,10 +134,11 @@ describe('R2Driver against the binding', () => {
 })
 
 describe('R2Driver delivery surface (RFC 0015)', () => {
+  const presign = { accountId: 'acct123', bucket: 'my-bucket', accessKeyId: 'AKIDEXAMPLE', secretAccessKey: 'secret' }
+
   test('declares presignedGet iff presign credentials are configured', () => {
-    const presign = { accountId: 'acct', bucket: 'b', accessKeyId: 'k', secretAccessKey: 's' }
     const { driver: bindingOnly } = createDriver()
-    const withPresign = new R2Driver({ binding: () => new FakeR2Bucket(), presign })
+    const { driver: withPresign } = createDriver({ presign })
 
     expect(bindingOnly.capabilities).toBeUndefined()
     expect(withPresign.capabilities).toEqual({ presignedGet: true })
@@ -163,25 +164,24 @@ describe('R2Driver delivery surface (RFC 0015)', () => {
     expect(bucket.calls[2]).toEqual({ method: 'get', args: ['media/range.bin'] })
   })
 
-  test('temporaryUrl signs the response overrides into the presigned query', async () => {
-    const presign = { accountId: 'acct123', bucket: 'my-bucket', accessKeyId: 'AKIDEXAMPLE', secretAccessKey: 'secret' }
-    const driver = new R2Driver({ binding: () => new FakeR2Bucket(), presign })
+  test('temporaryUrl ignores response overrides — R2 does not implement them', async () => {
+    const { driver } = createDriver({ presign })
+    const expires = new Date(Date.now() + 3600 * 1000)
 
+    // R2's S3 GetObject has no response-* query parameters; signing them in
+    // would look like disposition policy survives the redirect while R2
+    // serves the object's own metadata. The TemporaryUrlOptions contract is
+    // that an incapable driver ignores them — pin that it really does.
     const url = new URL(
-      await driver.temporaryUrl('doc.pdf', new Date(Date.now() + 3600 * 1000), {
+      await driver.temporaryUrl('doc.pdf', expires, {
         responseContentDisposition: 'attachment; filename="doc.pdf"',
         responseContentType: 'application/pdf',
       }),
     )
 
-    expect(url.searchParams.get('response-content-disposition')).toBe('attachment; filename="doc.pdf"')
-    expect(url.searchParams.get('response-content-type')).toBe('application/pdf')
-    // Present before X-Amz-Signature was computed, so they are signed query
-    // parameters — stripping or altering them invalidates the URL.
+    expect(url.searchParams.has('response-content-disposition')).toBe(false)
+    expect(url.searchParams.has('response-content-type')).toBe(false)
     expect(url.searchParams.get('X-Amz-Signature')).toMatch(/^[0-9a-f]{64}$/)
-
-    const plain = new URL(await driver.temporaryUrl('doc.pdf', new Date(Date.now() + 3600 * 1000)))
-    expect(plain.searchParams.has('response-content-disposition')).toBe(false)
-    expect(plain.searchParams.has('response-content-type')).toBe(false)
+    expect(url.pathname).toBe(new URL(await driver.temporaryUrl('doc.pdf', expires)).pathname)
   })
 })

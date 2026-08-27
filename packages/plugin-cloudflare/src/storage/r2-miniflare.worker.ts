@@ -16,14 +16,12 @@ export default {
     const bytes = await driver.get('moved.txt')
     // getStream() against the real binding: full body, an inclusive range
     // (mapped to R2's offset/length form), and the null contract.
-    const fullStream = await driver.getStream('moved.txt')
-    const streamedFull = fullStream
-      ? new TextDecoder().decode(await new Response(fullStream).arrayBuffer())
-      : null
-    const rangeStream = await driver.getStream('moved.txt', { range: { start: 1, end: 3 } })
-    const streamedRange = rangeStream
-      ? new TextDecoder().decode(await new Response(rangeStream).arrayBuffer())
-      : null
+    const readText = async (stream: ReadableStream<Uint8Array> | null) =>
+      stream && new TextDecoder().decode(await new Response(stream).arrayBuffer())
+    const streamedFull = await readText(await driver.getStream('moved.txt'))
+    const streamedRange = await readText(
+      await driver.getStream('moved.txt', { range: { start: 1, end: 3 } }),
+    )
     const missingStream = await driver.getStream('missing.txt')
     // Presigning must work from inside the bundle: the signer has to be
     // reachable through whatever bundler produced this worker, which a

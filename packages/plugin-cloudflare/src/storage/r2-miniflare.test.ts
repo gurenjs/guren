@@ -59,11 +59,12 @@ describe.skipIf(!enabled)('R2Driver against Miniflare R2 at scale', () => {
   })
 })
 
-// The streaming copy is the one code path the binding proxy cannot carry, so
-// this block bundles the driver and runs it inside workerd itself, where
-// `bucket.put(key, object.body)` is the documented R2 pattern.
-describe.skipIf(!enabled)('R2Driver.copy/move inside workerd', () => {
-  test('streams get().body into put() and carries metadata', async () => {
+// The paths that need `get().body` to stay inside workerd (see the
+// harness's streamingBody flag): this block bundles the driver and runs
+// them in workerd itself, where handing the stream onward is the
+// documented R2 pattern.
+describe.skipIf(!enabled)('R2Driver streaming paths inside workerd', () => {
+  test('copy/move pipe get().body into put(); getStream returns it', async () => {
     const entry = new URL('./r2-miniflare.worker.ts', import.meta.url).pathname
     const build = await Bun.build({ entrypoints: [entry], target: 'browser', format: 'esm', minify: false })
     if (!build.success) {

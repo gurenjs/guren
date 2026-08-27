@@ -77,26 +77,33 @@ export function describeR2DriverConformance(name: string, harness: R2Conformance
     })
 
     describe.skipIf(!harness.streamingBody)('getStream', () => {
+      const text = async (stream: ReadableStream<Uint8Array> | null) =>
+        Buffer.from(await new Response(stream!).arrayBuffer()).toString()
+
       test('streams the same bytes get() returns', async () => {
         await driver.put('stream.bin', Buffer.from('stream me, byte for byte'))
         const stream = await driver.getStream('stream.bin')
         expect(stream).not.toBeNull()
-        expect(Buffer.from(await new Response(stream!).arrayBuffer()).toString()).toBe(
-          'stream me, byte for byte',
-        )
+        expect(await text(stream)).toBe('stream me, byte for byte')
       })
 
       test('honours an inclusive byte range', async () => {
         await driver.put('range.bin', Buffer.from('0123456789'))
-        const middle = await driver.getStream('range.bin', { range: { start: 2, end: 5 } })
-        expect(Buffer.from(await new Response(middle!).arrayBuffer()).toString()).toBe('2345')
-
-        const tail = await driver.getStream('range.bin', { range: { start: 7 } })
-        expect(Buffer.from(await new Response(tail!).arrayBuffer()).toString()).toBe('789')
+        expect(await text(await driver.getStream('range.bin', { range: { start: 2, end: 5 } }))).toBe('2345')
+        expect(await text(await driver.getStream('range.bin', { range: { start: 7 } }))).toBe('789')
       })
 
       test('returns null for a missing key', async () => {
         expect(await driver.getStream('missing.bin')).toBeNull()
+      })
+
+      test('propagates the rejection for an unsatisfiable range', async () => {
+        // Real R2 rejects a range beyond EOF (only a missing key is null);
+        // the driver deliberately propagates that instead of masking it.
+        await driver.put('short.bin', Buffer.from('abc'))
+        await expect(driver.getStream('short.bin', { range: { start: 10 } })).rejects.toThrow(
+          /not satisfiable/,
+        )
       })
     })
 

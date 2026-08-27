@@ -95,18 +95,41 @@ async function hmac(key: ArrayBuffer | Uint8Array, value: string): Promise<Array
   return crypto.subtle.sign('HMAC', cryptoKey, new TextEncoder().encode(value))
 }
 
-/** `AWS4<secret>` → date → region → service → terminator. */
-async function signingKey(
+/**
+ * `AWS4<secret>` → date → region → service → terminator, cached per
+ * credential and day: the delivery route presigns once per request on
+ * redirect-mode disks, and the four-step HMAC chain (eight `crypto.subtle`
+ * host calls) only changes when the date stamp rolls over. Keyed by access
+ * key id — never the secret — plus scope; self-bounding, but capped anyway
+ * so a pathological key rotation cannot grow it.
+ */
+const signingKeyCache = new Map<string, Promise<ArrayBuffer>>()
+const SIGNING_KEY_CACHE_MAX = 8
+
+function signingKey(
+  accessKeyId: string,
   secretAccessKey: string,
   dateStamp: string,
   region: string,
   service: string,
 ): Promise<ArrayBuffer> {
-  const initial = new TextEncoder().encode(`AWS4${secretAccessKey}`)
-  const byDate = await hmac(initial, dateStamp)
-  const byRegion = await hmac(byDate, region)
-  const byService = await hmac(byRegion, service)
-  return hmac(byService, TERMINATOR)
+  const cacheKey = `${accessKeyId}/${dateStamp}/${region}/${service}`
+  const cached = signingKeyCache.get(cacheKey)
+  if (cached) return cached
+
+  const derived = (async () => {
+    const initial = new TextEncoder().encode(`AWS4${secretAccessKey}`)
+    const byDate = await hmac(initial, dateStamp)
+    const byRegion = await hmac(byDate, region)
+    const byService = await hmac(byRegion, service)
+    return hmac(byService, TERMINATOR)
+  })()
+
+  if (signingKeyCache.size >= SIGNING_KEY_CACHE_MAX) signingKeyCache.clear()
+  signingKeyCache.set(cacheKey, derived)
+  // A failed derivation must not stay cached as a forever-rejected promise.
+  derived.catch(() => signingKeyCache.delete(cacheKey))
+  return derived
 }
 
 /**
@@ -140,7 +163,7 @@ export async function presignGetUrl(options: PresignGetOptions): Promise<string>
   ].join('\n')
 
   const stringToSign = [ALGORITHM, amzDate, scope, await sha256Hex(canonicalRequest)].join('\n')
-  const key = await signingKey(secretAccessKey, dateStamp, region, service)
+  const key = await signingKey(accessKeyId, secretAccessKey, dateStamp, region, service)
   url.searchParams.set('X-Amz-Signature', toHex(await hmac(key, stringToSign)))
 
   return url.toString()
