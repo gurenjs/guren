@@ -1,5 +1,53 @@
 # @guren/cli
 
+## 2.12.0
+
+### Minor Changes
+
+- 677b4c8: Add attachments codegen (RFC 0013 Open Question 4, RFC 0010 §2): `guren
+codegen` now reads each model's `Attachable(...)` declaration and emits
+  `.guren/attachments.gen.ts` with `AttachmentsMap` (collection name → 'one' |
+  'many', keyed by model class name) and `AttachmentVariantsMap` (declared
+  variant names per collection). Apps without Attachable models get no file —
+  a stale one is removed — and a declaration that cannot be statically read is
+  skipped with a warning rather than emitted partially. The Vite plugin
+  regenerates the map when `app/Models/**` (or a module's) changes, `guren
+context <Entity>` lists the entity's attachment collections, and `guren
+check` flags models mixing in `Attachable(...)` in an app with no
+  `configureAttachments()` call.
+- f6037db: Delivery-route wiring checks (RFC 0015 Part 4). `guren check` now flags a
+  `configureAttachments({ delivery })` with no `registerAttachmentRoutes()`
+  route in the loaded route definitions — private attachment URLs would be
+  minted that 404, and every delivery failure is a uniform 404 by design —
+  and a `serve: 'redirect'` disk whose storage config declares a driver
+  that can never presign (`local`, `memory`), which at serve time silently
+  downgrades to proxy. Both judged on positive evidence only; anything not
+  statically readable is skipped, never guessed. The attachments scaffold's
+  config comment now points at the delivery route.
+
+### Patch Changes
+
+- 0096603: fix(cli): `agent:sync --prune` no longer deletes rules files your project wrote
+
+  `.claude/rules/` and `.agents/rules/` were claimed as whole directories, so
+  `--prune` removed any file there the current harness does not ship — including
+  the project's own conventions file, which is exactly what the same command's
+  output tells you to keep ("keep project-specific rules in files of your own").
+
+  The claim is now by rule filename, the way skills have been claimed since
+  v2.9.0: only the rule files the harness ships, plus the filenames earlier
+  harness versions shipped, are reported or removed. A rules file of your own,
+  including one in a subdirectory, is left alone and no longer listed at all.
+
+  Renamed framework rules are still cleaned up: the native `guren-*` copies by
+  their prefix, and the copies in the canonical roots under the names past
+  releases wrote.
+
+- Updated dependencies [36257a7]
+- Updated dependencies [fa7e6c7]
+  - @guren/server@2.13.0
+  - @guren/core@1.11.0
+
 ## 2.11.0
 
 ### Minor Changes
