@@ -107,6 +107,7 @@ export type {
   AttachmentRecord,
   AttachmentSource,
   AttachmentsDeclaration,
+  AttachmentUrlOptions,
   AttachmentVariantRecord,
   ConfigureAttachmentsOptions,
   ConfiguredAttachments,

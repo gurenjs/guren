@@ -4,6 +4,7 @@ export { configureAttachments } from './configure.js'
 export type { ConfigureAttachmentsOptions, ConfiguredAttachments } from './configure.js'
 export type {
   AttachOptions,
+  AttachmentUrlOptions,
   DeliveryOptions,
   DeliveryServeMode,
   DiskDeliveryConfig,

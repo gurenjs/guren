@@ -45,17 +45,16 @@ async function serve(
   url: string,
   init: { method?: string; ifNoneMatch?: string } = {},
 ): Promise<Response> {
-  const engine = getActiveAttachmentEngine()!
-  const absolute = new URL(url, 'http://app.test')
-  const id = decodeURIComponent(absolute.pathname.split('/')[2] ?? '')
-  return engine.handleDeliveryRequest({
-    url: absolute,
-    id,
-    variant: absolute.searchParams.get('variant') ?? undefined,
-    disposition: absolute.searchParams.get('disposition') ?? undefined,
-    ifNoneMatch: init.ifNoneMatch,
-    method: init.method ?? 'GET',
-  })
+  const headers = new Headers()
+  if (init.ifNoneMatch) headers.set('if-none-match', init.ifNoneMatch)
+  return getActiveAttachmentEngine()!.handleDeliveryRequest(
+    new Request(new URL(url, 'http://app.test'), { method: init.method ?? 'GET', headers }),
+  )
+}
+
+async function expectServesOriginal(response: Response): Promise<void> {
+  expect(response.status).toBe(200)
+  expect(Buffer.from(await response.arrayBuffer())).toEqual(Buffer.from(PNG_1X1))
 }
 
 describe('attachments signed delivery (RFC 0015)', () => {
@@ -195,7 +194,8 @@ describe('attachments signed delivery (RFC 0015)', () => {
       const response = await serve(url!)
 
       expect(response.status).toBe(200)
-      expect(Buffer.from(await response.arrayBuffer())).toEqual(Buffer.from(PNG_1X1))
+      const body = Buffer.from(await response.clone().arrayBuffer())
+      expect(body).toEqual(Buffer.from(PNG_1X1))
       expect(response.headers.get('Content-Type')).toBe('image/png')
       expect(response.headers.get('Content-Disposition')).toContain('inline')
       expect(response.headers.get('Content-Disposition')).toContain('cover.png')
@@ -228,10 +228,7 @@ describe('attachments signed delivery (RFC 0015)', () => {
       await attachCover()
       // processor: null ⇒ thumb is recorded but never generated.
       const url = await Post.attachmentUrl(1, 'cover', { variant: 'thumb' })
-      const response = await serve(url!)
-
-      expect(response.status).toBe(200)
-      expect(Buffer.from(await response.arrayBuffer())).toEqual(Buffer.from(PNG_1X1))
+      await expectServesOriginal(await serve(url!))
 
       const tampered = url!.replace('variant=thumb', 'variant=og')
       expect((await serve(tampered)).status).toBe(404)
@@ -298,10 +295,63 @@ describe('attachments signed delivery (RFC 0015)', () => {
         disk: 'media',
       })
       const url = await Post.attachmentUrl(3, 'cover')
-      const response = await serve(url!)
+      await expectServesOriginal(await serve(url!))
+    })
 
-      expect(response.status).toBe(200)
-      expect(Buffer.from(await response.arrayBuffer())).toEqual(Buffer.from(PNG_1X1))
+    test("serve: 'redirect' on a disk that cannot presign fails closed into proxy", async () => {
+      configure({ disks: { vault: { visibility: 'private', serve: 'redirect' } } })
+      await attachCover()
+      const url = await Post.attachmentUrl(1, 'cover')
+
+      // LocalDriver declares no presignedGet: a 302 here would hand out its
+      // plain public URL — the exact fail-open the route exists to close.
+      await expectServesOriginal(await serve(url!))
+    })
+
+    test('HEAD checks the object exists; a dangling row 404s', async () => {
+      const record = await attachCover()
+      const url = await Post.attachmentUrl(1, 'cover')
+
+      expect((await serve(url!, { method: 'HEAD' })).status).toBe(200)
+      await storage.disk('vault').delete(record.path)
+      expect((await serve(url!, { method: 'HEAD' })).status).toBe(404)
+      expect((await serve(url!)).status).toBe(404)
+    })
+
+    test('If-None-Match accepts lists, weak validators, and *', async () => {
+      await attachCover()
+      const url = await Post.attachmentUrl(1, 'cover')
+      const etag = (await serve(url!)).headers.get('ETag')!
+
+      expect((await serve(url!, { ifNoneMatch: `"other", ${etag}` })).status).toBe(304)
+      expect((await serve(url!, { ifNoneMatch: `W/${etag}` })).status).toBe(304)
+      expect((await serve(url!, { ifNoneMatch: '*' })).status).toBe(304)
+      expect((await serve(url!, { ifNoneMatch: '"other"' })).status).toBe(200)
+    })
+
+    test('the ETag moves when the row is rewritten, even at the same path and size', async () => {
+      const record = await attachCover()
+      const engine = getActiveAttachmentEngine()!
+      const url = await Post.attachmentUrl(1, 'cover')
+      const before = (await serve(url!)).headers.get('ETag')!
+
+      // Same path, same size — only updatedAt moves (a queued regeneration
+      // rewrites bytes in place and always lands with a row update).
+      await engine.model.forceUpdate({ id: record.id }, { updatedAt: new Date(Date.now() + 5000) })
+      const after = (await serve(url!)).headers.get('ETag')!
+
+      expect(after).not.toBe(before)
+      expect((await serve(url!, { ifNoneMatch: before })).status).toBe(200)
+    })
+
+    test('a filename truncated at a surrogate boundary still mints and serves', async () => {
+      // 199 ASCII chars + an astral emoji: a code-unit slice(0, 200) would
+      // split the surrogate pair and make encodeURIComponent throw.
+      const name = `${'x'.repeat(199)}\u{1F600}.png`
+      await Post.attach(4, 'cover', new File([PNG_1X1], name, { type: 'image/png' }))
+      const url = await Post.attachmentUrl(4, 'cover')
+
+      await expectServesOriginal(await serve(url!))
     })
   })
 
@@ -321,11 +371,11 @@ describe('attachments signed delivery (RFC 0015)', () => {
       return driver
     }
 
-    function withPresigningVault() {
+    function withPresigningVault(overrides: Partial<ConfigureAttachmentsOptions> = {}) {
       const base = storage.disk('vault')
       const driver = presigningDriver(base)
       const manager = { disk: () => driver } as unknown as StorageManager
-      configure({ storage: () => manager })
+      configure({ storage: () => manager, ...overrides })
       return driver as StorageDriver & {
         captured: { expiration?: Date; options?: TemporaryUrlOptions }
       }
@@ -333,7 +383,7 @@ describe('attachments signed delivery (RFC 0015)', () => {
 
     test('presign-capable disks 302 to a per-request presigned URL with response overrides', async () => {
       const driver = withPresigningVault()
-      const record = await Post.attach(1, 'cover', new File([PNG_1X1], 'c.png', { type: 'image/png' }))
+      const record = await attachCover()
       const url = await Post.attachmentUrl(1, 'cover')
       const response = await serve(url!)
 
@@ -348,19 +398,41 @@ describe('attachments signed delivery (RFC 0015)', () => {
     })
 
     test("serve: 'proxy' keeps a presign-capable disk on the proxy path", async () => {
-      const base = storage.disk('vault')
-      const driver = presigningDriver(base)
-      const manager = { disk: () => driver } as unknown as StorageManager
-      configure({
-        storage: () => manager,
-        disks: { vault: { visibility: 'private', serve: 'proxy' } },
-      })
-      await Post.attach(1, 'cover', new File([PNG_1X1], 'c.png', { type: 'image/png' }))
+      withPresigningVault({ disks: { vault: { visibility: 'private', serve: 'proxy' } } })
+      await attachCover()
+      const url = await Post.attachmentUrl(1, 'cover')
+
+      await expectServesOriginal(await serve(url!))
+    })
+
+    test('the inner presign stays short even when the outer lifetime is long', async () => {
+      const driver = withPresigningVault({ urlExpiresIn: 30 * 24 * 60 * 60 * 1000 })
+      await attachCover()
       const url = await Post.attachmentUrl(1, 'cover')
       const response = await serve(url!)
 
-      expect(response.status).toBe(200)
-      expect(Buffer.from(await response.arrayBuffer())).toEqual(Buffer.from(PNG_1X1))
+      expect(response.status).toBe(302)
+      // Fixed 5-minute inner TTL, decoupled from urlExpiresIn: a raised
+      // outer lifetime must never exceed a driver's presign ceiling.
+      expect(driver.captured.expiration!.getTime()).toBeLessThanOrEqual(Date.now() + 5 * 60 * 1000 + 1000)
+    })
+  })
+
+  describe('configuration and payloads', () => {
+    test('delivery.prefix rejects shapes URL parsing would reinterpret', () => {
+      for (const prefix of ['files', '//host', '/files?x=1', '/files#frag', '/fi les']) {
+        expect(() => configure({ delivery: { prefix } })).toThrow(/delivery\.prefix/)
+      }
+    })
+
+    test('without delivery, not-ready variant data URLs are byte-identical to the original URL', async () => {
+      configure({ delivery: undefined, disks: { vault: 'private' } })
+      await attachCover()
+      const [data] = await Post.withAttachments([{ id: 1 }], ['cover'])
+
+      // v1 semantics restored by memoization: the fallback URL is the same
+      // string, not a second temporaryUrl() call that might differ.
+      expect(data!.cover!.variants.thumb!.url).toBe(data!.cover!.url)
     })
   })
 })

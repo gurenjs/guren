@@ -1,6 +1,6 @@
 import type { Model, PlainObject } from '@guren/orm'
 import type { AttachmentsDeclaration } from './declaration.js'
-import { resolveAttachmentEngine, type AttachOptions } from './engine.js'
+import { resolveAttachmentEngine, type AttachOptions, type AttachmentUrlOptions } from './engine.js'
 import type { AttachmentData, AttachmentRecord, AttachmentSource } from './types.js'
 
 /** A record id accepted by the attachment statics (int and uuid/text PKs). */
@@ -100,11 +100,7 @@ export interface AttachableStatic<TBase extends typeof Model, TDecl extends Decl
     collection: K,
     // NoInfer: without it, `variant` becomes a second inference site for K
     // and widens it to whichever union of collections admits the name.
-    options?: {
-      variant?: VariantNamesOf<TDecl[NoInfer<K>]>
-      expiresIn?: number
-      disposition?: 'inline' | 'attachment'
-    },
+    options?: AttachmentUrlOptions & { variant?: VariantNamesOf<TDecl[NoInfer<K>]> },
   ): Promise<string | null>
 
   /**
@@ -184,7 +180,7 @@ export function Attachable<
       this: typeof Model,
       record: PlainObject | AttachableRecordId,
       collection: string,
-      options?: { variant?: string; expiresIn?: number; disposition?: 'inline' | 'attachment' },
+      options?: AttachmentUrlOptions & { variant?: string },
     ) {
       const engine = resolveAttachmentEngine(`${this.name}.attachmentUrl()`)
       return engine.attachmentUrl(this, decl, record, collection, options)

@@ -173,8 +173,12 @@ like:
   row), and it is a single path segment (no `:name*` — see the route
   path pitfall `guren check` guards).
 - Query parameters, all covered by the signature: `variant` (a
-  declared variant name), `disposition` (`inline` | `attachment`),
-  `expires` (unix seconds, written by the signer), `signature`.
+  declared variant name), `disposition` (~~`inline` | `attachment`~~
+  **Amended in Part 2:** `attachment` only — `inline` is already the
+  default outcome for allowlisted types and the allowlist can never be
+  forced to inline, so a signed `inline` value would change the URL
+  while doing nothing), `expires` (unix seconds, written by the
+  signer), `signature`.
 
 Request handling, in order (cheapest first):
 
@@ -270,7 +274,12 @@ per disk:
 - **Redirect** — 302 to a presigned URL **minted per request**:
   `disk.temporaryUrl(key, expiresAt, { responseContentDisposition,
   responseContentType })`, where `expiresAt` is an absolute `Date` at
-  `min(remaining signed lifetime, driver cap)`. Minting per request
+  ~~`min(remaining signed lifetime, driver cap)`~~ **Amended in
+  Part 2:** `min(remaining signed lifetime, a fixed 5-minute inner
+  TTL)` — the inner credential only needs to survive one fetch, no
+  driver exposes its ceiling to compare against, and a TTL derived
+  from `urlExpiresIn` would let a raised outer lifetime silently
+  exceed R2's 7-day limit. Minting per request
   is what lets a long-lived route URL (an emailed link) coexist with
   R2's 7-day presign ceiling — the inner presign is always fresh and
   short. `Cache-Control: no-store` on the redirect itself (the
@@ -334,12 +343,19 @@ disks: {
 ```
 
 `serve`: `'auto'` (default: redirect iff `capabilities.presignedGet`,
-else proxy) | `'redirect'` (boot-time error if the disk does not
-declare `presignedGet` — misconfiguration must not fail open into
-serving) | `'proxy'` (e.g. keep bucket egress behind the app for IP
-allowlisting) | `'direct'` (bypass the route entirely; the v1
-`temporaryUrl()` behaviour, for S3 apps that measured the extra hop
-and want it gone — with the v1 caveats back).
+else proxy) | `'redirect'` (~~boot-time error if the disk does not
+declare `presignedGet`~~ **Amended in Part 2:** a boot-time check has
+nowhere to run — `storage` is resolved lazily and boot never touches
+drivers — so the guard sits at the comparison site instead:
+redirecting always requires the driver's positive `presignedGet`
+declaration, and a `'redirect'` disk without it **downgrades to proxy
+with a warning** rather than 302ing to whatever `temporaryUrl()`
+returns; the static gate is a `guren check` rule in Part 4 —
+misconfiguration must not fail open into serving) | `'proxy'` (e.g.
+keep bucket egress behind the app for IP allowlisting) | `'direct'`
+(bypass the route entirely; the v1 `temporaryUrl()` behaviour, for S3
+apps that measured the extra hop and want it gone — with the v1
+caveats back).
 
 ### 4. Response hardening (proxy mode)
 
