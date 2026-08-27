@@ -1,5 +1,6 @@
 import type {
   R2BucketLike,
+  R2GetOptionsLike,
   R2ListOptionsLike,
   R2ObjectBodyLike,
   R2ObjectLike,
@@ -50,11 +51,22 @@ export class FakeR2Bucket implements R2BucketLike {
     return stored ? this.toObject(key, stored) : null
   }
 
-  async get(key: string): Promise<R2ObjectBodyLike | null> {
-    this.calls.push({ method: 'get', args: [key] })
+  async get(key: string, options?: R2GetOptionsLike): Promise<R2ObjectBodyLike | null> {
+    this.calls.push({ method: 'get', args: options ? [key, options] : [key] })
     const stored = this.objects.get(key)
     if (!stored) return null
-    const bytes = stored.bytes
+    // Real R2 rejects an unsatisfiable range; only a missing key is null.
+    // subarray() would silently return an empty slice here, masking the
+    // production behavior the driver deliberately propagates.
+    const range = options?.range
+    if (range && (range.offset >= stored.bytes.byteLength || (range.length !== undefined && range.length <= 0))) {
+      throw new Error('get: The requested range is not satisfiable (10039)')
+    }
+    // A range affects only the body/readers, like the real binding; the
+    // object's `size` stays the full object size.
+    const bytes = range
+      ? stored.bytes.subarray(range.offset, range.length === undefined ? undefined : range.offset + range.length)
+      : stored.bytes
     return {
       ...this.toObject(key, stored),
       body: new Blob([new Uint8Array(bytes)]).stream(),

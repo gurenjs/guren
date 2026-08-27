@@ -33,9 +33,10 @@ if (enabled) {
   describeR2DriverConformance('R2Driver (Miniflare R2)', {
     bucket: miniflareBucket,
     reset: emptyBucket,
-    // Miniflare's binding proxy cannot marshal the stream copy() pipes from
-    // get() into put(); the block below runs those two methods inside workerd.
-    streamingCopy: false,
+    // Miniflare's binding proxy cannot marshal `get().body` — the stream
+    // copy() pipes into put() and getStream() returns to the caller; the
+    // workerd block below runs those methods inside workerd instead.
+    streamingBody: false,
   })
 }
 
@@ -58,11 +59,12 @@ describe.skipIf(!enabled)('R2Driver against Miniflare R2 at scale', () => {
   })
 })
 
-// The streaming copy is the one code path the binding proxy cannot carry, so
-// this block bundles the driver and runs it inside workerd itself, where
-// `bucket.put(key, object.body)` is the documented R2 pattern.
-describe.skipIf(!enabled)('R2Driver.copy/move inside workerd', () => {
-  test('streams get().body into put() and carries metadata', async () => {
+// The paths that need `get().body` to stay inside workerd (see the
+// harness's streamingBody flag): this block bundles the driver and runs
+// them in workerd itself, where handing the stream onward is the
+// documented R2 pattern.
+describe.skipIf(!enabled)('R2Driver streaming paths inside workerd', () => {
+  test('copy/move pipe get().body into put(); getStream returns it', async () => {
     const entry = new URL('./r2-miniflare.worker.ts', import.meta.url).pathname
     const build = await Bun.build({ entrypoints: [entry], target: 'browser', format: 'esm', minify: false })
     if (!build.success) {
@@ -99,6 +101,10 @@ describe.skipIf(!enabled)('R2Driver.copy/move inside workerd', () => {
         copied: 'content',
         bytesAreBuffer: true,
         bytes: Array.from(new TextEncoder().encode('content')),
+        streamedFull: 'content',
+        // Inclusive start..end 1..3 of 'content' → offset 1, length 3.
+        streamedRange: 'ont',
+        missingStreamIsNull: true,
         moved: 'content',
         copyExistsAfterMove: false,
         sourceExists: true,

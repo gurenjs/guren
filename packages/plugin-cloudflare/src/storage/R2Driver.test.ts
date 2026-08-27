@@ -11,7 +11,7 @@ describeR2DriverConformance('R2Driver (FakeR2Bucket)', {
     for (const key of fake.keys()) await fake.delete(key)
     fake.calls.length = 0
   },
-  streamingCopy: true,
+  streamingBody: true,
 })
 
 // What only the fake can observe: which calls the driver makes, and how it
@@ -130,5 +130,58 @@ describe('R2Driver against the binding', () => {
       expect(url.searchParams.get('X-Amz-Credential')).toMatch(/^AKIDEXAMPLE\/\d{8}\/auto\/s3\/aws4_request$/)
       expect(url.searchParams.get('X-Amz-Signature')).toMatch(/^[0-9a-f]{64}$/)
     })
+  })
+})
+
+describe('R2Driver delivery surface (RFC 0015)', () => {
+  const presign = { accountId: 'acct123', bucket: 'my-bucket', accessKeyId: 'AKIDEXAMPLE', secretAccessKey: 'secret' }
+
+  test('declares presignedGet iff presign credentials are configured', () => {
+    const { driver: bindingOnly } = createDriver()
+    const { driver: withPresign } = createDriver({ presign })
+
+    expect(bindingOnly.capabilities).toBeUndefined()
+    expect(withPresign.capabilities).toEqual({ presignedGet: true })
+  })
+
+  test('getStream maps the inclusive range onto R2 offset/length', async () => {
+    const { bucket, driver } = createDriver({ prefix: 'media' })
+    await driver.put('range.bin', Buffer.from('0123456789'))
+    bucket.calls.length = 0
+
+    await driver.getStream('range.bin', { range: { start: 2, end: 5 } })
+    await driver.getStream('range.bin', { range: { start: 7 } })
+    await driver.getStream('range.bin')
+
+    expect(bucket.calls[0]).toEqual({
+      method: 'get',
+      args: ['media/range.bin', { range: { offset: 2, length: 4 } }],
+    })
+    expect(bucket.calls[1]).toEqual({
+      method: 'get',
+      args: ['media/range.bin', { range: { offset: 7 } }],
+    })
+    expect(bucket.calls[2]).toEqual({ method: 'get', args: ['media/range.bin'] })
+  })
+
+  test('temporaryUrl ignores response overrides — R2 does not implement them', async () => {
+    const { driver } = createDriver({ presign })
+    const expires = new Date(Date.now() + 3600 * 1000)
+
+    // R2's S3 GetObject has no response-* query parameters; signing them in
+    // would look like disposition policy survives the redirect while R2
+    // serves the object's own metadata. The TemporaryUrlOptions contract is
+    // that an incapable driver ignores them — pin that it really does.
+    const url = new URL(
+      await driver.temporaryUrl('doc.pdf', expires, {
+        responseContentDisposition: 'attachment; filename="doc.pdf"',
+        responseContentType: 'application/pdf',
+      }),
+    )
+
+    expect(url.searchParams.has('response-content-disposition')).toBe(false)
+    expect(url.searchParams.has('response-content-type')).toBe(false)
+    expect(url.searchParams.get('X-Amz-Signature')).toMatch(/^[0-9a-f]{64}$/)
+    expect(url.pathname).toBe(new URL(await driver.temporaryUrl('doc.pdf', expires)).pathname)
   })
 })

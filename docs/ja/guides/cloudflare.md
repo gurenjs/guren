@@ -201,7 +201,7 @@ Bun プロセス（スクリプトや Workers 以外のデプロイ）から同�
 - **同期ゲートは Worker 内でそのまま走ります。** バイト数超過(413)、`maxPixels` を超えるヘッダ寸法(422)、HEIC シグネチャ(415)、`image: 'require'` コレクションへの非画像(422)は、いずれもリクエスト内で拒否されます。純粋な JavaScript で、デコーダは不要です。
 - **`queued: true` でアタッチします。** Worker はオリジナルを保存し、宣言済みバリアントを `pending` として記録し、Redis ベースのキュー(`RedisQueueDriver`。キューガイドが Workers に求めるストアと同じ)へ `GenerateVariantsJob` をディスパッチします。ジョブが完了するまで、バリアント URL はオリジナルへフォールバックします。
 - **ワーカーは Bun で動かします。** 別プロセスの Bun(`Bun.Image` あり)がキューを処理します: 先送りしたフルデコード、オプトイン済みコレクションの HEIC 変換、バリアント生成を行います。`configureAttachments()` がジョブを登録するため、アプリの config を起動するワーカーなら追加配線なしで処理できます。
-- **R2 上の private アタッチメントには `presign` が必要です**(上記の `temporaryUrl()` のルール)。public のものはバケットのカスタムドメインから配信され、Worker の CPU を使いません。
+- **private アタッチメントは署名配信ルートによりバインディングだけで動きます。** `configureAttachments()` でディスクを private と宣言しルートを有効化してください: `disks: { media: 'private' }, delivery: {}`（未宣言のディスクは **public** 扱いで、`publicUrl` 付きのバケットもデフォルトで public です）。加えてルート登録関数で `registerAttachmentRoutes(router)` をマウントすると、private アタッチメントはパス相対の署名付き URL になり、ルートが `get().body` を Worker 経由でストリーム配信します。`presign` 資格情報は不要です。`presign` を設定した場合はドライバが `capabilities.presignedGet` を宣言し、同じルートが短寿命の presigned URL への 302 リダイレクトに昇格します。R2 固有の注意: R2 の S3 API は `response-content-*` ヘッダオーバーライドを無視するため、リダイレクトはオブジェクトの保存済みメタデータで配信されます。presign 対応の R2 ディスクで `Content-Disposition: attachment` を強制したいアプリは `serve: 'proxy'` を使ってください。public のアタッチメントは従来どおりバケットのカスタムドメインから配信され、Worker の CPU を使いません。
 
 同期ゲートが捕まえられない唯一のクラス、つまりヘッダで嘘をつくバイト列は、受理後にワーカーが検出します: `image: 'require'` コレクションではジョブがアタッチメントをパージし、それ以外では不透明ファイルとして残ります。
 
