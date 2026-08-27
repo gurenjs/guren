@@ -171,17 +171,17 @@ describe('installAgentHarness', () => {
   })
 
   it('sync --prune --dry-run reports stale files but deletes nothing', async () => {
-    await installAgentHarness({ cwd: tempDir, mode: 'init' })
-    await writeFile(join(tempDir, '.claude/rules/leftover.md'), 'old rule\n', 'utf8')
+    await installAgentHarness({ cwd: tempDir, mode: 'init', targets: ['claude', 'cursor'] })
+    await writeFile(join(tempDir, '.cursor/rules/guren-leftover.mdc'), 'old rule\n', 'utf8')
 
     const result = await installAgentHarness({ cwd: tempDir, mode: 'sync', prune: true, dryRun: true })
 
-    expect(result.stale).toEqual(['.claude/rules/leftover.md'])
+    expect(result.stale).toEqual(['.cursor/rules/guren-leftover.mdc'])
     expect(result.pruned).toBe(false)
     // the result distinguishes "--prune --dry-run" from a plain "--dry-run"
     expect(result.pruneRequested).toBe(true)
     expect(result.mode).toBe('sync')
-    expect(await readFile(join(tempDir, '.claude/rules/leftover.md'), 'utf8')).toBe('old rule\n')
+    expect(await readFile(join(tempDir, '.cursor/rules/guren-leftover.mdc'), 'utf8')).toBe('old rule\n')
   })
 
   it('sync writes user-owned files when missing', async () => {
@@ -375,11 +375,10 @@ describe('installAgentHarness', () => {
 
     const result = await installAgentHarness({ cwd: tempDir, mode: 'sync' })
 
-    expect(result.stale).toEqual([
-      '.agents/rules/models.md',
-      '.claude/rules/models.md',
-      '.cursor/rules/guren-models.mdc',
-    ])
+    // the native roots recognize the leftover by its guren- pattern; the
+    // canonical roots are claimed by name, so an old name is theirs to report
+    // only once it is recorded in RETIRED_CANONICAL_RULES (below)
+    expect(result.stale).toEqual(['.cursor/rules/guren-models.mdc'])
     expect(result.pruned).toBe(false)
     // the current name is restored, the old copies stay until an explicit --prune
     expect(result.written).toContain('.claude/rules/orm-models.md')
@@ -387,7 +386,7 @@ describe('installAgentHarness', () => {
     await access(join(tempDir, '.cursor/rules/guren-models.mdc'))
   })
 
-  it('sync --prune deletes the renamed rule leftovers in every root', async () => {
+  it('sync --prune deletes the renamed rule leftovers in the native roots', async () => {
     await installAgentHarness({ cwd: tempDir, mode: 'init', targets: ['claude', 'cursor', 'copilot'] })
     await renameInstalledRule('orm-models', 'models')
 
@@ -395,17 +394,30 @@ describe('installAgentHarness', () => {
 
     expect(result.pruned).toBe(true)
     expect(result.stale).toEqual([
-      '.agents/rules/models.md',
-      '.claude/rules/models.md',
       '.cursor/rules/guren-models.mdc',
       '.github/instructions/guren-models.instructions.md',
     ])
-    await expect(access(join(tempDir, '.claude/rules/models.md'))).rejects.toThrow()
     await expect(access(join(tempDir, '.cursor/rules/guren-models.mdc'))).rejects.toThrow()
     // the rule under its current name is freshly written, not pruned
     expect(await readFile(join(tempDir, '.cursor/rules/guren-orm-models.mdc'), 'utf8')).toContain(
       'defineModel',
     )
+  })
+
+  it('sync claims a retired canonical rule the plan no longer writes', async () => {
+    // the canonical roots' half of the rename above: an old rule filename is
+    // claimed once RETIRED_CANONICAL_RULES records it. Injected here through
+    // findStaleManagedFiles because that list is empty today — same seam, and
+    // same review obligation, as the retired skill below.
+    await installAgentHarness({ cwd: tempDir, mode: 'init' })
+    await renameInstalledRule('orm-models', 'models')
+
+    const plan = planComponents(['claude'], await loadAgentTemplates(), 'My App')
+    const stale = await findStaleManagedFiles(tempDir, ['claude'], plan, { rules: ['models.md'] })
+
+    expect(stale).toEqual(['.claude/rules/models.md'])
+    // and without the tombstone the same leftover is not claimed at all
+    expect(await findStaleManagedFiles(tempDir, ['claude'], plan)).toEqual([])
   })
 
   it('sync claims a retired canonical skill the plan no longer writes', async () => {
@@ -420,7 +432,9 @@ describe('installAgentHarness', () => {
     await writeFile(join(tempDir, '.claude/skills/retired-skill/SKILL.md'), 'old skill\n', 'utf8')
 
     const plan = planComponents(['claude'], await loadAgentTemplates(), 'My App')
-    const stale = await findStaleManagedFiles(tempDir, ['claude'], plan, ['retired-skill'])
+    const stale = await findStaleManagedFiles(tempDir, ['claude'], plan, {
+      skills: ['retired-skill'],
+    })
 
     expect(stale).toEqual(['.claude/skills/retired-skill/SKILL.md'])
     // and without the tombstone the same directory is not claimed at all
@@ -525,25 +539,41 @@ describe('installAgentHarness', () => {
     )
   })
 
-  it('sync reports a user file in the managed rules root but keeps it by default', async () => {
+  it('sync --prune never claims a rule the framework did not write — the rules roots are where projects keep their own', async () => {
+    // the advice sync itself prints ("keep project-specific rules in files of
+    // your own") puts a project's conventions in this directory, so a
+    // whole-root claim deleted exactly the file the tool asked for
     await installAgentHarness({ cwd: tempDir, mode: 'init' })
     await writeFile(join(tempDir, '.claude/rules/team-conventions.md'), 'user rule\n', 'utf8')
-
-    const result = await installAgentHarness({ cwd: tempDir, mode: 'sync' })
-
-    expect(result.stale).toEqual(['.claude/rules/team-conventions.md'])
-    expect(result.pruned).toBe(false)
-    expect(await readFile(join(tempDir, '.claude/rules/team-conventions.md'), 'utf8')).toBe('user rule\n')
-  })
-
-  it('sync --prune deletes a colliding user file — why deletion is opt-in', async () => {
-    await installAgentHarness({ cwd: tempDir, mode: 'init' })
-    await writeFile(join(tempDir, '.claude/rules/team-conventions.md'), 'user rule\n', 'utf8')
+    // the nested file carries a shipped rule's filename: the claim is
+    // top-level only, so a walk that turned recursive would delete it
+    await mkdir(join(tempDir, '.claude/rules/team'), { recursive: true })
+    await writeFile(join(tempDir, '.claude/rules/team/testing.md'), 'nested user rule\n', 'utf8')
 
     const result = await installAgentHarness({ cwd: tempDir, mode: 'sync', prune: true })
 
-    expect(result.stale).toEqual(['.claude/rules/team-conventions.md'])
-    await expect(access(join(tempDir, '.claude/rules/team-conventions.md'))).rejects.toThrow()
+    // not deleted, and not reported either: the report and the prune list are
+    // one answer, and a file the framework never wrote is neither's business
+    expect(result.stale).toEqual([])
+    expect(result.pruned).toBe(false)
+    expect(await readFile(join(tempDir, '.claude/rules/team-conventions.md'), 'utf8')).toBe('user rule\n')
+    expect(await readFile(join(tempDir, '.claude/rules/team/testing.md'), 'utf8')).toBe(
+      'nested user rule\n',
+    )
+  })
+
+  it('a user file under a claimed rule name is still the framework\'s to remove — why deletion is opt-in', async () => {
+    await installAgentHarness({ cwd: tempDir, mode: 'init' })
+    // a retired name is claimed the same way a planned one is, so a file of
+    // the project's own under that name is still the framework's to remove
+    const plan = planComponents(['claude'], await loadAgentTemplates(), 'My App')
+    await writeFile(join(tempDir, '.claude/rules/team-conventions.md'), 'user rule\n', 'utf8')
+
+    const stale = await findStaleManagedFiles(tempDir, ['claude'], plan, {
+      rules: ['team-conventions.md'],
+    })
+
+    expect(stale).toEqual(['.claude/rules/team-conventions.md'])
   })
 
   it('sync --prune does not delete through a symlinked .claude, above every namespace in it', async () => {
@@ -560,6 +590,12 @@ describe('installAgentHarness', () => {
     const result = await installAgentHarness({ cwd: tempDir, mode: 'sync', prune: true })
 
     expect(result.stale).toEqual([])
+    // a claimed name behind the link is out of reach too — the containment
+    // check is what stops here, not the claim
+    const plan = planComponents(['claude'], await loadAgentTemplates(), 'My App')
+    expect(await findStaleManagedFiles(tempDir, ['claude'], plan, { rules: ['legacy.md'] })).toEqual(
+      [],
+    )
     expect(await readFile(join(outside, 'rules/legacy.md'), 'utf8')).toBe('not ours to delete\n')
     await rm(outside, { recursive: true, force: true })
   })
@@ -600,6 +636,12 @@ describe('installAgentHarness', () => {
     const result = await installAgentHarness({ cwd: tempDir, mode: 'sync', prune: true })
 
     expect(result.stale).toEqual([])
+    // and it is the link that stops the walk, not the name: the same file
+    // under a claimed name is still not reached
+    const plan = planComponents(['claude'], await loadAgentTemplates(), 'My App')
+    expect(await findStaleManagedFiles(tempDir, ['claude'], plan, { rules: ['legacy.md'] })).toEqual(
+      [],
+    )
     expect(await readFile(join(tempDir, 'shared-rules/legacy.md'), 'utf8')).toBe('external\n')
   })
 

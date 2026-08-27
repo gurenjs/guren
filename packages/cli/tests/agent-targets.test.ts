@@ -6,6 +6,7 @@ import {
   managedNamespaces,
   parseTargetList,
   planComponents,
+  RETIRED_CANONICAL_RULES,
   RETIRED_CANONICAL_SKILLS,
   type HarnessComponent,
   type TemplateFiles,
@@ -177,6 +178,17 @@ describe('planComponents', () => {
     expect(rule?.content).toContain('globs: tests/**,app/**')
   })
 
+  it('throws when a canonical rule is nested — no claim can reach one', () => {
+    const templates = fakeTemplates()
+    templates.delete('core/rules/testing.md')
+    templates.set('core/rules/http/auth.md', FAKE_RULE)
+    // the native projections would fold it into guren-http/auth.mdc, and
+    // every prune claim scans a directory's top level only
+    expect(() => planComponents(['claude'], templates, 'My App')).toThrow(
+      'Agent harness rule http/auth.md must be a flat file',
+    )
+  })
+
   it('throws when a rule file has no parseable frontmatter instead of shipping an empty scope', () => {
     const templates = fakeTemplates()
     templates.set('core/rules/testing.md', '# No frontmatter\n')
@@ -208,20 +220,21 @@ describe('managedNamespaces', () => {
   const plan = (components: HarnessComponent[]) =>
     planComponents(components, fakeTemplates(), 'My App')
 
-  it('claims the rules roots wholesale but the skills roots only by planned name', () => {
-    // the skills roots are shared with external installers (npx skills add,
-    // Agent Plugins clients), so a whole-tree claim there would prune skills
-    // the framework never wrote — including its own catalog-distributed ones
+  it('claims the rules and skills roots only by the names the harness ships', () => {
+    // both roots are shared: the skills roots with external installers (npx
+    // skills add, Agent Plugins clients), the rules roots with the project's
+    // own conventions files — so a whole-root claim in either would prune
+    // files the framework never wrote
     expect(managedNamespaces(['claude', 'agents'], plan(['claude', 'agents']))).toEqual([
-      { kind: 'tree', dir: '.claude/rules' },
+      { kind: 'files', dir: '.claude/rules', names: ['testing.md'] },
       { kind: 'children', dir: '.claude/skills', names: ['scaffold'] },
-      { kind: 'tree', dir: '.agents/rules' },
+      { kind: 'files', dir: '.agents/rules', names: ['testing.md'] },
       { kind: 'children', dir: '.agents/skills', names: ['scaffold'] },
     ])
   })
 
   it('a retired skill name stays claimed alongside the planned ones', () => {
-    const [, claude] = managedNamespaces(['claude'], plan(['claude']), ['old-skill'])
+    const [, claude] = managedNamespaces(['claude'], plan(['claude']), { skills: ['old-skill'] })
     expect(claude).toEqual({
       kind: 'children',
       dir: '.claude/skills',
@@ -229,8 +242,17 @@ describe('managedNamespaces', () => {
     })
   })
 
+  it('a retired rule name stays claimed alongside the planned ones', () => {
+    const [claude] = managedNamespaces(['claude'], plan(['claude']), { rules: ['models.md'] })
+    expect(claude).toEqual({
+      kind: 'files',
+      dir: '.claude/rules',
+      names: ['models.md', 'testing.md'],
+    })
+  })
+
   it('rejects a retired name that is not a single path segment — the claim is rm-adjacent', () => {
-    const claim = (bad: string) => () => managedNamespaces(['claude'], plan(['claude']), [bad])
+    const claim = (bad: string) => () => managedNamespaces(['claude'], plan(['claude']), { skills: [bad] })
     // the traversal half is safePathSegments' rule, reported in its words —
     // including the backslash (a separator on Windows) and the NUL that
     // truncates a path syscall-side, neither of which a hand-written
@@ -239,8 +261,35 @@ describe('managedNamespaces', () => {
       expect(claim(bad)).toThrow('path traversal')
     }
     expect(claim('')).toThrow('required')
-    // and the one constraint a skill directory adds on top of it
+    // and the one constraint a claimed name adds on top of it
     expect(claim('a/b')).toThrow('not a single path segment')
+    // the rule claim is rm-adjacent in the same way, and reports as one
+    expect(() => managedNamespaces(['claude'], plan(['claude']), { rules: ['../x'] })).toThrow(
+      'path traversal',
+    )
+    expect(() => managedNamespaces(['claude'], plan(['claude']), { rules: ['a/b'] })).toThrow(
+      'Agent harness rule claim "a/b" is not a single path segment',
+    )
+  })
+
+  it('the rule claim is derived from the plan, so it tracks the real templates', async () => {
+    const real = planComponents(['claude'], await loadAgentTemplates(), 'My App')
+    const [claude] = managedNamespaces(['claude'], real)
+    if (claude.kind !== 'files') {
+      throw new Error('expected a files claim')
+    }
+    // same derivation and the same review obligation as the skill claim
+    // below: shipped ∪ retired, with nothing able to know a rule was dropped
+    // without a tombstone in RETIRED_CANONICAL_RULES
+    const shipped = real
+      .filter((file) => file.path.startsWith('.claude/rules/'))
+      .map((file) => file.path.slice('.claude/rules/'.length))
+      .sort()
+    expect(shipped).toContain('orm-models.md')
+    expect(claude.names).toEqual([...new Set([...shipped, ...RETIRED_CANONICAL_RULES])].sort())
+    for (const retired of RETIRED_CANONICAL_RULES) {
+      expect(shipped).not.toContain(retired)
+    }
   })
 
   it('the skill claim is derived from the plan, so it tracks the real templates', async () => {
