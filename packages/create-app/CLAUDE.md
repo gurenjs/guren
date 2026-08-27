@@ -59,11 +59,16 @@ Scaffolding CLI that copies templates from `templates/default` and replaces toke
   file pins those inlined constants, parse, the verbatim copy, and tarball
   inclusion; `tests/drizzle-config-guard.test.ts` executes the scaffolded
   SQLite config so a guard that is present but inert still fails.
-  The `drizzle.config.ts` that `templates/default` and `templates/api-only`
-  ship is dead — `applyDatabaseConfig` overwrites it unconditionally, so the
-  `guren make:module` comment those copies carry never reaches a scaffolded
-  app. Folding that comment into the three variants here is the fix; until
-  then, do not edit the template copies expecting users to see it.
+  These three are the *only* `drizzle.config.ts` under `templates/` — the base
+  templates deliberately ship none. `applyDatabaseConfig` writes the file
+  unconditionally on the one scaffold path, so a copy in `templates/default`
+  or `templates/api-only` is overwritten before the user ever sees it: that is
+  how the `guren make:module` comment sat in two dead files for as long as it
+  did. Comments meant for a scaffolded app belong in these variants, and
+  adding a base-template copy back only recreates the dead file. Nothing
+  enumerates the path either (`transformFiles` does not list it, and both
+  template tsconfigs reach it through their `*.ts` glob), so the scaffolded
+  app still picks up the written file.
 - **The generic `db/schema.ts` ships the same way**, as
   `templates/database/<driver>/db/schema.ts` — the fallback used only when a
   template ships no `db/schema.<driver>.ts` variant of its own. The unsuffixed
