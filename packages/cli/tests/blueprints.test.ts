@@ -16,6 +16,7 @@ import {
   captureWarnings,
   createTempWorkspace,
   readApiOnlyTemplateFile,
+  readShippedSchemaFile,
   seedApiOnlyApp,
   seedShippedApiOnlyApp,
   type TempWorkspace,
@@ -449,7 +450,7 @@ export default function registerWebRoutes(appRouter: Router): void {
       await mkdir('routes', { recursive: true })
       await mkdir('db', { recursive: true })
       await writeFile('routes/api.ts', await readApiOnlyTemplateFile('routes/api.ts'))
-      await writeFile('db/schema.ts', await readApiOnlyTemplateFile('db/schema.ts'))
+      await writeFile('db/schema.ts', await readShippedSchemaFile())
 
       await expect(runBlueprint('resource', { name: 'Post' })).rejects.toThrow(
         'but this app has no routes/web.ts',
@@ -943,7 +944,7 @@ describe('resource blueprint on an API-only app', () => {
     // Beyond the two files the predicate reads: this blueprint would append a
     // table to it, so the assertion below needs the real schema present.
     await mkdir('db', { recursive: true })
-    await writeFile('db/schema.ts', await readApiOnlyTemplateFile('db/schema.ts'))
+    await writeFile('db/schema.ts', await readShippedSchemaFile())
 
     await expect(runBlueprint('resource', { name: 'Post' })).rejects.toThrow(
       'guren add resource scaffolds Inertia pages',
