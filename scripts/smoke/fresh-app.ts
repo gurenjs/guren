@@ -527,7 +527,8 @@ async function assertFeatureScaffolds(appDir: string): Promise<void> {
  * whenever a template has started using an API that exists only in this
  * repository — invisible to the other install modes and to the root
  * `typecheck`, which excludes `templates` (that now covers `config/database.ts`
- * too, shipped as per-driver sources under `templates/database/`).
+ * and `drizzle.config.ts` too, shipped as per-driver sources under
+ * `templates/database/`).
  *
  * "Template" here means every template, not just the base scaffold. The
  * feature blueprints in `packages/cli/src/blueprints.ts` and `make-auth.ts`

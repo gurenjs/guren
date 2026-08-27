@@ -34,12 +34,26 @@ Scaffolding CLI that copies templates from `templates/default` and replaces toke
   that dialect's seeder context as `AppSeederContext` (the bare
   `SeederContext` is PostgreSQL-shaped and rejects a MySQL or SQLite schema —
   the alias is what keeps the shipped seeders portable). The files hardcode
-  the same URL `DATABASE_DEFAULTS` feeds into `.env` and `drizzle.config.ts`;
+  the same URL `DATABASE_DEFAULTS` feeds into `.env`;
   `tests/database-config-template.test.ts` pins that alignment, plus parse,
   the driver↔factory pairing, the verbatim copy, and tarball inclusion. Like
   every template here, these files are excluded from typecheck (they resolve
   `@guren/*` from npm); the starter smokes typecheck them inside a real
   scaffold.
+- **`drizzle.config.ts` ships the same way**, at
+  `templates/database/<driver>/drizzle.config.ts`. Each variant inlines its
+  driver's `DATABASE_DEFAULTS` url and dialect (note postgres declares
+  `postgresql`, not the driver key), and only the SQLite variant carries the
+  DATABASE_URL guard — Postgres and MySQL take a real connection string there,
+  so a scheme check would reject every valid value they have. The same test
+  file pins those inlined constants, parse, the verbatim copy, and tarball
+  inclusion; `tests/drizzle-config-guard.test.ts` executes the scaffolded
+  SQLite config so a guard that is present but inert still fails.
+  The `drizzle.config.ts` that `templates/default` and `templates/api-only`
+  ship is dead — `applyDatabaseConfig` overwrites it unconditionally, so the
+  `guren make:module` comment those copies carry never reaches a scaffolded
+  app. Folding that comment into the three variants here is the fix; until
+  then, do not edit the template copies expecting users to see it.
 - **Advertise nothing without a smoke.** Each blueprint gets a
   `smoke:starter:<name>` script and a CI step — `bun run typecheck` and
   `bun run build` inside a real scaffold are the only things that catch a
