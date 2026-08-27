@@ -1,5 +1,34 @@
 # @guren/cli
 
+## 2.11.0
+
+### Minor Changes
+
+- a19ff6f: Add the `guren add attachments` blueprint (RFC 0013 Part 4): appends the
+  attachments table to `db/schema.ts` for the app's dialect, writes
+  `config/attachments.ts` and an `AttachmentsProvider` that wires
+  `configureAttachments()` at boot, registers the `attachments:prune`
+  console command, and installs the storage blueprint first when the app has
+  no `StorageProvider`.
+- 6fc3156: Restyle the `make:auth` and `make:feature` scaffold output with the Guren UI design tokens: pages render in the guren.dev light/dark themes via `bg-g-*` / `text-g-*` utilities, flash and error messages become diagnostic rows, and the destructive delete action is an outline + confirm instead of red text. Both commands now ensure the app carries `resources/css/guren.css` and its `app.css` import (idempotent — apps scaffolded by create-guren-app ship them already). The blog blueprint's dashboard page moves in lockstep.
+- d8abe78: Add `guren make:feature --attach "cover:one,images:many"` (RFC 0013 Part 4):
+  wraps the generated model in the `Attachable` mixin (`hasOneAttached` /
+  `hasManyAttached` with `image: 'require'`), wires the store action to read
+  uploads via `this.file()` / `this.files()` and `Model.attach()`, and makes
+  the destroy action call `Model.purgeAttachments()` before deleting the row —
+  deletion is explicit because the polymorphic attachment rows carry no foreign
+  key. The flag is refused, with guidance to run `guren add attachments` first,
+  when the app has no `configureAttachments()`. `guren add resource` passes
+  `--attach` through.
+
+### Patch Changes
+
+- Updated dependencies [104c9b6]
+- Updated dependencies [d1b1eb6]
+- Updated dependencies [451755c]
+  - @guren/server@2.12.0
+  - @guren/core@1.10.0
+
 ## 2.10.0
 
 ### Minor Changes

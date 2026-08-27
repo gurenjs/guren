@@ -1,5 +1,36 @@
 # @guren/server
 
+## 2.12.0
+
+### Minor Changes
+
+- 104c9b6: First-class content rendering (RFC 0014): `Controller.view(component, props)`
+  renders a `hono/jsx` component to plain server-rendered HTML — the
+  non-hydrating counterpart to `this.inertia()` for public content pages, with
+  auto-escaping, native `<title>`/`<meta>`/`<link>` head hoisting, and a loud
+  error when a page forgets its Layout (pass `{ doctype: false }` for
+  intentional fragments).
+
+  Alongside it: `viteAsset(entry)` resolves Vite asset URLs (dev server in
+  development, hashed manifest output in production, throws when neither
+  resolves), and new `@guren/core/jsx-runtime` / `@guren/core/jsx-dev-runtime`
+  subpaths let View files compile with `/** @jsxImportSource @guren/core */` —
+  applications never declare hono themselves. `@guren/server`'s hono floor
+  moves to `^4.13.0`, where the component result contract `view()` renders was
+  introduced.
+
+- 451755c: Build-time Vite manifest injection for serverless targets: `viteAsset()` now
+  resolves production entries from `GUREN_VITE_MANIFEST` (the client manifest
+  JSON) before reading the filesystem, and all three deploy plugins populate it
+  during their build step — Cloudflare Workers and Lambda in their generated
+  entry module, Vercel by substituting the read at bundle time. Content pages
+  rendered with `Controller.view()` work on deploy targets whose runtime never
+  sees `public/assets/manifest.json`.
+
+### Patch Changes
+
+- d1b1eb6: Follow `NextContinuationToken` in `S3Driver.files()`, `directories()`, and `allFiles()`. A single ListObjectsV2 request returns at most 1000 entries, so listings beyond one page were silently truncated — `deleteDirectory()` left objects behind on large directories, and callers treating the listing as complete missed everything past the first page. A truncated page without an advancing token now throws instead of returning an incomplete listing. `deleteMany()` splits deletes into the 1000-key batches DeleteObjects accepts, and root listings on a disk with a `prefix` no longer send a doubled-slash `Prefix` that matches nothing.
+
 ## 2.11.0
 
 ### Minor Changes

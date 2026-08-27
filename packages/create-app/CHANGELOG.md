@@ -1,5 +1,16 @@
 # create-guren-app
 
+## 1.10.0
+
+### Minor Changes
+
+- db976f7: Restyle the default template with the Guren UI design tokens: `resources/css/guren.css` ships the guren.dev light/dark themes (white + crimson, rose-pine ground + rose accent) as CSS variables with a Tailwind `@theme inline` mapping, and the welcome page now renders in both themes following the system preference.
+
+### Patch Changes
+
+- 66d54cf: Restyle the blog blueprint with the Guren UI design tokens: every page moves from the slate + emerald look to the guren.dev light/dark themes the default template ships, matching the output of the restyled `make:auth` / `make:feature` generators it was originally derived from.
+- 6fc3156: Restyle the `make:auth` and `make:feature` scaffold output with the Guren UI design tokens: pages render in the guren.dev light/dark themes via `bg-g-*` / `text-g-*` utilities, flash and error messages become diagnostic rows, and the destructive delete action is an outline + confirm instead of red text. Both commands now ensure the app carries `resources/css/guren.css` and its `app.css` import (idempotent — apps scaffolded by create-guren-app ship them already). The blog blueprint's dashboard page moves in lockstep.
+
 ## 1.9.0
 
 ### Minor Changes

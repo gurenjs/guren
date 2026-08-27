@@ -1,5 +1,23 @@
 # @guren/plugin-lambda
 
+## 0.3.0
+
+### Minor Changes
+
+- 451755c: Build-time Vite manifest injection for serverless targets: `viteAsset()` now
+  resolves production entries from `GUREN_VITE_MANIFEST` (the client manifest
+  JSON) before reading the filesystem, and all three deploy plugins populate it
+  during their build step — Cloudflare Workers and Lambda in their generated
+  entry module, Vercel by substituting the read at bundle time. Content pages
+  rendered with `Controller.view()` work on deploy targets whose runtime never
+  sees `public/assets/manifest.json`.
+
+### Patch Changes
+
+- Updated dependencies [104c9b6]
+- Updated dependencies [451755c]
+  - @guren/core@1.10.0
+
 ## 0.2.1
 
 ### Patch Changes
