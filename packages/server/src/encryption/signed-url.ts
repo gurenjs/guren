@@ -13,33 +13,70 @@ const PURPOSE = 'signed-url'
 const SIGNATURE_PARAM = 'signature'
 const EXPIRES_PARAM = 'expires'
 
-function canonicalizeUrl(value: string): { canonical: string; url: URL } {
-  const url = new URL(value)
-  url.searchParams.delete(SIGNATURE_PARAM)
-  const params = Array.from(url.searchParams.entries()).sort(([left], [right]) => left.localeCompare(right))
-  url.search = ''
+// App-relative input ('/path?query') is parsed against this base; the origin
+// must never reach the signature (the canonical form is path + query) or the
+// return value (relative in, relative out) — RFC 0015 §2.
+const RELATIVE_BASE = 'https://relative.invalid'
+
+// `expires` must be a plain positive decimal integer in unix seconds. The
+// bound matters: `Number(expires) < now` alone lets `NaN` and `Infinity`
+// verify forever. 15 digits stays inside Number.MAX_SAFE_INTEGER.
+const EXPIRES_SHAPE = /^[0-9]{1,15}$/
+
+function parseUrl(value: string): { url: URL; relative: boolean } {
+  const relative = value.startsWith('/')
+  return { url: relative ? new URL(value, RELATIVE_BASE) : new URL(value), relative }
+}
+
+function serializeUrl(url: URL, relative: boolean): string {
+  return relative ? `${url.pathname}${url.search}` : url.toString()
+}
+
+function canonicalizeUrl(url: URL): string {
+  const canonical = new URL(url.toString())
+  canonical.searchParams.delete(SIGNATURE_PARAM)
+  // Code-unit comparison, not localeCompare: canonicalization must be
+  // deterministic across runtimes and locales or signer and verifier can
+  // disagree on the same URL.
+  const params = Array.from(canonical.searchParams.entries()).sort(([left], [right]) =>
+    left < right ? -1 : left > right ? 1 : 0,
+  )
+  canonical.search = ''
   for (const [key, paramValue] of params) {
-    url.searchParams.append(key, paramValue)
+    canonical.searchParams.append(key, paramValue)
   }
 
-  return { canonical: `${url.pathname}${url.search}`, url }
+  return `${canonical.pathname}${canonical.search}`
 }
 
 export function signUrl(value: string, keyring: AppKeyring, options: SignedUrlOptions = {}): string {
-  const url = new URL(value)
+  const { url, relative } = parseUrl(value)
   if (typeof options.expiresIn === 'number') {
+    if (!Number.isFinite(options.expiresIn)) {
+      throw new TypeError(
+        `signUrl: expiresIn must be a finite number of milliseconds, got ${options.expiresIn}`,
+      )
+    }
     url.searchParams.set(EXPIRES_PARAM, String(Math.floor((Date.now() + options.expiresIn) / 1000)))
   }
 
-  const { canonical } = canonicalizeUrl(url.toString())
+  const canonical = canonicalizeUrl(url)
   const signer = new MessageSigner(keyring)
   const signature = signer.sign({ url: canonical }, { purpose: PURPOSE })
   url.searchParams.set(SIGNATURE_PARAM, signature)
-  return url.toString()
+  return serializeUrl(url, relative)
 }
 
 export function verifySignedUrl(value: string, keyring: AppKeyring, options: VerifySignedUrlOptions = {}): boolean {
-  const url = new URL(value)
+  // A verifier is handed attacker-controlled input; malformed input is a
+  // failed verification, not an exception for the caller to remember.
+  let url: URL
+  try {
+    url = parseUrl(value).url
+  } catch {
+    return false
+  }
+
   const signature = url.searchParams.get(SIGNATURE_PARAM)
   if (!signature) {
     return false
@@ -50,11 +87,16 @@ export function verifySignedUrl(value: string, keyring: AppKeyring, options: Ver
     return false
   }
 
-  if (expires && Number(expires) < Math.floor(Date.now() / 1000)) {
-    return false
+  if (expires !== null) {
+    if (!EXPIRES_SHAPE.test(expires)) {
+      return false
+    }
+    if (Number(expires) < Math.floor(Date.now() / 1000)) {
+      return false
+    }
   }
 
-  const { canonical } = canonicalizeUrl(value)
+  const canonical = canonicalizeUrl(url)
   const signer = new MessageSigner(keyring)
   const payload = signer.verify<{ url: string }>(signature, { purpose: PURPOSE })
   return payload?.url === canonical

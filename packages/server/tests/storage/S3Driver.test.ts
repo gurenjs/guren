@@ -15,6 +15,16 @@ mock.module('@aws-sdk/client-s3', () => ({
   DeleteObjectsCommand: class {
     constructor(readonly input: Record<string, unknown>) {}
   },
+  GetObjectCommand: class {
+    constructor(readonly input: Record<string, unknown>) {}
+  },
+}))
+
+// The presigner is only ever handed the command; echoing its input back as
+// the "URL" lets tests assert what would have been signed.
+mock.module('@aws-sdk/s3-request-presigner', () => ({
+  getSignedUrl: async (_client: unknown, command: { input: Record<string, unknown> }) =>
+    `https://presigned.example/?input=${encodeURIComponent(JSON.stringify(command.input))}`,
 }))
 
 import { S3Driver } from '../../src/storage/drivers/S3Driver'
@@ -182,5 +192,91 @@ describe('S3Driver deleteMany batching', () => {
       (input) => (input.Delete as { Objects: unknown[] }).Objects.length,
     )
     expect(batchSizes).toEqual([1000, 1])
+  })
+})
+
+describe('S3Driver streaming and delivery capabilities (RFC 0015)', () => {
+  it('declares presignedGet — temporaryUrl is a real presign', () => {
+    const driver = new S3Driver({ client: { send: async () => ({}) }, bucket: 'bucket' })
+    expect(driver.capabilities).toEqual({ presignedGet: true })
+  })
+
+  it('getStream normalizes the SDK body via transformToWebStream', async () => {
+    const bytes = new TextEncoder().encode('streamed')
+    const client = {
+      inputs: [] as Array<Record<string, unknown>>,
+      async send(command: unknown): Promise<unknown> {
+        this.inputs.push((command as { input: Record<string, unknown> }).input)
+        return {
+          Body: {
+            transformToWebStream: () => new Blob([bytes]).stream(),
+          },
+        }
+      },
+    }
+    const driver = new S3Driver({ client, bucket: 'bucket', prefix: 'media' })
+
+    const stream = await driver.getStream('dir/a.bin')
+    expect(stream).not.toBeNull()
+    expect(Buffer.from(await new Response(stream!).arrayBuffer())).toEqual(Buffer.from(bytes))
+    expect(client.inputs[0]?.Key).toBe('media/dir/a.bin')
+    expect(client.inputs[0]?.Range).toBeUndefined()
+  })
+
+  it('getStream maps the range option onto an HTTP Range header', async () => {
+    const client = {
+      inputs: [] as Array<Record<string, unknown>>,
+      async send(command: unknown): Promise<unknown> {
+        this.inputs.push((command as { input: Record<string, unknown> }).input)
+        return { Body: { transformToWebStream: () => new Blob([]).stream() } }
+      },
+    }
+    const driver = new S3Driver({ client, bucket: 'bucket' })
+
+    await driver.getStream('a.bin', { range: { start: 5, end: 9 } })
+    await driver.getStream('a.bin', { range: { start: 7 } })
+
+    expect(client.inputs[0]?.Range).toBe('bytes=5-9')
+    expect(client.inputs[1]?.Range).toBe('bytes=7-')
+  })
+
+  it('getStream resolves null for a missing key', async () => {
+    const client = {
+      async send(): Promise<unknown> {
+        const error = new Error('no such key')
+        error.name = 'NoSuchKey'
+        throw error
+      },
+    }
+    const driver = new S3Driver({ client, bucket: 'bucket' })
+
+    expect(await driver.getStream('missing.bin')).toBeNull()
+  })
+
+  it('temporaryUrl forwards response overrides into the presigned command', async () => {
+    const driver = new S3Driver({ client: { send: async () => ({}) }, bucket: 'bucket' })
+
+    const url = await driver.temporaryUrl('doc.pdf', new Date(Date.now() + 60_000), {
+      responseContentDisposition: 'attachment; filename="doc.pdf"',
+      responseContentType: 'application/pdf',
+    })
+
+    const input = JSON.parse(
+      decodeURIComponent(new URL(url).searchParams.get('input') ?? '{}'),
+    ) as Record<string, unknown>
+    expect(input.ResponseContentDisposition).toBe('attachment; filename="doc.pdf"')
+    expect(input.ResponseContentType).toBe('application/pdf')
+    expect(input.Key).toBe('doc.pdf')
+  })
+
+  it('temporaryUrl omits response overrides when none are given', async () => {
+    const driver = new S3Driver({ client: { send: async () => ({}) }, bucket: 'bucket' })
+
+    const url = await driver.temporaryUrl('doc.pdf', new Date(Date.now() + 60_000))
+    const input = JSON.parse(
+      decodeURIComponent(new URL(url).searchParams.get('input') ?? '{}'),
+    ) as Record<string, unknown>
+    expect('ResponseContentDisposition' in input).toBe(false)
+    expect('ResponseContentType' in input).toBe(false)
   })
 })
