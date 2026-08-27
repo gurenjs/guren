@@ -17,7 +17,7 @@
     },
     "examples/api": {
       "name": "@guren/example-api",
-      "version": "0.1.25",
+      "version": "0.1.28",
       "dependencies": {
         "@guren/cli": "workspace:*",
         "@guren/core": "workspace:*",
@@ -70,7 +70,7 @@
     },
     "packages/cli": {
       "name": "@guren/cli",
-      "version": "2.9.1",
+      "version": "2.12.0",
       "bin": {
         "guren": "./dist/bin.js",
       },
@@ -103,7 +103,7 @@
     },
     "packages/core": {
       "name": "@guren/core",
-      "version": "1.8.1",
+      "version": "1.11.0",
       "bin": {
         "guren": "./dist/bin.js",
       },
@@ -121,7 +121,7 @@
     },
     "packages/create-app": {
       "name": "create-guren-app",
-      "version": "1.8.9",
+      "version": "1.10.1",
       "bin": {
         "create-guren-app": "./dist/cli.js",
       },
@@ -192,7 +192,7 @@
     },
     "packages/plugin-cloudflare": {
       "name": "@guren/plugin-cloudflare",
-      "version": "0.3.2",
+      "version": "0.5.0",
       "dependencies": {
         "@guren/core": "^1.6.2",
         "citty": "^0.1.6",
@@ -207,7 +207,7 @@
     },
     "packages/plugin-lambda": {
       "name": "@guren/plugin-lambda",
-      "version": "0.2.1",
+      "version": "0.3.0",
       "dependencies": {
         "@guren/core": "^1.6.2",
         "citty": "^0.1.6",
@@ -253,7 +253,7 @@
     },
     "packages/plugin-vercel": {
       "name": "@guren/plugin-vercel",
-      "version": "0.3.1",
+      "version": "0.4.0",
       "dependencies": {
         "@guren/core": "^1.6.2",
       },
@@ -265,7 +265,7 @@
     },
     "packages/server": {
       "name": "@guren/server",
-      "version": "2.10.1",
+      "version": "2.13.0",
       "dependencies": {
         "@guren/orm": "^2.6.1",
         "@modelcontextprotocol/sdk": "^1.30.0",
@@ -300,7 +300,7 @@
     },
     "packages/testing": {
       "name": "@guren/testing",
-      "version": "1.6.2",
+      "version": "1.7.0",
       "devDependencies": {
         "@types/react": "^19.0.0",
         "tsdown": "^0.22.14",
@@ -312,7 +312,7 @@
         "@guren/server": ">=2.2.0",
         "@inertiajs/react": "^3.6.1",
         "@testing-library/react": "^14.0.0 || ^15.0.0 || ^16.0.0",
-        "hono": "^4.12.29",
+        "hono": "^4.13.0",
         "react": "^18.0.0 || ^19.0.0",
         "vitest": "^3.2.6",
       },
@@ -326,7 +326,7 @@
     },
     "web": {
       "name": "web",
-      "version": "0.1.25",
+      "version": "0.1.28",
       "dependencies": {
         "@guren/cli": "workspace:*",
         "@guren/core": "workspace:*",
