@@ -100,8 +100,12 @@ describe('BlogController', () => {
       const html = await response.text()
 
       expect(response.status).toBe(404)
-      expect(html).toContain('Post not found')
+      // Body copy and the back link — the <title> alone also says
+      // "Post not found", so assert the parts only the body carries.
+      expect(html).toContain('exist or has been unpublished')
+      expect(html).toContain('href="/blog"')
       expect(html).toMatch(/<head>[\s\S]*noindex[\s\S]*<\/head>/)
+      expect(html).toMatch(/<link rel="stylesheet" href="[^"]*resources\/css\/app\.css"/)
     })
 
     it('should hide unpublished posts from guests', async () => {
@@ -147,9 +151,10 @@ describe('BlogController', () => {
       expect(html.split('<h1>Hello</h1>').length - 1).toBe(1)
       expect(html).not.toContain('__INERTIA_PAGE__')
       expect(html).not.toContain('data-page')
-      // Metadata hoisted into <head> from the Seo component in the body.
+      // Metadata in <head> via the ContentShell head slot.
       expect(html).toMatch(/<head>[\s\S]*Hello World[\s\S]*<\/head>/)
       expect(html).toMatch(/<head>[\s\S]*rel="canonical"[\s\S]*<\/head>/)
+      expect(html).toMatch(/<link rel="stylesheet" href="[^"]*resources\/css\/app\.css"/)
     })
   })
 })

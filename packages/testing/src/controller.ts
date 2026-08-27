@@ -1,3 +1,5 @@
+import { viteAsset } from '@guren/server'
+
 const HTML_ENTITIES: Record<string, string> = {
   '<': '\\u003c',
   '>': '\\u003e',
@@ -91,27 +93,6 @@ export function createControllerContext(
 }
 
 
-/** Mirrors `startsWithHtmlRoot` in `@guren/server` `src/mvc/view.ts`. */
-function startsWithHtmlRoot(body: string): boolean {
-  let i = 0
-  while (i < body.length) {
-    const ch = body.charCodeAt(i)
-    if (ch === 32 || (ch >= 9 && ch <= 13)) {
-      i++
-      continue
-    }
-    if (body.startsWith('<!--', i)) {
-      const end = body.indexOf('-->', i + 4)
-      if (end === -1) return false
-      i = end + 3
-      continue
-    }
-    break
-  }
-  if (body.slice(i, i + 5).toLowerCase() !== '<html') return false
-  const next = body.charCodeAt(i + 5)
-  return next === 62 /* > */ || next === 32 || (next >= 9 && next <= 13)
-}
 
 export function createGurenControllerModule() {
   class Controller {
@@ -195,63 +176,31 @@ export function createGurenControllerModule() {
     }
 
     /**
-     * Mirrors `Controller.view()` / `renderDocument()` in
-     * `@guren/server` (`src/mvc/view.ts`) — keep the two in lockstep. The
-     * real hono renderer is used (via the declared `hono` peer) rather than
-     * a reimplementation: a hand-written reduction diverges on escaping,
-     * which is exactly what tests exist to catch.
+     * Delegates to the real `renderDocument()` from `@guren/server` — the
+     * same engine `Controller.view()` uses — so the mock cannot drift on
+     * escaping, the fragment guard, or response shaping. Importing
+     * `@guren/server` here is established practice (`queue.ts` does), and
+     * only the `@guren/core` specifier is replaced by `vi.mock`.
      */
     async view(
       component: ((props: never) => unknown) & { displayName?: string; name?: string },
       props: unknown,
       options: ResponseInit & { doctype?: boolean } = {},
     ): Promise<Response> {
-      const { createElement } = await import('hono/jsx')
-      const element = createElement(component as never, props as never) as {
-        toString(): string | Promise<string>
-      }
-      const body = String(await element.toString())
-
-      if (options.doctype !== false && !startsWithHtmlRoot(body)) {
-        const name = component.displayName ?? component.name ?? 'component'
-        throw new Error(
-          `view(): ${name} rendered a fragment, not a document. ` +
-            'Wrap the page in your Layout (an <html> root), or pass { doctype: false } ' +
-            'for an intentional fragment response. Without <html>/<head>, <title> and ' +
-            '<meta> tags are not hoisted and the page ships unstyled.',
-        )
-      }
-
-      const { doctype, headers: headersInit, ...init } = options
-      const headers = new Headers(headersInit)
-      if (!headers.has('content-type')) {
-        headers.set('content-type', 'text/html; charset=utf-8')
-      }
-
-      return new Response((doctype === false ? '' : '<!doctype html>') + body, { ...init, headers })
+      const { renderDocument } = await import('@guren/server')
+      return renderDocument(component as never, props as never, options)
     }
-  }
-
-  /**
-   * Mirrors `viteAsset()` in `@guren/server` (`src/http/vite-assets.ts`).
-   * The dev branch is the real rule; the production branch has no manifest
-   * to read in unit tests, so it maps the entry identically under the real
-   * URL prefix — enough for assertions on where a Layout points.
-   */
-  const viteAsset = (entry: string): string => {
-    const normalized = entry.replace(/^\/+/u, '')
-    const devServerUrl = process.env.VITE_DEV_SERVER_URL
-    const isProduction =
-      (process.env.NODE_ENV ?? 'development') === 'production' && typeof devServerUrl !== 'string'
-    if (!isProduction) {
-      const base = (devServerUrl ?? 'http://localhost:5173').trim().replace(/\/+$/u, '')
-      return `${base}/${normalized}`
-    }
-    return `/public/assets/${normalized}`
   }
 
   return {
     Controller,
+    /**
+     * The real `viteAsset()` from `@guren/server`, verbatim: under vitest
+     * (`NODE_ENV` is never `production`) it always takes the dev branch and
+     * returns deterministic dev-server URLs; a test that forces production
+     * gets the real manifest lookup — including the missing-entry throw —
+     * rather than a fiction that hides a forgotten build input.
+     */
     viteAsset,
     parseRequestPayload: async (ctx: ControllerContext) => {
       // Clone so the raw body stays readable — the real runtime caches the

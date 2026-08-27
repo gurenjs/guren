@@ -63,15 +63,20 @@ return this.view(ShowPage, { post })                       // props compile-chec
 return this.view(ShowPage, { post: null }, { status: 404 })
 ```
 
-- **View components live in `app/View/*.tsx`, never under `resources/js/pages/`**
+- **View components live in `app/View/*.tsx` (module-local:
+  `modules/<name>/app/View/`), never under `resources/js/pages/`**
   (codegen claims that directory for Inertia pages). They start with the
   pragma `/** @jsxImportSource @guren/core */` and import
   `type { FC, PropsWithChildren }` and `viteAsset` from `@guren/core` — the
   app never declares `hono`.
-- **Head metadata hoists natively**: `<title>`, `<meta>`, and `<link>`
-  rendered anywhere in the page land in `<head>`. The Layout's own `<head>`
-  must carry only what pages never restate (charset, viewport, stylesheet) —
-  a hard-coded default `<title>` there silently shadows every page's.
+- **Pass page metadata through a Layout `head` slot, not the body.** Tags
+  rendered literally inside `<head>` skip hono's hoisting pass; hoisting
+  (`<title>`/`<meta>`/`<link>` from anywhere) still works as the safety net
+  for deeply nested tags, but it rescans the document per hoisted tag —
+  measured quadratic in tag count, so a 15-tag SEO block in the body costs
+  ~1 ms per render and grows with page size. The Layout's own `<head>` must
+  carry only what pages never restate (charset, viewport, stylesheet) — a
+  hard-coded default `<title>` there silently shadows every page's.
 - **`viteAsset('resources/css/app.css')`** resolves the stylesheet URL in
   both dev and production; the CSS file must be an explicit Vite build input.
 - **A page that forgets its Layout throws** a descriptive error instead of

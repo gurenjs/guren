@@ -1,6 +1,8 @@
-// Markup inlined into the server-rendered document `<head>`. Imported only by
-// `src/app.ts` — keeping these strings out of `theme.ts` keeps them out of the
-// client bundle, where they would ship on every page and never be read.
+// Markup inlined into the server-rendered document `<head>`. Imported by
+// `src/app.ts` (Inertia documents) and `app/View/Layout.tsx` (`view()`
+// documents) — both server-only. Keeping these strings out of `theme.ts`
+// keeps them out of the client bundle, where they would ship on every page
+// and never be read.
 
 import { COLOR_MODE_STORAGE_KEY, LIGHT_SURFACE_BODY_CLASS } from './theme.js'
 
@@ -27,13 +29,22 @@ const SIZE_UTILITIES = `
 
 export const LIGHT_SURFACE_CRITICAL_CSS = `${SURFACE_CSS}${SIZE_UTILITIES}`
 
-/** Favicon links, site-wide — the framework has no default of its own. */
-export const FAVICON_HEAD = `
-<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
-<link rel="icon" type="image/png" sizes="192x192" href="/favicon-192x192.png" />
-<link rel="icon" type="image/png" sizes="512x512" href="/favicon-512x512.png" />
-<link rel="apple-touch-icon" sizes="192x192" href="/favicon-192x192.png" />
-`.trim()
+/**
+ * Favicon links, site-wide — the framework has no default of its own. The
+ * structured form is the source of truth: the Inertia document consumes the
+ * derived string, `app/View/Layout.tsx` maps the same array to elements.
+ */
+export const FAVICON_LINKS = [
+  { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/favicon-32x32.png' },
+  { rel: 'icon', type: 'image/png', sizes: '192x192', href: '/favicon-192x192.png' },
+  { rel: 'icon', type: 'image/png', sizes: '512x512', href: '/favicon-512x512.png' },
+  { rel: 'apple-touch-icon', sizes: '192x192', href: '/favicon-192x192.png' },
+] as const
+
+export const FAVICON_HEAD = FAVICON_LINKS.map(
+  (link) =>
+    `<link rel="${link.rel}"${'type' in link ? ` type="${link.type}"` : ''} sizes="${link.sizes}" href="${link.href}" />`,
+).join('\n')
 
 /**
  * Resolves the color mode before the first paint, so a dark-mode reader never
@@ -49,4 +60,46 @@ export const COLOR_MODE_PREPAINT_SCRIPT = `(function(){
     root.classList.toggle('dark', dark);
     root.style.colorScheme = dark ? 'dark' : 'light';
   }catch(_){}
+})();`
+
+
+/**
+ * The click-to-toggle counterpart to the prepaint script above, inlined by
+ * `app/View/Header.tsx` on content pages. Shares the storage key and the
+ * two-line apply tail with the prepaint script and `applyMode()` — keeping
+ * all three color-mode behaviors in (or mirrored from) this one module.
+ *
+ * Semantics match the React toggle: a click collapses `system` into an
+ * explicit `light`/`dark`, and while the stored mode is `system` an OS theme
+ * change is followed live (the `matchMedia` listener, mirroring
+ * `Docs/theme.ts`'s subscription).
+ */
+export const COLOR_MODE_TOGGLE_SCRIPT = `(function(){
+  var root = document.documentElement;
+  function apply(dark){
+    root.classList.toggle('dark', dark);
+    root.style.colorScheme = dark ? 'dark' : 'light';
+  }
+  function stored(){
+    try { return localStorage.getItem('${COLOR_MODE_STORAGE_KEY}') || 'system'; } catch(_) { return 'system'; }
+  }
+  var button = document.getElementById('color-mode-toggle');
+  function label(){
+    if (button) button.setAttribute('aria-label', root.classList.contains('dark') ? 'Switch to light mode' : 'Switch to dark mode');
+  }
+  var media = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+  if (media && media.addEventListener) {
+    media.addEventListener('change', function(event){
+      if (stored() === 'system') { apply(event.matches); label(); }
+    });
+  }
+  if (button) {
+    button.addEventListener('click', function(){
+      var dark = !root.classList.contains('dark');
+      try { localStorage.setItem('${COLOR_MODE_STORAGE_KEY}', dark ? 'dark' : 'light'); } catch(_) {}
+      apply(dark);
+      label();
+    });
+  }
+  label();
 })();`

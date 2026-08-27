@@ -2,10 +2,11 @@
 "@guren/testing": minor
 ---
 
-`createControllerModuleMock()` now covers server-rendered content pages
-(RFC 0014): the mock `Controller` implements `view()` by rendering through
-the real hono runtime (via the declared `hono` peer, floor now `^4.13.0`) —
-mirroring `renderDocument()` in `@guren/server` including the
-forgotten-Layout guard — and the mocked module exports a `viteAsset()` whose
-dev branch is the real rule and whose production branch maps the entry
-identically under `/public/assets/` (unit tests have no manifest to read).
+`createGurenControllerModule()` now covers server-rendered content pages
+(RFC 0014): the mock `Controller.view()` delegates to the real
+`renderDocument()` from `@guren/server` (fragment guard, escaping, and
+response shaping included, so the mock cannot drift), and the mocked module
+exports the real `viteAsset()` — under vitest it takes the deterministic
+dev branch, and a test that forces production gets the real manifest lookup
+including the missing-entry throw. The `hono` peer floor moves to `^4.13.0`
+in line with `@guren/server`.

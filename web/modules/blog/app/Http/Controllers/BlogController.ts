@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { pageTitle } from '../../../../../config/site.js'
 import { Post, type PostRecord } from '../../Models/Post.js'
 import { isPublished, listPublishedPosts } from '../../Services/published-posts.js'
-import { ShowPage } from '../../View/ShowPage.js'
+import { PostNotFoundPage, ShowPage } from '../../View/ShowPage.js'
 import { pages } from '@/.guren/pages.gen.js'
 
 const SlugParamSchema = z.object({
@@ -43,7 +43,7 @@ export default class BlogController extends Controller {
     const visible = record !== null && (isPublished(record) || (await this.viewerAuthenticated()))
 
     if (!record || !visible) {
-      return this.view(ShowPage, { post: null }, { status: 404 })
+      return this.view(PostNotFoundPage, {}, { status: 404 })
     }
 
     return this.view(ShowPage, {
