@@ -149,12 +149,13 @@ Additional options:
 
 | Option | Default | Purpose |
 |---|---|---|
-| `disks` | `{}` | Per-disk visibility, e.g. `{ media: 'public', docs: 'private' }`. Private disks serve URLs via `temporaryUrl()`. |
+| `disks` | `{}` | Per-disk visibility, e.g. `{ media: 'public', docs: 'private' }`. The object form adds a serve mode: `{ docs: { visibility: 'private', serve: 'proxy' } }` (see [URLs and visibility](#urls-and-visibility)). |
+| `delivery` | off | Enables the signed delivery route for private disks: `delivery: {}` (options: `prefix`, `routeName`). Pair it with `registerAttachmentRoutes(router)` in the route registrar. |
 | `maxPixels` | `52_000_000` | Decode cap in pixels (decompression-bomb defense). |
 | `maxImageBytes` | `50_000_000` | Encoded-input cap in bytes, checked before any decode. |
 | `processor` | Bun-native | Custom `ImageProcessor`, or `null` to disable image decoding. |
 | `queue` | — | The app's QueueManager, resolved lazily; enables `attach(..., { queued: true })`. |
-| `urlExpiresIn` | 5 minutes | Lifetime of `temporaryUrl()` links for private disks. |
+| `urlExpiresIn` | 5 minutes | Lifetime of private-disk URLs — signed route URLs and `temporaryUrl()` links alike. Per-URL override: `attachmentUrl(rec, 'cover', { expiresIn })`. |
 
 ### Scaffolding a feature with attachments
 
@@ -273,12 +274,13 @@ Other rules that hold everywhere:
   at all store HEIC bytes as opaque files.
 - **Filenames are sanitized** (no path separators or control characters)
   before becoming part of an object key.
-- **Serving inherits your app's rules.** Attachments add no serving route:
-  public disks serve via `disk.url()`, private ones via
-  `disk.temporaryUrl()`. If a disk serves user uploads over your own
-  domain, make sure it sends correct `Content-Type` and
-  `X-Content-Type-Options: nosniff` headers — an inline SVG served as a
-  page is a script.
+- **Serving is hardened where the framework serves.** The signed delivery
+  route's proxy responses carry the hardening set listed under
+  [URLs and visibility](#urls-and-visibility). Public disks still serve
+  via `disk.url()` under your own rules: if such a disk serves user
+  uploads over your own domain, make sure it sends correct `Content-Type`
+  and `X-Content-Type-Options: nosniff` headers itself — an inline SVG
+  served as a same-origin page is a script.
 
 ## Variants
 
@@ -377,17 +379,79 @@ configureAttachments({
 })
 ```
 
-- Public disks: `attachmentUrl()` returns `disk.url(path)` — CDN-cacheable,
-  zero app CPU.
-- Private disks: `attachmentUrl()` returns `disk.temporaryUrl(path, expiry)`.
+Public disks always serve via `disk.url(path)` — CDN-cacheable, zero app
+CPU. For private disks there are two modes:
 
-Two limitations to know about, both inherited from the drivers:
+### The signed delivery route (recommended)
 
-- `LocalDriver.temporaryUrl()` returns a plain public URL, so "private on
-  the local disk" is **not actually private**.
-- `R2Driver` can only presign when `presign` credentials are configured —
-  without them `temporaryUrl()` throws, so private attachments on R2
-  require the `presign` option.
+Enable `delivery` and mount the route from your route registrar:
+
+```ts
+// config/attachments.ts
+configureAttachments({
+  // …
+  disks: { media: 'public', docs: 'private' },
+  delivery: {},          // options: prefix ('/attachments'), routeName ('attachments.show')
+})
+
+// routes/web.ts
+import { registerAttachmentRoutes } from '@guren/core'
+
+export function registerWebRoutes(router: Router): void {
+  registerAttachmentRoutes(router)
+  // …app routes…
+}
+```
+
+`attachmentUrl()` on a private disk now returns a **path-relative signed
+URL** (`/attachments/{id}/{filename}?expires=…&signature=…`) — HMAC-signed
+with a key derived for attachment delivery only, expiring after
+`urlExpiresIn` (override per URL with `{ expiresIn }`; force a download
+with `{ disposition: 'attachment' }` — guaranteed on proxy responses,
+while a redirecting disk depends on its backend honouring the presigned
+response overrides, which R2 does not: see the
+[Cloudflare guide](./cloudflare.md#attachments-on-workers)). The route
+verifies the signature
+(any failure is a uniform 404), resolves the variant at serve time — a
+declared-but-not-ready variant serves the original, and the same URL
+starts serving the variant once generation completes — and then either:
+
+- **redirects** (302) to a short-lived presigned URL on disks whose driver
+  declares `capabilities.presignedGet` (S3, R2 with `presign`) — the
+  bucket serves the bytes, zero app bandwidth; or
+- **proxies** the bytes with hardened headers (inline allowlist, `nosniff`,
+  `Content-Security-Policy: sandbox`, `Referrer-Policy: no-referrer`,
+  ETag/304) on everything else — which is what finally makes **private on
+  the local disk actually private**, and lets **private R2 disks work on
+  the binding alone, no `presign` credentials**.
+
+Per-disk override via the `disks` object form:
+`{ docs: { visibility: 'private', serve: 'proxy' } }` — `'auto'`
+(default), `'redirect'`, `'proxy'`, or `'direct'` (bypass the route and
+keep raw `temporaryUrl()` URLs). `guren check` verifies the route is
+mounted whenever `delivery` is configured, and flags `serve: 'redirect'`
+on a disk whose driver cannot presign.
+
+Two things the route does not do: it is a capability URL, not per-request
+authorization (anyone holding an unexpired URL can read the bytes — wrap
+`attachmentUrl()` in your own controller for revocable access), and it
+cannot un-publish a backing store that is itself public. On a local disk,
+also stop serving the private disk's directory statically — registering
+the route without closing the public mount is a lock on an open door.
+
+Two operational notes: the signature is a bearer credential in a query
+string, so redact query parameters for the route prefix in access logs
+(browser history holds them too — one reason the default lifetime is
+minutes, not days); and the proxy path serves bytes through your app, so
+bandwidth-sensitive apps should rate-limit the prefix with the usual
+route middleware and prefer redirect-capable disks.
+
+### Without `delivery` (the v1 behaviour)
+
+Private disks fall back to `disk.temporaryUrl(path, expiry)`, with the
+driver limitations that implies: `LocalDriver.temporaryUrl()` returns a
+plain public URL (not actually private), and R2 requires `presign`
+credentials. Enable `delivery` to close both gaps.
 
 ## Lifecycle and deletion
 

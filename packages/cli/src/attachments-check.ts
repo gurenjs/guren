@@ -1,8 +1,10 @@
 import { dirname, relative, resolve } from 'node:path'
-import type { CallExpression } from '@babel/types'
-import { walk } from './ast-walk'
+import type { CallExpression, ObjectExpression, ObjectProperty } from '@babel/types'
+import { AttachmentDeliveryController, type RouteDefinition } from '@guren/core'
+import { literalString, memberKeyName, walk } from './ast-walk'
 import { check, type CheckResult } from './check-result'
-import { collectFiles, listAppRoots } from './discovery'
+import { collectFiles, fileExists, listAppRoots } from './discovery'
+import { DEFAULT_ROUTES_FILE, loadRouteDefinitions } from './load-routes'
 import { parseModelSource } from './model-parser'
 import type { ParseCache, ParsedFile } from './parse-cache'
 import { schemaPathFor, type SchemaTable } from './schema-parser'
@@ -322,6 +324,324 @@ export async function checkAttachmentsConfig(options: {
         ),
       )
     })
+  }
+
+  return results
+}
+
+/**
+ * Visit every `configureAttachments()` call in `files` whose options are an
+ * inline object — the named import (aliases included) and the
+ * `core.configureAttachments()` namespace form alike, so a config style the
+ * presence checks accept is never invisible to the rules built on this.
+ */
+async function forEachConfigureAttachmentsCall(
+  cache: ParseCache,
+  files: string[],
+  visit: (context: { filePath: string; options: ObjectExpression }) => void,
+): Promise<void> {
+  for (const filePath of files) {
+    const source = await cache.source(filePath)
+    if (!source || !source.includes('configureAttachments')) continue
+    const parsed = await cache.get(filePath)
+    if (!parsed) continue
+    const { configureLocal, coreNamespaces } = scanAttachmentsImports(parsed)
+    if (!configureLocal && coreNamespaces.length === 0) continue
+    walk(parsed.ast, (node) => {
+      if (node.type !== 'CallExpression') return
+      const call = node as unknown as CallExpression
+      const callee = call.callee
+      const matches =
+        (callee.type === 'Identifier' && callee.name === configureLocal) ||
+        (callee.type === 'MemberExpression' &&
+          !callee.computed &&
+          callee.object.type === 'Identifier' &&
+          coreNamespaces.includes(callee.object.name) &&
+          callee.property.type === 'Identifier' &&
+          callee.property.name === 'configureAttachments')
+      if (!matches) return
+      const argument = call.arguments[0]
+      if (!argument || argument.type !== 'ObjectExpression') return
+      visit({ filePath, options: argument })
+    })
+  }
+}
+
+function propertyNamed(node: ObjectExpression, name: string): ObjectProperty | undefined {
+  return node.properties.find(
+    (property): property is ObjectProperty =>
+      property.type === 'ObjectProperty' && memberKeyName(property) === name,
+  )
+}
+
+/** `[diskName, value]` pairs of a disks map whose entries are object literals. */
+function* diskObjectEntries(disks: ObjectExpression): Generator<[string, ObjectExpression]> {
+  for (const entry of disks.properties) {
+    if (entry.type !== 'ObjectProperty') continue
+    const disk = memberKeyName(entry)
+    if (!disk || entry.value.type !== 'ObjectExpression') continue
+    yield [disk, entry.value]
+  }
+}
+
+/** What the delivery scan reads out of the app's `configureAttachments()` calls. */
+interface AttachmentsDeliveryScan {
+  /** Config files (cwd-relative, deduplicated) whose options include `delivery`. */
+  deliveryConfigs: string[]
+  /** The delivery route names in play (configured literals, or the default). */
+  routeNames: Set<string>
+  /** `serve: 'redirect'` disk declarations, deduplicated per config file. */
+  redirectDisks: Array<{ relPath: string; disk: string }>
+}
+
+const DEFAULT_DELIVERY_ROUTE_NAME = 'attachments.show'
+
+async function scanAttachmentsDelivery(
+  cwd: string,
+  cache: ParseCache,
+  files: string[],
+): Promise<AttachmentsDeliveryScan> {
+  const deliveryConfigs = new Set<string>()
+  const routeNames = new Set<string>()
+  const redirectDisks = new Set<string>()
+
+  await forEachConfigureAttachmentsCall(cache, files, ({ filePath, options }) => {
+    const relPath = relative(cwd, filePath)
+
+    const delivery = propertyNamed(options, 'delivery')
+    // A literal `delivery: undefined` is the documented inline "off".
+    if (delivery && !(delivery.value.type === 'Identifier' && delivery.value.name === 'undefined')) {
+      deliveryConfigs.add(relPath)
+      const routeName =
+        delivery.value.type === 'ObjectExpression'
+          ? literalString(propertyNamed(delivery.value, 'routeName')?.value)
+          : null
+      routeNames.add(routeName ?? DEFAULT_DELIVERY_ROUTE_NAME)
+    }
+
+    const disks = propertyNamed(options, 'disks')
+    if (disks?.value.type !== 'ObjectExpression') return
+    for (const [disk, config] of diskObjectEntries(disks.value)) {
+      if (literalString(propertyNamed(config, 'serve')?.value) === 'redirect') {
+        redirectDisks.add(`${relPath}\u0000${disk}`)
+      }
+    }
+  })
+
+  return {
+    deliveryConfigs: [...deliveryConfigs],
+    routeNames,
+    redirectDisks: [...redirectDisks].map((key) => {
+      const [relPath, disk] = key.split('\u0000')
+      return { relPath: relPath!, disk: disk! }
+    }),
+  }
+}
+
+/**
+ * The storage drivers the app's config declares, per disk name. Positive
+ * evidence only, in both directions: an entry counts when a `disks`
+ * property carries (inline, or through a same-file `const` the property
+ * references — the `StorageProvider` scaffold's shape) an object literal
+ * with a string-literal `driver`; two sources disagreeing about one disk
+ * makes that disk unreadable (`null`) rather than first-match-wins. The
+ * scan cannot prove a map reaches `createStorageManager()`, so the
+ * candidate set must keep sweeping all of config/, src/, and app/ — a
+ * discovery narrowed to attachments configs would silently blind the
+ * redirect rule (the runCheck-level test pins this).
+ */
+async function scanStorageDiskDrivers(cache: ParseCache, files: string[]): Promise<Map<string, string | null>> {
+  const drivers = new Map<string, string | null>()
+  const record = (disk: string, driver: string) => {
+    const existing = drivers.get(disk)
+    if (existing === undefined) drivers.set(disk, driver)
+    else if (existing !== driver) drivers.set(disk, null)
+  }
+
+  for (const filePath of files) {
+    const source = await cache.source(filePath)
+    if (!source || !source.includes('disks')) continue
+    const parsed = await cache.get(filePath)
+    if (!parsed) continue
+
+    // Same-file `const disks = { ... }` bindings, for the shorthand form.
+    const constObjects = new Map<string, ObjectExpression>()
+    for (const statement of parsed.ast.program.body) {
+      if (statement.type !== 'VariableDeclaration') continue
+      for (const declarator of statement.declarations) {
+        if (declarator.id.type === 'Identifier' && declarator.init?.type === 'ObjectExpression') {
+          constObjects.set(declarator.id.name, declarator.init)
+        }
+      }
+    }
+
+    walk(parsed.ast, (node) => {
+      if (node.type !== 'ObjectProperty') return
+      const property = node as unknown as ObjectProperty
+      if (memberKeyName(property) !== 'disks') return
+      const value =
+        property.value.type === 'ObjectExpression'
+          ? property.value
+          : property.value.type === 'Identifier'
+            ? constObjects.get(property.value.name)
+            : undefined
+      if (!value) return
+      for (const [disk, config] of diskObjectEntries(value)) {
+        const driver = literalString(propertyNamed(config, 'driver')?.value)
+        if (driver) record(disk, driver)
+      }
+    })
+  }
+  return drivers
+}
+
+/**
+ * Twinned with `StorageDriverCapabilities.presignedGet` in @guren/server —
+ * the runtime consults `disk.capabilities?.presignedGet === true`, which
+ * `S3Driver` declares, `LocalDriver`/`MemoryDriver` never do, and
+ * `R2Driver` declares only when `presign` credentials exist. A driver name
+ * in neither set is a capability this scan cannot read: skipped, never
+ * guessed in either direction (an unknown name passed off as green would
+ * fail open; failed, it would false-flag every custom presigning driver).
+ */
+const KNOWN_NON_PRESIGNING_DRIVERS = new Set(['local', 'memory'])
+const KNOWN_PRESIGNING_DRIVERS = new Set(['s3'])
+
+/**
+ * The RFC 0015 delivery-route wiring rules:
+ *
+ * 1. `configureAttachments({ delivery })` with no route registered by
+ *    `registerAttachmentRoutes()` reachable from the mounted registrar —
+ *    private attachment URLs would be minted that 404, and the failure is
+ *    a uniform 404 by design, so nothing at runtime names the cause.
+ *    Judged on *loaded* definitions (the registered controller), not the
+ *    routes file's AST, for the same reason the route-contract check is:
+ *    the registrar may delegate through helpers the AST cannot follow.
+ * 2. A delivery route name claimed by more than one loaded definition —
+ *    `Router.name()` silently overwrites duplicates.
+ * 3. `serve: 'redirect'` on a disk whose storage config declares a driver
+ *    that can never presign — at serve time this downgrades to proxy with
+ *    a warning (fail-closed), so this static gate is the only place the
+ *    misconfiguration is visible before traffic.
+ */
+export async function checkAttachmentsDelivery(options: {
+  cwd: string
+  cache: ParseCache
+  /** Candidate config files, from {@link discoverAttachmentsConfigFiles}. */
+  files: string[]
+  /** Routes entry file, POSIX-relative to `cwd`. */
+  routesFile?: string
+  /** Test seam, like the route-contract check's: definitions to use instead of loading. */
+  definitions?: RouteDefinition[]
+}): Promise<CheckResult[]> {
+  const { cwd, cache, files } = options
+  const scan = await scanAttachmentsDelivery(cwd, cache, files)
+  const results: CheckResult[] = []
+
+  if (scan.deliveryConfigs.length > 0) {
+    const routesFile = options.routesFile ?? DEFAULT_ROUTES_FILE
+    let definitions = options.definitions
+    let routesEntryMissing = false
+    if (!definitions) {
+      if (await fileExists(cwd, routesFile)) {
+        try {
+          definitions = await loadRouteDefinitions(resolve(cwd, routesFile), cwd)
+        } catch {
+          // An app whose routes cannot load is reported by the route
+          // checks; guessing about its delivery wiring on top would be
+          // noise. `definitions` stays undefined and the rule stays quiet.
+        }
+      } else {
+        // No routes entry at all is positive evidence: nothing can have
+        // mounted the route.
+        routesEntryMissing = true
+      }
+    }
+
+    const mounted =
+      definitions?.some(
+        (definition) => definition.controller?.name === AttachmentDeliveryController.name,
+      ) ?? false
+
+    if (mounted) {
+      results.push(
+        check(
+          'attachments-delivery',
+          'Attachments delivery route',
+          'pass',
+          'configureAttachments() enables delivery and registerAttachmentRoutes() is mounted.',
+        ),
+      )
+    } else if (definitions || routesEntryMissing) {
+      for (const relPath of scan.deliveryConfigs) {
+        results.push(
+          check(
+            `attachments-delivery:${relPath}`,
+            'Attachments delivery route',
+            'fail',
+            `configureAttachments() in ${relPath} enables delivery, but ` +
+              (routesEntryMissing
+                ? `the routes entry ${routesFile} does not exist, so nothing can mount the route. `
+                : `no route registered by registerAttachmentRoutes() was found in the loaded route definitions. `) +
+              `Private attachment URLs would be minted that 404 — and every delivery failure is a uniform ` +
+              `404 by design, so nothing at runtime names this cause.`,
+            `Call registerAttachmentRoutes(router) from the route registrar your app mounts ` +
+              `(${routesFile}), or remove the delivery option.`,
+            relPath,
+          ),
+        )
+      }
+    }
+
+    if (definitions) {
+      for (const routeName of scan.routeNames) {
+        const claims = definitions.filter((definition) => definition.name === routeName)
+        if (claims.length > 1) {
+          results.push(
+            check(
+              `attachments-route-name:${routeName}`,
+              'Attachments route name',
+              'warn',
+              `${claims.length} routes register the name '${routeName}'. Router.name() silently ` +
+                `overwrites duplicates, so route() lookups and typed links resolve to whichever ` +
+                `registered last.`,
+              `Rename the app route, or set delivery.routeName to a name the app does not use.`,
+            ),
+          )
+        }
+      }
+    }
+  }
+
+  if (scan.redirectDisks.length > 0) {
+    const drivers = await scanStorageDiskDrivers(cache, files)
+    for (const { relPath, disk } of scan.redirectDisks) {
+      const driver = drivers.get(disk)
+      // Unreadable (absent or conflicting evidence): skip, never guess.
+      if (driver == null) continue
+      const key = `attachments-serve-redirect:${relPath}:${disk}`
+      const title = 'Attachments redirect disk'
+      if (KNOWN_NON_PRESIGNING_DRIVERS.has(driver)) {
+        results.push(
+          check(
+            key,
+            title,
+            'fail',
+            `Disk '${disk}' is configured serve: 'redirect' in ${relPath}, but its storage driver ` +
+              `'${driver}' cannot presign. At serve time the route fails closed into proxying with a ` +
+              `warning, so the redirect you configured never happens.`,
+            `Use serve: 'proxy' (or the default 'auto') for '${disk}', or move it to a driver that ` +
+              `declares presignedGet (S3, or R2 with presign credentials).`,
+            relPath,
+          ),
+        )
+      } else if (KNOWN_PRESIGNING_DRIVERS.has(driver)) {
+        results.push(
+          check(key, title, 'pass', `Disk '${disk}' pairs serve: 'redirect' with driver '${driver}'.`),
+        )
+      }
+      // Any other driver name: a capability this scan cannot read — skipped.
+    }
   }
 
   return results

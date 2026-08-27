@@ -1,7 +1,10 @@
 import { mkdir, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
+import { AttachmentDeliveryController, type RouteDefinition } from '@guren/core'
+import { checkAttachmentsDelivery } from '../src/attachments-check'
 import { runCheck } from '../src/check'
+import { ParseCache } from '../src/parse-cache'
 import { createTempWorkspace } from './helpers'
 
 describe('runCheck — configureAttachments table binding', () => {
@@ -319,6 +322,246 @@ export class Clip extends Attachable(defineModel(clips), {
       expect(result).toBeDefined()
       expect(result!.status).toBe('fail')
       expect(result!.message).toContain('Clip')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+})
+
+describe('checkAttachmentsDelivery — delivery route wiring (RFC 0015)', () => {
+  const MOUNTED = [
+    { controller: { name: AttachmentDeliveryController.name } },
+  ] as unknown as RouteDefinition[]
+
+  function deliveryConfig(extra = ''): string {
+    return `import { configureAttachments } from '@guren/core'
+
+export const { Attachment } = configureAttachments({
+  table: {} as never,
+  storage: () => ({}) as never,
+  disk: 'media',
+  delivery: {},${extra}
+})`
+  }
+
+  async function writeConfig(dir: string, source: string, name = 'config/attachments.ts'): Promise<string> {
+    const filePath = join(dir, name)
+    await mkdir(dirname(filePath), { recursive: true })
+    await writeFile(filePath, source, 'utf8')
+    return filePath
+  }
+
+  function runDelivery(
+    dir: string,
+    files: string[],
+    definitions?: RouteDefinition[],
+  ): Promise<Awaited<ReturnType<typeof checkAttachmentsDelivery>>> {
+    return checkAttachmentsDelivery({ cwd: dir, cache: new ParseCache(), files, definitions })
+  }
+
+  it('passes when delivery is configured and the route is registered', async () => {
+    const workspace = await createTempWorkspace('guren-cli-delivery-pass-')
+    try {
+      const file = await writeConfig(workspace.dir, deliveryConfig())
+      const results = await runDelivery(workspace.dir, [file], MOUNTED)
+
+      expect(results.find((c) => c.key === 'attachments-delivery')?.status).toBe('pass')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('fails when delivery is configured but no delivery route is registered', async () => {
+    const workspace = await createTempWorkspace('guren-cli-delivery-fail-')
+    try {
+      const file = await writeConfig(workspace.dir, deliveryConfig())
+      const results = await runDelivery(workspace.dir, [file], [])
+
+      const result = results.find((c) => c.key.startsWith('attachments-delivery:'))
+      expect(result?.status).toBe('fail')
+      expect(result?.message).toContain('registerAttachmentRoutes')
+      expect(result?.suggestion).toContain('routes/web.ts')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('fails when delivery is configured and the routes entry file does not exist', async () => {
+    const workspace = await createTempWorkspace('guren-cli-delivery-noroutes-')
+    try {
+      const file = await writeConfig(workspace.dir, deliveryConfig())
+      // No definitions seam and no routes/web.ts: positive evidence that
+      // nothing can have mounted the route.
+      const results = await runDelivery(workspace.dir, [file])
+
+      const result = results.find((c) => c.key.startsWith('attachments-delivery:'))
+      expect(result?.status).toBe('fail')
+      expect(result?.message).toContain('does not exist')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('sees the namespace-import configuration style', async () => {
+    const workspace = await createTempWorkspace('guren-cli-delivery-ns-')
+    try {
+      const file = await writeConfig(
+        workspace.dir,
+        `import * as core from '@guren/core'
+export const { Attachment } = core.configureAttachments({ table: {} as never, storage: () => ({}) as never, disk: 'media', delivery: {} })`,
+      )
+      const results = await runDelivery(workspace.dir, [file], [])
+
+      expect(results.find((c) => c.key.startsWith('attachments-delivery:'))?.status).toBe('fail')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('emits nothing without a delivery option, including delivery: undefined', async () => {
+    const workspace = await createTempWorkspace('guren-cli-delivery-off-')
+    try {
+      const plain = await writeConfig(
+        workspace.dir,
+        `import { configureAttachments } from '@guren/core'
+export const { Attachment } = configureAttachments({ table: {} as never, storage: () => ({}) as never, disk: 'media' })`,
+      )
+      const off = await writeConfig(
+        workspace.dir,
+        `import { configureAttachments } from '@guren/core'
+export const { Attachment } = configureAttachments({ table: {} as never, storage: () => ({}) as never, disk: 'media', delivery: undefined })`,
+        'config/attachments-off.ts',
+      )
+
+      expect(await runDelivery(workspace.dir, [plain, off], [])).toEqual([])
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('warns when the delivery route name is claimed by more than one route', async () => {
+    const workspace = await createTempWorkspace('guren-cli-delivery-name-')
+    try {
+      const file = await writeConfig(workspace.dir, deliveryConfig())
+      const definitions = [
+        { name: 'attachments.show', controller: { name: AttachmentDeliveryController.name } },
+        { name: 'attachments.show', controller: { name: 'PostController' } },
+      ] as unknown as RouteDefinition[]
+      const results = await runDelivery(workspace.dir, [file], definitions)
+
+      const result = results.find((c) => c.key === 'attachments-route-name:attachments.show')
+      expect(result?.status).toBe('warn')
+      expect(result?.message).toContain('silently')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it("fails serve: 'redirect' on a disk whose storage driver cannot presign", async () => {
+    const workspace = await createTempWorkspace('guren-cli-delivery-redirect-')
+    try {
+      const config = await writeConfig(
+        workspace.dir,
+        deliveryConfig(`\n  disks: { vault: { visibility: 'private', serve: 'redirect' } },`),
+      )
+      const storage = await writeConfig(
+        workspace.dir,
+        `export const storageConfig = { default: 'vault', disks: { vault: { driver: 'local', root: './storage' } } }`,
+        'config/storage.ts',
+      )
+
+      const results = await runDelivery(workspace.dir, [config, storage], MOUNTED)
+
+      const result = results.find((c) => c.key.startsWith('attachments-serve-redirect:'))
+      expect(result?.status).toBe('fail')
+      expect(result?.message).toContain("'local'")
+      expect(result?.suggestion).toContain("serve: 'proxy'")
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('resolves the scaffold shape: a hoisted const disks map passed as shorthand', async () => {
+    const workspace = await createTempWorkspace('guren-cli-delivery-hoisted-')
+    try {
+      const config = await writeConfig(
+        workspace.dir,
+        deliveryConfig(`\n  disks: { vault: { visibility: 'private', serve: 'redirect' } },`),
+      )
+      const provider = await writeConfig(
+        workspace.dir,
+        `const disks = { vault: { driver: 'local', root: './storage' } }
+export function register(): unknown {
+  return { disks }
+}`,
+        'app/Providers/StorageProvider.ts',
+      )
+
+      const results = await runDelivery(workspace.dir, [config, provider], MOUNTED)
+
+      expect(results.find((c) => c.key.startsWith('attachments-serve-redirect:'))?.status).toBe('fail')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it("passes serve: 'redirect' on s3, skips unknown drivers and conflicting evidence", async () => {
+    const workspace = await createTempWorkspace('guren-cli-delivery-redirect-ok-')
+    try {
+      const config = await writeConfig(
+        workspace.dir,
+        deliveryConfig(
+          `\n  disks: {\n    media: { visibility: 'private', serve: 'redirect' },\n    mystery: { visibility: 'private', serve: 'redirect' },\n    torn: { visibility: 'private', serve: 'redirect' },\n  },`,
+        ),
+      )
+      const storage = await writeConfig(
+        workspace.dir,
+        `export const storageConfig = { disks: { media: { driver: 's3', bucket: 'b' }, torn: { driver: 'local' } } }
+export const other = { disks: { torn: { driver: 's3' } } }`,
+        'config/storage.ts',
+      )
+
+      const results = await runDelivery(workspace.dir, [config, storage], MOUNTED)
+
+      expect(results.find((c) => c.key.endsWith(':media'))?.status).toBe('pass')
+      // No statically readable driver ('mystery') and conflicting evidence
+      // ('torn') are both skipped, never guessed.
+      expect(results.find((c) => c.key.endsWith(':mystery'))).toBeUndefined()
+      expect(results.find((c) => c.key.endsWith(':torn'))).toBeUndefined()
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('reaches the redirect rule through runCheck discovery (config/storage.ts is swept)', async () => {
+    const workspace = await createTempWorkspace('guren-cli-delivery-runcheck-')
+    try {
+      await writeConfig(
+        workspace.dir,
+        `import { configureAttachments } from '@guren/core'
+export const { Attachment } = configureAttachments({
+  table: {} as never,
+  storage: () => ({}) as never,
+  disk: 'vault',
+  disks: { vault: { visibility: 'private', serve: 'redirect' } },
+  delivery: {},
+})`,
+      )
+      await writeConfig(
+        workspace.dir,
+        `export const storageConfig = { disks: { vault: { driver: 'local', root: './storage' } } }`,
+        'config/storage.ts',
+      )
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      expect(
+        report.checks.find((c) => c.key.startsWith('attachments-serve-redirect:'))?.status,
+      ).toBe('fail')
+      // No routes entry exists, which is itself the wiring failure.
+      expect(
+        report.checks.find((c) => c.key.startsWith('attachments-delivery:'))?.status,
+      ).toBe('fail')
     } finally {
       await workspace.cleanup()
     }

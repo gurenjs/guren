@@ -14,7 +14,10 @@ export const { Attachment } = configureAttachments({
   table: attachments,
   storage: () => getContainer().make('storage'),
   // Where new attachments are stored, and how their URLs are built: 'public'
-  // disks serve via disk.url(), 'private' ones via disk.temporaryUrl().
+  // disks serve via disk.url(); 'private' ones serve through the signed
+  // delivery route once you add `delivery: {}` here and mount
+  // registerAttachmentRoutes(router) in routes/web.ts (without that,
+  // private disks fall back to disk.temporaryUrl()).
   disk: 'public',
   disks: { public: 'public' },
 })

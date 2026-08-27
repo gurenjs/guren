@@ -132,12 +132,13 @@ export const { Attachment } = configureAttachments({
 
 | オプション | デフォルト | 用途 |
 |---|---|---|
-| `disks` | `{}` | ディスクごとの可視性。例: `{ media: 'public', docs: 'private' }`。private のディスクは `temporaryUrl()` で URL を発行します。 |
+| `disks` | `{}` | ディスクごとの可視性。例: `{ media: 'public', docs: 'private' }`。オブジェクト形式で配信モードも指定できます: `{ docs: { visibility: 'private', serve: 'proxy' } }`([URL と可視性](#url-と可視性)参照)。 |
+| `delivery` | 無効 | private ディスク向けの署名配信ルートを有効化: `delivery: {}`(オプション: `prefix`、`routeName`)。ルート登録関数での `registerAttachmentRoutes(router)` と対で使います。 |
 | `maxPixels` | `52_000_000` | デコード時のピクセル数上限(展開爆弾対策)。 |
 | `maxImageBytes` | `50_000_000` | デコード前に検査するエンコード済み入力のバイト数上限。 |
 | `processor` | Bun ネイティブ | カスタム `ImageProcessor`。`null` で画像デコードを無効化。 |
 | `queue` | なし | アプリの QueueManager を遅延解決で渡す。`attach(..., { queued: true })` を有効化。 |
-| `urlExpiresIn` | 5分 | private ディスクの `temporaryUrl()` リンクの有効期間。 |
+| `urlExpiresIn` | 5分 | private ディスク URL(署名ルート URL と `temporaryUrl()` リンクの両方)の有効期間。URL 単位の上書き: `attachmentUrl(rec, 'cover', { expiresIn })`。 |
 
 ### アタッチメント付きフィーチャーのスキャフォールド
 
@@ -228,7 +229,7 @@ const loaded = await Post.with('attachments').get() // 全コレクションの�
 - **バイト列のみ。** `attach()` が受け付けるのは `File | Blob | Uint8Array` だけです。ファイルシステムのパス文字列は任意ファイル読み取りの入口になるため、型でも実行時でも拒否されます。
 - **HEIC/HEIF はデフォルトで 415 拒否。** HEIC のデコードは OS コーデック依存で、macOS の開発機では動き Linux の本番では失敗する、というずれを既定で見逃すわけにはいきません。`accepts: { heic: 'convert' }` でオプトインすると、デコードして JPEG として保存します。コーデックがデコードできないランタイムではやはり 415 を返します。この拒否は画像パイプラインが走るとき常に適用されます。`image: 'allow'` のコレクションも対象で、iPhone の HEIC 写真は `'convert'` にオプトインしない限り 415 になります。HEIC のバイト列を不透明ファイルとして保存するのは、`image` ポリシーを持たないコレクションだけです。
 - **ファイル名はサニタイズされます**(パス区切りや制御文字の除去)。オブジェクトキーの一部になるためです。
-- **配信はアプリの既存ルールに従います。** アタッチメントは配信ルートを追加しません。public ディスクは `disk.url()`、private ディスクは `disk.temporaryUrl()` で配信します。ユーザーのアップロードを自分のドメインで配信するディスクでは、正しい `Content-Type` と `X-Content-Type-Options: nosniff` ヘッダを必ず付けてください。インライン表示される SVG はスクリプトになりえます。
+- **フレームワークが配信する箇所は強化済みです。** 署名配信ルートの proxy 応答には[URL と可視性](#url-と可視性)に挙げた強化ヘッダ一式が付きます。public ディスクは従来どおり `disk.url()` でアプリ側のルールに従って配信されるため、自分のドメインでユーザーのアップロードを配信する場合は正しい `Content-Type` と `X-Content-Type-Options: nosniff` ヘッダを自分で付けてください。同一オリジンのページとして表示される SVG はスクリプトになりえます。
 
 ## バリアント
 
@@ -293,13 +294,43 @@ configureAttachments({
 })
 ```
 
-- public ディスク: `attachmentUrl()` は `disk.url(path)` を返します。CDN にキャッシュでき、アプリの CPU を使いません。
-- private ディスク: `attachmentUrl()` は `disk.temporaryUrl(path, expiry)` を返します。
+public ディスクは常に `disk.url(path)` で配信されます。CDN にキャッシュでき、アプリの CPU を使いません。private ディスクには2つのモードがあります。
 
-ドライバから引き継ぐ既知の制限が2つあります:
+### 署名配信ルート(推奨)
 
-- `LocalDriver.temporaryUrl()` はただの公開 URL を返すため、「local ディスク上の private」は**実際には private ではありません**。
-- `R2Driver` は `presign` クレデンシャルが設定されているときだけ署名できます。未設定だと `temporaryUrl()` は throw するため、R2 上の private アタッチメントには `presign` オプションが必要です。
+`delivery` を有効にし、ルート登録関数でルートをマウントします:
+
+```ts
+// config/attachments.ts
+configureAttachments({
+  // …
+  disks: { media: 'public', docs: 'private' },
+  delivery: {},          // オプション: prefix ('/attachments')、routeName ('attachments.show')
+})
+
+// routes/web.ts
+import { registerAttachmentRoutes } from '@guren/core'
+
+export function registerWebRoutes(router: Router): void {
+  registerAttachmentRoutes(router)
+  // …アプリのルート…
+}
+```
+
+private ディスクの `attachmentUrl()` は**パス相対の署名付き URL**(`/attachments/{id}/{filename}?expires=…&signature=…`)を返すようになります。アタッチメント配信専用に導出した鍵で HMAC 署名され、`urlExpiresIn` 後に失効します(URL 単位の上書きは `{ expiresIn }`、ダウンロード強制は `{ disposition: 'attachment' }`。ただし強制が保証されるのは proxy 応答で、リダイレクトするディスクではバックエンドが presigned の response override を尊重するかに依存します。R2 は尊重しません: [Cloudflare ガイド](./cloudflare.md#attachments-on-workers)参照)。ルートは署名を検証し(失敗はすべて同一の 404)、variant を配信時に解決し(宣言済みだが未生成の variant はオリジナルを配信し、生成完了後は同じ URL が variant を配信し始めます)、その上で:
+
+- ドライバが `capabilities.presignedGet` を宣言するディスク(S3、`presign` 付き R2)では短寿命の presigned URL へ **302 リダイレクト**します。バケットがバイト列を配信し、アプリの帯域を使いません。
+- それ以外では強化ヘッダ付きで**プロキシ配信**します(inline allowlist、`nosniff`、`Content-Security-Policy: sandbox`、`Referrer-Policy: no-referrer`、ETag/304)。これにより **local ディスク上の private が本当に private になり**、**R2 の private ディスクが `presign` クレデンシャル無しのバインディングだけで動きます**。
+
+ディスク単位の上書きは `disks` のオブジェクト形式で行います: `{ docs: { visibility: 'private', serve: 'proxy' } }`。`serve` は `'auto'`(デフォルト)、`'redirect'`、`'proxy'`、`'direct'`(ルートを使わず従来の `temporaryUrl()` URL を維持)です。`guren check` は `delivery` 設定時にルートがマウントされているかを検証し、presign できないドライバのディスクへの `serve: 'redirect'` も検出します。
+
+ルートがやらないことが2つあります。これは capability URL でありリクエスト単位の認可ではありません(失効前の URL を持つ相手は誰でも読めます。取り消し可能なアクセスが必要なら `attachmentUrl()` を自分のコントローラでラップしてください)。また、裏のストア自体が公開されている状態を非公開にはできません。local ディスクでは private ディスクのディレクトリの静的配信も止めてください。公開マウントを閉じずにルートを登録するのは、開いたドアに鍵を付けるようなものです。
+
+運用上の注意が2つ: 署名はクエリ文字列に乗る bearer クレデンシャルなので、アクセスログではルートプレフィックスのクエリパラメータをリダクトしてください(ブラウザ履歴にも残ります。デフォルト寿命が日単位でなく分単位である理由のひとつです)。また proxy 経路はアプリ経由でバイト列を配信するため、帯域に敏感なアプリは通常のルートミドルウェアでプレフィックスをレート制限し、redirect 可能なディスクを優先してください。
+
+### `delivery` 無し(v1 の挙動)
+
+private ディスクは `disk.temporaryUrl(path, expiry)` にフォールバックし、ドライバ由来の制限がそのまま残ります: `LocalDriver.temporaryUrl()` はただの公開 URL を返し(実際には private になりません)、R2 は `presign` クレデンシャルが必要です。`delivery` を有効にすると両方の穴が塞がります。
 
 ## ライフサイクルと削除
 
