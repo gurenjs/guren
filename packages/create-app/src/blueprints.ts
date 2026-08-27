@@ -350,51 +350,29 @@ async function resolveSchema(destination: string, driver: DatabaseDriver): Promi
   return readFile(schemaVariantPath(destination, driver), 'utf8')
 }
 
-function generateDrizzleConfig(driver: DatabaseDriver): string {
-  const { url, dialect } = DATABASE_DEFAULTS[driver]
-
-  // Only SQLite names a file. Postgres and MySQL take a real connection string
-  // here, so the scheme check would reject every valid value they have.
-  const preamble =
-    driver !== 'sqlite'
-      ? ''
-      : `
-const filename = process.env.DATABASE_URL ?? '${url}'
-
 /**
- * DATABASE_URL is read by two different SQLite implementations that disagree
- * about URI filenames: the app opens it with \`bun:sqlite\`, which honours them,
- * while drizzle-kit opens it with \`node:sqlite\`, which does not. So \`file:\` is
- * not a shared spelling of anything — \`file:local.db\` migrates the app into
- * \`local.db\` and drizzle-kit into a file *named* \`file:local.db\`. The safe set
- * is what both agree on: plain paths, and \`:memory:\`.
- *
- * The scheme must be two characters or more, since no registered scheme is one
- * letter while \`C:/data/app.db\` is a Windows drive path.
+ * `drizzle.config.ts` ships the same way as `config/database.ts` above: one
+ * real source per driver, copied verbatim. The only variance the deleted
+ * string generator had was driver-keyed — the URL and dialect from
+ * `DATABASE_DEFAULTS`, plus the SQLite-only DATABASE_URL guard that Postgres
+ * and MySQL must not inherit (they take a real connection string here, so a
+ * scheme check would reject every valid value they have).
  */
-const uriScheme = /^([a-z][a-z0-9+.-]+):/i.exec(filename)
-
-if (uriScheme) {
-  throw new Error(
-    \`DATABASE_URL must be a plain file path for SQLite, but starts with "\${uriScheme[1]}:". \` +
-      'Point it at a file such as ${url}, or use ":memory:".',
-  )
+export function drizzleConfigTemplatePath(driver: DatabaseDriver): string {
+  return join(TEMPLATES_ROOT, 'database', driver, 'drizzle.config.ts')
 }
-`
 
-  const credentialUrl = driver === 'sqlite' ? 'filename' : `process.env.DATABASE_URL ?? '${url}'`
-
-  return `import { defineConfig } from 'drizzle-kit'
-${preamble}
-export default defineConfig({
-  schema: './db/schema.ts',
-  out: './db/migrations',
-  dialect: '${dialect}',
-  dbCredentials: {
-    url: ${credentialUrl},
-  },
-})
-`
+async function loadDrizzleConfig(driver: DatabaseDriver): Promise<string> {
+  try {
+    return await readFile(drizzleConfigTemplatePath(driver), 'utf8')
+  } catch (cause) {
+    throw new Error(
+      `Could not read the ${driver} drizzle config template at "${drizzleConfigTemplatePath(driver)}". ` +
+      'This build of create-guren-app may be incomplete — please report it at ' +
+      'https://github.com/gurenjs/guren/issues and try `npm create guren-app@latest` meanwhile.',
+      { cause },
+    )
+  }
 }
 
 /**
@@ -455,6 +433,7 @@ async function applyDatabaseConfig(destination: string, driver: DatabaseDriver):
   // schema fails while `db/schema.ts` still holds whatever the copy left there.
   const schema = await resolveSchema(destination, driver)
   const databaseConfig = await loadDatabaseConfig(driver)
+  const drizzleConfig = await loadDrizzleConfig(driver)
 
   // Write all DB-variant files in parallel — including SQLite, since an overlay
   // template may ship a schema written for one driver that has to be replaced
@@ -465,7 +444,7 @@ async function applyDatabaseConfig(destination: string, driver: DatabaseDriver):
     // Independent of the write above: the selected variant's contents are
     // already in `schema`, and no variant shares a path with db/schema.ts.
     ...DATABASE_DRIVERS.map((name) => rm(schemaVariantPath(destination, name), { force: true })),
-    writeFile(join(destination, 'drizzle.config.ts'), generateDrizzleConfig(driver), 'utf8'),
+    writeFile(join(destination, 'drizzle.config.ts'), drizzleConfig, 'utf8'),
     dockerCompose ? writeFile(join(destination, 'docker-compose.yml'), dockerCompose, 'utf8') : Promise.resolve(),
     // Update .env and .env.example with the correct DATABASE_URL
     ...['.env', '.env.example'].map(async (envFile) => {
