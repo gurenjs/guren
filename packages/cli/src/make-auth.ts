@@ -19,11 +19,10 @@ import { APP_ENTRY_CANDIDATES, resolveAppEntry, wireAppProvider, wireProvider } 
 import { wireRouteRegistrar } from './route-registrar'
 import { makeMigration } from './make-migration'
 import { ensureGurenUiTokens, FIELD_LABEL_CLASS, FORM_INPUT_CLASS, PRIMARY_SUBMIT_CLASS } from './guren-css'
-import { loadScaffoldTemplate } from './scaffold-templates'
+import { scaffoldTemplateFile } from './scaffold-templates'
 
-/** `path` is both the template path under `templates/scaffold/auth/` and the written app path. */
 function authFile(path: string): ScaffoldFileEntry {
-  return { path, contents: loadScaffoldTemplate(`auth/${path}`) }
+  return scaffoldTemplateFile('auth', path)
 }
 
 /** The page heading with the ember tick — the one structural device, once per

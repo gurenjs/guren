@@ -4,27 +4,7 @@
     "rootDirs": [
       "templates/scaffold/attachments",
       "tests/fixtures/scaffold-typecheck/attachments"
-    ],
-    "paths": {
-      "@guren/core": [
-        "../core/src/index.ts"
-      ],
-      "@guren/core/*": [
-        "../core/src/*"
-      ],
-      "@guren/server": [
-        "../server/src/index.ts"
-      ],
-      "@guren/server/*": [
-        "../server/src/*"
-      ],
-      "@guren/orm": [
-        "../orm/src/index.ts"
-      ],
-      "@guren/orm/*": [
-        "../orm/src/*"
-      ]
-    }
+    ]
   },
   "include": [
     "templates/scaffold/attachments/**/*",
