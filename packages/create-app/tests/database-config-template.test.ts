@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { readFile } from 'node:fs/promises'
+import { access, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   DATABASE_DEFAULTS,
@@ -15,10 +15,12 @@ import { createTempWorkspace } from './helpers'
  * `config/database.ts` and `drizzle.config.ts` both ship per driver under
  * `templates/database/<driver>/` and are copied into the app verbatim (see the
  * package CLAUDE.md). The pins here replace what the deleted string generators
- * enforced structurally: each file parses, hardcodes the same constants
- * `DATABASE_DEFAULTS` feeds into `.env`, reaches the app byte-for-byte, and is
- * actually packed into the npm tarball (the blog blueprint once shipped layers
- * no tarball contained).
+ * enforced structurally: each file parses, hardcodes the driver-keyed constants
+ * `DATABASE_DEFAULTS` holds (the url, which also reaches `.env`, and the
+ * dialect, which reaches nothing else), calls its own dialect's factory,
+ * agrees with its siblings on the fields no driver varies, reaches the app
+ * byte-for-byte, and is actually packed into the npm tarball (the blog
+ * blueprint once shipped layers no tarball contained).
  */
 const EXPECTED_FACTORY = {
   postgres: 'createPostgresDatabase',
@@ -64,6 +66,18 @@ describe('database config templates', () => {
  * `filename`, once in the guard's error text — so asserting every site is what
  * keeps a half-updated file from passing.
  */
+/**
+ * `schema` and `out` were single literals inside the deleted generator, so they
+ * could not differ between drivers. Shipped as three files they can, and
+ * nothing else would notice: the verbatim test compares a scaffold against the
+ * same edited file, the guard test reads only `dbCredentials.url`, and no gate
+ * anywhere runs drizzle-kit. Pinned here across the three, and against the
+ * paths the scaffolder actually writes in the test below — a config agreeing
+ * with its siblings about a directory none of them produces still breaks at
+ * the user's first `db:migrate`.
+ */
+const SHARED_DRIZZLE_FIELDS = ["schema: './db/schema.ts',", "out: './db/migrations',"]
+
 const EXPECTED_URL_SITES = {
   postgres: (url: string) => [`url: process.env.DATABASE_URL ?? '${url}',`],
   mysql: (url: string) => [`url: process.env.DATABASE_URL ?? '${url}',`],
@@ -88,6 +102,10 @@ describe('drizzle config templates', () => {
         expect(source).toContain(site)
       }
       expect(source).toContain(`dialect: '${DATABASE_DEFAULTS[driver].dialect}',`)
+
+      for (const field of SHARED_DRIZZLE_FIELDS) {
+        expect(source).toContain(field)
+      }
     })
 
     it(`scaffolds the ${driver} drizzle config verbatim`, async () => {
@@ -100,6 +118,19 @@ describe('drizzle config templates', () => {
         const scaffolded = await readFile(join(dest, 'drizzle.config.ts'), 'utf8')
 
         expect(scaffolded).toBe(await readFile(drizzleConfigTemplatePath(driver), 'utf8'))
+
+        // `access` rather than a text match: what has to hold is that the paths
+        // drizzle-kit will be handed exist in the app the scaffolder just
+        // built, whatever the config happens to call them. The bare await is
+        // the assertion — a missing path rejects with an ENOENT naming it,
+        // which reads better than any boolean could. (Do not wrap it in
+        // `.resolves.toBeUndefined()`: Bun's `access` resolves `null`.)
+        for (const field of ['schema', 'out'] as const) {
+          const declared = new RegExp(`${field}: '([^']+)'`).exec(scaffolded)?.[1]
+
+          expect(declared).toBeDefined()
+          await access(join(dest, declared!))
+        }
       } finally {
         await workspace.cleanup()
       }
