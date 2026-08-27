@@ -8,18 +8,15 @@ import { API_ONLY_FEATURE_ALTERNATIVE, buildRouteRegistrationHint, makeFeature }
 import { parseFieldsString, type FieldDefinition, type FieldType } from './fields'
 import { collectionSlug, schemaIdentifierFor, singularize, tableNameFor } from './inflect'
 import { schemaPathFor } from './schema-parser'
-import { makeController } from './make-controller'
 import { makeEvent } from './make-event'
 import { makeJob } from './make-job'
 import { makeListener } from './make-listener'
 import { makeMail } from './make-mail'
-import { makeModel } from './make-model'
 import { makeNotification } from './make-notification'
-import { makeRoute } from './make-route'
-import { makeView } from './make-view'
 import { detectSchemaDialect, ensureMysqlImports, ensurePgImports, ensureSqliteImports, insertImport } from './patch-helpers'
 import { wireProviders } from './provider-registrar'
 import { DEFAULT_ROUTES_FILE, findRouteRegistrar, wireRouteRegistrar } from './route-registrar'
+import { scaffoldTemplateFile } from './scaffold-templates'
 import { assertCwdUnsupported, camelCase, pascalCase, writeScaffoldFiles, type WriterOptions } from './utils'
 import { readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
@@ -28,6 +25,12 @@ export interface RunBlueprintOptions extends WriterOptions {
   name?: string
   /** Comma-separated field definitions for the resource blueprint, e.g. "title:string,body:text?". */
   fields?: string
+  /**
+   * Comma-separated attachment collections for the resource blueprint, e.g.
+   * "cover:one,images:many". Passed through to `makeFeature`, which refuses
+   * it on an app without `configureAttachments()`.
+   */
+  attach?: string
   /**
    * Skip the scaffold's authentication checks. Defaults to false (auth required).
    *
@@ -41,13 +44,6 @@ export interface RunBlueprintOptions extends WriterOptions {
 export interface BlueprintDefinition {
   description: string
   run: (options: RunBlueprintOptions) => Promise<string[]>
-}
-
-async function scaffoldFeatureFiles(
-  files: Array<{ path: string; contents: string }>,
-  options: WriterOptions,
-): Promise<string[]> {
-  return writeScaffoldFiles(files, options)
 }
 
 const blueprintRegistry: Record<string, BlueprintDefinition> = {
@@ -94,7 +90,7 @@ const blueprintRegistry: Record<string, BlueprintDefinition> = {
       // writes into the router shared with routes/web.ts, so it would silently
       // replace an alias the app configured with different options.
       const routeGuard = withAuth ? `, requireAuthenticated({ redirectTo: '/login' })` : ''
-      const created = await scaffoldFeatureFiles([
+      const created = await writeScaffoldFiles([
         {
           path: 'app/Http/Controllers/Admin/AdminDashboardController.ts',
           contents: `import { Controller } from '@guren/core'
@@ -116,43 +112,7 @@ ${controllerGuard}    return this.inertia(pages.admin.Dashboard, {
 }
 `,
         },
-        {
-          path: 'resources/js/pages/admin/Dashboard.tsx',
-          contents: `type Props = {
-  stats: {
-    users: number
-    posts: number
-    comments: number
-  }
-}
-
-export default function AdminDashboard({ stats }: Props) {
-  return (
-    <main className="mx-auto max-w-5xl space-y-8 px-6 py-12">
-      <header className="space-y-2">
-        <p className="text-xs uppercase tracking-wide text-zinc-500">Admin</p>
-        <h1 className="text-3xl font-semibold">Dashboard</h1>
-      </header>
-
-      <section className="grid gap-4 sm:grid-cols-3">
-        <article className="rounded border p-4">
-          <p className="text-sm text-zinc-500">Users</p>
-          <p className="mt-2 text-2xl font-semibold">{stats.users}</p>
-        </article>
-        <article className="rounded border p-4">
-          <p className="text-sm text-zinc-500">Posts</p>
-          <p className="mt-2 text-2xl font-semibold">{stats.posts}</p>
-        </article>
-        <article className="rounded border p-4">
-          <p className="text-sm text-zinc-500">Comments</p>
-          <p className="mt-2 text-2xl font-semibold">{stats.comments}</p>
-        </article>
-      </section>
-    </main>
-  )
-}
-`,
-        },
+        scaffoldTemplateFile('admin', 'resources/js/pages/admin/Dashboard.tsx'),
         {
           path: 'routes/admin.ts',
           contents: `import { Router${withAuth ? ', requireAuthenticated' : ''} } from '@guren/core'
@@ -188,128 +148,10 @@ export default registerAdminRoutes
     // the file is absent — the scaffold genuinely works on an API-only app.
     run: async (options) => {
       const writerOptions: WriterOptions = { force: Boolean(options.force) }
-      const created = await scaffoldFeatureFiles([
-        {
-          path: 'app/Providers/OAuthProvider.ts',
-          contents: `import { ServiceProvider, type OAuthManager, createGitHubOAuthProviderConfig, createGoogleOAuthProviderConfig, createDiscordOAuthProviderConfig } from '@guren/core'
-
-export default class OAuthProvider extends ServiceProvider {
-  register(): void {
-    const oauth = this.container.make<OAuthManager>('oauth')
-
-    const githubClientId = process.env.OAUTH_GITHUB_CLIENT_ID
-    const githubClientSecret = process.env.OAUTH_GITHUB_CLIENT_SECRET
-    const githubRedirectUri = process.env.OAUTH_GITHUB_REDIRECT_URI
-    if (githubClientId && githubClientSecret && githubRedirectUri) {
-      oauth.registerProvider('github', createGitHubOAuthProviderConfig({
-        clientId: githubClientId,
-        clientSecret: githubClientSecret,
-        redirectUri: githubRedirectUri,
-      }))
-    }
-
-    const googleClientId = process.env.OAUTH_GOOGLE_CLIENT_ID
-    const googleClientSecret = process.env.OAUTH_GOOGLE_CLIENT_SECRET
-    const googleRedirectUri = process.env.OAUTH_GOOGLE_REDIRECT_URI
-    if (googleClientId && googleClientSecret && googleRedirectUri) {
-      oauth.registerProvider('google', createGoogleOAuthProviderConfig({
-        clientId: googleClientId,
-        clientSecret: googleClientSecret,
-        redirectUri: googleRedirectUri,
-      }))
-    }
-
-    const discordClientId = process.env.OAUTH_DISCORD_CLIENT_ID
-    const discordClientSecret = process.env.OAUTH_DISCORD_CLIENT_SECRET
-    const discordRedirectUri = process.env.OAUTH_DISCORD_REDIRECT_URI
-    if (discordClientId && discordClientSecret && discordRedirectUri) {
-      oauth.registerProvider('discord', createDiscordOAuthProviderConfig({
-        clientId: discordClientId,
-        clientSecret: discordClientSecret,
-        redirectUri: discordRedirectUri,
-      }))
-    }
-  }
-}
-`,
-        },
-        {
-          path: 'app/Http/Controllers/Auth/OAuthController.ts',
-          contents: `import { Controller, type OAuthManager } from '@guren/core'
-
-type SupportedProvider = 'github' | 'google' | 'discord'
-
-const SUPPORTED_PROVIDERS = new Set<SupportedProvider>(['github', 'google', 'discord'])
-
-export default class OAuthController extends Controller {
-  private oauth(): OAuthManager {
-    return this.make<OAuthManager>('oauth')
-  }
-
-  // Note: not named \`redirect\` — that would shadow the base
-  // Controller.redirect() helper used below.
-  async redirectToProvider(): Promise<Response> {
-    const provider = this.validateProvider(this.request.param('provider'))
-
-    // Passing the session ties \`state\` to this browser: the manager keeps a
-    // binding in it that the callback must present back. Without it an
-    // attacker could authorize their own account, keep the \`code\` unconsumed,
-    // and walk a visitor through the callback — logging that visitor into the
-    // attacker's account.
-    // \`?redirectTo=\` is user input — the manager only keeps app-relative
-    // paths (or hosts allowlisted via stateConfig.allowedRedirectHosts).
-    const { url } = await this.oauth().authorize(provider, {
-      redirectTo: this.request.query('redirectTo'),
-      session: this.auth.session(),
-    })
-    return this.redirect(url)
-  }
-
-  async callback(): Promise<Response> {
-    const provider = this.validateProvider(this.request.param('provider'))
-    const code = this.request.query('code')
-    const state = this.request.query('state')
-
-    if (!code || !state) {
-      return this.json({ error: 'Missing OAuth callback parameters.' }, { status: 400 })
-    }
-
-    // Replace this with your own account linking: look the user up by
-    // profile.email, create one when missing, then \`await this.auth.login(user)\`
-    // and finish with \`return this.redirect(redirectTo ?? '/')\` —
-    // \`redirectTo\` is already sanitized against open redirects. Refuse to
-    // create an account when \`profile.emailVerified === false\`: the provider
-    // is saying it never checked that the address belongs to this user.
-    const { profile, redirectTo } = await this.oauth().handleCallback(provider, {
-      code,
-      state,
-      session: this.auth.session(),
-    })
-    return this.json({ provider, profile, redirectTo }, { status: 200 })
-  }
-
-  private validateProvider(value: string | undefined): SupportedProvider {
-    if (value && SUPPORTED_PROVIDERS.has(value as SupportedProvider)) {
-      return value as SupportedProvider
-    }
-    throw new Error(\`Unsupported OAuth provider: \${value ?? '(missing)'}\`)
-  }
-}
-`,
-        },
-        {
-          path: 'routes/oauth.ts',
-          contents: `import { Router } from '@guren/core'
-import OAuthController from '../app/Http/Controllers/Auth/OAuthController.js'
-
-export function registerOAuthRoutes(router: Router): void {
-  router.get('/auth/:provider', [OAuthController, 'redirectToProvider']).name('oauth.redirect')
-  router.get('/auth/:provider/callback', [OAuthController, 'callback']).name('oauth.callback')
-}
-
-export default registerOAuthRoutes
-`,
-        },
+      const created = await writeScaffoldFiles([
+        scaffoldTemplateFile('oauth', 'app/Providers/OAuthProvider.ts'),
+        scaffoldTemplateFile('oauth', 'app/Http/Controllers/Auth/OAuthController.ts'),
+        scaffoldTemplateFile('oauth', 'routes/oauth.ts'),
       ], writerOptions)
 
       await wireProviders([
@@ -326,36 +168,9 @@ export default registerOAuthRoutes
     description: 'Install the default cache provider and an example cache service.',
     run: async (options) => {
       const writerOptions: WriterOptions = { force: Boolean(options.force) }
-      const created = await scaffoldFeatureFiles([
-        {
-          path: 'app/Providers/CacheProvider.ts',
-          contents: `import { ServiceProvider, createCacheManager } from '@guren/core'
-
-export default class CacheProvider extends ServiceProvider {
-  register(): void {
-    this.container.singleton('cache', () => createCacheManager({
-      default: 'memory',
-      stores: {
-        memory: { driver: 'memory' },
-      },
-    }))
-  }
-}
-`,
-        },
-        {
-          path: 'app/Services/ApplicationCache.ts',
-          contents: `import type { CacheManager } from '@guren/core'
-
-export class ApplicationCache {
-  constructor(private readonly cache: CacheManager) {}
-
-  async rememberVersion(): Promise<string> {
-    return this.cache.store().rememberForever('app:version', async () => 'vNext')
-  }
-}
-`,
-        },
+      const created = await writeScaffoldFiles([
+        scaffoldTemplateFile('cache', 'app/Providers/CacheProvider.ts'),
+        scaffoldTemplateFile('cache', 'app/Services/ApplicationCache.ts'),
       ], writerOptions)
 
       await wireProviders([
@@ -372,27 +187,8 @@ export class ApplicationCache {
       const writerOptions: WriterOptions = { force: Boolean(options.force) }
       const eventPath = await makeEvent('OrderPlaced', writerOptions)
       const listenerPath = await makeListener('SendOrderReceipt', { ...writerOptions, event: 'OrderPlaced' })
-      const created = await scaffoldFeatureFiles([
-        {
-          path: 'app/Providers/EventProvider.ts',
-          contents: `import { ServiceProvider, type EventManager } from '@guren/core'
-import { OrderPlaced } from '../Events/OrderPlaced.js'
-import { SendOrderReceiptListener } from '../Listeners/SendOrderReceiptListener.js'
-
-export default class EventProvider extends ServiceProvider {
-  register(): void {}
-
-  boot(): void {
-    const events = this.container.make<EventManager>('events')
-    const listener = new SendOrderReceiptListener()
-
-    events.on(OrderPlaced, (event) => listener.handle(event), {
-      priority: SendOrderReceiptListener.priority,
-    })
-  }
-}
-`,
-        },
+      const created = await writeScaffoldFiles([
+        scaffoldTemplateFile('events', 'app/Providers/EventProvider.ts'),
       ], writerOptions)
 
       await wireProviders([
@@ -408,34 +204,8 @@ export default class EventProvider extends ServiceProvider {
     run: async (options) => {
       const writerOptions: WriterOptions = { force: Boolean(options.force) }
       const mailPath = await makeMail('WelcomeEmail', writerOptions)
-      const created = await scaffoldFeatureFiles([
-        {
-          path: 'app/Providers/MailProvider.ts',
-          contents: `import { ServiceProvider, createMailManager, setMailManager, type MailManager } from '@guren/core'
-
-export default class MailProvider extends ServiceProvider {
-  register(): void {
-    const manager = createMailManager({
-      // MAIL_MAILER=log writes messages to the server output (default);
-      // 'memory' keeps them inspectable in tests.
-      default: process.env.MAIL_MAILER === 'memory' ? 'memory' : 'log',
-      from: { email: 'noreply@example.com', name: 'Guren App' },
-      transports: {
-        log: { driver: 'log' },
-        memory: { driver: 'memory' },
-      },
-    })
-
-    this.container.instance('mail', manager)
-  }
-
-  boot(): void {
-    const manager = this.container.make<MailManager>('mail')
-    setMailManager(manager)
-  }
-}
-`,
-        },
+      const created = await writeScaffoldFiles([
+        scaffoldTemplateFile('mail', 'app/Providers/MailProvider.ts'),
       ], writerOptions)
 
       await wireProviders([
@@ -451,36 +221,8 @@ export default class MailProvider extends ServiceProvider {
     run: async (options) => {
       const writerOptions: WriterOptions = { force: Boolean(options.force) }
       const jobPath = await makeJob('ProcessWelcomeSequence', writerOptions)
-      const created = await scaffoldFeatureFiles([
-        {
-          path: 'app/Providers/QueueProvider.ts',
-          contents: `import { ServiceProvider, MemoryDriver, SyncDriver, createQueueManager, registerJob, type QueueManager } from '@guren/core'
-import { ProcessWelcomeSequenceJob } from '../Jobs/ProcessWelcomeSequenceJob.js'
-
-export default class QueueProvider extends ServiceProvider {
-  register(): void {
-    const queue = createQueueManager({
-      // QUEUE_CONNECTION=sync executes jobs inline on dispatch (default,
-      // no worker process needed); 'memory' queues them for a Worker.
-      default: process.env.QUEUE_CONNECTION === 'memory' ? 'memory' : 'sync',
-      drivers: {
-        sync: () => new SyncDriver(),
-        memory: () => new MemoryDriver(),
-      },
-    })
-
-    this.container.instance('queue', queue)
-  }
-
-  boot(): void {
-    // Register job classes before the driver so sync dispatches can resolve them.
-    registerJob(ProcessWelcomeSequenceJob)
-    const queue = this.container.make<QueueManager>('queue')
-    queue.driver()
-  }
-}
-`,
-        },
+      const created = await writeScaffoldFiles([
+        scaffoldTemplateFile('queue', 'app/Providers/QueueProvider.ts'),
       ], writerOptions)
 
       await wireProviders([
@@ -496,25 +238,8 @@ export default class QueueProvider extends ServiceProvider {
     run: async (options) => {
       const writerOptions: WriterOptions = { force: Boolean(options.force) }
       const notificationPath = await makeNotification('WelcomeUser', writerOptions)
-      const created = await scaffoldFeatureFiles([
-        {
-          path: 'app/Providers/NotificationProvider.ts',
-          contents: `import { ServiceProvider, DatabaseChannel, MailChannel, type NotificationManager } from '@guren/core'
-import type { MailManager } from '@guren/core'
-
-export default class NotificationProvider extends ServiceProvider {
-  register(): void {}
-
-  boot(): void {
-    const notifications = this.container.make<NotificationManager>('notifications')
-    const mail = this.container.make<MailManager>('mail')
-
-    notifications.registerChannel('mail', new MailChannel(mail))
-    notifications.registerChannel('database', new DatabaseChannel())
-  }
-}
-`,
-        },
+      const created = await writeScaffoldFiles([
+        scaffoldTemplateFile('notifications', 'app/Providers/NotificationProvider.ts'),
       ], writerOptions)
 
       await wireProviders([
@@ -529,57 +254,9 @@ export default class NotificationProvider extends ServiceProvider {
     description: 'Install storage infrastructure with local/public disks (switchable via STORAGE_DISK) and a sample storage service.',
     run: async (options) => {
       const writerOptions: WriterOptions = { force: Boolean(options.force) }
-      const created = await scaffoldFeatureFiles([
-        {
-          path: 'app/Providers/StorageProvider.ts',
-          contents: `import { ServiceProvider, createStorageManager } from '@guren/core'
-
-// Declared once, chosen per environment: set STORAGE_DISK in .env (or in
-// your platform's vars) to switch without touching code. Drivers are built
-// on first use, so a disk you never touch never opens a connection — but the
-// values below are read when this object is built, so keep anything that can
-// throw (a required-env helper) out of it.
-const disks = {
-  local: { driver: 'local', root: './storage/app' },
-  // Declared public because it is: everything under it is served. A local
-  // disk has no per-object visibility, so this is where that is decided.
-  // Rooted inside public/ so the root asset server serves these files and
-  // disk.url() returns a URL that actually resolves (images and the other
-  // allowlisted extensions; add a route for anything else).
-  public: { driver: 'local', root: './public/storage', url: '/storage', visibility: 'public' },
-} as const
-
-const selected = process.env.STORAGE_DISK ?? 'local'
-
-export default class StorageProvider extends ServiceProvider {
-  register(): void {
-    // Checked here rather than left to the first upload: an unknown name is
-    // accepted at construction and only throws when a disk is resolved,
-    // which can be a queued job or a rarely-hit route in production.
-    if (!(selected in disks)) {
-      throw new Error(
-        \`STORAGE_DISK="\${selected}" is not a declared disk. Declare it in app/Providers/StorageProvider.ts or use one of: \${Object.keys(disks).join(', ')}.\`,
-      )
-    }
-
-    this.container.instance('storage', createStorageManager({ default: selected, disks }))
-  }
-}
-`,
-        },
-        {
-          path: 'app/Services/FileStorage.ts',
-          contents: `import type { StorageManager } from '@guren/core'
-
-export class FileStorage {
-  constructor(private readonly storage: StorageManager) {}
-
-  async writeHealthcheck(): Promise<void> {
-    await this.storage.disk('public').put('health.txt', 'ok')
-  }
-}
-`,
-        },
+      const created = await writeScaffoldFiles([
+        scaffoldTemplateFile('storage', 'app/Providers/StorageProvider.ts'),
+        scaffoldTemplateFile('storage', 'app/Services/FileStorage.ts'),
       ], writerOptions)
 
       await wireProviders([
@@ -600,37 +277,8 @@ export class FileStorage {
         channel: 'users.{id}.feed',
         private: true,
       })
-      const created = await scaffoldFeatureFiles([
-        {
-          path: 'app/Providers/BroadcastProvider.ts',
-          contents: `import { ServiceProvider, createBroadcastManager, MemoryBroadcastDriver, type BroadcastManager } from '@guren/core'
-import OrdersChannel from '../Broadcasting/OrdersChannel.js'
-import UserFeedChannel from '../Broadcasting/UserFeedChannel.js'
-
-export default class BroadcastProvider extends ServiceProvider {
-  register(): void {
-    this.container.instance('broadcast', createBroadcastManager({
-      default: 'memory',
-      drivers: {
-        memory: () => new MemoryBroadcastDriver(),
-      },
-    }))
-  }
-
-  boot(): void {
-    const broadcast = this.container.make<BroadcastManager>('broadcast')
-    const orders = new OrdersChannel(broadcast)
-    const userFeed = new UserFeedChannel(broadcast)
-
-    // A public channel is open by definition. A private one is not: register
-    // the channel's own authorize() so the check in UserFeedChannel is the
-    // check that runs.
-    broadcast.channel(orders.getChannelName(), () => true)
-    broadcast.privateChannel(userFeed.getBaseName(), (channelName, user) => userFeed.authorize(channelName, user))
-  }
-}
-`,
-        },
+      const created = await writeScaffoldFiles([
+        scaffoldTemplateFile('broadcasting', 'app/Providers/BroadcastProvider.ts'),
       ], writerOptions)
 
       await wireProviders([
@@ -673,6 +321,7 @@ export default class BroadcastProvider extends ServiceProvider {
       const created = await makeFeature(singular, {
         force: Boolean(options.force),
         fields: options.fields,
+        attach: options.attach,
         publicAccess: options.publicAccess,
         announce: false,
       })
@@ -687,27 +336,8 @@ export default class BroadcastProvider extends ServiceProvider {
     description: 'Install a schedule kernel with a sample recurring task.',
     run: async (options) => {
       const writerOptions: WriterOptions = { force: Boolean(options.force) }
-      const created = await scaffoldFeatureFiles([
-        {
-          path: 'app/Console/Kernel.ts',
-          contents: `import { Schedule } from '@guren/core'
-
-export function scheduleTasksKernel(): Schedule {
-  const schedule = new Schedule()
-
-  schedule
-    .call(async () => {
-      console.log('[Schedule] Running heartbeat task')
-    })
-    .hourly()
-    .name('app-heartbeat')
-
-  return schedule
-}
-
-export default scheduleTasksKernel
-`,
-        },
+      const created = await writeScaffoldFiles([
+        scaffoldTemplateFile('schedule', 'app/Console/Kernel.ts'),
       ], writerOptions)
 
       await wireProviders([{ name: 'CoreSchedulingServiceProvider', importStatement: "import { SchedulingServiceProvider as CoreSchedulingServiceProvider } from '@guren/core'" }])

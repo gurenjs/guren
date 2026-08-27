@@ -1,8 +1,9 @@
 import { test, expect } from '@playwright/test'
+import { gotoHydrated } from './helpers.js'
 
 test.describe('Validation errors', () => {
   test('submitting an empty post form shows validation errors', async ({ page }) => {
-    await page.goto('/posts/new')
+    await gotoHydrated(page, '/posts/new')
     await expect(page.getByRole('heading', { name: 'New Post' })).toBeVisible()
 
     await page.getByRole('button', { name: 'Create Post' }).click()
@@ -13,7 +14,7 @@ test.describe('Validation errors', () => {
   })
 
   test('submitting a partially filled post form shows remaining errors', async ({ page }) => {
-    await page.goto('/posts/new')
+    await gotoHydrated(page, '/posts/new')
     await expect(page.getByRole('heading', { name: 'New Post' })).toBeVisible()
 
     const titleInput = page.getByLabel('Title')

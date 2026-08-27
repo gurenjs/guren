@@ -90,6 +90,12 @@ const DEFAULT_BLUEPRINT_FEATURES: readonly (readonly string[])[] = [
   // attachments exercises its own scaffolds rather than re-running the
   // storage prerequisite.
   ['attachments'],
+  // After attachments, deliberately: `--attach` refuses an app without
+  // configureAttachments(). This second resource is the one gate that
+  // *typechecks* the attach-aware model (Attachable + has*Attached from
+  // @guren/core) and controller (attach/purgeAttachments) an app installs —
+  // in the repo they are only parse-checked builder output.
+  ['resource', 'photos', '--fields', 'title:string,caption:text?', '--attach', 'cover:one,images:many'],
   ['broadcasting'],
   ['schedule'],
 ]

@@ -1,5 +1,6 @@
 import { Link, usePage } from '@inertiajs/react'
 import Layout from '../../components/Layout.js'
+import AttachmentImage from '../../components/AttachmentImage.js'
 import { Plus, ChevronLeft, ChevronRight } from 'lucide-react'
 import type { PaginatedPageProps } from '@guren/core'
 import type { PostResourceData } from '@/app/Http/Resources/PostResource'
@@ -82,6 +83,15 @@ export default function Index({ data: posts, pagination }: Props) {
                         {post.author?.name ?? 'Unknown'}
                       </p>
                     </div>
+                    {post.cover && (
+                      <AttachmentImage
+                        attachment={post.cover}
+                        variant="thumb"
+                        testId="post-cover-thumb"
+                        loading="lazy"
+                        className="mt-4 h-20 w-32 shrink-0 rounded-md object-cover ring-1 ring-stone-100 sm:mt-1"
+                      />
+                    )}
                   </Link>
                 </article>
               ))}

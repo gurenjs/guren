@@ -1,10 +1,10 @@
 import { dirname, relative, resolve } from 'node:path'
-import type { CallExpression, File } from '@babel/types'
+import type { CallExpression } from '@babel/types'
 import { walk } from './ast-walk'
 import { check, type CheckResult } from './check-result'
 import { collectFiles, listAppRoots } from './discovery'
 import { parseModelSource } from './model-parser'
-import type { ParseCache } from './parse-cache'
+import type { ParseCache, ParsedFile } from './parse-cache'
 import { schemaPathFor, type SchemaTable } from './schema-parser'
 
 /**
@@ -54,37 +54,63 @@ function schemaModuleFor(cwd: string, filePath: string, specifier: string): stri
   return undefined
 }
 
+interface AttachmentsImportScan {
+  /** The local binding `configureAttachments` (from `@guren/core`) is bound to, or null. */
+  configureLocal: string | null
+  /** Locals of `import * as ns from '@guren/core'` — `ns.configureAttachments(...)` counts as wiring too. */
+  coreNamespaces: string[]
+  /**
+   * Local binding -> { where it came from, the *exported* name it aliases }.
+   * The schema declares exported names, so an `import { attachments as att }`
+   * must be judged by 'attachments', never by 'att'. Default and namespace
+   * imports have no single exported name to judge against; recorded with an
+   * empty `imported` so provenance tests can skip them.
+   */
+  importsByLocal: Map<string, { source: string; imported: string }>
+}
+
 /**
- * The local bindings a file could call `configureAttachments` through: the
- * named-import local (aliases included) and any `import * as ns` namespace
- * locals — both restricted to `@guren/core`, the same provenance rule as
- * the table check below: a comment or a string merely containing the name
- * does not count. One resolver for both checks in this module, so the
- * binding rule cannot drift between them.
+ * One reading of a file's imports for every consumer in this file. The
+ * scaffolder preflight, the `guren check` rules, and the table check all
+ * judge "does this file wire the attachments layer" through this single
+ * scan — a second copy is how the two would start disagreeing about the
+ * same app (`guren check` green while `make:feature --attach` refuses, or
+ * worse).
  */
-function configureAttachmentsBindings(ast: File): { named: string | null; namespaces: string[] } {
-  let named: string | null = null
-  const namespaces: string[] = []
-  for (const declaration of ast.program.body) {
-    if (declaration.type !== 'ImportDeclaration' || declaration.source.value !== '@guren/core') continue
+function scanAttachmentsImports(parsed: ParsedFile): AttachmentsImportScan {
+  let configureLocal: string | null = null
+  const coreNamespaces: string[] = []
+  const importsByLocal = new Map<string, { source: string; imported: string }>()
+  for (const declaration of parsed.ast.program.body) {
+    if (declaration.type !== 'ImportDeclaration') continue
     for (const specifier of declaration.specifiers) {
-      if (specifier.type === 'ImportNamespaceSpecifier') {
-        namespaces.push(specifier.local.name)
-        continue
+      if (specifier.type === 'ImportSpecifier') {
+        const imported =
+          specifier.imported.type === 'Identifier' ? specifier.imported.name : specifier.imported.value
+        if (imported === 'configureAttachments' && declaration.source.value === '@guren/core') {
+          configureLocal = specifier.local.name
+        }
+        importsByLocal.set(specifier.local.name, { source: declaration.source.value, imported })
+      } else {
+        if (specifier.type === 'ImportNamespaceSpecifier' && declaration.source.value === '@guren/core') {
+          coreNamespaces.push(specifier.local.name)
+        }
+        importsByLocal.set(specifier.local.name, {
+          source: declaration.source.value,
+          imported: '',
+        })
       }
-      if (specifier.type !== 'ImportSpecifier') continue
-      const imported =
-        specifier.imported.type === 'Identifier' ? specifier.imported.name : specifier.imported.value
-      if (imported === 'configureAttachments') named = specifier.local.name
     }
   }
-  return { named, namespaces }
+  return { configureLocal, coreNamespaces, importsByLocal }
 }
 
 /**
  * Whether the file makes a `configureAttachments()` call under its
- * `@guren/core` bindings — the named import or a `core.configureAttachments()`
- * member call on a namespace import.
+ * `@guren/core` bindings — the named import (aliases included) or a
+ * `core.configureAttachments()` member call on a namespace import. The
+ * provenance rule of the table check below: a comment or a string merely
+ * containing the name does not count.
  */
 async function fileCallsConfigureAttachments(cache: ParseCache, filePath: string): Promise<boolean> {
   const source = await cache.source(filePath)
@@ -93,21 +119,21 @@ async function fileCallsConfigureAttachments(cache: ParseCache, filePath: string
   const parsed = await cache.get(filePath)
   if (!parsed) return false
 
-  const bindings = configureAttachmentsBindings(parsed.ast)
-  if (!bindings.named && bindings.namespaces.length === 0) return false
+  const { configureLocal, coreNamespaces } = scanAttachmentsImports(parsed)
+  if (!configureLocal && coreNamespaces.length === 0) return false
 
   let found = false
   walk(parsed.ast, (node) => {
     if (found) return false
     if (node.type !== 'CallExpression') return
     const callee = (node as unknown as CallExpression).callee
-    if (callee.type === 'Identifier' && callee.name === bindings.named) {
+    if (callee.type === 'Identifier' && callee.name === configureLocal) {
       found = true
     } else if (
       callee.type === 'MemberExpression' &&
       !callee.computed &&
       callee.object.type === 'Identifier' &&
-      bindings.namespaces.includes(callee.object.name) &&
+      coreNamespaces.includes(callee.object.name) &&
       callee.property.type === 'Identifier' &&
       callee.property.name === 'configureAttachments'
     ) {
@@ -115,6 +141,26 @@ async function fileCallsConfigureAttachments(cache: ParseCache, filePath: string
     }
   })
   return found
+}
+
+/**
+ * Whether the app (or one of its modules) wires the attachments layer: a
+ * `configureAttachments` imported from `@guren/core` that is actually called.
+ *
+ * For scaffolders (`make:feature --attach`) that would otherwise emit models
+ * whose `Attachable` statics all throw at first use — the guidance to run
+ * `guren add attachments` first has to come from the scaffold, not from the
+ * app's first crashed request. Positive evidence only, like the checks below:
+ * a file that cannot be read or parsed contributes nothing, so an app this
+ * cannot see into is refused rather than scaffolded broken. Delegates to the
+ * same per-file predicate `checkAttachableModels` uses, so the scaffolder
+ * and `guren check` cannot disagree about the same app.
+ */
+export async function appConfiguresAttachments(appRoot: string, cache: ParseCache): Promise<boolean> {
+  for (const filePath of await discoverAttachmentsConfigFiles(appRoot)) {
+    if (await fileCallsConfigureAttachments(cache, filePath)) return true
+  }
+  return false
 }
 
 /**
@@ -212,33 +258,12 @@ export async function checkAttachmentsConfig(options: {
     const parsed = await cache.get(filePath)
     if (!parsed) continue
 
-    // The local name configureAttachments is bound to (shared with the
-    // presence check above), and where each imported identifier came from —
-    // the table's provenance is what makes the check honest. Namespace-style
-    // configs (`core.configureAttachments(...)`) stay out of this check's
-    // sight; the presence check does see them.
-    const configureLocal = configureAttachmentsBindings(parsed.ast).named
-    // Local binding -> { where it came from, the *exported* name it aliases }.
-    // The schema declares exported names, so an `import { attachments as att }`
-    // must be judged by 'attachments', never by 'att'.
-    const importsByLocal = new Map<string, { source: string; imported: string }>()
-    for (const declaration of parsed.ast.program.body) {
-      if (declaration.type !== 'ImportDeclaration') continue
-      for (const specifier of declaration.specifiers) {
-        if (specifier.type === 'ImportSpecifier') {
-          const imported =
-            specifier.imported.type === 'Identifier' ? specifier.imported.name : specifier.imported.value
-          importsByLocal.set(specifier.local.name, { source: declaration.source.value, imported })
-        } else {
-          // Default and namespace imports have no single exported name to
-          // judge against; recorded so the provenance test below can skip.
-          importsByLocal.set(specifier.local.name, {
-            source: declaration.source.value,
-            imported: '',
-          })
-        }
-      }
-    }
+    // The local name configureAttachments is bound to, and where each
+    // imported identifier came from — the table's provenance is what makes
+    // the check honest. Namespace-style configs
+    // (`core.configureAttachments(...)`) stay out of this check's sight;
+    // the presence checks above do see them.
+    const { configureLocal, importsByLocal } = scanAttachmentsImports(parsed)
     if (!configureLocal) continue
 
     const relPath = relative(cwd, filePath)

@@ -23,7 +23,7 @@ Page references are attributed to the controller action whose body makes the cal
 | auth/ResetPassword | { token: string email: string errors?: RouteErrors<ResetPasswordBody> & { message?: string } } | GET /reset-password → ResetPasswordController.show |
 | auth/VerifyEmail | { status?: string } | GET /verify-email → VerifyEmailController.notice, GET /verify-email/confirm → VerifyEmailController.confirm, POST /verify-email → VerifyEmailController.resend |
 | dashboard/Index | { user?: { id: number; name: string; email: string } \| null } | GET /dashboard → DashboardController.index |
-| posts/Edit | { post: PostFormValues \| null postId: number errors?: RouteErrors<PostFormValues> & { message?: string } } | GET /posts/:id/edit → PostController.edit |
+| posts/Edit | { // The server sends the text fields only — the current cover arrives as its // own AttachmentData prop, never mixed into the form values. post: Omit<PostFormValues, 'cover'> \| null postId: number cover?: AttachmentData \| null errors?: RouteErrors<PostFormValues> & { message?: string } } | GET /posts/:id/edit → PostController.edit |
 | posts/Index | PaginatedPageProps<PostResourceData> & {} | GET / → PostController.index, GET /posts → PostController.index |
 | posts/New |  | GET /posts/new → PostController.create |
 | posts/Show | { post: PostResourceData } | GET /posts/:id → PostController.show |

@@ -10,7 +10,7 @@ interface Props {
 }
 
 const fieldClass =
-  'mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none ring-emerald-400 transition focus:border-emerald-400 focus:ring'
+  'mt-1 w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:border-transparent focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent'
 
 export default function EditPost({ post }: Props) {
   const form = useForm<PostFormData>({
@@ -23,7 +23,10 @@ export default function EditPost({ post }: Props) {
     <Layout>
       <Head title={`Edit ${post.title}`} />
       <section className="space-y-6">
-        <h1 className="text-3xl font-semibold text-emerald-300">Edit post</h1>
+        <h1 className="flex items-center gap-3 text-3xl font-bold text-g-heading">
+          <span aria-hidden className="h-7 w-[3px] shrink-0 rounded-full bg-[image:var(--g-tick)]" />
+          Edit post
+        </h1>
 
         <form
           className="space-y-4"
@@ -33,42 +36,42 @@ export default function EditPost({ post }: Props) {
           }}
         >
           <div>
-            <label className="block text-sm font-medium text-slate-200">Title</label>
+            <label className="block text-sm font-bold text-g-heading">Title</label>
             <input
               type="text"
               value={form.data.title}
               onChange={(event) => form.setData('title', event.target.value)}
               className={fieldClass}
             />
-            {form.errors.title ? <p className="mt-1 text-sm text-rose-300">{form.errors.title}</p> : null}
+            {form.errors.title ? <p className="mt-1 text-sm text-g-danger">{form.errors.title}</p> : null}
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-200">Excerpt</label>
+            <label className="block text-sm font-bold text-g-heading">Excerpt</label>
             <input
               type="text"
               value={form.data.excerpt}
               onChange={(event) => form.setData('excerpt', event.target.value)}
               className={fieldClass}
             />
-            {form.errors.excerpt ? <p className="mt-1 text-sm text-rose-300">{form.errors.excerpt}</p> : null}
+            {form.errors.excerpt ? <p className="mt-1 text-sm text-g-danger">{form.errors.excerpt}</p> : null}
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-200">Body</label>
+            <label className="block text-sm font-bold text-g-heading">Body</label>
             <textarea
               rows={10}
               value={form.data.body}
               onChange={(event) => form.setData('body', event.target.value)}
               className={fieldClass}
             />
-            {form.errors.body ? <p className="mt-1 text-sm text-rose-300">{form.errors.body}</p> : null}
+            {form.errors.body ? <p className="mt-1 text-sm text-g-danger">{form.errors.body}</p> : null}
           </div>
 
           <button
             type="submit"
             disabled={form.processing}
-            className="rounded bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400 disabled:opacity-50"
+            className="rounded-g-ctl bg-g-accent px-4 py-2 text-sm font-bold text-g-on-accent transition hover:bg-g-accent-down disabled:cursor-not-allowed disabled:opacity-45"
           >
             Save changes
           </button>

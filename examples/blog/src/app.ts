@@ -18,6 +18,7 @@ import EventServiceProvider from '../app/Providers/EventServiceProvider.js'
 import SchedulingProvider from '../app/Providers/SchedulingProvider.js'
 import NotificationProvider from '../app/Providers/NotificationProvider.js'
 import StorageProvider from '../app/Providers/StorageProvider.js'
+import AttachmentsProvider from '../app/Providers/AttachmentsProvider.js'
 import BroadcastProvider from '../app/Providers/BroadcastProvider.js'
 import { registerWebRoutes } from '../routes/web.js'
 import '../config/inertia.js'
@@ -65,6 +66,7 @@ const app = createApp({
     NotificationProvider,
     CoreStorageServiceProvider,
     StorageProvider,
+    AttachmentsProvider,
     CoreBroadcastServiceProvider,
     BroadcastProvider,
     EventServiceProvider,

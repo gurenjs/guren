@@ -1,0 +1,135 @@
+/* Guren UI — design tokens (https://github.com/gurenjs/guren-ui)
+   Light is the guren.dev docs light theme (white + crimson); dark is its
+   docs dark theme (rose-pine-moon ground, rose accent text). The dark block
+   follows the system preference — restructure it behind a class if the app
+   grows a theme toggle.
+
+   The red budget: --g-accent (crimson) fills one element per screen — the
+   primary action. Destructive actions are outline + explicit verb; the red
+   fill moves to them only inside a confirm step. */
+
+:root {
+  --g-font-sans: system-ui, 'Noto Sans JP', 'Hiragino Sans', sans-serif;
+  --g-font-mono: ui-monospace, 'JetBrains Mono', 'SFMono-Regular', Menlo, monospace;
+
+  /* surfaces */
+  --g-page: #ffffff;
+  --g-panel: #ffffff;
+  --g-raised: #fffafa;
+  --g-ink: #1a1212; /* terminal surface — dark in both themes */
+  --g-line: #e5e7eb;
+  --g-line-strong: #d1d5db;
+
+  /* text */
+  --g-heading: #111827;
+  --g-text: #1f2937;
+  --g-text-2: #4b5563;
+  --g-muted: #9ca3af;
+
+  /* text printed on the ink surface */
+  --g-on-ink: #fff5f5;
+  --g-on-ink-muted: #c9a9a9;
+
+  /* the red budget */
+  --g-accent: #db1b1b; /* crimson-600 — primary fills only */
+  --g-accent-down: #b91c1c;
+  --g-accent-text: #991b1b; /* crimson-800 — links, accent text */
+  --g-accent-tint: #fff1f2;
+  --g-on-accent: #fff5f5;
+
+  /* signals — text-safe value + chip value + wash */
+  --g-ok: #286983;
+  --g-ok-chip: #56949f;
+  --g-ok-tint: rgba(86, 148, 159, 0.12);
+  --g-warn: #b45309;
+  --g-warn-chip: #ea9d34;
+  --g-warn-tint: rgba(234, 157, 52, 0.14);
+  --g-danger: #b91c1c;
+  --g-danger-chip: #f23a3a;
+  --g-danger-tint: #fff1f2;
+
+  /* the one structural device — marks the current place, once per screen */
+  --g-tick: linear-gradient(180deg, #ff3c28, #8b0000);
+
+  /* geometry */
+  --g-r-ctl: 8px;
+  --g-r-card: 12px;
+  --g-shadow-card: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+  --g-shadow-float: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -2px rgba(0, 0, 0, 0.04);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --g-page: #1a1a2e;
+    --g-panel: #1e1e34;
+    --g-raised: #232340;
+    --g-line: #2e2e4a;
+    --g-line-strong: #3d3d5c;
+
+    --g-heading: #e0def4;
+    --g-text: #e0def4;
+    --g-text-2: #908caa;
+    --g-muted: #6e6a86;
+
+    /* fills stay crimson in both themes; accent TEXT moves to rose —
+       crimson measures 4.42:1 on this ground */
+    --g-accent-text: #eb6f92;
+    --g-accent-tint: rgba(235, 111, 146, 0.12);
+
+    --g-ok: #9ccfd8;
+    --g-ok-chip: #9ccfd8;
+    --g-ok-tint: rgba(156, 207, 216, 0.1);
+    --g-warn: #f6c177;
+    --g-warn-chip: #f6c177;
+    --g-warn-tint: rgba(246, 193, 119, 0.1);
+    --g-danger: #ffa5a5;
+    --g-danger-chip: #f23a3a;
+    --g-danger-tint: rgba(242, 58, 58, 0.12);
+
+    --g-shadow-card: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.2);
+    --g-shadow-float: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -2px rgba(0, 0, 0, 0.25);
+  }
+}
+
+/* Tailwind utilities over the tokens: bg-g-page, text-g-accent-text,
+   border-g-line, rounded-g-card, shadow-g-card, font-sans, font-mono … */
+@theme inline {
+  --font-sans: var(--g-font-sans);
+  --font-mono: var(--g-font-mono);
+
+  --color-g-page: var(--g-page);
+  --color-g-panel: var(--g-panel);
+  --color-g-raised: var(--g-raised);
+  --color-g-ink: var(--g-ink);
+  --color-g-line: var(--g-line);
+  --color-g-line-strong: var(--g-line-strong);
+
+  --color-g-heading: var(--g-heading);
+  --color-g-text: var(--g-text);
+  --color-g-text-2: var(--g-text-2);
+  --color-g-muted: var(--g-muted);
+
+  --color-g-on-ink: var(--g-on-ink);
+  --color-g-on-ink-muted: var(--g-on-ink-muted);
+
+  --color-g-accent: var(--g-accent);
+  --color-g-accent-down: var(--g-accent-down);
+  --color-g-accent-text: var(--g-accent-text);
+  --color-g-accent-tint: var(--g-accent-tint);
+  --color-g-on-accent: var(--g-on-accent);
+
+  --color-g-ok: var(--g-ok);
+  --color-g-ok-chip: var(--g-ok-chip);
+  --color-g-ok-tint: var(--g-ok-tint);
+  --color-g-warn: var(--g-warn);
+  --color-g-warn-chip: var(--g-warn-chip);
+  --color-g-warn-tint: var(--g-warn-tint);
+  --color-g-danger: var(--g-danger);
+  --color-g-danger-chip: var(--g-danger-chip);
+  --color-g-danger-tint: var(--g-danger-tint);
+
+  --radius-g-ctl: var(--g-r-ctl);
+  --radius-g-card: var(--g-r-card);
+  --shadow-g-card: var(--g-shadow-card);
+  --shadow-g-float: var(--g-shadow-float);
+}

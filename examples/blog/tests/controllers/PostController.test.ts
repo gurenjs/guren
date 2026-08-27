@@ -1,3 +1,7 @@
+// @vitest-environment node
+// The suite default is jsdom, whose File is not a real Blob — a multipart
+// Request holding one stalls undici's formData() forever. Controller tests
+// render no DOM, and the upload tests need working multipart parsing.
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import {
   createControllerContext,
@@ -11,6 +15,10 @@ const {
   mockFindWithOrFail,
   mockCreate,
   mockUpdate,
+  mockDelete,
+  mockAttach,
+  mockWithAttachments,
+  mockPurgeAttachments,
   mockGetPaginatedPosts,
   mockInvalidatePost,
   mockEmit,
@@ -20,6 +28,10 @@ const {
   mockFindWithOrFail: vi.fn(),
   mockCreate: vi.fn(),
   mockUpdate: vi.fn(),
+  mockDelete: vi.fn(),
+  mockAttach: vi.fn(),
+  mockWithAttachments: vi.fn(),
+  mockPurgeAttachments: vi.fn(),
   mockGetPaginatedPosts: vi.fn(),
   mockInvalidatePost: vi.fn(),
   mockEmit: vi.fn(),
@@ -35,6 +47,10 @@ vi.mock('../../app/Models/Post.js', () => ({
     findWithOrFail: mockFindWithOrFail,
     create: mockCreate,
     update: mockUpdate,
+    delete: mockDelete,
+    attach: mockAttach,
+    withAttachments: mockWithAttachments,
+    purgeAttachments: mockPurgeAttachments,
   },
 }))
 
@@ -151,6 +167,11 @@ const paginatedPostsResponse = {
 describe('PostController', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    // Same default as the real static: records pass through gaining a typed
+    // `cover` property (null when nothing is attached).
+    mockWithAttachments.mockImplementation(async (records: Array<Record<string, unknown>>) =>
+      records.map((record) => ({ ...record, cover: null })),
+    )
   })
 
   describe('index()', () => {
@@ -175,6 +196,7 @@ describe('PostController', () => {
         title: samplePost.title,
         excerpt: samplePost.excerpt,
         body: samplePost.body,
+        cover: null,
         notificationArtifactPath: `notifications/posts/${samplePost.id}.json`,
         broadcastChannels: {
           public: 'announcements',
@@ -270,6 +292,7 @@ describe('PostController', () => {
         title: samplePost.title,
         excerpt: samplePost.excerpt,
         body: samplePost.body,
+        cover: null,
         author: samplePost.author,
         notificationArtifactPath: 'notifications/posts/1.json',
         broadcastChannels: {
@@ -354,6 +377,62 @@ describe('PostController', () => {
         body: 'Body content',
         authorId: 1,
       })
+    })
+
+    it('attaches an uploaded cover to the created post', async () => {
+      const mockUser = { id: 1, name: 'John Doe' }
+      const createdPost = { id: 42, title: 'New Post', excerpt: 'Excerpt', body: 'Body content', authorId: 1 }
+      mockCreate.mockResolvedValue(createdPost)
+      mockAttach.mockResolvedValue({ id: '01ARZ3NDEKTSV4RRFFQ69G5FAV' })
+      const auth = createAuthStub(mockUser)
+
+      const formData = new FormData()
+      formData.append('title', 'New Post')
+      formData.append('excerpt', 'Excerpt')
+      formData.append('body', 'Body content')
+      formData.append('cover', new File([new Uint8Array([137, 80, 78, 71])], 'cover.png', { type: 'image/png' }))
+
+      const ctx = createControllerContext('http://blog.test/posts', {
+        method: 'POST',
+        body: formData,
+      }, {
+        cache: { store: vi.fn() },
+        events: { emit: mockEmit },
+      }) as unknown as Context
+
+      const controller = createControllerWithAuth(PostController, auth, ctx)
+      const response = await controller.store()
+
+      expect(response.status).toBe(303)
+      expect(mockAttach).toHaveBeenCalledWith(42, 'cover', expect.any(File))
+      const uploaded = mockAttach.mock.calls[0]?.[2] as File
+      expect(uploaded.name).toBe('cover.png')
+    })
+
+    it('skips attach when no cover was uploaded', async () => {
+      const mockUser = { id: 1, name: 'John Doe' }
+      const createdPost = { id: 42, title: 'New Post', excerpt: 'Excerpt', body: 'Body content', authorId: 1 }
+      mockCreate.mockResolvedValue(createdPost)
+      const auth = createAuthStub(mockUser)
+
+      const formData = new FormData()
+      formData.append('title', 'New Post')
+      formData.append('excerpt', 'Excerpt')
+      formData.append('body', 'Body content')
+
+      const ctx = createControllerContext('http://blog.test/posts', {
+        method: 'POST',
+        body: formData,
+      }, {
+        cache: { store: vi.fn() },
+        events: { emit: mockEmit },
+      }) as unknown as Context
+
+      const controller = createControllerWithAuth(PostController, auth, ctx)
+      const response = await controller.store()
+
+      expect(response.status).toBe(303)
+      expect(mockAttach).not.toHaveBeenCalled()
     })
 
     it('returns 401 when not authenticated', async () => {
@@ -453,6 +532,35 @@ describe('PostController', () => {
 
       expect(response.status).toBe(303)
       expect(response.headers.get('Location')).toBe('/posts/1')
+      expect(mockAttach).not.toHaveBeenCalled()
+    })
+
+    it('replaces the cover when a new file is uploaded', async () => {
+      mockFindOrFail.mockResolvedValue(samplePost)
+      mockUpdate.mockResolvedValue(samplePost)
+      mockAttach.mockResolvedValue({ id: '01ARZ3NDEKTSV4RRFFQ69G5FAV' })
+      const auth = createAuthStub()
+
+      const formData = new FormData()
+      formData.append('title', 'Updated Title')
+      formData.append('excerpt', 'Updated excerpt')
+      formData.append('body', 'Updated body')
+      formData.append('cover', new File([new Uint8Array([137, 80, 78, 71])], 'new-cover.png', { type: 'image/png' }))
+
+      const ctx = createControllerContext('http://blog.test/posts/1', {
+        method: 'PUT',
+        body: formData,
+      }, {
+        cache: { store: vi.fn() },
+        events: { emit: mockEmit },
+      }) as unknown as Context
+      setRouteParams(ctx, { id: '1' })
+
+      const controller = createControllerWithAuth(PostController, auth, ctx)
+      const response = await controller.update()
+
+      expect(response.status).toBe(303)
+      expect(mockAttach).toHaveBeenCalledWith(1, 'cover', expect.any(File))
     })
 
     it('returns 404 for non-existent post', async () => {
@@ -494,6 +602,70 @@ describe('PostController', () => {
           body: expect.any(Array),
         }),
       })
+    })
+  })
+
+  describe('destroy()', () => {
+    it('purges attachments before deleting the post', async () => {
+      mockFindOrFail.mockResolvedValue(samplePost)
+      mockPurgeAttachments.mockResolvedValue(undefined)
+      mockDelete.mockResolvedValue(undefined)
+      const auth = createAuthStub({ id: samplePost.authorId, name: 'John Doe' })
+      const ctx = createControllerContext('http://blog.test/posts/1', {
+        method: 'DELETE',
+      }, {
+        cache: { store: vi.fn() },
+        events: { emit: mockEmit },
+      }) as unknown as Context
+      setRouteParams(ctx, { id: '1' })
+
+      const controller = createControllerWithAuth(PostController, auth, ctx)
+      const response = await controller.destroy()
+
+      expect(response.status).toBe(303)
+      expect(response.headers.get('Location')).toBe('/posts')
+      expect(mockPurgeAttachments).toHaveBeenCalledWith(1)
+      expect(mockDelete).toHaveBeenCalledWith({ id: 1 })
+      // No cascade exists for the polymorphic pair — the purge must run
+      // before the row disappears.
+      expect(mockPurgeAttachments.mock.invocationCallOrder[0]).toBeLessThan(
+        mockDelete.mock.invocationCallOrder[0]!,
+      )
+      expect(mockInvalidatePost).toHaveBeenCalledWith(1)
+    })
+
+    it('returns 403 when the requester is not the author', async () => {
+      mockFindOrFail.mockResolvedValue(samplePost)
+      const auth = createAuthStub({ id: samplePost.authorId + 1, name: 'Someone Else' })
+      const ctx = createControllerContext('http://blog.test/posts/1', {
+        method: 'DELETE',
+      }, {
+        cache: { store: vi.fn() },
+        events: { emit: mockEmit },
+      }) as unknown as Context
+      setRouteParams(ctx, { id: '1' })
+
+      const controller = createControllerWithAuth(PostController, auth, ctx)
+      await expect(controller.destroy()).rejects.toMatchObject({ statusCode: 403 })
+      expect(mockPurgeAttachments).not.toHaveBeenCalled()
+      expect(mockDelete).not.toHaveBeenCalled()
+    })
+
+    it('returns 404 for non-existent post', async () => {
+      mockFindOrFail.mockRejectedValue(Object.assign(new Error('Post not found'), { statusCode: 404 }))
+      const auth = createAuthStub({ id: 1, name: 'John Doe' })
+      const ctx = createControllerContext('http://blog.test/posts/999', {
+        method: 'DELETE',
+      }, {
+        cache: { store: vi.fn() },
+        events: { emit: mockEmit },
+      }) as unknown as Context
+      setRouteParams(ctx, { id: '999' })
+
+      const controller = createControllerWithAuth(PostController, auth, ctx)
+      await expect(controller.destroy()).rejects.toMatchObject({ statusCode: 404, message: 'Post not found' })
+      expect(mockPurgeAttachments).not.toHaveBeenCalled()
+      expect(mockDelete).not.toHaveBeenCalled()
     })
   })
 })

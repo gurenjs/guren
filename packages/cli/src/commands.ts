@@ -111,6 +111,11 @@ const FIELDS_ARG = {
   description: 'Comma-separated fields, e.g. "title:string,body:text,published:boolean" (append ? for nullable).',
 }
 
+const ATTACH_ARG = {
+  type: 'string' as const,
+  description: 'Comma-separated attachment collections, e.g. "cover:one,images:many" (kind defaults to one). Requires the attachments layer — run `guren add attachments` first.',
+}
+
 function createMakeCommand(spec: MakeCommandSpec) {
   const { name: commandName, description, argDescription, makeFn, resourceName, nextStep } = spec
   return defineCommand({
@@ -2477,6 +2482,7 @@ const makeFeatureCommand = defineCommand({
       description: 'Feature name (singular, e.g., Product).',
     },
     fields: FIELDS_ARG,
+    attach: ATTACH_ARG,
     force: {
       type: 'boolean',
       alias: 'f',
@@ -2499,6 +2505,7 @@ const makeFeatureCommand = defineCommand({
   async run({ args }) {
     await makeFeature(args.name as string, {
       fields: args.fields,
+      attach: args.attach,
       force: Boolean(args.force),
       root: args.module,
       withTest: Boolean(args.test),
@@ -2579,6 +2586,7 @@ const addResourceCommand = defineCommand({
       description: 'Resource name (singular)',
     },
     fields: FIELDS_ARG,
+    attach: ATTACH_ARG,
     public: {
       type: 'boolean',
       description: 'Skip authentication checks in store/update/destroy actions',
@@ -2593,6 +2601,7 @@ const addResourceCommand = defineCommand({
     const createdFiles = await runBlueprint('resource', {
       name: String(args.name),
       fields: typeof args.fields === 'string' ? args.fields : undefined,
+      attach: typeof args.attach === 'string' ? args.attach : undefined,
       publicAccess: Boolean(args.public),
       force: Boolean(args.force),
     })

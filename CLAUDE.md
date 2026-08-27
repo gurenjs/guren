@@ -134,6 +134,7 @@ bunx guren make:feature Post --fields "title:string,body:text,published:boolean"
 bunx guren make:feature Post --fields "title:string,body:text" --test  # With test file
 bunx guren make:feature Post --fields "title:string" --public  # Skip auth checks in mutating actions
 bunx guren make:feature Post --fields "title:string" --policy  # Also generate a policy and enforce it in store/update
+bunx guren make:feature Post --fields "title:string" --attach "cover:one,images:many"  # Attachable model + attach-aware store/destroy (requires `guren add attachments` first; RFC 0013 Part 4)
 bunx guren make:policy Post     # Authorization policy scaffold (app/Policies)
 bunx guren make:validator Post --fields "title:string,body:text"  # Zod schemas (route params, list query, payload) in app/Http/Validators
 bunx guren make:adr "Billing cycle is end-of-month"  # Numbered ADR under docs/adr with linkable frontmatter (entities/related)
