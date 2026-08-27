@@ -57,6 +57,7 @@ import { generateRouteTypes } from './routes-types'
 import { describePageManifestSuppression, generatePageTypes, type PageManifestPlan } from './pages-types'
 import { generateTranslationTypes } from './i18n-types'
 import { generateDataTypes } from './data-types'
+import { generateAttachmentTypes } from './attachments-types'
 import { generateApiClientTypes } from './api-client-types'
 import { generateOpenApiSpec } from './openapi-generate'
 import { generateChannelTypes } from './channel-types'
@@ -1174,24 +1175,38 @@ const codegenCommand = defineCommand({
     // to protect hand-maintained files). --force is still accepted for
     // backward compatibility but is a no-op.
     const writerOptions: WriterOptions = { ...toWriterOptions(args), force: true }
-    const { outputPath: pagesOutputPath, plan: pagesPlan } = await generatePageTypes({
-      appRoot: args.app,
-      pagesDir: args.pages,
-      outputFile: args.pagesOut,
-      extractProps: true,
-      ...writerOptions,
-    })
+    // These three read disjoint inputs (pages, lang/, app/Models) and write
+    // disjoint artifacts, and the Vite plugin awaits this whole command
+    // before the dev server is usable — so they run concurrently.
+    // Translation keys and attachment maps only exist for apps with a lang/
+    // directory / Attachable models; those generators emit nothing otherwise.
+    const [
+      { outputPath: pagesOutputPath, plan: pagesPlan },
+      { outputPath: translationsOutputPath, keyCount },
+      { outputPath: attachmentsOutputPath, models: attachableModels, warnings: attachmentWarnings },
+    ] = await Promise.all([
+      generatePageTypes({
+        appRoot: args.app,
+        pagesDir: args.pages,
+        outputFile: args.pagesOut,
+        extractProps: true,
+        ...writerOptions,
+      }),
+      generateTranslationTypes({ appRoot: args.app, ...writerOptions }),
+      generateAttachmentTypes({ appRoot: args.app, ...writerOptions }),
+    ])
     if (pagesOutputPath) consola.success(`Page helpers generated at ${pagesOutputPath}`)
     reportSuppressedPageManifest(pagesPlan)
-
-    // Translation keys only exist for apps with a lang/ directory; the
-    // generator emits nothing otherwise, keeping t() keys plain strings.
-    const { outputPath: translationsOutputPath, keyCount } = await generateTranslationTypes({
-      appRoot: args.app,
-      ...writerOptions,
-    })
     if (translationsOutputPath) {
       consola.success(`Translation keys generated at ${translationsOutputPath} (${keyCount} keys)`)
+    }
+    for (const warning of attachmentWarnings) {
+      consola.warn(warning)
+    }
+    if (attachmentsOutputPath) {
+      consola.success(
+        `Attachment types generated at ${attachmentsOutputPath} (${attachableModels.length} ${attachableModels.length === 1 ? 'model' : 'models'})`,
+      )
     }
 
     // Route/API artifacts default to routes/web.ts; skip only when no routes file exists.

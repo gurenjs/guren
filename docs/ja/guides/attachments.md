@@ -342,9 +342,28 @@ Model.morphMap = { Post, User }
 
 スイープは肯定的な証拠があるときだけ削除します。morph map にない型、失敗した存在確認クエリ、リストできないディスクは報告して手を付けません。障害を大量削除に変えてはならないからです。スケジュールジョブや CI から、アプリに合った頻度で実行してください。
 
+### 生成される型: `.guren/attachments.gen.ts`
+
+モデル自体は mixin のジェネリクスで型付けされますが、ページ・リソース・アップロードクライアントからは `typeof Post.attachments` が見えません。`guren codegen` は各モデルの `Attachable(...)` 宣言を読み取り、境界を越えて使えるマップを生成します(Vite プラグインは `app/Models/` 配下、およびモジュールの同ディレクトリの変更時に再生成します):
+
+```ts
+// .guren/attachments.gen.ts — 生成物のため編集不可
+export interface AttachmentsMap {
+  Post: { cover: 'one'; images: 'many' }
+}
+export interface AttachmentVariantsMap {
+  Post: { cover: 'og' | 'thumb'; images: never }
+}
+export type AttachableModelName = keyof AttachmentsMap
+export type AttachmentName<M extends keyof AttachmentsMap> = keyof AttachmentsMap[M]
+```
+
+`Attachable` モデルがないアプリにはファイルは生成されません。ジェネレータは宣言を静的に読むため、完全に解析できない宣言(スプレッドや、別の場所で組み立てたオプションオブジェクト)は部分的に出力せず、警告してスキップします。マップに含めたいモデルの宣言は、インラインのオブジェクトリテラルで書いてください。
+
 ### エージェントコマンドが検証すること
 
 - `bunx guren check` は、`configureAttachments()` が `db/schema.ts` の実際にエクスポートされたテーブルを束縛していることを検証します。レイヤーはテーブルを型なしで受け取るため、スキーマエクスポートのリネームは本来、最初の attach 時の実行時エラーでしか発覚しません。
+- `bunx guren check` はさらに、アプリに `configureAttachments()` の呼び出しがまったくないのに `Attachable(...)` を mixin するモデルも検出します。mixin はレイヤーを初回利用時に解決するため、設定の欠落も本来は実行時にしか発覚しません。
 - `bunx guren audit` は、型付きの `attach()` に渡されるアップロードを検証済みとして扱います(宣言駆動のパイプラインが検証そのものです)。他のボディ入力を読むアクションには引き続き `validateBody()` が必要です。
 
 ## テスト

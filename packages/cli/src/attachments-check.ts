@@ -3,6 +3,7 @@ import type { CallExpression } from '@babel/types'
 import { walk } from './ast-walk'
 import { check, type CheckResult } from './check-result'
 import { collectFiles, listAppRoots } from './discovery'
+import { parseModelSource } from './model-parser'
 import type { ParseCache, ParsedFile } from './parse-cache'
 import { schemaPathFor, type SchemaTable } from './schema-parser'
 
@@ -56,6 +57,8 @@ function schemaModuleFor(cwd: string, filePath: string, specifier: string): stri
 interface AttachmentsImportScan {
   /** The local binding `configureAttachments` (from `@guren/core`) is bound to, or null. */
   configureLocal: string | null
+  /** Locals of `import * as ns from '@guren/core'` — `ns.configureAttachments(...)` counts as wiring too. */
+  coreNamespaces: string[]
   /**
    * Local binding -> { where it came from, the *exported* name it aliases }.
    * The schema declares exported names, so an `import { attachments as att }`
@@ -67,14 +70,16 @@ interface AttachmentsImportScan {
 }
 
 /**
- * One reading of a file's imports for both consumers in this file. The
- * scaffolder preflight below and the `guren check` rule underneath judge
- * "does this file wire the attachments layer" through this single scan —
- * a second copy is how the two would start disagreeing about the same app
- * (`guren check` green while `make:feature --attach` refuses, or worse).
+ * One reading of a file's imports for every consumer in this file. The
+ * scaffolder preflight, the `guren check` rules, and the table check all
+ * judge "does this file wire the attachments layer" through this single
+ * scan — a second copy is how the two would start disagreeing about the
+ * same app (`guren check` green while `make:feature --attach` refuses, or
+ * worse).
  */
 function scanAttachmentsImports(parsed: ParsedFile): AttachmentsImportScan {
   let configureLocal: string | null = null
+  const coreNamespaces: string[] = []
   const importsByLocal = new Map<string, { source: string; imported: string }>()
   for (const declaration of parsed.ast.program.body) {
     if (declaration.type !== 'ImportDeclaration') continue
@@ -87,6 +92,9 @@ function scanAttachmentsImports(parsed: ParsedFile): AttachmentsImportScan {
         }
         importsByLocal.set(specifier.local.name, { source: declaration.source.value, imported })
       } else {
+        if (specifier.type === 'ImportNamespaceSpecifier' && declaration.source.value === '@guren/core') {
+          coreNamespaces.push(specifier.local.name)
+        }
         importsByLocal.set(specifier.local.name, {
           source: declaration.source.value,
           imported: '',
@@ -94,7 +102,45 @@ function scanAttachmentsImports(parsed: ParsedFile): AttachmentsImportScan {
       }
     }
   }
-  return { configureLocal, importsByLocal }
+  return { configureLocal, coreNamespaces, importsByLocal }
+}
+
+/**
+ * Whether the file makes a `configureAttachments()` call under its
+ * `@guren/core` bindings — the named import (aliases included) or a
+ * `core.configureAttachments()` member call on a namespace import. The
+ * provenance rule of the table check below: a comment or a string merely
+ * containing the name does not count.
+ */
+async function fileCallsConfigureAttachments(cache: ParseCache, filePath: string): Promise<boolean> {
+  const source = await cache.source(filePath)
+  if (!source || !source.includes('configureAttachments')) return false
+
+  const parsed = await cache.get(filePath)
+  if (!parsed) return false
+
+  const { configureLocal, coreNamespaces } = scanAttachmentsImports(parsed)
+  if (!configureLocal && coreNamespaces.length === 0) return false
+
+  let found = false
+  walk(parsed.ast, (node) => {
+    if (found) return false
+    if (node.type !== 'CallExpression') return
+    const callee = (node as unknown as CallExpression).callee
+    if (callee.type === 'Identifier' && callee.name === configureLocal) {
+      found = true
+    } else if (
+      callee.type === 'MemberExpression' &&
+      !callee.computed &&
+      callee.object.type === 'Identifier' &&
+      coreNamespaces.includes(callee.object.name) &&
+      callee.property.type === 'Identifier' &&
+      callee.property.name === 'configureAttachments'
+    ) {
+      found = true
+    }
+  })
+  return found
 }
 
 /**
@@ -104,30 +150,79 @@ function scanAttachmentsImports(parsed: ParsedFile): AttachmentsImportScan {
  * For scaffolders (`make:feature --attach`) that would otherwise emit models
  * whose `Attachable` statics all throw at first use — the guidance to run
  * `guren add attachments` first has to come from the scaffold, not from the
- * app's first crashed request. Positive evidence only, like the check below:
+ * app's first crashed request. Positive evidence only, like the checks below:
  * a file that cannot be read or parsed contributes nothing, so an app this
- * cannot see into is refused rather than scaffolded broken.
+ * cannot see into is refused rather than scaffolded broken. Delegates to the
+ * same per-file predicate `checkAttachableModels` uses, so the scaffolder
+ * and `guren check` cannot disagree about the same app.
  */
 export async function appConfiguresAttachments(appRoot: string, cache: ParseCache): Promise<boolean> {
   for (const filePath of await discoverAttachmentsConfigFiles(appRoot)) {
-    const source = await cache.source(filePath)
-    if (!source || !source.includes('configureAttachments')) continue
-
-    const parsed = await cache.get(filePath)
-    if (!parsed) continue
-
-    const { configureLocal } = scanAttachmentsImports(parsed)
-    if (!configureLocal) continue
-
-    let called = false
-    walk(parsed.ast, (node) => {
-      if (node.type !== 'CallExpression') return
-      const call = node as unknown as CallExpression
-      if (call.callee.type === 'Identifier' && call.callee.name === configureLocal) called = true
-    })
-    if (called) return true
+    if (await fileCallsConfigureAttachments(cache, filePath)) return true
   }
   return false
+}
+
+/**
+ * Flags models that mix in `Attachable(...)` in an app with no
+ * `configureAttachments()` call anywhere (RFC 0013). The mixin's statics
+ * resolve the configured layer lazily, at first use — so a model can build,
+ * typecheck, and boot with no attachments config at all, and the miss only
+ * surfaces as a runtime error on the first `attach()`.
+ *
+ * Presence-only on purpose: which table the config binds is the
+ * {@link checkAttachmentsConfig} rule above; this one asks the prior
+ * question of whether a config exists to bind anything.
+ */
+export async function checkAttachableModels(options: {
+  cwd: string
+  cache: ParseCache
+  /** Model files, discovered once by the caller like the config `files` below. */
+  files: string[]
+  /** Candidate config files, from {@link discoverAttachmentsConfigFiles}. */
+  configFiles: string[]
+}): Promise<CheckResult[]> {
+  const { cwd, cache, files, configFiles } = options
+
+  // Same cheap pre-filter as the table check — only files naming the mixin
+  // are worth parsing — with the "is this model Attachable" question itself
+  // answered by the shared model projection rather than a second predicate.
+  const sources = await Promise.all(files.map((file) => cache.source(file)))
+  const attachableModels = files.flatMap((filePath, index) => {
+    const source = sources[index]
+    if (!source || !source.includes('Attachable')) return []
+    const info = parseModelSource(source, filePath)
+    if (!info || info.attachments === null) return []
+    return [{ className: info.className, relPath: relative(cwd, filePath) }]
+  })
+  if (attachableModels.length === 0) return []
+
+  let configured = false
+  for (const filePath of configFiles) {
+    if (await fileCallsConfigureAttachments(cache, filePath)) {
+      configured = true
+      break
+    }
+  }
+
+  return attachableModels.map(({ className, relPath }) => {
+    const key = `attachments-model:${relPath}`
+    const title = 'Attachable model wiring'
+    if (configured) {
+      return check(key, title, 'pass', `${className} declares attachments and configureAttachments() is present.`)
+    }
+    return check(
+      key,
+      title,
+      'fail',
+      `${className} in ${relPath} mixes in Attachable(...), but no configureAttachments() call was found in `
+        + `config/, src/, or app/. The mixin resolves the attachments layer at first use, so this only fails `
+        + `at runtime, on the first attach.`,
+      `Run \`guren add attachments\` to install the schema table, config, and provider, or add a `
+        + `configureAttachments() call (config/attachments.ts is the documented home).`,
+      relPath,
+    )
+  })
 }
 
 /**
@@ -165,7 +260,9 @@ export async function checkAttachmentsConfig(options: {
 
     // The local name configureAttachments is bound to, and where each
     // imported identifier came from — the table's provenance is what makes
-    // the check honest.
+    // the check honest. Namespace-style configs
+    // (`core.configureAttachments(...)`) stay out of this check's sight;
+    // the presence checks above do see them.
     const { configureLocal, importsByLocal } = scanAttachmentsImports(parsed)
     if (!configureLocal) continue
 

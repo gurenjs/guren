@@ -149,9 +149,19 @@ describe('routeTypesPlugin watches module Resources', () => {
     expect(await touchedBy('app/Http/Resources/PostResource.ts')).toBe(true)
   })
 
+  it('regenerates for a Model inside a module', async () => {
+    // Models feed attachments.gen.ts: an Attachable(...) declaration edited
+    // in a module must not leave the map stale for the dev session.
+    expect(await touchedBy('modules/billing/app/Models/Invoice.ts')).toBe(true)
+  })
+
+  it('regenerates for a Model at the project root', async () => {
+    expect(await touchedBy('app/Models/Post.ts')).toBe(true)
+  })
+
   it('ignores other files inside a module', async () => {
-    // Matched by shape, not by "anything under modules/" — a module's models
-    // and controllers do not feed any generated artifact.
-    expect(await touchedBy('modules/billing/app/Models/Invoice.ts')).toBe(false)
+    // Matched by shape, not by "anything under modules/" — a module's
+    // controllers do not feed any generated artifact.
+    expect(await touchedBy('modules/billing/app/Http/Controllers/InvoiceController.ts')).toBe(false)
   })
 })

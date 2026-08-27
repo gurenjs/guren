@@ -215,6 +215,7 @@ describe('renderContextMarkdown', () => {
         filePath: 'app/Models/Post.ts',
         tableName: 'posts',
         relationships: [{ name: 'author', type: 'belongsTo', relatedModel: 'User' }],
+        attachments: null,
         usesAuth: false,
         hasSoftDeletes: false,
         docsTags: [],

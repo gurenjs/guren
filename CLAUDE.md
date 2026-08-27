@@ -109,7 +109,7 @@ bunx guren model:list           # List models with relationships
 bunx guren model:list --format json  # Models as JSON
 
 # Integrity checking
-bunx guren check                # Validate route↔controller↔page consistency, console command registration, route registrar wiring (every routes/*.ts reached from the registrar that would mount it — the entry registrar for the project's, the registrar defineModule({ routes }) names for modules/*/routes/), route paths using `:name*` (not a Hono wildcard — it registers a parameter named literally `name*`), route contracts (`params` schema keys and `bind` keys against the parameters their path declares), Postgres timestamp time zones, configureAttachments() table bindings, architecture boundaries, and doc links (informational; only --arch/--docs/--spec set the exit code)
+bunx guren check                # Validate route↔controller↔page consistency, console command registration, route registrar wiring (every routes/*.ts reached from the registrar that would mount it — the entry registrar for the project's, the registrar defineModule({ routes }) names for modules/*/routes/), route paths using `:name*` (not a Hono wildcard — it registers a parameter named literally `name*`), route contracts (`params` schema keys and `bind` keys against the parameters their path declares), Postgres timestamp time zones, configureAttachments() table bindings, Attachable models in apps with no configureAttachments(), architecture boundaries, and doc links (informational; only --arch/--docs/--spec set the exit code)
 bunx guren check --json         # Check results as JSON
 bunx guren check --arch         # Architecture boundary checks only (guren.arch.ts) — fast path for edit hooks
 bunx guren check --docs         # Doc-link checks only: OKF frontmatter (type/entities/related) + body markdown links + @docs tags (exits non-zero on failures)
@@ -397,7 +397,8 @@ export const handler = createLambdaHandler(app)
 | `packages/cli/src/routes-check.ts` | AI agent: route registrar wiring checks — a `routes/*.ts` its mounting registrar never calls, per scope: the app's entry for the project's `routes/`, the registrar `defineModule({ routes })` names for `modules/<name>/routes/` (part of `guren check`) |
 | `packages/cli/src/route-contract-check.ts` | AI agent: route contract checks — a `params` schema key or `bind` key naming a parameter its path never declares. Reads *registered* definitions rather than the routes file's AST: the path a route registers is the joined one (group prefixes, `resource()` expansions), and a params schema is usually imported from elsewhere (part of `guren check`) |
 | `packages/cli/src/schema-check.ts` | AI agent: Postgres `timestamptz` schema checks (part of `guren check`) |
-| `packages/cli/src/attachments-check.ts` | AI agent: `configureAttachments()` table-binding checks — the layer takes the table untyped, so a renamed schema export otherwise only fails at runtime (part of `guren check`) |
+| `packages/cli/src/attachments-check.ts` | AI agent: attachments wiring checks — a `configureAttachments()` binding a table the schema does not export, and an `Attachable(...)` model in an app with no `configureAttachments()` at all; both otherwise only fail at runtime (part of `guren check`) |
+| `packages/cli/src/attachments-types.ts` | AI agent: cross-boundary attachment maps (`.guren/attachments.gen.ts` from `Attachable(...)` declarations, RFC 0013) |
 | `packages/cli/src/arch-check.ts` | AI agent: architecture boundary checking (`guren.arch.ts`, see RFC 0002) |
 | `packages/cli/src/arch/index.ts` | `defineArchRules()` + types, published as the `@guren/cli/arch` subpath |
 | `packages/cli/src/changed-files.ts` | Git-diff-based file filtering shared by `check --changed` |

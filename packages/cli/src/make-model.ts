@@ -1,9 +1,8 @@
 import type { WriterOptions } from './utils'
 import { scaffoldFile } from './utils'
+import { MODELS_DIR } from './discovery'
 import { schemaIdentifierFor } from './inflect'
 import type { AttachmentDefinition } from './fields'
-
-const MODELS_DIR = 'app/Models'
 
 export interface MakeModelOptions extends WriterOptions {
   /**

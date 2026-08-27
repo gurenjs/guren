@@ -499,3 +499,50 @@ describe('entity context (irregular plural db artifacts)', () => {
     expect(ctx.factories).toEqual(['db/factories/$LedgerFactory.ts'])
   })
 })
+
+describe('entity context (attachments)', () => {
+  let workspace: TempWorkspace
+
+  beforeAll(async () => {
+    workspace = await createTempWorkspace('guren-cli-entity-attachments-')
+    const dir = workspace.dir
+
+    await mkdir(join(dir, 'app/Models'), { recursive: true })
+    await writeFile(join(dir, 'package.json'), '{}', 'utf8')
+    await writeFile(
+      join(dir, 'app/Models/Post.ts'),
+      `import { Attachable, hasOneAttached, hasManyAttached } from '@guren/core'
+import { defineModel } from '@guren/orm'
+import { posts } from '../../db/schema.js'
+
+export class Post extends Attachable(defineModel(posts), {
+  cover: hasOneAttached({ variants: { thumb: { width: 320 }, og: { width: 1200 } } }),
+  images: hasManyAttached(),
+}) {}
+`,
+      'utf8',
+    )
+  })
+
+  afterAll(async () => {
+    await workspace.cleanup()
+  })
+
+  it('lists attachment collections on the model', async () => {
+    const ctx = await generateEntityContext('Post', { cwd: workspace.dir })
+
+    expect(ctx.model.attachments).toEqual([
+      { name: 'cover', kind: 'one', variants: ['thumb', 'og'] },
+      { name: 'images', kind: 'many', variants: [] },
+    ])
+    expect(ctx.model.attachmentsUnreadable).toBe(false)
+  })
+
+  it('renders attachment collections in the markdown bundle', async () => {
+    const ctx = await generateEntityContext('Post', { cwd: workspace.dir })
+    const markdown = renderEntityContextMarkdown(ctx)
+
+    expect(markdown).toContain('- hasOneAttached: `cover` (variants: thumb, og)')
+    expect(markdown).toContain('- hasManyAttached: `images`')
+  })
+})

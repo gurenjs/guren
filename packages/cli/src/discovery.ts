@@ -288,8 +288,16 @@ export async function collectAllFiles(directory: string): Promise<string[]> {
   return results
 }
 
+/**
+ * Where an app's models live, relative to an app root. Same contract as
+ * {@link RESOURCES_DIR}: `make:model` writes here, `discoverModelFiles`
+ * reads here, and the Vite plugin watches it so `attachments.gen.ts`
+ * regenerates when an `Attachable(...)` declaration changes.
+ */
+export const MODELS_DIR = 'app/Models'
+
 export function discoverModelFiles(appRoot: string): Promise<string[]> {
-  return discoverDir(appRoot, 'app/Models')
+  return discoverDir(appRoot, MODELS_DIR)
 }
 
 /**
