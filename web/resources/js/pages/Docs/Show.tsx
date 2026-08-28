@@ -8,6 +8,10 @@ import { ChevronRightIcon } from '../../components/icons.js'
 import { breadcrumbJsonLd, techArticleJsonLd } from '../../lib/structured-data.js'
 import { useColorMode } from './theme.js'
 
+// Staged out of node_modules by scripts/copy-docs-images.ts. Deliberately
+// outside public/assets/, which is the client bundle's budgeted output.
+const MERMAID_SCRIPT_SRC = '/docs-assets/mermaid.js'
+
 // Mirrors --font-family-display in resources/css/app.css.
 const DIAGRAM_FONT_FAMILY =
   "'Inter', 'Inter var', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
@@ -63,6 +67,87 @@ interface NavLink {
 // reusing one across re-renders (a theme toggle re-runs every diagram)
 // collides with the element still in the DOM.
 let mermaidRenderSeq = 0
+
+interface MermaidApi {
+  initialize(config: Record<string, unknown>): void
+  render(id: string, source: string): Promise<{ svg: string }>
+}
+
+declare global {
+  interface Window {
+    mermaid?: MermaidApi
+  }
+}
+
+let mermaidLoader: Promise<MermaidApi> | null = null
+
+/**
+ * Load mermaid as a plain script rather than `import('mermaid')`.
+ *
+ * Bundling it is not an option here: the library cannot fit the repo's
+ * 600 kB per-asset budget in any split (its cytoscape dependency alone is
+ * ~870 kB), and the Vite plugin's catch-all `vendor` chunk collapses the
+ * whole tree into one 3.2 MB file. Staged as a static asset instead, by
+ * scripts/copy-docs-images.ts, and fetched only by the pages that have a
+ * diagram — the same shape the framework's own `/_guren/docs` viewer uses.
+ */
+function loadMermaid(): Promise<MermaidApi> {
+  if (window.mermaid) return Promise.resolve(window.mermaid)
+  mermaidLoader ??= new Promise<MermaidApi>((resolvePromise, rejectPromise) => {
+    const script = document.createElement('script')
+    script.src = MERMAID_SCRIPT_SRC
+    script.onload = () => {
+      if (window.mermaid) {
+        resolvePromise(window.mermaid)
+      } else {
+        rejectPromise(new Error('mermaid loaded without defining window.mermaid'))
+      }
+    }
+    script.onerror = () => {
+      // A failed load must not be cached as the answer: the next diagram
+      // page should get a fresh attempt.
+      mermaidLoader = null
+      rejectPromise(new Error(`Failed to load ${MERMAID_SCRIPT_SRC}`))
+    }
+    document.head.append(script)
+  })
+  return mermaidLoader
+}
+
+/**
+ * Turn mermaid's SVG string into a node, instead of assigning innerHTML.
+ *
+ * The diagram source is read back out of the DOM, so assigning the result as
+ * HTML would reinterpret document text as markup (CodeQL
+ * js/html-constructed-from-input). DOMParser never executes script while
+ * parsing, and the pass below drops the two things that could still run once
+ * the node is adopted into the live document. Parsing is `text/html` rather
+ * than `image/svg+xml` because mermaid emits HTML-flavoured markup inside
+ * foreignObject labels — an unclosed `<br>` — which is not well-formed XML.
+ */
+function parseSvg(svg: string): SVGElement | null {
+  const parsed = new DOMParser().parseFromString(svg, 'text/html')
+  const root = parsed.body.querySelector('svg')
+  if (!root) return null
+
+  for (const script of root.querySelectorAll('script')) {
+    script.remove()
+  }
+  for (const element of [root, ...root.querySelectorAll('*')]) {
+    for (const attribute of [...element.attributes]) {
+      const name = attribute.name.toLowerCase()
+      const isEventHandler = name.startsWith('on')
+      // Covers `href` and `xlink:href` alike.
+      const isScriptUrl =
+        name.endsWith('href') && attribute.value.trim().toLowerCase().startsWith('javascript:')
+      if (isEventHandler || isScriptUrl) {
+        element.removeAttribute(attribute.name)
+      }
+    }
+  }
+
+  return root
+}
 
 
 interface TocItem {
@@ -193,7 +278,13 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
     let cancelled = false
 
     void (async () => {
-      const mermaid = (await import('mermaid')).default
+      let mermaid: MermaidApi
+      try {
+        mermaid = await loadMermaid()
+      } catch (error) {
+        console.error(error)
+        return
+      }
       if (cancelled) return
 
       mermaid.initialize({
@@ -206,7 +297,7 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
       })
 
       // Re-query rather than reusing `blocks`: hydration can replace the
-      // rendered-markdown subtree between the effect firing and the module
+      // rendered-markdown subtree between the effect firing and the script
       // arriving, which would leave us writing into detached nodes.
       const live = container.querySelectorAll<HTMLPreElement>('pre.mermaid')
 
@@ -220,7 +311,12 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
           mermaidRenderSeq += 1
           const { svg } = await mermaid.render(`docs-mermaid-${mermaidRenderSeq}`, source)
           if (cancelled) return
-          pre.innerHTML = svg
+          const node = parseSvg(svg)
+          if (!node) {
+            console.error('mermaid returned no <svg> root')
+            continue
+          }
+          pre.replaceChildren(document.importNode(node, true))
           pre.dataset.mermaidRendered = 'true'
         } catch (error) {
           console.error('Failed to render mermaid diagram', error)
