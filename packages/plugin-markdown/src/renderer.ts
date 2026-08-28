@@ -112,19 +112,14 @@ export function createMarkdownRenderer(options: MarkdownRendererOptions = {}): M
   if (alerts) {
     staticExtensions.push(alertsExtension(alertLabels))
   }
-  if (rewriteLink) {
+  if (rewriteLink || rewriteImage) {
+    // `link` and `image` both carry their target in `href`, so one pass
+    // covers them; which rewriter applies is the only difference.
     staticExtensions.push({
       walkTokens(token) {
-        if (token.type === 'link' && typeof token.href === 'string') {
+        if (token.type === 'link' && rewriteLink && typeof token.href === 'string') {
           token.href = rewriteLink(token.href)
-        }
-      },
-    })
-  }
-  if (rewriteImage) {
-    staticExtensions.push({
-      walkTokens(token) {
-        if (token.type === 'image' && typeof token.href === 'string') {
+        } else if (token.type === 'image' && rewriteImage && typeof token.href === 'string') {
           token.href = rewriteImage(token.href)
         }
       },

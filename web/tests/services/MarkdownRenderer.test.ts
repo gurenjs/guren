@@ -90,6 +90,14 @@ describe('rewriteDocImage', () => {
     expect(rewriteDocImage('data:image/png;base64,AAAA', context)).toBe('data:image/png;base64,AAAA')
   })
 
+  it('leaves a percent-encoded escape alone', () => {
+    // posix.join cannot normalize `%2e%2e`, but a browser resolves it after
+    // the rewrite — so containment has to be decided before that.
+    expect(rewriteDocImage('../../images/%2e%2e/other.png', context)).toBe(
+      '../../images/%2e%2e/other.png',
+    )
+  })
+
   it('leaves a relative path that resolves outside docs/images alone', () => {
     expect(rewriteDocImage('./local.png', context)).toBe('./local.png')
     expect(rewriteDocImage('../../../outside.png', context)).toBe('../../../outside.png')

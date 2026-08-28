@@ -14,10 +14,6 @@ autoConfigureInertiaAssets(app, {
       '.svg', '.png', '.jpg', '.jpeg', '.gif', '.ico', '.webp', '.avif',
       '.webmanifest', '.txt', '.js',
     ],
-    // Without this the file is served as application/octet-stream and the
-    // browser refuses to execute it. Workers Static Assets type `.js`
-    // correctly on their own, so this too is local-only.
-    contentTypeMap: { '.js': 'text/javascript; charset=utf-8' },
   },
 })
 

@@ -8,9 +8,9 @@ import { ChevronRightIcon } from '../../components/icons.js'
 import { breadcrumbJsonLd, techArticleJsonLd } from '../../lib/structured-data.js'
 import { useColorMode } from './theme.js'
 
-// Staged out of node_modules by scripts/copy-docs-images.ts. Deliberately
-// outside public/assets/, which is the client bundle's budgeted output.
-const MERMAID_SCRIPT_SRC = '/docs-assets/mermaid.js'
+// Staged out of node_modules by scripts/lib/stage-mermaid.ts, and shared with
+// the prerendered docs-viewer snapshot, whose shell fixes this path.
+const MERMAID_SCRIPT_SRC = '/_guren/docs/assets/mermaid.js'
 
 // Mirrors --font-family-display in resources/css/app.css.
 const DIAGRAM_FONT_FAMILY =
@@ -91,24 +91,24 @@ function loadMermaid(): Promise<MermaidApi> {
   mermaidLoader ??= new Promise<MermaidApi>((resolvePromise, rejectPromise) => {
     const script = document.createElement('script')
     script.src = MERMAID_SCRIPT_SRC
+    // Neither failure may be cached as the answer: the next diagram page
+    // should get a fresh attempt rather than reusing a rejected promise.
+    const fail = (message: string) => {
+      mermaidLoader = null
+      rejectPromise(new Error(message))
+    }
     script.onload = () => {
       if (window.mermaid) {
         resolvePromise(window.mermaid)
       } else {
-        rejectPromise(new Error('mermaid loaded without defining window.mermaid'))
+        fail('mermaid loaded without defining window.mermaid')
       }
     }
-    script.onerror = () => {
-      // A failed load must not be cached as the answer: the next diagram
-      // page should get a fresh attempt.
-      mermaidLoader = null
-      rejectPromise(new Error(`Failed to load ${MERMAID_SCRIPT_SRC}`))
-    }
+    script.onerror = () => fail(`Failed to load ${MERMAID_SCRIPT_SRC}`)
     document.head.append(script)
   })
   return mermaidLoader
 }
-
 
 interface TocItem {
   id: string
@@ -231,8 +231,7 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
     const container = document.querySelector('.docs-content')
     if (!container) return
 
-    const blocks = Array.from(container.querySelectorAll<HTMLPreElement>('pre.mermaid'))
-    if (blocks.length === 0) return
+    if (!container.querySelector('pre.mermaid')) return
 
     let cancelled = false
 
@@ -255,9 +254,9 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
         fontFamily: DIAGRAM_FONT_FAMILY,
       })
 
-      // Re-query rather than reusing `blocks`: hydration can replace the
-      // rendered-markdown subtree between the effect firing and the script
-      // arriving, which would leave us writing into detached nodes.
+      // Queried here, not above: hydration can replace the rendered-markdown
+      // subtree between the effect firing and the script arriving, which
+      // would leave us writing into detached nodes.
       const live = [...container.querySelectorAll<HTMLPreElement>('pre.mermaid')]
 
       for (const pre of live) {
@@ -275,8 +274,11 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
         // being reinterpreted as markup by this component.
         await mermaid.run({ nodes: live })
       } catch (error) {
-        console.error('Failed to render mermaid diagrams', error)
-        return
+        // run() reports one malformed fence by rejecting *after* processing
+        // the whole collection, so the diagrams it did render are marked
+        // below either way — otherwise one bad fence would leave every good
+        // one styled as a code block.
+        console.error('Failed to render some mermaid diagrams', error)
       }
       if (cancelled) return
 
@@ -288,7 +290,7 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
     return () => {
       cancelled = true
     }
-  }, [doc, isDark])
+  }, [doc?.html, isDark])
 
   // Copy button effect
   useEffect(() => {

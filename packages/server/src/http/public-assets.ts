@@ -18,6 +18,12 @@ const DEFAULT_CONTENT_TYPES: Record<string, string> = {
   '.avif': 'image/avif',
   '.webmanifest': 'application/manifest+json',
   '.txt': 'text/plain; charset=utf-8',
+  // Not in DEFAULT_EXTENSIONS, so these are only reachable for an app that
+  // opts in — but an app that does should not also have to restate the type.
+  // Served as application/octet-stream, a browser refuses to run or apply them.
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
 }
 
 export type RootPublicAssetsConfig = boolean | RootPublicAssetsOptions

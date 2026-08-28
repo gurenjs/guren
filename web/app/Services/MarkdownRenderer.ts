@@ -2,7 +2,7 @@ import { posix } from 'node:path'
 
 import { codeToHtml } from 'shiki'
 
-import { createMarkdownRenderer } from '@guren/plugin-markdown'
+import { createMarkdownRenderer, escapeHtml } from '@guren/plugin-markdown'
 
 import { MARKDOWN_CODE_THEMES, SITE_ALERT_LABELS } from '../../config/markdown.js'
 import { docPaths, GITHUB_URL } from '../../config/site.js'
@@ -18,6 +18,10 @@ import {
 
 const DEFAULT_LANGUAGE = 'text'
 
+/** Where screenshots live in the repo, and where the site serves them from. */
+const DOCS_IMAGE_DIR = 'docs/images/'
+const DOCS_IMAGE_URL_ROOT = '/docs-images/'
+
 export interface DocLinkContext {
   locale: DocLocale
   category: DocCategory
@@ -25,6 +29,29 @@ export interface DocLinkContext {
 
 const CATEGORY_BY_DIR = new Map(DOC_CATEGORY_KEYS.map((key) => [docCategoryDir(key), key]))
 const LOCALE_BY_DIR = new Map(DOC_LOCALE_KEYS.map((key) => [docLocaleDir(key), key]))
+
+/** Absolute URL, root-relative path, or bare anchor — never repo-relative. */
+const NON_RELATIVE_TARGET = /^(?:[a-z][a-z0-9+.-]*:|\/|#)/iu
+
+/**
+ * Where a repo-relative target resolves inside the docs tree, given the source
+ * file's own `docs/<locale>/<category>/` directory. Returns `null` for targets
+ * that escape the tree, and for anything still percent-encoded: `%2e%2e` would
+ * survive posix.join only to be normalized by the browser afterwards, so the
+ * containment both callers rely on has to be decided before that.
+ */
+function resolveInDocsTree(target: string, context: DocLinkContext): string | null {
+  const joined = posix.join(
+    'docs',
+    docLocaleDir(context.locale),
+    docCategoryDir(context.category),
+    target,
+  )
+  if (joined === '..' || joined.startsWith('../') || joined.includes('%')) {
+    return null
+  }
+  return joined
+}
 
 /**
  * Docs source keeps GitHub-compatible relative `.md` links; the site rewrites
@@ -34,7 +61,7 @@ const LOCALE_BY_DIR = new Map(DOC_LOCALE_KEYS.map((key) => [docLocaleDir(key), k
  * relative paths) passes through untouched.
  */
 export function rewriteDocLink(href: string, context: DocLinkContext): string {
-  if (/^(?:[a-z][a-z0-9+.-]*:|\/|#)/iu.test(href)) {
+  if (NON_RELATIVE_TARGET.test(href)) {
     return href
   }
 
@@ -49,14 +76,8 @@ export function rewriteDocLink(href: string, context: DocLinkContext): string {
     return href
   }
 
-  // Resolve against the source file's repo directory: docs/<locale>/<category>/.
-  const joined = posix.join(
-    'docs',
-    docLocaleDir(context.locale),
-    docCategoryDir(context.category),
-    path,
-  )
-  if (joined === '..' || joined.startsWith('../')) {
+  const joined = resolveInDocsTree(path, context)
+  if (joined === null) {
     return href
   }
 
@@ -84,29 +105,16 @@ export function rewriteDocLink(href: string, context: DocLinkContext): string {
  * (absolute URLs, data URIs, an escape upward) passes through untouched.
  */
 export function rewriteDocImage(src: string, context: DocLinkContext): string {
-  if (/^(?:[a-z][a-z0-9+.-]*:|\/|#)/iu.test(src)) {
+  if (NON_RELATIVE_TARGET.test(src)) {
     return src
   }
 
-  const joined = posix.join(
-    'docs',
-    docLocaleDir(context.locale),
-    docCategoryDir(context.category),
-    src,
-  )
+  const joined = resolveInDocsTree(src, context)
+  if (joined === null || !joined.startsWith(DOCS_IMAGE_DIR)) {
+    return src
+  }
 
-  return joined.startsWith('docs/images/') ? `/${joined.replace(/^docs\//u, 'docs-')}` : src
-}
-
-const MERMAID_LANGUAGE = 'mermaid'
-
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
+  return `${DOCS_IMAGE_URL_ROOT}${joined.slice(DOCS_IMAGE_DIR.length)}`
 }
 
 // Docs fences carry arbitrary languages, so this pipeline keeps the full
@@ -119,7 +127,7 @@ async function highlightDocsCode(code: string, lang?: string): Promise<string> {
   // back to `text` and render the diagram source as a grey code block. Hand
   // it to the client instead, in the same `<pre class="mermaid">` shape the
   // framework's own docs viewer uses (`guren docs:graph`).
-  if (normalizedLang === MERMAID_LANGUAGE) {
+  if (normalizedLang === 'mermaid') {
     return `<pre class="mermaid">${escapeHtml(code)}</pre>`
   }
   try {
