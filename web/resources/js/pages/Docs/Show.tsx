@@ -1,11 +1,16 @@
 import { Head, Link } from '@inertiajs/react'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { SITE_DESCRIPTION, pageTitle } from '../../../../config/site.js'
 import { Footer } from '../../components/Footer.js'
 import { Header } from '../../components/Header.js'
 import { Seo } from '../../components/Seo.js'
 import { ChevronRightIcon } from '../../components/icons.js'
 import { breadcrumbJsonLd, techArticleJsonLd } from '../../lib/structured-data.js'
+import { useColorMode } from './theme.js'
+
+// Mirrors --font-family-display in resources/css/app.css.
+const DIAGRAM_FONT_FAMILY =
+  "'Inter', 'Inter var', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
 
 type DocSummary = {
   slug: string
@@ -53,6 +58,12 @@ interface NavLink {
   href: string
   kind: 'prev' | 'next'
 }
+
+// mermaid.render() injects a scratch element keyed by the id it is given;
+// reusing one across re-renders (a theme toggle re-runs every diagram)
+// collides with the element still in the DOM.
+let mermaidRenderSeq = 0
+
 
 interface TocItem {
   id: string
@@ -148,11 +159,80 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
   const docPath = doc ? `${basePath}/${doc.category}/${doc.slug}` : basePath
   const nav = buildPrevNext(categories, active, basePath)
   const toc = useTableOfContents(doc)
+  const { isDark } = useColorMode()
+  // Load-bearing memo, not an optimisation. React 19 re-applies
+  // dangerouslySetInnerHTML on the *identity* of the `{ __html }` object and
+  // never compares the string (setProp in react-dom assigns innerHTML
+  // unconditionally; the `lastHtml !== nextHtml` guard React 18 had is gone).
+  // Written inline, the object is fresh on every render, so any unrelated
+  // setState -- the TOC filling in, a theme toggle, the sidebar opening --
+  // silently rebuilt this subtree and discarded everything the effects below
+  // had put into it: the copy buttons, the rendered diagrams, and the heading
+  // nodes the scroll-spy observer was watching.
+  const docHtml = useMemo(() => ({ __html: doc?.html ?? '' }), [doc?.html])
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
   useEffect(() => {
     setSidebarOpen(false)
   }, [active?.category, active?.slug])
+
+  // Mermaid diagrams: the build-time renderer leaves ```mermaid fences as
+  // <pre class="mermaid"> (shiki has no grammar for them), and the library
+  // is loaded here — lazily, client-only, and only on pages that have one.
+  // The bail-out above the import is what keeps the ~1 MB chunk off every
+  // other docs page; vite.config.ts keeps it out of the SSR bundle.
+  useEffect(() => {
+    if (!doc) return
+
+    const container = document.querySelector('.docs-content')
+    if (!container) return
+
+    const blocks = Array.from(container.querySelectorAll<HTMLPreElement>('pre.mermaid'))
+    if (blocks.length === 0) return
+
+    let cancelled = false
+
+    void (async () => {
+      const mermaid = (await import('mermaid')).default
+      if (cancelled) return
+
+      mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: 'strict',
+        theme: isDark ? 'dark' : 'default',
+        // Must agree with `.docs-content pre.mermaid` in app.css: mermaid
+        // sizes each node box by measuring its label in this font.
+        fontFamily: DIAGRAM_FONT_FAMILY,
+      })
+
+      // Re-query rather than reusing `blocks`: hydration can replace the
+      // rendered-markdown subtree between the effect firing and the module
+      // arriving, which would leave us writing into detached nodes.
+      const live = container.querySelectorAll<HTMLPreElement>('pre.mermaid')
+
+      for (const pre of live) {
+        // Rendering replaces the fence body with an <svg>, so the source is
+        // stashed on first pass — a theme toggle re-renders from it.
+        const source = pre.dataset.mermaidSource ?? pre.textContent ?? ''
+        pre.dataset.mermaidSource = source
+
+        try {
+          mermaidRenderSeq += 1
+          const { svg } = await mermaid.render(`docs-mermaid-${mermaidRenderSeq}`, source)
+          if (cancelled) return
+          pre.innerHTML = svg
+          pre.dataset.mermaidRendered = 'true'
+        } catch (error) {
+          console.error('Failed to render mermaid diagram', error)
+          pre.textContent = source
+        }
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [doc, isDark])
 
   // Copy button effect
   useEffect(() => {
@@ -164,7 +244,11 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
     container.querySelectorAll('.docs-copy-btn').forEach((btn) => btn.remove())
 
     const blocks = container.querySelectorAll<HTMLPreElement>('pre')
-    const topLevelBlocks = Array.from(blocks).filter((pre) => !pre.closest('pre pre'))
+    // `pre.mermaid` holds diagram source that becomes an <svg> below — there
+    // is nothing there a reader would want on their clipboard.
+    const topLevelBlocks = Array.from(blocks).filter(
+      (pre) => !pre.closest('pre pre') && !pre.classList.contains('mermaid'),
+    )
     const cleanups: Array<() => void> = []
 
     topLevelBlocks.forEach((pre) => {
@@ -299,7 +383,7 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
               </header>
               <div
                 className="docs-content"
-                dangerouslySetInnerHTML={{ __html: doc.html }}
+                dangerouslySetInnerHTML={docHtml}
               />
               {(nav.prev || nav.next) && (
                 <nav

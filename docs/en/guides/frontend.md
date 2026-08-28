@@ -130,14 +130,14 @@ Guren provides end-to-end type safety between controllers and page components th
 
 ### How the Type Flow Works
 
-```
-Page component          codegen              Controller
-┌──────────────┐    ┌──────────────┐    ┌──────────────────┐
-│ interface Props    │ pages.gen.ts │    │ this.inertia(     │
-│ {             │ ──►│ PagePropsMap │───►│   pages.posts.Show│
-│   post: Post  │    │ PageContract │    │   { post }        │
-│ }             │    └──────────────┘    │ ) // type-checked │
-└──────────────┘                        └──────────────────┘
+```mermaid
+flowchart LR
+  Page["Page component<br/>resources/js/pages/posts/Show.tsx<br/>interface Props { post }"]
+  Codegen["codegen<br/>.guren/pages.gen.ts<br/>PagePropsMap / PageContract"]
+  Controller["Controller<br/>PostController.show()<br/>this.inertia(pages.posts.Show, { post })"]
+
+  Page -- "extracts Props" --> Codegen
+  Codegen -- "supplies the Props type" --> Controller
 ```
 
 1. **Define Props in the page component** — each page declares an `interface Props` describing the data it expects:

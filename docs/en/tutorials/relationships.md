@@ -27,6 +27,34 @@ export const comments = sqliteTable('comments', {
 })
 ```
 
+With that table in place, here is how the three tables relate. `comments` is the first crossing point in this series: it references both a post and a user.
+
+```mermaid
+erDiagram
+  direction LR
+  users ||--o{ posts : writes
+  users ||--o{ comments : writes
+  posts ||--o{ comments : has
+
+  users {
+    integer id PK
+    text name
+    text email
+  }
+  posts {
+    integer id PK
+    text title
+    text body
+    integer author_id FK
+  }
+  comments {
+    integer id PK
+    text body
+    integer post_id FK
+    integer author_id FK
+  }
+```
+
 `onDelete: 'cascade'` means deleting a post deletes its comments with it. This is a brand-new table, so a normal migration is enough — no reset needed:
 
 ```bash
@@ -102,6 +130,20 @@ export class Post extends defineModel(posts) {
 
 Post.belongsTo('author', () => import('./User.js').then((m) => m.User), 'authorId', 'id')
 Post.hasMany('comments', () => import('./Comment.js').then((m) => m.Comment), 'postId', 'id')
+```
+
+The three relations you declared are easiest to keep straight by direction: **the side holding the foreign key is the `belongsTo` side**, and the side it points at gets the `hasMany`.
+
+```mermaid
+flowchart LR
+  Comment["Comment<br/>holds postId, authorId"]
+  Post["Post"]
+  User["User"]
+
+  Comment -- "belongsTo('post')" --> Post
+  Comment -- "belongsTo('author')" --> User
+  Post -- "hasMany('comments')" --> Comment
+  Post -- "belongsTo('author')" --> User
 ```
 
 `hasMany('comments', ..., 'postId', 'id')` reads as "the comments whose `postId` matches this post's `id`". With `relationTypes` declared, eager-loaded `post.comments` is typed `CommentRecord[]`. The full relationship API is covered in the [Database guide](../guides/database.md).

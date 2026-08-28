@@ -17,6 +17,22 @@ hand. Guren's answer is one principle:
 The result is a specification that stays true as the code moves — for
 you, and for every agent working in your repository.
 
+Here is how the three layers fit together.
+
+```mermaid
+flowchart LR
+  Code["Code<br/>db/schema.ts, app/Models,<br/>routes, pages"]
+  Derived["Derived<br/>spec:generate<br/>er / domain / screens / modules"]
+  Declared["Declared<br/>make:adr<br/>ADRs and documents"]
+  Checked["Checked<br/>check --spec / check --docs"]
+
+  Code -- "generates" --> Derived
+  Declared -- "names entities and code paths" --> Code
+  Derived --> Checked
+  Declared --> Checked
+  Checked -. "fails when they disagree" .-> Code
+```
+
 ## Derived: spec views
 
 ```bash
@@ -113,6 +129,8 @@ documents, entities, and code paths as nodes, validated links as
 edges — and clicking a node opens the document with its frontmatter,
 trust tier, and link verdicts. Diagrams render when `mermaid` is in
 your `devDependencies` (new apps ship with it).
+
+![The Docs Graph viewer: on the left a graph joining document, spec, and code nodes; on the right a panel showing the selected ER Diagram's frontmatter, table diagram, and column listings](../../images/docs-graph-er.png)
 
 "Only reachable from your own machine" is enforced rather than assumed:
 a request is served only once the runtime confirms the connection came

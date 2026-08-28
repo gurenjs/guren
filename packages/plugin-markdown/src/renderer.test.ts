@@ -191,6 +191,26 @@ describe('createMarkdownRenderer', () => {
       expect(html).toContain('href="https://example.com/"')
     })
 
+    test('should rewrite image sources via rewriteImage', async () => {
+      const renderer = createMarkdownRenderer({
+        rewriteImage: (src) =>
+          src.startsWith('../images/') ? src.replace('../images/', '/docs-images/') : src,
+      })
+      const html = await renderer.render(
+        '![list](../images/posts.png) and ![logo](https://example.com/logo.png)',
+      )
+      expect(html).toContain('src="/docs-images/posts.png"')
+      expect(html).toContain('src="https://example.com/logo.png"')
+    })
+
+    test('should leave image sources alone when only rewriteLink is given', async () => {
+      const renderer = createMarkdownRenderer({
+        rewriteLink: () => '/rewritten',
+      })
+      const html = await renderer.render('![list](../images/posts.png)')
+      expect(html).toContain('src="../images/posts.png"')
+    })
+
     test('should emit a complete <pre> block from the highlighter unwrapped', async () => {
       const renderer = createMarkdownRenderer({
         highlight: async (code, lang) => `<pre class="hl" data-lang="${lang ?? ''}">${code}</pre>`,

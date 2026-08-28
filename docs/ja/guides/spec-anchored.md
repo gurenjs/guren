@@ -17,6 +17,22 @@ AIエージェントは、人間が手作業でドキュメントを正しく保
 その結果、コードが動いても嘘をつかない仕様が手に入ります — あなたに
 とっても、リポジトリで作業するすべてのエージェントにとっても。
 
+3 つの層がどう噛み合うかを図にすると、こうなります。
+
+```mermaid
+flowchart LR
+  Code["コード<br/>db/schema.ts, app/Models,<br/>routes, pages"]
+  Derived["導出<br/>spec:generate<br/>er / domain / screens / modules"]
+  Declared["宣言<br/>make:adr<br/>ADR とドキュメント"]
+  Checked["検証<br/>check --spec / check --docs"]
+
+  Code -- "生成する" --> Derived
+  Declared -- "エンティティとコードパスを名指す" --> Code
+  Derived --> Checked
+  Declared --> Checked
+  Checked -. "食い違えば落ちる" .-> Code
+```
+
 ## 導出: スペックビュー
 
 ```bash
@@ -114,6 +130,8 @@ bunx guren make:adr "Billing cycle is end-of-month" --entity Invoice
 描画し、ノードをクリックするとfrontmatter・trust tier・リンク検証結果
 付きでその文書が開きます。図は `devDependencies` に `mermaid` があれば
 描画されます(新規アプリには最初から入っています)。
+
+![Docs Graph ビューアー。左に文書・スペック・コードのノードを結んだグラフ、右のパネルに選択した ER Diagram の frontmatter とテーブル図、カラム一覧が表示されている](../../images/docs-graph-er.png)
 
 「自分のマシンからしか到達できない」のは前提ではなく強制です。接続元が
 ループバックアドレスであるとランタイムが確認できたリクエストだけを処理し、

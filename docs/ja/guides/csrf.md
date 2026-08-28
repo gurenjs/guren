@@ -2,6 +2,29 @@
 
 CSRF（Cross-Site Request Forgery）保護は、悪意のあるウェブサイトが認証済みユーザーの代わりにフォームを送信することを防ぎます。Guren はセッションとシームレスに統合する組み込みの CSRF ミドルウェアを提供しています。
 
+トークンは 2 つのリクエストにまたがって働きます。フォームを表示する GET で発行され、送信する POST で照合されます。
+
+```mermaid
+sequenceDiagram
+  participant B as ブラウザー
+  participant M as CSRF ミドルウェア
+  participant C as コントローラー
+
+  B->>M: GET /form（安全なメソッドなので検証なし）
+  M->>M: セッションのトークンを発行<br/>（ゲストは double-submit トークン）
+  M->>C: 実行
+  C-->>B: hidden の _token を含むフォーム / XSRF-TOKEN クッキー
+  Note over B: 別サイトのフォームはこのトークンを読めない
+  B->>M: POST /form（_token または X-XSRF-TOKEN 付き）
+  M->>M: 送信されたトークンとセッションの値を照合
+  alt 一致する
+    M->>C: 実行
+    C-->>B: 200
+  else 欠落または不一致
+    M-->>B: 403
+  end
+```
+
 ## セットアップ
 
 アプリケーションにミドルウェアを追加して CSRF 保護を有効にします。

@@ -12,6 +12,21 @@
 - 生成物を磨く方法: バリデーションメッセージ、エラー表示、`fillable`
 - `guren audit` がセキュリティの穴をどう指摘してくれるか
 
+このパートで回す開発ループは、ずっと同じ形をしています。
+
+```mermaid
+flowchart LR
+  Gen["生成<br/>guren add resource"]
+  Migrate["マイグレーション<br/>db:make / db:migrate"]
+  Codegen["codegen<br/>型マニフェスト"]
+  Check["check<br/>整合性"]
+  Browser["ブラウザーで確認"]
+  Audit["audit<br/>セキュリティ"]
+
+  Gen --> Migrate --> Codegen --> Check --> Browser --> Audit
+  Audit -. "次の機能へ" .-> Gen
+```
+
 > [!TIP]
 > 「生成してから読む」のではなく、各レイヤーを 1 リクエスト分だけ手で辿って仕組みを深く理解したい場合は、[ファーストステップ](../guides/first-steps.md)の 10 分ツアーが最適です。このチュートリアルは実務と同じジェネレーター駆動のフローで進みます。
 
@@ -37,6 +52,8 @@ bun run dev
 ```
 
 **チェックポイント:** [http://localhost:3333](http://localhost:3333) を開きます。ウェルカムページが表示されるはずです。データベースのセットアップもコンテナも不要: SQLite ファイルは必要になった時点で `./data/` 以下に作成されます。
+
+![雛形生成直後のウェルカムページ。「Welcome to My Blog!」という見出しの下に、Routing & Controllers、Eloquent-style ORM、Inertia + React、Auth & Sessions、Queue & Mail、Zero-config SQLite の 6 枚のカードが並んでいる](../../images/welcome-page.png)
 
 このターミナルでは開発サーバーを動かしたままにして、以降のコマンドは別のターミナルで実行してください。
 
@@ -68,6 +85,30 @@ bunx guren add resource posts --fields "title:string,body:text" --public
 
 - `db/schema.ts` — `posts` テーブル定義を追記します（`id`、指定したフィールド、`createdAt`）。
 - `routes/web.ts` — `/posts` のルートグループ（7 ルート、名前付き、ボディスキーマ紐づけ済み）を追記します。
+
+この 8 個の新規ファイルと 2 個の追記が、どう噛み合ってリクエストを処理するのかを図にすると、こうなります。
+
+```mermaid
+flowchart TD
+  Routes["routes/web.ts<br/>（追記）7 ルート"]
+  Controller["PostController<br/>7 アクション"]
+  Validator["PostValidator<br/>Zod スキーマ 3 種"]
+  Model["Post モデル"]
+  Schema["db/schema.ts<br/>（追記）posts テーブル"]
+  Resource["PostResource<br/>送るフィールドを選ぶ"]
+  Pages["posts/*.tsx<br/>Index / Show / New / Edit"]
+
+  Routes --> Controller
+  Controller --> Validator
+  Controller --> Model
+  Model --> Schema
+  Controller --> Resource
+  Resource --> Pages
+  Routes -. "body スキーマを共有" .-> Validator
+  Validator -. "フォームの型を逆算" .-> Pages
+```
+
+点線は、実行時の呼び出しではなく **型のつながり** です。ルートに紐づけた Zod スキーマが、そのままフォームのデータ型になります（ステップ 7 で実際に見ます）。
 
 生成が終わると、コマンド自身が次のステップを教えてくれます: マイグレーションを作って適用し、codegen を回す。そのとおりに進みましょう。
 
@@ -111,6 +152,10 @@ WARN [warn] PostController tests: No test file named after PostController ...
 3. **Edit** で本文を書き換えて送信します — 更新が反映されます。
 4. 一覧に戻り、投稿がもう 1 件作れることも確認します。**Delete** で削除もできます（確認ダイアログ付き）。
 
+投稿を何件か作ると、一覧はこうなります。
+
+![/posts の一覧ページ。「Posts」という見出しと New Post ボタン、投稿 3 件がタイトルと本文抜粋のカードで並び、下にページ番号 1 のページネーションがある](../../images/posts-index.png)
+
 コードを 1 行も書かずに、バリデーション・ページネーション・型付きルーティングまで揃った CRUD が動いています。では、その中身を読み解きましょう。
 
 ## 6. 全体像を導出する: context と spec
@@ -132,6 +177,8 @@ bunx guren spec:generate
 `er.md`（テーブルと外部キー）、`domain.md`（モデルとリレーションシップ）、`screens.md`（ページとルートの対応）、`modules.md` が生成されます。これらは **コードから導出された仕様（derived）** で、コミットして残す成果物です。コードが変わればビューは古くなりますが、それを黙って放置させないためのゲートが `guren check --spec` です — Part 2 で実際にゲートが落ちるところを体験します。Guren のプロジェクト知識は、手書きで頑張るのではなく、導出（derived）・宣言（declared）・検証（checked）の 3 層で管理します。詳細は [スペックアンカード開発](../guides/spec-anchored.md) を参照してください。
 
 **チェックポイント:** 生成したビューはブラウザーからも読めます。`bun run dev` を動かしたまま [http://localhost:3333/_guren/docs](http://localhost:3333/_guren/docs) を開いてください。4 つのスペックビューと、雛形が最初から持っている ADR（`0001-record-architecture-decisions`）が一覧に並び、`er.md` を開くと `users` と `posts` の ER 図が描画されます。各ビューには「どのコードから導出されたか」のエッジ（`db/schema.ts` → `er.md` など）が付いています。このビューアーはローカル限定・読み取り専用・開発時限定です。
+
+![http://localhost:3333/_guren/docs の Docs Graph。左にスペックビューと ADR のノードがコードのノードと線で結ばれたグラフ、右のパネルに ER Diagram の内容として posts と users のテーブル図とカラム一覧が表示されている](../../images/docs-graph-er.png)
 
 ## 7. 生成されたコードを読む
 
@@ -284,12 +331,14 @@ type PostFormData = RouteBody<ApiRoutes, 'posts.store'>
 export default function NewPost() {
   const form = useForm<PostFormData>({ title: '', body: '' })
   return (
-    <main className="mx-auto max-w-3xl px-6 py-12">
-      <form className="space-y-4" onSubmit={(submitEvent) => { submitEvent.preventDefault(); form.post(route('posts.store')) }}>
-        <input value={form.data.title} onChange={(event) => form.setData('title', event.target.value)} placeholder="title" className="w-full rounded border px-3 py-2" />
-        <textarea value={form.data.body} onChange={(event) => form.setData('body', event.target.value)} placeholder="body" className="w-full rounded border px-3 py-2" />
-        <button type="submit" className="rounded bg-black px-4 py-2 text-white">Create</button>
-      </form>
+    <main className="min-h-screen bg-g-page font-sans text-g-text">
+      <div className="mx-auto max-w-3xl px-6 py-12">
+        <form className="space-y-4" onSubmit={(submitEvent) => { submitEvent.preventDefault(); form.post(route('posts.store')) }}>
+          <input value={form.data.title} onChange={(event) => form.setData('title', event.target.value)} placeholder="title" className="w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:border-transparent focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent" />
+          <textarea value={form.data.body} onChange={(event) => form.setData('body', event.target.value)} placeholder="body" className="w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:border-transparent focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent" />
+          <button type="submit" className="rounded-g-ctl bg-g-accent px-4 py-2 text-sm font-bold text-g-on-accent transition hover:bg-g-accent-down">Create</button>
+        </form>
+      </div>
     </main>
   )
 }
@@ -315,15 +364,17 @@ export const PostPayloadSchema = z.object({
 次に `resources/js/pages/posts/New.tsx` の各入力欄の下にエラー表示を追加します。
 
 ```tsx
-        <input value={form.data.title} onChange={(event) => form.setData('title', event.target.value)} placeholder="title" className="w-full rounded border px-3 py-2" />
-        {form.errors.title && <p className="text-sm text-red-600">{form.errors.title}</p>}
-        <textarea value={form.data.body} onChange={(event) => form.setData('body', event.target.value)} placeholder="body" className="w-full rounded border px-3 py-2" />
-        {form.errors.body && <p className="text-sm text-red-600">{form.errors.body}</p>}
+          <input value={form.data.title} … />
+          {form.errors.title && <p className="text-sm text-red-600">{form.errors.title}</p>}
+          <textarea value={form.data.body} … />
+          {form.errors.body && <p className="text-sm text-red-600">{form.errors.body}</p>}
 ```
 
 `Edit.tsx` にも同じ 2 行を足してください。この 422 → `form.errors` の往復の仕組みは[バリデーションガイド](../guides/validation.md)が仕様として定義しています。
 
 **チェックポイント:** `/posts/create` で両方のフィールドを **空のまま** 送信します — ページは遷移せず、入力欄の下に "Title is required." が表示されます。これはあなたの Zod スキーマの声です。サーバーでのバリデーション失敗が `form.errors` まで往復してきました。
+
+![空のまま送信した作成フォーム。title 入力欄の下に赤い文字で「Title is required.」、body 入力欄の下に「Body is required.」が表示されている](../../images/posts-validation-errors.png)
 
 ## 9. セキュリティ監査を実行する
 

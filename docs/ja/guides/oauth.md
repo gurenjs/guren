@@ -9,6 +9,28 @@ Guren は「GitHub / Google / Discordでサインイン」のようなログイ�
 - **OAuthStateStore** – CSRFとオープンリダイレクト攻撃を防ぐ、一度限りのstateストレージ。デフォルトはメモリ、マルチプロセス構成では `DatabaseOAuthStateStore`（またはRedis）を使用します。
 - **プロバイダーファクトリ** – `createGitHubOAuthProviderConfig`、`createGoogleOAuthProviderConfig`、`createDiscordOAuthProviderConfig` が各プロバイダーの既知のエンドポイントをあらかじめ埋めてくれます。
 
+フロー全体では 4 者が登場します。アプリはブラウザーを 2 回受け取り、その間に state ストアが「この `state` を発行したのは本当にこのブラウザーか」を答えます。
+
+```mermaid
+sequenceDiagram
+  participant B as ブラウザー
+  participant A as アプリ
+  participant S as OAuthStateStore
+  participant P as プロバイダー<br/>(GitHub など)
+
+  B->>A: GET /auth/github
+  A->>S: state を発行し、セッションに束縛
+  A-->>B: 302 プロバイダーの認可 URL へ
+  B->>P: 認可画面でユーザーが許可
+  P-->>B: 302 /auth/github/callback?code=…&state=…
+  B->>A: GET /auth/github/callback
+  A->>S: state を照合して消費（一度きり）
+  A->>P: code をアクセストークンに交換
+  P-->>A: トークンとプロフィール
+  A->>A: ユーザーを検索または作成してログイン
+  A-->>B: 302 /dashboard
+```
+
 ## 基本的な使い方
 
 ### マネージャーの登録

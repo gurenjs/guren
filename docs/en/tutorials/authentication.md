@@ -86,7 +86,11 @@ export default class AuthProvider extends ServiceProvider {
 
 With the dev server running (`bun run dev` if you stopped it), open [http://localhost:3333/login](http://localhost:3333/login).
 
+![The generated sign-in page: Email and Password fields, a Remember me checkbox, a Sign in button, and links for a forgotten password and for signing up. The header's right-hand button reads Sign in](../../images/auth-login.png)
+
 1. Sign in as **demo@example.com** / **secret** — you land on `/dashboard` with a personalized greeting, and the header navigation flips from **Sign in** to **Log out** (the shared props from `AuthProvider` at work).
+
+   ![The dashboard after signing in: below "This page is protected by the auth middleware." it reads "Signed in as Demo User" with the email address, and the header button now reads Log out](../../images/auth-dashboard.png)
 2. Try a wrong password — the form shows "Invalid credentials."
 3. Open `/dashboard` in a private browsing window — you're redirected to `/login`. Protected routes are actually protected.
 
@@ -125,6 +129,27 @@ export function registerWebRoutes(baseRouter: Router): void {
     })
   })
 }
+```
+
+Here is how a request from a signed-out visitor flows through a protected route.
+
+```mermaid
+sequenceDiagram
+  participant B as Browser
+  participant M as auth middleware
+  participant C as PostController
+  participant S as Session
+
+  B->>M: GET /posts/create
+  M->>S: Who is signed in?
+  S-->>M: Nobody
+  M-->>B: 302 redirect to /login
+  Note over B,S: After signing in, the session carries a user
+  B->>M: GET /posts/create (again)
+  M->>S: Who is signed in?
+  S-->>M: Demo User
+  M->>C: run create()
+  C-->>B: render the create form
 ```
 
 The mechanism has three tiers:

@@ -11,6 +11,27 @@ The standard vNext path is: import queue APIs from `@guren/core`, configure the 
 - **Driver** – The storage backend for jobs. Guren ships with Memory and Redis drivers.
 - **QueueManager** – Central registry for configuring and accessing multiple queue drivers.
 
+Dispatching and working are separate processes, joined asynchronously through the queue. The request returns as soon as the job is enqueued; it runs later, on the worker's schedule.
+
+```mermaid
+flowchart LR
+  C["Controller<br/>dispatches the job"]
+  R["responds immediately"]
+  Q[("Queue driver<br/>Memory / Redis")]
+  W["Worker, separate process<br/>runs handle()"]
+  OK["success<br/>removed from the queue"]
+  Retry["failure<br/>re-queued up to the limit"]
+  Failed["limit exceeded<br/>recorded as failed"]
+
+  C --> R
+  C -- "enqueue" --> Q
+  Q -- "dequeue" --> W
+  W --> OK
+  W --> Retry
+  Retry -. "back on" .-> Q
+  Retry --> Failed
+```
+
 ## Creating Jobs
 
 Generate a new job using the CLI:

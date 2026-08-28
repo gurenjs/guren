@@ -44,12 +44,16 @@ bun run dev
 
 ターミナルには Guren のバージョンと URL を添えた深紅の ASCII バナーが、ブラウザにはウェルカムページが表示されます。SQLite のデータベースファイルは必要になった時点で `./data/guren.db` に作成されます。新規アプリにはまだテーブル定義がないため、初回起動前にマイグレーションを実行する必要はありません。
 
+![ブラウザに表示されるウェルカムページ。「Welcome to My Blog!」の見出しと、Routing & Controllers、Eloquent-style ORM、Inertia + React、Auth & Sessions、Queue & Mail、Zero-config SQLite の 6 枚のカードが並んでいる](../../images/welcome-page.png)
+
 > [!TIP]
 > 開発サーバーはフロントエンドアセット用に Vite を自動起動するため、React ページへの変更は即座に反映されます。コントローラー・ルート・モデルといったバックエンドの変更も、`bun --hot` で動いているため再起動なしで反映されます。Vite を自分で起動したい場合は `GUREN_DEV_VITE=0` を、スクリプト実行時にバナーを消したい場合は `GUREN_DEV_BANNER=0` を設定してください。
 
 ### 4. プロジェクトの知識グラフを見る
 
 開発サーバーを動かしたまま [http://localhost:3333/_guren/docs](http://localhost:3333/_guren/docs) を開いてください。新規アプリには `docs/adr/` 配下にシード ADR が含まれており、Docs Graph では文書ノードとして表示されます。プロジェクトが育つにつれて、エンティティ、コードパス、生成スペックとの関係も加わります。文書をクリックすると、frontmatter、trust 情報、リンクの検証結果、Markdown 本文を読めます。
+
+![ローカルの Docs Graph ビューアー。文書・スペック・コードのノードが線で結ばれ、左上に concepts と relations の件数、ノード種別の絞り込みが並んでいる](../../images/docs-graph.png)
 
 ビューアーは読み取り専用です。スキャフォールドされた `dev` スクリプトの `GUREN_DOCS=1` で有効になり、自分のマシンからだけ到達でき、本番では決してマウントされません。デフォルトのフルスタック・スキャフォールドには生成図を描画する Mermaid も含まれます。Mermaid がなくても図のソースはコードブロックとして読めます。スペックビューを生成し、意思決定をコードへ結び付ける方法は [スペックアンカード開発](./spec-anchored.md) を参照してください。
 

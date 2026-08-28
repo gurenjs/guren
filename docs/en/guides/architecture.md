@@ -297,6 +297,19 @@ that fits a production run.
 - Migrations are managed via `bunx guren make:migration` and applied with `bun run db:migrate`.
 
 ## Request Lifecycle
+
+```mermaid
+flowchart LR
+  Hono["1. Hono receives<br/>the request"]
+  Global["2. Global<br/>middleware"]
+  Route["3-4. Route resolved<br/>route middleware<br/>model binding"]
+  Ctrl["5-6. Controller,<br/>database via models"]
+  Inertia["7. this.inertia()"]
+  Client["8. Client<br/>hydrates"]
+
+  Hono --> Global --> Route --> Ctrl --> Inertia --> Client
+```
+
 1. Hono receives an HTTP request.
 2. Global middleware runs (session, CSRF, rate limiting, etc.).
 3. The application router resolves the matching handler and runs route-level middleware.

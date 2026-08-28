@@ -27,6 +27,34 @@ export const comments = sqliteTable('comments', {
 })
 ```
 
+このテーブルを足すと、3 つのテーブルの関係はこうなります。`comments` は投稿とユーザーの両方を参照する、シリーズで初めての交差点です。
+
+```mermaid
+erDiagram
+  direction LR
+  users ||--o{ posts : "書く"
+  users ||--o{ comments : "書く"
+  posts ||--o{ comments : "持つ"
+
+  users {
+    integer id PK
+    text name
+    text email
+  }
+  posts {
+    integer id PK
+    text title
+    text body
+    integer author_id FK
+  }
+  comments {
+    integer id PK
+    text body
+    integer post_id FK
+    integer author_id FK
+  }
+```
+
 `onDelete: 'cascade'` は、投稿を削除するとそのコメントも一緒に削除されることを意味します。今回は完全に新規のテーブルなので、普通のマイグレーションで十分です — リセットは要りません。
 
 ```bash
@@ -102,6 +130,20 @@ export class Post extends defineModel(posts) {
 
 Post.belongsTo('author', () => import('./User.js').then((m) => m.User), 'authorId', 'id')
 Post.hasMany('comments', () => import('./Comment.js').then((m) => m.Comment), 'postId', 'id')
+```
+
+宣言した 3 本のリレーションシップは、向きで覚えると混乱しません。**外部キーを持っている側が `belongsTo`**、持たれている側が `hasMany` です。
+
+```mermaid
+flowchart LR
+  Comment["Comment<br/>postId, authorId を持つ"]
+  Post["Post"]
+  User["User"]
+
+  Comment -- "belongsTo('post')" --> Post
+  Comment -- "belongsTo('author')" --> User
+  Post -- "hasMany('comments')" --> Comment
+  Post -- "belongsTo('author')" --> User
 ```
 
 `hasMany('comments', ..., 'postId', 'id')` は「`postId` がこの投稿の `id` に一致するコメントたち」と読めます。`relationTypes` を宣言しておくと、eager load 時の `post.comments` は `CommentRecord[]` と型付けされます。リレーションシップ API の全体像は[データベースガイド](../guides/database.md)を参照してください。

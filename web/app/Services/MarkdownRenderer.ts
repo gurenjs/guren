@@ -75,12 +75,53 @@ export function rewriteDocLink(href: string, context: DocLinkContext): string {
   return `${GITHUB_URL}/blob/main/${joined}${suffix}`
 }
 
+/**
+ * Docs source keeps GitHub-compatible relative image paths
+ * (`../../images/foo.png`) so the pictures render on GitHub too. The site
+ * serves the same files from `web/public/docs-images/`, copied there by
+ * `scripts/copy-docs-images.ts` at build time, so the rendered `src` has to
+ * be rewritten to that root. Anything resolving outside `docs/images/`
+ * (absolute URLs, data URIs, an escape upward) passes through untouched.
+ */
+export function rewriteDocImage(src: string, context: DocLinkContext): string {
+  if (/^(?:[a-z][a-z0-9+.-]*:|\/|#)/iu.test(src)) {
+    return src
+  }
+
+  const joined = posix.join(
+    'docs',
+    docLocaleDir(context.locale),
+    docCategoryDir(context.category),
+    src,
+  )
+
+  return joined.startsWith('docs/images/') ? `/${joined.replace(/^docs\//u, 'docs-')}` : src
+}
+
+const MERMAID_LANGUAGE = 'mermaid'
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
 // Docs fences carry arbitrary languages, so this pipeline keeps the full
 // shiki entry instead of the plugin's fine-grained adapter. That is fine
 // here because docs render at build time (scripts/prerender-docs.ts) — the
 // Worker bundle never sees this import.
 async function highlightDocsCode(code: string, lang?: string): Promise<string> {
   const normalizedLang = lang?.trim() || DEFAULT_LANGUAGE
+  // shiki has no `mermaid` grammar, so highlighting one would silently fall
+  // back to `text` and render the diagram source as a grey code block. Hand
+  // it to the client instead, in the same `<pre class="mermaid">` shape the
+  // framework's own docs viewer uses (`guren docs:graph`).
+  if (normalizedLang === MERMAID_LANGUAGE) {
+    return `<pre class="mermaid">${escapeHtml(code)}</pre>`
+  }
   try {
     return await codeToHtml(code, { lang: normalizedLang, themes: MARKDOWN_CODE_THEMES, defaultColor: 'light' })
   } catch {
@@ -100,6 +141,7 @@ export async function renderMarkdownToHtml(
     sanitize: false,
     alertLabels: SITE_ALERT_LABELS,
     rewriteLink: linkContext ? (href) => rewriteDocLink(href, linkContext) : undefined,
+    rewriteImage: linkContext ? (src) => rewriteDocImage(src, linkContext) : undefined,
     highlight: highlightDocsCode,
   })
   return renderer.render(markdown)

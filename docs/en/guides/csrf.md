@@ -2,6 +2,29 @@
 
 Cross-Site Request Forgery (CSRF) protection prevents malicious websites from submitting forms on behalf of authenticated users. Guren provides built-in CSRF middleware that integrates seamlessly with sessions.
 
+The token spans two requests: it is issued on the GET that renders the form, and matched on the POST that submits it.
+
+```mermaid
+sequenceDiagram
+  participant B as Browser
+  participant M as CSRF middleware
+  participant C as Controller
+
+  B->>M: GET /form (safe method, not verified)
+  M->>M: issue the session token<br/>(a double-submit token for guests)
+  M->>C: run
+  C-->>B: form with a hidden _token / XSRF-TOKEN cookie
+  Note over B: A form on another site cannot read this token
+  B->>M: POST /form (with _token or X-XSRF-TOKEN)
+  M->>M: match the submitted token against the session value
+  alt they match
+    M->>C: run
+    C-->>B: 200
+  else missing or mismatched
+    M-->>B: 403
+  end
+```
+
 ## Setup
 
 Enable CSRF protection by adding the middleware to your application:

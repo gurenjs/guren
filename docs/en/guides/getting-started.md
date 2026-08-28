@@ -44,12 +44,16 @@ This regenerates the typed route/page manifests (codegen) and boots the server. 
 
 A crimson ASCII banner in the terminal with the Guren version and URLs, and the welcome page in your browser. The SQLite database file is created on demand at `./data/guren.db` — the fresh app defines no tables yet, so there is nothing to migrate before your first run.
 
+![The welcome page in the browser: a "Welcome to My Blog!" heading above six cards — Routing & Controllers, Eloquent-style ORM, Inertia + React, Auth & Sessions, Queue & Mail, and Zero-config SQLite](../../images/welcome-page.png)
+
 > [!TIP]
 > The dev server spawns Vite automatically for frontend assets, so edits to your React pages appear instantly. Backend changes — controllers, routes, models — are picked up too, without a restart, since the dev server runs under `bun --hot`. Set `GUREN_DEV_VITE=0` to run Vite yourself, or `GUREN_DEV_BANNER=0` to silence the banner in scripts.
 
 ### 4. Explore the project knowledge graph
 
 Keep the dev server running and open [http://localhost:3333/_guren/docs](http://localhost:3333/_guren/docs). A fresh app includes a seed architecture decision under `docs/adr/`; the Docs Graph renders it as a document node and will add entity, code-path, and generated-spec relations as your project grows. Click a document to read its frontmatter, trust information, link verdicts, and Markdown body.
+
+![The local Docs Graph viewer: document, spec, and code nodes joined by edges, with concept and relation counts and node-kind filters in the top-left](../../images/docs-graph.png)
 
 The viewer is read-only, enabled by `GUREN_DOCS=1` in the scaffold's `dev` script, restricted to your local machine, and never mounted in production. The default full-stack scaffold includes Mermaid for generated diagrams; without it, diagram source remains readable as a code block. The [Spec-Anchored Development guide](./spec-anchored.md) explains how to generate spec views and connect decisions to code.
 

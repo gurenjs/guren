@@ -130,14 +130,14 @@ Guren はコントローラーとページコンポーネント間のエンド�
 
 ### 型の流れ
 
-```
-ページコンポーネント      codegen              コントローラー
-┌──────────────┐    ┌──────────────┐    ┌──────────────────┐
-│ interface Props    │ pages.gen.ts │    │ this.inertia(     │
-│ {             │ ──►│ PagePropsMap │───►│   pages.posts.Show│
-│   post: Post  │    │ PageContract │    │   { post }        │
-│ }             │    └──────────────┘    │ ) // 型チェック済み│
-└──────────────┘                        └──────────────────┘
+```mermaid
+flowchart LR
+  Page["ページコンポーネント<br/>resources/js/pages/posts/Show.tsx<br/>interface Props { post }"]
+  Codegen["codegen<br/>.guren/pages.gen.ts<br/>PagePropsMap / PageContract"]
+  Controller["コントローラー<br/>PostController.show()<br/>this.inertia(pages.posts.Show, { post })"]
+
+  Page -- "Props を抽出" --> Codegen
+  Codegen -- "Props の型を供給" --> Controller
 ```
 
 1. **ページコンポーネントで Props を定義** — 各ページが受け取るデータを `interface Props` で宣言します:

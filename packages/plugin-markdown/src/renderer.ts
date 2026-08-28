@@ -40,6 +40,12 @@ export interface MarkdownRendererOptions {
   anchors?: boolean
   /** Rewrite every link `href` before rendering (e.g. relative `.md` → routes). */
   rewriteLink?: (href: string) => string
+  /**
+   * Rewrite every image `src` before rendering. Separate from `rewriteLink`
+   * because the two resolve against different roots in practice: a markdown
+   * link points at another document, an image at a served asset.
+   */
+  rewriteImage?: (src: string) => string
   /** Optional code-fence highlighter. Without it, fences render as plain `<pre><code>`. */
   highlight?: HighlightFn
 }
@@ -65,6 +71,7 @@ export function createMarkdownRenderer(options: MarkdownRendererOptions = {}): M
     anchors = true,
     alertLabels,
     rewriteLink,
+    rewriteImage,
     highlight,
   } = options
 
@@ -110,6 +117,15 @@ export function createMarkdownRenderer(options: MarkdownRendererOptions = {}): M
       walkTokens(token) {
         if (token.type === 'link' && typeof token.href === 'string') {
           token.href = rewriteLink(token.href)
+        }
+      },
+    })
+  }
+  if (rewriteImage) {
+    staticExtensions.push({
+      walkTokens(token) {
+        if (token.type === 'image' && typeof token.href === 'string') {
+          token.href = rewriteImage(token.href)
         }
       },
     })

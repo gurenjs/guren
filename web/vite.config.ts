@@ -1,3 +1,5 @@
+import { fileURLToPath } from 'node:url'
+
 import { routeTypesPlugin } from '@guren/cli/vite'
 import { defineConfig } from 'vite'
 import guren from '@guren/core/vite'
@@ -9,8 +11,18 @@ import tailwindcss from '@tailwindcss/vite'
 // browser's `localhost` reaches only one. An explicit port opts a session out.
 const devPort = Number.parseInt(process.env.GUREN_VITE_PORT ?? '', 10)
 
-export default defineConfig(({ command }) => ({
+// The docs pages import mermaid lazily, in a browser-only effect. Without
+// this the SSR build still pulls every diagram renderer it can reach into
+// `.guren/ssr` (~9 MB across 100+ chunks) — and that directory is what the
+// Cloudflare Worker ships. The stub keeps the client build untouched, so
+// readers still get the real, content-hashed, code-split library.
+const MERMAID_SSR_STUB = fileURLToPath(new URL('./resources/js/lib/mermaid-ssr-stub.ts', import.meta.url))
+
+export default defineConfig(({ command, isSsrBuild }) => ({
   publicDir: false,
+  resolve: {
+    alias: isSsrBuild ? { mermaid: MERMAID_SSR_STUB } : {},
+  },
   build: {
     rollupOptions: {
       // The Guren plugin sets the Inertia entry only when no input is

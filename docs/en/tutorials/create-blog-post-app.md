@@ -12,6 +12,21 @@ In this part you build the heart of the blog — creating, listing, editing, and
 - How to refine generated output: validation messages, error display, `fillable`
 - How `guren audit` points out security gaps for you
 
+The development loop you'll run in this part keeps the same shape throughout.
+
+```mermaid
+flowchart LR
+  Gen["generate<br/>guren add resource"]
+  Migrate["migrate<br/>db:make / db:migrate"]
+  Codegen["codegen<br/>typed manifests"]
+  Check["check<br/>wiring"]
+  Browser["verify in the browser"]
+  Audit["audit<br/>security"]
+
+  Gen --> Migrate --> Codegen --> Check --> Browser --> Audit
+  Audit -. "next feature" .-> Gen
+```
+
 > [!TIP]
 > If you'd rather trace one request through every layer by hand to build a deep mental model first, the 10-minute tour in [First Steps](../guides/first-steps.md) is the better fit. This tutorial follows the generator-driven flow you'll use in day-to-day work.
 
@@ -37,6 +52,8 @@ bun run dev
 ```
 
 **Checkpoint:** open [http://localhost:3333](http://localhost:3333). You should see the welcome page. No database setup, no containers: the SQLite file is created under `./data/` the moment it's needed.
+
+![The freshly scaffolded welcome page, headed "Welcome to My Blog!", with six cards below it: Routing & Controllers, Eloquent-style ORM, Inertia + React, Auth & Sessions, Queue & Mail, and Zero-config SQLite](../../images/welcome-page.png)
 
 Keep the dev server running in this terminal and run the following commands in a second one.
 
@@ -68,6 +85,30 @@ It also **edits existing files**:
 
 - `db/schema.ts` — appends the `posts` table definition (`id`, your fields, `createdAt`).
 - `routes/web.ts` — appends the `/posts` route group (seven routes, named, with body schemas attached).
+
+Here is how those eight new files and two appended ones fit together to serve a request.
+
+```mermaid
+flowchart TD
+  Routes["routes/web.ts<br/>(appended) 7 routes"]
+  Controller["PostController<br/>7 actions"]
+  Validator["PostValidator<br/>3 Zod schemas"]
+  Model["Post model"]
+  Schema["db/schema.ts<br/>(appended) posts table"]
+  Resource["PostResource<br/>picks what gets sent"]
+  Pages["posts/*.tsx<br/>Index / Show / New / Edit"]
+
+  Routes --> Controller
+  Controller --> Validator
+  Controller --> Model
+  Model --> Schema
+  Controller --> Resource
+  Resource --> Pages
+  Routes -. "shares the body schema" .-> Validator
+  Validator -. "form types derived from it" .-> Pages
+```
+
+The dotted edges are **type** connections, not runtime calls: the Zod schema attached to a route becomes the form's data type (you'll see this in step 7).
 
 When it finishes, the command itself tells you what comes next: create and apply the migration, then run codegen. Let's do exactly that.
 
@@ -111,6 +152,10 @@ With the dev server running (`bun run dev` if you stopped it):
 3. Use **Edit** to change the body and submit — the update sticks.
 4. Back on the list, create a second post. **Delete** works too (with a confirmation dialog).
 
+With a few posts created, the list looks like this.
+
+![The /posts index page: a "Posts" heading with a New Post button, three posts as cards showing title and body excerpt, and page-number pagination below](../../images/posts-index.png)
+
 Without writing a line of code, you have a CRUD with validation, pagination, and typed routing. Now let's read what it's made of.
 
 ## 6. Derive the big picture: context and spec
@@ -132,6 +177,8 @@ bunx guren spec:generate
 This generates `er.md` (tables and foreign keys), `domain.md` (models and relationships), `screens.md` (pages mapped to routes), and `modules.md`. These are **specs derived from the code**, and they're artifacts you commit. When the code changes, the views go stale — and the gate that refuses to let that slide silently is `guren check --spec` (you'll watch it trip in Part 2). Guren manages project knowledge not by hand-maintained documents but in three layers: derived, declared, and checked. See [Spec-Anchored Development](../guides/spec-anchored.md) for the full picture.
 
 **Checkpoint:** the generated views are readable from the browser too. With `bun run dev` still running, open [http://localhost:3333/_guren/docs](http://localhost:3333/_guren/docs). The four spec views and the ADR the scaffold ships with (`0001-record-architecture-decisions`) appear in the listing, and opening `er.md` renders the ER diagram for `users` and `posts`. Each view carries edges showing what code it was derived from (`db/schema.ts` → `er.md`, and so on). The viewer is local-only, read-only, and dev-only.
+
+![The Docs Graph at http://localhost:3333/_guren/docs: on the left a graph linking spec-view and ADR nodes to code nodes, on the right a panel showing the ER Diagram view with table diagrams and column listings for posts and users](../../images/docs-graph-er.png)
 
 ## 7. Read the generated code
 
@@ -284,12 +331,14 @@ type PostFormData = RouteBody<ApiRoutes, 'posts.store'>
 export default function NewPost() {
   const form = useForm<PostFormData>({ title: '', body: '' })
   return (
-    <main className="mx-auto max-w-3xl px-6 py-12">
-      <form className="space-y-4" onSubmit={(submitEvent) => { submitEvent.preventDefault(); form.post(route('posts.store')) }}>
-        <input value={form.data.title} onChange={(event) => form.setData('title', event.target.value)} placeholder="title" className="w-full rounded border px-3 py-2" />
-        <textarea value={form.data.body} onChange={(event) => form.setData('body', event.target.value)} placeholder="body" className="w-full rounded border px-3 py-2" />
-        <button type="submit" className="rounded bg-black px-4 py-2 text-white">Create</button>
-      </form>
+    <main className="min-h-screen bg-g-page font-sans text-g-text">
+      <div className="mx-auto max-w-3xl px-6 py-12">
+        <form className="space-y-4" onSubmit={(submitEvent) => { submitEvent.preventDefault(); form.post(route('posts.store')) }}>
+          <input value={form.data.title} onChange={(event) => form.setData('title', event.target.value)} placeholder="title" className="w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:border-transparent focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent" />
+          <textarea value={form.data.body} onChange={(event) => form.setData('body', event.target.value)} placeholder="body" className="w-full rounded-g-ctl border border-g-line-strong bg-g-panel px-3 py-2 text-g-text transition outline-none placeholder:text-g-muted focus:border-transparent focus:outline-2 focus:-outline-offset-1 focus:outline-g-accent" />
+          <button type="submit" className="rounded-g-ctl bg-g-accent px-4 py-2 text-sm font-bold text-g-on-accent transition hover:bg-g-accent-down">Create</button>
+        </form>
+      </div>
     </main>
   )
 }
@@ -315,15 +364,17 @@ export const PostPayloadSchema = z.object({
 Then add error display under each input in `resources/js/pages/posts/New.tsx`:
 
 ```tsx
-        <input value={form.data.title} onChange={(event) => form.setData('title', event.target.value)} placeholder="title" className="w-full rounded border px-3 py-2" />
-        {form.errors.title && <p className="text-sm text-red-600">{form.errors.title}</p>}
-        <textarea value={form.data.body} onChange={(event) => form.setData('body', event.target.value)} placeholder="body" className="w-full rounded border px-3 py-2" />
-        {form.errors.body && <p className="text-sm text-red-600">{form.errors.body}</p>}
+          <input value={form.data.title} … />
+          {form.errors.title && <p className="text-sm text-red-600">{form.errors.title}</p>}
+          <textarea value={form.data.body} … />
+          {form.errors.body && <p className="text-sm text-red-600">{form.errors.body}</p>}
 ```
 
 Add the same two lines to `Edit.tsx`. The mechanics of this 422 → `form.errors` round trip are specified in the [Validation guide](../guides/validation.md).
 
 **Checkpoint:** on `/posts/create`, submit the form with **both fields empty** — the page doesn't navigate, and "Title is required." appears under the input. That's your Zod schema speaking: a server-side validation failure made the round trip into `form.errors`.
+
+![The create form submitted empty, with "Title is required." in red under the title input and "Body is required." under the body input](../../images/posts-validation-errors.png)
 
 ## 9. Run the security audit
 
