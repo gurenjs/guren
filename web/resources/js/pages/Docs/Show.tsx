@@ -63,14 +63,9 @@ interface NavLink {
   kind: 'prev' | 'next'
 }
 
-// mermaid.render() injects a scratch element keyed by the id it is given;
-// reusing one across re-renders (a theme toggle re-runs every diagram)
-// collides with the element still in the DOM.
-let mermaidRenderSeq = 0
-
 interface MermaidApi {
   initialize(config: Record<string, unknown>): void
-  render(id: string, source: string): Promise<{ svg: string }>
+  run(options: { nodes: ArrayLike<HTMLElement> }): Promise<void>
 }
 
 declare global {
@@ -112,41 +107,6 @@ function loadMermaid(): Promise<MermaidApi> {
     document.head.append(script)
   })
   return mermaidLoader
-}
-
-/**
- * Turn mermaid's SVG string into a node, instead of assigning innerHTML.
- *
- * The diagram source is read back out of the DOM, so assigning the result as
- * HTML would reinterpret document text as markup (CodeQL
- * js/html-constructed-from-input). DOMParser never executes script while
- * parsing, and the pass below drops the two things that could still run once
- * the node is adopted into the live document. Parsing is `text/html` rather
- * than `image/svg+xml` because mermaid emits HTML-flavoured markup inside
- * foreignObject labels — an unclosed `<br>` — which is not well-formed XML.
- */
-function parseSvg(svg: string): SVGElement | null {
-  const parsed = new DOMParser().parseFromString(svg, 'text/html')
-  const root = parsed.body.querySelector('svg')
-  if (!root) return null
-
-  for (const script of root.querySelectorAll('script')) {
-    script.remove()
-  }
-  for (const element of [root, ...root.querySelectorAll('*')]) {
-    for (const attribute of [...element.attributes]) {
-      const name = attribute.name.toLowerCase()
-      const isEventHandler = name.startsWith('on')
-      // Covers `href` and `xlink:href` alike.
-      const isScriptUrl =
-        name.endsWith('href') && attribute.value.trim().toLowerCase().startsWith('javascript:')
-      if (isEventHandler || isScriptUrl) {
-        element.removeAttribute(attribute.name)
-      }
-    }
-  }
-
-  return root
 }
 
 
@@ -264,8 +224,7 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
   // Mermaid diagrams: the build-time renderer leaves ```mermaid fences as
   // <pre class="mermaid"> (shiki has no grammar for them), and the library
   // is loaded here — lazily, client-only, and only on pages that have one.
-  // The bail-out above the import is what keeps the ~1 MB chunk off every
-  // other docs page; vite.config.ts keeps it out of the SSR bundle.
+  // The bail-out below is what keeps the request off every other docs page.
   useEffect(() => {
     if (!doc) return
 
@@ -299,29 +258,30 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
       // Re-query rather than reusing `blocks`: hydration can replace the
       // rendered-markdown subtree between the effect firing and the script
       // arriving, which would leave us writing into detached nodes.
-      const live = container.querySelectorAll<HTMLPreElement>('pre.mermaid')
+      const live = [...container.querySelectorAll<HTMLPreElement>('pre.mermaid')]
 
       for (const pre of live) {
-        // Rendering replaces the fence body with an <svg>, so the source is
-        // stashed on first pass — a theme toggle re-renders from it.
+        // run() reads each element's own text and replaces it in place, so
+        // the source is stashed on first pass and restored here — a theme
+        // toggle re-renders from the fence body rather than from an <svg>.
         const source = pre.dataset.mermaidSource ?? pre.textContent ?? ''
         pre.dataset.mermaidSource = source
+        pre.textContent = source
+        pre.removeAttribute('data-processed')
+      }
 
-        try {
-          mermaidRenderSeq += 1
-          const { svg } = await mermaid.render(`docs-mermaid-${mermaidRenderSeq}`, source)
-          if (cancelled) return
-          const node = parseSvg(svg)
-          if (!node) {
-            console.error('mermaid returned no <svg> root')
-            continue
-          }
-          pre.replaceChildren(document.importNode(node, true))
-          pre.dataset.mermaidRendered = 'true'
-        } catch (error) {
-          console.error('Failed to render mermaid diagram', error)
-          pre.textContent = source
-        }
+      try {
+        // Letting mermaid own the DOM write keeps diagram text from ever
+        // being reinterpreted as markup by this component.
+        await mermaid.run({ nodes: live })
+      } catch (error) {
+        console.error('Failed to render mermaid diagrams', error)
+        return
+      }
+      if (cancelled) return
+
+      for (const pre of live) {
+        if (pre.querySelector('svg')) pre.dataset.mermaidRendered = 'true'
       }
     })()
 
