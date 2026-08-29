@@ -28,6 +28,7 @@ export type {
   RouteMiddlewareInput,
   RouteModelBinding,
   RouteOpenApiMetadata,
+  AgentRouteMetadata,
   ResourceAction as RouteResourceAction,
   ResourceResponseHint,
   ResourceResponseShape,

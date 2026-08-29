@@ -188,6 +188,8 @@ export interface RouteContractOptions<
    * and expose the record to the controller via `this.model(Post)`.
    */
   bind?: Record<string, RouteModelBinding>
+  /** Agent exposure metadata (RFC 0016). See {@link AgentRouteMetadata}. */
+  agent?: AgentRouteMetadata
 }
 
 export interface RouteOpenApiMetadata {
@@ -196,6 +198,51 @@ export interface RouteOpenApiMetadata {
   tags?: string[]
   operationId?: string
   deprecated?: boolean
+}
+
+/**
+ * Agent exposure metadata for a route (RFC 0016). Declaring it marks the
+ * route as an agent tool; everything else about the tool — its input schema,
+ * output schema, authorization — is derived from the contracts the route
+ * already carries, never restated here.
+ *
+ * Storage only: no defaults are applied at registration. Derivation
+ * (`deriveAgentTools`) resolves the tool description from this metadata or
+ * the route's OpenAPI metadata, the tool name from `toolName` or the route
+ * name, and the MCP annotation defaults from the HTTP method. A route needs
+ * a `.name()` to become a tool — the name is the tool's identity — but that
+ * is enforced by `guren check`, not here, because `.agent()` may legally be
+ * chained before `.name()`.
+ */
+export interface AgentRouteMetadata {
+  /** Tool description. Falls back to OpenAPI `description` ?? `summary` at derivation. */
+  description?: string
+  /** Tool name override. Defaults to the route name, used verbatim. */
+  toolName?: string
+  /** Protocol surfaces this tool appears on. Both default true at derivation. */
+  expose?: { mcp?: boolean; webMcp?: boolean }
+  /** MCP ToolAnnotations overrides; defaults derive from the HTTP method. */
+  readOnlyHint?: boolean
+  destructiveHint?: boolean
+  idempotentHint?: boolean
+  /** Route invocations through an agent surface require server-side approval. */
+  approval?: 'required'
+  /** Argument fields masked in agent audit logs. */
+  redact?: string[]
+}
+
+/**
+ * One immutable snapshot of agent metadata. Taken when the metadata is
+ * attached and again when `definitions()` hands it out, so neither a caller
+ * mutating its options object after registration nor a consumer mutating a
+ * definition can change what the router actually holds (the same rule the
+ * authorization stamps follow).
+ */
+function cloneAgentMetadata(metadata: AgentRouteMetadata): AgentRouteMetadata {
+  const clone: AgentRouteMetadata = { ...metadata }
+  if (metadata.expose) clone.expose = { ...metadata.expose }
+  if (metadata.redact) clone.redact = [...metadata.redact]
+  return clone
 }
 
 interface RegisteredRoute {
@@ -217,6 +264,7 @@ interface RegisteredRoute {
   resource?: ResourceResponseHint
   openapi?: RouteOpenApiMetadata
   bindings?: Map<string, ModelBinding>
+  agent?: AgentRouteMetadata
 }
 
 /**
@@ -263,6 +311,11 @@ export interface RouteDefinition {
   }
   /** Route model bindings: param name → bound model class name (from `bind`) */
   bindings?: Record<string, string>
+  /**
+   * Agent exposure metadata as declared (RFC 0016) — raw, no defaults
+   * applied. Absence means the route is not an agent tool.
+   */
+  agent?: AgentRouteMetadata
   summary?: string
   description?: string
   tags?: string[]
@@ -279,6 +332,8 @@ export interface RouteBuilder<M extends string = never> {
   name(routeName: string): RouteBuilder<M>
   /** Attach middleware to this specific route. See {@link RouteMiddlewareInput}. */
   middleware(...items: RouteMiddlewareInput<M>[]): RouteBuilder<M>
+  /** Expose this route as an agent tool (RFC 0016). See {@link AgentRouteMetadata}. */
+  agent(metadata: AgentRouteMetadata): RouteBuilder<M>
 }
 
 /**
@@ -357,6 +412,14 @@ export interface ResourceRouteOptions {
   param?: string
   only?: ResourceAction[]
   except?: ResourceAction[]
+  /**
+   * Per-action agent exposure (RFC 0016). An action not listed here is not
+   * exposed as a tool — deny by default, no `destroy: false` spelling needed.
+   * Listing an action this call does not register (excluded via `only`/
+   * `except`, or missing from the controller) throws: metadata for a tool
+   * that cannot exist is a wiring mistake, not a no-op.
+   */
+  agent?: Partial<Record<ResourceAction, AgentRouteMetadata>>
 }
 
 /**
@@ -639,7 +702,8 @@ export class Router<M extends string = never> {
   ): this {
     const baseName = options.name ?? path.replace(/^\//u, '').replace(/\//gu, '.')
     const paramName = options.param ?? 'id'
-    const { only, except } = options
+    const { only, except, agent } = options
+    const registered = new Set<ResourceAction>()
 
     for (const { method, suffix, httpMethod } of RESOURCE_ACTIONS) {
       if (only && !only.includes(method)) continue
@@ -649,7 +713,24 @@ export class Router<M extends string = never> {
       const routePath = path + actualSuffix
 
       if (typeof (controller.prototype as Record<string, unknown>)[method] === 'function') {
-        this[httpMethod](routePath, [controller, method as ControllerMethodFor<C>]).name(`${baseName}.${method}`)
+        const builder = this[httpMethod](routePath, [controller, method as ControllerMethodFor<C>]).name(`${baseName}.${method}`)
+        registered.add(method)
+
+        const agentMetadata = agent?.[method]
+        if (agentMetadata) {
+          builder.agent(agentMetadata)
+        }
+      }
+    }
+
+    if (agent) {
+      const orphaned = Object.keys(agent).filter((action) => !registered.has(action as ResourceAction))
+      if (orphaned.length > 0) {
+        throw new Error(
+          `Router.resource('${path}'): agent metadata declared for ${orphaned.map((a) => `"${a}"`).join(', ')}, `
+            + 'but no such route was registered (excluded via only/except, or missing from the controller). '
+            + 'Agent metadata for a tool that cannot exist is a wiring mistake.',
+        )
       }
     }
 
@@ -683,12 +764,13 @@ export class Router<M extends string = never> {
   }
 
   definitions(): RouteDefinition[] {
-    return this.registry.map(({ method, path, name, schemas, resource, openapi, routeMiddlewareNames, middlewares, scopedMiddlewares, handler, bindings }) => ({
+    return this.registry.map(({ method, path, name, schemas, resource, openapi, routeMiddlewareNames, middlewares, scopedMiddlewares, handler, bindings, agent }) => ({
       method,
       path,
       name,
       schemas,
       resource: serializeResourceHint(resource),
+      agent: agent ? cloneAgentMetadata(agent) : undefined,
       middlewareNames: [...routeMiddlewareNames],
       // Route-local only, so a group-scoped handler does not make every route
       // in the group report middleware it never attached (`guren audit` warns
@@ -867,6 +949,9 @@ function applyRouteContract(route: RegisteredRoute, options: RouteContractOption
     route.bindings = new Map(
       Object.entries(options.bind).map(([param, binding]) => [param, normalizeModelBinding(binding)]),
     )
+  }
+  if (options.agent) {
+    route.agent = cloneAgentMetadata(options.agent)
   }
 }
 
@@ -1079,6 +1164,10 @@ function createRouteBuilder<M extends string = never>(route: RegisteredRoute, na
       const { names, handlers } = partitionMiddleware(items)
       route.routeMiddlewareNames.push(...names)
       route.middlewares.push(...handlers)
+      return this
+    },
+    agent(metadata: AgentRouteMetadata): RouteBuilder<M> {
+      route.agent = cloneAgentMetadata(metadata)
       return this
     },
   }
@@ -1520,6 +1609,7 @@ function isRouteContractOptions(value: unknown): value is RouteContractOptions<S
     || 'bind' in value
     || 'name' in value
     || 'middlewares' in value
+    || 'agent' in value
     || 'summary' in value
     || 'description' in value
     || 'tags' in value
