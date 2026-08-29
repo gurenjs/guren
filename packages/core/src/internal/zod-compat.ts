@@ -31,10 +31,24 @@
 
 export interface ZodSchemaLike {
   _def?: Record<string, unknown>
-  /** zod 4's internal container; `values` is its own computed set of accepted literals. */
-  _zod?: { values?: Set<unknown> }
+  /**
+   * zod 4's internal container; `values` is its own computed set of accepted
+   * literals, `def` the definition of whatever the node is (for a check entry,
+   * the check itself — see `schemaChecks`).
+   */
+  _zod?: { values?: Set<unknown>; def?: Record<string, unknown> }
   type?: string
   shape?: Record<string, ZodSchemaLike>
+}
+
+/**
+ * One entry of `_def.checks`, as zod stores it: a `check` discriminator plus
+ * whatever that kind carries (`minimum`, `value`, `inclusive`, `pattern`, …).
+ * Left open rather than modelled as a union — the kinds are zod's to add, and
+ * a reader that does not recognise one must simply ignore it.
+ */
+export interface ZodCheckDef extends Record<string, unknown> {
+  check: string
 }
 
 /**
@@ -158,6 +172,49 @@ export function enumValues(schema: ZodSchemaLike): Array<string | number> {
   }
   const entries = schema._def?.entries as Record<string, string | number> | undefined
   return entries ? Object.values(entries) : []
+}
+
+/**
+ * The refinements attached to a node (`.min()`, `.regex()`, `.multipleOf()`, …),
+ * normalized to the definition objects zod keeps at each entry's `_zod.def`.
+ *
+ * Reading through `_zod.def` rather than the entry itself is what makes the
+ * list uniform: `_def.checks` is heterogeneous by construction. A plain
+ * refinement (`z.string().min(2)`) is stored as a bare check object, while a
+ * format method (`z.string().url()`) stores the *format schema* — a full node
+ * with `parse`, `safeParse` and the rest — in the same array. Both carry the
+ * check definition at `_zod.def`, and nothing else about them is shared.
+ *
+ * Entries without a string `check` are dropped rather than passed through: a
+ * caller switches on that discriminator, so an entry that has none can only be
+ * misread.
+ */
+export function schemaChecks(schema: ZodSchemaLike): ZodCheckDef[] {
+  const checks = schema._def?.checks
+  if (!Array.isArray(checks)) {
+    return []
+  }
+
+  return checks.flatMap((entry) => {
+    const def = entry && typeof entry === 'object' ? (entry as ZodSchemaLike)._zod?.def : undefined
+    return def && typeof def.check === 'string' ? [def as ZodCheckDef] : []
+  })
+}
+
+/**
+ * The node's declared format, if it has one — `'email'` for `z.email()`,
+ * `'safeint'` for `z.int()`.
+ *
+ * This is only *half* of how zod 4 records a format, and the half a caller is
+ * likeliest to forget. The top-level constructors (`z.email()`, `z.iso.datetime()`)
+ * set `_def.format` and attach no check; the equivalent string methods
+ * (`z.string().email()`, `z.string().datetime()`) attach a `string_format`
+ * check and leave `_def.format` undefined. A reader that wants "the format of
+ * this schema" has to consult both this and `schemaChecks`.
+ */
+export function schemaFormat(schema: ZodSchemaLike): string | undefined {
+  const format = schema._def?.format
+  return typeof format === 'string' ? format : undefined
 }
 
 /** A literal's values — always the `_def.values` array in zod 4, which may hold more than one. */

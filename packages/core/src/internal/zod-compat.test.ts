@@ -12,6 +12,8 @@ import {
   pipeSides,
   PRESENCE_WRAPPERS,
   schemaAt,
+  schemaChecks,
+  schemaFormat,
   SINGLE_CHILD_WRAPPERS,
   TRANSPARENT_WRAPPERS,
   typeOf,
@@ -187,5 +189,51 @@ describe('wrapper vocabulary', () => {
     for (const [name, make] of Object.entries(build)) {
       expect(typeOf(make() as never)).toBe(name)
     }
+  })
+})
+
+describe('schemaChecks', () => {
+  // `_def.checks` is heterogeneous: a plain refinement is stored as a bare
+  // check object, while a format method stores the whole format *schema* in the
+  // same array. Both carry the check definition at `_zod.def`, and nothing else
+  // about them is shared — a reader taking the entries at face value sees two
+  // unrelated shapes.
+  test('normalizes both entry shapes to their check definitions', () => {
+    expect(schemaChecks(z.string().min(2).max(5) as never)).toEqual([
+      expect.objectContaining({ check: 'min_length', minimum: 2 }),
+      expect.objectContaining({ check: 'max_length', maximum: 5 }),
+    ])
+
+    const [format] = schemaChecks(z.string().url() as never)
+    expect(format).toMatchObject({ check: 'string_format', format: 'url' })
+  })
+
+  test('returns an empty list for a node with no checks', () => {
+    expect(schemaChecks(z.string() as never)).toEqual([])
+    expect(schemaChecks(z.object({}) as never)).toEqual([])
+  })
+
+  // A caller switches on `check`, so an entry without one can only be misread.
+  test('drops entries that carry no check discriminator', () => {
+    expect(schemaChecks({ _def: { checks: [{ _zod: { def: { minimum: 1 } } }, 'nonsense', null] } })).toEqual([])
+  })
+})
+
+describe('schemaFormat', () => {
+  // The two spellings of a format record it in different places, and a reader
+  // that consults only one silently loses half the formats an app writes.
+  test('reads the format the top-level constructors declare on the node', () => {
+    expect(schemaFormat(z.email() as never)).toBe('email')
+    expect(schemaFormat(z.iso.datetime() as never)).toBe('datetime')
+    expect(schemaFormat(z.int() as never)).toBe('safeint')
+  })
+
+  test('is undefined for the string methods, which record the format as a check', () => {
+    expect(schemaFormat(z.string().email() as never)).toBeUndefined()
+    expect(schemaChecks(z.string().email() as never)[0]).toMatchObject({ format: 'email' })
+  })
+
+  test('is undefined for a node with no format', () => {
+    expect(schemaFormat(z.string() as never)).toBeUndefined()
   })
 })

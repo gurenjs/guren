@@ -120,7 +120,13 @@ Implementation notes (the non-obvious parts):
 **One Zod → JSON Schema rule.** The existing walker in `@guren/openapi`
 (`toOpenApiSchema`, OpenAPI 3.1 = JSON Schema 2020-12) is promoted to a shared
 internal module (`packages/core/src/internal/zod-json-schema.ts`, beside
-`zod-compat.ts`); `@guren/openapi` re-exports it. As part of the promotion it learns
+`zod-compat.ts`); ~~`@guren/openapi` re-exports it~~ **Amended in implementation:**
+`@guren/openapi` *imports* it and re-exports nothing. Re-exporting would publish an
+internal module through a package's stable index, which is exactly the tier
+`contributing/api-stability.md` says it must not reach — the walker stays behind one
+deep import, and the only name `@guren/openapi` still exposes is its own
+`OpenApiSchemaObject`, now an alias of the walker's `JsonSchemaObject` (OpenAPI 3.1's
+Schema Object *is* that dialect, so one definition serves both). As part of the promotion it learns
 to carry Zod checks (`min`/`max`/`regex`/`format`) into JSON Schema constraints —
 today it drops them.
 

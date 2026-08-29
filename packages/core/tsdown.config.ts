@@ -21,5 +21,6 @@ export default defineConfig({
     'src/redis.ts',
     'src/internal/deploy-build.ts',
     'src/internal/zod-compat.ts',
+    'src/internal/zod-json-schema.ts',
   ],
 })
