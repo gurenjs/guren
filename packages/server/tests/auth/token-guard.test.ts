@@ -1,0 +1,163 @@
+import { describe, test, expect } from 'bun:test'
+import type { Context } from 'hono'
+import { TokenGuard } from '../../src/auth/TokenGuard'
+import {
+  API_TOKEN_KEY,
+  createApiToken,
+  MemoryApiTokenStore,
+  type VerifiedApiToken,
+} from '../../src/auth/api-token'
+import type { UserProvider } from '../../src/auth/types'
+
+function fakeCtx(headers: Record<string, string> = {}): Context {
+  const store = new Map<string, unknown>()
+  return {
+    req: {
+      header: (name: string) => headers[name] ?? headers[name.toLowerCase()],
+    },
+    set: (key: string, value: unknown) => {
+      store.set(key, value)
+    },
+    get: (key: string) => store.get(key),
+  } as unknown as Context
+}
+
+async function issueToken(
+  store: MemoryApiTokenStore,
+  options: { userId?: string | number; abilities?: string[]; expiresIn?: number | null } = {},
+) {
+  return createApiToken(store, {
+    name: 'test-token',
+    userId: options.userId ?? 42,
+    abilities: options.abilities,
+    expiresIn: options.expiresIn,
+  })
+}
+
+describe('TokenGuard', () => {
+  test('should authenticate a request with a valid bearer token', async () => {
+    const store = new MemoryApiTokenStore()
+    const { plainTextToken } = await issueToken(store)
+    const ctx = fakeCtx({ Authorization: `Bearer ${plainTextToken}` })
+
+    const guard = new TokenGuard({ store, ctx })
+
+    expect(await guard.check()).toBe(true)
+    expect(await guard.guest()).toBe(false)
+    expect(await guard.id()).toBe(42)
+  })
+
+  test('should resolve a minimal { id } user without a provider', async () => {
+    const store = new MemoryApiTokenStore()
+    const { plainTextToken } = await issueToken(store, { userId: 'user-7' })
+    const ctx = fakeCtx({ Authorization: `Bearer ${plainTextToken}` })
+
+    const guard = new TokenGuard({ store, ctx })
+
+    expect(await guard.user<{ id: string }>()).toEqual({ id: 'user-7' })
+  })
+
+  test('should expose the verification result via API_TOKEN_KEY on the context', async () => {
+    const store = new MemoryApiTokenStore()
+    const { plainTextToken, token } = await issueToken(store, { abilities: ['posts.store'] })
+    const ctx = fakeCtx({ Authorization: `Bearer ${plainTextToken}` })
+
+    const guard = new TokenGuard({ store, ctx })
+    await guard.check()
+
+    const stored = ctx.get(API_TOKEN_KEY) as VerifiedApiToken
+    expect(stored.token.id).toBe(token.id)
+    expect(stored.abilities).toEqual(['posts.store'])
+  })
+
+  test('should treat a request without an Authorization header as a guest', async () => {
+    const guard = new TokenGuard({ store: new MemoryApiTokenStore(), ctx: fakeCtx() })
+
+    expect(await guard.check()).toBe(false)
+    expect(await guard.user()).toBeNull()
+    expect(await guard.id()).toBeNull()
+  })
+
+  test('should reject an unknown token', async () => {
+    const store = new MemoryApiTokenStore()
+    await issueToken(store)
+    const ctx = fakeCtx({ Authorization: 'Bearer 0123|not-a-real-token' })
+
+    const guard = new TokenGuard({ store, ctx })
+    expect(await guard.check()).toBe(false)
+  })
+
+  test('should reject an expired token', async () => {
+    const store = new MemoryApiTokenStore()
+    const { plainTextToken } = await issueToken(store, { expiresIn: -1_000 })
+    const ctx = fakeCtx({ Authorization: `Bearer ${plainTextToken}` })
+
+    const guard = new TokenGuard({ store, ctx })
+    expect(await guard.check()).toBe(false)
+  })
+
+  test('should load and sanitize the user through a provider', async () => {
+    const store = new MemoryApiTokenStore()
+    const { plainTextToken } = await issueToken(store, { userId: 42 })
+    const ctx = fakeCtx({ Authorization: `Bearer ${plainTextToken}` })
+
+    const provider: UserProvider<{ id: number; name: string; passwordHash?: string }> = {
+      retrieveById: async (id) => ({ id: Number(id), name: 'Alice', passwordHash: 'secret' }),
+      retrieveByCredentials: async () => null,
+      validateCredentials: async () => false,
+      getId: (user) => user.id,
+      sanitize: ({ passwordHash: _stripped, ...rest }) => rest,
+    }
+
+    const guard = new TokenGuard({ store, ctx, provider })
+
+    expect(await guard.user<{ id: number; name: string }>()).toEqual({ id: 42, name: 'Alice' })
+  })
+
+  test('should return null when the provider cannot find the user', async () => {
+    const store = new MemoryApiTokenStore()
+    const { plainTextToken } = await issueToken(store)
+    const ctx = fakeCtx({ Authorization: `Bearer ${plainTextToken}` })
+
+    const provider: UserProvider<{ id: number }> = {
+      retrieveById: async () => null,
+      retrieveByCredentials: async () => null,
+      validateCredentials: async () => false,
+      getId: (user) => user.id,
+    }
+
+    const guard = new TokenGuard({ store, ctx, provider })
+    expect(await guard.user()).toBeNull()
+  })
+
+  test('logout should revoke the presented token', async () => {
+    const store = new MemoryApiTokenStore()
+    const { plainTextToken, token } = await issueToken(store)
+    const ctx = fakeCtx({ Authorization: `Bearer ${plainTextToken}` })
+
+    const guard = new TokenGuard({ store, ctx })
+    expect(await guard.check()).toBe(true)
+
+    await guard.logout()
+
+    expect(await guard.check()).toBe(false)
+    expect(await store.findByHashedToken(token.hashedToken)).toBeNull()
+
+    // A fresh guard (new request) must also reject the revoked token.
+    const nextGuard = new TokenGuard({ store, ctx: fakeCtx({ Authorization: `Bearer ${plainTextToken}` }) })
+    expect(await nextGuard.check()).toBe(false)
+  })
+
+  test('should throw for credential-based flows', async () => {
+    const guard = new TokenGuard({ store: new MemoryApiTokenStore(), ctx: fakeCtx() })
+
+    expect(guard.login()).rejects.toThrow('does not support login')
+    expect(guard.attempt({})).rejects.toThrow('does not support attempt')
+    expect(guard.validate({})).rejects.toThrow('does not support validate')
+  })
+
+  test('session should be undefined', async () => {
+    const guard = new TokenGuard({ store: new MemoryApiTokenStore(), ctx: fakeCtx() })
+    expect(guard.session()).toBeUndefined()
+  })
+})

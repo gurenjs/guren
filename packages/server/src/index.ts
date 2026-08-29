@@ -77,6 +77,7 @@ export { FormRequest } from './http/FormRequest'
 export {
   AuthManager,
   SessionGuard,
+  TokenGuard,
   ModelUserProvider,
   BaseUserProvider,
   AuthenticatableModel,
@@ -154,6 +155,8 @@ export type {
   CreateApiTokenOptions,
   CreateApiTokenResult,
   BearerTokenMiddlewareOptions,
+  VerifiedApiToken,
+  TokenGuardOptions,
   OAuthProviderConfig,
   OAuthTokenResult,
   OAuthUserProfile,

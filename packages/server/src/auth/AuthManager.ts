@@ -4,6 +4,8 @@ import { getSessionFromContext } from '../http/middleware/session'
 import { RequestAuthContext } from './RequestAuthContext'
 import { ModelUserProvider, type ModelUserProviderOptions } from './providers/ModelUserProvider'
 import { SessionGuard } from './SessionGuard'
+import { TokenGuard } from './TokenGuard'
+import type { ApiTokenStore } from './api-token'
 import { ScryptHasher } from './password/ScryptHasher'
 import type {
   AttachContextOptions,
@@ -33,6 +35,7 @@ export class AuthManager implements AuthManagerContract {
   private readonly guards = new Map<string, GuardRegistryEntry>()
   private readonly providers = new Map<string, ProviderRegistryEntry<any>>()
   private defaultGuard: string
+  private tokenGuard: string | null = null
 
   constructor(options: AuthManagerOptions = {}) {
     this.defaultGuard = options.defaultGuard ?? DEFAULT_GUARD
@@ -88,25 +91,38 @@ export class AuthManager implements AuthManagerContract {
     return this.defaultGuard
   }
 
-  createAuthContext(ctx: Context, options: AttachContextOptions = {}): AuthContext {
-    const guardName = options.guard ?? this.defaultGuard
+  /**
+   * The guard name an unqualified `auth.guard()` / `auth.user()` call resolves
+   * to for this request. Explicit names always win; otherwise a registered
+   * token guard is selected when the request carries a Bearer Authorization
+   * header, falling back to the default (session) guard. This is the
+   * composite-guard rule from RFC 0016: session- and token-authenticated
+   * requests flow through the same auth surface without configuration.
+   */
+  resolveGuardName(ctx: Context, name?: string): string {
+    if (name) return name
+    if (this.tokenGuard && hasBearerHeader(ctx)) return this.tokenGuard
+    return this.defaultGuard
+  }
 
+  createAuthContext(ctx: Context, options: AttachContextOptions = {}): AuthContext {
     // Resolve the session lazily (at first guard use, not at attach time) so
     // the auth context can be attached anywhere in the middleware chain —
     // including before the session middleware — as long as the session
     // middleware has run by the time an auth method is actually called.
     const resolveSession = () => getSessionFromContext(ctx)
 
+    const resolveName = (name?: string) => this.resolveGuardName(ctx, name ?? options.guard)
+
     const guardFactory = (name?: string) => {
-      const targetName = name ?? guardName
-      return this.createGuard(targetName, {
+      return this.createGuard(resolveName(name), {
         ctx,
         session: resolveSession(),
         manager: this,
       })
     }
 
-    return new RequestAuthContext(this, ctx, resolveSession, guardFactory)
+    return new RequestAuthContext({ resolveName }, ctx, resolveSession, guardFactory)
   }
 
   async attempt(name: string, ctx: Context, credentials: AuthCredentials, remember?: boolean): Promise<boolean> {
@@ -148,6 +164,43 @@ export class AuthManager implements AuthManagerContract {
 
     this.setDefaultGuard(guardName)
   }
+
+  /**
+   * Register a bearer-token guard backed by an ApiTokenStore and enable
+   * header-based guard selection: requests carrying `Authorization: Bearer`
+   * resolve to this guard, everything else keeps the default (session)
+   * guard. The default guard itself is unchanged — session apps keep
+   * working exactly as before.
+   *
+   * @param store - Where issued tokens live (see createApiToken)
+   * @param options.provider - Registered provider name used to load the full
+   *   user record from the token's userId. Without it, `auth.user()` resolves
+   *   to a minimal `{ id }` record (enough for Gate/policy evaluation).
+   * @param options.guardName - Guard registry name (defaults to 'token')
+   */
+  useTokens(
+    store: ApiTokenStore,
+    options: { provider?: string; guardName?: string; updateLastUsed?: boolean } = {},
+  ): void {
+    const guardName = options.guardName ?? 'token'
+
+    this.registerGuard(guardName, ({ ctx, manager }) => {
+      const provider = options.provider ? manager.getProvider(options.provider) : undefined
+      return new TokenGuard({
+        store,
+        ctx,
+        provider,
+        updateLastUsed: options.updateLastUsed,
+      })
+    })
+
+    this.tokenGuard = guardName
+  }
+}
+
+function hasBearerHeader(ctx: Context): boolean {
+  const header = ctx.req.header('Authorization')
+  return header !== undefined && /^Bearer\s+/i.test(header)
 }
 
 export type { AuthCredentials } from './types'

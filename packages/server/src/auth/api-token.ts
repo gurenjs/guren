@@ -250,11 +250,21 @@ export function parseApiToken(plainTextToken: string): { id: string; token: stri
  * console.log(`User ${result.userId} authenticated with abilities:`, result.abilities)
  * ```
  */
+/**
+ * The result of a successful bearer-token verification: the stored token
+ * record plus the fields most callers need directly.
+ */
+export interface VerifiedApiToken {
+  token: ApiToken
+  userId: string | number
+  abilities: string[]
+}
+
 export async function verifyApiToken(
   plainTextToken: string,
   store: ApiTokenStore,
   options: { updateLastUsed?: boolean } = {}
-): Promise<{ token: ApiToken; userId: string | number; abilities: string[] } | null> {
+): Promise<VerifiedApiToken | null> {
   const { updateLastUsed = true } = options
 
   const parsed = parseApiToken(plainTextToken)

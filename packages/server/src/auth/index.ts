@@ -1,5 +1,7 @@
 export { AuthManager } from './AuthManager'
 export { SessionGuard } from './SessionGuard'
+export { TokenGuard } from './TokenGuard'
+export type { TokenGuardOptions } from './TokenGuard'
 export { BaseUserProvider } from './providers/UserProvider'
 export { ModelUserProvider } from './providers/ModelUserProvider'
 export { ScryptHasher } from './password/ScryptHasher'
@@ -74,6 +76,7 @@ export type {
   CreateApiTokenOptions,
   CreateApiTokenResult,
   BearerTokenMiddlewareOptions,
+  VerifiedApiToken,
 } from './api-token'
 export type {
   OAuthProviderConfig,

@@ -11,6 +11,8 @@ import type {
   ResponseBuilder,
 } from './types'
 import { AuthorizationException, HttpException } from '../errors'
+import { AUTH_CONTEXT_KEY } from '../http/middleware/auth'
+import type { AuthContext } from '../auth/types'
 
 /**
  * Response builder for authorization checks.
@@ -197,7 +199,20 @@ export class Gate {
       return this.userResolver(ctx)
     }
 
-    // Try to get user from context
+    // Prefer the framework auth context (guren:auth) so every guard —
+    // session or bearer token — reaches policy evaluation through the same
+    // path (RFC 0016). The legacy ctx.get('user') fallback stays for apps
+    // that set the user manually, but it no longer shadows real auth.
+    // Duck-typed on purpose: test doubles and exotic contexts may return
+    // arbitrary values for unknown keys.
+    const auth = ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
+    if (auth && typeof auth.user === 'function') {
+      const authUser = (await auth.user()) as AuthUser | null
+      if (authUser) {
+        return authUser
+      }
+    }
+
     const user = ctx.get('user') as AuthUser | undefined
     return user ?? null
   }

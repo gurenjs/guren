@@ -9,14 +9,19 @@ export class RequestAuthContext implements AuthContext {
   private readonly guardCache = new Map<string, Guard<unknown>>()
 
   constructor(
-    private readonly manager: { getDefaultGuard(): string },
+    private readonly manager: { resolveName(name?: string): string },
     private readonly ctx: Context,
     private readonly resolveSession: () => Session | undefined,
     private readonly resolveGuard: GuardResolver,
   ) {}
 
   guard<T = unknown>(name?: string): Guard<T> {
-    const key = name ?? this.manager.getDefaultGuard()
+    // The cache key is the *effective* guard name, not the requested one:
+    // with header-based selection (AuthManager.resolveGuardName) an
+    // unqualified guard() may resolve to the token guard, and caching that
+    // under the default guard's name would hand it back to an explicit
+    // guard('web') call later in the same request.
+    const key = this.manager.resolveName(name)
     if (!this.guardCache.has(key)) {
       const guard = this.resolveGuard(name)
       this.guardCache.set(key, guard)
