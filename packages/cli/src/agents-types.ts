@@ -65,10 +65,12 @@ export interface GenerateAgentTypesOptions extends WriterOptions {
  * scan over the same route files the path checks read: `.agent(` for the
  * builder, `agent:` for the route-contract and `resource()` option keys.
  *
- * It errs toward "no": a false negative costs a missing warning about a
- * manifest codegen would have written anyway, while a false positive nags an
- * app that has no tools. Deliberately not a substitute for the derivation —
- * nothing decides *exposure* from this.
+ * A string scan is wrong in both directions and cheap in both: `agent:` inside
+ * a comment or a string reads as a declaration (a spurious "manifest missing"
+ * warning), and metadata reaching a route through an options object built
+ * elsewhere does not (a warning that never fires for a manifest codegen writes
+ * anyway). Neither costs correctness, because nothing decides *exposure* from
+ * this — that is `deriveAgentTools()`, over the real route graph.
  */
 export async function appDeclaresAgentRoutes(cwd: string, routesFile?: string): Promise<boolean> {
   const files = await discoverRoutePathFiles(cwd, routesFile)
