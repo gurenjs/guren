@@ -3,6 +3,7 @@ import type { Middleware } from '../http/middleware'
 import type { AuthUser, AuthorizeOptions, AuthorizeResourceOptions } from './types'
 import { Gate, getGate, denialToException } from './Gate'
 import { AuthorizationException } from '../errors'
+import { stampCapabilities } from '../http/middleware/capabilities'
 
 /**
  * Middleware to authorize an ability.
@@ -24,7 +25,7 @@ export function authorizeMiddleware(
   modelResolver?: (ctx: Context) => unknown | Promise<unknown>,
   options: AuthorizeOptions = {}
 ): Middleware {
-  return async (ctx, next) => {
+  return stampCapabilities(async (ctx, next) => {
     const gate = getGate()
     const user = await gate.resolveUser(ctx)
     const gateForUser = gate.forUser(user)
@@ -47,7 +48,13 @@ export function authorizeMiddleware(
     }
 
     await next()
-  }
+  }, {
+    // Mirrors the runtime branch above: an array is an any-of check, a
+    // single ability is the one that has to hold.
+    authorization: Array.isArray(ability)
+      ? { abilities: [...ability], mode: 'any' }
+      : { abilities: [ability], mode: 'all' },
+  })
 }
 
 /**
@@ -58,7 +65,7 @@ export function authorizeAllMiddleware(
   modelResolver?: (ctx: Context) => unknown | Promise<unknown>,
   options: AuthorizeOptions = {}
 ): Middleware {
-  return async (ctx, next) => {
+  return stampCapabilities(async (ctx, next) => {
     const gate = getGate()
     const user = await gate.resolveUser(ctx)
     const gateForUser = gate.forUser(user)
@@ -73,7 +80,7 @@ export function authorizeAllMiddleware(
     }
 
     await next()
-  }
+  }, { authorization: { abilities: [...abilities], mode: 'all' } })
 }
 
 // HTTP method → policy ability. QUERY (RFC 10008) is safe like GET, so it
@@ -88,6 +95,21 @@ const RESOURCE_ABILITY_BY_METHOD: Record<string, string> = {
   PUT: 'update',
   PATCH: 'update',
   DELETE: 'delete',
+}
+
+/**
+ * The ability `authorizeResourceMiddleware` checks for an HTTP method, or
+ * `undefined` for a method it refuses to guess at (which the middleware
+ * denies). This is the single source of the verb → ability mapping: a
+ * consumer resolving a route's ability from its stamped
+ * `authorization.resource` capability calls this rather than restating the
+ * table, and may only do so when `resource.fromMethodMap` is true.
+ *
+ * Not re-exported from the package root — like the capability stamp itself
+ * (RFC 0007), this is an internal contract until a public consumer needs it.
+ */
+export function resourceAbilityForMethod(method: string): string | undefined {
+  return RESOURCE_ABILITY_BY_METHOD[method.toUpperCase()]
 }
 
 /**
@@ -116,7 +138,7 @@ export function authorizeResourceMiddleware(
   modelResolver: (ctx: Context) => unknown | Promise<unknown>,
   options: AuthorizeResourceOptions = {}
 ): Middleware {
-  return async (ctx, next) => {
+  return stampCapabilities(async (ctx, next) => {
     const method = ctx.req.method.toUpperCase()
     const ability = options.abilityFor?.(method) ?? RESOURCE_ABILITY_BY_METHOD[method]
 
@@ -136,7 +158,18 @@ export function authorizeResourceMiddleware(
     }
 
     await next()
-  }
+  }, {
+    // The ability is only known once a request arrives. `abilityFor` is
+    // consulted *before* the verb map and wins for standard methods too, so
+    // its presence makes the map non-authoritative for this route — say so
+    // rather than letting a consumer report the mapped ability for a check
+    // that never uses it.
+    authorization: {
+      abilities: [],
+      mode: 'all',
+      resource: { fromMethodMap: options.abilityFor === undefined },
+    },
+  })
 }
 
 /**

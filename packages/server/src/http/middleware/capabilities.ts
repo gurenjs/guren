@@ -17,6 +17,37 @@ export const CAPABILITIES = Symbol.for('guren.capabilities')
 
 export interface MiddlewareCapabilities {
   authentication?: { mode: 'required' | 'guest-only' }
+  /**
+   * Authorization enforced by the chain (RFC 0016 §4): what makes
+   * route → ability derivable without reading controller bodies.
+   *
+   * - `abilities` — the ability names checked, in the order the chain
+   *   checks them. Empty when every check derives its ability at request
+   *   time (see `resource`).
+   * - `mode` — how they combine. `'all'` every listed ability must pass,
+   *   `'any'` at least one must. `'mixed'` means the chain carries more
+   *   than one check and the conjunction of them is not expressible as
+   *   either: authorization is present, but the ability is *not* cleanly
+   *   derivable, and a consumer must treat it as undetermined rather than
+   *   picking a name out of `abilities`. Note `mode` alone does not say
+   *   whether one ability is derivable: `authorizeMiddleware('update')`
+   *   reports `'all'` and `authorizeMiddleware(['update'])` reports
+   *   `'any'`, and both are equally derivable — key on
+   *   `abilities.length === 1`, not on the mode.
+   * - `resource` — present when a check resolves its ability from the
+   *   request method (`authorizeResourceMiddleware`). `fromMethodMap: true`
+   *   means the built-in verb map decides, so a consumer holding the
+   *   route's method resolves the ability through
+   *   `resourceAbilityForMethod()` in `../../authorization/middleware`.
+   *   `false` means an `abilityFor` callback overrides that map and the
+   *   real ability is unknowable statically — fail closed, do not fall
+   *   back to the verb map.
+   */
+  authorization?: {
+    abilities: string[]
+    mode: 'all' | 'any' | 'mixed'
+    resource?: { fromMethodMap: boolean }
+  }
 }
 
 export function stampCapabilities(

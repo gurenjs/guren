@@ -872,6 +872,148 @@ describe('Router capability aggregation', () => {
   })
 })
 
+describe('Router authorization capabilities (RFC 0016)', () => {
+  const resolver = () => ({ id: 1 })
+
+  it('reports a single ability from authorizeMiddleware', async () => {
+    const { authorizeMiddleware } = await import('../../src/authorization/middleware')
+
+    const router = new Router()
+    router.put('/posts/:id', () => 'ok', authorizeMiddleware('update', resolver))
+
+    expect(router.definitions()[0]!.capabilities).toEqual({
+      authorization: { abilities: ['update'], mode: 'all' },
+    })
+  })
+
+  it('reports an ability list as any-of, and authorizeAll as all-of', async () => {
+    const { authorizeMiddleware, authorizeAllMiddleware } = await import('../../src/authorization/middleware')
+
+    const router = new Router()
+    router.get('/dashboard', () => 'ok', authorizeMiddleware(['admin', 'moderator']))
+    router.post('/reports', () => 'ok', authorizeAllMiddleware(['admin', 'billing']))
+
+    const defs = router.definitions()
+    expect(defs[0]!.capabilities?.authorization).toEqual({
+      abilities: ['admin', 'moderator'],
+      mode: 'any',
+    })
+    expect(defs[1]!.capabilities?.authorization).toEqual({
+      abilities: ['admin', 'billing'],
+      mode: 'all',
+    })
+  })
+
+  it('marks the resource variant as method-derived and resolves through the one verb map', async () => {
+    const { authorizeResourceMiddleware, resourceAbilityForMethod } = await import(
+      '../../src/authorization/middleware'
+    )
+
+    const router = new Router()
+    router.put('/posts/:id', () => 'ok', authorizeResourceMiddleware(resolver))
+
+    const [def] = router.definitions()
+    expect(def!.capabilities?.authorization).toEqual({
+      abilities: [],
+      mode: 'all',
+      resource: { fromMethodMap: true },
+    })
+
+    // A consumer holding the route's method derives the ability from the
+    // exported map rather than restating it.
+    expect(resourceAbilityForMethod(def!.method)).toBe('update')
+    expect(resourceAbilityForMethod('get')).toBe('view')
+    expect(resourceAbilityForMethod('PURGE')).toBeUndefined()
+  })
+
+  it('clears fromMethodMap when abilityFor overrides the verb map', async () => {
+    const { authorizeResourceMiddleware } = await import('../../src/authorization/middleware')
+
+    const router = new Router()
+    router.delete(
+      '/posts/:id',
+      () => 'ok',
+      // Legal and consulted *before* the map, so the mapped 'delete' would
+      // be a lie about what this route checks.
+      authorizeResourceMiddleware(resolver, {
+        abilityFor: (method) => (method === 'DELETE' ? 'archive' : undefined),
+      }),
+    )
+
+    expect(router.definitions()[0]!.capabilities?.authorization?.resource).toEqual({
+      fromMethodMap: false,
+    })
+  })
+
+  it('carries authorization stamps through aliases and groups alongside authentication', async () => {
+    const { authorizeMiddleware } = await import('../../src/authorization/middleware')
+    const { requireAuthenticated } = await import('../../src/http/middleware/auth')
+
+    const router = new Router<'auth' | 'can-update' | 'editor'>()
+    router.aliasMiddleware('auth', requireAuthenticated())
+    router.aliasMiddleware('can-update', authorizeMiddleware('update', resolver))
+    router.groupMiddleware('editor', ['auth', 'can-update'])
+    router.patch('/posts/:id', () => 'ok').middleware('editor')
+
+    expect(router.definitions()[0]!.capabilities).toEqual({
+      authentication: { mode: 'required' },
+      authorization: { abilities: ['update'], mode: 'all' },
+    })
+  })
+
+  it('reports two combined checks as mixed when they are not both all-of', async () => {
+    const { authorizeMiddleware, authorizeAllMiddleware } = await import('../../src/authorization/middleware')
+
+    const router = new Router()
+    router.post(
+      '/mixed',
+      () => 'ok',
+      authorizeMiddleware(['admin', 'moderator']),
+      authorizeAllMiddleware(['billing']),
+    )
+    router.post('/all', () => 'ok', authorizeMiddleware('update'), authorizeAllMiddleware(['billing']))
+
+    const defs = router.definitions()
+    expect(defs[0]!.capabilities?.authorization).toEqual({
+      abilities: ['admin', 'moderator', 'billing'],
+      mode: 'mixed',
+    })
+    expect(defs[1]!.capabilities?.authorization).toEqual({
+      abilities: ['update', 'billing'],
+      mode: 'all',
+    })
+  })
+
+  it('absorbs a repeated handler once instead of degrading its mode', async () => {
+    const { authorizeMiddleware } = await import('../../src/authorization/middleware')
+
+    const anyOf = authorizeMiddleware(['admin', 'moderator'])
+    const router = new Router()
+    router.post('/twice', () => 'ok', anyOf, anyOf)
+
+    expect(router.definitions()[0]!.capabilities?.authorization).toEqual({
+      abilities: ['admin', 'moderator'],
+      mode: 'any',
+    })
+  })
+
+  it('does not leak the aggregate back into the stamp', async () => {
+    const { authorizeMiddleware } = await import('../../src/authorization/middleware')
+    const { capabilitiesOf } = await import('../../src/http/middleware/capabilities')
+
+    const handler = authorizeMiddleware('update', resolver)
+    const router = new Router()
+    router.post('/a', () => 'ok', handler, authorizeMiddleware('publish'))
+
+    expect(router.definitions()[0]!.capabilities?.authorization?.abilities).toEqual([
+      'update',
+      'publish',
+    ])
+    // The handler's own stamp is untouched by aggregation.
+    expect(capabilitiesOf(handler)?.authorization?.abilities).toEqual(['update'])
+  })
+})
+
 describe('Router QUERY method (RFC 10008)', () => {
   it('query() registers a QUERY route with contract metadata', () => {
     const body = z.object({ q: z.string().min(1) })

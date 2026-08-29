@@ -785,14 +785,48 @@ export class Router<M extends string = never> {
   ): MiddlewareCapabilities {
     const aggregated: MiddlewareCapabilities = {}
     const visited = seen ?? new Set<string>()
+    // The same handler can legitimately appear twice in one chain (a scoped
+    // middleware also passed inline). Absorbing its stamp twice would read
+    // as two independent checks and degrade an 'any' to 'mixed', so each
+    // stamp object contributes once.
+    const absorbed = new Set<MiddlewareCapabilities>()
 
     const absorb = (capabilities: MiddlewareCapabilities | undefined): void => {
-      const auth = capabilities?.authentication
-      if (!auth) return
-      // 'required' wins: a route that both requires auth and (oddly)
-      // requires guest is reported as requiring auth.
-      if (!aggregated.authentication || auth.mode === 'required') {
-        aggregated.authentication = auth
+      if (!capabilities || absorbed.has(capabilities)) return
+      absorbed.add(capabilities)
+
+      const auth = capabilities.authentication
+      if (auth) {
+        // 'required' wins: a route that both requires auth and (oddly)
+        // requires guest is reported as requiring auth.
+        if (!aggregated.authentication || auth.mode === 'required') {
+          aggregated.authentication = auth
+        }
+      }
+
+      const authz = capabilities.authorization
+      if (authz) {
+        const current = aggregated.authorization
+        if (!current) {
+          aggregated.authorization = {
+            abilities: [...authz.abilities],
+            mode: authz.mode,
+            ...(authz.resource ? { resource: { ...authz.resource } } : {}),
+          }
+        } else {
+          // Two checks on one chain are a conjunction. Only all-of + all-of
+          // stays expressible; anything else is 'mixed' — present, but with
+          // no single ability a consumer may name.
+          for (const ability of authz.abilities) {
+            if (!current.abilities.includes(ability)) current.abilities.push(ability)
+          }
+          current.mode = current.mode === 'all' && authz.mode === 'all' ? 'all' : 'mixed'
+          if (authz.resource) {
+            current.resource = {
+              fromMethodMap: (current.resource?.fromMethodMap ?? true) && authz.resource.fromMethodMap,
+            }
+          }
+        }
       }
     }
 
