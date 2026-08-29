@@ -34,6 +34,17 @@ export type {
   ResourceResponseShape,
   ResourceRouteOptions,
 } from './mvc/Router'
+// Agent Contract (RFC 0016): protocol-independent derivation of agent tools
+// from the contracts routes already carry. Consumed by the CLI's
+// `.guren/agents.gen.ts` and by protocol adapters, which must not derive twice.
+export { deriveAgentTools } from './agent/derive'
+export type {
+  AgentToolSchema,
+  DeriveAgentToolsResult,
+  DerivedAgentTool,
+  DerivedAgentToolAnnotations,
+  DerivedAgentToolExposure,
+} from './agent/derive'
 export { ViewEngine } from './mvc/ViewEngine'
 export { inertia, setInertiaSsrRenderer, setInertiaDocument } from './mvc/inertia/InertiaEngine'
 export { setInertiaSharedProps, getInertiaSharedPropsResolver, shareInertiaProps } from './mvc/inertia/shared'

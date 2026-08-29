@@ -1204,8 +1204,15 @@ function createRouteBuilder<M extends string = never>(route: RegisteredRoute, na
 // js/polynomial-redos; measured 2.9s for a 16k-char path, vs 1.9ms here).
 const PATH_PARAM_PATTERN = /(^|\/):([A-Za-z0-9_-]+\*?)(?:\{[^{}]*\{[^{}]*\}[^{}]*\}|\{[^{}]*\})?\??/gu
 
-/** Param labels in path order, with constraints and modifiers dropped. */
-function extractPathParamNames(path: string): string[] {
+/**
+ * Param labels in path order, with constraints and modifiers dropped.
+ *
+ * Exported for `../agent/derive.ts`, which supplements a tool's input schema
+ * with the path parameters a `params` schema omits — off the same pattern the
+ * router substitutes and binds with, so a tool cannot disagree with the router
+ * about what a path declares. Not part of the package's public API.
+ */
+export function extractPathParamNames(path: string): string[] {
   return Array.from(path.matchAll(PATH_PARAM_PATTERN), (match) => match[2]!)
 }
 
