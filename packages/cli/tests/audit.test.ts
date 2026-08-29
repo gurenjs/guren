@@ -1,7 +1,10 @@
 import { mkdir, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
-import { authMiddlewareVerdict, describeMethod, runAudit, LINK_BUILDER_PATTERN, type AuditReport } from '../src/audit'
+import { authMiddlewareVerdict, runAudit, LINK_BUILDER_PATTERN, type AuditReport } from '../src/audit'
+// Moved out of audit.ts so `guren check`'s agent-route rules classify verbs
+// through the same function rather than a second hand-written list.
+import { describeMethod } from '../src/http-methods'
 import { createTempWorkspace, writeWorkspaceFiles } from './helpers'
 
 async function writeRoutes(dir: string, contents: string): Promise<void> {
@@ -2312,5 +2315,141 @@ describe('audit ignore config discovery', () => {
     } finally {
       await workspace.cleanup()
     }
+  })
+})
+
+describe('agent-exposed routes (RFC 0016)', () => {
+  /** Audit a throwaway workspace built from path → content, cleaning up after. */
+  async function withWorkspace(files: Record<string, string>): Promise<AuditReport> {
+    const workspace = await createTempWorkspace('guren-cli-audit-agent-')
+    try {
+      await writeWorkspaceFiles(workspace.dir, files)
+      return await runAudit({ cwd: workspace.dir })
+    } finally {
+      await workspace.cleanup()
+    }
+  }
+
+  const routesWith = (options: string) => `
+import { Router } from '@guren/core'
+
+class PostController {
+  async store() { return null }
+  async destroy() { return null }
+}
+
+export default function registerRoutes(router: Router) {
+  router.post('/posts', ${options}, [PostController, 'store'])
+}
+`
+
+  // The escalation the RFC asks for: the same unknown costs more once an
+  // agent composes the payload from an advertised schema.
+  it('escalates the unanalyzable-handler validation warn to a fail on an agent route', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': routesWith(`{ name: 'posts.store', agent: { description: 'Create a post.' } }`),
+    })
+
+    const validation = report.findings.find((f) => f.key === 'validation:POST /posts')
+    expect(validation?.status).toBe('fail')
+    expect(validation?.message).toContain('agent tool')
+  })
+
+  it('leaves the same finding a warn when the route is not agent-exposed', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': routesWith(`{ name: 'posts.store' }`),
+    })
+
+    const validation = report.findings.find((f) => f.key === 'validation:POST /posts')
+    expect(validation?.status).toBe('warn')
+    expect(validation?.message).not.toContain('agent tool')
+  })
+
+  // The key is unchanged so an existing config/audit.ts entry keeps applying
+  // to the escalated finding — route-level findings carry no line, so they
+  // stay eligible for suppression.
+  it('keeps the escalated finding suppressible through config/audit.ts', async () => {
+    const report = await withWorkspace({
+      'routes/web.ts': routesWith(`{ name: 'posts.store', agent: {} }`),
+      'config/audit.ts': `export default {
+  ignore: [{ key: 'validation:POST /posts', reason: 'handler validates in a shared service' }],
+}
+`,
+    })
+
+    const validation = report.findings.find((f) => f.key === 'validation:POST /posts')
+    expect(validation?.status).toBe('ignored')
+  })
+
+  describe('annotation honesty', () => {
+    const routes = `
+import { Router } from '@guren/core'
+
+class PostController {
+  async destroy() { return null }
+}
+
+export default function registerRoutes(router: Router) {
+  router.delete('/posts/:id', { name: 'posts.destroy', agent: { destructiveHint: false } }, [PostController, 'destroy'])
+}
+`
+
+    const controller = (body: string) => `export default class PostController {
+  async destroy() {
+${body}
+  }
+}
+`
+
+    it('warns when destructiveHint: false sits on an action that deletes', async () => {
+      const report = await withWorkspace({
+        'routes/web.ts': routes,
+        'app/Http/Controllers/PostController.ts': controller(
+          '    await Post.delete({ id: 1 })\n    return this.noContent()',
+        ),
+      })
+
+      const annotation = report.findings.find((f) => f.key === 'agent-annotation:DELETE /posts/:id')
+      expect(annotation?.status).toBe('warn')
+      expect(annotation?.message).toContain('destructiveHint: false')
+      expect(annotation?.classifications?.map((c) => c.id).sort()).toEqual(['API9', 'CWE-684'])
+    })
+
+    it('warns on a terminated query chain too', async () => {
+      const report = await withWorkspace({
+        'routes/web.ts': routes,
+        'app/Http/Controllers/PostController.ts': controller(
+          "    await Post.where('id', 1).delete()\n    return this.noContent()",
+        ),
+      })
+
+      expect(report.findings.some((f) => f.key === 'agent-annotation:DELETE /posts/:id')).toBe(true)
+    })
+
+    // Without the receiver constraint every Map/Set/cache eviction in an
+    // action would read as a record deletion.
+    it('does not warn about a cache eviction', async () => {
+      const report = await withWorkspace({
+        'routes/web.ts': routes,
+        'app/Http/Controllers/PostController.ts': controller(
+          '    cache.delete(key)\n    return this.noContent()',
+        ),
+      })
+
+      expect(report.findings.some((f) => f.key.startsWith('agent-annotation:'))).toBe(false)
+    })
+
+    // Absent is not `false`: the spec default for a non-read-only tool is
+    // already destructive, so an unset hint claims nothing to contradict.
+    it('does not warn when destructiveHint is simply unset', async () => {
+      const report = await withWorkspace({
+        'routes/web.ts': routes.replace('agent: { destructiveHint: false }', 'agent: {}'),
+        'app/Http/Controllers/PostController.ts': controller(
+          '    await Post.delete({ id: 1 })\n    return this.noContent()',
+        ),
+      })
+
+      expect(report.findings.some((f) => f.key.startsWith('agent-annotation:'))).toBe(false)
+    })
   })
 })

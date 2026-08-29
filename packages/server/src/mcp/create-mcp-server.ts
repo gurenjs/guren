@@ -135,6 +135,67 @@ export interface CreateMcpServerOptions {
   version?: string
 }
 
+/**
+ * A route in `generateContext()`'s output that declares agent metadata
+ * (RFC 0016). `GurenCliApi` types `routes` as `unknown[]` on purpose — this
+ * package carries the CLI's shapes rather than mirroring them — so the one
+ * tool that reads inside a route narrows it here, structurally and at
+ * runtime, instead of casting.
+ */
+interface AgentContextRoute {
+  method: string
+  path: string
+  name?: string
+  agent: {
+    description?: string
+    toolName?: string
+    expose?: { mcp?: boolean; webMcp?: boolean }
+    readOnlyHint?: boolean
+    destructiveHint?: boolean
+    idempotentHint?: boolean
+    approval?: 'required'
+  }
+  description?: string
+  summary?: string
+  authorization?: { ability?: string; abilities: string[]; mode: string; fromMethodMap?: boolean }
+}
+
+function isAgentRoute(route: unknown): route is AgentContextRoute {
+  if (!route || typeof route !== 'object') return false
+  const { agent, method, path } = route as Record<string, unknown>
+  return (
+    typeof method === 'string'
+    && typeof path === 'string'
+    && typeof agent === 'object'
+    && agent !== null
+  )
+}
+
+/**
+ * One tool as an agent editing the app should see it. Annotations are
+ * reported **as declared**, with no defaults filled in: the derivation layer
+ * owns the GET/QUERY → readOnlyHint rule, and restating it here would be a
+ * second copy of it that can disagree.
+ */
+function describeAgentRoute(route: AgentContextRoute) {
+  const { agent } = route
+  return {
+    toolName: agent.toolName ?? route.name,
+    routeName: route.name,
+    method: route.method,
+    path: route.path,
+    description: agent.description ?? route.description ?? route.summary,
+    expose: agent.expose,
+    annotations: {
+      readOnlyHint: agent.readOnlyHint,
+      destructiveHint: agent.destructiveHint,
+      idempotentHint: agent.idempotentHint,
+    },
+    approval: agent.approval ?? 'not-required',
+    authorization: route.authorization,
+  }
+}
+
 export function createMcpServer(options: CreateMcpServerOptions): McpServer {
   const { cwd, cli, version = '0.2.0' } = options
 
@@ -215,6 +276,19 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServer {
       },
     )
   }
+
+  server.tool(
+    'guren_agent_surface',
+    "The app's agent-facing tool surface (RFC 0016): every route that declares agent metadata, with its tool name, method and path, description, exposed surfaces, MCP annotations as declared, and whether invocations need approval. Call it BEFORE editing a route or its controller to find out whether an autonomous agent can already invoke it — renaming such a route renames a tool, and loosening its authorization loosens the tool's.",
+    {},
+    async () => {
+      const context = await cli.generateContext({ cwd })
+      const tools = context.routes.filter(isAgentRoute).map(describeAgentRoute)
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ tools }, null, 2) }],
+      }
+    },
+  )
 
   server.tool(
     'guren_check',

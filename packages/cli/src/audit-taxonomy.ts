@@ -63,6 +63,17 @@ const RULE_CLASSIFICATIONS: Record<string, AuditClassification[]> = {
     owaspApi('API3', 'Broken Object Property Level Authorization'),
     cwe('CWE-200', 'Exposure of Sensitive Information to an Unauthorized Actor'),
   ],
+  /**
+   * Agent-tool annotations that contradict the action behind them (RFC 0016).
+   * Its own prefix rather than a shared `agent:` bucket: `classifyFindingKey`
+   * slices at the first `:`, so one prefix can only carry one classification
+   * — and the other agent-facing rules are validation and authorization
+   * failures, already classified as such.
+   */
+  'agent-annotation': [
+    owaspApi('API9', 'Improper Inventory Management'),
+    cwe('CWE-684', 'Incorrect Provision of Specified Functionality'),
+  ],
   deps: [
     owasp('A06', 'Vulnerable and Outdated Components'),
     cwe('CWE-1395', 'Dependency on Vulnerable Third-Party Component'),

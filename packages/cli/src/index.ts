@@ -45,7 +45,12 @@ export {
   type EntityContext,
   type EntityContextOptions,
 } from './entity-context'
-export { routeDefinitionToContextRoute, loadContextRoutes, type ContextRoute } from './context-route'
+export {
+  routeDefinitionToContextRoute,
+  loadContextRoutes,
+  type ContextRoute,
+  type ContextRouteAuthorization,
+} from './context-route'
 export { createFreshContextApi } from './fresh-context'
 export {
   scanDocs,

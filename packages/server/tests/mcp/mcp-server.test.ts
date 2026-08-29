@@ -145,7 +145,8 @@ describe('Guren MCP Server', () => {
     expect(names).toContain('guren_make_feature')
     expect(names).toContain('guren_make_component')
     expect(names).toContain('guren_codegen')
-    expect(tools).toHaveLength(9)
+    expect(names).toContain('guren_agent_surface')
+    expect(tools).toHaveLength(10)
   })
 
   test('guren_docs_graph registers only when the CLI provides it', async () => {
@@ -250,6 +251,79 @@ describe('Guren MCP Server', () => {
     const text = (result.content as Array<{ type: string; text: string }>)[0].text
 
     expect(text).toStartWith('# Context')
+  })
+
+  // The route-shaped half of this tool is proven CLI-side (a real Router
+  // through routeDefinitionToContextRoute); what belongs here is the
+  // filtering and the reported shape.
+  test('guren_agent_surface reports only routes that declare agent metadata', async () => {
+    const client = await createTestClient({
+      generateContext: async () => ({
+        framework: { name: 'guren', version: '0.2.0' },
+        models: [],
+        routes: [
+          { method: 'GET', path: '/posts', name: 'posts.index' },
+          {
+            method: 'DELETE',
+            path: '/posts/:id',
+            name: 'posts.destroy',
+            agent: { description: 'Delete a post.', destructiveHint: true, approval: 'required' },
+            authorization: { ability: 'posts.destroy', abilities: ['posts.destroy'], mode: 'all' },
+          },
+        ],
+        pages: [],
+        controllers: [],
+        resources: [],
+        events: [],
+        jobs: [],
+        middleware: [],
+        listeners: [],
+        validators: [],
+      }),
+    })
+
+    const result = await client.callTool({ name: 'guren_agent_surface', arguments: {} })
+    const text = (result.content as Array<{ type: string; text: string }>)[0].text
+    const { tools } = JSON.parse(text)
+
+    expect(tools).toHaveLength(1)
+    expect(tools[0]).toMatchObject({
+      toolName: 'posts.destroy',
+      method: 'DELETE',
+      path: '/posts/:id',
+      description: 'Delete a post.',
+      approval: 'required',
+      annotations: { destructiveHint: true },
+      authorization: { ability: 'posts.destroy' },
+    })
+  })
+
+  // Annotations are reported as declared: the GET → readOnlyHint default is
+  // the derivation layer's rule, and a second copy of it here could disagree.
+  test('guren_agent_surface fills in no annotation defaults', async () => {
+    const client = await createTestClient({
+      generateContext: async () => ({
+        framework: { name: 'guren', version: '0.2.0' },
+        models: [],
+        routes: [{ method: 'GET', path: '/posts', name: 'posts.index', agent: {}, summary: 'List posts.' }],
+        pages: [],
+        controllers: [],
+        resources: [],
+        events: [],
+        jobs: [],
+        middleware: [],
+        listeners: [],
+        validators: [],
+      }),
+    })
+
+    const result = await client.callTool({ name: 'guren_agent_surface', arguments: {} })
+    const { tools } = JSON.parse((result.content as Array<{ type: string; text: string }>)[0].text)
+
+    expect(tools[0].annotations).toEqual({})
+    // Falls back to the route's OpenAPI description ?? summary.
+    expect(tools[0].description).toBe('List posts.')
+    expect(tools[0].approval).toBe('not-required')
   })
 
   test('guren_check returns check report', async () => {

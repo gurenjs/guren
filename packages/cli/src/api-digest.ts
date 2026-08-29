@@ -50,6 +50,12 @@ Verified quick reference — trust this and \`.claude/rules/*.md\` over grepping
   never on \`this.ctx.get()\`
 - \`await this.authorize('update', [Post, post])\` (throws → 403)
 
+### Routes (@guren/core)
+- Agent tools: \`.agent({ description })\` (or \`agent:\` in the route options) exposes a route as an MCP tool —
+  schemas derived from the route's own \`params\`/\`query\`/\`body\`/\`output\`. One declaration per route,
+  a route \`.name()\` is required (it *is* the tool name), and anything not read-only needs
+  authorization — \`this.auth.userOrFail()\` alone fails \`guren check\`
+
 ### Testing (@guren/testing)
 - \`const app = await TestApp.create()\` · \`app.actingAs(user)\` / \`app.json()\` / \`await app.withCsrf()\` — each returns a NEW TestApp
 - HTTP helpers: \`get(path)\` · \`post/put/patch/delete/query(path, body?)\` (\`query\` = HTTP QUERY, RFC 10008)

@@ -28,6 +28,7 @@ import { checkConsoleCommandRegistration } from './console-check'
 import { checkRoutePathParams, discoverRoutePathFiles } from './route-path-check'
 import { affectsRouteWiring, checkRouteRegistrarWiring } from './routes-check'
 import { checkRouteContracts } from './route-contract-check'
+import { checkAgentRoutes } from './agent-route-check'
 
 /**
  * Any file that could hold a route's params schema — which is any importable
@@ -308,6 +309,17 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     const sourceChanged = !changedFiles || [...changedFiles].some((file) => SOURCE_FILE_PATTERN.test(file))
     if (sourceChanged) {
       checks.push(...(await checkRouteContracts({ cwd, routesFile: options.routesFile })))
+
+      // 7.8. Check the routes that declare `.agent()` metadata (RFC 0016):
+      // the tool name is legal and unique, a non-read-only tool is covered by
+      // authorization rather than merely authentication, and the schemas an
+      // agent reads exist. Shares 7.7's gate for the same reason and pays the
+      // same price: a third `loadRouteDefinitions()` in one process, which
+      // re-runs only the registrar (see `load-routes.ts`) rather than
+      // threading definitions through a signature change 7.7 deliberately
+      // avoids. Content-activated inside — an app with no agent routes
+      // contributes nothing and never scans a controller.
+      checks.push(...(await checkAgentRoutes({ cwd, routesFile: options.routesFile })))
     }
 
     // 8. Check Postgres timestamp columns carry a time zone. Content-activated

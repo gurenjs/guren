@@ -1,10 +1,8 @@
 import { resolve, relative } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import { consola } from 'consola'
-import type { File } from '@babel/types'
 import {
   collectFiles,
-  discoverControllerFiles,
   discoverModelFiles,
   classNameFromPath,
   listModuleNames,
@@ -26,7 +24,12 @@ import {
   resolveModelStringArrayConfig,
 } from './model-parser'
 import { parseSourceFile } from './parse-cache'
-import { walk } from './ast-walk'
+import {
+  parseControllerMethods,
+  type ControllerMethodInfo,
+  type ControllerNameCollision,
+} from './controller-methods'
+import { describeMethod } from './http-methods'
 import { parseSchemaTableColumns } from './schema-parser'
 import { loadAuditConfig, type AuditIgnoreEntry } from './audit-config'
 
@@ -69,48 +72,6 @@ export interface RunAuditOptions {
    * audit` command enables it unless invoked with --no-deps.
    */
   deps?: boolean
-}
-
-/**
- * HTTP method semantics driving the two per-route phases in auditRoutes().
- * The two sets are orthogonal axes rather than a partition: unsafe methods
- * get the auth check, body-carrying methods get the validation check, and
- * QUERY (RFC 10008) is both — safe like GET, but body-carrying like POST.
- *
- * `SAFE_METHODS` holds the verbs the authentication phase trusts not to
- * change state. It is the RFC 9110 §9.2.1 safe set *minus TRACE*, on
- * purpose: an app registering a TRACE route is unusual enough that the
- * fail-closed default below is the better answer — do not "fix" the list
- * back to the RFC. It is the same axis as `DEFAULT_PROTECTED_METHODS` in
- * `@guren/server` (src/http/middleware/csrf.ts, expressed as its
- * complement) and the emitted `CSRF_SAFE_METHODS` in api-client-types.ts;
- * the packages share no dependency edge, so the list is duplicated by
- * convention (see trimSlashes in utils.ts for the precedent).
- *
- * `BODYLESS_METHODS` are the verbs whose requests conventionally carry no
- * body, so the validation phase demands no validateBody() for them.
- */
-const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS', 'QUERY'])
-const BODYLESS_METHODS = new Set(['GET', 'HEAD', 'OPTIONS', 'DELETE'])
-
-/**
- * Exported for tests. Classifies an HTTP method for the audit phases.
- *
- * Deliberately fail-closed: a verb neither set recognizes — anything an app
- * registers via `router.on('PURGE', ...)` — is treated as unsafe AND
- * body-carrying. The alternative (skipping it, as the pre-classification
- * enumerations did) made a custom-verb route with an unvalidated body and no
- * auth middleware produce zero findings, i.e. the routes the audit
- * understands least reported the cleanest pass. A false-positive finding on
- * a genuinely body-less custom verb can be suppressed via config/audit.ts;
- * a silently skipped route cannot be seen at all.
- */
-export function describeMethod(method: string): { safe: boolean; bodyCarrying: boolean } {
-  const upper = method.toUpperCase()
-  return {
-    safe: SAFE_METHODS.has(upper),
-    bodyCarrying: !BODYLESS_METHODS.has(upper),
-  }
 }
 
 /**
@@ -317,6 +278,19 @@ const MODEL_ATTACH_PATTERN = /\b[A-Z][A-Za-z0-9_]*\s*\.\s*attach\s*(?:<[^()]*>)?
  */
 const STORAGE_WRITE_PATTERN = /\.\s*put(?:File)?\s*\(/
 
+/**
+ * A record deletion, for the annotation-honesty rule below (RFC 0016 §5.5).
+ *
+ * Two shapes, both constrained the way `MODEL_ATTACH_PATTERN` is: a model
+ * static (`Post.delete(...)`, `Post.forceDelete(...)`), which requires a
+ * PascalCase receiver, and a terminated query chain (`Post.where(...)
+ * .delete()`), which requires the call to follow a closing paren. Without
+ * those constraints every `map.delete(key)` and `cache.delete(...)` in an
+ * action would read as a record deletion.
+ */
+const DELETE_CALL_PATTERN =
+  /\b[A-Z][A-Za-z0-9_]*\s*\.\s*(?:delete|forceDelete)\s*\(|\)\s*\.\s*(?:delete|forceDelete)\s*\(/
+
 const BODY_INCIDENTAL_PATTERN = new RegExp(
   `\\bthis\\s*\\.\\s*${accessorCallPattern(controllerMembers('body-incidental'))}`,
 )
@@ -342,7 +316,10 @@ export async function runAudit(options: RunAuditOptions = {}): Promise<AuditRepo
   // once the local scans are done.
   const dependencyScanOutput = options.deps ? startDependencyScan(cwd) : null
 
-  const controllerMethods = await parseControllerMethods(cwd, findings)
+  const { methods: controllerMethods, collisions } = await parseControllerMethods(cwd)
+  for (const collision of collisions) {
+    findings.push(controllerCollisionFinding(collision))
+  }
 
   const routesAnalyzed = await auditRoutes(cwd, options.routesFile, controllerMethods, findings)
   auditForceWrites(controllerMethods, findings)
@@ -496,127 +473,23 @@ function applyIgnoreEntries(
 
 // --- Route-level checks ---
 
-interface ControllerMethodInfo {
-  body: string
-  filePath: string
-}
-
 /**
- * Method bodies below are judged with regexes (VALIDATE_BODY_PATTERN,
- * AUTH_CALL_PATTERN, BODY_ACCESS_PATTERN, FORCE_WRITE_PATTERN), which cannot
- * tell live code from a commented-out line, a string that merely mentions an
- * API, JSX text, or a type-only declaration. A commented
- * `// await this.validateBody(...)` must not count as validation, a
- * `forceCreate` inside an error message must not warn, and neither must a
- * local `type Decoy = { validateBody(): void }` nested in the method body —
- * TS allows local type/interface declarations inside a function, and their
- * member signatures read exactly like the runtime call the regexes look for.
- * Blank comments, string/regex/JSX-text contents, template quasis, and whole
- * type-alias/interface declarations (never executable, so blanking the full
- * range is always safe) with spaces — offsets are preserved, so method-body
- * slices taken from the result line up with the original AST positions.
- * Template *expressions* are kept: they are live code.
+ * A same-named controller class in two files. The scan reports it (see
+ * `controller-methods.ts`); the audit fails on it, because every route-level
+ * verdict below is drawn from whichever file was scanned last and may
+ * therefore describe the other class entirely.
  */
-function blankCommentsAndStrings(source: string, ast: File): string {
-  const ranges: [number, number][] = []
-  for (const comment of ast.comments ?? []) {
-    if (typeof comment.start === 'number' && typeof comment.end === 'number') {
-      ranges.push([comment.start, comment.end])
-    }
-  }
-  walk(ast.program, (node) => {
-    const { type, start, end } = node
-    if (typeof start !== 'number' || typeof end !== 'number') return
-    if (type === 'StringLiteral' || type === 'DirectiveLiteral') {
-      ranges.push([start + 1, end - 1])
-    } else if (type === 'TemplateElement' || type === 'RegExpLiteral' || type === 'JSXText') {
-      ranges.push([start, end])
-    } else if (type === 'TSTypeAliasDeclaration' || type === 'TSInterfaceDeclaration') {
-      // Blank the whole declaration and stop descending — it contributes no
-      // runtime code, so there is nothing further inside worth walking.
-      ranges.push([start, end])
-      return false
-    }
-  })
-  if (ranges.length === 0) return source
-
-  // split('') keeps UTF-16 code-unit indexing — Babel offsets are code units,
-  // and a code-point spread would shift everything after an astral character.
-  const chars = source.split('')
-  for (const [start, end] of ranges) {
-    for (let i = start; i < end && i < chars.length; i++) {
-      if (chars[i] !== '\n') chars[i] = ' '
-    }
-  }
-  return chars.join('')
-}
-
-/**
- * Map of `ClassName.method` → method body source, for every controller in
- * app/Http/Controllers (module-aware — see discoverControllerFiles).
- *
- * The map is keyed by class name alone, with no file/module namespacing —
- * routes only carry `route.controller.name` (the class's runtime `.name`),
- * not an import path, so route-level checks below have no way to
- * disambiguate two same-named controllers in different modules. A flat
- * app/Http/Controllers/ directory can't produce this collision (the
- * filesystem itself enforces unique file names), but two modules each
- * scaffolding their own e.g. `PostController` legitimately can. When that
- * happens, findings for BOTH controllers' routes are checked against
- * whichever file was discovered last — a validated action in one module can
- * make an unsafe, same-named one in another module read as "pass". Push a
- * `fail` finding so this isn't silently wrong; renaming one class is the
- * fix (there's no reliable way to disambiguate further without threading
- * source-file identity through Router/RouteDefinition, a larger change).
- */
-async function parseControllerMethods(cwd: string, findings: AuditFinding[]): Promise<Map<string, ControllerMethodInfo>> {
-  const methods = new Map<string, ControllerMethodInfo>()
-  const classFiles = new Map<string, string>()
-  const controllerFiles = await discoverControllerFiles(cwd)
-
-  for (const filePath of controllerFiles) {
-    const source = await readFile(filePath, 'utf-8')
-    const relPath = relative(cwd, filePath)
-
-    const ast = parseSourceFile(source, filePath)
-    if (!ast) continue
-    const scrubbed = blankCommentsAndStrings(source, ast)
-
-    for (const node of ast.program.body) {
-      const classDecl = extractClassDeclaration(node)
-      if (!classDecl) continue
-      const className = classDecl.id?.name ?? classNameFromPath(filePath)
-
-      const previousFile = classFiles.get(className)
-      if (previousFile && previousFile !== relPath) {
-        findings.push(
-          finding(
-            `controller-name-collision:${className}`,
-            `${className} name collision`,
-            'fail',
-            `${className} is declared in both ${previousFile} and ${relPath} — route-level auth/validation `
-            + `checks for both controllers are checked against whichever file was scanned last, since routes `
-            + `only carry the class name, not its file. Findings for one may silently apply to the other.`,
-            `Rename one of the two ${className} classes so controller class names are unique across the app.`,
-          ),
-        )
-      }
-      classFiles.set(className, relPath)
-
-      for (const member of classDecl.body.body) {
-        if (member.type === 'ClassMethod' && member.key.type === 'Identifier') {
-          const start = member.body.start ?? 0
-          const end = member.body.end ?? 0
-          methods.set(`${className}.${member.key.name}`, {
-            body: scrubbed.slice(start, end),
-            filePath: relPath,
-          })
-        }
-      }
-    }
-  }
-
-  return methods
+function controllerCollisionFinding(collision: ControllerNameCollision): AuditFinding {
+  const { className, previousFile, currentFile } = collision
+  return finding(
+    `controller-name-collision:${className}`,
+    `${className} name collision`,
+    'fail',
+    `${className} is declared in both ${previousFile} and ${currentFile} — route-level auth/validation `
+    + `checks for both controllers are checked against whichever file was scanned last, since routes `
+    + `only carry the class name, not its file. Findings for one may silently apply to the other.`,
+    `Rename one of the two ${className} classes so controller class names are unique across the app.`,
+  )
 }
 
 /**
@@ -705,6 +578,8 @@ async function auditRoutes(
       ? `${route.controller.name}.${route.controller.action}`
       : undefined
     const methodInfo = controllerKey ? controllerMethods.get(controllerKey) : undefined
+    /** RFC 0016: the route is declared as an agent tool, which tightens rules below. */
+    const agentExposed = Boolean(route.agent)
 
     // 1. Input validation on body-carrying routes
     if (bodyCarrying) {
@@ -774,14 +649,24 @@ async function auditRoutes(
           ),
         )
       } else {
+        // An unanalyzable handler is a warn for an ordinary route and a fail
+        // for an agent-exposed one (RFC 0016 §13): the same unknown carries a
+        // different cost once a tool advertises the endpoint, because the
+        // caller is an autonomous agent composing payloads from a schema
+        // rather than a form the app itself rendered. Escalated in place
+        // rather than under a new key, so an existing config/audit.ts entry
+        // for this route keeps applying and the route is reported once.
         findings.push(
           finding(
             `validation:${routeLabel}`,
             routeLabel,
-            'warn',
-            route.controller
+            agentExposed ? 'fail' : 'warn',
+            (route.controller
               ? `Controller source for ${controllerKey} could not be analyzed — route body schemas are type-only for controller actions.`
-              : 'Handler source could not be analyzed and no body schema is attached.',
+              : 'Handler source could not be analyzed and no body schema is attached.')
+            + (agentExposed
+              ? ' The route is exposed as an agent tool, so nothing between the agent and the handler validates the payload.'
+              : ''),
             route.controller
               ? `Ensure ${controllerKey} calls this.validateBody(schema).`
               : 'Attach a body schema to the route, or validate the payload inside the handler.',
@@ -861,6 +746,27 @@ async function auditRoutes(
           ),
         )
       }
+    }
+
+    // 3. Annotation honesty (RFC 0016 §5.5). `destructiveHint: false` is the
+    // strong claim "additive updates only" — clients present such a tool as
+    // safe to call unattended, so an action that deletes behind it is a
+    // false statement about what the agent is authorizing. Only an explicit
+    // `false` is judged: the MCP spec's default for a non-read-only tool is
+    // already `true`, so an absent hint claims nothing.
+    if (route.agent?.destructiveHint === false && methodInfo && DELETE_CALL_PATTERN.test(methodInfo.body)) {
+      findings.push(
+        finding(
+          `agent-annotation:${routeLabel}`,
+          routeLabel,
+          'warn',
+          `The route declares destructiveHint: false, but ${controllerKey} deletes records. Clients read that `
+          + 'hint as "additive updates only" and may run the tool without asking the user first.',
+          `Drop destructiveHint: false from the route's agent metadata (the spec default for a non-read-only `
+          + `tool is destructive), or move the deletion out of ${controllerKey}.`,
+          methodInfo.filePath,
+        ),
+      )
     }
   }
 

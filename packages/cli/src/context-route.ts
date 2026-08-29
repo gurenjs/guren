@@ -1,7 +1,47 @@
 import { resolve } from 'node:path'
-import type { RouteDefinition } from '@guren/core'
+import type { AgentRouteMetadata, RouteDefinition } from '@guren/core'
 import { loadRouteDefinitions, resolveRoutesFile } from './load-routes'
 import { schemaToTypeString } from './schema-type-extractor'
+
+/**
+ * What a route's middleware chain authorizes, derived once here from the
+ * stamped `capabilities.authorization` (RFC 0007) so every consumer reads the
+ * same answer.
+ *
+ * Derived rather than carried raw: the capability shape is internal to
+ * `@guren/server` and documented as changeable, while `guren context --json`
+ * is an output contract. The derivability rule lives here and nowhere else —
+ * a single ability is `abilities.length === 1` with `mode: 'all'` and no
+ * method-map resolution. `mode: 'mixed'`, or an `abilityFor` callback
+ * (`fromMethodMap: false`), means authorization is enforced but the ability
+ * is *not* statically knowable: consumers must say so rather than pick a name
+ * out of `abilities`.
+ */
+export interface ContextRouteAuthorization {
+  /** The one ability this route enforces, present only when derivable. */
+  ability?: string
+  /** Ability names the chain checks, in check order. Empty when every check derives its ability at request time. */
+  abilities: string[]
+  /** How the checks combine, as stamped. */
+  mode: 'all' | 'any' | 'mixed'
+  /** True when a check resolves its ability from the request method via the built-in verb map. */
+  fromMethodMap?: boolean
+}
+
+function routeAuthorization(def: RouteDefinition): ContextRouteAuthorization | undefined {
+  const authorization = def.capabilities?.authorization
+  if (!authorization) return undefined
+
+  const { abilities, mode, resource } = authorization
+  const derivable = abilities.length === 1 && mode === 'all' && !resource
+
+  return {
+    ability: derivable ? abilities[0] : undefined,
+    abilities: [...abilities],
+    mode,
+    ...(resource ? { fromMethodMap: resource.fromMethodMap } : {}),
+  }
+}
 
 /**
  * Serializable route view shared by the whole-project context and the
@@ -20,6 +60,14 @@ export interface ContextRoute {
   query?: string
   body?: string
   output?: string
+  /**
+   * Agent exposure metadata as declared (RFC 0016), verbatim — absence means
+   * the route is not an agent tool. Plain data, so it needs none of the
+   * schema→string rendering the fields above do.
+   */
+  agent?: AgentRouteMetadata
+  /** What the route's middleware chain authorizes. See {@link ContextRouteAuthorization}. */
+  authorization?: ContextRouteAuthorization
   summary?: string
   description?: string
   tags?: string[]
@@ -43,6 +91,8 @@ export function routeDefinitionToContextRoute(def: RouteDefinition): ContextRout
     query: schemaToTypeString(def.schemas?.query, { io: 'output' }),
     body: schemaToTypeString(def.schemas?.body, { io: 'input' }),
     output: schemaToTypeString(def.schemas?.output, { io: 'output' }),
+    agent: def.agent,
+    authorization: routeAuthorization(def),
     summary: def.summary,
     description: def.description,
     tags: def.tags,

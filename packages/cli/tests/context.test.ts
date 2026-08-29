@@ -273,6 +273,7 @@ describe('GUREN_API_DIGEST', () => {
       "bind: { slug: [Post, 'slug'] }",
       "await this.authorize('update', [Post, post])",
     ],
+    'routes-codegen.md': ['.agent({ description })', 'One declaration per route'],
     'testing.md': ['actingAs', 'withCsrf', 'assertUnprocessable', 'assertInertia', 'query(path, body?)'],
   }
 
