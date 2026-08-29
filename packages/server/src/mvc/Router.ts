@@ -5,7 +5,7 @@ import { mountRoute } from './mount-route'
 import { flattenRequestQueries, formatValidationErrors, parseRequestPayload, type ValidationErrorLike } from '../http/request'
 import { ValidationException } from '../errors/exceptions/ValidationException'
 import type { ValidationSchema } from '../http/middleware/validation'
-import { capabilitiesOf, type MiddlewareCapabilities } from '../http/middleware/capabilities'
+import { capabilitiesOf, mergeCapabilities, type MiddlewareCapabilities } from '../http/middleware/capabilities'
 import { trimSlashes } from '../support/trim-slashes'
 
 /**
@@ -777,6 +777,9 @@ export class Router<M extends string = never> {
    * thrown: `definitions()` must stay side-effect-free for introspection of
    * routers that never mount (audit, codegen), and an unresolvable alias
    * simply contributes no capabilities.
+   *
+   * This walks the chain; the rules for combining what it finds live with the
+   * capability type, in `mergeCapabilities`.
    */
   private aggregateCapabilities(
     names: string[],
@@ -787,50 +790,17 @@ export class Router<M extends string = never> {
     const aggregated: MiddlewareCapabilities = {}
     const visited = seen ?? new Set<string>()
     // The same handler can legitimately appear twice in one chain — passed
-    // inline as well as reached through an alias or a group. Absorbing its
-    // stamp twice would read as two independent checks and degrade an 'any'
-    // to 'mixed', so each stamp object contributes once. Threaded through
-    // the group recursion alongside `visited`, or a stamp reached inside a
-    // group would not be recognized as the one seen inline.
-    const absorbed = seenStamps ?? new Set<MiddlewareCapabilities>()
+    // inline as well as reached through an alias or a group. `mergeCapabilities`
+    // counts every call as an independent check, which would degrade an 'any'
+    // to 'mixed', so each stamp is merged once. Threaded through the group
+    // recursion alongside `visited`, or a stamp reached inside a group would
+    // not be recognized as the one seen inline.
+    const merged = seenStamps ?? new Set<MiddlewareCapabilities>()
 
-    const absorb = (capabilities: MiddlewareCapabilities | undefined): void => {
-      if (!capabilities || absorbed.has(capabilities)) return
-      absorbed.add(capabilities)
-
-      const auth = capabilities.authentication
-      if (auth) {
-        // 'required' wins: a route that both requires auth and (oddly)
-        // requires guest is reported as requiring auth.
-        if (!aggregated.authentication || auth.mode === 'required') {
-          aggregated.authentication = auth
-        }
-      }
-
-      const authz = capabilities.authorization
-      if (authz) {
-        const current = aggregated.authorization
-        if (!current) {
-          aggregated.authorization = {
-            abilities: [...authz.abilities],
-            mode: authz.mode,
-            ...(authz.resource ? { resource: { ...authz.resource } } : {}),
-          }
-        } else {
-          // Two checks on one chain are a conjunction. Only all-of + all-of
-          // stays expressible; anything else is 'mixed' — present, but with
-          // no single ability a consumer may name.
-          for (const ability of authz.abilities) {
-            if (!current.abilities.includes(ability)) current.abilities.push(ability)
-          }
-          current.mode = current.mode === 'all' && authz.mode === 'all' ? 'all' : 'mixed'
-          if (authz.resource) {
-            current.resource = {
-              fromMethodMap: (current.resource?.fromMethodMap ?? true) && authz.resource.fromMethodMap,
-            }
-          }
-        }
-      }
+    const absorbStamp = (stamp: MiddlewareCapabilities | undefined): void => {
+      if (!stamp || merged.has(stamp)) return
+      merged.add(stamp)
+      mergeCapabilities(aggregated, stamp)
     }
 
     for (const name of names) {
@@ -839,14 +809,16 @@ export class Router<M extends string = never> {
 
       const groupNames = this.middlewareGroups.get(name)
       if (groupNames) {
-        absorb(this.aggregateCapabilities(groupNames, [], visited, absorbed))
+        // The group's own aggregate is freshly built from stamps already
+        // recorded in `merged`, so it needs no de-duplication of its own.
+        mergeCapabilities(aggregated, this.aggregateCapabilities(groupNames, [], visited, merged))
         continue
       }
 
-      absorb(capabilitiesOf(this.middlewareAliases.get(name)))
+      absorbStamp(capabilitiesOf(this.middlewareAliases.get(name)))
     }
 
-    for (const handler of inline) absorb(capabilitiesOf(handler))
+    for (const handler of inline) absorbStamp(capabilitiesOf(handler))
 
     return aggregated
   }

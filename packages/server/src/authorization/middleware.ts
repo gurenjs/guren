@@ -21,9 +21,11 @@ import { stampCapabilities } from '../http/middleware/capabilities'
  * ```
  *
  * An array argument is snapshotted at creation: mutating it afterwards
- * changes neither what the middleware checks nor what it reports. An empty
- * array denies every request (`Gate.any([])` is false) and stamps no ability
- * names — fail-closed, so it is left to run rather than rejected.
+ * changes neither what the middleware checks nor what it reports. A
+ * one-element array is treated exactly like the bare ability, denial message
+ * and status included. An empty array denies every request (`Gate.any([])` is
+ * false) and names no ability — fail-closed, so it is left to run rather than
+ * rejected.
  */
 export function authorizeMiddleware(
   ability: string | string[],
@@ -32,8 +34,8 @@ export function authorizeMiddleware(
 ): Middleware {
   // One snapshot feeds both the handler and the stamp, so a caller mutating
   // the array it passed cannot make the two disagree.
-  const anyOf = Array.isArray(ability)
-  const abilities = anyOf ? [...(ability as string[])] : [ability as string]
+  const abilities = Array.isArray(ability) ? [...ability] : [ability]
+  const anyOf = abilities.length !== 1
 
   return stampCapabilities(async (ctx, next) => {
     const gate = getGate()
@@ -48,8 +50,9 @@ export function authorizeMiddleware(
         throw new AuthorizationException(options.message ?? 'This action is unauthorized.')
       }
     } else {
-      // Single ability: keep the policy's own message and status, so the same
-      // denial reads the same here as through `Controller.authorize()`.
+      // Exactly one ability, however it was written: keep the policy's own
+      // message and status, so the same denial reads the same here as through
+      // `Controller.authorize()`.
       const response = await gateForUser.checkResponse(abilities[0]!, user, model)
       if (!response.allowed) {
         throw denialToException(options.message ? { ...response, message: options.message } : response)
@@ -58,10 +61,9 @@ export function authorizeMiddleware(
 
     await next()
   }, {
-    // Any-of over exactly one ability *is* that ability, so it normalizes to
-    // 'all' — otherwise combining it with another all-of check would report
-    // 'mixed' for a chain whose ability is perfectly derivable.
-    authorization: { abilities, mode: abilities.length === 1 ? 'all' : 'any' },
+    // One ability normalizes to 'all' whichever way it was written; see
+    // `MiddlewareCapabilities.authorization` for why.
+    authorization: { abilities, mode: anyOf ? 'any' : 'all' },
   })
 }
 
@@ -170,7 +172,7 @@ export function authorizeResourceMiddleware(
 
   return stampCapabilities(async (ctx, next) => {
     const method = ctx.req.method.toUpperCase()
-    const ability = abilityFor?.(method) ?? RESOURCE_ABILITY_BY_METHOD[method]
+    const ability = abilityFor?.(method) ?? resourceAbilityForMethod(method)
 
     if (ability === undefined) {
       throw new AuthorizationException(options.message ?? 'This action is unauthorized.')

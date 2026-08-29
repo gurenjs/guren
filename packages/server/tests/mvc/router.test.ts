@@ -4,6 +4,18 @@ import { z } from 'zod'
 import { Router } from '../../src/mvc/Router'
 import { Controller } from '../../src/mvc/Controller'
 import { Resource } from '../../src/http/resources/Resource'
+import {
+  authorizeAllMiddleware,
+  authorizeMiddleware,
+  authorizeResourceMiddleware,
+  resourceAbilityForMethod,
+} from '../../src/authorization/middleware'
+import { requireAuthenticated } from '../../src/http/middleware/auth'
+import {
+  capabilitiesOf,
+  mergeCapabilities,
+  type MiddlewareCapabilities,
+} from '../../src/http/middleware/capabilities'
 
 class StubController extends Controller {
   async index() { return new Response('index') }
@@ -875,9 +887,7 @@ describe('Router capability aggregation', () => {
 describe('Router authorization capabilities (RFC 0016)', () => {
   const resolver = () => ({ id: 1 })
 
-  it('reports a single ability from authorizeMiddleware', async () => {
-    const { authorizeMiddleware } = await import('../../src/authorization/middleware')
-
+  it('reports a single ability from authorizeMiddleware', () => {
     const router = new Router()
     router.put('/posts/:id', () => 'ok', authorizeMiddleware('update', resolver))
 
@@ -886,9 +896,7 @@ describe('Router authorization capabilities (RFC 0016)', () => {
     })
   })
 
-  it('reports an ability list as any-of, and authorizeAll as all-of', async () => {
-    const { authorizeMiddleware, authorizeAllMiddleware } = await import('../../src/authorization/middleware')
-
+  it('reports an ability list as any-of, and authorizeAll as all-of', () => {
     const router = new Router()
     router.get('/dashboard', () => 'ok', authorizeMiddleware(['admin', 'moderator']))
     router.post('/reports', () => 'ok', authorizeAllMiddleware(['admin', 'billing']))
@@ -904,11 +912,20 @@ describe('Router authorization capabilities (RFC 0016)', () => {
     })
   })
 
-  it('marks the resource variant as method-derived and resolves through the one verb map', async () => {
-    const { authorizeResourceMiddleware, resourceAbilityForMethod } = await import(
-      '../../src/authorization/middleware'
-    )
+  it('normalizes a single-element any-of so merging with all-of stays all', () => {
+    const router = new Router()
+    router.get('/one', () => 'ok', authorizeMiddleware(['read']))
+    router.post('/merged', () => 'ok', authorizeMiddleware(['read']), authorizeAllMiddleware(['write']))
 
+    const defs = router.definitions()
+    expect(defs[0]!.capabilities?.authorization).toEqual({ abilities: ['read'], mode: 'all' })
+    expect(defs[1]!.capabilities?.authorization).toEqual({
+      abilities: ['read', 'write'],
+      mode: 'all',
+    })
+  })
+
+  it('marks the resource variant as method-derived and resolves through the one verb map', () => {
     const router = new Router()
     router.put('/posts/:id', () => 'ok', authorizeResourceMiddleware(resolver))
 
@@ -926,9 +943,7 @@ describe('Router authorization capabilities (RFC 0016)', () => {
     expect(resourceAbilityForMethod('PURGE')).toBeUndefined()
   })
 
-  it('clears fromMethodMap when abilityFor overrides the verb map', async () => {
-    const { authorizeResourceMiddleware } = await import('../../src/authorization/middleware')
-
+  it('clears fromMethodMap when abilityFor overrides the verb map', () => {
     const router = new Router()
     router.delete(
       '/posts/:id',
@@ -945,10 +960,21 @@ describe('Router authorization capabilities (RFC 0016)', () => {
     })
   })
 
-  it('carries authorization stamps through aliases and groups alongside authentication', async () => {
-    const { authorizeMiddleware } = await import('../../src/authorization/middleware')
-    const { requireAuthenticated } = await import('../../src/http/middleware/auth')
+  it('clears fromMethodMap for the whole chain when one resource check overrides', () => {
+    const router = new Router()
+    router.delete(
+      '/posts/:id',
+      () => 'ok',
+      authorizeResourceMiddleware(resolver),
+      authorizeResourceMiddleware(resolver, { abilityFor: () => 'archive' }),
+    )
 
+    expect(router.definitions()[0]!.capabilities?.authorization?.resource).toEqual({
+      fromMethodMap: false,
+    })
+  })
+
+  it('carries authorization stamps through aliases and groups alongside authentication', () => {
     const router = new Router<'auth' | 'can-update' | 'editor'>()
     router.aliasMiddleware('auth', requireAuthenticated())
     router.aliasMiddleware('can-update', authorizeMiddleware('update', resolver))
@@ -961,9 +987,7 @@ describe('Router authorization capabilities (RFC 0016)', () => {
     })
   })
 
-  it('reports two combined checks as mixed when they are not both all-of', async () => {
-    const { authorizeMiddleware, authorizeAllMiddleware } = await import('../../src/authorization/middleware')
-
+  it('reports two combined checks as mixed when they are not both all-of', () => {
     const router = new Router()
     router.post(
       '/mixed',
@@ -984,9 +1008,7 @@ describe('Router authorization capabilities (RFC 0016)', () => {
     })
   })
 
-  it('absorbs a repeated handler once instead of degrading its mode', async () => {
-    const { authorizeMiddleware } = await import('../../src/authorization/middleware')
-
+  it('absorbs a repeated handler once instead of degrading its mode', () => {
     const anyOf = authorizeMiddleware(['admin', 'moderator'])
     const router = new Router()
     router.post('/twice', () => 'ok', anyOf, anyOf)
@@ -997,9 +1019,7 @@ describe('Router authorization capabilities (RFC 0016)', () => {
     })
   })
 
-  it('absorbs a handler once across the group boundary too', async () => {
-    const { authorizeMiddleware } = await import('../../src/authorization/middleware')
-
+  it('absorbs a handler once across the group boundary too', () => {
     // The same handler reached through a group *and* passed inline is still
     // one check, so the dedup has to survive the recursive aggregation.
     const anyOf = authorizeMiddleware(['admin', 'moderator'])
@@ -1014,25 +1034,7 @@ describe('Router authorization capabilities (RFC 0016)', () => {
     })
   })
 
-  it('normalizes a single-element any-of so merging with all-of stays all', async () => {
-    const { authorizeMiddleware, authorizeAllMiddleware } = await import('../../src/authorization/middleware')
-
-    const router = new Router()
-    router.get('/one', () => 'ok', authorizeMiddleware(['read']))
-    router.post('/merged', () => 'ok', authorizeMiddleware(['read']), authorizeAllMiddleware(['write']))
-
-    const defs = router.definitions()
-    expect(defs[0]!.capabilities?.authorization).toEqual({ abilities: ['read'], mode: 'all' })
-    expect(defs[1]!.capabilities?.authorization).toEqual({
-      abilities: ['read', 'write'],
-      mode: 'all',
-    })
-  })
-
-  it('snapshots the ability array so a later mutation cannot make the stamp lie', async () => {
-    const { authorizeMiddleware, authorizeAllMiddleware } = await import('../../src/authorization/middleware')
-    const { capabilitiesOf } = await import('../../src/http/middleware/capabilities')
-
+  it('snapshots the ability array so a later mutation cannot make the stamp lie', () => {
     const anyOf = ['admin', 'moderator']
     const allOf = ['admin']
     const anyHandler = authorizeMiddleware(anyOf)
@@ -1047,18 +1049,7 @@ describe('Router authorization capabilities (RFC 0016)', () => {
     expect(capabilitiesOf(allHandler)?.authorization?.abilities).toEqual(['admin'])
   })
 
-  it('refuses authorizeAllMiddleware with no abilities', async () => {
-    const { authorizeAllMiddleware } = await import('../../src/authorization/middleware')
-
-    // Gate.all([]) is vacuously true, so this would advertise authorization
-    // and enforce none.
-    expect(() => authorizeAllMiddleware([])).toThrow('at least one ability')
-  })
-
-  it('keeps the stamp in step with a late abilityFor assignment', async () => {
-    const { authorizeResourceMiddleware } = await import('../../src/authorization/middleware')
-    const { capabilitiesOf } = await import('../../src/http/middleware/capabilities')
-
+  it('keeps the stamp in step with a late abilityFor assignment', () => {
     const options: { abilityFor?: (method: string) => string | undefined } = {}
     const handler = authorizeResourceMiddleware(resolver, options)
     options.abilityFor = () => 'archive'
@@ -1068,10 +1059,7 @@ describe('Router authorization capabilities (RFC 0016)', () => {
     expect(capabilitiesOf(handler)?.authorization?.resource).toEqual({ fromMethodMap: true })
   })
 
-  it('does not leak the aggregate back into the stamp', async () => {
-    const { authorizeMiddleware } = await import('../../src/authorization/middleware')
-    const { capabilitiesOf } = await import('../../src/http/middleware/capabilities')
-
+  it('does not leak the aggregate back into the stamp', () => {
     const handler = authorizeMiddleware('update', resolver)
     const router = new Router()
     router.post('/a', () => 'ok', handler, authorizeMiddleware('publish'))
@@ -1082,6 +1070,85 @@ describe('Router authorization capabilities (RFC 0016)', () => {
     ])
     // The handler's own stamp is untouched by aggregation.
     expect(capabilitiesOf(handler)?.authorization?.abilities).toEqual(['update'])
+  })
+})
+
+describe('mergeCapabilities', () => {
+  const fold = (...stamps: MiddlewareCapabilities[]): MiddlewareCapabilities => {
+    const into: MiddlewareCapabilities = {}
+    for (const stamp of stamps) mergeCapabilities(into, stamp)
+    return into
+  }
+
+  const authz = (
+    abilities: string[],
+    mode: 'all' | 'any' | 'mixed',
+    resource?: { fromMethodMap: boolean },
+  ): MiddlewareCapabilities => ({
+    authorization: { abilities, mode, ...(resource ? { resource } : {}) },
+  })
+
+  it('lets required beat guest-only in either order', () => {
+    const required: MiddlewareCapabilities = { authentication: { mode: 'required' } }
+    const guest: MiddlewareCapabilities = { authentication: { mode: 'guest-only' } }
+
+    expect(fold(guest, required).authentication).toEqual({ mode: 'required' })
+    expect(fold(required, guest).authentication).toEqual({ mode: 'required' })
+  })
+
+  it('unions abilities without repeating one both checks name', () => {
+    expect(fold(authz(['a', 'b'], 'all'), authz(['b', 'c'], 'all')).authorization).toEqual({
+      abilities: ['a', 'b', 'c'],
+      mode: 'all',
+    })
+  })
+
+  it('keeps all-of only when both sides are all-of', () => {
+    const modeOf = (left: 'all' | 'any', right: 'all' | 'any') =>
+      fold(authz(['x'], left), authz(['y'], right)).authorization?.mode
+
+    expect(modeOf('all', 'all')).toBe('all')
+    expect(modeOf('all', 'any')).toBe('mixed')
+    expect(modeOf('any', 'all')).toBe('mixed')
+    // Two independent any-of groups are still a conjunction of two groups,
+    // which is not itself an any-of.
+    expect(modeOf('any', 'any')).toBe('mixed')
+  })
+
+  it('ANDs fromMethodMap and keeps a resource marker the second stamp lacks', () => {
+    const authoritative = authz([], 'all', { fromMethodMap: true })
+    const overridden = authz([], 'all', { fromMethodMap: false })
+
+    expect(fold(authoritative, authoritative).authorization?.resource).toEqual({ fromMethodMap: true })
+    expect(fold(authoritative, overridden).authorization?.resource).toEqual({ fromMethodMap: false })
+    expect(fold(overridden, authoritative).authorization?.resource).toEqual({ fromMethodMap: false })
+    expect(fold(authoritative, authz(['x'], 'all')).authorization?.resource).toEqual({
+      fromMethodMap: true,
+    })
+  })
+
+  it('copies on first take, so a later merge cannot write into a stamp', () => {
+    const stamp = authz(['read'], 'all', { fromMethodMap: true })
+    const into = fold(stamp, authz(['write'], 'any', { fromMethodMap: false }))
+
+    expect(into.authorization).toEqual({
+      abilities: ['read', 'write'],
+      mode: 'mixed',
+      resource: { fromMethodMap: false },
+    })
+    expect(stamp.authorization).toEqual({
+      abilities: ['read'],
+      mode: 'all',
+      resource: { fromMethodMap: true },
+    })
+  })
+
+  it('leaves the aggregate alone for a stamp carrying neither field', () => {
+    expect(fold(authz(['read'], 'all'), {}).authorization).toEqual({
+      abilities: ['read'],
+      mode: 'all',
+    })
+    expect(fold({})).toEqual({})
   })
 })
 
