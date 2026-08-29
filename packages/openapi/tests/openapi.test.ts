@@ -24,9 +24,9 @@ describe('@guren/openapi', () => {
         operationId: 'postsStore',
         deprecated: true,
         schemas: {
-          params: z.object({ id: z.coerce.number() }),
+          params: z.object({ id: z.coerce.number().positive() }),
           query: z.object({ preview: z.boolean().optional() }),
-          body: z.object({ title: z.string(), body: z.string() }),
+          body: z.object({ title: z.string().min(1).max(120), body: z.string() }),
           output: z.object({ id: z.number(), title: z.string(), body: z.string() }),
         },
       },
@@ -43,14 +43,17 @@ describe('@guren/openapi', () => {
     expect(document.info.title).toBe('Blog API')
     expect(document.paths['/posts/{id}']?.post?.summary).toBe('Create a post')
     expect(document.paths['/posts/{id}']?.post?.deprecated).toBe(true)
+    // The bounds a route validates with reach the document: a client (or an
+    // agent) reading `{ type: 'string' }` where the endpoint requires a
+    // non-empty string under 120 characters is told less than the app knows.
     expect(document.paths['/posts/{id}']?.post?.parameters).toEqual([
-      { name: 'id', in: 'path', required: true, schema: { type: 'number' } },
+      { name: 'id', in: 'path', required: true, schema: { type: 'number', exclusiveMinimum: 0 } },
       { name: 'preview', in: 'query', required: false, schema: { type: 'boolean' } },
     ])
     expect(document.paths['/posts/{id}']?.post?.requestBody?.content['application/json']?.schema).toEqual({
       type: 'object',
       properties: {
-        title: { type: 'string' },
+        title: { type: 'string', minLength: 1, maxLength: 120 },
         body: { type: 'string' },
       },
       required: ['title', 'body'],
@@ -342,6 +345,33 @@ describe('@guren/openapi', () => {
       const { operation, warnings } = operationFor({ query })
       return { parameters: operation?.parameters, warnings }
     }
+
+    // The walk itself is unit-tested in `@guren/core`'s own
+    // `zod-json-schema.test.ts`; what matters here is that the constraints
+    // survive the trip into every place a document carries a schema —
+    // request body, query parameter, and response — rather than only the one
+    // that happened to be exercised.
+    it('carries zod checks into every schema the document emits', () => {
+      const body = bodyDocument(z.object({
+        slug: z.string().regex(/^[a-z-]+$/),
+        contact: z.email(),
+        tags: z.array(z.string()).min(1).max(5),
+      }))
+      expect(body.warnings).toEqual([])
+      expect(body.schema?.properties).toEqual({
+        slug: { type: 'string', pattern: '^[a-z-]+$' },
+        contact: { type: 'string', format: 'email' },
+        tags: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 5 },
+      })
+
+      const { parameters } = queryParameters(z.object({ page: z.number().min(1).max(100) }))
+      expect(parameters).toEqual([
+        { name: 'page', in: 'query', required: true, schema: { type: 'number', minimum: 1, maximum: 100 } },
+      ])
+
+      const response = responseDocument(z.object({ id: z.uuid() }))
+      expect(response.schema?.properties?.id).toEqual({ type: 'string', format: 'uuid' })
+    })
 
     it('keeps the element type of a zod 4 array', () => {
       const { schema, warnings } = bodyDocument(z.object({ tags: z.array(z.string()) }))

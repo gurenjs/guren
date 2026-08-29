@@ -1,23 +1,13 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, relative, resolve } from 'node:path'
 import type { Application, RouteDefinition } from '@guren/core'
+import type { ZodSchemaLike } from '@guren/core/internal/zod-compat'
 import {
-  arrayElement,
-  enumValues,
-  getTypeName,
-  innerSchema,
-  isZod3Schema,
-  literalValues,
-  objectShape,
-  pipeSide,
-  pipeSides,
-  recordValueType,
-  type SchemaIo,
-  SINGLE_CHILD_WRAPPERS,
-  typeOf,
-  ZOD3_UNSUPPORTED_MESSAGE,
-  type ZodSchemaLike,
-} from '@guren/core/internal/zod-compat'
+  isZodSchema,
+  type JsonSchemaObject,
+  readObjectSchema,
+  toJsonSchema,
+} from '@guren/core/internal/zod-json-schema'
 
 type WriterOptions = {
   force?: boolean
@@ -26,8 +16,6 @@ type WriterOptions = {
 type ZodLike = ZodSchemaLike & {
   safeParse?: (data: unknown) => { success: boolean }
 }
-
-type OpenApiPrimitiveType = 'string' | 'number' | 'integer' | 'boolean' | 'array' | 'object' | 'null'
 
 export interface OpenApiServer {
   url: string
@@ -71,23 +59,14 @@ export interface OpenApiInfoObject {
   description?: string
 }
 
-export interface OpenApiSchemaObject {
-  type?: OpenApiPrimitiveType | OpenApiPrimitiveType[]
-  format?: string
-  description?: string
-  enum?: Array<string | number>
-  const?: string | number | boolean | null
-  properties?: Record<string, OpenApiSchemaObject>
-  required?: string[]
-  items?: OpenApiSchemaObject
-  prefixItems?: OpenApiSchemaObject[]
-  minItems?: number
-  maxItems?: number
-  additionalProperties?: boolean | OpenApiSchemaObject
-  anyOf?: OpenApiSchemaObject[]
-  oneOf?: OpenApiSchemaObject[]
-  allOf?: OpenApiSchemaObject[]
-}
+/**
+ * OpenAPI 3.1's Schema Object *is* JSON Schema 2020-12, so this is the shared
+ * walker's own type under the name this package has always exported. Keeping
+ * one definition is the point of the promotion: a second copy here is how the
+ * document and an agent tool derived from the same route come to advertise
+ * different constraints.
+ */
+export type OpenApiSchemaObject = JsonSchemaObject
 
 export interface OpenApiParameterObject {
   name: string
@@ -258,11 +237,6 @@ interface HonoLike {
   get(path: string, handler: (context: HonoLikeContext) => Response | Promise<Response>): unknown
 }
 
-type ObjectSchemaDetails = {
-  properties: Record<string, OpenApiSchemaObject>
-  required: Set<string>
-}
-
 function isApplicationLike(target: Application | HonoLike): target is Application & { hono: HonoLike; router: { definitions(): RouteDefinition[] } } {
   return typeof target === 'object'
     && target !== null
@@ -341,7 +315,7 @@ function buildRequestBody(definition: RouteDefinition, warnings: string[]): Open
     return undefined
   }
 
-  const bodySchema = toOpenApiSchema(schema, warnings, `${definition.method} ${definition.path} body`, 'input')
+  const bodySchema = toJsonSchema(schema, warnings, `${definition.method} ${definition.path} body`, 'input')
   if (!bodySchema) {
     return undefined
   }
@@ -358,7 +332,7 @@ function buildResponses(definition: RouteDefinition, warnings: string[]): Record
   const responses: Record<string, OpenApiResponseObject> = {}
   const successStatus = definition.method === 'POST' ? '201' : '200'
   const successSchema = definition.schemas?.output
-    ? toOpenApiSchema(definition.schemas.output, warnings, `${definition.method} ${definition.path} response`, 'output')
+    ? toJsonSchema(definition.schemas.output, warnings, `${definition.method} ${definition.path} response`, 'output')
     : undefined
 
   responses[successStatus] = {
@@ -380,203 +354,6 @@ function buildResponses(definition: RouteDefinition, warnings: string[]): Record
   }
 
   return responses
-}
-
-/**
- * Push the v3 refusal warning and report whether it fired. One helper so the
- * composed message cannot drift between the entry points, and so the recursive
- * walks re-check nested nodes — a v3 schema can sit inside a v4 object, and an
- * ungated recursion would document it wrong instead of refusing it.
- */
-function warnIfZod3(schema: unknown, warnings: string[], label: string): boolean {
-  if (schema && typeof schema === 'object' && isZod3Schema(schema as ZodLike)) {
-    warnings.push(`${label}: skipped — ${ZOD3_UNSUPPORTED_MESSAGE}`)
-    return true
-  }
-  return false
-}
-
-function readObjectSchema(schema: unknown, warnings: string[], label: string, io: SchemaIo): ObjectSchemaDetails | undefined {
-  if (!schema) {
-    return undefined
-  }
-
-  if (warnIfZod3(schema, warnings, label)) {
-    return undefined
-  }
-
-  if (!isZodSchema(schema)) {
-    warnings.push(`${label}: skipped because schema is not a supported Zod schema.`)
-    return undefined
-  }
-
-  const details = readObjectSchemaDetails(schema, warnings, label, io)
-  if (!details) {
-    warnings.push(`${label}: expected an object schema for parameter expansion.`)
-  }
-  return details
-}
-
-function readObjectSchemaDetails(schema: ZodLike, warnings: string[], label: string, io: SchemaIo): ObjectSchemaDetails | undefined {
-  // Recursion can surface a v3 node a wrapper was hiding (`z.optional(v3Obj)`
-  // passes the entry gate — the wrapper is v4).
-  if (warnIfZod3(schema, warnings, label)) {
-    return undefined
-  }
-
-  if (typeOf(schema) !== 'object') {
-    const nested = unwrap(schema, io)
-    return nested ? readObjectSchemaDetails(nested, warnings, label, io) : undefined
-  }
-
-  const shape = objectShape(schema)
-  if (!shape) {
-    warnings.push(`${label}: object schema shape could not be read.`)
-    return undefined
-  }
-
-  const properties: Record<string, OpenApiSchemaObject> = {}
-  const required = new Set<string>()
-
-  for (const [key, value] of Object.entries(shape)) {
-    const propertySchema = toOpenApiSchema(value, warnings, `${label}.${key}`, io)
-    if (!propertySchema) {
-      continue
-    }
-
-    properties[key] = propertySchema
-    if (!isOptional(value, io)) {
-      required.add(key)
-    }
-  }
-
-  return { properties, required }
-}
-
-function toOpenApiSchema(schema: unknown, warnings: string[], label: string, io: SchemaIo): OpenApiSchemaObject | undefined {
-  if (warnIfZod3(schema, warnings, label)) {
-    return undefined
-  }
-
-  if (!isZodSchema(schema)) {
-    warnings.push(`${label}: skipped because schema is not a supported Zod schema.`)
-    return undefined
-  }
-
-  const typeName = typeOf(schema)
-  const def = schema._def ?? {}
-
-  // Wrappers add nothing to the rendered type, so they are looked through
-  // uniformly. `nullable` is the exception — it renders as a union with null —
-  // and so keeps its own case below.
-  if (typeName !== 'nullable' && SINGLE_CHILD_WRAPPERS.has(typeName)) {
-    const nested = unwrap(schema, io)
-    if (!nested) {
-      // Reaching a wrapper whose contents cannot be read drops the property,
-      // so say so — `z.lazy()` hides its schema behind a getter this walker
-      // does not call, and a silently missing property reads as a schema that
-      // never declared one.
-      warnings.push(`${label}: the contents of a "${typeName}" schema could not be read, so it is omitted.`)
-      return undefined
-    }
-    return toOpenApiSchema(nested, warnings, label, io)
-  }
-
-  switch (typeName) {
-    case 'string':
-      return { type: 'string' }
-    case 'number':
-      return { type: 'number' }
-    case 'boolean':
-      return { type: 'boolean' }
-    case 'bigint':
-      return { type: 'integer' }
-    case 'date':
-      return { type: 'string', format: 'date-time' }
-    case 'undefined':
-      return undefined
-    case 'null':
-      return { type: 'null' }
-    case 'literal':
-      return literalSchema(def)
-    case 'array': {
-      const item = arrayElement(def)
-      return { type: 'array', items: toOpenApiSchema(item, warnings, `${label}[]`, io) ?? {} }
-    }
-    case 'object': {
-      const details = readObjectSchemaDetails(schema, warnings, label, io)
-      if (!details) {
-        return { type: 'object' }
-      }
-      return {
-        type: 'object',
-        properties: details.properties,
-        required: details.required.size > 0 ? Array.from(details.required) : undefined,
-      }
-    }
-    case 'nullable': {
-      const nested = unwrap(schema, io)
-      const nestedSchema = nested ? toOpenApiSchema(nested, warnings, label, io) : undefined
-      return nestedSchema ? { anyOf: [nestedSchema, { type: 'null' }] } : { type: ['null'] }
-    }
-    case 'transform':
-      warnings.push(`${label}: transform schemas are documented as generic objects.`)
-      return { type: 'object' }
-    // `z.discriminatedUnion()` produces this same node.
-    case 'union': {
-      const options = (def.options as unknown[]) ?? []
-      const oneOf = options
-        .map((option, index) => toOpenApiSchema(option, warnings, `${label}.option${index}`, io))
-        .filter((option): option is OpenApiSchemaObject => Boolean(option))
-      return oneOf.length > 0 ? { oneOf } : undefined
-    }
-    case 'intersection': {
-      const left = toOpenApiSchema(def.left, warnings, `${label}.left`, io)
-      const right = toOpenApiSchema(def.right, warnings, `${label}.right`, io)
-      const allOf = [left, right].filter((value): value is OpenApiSchemaObject => Boolean(value))
-      return allOf.length > 0 ? { allOf } : undefined
-    }
-    case 'record': {
-      const valueType = recordValueType(def)
-      return {
-        type: 'object',
-        additionalProperties: toOpenApiSchema(valueType, warnings, `${label}.value`, io) ?? true,
-      }
-    }
-    // `z.nativeEnum()` produces this same node, so the values may be numbers.
-    case 'enum': {
-      const values = enumValues(schema)
-      if (values.length === 0) {
-        // An empty enum accepts nothing; OpenAPI has no `never`, so a bare
-        // string is the least-wrong fallback (the CLI renders `never`).
-        return { type: 'string' }
-      }
-      const hasNumber = values.some((value) => typeof value === 'number')
-      const hasString = values.some((value) => typeof value === 'string')
-      if (hasNumber && hasString) {
-        return { type: ['string', 'number'], enum: values }
-      }
-      return { type: hasNumber ? 'number' : 'string', enum: values }
-    }
-    case 'tuple': {
-      const items = ((def.items as unknown[]) ?? [])
-        .map((item, index) => toOpenApiSchema(item, warnings, `${label}[${index}]`, io))
-        .filter((item): item is OpenApiSchemaObject => Boolean(item))
-      return {
-        type: 'array',
-        prefixItems: items,
-        minItems: items.length,
-        maxItems: items.length,
-      }
-    }
-    case 'promise': {
-      const nested = innerSchema(def)
-      return nested ? toOpenApiSchema(nested, warnings, label, io) : undefined
-    }
-    default:
-      warnings.push(`${label}: unsupported Zod type "${typeName}".`)
-      return undefined
-  }
 }
 
 function normalizeServers(servers?: OpenApiDocumentOptions['servers']): OpenApiServer[] | undefined {
@@ -679,93 +456,6 @@ function escapeHtml(value: string): string {
     .replace(/'/gu, '&#39;')
 }
 
-function isZodSchema(schema: unknown): schema is ZodLike {
-  if (!schema || typeof schema !== 'object') {
-    return false
-  }
-
-  return Boolean(getTypeName(schema as ZodLike))
-}
-
-/**
- * The schema a wrapper wraps, in the direction being documented. Three walks
- * look through wrappers for different reasons — finding the object behind a
- * parameter schema, rendering a type, deciding whether a property may be
- * omitted — and each layers its own handling on top (`nullable` renders as a
- * union; `optional` and friends decide presence). What none of them may do is
- * disagree about which names *are* wrappers, which is why the membership comes
- * from `SINGLE_CHILD_WRAPPERS` rather than a local list. See `pipeSides` for
- * why a pipe resolves per direction.
- */
-function unwrap(schema: ZodLike, io: SchemaIo): ZodLike | undefined {
-  const def = schema._def ?? {}
-  const typeName = typeOf(schema)
-
-  if (typeName === 'pipe') {
-    return pipeSide(def, io)
-  }
-
-  return SINGLE_CHILD_WRAPPERS.has(typeName) ? innerSchema(def) : undefined
-}
-
-function isOptional(schema: ZodLike, io: SchemaIo): boolean {
-  switch (typeOf(schema)) {
-    case 'optional':
-      return true
-    // Both fill a missing value in, so the field may be left out of a request
-    // but is always present in a response.
-    case 'default':
-    case 'prefault':
-      return io === 'input'
-    // Swallows any failure, a missing value included, and substitutes its
-    // fallback — so nothing is required of a caller, and a response always
-    // carries the field.
-    case 'catch':
-      return io === 'input'
-    // Re-requires a field an inner wrapper made optional, so the walk stops
-    // here rather than reading what it wraps.
-    case 'nonoptional':
-      return false
-    // A pipeline runs both stages, so a field may be omitted only if neither
-    // stage rejects a missing value. Reading just the side being rendered
-    // would document an omission the other stage refuses. Still an
-    // approximation in the other direction: a transforming stage can supply a
-    // value the next stage accepts, which this reports as required.
-    case 'pipe': {
-      const { from, to } = pipeSides(schema._def ?? {})
-      if (!from) {
-        return false
-      }
-      return to ? isOptional(from, io) && isOptional(to, io) : isOptional(from, io)
-    }
-    default: {
-      const nested = unwrap(schema, io)
-      return nested ? isOptional(nested, io) : false
-    }
-  }
-}
-
-function literalSchema(def: Record<string, unknown>): OpenApiSchemaObject {
-  // v4 literals can hold more than one value; only the first is documented
-  // here (unlike the CLI's type renderer, which unions all of them).
-  const value = literalValues(def)[0]
-
-  if (typeof value === 'string') {
-    return { type: 'string', const: value }
-  }
-  if (typeof value === 'number') {
-    return { type: 'number', const: value }
-  }
-  if (typeof value === 'boolean') {
-    return { type: 'boolean', const: value }
-  }
-  if (value === null) {
-    return { type: 'null', const: null }
-  }
-
-  return {}
-}
-
 function isRequestBodyRequired(schema: unknown): boolean {
   if (!isZodSchema(schema)) {
     return true
@@ -774,9 +464,13 @@ function isRequestBodyRequired(schema: unknown): boolean {
   // `safeParse` is supposed to return failures, but a malformed schema can
   // still throw — zod 4 throws outright when an object's property is not a
   // schema it recognizes (a nested v3 node, for one). A body whose schema
-  // cannot even run against `{}` is best documented as required.
+  // cannot even run against `{}` is best documented as required. Running the
+  // schema is this package's own business, which is why `ZodLike` (the reading
+  // surface plus `safeParse`) stays here rather than in the shared walker: the
+  // walker only ever *reads* a schema.
+  const parseable = schema as ZodLike
   try {
-    return !schema.safeParse!({}).success
+    return !parseable.safeParse?.({}).success
   } catch {
     return true
   }

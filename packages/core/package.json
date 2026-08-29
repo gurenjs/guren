@@ -53,6 +53,10 @@
       "types": "./dist/internal/zod-compat.d.ts",
       "default": "./dist/internal/zod-compat.js"
     },
+    "./internal/zod-json-schema": {
+      "types": "./dist/internal/zod-json-schema.d.ts",
+      "default": "./dist/internal/zod-json-schema.js"
+    },
     "./jsx-runtime": {
       "types": "./dist/jsx-runtime.d.ts",
       "default": "./dist/jsx-runtime.js"
