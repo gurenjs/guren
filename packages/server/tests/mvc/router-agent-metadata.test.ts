@@ -78,6 +78,32 @@ describe('AgentRouteMetadata (RFC 0016)', () => {
     })
   })
 
+  describe('double declaration', () => {
+    test('a chained .agent() after an options-level declaration throws instead of replacing', () => {
+      // A wholesale replace would silently drop security-relevant fields the
+      // first declaration carried (approval, redact).
+      const router = new Router()
+      expect(() =>
+        router
+          .post('/transfers', {
+            name: 'transfers.store',
+            agent: { approval: 'required', redact: ['ssn'] },
+          }, [PostController, 'store'])
+          .agent({ description: 'Transfer funds' }),
+      ).toThrow('already carries agent metadata')
+
+      // The first declaration survives intact.
+      const definition = definitionByName(router, 'transfers.store')
+      expect(definition.agent).toEqual({ approval: 'required', redact: ['ssn'] })
+    })
+
+    test('calling .agent() twice on the builder throws', () => {
+      const router = new Router()
+      const builder = router.get('/posts', [PostController, 'index']).name('posts.index').agent({ description: 'a' })
+      expect(() => builder.agent({ description: 'b' })).toThrow('already carries agent metadata')
+    })
+  })
+
   describe('snapshot semantics', () => {
     test('mutating the caller metadata object after registration changes nothing', () => {
       const router = new Router()
@@ -134,6 +160,36 @@ describe('AgentRouteMetadata (RFC 0016)', () => {
           agent: { destroy: { description: 'Delete a post' } },
         }),
       ).toThrow('agent metadata declared for "destroy"')
+    })
+
+    test('a rejected resource() call leaves the router untouched', () => {
+      const router = new Router()
+      expect(() =>
+        router.resource('posts', PostController, {
+          except: ['destroy'],
+          agent: { destroy: { description: 'Delete a post' } },
+        }),
+      ).toThrow()
+
+      // Validation runs before any registration: no phantom half-resource.
+      expect(router.definitions()).toHaveLength(0)
+      expect(router.hasRoute('posts.index')).toBe(false)
+    })
+
+    test('an explicitly-undefined metadata value is not a declaration', () => {
+      // The natural conditional spelling must not throw when the action is
+      // excluded — nothing was declared for it.
+      const router = new Router()
+      router.resource('posts', PostController, {
+        except: ['destroy'],
+        agent: {
+          index: { description: 'List posts' },
+          destroy: undefined,
+        },
+      })
+
+      expect(definitionByName(router, 'posts.index').agent).toEqual({ description: 'List posts' })
+      expect(router.hasRoute('posts.destroy')).toBe(false)
     })
 
     test('metadata for an action the controller does not implement throws', () => {

@@ -22,13 +22,13 @@ export type { ViteAssetOptions } from './http/vite-assets'
 export { Router } from './mvc/Router'
 export type {
   BindableModel,
+  AgentRouteMetadata,
   RouteBuilder,
   RouteContractOptions,
   RouteDefinition,
   RouteMiddlewareInput,
   RouteModelBinding,
   RouteOpenApiMetadata,
-  AgentRouteMetadata,
   ResourceAction as RouteResourceAction,
   ResourceResponseHint,
   ResourceResponseShape,

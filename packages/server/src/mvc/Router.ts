@@ -206,24 +206,24 @@ export interface RouteOpenApiMetadata {
  * output schema, authorization — is derived from the contracts the route
  * already carries, never restated here.
  *
- * Storage only: no defaults are applied at registration. Derivation
- * (`deriveAgentTools`) resolves the tool description from this metadata or
- * the route's OpenAPI metadata, the tool name from `toolName` or the route
- * name, and the MCP annotation defaults from the HTTP method. A route needs
- * a `.name()` to become a tool — the name is the tool's identity — but that
- * is enforced by `guren check`, not here, because `.agent()` may legally be
- * chained before `.name()`.
+ * Storage only: no defaults are applied at registration, and the router does
+ * not require a route name here — `.agent()` may legally be chained before
+ * `.name()`, so name-requirement enforcement is deliberately left to static
+ * checks over `definitions()` (a route without a name cannot become a tool;
+ * the name is the tool's identity).
  */
 export interface AgentRouteMetadata {
-  /** Tool description. Falls back to OpenAPI `description` ?? `summary` at derivation. */
+  /** Tool description. Absent, the route's OpenAPI `description` ?? `summary` stands in. */
   description?: string
   /** Tool name override. Defaults to the route name, used verbatim. */
   toolName?: string
-  /** Protocol surfaces this tool appears on. Both default true at derivation. */
+  /** Protocol surfaces this tool appears on. Unset surfaces count as exposed. */
   expose?: { mcp?: boolean; webMcp?: boolean }
-  /** MCP ToolAnnotations overrides; defaults derive from the HTTP method. */
+  /** MCP ToolAnnotations override: the tool does not modify its environment. Unset: GET/QUERY routes read-only. */
   readOnlyHint?: boolean
+  /** MCP ToolAnnotations override. `false` is the strong claim "additive updates only"; unset keeps the spec default (true for non-read-only tools). */
   destructiveHint?: boolean
+  /** MCP ToolAnnotations override: repeat calls with the same arguments have no additional effect. Unset: PUT/DELETE routes idempotent. */
   idempotentHint?: boolean
   /** Route invocations through an agent surface require server-side approval. */
   approval?: 'required'
@@ -232,17 +232,17 @@ export interface AgentRouteMetadata {
 }
 
 /**
- * One immutable snapshot of agent metadata. Taken when the metadata is
- * attached and again when `definitions()` hands it out, so neither a caller
+ * One immutable snapshot of agent metadata, taken when the metadata is
+ * attached and again when `definitions()` hands it out — so neither a caller
  * mutating its options object after registration nor a consumer mutating a
- * definition can change what the router actually holds (the same rule the
- * authorization stamps follow).
+ * definition can change the agent metadata the router actually holds. The
+ * claim is scoped to this field: other definition fields (`schemas`, the
+ * spread OpenAPI metadata) alias the registry. Plain data end to end, so
+ * `structuredClone` keeps future nested fields covered without a
+ * hand-maintained field list.
  */
 function cloneAgentMetadata(metadata: AgentRouteMetadata): AgentRouteMetadata {
-  const clone: AgentRouteMetadata = { ...metadata }
-  if (metadata.expose) clone.expose = { ...metadata.expose }
-  if (metadata.redact) clone.redact = [...metadata.redact]
-  return clone
+  return structuredClone(metadata)
 }
 
 interface RegisteredRoute {
@@ -703,28 +703,25 @@ export class Router<M extends string = never> {
     const baseName = options.name ?? path.replace(/^\//u, '').replace(/\//gu, '.')
     const paramName = options.param ?? 'id'
     const { only, except, agent } = options
-    const registered = new Set<ResourceAction>()
 
-    for (const { method, suffix, httpMethod } of RESOURCE_ACTIONS) {
+    // The registration predicate is pure, so it runs once up front. That
+    // keeps the orphan check *before* any mutation: a rejected resource()
+    // leaves the router exactly as it was, never holding half its routes.
+    const registrable = new Set<ResourceAction>()
+    for (const { method } of RESOURCE_ACTIONS) {
       if (only && !only.includes(method)) continue
       if (except?.includes(method)) continue
-
-      const actualSuffix = suffix.replace(':param', `:${paramName}`)
-      const routePath = path + actualSuffix
-
       if (typeof (controller.prototype as Record<string, unknown>)[method] === 'function') {
-        const builder = this[httpMethod](routePath, [controller, method as ControllerMethodFor<C>]).name(`${baseName}.${method}`)
-        registered.add(method)
-
-        const agentMetadata = agent?.[method]
-        if (agentMetadata) {
-          builder.agent(agentMetadata)
-        }
+        registrable.add(method)
       }
     }
 
     if (agent) {
-      const orphaned = Object.keys(agent).filter((action) => !registered.has(action as ResourceAction))
+      // An explicitly-undefined value (`destroy: enabled ? meta : undefined`)
+      // is not a declaration — only real metadata for an unregistrable action
+      // is a wiring mistake.
+      const orphaned = (Object.keys(agent) as ResourceAction[])
+        .filter((action) => agent[action] !== undefined && !registrable.has(action))
       if (orphaned.length > 0) {
         throw new Error(
           `Router.resource('${path}'): agent metadata declared for ${orphaned.map((a) => `"${a}"`).join(', ')}, `
@@ -732,6 +729,17 @@ export class Router<M extends string = never> {
             + 'Agent metadata for a tool that cannot exist is a wiring mistake.',
         )
       }
+    }
+
+    for (const { method, suffix, httpMethod } of RESOURCE_ACTIONS) {
+      if (!registrable.has(method)) continue
+
+      const actualSuffix = suffix.replace(':param', `:${paramName}`)
+      const routePath = path + actualSuffix
+
+      const builder = this[httpMethod](routePath, [controller, method as ControllerMethodFor<C>]).name(`${baseName}.${method}`)
+      const agentMetadata = agent?.[method]
+      if (agentMetadata) builder.agent(agentMetadata)
     }
 
     return this
@@ -1167,6 +1175,16 @@ function createRouteBuilder<M extends string = never>(route: RegisteredRoute, na
       return this
     },
     agent(metadata: AgentRouteMetadata): RouteBuilder<M> {
+      // Refuse a second declaration rather than replacing or merging: a
+      // wholesale replace silently drops security-relevant fields the first
+      // declaration carried (approval, redact), and merge semantics would be
+      // just as easy to weaken by accident. One route, one declaration.
+      if (route.agent) {
+        throw new Error(
+          `Route ${route.method} ${route.path} already carries agent metadata `
+            + '(declared via route options or an earlier .agent() call). Declare it once.',
+        )
+      }
       route.agent = cloneAgentMetadata(metadata)
       return this
     },
