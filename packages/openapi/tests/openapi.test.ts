@@ -24,7 +24,7 @@ describe('@guren/openapi', () => {
         operationId: 'postsStore',
         deprecated: true,
         schemas: {
-          params: z.object({ id: z.coerce.number().positive() }),
+          params: z.object({ id: z.coerce.number().int().positive() }),
           query: z.object({ preview: z.boolean().optional() }),
           body: z.object({ title: z.string().min(1).max(120), body: z.string() }),
           output: z.object({ id: z.number(), title: z.string(), body: z.string() }),
@@ -47,7 +47,7 @@ describe('@guren/openapi', () => {
     // agent) reading `{ type: 'string' }` where the endpoint requires a
     // non-empty string under 120 characters is told less than the app knows.
     expect(document.paths['/posts/{id}']?.post?.parameters).toEqual([
-      { name: 'id', in: 'path', required: true, schema: { type: 'number', exclusiveMinimum: 0 } },
+      { name: 'id', in: 'path', required: true, schema: { type: 'integer', exclusiveMinimum: 0 } },
       { name: 'preview', in: 'query', required: false, schema: { type: 'boolean' } },
     ])
     expect(document.paths['/posts/{id}']?.post?.requestBody?.content['application/json']?.schema).toEqual({

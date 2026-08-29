@@ -107,6 +107,26 @@ describe('toJsonSchema', () => {
       expect(clean(z.string().datetime())).toEqual({ type: 'string', format: 'date-time' })
     })
 
+    // The network formats JSON Schema 2020-12 registers, in both spellings.
+    test('maps the registered network and duration formats', () => {
+      expect(clean(z.ipv4())).toEqual({ type: 'string', format: 'ipv4' })
+      expect(clean(z.ipv6())).toEqual({ type: 'string', format: 'ipv6' })
+      expect(clean(z.hostname())).toEqual({ type: 'string', format: 'hostname' })
+      expect(clean(z.iso.duration())).toEqual({ type: 'string', format: 'duration' })
+
+      expect(clean(z.string().ipv4())).toEqual({ type: 'string', format: 'ipv4' })
+      expect(clean(z.string().ipv6())).toEqual({ type: 'string', format: 'ipv6' })
+      expect(clean(z.string().duration())).toEqual({ type: 'string', format: 'duration' })
+    })
+
+    // JSON Schema's `time` is an RFC 3339 `full-time` and requires an offset;
+    // `z.iso.time()` accepts a local wall-clock time, so claiming the format
+    // would assert something the schema does not enforce. zod's own emitter
+    // omits it for the same reason.
+    test('does not claim the time format for a schema that accepts a local time', () => {
+      expect(clean(z.iso.time())).toEqual({ type: 'string' })
+    })
+
     test('combines a format with the length bounds beside it', () => {
       expect(clean(z.email().max(254))).toEqual({ type: 'string', format: 'email', maxLength: 254 })
     })
@@ -118,9 +138,24 @@ describe('toJsonSchema', () => {
       expect(clean(z.iso.datetime())?.pattern).toBeUndefined()
     })
 
-    // JSON Schema has one `pattern` keyword, so the second is unrepresentable.
-    test('keeps the first pattern when a schema carries two', () => {
-      expect(clean(z.string().regex(/^a/).startsWith('b'))?.pattern).toBe('^a')
+    // One `pattern` keyword per schema object, so a second has to be conjoined.
+    // Dropping it would emit a schema that ACCEPTS strings the route rejects —
+    // the one direction a derived contract must never be wrong in.
+    test('conjoins a surplus pattern rather than dropping it', () => {
+      expect(clean(z.string().regex(/^a/).startsWith('b'))).toEqual({
+        type: 'string',
+        pattern: '^a',
+        allOf: [{ pattern: '^b.*' }],
+      })
+
+      expect(clean(z.string().regex(/^a/).startsWith('b').endsWith('c'))?.allOf).toEqual([
+        { pattern: '^b.*' },
+        { pattern: '.*c$' },
+      ])
+    })
+
+    test('leaves a lone pattern flat', () => {
+      expect(clean(z.string().regex(/^a/))).toEqual({ type: 'string', pattern: '^a' })
     })
 
     // Dropping an unmapped format leaves `type: 'string'`, which is still true.
@@ -154,6 +189,41 @@ describe('toJsonSchema', () => {
 
     test('carries multipleOf', () => {
       expect(clean(z.number().multipleOf(0.5))).toEqual({ type: 'number', multipleOf: 0.5 })
+    })
+
+    // Two multiples compose to their least common multiple, which one keyword
+    // cannot spell. zod's own emitter drops the second outright, which widens
+    // the schema past what the route accepts.
+    test('conjoins a surplus multipleOf rather than dropping it', () => {
+      expect(clean(z.number().multipleOf(2).multipleOf(3))).toEqual({
+        type: 'number',
+        multipleOf: 2,
+        allOf: [{ multipleOf: 3 }],
+      })
+    })
+
+    // `z.int()` documented as `number` advertises a contract admitting 3.14,
+    // which the route then rejects. JSON Schema says "whole" with a type.
+    test('renders an integer-formatted number as type integer', () => {
+      expect(clean(z.int())).toEqual({ type: 'integer' })
+      expect(clean(z.number().int())).toEqual({ type: 'integer' })
+      expect(clean(z.int32())).toEqual({ type: 'integer' })
+      expect(clean(z.uint32())).toEqual({ type: 'integer' })
+      expect(clean(z.int().min(1).max(9))).toEqual({ type: 'integer', minimum: 1, maximum: 9 })
+    })
+
+    // The other half of the same zod vocabulary; these really are reals.
+    test('leaves the float formats as plain numbers', () => {
+      expect(clean(z.float32())).toEqual({ type: 'number' })
+      expect(clean(z.float64())).toEqual({ type: 'number' })
+    })
+
+    // Zod's own emitter adds `minimum: -2147483648` for int32 and the
+    // safe-integer range for `z.int()`. Those are the representation's limits,
+    // not the application's contract, and they bury the bounds an author wrote.
+    test('does not emit the bounds a numeric format implies', () => {
+      expect(clean(z.int32())).not.toHaveProperty('minimum')
+      expect(clean(z.int())).not.toHaveProperty('maximum')
     })
 
     test('keeps the tighter of two bounds of the same kind', () => {

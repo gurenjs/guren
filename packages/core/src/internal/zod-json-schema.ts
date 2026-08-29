@@ -98,12 +98,19 @@ type ZodLike = ZodSchemaLike
  * same thing, matched against zod's own `z.toJSONSchema()` output so the two
  * cannot disagree about, say, whether `z.url()` is `"url"` or `"uri"`.
  *
- * Deliberately short. Zod carries plenty of formats that JSON Schema has never
- * registered (`cuid`, `nanoid`, `emoji`, `ulid`, `jwt`, `base64`…), and
- * emitting those verbatim advertises a constraint no consumer can interpret —
- * an agent reading `format: "cuid"` learns nothing it can act on, while the
- * `type: "string"` it already had stays true. Unmapped formats are dropped, not
- * warned about: the schema is still correct, just less specific.
+ * The line is "registered by JSON Schema 2020-12", not "short". Zod carries
+ * plenty of formats the spec has never registered (`cuid`, `nanoid`, `emoji`,
+ * `ulid`, `jwt`, `base64`…), and emitting those verbatim advertises a
+ * constraint no consumer can interpret — an agent reading `format: "cuid"`
+ * learns nothing it can act on, while the `type: "string"` it already had stays
+ * true. Unmapped formats are dropped, not warned about: the schema is still
+ * correct, just less specific.
+ *
+ * `time` is the one registered format deliberately left out, and zod omits it
+ * from its own output for the same reason: JSON Schema's `time` is an RFC 3339
+ * `full-time`, which requires an offset, while `z.iso.time()` accepts a local
+ * wall-clock time. Claiming the format would assert an offset the schema does
+ * not require.
  */
 const JSON_SCHEMA_STRING_FORMATS: Readonly<Record<string, string>> = {
   email: 'email',
@@ -111,7 +118,27 @@ const JSON_SCHEMA_STRING_FORMATS: Readonly<Record<string, string>> = {
   uuid: 'uuid',
   datetime: 'date-time',
   date: 'date',
+  duration: 'duration',
+  hostname: 'hostname',
+  ipv4: 'ipv4',
+  ipv6: 'ipv6',
 }
+
+/**
+ * The `number_format` values that describe an integer. JSON Schema says this
+ * with a *type*, not a format, so these change `type: "number"` to
+ * `type: "integer"` — a `z.int()` that documents as `number` advertises a
+ * contract admitting `3.14`, which the route then rejects.
+ *
+ * `float32` / `float64` are the other half of the same zod vocabulary and stay
+ * plain numbers. The bounds each of these formats implies (zod's own emitter
+ * adds `minimum: -2147483648` for `int32`, and the safe-integer range for
+ * `safeint`) are deliberately not emitted: they are the representation's
+ * limits rather than the application's contract, and they bury the constraints
+ * an author actually wrote. `int64` / `uint64` need no entry — they sit on
+ * `bigint` nodes, which this walker already renders as `integer`.
+ */
+const INTEGER_NUMBER_FORMATS: ReadonlySet<string> = new Set(['safeint', 'int32', 'uint32'])
 
 /**
  * The string formats whose zod-supplied regex is worth carrying as `pattern` —
@@ -175,7 +202,10 @@ export function toJsonSchema(
     case 'string':
       return { type: 'string', ...stringConstraints(schema) }
     case 'number':
-      return { type: 'number', ...numericConstraints(schema) }
+      return {
+        type: isIntegerNumber(schema) ? 'integer' : 'number',
+        ...numericConstraints(schema),
+      }
     case 'boolean':
       return { type: 'boolean' }
     case 'bigint':
@@ -513,40 +543,82 @@ function lengthConstraints(
   return constraints
 }
 
+/**
+ * Every format this node declares, in the order a reader should prefer them.
+ *
+ * Two sources, because zod has two spellings: the top-level constructors
+ * (`z.email()`, `z.int()`) record the format on the node, while the equivalent
+ * methods (`z.string().email()`, `z.number().int()`) attach it as a check and
+ * leave the node's own field empty. Reading one source loses half the formats
+ * an app writes, so both are collected here once rather than in each caller.
+ */
+function declaredFormats(schema: ZodSchemaLike): string[] {
+  const onNode = schemaFormat(schema)
+  const onChecks = schemaChecks(schema).flatMap((check) =>
+    typeof check.format === 'string' ? [check.format] : [],
+  )
+  return onNode ? [onNode, ...onChecks] : onChecks
+}
+
+/** Whether a `number` node is constrained to whole values, and so is a JSON Schema `integer`. */
+function isIntegerNumber(schema: ZodSchemaLike): boolean {
+  return declaredFormats(schema).some((format) => INTEGER_NUMBER_FORMATS.has(format))
+}
+
 function stringConstraints(schema: ZodSchemaLike): JsonSchemaObject {
   const constraints: JsonSchemaObject = lengthConstraints(schema, 'minLength', 'maxLength')
 
-  // `z.email()` records the format on the node; `z.string().email()` records it
-  // as a check. Both spellings have to be read or half of them lose the format.
-  const declared = JSON_SCHEMA_STRING_FORMATS[schemaFormat(schema) ?? '']
-  if (declared) {
-    constraints.format = declared
-  }
-
-  for (const check of schemaChecks(schema)) {
-    if (check.check !== 'string_format') continue
-    const format = typeof check.format === 'string' ? check.format : undefined
-    if (!format) continue
-
+  for (const format of declaredFormats(schema)) {
     const mapped = JSON_SCHEMA_STRING_FORMATS[format]
     if (mapped && constraints.format === undefined) {
       constraints.format = mapped
-      continue
-    }
-
-    // JSON Schema has one `pattern` keyword, so a schema carrying two
-    // pattern-bearing checks (`.regex(...).startsWith(...)`) can only keep the
-    // first. The alternative — an `allOf` of single-keyword schemas — buys
-    // exactness for a rare shape at the cost of a schema no consumer renders
-    // as well; the first pattern is still a true constraint, just not the
-    // only one.
-    if (PATTERN_BEARING_FORMATS.has(format) && constraints.pattern === undefined) {
-      const pattern = patternSource(check)
-      if (pattern) constraints.pattern = pattern
     }
   }
 
+  const patterns = schemaChecks(schema).flatMap((check) => {
+    if (check.check !== 'string_format') return []
+    const format = typeof check.format === 'string' ? check.format : undefined
+    if (!format || !PATTERN_BEARING_FORMATS.has(format)) return []
+    const pattern = patternSource(check)
+    return pattern ? [pattern] : []
+  })
+
+  assignWithSurplus(constraints, 'pattern', patterns)
+
   return constraints
+}
+
+/**
+ * Put the first value under `keyword` and fold any remainder into `allOf`.
+ *
+ * JSON Schema allows one `pattern` and one `multipleOf` per schema object, so a
+ * node carrying two of either (`z.string().regex(/^a/).startsWith('b')`,
+ * `z.number().multipleOf(2).multipleOf(3)`) cannot state both in place. Keeping
+ * only the first is not a lesser answer, it is a wrong one: the emitted schema
+ * then *accepts values the route rejects*, which is the one direction a derived
+ * contract must never be wrong in — an agent handed it will send input that
+ * fails validation. `allOf` conjoins, so the surplus stays enforceable.
+ *
+ * The first value stays on the node rather than going into `allOf` with the
+ * rest, so the overwhelmingly common single-constraint case emits flat.
+ * (zod's own emitter drops the surplus `multipleOf` outright here.)
+ */
+function assignWithSurplus(
+  constraints: JsonSchemaObject,
+  keyword: 'pattern' | 'multipleOf',
+  values: Array<string | number>,
+): void {
+  const [first, ...surplus] = values
+  if (first === undefined) {
+    return
+  }
+
+  // The keyword's value type is narrowed per keyword by the caller's input,
+  // which is why the assignment needs the cast the union of both cannot express.
+  ;(constraints[keyword] as string | number) = first
+  if (surplus.length > 0) {
+    constraints.allOf = surplus.map((value) => ({ [keyword]: value }) as JsonSchemaObject)
+  }
 }
 
 /** A check's regex as a JSON Schema `pattern` — the source, never the `/…/` literal form. */
@@ -583,19 +655,18 @@ function numericConstraints(schema: ZodSchemaLike): JsonSchemaObject {
         }
         break
       }
-      // Two `multipleOf` checks would compose to their least common multiple,
-      // which JSON Schema cannot spell in one keyword; the first is kept.
-      case 'multiple_of': {
-        const value = numeric(check.value)
-        if (value !== undefined && constraints.multipleOf === undefined) {
-          constraints.multipleOf = value
-        }
-        break
-      }
       default:
         break
     }
   }
+
+  // Two `multipleOf` checks compose to their least common multiple, which one
+  // keyword cannot spell — so the surplus is conjoined rather than dropped.
+  assignWithSurplus(constraints, 'multipleOf', schemaChecks(schema).flatMap((check) => {
+    if (check.check !== 'multiple_of') return []
+    const value = numeric(check.value)
+    return value === undefined ? [] : [value]
+  }))
 
   return constraints
 }
