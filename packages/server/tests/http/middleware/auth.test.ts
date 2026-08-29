@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import { Hono } from 'hono'
 import {
+  AUTH_CONTEXT_KEY,
   attachAuthContext,
   requireAuthenticated,
   requireGuest,
@@ -15,7 +16,7 @@ describe('attachAuthContext', () => {
 
     app.use(attachAuthContext(() => mockAuth))
     app.get('/test', async (c) => {
-      const auth = (c as unknown as { get: (key: string) => AuthContext }).get('guren:auth')
+      const auth = (c as unknown as { get: (key: string) => AuthContext }).get(AUTH_CONTEXT_KEY)
       const user = await auth.user()
       return c.json({ user })
     })

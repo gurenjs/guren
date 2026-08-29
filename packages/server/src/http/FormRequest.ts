@@ -2,9 +2,8 @@ import type { Context } from 'hono'
 import type { ValidationRule } from './validation/types'
 import { Validator } from './validation/Validator'
 import { AuthorizationException } from '../errors/exceptions/AuthorizationException'
-import { AUTH_CONTEXT_KEY } from './middleware/auth'
+import { getAuthContext } from '../auth/context'
 import { parseRequestPayload } from './request'
-import type { AuthContext } from '../auth'
 
 /**
  * Base class for form request validation.
@@ -83,7 +82,7 @@ export abstract class FormRequest<T = Record<string, unknown>> {
    * true, because an unawaited call is a pending promise.
    */
   protected async user<TUser = unknown>(): Promise<TUser | null> {
-    const auth = this.ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
+    const auth = getAuthContext(this.ctx)
     return (await auth?.user<TUser>()) ?? null
   }
 
