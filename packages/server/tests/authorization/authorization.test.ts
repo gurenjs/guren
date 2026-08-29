@@ -10,11 +10,14 @@ import {
   authorize,
   Policy,
   definePolicy,
+  authorizeMiddleware,
+  authorizeAllMiddleware,
   authorizeResourceMiddleware,
 } from '../../src/authorization'
 import type { AuthorizeResourceOptions } from '../../src/authorization'
 import { AuthorizationException } from '../../src/errors'
 import type { Context } from '../../src/http/Application'
+import type { Middleware } from '../../src/http/middleware'
 
 // Test models
 class Post {
@@ -705,6 +708,16 @@ describe('Authorization Integration', () => {
 // authorizeResourceMiddleware Tests
 // ===================
 
+/** Drive one authorization middleware against a fake request context. */
+const drive = async (middleware: Middleware, method = 'GET') => {
+  const ctx = { req: { method }, get: () => ({ id: 1 }) } as unknown as Context
+  let nextCalled = false
+  await middleware(ctx, async () => {
+    nextCalled = true
+  })
+  return nextCalled
+}
+
 describe('authorizeResourceMiddleware', () => {
   let checkedAbilities: string[]
 
@@ -720,18 +733,8 @@ describe('authorizeResourceMiddleware', () => {
     setGate(gate)
   })
 
-  const run = async (method: string, options?: AuthorizeResourceOptions) => {
-    const middleware = authorizeResourceMiddleware(() => ({ id: 1 }), options)
-    const ctx = {
-      req: { method },
-      get: () => ({ id: 1 }),
-    } as unknown as Context
-    let nextCalled = false
-    await middleware(ctx, async () => {
-      nextCalled = true
-    })
-    return nextCalled
-  }
+  const run = (method: string, options?: AuthorizeResourceOptions) =>
+    drive(authorizeResourceMiddleware(() => ({ id: 1 }), options), method)
 
   test('maps known methods to resource abilities', async () => {
     const expected: Array<[string, string]> = [
@@ -778,5 +781,78 @@ describe('authorizeResourceMiddleware', () => {
     const abilityFor = (method: string) => (method === 'POST' ? 'update' : undefined)
     expect(await run('POST', { abilityFor })).toBe(true)
     expect(checkedAbilities).toEqual(['update'])
+  })
+
+  test('captures abilityFor at creation, so a later assignment cannot apply', async () => {
+    // The capability stamp fixes `fromMethodMap` at creation. If the handler
+    // re-read options per request, an assignment made afterwards would change
+    // the ability checked while the stamp still named the verb map.
+    const options: AuthorizeResourceOptions = {}
+    const middleware = authorizeResourceMiddleware(() => ({ id: 1 }), options)
+    options.abilityFor = () => 'purge'
+
+    expect(await drive(middleware, 'DELETE')).toBe(true)
+    expect(checkedAbilities).toEqual(['delete'])
+  })
+})
+
+describe('authorize middleware ability snapshots', () => {
+  let checkedAbilities: string[]
+
+  beforeEach(() => {
+    checkedAbilities = []
+    const gate = new Gate()
+    for (const ability of ['admin', 'moderator', 'billing']) {
+      gate.define(ability, () => {
+        checkedAbilities.push(ability)
+        return true
+      })
+    }
+    setGate(gate)
+  })
+
+  test('authorizeMiddleware checks the array as it was at creation', async () => {
+    const abilities = ['admin', 'moderator']
+    const middleware = authorizeMiddleware(abilities)
+    abilities.length = 0
+
+    expect(await drive(middleware)).toBe(true)
+    // Not [] — an emptied array would make Gate.any([]) deny everything.
+    expect(checkedAbilities).toEqual(['admin'])
+  })
+
+  test('authorizeAllMiddleware checks the array as it was at creation', async () => {
+    const abilities = ['admin', 'billing']
+    const middleware = authorizeAllMiddleware(abilities)
+    abilities.length = 0
+
+    expect(await drive(middleware)).toBe(true)
+    // Not [] — Gate.all([]) is vacuously true and would authorize anyone.
+    expect(checkedAbilities).toEqual(['admin', 'billing'])
+  })
+
+  test('a one-element array keeps the policy denial, like the bare ability', async () => {
+    const gate = new Gate()
+    gate.define('publish', () => Response.denyWithStatus(404, 'No such post.'))
+    setGate(gate)
+
+    // Any-of over one ability is that ability, so it must not fall back to
+    // the generic any-of denial — the stamp reports it as all-of-one.
+    await expect(drive(authorizeMiddleware(['publish']))).rejects.toThrow('No such post.')
+    await expect(drive(authorizeMiddleware('publish'))).rejects.toThrow('No such post.')
+
+    // Two alternatives have no single response to carry, so that denial is
+    // generic — the boundary the normalization stops at.
+    await expect(drive(authorizeMiddleware(['publish', 'admin']))).rejects.toThrow(
+      'This action is unauthorized.'
+    )
+  })
+
+  test('an empty ability list still denies every request', async () => {
+    await expect(drive(authorizeMiddleware([]))).rejects.toThrow(AuthorizationException)
+  })
+
+  test('authorizeAllMiddleware refuses an empty ability list at creation', () => {
+    expect(() => authorizeAllMiddleware([])).toThrow('at least one ability')
   })
 })

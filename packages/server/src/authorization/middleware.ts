@@ -3,6 +3,7 @@ import type { Middleware } from '../http/middleware'
 import type { AuthUser, AuthorizeOptions, AuthorizeResourceOptions } from './types'
 import { Gate, getGate, denialToException } from './Gate'
 import { AuthorizationException } from '../errors'
+import { stampCapabilities } from '../http/middleware/capabilities'
 
 /**
  * Middleware to authorize an ability.
@@ -18,47 +19,79 @@ import { AuthorizationException } from '../errors'
  * // Multiple abilities (any)
  * app.get('/dashboard', authorizeMiddleware(['admin', 'moderator']), dashboardHandler)
  * ```
+ *
+ * An array argument is snapshotted at creation: mutating it afterwards
+ * changes neither what the middleware checks nor what it reports. A
+ * one-element array is treated exactly like the bare ability, denial message
+ * and status included. An empty array denies every request (`Gate.any([])` is
+ * false) and names no ability — fail-closed, so it is left to run rather than
+ * rejected.
  */
 export function authorizeMiddleware(
   ability: string | string[],
   modelResolver?: (ctx: Context) => unknown | Promise<unknown>,
   options: AuthorizeOptions = {}
 ): Middleware {
-  return async (ctx, next) => {
+  // One snapshot feeds both the handler and the stamp, so a caller mutating
+  // the array it passed cannot make the two disagree.
+  const abilities = Array.isArray(ability) ? [...ability] : [ability]
+  const anyOf = abilities.length !== 1
+
+  return stampCapabilities(async (ctx, next) => {
     const gate = getGate()
     const user = await gate.resolveUser(ctx)
     const gateForUser = gate.forUser(user)
 
-    const abilities = Array.isArray(ability) ? ability : [ability]
     const model = modelResolver ? await modelResolver(ctx) : undefined
 
-    if (Array.isArray(ability)) {
+    if (anyOf) {
       // Any-of has no single response to carry, so a denial can only be generic.
       if (!(await gateForUser.any(abilities, model))) {
         throw new AuthorizationException(options.message ?? 'This action is unauthorized.')
       }
     } else {
-      // Single ability: keep the policy's own message and status, so the same
-      // denial reads the same here as through `Controller.authorize()`.
-      const response = await gateForUser.checkResponse(ability, user, model)
+      // Exactly one ability, however it was written: keep the policy's own
+      // message and status, so the same denial reads the same here as through
+      // `Controller.authorize()`.
+      const response = await gateForUser.checkResponse(abilities[0]!, user, model)
       if (!response.allowed) {
         throw denialToException(options.message ? { ...response, message: options.message } : response)
       }
     }
 
     await next()
-  }
+  }, {
+    // One ability normalizes to 'all' whichever way it was written; see
+    // `MiddlewareCapabilities.authorization` for why.
+    authorization: { abilities, mode: anyOf ? 'any' : 'all' },
+  })
 }
 
 /**
  * Middleware to authorize all given abilities.
+ *
+ * The array is snapshotted at creation, so mutating it afterwards changes
+ * neither what the middleware checks nor what it reports.
+ *
+ * @throws if no ability is given. `Gate.all([])` is vacuously true, so an
+ * empty list would mount a route that advertises authorization and enforces
+ * none — the fail-open shape RFC 0016's "authn is not authz" rule exists to
+ * catch. Refusing at creation surfaces it at boot rather than per request.
  */
 export function authorizeAllMiddleware(
-  abilities: string[],
+  input: string[],
   modelResolver?: (ctx: Context) => unknown | Promise<unknown>,
   options: AuthorizeOptions = {}
 ): Middleware {
-  return async (ctx, next) => {
+  const abilities = [...input]
+
+  if (abilities.length === 0) {
+    throw new Error(
+      'authorizeAllMiddleware() requires at least one ability: an empty list authorizes every request while claiming to authorize.'
+    )
+  }
+
+  return stampCapabilities(async (ctx, next) => {
     const gate = getGate()
     const user = await gate.resolveUser(ctx)
     const gateForUser = gate.forUser(user)
@@ -73,7 +106,7 @@ export function authorizeAllMiddleware(
     }
 
     await next()
-  }
+  }, { authorization: { abilities, mode: 'all' } })
 }
 
 // HTTP method → policy ability. QUERY (RFC 10008) is safe like GET, so it
@@ -88,6 +121,21 @@ const RESOURCE_ABILITY_BY_METHOD: Record<string, string> = {
   PUT: 'update',
   PATCH: 'update',
   DELETE: 'delete',
+}
+
+/**
+ * The ability `authorizeResourceMiddleware` checks for an HTTP method, or
+ * `undefined` for a method it refuses to guess at (which the middleware
+ * denies). This is the single source of the verb → ability mapping: a
+ * consumer resolving a route's ability from its stamped
+ * `authorization.resource` capability calls this rather than restating the
+ * table, and may only do so when `resource.fromMethodMap` is true.
+ *
+ * Not re-exported from the package root — like the capability stamp itself
+ * (RFC 0007), this is an internal contract until a public consumer needs it.
+ */
+export function resourceAbilityForMethod(method: string): string | undefined {
+  return RESOURCE_ABILITY_BY_METHOD[method.toUpperCase()]
 }
 
 /**
@@ -116,9 +164,15 @@ export function authorizeResourceMiddleware(
   modelResolver: (ctx: Context) => unknown | Promise<unknown>,
   options: AuthorizeResourceOptions = {}
 ): Middleware {
-  return async (ctx, next) => {
+  // Captured once: the stamp's `fromMethodMap` is fixed at creation, so the
+  // handler must not read `options.abilityFor` again per request — a caller
+  // assigning it later would otherwise override the map the stamp still
+  // reports as authoritative.
+  const abilityFor = options.abilityFor
+
+  return stampCapabilities(async (ctx, next) => {
     const method = ctx.req.method.toUpperCase()
-    const ability = options.abilityFor?.(method) ?? RESOURCE_ABILITY_BY_METHOD[method]
+    const ability = abilityFor?.(method) ?? resourceAbilityForMethod(method)
 
     if (ability === undefined) {
       throw new AuthorizationException(options.message ?? 'This action is unauthorized.')
@@ -136,7 +190,18 @@ export function authorizeResourceMiddleware(
     }
 
     await next()
-  }
+  }, {
+    // The ability is only known once a request arrives. `abilityFor` is
+    // consulted *before* the verb map and wins for standard methods too, so
+    // its presence makes the map non-authoritative for this route — say so
+    // rather than letting a consumer report the mapped ability for a check
+    // that never uses it.
+    authorization: {
+      abilities: [],
+      mode: 'all',
+      resource: { fromMethodMap: abilityFor === undefined },
+    },
+  })
 }
 
 /**
