@@ -1,22 +1,29 @@
 import type { Context } from 'hono'
 import type { AuthCredentials, Guard, UserProvider } from './types'
 import type { Session } from '../http/middleware'
-import { API_TOKEN_KEY, revokeApiToken, verifyApiToken, type ApiTokenStore, type VerifiedApiToken } from './api-token'
+import {
+  API_TOKEN_KEY,
+  parseApiToken,
+  readBearerToken,
+  revokeApiToken,
+  verifyApiToken,
+  type ApiTokenStore,
+  type VerifiedApiToken,
+} from './api-token'
+import { sanitizeUser } from './providers/UserProvider'
 
 export interface TokenGuardOptions<User = unknown> {
   store: ApiTokenStore
   ctx: Context
   /**
-   * Resolves the token's userId to a full user record (and sanitizes it,
-   * when the provider implements `sanitize`). Without a provider the guard
-   * still authenticates: `user()` resolves to a minimal `{ id }` record so
+   * Resolves the token's userId to a full user record (sanitized through the
+   * provider's `sanitize` when present). Without a provider the guard still
+   * authenticates: `user()` resolves to a minimal `{ id }` record so
    * Gate/policy evaluation (which keys on `id`) works out of the box.
    */
   provider?: UserProvider<User>
   /** Update the token's lastUsedAt on successful verification. Default true. */
   updateLastUsed?: boolean
-  /** Header carrying the bearer token. Default 'Authorization'. */
-  headerName?: string
 }
 
 /**
@@ -28,7 +35,9 @@ export interface TokenGuardOptions<User = unknown> {
  * and Gate resolution treat session- and token-authenticated requests
  * identically. On successful verification the result is also written to
  * `ctx[API_TOKEN_KEY]`, keeping `getApiToken(ctx)` and `tokenCan*` working
- * exactly as they do behind `createBearerTokenMiddleware`.
+ * exactly as they do behind `createBearerTokenMiddleware` — and when that
+ * middleware already verified this request's token, the guard reuses its
+ * result instead of paying a second store read and lastUsedAt write.
  *
  * Credential flows do not apply to bearer tokens: `attempt()`, `login()` and
  * `validate()` throw. `logout()` is not a no-op — it revokes the presented
@@ -46,7 +55,6 @@ export class TokenGuard<User = unknown> implements Guard<User> {
   private readonly store: ApiTokenStore
   private readonly provider?: UserProvider<User>
   private readonly updateLastUsed: boolean
-  private readonly headerName: string
 
   private verification?: Promise<VerifiedApiToken | null>
   private resolvedUser?: Promise<User | null>
@@ -56,21 +64,21 @@ export class TokenGuard<User = unknown> implements Guard<User> {
     this.store = options.store
     this.provider = options.provider
     this.updateLastUsed = options.updateLastUsed ?? true
-    this.headerName = options.headerName ?? 'Authorization'
-  }
-
-  private bearerToken(): string | null {
-    const header = this.ctx.req.header(this.headerName)
-    if (!header) return null
-    const match = header.match(/^Bearer\s+(.+)$/i)
-    return match ? match[1] : null
   }
 
   private verify(): Promise<VerifiedApiToken | null> {
     if (!this.verification) {
       this.verification = (async () => {
-        const plainTextToken = this.bearerToken()
+        const plainTextToken = readBearerToken(this.ctx.req.header('Authorization'))
         if (!plainTextToken) return null
+
+        // createBearerTokenMiddleware may already have verified this request's
+        // token — reuse its result (matched by token id) rather than repeating
+        // the hash, the store read, and the lastUsedAt write.
+        const existing = this.ctx.get(API_TOKEN_KEY) as VerifiedApiToken | undefined
+        if (existing && existing.token.id === parseApiToken(plainTextToken)?.id) {
+          return existing
+        }
 
         const result = await verifyApiToken(plainTextToken, this.store, {
           updateLastUsed: this.updateLastUsed,
@@ -84,13 +92,11 @@ export class TokenGuard<User = unknown> implements Guard<User> {
     return this.verification
   }
 
+  // A valid token whose user no longer resolves (deleted/deactivated account
+  // with an unrevoked token) is NOT authenticated: without a provider user()
+  // is non-null exactly when verification succeeds, with one it also requires
+  // the account to exist.
   async check(): Promise<boolean> {
-    const result = await this.verify()
-    if (!result) return false
-    // With a provider configured, a token whose user no longer resolves
-    // (deleted/deactivated account with an unrevoked token) is NOT
-    // authenticated — token validity alone must not pass requireAuthenticated.
-    if (!this.provider) return true
     return (await this.user()) !== null
   }
 
@@ -109,8 +115,7 @@ export class TokenGuard<User = unknown> implements Guard<User> {
         }
 
         const record = await this.provider.retrieveById(result.userId)
-        if (!record) return null
-        return this.provider.sanitize ? this.provider.sanitize(record) : record
+        return record ? sanitizeUser(this.provider, record) : null
       })()
     }
     return this.resolvedUser as Promise<T | null>

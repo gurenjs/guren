@@ -1,5 +1,4 @@
 import { describe, test, expect } from 'bun:test'
-import type { Context } from 'hono'
 import { TokenGuard } from '../../src/auth/TokenGuard'
 import {
   API_TOKEN_KEY,
@@ -9,18 +8,7 @@ import {
 } from '../../src/auth/api-token'
 import type { UserProvider } from '../../src/auth/types'
 
-function fakeCtx(headers: Record<string, string> = {}): Context {
-  const store = new Map<string, unknown>()
-  return {
-    req: {
-      header: (name: string) => headers[name] ?? headers[name.toLowerCase()],
-    },
-    set: (key: string, value: unknown) => {
-      store.set(key, value)
-    },
-    get: (key: string) => store.get(key),
-  } as unknown as Context
-}
+import { fakeContext } from '../support/fake-context'
 
 async function issueToken(
   store: MemoryApiTokenStore,
@@ -38,7 +26,7 @@ describe('TokenGuard', () => {
   test('should authenticate a request with a valid bearer token', async () => {
     const store = new MemoryApiTokenStore()
     const { plainTextToken } = await issueToken(store)
-    const ctx = fakeCtx({ Authorization: `Bearer ${plainTextToken}` })
+    const ctx = fakeContext({ headers: { Authorization: `Bearer ${plainTextToken}` } })
 
     const guard = new TokenGuard({ store, ctx })
 
@@ -50,7 +38,7 @@ describe('TokenGuard', () => {
   test('should resolve a minimal { id } user without a provider', async () => {
     const store = new MemoryApiTokenStore()
     const { plainTextToken } = await issueToken(store, { userId: 'user-7' })
-    const ctx = fakeCtx({ Authorization: `Bearer ${plainTextToken}` })
+    const ctx = fakeContext({ headers: { Authorization: `Bearer ${plainTextToken}` } })
 
     const guard = new TokenGuard({ store, ctx })
 
@@ -60,7 +48,7 @@ describe('TokenGuard', () => {
   test('should expose the verification result via API_TOKEN_KEY on the context', async () => {
     const store = new MemoryApiTokenStore()
     const { plainTextToken, token } = await issueToken(store, { abilities: ['posts.store'] })
-    const ctx = fakeCtx({ Authorization: `Bearer ${plainTextToken}` })
+    const ctx = fakeContext({ headers: { Authorization: `Bearer ${plainTextToken}` } })
 
     const guard = new TokenGuard({ store, ctx })
     await guard.check()
@@ -71,7 +59,7 @@ describe('TokenGuard', () => {
   })
 
   test('should treat a request without an Authorization header as a guest', async () => {
-    const guard = new TokenGuard({ store: new MemoryApiTokenStore(), ctx: fakeCtx() })
+    const guard = new TokenGuard({ store: new MemoryApiTokenStore(), ctx: fakeContext() })
 
     expect(await guard.check()).toBe(false)
     expect(await guard.user()).toBeNull()
@@ -81,7 +69,7 @@ describe('TokenGuard', () => {
   test('should reject an unknown token', async () => {
     const store = new MemoryApiTokenStore()
     await issueToken(store)
-    const ctx = fakeCtx({ Authorization: 'Bearer 0123|not-a-real-token' })
+    const ctx = fakeContext({ headers: { Authorization: 'Bearer 0123|not-a-real-token' } })
 
     const guard = new TokenGuard({ store, ctx })
     expect(await guard.check()).toBe(false)
@@ -90,7 +78,7 @@ describe('TokenGuard', () => {
   test('should reject an expired token', async () => {
     const store = new MemoryApiTokenStore()
     const { plainTextToken } = await issueToken(store, { expiresIn: -1_000 })
-    const ctx = fakeCtx({ Authorization: `Bearer ${plainTextToken}` })
+    const ctx = fakeContext({ headers: { Authorization: `Bearer ${plainTextToken}` } })
 
     const guard = new TokenGuard({ store, ctx })
     expect(await guard.check()).toBe(false)
@@ -99,7 +87,7 @@ describe('TokenGuard', () => {
   test('should load and sanitize the user through a provider', async () => {
     const store = new MemoryApiTokenStore()
     const { plainTextToken } = await issueToken(store, { userId: 42 })
-    const ctx = fakeCtx({ Authorization: `Bearer ${plainTextToken}` })
+    const ctx = fakeContext({ headers: { Authorization: `Bearer ${plainTextToken}` } })
 
     const provider: UserProvider<{ id: number; name: string; passwordHash?: string }> = {
       retrieveById: async (id) => ({ id: Number(id), name: 'Alice', passwordHash: 'secret' }),
@@ -117,7 +105,7 @@ describe('TokenGuard', () => {
   test('should return null when the provider cannot find the user', async () => {
     const store = new MemoryApiTokenStore()
     const { plainTextToken } = await issueToken(store)
-    const ctx = fakeCtx({ Authorization: `Bearer ${plainTextToken}` })
+    const ctx = fakeContext({ headers: { Authorization: `Bearer ${plainTextToken}` } })
 
     const provider: UserProvider<{ id: number }> = {
       retrieveById: async () => null,
@@ -143,7 +131,7 @@ describe('TokenGuard', () => {
       lookups += 1
       return originalFind(hash)
     }
-    const ctx = fakeCtx({ Authorization: `Bearer ${plainTextToken}` })
+    const ctx = fakeContext({ headers: { Authorization: `Bearer ${plainTextToken}` } })
 
     const guard = new TokenGuard({ store: countingStore, ctx })
     await Promise.all([guard.check(), guard.user(), guard.id()])
@@ -151,10 +139,33 @@ describe('TokenGuard', () => {
     expect(lookups).toBe(1)
   })
 
+  test('should reuse a verification already on the context instead of re-verifying', async () => {
+    const store = new MemoryApiTokenStore()
+    const { plainTextToken } = await issueToken(store)
+    let lookups = 0
+    const countingStore: typeof store = Object.assign(Object.create(Object.getPrototypeOf(store)), store)
+    const originalFind = store.findByHashedToken.bind(store)
+    countingStore.findByHashedToken = async (hash: string) => {
+      lookups += 1
+      return originalFind(hash)
+    }
+    const ctx = fakeContext({ headers: { Authorization: `Bearer ${plainTextToken}` } })
+
+    const first = new TokenGuard({ store: countingStore, ctx })
+    expect(await first.check()).toBe(true)
+    expect(lookups).toBe(1)
+
+    // A second guard on the same request (middleware + guard both mounted)
+    // reuses the context result: no second store read, no second lastUsedAt write.
+    const second = new TokenGuard({ store: countingStore, ctx })
+    expect(await second.check()).toBe(true)
+    expect(lookups).toBe(1)
+  })
+
   test('logout should revoke the presented token', async () => {
     const store = new MemoryApiTokenStore()
     const { plainTextToken, token } = await issueToken(store)
-    const ctx = fakeCtx({ Authorization: `Bearer ${plainTextToken}` })
+    const ctx = fakeContext({ headers: { Authorization: `Bearer ${plainTextToken}` } })
 
     const guard = new TokenGuard({ store, ctx })
     expect(await guard.check()).toBe(true)
@@ -168,12 +179,12 @@ describe('TokenGuard', () => {
     expect(ctx.get(API_TOKEN_KEY)).toBeUndefined()
 
     // A fresh guard (new request) must also reject the revoked token.
-    const nextGuard = new TokenGuard({ store, ctx: fakeCtx({ Authorization: `Bearer ${plainTextToken}` }) })
+    const nextGuard = new TokenGuard({ store, ctx: fakeContext({ headers: { Authorization: `Bearer ${plainTextToken}` } }) })
     expect(await nextGuard.check()).toBe(false)
   })
 
   test('should throw for credential-based flows', async () => {
-    const guard = new TokenGuard({ store: new MemoryApiTokenStore(), ctx: fakeCtx() })
+    const guard = new TokenGuard({ store: new MemoryApiTokenStore(), ctx: fakeContext() })
 
     expect(guard.login()).rejects.toThrow('does not support login')
     expect(guard.attempt({})).rejects.toThrow('does not support attempt')
@@ -181,7 +192,7 @@ describe('TokenGuard', () => {
   })
 
   test('session should be undefined', async () => {
-    const guard = new TokenGuard({ store: new MemoryApiTokenStore(), ctx: fakeCtx() })
+    const guard = new TokenGuard({ store: new MemoryApiTokenStore(), ctx: fakeContext() })
     expect(guard.session()).toBeUndefined()
   })
 })

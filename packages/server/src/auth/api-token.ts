@@ -237,6 +237,28 @@ export function parseApiToken(plainTextToken: string): { id: string; token: stri
 }
 
 /**
+ * Extract the bearer token from an Authorization header value. The one
+ * parsing rule shared by `createBearerTokenMiddleware`, `TokenGuard`, and
+ * the guard selection in `AuthManager` — three readers of the same header
+ * must not disagree about what a bearer request is.
+ */
+export function readBearerToken(header: string | undefined | null): string | null {
+  if (!header) return null
+  const match = header.match(/^Bearer\s+(.+)$/i)
+  return match ? match[1] : null
+}
+
+/**
+ * The result of a successful bearer-token verification: the stored token
+ * record plus the fields most callers need directly.
+ */
+export interface VerifiedApiToken {
+  token: ApiToken
+  userId: string | number
+  abilities: string[]
+}
+
+/**
  * Verify an API token and return the associated user ID.
  *
  * @example
@@ -250,16 +272,6 @@ export function parseApiToken(plainTextToken: string): { id: string; token: stri
  * console.log(`User ${result.userId} authenticated with abilities:`, result.abilities)
  * ```
  */
-/**
- * The result of a successful bearer-token verification: the stored token
- * record plus the fields most callers need directly.
- */
-export interface VerifiedApiToken {
-  token: ApiToken
-  userId: string | number
-  abilities: string[]
-}
-
 export async function verifyApiToken(
   plainTextToken: string,
   store: ApiTokenStore,
@@ -472,13 +484,11 @@ export function createBearerTokenMiddleware(
     }
 
     // Parse Bearer token
-    const match = authHeader.match(/^Bearer\s+(.+)$/i)
-    if (!match) {
+    const plainTextToken = readBearerToken(authHeader)
+    if (!plainTextToken) {
       if (onUnauthorized) return onUnauthorized(ctx)
       return ctx.json({ error: 'Invalid authorization format' }, 401)
     }
-
-    const plainTextToken = match[1]
 
     // Verify token
     const result = await verifyApiToken(plainTextToken, store, { updateLastUsed })

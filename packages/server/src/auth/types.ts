@@ -119,4 +119,10 @@ export interface AuthManagerContract {
   setDefaultGuard(name: string): void
   getDefaultGuard(): string
   createAuthContext(ctx: Context, options?: AttachContextOptions): AuthContext
+  /**
+   * The guard name an unqualified guard() call resolves to for a request.
+   * Optional for backward compatibility; implementations without it behave
+   * as if it always returned the default guard.
+   */
+  resolveGuardName?(ctx: Context, name?: string): string
 }

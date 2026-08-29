@@ -5,7 +5,7 @@ import { RequestAuthContext } from './RequestAuthContext'
 import { ModelUserProvider, type ModelUserProviderOptions } from './providers/ModelUserProvider'
 import { SessionGuard } from './SessionGuard'
 import { TokenGuard } from './TokenGuard'
-import type { ApiTokenStore } from './api-token'
+import { readBearerToken, type ApiTokenStore } from './api-token'
 import { ScryptHasher } from './password/ScryptHasher'
 import type {
   AttachContextOptions,
@@ -114,15 +114,17 @@ export class AuthManager implements AuthManagerContract {
 
     const resolveName = (name?: string) => this.resolveGuardName(ctx, name ?? options.guard)
 
-    const guardFactory = (name?: string) => {
-      return this.createGuard(resolveName(name), {
+    // Receives the already-resolved name from RequestAuthContext (which
+    // resolved it for the cache key), so selection runs once per lookup.
+    const guardFactory = (resolvedName: string) => {
+      return this.createGuard(resolvedName, {
         ctx,
         session: resolveSession(),
         manager: this,
       })
     }
 
-    return new RequestAuthContext({ resolveName }, ctx, resolveSession, guardFactory)
+    return new RequestAuthContext(resolveName, ctx, resolveSession, guardFactory)
   }
 
   async attempt(name: string, ctx: Context, credentials: AuthCredentials, remember?: boolean): Promise<boolean> {
@@ -210,8 +212,7 @@ export class AuthManager implements AuthManagerContract {
 }
 
 function hasBearerHeader(ctx: Context): boolean {
-  const header = ctx.req.header('Authorization')
-  return header !== undefined && /^Bearer\s+/i.test(header)
+  return readBearerToken(ctx.req.header('Authorization')) !== null
 }
 
 export type { AuthCredentials } from './types'

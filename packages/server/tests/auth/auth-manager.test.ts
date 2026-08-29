@@ -1,6 +1,9 @@
 import { describe, test, expect } from 'bun:test'
 import { AuthManager } from '../../src/auth/AuthManager'
 import type { Guard, GuardContext, UserProvider, AuthCredentials, Authenticatable } from '../../src/auth/types'
+import { createApiToken, MemoryApiTokenStore } from '../../src/auth/api-token'
+import { TokenGuard } from '../../src/auth/TokenGuard'
+import { fakeContext } from '../support/fake-context'
 
 // --- Test helpers ---
 
@@ -144,18 +147,6 @@ describe('ModelUserProvider.sanitize', () => {
 
 // --- RFC 0016: token guard selection ---
 
-import { createApiToken, MemoryApiTokenStore } from '../../src/auth/api-token'
-import { TokenGuard } from '../../src/auth/TokenGuard'
-
-function fakeRequestCtx(headers: Record<string, string> = {}) {
-  const store = new Map<string, unknown>()
-  return {
-    req: { header: (name: string) => headers[name] ?? headers[name.toLowerCase()] },
-    set: (key: string, value: unknown) => { store.set(key, value) },
-    get: (key: string) => store.get(key),
-  } as never
-}
-
 describe('AuthManager.useTokens', () => {
   function createManagerWithSessionAndTokens(store: MemoryApiTokenStore) {
     const manager = new AuthManager()
@@ -175,11 +166,11 @@ describe('AuthManager.useTokens', () => {
   test('resolveGuardName should pick the token guard only for Bearer requests', () => {
     const { manager } = createManagerWithSessionAndTokens(new MemoryApiTokenStore())
 
-    expect(manager.resolveGuardName(fakeRequestCtx())).toBe('web')
-    expect(manager.resolveGuardName(fakeRequestCtx({ Authorization: 'Bearer abc' }))).toBe('token')
-    expect(manager.resolveGuardName(fakeRequestCtx({ Authorization: 'Basic abc' }))).toBe('web')
+    expect(manager.resolveGuardName(fakeContext() as never)).toBe('web')
+    expect(manager.resolveGuardName(fakeContext({ headers: { Authorization: 'Bearer abc' } }) as never)).toBe('token')
+    expect(manager.resolveGuardName(fakeContext({ headers: { Authorization: 'Basic abc' } }) as never)).toBe('web')
     // Explicit names always win over header selection.
-    expect(manager.resolveGuardName(fakeRequestCtx({ Authorization: 'Bearer abc' }), 'web')).toBe('web')
+    expect(manager.resolveGuardName(fakeContext({ headers: { Authorization: 'Bearer abc' } }) as never, 'web')).toBe('web')
   })
 
   test('auth context should authenticate a Bearer request through the token guard', async () => {
@@ -187,7 +178,7 @@ describe('AuthManager.useTokens', () => {
     const { manager } = createManagerWithSessionAndTokens(store)
     const { plainTextToken } = await createApiToken(store, { name: 't', userId: 7 })
 
-    const auth = manager.createAuthContext(fakeRequestCtx({ Authorization: `Bearer ${plainTextToken}` }))
+    const auth = manager.createAuthContext(fakeContext({ headers: { Authorization: `Bearer ${plainTextToken}` } }) as never)
 
     expect(await auth.check()).toBe(true)
     expect(await auth.user<{ id: number }>()).toEqual({ id: 7 })
@@ -197,7 +188,7 @@ describe('AuthManager.useTokens', () => {
   test('auth context should keep using the session guard without a Bearer header', async () => {
     const { manager, sessionGuard } = createManagerWithSessionAndTokens(new MemoryApiTokenStore())
 
-    const auth = manager.createAuthContext(fakeRequestCtx())
+    const auth = manager.createAuthContext(fakeContext() as never)
 
     expect(auth.guard()).toBe(sessionGuard)
     expect(await auth.user<{ id: string }>()).toEqual({ id: 'session-user' })
@@ -208,7 +199,7 @@ describe('AuthManager.useTokens', () => {
     const { manager, sessionGuard } = createManagerWithSessionAndTokens(store)
     const { plainTextToken } = await createApiToken(store, { name: 't', userId: 7 })
 
-    const auth = manager.createAuthContext(fakeRequestCtx({ Authorization: `Bearer ${plainTextToken}` }))
+    const auth = manager.createAuthContext(fakeContext({ headers: { Authorization: `Bearer ${plainTextToken}` } }) as never)
 
     expect(auth.guard()).toBeInstanceOf(TokenGuard)
     expect(auth.guard('web')).toBe(sessionGuard)
@@ -230,7 +221,7 @@ describe('AuthManager.useTokens', () => {
     manager.useTokens(store, { provider: 'users' })
 
     const { plainTextToken } = await createApiToken(store, { name: 't', userId: 42 })
-    const auth = manager.createAuthContext(fakeRequestCtx({ Authorization: `Bearer ${plainTextToken}` }))
+    const auth = manager.createAuthContext(fakeContext({ headers: { Authorization: `Bearer ${plainTextToken}` } }) as never)
 
     expect(await auth.user<{ id: number; name: string }>()).toEqual({ id: 42, name: 'Alice' })
   })
