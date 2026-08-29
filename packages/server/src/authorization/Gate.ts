@@ -199,18 +199,18 @@ export class Gate {
       return this.userResolver(ctx)
     }
 
-    // Prefer the framework auth context (guren:auth) so every guard —
-    // session or bearer token — reaches policy evaluation through the same
-    // path (RFC 0016). The legacy ctx.get('user') fallback stays for apps
-    // that set the user manually, but it no longer shadows real auth.
+    // When a framework auth context (guren:auth) is attached, its answer is
+    // authoritative — including null. Falling back to the legacy
+    // ctx.get('user') here would resurrect a principal that authentication
+    // just rejected (e.g. an invalid Bearer token on a request that also
+    // carries a manually-set user), letting authorizeMiddleware pass where
+    // requireAuthenticated denies (RFC 0016). The legacy fallback survives
+    // only for requests with no auth context at all.
     // Duck-typed on purpose: test doubles and exotic contexts may return
     // arbitrary values for unknown keys.
     const auth = ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
     if (auth && typeof auth.user === 'function') {
-      const authUser = (await auth.user()) as AuthUser | null
-      if (authUser) {
-        return authUser
-      }
+      return ((await auth.user()) as AuthUser | null) ?? null
     }
 
     const user = ctx.get('user') as AuthUser | undefined

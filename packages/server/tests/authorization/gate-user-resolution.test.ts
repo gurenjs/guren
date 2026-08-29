@@ -39,14 +39,17 @@ describe('Gate.resolveUser', () => {
     expect(await gate.resolveUser(ctx)).toEqual({ id: 3 })
   })
 
-  test('should fall back to ctx.get("user") when the auth context has no user', async () => {
+  test('an attached auth context is authoritative even when it has no user', async () => {
+    // No fallback to ctx.get('user') here: authentication rejected the
+    // request (e.g. invalid Bearer), so authorization must not resurrect a
+    // manually-set principal.
     const gate = new Gate()
     const ctx = fakeCtx({
       [AUTH_CONTEXT_KEY]: fakeAuthContext(null),
       user: { id: 3 },
     })
 
-    expect(await gate.resolveUser(ctx)).toEqual({ id: 3 })
+    expect(await gate.resolveUser(ctx)).toBeNull()
   })
 
   test('auth context should win over a manually set ctx user', async () => {

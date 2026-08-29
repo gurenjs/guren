@@ -184,6 +184,17 @@ export class AuthManager implements AuthManagerContract {
   ): void {
     const guardName = options.guardName ?? 'token'
 
+    // Refuse to shadow an existing guard: silently replacing the default
+    // (session) guard would route Bearer-less requests through the token
+    // guard, breaking the "session apps keep working" contract. Re-calling
+    // useTokens with the same name stays legal (re-configuration).
+    if (this.guards.has(guardName) && this.tokenGuard !== guardName) {
+      throw new Error(
+        `AuthManager: guard "${guardName}" is already registered. ` +
+          'Pass a different guardName to useTokens() instead of shadowing it.',
+      )
+    }
+
     this.registerGuard(guardName, ({ ctx, manager }) => {
       const provider = options.provider ? manager.getProvider(options.provider) : undefined
       return new TokenGuard({

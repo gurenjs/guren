@@ -128,6 +128,27 @@ describe('TokenGuard', () => {
 
     const guard = new TokenGuard({ store, ctx, provider })
     expect(await guard.user()).toBeNull()
+    // An unrevoked token whose user no longer exists must NOT count as
+    // authenticated when a provider is configured.
+    expect(await guard.check()).toBe(false)
+  })
+
+  test('should verify the token only once across concurrent calls', async () => {
+    const store = new MemoryApiTokenStore()
+    const { plainTextToken } = await issueToken(store)
+    let lookups = 0
+    const countingStore: typeof store = Object.assign(Object.create(Object.getPrototypeOf(store)), store)
+    const originalFind = store.findByHashedToken.bind(store)
+    countingStore.findByHashedToken = async (hash: string) => {
+      lookups += 1
+      return originalFind(hash)
+    }
+    const ctx = fakeCtx({ Authorization: `Bearer ${plainTextToken}` })
+
+    const guard = new TokenGuard({ store: countingStore, ctx })
+    await Promise.all([guard.check(), guard.user(), guard.id()])
+
+    expect(lookups).toBe(1)
   })
 
   test('logout should revoke the presented token', async () => {
@@ -142,6 +163,9 @@ describe('TokenGuard', () => {
 
     expect(await guard.check()).toBe(false)
     expect(await store.findByHashedToken(token.hashedToken)).toBeNull()
+    // The request-scoped verification result is cleared too — getApiToken()
+    // must not succeed after logout on the same request.
+    expect(ctx.get(API_TOKEN_KEY)).toBeUndefined()
 
     // A fresh guard (new request) must also reject the revoked token.
     const nextGuard = new TokenGuard({ store, ctx: fakeCtx({ Authorization: `Bearer ${plainTextToken}` }) })

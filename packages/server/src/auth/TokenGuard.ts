@@ -32,7 +32,14 @@ export interface TokenGuardOptions<User = unknown> {
  *
  * Credential flows do not apply to bearer tokens: `attempt()`, `login()` and
  * `validate()` throw. `logout()` is not a no-op — it revokes the presented
- * token, the closest meaningful analogue to ending a session.
+ * token, the closest meaningful analogue to ending a session. On a request
+ * that carries a session cookie *and* a Bearer header, only the token is
+ * revoked; end the session explicitly via `auth.guard('web').logout()`.
+ *
+ * This guard answers authentication only. Token *abilities* are not
+ * consulted here or by Gate/policies — enforce them where the operation is
+ * dispatched (`tokenCan*`, `createBearerTokenMiddleware({ abilities })`, or
+ * the RFC 0016 scope gate), per the RFC's scope-before-policy layering.
  */
 export class TokenGuard<User = unknown> implements Guard<User> {
   private readonly ctx: Context
@@ -78,7 +85,13 @@ export class TokenGuard<User = unknown> implements Guard<User> {
   }
 
   async check(): Promise<boolean> {
-    return (await this.verify()) !== null
+    const result = await this.verify()
+    if (!result) return false
+    // With a provider configured, a token whose user no longer resolves
+    // (deleted/deactivated account with an unrevoked token) is NOT
+    // authenticated — token validity alone must not pass requireAuthenticated.
+    if (!this.provider) return true
+    return (await this.user()) !== null
   }
 
   async guest(): Promise<boolean> {
@@ -128,6 +141,9 @@ export class TokenGuard<User = unknown> implements Guard<User> {
     }
     this.verification = Promise.resolve(null)
     this.resolvedUser = Promise.resolve(null)
+    // Clear the request-scoped verification result too, so getApiToken()/
+    // getApiTokenOrFail() cannot succeed after logout on the same request.
+    this.ctx.set(API_TOKEN_KEY, undefined)
   }
 
   session<T extends Session = Session>(): T | undefined {

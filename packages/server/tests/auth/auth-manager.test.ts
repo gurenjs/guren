@@ -235,3 +235,20 @@ describe('AuthManager.useTokens', () => {
     expect(await auth.user<{ id: number; name: string }>()).toEqual({ id: 42, name: 'Alice' })
   })
 })
+
+describe('AuthManager.useTokens guard name collision', () => {
+  test('should refuse to shadow an already registered guard', () => {
+    const manager = new AuthManager()
+    manager.registerGuard('web', createMockGuardFactory())
+    manager.setDefaultGuard('web')
+
+    expect(() => manager.useTokens(new MemoryApiTokenStore(), { guardName: 'web' }))
+      .toThrow('guard "web" is already registered')
+  })
+
+  test('should allow re-calling useTokens with the same guard name', () => {
+    const manager = new AuthManager()
+    manager.useTokens(new MemoryApiTokenStore())
+    expect(() => manager.useTokens(new MemoryApiTokenStore())).not.toThrow()
+  })
+})

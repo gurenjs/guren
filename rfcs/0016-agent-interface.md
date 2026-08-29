@@ -388,9 +388,15 @@ tests — small enough to review, and everything else consumes its shape.
 Purely additive; no existing API changes shape or behavior. Two soft edges:
 
 - The Phase 0 `Gate` user-resolution unification prefers the auth context over the
-  legacy `ctx.get('user')` fallback. The fallback is retained after the auth-context
+  legacy `ctx.get('user')` fallback. ~~The fallback is retained after the auth-context
   lookup, so existing apps that set `user` manually keep working; the changelog
-  documents the new precedence.
+  documents the new precedence.~~ **Amended in implementation:** an *attached* auth
+  context is authoritative, null included — retaining the fallback after a null
+  lookup would let a manually-set `ctx.get('user')` principal resurrect a request
+  authentication just rejected (invalid Bearer + manual user), so
+  `authorizeMiddleware` could pass where `requireAuthenticated` denies. The
+  fallback survives only for requests with no auth context; impersonation/reduced
+  principals move to `userResolver` / `gate.forUser(...)`, which keep precedence.
 - The CSRF bearer rule only *removes* 419s for cookie-less bearer requests; no
   currently-passing request changes outcome.
 
