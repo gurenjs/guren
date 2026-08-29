@@ -23,17 +23,17 @@ export interface MiddlewareCapabilities {
    *
    * - `abilities` — the ability names checked, in the order the chain
    *   checks them. Empty when every check derives its ability at request
-   *   time (see `resource`).
+   *   time (see `resource`), and also for the degenerate
+   *   `authorizeMiddleware([])`, which denies every request.
    * - `mode` — how they combine. `'all'` every listed ability must pass,
-   *   `'any'` at least one must. `'mixed'` means the chain carries more
-   *   than one check and the conjunction of them is not expressible as
-   *   either: authorization is present, but the ability is *not* cleanly
-   *   derivable, and a consumer must treat it as undetermined rather than
-   *   picking a name out of `abilities`. Note `mode` alone does not say
-   *   whether one ability is derivable: `authorizeMiddleware('update')`
-   *   reports `'all'` and `authorizeMiddleware(['update'])` reports
-   *   `'any'`, and both are equally derivable — key on
-   *   `abilities.length === 1`, not on the mode.
+   *   `'any'` at least one must (so `'any'` only ever appears with two or
+   *   more — an any-of over one ability normalizes to `'all'`). `'mixed'`
+   *   means the chain carries more than one check and the conjunction of
+   *   them is not expressible as either: authorization is present, but the
+   *   ability is *not* cleanly derivable, and a consumer must treat it as
+   *   undetermined rather than picking a name out of `abilities`. A single
+   *   derivable ability is `abilities.length === 1` with `mode: 'all'` and
+   *   no `resource`.
    * - `resource` — present when a check resolves its ability from the
    *   request method (`authorizeResourceMiddleware`). `fromMethodMap: true`
    *   means the built-in verb map decides, so a consumer holding the

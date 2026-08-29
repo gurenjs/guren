@@ -19,21 +19,30 @@ import { stampCapabilities } from '../http/middleware/capabilities'
  * // Multiple abilities (any)
  * app.get('/dashboard', authorizeMiddleware(['admin', 'moderator']), dashboardHandler)
  * ```
+ *
+ * An array argument is snapshotted at creation: mutating it afterwards
+ * changes neither what the middleware checks nor what it reports. An empty
+ * array denies every request (`Gate.any([])` is false) and stamps no ability
+ * names — fail-closed, so it is left to run rather than rejected.
  */
 export function authorizeMiddleware(
   ability: string | string[],
   modelResolver?: (ctx: Context) => unknown | Promise<unknown>,
   options: AuthorizeOptions = {}
 ): Middleware {
+  // One snapshot feeds both the handler and the stamp, so a caller mutating
+  // the array it passed cannot make the two disagree.
+  const anyOf = Array.isArray(ability)
+  const abilities = anyOf ? [...(ability as string[])] : [ability as string]
+
   return stampCapabilities(async (ctx, next) => {
     const gate = getGate()
     const user = await gate.resolveUser(ctx)
     const gateForUser = gate.forUser(user)
 
-    const abilities = Array.isArray(ability) ? ability : [ability]
     const model = modelResolver ? await modelResolver(ctx) : undefined
 
-    if (Array.isArray(ability)) {
+    if (anyOf) {
       // Any-of has no single response to carry, so a denial can only be generic.
       if (!(await gateForUser.any(abilities, model))) {
         throw new AuthorizationException(options.message ?? 'This action is unauthorized.')
@@ -41,7 +50,7 @@ export function authorizeMiddleware(
     } else {
       // Single ability: keep the policy's own message and status, so the same
       // denial reads the same here as through `Controller.authorize()`.
-      const response = await gateForUser.checkResponse(ability, user, model)
+      const response = await gateForUser.checkResponse(abilities[0]!, user, model)
       if (!response.allowed) {
         throw denialToException(options.message ? { ...response, message: options.message } : response)
       }
@@ -49,22 +58,37 @@ export function authorizeMiddleware(
 
     await next()
   }, {
-    // Mirrors the runtime branch above: an array is an any-of check, a
-    // single ability is the one that has to hold.
-    authorization: Array.isArray(ability)
-      ? { abilities: [...ability], mode: 'any' }
-      : { abilities: [ability], mode: 'all' },
+    // Any-of over exactly one ability *is* that ability, so it normalizes to
+    // 'all' — otherwise combining it with another all-of check would report
+    // 'mixed' for a chain whose ability is perfectly derivable.
+    authorization: { abilities, mode: abilities.length === 1 ? 'all' : 'any' },
   })
 }
 
 /**
  * Middleware to authorize all given abilities.
+ *
+ * The array is snapshotted at creation, so mutating it afterwards changes
+ * neither what the middleware checks nor what it reports.
+ *
+ * @throws if no ability is given. `Gate.all([])` is vacuously true, so an
+ * empty list would mount a route that advertises authorization and enforces
+ * none — the fail-open shape RFC 0016's "authn is not authz" rule exists to
+ * catch. Refusing at creation surfaces it at boot rather than per request.
  */
 export function authorizeAllMiddleware(
-  abilities: string[],
+  input: string[],
   modelResolver?: (ctx: Context) => unknown | Promise<unknown>,
   options: AuthorizeOptions = {}
 ): Middleware {
+  const abilities = [...input]
+
+  if (abilities.length === 0) {
+    throw new Error(
+      'authorizeAllMiddleware() requires at least one ability: an empty list authorizes every request while claiming to authorize.'
+    )
+  }
+
   return stampCapabilities(async (ctx, next) => {
     const gate = getGate()
     const user = await gate.resolveUser(ctx)
@@ -80,7 +104,7 @@ export function authorizeAllMiddleware(
     }
 
     await next()
-  }, { authorization: { abilities: [...abilities], mode: 'all' } })
+  }, { authorization: { abilities, mode: 'all' } })
 }
 
 // HTTP method → policy ability. QUERY (RFC 10008) is safe like GET, so it
@@ -138,9 +162,15 @@ export function authorizeResourceMiddleware(
   modelResolver: (ctx: Context) => unknown | Promise<unknown>,
   options: AuthorizeResourceOptions = {}
 ): Middleware {
+  // Captured once: the stamp's `fromMethodMap` is fixed at creation, so the
+  // handler must not read `options.abilityFor` again per request — a caller
+  // assigning it later would otherwise override the map the stamp still
+  // reports as authoritative.
+  const abilityFor = options.abilityFor
+
   return stampCapabilities(async (ctx, next) => {
     const method = ctx.req.method.toUpperCase()
-    const ability = options.abilityFor?.(method) ?? RESOURCE_ABILITY_BY_METHOD[method]
+    const ability = abilityFor?.(method) ?? RESOURCE_ABILITY_BY_METHOD[method]
 
     if (ability === undefined) {
       throw new AuthorizationException(options.message ?? 'This action is unauthorized.')
@@ -167,7 +197,7 @@ export function authorizeResourceMiddleware(
     authorization: {
       abilities: [],
       mode: 'all',
-      resource: { fromMethodMap: options.abilityFor === undefined },
+      resource: { fromMethodMap: abilityFor === undefined },
     },
   })
 }

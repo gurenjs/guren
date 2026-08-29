@@ -782,14 +782,17 @@ export class Router<M extends string = never> {
     names: string[],
     inline: MiddlewareHandler[],
     seen?: Set<string>,
+    seenStamps?: Set<MiddlewareCapabilities>,
   ): MiddlewareCapabilities {
     const aggregated: MiddlewareCapabilities = {}
     const visited = seen ?? new Set<string>()
-    // The same handler can legitimately appear twice in one chain (a scoped
-    // middleware also passed inline). Absorbing its stamp twice would read
-    // as two independent checks and degrade an 'any' to 'mixed', so each
-    // stamp object contributes once.
-    const absorbed = new Set<MiddlewareCapabilities>()
+    // The same handler can legitimately appear twice in one chain — passed
+    // inline as well as reached through an alias or a group. Absorbing its
+    // stamp twice would read as two independent checks and degrade an 'any'
+    // to 'mixed', so each stamp object contributes once. Threaded through
+    // the group recursion alongside `visited`, or a stamp reached inside a
+    // group would not be recognized as the one seen inline.
+    const absorbed = seenStamps ?? new Set<MiddlewareCapabilities>()
 
     const absorb = (capabilities: MiddlewareCapabilities | undefined): void => {
       if (!capabilities || absorbed.has(capabilities)) return
@@ -836,7 +839,7 @@ export class Router<M extends string = never> {
 
       const groupNames = this.middlewareGroups.get(name)
       if (groupNames) {
-        absorb(this.aggregateCapabilities(groupNames, [], visited))
+        absorb(this.aggregateCapabilities(groupNames, [], visited, absorbed))
         continue
       }
 

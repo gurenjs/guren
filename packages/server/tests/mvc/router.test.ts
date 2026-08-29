@@ -997,6 +997,77 @@ describe('Router authorization capabilities (RFC 0016)', () => {
     })
   })
 
+  it('absorbs a handler once across the group boundary too', async () => {
+    const { authorizeMiddleware } = await import('../../src/authorization/middleware')
+
+    // The same handler reached through a group *and* passed inline is still
+    // one check, so the dedup has to survive the recursive aggregation.
+    const anyOf = authorizeMiddleware(['admin', 'moderator'])
+    const router = new Router<'can-admin' | 'staff'>()
+    router.aliasMiddleware('can-admin', anyOf)
+    router.groupMiddleware('staff', ['can-admin'])
+    router.post('/both', () => 'ok', anyOf).middleware('staff')
+
+    expect(router.definitions()[0]!.capabilities?.authorization).toEqual({
+      abilities: ['admin', 'moderator'],
+      mode: 'any',
+    })
+  })
+
+  it('normalizes a single-element any-of so merging with all-of stays all', async () => {
+    const { authorizeMiddleware, authorizeAllMiddleware } = await import('../../src/authorization/middleware')
+
+    const router = new Router()
+    router.get('/one', () => 'ok', authorizeMiddleware(['read']))
+    router.post('/merged', () => 'ok', authorizeMiddleware(['read']), authorizeAllMiddleware(['write']))
+
+    const defs = router.definitions()
+    expect(defs[0]!.capabilities?.authorization).toEqual({ abilities: ['read'], mode: 'all' })
+    expect(defs[1]!.capabilities?.authorization).toEqual({
+      abilities: ['read', 'write'],
+      mode: 'all',
+    })
+  })
+
+  it('snapshots the ability array so a later mutation cannot make the stamp lie', async () => {
+    const { authorizeMiddleware, authorizeAllMiddleware } = await import('../../src/authorization/middleware')
+    const { capabilitiesOf } = await import('../../src/http/middleware/capabilities')
+
+    const anyOf = ['admin', 'moderator']
+    const allOf = ['admin']
+    const anyHandler = authorizeMiddleware(anyOf)
+    const allHandler = authorizeAllMiddleware(allOf)
+
+    // Emptying `allOf` would make Gate.all([]) pass unconditionally while the
+    // stamp still claimed 'admin' — the stamp must describe the snapshot.
+    anyOf.length = 0
+    allOf.length = 0
+
+    expect(capabilitiesOf(anyHandler)?.authorization?.abilities).toEqual(['admin', 'moderator'])
+    expect(capabilitiesOf(allHandler)?.authorization?.abilities).toEqual(['admin'])
+  })
+
+  it('refuses authorizeAllMiddleware with no abilities', async () => {
+    const { authorizeAllMiddleware } = await import('../../src/authorization/middleware')
+
+    // Gate.all([]) is vacuously true, so this would advertise authorization
+    // and enforce none.
+    expect(() => authorizeAllMiddleware([])).toThrow('at least one ability')
+  })
+
+  it('keeps the stamp in step with a late abilityFor assignment', async () => {
+    const { authorizeResourceMiddleware } = await import('../../src/authorization/middleware')
+    const { capabilitiesOf } = await import('../../src/http/middleware/capabilities')
+
+    const options: { abilityFor?: (method: string) => string | undefined } = {}
+    const handler = authorizeResourceMiddleware(resolver, options)
+    options.abilityFor = () => 'archive'
+
+    // The handler captured `abilityFor` at creation, so the assignment above
+    // changes neither the check nor the stamp that describes it.
+    expect(capabilitiesOf(handler)?.authorization?.resource).toEqual({ fromMethodMap: true })
+  })
+
   it('does not leak the aggregate back into the stamp', async () => {
     const { authorizeMiddleware } = await import('../../src/authorization/middleware')
     const { capabilitiesOf } = await import('../../src/http/middleware/capabilities')

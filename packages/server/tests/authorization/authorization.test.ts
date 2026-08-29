@@ -10,6 +10,8 @@ import {
   authorize,
   Policy,
   definePolicy,
+  authorizeMiddleware,
+  authorizeAllMiddleware,
   authorizeResourceMiddleware,
 } from '../../src/authorization'
 import type { AuthorizeResourceOptions } from '../../src/authorization'
@@ -778,5 +780,72 @@ describe('authorizeResourceMiddleware', () => {
     const abilityFor = (method: string) => (method === 'POST' ? 'update' : undefined)
     expect(await run('POST', { abilityFor })).toBe(true)
     expect(checkedAbilities).toEqual(['update'])
+  })
+
+  test('captures abilityFor at creation, so a later assignment cannot apply', async () => {
+    // The capability stamp fixes `fromMethodMap` at creation. If the handler
+    // re-read options per request, an assignment made afterwards would change
+    // the ability checked while the stamp still named the verb map.
+    const options: AuthorizeResourceOptions = {}
+    const middleware = authorizeResourceMiddleware(() => ({ id: 1 }), options)
+    options.abilityFor = () => 'purge'
+
+    const ctx = { req: { method: 'DELETE' }, get: () => ({ id: 1 }) } as unknown as Context
+    let nextCalled = false
+    await middleware(ctx, async () => {
+      nextCalled = true
+    })
+
+    expect(nextCalled).toBe(true)
+    expect(checkedAbilities).toEqual(['delete'])
+  })
+})
+
+describe('authorize middleware ability snapshots', () => {
+  let checkedAbilities: string[]
+
+  beforeEach(() => {
+    checkedAbilities = []
+    const gate = new Gate()
+    for (const ability of ['admin', 'moderator', 'billing']) {
+      gate.define(ability, () => {
+        checkedAbilities.push(ability)
+        return true
+      })
+    }
+    setGate(gate)
+  })
+
+  const drive = async (middleware: ReturnType<typeof authorizeMiddleware>) => {
+    const ctx = { req: { method: 'POST' }, get: () => ({ id: 1 }) } as unknown as Context
+    let nextCalled = false
+    await middleware(ctx, async () => {
+      nextCalled = true
+    })
+    return nextCalled
+  }
+
+  test('authorizeMiddleware checks the array as it was at creation', async () => {
+    const abilities = ['admin', 'moderator']
+    const middleware = authorizeMiddleware(abilities)
+    abilities.length = 0
+
+    expect(await drive(middleware)).toBe(true)
+    // Not [] — an emptied array would make Gate.any([]) deny everything.
+    expect(checkedAbilities).toEqual(['admin'])
+  })
+
+  test('authorizeAllMiddleware checks the array as it was at creation', async () => {
+    const abilities = ['admin', 'billing']
+    const middleware = authorizeAllMiddleware(abilities)
+    abilities.length = 0
+
+    expect(await drive(middleware)).toBe(true)
+    // Not [] — Gate.all([]) is vacuously true and would authorize anyone.
+    expect(checkedAbilities).toEqual(['admin', 'billing'])
+  })
+
+  test('authorizeAllMiddleware refuses an empty ability list at creation', () => {
+    expect(() => authorizeAllMiddleware([])).toThrow('at least one ability')
   })
 })
