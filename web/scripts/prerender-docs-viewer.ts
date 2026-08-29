@@ -16,13 +16,14 @@
  *
  * Usage: bun scripts/prerender-docs-viewer.ts
  */
-import { createRequire } from 'node:module'
-import { copyFileSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
+import { mkdirSync, statSync, writeFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { gzipSync } from 'node:zlib'
 import { buildDocsViewerData, docsViewerAssetPath } from '@guren/cli'
+
+import { stageMermaid } from './lib/stage-mermaid.js'
 
 const webRoot = fileURLToPath(new URL('..', import.meta.url))
 
@@ -126,9 +127,6 @@ write(
 
 // The shell loads mermaid from a fixed path and degrades to "bun add -d
 // mermaid" hints without it — three of the example's spec views are mermaid
-// diagrams, so a snapshot without it reads as broken.
-copyFileSync(
-  createRequire(import.meta.url).resolve('mermaid/dist/mermaid.min.js'),
-  resolve(outDir, 'assets/mermaid.js'),
-)
-report(resolve(outDir, 'assets/mermaid.js'))
+// diagrams, so a snapshot without it reads as broken. The docs pages render
+// their own diagrams from the same staged file.
+report(stageMermaid().path)

@@ -10,6 +10,28 @@ bunx guren add resource posts --fields "title:string,body:text,published:boolean
 
 Prefer to build this yourself step by step? Take the [Build a Mini Blog tutorial](../tutorials/overview.md) instead — it covers the same ground hands-on.
 
+Here is the whole path first. `GET /posts` moves through these layers in order, and HTML comes back out.
+
+```mermaid
+flowchart TD
+  Browser["Browser<br/>GET /posts"]
+  Route["1. Route<br/>routes/web.ts"]
+  Controller["2. Controller<br/>PostController.index()"]
+  Validator["3. Validation<br/>ListPostsQuerySchema"]
+  Model["4. Model<br/>Post.paginate()"]
+  Database[("Database<br/>posts table")]
+  Resource["5. Resource<br/>PostResource"]
+  Page["6. Inertia page<br/>posts/Index.tsx"]
+
+  Browser --> Route --> Controller
+  Controller --> Validator --> Model
+  Model <--> Database
+  Model --> Resource --> Page
+  Page -- "rendered response" --> Browser
+```
+
+The rest of this tour walks the stops one at a time.
+
 ## 1. The route
 
 Every request starts in `routes/web.ts`, where a registrar maps URLs to controller actions:
@@ -116,6 +138,10 @@ export default function PostsIndex({ data }: Props) {
 }
 ```
 
+The index page `bunx guren add resource` generates arrives a little more finished than this:
+
+![The /posts index page: a "Posts" heading with a New Post button, three posts as cards showing title and body excerpt, and page-number pagination below](../../images/posts-index.png)
+
 Codegen extracts each page's `Props` into `.guren/pages.gen.ts`, so a controller passing the wrong shape is a compile error — rename a column and TypeScript flags every layer from schema to browser. See the [Frontend Guide](./frontend.md).
 
 ## 7. The test
@@ -139,6 +165,8 @@ See the [Testing Guide](./testing.md) for fluent assertions, `actingAs`, and dat
 The request path explains what the application does; project knowledge records why it works that way and keeps the overview current. `bunx guren spec:generate` derives ER, domain, screen, and module views from the code. ADRs created with `bunx guren make:adr` declare the entities and paths they govern, while `bunx guren check --docs` validates those relations.
 
 With `bun run dev` running, open [http://localhost:3333/_guren/docs](http://localhost:3333/_guren/docs) to browse those documents, entities, and code paths as one interactive Docs Graph. The graph surrounds the request path above with its rationale and generated views; it does not replace the route-to-page flow. See [Spec-Anchored Development](./spec-anchored.md) for the full workflow.
+
+![The Docs Graph: spec-view and ADR nodes linked by edges to code nodes such as schema.ts, Models, routes, Controllers, and pages](../../images/docs-graph.png)
 
 ## The mental model
 

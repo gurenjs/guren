@@ -23,6 +23,31 @@ Each part starts where the previous one ended. Follow them in order.
 2. **[Add Authentication](./authentication.md)** — Install the auth stack (login, registration, password reset) with one command, sign in as a demo user, put post mutations behind a login wall, attach an author to every post, and catch the spec views back up through the `check --spec` drift gate after the schema change. **End state:** only signed-in users can change posts, every post shows who wrote it, and the warnings `audit` raised in Part 1 are resolved.
 3. **[Relationships: Comments](./relationships.md)** — Add a `comments` table related to both posts and users, scaffold the skeleton with the single-purpose `make:*` generators, and finish the `hasMany` / `belongsTo` relationships and a comment form on the post page. Then generate spec views, record the architecture decision, verify the links, and explore the finished system in the Docs Graph. **End state:** signed-in users can comment on any post, and the code, derived views, and decisions behind that behavior are connected.
 
+Here is what each part stacks on top of the last.
+
+```mermaid
+flowchart LR
+  subgraph P1["Part 1: Build a blog post app"]
+    direction TB
+    A1["The posts table and full CRUD<br/>from a single command"]
+    A2["Verified with check and audit"]
+    A1 --> A2
+  end
+  subgraph P2["Part 2: Add authentication"]
+    direction TB
+    B1["Users and sign-in"]
+    B2["Post changes protected, authors attached"]
+    B1 --> B2
+  end
+  subgraph P3["Part 3: Relationships: comments"]
+    direction TB
+    C1["The comments table"]
+    C2["hasMany / belongsTo and a comment form"]
+    C1 --> C2
+  end
+  P1 --> P2 --> P3
+```
+
 ## Prerequisites
 
 - **[Bun](https://bun.sh) 1.1+** — that's the only requirement.

@@ -6,8 +6,8 @@
   "scripts": {
     "codegen": "bun run prerender:stub && cd .. && bun packages/cli/src/bin.ts codegen --app web --routes routes/web.ts --out types/generated/routes.d.ts --pages resources/js/pages --pagesOut .guren/pages.gen.ts --force",
     "routes:types": "bun run codegen",
-    "prerender": "bun scripts/prerender-docs.ts && bun scripts/prerender-docs-viewer.ts",
-    "prerender:stub": "bun scripts/prerender-docs.ts --stub",
+    "prerender": "bun scripts/copy-docs-images.ts && bun scripts/prerender-docs.ts && bun scripts/prerender-docs-viewer.ts",
+    "prerender:stub": "bun scripts/copy-docs-images.ts && bun scripts/prerender-docs.ts --stub",
     "dev": "bun run codegen && bun run prerender:stub && bun run dev:server",
     "dev:server": "bun run --watch bin/serve.ts",
     "typecheck": "bun run prerender:stub && bunx tsc --noEmit",

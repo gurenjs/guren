@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 const mockCodeToHtml = vi.fn(async () => '<pre>code</pre>')
 vi.mock('shiki', () => ({ codeToHtml: mockCodeToHtml }))
 
-const { renderMarkdownToHtml, rewriteDocLink } = await import(
+const { renderMarkdownToHtml, rewriteDocLink, rewriteDocImage } = await import(
   '../../app/Services/MarkdownRenderer.js'
 )
 
@@ -37,6 +37,70 @@ describe('renderMarkdownToHtml', () => {
   it('leaves .md links untouched without a link context', async () => {
     const html = await renderMarkdownToHtml('[Glossary](./glossary.md)')
     expect(html).toContain('href="./glossary.md"')
+  })
+
+  it('renders mermaid fences as a client-rendered <pre class="mermaid">', async () => {
+    mockCodeToHtml.mockClear()
+    const html = await renderMarkdownToHtml('```mermaid\nflowchart LR\n  A --> B\n```')
+    // shiki has no mermaid grammar; highlighting one would silently produce a
+    // grey `text` code block instead of a diagram.
+    expect(html).toContain('<pre class="mermaid">')
+    expect(html).toContain('flowchart LR')
+    expect(mockCodeToHtml).not.toHaveBeenCalled()
+  })
+
+  it('escapes the diagram source it hands to the client', async () => {
+    const html = await renderMarkdownToHtml('```mermaid\nflowchart LR\n  A["<b>x</b>"] --> B\n```')
+    expect(html).toContain('&lt;b&gt;x&lt;/b&gt;')
+    expect(html).not.toContain('<b>x</b>')
+  })
+
+  it('rewrites relative docs images onto the served root when a link context is given', async () => {
+    const html = await renderMarkdownToHtml('![list](../../images/posts-index.png)', {
+      locale: 'ja',
+      category: 'tutorials',
+    })
+    expect(html).toContain('src="/docs-images/posts-index.png"')
+  })
+
+  it('leaves image sources untouched without a link context', async () => {
+    const html = await renderMarkdownToHtml('![list](../../images/posts-index.png)')
+    expect(html).toContain('src="../../images/posts-index.png"')
+  })
+})
+
+describe('rewriteDocImage', () => {
+  const context = { locale: 'ja', category: 'tutorials' } as const
+
+  it('maps a docs/images path onto the /docs-images root', () => {
+    expect(rewriteDocImage('../../images/welcome-page.png', context)).toBe(
+      '/docs-images/welcome-page.png',
+    )
+  })
+
+  it('resolves from the guides directory too', () => {
+    expect(rewriteDocImage('../../images/docs-graph.png', { locale: 'en', category: 'guides' })).toBe(
+      '/docs-images/docs-graph.png',
+    )
+  })
+
+  it('leaves absolute URLs, roots, and data URIs alone', () => {
+    expect(rewriteDocImage('https://example.com/a.png', context)).toBe('https://example.com/a.png')
+    expect(rewriteDocImage('/already-served.png', context)).toBe('/already-served.png')
+    expect(rewriteDocImage('data:image/png;base64,AAAA', context)).toBe('data:image/png;base64,AAAA')
+  })
+
+  it('leaves a percent-encoded escape alone', () => {
+    // posix.join cannot normalize `%2e%2e`, but a browser resolves it after
+    // the rewrite — so containment has to be decided before that.
+    expect(rewriteDocImage('../../images/%2e%2e/other.png', context)).toBe(
+      '../../images/%2e%2e/other.png',
+    )
+  })
+
+  it('leaves a relative path that resolves outside docs/images alone', () => {
+    expect(rewriteDocImage('./local.png', context)).toBe('./local.png')
+    expect(rewriteDocImage('../../../outside.png', context)).toBe('../../../outside.png')
   })
 })
 

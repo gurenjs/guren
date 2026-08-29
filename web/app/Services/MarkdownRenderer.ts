@@ -2,7 +2,7 @@ import { posix } from 'node:path'
 
 import { codeToHtml } from 'shiki'
 
-import { createMarkdownRenderer } from '@guren/plugin-markdown'
+import { createMarkdownRenderer, escapeHtml } from '@guren/plugin-markdown'
 
 import { MARKDOWN_CODE_THEMES, SITE_ALERT_LABELS } from '../../config/markdown.js'
 import { docPaths, GITHUB_URL } from '../../config/site.js'
@@ -18,6 +18,10 @@ import {
 
 const DEFAULT_LANGUAGE = 'text'
 
+/** Where screenshots live in the repo, and where the site serves them from. */
+const DOCS_IMAGE_DIR = 'docs/images/'
+const DOCS_IMAGE_URL_ROOT = '/docs-images/'
+
 export interface DocLinkContext {
   locale: DocLocale
   category: DocCategory
@@ -25,6 +29,29 @@ export interface DocLinkContext {
 
 const CATEGORY_BY_DIR = new Map(DOC_CATEGORY_KEYS.map((key) => [docCategoryDir(key), key]))
 const LOCALE_BY_DIR = new Map(DOC_LOCALE_KEYS.map((key) => [docLocaleDir(key), key]))
+
+/** Absolute URL, root-relative path, or bare anchor — never repo-relative. */
+const NON_RELATIVE_TARGET = /^(?:[a-z][a-z0-9+.-]*:|\/|#)/iu
+
+/**
+ * Where a repo-relative target resolves inside the docs tree, given the source
+ * file's own `docs/<locale>/<category>/` directory. Returns `null` for targets
+ * that escape the tree, and for anything still percent-encoded: `%2e%2e` would
+ * survive posix.join only to be normalized by the browser afterwards, so the
+ * containment both callers rely on has to be decided before that.
+ */
+function resolveInDocsTree(target: string, context: DocLinkContext): string | null {
+  const joined = posix.join(
+    'docs',
+    docLocaleDir(context.locale),
+    docCategoryDir(context.category),
+    target,
+  )
+  if (joined === '..' || joined.startsWith('../') || joined.includes('%')) {
+    return null
+  }
+  return joined
+}
 
 /**
  * Docs source keeps GitHub-compatible relative `.md` links; the site rewrites
@@ -34,7 +61,7 @@ const LOCALE_BY_DIR = new Map(DOC_LOCALE_KEYS.map((key) => [docLocaleDir(key), k
  * relative paths) passes through untouched.
  */
 export function rewriteDocLink(href: string, context: DocLinkContext): string {
-  if (/^(?:[a-z][a-z0-9+.-]*:|\/|#)/iu.test(href)) {
+  if (NON_RELATIVE_TARGET.test(href)) {
     return href
   }
 
@@ -49,14 +76,8 @@ export function rewriteDocLink(href: string, context: DocLinkContext): string {
     return href
   }
 
-  // Resolve against the source file's repo directory: docs/<locale>/<category>/.
-  const joined = posix.join(
-    'docs',
-    docLocaleDir(context.locale),
-    docCategoryDir(context.category),
-    path,
-  )
-  if (joined === '..' || joined.startsWith('../')) {
+  const joined = resolveInDocsTree(path, context)
+  if (joined === null) {
     return href
   }
 
@@ -75,12 +96,40 @@ export function rewriteDocLink(href: string, context: DocLinkContext): string {
   return `${GITHUB_URL}/blob/main/${joined}${suffix}`
 }
 
+/**
+ * Docs source keeps GitHub-compatible relative image paths
+ * (`../../images/foo.png`) so the pictures render on GitHub too. The site
+ * serves the same files from `web/public/docs-images/`, copied there by
+ * `scripts/copy-docs-images.ts` at build time, so the rendered `src` has to
+ * be rewritten to that root. Anything resolving outside `docs/images/`
+ * (absolute URLs, data URIs, an escape upward) passes through untouched.
+ */
+export function rewriteDocImage(src: string, context: DocLinkContext): string {
+  if (NON_RELATIVE_TARGET.test(src)) {
+    return src
+  }
+
+  const joined = resolveInDocsTree(src, context)
+  if (joined === null || !joined.startsWith(DOCS_IMAGE_DIR)) {
+    return src
+  }
+
+  return `${DOCS_IMAGE_URL_ROOT}${joined.slice(DOCS_IMAGE_DIR.length)}`
+}
+
 // Docs fences carry arbitrary languages, so this pipeline keeps the full
 // shiki entry instead of the plugin's fine-grained adapter. That is fine
 // here because docs render at build time (scripts/prerender-docs.ts) — the
 // Worker bundle never sees this import.
 async function highlightDocsCode(code: string, lang?: string): Promise<string> {
   const normalizedLang = lang?.trim() || DEFAULT_LANGUAGE
+  // shiki has no `mermaid` grammar, so highlighting one would silently fall
+  // back to `text` and render the diagram source as a grey code block. Hand
+  // it to the client instead, in the same `<pre class="mermaid">` shape the
+  // framework's own docs viewer uses (`guren docs:graph`).
+  if (normalizedLang === 'mermaid') {
+    return `<pre class="mermaid">${escapeHtml(code)}</pre>`
+  }
   try {
     return await codeToHtml(code, { lang: normalizedLang, themes: MARKDOWN_CODE_THEMES, defaultColor: 'light' })
   } catch {
@@ -100,6 +149,7 @@ export async function renderMarkdownToHtml(
     sanitize: false,
     alertLabels: SITE_ALERT_LABELS,
     rewriteLink: linkContext ? (href) => rewriteDocLink(href, linkContext) : undefined,
+    rewriteImage: linkContext ? (src) => rewriteDocImage(src, linkContext) : undefined,
     highlight: highlightDocsCode,
   })
   return renderer.render(markdown)

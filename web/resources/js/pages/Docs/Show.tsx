@@ -1,11 +1,20 @@
 import { Head, Link } from '@inertiajs/react'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { SITE_DESCRIPTION, pageTitle } from '../../../../config/site.js'
 import { Footer } from '../../components/Footer.js'
 import { Header } from '../../components/Header.js'
 import { Seo } from '../../components/Seo.js'
 import { ChevronRightIcon } from '../../components/icons.js'
 import { breadcrumbJsonLd, techArticleJsonLd } from '../../lib/structured-data.js'
+import { useColorMode } from './theme.js'
+
+// Staged out of node_modules by scripts/lib/stage-mermaid.ts, and shared with
+// the prerendered docs-viewer snapshot, whose shell fixes this path.
+const MERMAID_SCRIPT_SRC = '/_guren/docs/assets/mermaid.js'
+
+// Mirrors --font-family-display in resources/css/app.css.
+const DIAGRAM_FONT_FAMILY =
+  "'Inter', 'Inter var', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
 
 type DocSummary = {
   slug: string
@@ -52,6 +61,53 @@ interface NavLink {
   title: string
   href: string
   kind: 'prev' | 'next'
+}
+
+interface MermaidApi {
+  initialize(config: Record<string, unknown>): void
+  run(options: { nodes: ArrayLike<HTMLElement> }): Promise<void>
+}
+
+declare global {
+  interface Window {
+    mermaid?: MermaidApi
+  }
+}
+
+let mermaidLoader: Promise<MermaidApi> | null = null
+
+/**
+ * Load mermaid as a plain script rather than `import('mermaid')`.
+ *
+ * Bundling it is not an option here: the library cannot fit the repo's
+ * 600 kB per-asset budget in any split (its cytoscape dependency alone is
+ * ~870 kB), and the Vite plugin's catch-all `vendor` chunk collapses the
+ * whole tree into one 3.2 MB file. Staged as a static asset instead, by
+ * scripts/copy-docs-images.ts, and fetched only by the pages that have a
+ * diagram — the same shape the framework's own `/_guren/docs` viewer uses.
+ */
+function loadMermaid(): Promise<MermaidApi> {
+  if (window.mermaid) return Promise.resolve(window.mermaid)
+  mermaidLoader ??= new Promise<MermaidApi>((resolvePromise, rejectPromise) => {
+    const script = document.createElement('script')
+    script.src = MERMAID_SCRIPT_SRC
+    // Neither failure may be cached as the answer: the next diagram page
+    // should get a fresh attempt rather than reusing a rejected promise.
+    const fail = (message: string) => {
+      mermaidLoader = null
+      rejectPromise(new Error(message))
+    }
+    script.onload = () => {
+      if (window.mermaid) {
+        resolvePromise(window.mermaid)
+      } else {
+        fail('mermaid loaded without defining window.mermaid')
+      }
+    }
+    script.onerror = () => fail(`Failed to load ${MERMAID_SCRIPT_SRC}`)
+    document.head.append(script)
+  })
+  return mermaidLoader
 }
 
 interface TocItem {
@@ -148,11 +204,93 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
   const docPath = doc ? `${basePath}/${doc.category}/${doc.slug}` : basePath
   const nav = buildPrevNext(categories, active, basePath)
   const toc = useTableOfContents(doc)
+  const { isDark } = useColorMode()
+  // Load-bearing memo, not an optimisation. React 19 re-applies
+  // dangerouslySetInnerHTML on the *identity* of the `{ __html }` object and
+  // never compares the string (setProp in react-dom assigns innerHTML
+  // unconditionally; the `lastHtml !== nextHtml` guard React 18 had is gone).
+  // Written inline, the object is fresh on every render, so any unrelated
+  // setState -- the TOC filling in, a theme toggle, the sidebar opening --
+  // silently rebuilt this subtree and discarded everything the effects below
+  // had put into it: the copy buttons, the rendered diagrams, and the heading
+  // nodes the scroll-spy observer was watching.
+  const docHtml = useMemo(() => ({ __html: doc?.html ?? '' }), [doc?.html])
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
   useEffect(() => {
     setSidebarOpen(false)
   }, [active?.category, active?.slug])
+
+  // Mermaid diagrams: the build-time renderer leaves ```mermaid fences as
+  // <pre class="mermaid"> (shiki has no grammar for them), and the library
+  // is loaded here — lazily, client-only, and only on pages that have one.
+  // The bail-out below is what keeps the request off every other docs page.
+  useEffect(() => {
+    if (!doc) return
+
+    const container = document.querySelector('.docs-content')
+    if (!container) return
+
+    if (!container.querySelector('pre.mermaid')) return
+
+    let cancelled = false
+
+    void (async () => {
+      let mermaid: MermaidApi
+      try {
+        mermaid = await loadMermaid()
+      } catch (error) {
+        console.error(error)
+        return
+      }
+      if (cancelled) return
+
+      mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: 'strict',
+        theme: isDark ? 'dark' : 'default',
+        // Must agree with `.docs-content pre.mermaid` in app.css: mermaid
+        // sizes each node box by measuring its label in this font.
+        fontFamily: DIAGRAM_FONT_FAMILY,
+      })
+
+      // Queried here, not above: hydration can replace the rendered-markdown
+      // subtree between the effect firing and the script arriving, which
+      // would leave us writing into detached nodes.
+      const live = [...container.querySelectorAll<HTMLPreElement>('pre.mermaid')]
+
+      for (const pre of live) {
+        // run() reads each element's own text and replaces it in place, so
+        // the source is stashed on first pass and restored here — a theme
+        // toggle re-renders from the fence body rather than from an <svg>.
+        const source = pre.dataset.mermaidSource ?? pre.textContent ?? ''
+        pre.dataset.mermaidSource = source
+        pre.textContent = source
+        pre.removeAttribute('data-processed')
+      }
+
+      try {
+        // Letting mermaid own the DOM write keeps diagram text from ever
+        // being reinterpreted as markup by this component.
+        await mermaid.run({ nodes: live })
+      } catch (error) {
+        // run() reports one malformed fence by rejecting *after* processing
+        // the whole collection, so the diagrams it did render are marked
+        // below either way — otherwise one bad fence would leave every good
+        // one styled as a code block.
+        console.error('Failed to render some mermaid diagrams', error)
+      }
+      if (cancelled) return
+
+      for (const pre of live) {
+        if (pre.querySelector('svg')) pre.dataset.mermaidRendered = 'true'
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [doc?.html, isDark])
 
   // Copy button effect
   useEffect(() => {
@@ -164,7 +302,11 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
     container.querySelectorAll('.docs-copy-btn').forEach((btn) => btn.remove())
 
     const blocks = container.querySelectorAll<HTMLPreElement>('pre')
-    const topLevelBlocks = Array.from(blocks).filter((pre) => !pre.closest('pre pre'))
+    // `pre.mermaid` holds diagram source that becomes an <svg> below — there
+    // is nothing there a reader would want on their clipboard.
+    const topLevelBlocks = Array.from(blocks).filter(
+      (pre) => !pre.closest('pre pre') && !pre.classList.contains('mermaid'),
+    )
     const cleanups: Array<() => void> = []
 
     topLevelBlocks.forEach((pre) => {
@@ -299,7 +441,7 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
               </header>
               <div
                 className="docs-content"
-                dangerouslySetInnerHTML={{ __html: doc.html }}
+                dangerouslySetInnerHTML={docHtml}
               />
               {(nav.prev || nav.next) && (
                 <nav

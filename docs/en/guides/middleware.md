@@ -39,6 +39,29 @@ Route middleware only applies to the specific endpoint (or every endpoint nested
 
 `.middleware()` accepts handler functions, registered alias names, or a mix of both. They are resolved by kind rather than by position: every name in a route's chain runs before every handler, across groups as well as within one call. So an inline handler on an outer group runs *after* a named one on an inner group — the reverse of how they read. Use aliases throughout when relative order matters.
 
+```mermaid
+flowchart LR
+  subgraph Written["As written"]
+    direction TB
+    W1["outer group<br/>.middleware(inlineA)"]
+    W2["inner group<br/>.middleware('auth')"]
+    W3["route<br/>.middleware(inlineB)"]
+    W1 --> W2 --> W3
+  end
+  subgraph Actual["As it runs"]
+    direction TB
+    A1["'auth'<br/>every name comes first"]
+    A2["inlineA<br/>outer group's inline handler"]
+    A3["inlineB<br/>the route's inline handler"]
+    A4["route contract validation<br/>body / params / query schemas"]
+    A5["controller action"]
+    A1 --> A2 --> A3 --> A4 --> A5
+  end
+  Written --> Actual
+```
+
+The last two stages are not something `.middleware()` can reorder: a schema attached to the route is always validated after every middleware has run, immediately before the action.
+
 Aliases are also the only form that `guren audit` can report by name. Guards the framework recognizes — `requireAuthenticated()` and `requireGuest()` — are detected either way, but any other middleware is invisible to the audit unless it is registered under an alias.
 
 ## Middleware Aliases

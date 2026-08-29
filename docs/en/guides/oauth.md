@@ -9,6 +9,28 @@ Guren ships an OAuth 2.0 authorization-code flow for "Sign in with GitHub / Goog
 - **OAuthStateStore** – One-time state storage that prevents CSRF and open-redirect attacks. Memory by default; use `DatabaseOAuthStateStore` (or Redis) for multi-process deployments.
 - **Provider factories** – `createGitHubOAuthProviderConfig`, `createGoogleOAuthProviderConfig`, `createDiscordOAuthProviderConfig` pre-fill the well-known endpoints for each provider.
 
+The full flow has four parties. Your app is entered twice, and in between the state store answers one question: did this browser really start this flow?
+
+```mermaid
+sequenceDiagram
+  participant B as Browser
+  participant A as Your app
+  participant S as OAuthStateStore
+  participant P as Provider<br/>(GitHub, …)
+
+  B->>A: GET /auth/github
+  A->>S: issue state, bound to the session
+  A-->>B: 302 to the provider's authorize URL
+  B->>P: user approves on the consent screen
+  P-->>B: 302 /auth/github/callback?code=…&state=…
+  B->>A: GET /auth/github/callback
+  A->>S: match and consume the state (single use)
+  A->>P: exchange the code for an access token
+  P-->>A: token and profile
+  A->>A: find or create the user, then sign in
+  A-->>B: 302 /dashboard
+```
+
 ## Basic Setup
 
 ### Registering the Manager

@@ -451,6 +451,28 @@ body.docs-theme {
   white-space: inherit;
 }
 
+/* Mermaid fences arrive as <pre class="mermaid"> holding diagram source and
+   are replaced by an <svg> client-side (pages/Docs/Show.tsx). The font must
+   match what mermaid measures with, or every node label is laid out for a
+   proportional font and rendered in the inherited monospace one — which
+   clips the text inside its box. */
+.docs-content pre.mermaid {
+  font-family: var(--font-family-display);
+  white-space: pre;
+}
+
+.docs-content pre.mermaid[data-mermaid-rendered] {
+  background: none;
+  border: 0;
+  padding: 0;
+  text-align: center;
+}
+
+.docs-content pre.mermaid[data-mermaid-rendered] svg {
+  max-width: 100%;
+  height: auto;
+}
+
 .docs-content a {
   color: var(--docs-accent-strong);
   text-decoration: none;

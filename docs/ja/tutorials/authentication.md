@@ -86,7 +86,11 @@ export default class AuthProvider extends ServiceProvider {
 
 開発サーバーが動いている状態で（止めていたら `bun run dev`）、[http://localhost:3333/login](http://localhost:3333/login) を開きます。
 
+![生成されたサインインページ。Email と Password の入力欄、Remember me のチェックボックス、Sign in ボタン、パスワードを忘れた場合と新規登録へのリンクがある。ヘッダー右端は Sign in](../../images/auth-login.png)
+
 1. **demo@example.com** / **secret** でサインインします — `/dashboard` に着地し、名前入りの挨拶が表示されます。ヘッダーのナビゲーションも **Sign in** から **Log out** に切り替わっています（`AuthProvider` が共有している props の効果です）。
+
+   ![サインイン後のダッシュボード。「This page is protected by the auth middleware.」の下に「Signed in as Demo User」とメールアドレスが表示され、ヘッダー右端のボタンが Log out に変わっている](../../images/auth-dashboard.png)
 2. 間違ったパスワードを試します — フォームに "Invalid credentials." が表示されます。
 3. プライベートブラウジングのウィンドウで `/dashboard` を開きます — `/login` にリダイレクトされます。保護されたルートは本当に保護されています。
 
@@ -125,6 +129,27 @@ export function registerWebRoutes(baseRouter: Router): void {
     })
   })
 }
+```
+
+未ログインの訪問者が保護されたルートを叩いたとき、リクエストがどう流れるかを図にすると、こうなります。
+
+```mermaid
+sequenceDiagram
+  participant B as ブラウザー
+  participant M as auth ミドルウェア
+  participant C as PostController
+  participant S as セッション
+
+  B->>M: GET /posts/create
+  M->>S: サインイン中のユーザーは？
+  S-->>M: なし
+  M-->>B: 302 /login へリダイレクト
+  Note over B,S: サインイン後、セッションにユーザーが載る
+  B->>M: GET /posts/create（再訪）
+  M->>S: サインイン中のユーザーは？
+  S-->>M: Demo User
+  M->>C: create() を実行
+  C-->>B: 作成フォームを表示
 ```
 
 仕組みは 3 段構えです。

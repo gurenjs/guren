@@ -34,7 +34,12 @@ type AlertBlockquote = Tokens.Blockquote & { alertType?: AlertType }
 
 // Labels are configuration, but they are still interpolated into markup —
 // and the sanitize: false path has no later line of defense.
-function escapeHtml(value: string): string {
+/**
+ * Escape for both element and attribute contexts. Exported because consumers
+ * that pass `sanitize: false` (trusted content) still have to escape anything
+ * they hand back through the `highlight` callback.
+ */
+export function escapeHtml(value: string): string {
   return value
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')

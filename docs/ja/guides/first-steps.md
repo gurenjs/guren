@@ -10,6 +10,28 @@ bunx guren add resource posts --fields "title:string,body:text,published:boolean
 
 自分の手で一歩ずつ作りたい方は、代わりに [ミニブログを作るチュートリアル](../tutorials/overview.md) をどうぞ — 同じ内容をハンズオンでカバーしています。
 
+まずは全体像です。`GET /posts` は次の順にレイヤーを通り、ブラウザーに HTML が返ります。
+
+```mermaid
+flowchart TD
+  Browser["ブラウザー<br/>GET /posts"]
+  Route["1. ルート<br/>routes/web.ts"]
+  Controller["2. コントローラー<br/>PostController.index()"]
+  Validator["3. バリデーション<br/>ListPostsQuerySchema"]
+  Model["4. モデル<br/>Post.paginate()"]
+  Database[("データベース<br/>posts テーブル")]
+  Resource["5. リソース<br/>PostResource"]
+  Page["6. Inertia ページ<br/>posts/Index.tsx"]
+
+  Browser --> Route --> Controller
+  Controller --> Validator --> Model
+  Model <--> Database
+  Model --> Resource --> Page
+  Page -- "レンダリング結果" --> Browser
+```
+
+以降は、この図の各ストップを 1 つずつ見ていきます。
+
 ## 1. ルート
 
 すべてのリクエストは `routes/web.ts` から始まります。ここで registrar が URL をコントローラーのアクションにマッピングします。
@@ -116,6 +138,10 @@ export default function PostsIndex({ data }: Props) {
 }
 ```
 
+`bunx guren add resource` が生成する一覧ページは、もう少し作り込まれた見た目で届きます。
+
+![/posts の一覧ページ。「Posts」という見出しと New Post ボタン、投稿 3 件がタイトルと本文抜粋のカードで並び、下にページ番号 1 のページネーションがある](../../images/posts-index.png)
+
 codegen は各ページの `Props` を `.guren/pages.gen.ts` に抽出するため、コントローラーが誤った形の props を渡すとコンパイルエラーになります。カラムをリネームすれば、スキーマからブラウザまで、すべてのレイヤーを TypeScript が指摘してくれます。詳しくは [フロントエンドガイド](./frontend.md) を参照してください。
 
 ## 7. テスト
@@ -138,7 +164,9 @@ fluent なアサーション、`actingAs`、データベースヘルパーにつ
 
 ここまでのリクエスト経路はアプリが何をするかを説明します。プロジェクト知識は、なぜその設計なのかを記録し、全体像を最新に保ちます。`bunx guren spec:generate` はコードから ER、ドメイン、画面、モジュールのビューを導出します。`bunx guren make:adr` で作る ADR は、自分が統べるエンティティとコードパスを宣言し、`bunx guren check --docs` がその関係を検証します。
 
-`bun run dev` の実行中に [http://localhost:3333/_guren/docs](http://localhost:3333/_guren/docs) を開くと、それらの文書、エンティティ、コードパスを一つのインタラクティブな Docs Graph として閲覧できます。Docs Graph は上のリクエスト経路を置き換えるものではなく、その周囲に設計理由と生成ビューを結び付けます。ワークフロー全体は [スペックアンカード開発](./spec-anchored.md) を参照してください。
+`bun run dev` の実行中に [http://localhost:3333/_guren/docs](http://localhost:3333/_guren/docs) を開くと、それらの文書、エンティティ、コードパスを一つのインタラクティブな Docs Graph として閲覧できます。
+
+![Docs Graph。スペックビューと ADR のノードが、schema.ts・Models・routes・Controllers・pages といったコードのノードと線で結ばれている](../../images/docs-graph.png)Docs Graph は上のリクエスト経路を置き換えるものではなく、その周囲に設計理由と生成ビューを結び付けます。ワークフロー全体は [スペックアンカード開発](./spec-anchored.md) を参照してください。
 
 ## メンタルモデル
 

@@ -88,6 +88,36 @@ describe('registerRootPublicAssets with a route prefix', () => {
   })
 })
 
+describe('registerRootPublicAssets serving opt-in script and style assets', () => {
+  const fixture = useAssetFixture('guren-public-assets-scripts-')
+  let app: Application
+
+  beforeEach(async () => {
+    await fixture.write('public/vendor/lib.js', 'export const a = 1\n')
+    await fixture.write('public/vendor/theme.css', 'body { color: red }\n')
+
+    app = new Application()
+    // `.js`/`.css` are not in the default allowlist; an app that opts in
+    // should not also have to restate their content types.
+    registerRootPublicAssets(app, fixture.path('public'), { extensions: ['js', 'css'] })
+  })
+
+  it('serves scripts as executable JavaScript', async () => {
+    const response = await app.fetch(new Request('http://example.com/vendor/lib.js'))
+
+    expect(response.status).toBe(200)
+    // application/octet-stream here means the browser refuses to run it.
+    expect(response.headers.get('Content-Type')).toContain('text/javascript')
+  })
+
+  it('serves stylesheets as text/css', async () => {
+    const response = await app.fetch(new Request('http://example.com/vendor/theme.css'))
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get('Content-Type')).toContain('text/css')
+  })
+})
+
 describe('registerRootPublicAssets with a public directory reached through a symlink', () => {
   const fixture = useAssetFixture('guren-public-assets-linked-')
   let app: Application
