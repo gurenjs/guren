@@ -24,9 +24,9 @@ function createContext(
   session?: Session,
 ) {
   const guard = createMockGuard(guardOverrides)
-  const manager = { getDefaultGuard: () => 'web' }
+  const resolveName = (name?: string) => name ?? 'web'
   const resolveGuard = () => guard
-  return new RequestAuthContext(manager, {} as any, () => session, resolveGuard)
+  return new RequestAuthContext(resolveName, {} as any, () => session, resolveGuard)
 }
 
 describe('RequestAuthContext', () => {

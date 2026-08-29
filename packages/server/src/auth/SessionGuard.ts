@@ -1,6 +1,7 @@
 import type { Session } from '../http/middleware'
 import type { AuthCredentials, Authenticatable, Guard, UserProvider } from './types'
 import { generateToken, secureStringCompare } from './utils'
+import { sanitizeUser } from './providers/UserProvider'
 
 export interface SessionGuardOptions {
   provider: UserProvider
@@ -63,7 +64,7 @@ export class SessionGuard<User extends Authenticatable = Authenticatable> implem
 
   /** Strip auth-internal fields before a record is cached or exposed. */
   private sanitizeUser(user: User): User {
-    return this.provider.sanitize ? this.provider.sanitize(user) : user
+    return sanitizeUser(this.provider, user)
   }
 
   private async resolveUser(): Promise<User | null> {

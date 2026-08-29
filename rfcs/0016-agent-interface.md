@@ -187,9 +187,18 @@ Tool execution re-enters the application as a real HTTP request:
 **Prerequisite work (independently valuable, Phase 0):**
 
 - `TokenGuard`: a `Guard` implementation backed by `ApiTokenStore`.
-- A composite default guard: delegate to token when `Authorization: Bearer` is
-  present, session otherwise. (Registering a second guard is not enough —
-  `AuthManager` has a single default and `RequestAuthContext` always uses it.)
+- ~~A composite default guard: delegate to token when `Authorization: Bearer` is
+  present, session otherwise.~~ **Amended in implementation:** shipped as
+  manager-level *name* resolution (`AuthManager.resolveGuardName`, selecting the
+  token guard for Bearer requests; optional on `AuthManagerContract`) rather
+  than a composite `Guard` object. A composite guard would need its own hidden
+  registry name to keep explicit `guard('web')` lookups intact, and the
+  selection rule is one predicate — a wrapper class generalizing to N guards
+  was judged premature. The bearer predicate is shared with the guard itself
+  through `readBearerToken()` so the selector and the selected guard cannot
+  disagree about what a bearer request is. (Registering a second guard alone
+  is still not enough — `AuthManager` has a single default and
+  `RequestAuthContext` always uses it.)
 - `Gate` user resolution unified onto the auth context. Today `Gate.resolveUser`
   falls back to `ctx.get('user')` and never consults `guren:auth`, so bearer-authenticated
   requests reach policies with no principal.
@@ -388,9 +397,15 @@ tests — small enough to review, and everything else consumes its shape.
 Purely additive; no existing API changes shape or behavior. Two soft edges:
 
 - The Phase 0 `Gate` user-resolution unification prefers the auth context over the
-  legacy `ctx.get('user')` fallback. The fallback is retained after the auth-context
+  legacy `ctx.get('user')` fallback. ~~The fallback is retained after the auth-context
   lookup, so existing apps that set `user` manually keep working; the changelog
-  documents the new precedence.
+  documents the new precedence.~~ **Amended in implementation:** an *attached* auth
+  context is authoritative, null included — retaining the fallback after a null
+  lookup would let a manually-set `ctx.get('user')` principal resurrect a request
+  authentication just rejected (invalid Bearer + manual user), so
+  `authorizeMiddleware` could pass where `requireAuthenticated` denies. The
+  fallback survives only for requests with no auth context; impersonation/reduced
+  principals move to `userResolver` / `gate.forUser(...)`, which keep precedence.
 - The CSRF bearer rule only *removes* 419s for cookie-less bearer requests; no
   currently-passing request changes outcome.
 

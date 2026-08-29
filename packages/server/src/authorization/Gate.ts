@@ -11,6 +11,8 @@ import type {
   ResponseBuilder,
 } from './types'
 import { AuthorizationException, HttpException } from '../errors'
+import { AUTH_CONTEXT_KEY } from '../http/middleware/auth'
+import type { AuthContext } from '../auth/types'
 
 /**
  * Response builder for authorization checks.
@@ -197,7 +199,20 @@ export class Gate {
       return this.userResolver(ctx)
     }
 
-    // Try to get user from context
+    // When a framework auth context (guren:auth) is attached, its answer is
+    // authoritative — including null. Falling back to the legacy
+    // ctx.get('user') here would resurrect a principal that authentication
+    // just rejected (e.g. an invalid Bearer token on a request that also
+    // carries a manually-set user), letting authorizeMiddleware pass where
+    // requireAuthenticated denies (RFC 0016). The legacy fallback survives
+    // only for requests with no auth context at all.
+    // Duck-typed on purpose: test doubles and exotic contexts may return
+    // arbitrary values for unknown keys.
+    const auth = ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
+    if (auth && typeof auth.user === 'function') {
+      return ((await auth.user()) as AuthUser | null) ?? null
+    }
+
     const user = ctx.get('user') as AuthUser | undefined
     return user ?? null
   }
