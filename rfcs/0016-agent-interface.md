@@ -2,7 +2,11 @@
 
 **Author:** Urata Daiki (@7nohe)
 **Date:** 2026-08-29
-**Status:** Draft
+**Status:** Accepted
+
+> The standard two-week discussion window was shortened by maintainer decision
+> (solo-maintained project; the design went through an external review pass and a
+> market validation pass before this document was filed).
 
 ## Problem
 
