@@ -33,7 +33,11 @@ async function makeApp(files: Record<string, string> = {}): Promise<string> {
  * hint by reading the class's `name`, so a real class is what makes the hint
  * survive `definitions()` as `'ArticleResource'`.
  */
-class ArticleResource {}
+class ArticleResource {
+  toJSON(): unknown {
+    return {}
+  }
+}
 
 class PostController extends Controller {
   async index() {
