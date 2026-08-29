@@ -479,7 +479,6 @@ describe('deriveAgentTools (RFC 0016)', () => {
     test('derives only the actions the resource call exposed', () => {
       const router = new Router()
       router.resource('/posts', PostController, {
-        names: { index: 'posts.index', store: 'posts.store' },
         only: ['index', 'store'],
         agent: { store: { description: 'Create a post' } },
       })

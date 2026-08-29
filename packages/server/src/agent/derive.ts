@@ -20,7 +20,7 @@
  *   carrying a name. Auto-exposing endpoints is the anti-pattern RFC 0016
  *   opens by rejecting.
  */
-import { extractPathParamNames, type RouteDefinition } from '../mvc/Router'
+import { extractPathParamNames, type ResourceResponseShape, type RouteDefinition } from '../mvc/Router'
 import { resourceAbilityForMethod } from '../authorization/middleware'
 import {
   type JsonSchemaObject,
@@ -80,6 +80,15 @@ export interface DerivedAgentTool {
   inputSchema: AgentToolSchema
   /** Present only when the route binds an `output` schema — the one shape validated at runtime. */
   outputSchema?: AgentToolSchema
+  /**
+   * The route's `resource` response hint, as class names — RFC 0016's second
+   * output rung, carried rather than resolved. `definitions()` has only the
+   * names; the payload type behind them exists solely in the CLI's AST
+   * extraction, which is why codegen enriches the description from this and
+   * the runtime does not. Absent when the route declares no hint, and ignored
+   * whenever `outputSchema` is present (a validated schema outranks a claim).
+   */
+  resource?: ResourceResponseShape
   annotations: DerivedAgentToolAnnotations
   /**
    * The policy ability guarding this route, when its middleware chain stamped
@@ -164,6 +173,7 @@ export function deriveAgentTools(definitions: RouteDefinition[]): DeriveAgentToo
       description: agent.description ?? definition.description ?? definition.summary,
       inputSchema: buildInputSchema(definition, method, toolWarnings),
       outputSchema: buildOutputSchema(definition, method, toolWarnings),
+      resource: definition.resource,
       annotations: {
         readOnlyHint,
         // The MCP spec's default for a non-read-only tool is `true`; declaring

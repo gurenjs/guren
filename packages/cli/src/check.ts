@@ -47,6 +47,7 @@ import { parseSchemaTables, schemaPathFor, type SchemaTable } from './schema-par
 import { ParseCache } from './parse-cache'
 import { extractInertiaPageRefs, resolveInertiaPageFile, expectedInertiaPagePath } from './inertia-pages'
 import { describePageManifestSuppression, PAGES_MANIFEST_FILE, planPageManifest } from './pages-types'
+import { AGENTS_MANIFEST_FILE, appDeclaresAgentRoutes } from './agents-types'
 import { runArchCheck } from './arch-check'
 import { runDocsCheck } from './docs-check'
 import { runI18nCheck } from './i18n-check'
@@ -229,6 +230,11 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
       '.guren/routes.gen.ts',
       ...(pagesPlan.reason === 'pages' ? [PAGES_MANIFEST_FILE] : []),
       '.guren/data.gen.ts',
+      // Conditional on the same principle as the pages manifest: codegen
+      // writes an agent manifest only for apps whose routes declare
+      // `.agent()` metadata, so expecting one from every app would warn about
+      // a file that should not exist (RFC 0016).
+      ...((await appDeclaresAgentRoutes(cwd, options.routesFile)) ? [AGENTS_MANIFEST_FILE] : []),
     ]
     for (const manifest of manifests) {
       const exists = await fileExists(cwd, manifest)

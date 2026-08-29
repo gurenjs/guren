@@ -24,6 +24,7 @@ import {
   planPageManifest,
   type PageManifestPlan,
 } from './pages-types'
+import { AGENTS_MANIFEST_FILE, appDeclaresAgentRoutes } from './agents-types'
 import { extractClassDeclaration } from './model-parser'
 import { parseSourceFile } from './parse-cache'
 import { ROUTES_ENTRY_CANDIDATES } from './route-registrar'
@@ -118,6 +119,10 @@ interface DoctorRuleContext {
   // snapshot of the filesystem — computing it per-rule would let concurrent
   // rules disagree if a page file were added or removed mid-run.
   pageManifest: Promise<PageManifestPlan>
+  // Whether any route source declares agent metadata (RFC 0016). Shared for
+  // the same reason, and cheap for a different one: it is a string scan over
+  // route files, not an evaluation of the app's module graph.
+  agentRoutes: Promise<boolean>
 }
 
 interface DoctorRule {
@@ -134,7 +139,14 @@ type JsonReadResult<T> =
 
 const APP_ENTRY_CANDIDATES = ['src/main.ts', 'src/main.mts', 'src/main.js', 'src/main.mjs']
 const PAGE_CONTRACT_CANDIDATES = [PAGES_MANIFEST_FILE]
-const GENERATED_FILES = ['.guren/routes.gen.ts', PAGES_MANIFEST_FILE, '.guren/data.gen.ts', '.guren/api-client.gen.ts', '.guren/channels.gen.ts']
+const GENERATED_FILES = [
+  '.guren/routes.gen.ts',
+  PAGES_MANIFEST_FILE,
+  '.guren/data.gen.ts',
+  '.guren/api-client.gen.ts',
+  '.guren/channels.gen.ts',
+  AGENTS_MANIFEST_FILE,
+]
 
 export const DOCTOR_RECOMMENDED_COMMANDS = [
   'bunx guren codegen --force',
@@ -372,6 +384,18 @@ function createGeneratedManifestRule(generatedFile: string): DoctorRule {
           generatedFile,
           'pass',
           `No Inertia pages detected; ${generatedFile} is not applicable.`,
+        )
+      }
+
+      // Conditional artifacts: an app that exposes no agent tools has no
+      // manifest to miss, and warning about one would nag every app written
+      // before RFC 0016. Same shape as the pages exemption above.
+      if (generatedFile === AGENTS_MANIFEST_FILE && !(await context.agentRoutes)) {
+        return createCheck(
+          key,
+          generatedFile,
+          'pass',
+          `No routes declare agent metadata; ${generatedFile} is not applicable.`,
         )
       }
 
@@ -1276,7 +1300,11 @@ export async function getDoctorRuleEvaluations(options: { cwd?: string } = {}): 
   evaluations: DoctorRuleEvaluation[]
 }> {
   const cwd = resolve(options.cwd ?? process.cwd())
-  const context: DoctorRuleContext = { cwd, pageManifest: planPageManifest(cwd) }
+  const context: DoctorRuleContext = {
+    cwd,
+    pageManifest: planPageManifest(cwd),
+    agentRoutes: appDeclaresAgentRoutes(cwd),
+  }
 
   // The deploy-runtime checks share one filesystem scan, computed once here
   // rather than through the DoctorRule interface (they need no autofix and no
@@ -1468,11 +1496,15 @@ export async function suggestNextSteps(options: { cwd?: string } = {}): Promise<
     // Ignore
   }
 
-  const pagesPlan = await planPageManifest(cwd)
+  const [pagesPlan, hasAgentRoutes] = await Promise.all([planPageManifest(cwd), appDeclaresAgentRoutes(cwd)])
   const requiredManifests = [
     '.guren/routes.gen.ts',
     ...(pagesPlan.reason === 'pages' ? [PAGES_MANIFEST_FILE] : []),
     '.guren/data.gen.ts',
+    // Conditional, like the pages manifest: an app whose routes declare no
+    // agent metadata has no tools, so nothing is missing when it has no
+    // manifest.
+    ...(hasAgentRoutes ? [AGENTS_MANIFEST_FILE] : []),
     '.guren/api-client.gen.ts',
   ]
   let missingManifests = false
