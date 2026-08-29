@@ -91,8 +91,6 @@ export interface ObjectSchemaDetails {
   required: Set<string>
 }
 
-type ZodLike = ZodSchemaLike
-
 /**
  * Zod's string formats mapped to the JSON Schema `format` names that mean the
  * same thing, matched against zod's own `z.toJSONSchema()` output so the two
@@ -202,10 +200,7 @@ export function toJsonSchema(
     case 'string':
       return { type: 'string', ...stringConstraints(schema) }
     case 'number':
-      return {
-        type: isIntegerNumber(schema) ? 'integer' : 'number',
-        ...numericConstraints(schema),
-      }
+      return numberSchema(schema)
     case 'boolean':
       return { type: 'boolean' }
     case 'bigint':
@@ -226,7 +221,7 @@ export function toJsonSchema(
       return {
         type: 'array',
         items: toJsonSchema(item, warnings, `${label}[]`, io) ?? {},
-        ...lengthConstraints(schema, 'minItems', 'maxItems'),
+        ...lengthConstraints(schemaChecks(schema), 'minItems', 'maxItems'),
       }
     }
     case 'object': {
@@ -354,7 +349,7 @@ export function isZodSchema(schema: unknown): schema is ZodSchemaLike {
  * ungated recursion would document it wrong instead of refusing it.
  */
 function warnIfZod3(schema: unknown, warnings: string[], label: string): boolean {
-  if (schema && typeof schema === 'object' && isZod3Schema(schema as ZodLike)) {
+  if (schema && typeof schema === 'object' && isZod3Schema(schema as ZodSchemaLike)) {
     warnings.push(`${label}: skipped — ${ZOD3_UNSUPPORTED_MESSAGE}`)
     return true
   }
@@ -362,7 +357,7 @@ function warnIfZod3(schema: unknown, warnings: string[], label: string): boolean
 }
 
 function readObjectSchemaDetails(
-  schema: ZodLike,
+  schema: ZodSchemaLike,
   warnings: string[],
   label: string,
   io: SchemaIo,
@@ -412,7 +407,7 @@ function readObjectSchemaDetails(
  * from `SINGLE_CHILD_WRAPPERS` rather than a local list. See `pipeSides` for
  * why a pipe resolves per direction.
  */
-function unwrap(schema: ZodLike, io: SchemaIo): ZodLike | undefined {
+function unwrap(schema: ZodSchemaLike, io: SchemaIo): ZodSchemaLike | undefined {
   const def = schema._def ?? {}
   const typeName = typeOf(schema)
 
@@ -423,7 +418,7 @@ function unwrap(schema: ZodLike, io: SchemaIo): ZodLike | undefined {
   return SINGLE_CHILD_WRAPPERS.has(typeName) ? innerSchema(def) : undefined
 }
 
-function isOptional(schema: ZodLike, io: SchemaIo): boolean {
+function isOptional(schema: ZodSchemaLike, io: SchemaIo): boolean {
   switch (typeOf(schema)) {
     case 'optional':
       return true
@@ -508,13 +503,13 @@ function tightenUpper(current: number | undefined, candidate: number): number {
  * count elements (`minItems`). Zod uses the same three check kinds for both.
  */
 function lengthConstraints(
-  schema: ZodSchemaLike,
+  checks: readonly ZodCheckDef[],
   minKey: 'minLength' | 'minItems',
   maxKey: 'maxLength' | 'maxItems',
 ): JsonSchemaObject {
   const constraints: JsonSchemaObject = {}
 
-  for (const check of schemaChecks(schema)) {
+  for (const check of checks) {
     switch (check.check) {
       case 'min_length': {
         const minimum = numeric(check.minimum)
@@ -551,39 +546,47 @@ function lengthConstraints(
  * methods (`z.string().email()`, `z.number().int()`) attach it as a check and
  * leave the node's own field empty. Reading one source loses half the formats
  * an app writes, so both are collected here once rather than in each caller.
+ *
+ * Takes the node's checks rather than re-reading them: every caller has already
+ * walked `_def.checks` for something else, and this walker is on RFC 0016's
+ * tool-derivation path as well as the document one.
  */
-function declaredFormats(schema: ZodSchemaLike): string[] {
+function declaredFormats(schema: ZodSchemaLike, checks: readonly ZodCheckDef[]): string[] {
   const onNode = schemaFormat(schema)
-  const onChecks = schemaChecks(schema).flatMap((check) =>
-    typeof check.format === 'string' ? [check.format] : [],
-  )
+  const onChecks = checks.flatMap((check) => typeof check.format === 'string' ? [check.format] : [])
   return onNode ? [onNode, ...onChecks] : onChecks
 }
 
-/** Whether a `number` node is constrained to whole values, and so is a JSON Schema `integer`. */
-function isIntegerNumber(schema: ZodSchemaLike): boolean {
-  return declaredFormats(schema).some((format) => INTEGER_NUMBER_FORMATS.has(format))
+/**
+ * The whole rendering of a `number` node, because its *type* and its
+ * constraints are read from the same check list — `z.int()` is a format, and
+ * splitting the two would walk `_def.checks` twice per node.
+ */
+function numberSchema(schema: ZodSchemaLike): JsonSchemaObject {
+  const checks = schemaChecks(schema)
+  const isInteger = declaredFormats(schema, checks).some((format) => INTEGER_NUMBER_FORMATS.has(format))
+
+  return { type: isInteger ? 'integer' : 'number', ...numericConstraints(checks) }
 }
 
 function stringConstraints(schema: ZodSchemaLike): JsonSchemaObject {
-  const constraints: JsonSchemaObject = lengthConstraints(schema, 'minLength', 'maxLength')
+  const checks = schemaChecks(schema)
+  const constraints: JsonSchemaObject = lengthConstraints(checks, 'minLength', 'maxLength')
 
-  for (const format of declaredFormats(schema)) {
-    const mapped = JSON_SCHEMA_STRING_FORMATS[format]
-    if (mapped && constraints.format === undefined) {
-      constraints.format = mapped
-    }
+  // First mapped format wins, which is why the node's own format leads the list.
+  const format = declaredFormats(schema, checks)
+    .map((declared) => JSON_SCHEMA_STRING_FORMATS[declared])
+    .find(Boolean)
+  if (format) {
+    constraints.format = format
   }
 
-  const patterns = schemaChecks(schema).flatMap((check) => {
+  assignWithSurplus(constraints, 'pattern', checks.flatMap((check) => {
     if (check.check !== 'string_format') return []
-    const format = typeof check.format === 'string' ? check.format : undefined
-    if (!format || !PATTERN_BEARING_FORMATS.has(format)) return []
+    if (typeof check.format !== 'string' || !PATTERN_BEARING_FORMATS.has(check.format)) return []
     const pattern = patternSource(check)
     return pattern ? [pattern] : []
-  })
-
-  assignWithSurplus(constraints, 'pattern', patterns)
+  }))
 
   return constraints
 }
@@ -626,10 +629,10 @@ function patternSource(check: ZodCheckDef): string | undefined {
   return check.pattern instanceof RegExp ? check.pattern.source : undefined
 }
 
-function numericConstraints(schema: ZodSchemaLike): JsonSchemaObject {
+function numericConstraints(checks: readonly ZodCheckDef[]): JsonSchemaObject {
   const constraints: JsonSchemaObject = {}
 
-  for (const check of schemaChecks(schema)) {
+  for (const check of checks) {
     switch (check.check) {
       // `.min()`/`.gte()` and `.gt()` are one check kind separated by
       // `inclusive`; JSON Schema 2020-12 separates them into two keywords whose
@@ -662,7 +665,7 @@ function numericConstraints(schema: ZodSchemaLike): JsonSchemaObject {
 
   // Two `multipleOf` checks compose to their least common multiple, which one
   // keyword cannot spell — so the surplus is conjoined rather than dropped.
-  assignWithSurplus(constraints, 'multipleOf', schemaChecks(schema).flatMap((check) => {
+  assignWithSurplus(constraints, 'multipleOf', checks.flatMap((check) => {
     if (check.check !== 'multiple_of') return []
     const value = numeric(check.value)
     return value === undefined ? [] : [value]
