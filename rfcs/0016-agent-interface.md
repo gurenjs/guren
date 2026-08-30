@@ -320,8 +320,20 @@ Each feature maps to a measured failure mode of the MCP ecosystem.
 ### 7. Protocol adapters
 
 **`@guren/plugin-mcp` (Phase 2).** Installed via `guren plugin @guren/plugin-mcp`;
-configured in `config/agent.ts` (`defineAgentConfig({ mcp: { path: '/mcp', auth } })`).
-Mounts per-request stateless `McpServer` + `WebStandardStreamableHTTPServerTransport`
+~~configured in `config/agent.ts` (`defineAgentConfig({ mcp: { path: '/mcp', auth } })`)~~.
+**Amended in implementation:** configured directly on the factory
+(`mcpPlugin({ path: '/mcp' })`), like every other Guren plugin; a
+`defineAgentConfig` wrapper can layer on later without changing the plugin's
+contract. The per-request server is the SDK's *low-level* `Server`, not
+`McpServer` — the tools already carry JSON Schema and the high-level API wants
+live Zod, which §3.2 forbids handing over. Further shipped judgments:
+tools/list is filtered to the token's scopes (an ungranted catalog would map
+the write surface for a read-only token); an `approval: 'required'` tool is
+refused fail-closed until the 2.5 queue exists; `_preflight` is deferred to a
+follow-up (it needs a server-side seam to stop the chain before the
+controller); and bearer auth answers 401 + `WWW-Authenticate: Bearer` at the
+transport boundary, before any MCP framing. Mounts per-request stateless
+server + `WebStandardStreamableHTTPServerTransport`
 (the Dev MCP pattern), derives from the live router at boot, dispatches per §3.
 Ships with bearer auth; acting as an OAuth authorization server is out of scope
 (separate RFC), except on Cloudflare below. Auto-generated MCP prompts ("how to use

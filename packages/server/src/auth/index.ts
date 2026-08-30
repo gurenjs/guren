@@ -40,6 +40,7 @@ export type {
 export {
   createApiToken,
   parseApiToken,
+  readBearerToken,
   verifyApiToken,
   tokenCan,
   tokenCanAll,
