@@ -2,7 +2,7 @@ import type { Context, MiddlewareHandler, Hono, Next } from 'hono'
 import { Controller } from './Controller'
 import type { Container } from '../container/Container'
 import { mountRoute } from './mount-route'
-import { flattenRequestQueries, formatValidationErrors, parseRequestPayload, type ValidationErrorLike } from '../http/request'
+import { flattenRequestQueries, formatValidationErrors, parseRequestBody, type ValidationErrorLike } from '../http/request'
 import { ValidationException } from '../errors/exceptions/ValidationException'
 import type { ValidationSchema } from '../http/middleware/validation'
 import { capabilitiesOf, mergeCapabilities, type MiddlewareCapabilities } from '../http/middleware/capabilities'
@@ -1223,7 +1223,9 @@ function createContractHandler<
       return query
     }
 
-    const payload = options.body ? await parseRequestPayload(ctx) : {}
+    // The parsed body reaches the schema unnarrowed, so a contract may bind
+    // any shape — `z.array()`, `z.string()` — not only an object one.
+    const payload = options.body ? await parseRequestBody(ctx) : {}
     const body = parseRouteSegment(options.body, payload, 422)
     if (body instanceof Response) {
       return body

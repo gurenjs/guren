@@ -300,7 +300,7 @@ export function createControllerModuleMock() {
   }
 
   class TestController extends module.Controller {
-    public parsedBody?: Record<string, unknown>
+    public parsedBody?: { value: unknown }
 
     public runValidation<T>(
       schema: {
@@ -350,13 +350,24 @@ export function createControllerModuleMock() {
       return this.ctx.req
     }
 
-    public async getBody(): Promise<Record<string, unknown>> {
+    // Mirrors the real Controller's split: validation sees the body as sent
+    // (an array stays an array), while the field-by-field helpers see the
+    // record view. Boxed rather than truthiness-memoized so a body of `null`,
+    // `''`, `0` or `false` is cached like any other.
+    public async getRawBody(): Promise<unknown> {
       if (this.parsedBody) {
-        return this.parsedBody
+        return this.parsedBody.value
       }
 
-      this.parsedBody = ((await module.parseRequestPayload(this.ctx)) ?? {}) as Record<string, unknown>
-      return this.parsedBody
+      this.parsedBody = { value: (await module.parseRequestPayload(this.ctx)) ?? {} }
+      return this.parsedBody.value
+    }
+
+    public async getBody(): Promise<Record<string, unknown>> {
+      const body = await this.getRawBody()
+      return typeof body === 'object' && body !== null && !Array.isArray(body)
+        ? (body as Record<string, unknown>)
+        : {}
     }
 
     // Public like parsedBody above: TS4094 forbids private members on the
@@ -407,8 +418,7 @@ export function createControllerModuleMock() {
         | { success: true; data: T }
         | { success: false; error: { issues?: Array<{ path: (string | number)[]; message: string }> } }
     }): Promise<T> {
-      const body = await this.getBody()
-      return this.runValidation(schema, body, 422)
+      return this.runValidation(schema, await this.getRawBody(), 422)
     }
 
     public async validateBodySafe<T>(schema: {
@@ -416,8 +426,7 @@ export function createControllerModuleMock() {
         | { success: true; data: T }
         | { success: false; error: { issues?: Array<{ path: (string | number)[]; message: string }> } }
     }): Promise<{ success: true; data: T } | { success: false; errors: Record<string, string> }> {
-      const body = await this.getBody()
-      return this.runValidationSafe(schema, body)
+      return this.runValidationSafe(schema, await this.getRawBody())
     }
 
     public validateQuery<T>(schema: {
