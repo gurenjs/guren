@@ -67,6 +67,7 @@ import { bootstrapApplication, resolveMainEntry, type MaybeApplication } from '.
 import { runQueueWorker, listFailedJobs, retryFailedJob, retryAllFailedJobs, flushFailedJobs } from './queue'
 import { displayRoutes } from './route-list'
 import { displayToolInspection, displayTools } from './tool-list'
+import { runTokenIssue } from './token-issue'
 import { cacheConfig, clearConfigCache, showConfigCacheInfo } from './config-cache'
 import { createStorageLink, removeStorageLink } from './storage-link'
 import { listScheduledTasks, runScheduledTasks } from './schedule'
@@ -1659,6 +1660,83 @@ const toolInspectCommand = defineCommand({
   },
 })
 
+// `token:` is its own namespace, distinct from the `tool:` commands above
+// (which only *describe* the surface) and from `agent:` (the coding-agent
+// harness). This one writes into the application's store, so unlike its
+// neighbours it boots the app.
+const tokenIssueCommand = defineCommand({
+  meta: {
+    name: 'token:issue',
+    description: 'Issue an API token scoped to this application\'s agent tools (RFC 0016).',
+  },
+  args: {
+    name: {
+      type: 'string',
+      description: 'Human-readable token name',
+      required: true,
+    },
+    user: {
+      type: 'string',
+      description: 'User ID the token authenticates as',
+      required: true,
+    },
+    tools: {
+      type: 'string',
+      description: 'Comma-separated tool scopes (tools:read, posts.*, posts.store, tools:*)',
+      required: true,
+    },
+    'read-only': {
+      type: 'boolean',
+      description: 'Grant only read-only tools, stored as concrete tool: entries',
+    },
+    expires: {
+      type: 'string',
+      description: 'Expiry as 30d, 12h or 45m (omit to issue a non-expiring token)',
+    },
+    'allow-unmatched': {
+      type: 'boolean',
+      description: 'Accept a scope matching no current tool, granting it to tools added later',
+    },
+    yes: {
+      type: 'boolean',
+      description: 'Confirm a tools:* grant',
+    },
+    routes: {
+      type: 'string',
+      description: 'Path to the routes entry file',
+      valueHint: 'routes/web.ts',
+    },
+    app: {
+      type: 'string',
+      description: 'Application root directory',
+    },
+    json: {
+      type: 'boolean',
+      description: 'Output the issued token as JSON',
+    },
+  },
+  async run({ args }) {
+    await runTokenIssue({
+      name: args.name,
+      user: args.user,
+      tools: args.tools,
+      readOnly: args['read-only'],
+      allowUnmatched: args['allow-unmatched'],
+      yes: args.yes,
+      expires: args.expires,
+      routesFile: args.routes,
+      appRoot: args.app,
+      json: args.json,
+    })
+
+    // Booting the app to reach its token store opens whatever the app opens —
+    // a database pool, a Redis client — and nothing here closes them. Exit
+    // explicitly rather than leaving a one-shot command hanging on handles it
+    // did not create; `routes:types` ends the same way, for the same reason.
+    process.exit(0)
+  },
+})
+
 const configCacheCommand = defineCommand({
   meta: {
     name: 'config:cache',
@@ -3057,6 +3135,7 @@ export const builtinSubCommands = {
   'route:list': routeListCommand,
   'tool:list': toolListCommand,
   'tool:inspect': toolInspectCommand,
+  'token:issue': tokenIssueCommand,
   'openapi:generate': openApiGenerateCommand,
   'config:cache': configCacheCommand,
   'config:clear': configClearCommand,

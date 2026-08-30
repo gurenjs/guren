@@ -2,6 +2,7 @@ import { access } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { consola } from 'consola'
+import type { ApiTokenStore } from '@guren/core'
 
 const MAIN_ENTRY_CANDIDATES = [
   'src/main.ts',
@@ -22,6 +23,17 @@ export type MaybeApplication = {
     hostname?: string
   }) => unknown | Promise<{ port: number; hostname: string; url: string } | undefined>
   boot?: () => Promise<void> | void
+  /**
+   * The app's auth manager, as much of it as a command may touch. Structural
+   * and optional all the way down for the same reason `listen` carries an
+   * `unknown` arm: the app being loaded is the *user's*, and may resolve a
+   * `@guren/core` older than `getApiTokenStore()`. A missing method has to
+   * reach the caller's own diagnostic ("call `useTokens(store)`") rather than
+   * a `TypeError` naming an internal.
+   */
+  auth?: {
+    getApiTokenStore?: () => ApiTokenStore | undefined
+  }
 }
 
 export async function resolveMainEntry(): Promise<string> {

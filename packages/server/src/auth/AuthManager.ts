@@ -209,17 +209,27 @@ export class AuthManager implements AuthManagerContract {
     })
 
     this.tokenGuard = guardName
+    // Recorded last, after the shadowing guard above can throw: a refused
+    // call must not leave a store behind for an issuer to find. A legal
+    // re-call replaces it, matching the guard it just re-registered.
     this.apiTokenStore = store
   }
 
   /**
-   * The `ApiTokenStore` the last `useTokens()` call configured, or undefined
-   * for an app that never opted into token auth. The store is otherwise
-   * closed over by the guard factory, so this accessor is the one way
-   * out-of-request machinery — `guren token:issue`, the App MCP adapter's
-   * principal lookup — reaches the same store the guard verifies against.
-   * Handing them a *different* store is how an issued token comes to fail
-   * verification.
+   * The token store {@link useTokens} was configured with, or `undefined`
+   * when this app never called it.
+   *
+   * This is the one path by which out-of-request machinery — `guren
+   * token:issue`, the App MCP adapter's principal lookup — reaches the same
+   * store the guard verifies against. `useTokens` otherwise closes over
+   * `store` inside the guard factory, where nothing outside a live request
+   * can see it, so an issuance command could only write tokens into a store
+   * of its own making, which no running app would ever read.
+   *
+   * Deliberately on this class rather than on `AuthManagerContract`: the
+   * contract describes what a *request* needs from auth, and handing out the
+   * raw store is not part of that. Callers reach it through the concrete
+   * manager (`Application.auth`).
    */
   getApiTokenStore(): ApiTokenStore | undefined {
     return this.apiTokenStore ?? undefined
