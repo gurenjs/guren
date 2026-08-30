@@ -82,6 +82,16 @@ import { registerWebRoutes } from '../routes/web'
 export default createApp({ routes: registerWebRoutes, auth: {} })
 `
 
+/** CSRF whose cookie path is not absolute, so RFC 6265 reads it as `/`. */
+const MAIN_WITH_RELATIVE_CSRF_PATH = `import { createApp, createCsrfMiddleware } from '@guren/core'
+import { registerWebRoutes } from '../routes/web'
+
+const app = createApp({ routes: registerWebRoutes })
+app.use(createCsrfMiddleware({ cookieOptions: { path: 'admin' } }))
+
+export default app
+`
+
 /** CSRF configured to scope its cookie to a path the tools do not sit under. */
 const MAIN_WITH_SCOPED_CSRF = `import { createApp, createCsrfMiddleware } from '@guren/core'
 import { registerWebRoutes } from '../routes/web'
@@ -226,6 +236,18 @@ describe('tool:call', () => {
 
     const result = payload()
     expect(result.status).toBe(403)
+  })
+
+  it('sends a cookie whose Path is not absolute, which scopes it to the root', async () => {
+    // RFC 6265: a Path that is not absolute is no scope at all and falls back
+    // to the default path of the request that set it. Reading `admin` as a
+    // scope would withhold a cookie a browser sends, and turn a working app
+    // into a 403 nobody can explain.
+    await writeFile(join(appDir, 'src/main.ts'), MAIN_WITH_RELATIVE_CSRF_PATH)
+
+    await runToolCall({ name: 'posts.store', input: '{"title":"Relative"}', appRoot: appDir, json: true })
+
+    expect(payload().status).toBe(201)
   })
 
   it('names every tool the app exposes when the name is unknown', async () => {

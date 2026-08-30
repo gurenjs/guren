@@ -168,6 +168,29 @@ async function loadAgentSurface(
   return { definitions, fetch: async (request) => fetch(request) }
 }
 
+/**
+ * The path a `Set-Cookie` is actually scoped to (RFC 6265 §5.2.4, §5.3).
+ *
+ * Three rules, each of which the obvious reading gets wrong in a direction
+ * that matters here. The *last* `Path` wins, not the first — taking the first
+ * of `Path=/; Path=/admin` sends a cookie a browser withholds. An empty or
+ * non-absolute value is not a path at all and falls back to the default path
+ * of the request that set it; since priming always requests `/`, that is `/`
+ * — treating `path: 'admin'` as a scope instead withholds a cookie a browser
+ * sends, and turns a working app into a 403 nobody can explain. Attribute
+ * whitespace is not part of the value.
+ */
+function cookiePath(attributes: string[]): string {
+  const declared = attributes
+    .map((attribute) => attribute.trim())
+    .filter((attribute) => attribute.toLowerCase().startsWith('path='))
+    .at(-1)
+    ?.slice('path='.length)
+    .trim()
+
+  return declared !== undefined && declared.startsWith('/') ? declared : '/'
+}
+
 /** RFC 6265 §5.1.4: does a cookie scoped to `cookiePath` travel to `requestPath`? */
 function pathMatches(requestPath: string, cookiePath: string): boolean {
   if (cookiePath === '' || cookiePath === '/') return true
@@ -213,11 +236,7 @@ async function primeCsrfHeaders(
     // could turn a real CSRF misconfiguration into a green run here. Domain
     // and Secure are not evaluated: the request never leaves the process and
     // both are fixed by that.
-    const path = attributes
-      .map((attribute) => attribute.trim())
-      .find((attribute) => attribute.toLowerCase().startsWith('path='))
-      ?.slice('path='.length)
-    if (path !== undefined && !pathMatches(toolPath, path)) continue
+    if (!pathMatches(toolPath, cookiePath(attributes))) continue
 
     cookies.set(pair.slice(0, separator).trim(), pair.slice(separator + 1).trim())
   }
