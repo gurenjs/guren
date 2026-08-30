@@ -62,7 +62,16 @@ export class AgentToolInvoked extends Event {
   }
 }
 
-/** Why a tool invocation was refused before it reached the route handler. */
+/**
+ * Why a tool invocation was refused before it reached the route handler.
+ *
+ * Deliberately no `'policy'`: `Gate` policies evaluate *inside* the
+ * dispatched request, so a policy denial is an execution that returned 403 —
+ * an {@link AgentToolInvoked} with that status — not an adapter-level
+ * refusal. The reasons here are exactly the checks the adapter runs before
+ * synthesizing the request, which is also why a denial carries no HTTP
+ * status: no HTTP happened.
+ */
 export type AgentToolDenialReason = 'auth' | 'scope' | 'approval' | 'rate-limit'
 
 /**

@@ -231,3 +231,52 @@ describe('redactAgentArguments', () => {
     expect(redactAgentArguments({ a: null, b: undefined })).toEqual({ a: null, b: undefined })
   })
 })
+
+describe('redactAgentArguments totality on non-object roots', () => {
+  // A denial is recorded before any validation, so the type annotation does
+  // not protect this path — a raw JSON-RPC call can put anything here.
+  const asArgs = (value: unknown) => value as Record<string, unknown>
+
+  test('should return an empty record for a null root', () => {
+    expect(redactAgentArguments(asArgs(null))).toEqual({})
+  })
+
+  test('should return an empty record for an undefined root', () => {
+    expect(redactAgentArguments(asArgs(undefined))).toEqual({})
+  })
+
+  test('should return an empty record for a scalar root', () => {
+    expect(redactAgentArguments(asArgs('a string'))).toEqual({})
+    expect(redactAgentArguments(asArgs(42))).toEqual({})
+    expect(redactAgentArguments(asArgs(true))).toEqual({})
+  })
+})
+
+describe('redactAgentArguments separator normalization', () => {
+  test('should mask hyphenated spellings of built-in fragments', () => {
+    expect(
+      redactAgentArguments({
+        'X-Api-Key': 'sk-live',
+        'api-key': 'sk-2',
+        'x-auth-token': 't',
+        'Set-Cookie': 'sid=1',
+      }),
+    ).toEqual({
+      'X-Api-Key': AGENT_REDACTED,
+      'api-key': AGENT_REDACTED,
+      'x-auth-token': AGENT_REDACTED,
+      'Set-Cookie': AGENT_REDACTED,
+    })
+  })
+
+  test('should normalize declared redact entries the same way', () => {
+    expect(redactAgentArguments({ ssnNumber: '123', taxId: 'x' }, ['ssn-number', 'TAX_ID'])).toEqual({
+      ssnNumber: AGENT_REDACTED,
+      taxId: AGENT_REDACTED,
+    })
+  })
+
+  test('should skip a redact entry that normalizes to nothing', () => {
+    expect(redactAgentArguments({ title: 'Hello' }, ['-', '_ '])).toEqual({ title: 'Hello' })
+  })
+})

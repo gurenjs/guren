@@ -259,9 +259,16 @@ Each feature maps to a measured failure mode of the MCP ecosystem.
    - `guren token:issue --tools 'posts.*' --read-only --expires 30d`.
 2. **Default audit logging** (vs. "no approval workflow / no traceability"):
    every invocation — and every denial — is recorded (principal, tool, arguments,
-   status, duration, surface) with automatic redaction of sensitive argument names
+   ~~status, duration,~~ surface) with automatic redaction of sensitive argument names
    plus explicit `redact` metadata. Emitted as framework events (`AgentToolInvoked`,
    `AgentToolDenied`) so existing listeners can forward anywhere. `guren tool:log --tail`.
+   **Amended in implementation:** status and duration belong to *invocations* only.
+   An adapter-level denial (`auth`, `scope`, `approval`, `rate-limit`) refuses before
+   synthesizing the request, so no HTTP happened and there is no status to record —
+   `AgentToolDenied` carries a `reason` instead. A `Gate` policy denial is not a
+   denial event at all: policies evaluate inside the dispatched request, so it is an
+   `AgentToolInvoked` with status 403 — which is why the reason union has no
+   `'policy'` member.
 3. **Rate limits by default**: the App MCP endpoint ships rate-limited (key = token id;
    `CF-Connecting-IP` fallback on Workers), stricter defaults for write tools.
 4. **Approval queue and preflight**: `approval: 'required'` tools create a pending

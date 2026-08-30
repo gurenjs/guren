@@ -55,9 +55,10 @@ export const AGENT_TRUNCATED = '[Truncated]'
 const MAX_DEPTH = 64
 
 /**
- * Key-name fragments masked in every application. Lowercase; matching
- * lowercases the key before testing, so `Authorization`, `apiKey` and
- * `API_KEY` are all covered.
+ * Key-name fragments masked in every application. Spelled in the normalized
+ * form {@link normalizeKeyText} produces — lowercase, no separators — so
+ * `Authorization`, `apiKey`, `API_KEY` and `x-api-key` are all covered by
+ * their one entry.
  */
 const DEFAULT_SENSITIVE_KEY_FRAGMENTS: readonly string[] = [
   'password',
@@ -65,12 +66,24 @@ const DEFAULT_SENSITIVE_KEY_FRAGMENTS: readonly string[] = [
   'secret',
   'token',
   'apikey',
-  'api_key',
   'authorization',
   'credential',
   'cookie',
   'session',
 ]
+
+/**
+ * The form keys and fragments are compared in: lowercased, with separator
+ * characters removed. `apiKey`, `api_key`, `api-key` and `X-Api-Key` are the
+ * same name to a human reading a log, so they must be the same name to the
+ * mask — a literal substring test lets the hyphenated spelling of a fragment
+ * through, and header-shaped argument names (`x-api-key`) are exactly where
+ * credentials live. Applied to declared `redact` entries too, so a route
+ * author writes any spelling.
+ */
+function normalizeKeyText(text: string): string {
+  return text.toLowerCase().replace(/[-_\s]/gu, '')
+}
 
 /**
  * Mask the sensitive fields of an agent tool's arguments.
@@ -94,9 +107,16 @@ export function redactAgentArguments(
   args: Record<string, unknown>,
   redact?: readonly string[]
 ): Record<string, unknown> {
+  // The whole point of this function is to be total on the audit path, and
+  // the type annotation is no guard there: a denial is recorded before any
+  // validation, so `arguments: null` from a raw JSON-RPC call arrives here
+  // as-is. A root that is not an object has no keys to mask and nothing to
+  // walk — an empty record is the whole truth about it.
+  if (args === null || typeof args !== 'object') return {}
+
   const fragments = [...DEFAULT_SENSITIVE_KEY_FRAGMENTS]
   for (const entry of redact ?? []) {
-    const fragment = entry.toLowerCase()
+    const fragment = normalizeKeyText(entry)
     // An empty fragment is a substring of every key and would mask the whole
     // record — almost certainly a typo in route metadata rather than a
     // request to log nothing.
@@ -112,8 +132,8 @@ export function redactAgentArguments(
 
 /** Whether a key name should have its value masked. */
 function isSensitiveKey(key: string, fragments: readonly string[]): boolean {
-  const lowered = key.toLowerCase()
-  return fragments.some((fragment) => lowered.includes(fragment))
+  const normalized = normalizeKeyText(key)
+  return fragments.some((fragment) => normalized.includes(fragment))
 }
 
 /**
