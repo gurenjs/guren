@@ -17,6 +17,14 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  * cost is that a non-object schema sees `{}` there and fails validation,
  * rather than receiving nothing.
  *
+ * The fallback does not distinguish whose fault the failure was: a body the
+ * client could never have sent correctly and a body already consumed upstream
+ * (middleware reading `ctx.req.raw` directly, bypassing Hono's cache) both read
+ * as `{}` here. That is deliberate — the JSON branch above has always behaved
+ * this way, and telling the two apart means matching runtime-specific error
+ * codes, which would answer differently on Bun, Node and Workers. A parser
+ * error is a poor signal for a middleware-ordering bug either way.
+ *
  * Form submissions have no non-object shape to preserve, so they normalize to
  * a record exactly as {@link parseRequestPayload} does.
  */

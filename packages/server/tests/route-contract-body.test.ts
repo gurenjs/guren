@@ -1,6 +1,14 @@
 import { describe, test, expect } from 'bun:test'
 import { z } from 'zod'
-import { Application, Controller, FormRequest, validateRequest, getValidatedData, type Router } from '../src/index'
+import {
+  Application,
+  Controller,
+  FormRequest,
+  validateRequest,
+  validateRequestWith,
+  getValidatedData,
+  type Router,
+} from '../src/index'
 import { required, string } from '../src/http/validation/rules'
 
 /**
@@ -209,6 +217,26 @@ describe('a request body the form parser cannot decode', () => {
     const { status, body } = await post(
       (router) =>
         router.post('/posts', (c: any) => c.json({ reached: true }), validateRequest(RequiredTitle)),
+      '/posts',
+      UNDECODABLE_FORM.body,
+      UNDECODABLE_FORM.contentType,
+    )
+
+    expect(status).toBe(422)
+    expect(body).not.toContain('TypeError')
+    expect(JSON.parse(body)).toHaveProperty('errors.title')
+  })
+
+  // Named beside validateRequest() because it is the same body read behind a
+  // schema factory — the factory must not be what decides the status.
+  test('validateRequestWith() middleware answers 422', async () => {
+    const { status, body } = await post(
+      (router) =>
+        router.post(
+          '/posts',
+          (c: any) => c.json({ reached: true }),
+          validateRequestWith(() => RequiredTitle),
+        ),
       '/posts',
       UNDECODABLE_FORM.body,
       UNDECODABLE_FORM.contentType,
