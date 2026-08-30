@@ -94,22 +94,18 @@ export function normalizeToolScope(entry: string): string {
  */
 export function parseExpiresDuration(value: string): number {
   const match = DURATION_PATTERN.exec(value)
-  const amount = match ? Number(match[1]) : NaN
-  const milliseconds = match ? amount * DURATION_UNITS[match[2]!]! : NaN
-
-  if (
-    !match
-    || !Number.isSafeInteger(amount)
-    || amount <= 0
-    || milliseconds > MAX_EXPIRES_MS
-  ) {
-    throw new Error(
-      `Invalid --expires value "${value}". Use a positive amount followed by d, h, or m (for example 30d, 12h, 45m)`
-        + `, up to ${MAX_EXPIRES_DAYS}d.`,
-    )
+  if (match) {
+    const amount = Number(match[1])
+    const milliseconds = amount * DURATION_UNITS[match[2]!]!
+    if (Number.isSafeInteger(amount) && amount > 0 && milliseconds <= MAX_EXPIRES_MS) {
+      return milliseconds
+    }
   }
 
-  return milliseconds
+  throw new Error(
+    `Invalid --expires value "${value}". Use a positive amount followed by d, h, or m (for example 30d, 12h, 45m)`
+      + `, up to ${MAX_EXPIRES_DAYS}d.`,
+  )
 }
 
 /**
@@ -212,8 +208,10 @@ export function planTokenIssue(input: TokenIssueInput, tools: readonly ScopedToo
   // the entry silently means "every read-only tool" instead. Nothing is
   // broadened and the printed grant stays exact; the warning exists because
   // the two readings look identical on the command line.
-  if (input.tools.split(',').some((entry) => entry.trim() === 'read')
-    && tools.some((tool) => tool.name === 'read')) {
+  // Read from `entries`, the shorthand as it was typed: `normalized` cannot
+  // answer this, because an explicit `tools:read` normalizes to the same entry
+  // and its author has no ambiguity to be warned about.
+  if (entries.includes('read') && tools.some((tool) => tool.name === 'read')) {
     warnings.push(
       'The shorthand "read" means tools:read — every read-only tool — not the tool named "read". '
         + 'Write tool:read to grant that one tool.',
@@ -225,8 +223,9 @@ export function planTokenIssue(input: TokenIssueInput, tools: readonly ScopedToo
   // rule below say exactly what the token will end up granting: a scope
   // resolving only to write tools contributes nothing to a read-only token,
   // and is as much a mistake as a misspelled name.
-  const readOnlyNames = new Set(tools.filter((tool) => tool.readOnly).map((tool) => tool.name))
-  const matchable = input.readOnly ? tools.filter((tool) => tool.readOnly) : tools
+  const readOnlyTools = tools.filter((tool) => tool.readOnly)
+  const readOnlyNames = new Set(readOnlyTools.map((tool) => tool.name))
+  const matchable = input.readOnly ? readOnlyTools : tools
 
   for (const scope of normalized) {
     if (expandToolScopes([scope], matchable).length > 0) continue
