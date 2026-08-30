@@ -245,6 +245,13 @@ export class Controller {
    * try/catch rather than `.catch()`, for the reason given on the shared
    * fallback: `parseBody` may throw synchronously as well as reject, and only
    * one of those two shapes reaches a `.catch()`.
+   *
+   * It fails open in one direction, deliberately and for the same reason
+   * {@link parseRequestBody} does: a body already consumed upstream reads as
+   * "no upload" rather than throwing, so a middleware-ordering bug loses the
+   * 500 that used to announce it. Telling that apart from a client's malformed
+   * body means matching runtime-specific error codes, which answer differently
+   * on Bun, Node and Workers.
    */
   private async parseUploads(): Promise<Record<string, string | File | (string | File)[]>> {
     try {
