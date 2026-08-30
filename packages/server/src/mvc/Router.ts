@@ -1590,6 +1590,15 @@ function serializeResourceHint(hint: ResourceResponseHint | undefined): Resource
     return hint.name || undefined
   }
 
+  // Nothing validates the hint at runtime, so a value outside the type is
+  // reachable and voids the hint like an unnamed class does. A primitive has to
+  // be rejected before `Object.entries`, which turns a string into an infinite
+  // recursion (every character is itself a one-character string) and throws on
+  // `null`.
+  if (typeof hint !== 'object' || hint === null) {
+    return undefined
+  }
+
   // Array.isArray does not narrow the readonly tuple member of the union
   // (it is not assignable to `any[]`), so without the assertion the tuple
   // would fall through to the Object.entries path and serialize as
@@ -1597,6 +1606,14 @@ function serializeResourceHint(hint: ResourceResponseHint | undefined): Resource
   if (Array.isArray(hint)) {
     const inner = serializeResourceHint((hint as readonly ResourceResponseHint[])[0])
     return inner === undefined ? undefined : [inner]
+  }
+
+  // Only an envelope literal is left. A class instance enumerates to nothing
+  // through `Object.entries`, so without this it would serialize to `{}` — a
+  // response shape the server never sends.
+  const proto = Object.getPrototypeOf(hint)
+  if (proto !== Object.prototype && proto !== null) {
+    return undefined
   }
 
   const entries: Array<[string, ResourceResponseShape]> = []
