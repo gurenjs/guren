@@ -1782,10 +1782,14 @@ const toolDevCommand = defineCommand({
   async run({ args }) {
     // Repeat-safe like every other flag reader here: citty arrays a repeated
     // flag, and this one picks the port a listener binds.
+    //
+    // `Number`, not `parseInt`: the latter stops at the first non-digit, so
+    // `--port 3333abc` would bind 3333 and report success for a value nobody
+    // typed.
     const rawPort = lastFlagValue(args.port)
-    const port = rawPort === undefined ? undefined : Number.parseInt(rawPort, 10)
-    if (rawPort !== undefined && !Number.isInteger(port)) {
-      throw new Error(`Invalid --port value "${rawPort}".`)
+    const port = rawPort === undefined ? undefined : Number(rawPort)
+    if (port !== undefined && (!Number.isInteger(port) || port < 0 || port > 65535)) {
+      throw new Error(`Invalid --port value "${rawPort}". Use a port number between 0 and 65535.`)
     }
 
     await runToolDev({

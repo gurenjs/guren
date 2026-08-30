@@ -71,8 +71,15 @@ app.auth.useTokens(new MemoryApiTokenStore())
 export default app
 `
 
-/** Ports for the cases that actually listen, kept apart so they can run in any order. */
-let nextPort = 3610
+/**
+ * Every listening case binds port 0 and reads back what the app reports.
+ *
+ * `Application.listen()` walks the port forward when the one it was handed is
+ * busy, so a fixed number plus an exact-port assertion describes a server
+ * that may have moved — and nothing here stops the servers it starts, which
+ * makes a second run of this file the very collision that hides the bug.
+ */
+const ANY_PORT = 0
 
 describe('tool:dev', () => {
   let workspace: TempWorkspace
@@ -111,7 +118,7 @@ describe('tool:dev', () => {
   it('names the plugin when no endpoint answers', async () => {
     await writeFile(join(appDir, 'src/main.ts'), MAIN_WITHOUT_PLUGIN)
 
-    await expect(runToolDev({ appRoot: appDir, port: nextPort++ })).rejects.toThrow(
+    await expect(runToolDev({ appRoot: appDir, port: ANY_PORT })).rejects.toThrow(
       /No App MCP endpoint answered.*404/s,
     )
   })
@@ -122,18 +129,18 @@ describe('tool:dev', () => {
     // An app that mounts requireAuthenticated() globally answers 401 on this
     // path without the plugin. Reading a bare 401 as "live" would print a
     // token that cannot work; the plugin's own refusal names itself.
-    await expect(runToolDev({ appRoot: appDir, port: nextPort++ })).rejects.toThrow(
+    await expect(runToolDev({ appRoot: appDir, port: ANY_PORT })).rejects.toThrow(
       /global authentication middleware/u,
     )
   })
 
   it('serves the endpoint with a token that works, without touching the app store', async () => {
     await writeFile(join(appDir, 'src/main.ts'), MAIN_WITH_PLUGIN)
-    const port = nextPort++
+    const session = await runToolDev({ appRoot: appDir, port: ANY_PORT })
 
-    const session = await runToolDev({ appRoot: appDir, port })
-
-    expect(session.endpoint).toBe(`http://127.0.0.1:${port}/mcp`)
+    // The shape, not a number the test chose: the endpoint has to be the one
+    // the app actually bound.
+    expect(session.endpoint).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/mcp$/u)
     const { token, endpoint } = session
     const listed = await fetch(endpoint, {
       method: 'POST',
@@ -161,14 +168,14 @@ describe('tool:dev', () => {
   it('says which user tool calls authenticate as', async () => {
     await writeFile(join(appDir, 'src/main.ts'), MAIN_WITH_PLUGIN)
 
-    const explicit = await runToolDev({ appRoot: appDir, port: nextPort++, as: '42' })
+    const explicit = await runToolDev({ appRoot: appDir, port: ANY_PORT, as: '42' })
     expect(explicit.userId).toBe('42')
 
     // Never a mystery: a call whose policy loads a user behaves differently
     // depending on this, so the default is a placeholder that matches no
     // record rather than a plausible id.
     await writeFile(join(appDir, 'src/main.ts'), MAIN_WITH_PLUGIN)
-    const fallback = await runToolDev({ appRoot: appDir, port: nextPort++ })
+    const fallback = await runToolDev({ appRoot: appDir, port: ANY_PORT })
     expect(fallback.userId).toBe('tool-dev')
   })
 })

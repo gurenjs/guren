@@ -148,7 +148,18 @@ export async function runToolDev(options: ToolDevOptions = {}): Promise<ToolDevS
   // Installed *after* boot on purpose: an app that configures its own store
   // does so during boot, and this must be the store that answers afterwards.
   const store = new MemoryApiTokenStore()
-  app.auth.useTokens(store)
+  try {
+    app.auth.useTokens(store)
+  } catch (error) {
+    // `useTokens` refuses to shadow a guard registered under the same name by
+    // something else. That is an app-shaped problem, so it gets an
+    // app-shaped message rather than the manager's internal one.
+    throw new Error(
+      'Could not install a throwaway token store: this application already registers a guard '
+        + `named "token" that it did not create through useTokens(). Rename that guard, or issue a `
+        + `token yourself with \`guren token:issue\`. (${error instanceof Error ? error.message : String(error)})`,
+    )
+  }
 
   const userId = options.as ?? ANONYMOUS_DEV_USER
   const { plainTextToken } = await createApiToken(store, {
@@ -181,6 +192,11 @@ export async function runToolDev(options: ToolDevOptions = {}): Promise<ToolDevS
   }
   const base = address?.url ?? `http://${options.hostname ?? '127.0.0.1'}:${options.port ?? 3333}`
   const path = options.path ?? DEFAULT_MCP_PATH
+  if (!path.startsWith('/')) {
+    // Concatenated as given, `--path mcp` yields `http://host:3333mcp` — an
+    // invalid URL whose only symptom is whatever `fetch` says about it.
+    throw new Error(`Invalid --path value "${path}": an endpoint path must start with "/".`)
+  }
   const endpoint = `${base.replace(/\/$/u, '')}${path}`
 
   const probe = await probeEndpoint(endpoint)
