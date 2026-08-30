@@ -20,6 +20,9 @@ function createMockCli(overrides: Partial<GurenCliApi> = {}, calls?: CodegenCall
     }
 
   return {
+    // The base mock stands in for a current @guren/cli; the tool gates on
+    // this list because @guren/cli is resolved from the app at runtime.
+    CONTEXT_ROUTE_FEATURES: ['agent'],
     generateContext: async () => ({
       framework: { name: 'guren', version: '0.2.0' },
       models: [{ className: 'Post' }, { className: 'User' }],
@@ -145,7 +148,8 @@ describe('Guren MCP Server', () => {
     expect(names).toContain('guren_make_feature')
     expect(names).toContain('guren_make_component')
     expect(names).toContain('guren_codegen')
-    expect(tools).toHaveLength(9)
+    expect(names).toContain('guren_agent_surface')
+    expect(tools).toHaveLength(10)
   })
 
   test('guren_docs_graph registers only when the CLI provides it', async () => {
@@ -250,6 +254,184 @@ describe('Guren MCP Server', () => {
     const text = (result.content as Array<{ type: string; text: string }>)[0].text
 
     expect(text).toStartWith('# Context')
+  })
+
+  // The route-shaped half of this tool is proven CLI-side (a real Router
+  // through routeDefinitionToContextRoute); what belongs here is the
+  // filtering and the reported shape.
+  test('guren_agent_surface reports only routes that declare agent metadata', async () => {
+    const client = await createTestClient({
+      generateContext: async () => ({
+        framework: { name: 'guren', version: '0.2.0' },
+        models: [],
+        routes: [
+          { method: 'GET', path: '/posts', name: 'posts.index' },
+          {
+            method: 'DELETE',
+            path: '/posts/:id',
+            name: 'posts.destroy',
+            agent: { description: 'Delete a post.', destructiveHint: true, approval: 'required' },
+            authorization: { ability: 'posts.destroy', abilities: ['posts.destroy'], mode: 'all' },
+          },
+        ],
+        pages: [],
+        controllers: [],
+        resources: [],
+        events: [],
+        jobs: [],
+        middleware: [],
+        listeners: [],
+        validators: [],
+      }),
+    })
+
+    const result = await client.callTool({ name: 'guren_agent_surface', arguments: {} })
+    const text = (result.content as Array<{ type: string; text: string }>)[0].text
+    const { tools } = JSON.parse(text)
+
+    expect(tools).toHaveLength(1)
+    expect(tools[0]).toMatchObject({
+      toolName: 'posts.destroy',
+      method: 'DELETE',
+      path: '/posts/:id',
+      description: 'Delete a post.',
+      approval: 'required',
+      annotations: { destructiveHint: true },
+      authorization: { ability: 'posts.destroy' },
+    })
+  })
+
+  // Annotations are reported as declared: the GET → readOnlyHint default is
+  // the derivation layer's rule, and a second copy of it here could disagree.
+  test('guren_agent_surface fills in no annotation defaults', async () => {
+    const client = await createTestClient({
+      generateContext: async () => ({
+        framework: { name: 'guren', version: '0.2.0' },
+        models: [],
+        routes: [{ method: 'GET', path: '/posts', name: 'posts.index', agent: {}, summary: 'List posts.' }],
+        pages: [],
+        controllers: [],
+        resources: [],
+        events: [],
+        jobs: [],
+        middleware: [],
+        listeners: [],
+        validators: [],
+      }),
+    })
+
+    const result = await client.callTool({ name: 'guren_agent_surface', arguments: {} })
+    const { tools } = JSON.parse((result.content as Array<{ type: string; text: string }>)[0].text)
+
+    expect(tools[0].annotations).toEqual({})
+    // Falls back to the route's OpenAPI description ?? summary.
+    expect(tools[0].description).toBe('List posts.')
+    expect(tools[0].approval).toBe('not-required')
+  })
+
+  // @guren/cli is resolved from the app, so it can predate the field this
+  // tool reads — and an older CLI's routes carry no `agent` at all, which is
+  // indistinguishable from an app exposing nothing. Reporting an empty list
+  // there would answer a question this server cannot answer.
+  // The probe reads a field off the @guren/cli module namespace, so a mock
+  // spelling it any other way proves only that the mock agrees with itself.
+  // This one takes the real module's exports: a rename or a casing slip on
+  // either side fails here, which is exactly how the first version of this
+  // probe shipped reading a name the CLI never exported.
+  test('guren_agent_surface probes the capability the real @guren/cli exports', async () => {
+    const cliModule = (await import('@guren/cli')) as Record<string, unknown>
+
+    expect(cliModule.CONTEXT_ROUTE_FEATURES).toEqual(['agent'])
+
+    const client = await createTestClient({
+      CONTEXT_ROUTE_FEATURES: cliModule.CONTEXT_ROUTE_FEATURES as readonly string[],
+      loadContextRoutes: async () => [
+        { method: 'GET', path: '/posts', name: 'posts.index', agent: { description: 'List posts.' } },
+      ],
+    })
+
+    const result = await client.callTool({ name: 'guren_agent_surface', arguments: {} })
+    const payload = JSON.parse((result.content as Array<{ type: string; text: string }>)[0].text)
+
+    expect(payload.supported).toBe(true)
+    expect(payload.tools).toHaveLength(1)
+  })
+
+  // Reading only the routes keeps an interactive, uncached tool off a full
+  // project scan; an older CLI without the entry still answers the long way.
+  test('guren_agent_surface prefers the routes-only entry over the whole context', async () => {
+    const called: string[] = []
+    const client = await createTestClient({
+      loadContextRoutes: async () => {
+        called.push('loadContextRoutes')
+        return []
+      },
+      generateContext: async () => {
+        called.push('generateContext')
+        throw new Error('should not be reached when the routes-only entry exists')
+      },
+    })
+
+    await client.callTool({ name: 'guren_agent_surface', arguments: {} })
+
+    expect(called).toEqual(['loadContextRoutes'])
+  })
+
+  // A routes file that throws degrades to zero routes. Reporting that as an
+  // empty tool surface is the confident-looking "no routes" the CLI's own
+  // loader warns about — indistinguishable from an app exposing nothing.
+  test('guren_agent_surface reports a route graph that failed to load', async () => {
+    const client = await createTestClient({
+      loadContextRoutes: async (_cwd, _routesFile, loadErrors) => {
+        loadErrors?.push('Cannot find module ./does-not-exist')
+        return []
+      },
+    })
+
+    const result = await client.callTool({ name: 'guren_agent_surface', arguments: {} })
+    const payload = JSON.parse((result.content as Array<{ type: string; text: string }>)[0].text)
+
+    expect(payload.routesLoaded).toBe(false)
+    expect(payload.loadErrors).toEqual(['Cannot find module ./does-not-exist'])
+    expect(payload.note).toContain('not evidence')
+  })
+
+  // The same degradation through the older whole-context path.
+  test('guren_agent_surface carries routesError from the fallback path', async () => {
+    const client = await createTestClient({
+      loadContextRoutes: undefined,
+      generateContext: async () => ({
+        framework: { name: 'guren', version: '0.2.0' },
+        models: [],
+        routes: [],
+        routesError: 'boom',
+        pages: [],
+        controllers: [],
+        resources: [],
+        events: [],
+        jobs: [],
+        middleware: [],
+        listeners: [],
+        validators: [],
+      }),
+    })
+
+    const result = await client.callTool({ name: 'guren_agent_surface', arguments: {} })
+    const payload = JSON.parse((result.content as Array<{ type: string; text: string }>)[0].text)
+
+    expect(payload.routesLoaded).toBe(false)
+    expect(payload.loadErrors).toEqual(['boom'])
+  })
+
+  test('guren_agent_surface says so when the app CLI predates agent metadata', async () => {
+    const client = await createTestClient({ CONTEXT_ROUTE_FEATURES: undefined })
+
+    const result = await client.callTool({ name: 'guren_agent_surface', arguments: {} })
+    const payload = JSON.parse((result.content as Array<{ type: string; text: string }>)[0].text)
+
+    expect(payload.supported).toBe(false)
+    expect(payload.tools).toBeUndefined()
+    expect(payload.reason).toContain('predates agent route metadata')
   })
 
   test('guren_check returns check report', async () => {

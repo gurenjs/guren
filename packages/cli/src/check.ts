@@ -28,6 +28,9 @@ import { checkConsoleCommandRegistration } from './console-check'
 import { checkRoutePathParams, discoverRoutePathFiles } from './route-path-check'
 import { affectsRouteWiring, checkRouteRegistrarWiring } from './routes-check'
 import { checkRouteContracts } from './route-contract-check'
+import { checkAgentRoutes } from './agent-route-check'
+import { DEFAULT_ROUTES_FILE, loadRouteDefinitions } from './load-routes'
+import type { RouteDefinition } from '@guren/core'
 
 /**
  * Any file that could hold a route's params schema — which is any importable
@@ -90,6 +93,27 @@ export interface RunCheckOptions {
    * zero results.
    */
   i18n?: boolean
+}
+
+/**
+ * The app's registered route definitions, or the reason they could not be
+ * loaded — never a throw, and never an empty list standing in for a failure.
+ *
+ * Loaded once per run for the two checks that read registered routes. An
+ * absent routes file is neither: nothing to load is a legitimate shape (an
+ * app mid-scaffold), and both checks contribute nothing for it.
+ */
+async function loadRouteGraph(
+  cwd: string,
+  routesFile: string,
+): Promise<{ definitions?: RouteDefinition[]; error?: string }> {
+  if (!(await fileExists(cwd, routesFile))) return {}
+
+  try {
+    return { definitions: await loadRouteDefinitions(resolve(cwd, routesFile), cwd) }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) }
+  }
 }
 
 /**
@@ -307,7 +331,44 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     // why nothing is re-evaluated).
     const sourceChanged = !changedFiles || [...changedFiles].some((file) => SOURCE_FILE_PATTERN.test(file))
     if (sourceChanged) {
-      checks.push(...(await checkRouteContracts({ cwd, routesFile: options.routesFile })))
+      // 7.7 and 7.8 both read registered route definitions, so the graph is
+      // loaded once here and handed to both. Loading it twice would re-run
+      // only the registrar (`load-routes.ts` documents why nothing is
+      // re-evaluated), but it would also produce the same load-failure
+      // warning twice — one broken routes file reported as two findings.
+      //
+      // Scoped to these two, not to the run: check 10's screens view still
+      // loads the graph itself, for the reason the paragraph above gives.
+      // Any later check that reads registered routes belongs here too.
+      const routesFile = options.routesFile ?? DEFAULT_ROUTES_FILE
+      const graph = await loadRouteGraph(cwd, routesFile)
+
+      if (graph.error) {
+        checks.push(
+          check(
+            'route-graph',
+            'Route graph',
+            'warn',
+            `Skipped: the route graph failed to load: ${graph.error}. Route contract and agent-route `
+            + 'checks did not run.',
+            'Fix the error, then run: bunx guren check',
+            routesFile,
+          ),
+        )
+      } else if (graph.definitions) {
+        checks.push(...(await checkRouteContracts({ cwd, routesFile, definitions: graph.definitions })))
+
+        // 7.8. Check the routes that declare `.agent()` metadata (RFC 0016):
+        // the tool name is legal and unique, a non-read-only tool is covered
+        // by authorization rather than merely authentication, and the schemas
+        // an agent reads exist. Shares 7.7's gate and its definitions.
+        // Content-activated inside — an app with no agent routes contributes
+        // nothing, and one whose agent routes are all inline handlers never
+        // scans a controller.
+        checks.push(
+          ...(await checkAgentRoutes({ cwd, routesFile, definitions: graph.definitions, cache })),
+        )
+      }
     }
 
     // 8. Check Postgres timestamp columns carry a time zone. Content-activated

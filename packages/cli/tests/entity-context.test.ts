@@ -88,7 +88,10 @@ class Post {
 }
 
 export function registerWebRoutes(router: Router): void {
-  router.get('/posts', [PostController, 'index'] as any).name('posts.index')
+  router
+    .get('/posts', [PostController, 'index'] as any)
+    .name('posts.index')
+    .agent({ description: 'List published posts.', idempotentHint: true })
   router.get('/posts/:id', { name: 'posts.show', bind: { id: Post } } as any, [
     PostController,
     'show',
@@ -342,6 +345,22 @@ verified:
     expect(md).toContain('## Factories (1)')
     expect(md).toContain('## Seeders (1)')
     expect(md).toContain('## Tests (1)')
+  })
+
+  it('renders the Agent Interfaces section for routes that declare .agent()', async () => {
+    const ctx = await generateEntityContext('Post', { cwd: workspace.dir })
+    const md = renderEntityContextMarkdown(ctx)
+
+    // One of the entity's two routes declares agent metadata, so the section
+    // describes that route alone.
+    expect(md).toContain('## Agent Interfaces (1)')
+    expect(md).toContain('### posts.index')
+    expect(md).toContain('- Route: `GET /posts`')
+    expect(md).toContain('- Description: List published posts.')
+    expect(md).toContain('- Output: no output schema declared')
+    expect(md).toContain('- Authorization: none derivable from the middleware chain')
+    expect(md).toContain('- Annotations: idempotentHint: true')
+    expect(md).toContain('- Approval: not required')
   })
 
   it('renders reverse references for the target entity', async () => {

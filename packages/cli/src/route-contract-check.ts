@@ -21,11 +21,9 @@ export interface RouteContractCheckOptions {
   /** Routes entry file, POSIX-relative to `cwd`. Defaults to `routes/web.ts`. */
   routesFile?: string
   /**
-   * Definitions to check instead of loading them. A test seam, not a
-   * shared-load path: the one production caller (`runCheck`) deliberately does
-   * not pass it, because a second `loadRouteDefinitions()` in the same process
-   * re-runs only the registrar — the module graph is already evaluated and is
-   * never re-evaluated (see `load-routes.ts`).
+   * Definitions to check instead of loading them. `runCheck` loads the graph
+   * once and passes it here and to the agent-route checks; tests pass
+   * hand-built definitions. Absent, this loads its own.
    */
   definitions?: RouteDefinition[]
 }
