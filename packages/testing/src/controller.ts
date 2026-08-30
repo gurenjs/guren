@@ -149,28 +149,44 @@ function loadServer(): Promise<ServerModule> {
 /**
  * The mock's counterpart to the runtime's `parseRequestBody`: the parsed body
  * as sent, so an array stays an array for `validateBody()` to judge.
+ *
+ * A body that cannot be parsed falls back to `{}` — a client error reaches the
+ * schema and fails validation rather than throwing, matching what the runtime's
+ * parser now does for a form body no parser can decode. The fallback wraps the
+ * whole parse, not just that one branch: `clone()` throws on an already-read
+ * body, and the callers this feeds have no fallback of their own to catch it.
  */
 async function parseRequestBody(ctx: ControllerContext): Promise<unknown> {
-  // Clone so the raw body stays readable — the real runtime caches the
-  // parsed body in Hono, letting validateBody() and file() compose on one
-  // request; here the clone is what preserves that property.
-  const request = ctx.req.raw.clone()
-  const contentType = request.headers.get('Content-Type') ?? ''
+  // Read outside the fallback on purpose: the fallback is for an unparseable
+  // *body*, and a ctx with no request at all is a broken test setup. Swallowing
+  // that into `{}` would turn a wiring mistake into a confusing validation
+  // failure, and the runtime's parser does not swallow it either.
+  const raw = ctx.req.raw
 
-  if (contentType.includes('application/json')) {
-    return request.json().catch(() => ({}))
+  try {
+    // Clone so the raw body stays readable — the real runtime caches the
+    // parsed body in Hono, letting validateBody() and file() compose on one
+    // request; here the clone is what preserves that property.
+    const request = raw.clone()
+    const contentType = request.headers.get('Content-Type') ?? ''
+
+    if (contentType.includes('application/json')) {
+      return await request.json().catch(() => ({}))
+    }
+
+    if (contentType.includes('application/x-www-form-urlencoded')) {
+      const text = await request.text()
+      return collectFormEntries(new URLSearchParams(text))
+    }
+
+    if (contentType.includes('multipart/form-data')) {
+      return collectFormEntries(await request.formData())
+    }
+
+    return {}
+  } catch {
+    return {}
   }
-
-  if (contentType.includes('application/x-www-form-urlencoded')) {
-    const text = await request.text()
-    return collectFormEntries(new URLSearchParams(text))
-  }
-
-  if (contentType.includes('multipart/form-data')) {
-    return collectFormEntries(await request.formData())
-  }
-
-  return {}
 }
 
 /** The record view of {@link parseRequestBody}, as the runtime narrows it. */
@@ -426,15 +442,11 @@ export function createControllerModuleMock() {
     // that one narrows, which is what made a non-object body unreachable.
     // Unmemoized, because the parser clones the request: the real Controller
     // boxes its cache to avoid re-reading a body Hono hands over once, and
-    // here there is nothing to exhaust. Errors fall back to `{}` as the real
-    // one does, so a malformed body is a validation failure rather than a
-    // throw out of validateBody().
+    // here there is nothing to exhaust. No fallback of its own either — an
+    // unparseable body already arrives as `{}` from the parser above, which is
+    // also what `parseRequestPayload` reads, so both views agree.
     public async getRawBody(): Promise<unknown> {
-      try {
-        return await parseRequestBody(this.ctx)
-      } catch {
-        return {}
-      }
+      return parseRequestBody(this.ctx)
     }
 
     public async getBody(): Promise<Record<string, unknown>> {
