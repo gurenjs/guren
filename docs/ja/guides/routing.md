@@ -336,6 +336,40 @@ router.get('/posts/:id', {
 
 スペックドキュメントの生成については CLI リファレンスの OpenAPI セクションを参照してください。
 
+### エージェントツール
+
+名前付きのルートに `agent` メタデータを宣言すると、そのルートは MCP ツールとして AI エージェントに公開されます。ツールの入力スキーマ、出力スキーマ、認可はすべて上記のコントラクトから導出されるため、同じ内容を書き直す必要はありません。
+
+```ts
+// メソッドチェーン
+router
+  .post('/posts', { body: CreatePostSchema, output: PostResponseSchema }, [PostsController, 'store'])
+  .name('posts.store')
+  .agent({ description: 'Create a blog post as the authenticated user.' })
+
+// ルートコントラクトのキーとして
+router.post('/posts', {
+  name: 'posts.store',
+  body: CreatePostSchema,
+  agent: { description: 'Create a blog post as the authenticated user.' },
+}, [PostsController, 'store'])
+```
+
+`resource()` はアクションごとに同じメタデータを受け取ります。**列挙しなかったアクションは公開されません**:
+
+```ts
+router.resource('/posts', PostsController, {
+  agent: {
+    index: { description: 'List posts.' },
+    show: { description: 'Fetch one post by id.' },
+  },
+})
+```
+
+公開はルート単位のオプトインです。ツール名はルート名がそのまま使われるため、`.name()` のないルートはツールになれません。ルートオプションの `agent` と `.agent()` チェーンを両方書くと登録時に例外になります。宣言は1箇所だけにしてください。
+
+エージェントから何が見えるかは `bunx guren tool:list` で確認できます。メタデータの各フィールド、入出力の導出ルール、MCP エンドポイント、トークンスコープ、監査ログについては[エージェントインターフェースガイド](./agent-interface.md)を参照してください。
+
 ## OpenAPI ドキュメント生成
 
 オプションの `@guren/openapi` パッケージをインストールして、ルート定義からスペックを生成します。

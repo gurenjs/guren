@@ -652,6 +652,131 @@ describe('readInertiaResponse', () => {
 })
 
 /**
+ * The mock and the runtime must read a repeated form field identically, or a
+ * controller test passes on behavior production does not have.
+ *
+ * The rule is Hono's, not "first wins": `parseBody()` collects every value
+ * only for a `[]`-suffixed key, and the runtime's `parseRequestPayload` then
+ * flattens with `Array.isArray(v) ? v[0] : v`. So `tags[]` yields the FIRST
+ * value and a plain repeated `tags` yields the LAST. Both keys are asserted
+ * here on purpose: a `tags[]`-only test also passes under a blanket
+ * first-wins mock, which would agree with the runtime on `tags[]` while
+ * newly disagreeing on `tags`.
+ *
+ * Each case runs the same body through the mock and through a real
+ * `Application.fetch()`, so the two cannot drift apart again.
+ */
+describe('repeated form fields', () => {
+  const FIRST = 'core'
+  const LAST = 'framework'
+
+  const KEYS = [
+    { key: 'tags[]', expected: FIRST, rule: 'keeps the first value' },
+    { key: 'tags', expected: LAST, rule: 'keeps the last value' },
+  ] as const
+
+  const BODIES = [
+    {
+      encoding: 'urlencoded',
+      build: (key: string): RequestInit => {
+        const params = new URLSearchParams()
+        params.append(key, FIRST)
+        params.append(key, LAST)
+        return {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: params.toString(),
+        }
+      },
+    },
+    {
+      encoding: 'multipart',
+      build: (key: string): RequestInit => {
+        const form = new FormData()
+        form.append(key, FIRST)
+        form.append(key, LAST)
+        return { method: 'POST', body: form }
+      },
+    },
+  ] as const
+
+  async function readThroughMock(key: string, init: RequestInit): Promise<unknown> {
+    const { Controller } = createControllerModuleMock()
+
+    class ReadController extends Controller {
+      async read() {
+        return this.input<string>(key)
+      }
+    }
+
+    const controller = new ReadController()
+    controller.setContext(
+      createControllerContext('http://example.com/posts', init) as unknown as ControllerContext
+    )
+
+    return controller.read()
+  }
+
+  async function readThroughRuntime(key: string, init: RequestInit): Promise<unknown> {
+    // Lazy, like the rest of this package: the mock resolves @guren/server on
+    // demand so a suite that mocks it still gets the real module here.
+    const { Controller, createApp } = await import('@guren/core')
+
+    class ReadController extends Controller {
+      async read() {
+        return this.json({ value: (await this.input<string>(key)) ?? null })
+      }
+    }
+
+    const app = createApp({
+      routes: (router) => {
+        router.post('/posts', [ReadController, 'read'])
+      },
+    })
+    await app.boot()
+
+    const response = await app.fetch(new Request('http://example.com/posts', init))
+    expect(response.status).toBe(200)
+
+    return ((await response.json()) as { value: unknown }).value
+  }
+
+  /**
+   * `__proto__` must survive as an own property, as it does in the runtime:
+   * Hono collects into a null-prototype object and `parseRequestPayload`
+   * materializes it with `Object.fromEntries`. Assigning into an object
+   * literal instead hits the inherited setter and drops the field silently,
+   * which would let a mass-assignment test pass against a body the runtime
+   * actually delivers.
+   */
+  for (const { encoding, build } of BODIES) {
+    it(`${encoding}: a \`__proto__\` field survives in the mock and the runtime`, async () => {
+      const key = '__proto__'
+      const fromMock = await readThroughMock(key, build(key))
+      const fromRuntime = await readThroughRuntime(key, build(key))
+
+      expect(fromRuntime).toBe(LAST)
+      expect(fromMock).toBe(LAST)
+    })
+  }
+
+  for (const { encoding, build } of BODIES) {
+    for (const { key, expected, rule } of KEYS) {
+      it(`${encoding}: a repeated \`${key}\` ${rule} in the mock and the runtime`, async () => {
+        const init = build(key)
+
+        const fromMock = await readThroughMock(key, build(key))
+        const fromRuntime = await readThroughRuntime(key, init)
+
+        expect(fromRuntime).toBe(expected)
+        expect(fromMock).toBe(expected)
+        expect(fromMock).toBe(fromRuntime as string)
+      })
+    }
+  }
+})
+
+/**
  * The mock and the runtime must hand a validation schema the same query data,
  * or a controller test passes on behavior production does not have.
  *

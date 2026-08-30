@@ -9,8 +9,9 @@
  * saw the JSON Schema) and never decides authorization (the gate and the
  * app's policies do).
  */
-import type { AgentToolInputSource, DerivedAgentTool } from '@guren/core'
-import { PATH_PARAM_PATTERN } from '@guren/core/internal/route-path'
+import type { AgentToolInputSource, DerivedAgentTool } from './derive'
+import { PATH_PARAM_PATTERN } from '../internal/route-path'
+import { AGENT_PREFLIGHT_HEADER, AGENT_PREFLIGHT_VERDICT_HEADER } from '../internal/agent-preflight'
 
 /** How many characters of a non-JSON response body survive into the result. */
 const TEXT_RESPONSE_CAP = 50_000
@@ -29,7 +30,26 @@ export interface BuildToolRequestOptions {
    * surface that authenticates some other way.
    */
   authorization?: string
+  /**
+   * Ask for a verdict instead of an execution (RFC 0016 §5.4): the request
+   * runs the route's middleware and validates the advertised contract, then
+   * stops before the handler. Only routes declaring `.agent()` honour it.
+   */
+  preflight?: boolean
 }
+
+/**
+ * The argument-level spelling of a preflight request (RFC 0016 §5.4), for a
+ * surface whose callers pass flat arguments rather than dispatch options.
+ *
+ * No adapter strips it today: MCP does not offer preflight at all (see
+ * `mapToolResponse` and the plugin), and the surfaces that do reach the seam
+ * ask through `BuildToolRequestOptions.preflight`. A surface that adopts this
+ * key owns the stripping — it is an instruction to the adapter, not a field of
+ * any route's contract, and forwarding it would fail the very validation the
+ * caller asked to rehearse.
+ */
+export const PREFLIGHT_ARGUMENT = '_preflight'
 
 export type BuiltToolRequest =
   | { request: Request }
@@ -146,6 +166,9 @@ export function buildToolRequest(
   })
   if (options.authorization) {
     headers.set('Authorization', options.authorization)
+  }
+  if (options.preflight) {
+    headers.set(AGENT_PREFLIGHT_HEADER, '1')
   }
 
   let body: string | undefined
@@ -287,6 +310,15 @@ export async function mapToolResponse(
       : raw
     if (structured) return inconsistentOutput(tool, `a non-JSON body (${text.slice(0, 200)})`, status)
     return { content: [{ type: 'text', text }], status }
+  }
+
+  // A preflight verdict is not the route's output: the handler never ran.
+  // Returned as plain content whatever the tool advertises — put in
+  // `structuredContent`, an SDK client would validate it against the tool's
+  // output schema and throw, turning an allowed rehearsal into a protocol
+  // error.
+  if (response.headers.get(AGENT_PREFLIGHT_VERDICT_HEADER) !== null) {
+    return { content: [{ type: 'text', text: JSON.stringify(parsed) }], status }
   }
 
   const payload = unwrapInertiaProps(tool, response, parsed)

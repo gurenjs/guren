@@ -41,6 +41,39 @@ export interface InertiaPayload {
   version?: string
 }
 
+/**
+ * Applies Hono's `parseBody()` rule for repeated form fields, as the real
+ * runtime then flattens it in `parseRequestPayload`.
+ *
+ * Hono collects every value only when the key ends with `[]` (its
+ * `shouldParseAllValues`); any other repeated key keeps just the last one.
+ * The runtime then flattens with `Array.isArray(v) ? v[0] : v`, so the
+ * observable contract is: **`[]`-suffixed keys keep the FIRST value, every
+ * other key keeps the LAST**. Taking the first directly is equivalent to
+ * collecting the array and slicing it, and both content types go through
+ * this one function — a per-branch rule is how the mock came to disagree
+ * with production on `tags[]` while agreeing on `tags`.
+ */
+function collectFormEntries(
+  entries: Iterable<[string, FormDataEntryValue]>,
+): Record<string, unknown> {
+  // Collected in a Map and materialized with `Object.fromEntries`, never by
+  // assigning into an object literal: `result['__proto__'] = v` hits the
+  // inherited setter and silently drops the field, where the runtime — whose
+  // own last step is `Object.fromEntries` over Hono's null-prototype object —
+  // keeps it as an own property.
+  const collected = new Map<string, FormDataEntryValue>()
+
+  for (const [key, value] of entries) {
+    if (key.endsWith('[]') && collected.has(key)) {
+      continue
+    }
+    collected.set(key, value)
+  }
+
+  return Object.fromEntries(collected)
+}
+
 export function createControllerContext(
   url: string,
   init: RequestInit = {},
@@ -161,16 +194,11 @@ async function parseRequestBody(ctx: ControllerContext): Promise<unknown> {
 
     if (contentType.includes('application/x-www-form-urlencoded')) {
       const text = await request.text()
-      return Object.fromEntries(new URLSearchParams(text))
+      return collectFormEntries(new URLSearchParams(text))
     }
 
     if (contentType.includes('multipart/form-data')) {
-      const formData = await request.formData()
-      const result: Record<string, unknown> = {}
-      formData.forEach((value, key) => {
-        result[key] = value
-      })
-      return result
+      return collectFormEntries(await request.formData())
     }
 
     return {}
