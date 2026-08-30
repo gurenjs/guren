@@ -2,30 +2,34 @@ import { resolve } from 'node:path'
 import type { AgentRouteMetadata, RouteDefinition } from '@guren/core'
 import { check, type CheckResult } from './check-result'
 import {
+  mutatesRecords,
   parseControllerMethods,
   AUTHORIZE_CALL_PATTERN,
   AUTH_CALL_PATTERN,
-  DELETE_CALL_PATTERN,
-  FORCE_WRITE_PATTERN,
   INERTIA_CALL_PATTERN,
   type ControllerMethodInfo,
 } from './controller-methods'
 import { fileExists } from './discovery'
 import { describeMethod } from './http-methods'
 import { DEFAULT_ROUTES_FILE, loadRouteDefinitions } from './load-routes'
+import type { ParseCache } from './parse-cache'
 
 export interface AgentRouteCheckOptions {
   cwd: string
   /** Routes entry file, POSIX-relative to `cwd`. Defaults to `routes/web.ts`. */
   routesFile?: string
   /**
-   * Definitions to check instead of loading them. A test seam, not a
-   * shared-load path: the one production caller (`runCheck`) deliberately does
-   * not pass it, because a second `loadRouteDefinitions()` in the same process
-   * re-runs only the registrar — the module graph is already evaluated and is
-   * never re-evaluated (see `load-routes.ts`).
+   * Definitions to check instead of loading them. `runCheck` passes the graph
+   * it already loaded for the route-contract checks, so one `guren check` run
+   * loads it once; tests pass hand-built definitions. Absent, this loads its
+   * own.
    */
   definitions?: RouteDefinition[]
+  /**
+   * Parse cache to read controller sources through. `runCheck` passes its
+   * own, so the files earlier checks already parsed are not parsed twice.
+   */
+  cache?: ParseCache
 }
 
 /**
@@ -50,16 +54,6 @@ const TOOL_NAME_PATTERN = /^[A-Za-z0-9._-]{1,128}$/
  */
 const AGENT_READ_ONLY_METHODS = new Set(['GET', 'QUERY'])
 
-/**
- * State change an action performs in its own body, for the annotation-honesty
- * rules. A deletion or a mass-assignment-bypassing write is not the whole
- * vocabulary of "mutates", but both are unambiguous — which is what an
- * *honesty* rule needs, since it contradicts something the author declared.
- */
-function mutatesInBody(body: string): boolean {
-  return DELETE_CALL_PATTERN.test(body) || FORCE_WRITE_PATTERN.test(body)
-}
-
 interface AgentRoute {
   definition: RouteDefinition
   agent: AgentRouteMetadata
@@ -79,12 +73,11 @@ function readOnlyOf(route: AgentRoute): boolean {
 }
 
 /**
- * Whether `readOnlyHint: true` was *written* on a route whose method does not
- * default to it — the declaration that exempts the route from the
- * authorization rule below, and therefore the one worth checking against the
- * action's body.
+ * Whether `readOnlyHint: true` was *written* rather than inherited from the
+ * method — the declaration that exempts a mutating route from the
+ * authorization rule below.
  */
-function claimsReadOnlyAgainstMethod(route: AgentRoute): boolean {
+function overridesReadOnly(route: AgentRoute): boolean {
   return route.agent.readOnlyHint === true && !AGENT_READ_ONLY_METHODS.has(route.method)
 }
 
@@ -230,23 +223,34 @@ function authorizationFinding(route: AgentRoute): CheckResult | undefined {
  * Annotation honesty for `readOnlyHint` (RFC 0016 §5.5), the counterpart to
  * `guren audit`'s `destructiveHint` rule.
  *
- * `readOnlyHint: true` on a mutating verb is the one declaration that
- * *exempts* a route from the authorization rule above, so leaving it
- * unchecked would make the exemption self-service: writing the hint would be
- * enough to silence the failure it was meant to answer. Only an explicit
- * override against the method's own default is judged — the GET/QUERY default
- * claims nothing an author wrote.
+ * Two routes are read-only tools, and both are checked against the action:
+ *
+ * - An explicit `readOnlyHint: true` on a mutating verb. This is the one
+ *   declaration that *exempts* a route from the authorization rule above, so
+ *   leaving it unchecked would make the exemption self-service — writing the
+ *   hint would be enough to silence the failure it was meant to answer.
+ * - A GET or QUERY route, which inherits the same read-only default with the
+ *   same exemption. Nobody wrote the claim, but a GET that deletes records is
+ *   advertised to agents as safe to call unattended either way, and the
+ *   safe-verb contract it breaks is HTTP's before it is MCP's.
  */
 function readOnlyHonestyFinding(route: AgentRoute): CheckResult | undefined {
-  if (!claimsReadOnlyAgainstMethod(route)) return undefined
+  if (!readOnlyOf(route)) return undefined
 
+  const override = overridesReadOnly(route)
   const key = `agent-route-annotation:${route.keySuffix}`
   const title = `${route.label} agent tool`
-  const suggestion =
-    'Drop readOnlyHint: true, and cover the route with authorize()/authorizeResource() middleware or '
-    + 'this.authorize(...) in the action.'
+  const suggestion = override
+    ? 'Drop readOnlyHint: true, and cover the route with authorize()/authorizeResource() middleware or '
+      + 'this.authorize(...) in the action.'
+    : `Move the state change to a non-safe method, or declare agent: { readOnlyHint: false } and cover `
+      + `${route.label} with authorization.`
 
+  // Only the written claim is chased into an unreadable body: an unverifiable
+  // *default* on a GET would fire on every ordinary read route whose
+  // controller this check cannot see, which is noise about nothing declared.
   if (!route.methodInfo) {
+    if (!override) return undefined
     return check(
       key,
       title,
@@ -257,15 +261,20 @@ function readOnlyHonestyFinding(route: AgentRoute): CheckResult | undefined {
     )
   }
 
-  if (!mutatesInBody(route.methodInfo.body)) return undefined
+  if (!mutatesRecords(route.methodInfo.body)) return undefined
 
   return check(
     key,
     title,
     'warn',
-    `The route declares readOnlyHint: true, but ${route.controllerKey} deletes or force-writes records. `
-    + 'Clients read that hint as "safe to call unattended", and it is also what exempts this route from '
-    + 'the authorization rule — so the claim is buying the exemption its own body contradicts.',
+    override
+      ? `The route declares readOnlyHint: true, but ${route.controllerKey} deletes, updates, or `
+        + 'force-writes records. Clients read that hint as "safe to call unattended", and it is also what '
+        + 'exempts this route from the authorization rule — so the claim is buying the exemption its own '
+        + 'body contradicts.'
+      : `${route.method} routes are read-only tools by default, but ${route.controllerKey} deletes, `
+        + 'updates, or force-writes records. The tool is advertised to agents as safe to call unattended, '
+        + 'and the default is also what exempts this route from the authorization rule.',
     suggestion,
     route.methodInfo.filePath,
   )
@@ -428,12 +437,41 @@ export async function checkAgentRoutes(options: AgentRouteCheckOptions): Promise
 
   if (!definitions.some((definition) => definition.agent)) return []
 
-  const { methods, collisions } = await parseControllerMethods(cwd)
-  const routes = definitions
-    .map((definition) => toAgentRoute(definition, methods))
+  // Routes first, controllers only if one of them names a controller: an app
+  // whose agent routes are all inline handlers has no body for any rule here
+  // to read, so scanning every controller in it would buy nothing.
+  const bare = definitions
+    .map((definition) => toAgentRoute(definition, new Map()))
     .filter((route): route is AgentRoute => route !== undefined)
 
+  const scan = bare.some((route) => route.controllerKey)
+    ? await parseControllerMethods(cwd, options.cache)
+    : { methods: new Map<string, ControllerMethodInfo>(), collisions: [], unreadableFiles: [] }
+
+  const routes = bare.map((route) => ({
+    ...route,
+    methodInfo: route.controllerKey ? scan.methods.get(route.controllerKey) : undefined,
+  }))
+
   const results: CheckResult[] = []
+
+  // A controller file that could not be read at all. The routes naming it
+  // already take the could-not-verify path, but that message blames the
+  // discovery set ("not among the controller sources this check reads") when
+  // the real cause is a file right where it should be that would not open.
+  for (const filePath of scan.unreadableFiles) {
+    results.push(
+      check(
+        `agent-route-controller-unreadable:${filePath}`,
+        `${filePath} unreadable`,
+        'warn',
+        `${filePath} could not be read, so any agent route whose action lives there was checked against `
+        + 'no body at all.',
+        `Check the file's permissions and that it still exists, then re-run: bunx guren check`,
+        filePath,
+      ),
+    )
+  }
 
   // Two controllers sharing a class name make every body-derived verdict
   // below unreliable — routes carry the class name alone, so an authorize()
@@ -448,7 +486,7 @@ export async function checkAgentRoutes(options: AgentRouteCheckOptions): Promise
   const agentControllers = new Set(
     routes.flatMap((route) => (route.definition.controller ? [route.definition.controller.name] : [])),
   )
-  for (const collision of collisions.filter((c) => agentControllers.has(c.className))) {
+  for (const collision of scan.collisions.filter((c) => agentControllers.has(c.className))) {
     results.push(
       check(
         `agent-route-controller-collision:${collision.className}`,

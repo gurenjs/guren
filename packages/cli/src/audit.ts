@@ -31,9 +31,9 @@ import { parseSourceFile } from './parse-cache'
 import {
   accessorCallPattern,
   controllerMembers,
+  mutatesRecords,
   parseControllerMethods,
   AUTH_CALL_PATTERN,
-  DELETE_CALL_PATTERN,
   FORCE_WRITE_PATTERN,
   type ControllerMethodInfo,
   type ControllerNameCollision,
@@ -208,9 +208,24 @@ export async function runAudit(options: RunAuditOptions = {}): Promise<AuditRepo
   // once the local scans are done.
   const dependencyScanOutput = options.deps ? startDependencyScan(cwd) : null
 
-  const { methods: controllerMethods, collisions } = await parseControllerMethods(cwd)
+  const { methods: controllerMethods, collisions, unreadableFiles } = await parseControllerMethods(cwd)
   for (const collision of collisions) {
     findings.push(controllerCollisionFinding(collision))
+  }
+  // A controller that would not open is judged against no body at all, which
+  // is a pass for every rule below. Reported so it cannot read as one.
+  for (const filePath of unreadableFiles) {
+    findings.push(
+      finding(
+        `controller-unreadable:${filePath}`,
+        `${filePath} unreadable`,
+        'warn',
+        `${filePath} could not be read, so the validation, authentication, and annotation rules saw no `
+        + 'body for any action it declares.',
+        `Check the file's permissions and that it still exists, then re-run: bunx guren audit`,
+        filePath,
+      ),
+    )
   }
 
   const routesAnalyzed = await auditRoutes(cwd, options.routesFile, controllerMethods, findings)
@@ -660,16 +675,17 @@ async function auditRoutes(
             + '— the spec default for a non-read-only tool is destructive.',
           ),
         )
-      } else if (DELETE_CALL_PATTERN.test(methodInfo.body)) {
+      } else if (mutatesRecords(methodInfo.body)) {
         findings.push(
           finding(
             `agent-annotation:${routeLabel}`,
             routeLabel,
             'warn',
-            `The route declares destructiveHint: false, but ${controllerKey} deletes records. Clients read that `
-            + 'hint as "additive updates only" and may run the tool without asking the user first.',
+            `The route declares destructiveHint: false, but ${controllerKey} deletes, updates, or force-writes `
+            + 'records. Clients read that hint as "additive updates only" and may run the tool without asking '
+            + 'the user first.',
             `Drop destructiveHint: false from the route's agent metadata (the spec default for a non-read-only `
-            + `tool is destructive), or move the deletion out of ${controllerKey}.`,
+            + `tool is destructive), or move the state change out of ${controllerKey}.`,
             methodInfo.filePath,
           ),
         )

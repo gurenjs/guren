@@ -1,13 +1,15 @@
 import { describe, expect, it } from 'bun:test'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { chmod, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
   blankCommentsAndStrings,
+  mutatesRecords,
   parseControllerMethods,
   AUTHORIZE_CALL_PATTERN,
   AUTH_CALL_PATTERN,
   DELETE_CALL_PATTERN,
+  FORCE_WRITE_PATTERN,
   INERTIA_CALL_PATTERN,
 } from '../src/controller-methods'
 import { parseSourceFile } from '../src/parse-cache'
@@ -92,6 +94,29 @@ describe('controller member patterns', () => {
     expect(AUTH_CALL_PATTERN.test('const user = await this.auth.user()')).toBe(false)
   })
 
+  // A bare name matched a *declaration* too, so an action defining its own
+  // helper was reported for calling one.
+  it('does not read a function declaration as a force write', () => {
+    expect(FORCE_WRITE_PATTERN.test('function forceUpdate() { return null }')).toBe(false)
+    expect(FORCE_WRITE_PATTERN.test('const forceCreate = () => null')).toBe(false)
+    expect(FORCE_WRITE_PATTERN.test('await Post.forceUpdate({ id }, data)')).toBe(true)
+  })
+
+  it('counts deletes, updates, and force writes as record mutations', () => {
+    expect(mutatesRecords('await Post.delete({ id })')).toBe(true)
+    expect(mutatesRecords('await Post.update({ id }, data)')).toBe(true)
+    expect(mutatesRecords('await Post.where("id", id).update(data)')).toBe(true)
+    expect(mutatesRecords('await Post.forceUpdate({ id }, data)')).toBe(true)
+    expect(mutatesRecords('const post = await Post.find(1)')).toBe(false)
+  })
+
+  // `.update(` is a common method name; without the receiver discipline every
+  // progress bar or state container in an action would read as a write.
+  it('does not read an arbitrary update() as a record mutation', () => {
+    expect(mutatesRecords('progress.update(50)')).toBe(false)
+    expect(mutatesRecords('this.state.update(next)')).toBe(false)
+  })
+
   it('matches a model deletion in both its static and chained forms', () => {
     expect(DELETE_CALL_PATTERN.test('await Post.delete({ id })')).toBe(true)
     expect(DELETE_CALL_PATTERN.test('await Post.forceDelete({ id })')).toBe(true)
@@ -128,6 +153,74 @@ export class PostController extends Controller {
       const info = methods.get('PostController.index')
       expect(info?.filePath).toBe('app/Http/Controllers/PostController.ts')
       expect(INERTIA_CALL_PATTERN.test(info!.body)).toBe(true)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  // Both forms are legal to Router's types and its runtime dispatch, so a
+  // scanner collecting only ClassMethod leaves every class-field action with
+  // no body — which reads as "could not verify", not as what it says.
+  it('collects a class-field action as well as a method', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'guren-controller-methods-field-'))
+    try {
+      await writeWorkspaceFiles(dir, {
+        'app/Http/Controllers/PostController.ts': `
+import { Controller } from '@guren/core'
+
+export class PostController extends Controller {
+  store = async () => {
+    await this.authorize('create', Post)
+    return this.json({})
+  }
+
+  show = () => this.inertia('posts/Show', {})
+
+  async destroy() {
+    return this.noContent()
+  }
+}
+`,
+      })
+
+      const { methods } = await parseControllerMethods(dir)
+
+      expect(AUTHORIZE_CALL_PATTERN.test(methods.get('PostController.store')!.body)).toBe(true)
+      // An expression-bodied arrow has no block; the expression is the body.
+      expect(INERTIA_CALL_PATTERN.test(methods.get('PostController.show')!.body)).toBe(true)
+      expect(methods.has('PostController.destroy')).toBe(true)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  // A file that will not open used to reject the whole promise, taking the
+  // entire check/audit run down instead of producing a finding.
+  it('reports an unreadable controller instead of rejecting', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'guren-controller-methods-unreadable-'))
+    try {
+      await writeWorkspaceFiles(dir, {
+        'app/Http/Controllers/PostController.ts': `
+import { Controller } from '@guren/core'
+
+export class PostController extends Controller {
+  async index() { return this.json({}) }
+}
+`,
+      })
+      // Discovery collects real files only (a directory or dangling symlink
+      // in its place is filtered before any read), so the only way to reach
+      // the failing read is to make a discovered file unopenable.
+      const controller = join(dir, 'app/Http/Controllers/PostController.ts')
+      await chmod(controller, 0o000)
+      const stillReadable = await readFile(controller, 'utf8').then(() => true, () => false)
+      if (stillReadable) return // running as root: the mode says nothing
+
+      const { methods, unreadableFiles } = await parseControllerMethods(dir)
+
+      expect(unreadableFiles).toEqual(['app/Http/Controllers/PostController.ts'])
+      expect(methods.size).toBe(0)
+      await chmod(controller, 0o644)
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

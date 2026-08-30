@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import type { ProjectContext } from './context'
 import type { EntityContext } from './entity-context'
+import type { ContextRoute } from './context-route'
 
 const execFileAsync = promisify(execFile)
 
@@ -134,6 +135,7 @@ export function createFreshContextApi(): {
     entity: string,
     options: { cwd: string; module?: string },
   ): Promise<EntityContext>
+  loadContextRoutes(cwd: string, routesFile?: string): Promise<ContextRoute[]>
 } {
   return {
     generateContext: ({ cwd }) => runCliJson<ProjectContext>(['context'], cwd),
@@ -143,5 +145,14 @@ export function createFreshContextApi(): {
         module ? ['context', entity, '--module', module] : ['context', entity],
         cwd,
       ),
+
+    // Overrides the in-process `loadContextRoutes`, which reaches
+    // `loadRouteDefinitions()` like the two above and would answer every
+    // request from the module graph captured at the first one. The child
+    // process still builds the whole context to hand back one field: the
+    // routes-only saving is real for an in-process caller, and a routes-only
+    // CLI output would be needed to extend it here.
+    loadContextRoutes: async (cwd) =>
+      (await runCliJson<ProjectContext>(['context'], cwd)).routes,
   }
 }

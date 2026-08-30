@@ -22,7 +22,7 @@ function createMockCli(overrides: Partial<GurenCliApi> = {}, calls?: CodegenCall
   return {
     // The base mock stands in for a current @guren/cli; the tool gates on
     // this list because @guren/cli is resolved from the app at runtime.
-    contextRouteFeatures: ['agent'],
+    CONTEXT_ROUTE_FEATURES: ['agent'],
     generateContext: async () => ({
       framework: { name: 'guren', version: '0.2.0' },
       models: [{ className: 'Post' }, { className: 'User' }],
@@ -333,8 +333,52 @@ describe('Guren MCP Server', () => {
   // tool reads — and an older CLI's routes carry no `agent` at all, which is
   // indistinguishable from an app exposing nothing. Reporting an empty list
   // there would answer a question this server cannot answer.
+  // The probe reads a field off the @guren/cli module namespace, so a mock
+  // spelling it any other way proves only that the mock agrees with itself.
+  // This one takes the real module's exports: a rename or a casing slip on
+  // either side fails here, which is exactly how the first version of this
+  // probe shipped reading a name the CLI never exported.
+  test('guren_agent_surface probes the capability the real @guren/cli exports', async () => {
+    const cliModule = (await import('@guren/cli')) as Record<string, unknown>
+
+    expect(cliModule.CONTEXT_ROUTE_FEATURES).toEqual(['agent'])
+
+    const client = await createTestClient({
+      CONTEXT_ROUTE_FEATURES: cliModule.CONTEXT_ROUTE_FEATURES as readonly string[],
+      loadContextRoutes: async () => [
+        { method: 'GET', path: '/posts', name: 'posts.index', agent: { description: 'List posts.' } },
+      ],
+    })
+
+    const result = await client.callTool({ name: 'guren_agent_surface', arguments: {} })
+    const payload = JSON.parse((result.content as Array<{ type: string; text: string }>)[0].text)
+
+    expect(payload.supported).toBe(true)
+    expect(payload.tools).toHaveLength(1)
+  })
+
+  // Reading only the routes keeps an interactive, uncached tool off a full
+  // project scan; an older CLI without the entry still answers the long way.
+  test('guren_agent_surface prefers the routes-only entry over the whole context', async () => {
+    const called: string[] = []
+    const client = await createTestClient({
+      loadContextRoutes: async () => {
+        called.push('loadContextRoutes')
+        return []
+      },
+      generateContext: async () => {
+        called.push('generateContext')
+        throw new Error('should not be reached when the routes-only entry exists')
+      },
+    })
+
+    await client.callTool({ name: 'guren_agent_surface', arguments: {} })
+
+    expect(called).toEqual(['loadContextRoutes'])
+  })
+
   test('guren_agent_surface says so when the app CLI predates agent metadata', async () => {
-    const client = await createTestClient({ contextRouteFeatures: undefined })
+    const client = await createTestClient({ CONTEXT_ROUTE_FEATURES: undefined })
 
     const result = await client.callTool({ name: 'guren_agent_surface', arguments: {} })
     const payload = JSON.parse((result.content as Array<{ type: string; text: string }>)[0].text)

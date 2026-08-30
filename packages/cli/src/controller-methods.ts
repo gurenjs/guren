@@ -1,9 +1,8 @@
 import { relative } from 'node:path'
-import { readFile } from 'node:fs/promises'
-import type { File } from '@babel/types'
+import type { ClassDeclaration, File } from '@babel/types'
 import { classNameFromPath, discoverControllerFiles } from './discovery'
 import { extractClassDeclaration } from './model-parser'
-import { parseSourceFile } from './parse-cache'
+import { ParseCache } from './parse-cache'
 import { walk } from './ast-walk'
 
 /**
@@ -45,6 +44,12 @@ export interface ControllerMethodScan {
   /** `ClassName.method` → body. Last file scanned wins on a collision. */
   methods: Map<string, ControllerMethodInfo>
   collisions: ControllerNameCollision[]
+  /**
+   * Controller files that could not be read at all. Their actions are absent
+   * from `methods`, so a route naming one takes whichever could-not-verify
+   * path its caller documents rather than a confident verdict.
+   */
+  unreadableFiles: string[]
 }
 
 /**
@@ -199,11 +204,43 @@ export const DELETE_CALL_PATTERN =
   /\b[A-Z][A-Za-z0-9_]*\s*\.\s*(?:delete|forceDelete)\s*\(|\)\s*\.\s*(?:delete|forceDelete)\s*\(/
 
 /**
+ * A record update, in the same two receiver-disciplined shapes as
+ * {@link DELETE_CALL_PATTERN}. `.update(` is a common enough method name that
+ * without those constraints a `state.update(...)` or `progress.update(...)`
+ * in an action would read as a database write.
+ */
+export const UPDATE_CALL_PATTERN =
+  /\b[A-Z][A-Za-z0-9_]*\s*\.\s*update\s*\(|\)\s*\.\s*update\s*\(/
+
+/**
  * A write that bypasses mass-assignment protection. Read by the audit's
  * force-write heuristic and by the agent-route annotation rules, which count
  * it as state change alongside a deletion.
+ *
+ * The receiver is required. Without it the pattern matched any bare
+ * occurrence of the name — including a *declaration*, so an action defining
+ * its own `function forceUpdate() {}` helper triggered the warning about
+ * calling one.
  */
-export const FORCE_WRITE_PATTERN = /\bforce(Create|Update)\s*\(/
+export const FORCE_WRITE_PATTERN = /\.\s*force(?:Create|Update)\s*\(/
+
+/**
+ * Whether an action body shows it changes stored records: a deletion, an
+ * update, or a mass-assignment-bypassing write.
+ *
+ * The one rule behind both annotation-honesty checks — `guren audit`'s
+ * `destructiveHint: false` and `guren check`'s `readOnlyHint: true` — because
+ * the two contradict the same evidence and must not disagree about what
+ * counts as a mutation. Deliberately narrow: an honesty rule accuses an
+ * author of a false declaration, so it fires only on unambiguous shapes.
+ */
+export function mutatesRecords(body: string): boolean {
+  return (
+    DELETE_CALL_PATTERN.test(body)
+    || UPDATE_CALL_PATTERN.test(body)
+    || FORCE_WRITE_PATTERN.test(body)
+  )
+}
 
 /**
  * Method bodies below are judged with regexes (VALIDATE_BODY_PATTERN,
@@ -275,18 +312,36 @@ export function blankCommentsAndStrings(source: string, ast: File): string {
  * body a rule just judged may belong to a different file than the route it
  * judged it for.
  */
-export async function parseControllerMethods(cwd: string): Promise<ControllerMethodScan> {
+export async function parseControllerMethods(
+  cwd: string,
+  cache?: ParseCache,
+): Promise<ControllerMethodScan> {
   const methods = new Map<string, ControllerMethodInfo>()
   const collisions: ControllerNameCollision[] = []
+  const unreadableFiles: string[] = []
   const classFiles = new Map<string, string>()
   const controllerFiles = await discoverControllerFiles(cwd)
 
-  for (const filePath of controllerFiles) {
-    const source = await readFile(filePath, 'utf-8')
-    const relPath = relative(cwd, filePath)
+  // Every read goes through a cache, given one or not. It is what makes an
+  // unreadable file a *reported outcome* rather than a rejected promise — a
+  // permission error, or a file deleted between discovery and read, used to
+  // take the whole `guren check` / `guren audit` run down instead of
+  // producing the could-not-verify finding those commands document.
+  const parseCache = cache ?? new ParseCache()
 
-    const ast = parseSourceFile(source, filePath)
-    if (!ast) continue
+  for (const filePath of controllerFiles) {
+    const relPath = relative(cwd, filePath)
+    const outcome = await parseCache.read(filePath)
+
+    if (outcome.status === 'unreadable') {
+      unreadableFiles.push(relPath)
+      continue
+    }
+    // Read but unparseable: nothing to walk, and the source alone tells this
+    // scan nothing, since every caller judges an action *body*.
+    if (outcome.status !== 'parsed') continue
+
+    const { source, ast } = outcome
     const scrubbed = blankCommentsAndStrings(source, ast)
 
     for (const node of ast.program.body) {
@@ -301,17 +356,53 @@ export async function parseControllerMethods(cwd: string): Promise<ControllerMet
       classFiles.set(className, relPath)
 
       for (const member of classDecl.body.body) {
-        if (member.type === 'ClassMethod' && member.key.type === 'Identifier') {
-          const start = member.body.start ?? 0
-          const end = member.body.end ?? 0
-          methods.set(`${className}.${member.key.name}`, {
-            body: scrubbed.slice(start, end),
-            filePath: relPath,
-          })
-        }
+        const found = memberBodyRange(member)
+        if (!found) continue
+        methods.set(`${className}.${found.name}`, {
+          body: scrubbed.slice(found.start, found.end),
+          filePath: relPath,
+        })
       }
     }
   }
 
-  return { methods, collisions }
+  return { methods, collisions, unreadableFiles }
+}
+
+/**
+ * The source range of one controller action, whichever way it is written.
+ *
+ * Both forms are legal to `Router`'s types and to its runtime dispatch, so
+ * collecting only `ClassMethod` silently downgraded every class-field action:
+ * an unauthorized one reported as "could not verify" instead of failing, and
+ * an authorized one drew a false warning about source that was right there.
+ *
+ * ```ts
+ * class PostController extends Controller {
+ *   async destroy() {}          // ClassMethod
+ *   store = async () => {}      // ClassProperty holding a function
+ * }
+ * ```
+ *
+ * For an expression-bodied arrow (`store = () => this.json({})`) the range is
+ * the expression itself — there is no block, and the expression is the body.
+ */
+function memberBodyRange(
+  member: ClassDeclaration['body']['body'][number],
+): { name: string; start: number; end: number } | undefined {
+  if (member.type === 'ClassMethod' && member.key.type === 'Identifier') {
+    return { name: member.key.name, start: member.body.start ?? 0, end: member.body.end ?? 0 }
+  }
+
+  if (member.type === 'ClassProperty' && member.key.type === 'Identifier') {
+    const { value } = member
+    if (
+      value
+      && (value.type === 'ArrowFunctionExpression' || value.type === 'FunctionExpression')
+    ) {
+      return { name: member.key.name, start: value.body.start ?? 0, end: value.body.end ?? 0 }
+    }
+  }
+
+  return undefined
 }

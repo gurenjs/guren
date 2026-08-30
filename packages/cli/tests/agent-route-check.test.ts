@@ -497,8 +497,9 @@ export class PostController extends Controller {
         expect(keys(results)).not.toContain('agent-route-annotation:DELETE:/posts/:id')
       })
 
-      // The GET default is nobody's claim, so there is nothing to contradict.
-      it('does not judge the method default, only an explicit override', async () => {
+      // Nobody wrote the GET default, but it carries the same exemption and
+      // the same "safe to call unattended" promise to a client.
+      it('judges the method default too, when a GET action mutates', async () => {
         await writeWorkspaceFiles(tempDir, {
           'app/Http/Controllers/PostController.ts': `
 import { Controller } from '@guren/core'
@@ -525,8 +526,82 @@ export class PostController extends Controller {
           tempDir,
         )
 
+        const honesty = results.find((r) => r.key === 'agent-route-annotation:GET:/posts')
+        expect(honesty?.status).toBe('warn')
+        expect(honesty?.message).toContain('read-only tools by default')
+      })
+
+      // An unverifiable *default* would fire on every ordinary read route
+      // whose controller this check cannot see — noise about nothing declared.
+      it('does not chase the method default into an unreadable body', async () => {
+        const results = await run([
+          route({
+            path: '/posts',
+            name: 'posts.index',
+            agent: {},
+            controller: { name: 'MissingController', action: 'index' },
+            schemas: OUTPUT,
+          }),
+        ])
+
         expect(keys(results)).not.toContain('agent-route-annotation:GET:/posts')
       })
+
+      // A plain update() is a mutation the earlier delete-only evidence missed.
+      it('counts a plain update() as mutation evidence', async () => {
+        const results = await runDestroy(
+          "    await Post.update({ id: 1 }, { title: 'x' })\n    return this.noContent()",
+          { readOnlyHint: true },
+        )
+
+        expect(keys(results)).toContain('agent-route-annotation:DELETE:/posts/:id')
+      })
+
+      // The force-write pattern needs a receiver, or an action defining its
+      // own helper triggers the warning about calling one.
+      it('does not read a local function declaration as a force write', async () => {
+        const results = await runDestroy(
+          '    function forceUpdate() { return null }\n    forceUpdate()\n    return this.noContent()',
+          { readOnlyHint: true },
+        )
+
+        expect(keys(results)).not.toContain('agent-route-annotation:DELETE:/posts/:id')
+      })
+    })
+
+    // Both forms are legal to Router's types and its runtime dispatch, so a
+    // scanner that saw only ClassMethod downgraded every class-field action.
+    it('reads a class-field action, not just a method', async () => {
+      await writeWorkspaceFiles(tempDir, {
+        'app/Http/Controllers/PostController.ts': `
+import { Controller } from '@guren/core'
+
+export class PostController extends Controller {
+  destroy = async () => {
+    await this.authorize('delete', Post)
+    return this.noContent()
+  }
+}
+`,
+      })
+
+      const results = await run(
+        [
+          route({
+            method: 'DELETE',
+            path: '/posts/:id',
+            name: 'posts.destroy',
+            agent: {},
+            controller: { name: 'PostController', action: 'destroy' },
+            schemas: OUTPUT,
+          }),
+        ],
+        tempDir,
+      )
+
+      // The authorize() in the class field is found, so this is a clean pass
+      // rather than the could-not-verify warn an unread body produces.
+      expect(results[0]?.status).toBe('pass')
     })
 
     // A collision changes the verdict only for routes naming that class.

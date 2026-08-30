@@ -122,12 +122,22 @@ export interface GurenCliApi {
    */
   createFreshContextApi?: () => Pick<GurenCliApi, 'generateContext' | 'generateEntityContext'>
   /**
-   * Optional fields the CLI's context routes populate (`CONTEXT_ROUTE_FEATURES`).
-   * Optional here for the same runtime-resolution reason as above, and read
-   * for exactly that reason: an older CLI emits routes with no `agent` field
-   * at all, which reads identically to an app exposing no agent tools.
+   * Optional fields the CLI's context routes populate. Spelled exactly as
+   * `@guren/cli` exports it — this interface describes that module namespace,
+   * so a prettier camelCase name here would read `undefined` off every real
+   * CLI and silently answer "unsupported" forever.
+   *
+   * Optional for the same runtime-resolution reason as the members above, and
+   * read for exactly that reason: an older CLI emits routes with no `agent`
+   * field at all, which reads identically to an app exposing no agent tools.
    */
-  contextRouteFeatures?: readonly string[]
+  CONTEXT_ROUTE_FEATURES?: readonly string[]
+  /**
+   * Every route as a context route, without building the rest of the project
+   * context. Optional like the above; `guren_agent_surface` falls back to
+   * `generateContext` when an older CLI does not provide it.
+   */
+  loadContextRoutes?(cwd: string, routesFile?: string, loadErrors?: string[]): Promise<unknown[]>
   /**
    * The OKF docs relation graph (RFC 0005). Optional for the same
    * runtime-resolution reason as above.
@@ -293,7 +303,7 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServer {
       // exposes nothing, and a @guren/cli — resolved from the app, so
       // possibly older than this server — whose context output has no agent
       // field to read. Say which one happened.
-      if (!cli.contextRouteFeatures?.includes('agent')) {
+      if (!cli.CONTEXT_ROUTE_FEATURES?.includes('agent')) {
         return {
           content: [
             {
@@ -314,8 +324,16 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServer {
         }
       }
 
-      const context = await cli.generateContext({ cwd })
-      const tools = context.routes.filter(isAgentRoute).map(describeAgentRoute)
+      // The routes are all this tool reads, and building the rest of the
+      // project context — models, pages, controllers, resources — costs a
+      // full filesystem scan on an interactive path with no caching. Older
+      // CLIs without the routes-only entry still answer through the whole
+      // context, which is what they always did.
+      const routes = cli.loadContextRoutes
+        ? await cli.loadContextRoutes(cwd)
+        : (await cli.generateContext({ cwd })).routes
+
+      const tools = routes.filter(isAgentRoute).map(describeAgentRoute)
       return {
         content: [{ type: 'text', text: JSON.stringify({ supported: true, tools }, null, 2) }],
       }
