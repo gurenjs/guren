@@ -119,9 +119,20 @@ Implementation notes (the non-obvious parts):
 
 **One Zod → JSON Schema rule.** The existing walker in `@guren/openapi`
 (`toOpenApiSchema`, OpenAPI 3.1 = JSON Schema 2020-12) is promoted to a shared
-internal module (~~`packages/core/src/internal/zod-json-schema.ts`~~
-**amended below**, beside
-`zod-compat.ts`); ~~`@guren/openapi` re-exports it~~ **Amended in implementation:**
+internal module (~~`packages/core/src/internal/zod-json-schema.ts`, beside
+`zod-compat.ts`~~ **Amended in implementation:** `packages/server/src/internal/`,
+both files, with `@guren/core/internal/zod-compat` and
+`@guren/core/internal/zod-json-schema` kept as re-export shims so every consumer
+outside `@guren/server` keeps writing the core specifier. The reason is build
+order, not layering: `@guren/core`'s index is `export * from '@guren/server'`, so
+core builds *after* server and a server module importing a core one closes a
+cycle — server's declaration build runs `tsc -p tsconfig.build.json` with
+`paths: {}` and full checking, so it would look for a core `dist/` that does not
+exist yet. Since §8 places `deriveAgentTools` in `@guren/server`, the one rule
+has to live in the package both it and the OpenAPI generator can see. The
+precedent is `@guren/server/support/expiry`, re-exported by core's
+`store-utils.ts` for the same reason);
+~~`@guren/openapi` re-exports it~~ **Amended in implementation:**
 `@guren/openapi` *imports* it and re-exports nothing. Re-exporting would publish an
 internal module through a package's stable index, which is exactly the tier
 `contributing/api-stability.md` says it must not reach — the walker stays behind one
@@ -130,18 +141,6 @@ deep import, and the only name `@guren/openapi` still exposes is its own
 Schema Object *is* that dialect, so one definition serves both). As part of the promotion it learns
 to carry Zod checks (`min`/`max`/`regex`/`format`) into JSON Schema constraints —
 today it drops them.
-
-**Amended again when `deriveAgentTools` landed:** the walker's files moved to
-`packages/server/src/internal/`, and `@guren/core/internal/zod-{compat,json-schema}`
-became re-export shims so every consumer outside `@guren/server` keeps writing the
-core specifier. The reason is build order, not layering: `@guren/core`'s index is
-`export * from '@guren/server'`, so core builds *after* server, and a server module
-importing a core one closes a cycle — server's declaration build runs
-`tsc -p tsconfig.build.json` with `paths: {}` and full checking, so it would look
-for a core `dist/` that does not exist yet. Since §8 places `deriveAgentTools` in
-`@guren/server`, the one rule has to live in the package both it and the OpenAPI
-generator can see. The precedent is `@guren/server/support/expiry`, re-exported by
-core's `store-utils.ts` for the same reason.
 
 **Input**: `params` + `query` + `body` merge into one object schema:
 
