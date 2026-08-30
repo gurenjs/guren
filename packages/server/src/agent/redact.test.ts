@@ -280,3 +280,14 @@ describe('redactAgentArguments separator normalization', () => {
     expect(redactAgentArguments({ title: 'Hello' }, ['-', '_ '])).toEqual({ title: 'Hello' })
   })
 })
+
+describe('redactAgentArguments on an array root', () => {
+  test('should walk it as an index-keyed record, still masking', () => {
+    // Not a legal MCP arguments shape, but reachable pre-validation; total
+    // and masked is the contract, and this pins the shape it comes back in.
+    expect(redactAgentArguments(['a', { token: 't' }] as unknown as Record<string, unknown>)).toEqual({
+      '0': 'a',
+      '1': { token: AGENT_REDACTED },
+    })
+  })
+})
