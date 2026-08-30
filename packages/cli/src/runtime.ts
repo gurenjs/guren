@@ -33,6 +33,12 @@ export type MaybeApplication = {
    */
   auth?: {
     getApiTokenStore?: () => ApiTokenStore | undefined
+    /**
+     * Installs a token store over whatever the app configured, which is how
+     * `tool:dev` issues a credential that cannot outlive its process. Same
+     * structural-and-optional reasoning as the accessor above.
+     */
+    useTokens?: (store: ApiTokenStore, options?: { provider?: string; guardName?: string }) => void
   }
 }
 

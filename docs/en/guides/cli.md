@@ -461,6 +461,7 @@ Routes that declare `.agent()` metadata are exposed to AI agents as MCP tools (s
 |---------|-------------|---------|
 | `tool:list` | List the agent tools this application exposes | `bunx guren tool:list` |
 | `tool:inspect` | Show one tool's full derivation | `bunx guren tool:inspect posts.store` |
+| `tool:dev` | Serve the tools locally with a throwaway token | `bunx guren tool:dev` |
 
 ```bash
 # Every exposed tool, with its method, path, protocol exposure,
@@ -474,7 +475,18 @@ bunx guren tool:list --json
 # annotations, approval and redaction
 bunx guren tool:inspect posts.store
 bunx guren tool:inspect posts.store --json
+
+# Run the app's MCP endpoint locally with a token that lasts only as long
+# as the command, and print the MCP Inspector invocation for it
+bunx guren tool:dev
+bunx guren tool:dev --as 42 --port 4000
 ```
+
+`tool:dev` serves the application's *own* endpoint — it requires
+[`@guren/plugin-mcp`](./agent-interface.md) to be installed and registered, and
+says so if no endpoint answers. The token it issues lives in memory for that
+process only: nothing is written to your app's token store, and stopping the
+command revokes it. It refuses to run with `NODE_ENV=production`.
 
 | Option | Default | Description |
 |--------|---------|-------------|

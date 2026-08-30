@@ -68,6 +68,7 @@ import { runQueueWorker, listFailedJobs, retryFailedJob, retryAllFailedJobs, flu
 import { displayRoutes } from './route-list'
 import { displayToolInspection, displayTools } from './tool-list'
 import { runTokenIssue } from './token-issue'
+import { runToolDev } from './tool-dev'
 import { cacheConfig, clearConfigCache, showConfigCacheInfo } from './config-cache'
 import { createStorageLink, removeStorageLink } from './storage-link'
 import { listScheduledTasks, runScheduledTasks } from './schedule'
@@ -1750,6 +1751,57 @@ const tokenIssueCommand = defineCommand({
   },
 })
 
+const toolDevCommand = defineCommand({
+  meta: {
+    name: 'tool:dev',
+    description: 'Serve this application\'s agent tools locally with a throwaway token (RFC 0016).',
+  },
+  args: {
+    as: {
+      type: 'string',
+      description: 'User ID tool calls authenticate as (default: a placeholder matching no record)',
+    },
+    path: {
+      type: 'string',
+      description: 'Endpoint path, if the app mounted the MCP plugin somewhere other than /mcp',
+      valueHint: '/mcp',
+    },
+    port: {
+      type: 'string',
+      description: 'Port to listen on (default 3333)',
+    },
+    host: {
+      type: 'string',
+      description: 'Hostname to bind (default 127.0.0.1)',
+    },
+    app: {
+      type: 'string',
+      description: 'Application root directory',
+    },
+  },
+  async run({ args }) {
+    // Repeat-safe like every other flag reader here: citty arrays a repeated
+    // flag, and this one picks the port a listener binds.
+    const rawPort = lastFlagValue(args.port)
+    const port = rawPort === undefined ? undefined : Number.parseInt(rawPort, 10)
+    if (rawPort !== undefined && !Number.isInteger(port)) {
+      throw new Error(`Invalid --port value "${rawPort}".`)
+    }
+
+    await runToolDev({
+      as: lastFlagValue(args.as),
+      path: lastFlagValue(args.path),
+      port,
+      hostname: lastFlagValue(args.host),
+      appRoot: lastFlagValue(args.app),
+    })
+
+    // Deliberately no process.exit: unlike the one-shot commands beside it,
+    // this one is the server. It ends when the developer stops it, which is
+    // also when the token stops existing.
+  },
+})
+
 const configCacheCommand = defineCommand({
   meta: {
     name: 'config:cache',
@@ -3149,6 +3201,7 @@ export const builtinSubCommands = {
   'tool:list': toolListCommand,
   'tool:inspect': toolInspectCommand,
   'token:issue': tokenIssueCommand,
+  'tool:dev': toolDevCommand,
   'openapi:generate': openApiGenerateCommand,
   'config:cache': configCacheCommand,
   'config:clear': configClearCommand,

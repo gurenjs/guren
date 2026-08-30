@@ -459,6 +459,7 @@ bunx guren route:list --format compact # コンパクトな1行形式
 |----------|------|----|
 | `tool:list` | このアプリが公開しているエージェントツールを一覧表示 | `bunx guren tool:list` |
 | `tool:inspect` | 1 つのツールの導出結果を表示 | `bunx guren tool:inspect posts.store` |
+| `tool:dev` | 使い捨てトークン付きでツールをローカルに提供 | `bunx guren tool:dev` |
 
 ```bash
 # 公開中の全ツールを、メソッド・パス・プロトコル別の公開状態・
@@ -472,7 +473,18 @@ bunx guren tool:list --json
 # アノテーション・承認・マスク対象
 bunx guren tool:inspect posts.store
 bunx guren tool:inspect posts.store --json
+
+# アプリの MCP エンドポイントをローカルで起動し、コマンドの生存期間だけ
+# 有効なトークンと、MCP Inspector の接続コマンドを表示する
+bunx guren tool:dev
+bunx guren tool:dev --as 42 --port 4000
 ```
+
+`tool:dev` が提供するのはアプリ自身のエンドポイントです。
+[`@guren/plugin-mcp`](./agent-interface.md) のインストールと登録が必要で、
+エンドポイントが応答しない場合はその旨を報告します。発行されるトークンは
+そのプロセスのメモリ上にのみ存在し、アプリのトークンストアには何も書き込みません。
+コマンドを止めればトークンも失効します。`NODE_ENV=production` では実行を拒否します。
 
 | オプション | デフォルト | 説明 |
 |-----------|-----------|------|
