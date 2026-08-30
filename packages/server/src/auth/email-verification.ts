@@ -1,3 +1,4 @@
+import { getAuthContext } from './context'
 import { generateId, buildTokenUrl, parseTokenUrl } from './utils'
 import { MessageSigner } from '../encryption/MessageSigner'
 import { deriveAppKeyring, getAppKeyringFromEnv } from '../encryption/app-key'
@@ -364,8 +365,8 @@ export function requireVerifiedEmail(options: {
 
   return async (ctx: { get: <T = unknown>(key: string) => T; redirect: (url: string) => Response }, next: () => Promise<void>) => {
     const getUser = options.getUser ?? (async (c: { get: <T = unknown>(key: string) => T }) => {
-      const auth = c.get<{ user?: () => Promise<{ emailVerifiedAt?: Date | null } | null> } | undefined>('guren:auth')
-      return auth?.user?.() ?? null
+      const auth = getAuthContext(c)
+      return (await auth?.user<{ emailVerifiedAt?: Date | null }>()) ?? null
     })
 
     const user = await getUser(ctx)

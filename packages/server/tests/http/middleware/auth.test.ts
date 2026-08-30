@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import { Hono } from 'hono'
 import {
+  AUTH_CONTEXT_KEY,
   attachAuthContext,
   requireAuthenticated,
   requireGuest,
@@ -15,7 +16,7 @@ describe('attachAuthContext', () => {
 
     app.use(attachAuthContext(() => mockAuth))
     app.get('/test', async (c) => {
-      const auth = (c as unknown as { get: (key: string) => AuthContext }).get('guren:auth')
+      const auth = (c as unknown as { get: (key: string) => AuthContext }).get(AUTH_CONTEXT_KEY)
       const user = await auth.user()
       return c.json({ user })
     })
@@ -29,6 +30,25 @@ describe('attachAuthContext', () => {
 })
 
 describe('requireAuthenticated', () => {
+  it('accepts a context that implements only the method it calls', async () => {
+    // The guards read check()/guest() and nothing else, so a hand-rolled
+    // minimal context has to keep working. This pins getAuthContext's
+    // contract: it does not probe for members its callers never touch —
+    // Gate does that at its own call site, where a stray value decides
+    // whether the legacy fallback runs.
+    const app = new Hono()
+    const partialAuth = { check: async () => true } as unknown as AuthContext
+
+    app.use(attachAuthContext(() => partialAuth))
+    app.use('/protected/*', requireAuthenticated())
+    app.get('/protected/resource', (c) => c.text('secret data'))
+
+    const res = await app.request('/protected/resource')
+
+    expect(res.status).toBe(200)
+    expect(await res.text()).toBe('secret data')
+  })
+
   it('allows authenticated users to proceed', async () => {
     const app = new Hono()
     const mockAuth = createMockAuthContext({ isAuthenticated: true })
