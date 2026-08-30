@@ -83,17 +83,14 @@ export default class PostController extends Controller {
   it('detects an empty class-field action, and does not flag a concise arrow', async () => {
     const workspace = await createTempWorkspace('guren-cli-check-empty-field-')
     try {
-      await mkdir(join(workspace.dir, 'app/Http/Controllers'), { recursive: true })
-      await writeFile(
-        join(workspace.dir, 'app/Http/Controllers/PostController.ts'),
-        `import { Controller } from '@guren/core'
+      await writeWorkspaceFiles(workspace.dir, {
+        'app/Http/Controllers/PostController.ts': `import { Controller } from '@guren/core'
 export class PostController extends Controller {
   store = async () => {}
   show = () => this.inertia('posts/Show', {})
   perPage = 25
 }`,
-        'utf8',
-      )
+      })
 
       const report = await runCheck({ cwd: workspace.dir })
       const keys = report.checks.filter((c) => c.key.startsWith('empty-method:')).map((c) => c.key)

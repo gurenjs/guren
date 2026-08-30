@@ -13,7 +13,7 @@ import {
   FORCE_WRITE_PATTERN,
   INERTIA_CALL_PATTERN,
 } from '../src/controller-methods'
-import { extractClassDeclaration } from '../src/model-parser'
+import { firstClassDeclaration } from '../src/model-parser'
 import { parseSourceFile } from '../src/parse-cache'
 import { writeWorkspaceFiles } from './helpers'
 
@@ -267,9 +267,7 @@ describe('classActionMembers', () => {
   function membersOf(source: string): { name: string; bodyType: string }[] {
     const ast = parseSourceFile(source, 'PostController.ts')
     if (!ast) throw new Error('fixture failed to parse')
-    const classDecl = ast.program.body
-      .map((node) => extractClassDeclaration(node))
-      .find((decl) => decl !== null)
+    const classDecl = firstClassDeclaration(ast.program.body)
     if (!classDecl) throw new Error('fixture declares no class')
     return [...classActionMembers(classDecl)].map(({ name, body }) => ({
       name,
@@ -311,6 +309,22 @@ describe('classActionMembers', () => {
   protected guard = () => true
 }`).map((m) => m.name),
     ).toEqual(['constructor', 'make', 'helper', 'guard'])
+  })
+
+  // Names come from the shared `memberKeyName` rule rather than a local
+  // `key.type === 'Identifier'` test, which got both of these wrong: it read
+  // the literal text of a computed key as the action name, and dropped a
+  // quoted one that dispatches perfectly well.
+  it('reads a quoted key and refuses to guess at a computed one', () => {
+    expect(
+      membersOf(`const store = 'destroy'
+class PostController {
+  [store]() {}
+  'quoted'() {}
+  'quotedField' = () => null
+  plain() {}
+}`).map((m) => m.name),
+    ).toEqual(['quoted', 'quotedField', 'plain'])
   })
 
   // Neither carries a body a scanner could read, and a `#private` member is

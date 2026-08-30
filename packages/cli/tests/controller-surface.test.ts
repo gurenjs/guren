@@ -60,14 +60,13 @@ async function publicControllerSurface(): Promise<string[]> {
     const names = new Set<string>()
     for (const member of classDecl.body.body) {
       const callable =
-        member.type === 'ClassMethod'
-        || member.type === 'TSDeclareMethod'
+        ((member.type === 'ClassMethod' || member.type === 'TSDeclareMethod')
+          && member.kind !== 'constructor')
         || (member.type === 'ClassProperty'
           && (member.value?.type === 'ArrowFunctionExpression'
             || member.value?.type === 'FunctionExpression'))
       if (!callable) continue
       if (member.static || member.accessibility === 'private') continue
-      if (member.type !== 'ClassProperty' && member.kind === 'constructor') continue
       if (member.key.type !== 'Identifier') {
         throw new Error(
           `Controller has a public/protected member with a ${member.key.type} key, which this guard `

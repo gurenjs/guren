@@ -17,14 +17,13 @@ import {
 } from './discovery'
 import {
   classUsesAuthenticatableBase,
-  extractClassDeclaration,
   extractTableIdentifier,
   findStaticClassProperty,
   firstClassDeclaration,
   resolveModelStringArrayConfig,
   staticStringProperty,
 } from './model-parser'
-import { classActionMembers } from './controller-methods'
+import { emptyActions } from './controller-methods'
 import { checkConsoleCommandRegistration } from './console-check'
 import { checkRoutePathParams, discoverRoutePathFiles } from './route-path-check'
 import { affectsRouteWiring, checkRouteRegistrarWiring } from './routes-check'
@@ -753,31 +752,18 @@ async function checkEmptyMethods(cache: ParseCache, filePath: string, relPath: s
   const results: CheckResult[] = []
   const parsed = await cache.get(filePath)
   if (!parsed) return results
-  const { ast } = parsed
 
-  for (const node of ast.program.body) {
-    const classDecl = extractClassDeclaration(node)
-    if (!classDecl) continue
-    const className = classDecl.id?.name ?? classNameFromPath(filePath)
-
-    // Class-field actions included: `store = async () => {}` is as empty as
-    // `async store() {}`, and both dispatch. An expression-bodied arrow never
-    // reaches the block test — its expression is its body, so it is never
-    // empty.
-    for (const { name, body } of classActionMembers(classDecl)) {
-      if (name === 'constructor') continue
-      if (body.type !== 'BlockStatement' || body.body.length > 0) continue
-      results.push(
-        check(
-          `empty-method:${className}.${name}`,
-          `${className}.${name}()`,
-          'warn',
-          `Method ${name}() has an empty body.`,
-          `Implement ${className}.${name}() in ${relPath}.`,
-          relPath,
-        ),
-      )
-    }
+  for (const { className, name } of emptyActions(parsed.ast, filePath)) {
+    results.push(
+      check(
+        `empty-method:${className}.${name}`,
+        `${className}.${name}()`,
+        'warn',
+        `Method ${name}() has an empty body.`,
+        `Implement ${className}.${name}() in ${relPath}.`,
+        relPath,
+      ),
+    )
   }
 
   return results

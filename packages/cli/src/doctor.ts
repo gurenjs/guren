@@ -25,8 +25,7 @@ import {
   type PageManifestPlan,
 } from './pages-types'
 import { AGENTS_MANIFEST_FILE, planAgentManifest, type AgentManifestPlan } from './agents-types'
-import { classActionMembers } from './controller-methods'
-import { extractClassDeclaration } from './model-parser'
+import { emptyActions } from './controller-methods'
 import { parseSourceFile } from './parse-cache'
 import { ROUTES_ENTRY_CANDIDATES } from './route-registrar'
 import {
@@ -1510,24 +1509,13 @@ export async function suggestNextSteps(
       const ast = parseSourceFile(source, filePath)
       if (!ast) continue
 
-      for (const node of ast.program.body) {
-        const classDecl = extractClassDeclaration(node)
-        if (!classDecl) continue
-        const className = classDecl.id?.name ?? classNameFromPath(filePath)
-
-        // Class-field actions count: `store = async () => {}` is as empty as
-        // `async store() {}`. An expression-bodied arrow is never empty —
-        // its expression is its body — so it fails the block test.
-        for (const { name, body } of classActionMembers(classDecl)) {
-          if (name === 'constructor') continue
-          if (body.type !== 'BlockStatement' || body.body.length > 0) continue
-          steps.push({
-            priority: priority++,
-            title: `Implement ${className}.${name}()`,
-            description: 'Method has an empty body.',
-            filePath: relative(cwd, filePath),
-          })
-        }
+      for (const { className, name } of emptyActions(ast, filePath)) {
+        steps.push({
+          priority: priority++,
+          title: `Implement ${className}.${name}()`,
+          description: 'Method has an empty body.',
+          filePath: relative(cwd, filePath),
+        })
       }
     }
   } catch {

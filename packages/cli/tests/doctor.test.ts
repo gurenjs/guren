@@ -1364,15 +1364,12 @@ class TaskController {
   it('suggests implementing an empty class-field action but not a concise arrow', async () => {
     const workspace = await createTempWorkspace('guren-cli-doctor-empty-field-action-')
     try {
-      await mkdir(join(workspace.dir, 'app/Http/Controllers'), { recursive: true })
-      await writeFile(
-        join(workspace.dir, 'app/Http/Controllers/TaskController.ts'),
-        `export class TaskController {
+      await writeWorkspaceFiles(workspace.dir, {
+        'app/Http/Controllers/TaskController.ts': `export class TaskController {
   store = async () => {}
   show = () => this.inertia('tasks/Show', {})
 }`,
-        'utf8',
-      )
+      })
 
       const steps = await suggestNextSteps({ cwd: workspace.dir })
       const implement = steps.filter((step) => step.title.startsWith('Implement '))

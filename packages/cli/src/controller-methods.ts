@@ -10,7 +10,7 @@ import type {
 import { classNameFromPath, discoverControllerFiles } from './discovery'
 import { extractClassDeclaration } from './model-parser'
 import { ParseCache } from './parse-cache'
-import { walk } from './ast-walk'
+import { memberKeyName, walk } from './ast-walk'
 
 /**
  * Controller action bodies, extracted once and judged by regex afterwards.
@@ -423,6 +423,23 @@ export async function parseControllerMethods(
  * empty-body rule, `guren doctor`'s next steps, `guren context <Entity>`, and
  * the `spec:generate` screens view all read this list.
  *
+ * Member names come from `memberKeyName`, so a quoted key (`'store'() {}`)
+ * counts — it dispatches as `controller['store']` like any other — and a
+ * computed key (`[store]() {}`) does not: it names whatever the expression
+ * holds at runtime, which this scan cannot know, and guessing the literal
+ * text would attribute a body to an action that may not exist.
+ *
+ * One declaration is yielded per member, not one per *name*: a name declared
+ * twice yields twice. TypeScript rejects that outright (TS2300), so it needs a
+ * hand-written `.js`/`.mjs` controller — which `discoverControllerFiles` does
+ * collect. Collapsing to the name would be wrong for the shape that actually
+ * occurs, a `get x()`/`set x()` pair, which is two members legitimately
+ * sharing one name. Callers that report per name may therefore report a
+ * duplicated name twice, as they did when they walked members themselves.
+ * Worth knowing if you key on the name: an instance field shadows a prototype
+ * method whatever the source order, so the last declaration is not always the
+ * one that dispatches.
+ *
  * The question it answers is structural — *is this member function-shaped* —
  * and nothing more. Which of those members a given scanner cares about is
  * policy each one owns: `constructor` is yielded (three of the five skip it,
@@ -450,19 +467,56 @@ export function* classActionMembers(
   classDecl: ClassDeclaration,
 ): Generator<ClassActionMember> {
   for (const member of classDecl.body.body) {
-    if (member.type === 'ClassMethod' && member.key.type === 'Identifier') {
-      yield { member, name: member.key.name, body: member.body }
+    if (member.type === 'ClassMethod') {
+      const name = memberKeyName(member)
+      if (name !== undefined) yield { member, name, body: member.body }
       continue
     }
 
-    if (member.type === 'ClassProperty' && member.key.type === 'Identifier') {
+    if (member.type === 'ClassProperty') {
       const { value } = member
       if (
         value
         && (value.type === 'ArrowFunctionExpression' || value.type === 'FunctionExpression')
       ) {
-        yield { member, name: member.key.name, body: value.body }
+        const name = memberKeyName(member)
+        if (name !== undefined) yield { member, name, body: value.body }
       }
+    }
+  }
+}
+
+/**
+ * Controller actions declared with an empty body, per class in one file.
+ *
+ * The rule behind two findings that are the same observation rendered twice:
+ * `guren check`'s `empty-method:` warning and `guren doctor --next`'s
+ * "Implement X()" step. They read the same AST the same way and differ only in
+ * the record they emit, so the walk lives here and each command keeps its own
+ * file I/O and result shape. Written out twice, the block-before-length test
+ * below is a trap one copy can lose.
+ *
+ * `constructor` is filtered here rather than by the callers because this is a
+ * rule, not the structural iterator: a constructor is not an action to
+ * implement under either command's reading.
+ */
+export interface EmptyAction {
+  className: string
+  name: string
+}
+
+export function* emptyActions(ast: File, filePath: string): Generator<EmptyAction> {
+  for (const node of ast.program.body) {
+    const classDecl = extractClassDeclaration(node)
+    if (!classDecl) continue
+    const className = classDecl.id?.name ?? classNameFromPath(filePath)
+
+    for (const { name, body } of classActionMembers(classDecl)) {
+      if (name === 'constructor') continue
+      // An expression-bodied arrow has no block; its expression is its body,
+      // so it is never empty. The block test has to come first.
+      if (body.type !== 'BlockStatement' || body.body.length > 0) continue
+      yield { className, name }
     }
   }
 }
