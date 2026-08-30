@@ -243,3 +243,39 @@ describe('AuthManager.useTokens guard name collision', () => {
     expect(() => manager.useTokens(new MemoryApiTokenStore())).not.toThrow()
   })
 })
+
+describe('AuthManager.getApiTokenStore', () => {
+  test('should report no store before useTokens is called', () => {
+    expect(new AuthManager().getApiTokenStore()).toBeUndefined()
+  })
+
+  test('should return the store useTokens was configured with', () => {
+    const manager = new AuthManager()
+    const store = new MemoryApiTokenStore()
+
+    manager.useTokens(store)
+
+    expect(manager.getApiTokenStore()).toBe(store)
+  })
+
+  test('should replace the store on a legal re-call', () => {
+    const manager = new AuthManager()
+    manager.useTokens(new MemoryApiTokenStore())
+    const replacement = new MemoryApiTokenStore()
+
+    manager.useTokens(replacement)
+
+    expect(manager.getApiTokenStore()).toBe(replacement)
+  })
+
+  test('should keep no store from a call the guard-collision check refused', () => {
+    const manager = new AuthManager()
+    manager.registerGuard('web', createMockGuardFactory())
+
+    expect(() => manager.useTokens(new MemoryApiTokenStore(), { guardName: 'web' })).toThrow()
+
+    // A refused call registered no guard, so an issuer must not find a store
+    // it could write tokens into that nothing would ever read.
+    expect(manager.getApiTokenStore()).toBeUndefined()
+  })
+})
