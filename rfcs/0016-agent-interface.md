@@ -185,11 +185,21 @@ Tool execution re-enters the application as a real HTTP request:
    body and validated by the route/controller as usual. Passing live Zod to the SDK
    would apply `coerce`/`default`/`transform` twice.
 3. **CSRF**: verification is skipped for requests that carry `Authorization: Bearer`
-   **and no session cookie**. CSRF defends cookie ambient authority; a cookie-less
-   request has none. The cookie condition matters because CSRF middleware runs before
-   auth context and cannot verify the bearer token — with it, a forged Bearer header
-   on a cookie-carrying (victim-browser) request is still verified. Cookie issuance
-   (`settleCookie`) is unchanged. No endpoint-specific CSRF exemption is needed.
+   **and ~~no session cookie~~ no `Cookie` header at all**. **Amended in
+   implementation:** the predicate is the raw `Cookie` header's absence, which is
+   both stricter and more robust than "no session cookie". The session cookie's
+   name is configuration owned by the session middleware mount and invisible to the
+   CSRF middleware, and the tempting refinement — keying on the *loaded* session —
+   is weaker on both edges: mounted before the session middleware it sees no
+   session and fails open for a cookie-carrying victim browser, and an intermediate
+   middleware writing one value into a fresh session turns a genuinely cookie-less
+   client into a 403. Ambient authority requires a cookie, so the header's absence
+   is proof by itself, independent of mount order; dispatch synthesizes cookie-less
+   bearer requests by construction, and a bearer request carrying any cookie simply
+   verifies as before. Bearer detection is the shared `readBearerToken()`, so this
+   rule and token authentication cannot disagree about what a bearer request is.
+   Cookie issuance (`settleCookie`) is unchanged. No endpoint-specific CSRF
+   exemption is needed.
 4. **Response mapping** to MCP results:
    - 2xx JSON → `structuredContent` (when an outputSchema is advertised) + serialized text content
    - 2xx Inertia page JSON → unwrapped to `page.props`, **only** for routes with no
