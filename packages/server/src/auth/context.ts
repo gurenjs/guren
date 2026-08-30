@@ -12,12 +12,15 @@ export const AUTH_CONTEXT_KEY = 'guren:auth'
 /**
  * Read the framework auth context off a request context.
  *
- * Duck-typed on purpose: `ctx.get` returns arbitrary values for unknown keys —
- * test doubles and exotic contexts included — so a bare cast hands out values
- * that are not auth contexts at all. The `user` probe is a cheap sanity check,
- * not validation: an object shaped like an auth context is taken at its word.
+ * The lookup and its cast, in one place — nothing more. `ctx.get` returns
+ * arbitrary values for unknown keys (test doubles and exotic contexts
+ * included), so the cast is a claim, not a check. A caller whose behavior
+ * turns on the value really being an auth context probes the member it is
+ * about to call; `Gate.resolveUser` does exactly that, because a stray value
+ * there decides whether the legacy `ctx.get('user')` fallback runs. Probing
+ * here instead would reject contexts that `requireAuthenticated` and
+ * `requireGuest` can use — they only ever read `check()` / `guest()`.
  */
 export function getAuthContext(ctx: { get: (key: string) => unknown }): AuthContext | undefined {
-  const auth = ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
-  return auth && typeof auth.user === 'function' ? auth : undefined
+  return ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
 }
