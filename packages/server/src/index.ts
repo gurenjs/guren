@@ -45,6 +45,23 @@ export type {
   DerivedAgentToolAnnotations,
   DerivedAgentToolExposure,
 } from './agent/derive'
+// Agent Security Layer (RFC 0016 §5): the token scope grammar that gates the
+// agent surface, the audit events every surface emits, and the argument
+// masking those events' payloads must already have been through. Pure logic —
+// no dispatch, so a CLI, a codegen step and a protocol adapter share one rule.
+export {
+  AGENT_TOOL_NAME_PATTERN,
+  expandToolScopes,
+  parseToolScope,
+  scopesAllowTool,
+} from './agent/scopes'
+export type { ParsedToolScope, ScopedTool } from './agent/scopes'
+export { AgentToolDenied, AgentToolInvoked } from './agent/events'
+export type { AgentPrincipal, AgentSurface, AgentToolDenialReason } from './agent/events'
+// `AGENT_REDACTED` only: a listener or a test asserting on a masked field
+// wants that literal, while the walk's own terminator markers are an internal
+// detail of a total function, not a vocabulary a consumer matches on.
+export { AGENT_REDACTED, redactAgentArguments } from './agent/redact'
 export { ViewEngine } from './mvc/ViewEngine'
 export { inertia, setInertiaSsrRenderer, setInertiaDocument } from './mvc/inertia/InertiaEngine'
 export { setInertiaSharedProps, getInertiaSharedPropsResolver, shareInertiaProps } from './mvc/inertia/shared'
