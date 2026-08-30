@@ -579,3 +579,123 @@ describe('readInertiaResponse', () => {
     expect(result.payload.props.html).toBe('<div>&</div>')
   })
 })
+
+/**
+ * The mock and the runtime must hand a validation schema the same query data,
+ * or a controller test passes on behavior production does not have.
+ *
+ * The runtime validates against `flattenRequestQueries`, which reads
+ * `ctx.req.queries()` and returns `values.length === 1 ? values[0] : values` —
+ * so a repeated key arrives as an ARRAY and a single occurrence as a string.
+ * The mock validated against `ctx.req.query()`, one value per key, so
+ * `?tag=a&tag=b` reached a `z.array(...)` schema as `'b'`.
+ *
+ * The probe is `validateQuery`/`validateQuerySafe` specifically: `input()`
+ * takes the keyed `query(key)` form on both sides and already agreed, so an
+ * `input()`-based test here could never fail. The schema is an identity one so
+ * the buggy mock returns a wrong shape instead of throwing 422, which is what
+ * lets the two sides be compared directly. Both keys are asserted on purpose:
+ * a repeated-only case also passes under a mock that wraps every value in an
+ * array, which would agree on `tag` while newly disagreeing on `page`.
+ */
+describe('repeated query parameters', () => {
+  const URL_UNDER_TEST = 'http://example.com/posts?tag=core&tag=framework&page=2'
+  const EXPECTED = { tag: ['core', 'framework'], page: '2' }
+
+  const identitySchema = {
+    safeParse: (data: unknown) => ({ success: true as const, data }),
+  }
+
+  function readThroughMock(surface: 'validateQuery' | 'validateQuerySafe'): unknown {
+    const { Controller } = createControllerModuleMock()
+
+    class ReadController extends Controller {
+      read() {
+        if (surface === 'validateQuery') {
+          return this.validateQuery(identitySchema)
+        }
+        const result = this.validateQuerySafe(identitySchema)
+        return result.success ? result.data : result.errors
+      }
+    }
+
+    const controller = new ReadController()
+    controller.setContext(
+      createControllerContext(URL_UNDER_TEST) as unknown as ControllerContext
+    )
+
+    return controller.read()
+  }
+
+  async function readThroughRuntime(
+    surface: 'validateQuery' | 'validateQuerySafe',
+  ): Promise<unknown> {
+    // Lazy, like the rest of this package: the mock resolves @guren/server on
+    // demand so a suite that mocks it still gets the real module here.
+    const { Controller, createApp } = await import('@guren/core')
+
+    class ReadController extends Controller {
+      read() {
+        if (surface === 'validateQuery') {
+          return this.json({ value: this.validateQuery(identitySchema) })
+        }
+        const result = this.validateQuerySafe(identitySchema)
+        return this.json({ value: result.success ? result.data : result.errors })
+      }
+    }
+
+    const app = createApp({
+      routes: (router) => {
+        router.get('/posts', [ReadController, 'read'])
+      },
+    })
+    await app.boot()
+
+    const response = await app.fetch(new Request(URL_UNDER_TEST))
+    expect(response.status).toBe(200)
+
+    return ((await response.json()) as { value: unknown }).value
+  }
+
+  for (const surface of ['validateQuery', 'validateQuerySafe'] as const) {
+    it(`${surface}() sees repeated keys as arrays in the mock and the runtime`, async () => {
+      const fromMock = readThroughMock(surface)
+      const fromRuntime = await readThroughRuntime(surface)
+
+      expect(fromRuntime).toEqual(EXPECTED)
+      expect(fromMock).toEqual(EXPECTED)
+      expect(fromMock).toEqual(fromRuntime)
+    })
+  }
+
+  it('flattens from req.url when the context has no queries()', () => {
+    // The fallback branch of flattenContextQueries: `queries()` is optional on
+    // ControllerContext, and a hand-rolled context without one must still see
+    // the array — falling back to `query()` would quietly restore the bug.
+    const { Controller } = createControllerModuleMock()
+
+    class ReadController extends Controller {
+      read() {
+        return this.validateQuery(identitySchema)
+      }
+    }
+
+    const full = createControllerContext(URL_UNDER_TEST)
+    const withoutQueries = {
+      ...full,
+      req: { ...full.req, queries: undefined },
+    } as unknown as ControllerContext
+
+    const controller = new ReadController()
+    controller.setContext(withoutQueries)
+
+    expect(controller.read()).toEqual(EXPECTED)
+  })
+
+  it('reads back the first occurrence from the mock context, as Hono does', () => {
+    const ctx = createControllerContext(URL_UNDER_TEST)
+
+    expect(ctx.req.query()).toEqual({ tag: 'core', page: '2' })
+    expect(ctx.req.query('tag')).toBe('core')
+  })
+})

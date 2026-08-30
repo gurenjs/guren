@@ -58,20 +58,22 @@ export function createControllerContext(
     method: request.method,
     query: (key?: string) => {
       if (!key) {
-        return Object.fromEntries(searchParams.entries())
+        // Hono's no-arg `query()` keeps the FIRST occurrence of a repeated
+        // key, so `?tag=a&tag=b` reads back as `a`. `Object.fromEntries` over
+        // the entries keeps the last one, which is how the mock came to
+        // disagree with the runtime here.
+        const first: Record<string, string> = {}
+        for (const [name, value] of searchParams.entries()) {
+          if (!(name in first)) {
+            first[name] = value
+          }
+        }
+        return first
       }
 
       return searchParams.get(key) ?? undefined
     },
-    queries: () => {
-      const values = new Map<string, string[]>()
-      for (const [key, value] of searchParams.entries()) {
-        const existing = values.get(key) ?? []
-        existing.push(value)
-        values.set(key, existing)
-      }
-      return Object.fromEntries(values)
-    },
+    queries: () => groupSearchParams(searchParams),
     param: () => undefined,
     header: (name: string) => request.headers.get(name) ?? undefined,
   }
@@ -150,6 +152,39 @@ function asRecord(body: unknown): Record<string, unknown> {
   return typeof body === 'object' && body !== null && !Array.isArray(body)
     ? (body as Record<string, unknown>)
     : {}
+}
+
+/**
+ * The mock's counterpart to the runtime's `flattenRequestQueries`: query data
+ * as a validation schema sees it, keeping a repeated key as an array and a
+ * single occurrence as a plain string (`?tag=a&tag=b` → `{ tag: ['a', 'b'] }`,
+ * `?page=2` → `{ page: '2' }`).
+ *
+ * The runtime calls `ctx.req.queries()` unconditionally, so a context without
+ * one throws there. `queries()` is optional on {@link ControllerContext}, and
+ * the fallback re-derives the same grouping from `req.url` — which is required,
+ * and is what `createControllerContext` parses internally anyway. It must not
+ * fall back to `query()`: that surface is one value per key by construction,
+ * which is the divergence this function exists to close.
+ */
+function flattenContextQueries(ctx: ControllerContext): Record<string, unknown> {
+  const queries = ctx.req.queries?.() ?? groupSearchParams(new URL(ctx.req.url).searchParams)
+  const flat: Record<string, unknown> = {}
+  for (const [key, values] of Object.entries(queries)) {
+    flat[key] = values.length === 1 ? values[0] : values
+  }
+  return flat
+}
+
+/** Groups repeated search params into `queries()`' `Record<string, string[]>`. */
+function groupSearchParams(searchParams: URLSearchParams): Record<string, string[]> {
+  const values = new Map<string, string[]>()
+  for (const [key, value] of searchParams.entries()) {
+    const existing = values.get(key) ?? []
+    existing.push(value)
+    values.set(key, existing)
+  }
+  return Object.fromEntries(values)
 }
 
 export function createGurenControllerModule() {
@@ -455,7 +490,7 @@ export function createControllerModuleMock() {
         | { success: true; data: T }
         | { success: false; error: { issues?: Array<{ path: (string | number)[]; message: string }> } }
     }): T {
-      return this.runValidation(schema, this.ctx.req.query(), 422)
+      return this.runValidation(schema, flattenContextQueries(this.ctx), 422)
     }
 
     public validateQuerySafe<T>(schema: {
@@ -463,7 +498,7 @@ export function createControllerModuleMock() {
         | { success: true; data: T }
         | { success: false; error: { issues?: Array<{ path: (string | number)[]; message: string }> } }
     }): { success: true; data: T } | { success: false; errors: Record<string, string> } {
-      return this.runValidationSafe(schema, this.ctx.req.query())
+      return this.runValidationSafe(schema, flattenContextQueries(this.ctx))
     }
 
     public validateParams<T>(schema: {
