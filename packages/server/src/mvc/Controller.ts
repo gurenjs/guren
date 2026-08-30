@@ -698,18 +698,17 @@ export class Controller {
    * Memoized in a box rather than by truthiness: a body of `null`, `''`, `0`
    * or `false` is a parsed body, and re-reading the request would find the
    * stream consumed.
+   *
+   * No fallback of its own: an unparseable body already arrives here as `{}`
+   * from {@link parseRequestBody}, which is what gives every dispatch path the
+   * same answer. A second fallback here could only diverge from that one.
    */
   private async getRawBody(): Promise<unknown> {
     if (this.parsedBody) {
       return this.parsedBody.value
     }
 
-    try {
-      this.parsedBody = { value: await parseRequestBody(this.ctx) }
-    } catch {
-      this.parsedBody = { value: {} }
-    }
-
+    this.parsedBody = { value: await parseRequestBody(this.ctx) }
     return this.parsedBody.value
   }
 
