@@ -188,10 +188,11 @@ async function dispatchThroughApp(
   app: Application,
   c: Context,
   tool: DerivedAgentTool,
-  rawArgs: Record<string, unknown>,
+  args: Record<string, unknown>,
 ): Promise<ToolCallOutcome> {
-  // Preflight is deliberately *not* offered on this surface, though the seam
-  // it uses is server-side and available to every other one (RFC 0016 §5.4).
+  // No `preflight` option below, deliberately: preflight is *not* offered on
+  // this surface, though the seam it uses is server-side and available to
+  // every other one (RFC 0016 §5.4).
   //
   // MCP leaves no room for it inside a tool that advertises an `outputSchema`:
   // the spec requires such a tool to answer with `structuredContent`
@@ -206,8 +207,6 @@ async function dispatchThroughApp(
   // tool's input schema, so no client could discover it. It reaches
   // `guren tool:call` and `@guren/testing` through the dispatch option
   // instead, neither of which is bound by that rule.
-  const args = rawArgs
-
   const built = buildToolRequest(tool, args, {
     // The inbound request's own origin, so the re-entrant request carries the
     // real Host the MCP client reached `/mcp` on. Defaulting to localhost

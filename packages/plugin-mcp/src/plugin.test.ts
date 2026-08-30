@@ -153,6 +153,4 @@ describe('mcpPlugin (integration)', () => {
     const { tools } = await client.listTools()
     expect(tools).toEqual([])
   })
-
-
 })

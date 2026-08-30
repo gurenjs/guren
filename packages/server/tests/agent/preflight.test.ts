@@ -6,6 +6,7 @@ import { Router } from '../../src/mvc/Router'
 import { AGENT_PREFLIGHT_HEADER } from '../../src/internal/agent-preflight'
 import { Controller } from '../../src/mvc/Controller'
 import { authorizeMiddleware } from '../../src/authorization/middleware'
+import { stampCapabilities } from '../../src/http/middleware/capabilities'
 import { createApp } from '../../src/http/Application'
 import { deriveAgentTools } from '../../src/agent/derive'
 import { buildToolRequest } from '../../src/agent/dispatch'
@@ -237,5 +238,29 @@ describe('agent preflight honesty', () => {
     // middleware answering, which is the point. What matters here is that it
     // is not the seam inventing a verdict.
     expect([401, 403]).toContain(response.status)
+  })
+
+  test('claims nothing unverified once the verdict is actually reached', async () => {
+    // The test above cannot show this: a real authorization middleware refuses
+    // before the seam runs, so the honest-report branch is only observable
+    // behind a middleware that carries the capability *and* passes. Without
+    // this, inverting the capability check would break nothing.
+    const app = await mount((router) => {
+      router
+        .post('/posts', [PostController, 'store'])
+        .middleware(stampCapabilities(async (_c, next) => { await next() }, {
+          authorization: { abilities: ['posts.create'], mode: 'all' },
+        }))
+        .name('posts.store')
+        .agent({})
+    })
+
+    const body = (await (await app.request('/posts', { method: 'POST', headers: preflight })).json()) as {
+      unverified: string[]
+      message: string
+    }
+
+    expect(body.unverified).toEqual([])
+    expect(body.message).not.toContain('authorization')
   })
 })

@@ -755,19 +755,17 @@ export class Router<M extends string = never> {
       const inlineMiddlewares = [...route.scopedMiddlewares, ...route.middlewares]
       // Last before the handler, so a preflight verdict answers only for a
       // request that already cleared every other gate — see
-      // createAgentPreflightMiddleware.
-      const preflightMiddleware = createAgentPreflightMiddleware(
-        route,
-        this.aggregateCapabilities(route.routeMiddlewareNames, [
-          ...route.scopedMiddlewares,
-          ...route.middlewares,
-        ]),
-      )
+      // createAgentPreflightMiddleware. The capability walk is passed lazily
+      // because only an `.agent()` route has a seam to build: aggregating
+      // expands every alias and group on the chain, and doing that eagerly
+      // would discard the result for most routes in an app.
+      const preflightMiddleware = createAgentPreflightMiddleware(route, () =>
+        this.aggregateCapabilities(route.routeMiddlewareNames, inlineMiddlewares))
       const chain = [...resolvedMiddlewares, ...inlineMiddlewares]
       if (contractMiddleware) chain.push(contractMiddleware)
       if (preflightMiddleware) chain.push(preflightMiddleware)
-      const allMiddlewares = [...chain, handler]
-      mountRoute(app, route.method, route.path, ...allMiddlewares)
+      chain.push(handler)
+      mountRoute(app, route.method, route.path, ...chain)
     }
   }
 
@@ -1379,14 +1377,16 @@ function throwOnInvalid(schema: ValidationSchema<unknown>, data: unknown): void 
  */
 function createAgentPreflightMiddleware(
   route: RegisteredRoute,
-  capabilities: MiddlewareCapabilities | undefined,
+  capabilities: () => MiddlewareCapabilities,
 ): MiddlewareHandler | null {
   if (!route.agent) {
     return null
   }
 
   const schemas = route.schemas
-  const authorizationOnChain = capabilities?.authorization !== undefined
+  // Resolved once, here: the chain a route was mounted with cannot change, so
+  // asking per request would only move the walk somewhere hotter.
+  const unverified = capabilities().authorization === undefined ? ['authorization'] : []
 
   return async (c, next) => {
     if (c.req.header(AGENT_PREFLIGHT_HEADER) === undefined) {
@@ -1406,8 +1406,6 @@ function createAgentPreflightMiddleware(
       throwOnInvalid(schemas.body, await parseRequestBody(c))
       validated.push('body')
     }
-
-    const unverified = authorizationOnChain ? [] : ['authorization']
 
     // Marked as a verdict so nothing downstream mistakes it for the route's
     // own output: this body does not satisfy an `output` schema, and it is
