@@ -107,6 +107,8 @@ bunx guren context User         # Entity-centric bundle: model, routes, pages, r
 bunx guren docs:graph           # OKF docs relation graph (--entity/--path narrows; --json for agents)
 bunx guren model:list           # List models with relationships
 bunx guren model:list --format json  # Models as JSON
+bunx guren tool:list            # Agent tools this app exposes (RFC 0016); --json for the raw derivation
+bunx guren tool:inspect posts.store  # One tool's full derivation: input, output, authorization, annotations
 
 # Integrity checking
 bunx guren check                # Validate route↔controller↔page consistency, console command registration, route registrar wiring (every routes/*.ts reached from the registrar that would mount it — the entry registrar for the project's, the registrar defineModule({ routes }) names for modules/*/routes/), route paths using `:name*` (not a Hono wildcard — it registers a parameter named literally `name*`), route contracts (`params` schema keys and `bind` keys against the parameters their path declares), agent routes (`.agent()` metadata: a route with no name, an illegal or duplicated tool name, a non-read-only tool with authentication but no authorization; warns on missing output/body schemas, an Inertia response, a read-only tool whose action mutates — declared or GET/QUERY-default — and any verdict blocked by a handler body it does not read), Postgres timestamp time zones, configureAttachments() table bindings, Attachable models in apps with no configureAttachments(), attachments delivery wiring (delivery configured but registerAttachmentRoutes() unmounted; serve: 'redirect' on a disk whose driver cannot presign), architecture boundaries, and doc links (informational; only --arch/--docs/--spec set the exit code)
@@ -285,7 +287,7 @@ export const requireAuth = defineMiddleware(async (c, next) => {
 4. Models reference schema tables via static `table` property
 
 ### End-to-End Type Safety
-- `bunx guren codegen` generates four artifacts in `.guren/`: `pages.gen.ts`, `routes.gen.ts`, `data.gen.ts`, `api-client.gen.ts`
+- `bunx guren codegen` generates four artifacts in `.guren/`: `pages.gen.ts`, `routes.gen.ts`, `data.gen.ts`, `api-client.gen.ts` (plus `agents.gen.ts` for apps whose routes declare `.agent()`)
 - **Route Schema Binding**: Attach Zod schemas to routes via `RouteContractOptions` (`body`, `params`, `query`); codegen extracts schema types and generates typed `body` fields in `ApiRoutes`
 - **Route Model Binding**: `bind: { id: Post }` in route options + `this.model(Post)` in controllers for typed, auto-resolved model instances
 - **Page Props**: Define `interface Props` in page components; codegen extracts them via Babel AST into `PagePropsMap` for compile-time validation in `this.inertia()`
@@ -402,6 +404,9 @@ export const handler = createLambdaHandler(app)
 | `packages/cli/src/schema-check.ts` | AI agent: Postgres `timestamptz` schema checks (part of `guren check`) |
 | `packages/cli/src/attachments-check.ts` | AI agent: attachments wiring checks — a `configureAttachments()` binding a table the schema does not export, an `Attachable(...)` model in an app with no `configureAttachments()` at all, and the RFC 0015 delivery rules (`delivery` configured with no `registerAttachmentRoutes()` route in the loaded definitions; `serve: 'redirect'` on a non-presigning driver); all otherwise only fail at runtime (part of `guren check`) |
 | `packages/cli/src/attachments-types.ts` | AI agent: cross-boundary attachment maps (`.guren/attachments.gen.ts` from `Attachable(...)` declarations, RFC 0013) |
+| `packages/server/src/agent/derive.ts` | The one derivation of agent tools from route contracts (`deriveAgentTools`, RFC 0016). Runtime adapters and codegen both call it, so a generated manifest and a live server cannot advertise different schemas. Total by contract: a collision or an unnamed agent route is a warning plus a deterministic result, never a throw |
+| `packages/cli/src/agents-types.ts` | AI agent: the agent tool manifest (`.guren/agents.gen.ts`) plus the codegen-only enrichment a `resource` hint needs — `definitions()` carries class names, the payload type behind them exists only in the CLI's AST extraction |
+| `packages/cli/src/tool-list.ts` | AI agent: `tool:list` / `tool:inspect`, derived live from the route graph rather than read from the manifest |
 | `packages/cli/src/arch-check.ts` | AI agent: architecture boundary checking (`guren.arch.ts`, see RFC 0002) |
 | `packages/cli/src/arch/index.ts` | `defineArchRules()` + types, published as the `@guren/cli/arch` subpath |
 | `packages/cli/src/changed-files.ts` | Git-diff-based file filtering shared by `check --changed` |

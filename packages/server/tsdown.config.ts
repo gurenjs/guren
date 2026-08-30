@@ -35,6 +35,14 @@ export default defineConfig({
     // Not public API: @guren/core's database stores re-export the expiry
     // rules from here so the two packages cannot drift apart.
     'src/support/expiry.ts',
+    // Not public API either, and here for the same reason one step further
+    // out: `@guren/core/internal/*` re-exports these, so @guren/openapi and
+    // @guren/cli keep one Zod → JSON Schema rule with `deriveAgentTools`.
+    // Declarations come from tsc, JS from here — a path listed in
+    // package.json `exports` but missing below emits a .d.ts with no .js.
+    'src/internal/route-path.ts',
+    'src/internal/zod-compat.ts',
+    'src/internal/zod-json-schema.ts',
   ],
   // Declarations come from `tsc -p tsconfig.build.json` (see the build
   // script): unbundled, one .d.ts per module, which keeps the MCP SDK types

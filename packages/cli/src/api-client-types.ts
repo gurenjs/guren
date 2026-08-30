@@ -83,17 +83,77 @@ export interface BuildApiClientOptions {
   warnings?: string[]
 }
 
-interface ResourceShapeContext {
-  /** Class name → every Resource declaring it. Arity is what decides. */
-  declared: Map<string, ResourceTypeRef[]>
+/**
+ * What resolving one `resource` hint produced, and everything a caller needs
+ * to explain a refusal. Shared with `agents-types.ts`: an agent tool describes
+ * its response from the same hint this client types `json()` from, so the two
+ * cannot be allowed to resolve a class name differently.
+ */
+export interface ResourceShapeResolution {
+  /** The rendered type, with `unknown` in place of every leaf that failed. */
+  type: string
   /** Hint leaves naming a Resource class nothing declares. */
   missing: Set<string>
   /** Hint leaves naming a class that does not resolve to exactly one type. */
   unresolved: Set<string>
+  /** Whether any leaf resolved — i.e. whether the rendered leaves are in play. */
   usedData: boolean
 }
 
-function resourceShapeToType(shape: ResourceResponseShape, context: ResourceShapeContext): string {
+interface ResourceShapeContext<T extends ResourceTypeRef> {
+  declared: Map<string, T[]>
+  renderLeaf: (ref: T) => string
+  missing: Set<string>
+  unresolved: Set<string>
+  usedData: boolean
+}
+
+/**
+ * Resource classes keyed by class name. Grouping rather than keying by name is
+ * what lets arity refuse the ones that cannot be attributed to a single
+ * declaration: class names are unique per app root but not across them — the
+ * project root and any `modules/<name>/` may each declare a `PostResource`.
+ */
+export function groupResourcesByClassName<T extends ResourceTypeRef>(
+  resources: T[] | undefined,
+): Map<string, T[]> {
+  const declared = new Map<string, T[]>()
+  for (const resource of resources ?? []) {
+    const group = declared.get(resource.className)
+    if (group) group.push(resource)
+    else declared.set(resource.className, [resource])
+  }
+  return declared
+}
+
+/**
+ * Render a `resource` response hint as a type, one leaf at a time.
+ *
+ * `renderLeaf` is what varies between callers and nothing else: the API client
+ * emits `Data.Post`, an agent tool's description embeds the extracted type
+ * text. The refusal rules — which class names resolve and which do not — stay
+ * here so one hint cannot mean two things.
+ */
+export function resolveResourceShapeType<T extends ResourceTypeRef>(
+  shape: ResourceResponseShape,
+  declared: Map<string, T[]>,
+  renderLeaf: (ref: T) => string,
+): ResourceShapeResolution {
+  const context: ResourceShapeContext<T> = {
+    declared,
+    renderLeaf,
+    missing: new Set(),
+    unresolved: new Set(),
+    usedData: false,
+  }
+  const type = renderResourceShape(shape, context)
+  return { type, missing: context.missing, unresolved: context.unresolved, usedData: context.usedData }
+}
+
+function renderResourceShape<T extends ResourceTypeRef>(
+  shape: ResourceResponseShape,
+  context: ResourceShapeContext<T>,
+): string {
   if (typeof shape === 'string') {
     const declared = context.declared.get(shape) ?? []
     // A hint carries only the class name (`serializeResourceHint` in the
@@ -101,30 +161,30 @@ function resourceShapeToType(shape: ResourceResponseShape, context: ResourceShap
     // either — guessing would type the response as the other one's payload.
     // One declaration with no emitted type is the same refusal for a different
     // reason, and data.gen's own warnings say which.
-    if (declared.length !== 1 || declared[0].dataName === null) {
+    if (declared.length !== 1 || declared[0]!.dataName === null) {
       ;(declared.length === 0 ? context.missing : context.unresolved).add(shape)
       return 'unknown'
     }
     context.usedData = true
-    return `Data.${declared[0].dataName}`
+    return context.renderLeaf(declared[0]!)
   }
 
   if (Array.isArray(shape)) {
-    return `Array<${resourceShapeToType(shape[0], context)}>`
+    return `Array<${renderResourceShape(shape[0], context)}>`
   }
 
   const entries = Object.entries(shape).map(
-    ([key, value]) => `${quoteObjectKey(key)}: ${resourceShapeToType(value, context)}`,
+    ([key, value]) => `${quoteObjectKey(key)}: ${renderResourceShape(value, context)}`,
   )
   return entries.length > 0 ? `{ ${entries.join('; ')} }` : '{}'
 }
 
-function quoteNames(names: Iterable<string>): string {
+export function quoteNames(names: Iterable<string>): string {
   return Array.from(names).map((name) => `"${name}"`).join(', ')
 }
 
 /** Names the candidates behind an unresolvable class name, by file when known. */
-function describeDeclarations(refs: ResourceTypeRef[]): string[] {
+export function describeDeclarations(refs: ResourceTypeRef[]): string[] {
   return refs.map((ref) => {
     const type = ref.dataName === null ? 'no generated type' : `Data.${ref.dataName}`
     return ref.filePath ? `${ref.filePath} → ${type}` : type
@@ -139,16 +199,7 @@ export function buildApiClientContent(
     .filter((d): d is RouteDefinitionLike & { name: string } => Boolean(d.name))
     .sort((a, b) => a.name.localeCompare(b.name))
 
-  // Resource class names are unique per app root but not across them: the
-  // project root and any `modules/<name>/` may each declare a `PostResource`.
-  // Grouping rather than keying by name is what lets arity, below, refuse the
-  // ones that cannot be attributed to a single declaration.
-  const declared = new Map<string, ResourceTypeRef[]>()
-  for (const resource of options.resources ?? []) {
-    const group = declared.get(resource.className)
-    if (group) group.push(resource)
-    else declared.set(resource.className, [resource])
-  }
+  const declared = groupResourcesByClassName(options.resources)
 
   let importsData = false
 
@@ -158,13 +209,8 @@ export function buildApiClientContent(
     if (d.schemas?.output) return schemaToTypeString(d.schemas.output, { io: 'output' })
     if (d.resource === undefined) return undefined
 
-    const context: ResourceShapeContext = {
-      declared,
-      missing: new Set(),
-      unresolved: new Set(),
-      usedData: false,
-    }
-    const rendered = resourceShapeToType(d.resource, context)
+    const context = resolveResourceShapeType(d.resource, declared, (ref) => `Data.${ref.dataName}`)
+    const rendered = context.type
     // All-or-nothing: a response typed around an unresolved leaf would assert
     // a shape the server does not send. Untyped stays honest. Both sets are
     // reported — a hint naming one unknown class and one ambiguous class has

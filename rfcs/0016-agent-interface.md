@@ -119,8 +119,20 @@ Implementation notes (the non-obvious parts):
 
 **One Zod → JSON Schema rule.** The existing walker in `@guren/openapi`
 (`toOpenApiSchema`, OpenAPI 3.1 = JSON Schema 2020-12) is promoted to a shared
-internal module (`packages/core/src/internal/zod-json-schema.ts`, beside
-`zod-compat.ts`); ~~`@guren/openapi` re-exports it~~ **Amended in implementation:**
+internal module (~~`packages/core/src/internal/zod-json-schema.ts`, beside
+`zod-compat.ts`~~ **Amended in implementation:** `packages/server/src/internal/`,
+both files, with `@guren/core/internal/zod-compat` and
+`@guren/core/internal/zod-json-schema` kept as re-export shims so every consumer
+outside `@guren/server` keeps writing the core specifier. The reason is build
+order, not layering: `@guren/core`'s index is `export * from '@guren/server'`, so
+core builds *after* server and a server module importing a core one closes a
+cycle — server's declaration build runs `tsc -p tsconfig.build.json` with
+`paths: {}` and full checking, so it would look for a core `dist/` that does not
+exist yet. Since §8 places `deriveAgentTools` in `@guren/server`, the one rule
+has to live in the package both it and the OpenAPI generator can see. The
+precedent is `@guren/server/support/expiry`, re-exported by core's
+`store-utils.ts` for the same reason);
+~~`@guren/openapi` re-exports it~~ **Amended in implementation:**
 `@guren/openapi` *imports* it and re-exports nothing. Re-exporting would publish an
 internal module through a package's stable index, which is exactly the tier
 `contributing/api-stability.md` says it must not reach — the walker stays behind one
@@ -331,7 +343,7 @@ tools to elicitation / Workflow approvals server-side.
 | Layer | Package |
 |---|---|
 | `.agent()`, metadata, `definitions()`, `deriveAgentTools`, guard/Gate work, CSRF rule, scope grammar, event types | `@guren/server` (auto-exported by `@guren/core`) |
-| Zod → JSON Schema walker | `packages/core/src/internal/` (not public API) |
+| Zod → JSON Schema walker | `packages/server/src/internal/`, re-exported by `@guren/core/internal/*` (not public API — see the §2 amendment) |
 | codegen, `tool:*` commands, `token:issue`, checks, audits | `@guren/cli` |
 | App MCP endpoint, audit-log implementation, approval queue | `@guren/plugin-mcp` |
 | WebMCP client | `@guren/plugin-webmcp` |

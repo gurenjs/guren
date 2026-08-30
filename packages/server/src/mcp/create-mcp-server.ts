@@ -118,6 +118,17 @@ export interface GurenCliApi {
     opts: CodegenOptions & { resources?: unknown[] },
   ): Promise<CodegenResult | void>
   /**
+   * Agent tools derived from the route manifest (RFC 0016), so it runs after
+   * `generateRouteTypes` and — because a `resource` hint's payload type is
+   * embedded in a tool description — after `generateDataTypes` too. Optional
+   * because `@guren/cli` is resolved from the app at runtime and may predate
+   * it; an older CLI simply generates no agent manifest.
+   */
+  generateAgentTypes?(
+    definitions: unknown[],
+    opts: CodegenOptions & { resources?: unknown[] },
+  ): Promise<CodegenResult | void>
+  /**
    * Route-dependent context generation that re-runs the CLI in a fresh
    * process. Optional because `@guren/cli` is resolved from the app at
    * runtime and may predate it — see `McpServiceProvider`.
@@ -558,6 +569,18 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServer {
       await run(['.guren/pages.gen.ts'], () => cli.generatePageTypes(options))
       const data = await run(['.guren/data.gen.ts'], () => cli.generateDataTypes(options))
       await run(['.guren/channels.gen.ts'], () => cli.generateChannelTypes(options))
+      // Between data and the API client, exactly as `guren codegen` orders it:
+      // a `resource` hint's payload type comes from the Resource definitions,
+      // and the emitted `Data` import resolves against data.gen.ts.
+      if (cli.generateAgentTypes) {
+        const generateAgentTypes = cli.generateAgentTypes.bind(cli)
+        await run(['.guren/agents.gen.ts'], () => {
+          if (!routes?.definitions) {
+            throw new Error('route generation produced no manifest to derive agent tools from')
+          }
+          return generateAgentTypes(routes.definitions, { ...options, resources: data?.definitions })
+        })
+      }
       await run(['.guren/api-client.gen.ts'], () => {
         if (!routes?.definitions) {
           throw new Error('route generation produced no manifest to build a client from')

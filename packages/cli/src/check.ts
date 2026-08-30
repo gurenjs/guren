@@ -50,6 +50,7 @@ import { parseSchemaTables, schemaPathFor, type SchemaTable } from './schema-par
 import { ParseCache } from './parse-cache'
 import { extractInertiaPageRefs, resolveInertiaPageFile, expectedInertiaPagePath } from './inertia-pages'
 import { describePageManifestSuppression, PAGES_MANIFEST_FILE, planPageManifest } from './pages-types'
+import { AGENTS_MANIFEST_FILE, planAgentManifest } from './agents-types'
 import { runArchCheck } from './arch-check'
 import { runDocsCheck } from './docs-check'
 import { runI18nCheck } from './i18n-check'
@@ -93,6 +94,84 @@ export interface RunCheckOptions {
    * zero results.
    */
   i18n?: boolean
+}
+
+/**
+ * The `guren codegen` invocation that regenerates the artifacts *this* check
+ * read — carrying `--routes` when the caller passed one.
+ *
+ * Without it, a `guren check --routes routes/api.ts` run reports on one route
+ * graph and prints a remedy that reads a different one (`routes/web.ts`, the
+ * codegen default), so the command cannot clear the state it was printed for
+ * — and, worse, writes or deletes the manifest from the wrong graph. Same
+ * principle as keying the expectation on the derivation rather than a string
+ * scan: a remedy that does not resolve its own finding is a defect, not a
+ * cosmetic issue.
+ */
+function codegenCommandFor(routesFile?: string): string {
+  if (routesFile === undefined) return 'bunx guren codegen'
+  // Quoted only when it would not survive a shell word-split, so the ordinary
+  // `routes/api.ts` stays copy-pasteable as written.
+  const argument = /^[\w./@-]+$/u.test(routesFile) ? routesFile : `'${routesFile.replace(/'/gu, `'\\''`)}'`
+  return `bunx guren codegen --routes ${argument}`
+}
+
+/**
+ * The agent manifest's own presence check (RFC 0016), which the generic
+ * manifest loop cannot express: `.guren/agents.gen.ts` is expected only when
+ * the derivation yields a tool, and an existing one is *wrong* when it does
+ * not — `guren codegen` deletes it. Both states point at the same command,
+ * which is the property that makes the check clearable.
+ */
+async function checkAgentManifest(
+  cwd: string,
+  routesFile?: string,
+  definitions?: RouteDefinition[],
+): Promise<CheckResult> {
+  const key = `manifest:${AGENTS_MANIFEST_FILE}`
+  const plan = await planAgentManifest(cwd, routesFile, definitions)
+  const codegen = codegenCommandFor(routesFile)
+
+  if (plan.reason === 'unreadable') {
+    return check(
+      key,
+      AGENTS_MANIFEST_FILE,
+      'warn',
+      `Skipped: the route graph failed to load: ${plan.loadError}`,
+      'Fix the error, then run: bunx guren check',
+      routesFile,
+    )
+  }
+
+  if (plan.staleManifest) {
+    return check(
+      key,
+      AGENTS_MANIFEST_FILE,
+      'warn',
+      `${AGENTS_MANIFEST_FILE} describes agent tools this app no longer exposes — no route derives one.`,
+      `Run: ${codegen} (it removes ${AGENTS_MANIFEST_FILE})`,
+    )
+  }
+
+  if (plan.reason === 'no-tools') {
+    return check(
+      key,
+      AGENTS_MANIFEST_FILE,
+      'pass',
+      `No route declares agent metadata; ${AGENTS_MANIFEST_FILE} is not applicable.`,
+    )
+  }
+
+  const present = await fileExists(cwd, AGENTS_MANIFEST_FILE)
+  return check(
+    key,
+    AGENTS_MANIFEST_FILE,
+    present ? 'pass' : 'warn',
+    present
+      ? `${AGENTS_MANIFEST_FILE} is present (${plan.toolCount} ${plan.toolCount === 1 ? 'tool' : 'tools'}).`
+      : `${AGENTS_MANIFEST_FILE} is missing; ${plan.toolCount} ${plan.toolCount === 1 ? 'route derives' : 'routes derive'} an agent tool.`,
+    present ? undefined : `Run: ${codegen}`,
+  )
 }
 
 /**
@@ -173,6 +252,11 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
   const changedFiles = options.changed ? await getChangedFiles(cwd) : null
   const filterChanged = (files: string[]): string[] =>
     changedFiles ? files.filter((f) => changedFiles.has(toPosixRelative(cwd, f))) : files
+  // Whether any changed file could affect what the app's modules evaluate to.
+  // The gate for every check that loads the route graph (5.5, 7.7, 8.7) —
+  // hoisted here rather than declared beside the first of them, because they
+  // are spread across the suite and each must ask the same question.
+  const sourceChanged = !changedFiles || [...changedFiles].some((file) => SOURCE_FILE_PATTERN.test(file))
 
   // `--arch` / `--docs` / `--spec` select suites; combining them runs the
   // union (never silently nothing). No flag = every suite.
@@ -267,6 +351,46 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
       )
     }
 
+    // 5.5. The agent manifest is conditional in both directions, so it cannot
+    // ride the loop above: codegen writes it only for apps that derive at
+    // least one tool, and *removes* it otherwise. Keyed on the derivation
+    // rather than on the presence of `.agent()` in a source file, so the
+    // remedy this prints always clears the state it reports — see
+    // planAgentManifest.
+    //
+    // This check, 7.7 and 7.8 all read registered route definitions, so the
+    // graph is loaded once here and handed to all three. Loading it per
+    // consumer would re-run only the registrar (`load-routes.ts` documents
+    // why nothing is re-evaluated), but it would also repeat the same
+    // load-failure warning — one broken routes file reported as several
+    // findings. Scoped to these three, not to the run: check 10's screens
+    // view still loads the graph itself (see 7.7). Any later check that
+    // reads registered routes belongs here too.
+    //
+    // Gated with 7.7 and 7.8 under --changed, and for their reason: this is
+    // a full module evaluation, which a docs- or lang-only run would pay to
+    // re-derive an answer nothing in that run could have changed.
+    const routeGraphFile = options.routesFile ?? DEFAULT_ROUTES_FILE
+    let graph: Awaited<ReturnType<typeof loadRouteGraph>> | undefined
+    if (sourceChanged) {
+      graph = await loadRouteGraph(cwd, routeGraphFile)
+      if (graph.error) {
+        checks.push(
+          check(
+            'route-graph',
+            'Route graph',
+            'warn',
+            `Skipped: the route graph failed to load: ${graph.error}. Agent manifest, route contract `
+            + 'and agent-route checks did not run.',
+            'Fix the error, then run: bunx guren check',
+            routeGraphFile,
+          ),
+        )
+      } else {
+        checks.push(await checkAgentManifest(cwd, options.routesFile, graph.definitions))
+      }
+    }
+
     // 6. Check every module's db/schema.ts is re-exported from the root
     // db/schema.ts (the wiring make:module performs automatically — this
     // catches modules created or edited by hand). Not an architecture
@@ -329,46 +453,22 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     // signature change: whichever runs first pays the module evaluation, and
     // the second call re-runs only the registrar (`load-routes.ts` documents
     // why nothing is re-evaluated).
-    const sourceChanged = !changedFiles || [...changedFiles].some((file) => SOURCE_FILE_PATTERN.test(file))
-    if (sourceChanged) {
-      // 7.7 and 7.8 both read registered route definitions, so the graph is
-      // loaded once here and handed to both. Loading it twice would re-run
-      // only the registrar (`load-routes.ts` documents why nothing is
-      // re-evaluated), but it would also produce the same load-failure
-      // warning twice — one broken routes file reported as two findings.
-      //
-      // Scoped to these two, not to the run: check 10's screens view still
-      // loads the graph itself, for the reason the paragraph above gives.
-      // Any later check that reads registered routes belongs here too.
-      const routesFile = options.routesFile ?? DEFAULT_ROUTES_FILE
-      const graph = await loadRouteGraph(cwd, routesFile)
+    // The graph itself is loaded once at 5.5 — a load failure was reported
+    // there, so this contributes nothing for it.
+    if (graph?.definitions) {
+      const definitions = graph.definitions
+      checks.push(...(await checkRouteContracts({ cwd, routesFile: routeGraphFile, definitions })))
 
-      if (graph.error) {
-        checks.push(
-          check(
-            'route-graph',
-            'Route graph',
-            'warn',
-            `Skipped: the route graph failed to load: ${graph.error}. Route contract and agent-route `
-            + 'checks did not run.',
-            'Fix the error, then run: bunx guren check',
-            routesFile,
-          ),
-        )
-      } else if (graph.definitions) {
-        checks.push(...(await checkRouteContracts({ cwd, routesFile, definitions: graph.definitions })))
-
-        // 7.8. Check the routes that declare `.agent()` metadata (RFC 0016):
-        // the tool name is legal and unique, a non-read-only tool is covered
-        // by authorization rather than merely authentication, and the schemas
-        // an agent reads exist. Shares 7.7's gate and its definitions.
-        // Content-activated inside — an app with no agent routes contributes
-        // nothing, and one whose agent routes are all inline handlers never
-        // scans a controller.
-        checks.push(
-          ...(await checkAgentRoutes({ cwd, routesFile, definitions: graph.definitions, cache })),
-        )
-      }
+      // 7.8. Check the routes that declare `.agent()` metadata (RFC 0016):
+      // the tool name is legal and unique, a non-read-only tool is covered
+      // by authorization rather than merely authentication, and the schemas
+      // an agent reads exist. Shares 7.7's gate and its definitions.
+      // Content-activated inside — an app with no agent routes contributes
+      // nothing, and one whose agent routes are all inline handlers never
+      // scans a controller.
+      checks.push(
+        ...(await checkAgentRoutes({ cwd, routesFile: routeGraphFile, definitions, cache })),
+      )
     }
 
     // 8. Check Postgres timestamp columns carry a time zone. Content-activated

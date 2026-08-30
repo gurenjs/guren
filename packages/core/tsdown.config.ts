@@ -20,6 +20,7 @@ export default defineConfig({
     'src/lambda.ts',
     'src/redis.ts',
     'src/internal/deploy-build.ts',
+    'src/internal/route-path.ts',
     'src/internal/zod-compat.ts',
     'src/internal/zod-json-schema.ts',
   ],
