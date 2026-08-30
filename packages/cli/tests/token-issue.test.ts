@@ -59,6 +59,14 @@ describe('parseExpiresDuration', () => {
   it('rejects zero rather than minting an already-expired token', () => {
     expect(() => parseExpiresDuration('0d')).toThrow('Invalid --expires value')
   })
+
+  it('rejects a duration that would overflow the Date range', () => {
+    // `now + expiresIn` past the Date range is an Invalid Date, which every
+    // expiry check reads as expired — a dead token reported as issued.
+    expect(() => parseExpiresDuration('99999999999999d')).toThrow('Invalid --expires value')
+    // The bound is generous; a century still parses.
+    expect(parseExpiresDuration('36500d')).toBe(36_500 * 24 * 60 * 60_000)
+  })
 })
 
 describe('parseUserId', () => {
@@ -247,6 +255,26 @@ describe('issueAgentToken', () => {
     })
 
     expect(result.token.expiresAt).toBeNull()
+  })
+
+  it('refuses an empty user ID, which citty accepts for a required flag', async () => {
+    const store = new MemoryApiTokenStore()
+
+    await expect(
+      issueAgentToken(() => store, TOOLS, { name: 'a', userId: '', tools: 'read' }),
+    ).rejects.toThrow('authenticates as nobody')
+
+    expect(store.size).toBe(0)
+  })
+
+  it('refuses an empty name, which nothing could later identify for revocation', async () => {
+    const store = new MemoryApiTokenStore()
+
+    await expect(
+      issueAgentToken(() => store, TOOLS, { name: '  ', userId: 1, tools: 'read' }),
+    ).rejects.toThrow('--name requires a non-empty name')
+
+    expect(store.size).toBe(0)
   })
 
   it('never reaches for the store when the plan is refused', async () => {

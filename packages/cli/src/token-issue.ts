@@ -57,6 +57,15 @@ const DURATION_UNITS: Record<string, number> = {
 const DURATION_PATTERN = /^(\d+)([dhm])$/
 
 /**
+ * The longest expiry that still lands inside the ECMAScript Date range
+ * (±100,000,000 days from the epoch) from any plausible `now`. Half the range
+ * with room to spare: the exact edge is not worth defending, and nothing
+ * legitimate asks for a token good for a quarter of a million years.
+ */
+const MAX_EXPIRES_DAYS = 36_500_000
+const MAX_EXPIRES_MS = MAX_EXPIRES_DAYS * DURATION_UNITS.d!
+
+/**
  * Expand a shorthand `--tools` entry to full scope syntax.
  *
  * An entry that already names a prefix is passed through verbatim — including
@@ -78,18 +87,29 @@ export function normalizeToolScope(entry: string): string {
  * Zero is refused rather than accepted as "expires now": `createApiToken`
  * stores `now + expiresIn` unguarded, so `0m` would mint a token that is
  * already dead — a silent no-op wearing the shape of a successful issuance.
+ * The upper bound refuses the same failure from the other end: past the
+ * Date range, `now + expiresIn` is an Invalid Date, which every expiry check
+ * reads as expired. Both ends fail closed at the store; the point of
+ * refusing here is that the success message would otherwise be false.
  */
 export function parseExpiresDuration(value: string): number {
   const match = DURATION_PATTERN.exec(value)
   const amount = match ? Number(match[1]) : NaN
+  const milliseconds = match ? amount * DURATION_UNITS[match[2]!]! : NaN
 
-  if (!match || !Number.isSafeInteger(amount) || amount <= 0) {
+  if (
+    !match
+    || !Number.isSafeInteger(amount)
+    || amount <= 0
+    || milliseconds > MAX_EXPIRES_MS
+  ) {
     throw new Error(
-      `Invalid --expires value "${value}". Use a positive amount followed by d, h, or m (for example 30d, 12h, 45m).`,
+      `Invalid --expires value "${value}". Use a positive amount followed by d, h, or m (for example 30d, 12h, 45m)`
+        + `, up to ${MAX_EXPIRES_DAYS}d.`,
     )
   }
 
-  return amount * DURATION_UNITS[match[2]!]!
+  return milliseconds
 }
 
 /**
@@ -263,6 +283,18 @@ export async function issueAgentToken(
   tools: readonly ScopedTool[],
   input: TokenIssueInput & { name: string; userId: string | number },
 ): Promise<{ plan: TokenIssuePlan; result: CreateApiTokenResult }> {
+  // citty's `required: true` is satisfied by `--user ''`, and an empty
+  // identifier resolves to no user at all — a token that authenticates as
+  // nobody and only says so at dispatch, which is the inversion this whole
+  // command exists to prevent. Same for a nameless token, which is
+  // unrevocable in practice because nothing in a token list identifies it.
+  if (String(input.userId).trim() === '') {
+    throw new Error('--user requires a user ID; an empty one would issue a token that authenticates as nobody.')
+  }
+  if (input.name.trim() === '') {
+    throw new Error('--name requires a non-empty name; it is how this token is identified when someone revokes it.')
+  }
+
   const plan = planTokenIssue(input, tools)
   const store = await resolveStore()
 
