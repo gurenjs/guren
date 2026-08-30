@@ -2,7 +2,9 @@ import { describe, it, expect, beforeEach, afterEach, spyOn } from 'bun:test'
 import { mkdir, symlink, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { runCommand } from 'citty'
 import { createTempWorkspace, linkWorkspaceCore, type TempWorkspace } from './helpers'
+import { builtinSubCommands } from '../src/commands'
 import { runTokenIssue } from '../src/token-issue'
 
 const repoRoot = resolve(import.meta.dir, '../../..')
@@ -196,5 +198,83 @@ export default registerWebRoutes
     await expect(
       runTokenIssue({ name: 'ci', user: '42', tools: 'posts.index', appRoot: appDir, json: true }),
     ).rejects.toThrow('no agent tools')
+  })
+})
+
+/**
+ * The citty layer, driven through the parser rather than around it.
+ *
+ * `runTokenIssue` above receives values already narrowed to scalars, so it
+ * cannot see the defect these cover: citty arrays a repeated flag and every
+ * array is truthy, which turned `--yes=false --yes=false` into consent for a
+ * `tools:*` grant. A test that calls the function directly passes whether or
+ * not the command reads its flags safely — the bug lives in the parse.
+ */
+describe('token:issue flag parsing', () => {
+  let workspace: TempWorkspace
+  let appDir: string
+  let logSpy: ReturnType<typeof spyOn>
+  let exitSpy: ReturnType<typeof spyOn>
+
+  beforeEach(async () => {
+    workspace = await createTempWorkspace('guren-cli-token-flags-')
+    await linkFixtureDependencies(workspace.dir)
+    appDir = join(workspace.dir, 'app')
+    await mkdir(join(appDir, 'routes'), { recursive: true })
+    await mkdir(join(appDir, 'src'), { recursive: true })
+    await writeFile(join(appDir, 'routes/web.ts'), ROUTES)
+    await writeFile(join(appDir, 'src/main.ts'), MAIN)
+    logSpy = spyOn(console, 'log').mockImplementation(() => {})
+    // The command ends a successful run with `process.exit(0)` — it boots the
+    // app and closes none of what that opens. Left real, the first passing
+    // case would take the test runner with it, so success is observed as this
+    // sentinel instead.
+    exitSpy = spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      throw new Error(`process.exit(${code ?? 0})`)
+    }) as never)
+  })
+
+  afterEach(async () => {
+    exitSpy.mockRestore()
+    logSpy.mockRestore()
+    await workspace.cleanup()
+  })
+
+  async function runFlags(rawArgs: string[]): Promise<unknown> {
+    const command = builtinSubCommands['token:issue']
+    return runCommand(command, { rawArgs: [...rawArgs, '--app', appDir, '--json'] })
+  }
+
+  it('still refuses tools:* when --yes is repeated as false', async () => {
+    await expect(
+      runFlags(['--name', 'ci', '--user', '42', '--tools', '*', '--yes=false', '--yes=false']),
+    ).rejects.toThrow('--yes')
+  })
+
+  it('honours the last value of a repeated boolean rather than any false', async () => {
+    // The inverse direction, on a scope that only issues when the last value
+    // wins: `posts.store` is a write tool, so a lingering `--read-only=true`
+    // would refuse it. Reaching the success exit is the assertion.
+    await expect(
+      runFlags(['--name', 'ci', '--user', '42', '--tools', 'posts.store', '--read-only=true', '--read-only=false']),
+    ).rejects.toThrow('process.exit(0)')
+  })
+
+  it('reads the last --tools rather than joining repeats', async () => {
+    // Joined, the repeat would read as one scope naming neither tool and be
+    // refused; last-wins issues against the second one, so this reaches the
+    // success exit.
+    await expect(
+      runFlags(['--name', 'ci', '--user', '42', '--tools', 'internal.index', '--tools', 'posts.index']),
+    ).rejects.toThrow('process.exit(0)')
+  })
+
+  it('refuses a repeated --allow-unmatched that ends in false', async () => {
+    await expect(
+      runFlags([
+        '--name', 'ci', '--user', '42', '--tools', 'billing.*',
+        '--allow-unmatched=true', '--allow-unmatched=false',
+      ]),
+    ).rejects.toThrow('matches none of this app')
   })
 })
