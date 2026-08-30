@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
   blankCommentsAndStrings,
+  classActionMembers,
   mutatesRecords,
   parseControllerMethods,
   AUTHORIZE_CALL_PATTERN,
@@ -12,6 +13,7 @@ import {
   FORCE_WRITE_PATTERN,
   INERTIA_CALL_PATTERN,
 } from '../src/controller-methods'
+import { extractClassDeclaration } from '../src/model-parser'
 import { parseSourceFile } from '../src/parse-cache'
 import { writeWorkspaceFiles } from './helpers'
 
@@ -251,5 +253,79 @@ export class PostController extends Controller {
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
+  })
+})
+
+/**
+ * The one answer to "which members of a controller class are actions", shared
+ * by five scanners. Covered here rather than only through its callers because
+ * a gap in it surfaces once per command as an unexplained verdict, and the
+ * blind spot it exists to close (class-field actions) was originally fixed in
+ * one caller while four others kept their own copy of the wrong test.
+ */
+describe('classActionMembers', () => {
+  function membersOf(source: string): { name: string; bodyType: string }[] {
+    const ast = parseSourceFile(source, 'PostController.ts')
+    if (!ast) throw new Error('fixture failed to parse')
+    const classDecl = ast.program.body
+      .map((node) => extractClassDeclaration(node))
+      .find((decl) => decl !== null)
+    if (!classDecl) throw new Error('fixture declares no class')
+    return [...classActionMembers(classDecl)].map(({ name, body }) => ({
+      name,
+      bodyType: body.type,
+    }))
+  }
+
+  it('yields both a method and a function-valued class field', () => {
+    expect(
+      membersOf(`class PostController {
+  async index() {}
+  store = async () => {}
+  update = function () {}
+}`),
+    ).toEqual([
+      { name: 'index', bodyType: 'BlockStatement' },
+      { name: 'store', bodyType: 'BlockStatement' },
+      { name: 'update', bodyType: 'BlockStatement' },
+    ])
+  })
+
+  // An expression-bodied arrow has no block, so the expression is the body —
+  // which is why an emptiness rule must test for the block before its length.
+  it('yields the expression itself as the body of a concise arrow', () => {
+    expect(membersOf('class PostController {\n  show = () => this.inertia("posts/Show", {})\n}')).toEqual([
+      { name: 'show', bodyType: 'CallExpression' },
+    ])
+  })
+
+  // Structural question only: which of these a scanner cares about is policy
+  // it owns, so hoisting any of these filters in here would apply them to
+  // callers that never asked for them.
+  it('yields constructor, static and private members, leaving those filters to callers', () => {
+    expect(
+      membersOf(`class PostController {
+  constructor() {}
+  static make() {}
+  private helper() {}
+  protected guard = () => true
+}`).map((m) => m.name),
+    ).toEqual(['constructor', 'make', 'helper', 'guard'])
+  })
+
+  // Neither carries a body a scanner could read, and a `#private` member is
+  // unreachable by a route in the first place.
+  it('skips fields that hold no function, overload signatures, and #private names', () => {
+    expect(
+      membersOf(`class PostController {
+  perPage = 25
+  title: string
+  declare readonly kind: string
+  overloaded(a: string): void
+  overloaded(a: string): void {}
+  #secret() {}
+  accessor draft = () => null
+}`).map((m) => m.name),
+    ).toEqual(['overloaded'])
   })
 })

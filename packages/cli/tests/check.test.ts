@@ -78,6 +78,32 @@ export default class PostController extends Controller {
     }
   })
 
+  // `store = async () => {}` dispatches exactly like `async store() {}`, so it
+  // is exactly as empty. Scanning only ClassMethod left it unreported.
+  it('detects an empty class-field action, and does not flag a concise arrow', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-empty-field-')
+    try {
+      await mkdir(join(workspace.dir, 'app/Http/Controllers'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'app/Http/Controllers/PostController.ts'),
+        `import { Controller } from '@guren/core'
+export class PostController extends Controller {
+  store = async () => {}
+  show = () => this.inertia('posts/Show', {})
+  perPage = 25
+}`,
+        'utf8',
+      )
+
+      const report = await runCheck({ cwd: workspace.dir })
+      const keys = report.checks.filter((c) => c.key.startsWith('empty-method:')).map((c) => c.key)
+
+      expect(keys).toEqual(['empty-method:PostController.store'])
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('warns about missing test files', async () => {
     const workspace = await createTempWorkspace('guren-cli-check-tests-')
 

@@ -24,6 +24,7 @@ import {
   resolveModelStringArrayConfig,
   staticStringProperty,
 } from './model-parser'
+import { classActionMembers } from './controller-methods'
 import { checkConsoleCommandRegistration } from './console-check'
 import { checkRoutePathParams, discoverRoutePathFiles } from './route-path-check'
 import { affectsRouteWiring, checkRouteRegistrarWiring } from './routes-check'
@@ -759,24 +760,23 @@ async function checkEmptyMethods(cache: ParseCache, filePath: string, relPath: s
     if (!classDecl) continue
     const className = classDecl.id?.name ?? classNameFromPath(filePath)
 
-    for (const member of classDecl.body.body) {
-      if (member.type === 'ClassMethod' && member.key.type === 'Identifier') {
-        if (member.key.name === 'constructor') continue
-        const body = member.body
-        const isEmpty = body.body.length === 0
-        if (isEmpty) {
-          results.push(
-            check(
-              `empty-method:${className}.${member.key.name}`,
-              `${className}.${member.key.name}()`,
-              'warn',
-              `Method ${member.key.name}() has an empty body.`,
-              `Implement ${className}.${member.key.name}() in ${relPath}.`,
-              relPath,
-            ),
-          )
-        }
-      }
+    // Class-field actions included: `store = async () => {}` is as empty as
+    // `async store() {}`, and both dispatch. An expression-bodied arrow never
+    // reaches the block test — its expression is its body, so it is never
+    // empty.
+    for (const { name, body } of classActionMembers(classDecl)) {
+      if (name === 'constructor') continue
+      if (body.type !== 'BlockStatement' || body.body.length > 0) continue
+      results.push(
+        check(
+          `empty-method:${className}.${name}`,
+          `${className}.${name}()`,
+          'warn',
+          `Method ${name}() has an empty body.`,
+          `Implement ${className}.${name}() in ${relPath}.`,
+          relPath,
+        ),
+      )
     }
   }
 

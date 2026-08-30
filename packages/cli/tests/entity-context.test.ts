@@ -294,6 +294,37 @@ verified:
     }
   })
 
+  // `Router` dispatches to a function-valued field exactly as to a method, so
+  // listing only methods dropped a real action out of the bundle silently.
+  it('lists class-field actions alongside methods, still excluding static and private members', async () => {
+    const scoped = await createTempWorkspace('guren-cli-entity-field-actions-')
+    try {
+      await mkdir(join(scoped.dir, 'app/Models'), { recursive: true })
+      await mkdir(join(scoped.dir, 'app/Http/Controllers'), { recursive: true })
+      await writeFile(join(scoped.dir, 'package.json'), '{}', 'utf8')
+      await writeFile(join(scoped.dir, 'app/Models/Task.ts'), 'export class Task {}\n', 'utf8')
+      await writeFile(
+        join(scoped.dir, 'app/Http/Controllers/TaskController.ts'),
+        `export class TaskController {
+  async index() {}
+  store = async () => {}
+  show = () => this.inertia('tasks/Show', {})
+  private helper = () => null
+  static make = () => null
+  perPage = 25
+}
+`,
+        'utf8',
+      )
+
+      const ctx = await generateEntityContext('Task', { cwd: scoped.dir })
+
+      expect(ctx.controller?.actions).toEqual(['index', 'store', 'show'])
+    } finally {
+      await scoped.cleanup()
+    }
+  })
+
   it('renders the Linked docs section', async () => {
     const ctx = await generateEntityContext('Post', { cwd: workspace.dir })
     const md = renderEntityContextMarkdown(ctx)

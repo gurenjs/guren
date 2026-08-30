@@ -22,6 +22,7 @@ import {
   type ModelAttachmentCollection,
   type ModelRelationship,
 } from './model-parser'
+import { classActionMembers } from './controller-methods'
 import { loadRouteDefinitions, resolveRoutesFile } from './load-routes'
 import { parseSourceFile } from './parse-cache'
 import {
@@ -155,15 +156,19 @@ function resolveEntity(
   return matches[0]
 }
 
-function publicMethodNames(classDecl: ClassDeclaration): string[] {
+/**
+ * Action names a route may dispatch to: public, instance-level, and written
+ * either as a method or as a function-valued class field — `Router` accepts
+ * both, so listing only methods left a field action out of the bundle
+ * entirely, with nothing to say it had been skipped.
+ */
+function publicActionNames(classDecl: ClassDeclaration): string[] {
   const actions: string[] = []
-  for (const member of classDecl.body.body) {
-    if (member.type !== 'ClassMethod') continue
-    if (member.key.type !== 'Identifier') continue
-    if (member.key.name === 'constructor') continue
+  for (const { member, name } of classActionMembers(classDecl)) {
+    if (name === 'constructor') continue
     if (member.accessibility === 'private' || member.accessibility === 'protected') continue
     if (member.static) continue
-    actions.push(member.key.name)
+    actions.push(name)
   }
   return actions
 }
@@ -182,12 +187,12 @@ function extractControllerActions(source: string, filePath: string): string[] {
     const classDecl = extractClassDeclaration(node)
     if (!classDecl) continue
     if (node.type !== 'ClassDeclaration') {
-      return publicMethodNames(classDecl)
+      return publicActionNames(classDecl)
     }
     unexported ??= classDecl
   }
 
-  return unexported ? publicMethodNames(unexported) : []
+  return unexported ? publicActionNames(unexported) : []
 }
 
 async function resolvePages(cwd: string, pageIds: string[]): Promise<EntityPage[]> {

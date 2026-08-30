@@ -1,5 +1,12 @@
 import { relative } from 'node:path'
-import type { ClassDeclaration, File } from '@babel/types'
+import type {
+  BlockStatement,
+  ClassDeclaration,
+  ClassMethod,
+  ClassProperty,
+  Expression,
+  File,
+} from '@babel/types'
 import { classNameFromPath, discoverControllerFiles } from './discovery'
 import { extractClassDeclaration } from './model-parser'
 import { ParseCache } from './parse-cache'
@@ -381,11 +388,9 @@ export async function parseControllerMethods(
       }
       classFiles.set(className, relPath)
 
-      for (const member of classDecl.body.body) {
-        const found = memberBodyRange(member)
-        if (!found) continue
-        methods.set(`${className}.${found.name}`, {
-          body: scrubbed.slice(found.start, found.end),
+      for (const { name, body } of classActionMembers(classDecl)) {
+        methods.set(`${className}.${name}`, {
+          body: scrubbed.slice(body.start ?? 0, body.end ?? 0),
           filePath: relPath,
         })
       }
@@ -396,7 +401,8 @@ export async function parseControllerMethods(
 }
 
 /**
- * The source range of one controller action, whichever way it is written.
+ * Every member of a controller class that holds a function body, in whichever
+ * of the two forms it is written.
  *
  * Both forms are legal to `Router`'s types and to its runtime dispatch, so
  * collecting only `ClassMethod` silently downgraded every class-field action:
@@ -410,25 +416,53 @@ export async function parseControllerMethods(
  * }
  * ```
  *
- * For an expression-bodied arrow (`store = () => this.json({})`) the range is
- * the expression itself — there is no block, and the expression is the body.
+ * Shared from this module for the same reason the member vocabulary above is:
+ * five scanners across three commands ask which members of a controller are
+ * actions, and a second copy of the answer is how the class-field blind spot
+ * survived in four of them after the fifth was fixed. `guren check`'s
+ * empty-body rule, `guren doctor`'s next steps, `guren context <Entity>`, and
+ * the `spec:generate` screens view all read this list.
+ *
+ * The question it answers is structural — *is this member function-shaped* —
+ * and nothing more. Which of those members a given scanner cares about is
+ * policy each one owns: `constructor` is yielded (three of the five skip it,
+ * this scan deliberately does not), as are `static` and `private` members,
+ * because a filter hoisted in here would apply to callers that never asked
+ * for it. `TSDeclareMethod` (a bare overload signature) and
+ * `ClassAccessorProperty` are excluded by the type tests below: neither
+ * carries a body a scanner could read.
  */
-function memberBodyRange(
-  member: ClassDeclaration['body']['body'][number],
-): { name: string; start: number; end: number } | undefined {
-  if (member.type === 'ClassMethod' && member.key.type === 'Identifier') {
-    return { name: member.key.name, start: member.body.start ?? 0, end: member.body.end ?? 0 }
-  }
+export interface ClassActionMember {
+  /** The member node itself, for its source span, `accessibility`, and `static`. */
+  member: ClassMethod | ClassProperty
+  name: string
+  /**
+   * The function body. A `BlockStatement` for a method or a block-bodied
+   * arrow; for an expression-bodied arrow (`store = () => this.json({})`)
+   * the expression itself, since there is no block and the expression *is*
+   * the body. A caller asking whether a body is empty must therefore test
+   * for the block first — an expression body is never empty.
+   */
+  body: BlockStatement | Expression
+}
 
-  if (member.type === 'ClassProperty' && member.key.type === 'Identifier') {
-    const { value } = member
-    if (
-      value
-      && (value.type === 'ArrowFunctionExpression' || value.type === 'FunctionExpression')
-    ) {
-      return { name: member.key.name, start: value.body.start ?? 0, end: value.body.end ?? 0 }
+export function* classActionMembers(
+  classDecl: ClassDeclaration,
+): Generator<ClassActionMember> {
+  for (const member of classDecl.body.body) {
+    if (member.type === 'ClassMethod' && member.key.type === 'Identifier') {
+      yield { member, name: member.key.name, body: member.body }
+      continue
+    }
+
+    if (member.type === 'ClassProperty' && member.key.type === 'Identifier') {
+      const { value } = member
+      if (
+        value
+        && (value.type === 'ArrowFunctionExpression' || value.type === 'FunctionExpression')
+      ) {
+        yield { member, name: member.key.name, body: value.body }
+      }
     }
   }
-
-  return undefined
 }

@@ -370,3 +370,80 @@ export function registerInvoiceRoutes(router: Router): void {
     expect(row).toContain('GET /billing/invoices → InvoiceController.index')
   })
 })
+
+/**
+ * A page rendered from a class-field action used to land in the file-level
+ * leftovers instead of being attributed to the action, so it appeared in
+ * screens.md joined to no route at all — or, worse, its controller's other
+ * routes were the only ones the reader saw.
+ */
+describe('screens spec (class-field actions)', () => {
+  let workspace: TempWorkspace
+
+  beforeAll(async () => {
+    workspace = await createTempWorkspace('guren-cli-spec-screens-field-action-')
+    await mkdir(join(workspace.dir, 'app/Http/Controllers'), { recursive: true })
+    await mkdir(join(workspace.dir, 'resources/js/pages/tasks'), { recursive: true })
+    await mkdir(join(workspace.dir, 'routes'), { recursive: true })
+    await writeFile(join(workspace.dir, 'package.json'), '{}', 'utf8')
+
+    await writeFile(
+      join(workspace.dir, 'routes/web.ts'),
+      `import type { Router } from '@guren/core'
+
+class TaskController {
+  index() {}
+  show() {}
+}
+
+export function registerWebRoutes(router: Router): void {
+  router.get('/tasks', [TaskController, 'index'] as any).name('tasks.index')
+  router.get('/tasks/:id', [TaskController, 'show'] as any).name('tasks.show')
+}
+`,
+      'utf8',
+    )
+
+    await writeFile(
+      join(workspace.dir, 'app/Http/Controllers/TaskController.ts'),
+      `export class TaskController {
+  index = async () => {
+    return this.inertia('tasks/Index', { tasks: [] })
+  }
+
+  show = () => this.inertia('tasks/Show', { task: null })
+}
+`,
+      'utf8',
+    )
+
+    for (const page of ['Index', 'Show']) {
+      await writeFile(
+        join(workspace.dir, `resources/js/pages/tasks/${page}.tsx`),
+        `interface Props {\n  tasks: string[]\n}\n\nexport default function ${page}({ tasks }: Props) {\n  return null\n}\n`,
+        'utf8',
+      )
+    }
+  })
+
+  afterAll(async () => {
+    await workspace.cleanup()
+  })
+
+  it('attributes a page to the field action that renders it, block- or expression-bodied', async () => {
+    const { content } = await generateScreensSpec(workspace.dir)
+
+    const indexRow = content.split('\n').find((line) => line.startsWith('| tasks/Index '))
+    expect(indexRow).toContain('GET /tasks → TaskController.index')
+    expect(indexRow).not.toContain('/tasks/:id')
+
+    // The concise arrow has no block — its expression is its body, and the
+    // member span still covers the `this.inertia(...)` call inside it.
+    const showRow = content.split('\n').find((line) => line.startsWith('| tasks/Show '))
+    expect(showRow).toContain('GET /tasks/:id → TaskController.show')
+    expect(showRow).not.toContain('GET /tasks →')
+
+    // Attributed, so neither page falls through to the unrouted listing.
+    expect(content).not.toContain('## Unrouted pages')
+  })
+})

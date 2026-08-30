@@ -1359,6 +1359,30 @@ class TaskController {
     }
   })
 
+  // Same blind spot as `guren check`'s empty-method rule: a field action is an
+  // action, and an expression-bodied arrow has no block to be empty.
+  it('suggests implementing an empty class-field action but not a concise arrow', async () => {
+    const workspace = await createTempWorkspace('guren-cli-doctor-empty-field-action-')
+    try {
+      await mkdir(join(workspace.dir, 'app/Http/Controllers'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'app/Http/Controllers/TaskController.ts'),
+        `export class TaskController {
+  store = async () => {}
+  show = () => this.inertia('tasks/Show', {})
+}`,
+        'utf8',
+      )
+
+      const steps = await suggestNextSteps({ cwd: workspace.dir })
+      const implement = steps.filter((step) => step.title.startsWith('Implement '))
+
+      expect(implement.map((step) => step.title)).toEqual(['Implement TaskController.store()'])
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('does not suggest installing test infrastructure in --next when already present', async () => {
     const workspace = await createTempWorkspace('guren-cli-doctor-test-infra-next-absent-')
 
