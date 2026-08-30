@@ -6,7 +6,7 @@ import { deriveAppKeyring, getAppKeyringFromEnv } from '../../encryption/app-key
 import { MessageSigner } from '../../encryption/MessageSigner'
 import { secureCompare } from '../../encryption/Hash'
 import { isMcpEndpointEnabled, MCP_ENDPOINT_PATH } from '../../mcp/endpoint'
-import { readBearerToken } from '../../auth/api-token'
+import { hasBearerHeader } from '../../auth/api-token'
 
 export const CSRF_TOKEN_KEY = '_csrf_token'
 export const CSRF_HEADER_NAME = 'X-CSRF-TOKEN'
@@ -176,12 +176,13 @@ function isMcpEndpointRequest(path: string): boolean {
  * never reads — therefore keeps verification on; a bearer client that wants
  * the skip sends none, which is what every non-browser client does.
  *
- * Bearer detection is `readBearerToken`, shared with `TokenGuard` and
- * `AuthManager.resolveGuardName`, so this rule and token authentication
- * cannot disagree about what a bearer request is.
+ * Bearer detection is `hasBearerHeader`, the same predicate
+ * `AuthManager.resolveGuardName` routes a request to the token guard by, so
+ * this rule and token authentication cannot disagree about what a bearer
+ * request is.
  */
 function isBearerRequestWithoutCookies(ctx: Context): boolean {
-  if (readBearerToken(ctx.req.header('Authorization')) === null) {
+  if (!hasBearerHeader(ctx)) {
     return false
   }
 

@@ -5,7 +5,7 @@ import { RequestAuthContext } from './RequestAuthContext'
 import { ModelUserProvider, type ModelUserProviderOptions } from './providers/ModelUserProvider'
 import { SessionGuard } from './SessionGuard'
 import { TokenGuard } from './TokenGuard'
-import { readBearerToken, type ApiTokenStore } from './api-token'
+import { hasBearerHeader, type ApiTokenStore } from './api-token'
 import { ScryptHasher } from './password/ScryptHasher'
 import type {
   AttachContextOptions,
@@ -209,10 +209,6 @@ export class AuthManager implements AuthManagerContract {
 
     this.tokenGuard = guardName
   }
-}
-
-function hasBearerHeader(ctx: Context): boolean {
-  return readBearerToken(ctx.req.header('Authorization')) !== null
 }
 
 export type { AuthCredentials } from './types'

@@ -239,13 +239,24 @@ export function parseApiToken(plainTextToken: string): { id: string; token: stri
 /**
  * Extract the bearer token from an Authorization header value. The one
  * parsing rule shared by `createBearerTokenMiddleware`, `TokenGuard`, and
- * the guard selection in `AuthManager` — three readers of the same header
- * must not disagree about what a bearer request is.
+ * `hasBearerHeader` below — three readers of the same header must not
+ * disagree about what a bearer request is.
  */
 export function readBearerToken(header: string | undefined | null): string | null {
   if (!header) return null
   const match = header.match(/^Bearer\s+(.+)$/i)
   return match ? match[1] : null
+}
+
+/**
+ * The one answer to "is this request bearer-authenticated?" — the parsing
+ * rule above applied to the header it is read from. Shared by guard selection
+ * (`AuthManager.resolveGuardName`) and the CSRF skip for cookie-less bearer
+ * requests: both must classify a request identically, and a second copy of
+ * the header name is how they would drift apart.
+ */
+export function hasBearerHeader(ctx: Context): boolean {
+  return readBearerToken(ctx.req.header('Authorization')) !== null
 }
 
 /**
