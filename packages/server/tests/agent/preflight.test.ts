@@ -2,8 +2,10 @@ process.env.APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
 
 import { describe, test, expect } from 'bun:test'
 import { z } from 'zod'
-import { Router, AGENT_PREFLIGHT_HEADER } from '../../src/mvc/Router'
+import { Router } from '../../src/mvc/Router'
+import { AGENT_PREFLIGHT_HEADER } from '../../src/internal/agent-preflight'
 import { Controller } from '../../src/mvc/Controller'
+import { authorizeMiddleware } from '../../src/authorization/middleware'
 import { createApp } from '../../src/http/Application'
 import { deriveAgentTools } from '../../src/agent/derive'
 import { buildToolRequest } from '../../src/agent/dispatch'
@@ -157,5 +159,83 @@ describe('agent preflight', () => {
 
     expect(('request' in plain ? plain.request : undefined)?.headers.get(AGENT_PREFLIGHT_HEADER)).toBeNull()
     expect(('request' in asked ? asked.request : undefined)?.headers.get(AGENT_PREFLIGHT_HEADER)).toBe('1')
+  })
+})
+
+describe('agent preflight and output contracts', () => {
+  test('a verdict survives a route that declares an output schema', async () => {
+    created = 0
+    const app = await mount((router) => {
+      router
+        .post(
+          '/posts',
+          { body: z.object({ title: z.string() }), output: z.object({ created: z.number() }) },
+          [PostController, 'store'],
+        )
+        .name('posts.store')
+        .agent({})
+    })
+
+    // The contract middleware validates the response after the handler; the
+    // verdict is not that response, so validating it would answer 500 to a
+    // request that was allowed.
+    const response = await app.request('/posts', {
+      method: 'POST',
+      headers: preflight,
+      body: JSON.stringify({ title: 'ok' }),
+    })
+
+    expect(response.status).toBe(200)
+    expect((await response.json() as { preflight: boolean }).preflight).toBe(true)
+    expect(created).toBe(0)
+  })
+
+  test('still validates the output schema on a real call', async () => {
+    created = 0
+    const app = await mount((router) => {
+      router
+        .post('/posts', { output: z.object({ nope: z.string() }) }, [PostController, 'store'])
+        .name('posts.store')
+        .agent({})
+    })
+
+    // The skip is keyed on the verdict marker, not on the route declaring
+    // agent metadata — an ordinary call still has its output checked.
+    const response = await app.request('/posts', { method: 'POST' })
+    expect(response.status).toBe(500)
+  })
+})
+
+describe('agent preflight honesty', () => {
+  test('names authorization as unverified when the chain carries none', async () => {
+    const app = await mount((router) => {
+      router.post('/posts', [PostController, 'store']).name('posts.store').agent({})
+    })
+
+    const body = (await (await app.request('/posts', { method: 'POST', headers: preflight })).json()) as {
+      unverified: string[]
+      message: string
+    }
+
+    // `guren check` accepts `await this.authorize(...)` inside the action,
+    // which this seam can never reach — so it must not claim it did.
+    expect(body.unverified).toEqual(['authorization'])
+    expect(body.message).toContain('authorization')
+  })
+
+  test('claims nothing unverified when authorization middleware is on the chain', async () => {
+    const app = await mount((router) => {
+      router
+        .post('/posts', [PostController, 'store'])
+        .middleware(authorizeMiddleware('posts.create'))
+        .name('posts.store')
+        .agent({})
+    })
+
+    const response = await app.request('/posts', { method: 'POST', headers: preflight })
+    // The gate itself refuses an unauthenticated caller — that is the real
+    // middleware answering, which is the point. What matters here is that it
+    // is not the seam inventing a verdict.
+    expect([401, 403]).toContain(response.status)
   })
 })

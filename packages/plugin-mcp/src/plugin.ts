@@ -5,7 +5,6 @@ import {
   definePlugin,
   deriveAgentTools,
   mapToolResponse,
-  PREFLIGHT_ARGUMENT,
   readBearerToken,
   redactAgentArguments,
   verifyApiToken,
@@ -191,17 +190,25 @@ async function dispatchThroughApp(
   tool: DerivedAgentTool,
   rawArgs: Record<string, unknown>,
 ): Promise<ToolCallOutcome> {
-  // `_preflight` is an instruction to this adapter, not a field of the
-  // route's contract — forwarded, it would fail the very validation the
-  // caller asked to rehearse. Stripped before the request is built, and only
-  // here: the scope and approval gates ran first, so a preflight cannot be
-  // used to probe a tool the token may not call.
-  const preflight = rawArgs[PREFLIGHT_ARGUMENT] === true
-  const args = { ...rawArgs }
-  delete args[PREFLIGHT_ARGUMENT]
+  // Preflight is deliberately *not* offered on this surface, though the seam
+  // it uses is server-side and available to every other one (RFC 0016 §5.4).
+  //
+  // MCP leaves no room for it inside a tool that advertises an `outputSchema`:
+  // the spec requires such a tool to answer with `structuredContent`
+  // conforming to that schema unless the result is an error, and a verdict
+  // conforms to no route's output. Reporting "allowed" as `isError` would be
+  // worse than not offering it. So the MCP form needs a companion tool with
+  // its own result schema — which is the same problem the approval queue has
+  // ("the tool result carries the pending state"), and belongs with it in
+  // Phase 2.5 rather than being solved twice, differently.
+  //
+  // Nothing is lost meanwhile: `_preflight` was never advertised in any
+  // tool's input schema, so no client could discover it. It reaches
+  // `guren tool:call` and `@guren/testing` through the dispatch option
+  // instead, neither of which is bound by that rule.
+  const args = rawArgs
 
   const built = buildToolRequest(tool, args, {
-    preflight,
     // The inbound request's own origin, so the re-entrant request carries the
     // real Host the MCP client reached `/mcp` on. Defaulting to localhost
     // (dispatch's fallback) makes host-authorization middleware — which RFC

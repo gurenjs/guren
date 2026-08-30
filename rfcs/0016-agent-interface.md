@@ -295,6 +295,28 @@ Each feature maps to a measured failure mode of the MCP ecosystem.
    never checked the field an agent is most likely to get wrong. And only routes
    declaring `.agent()` honour the header, so no ordinary endpoint changes
    behaviour on a header any client can set.
+
+   **The `_preflight: true` argument does not ship on MCP, and neither can the
+   pending-approval result as described.** Both were specified as a *different
+   shape of success* from the same tool, and MCP forbids exactly that: a tool
+   advertising an `outputSchema` must answer with `structuredContent`
+   conforming to it unless the result is an error (verified against the SDK
+   client, which throws `-32600` on a conforming-schema tool that returns plain
+   content and `-32602` on structured content of the wrong shape). A verdict
+   conforms to no route's output, and reporting "allowed" as an error would be
+   worse than not offering it. So on MCP both need a **companion tool** with its
+   own result schema — one design problem, deferred to 2.5 rather than solved
+   twice, differently. The seam itself is server-side and unaffected: surfaces
+   not bound by that rule (`guren tool:call`, `@guren/testing`) reach it through
+   `BuildToolRequestOptions.preflight`. Nothing was lost in the meantime —
+   `_preflight` was never advertised in any tool's input schema, so no client
+   could have discovered it.
+
+   The verdict also reports what it could *not* check. A route may authorize
+   inside its action (`await this.authorize(...)`), which `guren check` accepts
+   and which a seam stopping before the handler structurally cannot reach, so
+   `allowed: true` carries `unverified: ['authorization']` whenever no
+   authorization capability is present on the middleware chain.
 5. **Static rules** (`guren check` / `guren audit`), beyond schema wiring:
    - authn is not authz: a non-read-only tool with neither an authorization capability
      nor a detected `this.authorize(` **fails**, even when `auth.userOrFail()` is present.

@@ -6,6 +6,7 @@ import { flattenRequestQueries, formatValidationErrors, parseRequestBody, type V
 import { ValidationException } from '../errors/exceptions/ValidationException'
 import type { ValidationSchema } from '../http/middleware/validation'
 import { capabilitiesOf, mergeCapabilities, type MiddlewareCapabilities } from '../http/middleware/capabilities'
+import { AGENT_PREFLIGHT_HEADER, AGENT_PREFLIGHT_VERDICT_HEADER } from '../internal/agent-preflight'
 import { trimSlashes } from '../support/trim-slashes'
 import { extractPathParamNames, PATH_PARAM_PATTERN } from '../internal/route-path'
 
@@ -755,7 +756,13 @@ export class Router<M extends string = never> {
       // Last before the handler, so a preflight verdict answers only for a
       // request that already cleared every other gate — see
       // createAgentPreflightMiddleware.
-      const preflightMiddleware = createAgentPreflightMiddleware(route)
+      const preflightMiddleware = createAgentPreflightMiddleware(
+        route,
+        this.aggregateCapabilities(route.routeMiddlewareNames, [
+          ...route.scopedMiddlewares,
+          ...route.middlewares,
+        ]),
+      )
       const chain = [...resolvedMiddlewares, ...inlineMiddlewares]
       if (contractMiddleware) chain.push(contractMiddleware)
       if (preflightMiddleware) chain.push(preflightMiddleware)
@@ -1340,12 +1347,6 @@ function throwOnInvalid(schema: ValidationSchema<unknown>, data: unknown): void 
 }
 
 /**
- * Header a dispatching agent surface sets to ask for a verdict instead of an
- * execution (RFC 0016 §5.4). Set by `buildToolRequest`, never by a browser.
- */
-export const AGENT_PREFLIGHT_HEADER = 'X-Guren-Agent-Preflight'
-
-/**
  * The preflight seam: everything a request must pass before the handler runs,
  * reported instead of executed.
  *
@@ -1366,13 +1367,26 @@ export const AGENT_PREFLIGHT_HEADER = 'X-Guren-Agent-Preflight'
  * shape of the request an agent is most likely to get wrong. Reading the body
  * is safe precisely because this branch does not call `next()`, so nothing
  * downstream reads the stream after it.
+ *
+ * What it cannot check, it says. A route may authorize inside its action
+ * (`await this.authorize(...)`), which `guren check` accepts as satisfying the
+ * agent-route authorization rule — and which this seam structurally cannot
+ * reach, because the action never runs. So `allowed: true` means "passed
+ * everything that runs before the handler", and `unverified` names what a real
+ * call would still evaluate. Reporting a bare `allowed: true` for a route
+ * whose only authorization lives in its body would be the verdict claiming a
+ * check it never made.
  */
-function createAgentPreflightMiddleware(route: RegisteredRoute): MiddlewareHandler | null {
+function createAgentPreflightMiddleware(
+  route: RegisteredRoute,
+  capabilities: MiddlewareCapabilities | undefined,
+): MiddlewareHandler | null {
   if (!route.agent) {
     return null
   }
 
   const schemas = route.schemas
+  const authorizationOnChain = capabilities?.authorization !== undefined
 
   return async (c, next) => {
     if (c.req.header(AGENT_PREFLIGHT_HEADER) === undefined) {
@@ -1393,15 +1407,26 @@ function createAgentPreflightMiddleware(route: RegisteredRoute): MiddlewareHandl
       validated.push('body')
     }
 
+    const unverified = authorizationOnChain ? [] : ['authorization']
+
+    // Marked as a verdict so nothing downstream mistakes it for the route's
+    // own output: this body does not satisfy an `output` schema, and it is
+    // not the tool's `structuredContent`.
+    c.header(AGENT_PREFLIGHT_VERDICT_HEADER, '1')
     return c.json({
       preflight: true,
       allowed: true,
       route: route.name,
       validated,
+      unverified,
       message:
         'Preflight only: the request passed this route\'s middleware'
         + (validated.length > 0 ? ` and its ${validated.join(', ')} schema${validated.length > 1 ? 's' : ''}` : '')
-        + '. The handler did not run, so nothing was created, changed, or deleted.',
+        + '. The handler did not run, so nothing was created, changed, or deleted.'
+        + (unverified.length > 0
+          ? ' No authorization middleware was found on this route, so any check inside the'
+            + ' handler itself was not evaluated.'
+          : ''),
     })
   }
 }
@@ -1430,8 +1455,10 @@ function createContractValidationMiddleware(route: RegisteredRoute): MiddlewareH
 
     await next()
 
-    // Validate output schema against the response body
-    if (schemas.output && c.res) {
+    // Validate output schema against the response body. A preflight verdict
+    // is not that body — the handler never ran — so validating it here would
+    // reject the verdict and answer 500 to a question that was allowed.
+    if (schemas.output && c.res && c.res.headers.get(AGENT_PREFLIGHT_VERDICT_HEADER) === null) {
       let sourceBody: string
       let parsedBody: unknown
       try {

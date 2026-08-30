@@ -34,8 +34,19 @@ describe('mcpPlugin (integration)', () => {
       .name('posts.index')
       .agent({ description: 'List posts' })
     router
-      .post('/posts', { body: z.object({ title: z.string(), password: z.string() }) }, ({ body }) =>
-        Response.json({ created: body.title }, { status: 201 }))
+      .post(
+        '/posts',
+        {
+          body: z.object({ title: z.string(), password: z.string() }),
+          // Declared on purpose: an object `output` is what makes the SDK
+          // client validate a call's structuredContent after listTools(), and
+          // it is the shape `guren check` steers agent routes toward.
+          output: z.object({ created: z.string() }),
+        },
+        // An output contract validates the returned data, so the handler
+        // returns the payload rather than a Response.
+        ({ body }) => ({ created: body.title }),
+      )
       .name('posts.store')
       .agent({})
   }
@@ -100,11 +111,15 @@ describe('mcpPlugin (integration)', () => {
     })
 
     const client = await connectClient(token)
+    // listTools() first, so the SDK validates the call's structuredContent
+    // against the advertised output schema instead of ignoring it.
+    await client.listTools()
     const result = await client.callTool({
       name: 'posts.store',
       arguments: { title: 'New', password: 'hunter2' },
     })
     expect(result.isError).toBeUndefined()
+    expect(result.structuredContent).toEqual({ created: 'New' })
 
     // Emission is fire-and-forget; give the microtask a beat.
     await new Promise((resolve) => setTimeout(resolve, 10))
@@ -113,7 +128,7 @@ describe('mcpPlugin (integration)', () => {
     expect(invoked!.principal).toEqual({ kind: 'user', id: 42, abilities: ['tools:*'] })
     expect(invoked!.arguments.title).toBe('New')
     expect(invoked!.arguments.password).toBe('[REDACTED]')
-    expect(invoked!.status).toBe(201)
+    expect(invoked!.status).toBe(200)
     expect(invoked!.surface).toBe('mcp')
   })
 
@@ -138,34 +153,6 @@ describe('mcpPlugin (integration)', () => {
     const { tools } = await client.listTools()
     expect(tools).toEqual([])
   })
-  test('should report a preflight verdict without executing the tool', async () => {
-    const client = await connectClient(token)
 
-    const result = await client.callTool({
-      name: 'posts.store',
-      arguments: { title: 'Rehearsal', password: 'x', _preflight: true },
-    })
 
-    expect(result.isError).toBeUndefined()
-    const content = result.content as Array<{ type: string; text: string }>
-    const verdict = JSON.parse(content[0]!.text) as { preflight: boolean; route: string }
-    expect(verdict.preflight).toBe(true)
-    expect(verdict.route).toBe('posts.store')
-  })
-
-  test('should not forward _preflight into the validated body', async () => {
-    const client = await connectClient(token)
-
-    // `_preflight` is an instruction to the adapter; forwarded, it would fail
-    // the strict body schema this route declares — the 422 would look like
-    // the caller's payload was wrong.
-    const result = await client.callTool({
-      name: 'posts.store',
-      arguments: { title: 'Real', password: 'x', _preflight: false },
-    })
-
-    expect(result.isError).toBeUndefined()
-    const content = result.content as Array<{ type: string; text: string }>
-    expect(JSON.parse(content[0]!.text)).toEqual({ created: 'Real' })
-  })
 })

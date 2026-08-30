@@ -19,7 +19,7 @@ export type { ViewOptions } from './mvc/view'
 export type { FC, PropsWithChildren } from 'hono/jsx'
 export { viteAsset } from './http/vite-assets'
 export type { ViteAssetOptions } from './http/vite-assets'
-export { AGENT_PREFLIGHT_HEADER, Router } from './mvc/Router'
+export { Router } from './mvc/Router'
 export type {
   BindableModel,
   AgentRouteMetadata,

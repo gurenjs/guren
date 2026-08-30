@@ -11,7 +11,7 @@
  */
 import type { AgentToolInputSource, DerivedAgentTool } from './derive'
 import { PATH_PARAM_PATTERN } from '../internal/route-path'
-import { AGENT_PREFLIGHT_HEADER } from '../mvc/Router'
+import { AGENT_PREFLIGHT_HEADER, AGENT_PREFLIGHT_VERDICT_HEADER } from '../internal/agent-preflight'
 
 /** How many characters of a non-JSON response body survive into the result. */
 const TEXT_RESPONSE_CAP = 50_000
@@ -305,6 +305,15 @@ export async function mapToolResponse(
       : raw
     if (structured) return inconsistentOutput(tool, `a non-JSON body (${text.slice(0, 200)})`, status)
     return { content: [{ type: 'text', text }], status }
+  }
+
+  // A preflight verdict is not the route's output: the handler never ran.
+  // Returned as plain content whatever the tool advertises — put in
+  // `structuredContent`, an SDK client would validate it against the tool's
+  // output schema and throw, turning an allowed rehearsal into a protocol
+  // error.
+  if (response.headers.get(AGENT_PREFLIGHT_VERDICT_HEADER) !== null) {
+    return { content: [{ type: 'text', text: JSON.stringify(parsed) }], status }
   }
 
   const payload = unwrapInertiaProps(tool, response, parsed)
