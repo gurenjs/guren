@@ -1,8 +1,10 @@
 import {
   AgentToolDenied,
   AgentToolInvoked,
+  buildToolRequest,
   definePlugin,
   deriveAgentTools,
+  mapToolResponse,
   readBearerToken,
   redactAgentArguments,
   verifyApiToken,
@@ -13,10 +15,10 @@ import {
   type DerivedAgentTool,
   type EventManager,
   type ServiceProviderConstructor,
+  type ToolCallOutcome,
 } from '@guren/core'
 import type { Context } from 'hono'
 
-import { buildToolRequest, mapToolResponse, type ToolCallOutcome } from './dispatch'
 import { AgentRateLimiter, type RateLimitConfig } from './rate-limit'
 import { createAppMcpServer } from './server'
 
@@ -188,6 +190,23 @@ async function dispatchThroughApp(
   tool: DerivedAgentTool,
   args: Record<string, unknown>,
 ): Promise<ToolCallOutcome> {
+  // No `preflight` option below, deliberately: preflight is *not* offered on
+  // this surface, though the seam it uses is server-side and available to
+  // every other one (RFC 0016 §5.4).
+  //
+  // MCP leaves no room for it inside a tool that advertises an `outputSchema`:
+  // the spec requires such a tool to answer with `structuredContent`
+  // conforming to that schema unless the result is an error, and a verdict
+  // conforms to no route's output. Reporting "allowed" as `isError` would be
+  // worse than not offering it. So the MCP form needs a companion tool with
+  // its own result schema — which is the same problem the approval queue has
+  // ("the tool result carries the pending state"), and belongs with it in
+  // Phase 2.5 rather than being solved twice, differently.
+  //
+  // Nothing is lost meanwhile: `_preflight` was never advertised in any
+  // tool's input schema, so no client could discover it. It reaches
+  // `guren tool:call` and `@guren/testing` through the dispatch option
+  // instead, neither of which is bound by that rule.
   const built = buildToolRequest(tool, args, {
     // The inbound request's own origin, so the re-entrant request carries the
     // real Host the MCP client reached `/mcp` on. Defaulting to localhost

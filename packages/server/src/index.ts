@@ -46,6 +46,23 @@ export type {
   DerivedAgentToolAnnotations,
   DerivedAgentToolExposure,
 } from './agent/derive'
+// The dispatch contract (RFC 0016 §3): a tool call re-enters the application
+// as a real HTTP request. Here rather than in a protocol adapter because
+// every surface that invokes a tool — the App MCP plugin, `guren tool:call`,
+// `@guren/testing` — must build the same request and read the same response,
+// and a second copy is how one of them comes to send a POST route's query
+// keys in the body.
+export {
+  advertisesStructuredOutput,
+  buildToolRequest,
+  mapToolResponse,
+  PREFLIGHT_ARGUMENT,
+} from './agent/dispatch'
+export type {
+  BuildToolRequestOptions,
+  BuiltToolRequest,
+  ToolCallOutcome,
+} from './agent/dispatch'
 // Agent Security Layer (RFC 0016 §5): the token scope grammar that gates the
 // agent surface, the audit events every surface emits, and the argument
 // masking those events' payloads must already have been through. Pure logic —

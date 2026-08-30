@@ -5,7 +5,7 @@ import { Router, deriveAgentTools, type AgentToolDenialReason, type DerivedAgent
 
 import { AgentRateLimiter } from './rate-limit'
 import { createAppMcpServer, type AppMcpServerOptions } from './server'
-import type { ToolCallOutcome } from './dispatch'
+import type { ToolCallOutcome } from '@guren/core'
 
 function deriveFixtureTools(): DerivedAgentTool[] {
   const router = new Router()
