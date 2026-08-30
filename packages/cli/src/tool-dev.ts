@@ -21,6 +21,7 @@
 import { consola } from 'consola'
 import { createApiToken, MemoryApiTokenStore } from '@guren/core'
 import { loadBootedApplication } from './runtime'
+import { parseUserId } from './token-issue'
 
 /** Default mount path of `@guren/plugin-mcp`. */
 const DEFAULT_MCP_PATH = '/mcp'
@@ -51,46 +52,72 @@ type EndpointProbe =
   | { mounted: false; status: number; detail?: string }
 
 /**
- * Ask the running app whether the endpoint is really there.
+ * Ask the running app whether the endpoint is really there — by using it.
  *
- * Positive evidence rather than assumption: the answer has to be *the
- * plugin's* refusal, not merely a refusal. A mounted endpoint replies 401
- * with its own `{ error: 'unauthorized' }` body once a store is configured,
- * which one was a moment ago. The status alone is not enough — an app that
- * never registered the plugin but mounts `requireAuthenticated()` globally
- * answers 401 on this path too (measured), and reading that as "live" would
- * print a token that cannot work and send the developer looking at their
- * client.
+ * The probe is a real `tools/list` carrying the token this command just
+ * minted, and the evidence is a JSON-RPC answer. Nothing weaker survives
+ * contact with real apps in both directions:
  *
- * Guessing from the app's dependencies would be worse still: it reports an
- * endpoint for an app that installed the package and never registered the
- * plugin.
+ * - A bearer-less probe reading any 401 as "mounted" is a false positive: an
+ *   app that never registered the plugin but mounts `requireAuthenticated()`
+ *   globally answers 401 on this path too.
+ * - Reading only *the plugin's own* 401 fixes that and introduces the
+ *   opposite error. With the same global middleware in front of a genuinely
+ *   mounted endpoint, the bearer-less probe never reaches the plugin, so a
+ *   working setup is reported as missing. Both measured.
+ *
+ * Using the credential settles both, and proves more than it was asked to:
+ * an answer here means the endpoint is mounted, the token authenticates, and
+ * the scopes admit the catalogue — which is exactly what the printed
+ * invocation promises.
  */
-async function probeEndpoint(url: string): Promise<EndpointProbe> {
+async function probeEndpoint(url: string, token: string): Promise<EndpointProbe> {
   let response: Response
+  let body: string
   try {
     response = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
-      body: '{}',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json, text/event-stream',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
     })
+    body = await response.text()
   } catch (error) {
     return { mounted: false, status: 0, detail: error instanceof Error ? error.message : String(error) }
   }
 
-  if (response.status !== 401) {
-    return { mounted: false, status: response.status }
-  }
-
-  const body = (await response.json().catch(() => undefined)) as { error?: unknown } | undefined
-  if (body?.error === 'unauthorized') {
+  // The transport answers over SSE or plain JSON depending on what the client
+  // accepts, so the marker is the JSON-RPC envelope rather than a shape.
+  if (response.ok && body.includes('"jsonrpc"')) {
     return { mounted: true }
   }
 
   return {
     mounted: false,
-    status: 401,
-    detail: 'something else on this path refused the request — a global authentication middleware, not the MCP endpoint',
+    status: response.status,
+    detail:
+      response.status === 401 || response.status === 403
+        ? 'something on this path refused the token — most likely an authentication middleware in front of the endpoint'
+        : undefined,
+  }
+}
+
+/**
+ * Stop a listener this command started, without letting the stop itself
+ * become the reported failure.
+ *
+ * Reached only on the paths that already have something worse to report: the
+ * caller is about to be told why the endpoint could not be used, and a
+ * secondary error about shutting down would bury it.
+ */
+async function stopQuietly(app: { stop?: (closeConnections?: boolean) => void | Promise<void> }): Promise<void> {
+  try {
+    await app.stop?.(true)
+  } catch {
+    // Nothing to add: the throw that follows is the one that matters.
   }
 }
 
@@ -100,8 +127,12 @@ export interface ToolDevSession {
   endpoint: string
   /** The throwaway bearer, which exists only for this process's lifetime. */
   token: string
-  /** The user id tool calls authenticate as. */
-  userId: string
+  /**
+   * The user id tool calls authenticate as, in the form it was stored: a
+   * digits-only `--as` becomes the number a serial key is, everything else
+   * stays a string.
+   */
+  userId: string | number
 }
 
 export async function runToolDev(options: ToolDevOptions = {}): Promise<ToolDevSession> {
@@ -115,6 +146,15 @@ export async function runToolDev(options: ToolDevOptions = {}): Promise<ToolDevS
       'tool:dev is a development command: it replaces the application\'s token store with an '
         + 'in-memory one for this process. Refusing to run with NODE_ENV=production.',
     )
+  }
+
+  const path = options.path ?? DEFAULT_MCP_PATH
+  if (!path.startsWith('/')) {
+    // Checked before the app is loaded, let alone bound: concatenated as
+    // given, `--path mcp` yields `http://host:3333mcp`, an invalid URL whose
+    // only symptom is whatever `fetch` says about it — and there is no reason
+    // to have started a server to find that out.
+    throw new Error(`Invalid --path value "${path}": an endpoint path must start with "/".`)
   }
 
   const app = await loadBootedApplication(options.appRoot)
@@ -131,7 +171,12 @@ export async function runToolDev(options: ToolDevOptions = {}): Promise<ToolDevS
   // does so during boot, and this must be the store that answers afterwards.
   const store = new MemoryApiTokenStore()
   try {
-    app.auth.useTokens(store)
+    // The app's own options, verbatim: replacing the store must change where
+    // tokens live and nothing else. A bare `useTokens(store)` drops the app's
+    // `provider`, so a token resolves to a bare `{ id }` instead of the real
+    // user record — `--as 42` would then authenticate as something no policy
+    // reading a user field can recognise, silently.
+    app.auth.useTokens(store, app.auth.getApiTokenOptions?.())
   } catch (error) {
     // `useTokens` refuses to shadow a guard registered under the same name by
     // something else. That is an app-shaped problem, so it gets an
@@ -143,7 +188,10 @@ export async function runToolDev(options: ToolDevOptions = {}): Promise<ToolDevS
     )
   }
 
-  const userId = options.as ?? ANONYMOUS_DEV_USER
+  // Through the same reader `token:issue` uses, so a digits-only id reaches
+  // the provider as the number a serial key is — and `0042` stays the string
+  // it is.
+  const userId = options.as === undefined ? ANONYMOUS_DEV_USER : parseUserId(options.as)
   const { plainTextToken } = await createApiToken(store, {
     name: 'guren tool:dev',
     userId,
@@ -167,23 +215,33 @@ export async function runToolDev(options: ToolDevOptions = {}): Promise<ToolDevS
   // the request to go on, so the assumption is stated rather than hidden —
   // the probe below then fails against the wrong address, and the developer
   // needs to know which of the two things went wrong.
+  if (address?.url === undefined && port === 0) {
+    // Nothing to fall back to: the OS chose the port and this app did not say
+    // which. Constructing `http://host:0` would send the probe somewhere that
+    // cannot answer and then blame the plugin for it.
+    await stopQuietly(app)
+    throw new Error(
+      'This application did not report the address it bound, so --port 0 leaves no way to know '
+        + 'which port it chose. Pass an explicit --port, or upgrade @guren/core.',
+    )
+  }
   if (address?.url === undefined) {
     consola.warn(
       'This application did not report the address it bound, so the URL below assumes the '
         + 'requested one. If the port was taken, the listener may have moved.',
     )
   }
-  const base = address?.url ?? `http://${hostname}:${port}`
-  const path = options.path ?? DEFAULT_MCP_PATH
-  if (!path.startsWith('/')) {
-    // Concatenated as given, `--path mcp` yields `http://host:3333mcp` — an
-    // invalid URL whose only symptom is whatever `fetch` says about it.
-    throw new Error(`Invalid --path value "${path}": an endpoint path must start with "/".`)
-  }
+  // Bracketed for IPv6: `http://::1:3333` is not a URL.
+  const authority = hostname.includes(':') ? `[${hostname}]` : hostname
+  const base = address?.url ?? `http://${authority}:${port}`
   const endpoint = `${base.replace(/\/$/u, '')}${path}`
 
-  const probe = await probeEndpoint(endpoint)
+  const probe = await probeEndpoint(endpoint, plainTextToken)
   if (!probe.mounted) {
+    // The listener is already up and the app's token store already replaced.
+    // `runToolDev` is exported, so a caller that catches this must not be left
+    // holding a live server whose real tokens no longer work.
+    await stopQuietly(app)
     const observed = probe.status === 0 ? 'the request failed' : `HTTP ${probe.status}`
     throw new Error(
       `No App MCP endpoint answered at ${endpoint} (${observed}`

@@ -199,6 +199,7 @@ export type {
   EmailVerificationTokenResult,
   // API token types
   ApiToken,
+  ApiTokenGuardOptions,
   ApiTokenStore,
   CreateApiTokenOptions,
   CreateApiTokenResult,

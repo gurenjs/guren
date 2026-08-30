@@ -22,6 +22,16 @@ import type {
 
 const DEFAULT_GUARD = 'web'
 
+/** How `useTokens()` configures the guard it registers. */
+export interface ApiTokenGuardOptions {
+  /** Registered provider name used to load the full user record from a token's userId. */
+  provider?: string
+  /** Guard registry name (defaults to 'token'). */
+  guardName?: string
+  /** Whether verifying a bearer writes the token's `lastUsedAt`. */
+  updateLastUsed?: boolean
+}
+
 interface GuardRegistryEntry {
   factory: GuardFactory<unknown>
 }
@@ -37,6 +47,7 @@ export class AuthManager implements AuthManagerContract {
   private defaultGuard: string
   private tokenGuard: string | null = null
   private apiTokenStore: ApiTokenStore | null = null
+  private apiTokenOptions: ApiTokenGuardOptions = {}
 
   constructor(options: AuthManagerOptions = {}) {
     this.defaultGuard = options.defaultGuard ?? DEFAULT_GUARD
@@ -183,7 +194,7 @@ export class AuthManager implements AuthManagerContract {
    */
   useTokens(
     store: ApiTokenStore,
-    options: { provider?: string; guardName?: string; updateLastUsed?: boolean } = {},
+    options: ApiTokenGuardOptions = {},
   ): void {
     const guardName = options.guardName ?? 'token'
 
@@ -213,6 +224,21 @@ export class AuthManager implements AuthManagerContract {
     // call must not leave a store behind for an issuer to find. A legal
     // re-call replaces it, matching the guard it just re-registered.
     this.apiTokenStore = store
+    this.apiTokenOptions = { ...options }
+  }
+
+  /**
+   * The options the last `useTokens()` call configured its guard with.
+   *
+   * Read by machinery that has to *replace* the store without changing
+   * anything else about how tokens authenticate — `guren tool:dev` installs an
+   * ephemeral store over the app's, and doing that with a bare `useTokens(store)`
+   * silently dropped the app's `provider`, so a token resolved to a bare
+   * `{ id }` instead of the real user record and every policy reading a user
+   * field behaved differently for no stated reason.
+   */
+  getApiTokenOptions(): ApiTokenGuardOptions {
+    return { ...this.apiTokenOptions }
   }
 
   /**

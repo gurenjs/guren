@@ -72,6 +72,37 @@ export default app
 `
 
 /**
+ * The plugin *and* a global authentication middleware in front of it — the
+ * probe's false-negative shape, and a realistic app.
+ */
+const MAIN_GLOBAL_AUTH_WITH_PLUGIN = `import { createApp, MemoryApiTokenStore, requireAuthenticated } from '@guren/core'
+import { mcpPlugin } from '@guren/plugin-mcp'
+import { registerWebRoutes } from '../routes/web'
+
+const app = createApp({ routes: registerWebRoutes, providers: [mcpPlugin()] })
+app.use(requireAuthenticated())
+app.auth.useTokens(new MemoryApiTokenStore())
+
+export default app
+`
+
+/** Wires tokens to a provider, so a resolved user is more than a bare id. */
+const MAIN_WITH_PROVIDER = `import { createApp, MemoryApiTokenStore } from '@guren/core'
+import { mcpPlugin } from '@guren/plugin-mcp'
+import { registerWebRoutes } from '../routes/web'
+
+const app = createApp({ routes: registerWebRoutes, providers: [mcpPlugin()] })
+app.auth.registerProvider('users', () => ({
+  retrieveById: async (id) => ({ id, name: 'Real User' }),
+  retrieveByCredentials: async () => null,
+  validateCredentials: async () => false,
+}))
+app.auth.useTokens(new MemoryApiTokenStore(), { provider: 'users' })
+
+export default app
+`
+
+/**
  * Every listening case binds port 0 and reads back what the app reports.
  *
  * `Application.listen()` walks the port forward when the one it was handed is
@@ -123,15 +154,57 @@ describe('tool:dev', () => {
     )
   })
 
-  it('does not mistake a global auth middleware for the endpoint', async () => {
+  it('diagnoses a missing plugin even behind a global auth middleware', async () => {
     await writeFile(join(appDir, 'src/main.ts'), MAIN_GLOBAL_AUTH)
 
-    // An app that mounts requireAuthenticated() globally answers 401 on this
-    // path without the plugin. Reading a bare 401 as "live" would print a
-    // token that cannot work; the plugin's own refusal names itself.
+    // requireAuthenticated() alone answers 401 on this path, which a
+    // status-only probe once read as "live". Carrying the token gets past it,
+    // so what is left is the truth: nothing is mounted here.
     await expect(runToolDev({ appRoot: appDir, port: ANY_PORT })).rejects.toThrow(
-      /global authentication middleware/u,
+      /No App MCP endpoint answered.*404/su,
     )
+  })
+
+  it('finds the endpoint behind a global authentication middleware', async () => {
+    await writeFile(join(appDir, 'src/main.ts'), MAIN_GLOBAL_AUTH_WITH_PLUGIN)
+
+    // The probe carries the token it just minted, so it passes the same gate
+    // a real client passes. A bearer-less probe never reaches the plugin here
+    // and would report a working setup as missing.
+    const session = await runToolDev({ appRoot: appDir, port: ANY_PORT })
+    expect(session.endpoint).toMatch(/\/mcp$/u)
+  })
+
+  it('keeps the provider the app configured its token guard with', async () => {
+    await writeFile(join(appDir, 'src/main.ts'), MAIN_WITH_PROVIDER)
+
+    // Replacing the store must change where tokens live and nothing else: a
+    // bare useTokens(store) drops the provider, and the user behind --as
+    // becomes a bare { id } no policy reading a field can recognise.
+    const session = await runToolDev({ appRoot: appDir, port: ANY_PORT, as: '7' })
+
+    const module = (await import(pathToFileURL(join(appDir, 'src/main.ts')).href)) as {
+      default: {
+        auth: {
+          createGuard: (name: string, ctx: unknown) => { user: () => Promise<unknown> }
+        }
+      }
+    }
+    const auth = module.default.auth
+    const guard = auth.createGuard('token', {
+      ctx: {
+        req: {
+          header: (name: string) =>
+            name.toLowerCase() === 'authorization' ? `Bearer ${session.token}` : undefined,
+        },
+        // TokenGuard caches its verification on the context.
+        get: () => undefined,
+        set: () => {},
+      },
+      manager: auth,
+    })
+
+    expect(await guard.user()).toEqual({ id: 7, name: 'Real User' })
   })
 
   it('serves the endpoint with a token that works, without touching the app store', async () => {
@@ -169,7 +242,7 @@ describe('tool:dev', () => {
     await writeFile(join(appDir, 'src/main.ts'), MAIN_WITH_PLUGIN)
 
     const explicit = await runToolDev({ appRoot: appDir, port: ANY_PORT, as: '42' })
-    expect(explicit.userId).toBe('42')
+    expect(explicit.userId).toBe(42)
 
     // Never a mystery: a call whose policy loads a user behaves differently
     // depending on this, so the default is a placeholder that matches no

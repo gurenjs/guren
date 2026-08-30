@@ -31,8 +31,15 @@ export type MaybeApplication = {
    * reach the caller's own diagnostic ("call `useTokens(store)`") rather than
    * a `TypeError` naming an internal.
    */
+  /** Bun's listener handle, when the app is one that reports having a server. */
+  stop?: (closeConnections?: boolean) => void | Promise<void>
   auth?: {
     getApiTokenStore?: () => ApiTokenStore | undefined
+    /**
+     * The options the app's own `useTokens()` used, so machinery replacing
+     * the store changes where tokens live and nothing else.
+     */
+    getApiTokenOptions?: () => { provider?: string; guardName?: string; updateLastUsed?: boolean }
     /**
      * Installs a token store over whatever the app configured, which is how
      * `tool:dev` issues a credential that cannot outlive its process. Same
