@@ -54,26 +54,50 @@ export interface ToolDevOptions {
 /** What the probe learned about the endpoint, before anything is printed. */
 type EndpointProbe =
   | { mounted: true }
-  | { mounted: false; status: number }
+  | { mounted: false; status: number; detail?: string }
 
 /**
  * Ask the running app whether the endpoint is really there.
  *
- * Positive evidence rather than assumption: a mounted endpoint answers 401 to
- * a request with no bearer (it is the first thing it checks once a store is
- * configured), and an app that never installed the plugin answers 404. Both
- * were measured. Guessing from the app's dependencies instead would report an
+ * Positive evidence rather than assumption: the answer has to be *the
+ * plugin's* refusal, not merely a refusal. A mounted endpoint replies 401
+ * with its own `{ error: 'unauthorized' }` body once a store is configured,
+ * which one was a moment ago. The status alone is not enough — an app that
+ * never registered the plugin but mounts `requireAuthenticated()` globally
+ * answers 401 on this path too (measured), and reading that as "live" would
+ * print a token that cannot work and send the developer looking at their
+ * client.
+ *
+ * Guessing from the app's dependencies would be worse still: it reports an
  * endpoint for an app that installed the package and never registered the
- * plugin — the exact mistake that wastes the next ten minutes.
+ * plugin.
  */
 async function probeEndpoint(url: string): Promise<EndpointProbe> {
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
-    body: '{}',
-  })
+  let response: Response
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
+      body: '{}',
+    })
+  } catch (error) {
+    return { mounted: false, status: 0, detail: error instanceof Error ? error.message : String(error) }
+  }
 
-  return response.status === 401 ? { mounted: true } : { mounted: false, status: response.status }
+  if (response.status !== 401) {
+    return { mounted: false, status: response.status }
+  }
+
+  const body = (await response.json().catch(() => undefined)) as { error?: unknown } | undefined
+  if (body?.error === 'unauthorized') {
+    return { mounted: true }
+  }
+
+  return {
+    mounted: false,
+    status: 401,
+    detail: 'something else on this path refused the request — a global authentication middleware, not the MCP endpoint',
+  }
 }
 
 /** What the command established, for a caller that needs it rather than the printout. */
@@ -144,14 +168,27 @@ export async function runToolDev(options: ToolDevOptions = {}): Promise<ToolDevS
   // The address the app reports binding, never the one that was requested:
   // a listener may walk the port forward, and printing the asked-for one
   // sends the Inspector at whatever else is on it.
+  //
+  // A `@guren/core` old enough not to report one leaves nothing better than
+  // the request to go on, so the assumption is stated rather than hidden —
+  // the probe below then fails against the wrong address, and the developer
+  // needs to know which of the two things went wrong.
+  if (address?.url === undefined) {
+    consola.warn(
+      'This application did not report the address it bound, so the URL below assumes the '
+        + 'requested one. If the port was taken, the listener may have moved.',
+    )
+  }
   const base = address?.url ?? `http://${options.hostname ?? '127.0.0.1'}:${options.port ?? 3333}`
   const path = options.path ?? DEFAULT_MCP_PATH
   const endpoint = `${base.replace(/\/$/u, '')}${path}`
 
   const probe = await probeEndpoint(endpoint)
   if (!probe.mounted) {
+    const observed = probe.status === 0 ? 'the request failed' : `HTTP ${probe.status}`
     throw new Error(
-      `No App MCP endpoint answered at ${endpoint} (HTTP ${probe.status}). `
+      `No App MCP endpoint answered at ${endpoint} (${observed}`
+        + `${probe.detail ? `: ${probe.detail}` : ''}). `
         + 'Install and register the plugin — `guren plugin @guren/plugin-mcp`, then add '
         + '`mcpPlugin()` to createApp({ providers }) — or pass --path if it is mounted elsewhere.',
     )

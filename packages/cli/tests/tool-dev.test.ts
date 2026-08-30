@@ -60,6 +60,17 @@ app.auth.useTokens(new MemoryApiTokenStore())
 export default app
 `
 
+/** No plugin, but everything answers 401 — the probe's false-positive shape. */
+const MAIN_GLOBAL_AUTH = `import { createApp, MemoryApiTokenStore, requireAuthenticated } from '@guren/core'
+import { registerWebRoutes } from '../routes/web'
+
+const app = createApp({ routes: registerWebRoutes })
+app.use(requireAuthenticated())
+app.auth.useTokens(new MemoryApiTokenStore())
+
+export default app
+`
+
 /** Ports for the cases that actually listen, kept apart so they can run in any order. */
 let nextPort = 3610
 
@@ -102,6 +113,17 @@ describe('tool:dev', () => {
 
     await expect(runToolDev({ appRoot: appDir, port: nextPort++ })).rejects.toThrow(
       /No App MCP endpoint answered.*404/s,
+    )
+  })
+
+  it('does not mistake a global auth middleware for the endpoint', async () => {
+    await writeFile(join(appDir, 'src/main.ts'), MAIN_GLOBAL_AUTH)
+
+    // An app that mounts requireAuthenticated() globally answers 401 on this
+    // path without the plugin. Reading a bare 401 as "live" would print a
+    // token that cannot work; the plugin's own refusal names itself.
+    await expect(runToolDev({ appRoot: appDir, port: nextPort++ })).rejects.toThrow(
+      /global authentication middleware/u,
     )
   })
 
