@@ -113,6 +113,45 @@ function loadServer(): Promise<ServerModule> {
   return serverModulePromise
 }
 
+/**
+ * The mock's counterpart to the runtime's `parseRequestBody`: the parsed body
+ * as sent, so an array stays an array for `validateBody()` to judge.
+ */
+async function parseRequestBody(ctx: ControllerContext): Promise<unknown> {
+  // Clone so the raw body stays readable — the real runtime caches the
+  // parsed body in Hono, letting validateBody() and file() compose on one
+  // request; here the clone is what preserves that property.
+  const request = ctx.req.raw.clone()
+  const contentType = request.headers.get('Content-Type') ?? ''
+
+  if (contentType.includes('application/json')) {
+    return request.json()
+  }
+
+  if (contentType.includes('application/x-www-form-urlencoded')) {
+    const text = await request.text()
+    return Object.fromEntries(new URLSearchParams(text))
+  }
+
+  if (contentType.includes('multipart/form-data')) {
+    const formData = await request.formData()
+    const result: Record<string, unknown> = {}
+    formData.forEach((value, key) => {
+      result[key] = value
+    })
+    return result
+  }
+
+  return {}
+}
+
+/** The record view of {@link parseRequestBody}, as the runtime narrows it. */
+function asRecord(body: unknown): Record<string, unknown> {
+  return typeof body === 'object' && body !== null && !Array.isArray(body)
+    ? (body as Record<string, unknown>)
+    : {}
+}
+
 export function createGurenControllerModule() {
   // Prime the memo now: continuations on one promise run in registration
   // order, so by the time an awaited view() render invokes a component that
@@ -237,33 +276,8 @@ export function createGurenControllerModule() {
       }
       return loadedServer.viteAsset(entry, options)
     },
-    parseRequestPayload: async (ctx: ControllerContext) => {
-      // Clone so the raw body stays readable — the real runtime caches the
-      // parsed body in Hono, letting validateBody() and file() compose on one
-      // request; here the clone is what preserves that property.
-      const request = ctx.req.raw.clone()
-      const contentType = request.headers.get('Content-Type') ?? ''
-
-      if (contentType.includes('application/json')) {
-        return request.json()
-      }
-
-      if (contentType.includes('application/x-www-form-urlencoded')) {
-        const text = await request.text()
-        return Object.fromEntries(new URLSearchParams(text))
-      }
-
-      if (contentType.includes('multipart/form-data')) {
-        const formData = await request.formData()
-        const result: Record<string, unknown> = {}
-        formData.forEach((value, key) => {
-          result[key] = value
-        })
-        return result
-      }
-
-      return {}
-    },
+    parseRequestBody: parseRequestBody,
+    parseRequestPayload: async (ctx: ControllerContext) => asRecord(await parseRequestBody(ctx)),
     formatValidationErrors: (error: { issues?: Array<{ path: (string | number)[]; message: string }> }) => {
       const errors: Record<string, string> = {}
       if (error?.issues) {
@@ -359,15 +373,14 @@ export function createControllerModuleMock() {
         return this.parsedBody.value
       }
 
-      this.parsedBody = { value: (await module.parseRequestPayload(this.ctx)) ?? {} }
+      // Deliberately the raw parser, not `module.parseRequestPayload` — that
+      // one narrows, which is what made a non-object body unreachable.
+      this.parsedBody = { value: (await module.parseRequestBody(this.ctx)) ?? {} }
       return this.parsedBody.value
     }
 
     public async getBody(): Promise<Record<string, unknown>> {
-      const body = await this.getRawBody()
-      return typeof body === 'object' && body !== null && !Array.isArray(body)
-        ? (body as Record<string, unknown>)
-        : {}
+      return asRecord(await this.getRawBody())
     }
 
     // Public like parsedBody above: TS4094 forbids private members on the

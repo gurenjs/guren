@@ -1,6 +1,6 @@
 ---
 "@guren/server": patch
-"@guren/testing": patch
+"@guren/testing": minor
 ---
 
 Route contracts and `validateBody()` accept non-object request bodies.
@@ -14,4 +14,6 @@ The parse step now has two shapes, and the caller picks by what it does with the
 
 Two behaviors are deliberately preserved. A malformed or empty body still parses to `{}`, so an all-optional object schema keeps passing on an empty POST — the cost is that a non-object schema sees that `{}` and returns 422 rather than receiving nothing. And form submissions still normalize to a record, since they have no non-object shape to keep.
 
-`@guren/testing`'s controller mock gains the same split, so a mocked controller and a real one now agree on a non-object body instead of only the mock letting one through.
+`@guren/testing`'s controller mock gains the same split, on both halves: its module-level `parseRequestPayload` now narrows exactly as the runtime's does, a new `parseRequestBody` returns the body as sent, and the mock `Controller` routes validation through the raw one. Previously the mock narrowed nowhere, so a mocked controller and a real one disagreed on every non-object body — and a test written against the mock could pass on code the runtime would 422.
+
+That is a minor rather than a patch for `@guren/testing` because the mock `Controller`'s `parsedBody` field — public only to satisfy TS4094 on the factory's exported class type — changes from `Record<string, unknown>` to a `{ value: unknown }` box, so that a body of `null`, `''`, `0` or `false` is memoized rather than re-read from a consumed stream.
