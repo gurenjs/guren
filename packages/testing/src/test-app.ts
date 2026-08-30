@@ -1,6 +1,12 @@
 import type { Hono } from 'hono'
-import type { I18nPluginOptions, Router, ServiceProviderConstructor } from '@guren/server'
+import type {
+  I18nPluginOptions,
+  RouteDefinition,
+  Router,
+  ServiceProviderConstructor,
+} from '@guren/server'
 import { TestResponse } from './http'
+import { TestAgent, type AgentTestBridge } from './agent'
 
 type BootCallback = (app: Hono) => void | Promise<void>
 type ProviderLike = { register?(): unknown; boot?(): unknown }
@@ -22,6 +28,14 @@ type RouteRegistration = (router: Router) => void | Promise<void>
 type ApplicationLike = {
   boot(): Promise<void>
   fetch(request: Request): Response | Promise<Response>
+  /**
+   * The app-local route registry, read after `boot()` so `agent()` derives
+   * tools from the graph this app actually serves. Optional because the shape
+   * is structural: an app resolving a `@guren/core` without the agent
+   * interface has none, and `agent()` must say so rather than throw a
+   * `TypeError` naming an internal.
+   */
+  readonly router?: { definitions(): RouteDefinition[] }
 }
 /**
  * The `Application` constructor as this file calls it — kept structural for the
@@ -387,6 +401,13 @@ export class TestApp {
   private fetchFn: (request: Request) => Promise<Response>
   private defaultHeaders: Record<string, string> = {}
   private authenticatedUser: unknown = null
+  /**
+   * The app's route definitions, when this TestApp was built from an
+   * Application rather than a bare fetch function. Undefined — never an empty
+   * list — for `fromFetch`/`fromWorkers`, so `agent()` can distinguish "this
+   * app exposes no tools" from "this construction cannot see any routes".
+   */
+  private routeDefinitions?: readonly RouteDefinition[]
   /** Present when created via fromWorkers(); propagated across builder copies. */
   workers?: WorkersTestContext
 
@@ -447,7 +468,10 @@ export class TestApp {
     await application.boot()
 
     const fetchFn = (request: Request) => Promise.resolve(application.fetch(request))
-    return new TestApp(fetchFn)
+    const app = new TestApp(fetchFn)
+    // After boot(), because that is when the app mounts its routes.
+    app.routeDefinitions = application.router?.definitions()
+    return app
   }
 
   /**
@@ -473,7 +497,11 @@ export class TestApp {
     process.env.GUREN_TESTING = '1'
     await app.boot()
 
-    return TestApp.fromFetch((request) => app.fetch(request), baseUrl)
+    const testApp = TestApp.fromFetch((request) => app.fetch(request), baseUrl)
+    // The one thing `fromFetch` cannot recover from a bare function: the route
+    // graph `agent()` derives tools from.
+    testApp.routeDefinitions = app.router?.definitions()
+    return testApp
   }
 
   /**
@@ -530,11 +558,58 @@ export class TestApp {
    * can recognize in test mode.
    */
   actingAs(user: unknown): TestApp {
+    const copy = this.clone()
+    copy.authenticatedUser = user
+    return copy
+  }
+
+  /**
+   * A copy carrying everything this TestApp was configured with.
+   *
+   * One place, because every builder (`actingAs`, `withHeaders`, `withCsrf`)
+   * has to carry *all* of it: the three used to hand-copy field by field, and
+   * a field added to one but not the others vanishes on the next `.actingAs()`
+   * with nothing failing.
+   */
+  private clone(): TestApp {
     const copy = new TestApp(this.fetchFn, this.baseUrl)
     copy.defaultHeaders = { ...this.defaultHeaders }
-    copy.authenticatedUser = user
+    copy.authenticatedUser = this.authenticatedUser
+    copy.routeDefinitions = this.routeDefinitions
     copy.workers = this.workers
     return copy
+  }
+
+  /**
+   * The agent surface of this app: the tools an MCP client would see, and a
+   * way to call them (RFC 0016).
+   *
+   * A call goes through the framework's own dispatch contract and out through
+   * the same `fetch` as every other request here, so a test asserts against
+   * exactly what an agent gets.
+   *
+   * @example
+   * const result = await app.agent().call('posts.store', { title: 'x' }, { as: user })
+   * result.assertOk()
+   * const post = result.assertStructured<{ id: number }>()
+   */
+  agent(): TestAgent {
+    return new TestAgent(this.agentBridge())
+  }
+
+  private agentBridge(): AgentTestBridge {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
+    const app = this
+    return {
+      baseUrl: app.baseUrl,
+      routeDefinitions: () => app.routeDefinitions,
+      headers: () => app.requestHeaders(),
+      // Through `fetchFn`, not an Application: `fromWorkers` closes over the
+      // env and ExecutionContext there, so a tool call inherits the bindings
+      // and `waitUntil` that RFC 0016 §3.1 warns about losing.
+      dispatch: (request) => app.fetchFn(request),
+      actingAs: (user) => app.actingAs(user).agentBridge(),
+    }
   }
 
   /**
@@ -568,14 +643,12 @@ export class TestApp {
       )
     }
 
-    const copy = new TestApp(this.fetchFn, this.baseUrl)
+    const copy = this.clone()
     copy.defaultHeaders = {
-      ...this.defaultHeaders,
+      ...copy.defaultHeaders,
       Cookie: [...cookies.entries()].map(([name, value]) => `${name}=${value}`).join('; '),
       'X-XSRF-TOKEN': decodeURIComponent(xsrfToken),
     }
-    copy.authenticatedUser = this.authenticatedUser
-    copy.workers = this.workers
     return copy
   }
 
@@ -594,13 +667,8 @@ export class TestApp {
    * await en.get('/') // rendered with the English locale
    */
   withHeaders(headers: Record<string, string>): TestApp {
-    const copy = new TestApp(this.fetchFn, this.baseUrl)
-    copy.defaultHeaders = {
-      ...this.defaultHeaders,
-      ...headers,
-    }
-    copy.authenticatedUser = this.authenticatedUser
-    copy.workers = this.workers
+    const copy = this.clone()
+    copy.defaultHeaders = { ...copy.defaultHeaders, ...headers }
     return copy
   }
 
@@ -657,15 +725,16 @@ export class TestApp {
   /**
    * Make a request with any HTTP method.
    */
-  private request(method: string, path: string, body?: unknown): PendingTestResponse {
-    const url = path.startsWith('http') ? path : `${this.baseUrl}${path}`
-
+  /**
+   * The headers every request from this TestApp carries: whatever
+   * `withHeaders`/`withCsrf` parked, plus the authenticated-user envelope.
+   *
+   * One spelling, shared with the agent dispatch: a second copy of the
+   * `X-Testing-User` envelope is how the two come to disagree about who a
+   * call authenticates as.
+   */
+  private requestHeaders(): Record<string, string> {
     const headers: Record<string, string> = { ...this.defaultHeaders }
-
-    // FormData bodies get their multipart boundary from fetch itself.
-    if (body !== undefined && body !== null && !(body instanceof FormData)) {
-      headers['Content-Type'] = 'application/json'
-    }
 
     if (this.authenticatedUser) {
       // Inject authenticated user as a JSON-encoded header that test-aware
@@ -677,6 +746,19 @@ export class TestApp {
           ? (user as { getAuthIdentifier(): unknown }).getAuthIdentifier()
           : user.id ?? null
       headers['X-Testing-User'] = JSON.stringify({ ...user, __authId: authId })
+    }
+
+    return headers
+  }
+
+  private request(method: string, path: string, body?: unknown): PendingTestResponse {
+    const url = path.startsWith('http') ? path : `${this.baseUrl}${path}`
+
+    const headers = this.requestHeaders()
+
+    // FormData bodies get their multipart boundary from fetch itself.
+    if (body !== undefined && body !== null && !(body instanceof FormData)) {
+      headers['Content-Type'] = 'application/json'
     }
 
     const init: RequestInit = {

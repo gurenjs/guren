@@ -90,6 +90,156 @@ missing or stale. Pass `--json` to either for the raw derivation.
 apps that expose at least one tool, and removes the file for apps that expose
 none. See [CLI — Agent Tool Commands](./cli.md#agent-tool-commands).
 
+## Calling a tool yourself
+
+`tool:list` describes the surface. `tool:call` uses it — no MCP client, no
+token, no running server:
+
+```bash
+bunx guren tool:call posts.store --input '{"title":"Hello agents"}'
+```
+
+```
+posts.store  POST /posts
+Status:   201
+
+Result
+{
+  "id": 1,
+  "title": "Hello agents"
+}
+```
+
+The command boots your application and dispatches through the same contract an
+MCP client's call goes through: the tool is found by `deriveAgentTools`, the
+HTTP request is rebuilt by the framework's dispatcher, and the response is
+mapped back the same way. There is no CLI-only code path, so what you see here
+is what an agent gets.
+
+Its tools come from the **booted** app's route graph, which is why there is no
+`--routes` flag: a routes file cannot change what the running app serves, and a
+tool you could name but not reach would be worse than no flag at all. Use
+`--app <dir>` to point at an application root that is not the current
+directory.
+
+An unknown name answers with the names that exist, and a call that fails
+reports the application's own failure and exits non-zero:
+
+```bash
+bunx guren tool:call posts.store --input '{"title":"no"}' --json
+```
+
+```json
+{
+  "tool": "posts.store",
+  "method": "POST",
+  "path": "/posts",
+  "status": 422,
+  "isError": true,
+  "content": "{\"errors\":{\"title\":\"Too small: expected string to have >=3 characters\"}}"
+}
+```
+
+### `--as` bypasses authentication
+
+`--as user:42` runs the call as that user. It works by setting `GUREN_TESTING=1`
+for the process, which makes the app accept an injected user instead of a real
+credential — the same mechanism `@guren/testing` uses. The command says so every
+time it is passed.
+
+This is a development flag on the same trust boundary as `bunx guren console`:
+it assumes whoever runs it can already execute code in this project. Never run
+it against a shared or production database.
+
+### `--preflight` rehearses a call
+
+```bash
+bunx guren tool:call posts.store --input '{"title":"Rehearsal"}' --preflight
+```
+
+```
+posts.store  POST /posts
+Status:   200
+
+Preflight  allowed (the handler did not run)
+Validated: body
+Unverified: authorization
+
+Preflight only: the request passed this route's middleware and its body schema.
+The handler did not run, so nothing was created, changed, or deleted. No
+authorization middleware was found on this route, so any check inside the
+handler itself was not evaluated.
+```
+
+The request runs the route's middleware and validates the contract the tool
+advertises, then stops before the handler. `unverified` names what a real call
+would still evaluate — a route that authorizes inside its action is a check this
+seam structurally cannot reach.
+
+The MCP endpoint does not offer preflight. A tool that advertises an
+`outputSchema` must answer with `structuredContent` conforming to it, and a
+verdict conforms to no route's output; `tool:call` and `@guren/testing` are not
+bound by that rule, so they offer what the seam supports.
+
+## Testing a tool
+
+`app.agent()` calls the tools of an app under test, through the same dispatch:
+
+```ts
+import { TestApp } from '@guren/testing'
+
+const app = await TestApp.create({ routes: registerWebRoutes })
+
+const result = await app.agent().call('posts.store', { title: 'Hello' }, { as: user })
+result.assertOk()
+
+const post = result.assertStructured<{ id: number; title: string }>()
+expect(post.title).toBe('Hello')
+```
+
+Assertions chain on the pending call as well, like every other `TestApp`
+request:
+
+```ts
+await app.agent().call('posts.index').assertOk()
+await app.agent().call('posts.store', { title: 'no' }).assertStatus(422)
+await app.agent().call('secret.show').assertDenied()
+```
+
+| Assertion | Passes when |
+|-----------|-------------|
+| `assertOk()` | the call did not come back as an error result (any 2xx/3xx status) |
+| `assertStatus(code)` | the dispatch resolved to exactly that HTTP status |
+| `assertDenied()` | the application answered `401` or `403` |
+| `assertStructured<T>()` | the tool advertises an object output schema and returned one — awaited, it returns the payload |
+
+`await app.agent().tools()` lists the tools the app exposes, exactly as
+`tool:list` derives them.
+
+Three things worth knowing:
+
+- **`{ as: user }` is `actingAs(user)`,** the `X-Testing-User` envelope. There
+  is no token here, so `assertDenied()` means "the application refused" — its
+  authentication or its policies. Bearer scopes belong to the MCP endpoint and
+  are not reachable from a test.
+- **Mount CSRF or skip it, deliberately.** A dispatched tool call carries no
+  cookie and no bearer, so an app created with `auth` refuses a mutating call
+  with `403` before any policy is consulted — which `assertDenied()` cannot tell
+  apart from a policy refusal. Dispatch through
+  `(await app.withCsrf()).agent()`, or test against an app that mounts no CSRF.
+- **The app must carry a route graph.** `TestApp.create({ routes })` and
+  `TestApp.fromApp(app)` do; `TestApp.fromFetch()` and `TestApp.fromWorkers()`
+  are handed a bare fetch function and have none, so `agent()` says which
+  constructor to use rather than reporting an empty tool list.
+
+`{ preflight: true }` works here too, and answers the same verdict:
+
+```ts
+const result = await app.agent().call('posts.store', { title: 'x' }, { preflight: true })
+result.assertOk()
+expect(result.json<{ allowed: boolean }>().allowed).toBe(true)
+```
+
 ## Declaring `.agent()`
 
 Two spellings, and they are equivalent. Use whichever reads better beside the

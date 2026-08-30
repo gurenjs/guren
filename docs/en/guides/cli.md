@@ -461,6 +461,7 @@ Routes that declare `.agent()` metadata are exposed to AI agents as MCP tools (s
 |---------|-------------|---------|
 | `tool:list` | List the agent tools this application exposes | `bunx guren tool:list` |
 | `tool:inspect` | Show one tool's full derivation | `bunx guren tool:inspect posts.store` |
+| `tool:call` | Invoke one tool the way an agent would | `bunx guren tool:call posts.index` |
 
 ```bash
 # Every exposed tool, with its method, path, protocol exposure,
@@ -481,6 +482,29 @@ bunx guren tool:inspect posts.store --json
 | `--routes` | `routes/web.ts` | Path to the routes entry file |
 | `--app` | Current directory | Application root directory |
 | `--json` | `false` | Output the derived tools as JSON |
+
+`tool:call` goes one step further and actually invokes a tool, through the same dispatch contract an MCP client's call goes through. It boots the application, so its tools come from the graph the running app serves — which is why it takes no `--routes`.
+
+```bash
+# Call a tool with arguments
+bunx guren tool:call posts.store --input '{"title":"Hello agents"}'
+
+# Rehearse it: run the middleware and validate the contract, stop before the handler
+bunx guren tool:call posts.store --input '{"title":"Hello"}' --preflight
+
+# Call as a user, and read the result as JSON
+bunx guren tool:call posts.index --as user:42 --json
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--input` | `{}` | Tool arguments as a JSON object |
+| `--as` | (unauthenticated) | Authenticate as a user (`user:42`). Development only: sets `GUREN_TESTING=1` for the process, so the app accepts an injected user instead of a real credential |
+| `--preflight` | `false` | Ask for a verdict instead of an execution — the handler does not run |
+| `--app` | Current directory | Application root directory |
+| `--json` | `false` | Output the call result as JSON |
+
+The command exits non-zero when the call comes back as an error result, so a 422 or a 403 is not read as a success by a script. See [Agent Interface — Calling a tool yourself](./agent-interface.md#calling-a-tool-yourself).
 
 Everything shown is derived from contracts the route already carries: the input schema merges its `params`, `query` and `body` schemas, the output schema comes from `output`, and the authorization ability comes from the policy its middleware chain checks. Nothing is declared twice, so a tool cannot advertise a schema the endpoint does not validate.
 

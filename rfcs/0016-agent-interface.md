@@ -345,8 +345,18 @@ Each feature maps to a measured failure mode of the MCP ecosystem.
   invocation. Structurally impossible in production (the ephemeral store is dev-only);
   no new inspection UI is built.
 - `@guren/testing`: `app.agent().call(name, input, { as })` with
-  `assertOk` / `assertStructured<T>` / `assertDenied` / `assertPendingApproval`;
+  `assertOk` / `assertStructured<T>` / `assertDenied` / ~~`assertPendingApproval`~~;
   `make:feature --agent` scaffolds these tests.
+  **Amended in implementation:** `assertPendingApproval` ships with the approval
+  queue (2.5), not here. There is nothing for it to assert yet: the queue is
+  unimplemented, and the testing path does not go through the plugin at all —
+  the gate that would produce a pending verdict lives in `@guren/plugin-mcp`,
+  while `app.agent()` dispatches straight into the application. An assertion
+  that can only ever fail, or only ever pass vacuously, is worse than an absent
+  one. `assertDenied` is likewise narrower than it reads on this surface and
+  says so: it means the *application* answered 401/403, because `@guren/testing`
+  has no token issuer and therefore cannot reach a scope denial.
+  `guren tool:call` makes the same distinction for the same reason.
 
 ### 7. Protocol adapters
 

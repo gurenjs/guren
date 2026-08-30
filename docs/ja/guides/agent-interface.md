@@ -75,6 +75,118 @@ Output
 
 `bunx guren codegen` は、ツールを1つ以上公開しているアプリに対して同じ導出結果を `.guren/agents.gen.ts` に書き出し、1つも公開していないアプリではそのファイルを削除します。[CLI: エージェントツールコマンド](./cli.md#エージェントツールコマンド)も参照してください。
 
+## 自分でツールを呼ぶ
+
+`tool:list` が表面を説明するのに対して、`tool:call` は実際に呼びます。MCP クライアントもトークンも、起動中のサーバーも必要ありません。
+
+```bash
+bunx guren tool:call posts.store --input '{"title":"Hello agents"}'
+```
+
+```
+posts.store  POST /posts
+Status:   201
+
+Result
+{
+  "id": 1,
+  "title": "Hello agents"
+}
+```
+
+このコマンドはアプリケーションを起動し、MCP クライアントからの呼び出しとまったく同じ経路でディスパッチします: ツールは `deriveAgentTools` で解決され、HTTP リクエストはフレームワーク自身のディスパッチャが組み立て、レスポンスも同じ関数がマッピングします。CLI 専用の経路は存在しないので、ここで見えるものがエージェントの受け取るものです。
+
+ツールの一覧は「起動済み」アプリのルートグラフから取ります。`--routes` フラグが無いのはそのためです: ルートファイルを差し替えても稼働中のアプリが提供するものは変わらず、名前は引けるのに到達できないツールが生まれるほうが害が大きいからです。カレントディレクトリ以外のアプリを指すときは `--app <dir>` を使います。
+
+存在しない名前を渡すと、存在する名前を並べて答えます。呼び出しが失敗した場合はアプリケーション自身の失敗をそのまま報告し、終了コードは 0 以外になります。
+
+```bash
+bunx guren tool:call posts.store --input '{"title":"no"}' --json
+```
+
+```json
+{
+  "tool": "posts.store",
+  "method": "POST",
+  "path": "/posts",
+  "status": 422,
+  "isError": true,
+  "content": "{\"errors\":{\"title\":\"Too small: expected string to have >=3 characters\"}}"
+}
+```
+
+### `--as` は認証を迂回します
+
+`--as user:42` はそのユーザーとして呼び出します。仕組みはプロセスに `GUREN_TESTING=1` を設定することで、アプリが実際の資格情報の代わりに注入されたユーザーを受け入れるようになります。`@guren/testing` と同じ仕組みです。このフラグを渡すたびにコマンドがその旨を警告します。
+
+信頼境界は `bunx guren console` と同じで、実行できる人はすでにこのプロジェクトでコードを実行できる、という前提の開発用フラグです。共有環境や本番のデータベースに対しては絶対に実行しないでください。
+
+### `--preflight` は呼び出しの予行演習です
+
+```bash
+bunx guren tool:call posts.store --input '{"title":"Rehearsal"}' --preflight
+```
+
+```
+posts.store  POST /posts
+Status:   200
+
+Preflight  allowed (the handler did not run)
+Validated: body
+Unverified: authorization
+```
+
+リクエストはルートのミドルウェアを通り、ツールが公開しているコントラクトを検証したうえで、ハンドラーの手前で止まります。`unverified` は本当の呼び出しならまだ評価されるものを示します。アクションの内部で認可するルートは、この継ぎ目が構造上到達できないチェックだからです。
+
+MCP エンドポイントは preflight を提供しません。`outputSchema` を公開するツールはそれに適合する `structuredContent` で答えなければならず、verdict はどのルートの出力にも適合しないためです。`tool:call` と `@guren/testing` はこの制約の下にないので、継ぎ目が提供できるものをそのまま提供します。
+
+## ツールをテストする
+
+`app.agent()` は、テスト対象アプリのツールを同じディスパッチ経路で呼びます。
+
+```ts
+import { TestApp } from '@guren/testing'
+
+const app = await TestApp.create({ routes: registerWebRoutes })
+
+const result = await app.agent().call('posts.store', { title: 'Hello' }, { as: user })
+result.assertOk()
+
+const post = result.assertStructured<{ id: number; title: string }>()
+expect(post.title).toBe('Hello')
+```
+
+他の `TestApp` リクエストと同じく、呼び出しに直接アサーションをチェーンすることもできます。
+
+```ts
+await app.agent().call('posts.index').assertOk()
+await app.agent().call('posts.store', { title: 'no' }).assertStatus(422)
+await app.agent().call('secret.show').assertDenied()
+```
+
+| アサーション | 成功する条件 |
+|-------------|-------------|
+| `assertOk()` | 呼び出しがエラー結果として返らなかった(2xx/3xx のいずれか) |
+| `assertStatus(code)` | ディスパッチがちょうどその HTTP ステータスに解決した |
+| `assertDenied()` | アプリケーションが `401` または `403` を返した |
+| `assertStructured<T>()` | ツールがオブジェクトの出力スキーマを公開し、それを返した。await した結果ではペイロードそのものを返します |
+
+`await app.agent().tools()` は、`tool:list` と同じ導出でアプリが公開するツールを列挙します。
+
+知っておくべき点が3つあります。
+
+- **`{ as: user }` は `actingAs(user)` です。** `X-Testing-User` のエンベロープを使います。ここにトークンは存在しないので、`assertDenied()` は「アプリケーションが拒否した」という意味であり、認証か認可のどちらかです。bearer のスコープは MCP エンドポイント側の概念で、テストからは到達しません。
+- **CSRF は意図して用意するか、意図して外してください。** ディスパッチされたツール呼び出しは cookie も bearer も持たないため、`auth` を付けて作ったアプリでは更新系の呼び出しがポリシーに届く前に `403` で拒否されます。これは `assertDenied()` からはポリシーによる拒否と区別できません。`(await app.withCsrf()).agent()` 経由で呼ぶか、CSRF を積まないアプリでテストしてください。
+- **アプリがルートグラフを持っている必要があります。** `TestApp.create({ routes })` と `TestApp.fromApp(app)` は持っています。`TestApp.fromFetch()` と `TestApp.fromWorkers()` は素の fetch 関数を渡されるだけなので持っておらず、`agent()` は「ツールが0件」ではなくどのコンストラクタを使うべきかを伝えます。
+
+`{ preflight: true }` もここで使え、同じ verdict を返します。
+
+```ts
+const result = await app.agent().call('posts.store', { title: 'x' }, { preflight: true })
+result.assertOk()
+expect(result.json<{ allowed: boolean }>().allowed).toBe(true)
+```
+
 ## `.agent()` を宣言する
 
 書き方は2通りあり、意味は同じです。ルートの他の記述と並べて読みやすいほうを選んでください。

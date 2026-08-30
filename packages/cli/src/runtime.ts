@@ -2,7 +2,7 @@ import { access } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { consola } from 'consola'
-import type { ApiTokenStore } from '@guren/core'
+import type { ApiTokenStore, RouteDefinition } from '@guren/core'
 
 const MAIN_ENTRY_CANDIDATES = [
   'src/main.ts',
@@ -34,6 +34,18 @@ export type MaybeApplication = {
   auth?: {
     getApiTokenStore?: () => ApiTokenStore | undefined
   }
+  /**
+   * The app-local route registry, for the commands that must read the graph
+   * the *booted* app serves rather than the one on disk (`guren tool:call`).
+   * Optional for the same reason `auth` is: an app resolving a `@guren/core`
+   * without the agent interface has no such registry, and that must reach the
+   * caller's own diagnostic instead of a `TypeError`.
+   */
+  router?: {
+    definitions?: () => RouteDefinition[]
+  }
+  /** The app's HTTP entry, when it has one — `tool:call` re-enters through it. */
+  fetch?: (request: Request) => Response | Promise<Response>
 }
 
 export async function resolveMainEntry(appRoot?: string): Promise<string> {

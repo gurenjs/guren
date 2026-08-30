@@ -67,6 +67,7 @@ import { bootstrapApplication, resolveMainEntry, type MaybeApplication } from '.
 import { runQueueWorker, listFailedJobs, retryFailedJob, retryAllFailedJobs, flushFailedJobs } from './queue'
 import { displayRoutes } from './route-list'
 import { displayToolInspection, displayTools } from './tool-list'
+import { runToolCall } from './tool-call'
 import { runTokenIssue } from './token-issue'
 import { cacheConfig, clearConfigCache, showConfigCacheInfo } from './config-cache'
 import { createStorageLink, removeStorageLink } from './storage-link'
@@ -1660,6 +1661,63 @@ const toolInspectCommand = defineCommand({
   },
 })
 
+const toolCallCommand = defineCommand({
+  meta: {
+    name: 'tool:call',
+    description: 'Invoke one agent tool against this application, the way an agent would (RFC 0016).',
+  },
+  args: {
+    name: {
+      type: 'positional',
+      description: 'Tool name, as tool:list prints it',
+      required: true,
+    },
+    input: {
+      type: 'string',
+      description: 'Tool arguments as a JSON object',
+      valueHint: '{"title":"Hello"}',
+    },
+    as: {
+      type: 'string',
+      description:
+        'Authenticate as a user (user:42). Development only: sets GUREN_TESTING=1 for this process, '
+        + 'which makes the app accept an injected user instead of a real credential',
+      valueHint: 'user:42',
+    },
+    preflight: {
+      type: 'boolean',
+      description: 'Ask for a verdict instead of an execution — the handler does not run',
+    },
+    // No `--routes`: unlike `tool:list`, this command dispatches into the
+    // booted application, so its tools come from the graph that app actually
+    // serves. A routes file could not change that, and a flag that silently
+    // does not apply is worse than an absent one — see `tool-call.ts`.
+    app: {
+      type: 'string',
+      description: 'Application root directory',
+    },
+    json: {
+      type: 'boolean',
+      description: 'Output the call result as JSON',
+    },
+  },
+  async run({ args }) {
+    await runToolCall({
+      name: args.name,
+      // Through `lastFlagValue`/`lastBooleanFlag`: citty arrays a repeated
+      // flag whatever its declared type, and every array is truthy — so
+      // `--input a --input b` would otherwise arrive as a comma-joined string
+      // that is not JSON, and `--json=false --json=false` would turn off into
+      // on.
+      input: lastFlagValue(args.input),
+      as: lastFlagValue(args.as),
+      preflight: lastBooleanFlag(args.preflight),
+      appRoot: lastFlagValue(args.app),
+      json: lastBooleanFlag(args.json),
+    })
+  },
+})
+
 // `token:` is its own namespace, distinct from the `tool:` commands above
 // (which only *describe* the surface) and from `agent:` (the coding-agent
 // harness). This one writes into the application's store, so unlike its
@@ -3148,6 +3206,7 @@ export const builtinSubCommands = {
   'route:list': routeListCommand,
   'tool:list': toolListCommand,
   'tool:inspect': toolInspectCommand,
+  'tool:call': toolCallCommand,
   'token:issue': tokenIssueCommand,
   'openapi:generate': openApiGenerateCommand,
   'config:cache': configCacheCommand,
