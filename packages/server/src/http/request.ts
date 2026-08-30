@@ -5,15 +5,25 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Parses the incoming request payload supporting both JSON bodies and form submissions.
- * Falls back to an empty object if the payload cannot be parsed.
+ * Parses the incoming request body and returns the parsed value as-is: a JSON
+ * array stays an array, a JSON string stays a string. Use this wherever the
+ * result is handed to a schema and *that* decides the shape — a route
+ * contract's `body`, `Controller.validateBody()`, `validateRequest()`.
+ *
+ * Falls back to an empty object when the body cannot be parsed (malformed
+ * JSON, an empty POST, an unsupported content type). That fallback is load
+ * bearing: an all-optional object schema has to keep passing on an empty
+ * body, which `undefined` would break. The cost is that a non-object schema
+ * sees `{}` there and fails validation, rather than receiving nothing.
+ *
+ * Form submissions have no non-object shape to preserve, so they normalize to
+ * a record exactly as {@link parseRequestPayload} does.
  */
-export async function parseRequestPayload(ctx: Context): Promise<Record<string, unknown>> {
+export async function parseRequestBody(ctx: Context): Promise<unknown> {
   const contentType = ctx.req.header('content-type') ?? ''
 
   if (contentType.includes('application/json')) {
-    const body = await ctx.req.json().catch(() => ({}))
-    return isPlainObject(body) ? body : {}
+    return ctx.req.json().catch(() => ({}))
   }
 
   if (typeof ctx.req.parseBody === 'function') {
@@ -24,6 +34,22 @@ export async function parseRequestPayload(ctx: Context): Promise<Record<string, 
   }
 
   return {}
+}
+
+/**
+ * The record-shaped view of {@link parseRequestBody}, for callers that read the
+ * payload field by field (`payload.channel`, per-field validation rules,
+ * `Controller.input()`/`only()`/`except()`/`has()`). A body that is not a plain
+ * object — an array, a string, `null` — becomes `{}`, because there is no
+ * field to read on one.
+ */
+export async function parseRequestPayload(ctx: Context): Promise<Record<string, unknown>> {
+  return asRecord(await parseRequestBody(ctx))
+}
+
+/** Narrow a parsed body to the record view described on {@link parseRequestPayload}. */
+export function asRecord(body: unknown): Record<string, unknown> {
+  return isPlainObject(body) ? body : {}
 }
 
 /**

@@ -5,7 +5,7 @@ import { inertia, type InertiaOptions } from './inertia/InertiaEngine'
 import { resolveSharedInertiaProps, type ResolvedSharedInertiaProps } from './inertia/shared'
 import { getRequestLocale, getRequestTranslator, type TranslatorBinding } from '../http/middleware/detect-locale'
 import { tryGetI18n, type I18nManager, type RegisteredTranslationKey, type ReplacementValues } from '../i18n'
-import { flattenRequestQueries, parseRequestPayload } from '../http/request'
+import { asRecord, flattenRequestQueries, parseRequestBody } from '../http/request'
 import { getAuthContext } from '../auth/context'
 import type { AuthContext } from '../auth/types'
 import type { ServiceBindings } from '../container/bindings'
@@ -128,7 +128,7 @@ export class Controller {
   static inject?: readonly string[]
 
   private context?: Context
-  private parsedBody?: Record<string, unknown>
+  private parsedBody?: { value: unknown }
   private resolvedModels?: Map<unknown, unknown>
   private _container?: ContainerLike
 
@@ -598,8 +598,7 @@ export class Controller {
    * ```
    */
   protected async validateBody<T>(schema: ZodLikeSchema<T>): Promise<T> {
-    const body = await this.getBody()
-    return this.runValidation(schema, body)
+    return this.runValidation(schema, await this.getRawBody())
   }
 
   /**
@@ -645,8 +644,7 @@ export class Controller {
    * ```
    */
   protected async validateBodySafe<T>(schema: ZodLikeSchema<T>): Promise<SafeValidationResult<T>> {
-    const body = await this.getBody()
-    return this.runValidationSafe(schema, body)
+    return this.runValidationSafe(schema, await this.getRawBody())
   }
 
   /**
@@ -691,17 +689,36 @@ export class Controller {
 
   // ─── Private Helpers ────────────────────────────────────────────
 
-  private async getBody(): Promise<Record<string, unknown>> {
+  /**
+   * The parsed body as sent: an array stays an array, a string stays a string.
+   * Only validation reads it — a schema is what decides whether the shape is
+   * acceptable, so narrowing first would make a non-object contract
+   * unreachable.
+   *
+   * Memoized in a box rather than by truthiness: a body of `null`, `''`, `0`
+   * or `false` is a parsed body, and re-reading the request would find the
+   * stream consumed.
+   */
+  private async getRawBody(): Promise<unknown> {
     if (this.parsedBody) {
-      return this.parsedBody
+      return this.parsedBody.value
     }
 
     try {
-      this.parsedBody = await parseRequestPayload(this.ctx)
+      this.parsedBody = { value: await parseRequestBody(this.ctx) }
     } catch {
-      this.parsedBody = {}
+      this.parsedBody = { value: {} }
     }
 
-    return this.parsedBody
+    return this.parsedBody.value
+  }
+
+  /**
+   * The record view of {@link getRawBody}, for the field-by-field helpers
+   * (`input`, `only`, `except`, `has`). A non-object body has no field to
+   * read, so it reads as `{}`.
+   */
+  private async getBody(): Promise<Record<string, unknown>> {
+    return asRecord(await this.getRawBody())
   }
 }

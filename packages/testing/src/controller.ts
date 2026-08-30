@@ -113,6 +113,45 @@ function loadServer(): Promise<ServerModule> {
   return serverModulePromise
 }
 
+/**
+ * The mock's counterpart to the runtime's `parseRequestBody`: the parsed body
+ * as sent, so an array stays an array for `validateBody()` to judge.
+ */
+async function parseRequestBody(ctx: ControllerContext): Promise<unknown> {
+  // Clone so the raw body stays readable — the real runtime caches the
+  // parsed body in Hono, letting validateBody() and file() compose on one
+  // request; here the clone is what preserves that property.
+  const request = ctx.req.raw.clone()
+  const contentType = request.headers.get('Content-Type') ?? ''
+
+  if (contentType.includes('application/json')) {
+    return request.json().catch(() => ({}))
+  }
+
+  if (contentType.includes('application/x-www-form-urlencoded')) {
+    const text = await request.text()
+    return Object.fromEntries(new URLSearchParams(text))
+  }
+
+  if (contentType.includes('multipart/form-data')) {
+    const formData = await request.formData()
+    const result: Record<string, unknown> = {}
+    formData.forEach((value, key) => {
+      result[key] = value
+    })
+    return result
+  }
+
+  return {}
+}
+
+/** The record view of {@link parseRequestBody}, as the runtime narrows it. */
+function asRecord(body: unknown): Record<string, unknown> {
+  return typeof body === 'object' && body !== null && !Array.isArray(body)
+    ? (body as Record<string, unknown>)
+    : {}
+}
+
 export function createGurenControllerModule() {
   // Prime the memo now: continuations on one promise run in registration
   // order, so by the time an awaited view() render invokes a component that
@@ -237,33 +276,7 @@ export function createGurenControllerModule() {
       }
       return loadedServer.viteAsset(entry, options)
     },
-    parseRequestPayload: async (ctx: ControllerContext) => {
-      // Clone so the raw body stays readable — the real runtime caches the
-      // parsed body in Hono, letting validateBody() and file() compose on one
-      // request; here the clone is what preserves that property.
-      const request = ctx.req.raw.clone()
-      const contentType = request.headers.get('Content-Type') ?? ''
-
-      if (contentType.includes('application/json')) {
-        return request.json()
-      }
-
-      if (contentType.includes('application/x-www-form-urlencoded')) {
-        const text = await request.text()
-        return Object.fromEntries(new URLSearchParams(text))
-      }
-
-      if (contentType.includes('multipart/form-data')) {
-        const formData = await request.formData()
-        const result: Record<string, unknown> = {}
-        formData.forEach((value, key) => {
-          result[key] = value
-        })
-        return result
-      }
-
-      return {}
-    },
+    parseRequestPayload: async (ctx: ControllerContext) => asRecord(await parseRequestBody(ctx)),
     formatValidationErrors: (error: { issues?: Array<{ path: (string | number)[]; message: string }> }) => {
       const errors: Record<string, string> = {}
       if (error?.issues) {
@@ -350,12 +363,31 @@ export function createControllerModuleMock() {
       return this.ctx.req
     }
 
+    // Mirrors the real Controller's split: validation sees the body as sent
+    // (an array stays an array), while the field-by-field helpers see the
+    // record view.
+    //
+    // Deliberately the local raw parser, not `module.parseRequestPayload` —
+    // that one narrows, which is what made a non-object body unreachable.
+    // Unmemoized, because the parser clones the request: the real Controller
+    // boxes its cache to avoid re-reading a body Hono hands over once, and
+    // here there is nothing to exhaust. Errors fall back to `{}` as the real
+    // one does, so a malformed body is a validation failure rather than a
+    // throw out of validateBody().
+    public async getRawBody(): Promise<unknown> {
+      try {
+        return await parseRequestBody(this.ctx)
+      } catch {
+        return {}
+      }
+    }
+
     public async getBody(): Promise<Record<string, unknown>> {
       if (this.parsedBody) {
         return this.parsedBody
       }
 
-      this.parsedBody = ((await module.parseRequestPayload(this.ctx)) ?? {}) as Record<string, unknown>
+      this.parsedBody = asRecord(await this.getRawBody())
       return this.parsedBody
     }
 
@@ -407,8 +439,7 @@ export function createControllerModuleMock() {
         | { success: true; data: T }
         | { success: false; error: { issues?: Array<{ path: (string | number)[]; message: string }> } }
     }): Promise<T> {
-      const body = await this.getBody()
-      return this.runValidation(schema, body, 422)
+      return this.runValidation(schema, await this.getRawBody(), 422)
     }
 
     public async validateBodySafe<T>(schema: {
@@ -416,8 +447,7 @@ export function createControllerModuleMock() {
         | { success: true; data: T }
         | { success: false; error: { issues?: Array<{ path: (string | number)[]; message: string }> } }
     }): Promise<{ success: true; data: T } | { success: false; errors: Record<string, string> }> {
-      const body = await this.getBody()
-      return this.runValidationSafe(schema, body)
+      return this.runValidationSafe(schema, await this.getRawBody())
     }
 
     public validateQuery<T>(schema: {
