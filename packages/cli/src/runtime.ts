@@ -31,8 +31,21 @@ export type MaybeApplication = {
    * reach the caller's own diagnostic ("call `useTokens(store)`") rather than
    * a `TypeError` naming an internal.
    */
+  /** Bun's listener handle, when the app is one that reports having a server. */
+  stop?: (closeConnections?: boolean) => void | Promise<void>
   auth?: {
     getApiTokenStore?: () => ApiTokenStore | undefined
+    /**
+     * The options the app's own `useTokens()` used, so machinery replacing
+     * the store changes where tokens live and nothing else.
+     */
+    getApiTokenOptions?: () => { provider?: string; guardName?: string; updateLastUsed?: boolean }
+    /**
+     * Installs a token store over whatever the app configured, which is how
+     * `tool:dev` issues a credential that cannot outlive its process. Same
+     * structural-and-optional reasoning as the accessor above.
+     */
+    useTokens?: (store: ApiTokenStore, options?: { provider?: string; guardName?: string }) => void
   }
   /**
    * The app-local route registry, for the commands that must read the graph
@@ -109,10 +122,13 @@ export async function bootstrapApplication(mod: Record<string, unknown>): Promis
  * Resolve the app's entry, import it, bootstrap it, and boot it — the block
  * every command that must reach a *live* application performs.
  *
- * `boot()` failures are rethrown rather than warned about, because a command
- * reaching into a half-booted app reads state whose configuration never
- * completed. What that costs differs per command, so each call site says so in
- * its own words.
+ * `boot()` failures are rethrown rather than warned about, and that is the
+ * whole reason this is a helper rather than four lines at each call site: a
+ * command reaching into a half-booted app reads state whose configuration
+ * never completed. A provider that failed after auth registered leaves a store
+ * that *looks* configured, so a token minted against it is written into an
+ * application that never finished booting — and reported as a success. What
+ * that costs differs per command, so each call site says so in its own words.
  */
 export async function loadBootedApplication(appRoot?: string): Promise<MaybeApplication> {
   // The same root everything else about the app was resolved from — see
