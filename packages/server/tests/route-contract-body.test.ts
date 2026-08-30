@@ -1,6 +1,7 @@
 import { describe, test, expect } from 'bun:test'
 import { z } from 'zod'
-import { Application, Controller, validateRequest, getValidatedData, type Router } from '../src/index'
+import { Application, Controller, FormRequest, validateRequest, getValidatedData, type Router } from '../src/index'
+import { required, string } from '../src/http/validation/rules'
 
 /**
  * A route may bind any schema to `body`, not only an object one. The parsed
@@ -35,6 +36,17 @@ class BulkController extends Controller {
   async allowEmpty() {
     const data = await this.validateBody(AllOptional)
     return this.json({ received: data })
+  }
+
+  async viaFormRequest() {
+    const data = await new TitleFormRequest().handle(this.ctx)
+    return this.json({ received: data })
+  }
+}
+
+class TitleFormRequest extends FormRequest<{ title: string }> {
+  rules() {
+    return { title: [required(), string()] }
   }
 }
 
@@ -263,6 +275,21 @@ describe('a request body the form parser cannot decode', () => {
 
     expect(status).toBe(200)
     expect(JSON.parse(body)).toEqual({ received: {} })
+  })
+
+  // The fallback lives in the shared parser, so the paths that read the body
+  // field by field inherit it too — they are what `parseRequestPayload()`
+  // feeds. `FormRequest` stands in for that group here.
+  test('FormRequest rules see the empty-object fallback rather than a throw', async () => {
+    const { status, body } = await post(
+      (router) => router.post('/posts', [BulkController, 'viaFormRequest']),
+      '/posts',
+      UNDECODABLE_FORM.body,
+      UNDECODABLE_FORM.contentType,
+    )
+
+    expect(status).toBe(422)
+    expect(body).not.toContain('TypeError')
   })
 
   // A form body that *does* decode is untouched by the fallback — the point is

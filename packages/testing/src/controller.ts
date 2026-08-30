@@ -116,43 +116,43 @@ function loadServer(): Promise<ServerModule> {
 /**
  * The mock's counterpart to the runtime's `parseRequestBody`: the parsed body
  * as sent, so an array stays an array for `validateBody()` to judge.
+ *
+ * A body that cannot be parsed falls back to `{}` — a client error reaches the
+ * schema and fails validation rather than throwing, matching what the runtime's
+ * parser now does for a form body no parser can decode. The fallback wraps the
+ * whole read, not just that one branch: `clone()` throws on an already-read
+ * body, and the callers this feeds have no fallback of their own to catch it.
  */
 async function parseRequestBody(ctx: ControllerContext): Promise<unknown> {
-  // Clone so the raw body stays readable — the real runtime caches the
-  // parsed body in Hono, letting validateBody() and file() compose on one
-  // request; here the clone is what preserves that property.
-  const request = ctx.req.raw.clone()
-  const contentType = request.headers.get('Content-Type') ?? ''
+  try {
+    // Clone so the raw body stays readable — the real runtime caches the
+    // parsed body in Hono, letting validateBody() and file() compose on one
+    // request; here the clone is what preserves that property.
+    const request = ctx.req.raw.clone()
+    const contentType = request.headers.get('Content-Type') ?? ''
 
-  if (contentType.includes('application/json')) {
-    return request.json().catch(() => ({}))
-  }
+    if (contentType.includes('application/json')) {
+      return await request.json().catch(() => ({}))
+    }
 
-  if (contentType.includes('application/x-www-form-urlencoded')) {
-    const text = await request.text()
-    return Object.fromEntries(new URLSearchParams(text))
-  }
+    if (contentType.includes('application/x-www-form-urlencoded')) {
+      const text = await request.text()
+      return Object.fromEntries(new URLSearchParams(text))
+    }
 
-  if (contentType.includes('multipart/form-data')) {
-    // The fallback sits here, not in the callers, for the same reason the
-    // runtime's does: a body the form parser cannot decode is a client error,
-    // so it reaches the schema as `{}` and fails validation rather than
-    // throwing. Both views of the body — this one and `parseRequestPayload`
-    // below — get that answer, which is what keeps the mock and the runtime
-    // agreeing on a malformed form body.
-    try {
+    if (contentType.includes('multipart/form-data')) {
       const formData = await request.formData()
       const result: Record<string, unknown> = {}
       formData.forEach((value, key) => {
         result[key] = value
       })
       return result
-    } catch {
-      return {}
     }
-  }
 
-  return {}
+    return {}
+  } catch {
+    return {}
+  }
 }
 
 /** The record view of {@link parseRequestBody}, as the runtime narrows it. */
@@ -409,8 +409,8 @@ export function createControllerModuleMock() {
     // Unmemoized, because the parser clones the request: the real Controller
     // boxes its cache to avoid re-reading a body Hono hands over once, and
     // here there is nothing to exhaust. No fallback of its own either — an
-    // unparseable body already arrives as `{}` from the parser above, exactly
-    // as it does in the runtime.
+    // unparseable body already arrives as `{}` from the parser above, which is
+    // also what `parseRequestPayload` reads, so both views agree.
     public async getRawBody(): Promise<unknown> {
       return parseRequestBody(this.ctx)
     }

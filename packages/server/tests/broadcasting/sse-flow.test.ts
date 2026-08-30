@@ -112,6 +112,27 @@ describe('SSE subscription flow', () => {
     expect((connected!.data as { channels: string[] }).channels).toEqual([])
   })
 
+  // The auth endpoint reads the channel out of the request payload, so it
+  // inherits the shared parser's empty-object fallback. A body no form parser
+  // can decode names no channel, which is the ordinary 400 — not the 500 the
+  // parser's TypeError used to produce.
+  test('answers 400 for a request body the form parser cannot decode', async () => {
+    const manager = createManager()
+    manager.privateChannel('users.1.notifications', () => true)
+
+    const app = new Hono()
+    app.post('/auth', manager.authMiddleware({ getUser: () => ({ id: 1 }) }) as never)
+
+    const response = await app.request('/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'multipart/form-data' },
+      body: 'broken',
+    })
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: 'No channel specified' })
+  })
+
   test('should subscribe an existing client through the auth endpoint', async () => {
     const manager = createManager()
     manager.privateChannel('users.1.notifications', (_channel, user) => (user as { id: number } | null)?.id === 1)
