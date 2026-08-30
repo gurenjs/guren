@@ -165,6 +165,23 @@ async function readMultipartBody(request: Request): Promise<FormData | null> {
 }
 
 /**
+ * Hono's media-type rule, which is what every form body in the runtime is
+ * gated on: `parseBody()` takes `Content-Type` up to the first `;`, trims it,
+ * lowercases it, and compares with `===` (hono/utils/body). A substring test
+ * diverges in *both* directions — it misses `Application/X-WWW-Form-Urlencoded`,
+ * which the runtime parses, and it accepts
+ * `application/x-www-form-urlencoded-evil`, which the runtime does not.
+ *
+ * The JSON branch below deliberately keeps its case-sensitive `includes()`
+ * instead: the runtime reaches `ctx.req.json()` through exactly that test, so
+ * `application/json-evil` is read as JSON and `Application/JSON` falls past it
+ * to the form rule — in the mock and in the runtime alike.
+ */
+function isMediaType(contentType: string, mediaType: string): boolean {
+  return contentType.split(';')[0]?.trim().toLowerCase() === mediaType
+}
+
+/**
  * The mock's counterpart to the runtime's `parseRequestBody`: the parsed body
  * as sent, so an array stays an array for `validateBody()` to judge.
  *
@@ -192,12 +209,12 @@ async function parseRequestBody(ctx: ControllerContext): Promise<unknown> {
       return await request.json().catch(() => ({}))
     }
 
-    if (contentType.includes('application/x-www-form-urlencoded')) {
+    if (isMediaType(contentType, 'application/x-www-form-urlencoded')) {
       const text = await request.text()
       return collectFormEntries(new URLSearchParams(text))
     }
 
-    if (contentType.includes('multipart/form-data')) {
+    if (isMediaType(contentType, 'multipart/form-data')) {
       return collectFormEntries(await request.formData())
     }
 
@@ -494,7 +511,10 @@ export function createControllerModuleMock() {
         // controller. Guarded here rather than in the two callers so the memo
         // still holds — a rejected promise cached is one parse, a guard per
         // call site is two.
-        this.multipartBody = contentType.includes('multipart/form-data')
+        //
+        // The runtime's file()/files() read ctx.req.parseBody(), so they are
+        // gated on Hono's media-type rule too — see isMediaType.
+        this.multipartBody = isMediaType(contentType, 'multipart/form-data')
           ? readMultipartBody(request)
           : Promise.resolve(null)
       }
