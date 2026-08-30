@@ -752,9 +752,14 @@ export class Router<M extends string = never> {
       const handler = resolveHandler(route.handler, this.modelBindings, options.container, route.bindings, route.path)
       const contractMiddleware = createContractValidationMiddleware(route)
       const inlineMiddlewares = [...route.scopedMiddlewares, ...route.middlewares]
-      const allMiddlewares = contractMiddleware
-        ? [...resolvedMiddlewares, ...inlineMiddlewares, contractMiddleware, handler]
-        : [...resolvedMiddlewares, ...inlineMiddlewares, handler]
+      // Last before the handler, so a preflight verdict answers only for a
+      // request that already cleared every other gate — see
+      // createAgentPreflightMiddleware.
+      const preflightMiddleware = createAgentPreflightMiddleware(route)
+      const chain = [...resolvedMiddlewares, ...inlineMiddlewares]
+      if (contractMiddleware) chain.push(contractMiddleware)
+      if (preflightMiddleware) chain.push(preflightMiddleware)
+      const allMiddlewares = [...chain, handler]
       mountRoute(app, route.method, route.path, ...allMiddlewares)
     }
   }
@@ -1331,6 +1336,73 @@ function throwOnInvalid(schema: ValidationSchema<unknown>, data: unknown): void 
   const result = schema.safeParse(data)
   if (!result.success) {
     throw ValidationException.withMessages(formatValidationErrors(result.error))
+  }
+}
+
+/**
+ * Header a dispatching agent surface sets to ask for a verdict instead of an
+ * execution (RFC 0016 §5.4). Set by `buildToolRequest`, never by a browser.
+ */
+export const AGENT_PREFLIGHT_HEADER = 'X-Guren-Agent-Preflight'
+
+/**
+ * The preflight seam: everything a request must pass before the handler runs,
+ * reported instead of executed.
+ *
+ * Mounted last, so the whole chain in front of it has already run — an
+ * unauthenticated call is a 401 and an unauthorized one a 403 from the real
+ * middleware, not from a second copy of the rule here. Reaching this point is
+ * itself the positive half of the verdict; what it adds is validating the
+ * contract the *tool advertised* and then stopping, so an agent can ask "would
+ * this be allowed" without the write happening.
+ *
+ * **Only routes declaring `.agent()` honour the header.** A non-agent route
+ * ignores it completely, so no ordinary endpoint changes behaviour on a header
+ * an arbitrary client can set; the surface is exactly what RFC 0016 defines.
+ *
+ * Body validation happens *here* rather than being left to the controller's
+ * `validateBody()`: the chain stops before the controller by construction, so
+ * the alternative is a verdict that silently never checked the body — the
+ * shape of the request an agent is most likely to get wrong. Reading the body
+ * is safe precisely because this branch does not call `next()`, so nothing
+ * downstream reads the stream after it.
+ */
+function createAgentPreflightMiddleware(route: RegisteredRoute): MiddlewareHandler | null {
+  if (!route.agent) {
+    return null
+  }
+
+  const schemas = route.schemas
+
+  return async (c, next) => {
+    if (c.req.header(AGENT_PREFLIGHT_HEADER) === undefined) {
+      return next()
+    }
+
+    const validated: string[] = []
+    if (schemas?.params) {
+      throwOnInvalid(schemas.params, c.req.param())
+      validated.push('params')
+    }
+    if (schemas?.query) {
+      throwOnInvalid(schemas.query, flattenRequestQueries(c))
+      validated.push('query')
+    }
+    if (schemas?.body) {
+      throwOnInvalid(schemas.body, await parseRequestBody(c))
+      validated.push('body')
+    }
+
+    return c.json({
+      preflight: true,
+      allowed: true,
+      route: route.name,
+      validated,
+      message:
+        'Preflight only: the request passed this route\'s middleware'
+        + (validated.length > 0 ? ` and its ${validated.join(', ')} schema${validated.length > 1 ? 's' : ''}` : '')
+        + '. The handler did not run, so nothing was created, changed, or deleted.',
+    })
   }
 }
 

@@ -138,4 +138,34 @@ describe('mcpPlugin (integration)', () => {
     const { tools } = await client.listTools()
     expect(tools).toEqual([])
   })
+  test('should report a preflight verdict without executing the tool', async () => {
+    const client = await connectClient(token)
+
+    const result = await client.callTool({
+      name: 'posts.store',
+      arguments: { title: 'Rehearsal', password: 'x', _preflight: true },
+    })
+
+    expect(result.isError).toBeUndefined()
+    const content = result.content as Array<{ type: string; text: string }>
+    const verdict = JSON.parse(content[0]!.text) as { preflight: boolean; route: string }
+    expect(verdict.preflight).toBe(true)
+    expect(verdict.route).toBe('posts.store')
+  })
+
+  test('should not forward _preflight into the validated body', async () => {
+    const client = await connectClient(token)
+
+    // `_preflight` is an instruction to the adapter; forwarded, it would fail
+    // the strict body schema this route declares — the 422 would look like
+    // the caller's payload was wrong.
+    const result = await client.callTool({
+      name: 'posts.store',
+      arguments: { title: 'Real', password: 'x', _preflight: false },
+    })
+
+    expect(result.isError).toBeUndefined()
+    const content = result.content as Array<{ type: string; text: string }>
+    expect(JSON.parse(content[0]!.text)).toEqual({ created: 'Real' })
+  })
 })

@@ -1,8 +1,11 @@
 import {
   AgentToolDenied,
   AgentToolInvoked,
+  buildToolRequest,
   definePlugin,
   deriveAgentTools,
+  mapToolResponse,
+  PREFLIGHT_ARGUMENT,
   readBearerToken,
   redactAgentArguments,
   verifyApiToken,
@@ -13,10 +16,10 @@ import {
   type DerivedAgentTool,
   type EventManager,
   type ServiceProviderConstructor,
+  type ToolCallOutcome,
 } from '@guren/core'
 import type { Context } from 'hono'
 
-import { buildToolRequest, mapToolResponse, type ToolCallOutcome } from './dispatch'
 import { AgentRateLimiter, type RateLimitConfig } from './rate-limit'
 import { createAppMcpServer } from './server'
 
@@ -186,9 +189,19 @@ async function dispatchThroughApp(
   app: Application,
   c: Context,
   tool: DerivedAgentTool,
-  args: Record<string, unknown>,
+  rawArgs: Record<string, unknown>,
 ): Promise<ToolCallOutcome> {
+  // `_preflight` is an instruction to this adapter, not a field of the
+  // route's contract — forwarded, it would fail the very validation the
+  // caller asked to rehearse. Stripped before the request is built, and only
+  // here: the scope and approval gates ran first, so a preflight cannot be
+  // used to probe a tool the token may not call.
+  const preflight = rawArgs[PREFLIGHT_ARGUMENT] === true
+  const args = { ...rawArgs }
+  delete args[PREFLIGHT_ARGUMENT]
+
   const built = buildToolRequest(tool, args, {
+    preflight,
     // The inbound request's own origin, so the re-entrant request carries the
     // real Host the MCP client reached `/mcp` on. Defaulting to localhost
     // (dispatch's fallback) makes host-authorization middleware — which RFC

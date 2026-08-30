@@ -1,8 +1,8 @@
 import { describe, test, expect } from 'bun:test'
 import { z } from 'zod'
-import { Router, deriveAgentTools, type DerivedAgentTool } from '@guren/core'
-
-import { advertisesStructuredOutput, buildToolRequest, mapToolResponse } from './dispatch'
+import { Router } from '../../src/mvc/Router'
+import { deriveAgentTools, type DerivedAgentTool } from '../../src/agent/derive'
+import { advertisesStructuredOutput, buildToolRequest, mapToolResponse } from '../../src/agent/dispatch'
 
 function toolFor(register: (router: Router) => void, name: string): DerivedAgentTool {
   const router = new Router()

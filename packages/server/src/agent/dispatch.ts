@@ -9,8 +9,9 @@
  * saw the JSON Schema) and never decides authorization (the gate and the
  * app's policies do).
  */
-import type { AgentToolInputSource, DerivedAgentTool } from '@guren/core'
-import { PATH_PARAM_PATTERN } from '@guren/core/internal/route-path'
+import type { AgentToolInputSource, DerivedAgentTool } from './derive'
+import { PATH_PARAM_PATTERN } from '../internal/route-path'
+import { AGENT_PREFLIGHT_HEADER } from '../mvc/Router'
 
 /** How many characters of a non-JSON response body survive into the result. */
 const TEXT_RESPONSE_CAP = 50_000
@@ -29,7 +30,21 @@ export interface BuildToolRequestOptions {
    * surface that authenticates some other way.
    */
   authorization?: string
+  /**
+   * Ask for a verdict instead of an execution (RFC 0016 §5.4): the request
+   * runs the route's middleware and validates the advertised contract, then
+   * stops before the handler. Only routes declaring `.agent()` honour it.
+   */
+  preflight?: boolean
 }
+
+/**
+ * The argument key an agent surface uses to request a preflight. Stripped
+ * from the arguments before the request is built — it is an instruction to
+ * the adapter, not a field of any route's contract, and forwarding it would
+ * fail the very validation the caller asked to rehearse.
+ */
+export const PREFLIGHT_ARGUMENT = '_preflight'
 
 export type BuiltToolRequest =
   | { request: Request }
@@ -146,6 +161,9 @@ export function buildToolRequest(
   })
   if (options.authorization) {
     headers.set('Authorization', options.authorization)
+  }
+  if (options.preflight) {
+    headers.set(AGENT_PREFLIGHT_HEADER, '1')
   }
 
   let body: string | undefined
