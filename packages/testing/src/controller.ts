@@ -57,16 +57,21 @@ export interface InertiaPayload {
 function collectFormEntries(
   entries: Iterable<[string, FormDataEntryValue]>,
 ): Record<string, unknown> {
-  const result: Record<string, unknown> = {}
+  // Collected in a Map and materialized with `Object.fromEntries`, never by
+  // assigning into an object literal: `result['__proto__'] = v` hits the
+  // inherited setter and silently drops the field, where the runtime — whose
+  // own last step is `Object.fromEntries` over Hono's null-prototype object —
+  // keeps it as an own property.
+  const collected = new Map<string, FormDataEntryValue>()
 
   for (const [key, value] of entries) {
-    if (key.endsWith('[]') && key in result) {
+    if (key.endsWith('[]') && collected.has(key)) {
       continue
     }
-    result[key] = value
+    collected.set(key, value)
   }
 
-  return result
+  return Object.fromEntries(collected)
 }
 
 export function createControllerContext(

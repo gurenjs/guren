@@ -576,6 +576,25 @@ describe('repeated form fields', () => {
     return ((await response.json()) as { value: unknown }).value
   }
 
+  /**
+   * `__proto__` must survive as an own property, as it does in the runtime:
+   * Hono collects into a null-prototype object and `parseRequestPayload`
+   * materializes it with `Object.fromEntries`. Assigning into an object
+   * literal instead hits the inherited setter and drops the field silently,
+   * which would let a mass-assignment test pass against a body the runtime
+   * actually delivers.
+   */
+  for (const { encoding, build } of BODIES) {
+    it(`${encoding}: a \`__proto__\` field survives in the mock and the runtime`, async () => {
+      const key = '__proto__'
+      const fromMock = await readThroughMock(key, build(key))
+      const fromRuntime = await readThroughRuntime(key, build(key))
+
+      expect(fromRuntime).toBe(LAST)
+      expect(fromMock).toBe(LAST)
+    })
+  }
+
   for (const { encoding, build } of BODIES) {
     for (const { key, expected, rule } of KEYS) {
       it(`${encoding}: a repeated \`${key}\` ${rule} in the mock and the runtime`, async () => {
