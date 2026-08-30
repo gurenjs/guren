@@ -165,6 +165,200 @@ bunx guren check --spec    # docs/spec/ が再生成結果と一致するか
 
 名前付きミドルウェアで保護されたルート(例: `router.middleware('auth').group(...)`)は保護済みと認識されます。`/login` や `/register` などのゲストフローは認証チェックの対象外です。
 
+### エージェントに公開したルート
+
+`.agent()` メタデータを宣言したルート([ルーティング](./routing.md)を参照)は、`check` の検査対象になり、`audit` ではより厳しく扱われます。ルールは通常の `check` スイートで実行され、内容によって有効化されます。エージェント公開ルートが存在しないアプリでは findings は生成されず、コントローラの走査も行われません。
+
+`check` が **fail** にするもの:
+
+| Finding key | ルール |
+|---|---|
+| `agent-route-name:*` | agent メタデータを宣言しているのに `.name()` がない。ツール名はツールの識別子そのものなので、名前のないルートはツールになれません。 |
+| `agent-route-tool-name:*` | ツール名(`agent.toolName` またはルート名)が MCP の文法 `^[A-Za-z0-9._-]{1,128}# CLI リファレンス
+
+Guren には 2 つの CLI が付属します。
+
+- 既存プロジェクト内でコントローラー/モデル/ビュー生成やユーティリティを実行する `bunx guren`
+- 新規アプリをスキャフォールドする `bunx create-guren-app`
+
+## 基本的な使い方
+
+```bash
+# グローバルインストール不要。プロジェクトルートでそのまま実行
+bunx guren --help
+```
+
+コマンドは `bunx guren make:controller UserController` のようなサブコマンド形式です。
+
+## 高レベルスキャフォールド
+
+低レベルな `make:*` ではなく、標準構成をまとめて導入したい場合は `bunx guren add ...` を使います。
+
+```bash
+bunx guren add auth
+bunx guren add admin
+bunx guren add resource posts --fields "title:string,body:text"
+bunx guren add queue
+bunx guren add mail
+bunx guren add events
+bunx guren add cache
+bunx guren add notifications
+bunx guren add storage
+bunx guren add attachments
+bunx guren add broadcasting
+bunx guren add schedule
+```
+> **Golden path:** まず `bunx guren add auth` と `bunx guren add resource` から始め、アプリの成長に応じて他の機能を追加してください。
+
+```bash
+bunx guren plugin @acme/guren-plugin-audit
+```
+
+`plugin`（`add plugin` としても利用可能）は、依存が未インストールの場合に `bun add` でインストールし（`--no-install` でスキップ可能）、プラグインが宣言するGurenバージョン互換性を検証した上で（`--ignore-compatibility` で無視可能）、Providerを `src/app.ts` に自動登録します。プラグインが `gurenPlugin` マニフェストで宣言した設定スタブや環境変数キーも適用されます。`--force` は公開済みファイルの上書きに使います。
+
+これらのコマンドは `src/app.ts` を更新し、対応する provider/runtime ファイルを生成します。
+
+`bunx guren add admin` は次を生成します:
+
+- `app/Http/Controllers/Admin/AdminDashboardController.ts`
+- `resources/js/pages/admin/Dashboard.tsx`
+- `routes/admin.ts`（`routes/web.ts` がある場合は自動配線）
+
+ダッシュボードは**既定で認証必須**です。`routes/admin.ts` が `/admin` に
+`requireAuthenticated({ redirectTo: '/login' })` を付与し、コントローラーでも
+`this.auth.userOrFail()` を呼びます。`make:feature --public` が変更系アクション
+だけを対象にするのに対し、ここでの `--public` はダッシュボード全体を公開します:
+
+```bash
+bunx guren add admin --public
+```
+
+`add auth` より先に `add admin` を実行しても構いません。その場合もガードは有効で、
+認証が未設定のアプリにはサインイン済みユーザーが存在しないため、すべてのリクエストが
+`/login` にリダイレクトされます。`/login` は `bunx guren add auth` を実行して初めて
+存在するルートです。実際に使えるダッシュボードにするには先に認証を追加するか、
+`--public` を付けて後から独自のチェックを実装してください。
+
+`add admin` はフルスタックアプリ専用です。ダッシュボードは Inertia ページなので、
+`api` ブループリントで生成したアプリ（`@guren/inertia-client` 依存も、web ルート
+エントリ（`routes/web.ts` または `routes/web.js`）も持たない）では、型検査を通らない
+コントローラーとどこにもマウントされないルートファイルを書く代わりに、コマンドが
+理由を示して中断し何も生成しません。管理用のエンドポイントは `make:controller` で
+生成し、`routes/api.ts` に登録してください。
+
+`add auth` も同じ理由でフルスタックアプリ専用で、同じ2つのシグナルを見て中断します。
+同じスキャフォールドを生成する `make:auth` も同様です。auth は `db/schema.ts` への
+パッチとマイグレーション生成も行うため、中断は最初のファイル書き込みだけでなく
+それらすべてより前に起こり、アプリは元のまま残ります。トークンベースのAPIに
+するには、`@guren/core` の `createBearerTokenMiddleware` で `routes/api.ts` を
+保護し、`createApiToken` でトークンを発行してください
+（[APIトークンガイド](./api-tokens.md)参照）。
+
+`add resource` も同じ2つのシグナルを見て、同じ理由で中断します。React のページ
+コンポーネントと Inertia レスポンスを返すコントローラーを生成するためです。中断は
+同様に、`db/schema.ts` へ追記されるはずだったテーブルよりも前の時点で起こります。
+同じスキャフォールドに直接到達する `make:feature` も同様に中断します。JSON を
+返すコントローラーは `make:controller` で生成し、`routes/api.ts` に結線して
+ください。
+
+`make:controller` は同じ2つのシグナルを読みますが、中断ではなく適応します。
+API専用と判定されたアプリでは、生成されるコントローラーは Inertia ページではなく
+JSON(`this.json(...)`)を返すため、そのまま型検査を通り、`routes/api.ts` に
+そのまま結線できます。シグナルが API専用と確認できない場合は通常の Inertia
+テンプレートが生成されます — `@guren/inertia-client` をインストールすれば
+元に戻ります。
+
+`make:view` は上記のスキャフォールドと同様、同じシグナルで中断します。ページには
+適応できる JSON 版が存在せず、そのアプリにはページを描画する手段がないためです。
+`guren codegen`(`bun run dev` が自動実行します)はそうしたコンポーネントを
+`.guren/pages.gen.ts` に取り込まず除外します — このファイルは API専用アプリが
+インストールしない `@guren/inertia-client` を import するためです。つまり中断は
+`typecheck` の破壊を防ぐためではなく、原因となったコマンドの時点でそれを伝える
+ためのものです。API アプリをフルスタック化するときは、先に
+`@guren/inertia-client` をインストールすれば再び使えるようになります。
+
+`add resource` は、アプリの形がどうであれ、パッチ対象の2つのファイルがそこにあることも
+必要とします。テーブル定義を `db/schema.ts` に追記し、CRUD ルートを `routes/web.ts` に
+登録するため、両方が既に存在している必要があり、さらに該当ルートが未登録の場合は
+`routes/web.ts` がパッチ可能なルートレジストラをエクスポートしている必要があります。
+いずれかが欠けている場合、コマンドはどれが足りないかを示して何も生成しません。生成物だけを
+残したまま、登録されなかったルートのためのテーブルが `db/schema.ts` に追記された状態を
+作らないためです。2つのパッチなしでファイルだけが欲しい場合は `bunx guren make:feature`
+を使ってください。貼り付け用のルートブロックを出力し、テーブル定義を追記すべきスキーマ
+ファイルを案内します。
+
+## 主要コマンド
+
+| コマンド | 説明 | 例 |
+|----------|------|----|
+| `key:generate` | 新しい `APP_KEY` 値を生成。`--write` で `.env` に保存 | `bunx guren key:generate --write` |
+| `deploy` | Docker/Fly.io/Railway/Vercel 向けデプロイ設定ファイルを生成 | `bunx guren deploy --target all --app my-app --port 3333` |
+| `make:controller <Name>` | `app/Http/Controllers` にコントローラーを生成(API専用アプリでは Inertia ページの代わりに JSON を返す) | `bunx guren make:controller PostController` |
+| `make:model <Name>` | 最小のモデルクラスと型定義を `app/Models` に生成（`db/schema` から `camelCase(Name)s` を import） | `bunx guren make:model Post` |
+| `make:view <path>` | `resources/js/pages` に React コンポーネントを生成(API専用アプリでは中断) | `bunx guren make:view posts/Index` |
+| `make:auth` | ログイン/ログアウト・新規登録・パスワードリセットのコントローラー、プロバイダー、ビュー、マイグレーション、シーダー、ルートをスキャフォールド（`--minimal` で登録・パスワードリセットを省略、`--verify` でメール確認も追加、`--oauth <providers>` でカンマ区切りのプロバイダー向け OAuth ログインボタンも追加、`--oauth-only` でパスワードログインを完全に外して OAuth のみにする） | `bunx guren make:auth --oauth github,google` |
+| `make:middleware <Name>` | `app/Http/Middleware` にミドルウェアを生成 | `bunx guren make:middleware Auth` |
+| `make:seeder <Name>` | データベースシーダーファイルを生成 | `bunx guren make:seeder UserSeeder` |
+| `make:job <Name>` | キュー可能なジョブクラスを生成 | `bunx guren make:job SendEmail` |
+| `make:event <Name>` | イベントクラスを生成 | `bunx guren make:event UserRegistered` |
+| `make:listener <Name>` | イベントリスナークラスを生成 | `bunx guren make:listener SendWelcomeEmail` |
+| `make:notification <Name>` | 通知クラスを生成 | `bunx guren make:notification InvoicePaid` |
+| `make:mail <Name>` | メールクラスを生成 | `bunx guren make:mail WelcomeEmail` |
+| `make:command <Name>` | `app/Console/Commands` にコンソールコマンドを生成。`--command <name>` で呼び出し名を指定。`src/console.ts` への登録が必要（[コンソールコマンドガイド](./console.md)参照） | `bunx guren make:command SendDigest --command reports:digest` |
+| `make:policy <Name>` | 所有者ベースのデフォルトを備えた認可ポリシーを `app/Policies` に生成 | `bunx guren make:policy Post` |
+| `make:validator <Name>` | Zodバリデーションスキーマ(ルートパラメータ・一覧クエリ・ペイロード)を `app/Http/Validators` に生成。`--fields` は `make:feature` と同じ構文 | `bunx guren make:validator Post --fields "title:string,body:text"` |
+| `make:adr "<Title>"` | アーキテクチャ意思決定を採番付きファイルとして `docs/adr/` に記録(リンク可能なfrontmatter付き)。`--entity <Model>` で `entities:`/`related:` を自動補完 | `bunx guren make:adr "Billing cycle is end-of-month" --entity Invoice` |
+
+> **Note:** `make:*` は既存ファイルを上書きしません。必要なら `--force` を付けてください。
+
+## 検査・監査コマンド
+
+リリース前のアプリ検証に使えるコマンドです。AIコーディングエージェント向けにも設計されています(`--json` で機械可読な出力になります)。
+
+| コマンド | 説明 | 例 |
+|---------|------|-----|
+| `check` | ルート・コントローラ・ページ・モデル間の整合性（`routes/` 配下の各ファイルがエントリのレジストラから、モジュールの `routes/` 配下は各モジュール自身のレジストラから実際に呼ばれているかを含む）に加え、docリンク・スペックビューの鮮度・アーキテクチャ境界を検証 | `bunx guren check --json` |
+| `audit` | セキュリティ監査: 変更系ルートのバリデーション/認証の欠如、文字列補間付き生SQL、ハードコードされた認証情報、無効化されたセキュリティ既定値、mass assignment 設定、`hidden` 未登録の機微カラム、リクエストのホストから組み立てられたメール内リンクを検査 | `bunx guren audit --json` |
+| `doctor` | プロジェクトの健全性レポート(環境変数・設定・生成ファイル)と次のアクション | `bunx guren doctor --next` |
+| `context [Entity]` | プロジェクトコンテキストマップ。エンティティ名を渡すと1モデルのすべて — テーブル・リレーション・スキーマ付きルート・Props付きページ・Resource・Policy・紐付きdocs — を出力(同名モデルは `--module` で解決、`"app"` はプロジェクトルート) | `bunx guren context User --json` |
+| `docs:graph` | OKF docsのリレーショングラフ。文書・エンティティ・コードパスがノード、検証済みリレーションがエッジ。`--entity <Model>` / `--path <file>` で近傍に絞り、リネーム前に「これを統べるdocsはどれか」を照会 | `bunx guren docs:graph --path app/Http/Controllers/PostController.ts` |
+| `spec:generate` | `docs/spec/` の導出スペックビュー(ER図・ドメインモデル・画面一覧・モジュールマップ)を再生成 — 詳細は[スペックアンカード開発](./spec-anchored.md) | `bunx guren spec:generate` |
+
+`audit` は失敗(fail)を検出すると非ゼロの終了コードを返します。
+プレーンな `check` は情報提供で、CIをゲートするのは各スイートフラグです
+(それぞれのスイートの失敗で非ゼロexit):
+
+```bash
+bunx guren audit
+bunx guren check --arch    # アーキテクチャ境界(guren.arch.ts + モジュールルール)
+bunx guren check --docs    # docリンク: OKF frontmatter(type/entities/related)+ 本文リンク + @docsタグ
+bunx guren check --spec    # docs/spec/ が再生成結果と一致するか
+```
+
+スイートフラグは併用すると和集合で実行されます。`--changed` はいずれの
+スイートも main とのマージベースからの変更ファイルに限定します —
+エージェントハーネスのedit hookが使う高速パスです。
+
+名前付きミドルウェアで保護されたルート(例: `router.middleware('auth').group(...)`)は保護済みと認識されます。 から外れている。クライアントは該当ツールだけでなくツール一覧全体を拒否します。 |
+| `agent-route-duplicate:*` | 2つ以上のルートが同じツール名に解決される。 |
+| `agent-route-authorization:*` | read-only でないツールなのに、ミドルウェアチェーンに認可 capability がなく、コントローラアクションでも `this.authorize(...)` を呼んでいない。**認証は認可ではありません**。`this.auth.userOrFail()` や APIトークンの確認はどちらも認可の代わりにならず、その場合は専用のメッセージで報告されます。 |
+
+`check` が **warn** にするもの:
+
+| Finding key | ルール |
+|---|---|
+| `agent-route-output:*` | ルートに `output` スキーマも `resource` ヒントもないため、導出されるツールが出力の形を提示できない。読み取り系だけでなく書き込み系のツールにも適用されます。 |
+| `agent-route-inertia:*` | アクションが `this.inertia(...)` で応答し、出力の形も宣言していない。そのツールはページがコンポーネントに渡した内容をそのまま返すことになります。このルートでは上の finding の代わりに報告されます。 |
+| `agent-route-input:*` | ボディを持つメソッドのルートに `body` スキーマがなく、導出される入力スキーマがパスとクエリだけから組み立てられる。インラインハンドラの場合、そのスキーマはリクエスト時の検証そのものでもあるため、送られた内容を検証するものが存在しないことになります。 |
+| `agent-route-annotation:*` | 変更系メソッドに `readOnlyHint: true` が宣言されているのに、アクションがレコードを削除または force-write している。このヒントは認可ルールの適用を免除するものなので、アクションの内容と突き合わせて検査されます。 |
+| `agent-route-authorization:*` | 判定に到達できなかった。ハンドラがインライン関数であるか、コントローラアクションが check の読み取る対象に含まれていない場合です。 |
+| `agent-route-controller-collision:*` | 同名のコントローラクラスが2つあり、その一方をエージェント公開ルートが使っている。コントローラ本体から導いた判定が、もう一方のクラスを指している可能性があります。 |
+
+`audit` は同じルートに対して2つのルールを追加します。
+
+- 通常のルートでは warning になるボディ検証の finding が、エージェント公開ルートでは **failure** になります。key は `validation:*` のままなので、既存の `config/audit.ts` のエントリはそのまま効きます。
+- `agent-annotation:*` は、レコードを削除するアクションに `destructiveHint: false` が宣言されている場合と、アクション本体を読み取れずその宣言を検査できなかった場合に warn します。
+
 誤検出は、対象行またはその直前の行に `// guren-audit-ignore` を置くことで抑制できます:
 
 ```ts
@@ -172,7 +366,7 @@ bunx guren check --spec    # docs/spec/ が再生成結果と一致するか
 const apiKey = 'example-not-a-real-key'
 ```
 
-ルートレベル・モデルレベルの findings(`authz:*`、`validation:*`、`mass-assignment:*`、`hidden-columns:*`)には、コメントを付けられる特定の行が存在しません。これらはルートレジストラを実行し、モデルを検査することで生成されるためです。代わりに `config/audit.ts` で finding の `key`(`--json` の出力からそのままコピーできます)と必須の `reason` を指定して無視します:
+ルートレベル・モデルレベルの findings(`authz:*`、`validation:*`、`agent-annotation:*`、`mass-assignment:*`、`hidden-columns:*`)には、コメントを付けられる特定の行が存在しません。これらはルートレジストラを実行し、モデルを検査することで生成されるためです。代わりに `config/audit.ts` で finding の `key`(`--json` の出力からそのままコピーできます)と必須の `reason` を指定して無視します:
 
 ```ts
 // config/audit.ts

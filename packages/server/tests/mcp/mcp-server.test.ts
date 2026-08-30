@@ -20,6 +20,9 @@ function createMockCli(overrides: Partial<GurenCliApi> = {}, calls?: CodegenCall
     }
 
   return {
+    // The base mock stands in for a current @guren/cli; the tool gates on
+    // this list because @guren/cli is resolved from the app at runtime.
+    contextRouteFeatures: ['agent'],
     generateContext: async () => ({
       framework: { name: 'guren', version: '0.2.0' },
       models: [{ className: 'Post' }, { className: 'User' }],
@@ -324,6 +327,21 @@ describe('Guren MCP Server', () => {
     // Falls back to the route's OpenAPI description ?? summary.
     expect(tools[0].description).toBe('List posts.')
     expect(tools[0].approval).toBe('not-required')
+  })
+
+  // @guren/cli is resolved from the app, so it can predate the field this
+  // tool reads — and an older CLI's routes carry no `agent` at all, which is
+  // indistinguishable from an app exposing nothing. Reporting an empty list
+  // there would answer a question this server cannot answer.
+  test('guren_agent_surface says so when the app CLI predates agent metadata', async () => {
+    const client = await createTestClient({ contextRouteFeatures: undefined })
+
+    const result = await client.callTool({ name: 'guren_agent_surface', arguments: {} })
+    const payload = JSON.parse((result.content as Array<{ type: string; text: string }>)[0].text)
+
+    expect(payload.supported).toBe(false)
+    expect(payload.tools).toBeUndefined()
+    expect(payload.reason).toContain('predates agent route metadata')
   })
 
   test('guren_check returns check report', async () => {

@@ -122,6 +122,13 @@ export interface GurenCliApi {
    */
   createFreshContextApi?: () => Pick<GurenCliApi, 'generateContext' | 'generateEntityContext'>
   /**
+   * Optional fields the CLI's context routes populate (`CONTEXT_ROUTE_FEATURES`).
+   * Optional here for the same runtime-resolution reason as above, and read
+   * for exactly that reason: an older CLI emits routes with no `agent` field
+   * at all, which reads identically to an app exposing no agent tools.
+   */
+  contextRouteFeatures?: readonly string[]
+  /**
    * The OKF docs relation graph (RFC 0005). Optional for the same
    * runtime-resolution reason as above.
    */
@@ -282,10 +289,35 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServer {
     "The app's agent-facing tool surface (RFC 0016): every route that declares agent metadata, with its tool name, method and path, description, exposed surfaces, MCP annotations as declared, and whether invocations need approval. Call it BEFORE editing a route or its controller to find out whether an autonomous agent can already invoke it — renaming such a route renames a tool, and loosening its authorization loosens the tool's.",
     {},
     async () => {
+      // An empty list has two causes that must not be conflated: an app that
+      // exposes nothing, and a @guren/cli — resolved from the app, so
+      // possibly older than this server — whose context output has no agent
+      // field to read. Say which one happened.
+      if (!cli.contextRouteFeatures?.includes('agent')) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify(
+                {
+                  supported: false,
+                  reason:
+                    "The @guren/cli installed in this app predates agent route metadata, so the agent "
+                    + 'surface cannot be read. This is not the same as the app exposing no tools — the '
+                    + 'answer is unknown. Upgrade @guren/cli (bunx guren upgrade) to query it.',
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+        }
+      }
+
       const context = await cli.generateContext({ cwd })
       const tools = context.routes.filter(isAgentRoute).map(describeAgentRoute)
       return {
-        content: [{ type: 'text', text: JSON.stringify({ tools }, null, 2) }],
+        content: [{ type: 'text', text: JSON.stringify({ supported: true, tools }, null, 2) }],
       }
     },
   )

@@ -24,8 +24,17 @@ import {
   resolveModelStringArrayConfig,
 } from './model-parser'
 import { parseSourceFile } from './parse-cache'
+// The controller-body vocabulary lives beside the scan that produces the
+// bodies, so every command judging an action reads one copy of it — and every
+// pattern naming a `Controller` member stays inside the reach of
+// controller-surface.test.ts.
 import {
+  accessorCallPattern,
+  controllerMembers,
   parseControllerMethods,
+  AUTH_CALL_PATTERN,
+  DELETE_CALL_PATTERN,
+  FORCE_WRITE_PATTERN,
   type ControllerMethodInfo,
   type ControllerNameCollision,
 } from './controller-methods'
@@ -116,110 +125,6 @@ export function authMiddlewareVerdict(
   return nameMatches ? 'unverified-auth-name' : 'none'
 }
 
-/**
- * Calls that actually reject unauthenticated requests. Optional reads like
- * `auth.user()`, `auth.id()`, or `auth.check()` do not enforce anything on
- * their own, so they intentionally do not count as protection.
- */
-const AUTH_CALL_PATTERN = /\bauth\s*\.\s*userOrFail\s*(?:<[^>]*>)?\s*\(|\bthis\s*\.\s*apiToken(?:UserId)?\s*(?:<[^>]*>)?\s*\(/
-
-/**
- * What request data each member of `Controller` hands an action.
- *
- * The keys are the full public/protected method-and-getter surface of
- * `packages/server/src/mvc/Controller.ts` — the only members app code can
- * reach — and `controller-surface.test.ts` re-parses that file and fails when
- * the two lists diverge. That test is the point of enumerating members this
- * rule doesn't care about: a new accessor cannot be added over there and
- * quietly default to "harmless" here, which is exactly how `input()` came to
- * be missed. Which bucket a member belongs in is a semantic judgement about
- * its body, so it stays a deliberate classification rather than something
- * inferred from the name.
- *
- * Classifying a member is not the same as wiring it up: the patterns below are
- * derived from these names but still assume call syntax, so a body-reading
- * *getter* would need the pattern touched too, not just an entry here.
- */
-export type ControllerMemberKind =
-  /**
-   * Hands back request-body content nothing has validated. `file()`/`files()`
-   * belong here because they are `req.parseBody()` under the hood
-   * (Controller.ts) — the raw call this rule has always flagged — and a helper
-   * cannot be a clean pass while the call it delegates to is a failure.
-   */
-  | 'body-payload'
-  /**
-   * Reads the body but yields nothing a schema would have caught: `has()`
-   * answers only whether a key is present. Not flagged, but not "does not
-   * consume the request body" either — see the finding below.
-   */
-  | 'body-incidental'
-  /** Reads the body in order to validate it — the remedy, not the problem. */
-  | 'body-validation'
-  /** Never touches the request body. */
-  | 'non-body'
-
-export const CONTROLLER_MEMBER_KINDS: Readonly<Record<string, ControllerMemberKind>> = {
-  input: 'body-payload',
-  only: 'body-payload',
-  except: 'body-payload',
-  file: 'body-payload',
-  files: 'body-payload',
-
-  has: 'body-incidental',
-
-  validateBody: 'body-validation',
-  validateBodySafe: 'body-validation',
-
-  setContext: 'non-body',
-  setContainer: 'non-body',
-  setResolvedModel: 'non-body',
-  model: 'non-body',
-  ctx: 'non-body',
-  /** Reached by name through RAW_BODY_READ_PATTERN, not as `this.request(`. */
-  request: 'non-body',
-  auth: 'non-body',
-  make: 'non-body',
-  apiToken: 'non-body',
-  apiTokenUserId: 'non-body',
-  authorize: 'non-body',
-  can: 'non-body',
-  inertia: 'non-body',
-  view: 'non-body',
-  locale: 'non-body',
-  t: 'non-body',
-  tc: 'non-body',
-  json: 'non-body',
-  text: 'non-body',
-  redirect: 'non-body',
-  noContent: 'non-body',
-  created: 'non-body',
-  accepted: 'non-body',
-  query: 'non-body',
-  validateQuery: 'non-body',
-  validateParams: 'non-body',
-  validateQuerySafe: 'non-body',
-  validateParamsSafe: 'non-body',
-}
-
-function controllerMembers(kind: ControllerMemberKind): string[] {
-  return Object.entries(CONTROLLER_MEMBER_KINDS)
-    .filter(([, memberKind]) => memberKind === kind)
-    .map(([name]) => name)
-}
-
-/**
- * `name(`, plus the generic forms these helpers are declared with. `[^()]*`
- * rather than `[^>]*` so a nested type argument (`this.input<Array<string>>()`)
- * still reaches the closing `(` — stopping at the first `>` silently skipped
- * those calls. Longest name first so `validateBody` cannot shadow
- * `validateBodySafe`.
- */
-function accessorCallPattern(names: readonly string[]): string {
-  const alternation = [...names].sort((a, b) => b.length - a.length).join('|')
-  return `\\b(?:${alternation})\\s*(?:<[^()]*>)?\\s*\\(`
-}
-
 const VALIDATE_BODY_PATTERN = new RegExp(accessorCallPattern(controllerMembers('body-validation')))
 
 /** Reading the body without going through the controller's helpers at all. */
@@ -277,19 +182,6 @@ const MODEL_ATTACH_PATTERN = /\b[A-Z][A-Za-z0-9_]*\s*\.\s*attach\s*(?:<[^()]*>)?
  * upload — the audit takes the first.
  */
 const STORAGE_WRITE_PATTERN = /\.\s*put(?:File)?\s*\(/
-
-/**
- * A record deletion, for the annotation-honesty rule below (RFC 0016 §5.5).
- *
- * Two shapes, both constrained the way `MODEL_ATTACH_PATTERN` is: a model
- * static (`Post.delete(...)`, `Post.forceDelete(...)`), which requires a
- * PascalCase receiver, and a terminated query chain (`Post.where(...)
- * .delete()`), which requires the call to follow a closing paren. Without
- * those constraints every `map.delete(key)` and `cache.delete(...)` in an
- * action would read as a record deletion.
- */
-const DELETE_CALL_PATTERN =
-  /\b[A-Z][A-Za-z0-9_]*\s*\.\s*(?:delete|forceDelete)\s*\(|\)\s*\.\s*(?:delete|forceDelete)\s*\(/
 
 const BODY_INCIDENTAL_PATTERN = new RegExp(
   `\\bthis\\s*\\.\\s*${accessorCallPattern(controllerMembers('body-incidental'))}`,
@@ -500,8 +392,6 @@ function controllerCollisionFinding(collision: ControllerNameCollision): AuditFi
  * trusted server-side values only. Static analysis cannot prove data flow,
  * so this is a review prompt (warn), never a fail.
  */
-const FORCE_WRITE_PATTERN = /\bforce(Create|Update)\s*\(/
-
 function auditForceWrites(controllerMethods: Map<string, ControllerMethodInfo>, findings: AuditFinding[]): void {
   for (const [methodKey, info] of controllerMethods) {
     if (!FORCE_WRITE_PATTERN.test(info.body)) continue
@@ -754,19 +644,36 @@ async function auditRoutes(
     // false statement about what the agent is authorizing. Only an explicit
     // `false` is judged: the MCP spec's default for a non-read-only tool is
     // already `true`, so an absent hint claims nothing.
-    if (route.agent?.destructiveHint === false && methodInfo && DELETE_CALL_PATTERN.test(methodInfo.body)) {
-      findings.push(
-        finding(
-          `agent-annotation:${routeLabel}`,
-          routeLabel,
-          'warn',
-          `The route declares destructiveHint: false, but ${controllerKey} deletes records. Clients read that `
-          + 'hint as "additive updates only" and may run the tool without asking the user first.',
-          `Drop destructiveHint: false from the route's agent metadata (the spec default for a non-read-only `
-          + `tool is destructive), or move the deletion out of ${controllerKey}.`,
-          methodInfo.filePath,
-        ),
-      )
+    if (route.agent?.destructiveHint === false) {
+      // An unread body is reported, not passed over. The escalation above
+      // states the rule this must not contradict twenty lines later: for an
+      // agent-exposed route, an unknown is a finding rather than silence.
+      if (!methodInfo) {
+        findings.push(
+          finding(
+            `agent-annotation:${routeLabel}`,
+            routeLabel,
+            'warn',
+            `The route declares destructiveHint: false, and the handler body that claim would be checked `
+            + `against could not be analyzed${controllerKey ? ` (${controllerKey})` : ''}.`,
+            'Ensure the action is among the controller sources the audit reads, or drop destructiveHint: false '
+            + '— the spec default for a non-read-only tool is destructive.',
+          ),
+        )
+      } else if (DELETE_CALL_PATTERN.test(methodInfo.body)) {
+        findings.push(
+          finding(
+            `agent-annotation:${routeLabel}`,
+            routeLabel,
+            'warn',
+            `The route declares destructiveHint: false, but ${controllerKey} deletes records. Clients read that `
+            + 'hint as "additive updates only" and may run the tool without asking the user first.',
+            `Drop destructiveHint: false from the route's agent metadata (the spec default for a non-read-only `
+            + `tool is destructive), or move the deletion out of ${controllerKey}.`,
+            methodInfo.filePath,
+          ),
+        )
+      }
     }
   }
 

@@ -1,7 +1,15 @@
 import { resolve } from 'node:path'
 import type { AgentRouteMetadata, RouteDefinition } from '@guren/core'
 import { check, type CheckResult } from './check-result'
-import { parseControllerMethods, type ControllerMethodInfo } from './controller-methods'
+import {
+  parseControllerMethods,
+  AUTHORIZE_CALL_PATTERN,
+  AUTH_CALL_PATTERN,
+  DELETE_CALL_PATTERN,
+  FORCE_WRITE_PATTERN,
+  INERTIA_CALL_PATTERN,
+  type ControllerMethodInfo,
+} from './controller-methods'
 import { fileExists } from './discovery'
 import { describeMethod } from './http-methods'
 import { DEFAULT_ROUTES_FILE, loadRouteDefinitions } from './load-routes'
@@ -23,6 +31,11 @@ export interface AgentRouteCheckOptions {
 /**
  * The MCP tool-name grammar (SEP-986). Dots are permitted, which is why a
  * route name is used verbatim as the tool name — see RFC 0016 §1.
+ *
+ * Consolidation follow-up, like {@link AGENT_READ_ONLY_METHODS}: the
+ * derivation layer (`deriveAgentTools`) has to know this grammar too. RFC
+ * 0016 §1 is the shared source until one of the two can import the other —
+ * do not fork the pattern in the meantime.
  */
 const TOOL_NAME_PATTERN = /^[A-Za-z0-9._-]{1,128}$/
 
@@ -38,19 +51,14 @@ const TOOL_NAME_PATTERN = /^[A-Za-z0-9._-]{1,128}$/
 const AGENT_READ_ONLY_METHODS = new Set(['GET', 'QUERY'])
 
 /**
- * `this.authorize(...)` — the call that throws a 403. `this.can(...)` is
- * deliberately not evidence: it returns a boolean and enforces nothing, the
- * same distinction `guren audit` already draws between `auth.userOrFail()`
- * and `auth.check()`. The `this.` prefix is required because the member is
- * protected, so a call through anything else is a different API.
+ * State change an action performs in its own body, for the annotation-honesty
+ * rules. A deletion or a mass-assignment-bypassing write is not the whole
+ * vocabulary of "mutates", but both are unambiguous — which is what an
+ * *honesty* rule needs, since it contradicts something the author declared.
  */
-const AUTHORIZE_CALL_PATTERN = /\bthis\s*\.\s*authorize\s*(?:<[^()]*>)?\s*\(/
-
-/** Authentication that rejects the request — not authorization. See RFC 0016 §5.5. */
-const AUTHENTICATE_CALL_PATTERN = /\bauth\s*\.\s*userOrFail\s*(?:<[^>]*>)?\s*\(/
-
-/** An Inertia page response, which carries no JSON schema an agent could read. */
-const INERTIA_CALL_PATTERN = /\bthis\s*\.\s*inertia\s*(?:<[^()]*>)?\s*\(/
+function mutatesInBody(body: string): boolean {
+  return DELETE_CALL_PATTERN.test(body) || FORCE_WRITE_PATTERN.test(body)
+}
 
 interface AgentRoute {
   definition: RouteDefinition
@@ -68,6 +76,16 @@ interface AgentRoute {
 
 function readOnlyOf(route: AgentRoute): boolean {
   return route.agent.readOnlyHint ?? AGENT_READ_ONLY_METHODS.has(route.method)
+}
+
+/**
+ * Whether `readOnlyHint: true` was *written* on a route whose method does not
+ * default to it — the declaration that exempts the route from the
+ * authorization rule below, and therefore the one worth checking against the
+ * action's body.
+ */
+function claimsReadOnlyAgainstMethod(route: AgentRoute): boolean {
+  return route.agent.readOnlyHint === true && !AGENT_READ_ONLY_METHODS.has(route.method)
 }
 
 /** Whether the route advertises any output shape an agent can read (RFC 0016 §2). */
@@ -108,11 +126,15 @@ function toolNameFinding(route: AgentRoute): CheckResult | undefined {
 /**
  * One finding per collision group rather than per route: two routes sharing a
  * tool name are one defect, and the reader needs both sides of it named.
+ *
+ * A name the grammar rejects is skipped here: it is already failing under its
+ * own rule, and renaming it is the fix for both, so reporting it twice more
+ * as a collision would spend three findings on one defect.
  */
 function duplicateFindings(routes: AgentRoute[]): CheckResult[] {
   const byToolName = new Map<string, AgentRoute[]>()
   for (const route of routes) {
-    if (route.toolName === undefined) continue
+    if (route.toolName === undefined || !TOOL_NAME_PATTERN.test(route.toolName)) continue
     const group = byToolName.get(route.toolName)
     if (group) group.push(route)
     else byToolName.set(route.toolName, [route])
@@ -158,24 +180,35 @@ function authorizationFinding(route: AgentRoute): CheckResult | undefined {
   if (route.definition.capabilities?.authorization) return undefined
   if (route.methodInfo && AUTHORIZE_CALL_PATTERN.test(route.methodInfo.body)) return undefined
 
-  // A controller whose source could not be read is reported rather than
-  // failed: the action may well authorize, and unlike `guren audit` this
-  // command has no per-finding ignore config to suppress a false positive
-  // that only moving the file could fix.
-  if (route.controllerKey && !route.methodInfo) {
+  const suggestion =
+    'Add authorize()/authorizeResource() middleware to the route, or call await this.authorize(ability, ...) '
+    + 'in the action.'
+
+  // A handler body this check never read cannot be failed over. Two shapes
+  // reach here: a controller action whose source is not among the files
+  // discovered (moved out of app/Http/Controllers, unparseable, or supplied
+  // by a package), and an inline handler, whose body is a closure in the
+  // routes file that this check does not read at all. Both get a warn rather
+  // than the fail — unlike `guren audit`, this command has no per-finding
+  // ignore config, so a false positive here would be unsuppressible — and
+  // both say which half is actually known: the middleware chain.
+  if (!route.methodInfo) {
     return check(
       key,
       title,
       'warn',
-      `Authorization could not be verified: ${route.controllerKey} is not among the controller sources `
-      + 'this check can read, and the route\'s middleware carries no authorization capability.',
-      'Wrap the route in authorize()/authorizeResource() middleware, or call this.authorize(...) in the action.',
+      route.controllerKey
+        ? `Authorization could not be verified: the route's middleware chain carries no authorization `
+          + `capability, and ${route.controllerKey} is not among the controller sources this check reads.`
+        : 'Authorization could not be verified: the route\'s middleware chain carries no authorization '
+          + 'capability, and the handler is an inline function whose body this check does not read.',
+      suggestion,
     )
   }
 
   const authenticated =
     route.definition.capabilities?.authentication?.mode === 'required'
-    || Boolean(route.methodInfo && AUTHENTICATE_CALL_PATTERN.test(route.methodInfo.body))
+    || AUTH_CALL_PATTERN.test(route.methodInfo.body)
 
   return check(
     key,
@@ -187,16 +220,65 @@ function authorizationFinding(route: AgentRoute): CheckResult | undefined {
         + 'principal — every agent holding any token — the whole action.'
       : 'A non-read-only agent tool with no authorization: neither the middleware chain nor the controller '
         + 'action decides whether the caller may perform this action.',
-    'Add authorize()/authorizeResource() middleware to the route, or call await this.authorize(ability, ...) '
-    + 'in the action. Mark the tool agent: { readOnlyHint: true } only if it truly changes nothing.',
-    route.methodInfo?.filePath,
+    `${suggestion} Mark the tool agent: { readOnlyHint: true } only if it truly changes nothing — that `
+    + 'claim is itself checked against the action\'s body.',
+    route.methodInfo.filePath,
   )
 }
 
 /**
- * The output half of the tier ladder (RFC 0016 §2/§4). The Inertia finding is
- * the more specific of the two and suppresses the generic one, so a read-only
- * page route reports once rather than twice.
+ * Annotation honesty for `readOnlyHint` (RFC 0016 §5.5), the counterpart to
+ * `guren audit`'s `destructiveHint` rule.
+ *
+ * `readOnlyHint: true` on a mutating verb is the one declaration that
+ * *exempts* a route from the authorization rule above, so leaving it
+ * unchecked would make the exemption self-service: writing the hint would be
+ * enough to silence the failure it was meant to answer. Only an explicit
+ * override against the method's own default is judged — the GET/QUERY default
+ * claims nothing an author wrote.
+ */
+function readOnlyHonestyFinding(route: AgentRoute): CheckResult | undefined {
+  if (!claimsReadOnlyAgainstMethod(route)) return undefined
+
+  const key = `agent-route-annotation:${route.keySuffix}`
+  const title = `${route.label} agent tool`
+  const suggestion =
+    'Drop readOnlyHint: true, and cover the route with authorize()/authorizeResource() middleware or '
+    + 'this.authorize(...) in the action.'
+
+  if (!route.methodInfo) {
+    return check(
+      key,
+      title,
+      'warn',
+      `The route declares readOnlyHint: true on ${route.method}, which exempts it from the authorization `
+      + 'rule, and the handler body this claim would be checked against is one this check does not read.',
+      suggestion,
+    )
+  }
+
+  if (!mutatesInBody(route.methodInfo.body)) return undefined
+
+  return check(
+    key,
+    title,
+    'warn',
+    `The route declares readOnlyHint: true, but ${route.controllerKey} deletes or force-writes records. `
+    + 'Clients read that hint as "safe to call unattended", and it is also what exempts this route from '
+    + 'the authorization rule — so the claim is buying the exemption its own body contradicts.',
+    suggestion,
+    route.methodInfo.filePath,
+  )
+}
+
+/**
+ * The output half of the tier ladder (RFC 0016 §2/§4): *any* agent route with
+ * neither an `output` schema nor a `resource` hint is tier 3, whatever its
+ * method — a write tool whose result an agent cannot read is no better off
+ * than a read tool.
+ *
+ * The Inertia finding is the more specific of the two and suppresses the
+ * generic one, so a page route reports once rather than twice.
  */
 function outputFinding(route: AgentRoute): CheckResult | undefined {
   if (describesOutput(route.definition)) return undefined
@@ -219,8 +301,6 @@ function outputFinding(route: AgentRoute): CheckResult | undefined {
     )
   }
 
-  if (!readOnlyOf(route)) return undefined
-
   return check(
     `agent-route-output:${route.keySuffix}`,
     title,
@@ -240,6 +320,10 @@ function outputFinding(route: AgentRoute): CheckResult | undefined {
  * a hand-listed POST/PUT/PATCH — that also covers QUERY (RFC 10008) and is
  * fail-closed on custom verbs.
  *
+ * Inline handlers are covered too, and are the worse case: for them a route
+ * `body` schema is *runtime-enforced*, so its absence means nothing validates
+ * the payload either — the agent guesses at a shape the app never checks.
+ *
  * Best-effort matching of the route's body schema identifier against the
  * `validateBody(X)` call in the action is deliberately not attempted: the
  * schema is usually imported under a different local name, so the comparison
@@ -247,18 +331,27 @@ function outputFinding(route: AgentRoute): CheckResult | undefined {
  */
 function inputFinding(route: AgentRoute): CheckResult | undefined {
   if (!describeMethod(route.method).bodyCarrying) return undefined
-  if (!route.controllerKey) return undefined
   if (route.definition.schemas?.body) return undefined
+
+  const shared =
+    'The route carries no `body` schema, so the tool\'s advertised inputSchema is built from the path and '
+    + 'query alone. '
 
   return check(
     `agent-route-input:${route.keySuffix}`,
     `${route.label} agent tool`,
     'warn',
-    `The route carries no \`body\` schema, so the tool's advertised inputSchema is built from the path and `
-    + `query alone. An agent cannot see what ${route.controllerKey} expects in the request body, and every `
-    + 'call it makes is rejected by the validation inside the action.',
-    'Attach the same Zod schema the action validates with as the route\'s `body` option — it is type '
-    + 'information for controller actions, and the one place codegen and the agent surface can read it.',
+    shared
+    + (route.controllerKey
+      ? `An agent cannot see what ${route.controllerKey} expects in the request body, and every call it `
+        + 'composes is rejected by the validation inside the action.'
+      : 'The handler is an inline function, for which a route body schema is the validation — so nothing '
+        + 'tells the agent what to send, and nothing checks what it sends.'),
+    route.controllerKey
+      ? 'Attach the same Zod schema the action validates with as the route\'s `body` option — it is type '
+        + 'information for controller actions, and the one place codegen and the agent surface can read it.'
+      : 'Attach a Zod schema as the route\'s `body` option — for an inline handler it is enforced at '
+        + 'request time as well as advertised to the agent.',
   )
 }
 
@@ -347,7 +440,15 @@ export async function checkAgentRoutes(options: AgentRouteCheckOptions): Promise
   // in one file can clear a route belonging to the other. `guren audit` fails
   // on the collision itself; here it is reported as the reason the agent
   // verdicts cannot be trusted.
-  for (const collision of collisions) {
+  //
+  // Narrowed to the controllers agent routes actually name: a collision
+  // between two classes with no agent route between them changes no verdict
+  // this check draws, and reporting it here would be this check answering for
+  // the audit's rule.
+  const agentControllers = new Set(
+    routes.flatMap((route) => (route.definition.controller ? [route.definition.controller.name] : [])),
+  )
+  for (const collision of collisions.filter((c) => agentControllers.has(c.className))) {
     results.push(
       check(
         `agent-route-controller-collision:${collision.className}`,
@@ -378,6 +479,9 @@ export async function checkAgentRoutes(options: AgentRouteCheckOptions): Promise
     const authorization = authorizationFinding(route)
     if (authorization) results.push(authorization)
 
+    const honesty = readOnlyHonestyFinding(route)
+    if (honesty) results.push(honesty)
+
     const output = outputFinding(route)
     if (output) results.push(output)
 
@@ -393,8 +497,10 @@ export async function checkAgentRoutes(options: AgentRouteCheckOptions): Promise
       'Agent routes',
       'pass',
       `${routes.length} agent-exposed route${routes.length === 1 ? '' : 's'} checked: every tool name is `
-      + 'legal and unique, every non-read-only tool is covered by authorization, and every tool advertises '
-      + 'the schemas an agent reads.',
+      + 'legal and unique, every non-read-only tool carries authorization evidence, every declared '
+      + 'readOnlyHint holds against the action, and every route declares the schemas a tool is derived '
+      + 'from. Nothing here validates the derived tools themselves, or any behaviour outside the '
+      + 'controller bodies this check reads.',
     ),
   ]
 }

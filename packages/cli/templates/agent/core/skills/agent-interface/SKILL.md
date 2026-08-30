@@ -53,18 +53,20 @@ Declaring metadata for an action that was not registered (excluded via `only`/`e
 
 ## Metadata fields
 
+Everything below is **declared metadata**. Declaring it is what this release ships: the route records your intent, `guren check` and `guren audit` hold you to it, and `guren context <Entity>` reports it. The runtime that *derives tools from it and serves them* — the protocol surface, the annotation defaults, the approval queue, the audit log — lands with the agent surface itself. Write the metadata now; it is read by the checks today and by that surface when it arrives.
+
 | Field | Meaning |
 |-------|---------|
 | `description` | What the tool does. Falls back to the route's OpenAPI `description` ?? `summary`. Write it for an agent that has never seen your app. |
 | `toolName` | Overrides the route name as the tool name. |
-| `expose` | `{ mcp?, webMcp? }` — which surfaces the tool appears on. Both default to exposed. |
-| `readOnlyHint` | The tool changes nothing. Defaults to true for GET and QUERY routes. |
-| `destructiveHint` | `false` is the strong claim "additive updates only". Unset keeps the spec default (destructive for a non-read-only tool). |
-| `idempotentHint` | Repeat calls with the same arguments add no effect. Defaults to true for PUT and DELETE. |
-| `approval` | `'required'` routes the invocation through a server-side approval queue instead of executing. |
-| `redact` | Argument field names masked in the agent audit log. |
+| `expose` | `{ mcp?, webMcp? }` — which protocol surfaces the tool should appear on. Recorded now; acted on when those surfaces ship. |
+| `readOnlyHint` | The tool changes nothing. On a mutating verb this is an explicit override — and it exempts the route from the authorization rule below, so `guren check` holds it against the action's body. |
+| `destructiveHint` | `false` is the strong claim "additive updates only" — `guren audit` checks it against the action. Unset keeps the spec default (destructive for a non-read-only tool). |
+| `idempotentHint` | Repeat calls with the same arguments add no effect. The derivation defaults it to true for PUT and DELETE; declaring it records your own claim. |
+| `approval` | `'required'` marks the tool as needing server-side approval before it executes. Recorded now; the approval queue that honours it ships with the agent surface. |
+| `redact` | Argument field names to mask in the agent audit log. Recorded now; the audit log ships with the agent surface. |
 
-Annotations are untrusted hints for client UX. **They enforce nothing** — enforcement lives in policies and the approval queue.
+Annotations are untrusted hints for client UX. **They enforce nothing** — enforcement lives in policies and, later, the approval queue. That is exactly why the two hints that *weaken* a check are held against the controller body.
 
 ## Authentication is not authorization
 
@@ -83,12 +85,14 @@ await this.authorize('delete', [Post, post])
 
 `this.can(...)` is not enough: it returns a boolean and enforces nothing. `guren check` **fails** a non-read-only agent route with neither.
 
+Do not reach for `agent: { readOnlyHint: true }` to quiet that failure. It is the one declaration that exempts a route from this rule, so `guren check` holds it against the action's body and warns when the action deletes or force-writes. Declare it only when the tool truly changes nothing.
+
 ## Give the tool its schemas
 
-The tool's input schema is derived from the route's `params`, `query`, and `body`; its output schema from `output`, or a `resource` hint for the description. A route missing them still works over HTTP but leaves an agent guessing:
+A tool's input schema comes from the route's `params`, `query`, and `body`; its output schema from `output`, or a `resource` hint for the description. A route missing them still works over HTTP but leaves an agent guessing:
 
-- No `body` schema on a body-carrying route → the agent cannot see what the action expects, and every call it composes is rejected by the validation inside the action.
-- No `output` schema and no `resource` hint → the result reaches the agent as untyped text.
+- No `body` schema on a body-carrying route → the agent cannot see what the action expects, and every call it composes is rejected by the validation inside the action. On an **inline handler** it is worse: there the route schema is what validates at request time, so nothing checks the payload either.
+- No `output` schema and no `resource` hint → the result reaches the agent as untyped text. This applies to write tools as much as read tools.
 - An action that returns `this.inertia(...)` → the tool returns whatever the page passes its component, a shape nothing checks and any UI change can move. Prefer `output` + `this.json(...)` for agent-facing routes.
 
 ## Check the wiring
@@ -98,6 +102,8 @@ bunx guren check    # agent-route rules run in the normal suite
 bunx guren audit    # validation rules are stricter for agent-exposed routes
 ```
 
-`guren check` reports: a nameless agent route, a tool name outside `^[A-Za-z0-9._-]{1,128}$`, two routes resolving to one tool name, a non-read-only tool with no authorization (fail); and missing output/body schemas or an Inertia response (warn). `guren audit` warns when `destructiveHint: false` sits on an action that deletes records.
+`guren check` **fails** on: a nameless agent route, a tool name outside `^[A-Za-z0-9._-]{1,128}$`, two routes resolving to one tool name, and a non-read-only tool whose controller action shows no authorization. It **warns** on: a missing output or body schema, an Inertia response, a `readOnlyHint: true` contradicted by the action, and any verdict it could not reach because the handler body was one it does not read (an inline handler, or a controller outside `app/Http/Controllers/`).
+
+`guren audit` warns when `destructiveHint: false` sits on an action that deletes records, and treats an unverifiable body validation on an agent route as a failure rather than a warning. Suppress an audit finding you have judged safe by its exact key in `config/audit.ts`.
 
 Full routing reference: `__RULES_DIR__/routes-codegen.md`.

@@ -48,6 +48,9 @@ export {
 export {
   routeDefinitionToContextRoute,
   loadContextRoutes,
+  // Read by @guren/server's development MCP endpoint, which resolves this
+  // package from the app and may load a copy older than the field it wants.
+  CONTEXT_ROUTE_FEATURES,
   type ContextRoute,
   type ContextRouteAuthorization,
 } from './context-route'

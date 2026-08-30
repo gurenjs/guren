@@ -4,6 +4,20 @@ import { loadRouteDefinitions, resolveRoutesFile } from './load-routes'
 import { schemaToTypeString } from './schema-type-extractor'
 
 /**
+ * Optional fields this CLI's `ContextRoute` populates, as a runtime value.
+ *
+ * `@guren/cli` is resolved from the *app* at runtime, so `@guren/server`'s
+ * development MCP endpoint can be handed a CLI older than the field it wants
+ * to read — and an older CLI's context output is a route list with no `agent`
+ * on any route, which is indistinguishable from an app that exposes no agent
+ * tools. A consumer probes this list to tell "nothing exposed" from "this CLI
+ * cannot answer", rather than reporting an empty surface either way.
+ *
+ * Append-only: a name here is a compatibility claim other packages branch on.
+ */
+export const CONTEXT_ROUTE_FEATURES: readonly string[] = ['agent']
+
+/**
  * What a route's middleware chain authorizes, derived once here from the
  * stamped `capabilities.authorization` (RFC 0007) so every consumer reads the
  * same answer.

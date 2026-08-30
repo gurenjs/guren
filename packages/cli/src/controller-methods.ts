@@ -16,9 +16,12 @@ import { walk } from './ast-walk'
  * core-suite check would drag the dependency and ignore-config machinery
  * into every `guren check` run for one map.
  *
- * The rule vocabularies stay where they are used: `CONTROLLER_MEMBER_KINDS`
- * and the audit's patterns remain in `audit.ts`, whose classification is
- * pinned against `Controller.ts` by `controller-surface.test.ts`.
+ * The member vocabulary lives here too, for the same reason: every pattern
+ * that spells a `Controller` member name is protected by
+ * `controller-surface.test.ts`, which pins `CONTROLLER_MEMBER_KINDS` against
+ * `Controller.ts`. A pattern defined outside that reach — as the agent-route
+ * checks' `this.authorize(` and `this.inertia(` briefly were — goes stale on
+ * a rename with nothing failing.
  */
 export interface ControllerMethodInfo {
   /** Method body source with comments and string contents blanked, offsets preserved. */
@@ -43,6 +46,164 @@ export interface ControllerMethodScan {
   methods: Map<string, ControllerMethodInfo>
   collisions: ControllerNameCollision[]
 }
+
+/**
+ * What request data each member of `Controller` hands an action.
+ *
+ * The keys are the full public/protected method-and-getter surface of
+ * `packages/server/src/mvc/Controller.ts` — the only members app code can
+ * reach — and `controller-surface.test.ts` re-parses that file and fails when
+ * the two lists diverge. That test is the point of enumerating members this
+ * rule doesn't care about: a new accessor cannot be added over there and
+ * quietly default to "harmless" here, which is exactly how `input()` came to
+ * be missed. Which bucket a member belongs in is a semantic judgement about
+ * its body, so it stays a deliberate classification rather than something
+ * inferred from the name.
+ *
+ * Classifying a member is not the same as wiring it up: the patterns below are
+ * derived from these names but still assume call syntax, so a body-reading
+ * *getter* would need the pattern touched too, not just an entry here.
+ */
+export type ControllerMemberKind =
+  /**
+   * Hands back request-body content nothing has validated. `file()`/`files()`
+   * belong here because they are `req.parseBody()` under the hood
+   * (Controller.ts) — the raw call this rule has always flagged — and a helper
+   * cannot be a clean pass while the call it delegates to is a failure.
+   */
+  | 'body-payload'
+  /**
+   * Reads the body but yields nothing a schema would have caught: `has()`
+   * answers only whether a key is present. Not flagged, but not "does not
+   * consume the request body" either — see the finding in audit.ts.
+   */
+  | 'body-incidental'
+  /** Reads the body in order to validate it — the remedy, not the problem. */
+  | 'body-validation'
+  /** Never touches the request body. */
+  | 'non-body'
+
+export const CONTROLLER_MEMBER_KINDS = {
+  input: 'body-payload',
+  only: 'body-payload',
+  except: 'body-payload',
+  file: 'body-payload',
+  files: 'body-payload',
+
+  has: 'body-incidental',
+
+  validateBody: 'body-validation',
+  validateBodySafe: 'body-validation',
+
+  setContext: 'non-body',
+  setContainer: 'non-body',
+  setResolvedModel: 'non-body',
+  model: 'non-body',
+  ctx: 'non-body',
+  /** Reached by name through RAW_BODY_READ_PATTERN, not as `this.request(`. */
+  request: 'non-body',
+  auth: 'non-body',
+  make: 'non-body',
+  apiToken: 'non-body',
+  apiTokenUserId: 'non-body',
+  authorize: 'non-body',
+  can: 'non-body',
+  inertia: 'non-body',
+  view: 'non-body',
+  locale: 'non-body',
+  t: 'non-body',
+  tc: 'non-body',
+  json: 'non-body',
+  text: 'non-body',
+  redirect: 'non-body',
+  noContent: 'non-body',
+  created: 'non-body',
+  accepted: 'non-body',
+  query: 'non-body',
+  validateQuery: 'non-body',
+  validateParams: 'non-body',
+  validateQuerySafe: 'non-body',
+  validateParamsSafe: 'non-body',
+} as const satisfies Readonly<Record<string, ControllerMemberKind>>
+
+/**
+ * A member name the classification above knows. Spelling a pattern through
+ * this type is what makes the surface test protect it: a member renamed in
+ * `Controller.ts` fails that test, and every pattern naming the old member
+ * then fails to compile instead of silently matching nothing.
+ */
+export type ControllerMemberName = keyof typeof CONTROLLER_MEMBER_KINDS
+
+export function controllerMembers(kind: ControllerMemberKind): string[] {
+  return Object.entries(CONTROLLER_MEMBER_KINDS)
+    .filter(([, memberKind]) => memberKind === kind)
+    .map(([name]) => name)
+}
+
+/**
+ * `name(`, plus the generic forms these helpers are declared with. `[^()]*`
+ * rather than `[^>]*` so a nested type argument (`this.input<Array<string>>()`)
+ * still reaches the closing `(` — stopping at the first `>` silently skipped
+ * those calls. Longest name first so `validateBody` cannot shadow
+ * `validateBodySafe`.
+ */
+export function accessorCallPattern(names: readonly string[]): string {
+  const alternation = [...names].sort((a, b) => b.length - a.length).join('|')
+  return `\\b(?:${alternation})\\s*(?:<[^()]*>)?\\s*\\(`
+}
+
+/**
+ * `this.<member>(` for named members. `this.` is required because the members
+ * are `protected`: a call through anything else is a different API.
+ */
+function controllerMemberCall(...names: ControllerMemberName[]): RegExp {
+  return new RegExp(`\\bthis\\s*\\.\\s*${accessorCallPattern(names)}`)
+}
+
+/**
+ * Calls that actually reject unauthenticated requests. Optional reads like
+ * `auth.user()`, `auth.id()`, or `auth.check()` do not enforce anything on
+ * their own, so they intentionally do not count as protection.
+ *
+ * The `apiToken` half is not optional for agent-facing rules: a bearer token
+ * is the auth path an agent actually uses, so a narrower copy of this pattern
+ * would report a token-authenticated action as having no authentication at
+ * all.
+ */
+export const AUTH_CALL_PATTERN = new RegExp(
+  `\\bauth\\s*\\.\\s*userOrFail\\s*(?:<[^>]*>)?\\s*\\(|${
+    controllerMemberCall('apiToken', 'apiTokenUserId').source}`,
+)
+
+/**
+ * `this.authorize(...)` — the call that throws a 403. `this.can(...)` is
+ * deliberately excluded: it returns a boolean and enforces nothing, the same
+ * distinction drawn above between `userOrFail()` and `check()`.
+ */
+export const AUTHORIZE_CALL_PATTERN = controllerMemberCall('authorize')
+
+/** An Inertia page response, which carries no JSON schema an agent could read. */
+export const INERTIA_CALL_PATTERN = controllerMemberCall('inertia')
+
+/**
+ * A record deletion, for the annotation-honesty rules (RFC 0016 §5.5).
+ *
+ * Two shapes, both constrained the way `MODEL_ATTACH_PATTERN` in audit.ts is:
+ * a model static (`Post.delete(...)`, `Post.forceDelete(...)`), which requires
+ * a PascalCase receiver, and a terminated query chain
+ * (`Post.where(...).delete()`), which requires the call to follow a closing
+ * paren. Without those constraints every `map.delete(key)` and
+ * `cache.delete(...)` in an action would read as a record deletion.
+ */
+export const DELETE_CALL_PATTERN =
+  /\b[A-Z][A-Za-z0-9_]*\s*\.\s*(?:delete|forceDelete)\s*\(|\)\s*\.\s*(?:delete|forceDelete)\s*\(/
+
+/**
+ * A write that bypasses mass-assignment protection. Read by the audit's
+ * force-write heuristic and by the agent-route annotation rules, which count
+ * it as state change alongside a deletion.
+ */
+export const FORCE_WRITE_PATTERN = /\bforce(Create|Update)\s*\(/
 
 /**
  * Method bodies below are judged with regexes (VALIDATE_BODY_PATTERN,
