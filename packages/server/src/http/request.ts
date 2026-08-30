@@ -1,4 +1,25 @@
+import type { HonoRequest } from 'hono'
+
 import type { Context } from './Application'
+
+/**
+ * What {@link parseRequestBody} actually reads: three members off `ctx.req`,
+ * not a whole Hono context.
+ *
+ * Declared structurally because the difference is load bearing. `parseBody` is
+ * optional here, which is what makes the `typeof` guard below meaningful — a
+ * real `Context` always carries one, so against `Context` that guard reads as
+ * dead code. It is not: `@guren/testing`'s controller mock reaches this parser
+ * through a `HonoRequest` built from a plain `Request`, and this is the
+ * declaration that lets it do so without casting its way past the signature.
+ *
+ * Narrowing a parameter accepts strictly more callers, so every existing one —
+ * `Router`, `Controller`, the validation middleware, `FormRequest`,
+ * `BroadcastManager` — keeps passing a real `Context` unchanged.
+ */
+export interface RequestBodyContext {
+  req: Pick<HonoRequest, 'header' | 'json'> & Partial<Pick<HonoRequest, 'parseBody'>>
+}
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -28,7 +49,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  * Form submissions have no non-object shape to preserve, so they normalize to
  * a record exactly as {@link parseRequestPayload} does.
  */
-export async function parseRequestBody(ctx: Context): Promise<unknown> {
+export async function parseRequestBody(ctx: RequestBodyContext): Promise<unknown> {
   const contentType = ctx.req.header('content-type') ?? ''
 
   if (contentType.includes('application/json')) {

@@ -16,3 +16,4 @@
  * package root; this subpath exists for the two that are not.
  */
 export { parseRequestBody, asRecord } from '../http/request'
+export type { RequestBodyContext } from '../http/request'

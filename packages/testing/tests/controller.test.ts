@@ -7,6 +7,28 @@ import {
   type ControllerContext,
 } from '../src/controller'
 
+/**
+ * Passes anything through, so a divergence between the mock and the runtime
+ * shows up as a shape to compare rather than a 422 from either side.
+ */
+const identitySchema = {
+  safeParse: (data: unknown) => ({ success: true as const, data }),
+}
+
+/**
+ * A multipart body, hand-built rather than via `new FormData()`: handing
+ * `fetch` a FormData body lets it pick the boundary *and* the media-type
+ * casing, and the casing is one of the things these suites test.
+ */
+function multipartBody(boundary: string, fields: Array<[string, string]>): string {
+  const parts = fields.map(
+    ([name, value]) =>
+      `--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`,
+  )
+
+  return `${parts.join('')}--${boundary}--\r\n`
+}
+
 describe('createControllerContext', () => {
   it('creates context with correct URL parsing', () => {
     const ctx = createControllerContext('http://example.com/users/123?page=1')
@@ -798,10 +820,6 @@ describe('repeated query parameters', () => {
   const URL_UNDER_TEST = 'http://example.com/posts?tag=core&tag=framework&page=2'
   const EXPECTED = { tag: ['core', 'framework'], page: '2' }
 
-  const identitySchema = {
-    safeParse: (data: unknown) => ({ success: true as const, data }),
-  }
-
   /** Both surfaces read the same context, so one pass answers for both. */
   interface BothSurfaces {
     validateQuery: unknown
@@ -923,17 +941,10 @@ describe('body content-type recognition', () => {
     body: JSON.stringify({ [FIELD]: VALUE }),
   })
 
-  // Hand-built rather than via FormData: passing a FormData body lets the
-  // runtime pick the Content-Type, and the header is exactly what is under
-  // test here.
   const multipart = (contentType: string): RequestInit => ({
     method: 'POST',
     headers: { 'Content-Type': contentType },
-    body:
-      `--${BOUNDARY}\r\n` +
-      `Content-Disposition: form-data; name="${FIELD}"\r\n\r\n` +
-      `${VALUE}\r\n` +
-      `--${BOUNDARY}--\r\n`,
+    body: multipartBody(BOUNDARY, [[FIELD, VALUE]]),
   })
 
   async function readThroughControllerMock(init: RequestInit): Promise<unknown> {
@@ -1206,30 +1217,11 @@ describe('request body parity', () => {
   const URL_UNDER_TEST = 'http://example.com/parity'
   const BOUNDARY = 'guren-parity-boundary'
 
-  /** Passes anything through, so a divergence shows up as a shape rather than a 422. */
-  const identitySchema = {
-    safeParse: (data: unknown) => ({ success: true as const, data }),
-  }
-
-  /**
-   * Hand-built rather than `new FormData()`: `fetch` picks the boundary and
-   * the exact media-type casing for a FormData body, and the casing is one of
-   * the things under test here.
-   */
-  function multipartBody(fields: Array<[string, string]>): string {
-    const parts = fields.map(
-      ([name, value]) =>
-        `--${BOUNDARY}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`,
-    )
-
-    return `${parts.join('')}--${BOUNDARY}--\r\n`
-  }
-
   interface BodyCase {
     name: string
     /** Left unset only by the "no content type" row, which asserts its absence. */
     contentType?: string
-    body?: BodyInit
+    body: BodyInit
     expected: unknown
   }
 
@@ -1313,19 +1305,19 @@ describe('request body parity', () => {
     {
       name: 'multipart',
       contentType: `multipart/form-data; boundary=${BOUNDARY}`,
-      body: multipartBody([['title', 'Guren']]),
+      body: multipartBody(BOUNDARY, [['title', 'Guren']]),
       expected: { title: 'Guren' },
     },
     {
       name: 'an uppercase multipart media type',
       contentType: `MULTIPART/FORM-DATA; boundary=${BOUNDARY}`,
-      body: multipartBody([['title', 'Guren']]),
+      body: multipartBody(BOUNDARY, [['title', 'Guren']]),
       expected: { title: 'Guren' },
     },
     {
       name: 'a repeated multipart field[], which keeps the first value',
       contentType: `multipart/form-data; boundary=${BOUNDARY}`,
-      body: multipartBody([
+      body: multipartBody(BOUNDARY, [
         ['tag[]', 'a'],
         ['tag[]', 'b'],
       ]),
@@ -1406,6 +1398,59 @@ describe('request body parity', () => {
 
     return ((await response.json()) as { body: unknown }).body
   }
+
+  /**
+   * The runtime boxes its parse (`Controller.getRawBody`), so two reads in one
+   * action are handed the same object. The mock clones the request, so nothing
+   * forces it to re-read — but re-parsing is not the same answer: it hands out
+   * two objects where the runtime hands out one, and a schema that mutates what
+   * it validates then sees a different body on the second read.
+   *
+   * Identity is the probe because it is the only thing that separates one parse
+   * from two. Every row above reads each request once and so cannot see this.
+   */
+  it('hands both reads of one body the same object, as the runtime does', async () => {
+    const init: RequestInit = {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{"title":"Guren"}',
+    }
+
+    const { Controller } = createControllerModuleMock()
+
+    class TwiceController extends Controller {
+      async read(): Promise<boolean> {
+        return (await this.validateBody(identitySchema)) === (await this.validateBody(identitySchema))
+      }
+    }
+
+    const controller = new TwiceController()
+    controller.setContext(
+      createControllerContext(URL_UNDER_TEST, init) as unknown as ControllerContext,
+    )
+
+    expect(await controller.read()).toBe(true)
+
+    const { Controller: RuntimeController, createApp } = await import('@guren/core')
+
+    class RuntimeTwiceController extends RuntimeController {
+      async read() {
+        const first = await this.validateBody(identitySchema)
+        const second = await this.validateBody(identitySchema)
+        return this.json({ same: first === second })
+      }
+    }
+
+    const app = createApp({
+      routes: (router) => {
+        router.post('/twice', [RuntimeTwiceController, 'read'])
+      },
+    })
+    await app.boot()
+
+    const response = await app.fetch(new Request('http://example.com/twice', init))
+    expect(await response.json()).toEqual({ same: true })
+  })
 
   it.each(CASES)('agrees on $name', async (testCase) => {
     // A row claiming no content type has to prove it: `fetch` supplies one for
