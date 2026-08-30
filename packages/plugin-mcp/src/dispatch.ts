@@ -9,7 +9,7 @@
  * saw the JSON Schema) and never decides authorization (the gate and the
  * app's policies do).
  */
-import type { DerivedAgentTool } from '@guren/core'
+import type { AgentToolInputSource, DerivedAgentTool } from '@guren/core'
 import { PATH_PARAM_PATTERN } from '@guren/core/internal/route-path'
 
 /** How many characters of a non-JSON response body survive into the result. */
@@ -86,19 +86,21 @@ export function buildToolRequest(
         missing.push(name)
         return `${lead}:${name}`
       }
-      const encoded = String(value)
-      if (encoded === '.' || encoded === '..') {
+      // The raw stringified value — the dot-segment check runs before
+      // encoding, because `encodeURIComponent` leaves `.`/`..` untouched.
+      const stringified = String(value)
+      if (stringified === '.' || stringified === '..') {
         invalidPath.push(name)
         return `${lead}:${name}`
       }
       // A name the merge assigned to query/body still substitutes into the
       // URL, but keeps flowing to that sink — so a collision does not drop
       // the argument from the body the route validates.
-      const source = Object.hasOwn(tool.inputSources, name) ? tool.inputSources[name] : undefined
+      const source = sourceOf(tool, name)
       if (source === undefined || source === 'params' || source === 'path') {
         pathOnly.add(name)
       }
-      return `${lead}${encodeURIComponent(encoded)}`
+      return `${lead}${encodeURIComponent(stringified)}`
     },
   )
   if (missing.length > 0) {
@@ -115,7 +117,7 @@ export function buildToolRequest(
   const bodyEntries: Array<[string, unknown]> = []
   for (const [key, value] of Object.entries(args)) {
     if (pathOnly.has(key) || value === undefined) continue
-    const source = Object.hasOwn(tool.inputSources, key) ? tool.inputSources[key] : undefined
+    const source = sourceOf(tool, key)
     // Query-bound: everything on a bodyless method; declared `query` keys; a
     // `params`/`path` key the path never declared (a contract defect
     // `guren check` fails — forwarded so the route's validation reports it
@@ -167,6 +169,16 @@ export function buildToolRequest(
   const qs = query.toString()
   const url = `${origin}${path}${qs ? `?${qs}` : ''}`
   return { request: new Request(url, { method, headers, body }) }
+}
+
+/**
+ * The contract a property was declared under, or undefined if the derivation
+ * never advertised it. `Object.hasOwn` rather than a plain read: a JSON
+ * argument may legally be named `__proto__`, and `inputSources['__proto__']`
+ * would otherwise resolve to `Object.prototype`, not undefined.
+ */
+function sourceOf(tool: DerivedAgentTool, name: string): AgentToolInputSource | undefined {
+  return Object.hasOwn(tool.inputSources, name) ? tool.inputSources[name] : undefined
 }
 
 /** Primitives stringify; anything structured rides as JSON text. */
@@ -257,7 +269,6 @@ export async function mapToolResponse(
   }
 
   const raw = await response.text()
-  const parsed = parseJsonBody(response, raw)
 
   if (status >= 400) {
     return {
@@ -266,6 +277,9 @@ export async function mapToolResponse(
       status,
     }
   }
+
+  // Parsed only past the error branch, which reads the raw body verbatim.
+  const parsed = parseJsonBody(response, raw)
 
   if (parsed === undefined) {
     const text = raw.length > TEXT_RESPONSE_CAP
