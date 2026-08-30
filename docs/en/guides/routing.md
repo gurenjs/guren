@@ -378,6 +378,40 @@ Available OpenAPI fields:
 
 See the [OpenAPI guide](#openapi) section in the CLI reference for generating the spec document.
 
+### Agent Tools
+
+A named route can be exposed to AI agents as an MCP tool by declaring `agent` metadata on it. Everything about the tool — its input schema, its output schema, its authorization — is derived from the contracts above; nothing is restated.
+
+```ts
+// Fluent
+router
+  .post('/posts', { body: CreatePostSchema, output: PostResponseSchema }, [PostsController, 'store'])
+  .name('posts.store')
+  .agent({ description: 'Create a blog post as the authenticated user.' })
+
+// Or as a contract key
+router.post('/posts', {
+  name: 'posts.store',
+  body: CreatePostSchema,
+  agent: { description: 'Create a blog post as the authenticated user.' },
+}, [PostsController, 'store'])
+```
+
+`resource()` takes the same metadata per action, and **an action not listed is not exposed**:
+
+```ts
+router.resource('/posts', PostsController, {
+  agent: {
+    index: { description: 'List posts.' },
+    show: { description: 'Fetch one post by id.' },
+  },
+})
+```
+
+Exposure is opt-in per route, the tool name is the route name used verbatim, and a route with no `.name()` cannot become a tool. Declaring `agent` in the route options *and* chaining `.agent()` throws — declare it once.
+
+`bunx guren tool:list` shows what an agent would see. For the metadata fields, the input/output derivation rules, the MCP endpoint, token scopes and the audit trail, see the [Agent Interface guide](./agent-interface.md).
+
 ## OpenAPI Document Generation
 
 Install the optional `@guren/openapi` package and generate a spec from your route definitions:

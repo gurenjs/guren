@@ -17,7 +17,7 @@ import {
 import type { AgentToolDenialReason, DerivedAgentTool } from '@guren/core'
 
 import { gateToolCall } from './gate'
-import { advertisesStructuredOutput, type ToolCallOutcome } from './dispatch'
+import { advertisesStructuredOutput, type ToolCallOutcome } from '@guren/core'
 import type { AgentRateLimiter } from './rate-limit'
 
 export interface AppMcpServerOptions {
