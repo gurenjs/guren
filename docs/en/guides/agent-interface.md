@@ -113,8 +113,16 @@ Result
 The command boots your application and dispatches through the same contract an
 MCP client's call goes through: the tool is found by `deriveAgentTools`, the
 HTTP request is rebuilt by the framework's dispatcher, and the response is
-mapped back the same way. There is no CLI-only code path, so what you see here
-is what an agent gets.
+mapped back the same way. There is no CLI-only code path for any of that, so
+the tool a call resolves to, the request it becomes, and the result you read
+are what an agent gets.
+
+What differs is how the caller proves who it is. An MCP client presents a
+bearer token, which is scope-checked before the request is built and which
+skips CSRF verification because it carries no cookies; `tool:call`
+authenticates with `--as` and fetches a CSRF token the way a browser does. So
+a green `tool:call` run tells you the tool works, not that a particular token
+is scoped to reach it: `guren token:issue` is where that is decided.
 
 Its tools come from the **booted** app's route graph, which is why there is no
 `--routes` flag: a routes file cannot change what the running app serves, and a

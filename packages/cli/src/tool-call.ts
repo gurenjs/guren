@@ -197,8 +197,17 @@ async function loadAgentSurface(
  * nothing with. Priming is not a bypass: it performs exactly the round-trip a
  * browser performs, and an app that issues no token gets no headers added.
  */
+/** RFC 6265 §5.1.4: does a cookie scoped to `cookiePath` travel to `requestPath`? */
+function pathMatches(requestPath: string, cookiePath: string): boolean {
+  if (cookiePath === '' || cookiePath === '/') return true
+  if (requestPath === cookiePath) return true
+  if (!requestPath.startsWith(cookiePath)) return false
+  return cookiePath.endsWith('/') || requestPath[cookiePath.length] === '/'
+}
+
 async function primeCsrfHeaders(
   fetch: (request: Request) => Promise<Response>,
+  toolPath: string,
 ): Promise<Record<string, string>> {
   let response: Response
   try {
@@ -211,11 +220,23 @@ async function primeCsrfHeaders(
 
   const cookies = new Map<string, string>()
   for (const setCookie of response.headers.getSetCookie()) {
-    const [pair] = setCookie.split(';')
+    const [pair, ...attributes] = setCookie.split(';')
     const separator = pair?.indexOf('=') ?? -1
-    if (pair && separator > 0) {
-      cookies.set(pair.slice(0, separator).trim(), pair.slice(separator + 1).trim())
-    }
+    if (!pair || separator <= 0) continue
+
+    // Path is honoured because it is configurable (`cookieOptions.path`), so
+    // ignoring it would let this command present a cookie a browser would
+    // withhold — presenting *more* than a browser is the one direction that
+    // could turn a real CSRF misconfiguration into a green run here. Domain
+    // and Secure are not evaluated: the request never leaves the process and
+    // both are fixed by that.
+    const path = attributes
+      .map((attribute) => attribute.trim())
+      .find((attribute) => attribute.toLowerCase().startsWith('path='))
+      ?.slice('path='.length)
+    if (path !== undefined && !pathMatches(toolPath, path)) continue
+
+    cookies.set(pair.slice(0, separator).trim(), pair.slice(separator + 1).trim())
   }
 
   const xsrf = cookies.get('XSRF-TOKEN')
@@ -287,7 +308,10 @@ export async function dispatchToolCall(
     headers.set('X-Testing-User', testingUserHeader(options.actingAs))
   }
   if (!CSRF_SAFE_METHODS.has(tool.method)) {
-    for (const [name, value] of Object.entries(await primeCsrfHeaders(fetch))) {
+    // The tool's own path, so a path-scoped cookie is judged against the
+    // request that will actually carry it.
+    const primed = await primeCsrfHeaders(fetch, new URL(request.url).pathname)
+    for (const [name, value] of Object.entries(primed)) {
       headers.set(name, value)
     }
   }
@@ -344,6 +368,10 @@ export async function runToolCall(options: ToolCallOptions): Promise<void> {
     // who can run it can already execute code in this project), but the header
     // it turns on is the one thing standing between a deployed app and
     // unauthenticated impersonation, so a run that enables it says so.
+    // Never restored: this is a one-shot CLI process that exits after the
+    // call, and a restore would only matter to a caller importing
+    // runToolCall into a longer-lived process — which the tests do, and
+    // which is why they save and restore it themselves.
     process.env.GUREN_TESTING = '1'
     consola.warn(
       `--as user:${String(actingAs)} bypasses authentication: it sets GUREN_TESTING=1 for this process so the `

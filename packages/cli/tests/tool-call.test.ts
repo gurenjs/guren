@@ -82,6 +82,16 @@ import { registerWebRoutes } from '../routes/web'
 export default createApp({ routes: registerWebRoutes, auth: {} })
 `
 
+/** CSRF configured to scope its cookie to a path the tools do not sit under. */
+const MAIN_WITH_SCOPED_CSRF = `import { createApp, createCsrfMiddleware } from '@guren/core'
+import { registerWebRoutes } from '../routes/web'
+
+const app = createApp({ routes: registerWebRoutes })
+app.use(createCsrfMiddleware({ cookieOptions: { path: '/admin' } }))
+
+export default app
+`
+
 describe('tool:call', () => {
   let workspace: TempWorkspace
   let appDir: string
@@ -203,6 +213,19 @@ describe('tool:call', () => {
     const result = payload()
     expect(result.status).toBe(201)
     expect(result.isError).toBe(false)
+  })
+
+  it('withholds a cookie scoped to a path the tool does not sit under', async () => {
+    // Presenting more than a browser would is the one direction that could
+    // turn a real CSRF misconfiguration into a green run here, so Path is
+    // honoured: this app scopes its XSRF cookie to /admin, and the tool is
+    // not under it.
+    await writeFile(join(appDir, 'src/main.ts'), MAIN_WITH_SCOPED_CSRF)
+
+    await runToolCall({ name: 'posts.store', input: '{"title":"Scoped"}', appRoot: appDir, json: true })
+
+    const result = payload()
+    expect(result.status).toBe(403)
   })
 
   it('names every tool the app exposes when the name is unknown', async () => {

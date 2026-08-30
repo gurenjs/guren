@@ -46,15 +46,29 @@ function routes(router: Router): void {
     .agent({ description: 'List posts.' })
 
   router
-    // No `output` schema on purpose: a controller route that declares one has
-    // its *error* responses validated against it too, so the 422 this test
-    // wants would surface as a 500. That is the framework's behaviour today
-    // and not what these tests are about.
-    .post('/posts', { body: z.object({ title: z.string().min(3) }) }, [PostController, 'store'])
+    // Declares an `output` schema on purpose: it is the shape `guren check`
+    // steers agent routes toward, and until output validation was scoped to
+    // successful responses the 422 below surfaced as a 500. Keeping it here
+    // means that fix is covered on the surface that found it.
+    .post(
+      '/posts',
+      {
+        body: z.object({ title: z.string().min(3) }),
+        output: z.object({ id: z.number(), title: z.string() }),
+      },
+      [PostController, 'store'],
+    )
     .name('posts.store')
     .agent({ description: 'Create a post.' })
 
   router.get('/secret', [PostController, 'secret']).name('secret.show').agent({})
+
+  // Answers 201, so `assertOk()` passing here is only explicable by its
+  // isError semantics — an assertStatus(200) in disguise would fail.
+  router
+    .post('/drafts', () => Response.json({ ok: true }, { status: 201 }))
+    .name('drafts.store')
+    .agent({})
 }
 
 async function freshApp(options: { auth?: Record<string, unknown> } = {}): Promise<TestApp> {
@@ -67,7 +81,7 @@ describe('TestApp.agent()', () => {
     const app = await freshApp()
     const names = (await app.agent().tools()).map((tool) => tool.toolName).sort()
 
-    expect(names).toEqual(['posts.index', 'posts.store', 'secret.show'])
+    expect(names).toEqual(['drafts.store', 'posts.index', 'posts.store', 'secret.show'])
   })
 
   it('dispatches a read tool and exposes its structured result', async () => {
@@ -111,6 +125,17 @@ describe('TestApp.agent()', () => {
     expect(created).toEqual([{ title: 'Acting as', author: 99 }])
   })
 
+  it('accepts a non-200 success, unlike an HTTP status assertion', async () => {
+    const app = await freshApp()
+    const result = await app.agent().call('drafts.store')
+
+    // 201 is a tool-call success. assertOk() passing here is only explicable
+    // by its isError semantics: an assertStatus(200) in disguise would fail.
+    expect(result.status).toBe(201)
+    result.assertOk()
+    expect(() => result.assertStatus(200)).toThrow()
+  })
+
   it('reports an unauthenticated call as denied', async () => {
     const app = await freshApp()
 
@@ -149,7 +174,7 @@ describe('TestApp.agent()', () => {
     const app = await freshApp()
 
     await expect(app.agent().call('posts.destroy')).rejects.toThrow(
-      /This app exposes: posts\.index, posts\.store, secret\.show\./,
+      /This app exposes: drafts\.store, posts\.index, posts\.store, secret\.show\./,
     )
   })
 
