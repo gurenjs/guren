@@ -1453,10 +1453,22 @@ function createContractValidationMiddleware(route: RegisteredRoute): MiddlewareH
 
     await next()
 
-    // Validate output schema against the response body. A preflight verdict
-    // is not that body — the handler never ran — so validating it here would
-    // reject the verdict and answer 500 to a question that was allowed.
-    if (schemas.output && c.res && c.res.headers.get(AGENT_PREFLIGHT_VERDICT_HEADER) === null) {
+    // Validate output schema against the response body — but only a body the
+    // schema actually describes.
+    //
+    // `output` states what the action *returns*, so a failure response is
+    // outside it by construction: the exception handler wrote that body, not
+    // the action. Validating it anyway rewrote every `validateBody()` 422 on
+    // such a route into `500 Response validation failed`, hiding the real
+    // error behind a report that the app had violated its own contract. RFC
+    // 0016 makes the combination usual rather than exotic, since `guren
+    // check` warns about an agent route with no `output` schema.
+    //
+    // A preflight verdict is excluded for the same reason and one more: the
+    // handler never ran at all, so answering 500 would fail a question that
+    // was allowed.
+    const isSuccess = c.res !== undefined && c.res.status >= 200 && c.res.status < 300
+    if (schemas.output && isSuccess && c.res.headers.get(AGENT_PREFLIGHT_VERDICT_HEADER) === null) {
       let sourceBody: string
       let parsedBody: unknown
       try {

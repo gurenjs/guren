@@ -138,3 +138,52 @@ describe('route contract failure modes', () => {
     expect(JSON.parse(body)).toEqual({ params: { id: '7' } })
   })
 })
+
+/**
+ * An `output` schema states what the *action returns*. A failure response is
+ * written by the exception handler, not the action, so it is outside that
+ * schema by construction — and validating it anyway turned every rejection
+ * into a report that the app had violated its own contract.
+ */
+describe('output schema scope', () => {
+  const Body = z.object({ title: z.string().min(3) })
+  const Output = z.object({ id: z.number(), title: z.string() })
+
+  class OutputController extends Controller {
+    async store() {
+      const data = await this.validateBody(Body)
+      return this.json({ id: 1, title: data.title })
+    }
+  }
+
+  async function post(body: unknown) {
+    const app = new Application({
+      routes: (router) => {
+        router.post('/posts', { output: Output }, [OutputController, 'store']).name('posts.store')
+      },
+    })
+    await app.boot()
+    const response = await app.fetch(
+      new Request('http://localhost/posts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    )
+    return { status: response.status, body: await response.text() }
+  }
+
+  test('a validateBody rejection keeps its 422 instead of becoming a 500', async () => {
+    const { status, body } = await post({ title: 'no' })
+
+    expect(status).toBe(422)
+    expect(body).not.toContain('Response validation failed')
+  })
+
+  test('a successful response is still validated against the schema', async () => {
+    const { status, body } = await post({ title: 'hello' })
+
+    expect(status).toBe(200)
+    expect(JSON.parse(body)).toEqual({ id: 1, title: 'hello' })
+  })
+})
