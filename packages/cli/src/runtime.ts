@@ -36,8 +36,14 @@ export type MaybeApplication = {
   }
 }
 
-export async function resolveMainEntry(): Promise<string> {
-  const cwd = process.cwd()
+export async function resolveMainEntry(appRoot?: string): Promise<string> {
+  // A caller that resolved anything *else* about the app from an explicit
+  // root has to resolve the entry from that same root. `token:issue` derives
+  // its tool list from `--app` and writes the token into the store this
+  // returns: reading `process.cwd()` here made those two different
+  // applications, so the command printed one app's tools and granted them in
+  // another.
+  const cwd = appRoot ? resolve(process.cwd(), appRoot) : process.cwd()
 
   for (const candidate of MAIN_ENTRY_CANDIDATES) {
     const absolute = resolve(cwd, candidate)
@@ -105,7 +111,11 @@ function moduleHandlesBoot(moduleExports: Record<string, unknown>): boolean {
   return typeof bootstrap === 'function'
 }
 
-export async function ensureApplicationBooted(app: MaybeApplication, moduleExports: Record<string, unknown>): Promise<void> {
+export async function ensureApplicationBooted(
+  app: MaybeApplication,
+  moduleExports: Record<string, unknown>,
+  options: { rethrow?: boolean } = {},
+): Promise<void> {
   if (moduleHandlesBoot(moduleExports)) {
     return
   }
@@ -118,6 +128,12 @@ export async function ensureApplicationBooted(app: MaybeApplication, moduleExpor
   try {
     await maybeBoot.call(app)
   } catch (error) {
+    // Warn-and-continue suits a command that only inspects a half-built app
+    // (`console` still gives a usable REPL). A command that *writes* through
+    // one must not: a provider that failed after auth registered leaves a
+    // store that looks configured, so `token:issue` would mint into an
+    // application that never finished booting and report success.
+    if (options.rethrow) throw error
     consola.warn('Application boot() rejected:', error)
   }
 }

@@ -121,7 +121,16 @@ export function parseExpiresDuration(value: string): number {
  * report. Anything else (a UUID, a ULID) stays a string.
  */
 export function parseUserId(value: string): string | number {
-  return /^\d+$/.test(value) && Number.isSafeInteger(Number(value)) ? Number(value) : value
+  // Round-trip, not just digits-only: `0042` and `42` are different ids in an
+  // app keyed by string, and coercing the first to the second mints a token
+  // for a principal nobody typed. A value that survives `String(Number(v))`
+  // unchanged is the same id either way, which is the only case where
+  // choosing number over string is free — and it has to be a number there,
+  // because `retrieveById` hands it to `Model.find` against a serial key.
+  const numeric = Number(value)
+  return /^\d+$/.test(value) && Number.isSafeInteger(numeric) && String(numeric) === value
+    ? numeric
+    : value
 }
 
 export interface TokenIssueInput {
@@ -196,6 +205,20 @@ export function planTokenIssue(input: TokenIssueInput, tools: readonly ScopedToo
   }
 
   const warnings: string[] = []
+
+  // `read` is a reserved word before it is a tool name, and the grammar says
+  // so deliberately (`tools:read` wins its own spelling). An app that happens
+  // to name a tool `read` therefore cannot reach it through the shorthand —
+  // the entry silently means "every read-only tool" instead. Nothing is
+  // broadened and the printed grant stays exact; the warning exists because
+  // the two readings look identical on the command line.
+  if (input.tools.split(',').some((entry) => entry.trim() === 'read')
+    && tools.some((tool) => tool.name === 'read')) {
+    warnings.push(
+      'The shorthand "read" means tools:read — every read-only tool — not the tool named "read". '
+        + 'Write tool:read to grant that one tool.',
+    )
+  }
 
   // The tools an entry is allowed to count as a match against. Under
   // `--read-only` that is the read-only ones alone, which makes the per-entry
@@ -324,8 +347,9 @@ export interface TokenIssueOptions extends TokenIssueInput {
  * `AuthManager`: an app resolving an older `@guren/core` has no accessor at
  * all, and that must land on the message below instead of a `TypeError`.
  */
-async function resolveApiTokenStore(): Promise<ApiTokenStore> {
-  const entry = await resolveMainEntry()
+async function resolveApiTokenStore(appRoot?: string): Promise<ApiTokenStore> {
+  // The same root the tool list was derived from — see `resolveMainEntry`.
+  const entry = await resolveMainEntry(appRoot)
 
   let moduleExports: Record<string, unknown>
   try {
@@ -337,7 +361,9 @@ async function resolveApiTokenStore(): Promise<ApiTokenStore> {
   }
 
   const app: MaybeApplication = await bootstrapApplication(moduleExports)
-  await ensureApplicationBooted(app, moduleExports)
+  // Fail rather than warn: a token written into a half-booted app is issued
+  // against a store whose configuration never completed.
+  await ensureApplicationBooted(app, moduleExports, { rethrow: true })
 
   const store = app.auth?.getApiTokenStore?.()
   if (!store) {
@@ -354,7 +380,16 @@ async function resolveApiTokenStore(): Promise<ApiTokenStore> {
 async function loadScopedTools(options: TokenIssueOptions): Promise<{ tools: ScopedTool[]; warnings: string[] }> {
   const { tools, warnings } = await listTools({ routesFile: options.routesFile, appRoot: options.appRoot })
   return {
-    tools: tools.map((tool) => ({ name: tool.toolName, readOnly: tool.annotations.readOnlyHint })),
+    // Only tools exposed on MCP. What this command mints is a bearer token,
+    // and bearer is how the App MCP endpoint authenticates — the other
+    // surfaces do not read these tokens (WebMCP carries the session,
+    // `tool:call` takes `--as`). A tool with `expose: { mcp: false }` is
+    // therefore not something this token can ever reach, so counting it
+    // would print a grant no dispatcher honours and let a `--read-only`
+    // intersection pass on a tool that is not callable.
+    tools: tools
+      .filter((tool) => tool.expose.mcp)
+      .map((tool) => ({ name: tool.toolName, readOnly: tool.annotations.readOnlyHint })),
     warnings,
   }
 }
@@ -371,7 +406,7 @@ export async function runTokenIssue(options: TokenIssueOptions): Promise<void> {
     )
   }
 
-  const { plan, result } = await issueAgentToken(resolveApiTokenStore, tools, {
+  const { plan, result } = await issueAgentToken(() => resolveApiTokenStore(options.appRoot), tools, {
     ...options,
     userId: parseUserId(options.user),
   })

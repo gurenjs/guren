@@ -1716,17 +1716,30 @@ const tokenIssueCommand = defineCommand({
     },
   },
   async run({ args }) {
+    // Every flag is narrowed through the repeat-safe readers: citty arrays a
+    // repeated flag, and an array is truthy — so `--yes=false --yes=false`
+    // would authorize a `tools:*` grant the user twice declined, and a
+    // repeated `--user` would be stored comma-joined as a principal nobody
+    // is. This command mints credentials; last-wins is what repeating a flag
+    // means to whoever typed it.
+    const name = lastFlagValue(args.name)
+    const user = lastFlagValue(args.user)
+    const tools = lastFlagValue(args.tools)
+    if (name === undefined || user === undefined || tools === undefined) {
+      throw new Error('token:issue requires --name, --user and --tools.')
+    }
+
     await runTokenIssue({
-      name: args.name,
-      user: args.user,
-      tools: args.tools,
-      readOnly: args['read-only'],
-      allowUnmatched: args['allow-unmatched'],
-      yes: args.yes,
-      expires: args.expires,
-      routesFile: args.routes,
-      appRoot: args.app,
-      json: args.json,
+      name,
+      user,
+      tools,
+      readOnly: lastBooleanFlag(args['read-only']),
+      allowUnmatched: lastBooleanFlag(args['allow-unmatched']),
+      yes: lastBooleanFlag(args.yes),
+      expires: lastFlagValue(args.expires),
+      routesFile: lastFlagValue(args.routes),
+      appRoot: lastFlagValue(args.app),
+      json: lastBooleanFlag(args.json),
     })
 
     // Booting the app to reach its token store opens whatever the app opens —

@@ -298,3 +298,28 @@ describe('issueAgentToken', () => {
     expect(store.size).toBe(0)
   })
 })
+
+describe('parseUserId round-trip', () => {
+  it('keeps a digit string that is not its own numeric spelling', () => {
+    // `0042` and `42` are different ids in an app keyed by string; coercing
+    // the first would mint for a principal nobody typed.
+    expect(parseUserId('0042')).toBe('0042')
+    expect(parseUserId('42')).toBe(42)
+    expect(parseUserId('user-7')).toBe('user-7')
+  })
+})
+
+describe('planTokenIssue reserved-word collision', () => {
+  it('warns when the read shorthand shadows a tool literally named read', () => {
+    const withRead: ScopedTool[] = [...TOOLS, { name: 'read', readOnly: false }]
+    const plan = planTokenIssue({ tools: 'read' }, withRead)
+
+    expect(plan.abilities).toEqual(['tools:read'])
+    expect(plan.warnings.some((warning) => warning.includes('tool:read'))).toBe(true)
+  })
+
+  it('stays silent when no tool is named read', () => {
+    const plan = planTokenIssue({ tools: 'read' }, TOOLS)
+    expect(plan.warnings.some((warning) => warning.includes('tool:read'))).toBe(false)
+  })
+})
