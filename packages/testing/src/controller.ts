@@ -63,10 +63,8 @@ export function createControllerContext(
         // the entries keeps the last one, which is how the mock came to
         // disagree with the runtime here.
         const first: Record<string, string> = {}
-        for (const [name, value] of searchParams.entries()) {
-          if (!(name in first)) {
-            first[name] = value
-          }
+        for (const [name, value] of searchParams) {
+          first[name] ??= value
         }
         return first
       }
@@ -178,13 +176,7 @@ function flattenContextQueries(ctx: ControllerContext): Record<string, unknown> 
 
 /** Groups repeated search params into `queries()`' `Record<string, string[]>`. */
 function groupSearchParams(searchParams: URLSearchParams): Record<string, string[]> {
-  const values = new Map<string, string[]>()
-  for (const [key, value] of searchParams.entries()) {
-    const existing = values.get(key) ?? []
-    existing.push(value)
-    values.set(key, existing)
-  }
-  return Object.fromEntries(values)
+  return Object.fromEntries([...searchParams.keys()].map((key) => [key, searchParams.getAll(key)]))
 }
 
 export function createGurenControllerModule() {

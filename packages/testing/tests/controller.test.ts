@@ -606,41 +606,43 @@ describe('repeated query parameters', () => {
     safeParse: (data: unknown) => ({ success: true as const, data }),
   }
 
-  function readThroughMock(surface: 'validateQuery' | 'validateQuerySafe'): unknown {
+  /** Both surfaces read the same context, so one pass answers for both. */
+  interface BothSurfaces {
+    validateQuery: unknown
+    validateQuerySafe: unknown
+  }
+
+  function readThroughMock(ctx: ControllerContext): BothSurfaces {
     const { Controller } = createControllerModuleMock()
 
     class ReadController extends Controller {
-      read() {
-        if (surface === 'validateQuery') {
-          return this.validateQuery(identitySchema)
+      read(): BothSurfaces {
+        const safe = this.validateQuerySafe(identitySchema)
+        return {
+          validateQuery: this.validateQuery(identitySchema),
+          validateQuerySafe: safe.success ? safe.data : safe.errors,
         }
-        const result = this.validateQuerySafe(identitySchema)
-        return result.success ? result.data : result.errors
       }
     }
 
     const controller = new ReadController()
-    controller.setContext(
-      createControllerContext(URL_UNDER_TEST) as unknown as ControllerContext
-    )
+    controller.setContext(ctx)
 
     return controller.read()
   }
 
-  async function readThroughRuntime(
-    surface: 'validateQuery' | 'validateQuerySafe',
-  ): Promise<unknown> {
+  async function readThroughRuntime(): Promise<BothSurfaces> {
     // Lazy, like the rest of this package: the mock resolves @guren/server on
     // demand so a suite that mocks it still gets the real module here.
     const { Controller, createApp } = await import('@guren/core')
 
     class ReadController extends Controller {
       read() {
-        if (surface === 'validateQuery') {
-          return this.json({ value: this.validateQuery(identitySchema) })
-        }
-        const result = this.validateQuerySafe(identitySchema)
-        return this.json({ value: result.success ? result.data : result.errors })
+        const safe = this.validateQuerySafe(identitySchema)
+        return this.json({
+          validateQuery: this.validateQuery(identitySchema),
+          validateQuerySafe: safe.success ? safe.data : safe.errors,
+        })
       }
     }
 
@@ -654,42 +656,30 @@ describe('repeated query parameters', () => {
     const response = await app.fetch(new Request(URL_UNDER_TEST))
     expect(response.status).toBe(200)
 
-    return ((await response.json()) as { value: unknown }).value
+    return (await response.json()) as BothSurfaces
   }
 
-  for (const surface of ['validateQuery', 'validateQuerySafe'] as const) {
-    it(`${surface}() sees repeated keys as arrays in the mock and the runtime`, async () => {
-      const fromMock = readThroughMock(surface)
-      const fromRuntime = await readThroughRuntime(surface)
+  it('validateQuery()/validateQuerySafe() see repeated keys as arrays in the mock and the runtime', async () => {
+    const fromRuntime = await readThroughRuntime()
+    const fromMock = readThroughMock(
+      createControllerContext(URL_UNDER_TEST) as unknown as ControllerContext
+    )
 
-      expect(fromRuntime).toEqual(EXPECTED)
-      expect(fromMock).toEqual(EXPECTED)
-      expect(fromMock).toEqual(fromRuntime)
-    })
-  }
+    expect(fromRuntime).toEqual({ validateQuery: EXPECTED, validateQuerySafe: EXPECTED })
+    expect(fromMock).toEqual(fromRuntime)
+  })
 
   it('flattens from req.url when the context has no queries()', () => {
     // The fallback branch of flattenContextQueries: `queries()` is optional on
     // ControllerContext, and a hand-rolled context without one must still see
     // the array — falling back to `query()` would quietly restore the bug.
-    const { Controller } = createControllerModuleMock()
-
-    class ReadController extends Controller {
-      read() {
-        return this.validateQuery(identitySchema)
-      }
-    }
-
     const full = createControllerContext(URL_UNDER_TEST)
     const withoutQueries = {
       ...full,
       req: { ...full.req, queries: undefined },
     } as unknown as ControllerContext
 
-    const controller = new ReadController()
-    controller.setContext(withoutQueries)
-
-    expect(controller.read()).toEqual(EXPECTED)
+    expect(readThroughMock(withoutQueries).validateQuery).toEqual(EXPECTED)
   })
 
   it('reads back the first occurrence from the mock context, as Hono does', () => {
