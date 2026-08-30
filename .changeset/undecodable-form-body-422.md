@@ -13,4 +13,4 @@ A malformed body is a client error, so it is now treated as one everywhere: the 
 
 An empty-object fallback rather than `undefined` is the deliberate half: an all-optional object schema keeps passing on an undecodable body, exactly as it does on an empty POST. A body that decodes is untouched.
 
-`Controller.getRawBody()` drops its own now-redundant fallback and reads the shared one. `@guren/testing`'s controller mock does the same, and its parser's fallback now covers the whole body read rather than one content type, so the mock and the runtime keep giving the same answer here.
+`Controller.getRawBody()` drops its own now-redundant fallback and reads the shared one. `@guren/testing`'s controller mock does the same, and its parser's fallback now covers the whole body read rather than one content type, so the mock and the runtime keep giving the same answer here. A ctx carrying no request at all still throws there rather than reading as `{}` — that is a broken test setup, not an unparseable body.

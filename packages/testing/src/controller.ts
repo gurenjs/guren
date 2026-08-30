@@ -120,15 +120,21 @@ function loadServer(): Promise<ServerModule> {
  * A body that cannot be parsed falls back to `{}` — a client error reaches the
  * schema and fails validation rather than throwing, matching what the runtime's
  * parser now does for a form body no parser can decode. The fallback wraps the
- * whole read, not just that one branch: `clone()` throws on an already-read
+ * whole parse, not just that one branch: `clone()` throws on an already-read
  * body, and the callers this feeds have no fallback of their own to catch it.
  */
 async function parseRequestBody(ctx: ControllerContext): Promise<unknown> {
+  // Read outside the fallback on purpose: the fallback is for an unparseable
+  // *body*, and a ctx with no request at all is a broken test setup. Swallowing
+  // that into `{}` would turn a wiring mistake into a confusing validation
+  // failure, and the runtime's parser does not swallow it either.
+  const raw = ctx.req.raw
+
   try {
     // Clone so the raw body stays readable — the real runtime caches the
     // parsed body in Hono, letting validateBody() and file() compose on one
     // request; here the clone is what preserves that property.
-    const request = ctx.req.raw.clone()
+    const request = raw.clone()
     const contentType = request.headers.get('Content-Type') ?? ''
 
     if (contentType.includes('application/json')) {
