@@ -864,3 +864,88 @@ describe('repeated query parameters', () => {
     expect(ctx.req.query('tag')).toBe('core')
   })
 })
+
+/**
+ * The mock and the runtime must agree on which `Content-Type` carries a form
+ * body, or a controller test reads a body production never parsed — or misses
+ * one it did.
+ *
+ * The runtime has no form branch of its own: everything non-JSON reaches
+ * Hono's `parseBody()`, which takes `split(';')[0].trim().toLowerCase()` and
+ * compares the media type exactly, answering `{}` otherwise. The mock used a
+ * substring test, which is wrong in BOTH directions — too strict on a legal
+ * uppercase spelling, too loose on a media type that merely starts the same
+ * way. Both directions are asserted for that reason: a case-insensitive
+ * substring test still passes the uppercase case while leaving the bogus one
+ * broken.
+ *
+ * The parameterized `; charset=UTF-8` spelling is the one browsers actually
+ * send and already agreed; it is pinned so the normalization cannot regress
+ * into a bare equality check.
+ */
+describe('form content types', () => {
+  const CASES = [
+    { name: 'the parameterized spelling browsers send', contentType: 'application/x-www-form-urlencoded; charset=UTF-8', expected: 'hit' },
+    { name: 'a legal uppercase spelling', contentType: 'Application/X-WWW-Form-Urlencoded', expected: 'hit' },
+    { name: 'a media type that only starts the same way', contentType: 'application/x-www-form-urlencoded-evil', expected: null },
+    { name: 'multipart with its boundary parameter', contentType: null, expected: 'hit' },
+  ] as const
+
+  function build(contentType: string | null): RequestInit {
+    if (contentType === null) {
+      const form = new FormData()
+      form.append('a', 'hit')
+      return { method: 'POST', body: form }
+    }
+    return { method: 'POST', headers: { 'Content-Type': contentType }, body: 'a=hit' }
+  }
+
+  async function readThroughMock(init: RequestInit): Promise<unknown> {
+    const { Controller } = createControllerModuleMock()
+
+    class ReadController extends Controller {
+      async read() {
+        return (await this.input<string>('a')) ?? null
+      }
+    }
+
+    const controller = new ReadController()
+    controller.setContext(
+      createControllerContext('http://example.com/posts', init) as unknown as ControllerContext
+    )
+
+    return controller.read()
+  }
+
+  async function readThroughRuntime(init: RequestInit): Promise<unknown> {
+    const { Controller, createApp } = await import('@guren/core')
+
+    class ReadController extends Controller {
+      async read() {
+        return this.json({ value: (await this.input<string>('a')) ?? null })
+      }
+    }
+
+    const app = createApp({
+      routes: (router) => {
+        router.post('/posts', [ReadController, 'read'])
+      },
+    })
+    await app.boot()
+
+    const response = await app.fetch(new Request('http://example.com/posts', init))
+    expect(response.status).toBe(200)
+
+    return ((await response.json()) as { value: unknown }).value
+  }
+
+  for (const { name, contentType, expected } of CASES) {
+    it(`${name} reads the same in the mock and the runtime`, async () => {
+      const fromMock = await readThroughMock(build(contentType))
+      const fromRuntime = await readThroughRuntime(build(contentType))
+
+      expect(fromRuntime).toBe(expected)
+      expect(fromMock).toBe(expected)
+    })
+  }
+})

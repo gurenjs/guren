@@ -174,12 +174,25 @@ async function parseRequestBody(ctx: ControllerContext): Promise<unknown> {
       return await request.json().catch(() => ({}))
     }
 
-    if (contentType.includes('application/x-www-form-urlencoded')) {
+    // The form gate is Hono's, not a looser spelling of it. The runtime has no
+    // form branch of its own: everything non-JSON goes to `parseBody()`, which
+    // normalizes the header and matches the media type exactly, answering `{}`
+    // for anything else. A substring test is wrong in both directions —
+    // `Application/X-WWW-Form-Urlencoded` is a body production parses and the
+    // mock would drop, and `application/x-www-form-urlencoded-evil` is one
+    // production ignores and the mock would parse.
+    //
+    // The JSON test above stays a substring test on purpose: the runtime
+    // spells that one `includes('application/json')` too, so tightening it
+    // here would introduce a divergence rather than remove one.
+    const mediaType = contentType.split(';')[0].trim().toLowerCase()
+
+    if (mediaType === 'application/x-www-form-urlencoded') {
       const text = await request.text()
       return collectFormEntries(new URLSearchParams(text))
     }
 
-    if (contentType.includes('multipart/form-data')) {
+    if (mediaType === 'multipart/form-data') {
       return collectFormEntries(await request.formData())
     }
 
