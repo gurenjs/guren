@@ -6,6 +6,13 @@ import { Controller } from '../../src/mvc/Controller'
 import { authorizeMiddleware, authorizeAllMiddleware, authorizeResourceMiddleware } from '../../src/authorization/middleware'
 import { requireAuthenticated } from '../../src/http/middleware/auth'
 
+/** Stands in for a JsonResource subclass: the router serializes it by name. */
+class ArticleResource {
+  toJSON(): unknown {
+    return {}
+  }
+}
+
 class PostController extends Controller {
   async index() {
     return this.json({ posts: [] })
@@ -291,7 +298,41 @@ describe('deriveAgentTools (RFC 0016)', () => {
       expect(warnings[0]).toContain('body')
     })
 
-    test('a collision on a supplemented path param does not leave it required twice', () => {
+    test('a losing source does not leave its key required after the winner made it optional', () => {
+      const router = new Router()
+      router.post(
+        '/posts',
+        {
+          name: 'posts.store',
+          query: z.object({ note: z.string() }),
+          body: z.object({ note: z.string().optional() }),
+          agent: {},
+        },
+        [PostController, 'store'],
+      )
+
+      const { tools, warnings } = derive(router)
+      // The query made `note` required; the body owns it now and says it is
+      // optional, so the advertised schema must not still demand it.
+      expect(tools[0]!.inputSchema.required).toBeUndefined()
+      expect(warnings[0]).toContain('"note"')
+    })
+
+    test('a path param stays required when its params schema declares it optional', () => {
+      const router = new Router()
+      router.get(
+        '/posts/:id',
+        { name: 'posts.show', params: z.object({ id: z.string().optional() }), agent: {} },
+        [PostController, 'show'],
+      )
+
+      // A path parameter is part of the URL: the schema describes its type, not
+      // whether the caller may omit it. `@guren/openapi` states the same rule
+      // as `required: true` on every path parameter.
+      expect(toolNamed(router, 'posts.show').inputSchema.required).toEqual(['id'])
+    })
+
+    test('a path param stays required when a body key wins it and declares it optional', () => {
       const router = new Router()
       router.post(
         '/posts/:id',
@@ -300,10 +341,29 @@ describe('deriveAgentTools (RFC 0016)', () => {
       )
 
       const { tools, warnings } = derive(router)
-      // The path supplement made `id` required; the body owns it now and says
-      // it is optional, so the advertised schema must not still demand it.
-      expect(tools[0]!.inputSchema.required).toBeUndefined()
+      expect(tools[0]!.inputSchema.properties?.id).toEqual({ type: 'number' })
+      expect(tools[0]!.inputSchema.required).toEqual(['id'])
       expect(warnings[0]).toContain('"id"')
+    })
+
+    test('keeps a path param named __proto__ as a real property', () => {
+      const router = new Router()
+      router.get('/posts/:__proto__', [PostController, 'show']).name('posts.odd').agent({})
+
+      const { inputSchema } = toolNamed(router, 'posts.odd')
+      // Assigning that key on a plain object invokes the prototype setter
+      // instead of defining a property, which would drop the argument.
+      expect(Object.keys(inputSchema.properties ?? {})).toEqual(['__proto__'])
+      expect(inputSchema.required).toEqual(['__proto__'])
+    })
+
+    test('keeps a wildcard-looking path param under the name Hono registers', () => {
+      const router = new Router()
+      router.get('/files/:name*', [PostController, 'show']).name('files.show').agent({})
+
+      // `:name*` is not a wildcard — Hono registers one parameter literally
+      // named `name*`, which is the name a tool has to ask for.
+      expect(Object.keys(toolNamed(router, 'files.show').inputSchema.properties ?? {})).toEqual(['name*'])
     })
 
     test('a synthesized body key collides like any other key', () => {
@@ -343,6 +403,43 @@ describe('deriveAgentTools (RFC 0016)', () => {
         properties: { total: { type: 'number' } },
         required: ['total'],
       })
+    })
+
+    test('withholds the resource hint when the route declares an output schema', () => {
+      const router = new Router()
+      router.get(
+        '/posts',
+        { name: 'posts.index', output: z.object({ total: z.number() }), resource: ArticleResource, agent: {} },
+        [PostController, 'index'],
+      )
+
+      expect(toolNamed(router, 'posts.index').resource).toBeUndefined()
+    })
+
+    test('withholds the resource hint even when the output schema could not be rendered', () => {
+      const router = new Router()
+      router.get(
+        '/posts',
+        // A schema the walker cannot express: the derived outputSchema is
+        // absent, but the route still validates against it, so the hint must
+        // not stand in for the contract that vanished.
+        { name: 'posts.index', output: z.undefined(), resource: ArticleResource, agent: {} },
+        [PostController, 'index'],
+      )
+
+      const tool = toolNamed(router, 'posts.index')
+      expect(tool.outputSchema).toBeUndefined()
+      expect(tool.resource).toBeUndefined()
+    })
+
+    test('carries the resource hint when no output schema is declared', () => {
+      const router = new Router()
+      router.get('/posts', { name: 'posts.index', resource: ArticleResource, agent: {} }, [
+        PostController,
+        'index',
+      ])
+
+      expect(toolNamed(router, 'posts.index').resource).toBe('ArticleResource')
     })
 
     test('is absent without one — a resource hint is CLI-side enrichment', () => {
@@ -448,6 +545,45 @@ describe('deriveAgentTools (RFC 0016)', () => {
       ])
 
       expect(tools[0]!.authorization).toBeUndefined()
+    })
+  })
+
+  describe('warning attribution', () => {
+    test('puts a tool’s own warnings on the tool, unprefixed', () => {
+      const router = new Router()
+      router.get('/posts', { name: 'posts.index', query: z.string(), agent: {} }, [PostController, 'index'])
+
+      const { tools, warnings } = derive(router)
+      expect(tools[0]!.warnings).toHaveLength(1)
+      expect(tools[0]!.warnings[0]).toStartWith('GET /posts query:')
+      // The aggregate carries the same line, prefixed — attribution comes from
+      // the field, not from parsing the prefix back off.
+      expect(warnings[0]).toBe(`posts.index: ${tools[0]!.warnings[0]}`)
+    })
+
+    test('a cleanly derived tool carries no warnings', () => {
+      const router = new Router()
+      router.get('/posts', [PostController, 'index']).name('posts.index').agent({})
+
+      expect(toolNamed(router, 'posts.index').warnings).toEqual([])
+    })
+
+    test('does not compute the loser’s schema warnings on a tool-name collision', () => {
+      const router = new Router()
+      router.get('/posts', [PostController, 'index']).name('posts.index').agent({})
+      // This route would produce a walker warning of its own — but it never
+      // becomes a tool, so resolving the collision must not look like it
+      // introduced a warning that was there all along.
+      router.get('/archive', { name: 'archive.index', query: z.string(), agent: { toolName: 'posts.index' } }, [
+        PostController,
+        'index',
+      ])
+
+      const { tools, warnings } = derive(router)
+      expect(tools).toHaveLength(1)
+      expect(warnings).toHaveLength(1)
+      expect(warnings[0]).toContain('claims a tool name already derived from')
+      expect(warnings.some((warning) => warning.includes('query'))).toBe(false)
     })
   })
 

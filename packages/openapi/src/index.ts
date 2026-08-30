@@ -2,6 +2,9 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, relative, resolve } from 'node:path'
 import type { Application, RouteDefinition } from '@guren/core'
 import type { ZodSchemaLike } from '@guren/core/internal/zod-compat'
+// The shared Hono path lexer. A second copy here is how this document came to
+// name a parameter `name` that the router registers as `name*`.
+import { extractPathParamNames, PATH_PARAM_PATTERN } from '@guren/core/internal/route-path'
 import {
   isZodSchema,
   type JsonSchemaObject,
@@ -282,7 +285,7 @@ function buildOperation(definition: RouteDefinition, warnings: string[]): OpenAp
 
 function buildParameters(definition: RouteDefinition, warnings: string[]): OpenApiParameterObject[] {
   const parameters: OpenApiParameterObject[] = []
-  const pathParamNames = extractPathParamNames(definition.path)
+  const pathParamNames = openApiPathParamNames(definition.path)
   const paramsDetails = readObjectSchema(definition.schemas?.params, warnings, `${definition.method} ${definition.path} params`, 'input')
 
   for (const name of pathParamNames) {
@@ -365,28 +368,32 @@ function normalizeServers(servers?: OpenApiDocumentOptions['servers']): OpenApiS
   return resolved.map((server) => typeof server === 'string' ? { url: server } : server)
 }
 
-// Mirrors Hono's path lexing — a param starts only at a segment boundary
-// (`/status/foo:bar` is a literal) and an attached regex constraint is
-// consumed whole — feeding the path template, the parameter list, and the
-// operation id below. One deliberate divergence: a trailing `*`
-// is dropped here, though the TypeScript/runtime rule keeps it (Hono does —
-// `/files/:slug*` arrives as the key `slug*`). OpenAPI path templates are RFC
-// 6570 URI templates, where `{name*}` already means "explode", so emitting the
-// literal asterisk would claim something else entirely.
-//
-// The constraint is spelled out to one level of nesting rather than with a
-// nested quantifier: every class here excludes both braces, so a scan stops
-// at the next brace instead of running to the end of the string. The
-// `\{[^}]*\}(?:[^/]*\})*` shape it replaces was quadratic (CodeQL
-// js/polynomial-redos; measured 2.9s for a 16k-char path, vs 1.9ms here).
-const PATH_PARAM_PATTERN = /(^|\/):([A-Za-z0-9_-]+)(?:\{[^{}]*\{[^{}]*\}[^{}]*\}|\{[^{}]*\})?[?*]?/gu
-
-function toOpenApiPath(path: string): string {
-  return path.replace(PATH_PARAM_PATTERN, '$1{$2}')
+/**
+ * The one deliberate divergence between this document and every other surface
+ * derived from the same route: Hono keeps a trailing `*` in a parameter's name
+ * (`/files/:slug*` arrives as the key `slug*`), and the shared lexer reports it
+ * that way, but OpenAPI path templates are RFC 6570 URI templates where
+ * `{name*}` already means "explode". Emitting the literal asterisk would claim
+ * something else entirely, so it is stripped here — at the one place that
+ * renders, rather than by lexing the path differently.
+ *
+ * Applied to the path template *and* the parameter list, which is what keeps
+ * them consistent: OpenAPI requires every `{name}` in a template to match a
+ * `parameters[].name`.
+ */
+function stripExplodeModifier(label: string): string {
+  return label.endsWith('*') ? label.slice(0, -1) : label
 }
 
-function extractPathParamNames(path: string): string[] {
-  return Array.from(path.matchAll(PATH_PARAM_PATTERN)).map((match) => match[2] ?? '')
+function toOpenApiPath(path: string): string {
+  return path.replace(
+    PATH_PARAM_PATTERN,
+    (_match, prefix: string, label: string) => `${prefix}{${stripExplodeModifier(label)}}`,
+  )
+}
+
+function openApiPathParamNames(path: string): string[] {
+  return extractPathParamNames(path).map(stripExplodeModifier)
 }
 
 function buildOperationId(definition: RouteDefinition): string {

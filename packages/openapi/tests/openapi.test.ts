@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { z } from 'zod'
 import * as z3 from 'zod/v3'
 import { createApp, type RouteDefinition } from '@guren/core'
+import { extractPathParamNames } from '@guren/core/internal/route-path'
 import {
   generateOpenApiDocument,
   mountOpenApiDocs,
@@ -93,6 +94,29 @@ describe('@guren/openapi', () => {
     ])
     // A mid-segment colon is a literal in Hono, so it is not a path param.
     expect(document.paths['/status/foo:bar']?.get?.parameters).toBeUndefined()
+  })
+
+  it('renders a trailing * away while lexing it the way the router does', () => {
+    const definitions: RouteDefinition[] = [{ method: 'GET', path: '/files/:slug*', name: 'files.show' }]
+
+    const { document, warnings } = generateOpenApiDocument(definitions, {
+      title: 'Blog API',
+      version: '1.0.0',
+    })
+
+    expect(warnings).toEqual([])
+    // OpenAPI path templates are RFC 6570 URI templates, where `{slug*}`
+    // already means "explode" — so the asterisk is dropped here, and the
+    // parameter name matches the template, as OpenAPI requires.
+    expect(Object.keys(document.paths)).toEqual(['/files/{slug}'])
+    expect(document.paths['/files/{slug}']?.get?.parameters).toEqual([
+      { name: 'slug', in: 'path', required: true, schema: { type: 'string' } },
+    ])
+    // That is a *rendering* decision, not a second lexing rule: the shared
+    // lexer reports what Hono registers, and every other surface derived from
+    // this route (an agent tool's input, the router's own binding scan) asks
+    // for `slug*`. Two lexers is how those two answers drifted apart before.
+    expect(extractPathParamNames('/files/:slug*')).toEqual(['slug*'])
   })
 
   it('returns warnings for non-zod schemas', () => {

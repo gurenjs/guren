@@ -20,7 +20,8 @@
  *   carrying a name. Auto-exposing endpoints is the anti-pattern RFC 0016
  *   opens by rejecting.
  */
-import { extractPathParamNames, type ResourceResponseShape, type RouteDefinition } from '../mvc/Router'
+import type { ResourceResponseShape, RouteDefinition } from '../mvc/Router'
+import { extractPathParamNames } from '../internal/route-path'
 import { resourceAbilityForMethod } from '../authorization/middleware'
 import {
   type JsonSchemaObject,
@@ -85,8 +86,15 @@ export interface DerivedAgentTool {
    * output rung, carried rather than resolved. `definitions()` has only the
    * names; the payload type behind them exists solely in the CLI's AST
    * extraction, which is why codegen enriches the description from this and
-   * the runtime does not. Absent when the route declares no hint, and ignored
-   * whenever `outputSchema` is present (a validated schema outranks a claim).
+   * the runtime does not.
+   *
+   * Absent when the route declares no hint — and, deliberately, whenever the
+   * route *declares* an `output` schema, whether or not the walker could
+   * render it. The declaration is what the runtime validates against, so it
+   * outranks the hint; carrying both would leave two descriptions of one
+   * response with nothing keeping them in agreement, and a route whose
+   * `output` the walker cannot express would advertise the *unvalidated* one
+   * while the enforced contract silently vanished.
    */
   resource?: ResourceResponseShape
   annotations: DerivedAgentToolAnnotations
@@ -101,6 +109,15 @@ export interface DerivedAgentTool {
   /** Declared verbatim: argument fields masked in agent audit logs. */
   redact?: string[]
   expose: DerivedAgentToolExposure
+  /**
+   * What could not be expressed while deriving *this* tool, unprefixed. The
+   * same lines appear in {@link DeriveAgentToolsResult.warnings} prefixed with
+   * the tool name; that aggregate is for printing, this field is for anything
+   * that needs to know which tool a warning belongs to. Attributing by parsing
+   * the prefix back off would couple every consumer to a message format
+   * nothing states. Empty for a tool that derived cleanly.
+   */
+  warnings: string[]
 }
 
 export interface DeriveAgentToolsResult {
@@ -108,7 +125,9 @@ export interface DeriveAgentToolsResult {
   /**
    * Everything the derivation could not express, one line each, prefixed with
    * the tool (or the route, for a route that could not become one). Non-fatal
-   * by construction — see the module header.
+   * by construction — see the module header. Per-tool lines are also on the
+   * tool itself ({@link DerivedAgentTool.warnings}), which is what a consumer
+   * needing attribution should read.
    */
   warnings: string[]
 }
@@ -162,8 +181,27 @@ export function deriveAgentTools(definitions: RouteDefinition[]): DeriveAgentToo
 
     const routeName = definition.name
     const toolName = agent.toolName ?? routeName
-    const toolWarnings: string[] = []
 
+    // Two routes claiming one tool name is a genuine conflict, not a merge:
+    // the manifest is keyed by name, and an adapter registering the second
+    // would either throw or shadow the first. First registration wins so the
+    // result is deterministic wherever the definitions came from, and the
+    // loser is named rather than dropped in silence.
+    //
+    // Settled *before* the schemas are walked, not after: the loser's walker
+    // warnings would be computed and then thrown away, so resolving the
+    // collision would surface warnings that read as newly introduced.
+    const existing = claimed.get(toolName)
+    if (existing) {
+      warnings.push(
+        `${toolName}: ${where} (route "${routeName}") claims a tool name already derived from `
+          + `${existing.method} ${existing.path} (route "${existing.routeName}") — the later route is not `
+          + 'exposed. Give one of them a distinct agent toolName.',
+      )
+      continue
+    }
+
+    const toolWarnings: string[] = []
     const readOnlyHint = agent.readOnlyHint ?? READ_ONLY_METHODS.has(method)
     const tool: DerivedAgentTool = {
       toolName,
@@ -173,7 +211,9 @@ export function deriveAgentTools(definitions: RouteDefinition[]): DeriveAgentToo
       description: agent.description ?? definition.description ?? definition.summary,
       inputSchema: buildInputSchema(definition, method, toolWarnings),
       outputSchema: buildOutputSchema(definition, method, toolWarnings),
-      resource: definition.resource,
+      // Declared, not derived — see the field's own doc for why an
+      // unrepresentable `output` must still suppress the hint.
+      resource: definition.schemas?.output ? undefined : definition.resource,
       annotations: {
         readOnlyHint,
         // The MCP spec's default for a non-read-only tool is `true`; declaring
@@ -190,21 +230,7 @@ export function deriveAgentTools(definitions: RouteDefinition[]): DeriveAgentToo
         mcp: agent.expose?.mcp ?? true,
         webMcp: agent.expose?.webMcp ?? true,
       },
-    }
-
-    // Two routes claiming one tool name is a genuine conflict, not a merge:
-    // the manifest is keyed by name, and an adapter registering the second
-    // would either throw or shadow the first. First registration wins so the
-    // result is deterministic wherever the definitions came from, and the
-    // loser is named rather than dropped in silence.
-    const existing = claimed.get(toolName)
-    if (existing) {
-      warnings.push(
-        `${toolName}: ${where} (route "${routeName}") claims a tool name already derived from `
-          + `${existing.method} ${existing.path} (route "${existing.routeName}") — the later route is not `
-          + 'exposed. Give one of them a distinct agent toolName.',
-      )
-      continue
+      warnings: toolWarnings,
     }
 
     claimed.set(toolName, tool)
@@ -226,6 +252,10 @@ export function deriveAgentTools(definitions: RouteDefinition[]): DeriveAgentToo
  * source wins a collision. Deliberately a warning and not a throw: the runtime
  * derivation stays total, and the corresponding `guren check` rule fails the
  * build instead, where a rename is actually possible.
+ *
+ * One thing no schema can override: a path parameter is required, because the
+ * URL cannot be built without it. That is applied after the merge, so it holds
+ * however the parameter came to be described.
  */
 function buildInputSchema(
   definition: RouteDefinition,
@@ -233,7 +263,18 @@ function buildInputSchema(
   warnings: string[],
 ): AgentToolSchema {
   const label = `${method} ${definition.path}`
-  const merged: MergedInput = { properties: {}, required: new Set(), owner: new Map() }
+  // Null-prototype: a path parameter may legally be named `__proto__`
+  // (`/posts/:__proto__` — the lexer accepts `[A-Za-z0-9_-]+`), and assigning
+  // that key on a plain `{}` invokes the prototype setter instead of defining
+  // a property, so the argument would vanish from the advertised schema. The
+  // same reasoning `Router.serializeResourceHint` records for its envelope
+  // keys.
+  const merged: MergedInput = {
+    properties: Object.create(null) as Record<string, AgentToolSchema>,
+    required: new Set(),
+    owner: new Map(),
+  }
+  const pathParamNames = extractPathParamNames(definition.path)
 
   const paramsDetails = definition.schemas?.params
     ? readObjectSchema(definition.schemas.params, warnings, `${label} params`, 'input')
@@ -243,12 +284,22 @@ function buildInputSchema(
   }
 
   // Path parameters the `params` schema does not describe are still arguments
-  // the caller has to supply, and they are always required — the same
-  // supplementation `@guren/openapi`'s buildParameters applies, off the same
-  // path lexer the router substitutes with.
-  const supplements: Record<string, AgentToolSchema> = {}
+  // the caller has to supply — the same supplementation `@guren/openapi`'s
+  // buildParameters applies, off the same lexer (`../internal/route-path`), so
+  // the two surfaces cannot disagree about what a path declares. They did:
+  // `/files/:name*` is one parameter named `name*`, which is what Hono
+  // registers and what a tool must ask for; the OpenAPI document renders it as
+  // `{name}` on purpose (RFC 6570 reads `{name*}` as "explode"), and that
+  // stays a rendering decision at its own call site rather than a second lexer.
+  //
+  // Known limitation, shared with the OpenAPI document on purpose: Hono's
+  // optional modifier (`/posts/:id?`) is lexed away with the rest of the
+  // token, so an optional path parameter is advertised as required. Relaxing
+  // it here alone would re-split the two surfaces; it belongs in the shared
+  // lexer, for both.
+  const supplements: Record<string, AgentToolSchema> = Object.create(null)
   const supplementRequired = new Set<string>()
-  for (const name of extractPathParamNames(definition.path)) {
+  for (const name of pathParamNames) {
     if (merged.owner.has(name)) continue
     supplements[name] = { type: 'string' }
     supplementRequired.add(name)
@@ -283,10 +334,23 @@ function buildInputSchema(
     }
   }
 
+  // Structural, so it is applied last and outranks every schema that had an
+  // opinion: a path parameter is part of the URL, and a request cannot be
+  // built without it. A `params` schema declaring `id` optional, or a body key
+  // colliding with one and declaring itself optional, describes the *type* of
+  // that argument — not whether the caller may omit it. (`@guren/openapi`
+  // states the same rule as `required: true` on every path parameter.)
+  for (const name of pathParamNames) {
+    if (name in merged.properties) merged.required.add(name)
+  }
+
   const required = Array.from(merged.required)
   return {
     type: 'object',
-    properties: merged.properties,
+    // Copied onto a normal object: `merged.properties` has a null prototype
+    // (see above), which JSON.stringify handles but a consumer calling
+    // `hasOwnProperty` on the returned schema would not.
+    properties: { ...merged.properties },
     ...(required.length > 0 ? { required } : {}),
   }
 }
