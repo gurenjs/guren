@@ -28,6 +28,9 @@ import { checkConsoleCommandRegistration } from './console-check'
 import { checkRoutePathParams, discoverRoutePathFiles } from './route-path-check'
 import { affectsRouteWiring, checkRouteRegistrarWiring } from './routes-check'
 import { checkRouteContracts } from './route-contract-check'
+import { checkAgentRoutes } from './agent-route-check'
+import { DEFAULT_ROUTES_FILE, loadRouteDefinitions } from './load-routes'
+import type { RouteDefinition } from '@guren/core'
 
 /**
  * Any file that could hold a route's params schema — which is any importable
@@ -120,9 +123,13 @@ function codegenCommandFor(routesFile?: string): string {
  * not — `guren codegen` deletes it. Both states point at the same command,
  * which is the property that makes the check clearable.
  */
-async function checkAgentManifest(cwd: string, routesFile?: string): Promise<CheckResult> {
+async function checkAgentManifest(
+  cwd: string,
+  routesFile?: string,
+  definitions?: RouteDefinition[],
+): Promise<CheckResult> {
   const key = `manifest:${AGENTS_MANIFEST_FILE}`
-  const plan = await planAgentManifest(cwd, routesFile)
+  const plan = await planAgentManifest(cwd, routesFile, definitions)
   const codegen = codegenCommandFor(routesFile)
 
   if (plan.reason === 'unreadable') {
@@ -165,6 +172,27 @@ async function checkAgentManifest(cwd: string, routesFile?: string): Promise<Che
       : `${AGENTS_MANIFEST_FILE} is missing; ${plan.toolCount} ${plan.toolCount === 1 ? 'route derives' : 'routes derive'} an agent tool.`,
     present ? undefined : `Run: ${codegen}`,
   )
+}
+
+/**
+ * The app's registered route definitions, or the reason they could not be
+ * loaded — never a throw, and never an empty list standing in for a failure.
+ *
+ * Loaded once per run for the two checks that read registered routes. An
+ * absent routes file is neither: nothing to load is a legitimate shape (an
+ * app mid-scaffold), and both checks contribute nothing for it.
+ */
+async function loadRouteGraph(
+  cwd: string,
+  routesFile: string,
+): Promise<{ definitions?: RouteDefinition[]; error?: string }> {
+  if (!(await fileExists(cwd, routesFile))) return {}
+
+  try {
+    return { definitions: await loadRouteDefinitions(resolve(cwd, routesFile), cwd) }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) }
+  }
 }
 
 /**
@@ -330,14 +358,37 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     // remedy this prints always clears the state it reports — see
     // planAgentManifest.
     //
-    // Gated with 7.7 and 8.7 under --changed, and for their reason: on an app
-    // that exposes tools this loads the route graph and walks every schema, so
-    // a docs- or lang-only run would pay a full module evaluation to re-derive
-    // an answer nothing in that run could have changed. (Apps with no manifest
-    // and no `.agent()` in their sources never load anything either way — that
-    // fast path is inside planAgentManifest.)
+    // This check, 7.7 and 7.8 all read registered route definitions, so the
+    // graph is loaded once here and handed to all three. Loading it per
+    // consumer would re-run only the registrar (`load-routes.ts` documents
+    // why nothing is re-evaluated), but it would also repeat the same
+    // load-failure warning — one broken routes file reported as several
+    // findings. Scoped to these three, not to the run: check 10's screens
+    // view still loads the graph itself (see 7.7). Any later check that
+    // reads registered routes belongs here too.
+    //
+    // Gated with 7.7 and 7.8 under --changed, and for their reason: this is
+    // a full module evaluation, which a docs- or lang-only run would pay to
+    // re-derive an answer nothing in that run could have changed.
+    const routeGraphFile = options.routesFile ?? DEFAULT_ROUTES_FILE
+    let graph: Awaited<ReturnType<typeof loadRouteGraph>> | undefined
     if (sourceChanged) {
-      checks.push(await checkAgentManifest(cwd, options.routesFile))
+      graph = await loadRouteGraph(cwd, routeGraphFile)
+      if (graph.error) {
+        checks.push(
+          check(
+            'route-graph',
+            'Route graph',
+            'warn',
+            `Skipped: the route graph failed to load: ${graph.error}. Agent manifest, route contract `
+            + 'and agent-route checks did not run.',
+            'Fix the error, then run: bunx guren check',
+            routeGraphFile,
+          ),
+        )
+      } else {
+        checks.push(await checkAgentManifest(cwd, options.routesFile, graph.definitions))
+      }
     }
 
     // 6. Check every module's db/schema.ts is re-exported from the root
@@ -402,8 +453,22 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     // signature change: whichever runs first pays the module evaluation, and
     // the second call re-runs only the registrar (`load-routes.ts` documents
     // why nothing is re-evaluated).
-    if (sourceChanged) {
-      checks.push(...(await checkRouteContracts({ cwd, routesFile: options.routesFile })))
+    // The graph itself is loaded once at 5.5 — a load failure was reported
+    // there, so this contributes nothing for it.
+    if (graph?.definitions) {
+      const definitions = graph.definitions
+      checks.push(...(await checkRouteContracts({ cwd, routesFile: routeGraphFile, definitions })))
+
+      // 7.8. Check the routes that declare `.agent()` metadata (RFC 0016):
+      // the tool name is legal and unique, a non-read-only tool is covered
+      // by authorization rather than merely authentication, and the schemas
+      // an agent reads exist. Shares 7.7's gate and its definitions.
+      // Content-activated inside — an app with no agent routes contributes
+      // nothing, and one whose agent routes are all inline handlers never
+      // scans a controller.
+      checks.push(
+        ...(await checkAgentRoutes({ cwd, routesFile: routeGraphFile, definitions, cache })),
+      )
     }
 
     // 8. Check Postgres timestamp columns carry a time zone. Content-activated

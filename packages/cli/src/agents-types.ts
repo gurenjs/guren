@@ -132,34 +132,42 @@ export interface AgentManifestPlan {
  * source mentioning agent metadata never loads the route graph. Everything
  * else — including a manifest left behind after the last `.agent()` was
  * removed, which is the stale case this reports — is worth one load.
+ *
+ * A caller that already holds the loaded route graph hands it in as
+ * `preloadedDefinitions` — `guren check` does, so a broken routes file is
+ * one load and one finding rather than one per consumer. Doctor calls
+ * without, and this loads for itself.
  */
 export async function planAgentManifest(
   cwd: string,
   routesFile: string = DEFAULT_ROUTES_FILE,
+  preloadedDefinitions?: RouteDefinition[],
 ): Promise<AgentManifestPlan> {
   const present = await fileExists(cwd, AGENTS_MANIFEST_FILE)
 
-  if (!present && !(await appDeclaresAgentRoutes(cwd, routesFile))) {
-    return { reason: 'no-tools', toolCount: 0, staleManifest: false }
-  }
+  let definitions = preloadedDefinitions
+  if (definitions === undefined) {
+    if (!present && !(await appDeclaresAgentRoutes(cwd, routesFile))) {
+      return { reason: 'no-tools', toolCount: 0, staleManifest: false }
+    }
 
-  if (!(await fileExists(cwd, routesFile))) {
-    // No routes file at all: nothing can derive, and a manifest sitting beside
-    // it describes tools that cannot exist.
-    return { reason: 'no-tools', toolCount: 0, staleManifest: present }
-  }
+    if (!(await fileExists(cwd, routesFile))) {
+      // No routes file at all: nothing can derive, and a manifest sitting
+      // beside it describes tools that cannot exist.
+      return { reason: 'no-tools', toolCount: 0, staleManifest: present }
+    }
 
-  let definitions
-  try {
-    definitions = await loadRouteDefinitions(resolve(cwd, routesFile), cwd)
-  } catch (error) {
-    // Reported, never swallowed: staying silent here is indistinguishable
-    // from an app that legitimately exposes nothing.
-    return {
-      reason: 'unreadable',
-      toolCount: 0,
-      staleManifest: false,
-      loadError: error instanceof Error ? error.message : String(error),
+    try {
+      definitions = await loadRouteDefinitions(resolve(cwd, routesFile), cwd)
+    } catch (error) {
+      // Reported, never swallowed: staying silent here is indistinguishable
+      // from an app that legitimately exposes nothing.
+      return {
+        reason: 'unreadable',
+        toolCount: 0,
+        staleManifest: false,
+        loadError: error instanceof Error ? error.message : String(error),
+      }
     }
   }
 

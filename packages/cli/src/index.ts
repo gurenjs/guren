@@ -48,7 +48,15 @@ export {
   type EntityContext,
   type EntityContextOptions,
 } from './entity-context'
-export { routeDefinitionToContextRoute, loadContextRoutes, type ContextRoute } from './context-route'
+export {
+  routeDefinitionToContextRoute,
+  loadContextRoutes,
+  // Read by @guren/server's development MCP endpoint, which resolves this
+  // package from the app and may load a copy older than the field it wants.
+  CONTEXT_ROUTE_FEATURES,
+  type ContextRoute,
+  type ContextRouteAuthorization,
+} from './context-route'
 export { createFreshContextApi } from './fresh-context'
 export {
   scanDocs,

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import { Hono, type MiddlewareHandler } from 'hono'
 import { z } from 'zod'
-import { Router } from '../../src/mvc/Router'
+import { Router, type ResourceResponseHint } from '../../src/mvc/Router'
 import { Controller } from '../../src/mvc/Controller'
 import { Resource } from '../../src/http/resources/Resource'
 import {
@@ -203,6 +203,27 @@ describe('Router resource response hint', () => {
     router.get('/posts', {
       name: 'posts.index',
       resource: { data: [Anonymous], author: AuthorResource },
+    }, [StubController, 'index'])
+
+    expect(router.definitions()[0]?.resource).toBeUndefined()
+  })
+
+  // The hint type admits only classes, single-element arrays and plain objects,
+  // but nothing validates it at runtime: a string used to recurse forever (every
+  // character is itself a one-character string) and `null` threw out of
+  // `Object.entries`. Anything unusable follows the same all-or-nothing rule as
+  // an unnamed class.
+  it.each([
+    ['a bare string', 'PostResource'],
+    ['null', null],
+    ['a string nested in an envelope', { data: 'PostResource' }],
+    ['a string nested in a collection', { data: ['PostResource'] }],
+    ['a class instance', new Date()],
+  ])('omits the whole hint for %s', (_label, hint) => {
+    const router = new Router()
+    router.get('/posts', {
+      name: 'posts.index',
+      resource: hint as unknown as ResourceResponseHint,
     }, [StubController, 'index'])
 
     expect(router.definitions()[0]?.resource).toBeUndefined()

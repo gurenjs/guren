@@ -385,6 +385,72 @@ export async function generateEntityContext(
   }
 }
 
+/**
+ * The `## Agent Interfaces` section (RFC 0016 §14): the entity's routes that
+ * declare `.agent()` metadata, rendered as the tools they become.
+ *
+ * Content-activated — an entity exposing no agent tools contributes no
+ * section at all, which is every entity until a route opts in.
+ *
+ * Input is the route's *already rendered* schema strings; the tool's real
+ * inputSchema is the merge of params, query, and body that the derivation
+ * layer builds, so this lists the parts rather than claiming to be that
+ * schema. Authorization is reported only where the middleware chain makes it
+ * derivable, and says so plainly where it does not — a route whose ability is
+ * resolved at request time must not be rendered as if it named one.
+ */
+function renderAgentInterfaces(routes: ContextRoute[]): string[] {
+  const exposed = routes.filter((route) => route.agent)
+  if (exposed.length === 0) return []
+
+  const lines: string[] = [`## Agent Interfaces (${exposed.length})`]
+
+  for (const route of exposed) {
+    const agent = route.agent!
+    const toolName = agent.toolName ?? route.name ?? '(unnamed — cannot become a tool)'
+    lines.push('')
+    lines.push(`### ${toolName}`)
+    lines.push(`- Route: \`${route.method} ${route.path}\``)
+
+    const description = agent.description ?? route.description ?? route.summary
+    if (description) lines.push(`- Description: ${description}`)
+
+    const input = (['params', 'query', 'body'] as const)
+      .flatMap((part) => (route[part] ? [`${part}: \`${route[part]}\``] : []))
+    lines.push(`- Input: ${input.length > 0 ? input.join(' · ') : 'no schema declared'}`)
+
+    const output = route.output ? `\`${route.output}\`` : 'no output schema declared'
+    lines.push(`- Output: ${output}`)
+
+    lines.push(`- Authorization: ${describeAuthorization(route)}`)
+
+    const annotations = (['readOnlyHint', 'destructiveHint', 'idempotentHint'] as const)
+      .flatMap((hint) => (agent[hint] === undefined ? [] : [`${hint}: ${agent[hint]}`]))
+    if (annotations.length > 0) lines.push(`- Annotations: ${annotations.join(', ')}`)
+
+    lines.push(`- Approval: ${agent.approval === 'required' ? 'required' : 'not required'}`)
+  }
+
+  lines.push('')
+  return lines
+}
+
+function describeAuthorization(route: ContextRoute): string {
+  const { authorization } = route
+  if (!authorization) {
+    return route.middleware && route.middleware.length > 0
+      ? `none derivable from the middleware chain (${route.middleware.join(', ')})`
+      : 'none derivable from the middleware chain'
+  }
+  if (authorization.ability) return `\`${authorization.ability}\``
+  if (authorization.fromMethodMap) {
+    return 'enforced; the ability is resolved from the request method at request time'
+  }
+  return authorization.abilities.length > 0
+    ? `enforced (${authorization.abilities.join(', ')}, mode: ${authorization.mode}), no single ability derivable`
+    : 'enforced, but no ability is statically derivable'
+}
+
 export function renderEntityContextMarkdown(ctx: EntityContext): string {
   const lines: string[] = []
 
@@ -465,6 +531,8 @@ export function renderEntityContextMarkdown(ctx: EntityContext): string {
     lines.push(`## Policy — ${ctx.policy}`)
     lines.push('')
   }
+
+  lines.push(...renderAgentInterfaces(ctx.routes))
 
   const pushList = (title: string, items: string[]): void => {
     if (items.length === 0) return
