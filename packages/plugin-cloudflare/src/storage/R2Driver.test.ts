@@ -126,7 +126,16 @@ describe('R2Driver against the binding', () => {
       expect(url.origin).toBe('https://acct123.r2.cloudflarestorage.com')
       expect(url.pathname).toBe('/my-bucket/uploads/a%20b/c.png')
       expect(url.searchParams.get('X-Amz-Algorithm')).toBe('AWS4-HMAC-SHA256')
-      expect(url.searchParams.get('X-Amz-Expires')).toBe('3600')
+      // A window, not the exact number: the test reads `Date.now()` to build
+      // the expiration and the driver reads it again to subtract, so a single
+      // millisecond between the two makes `Math.floor` yield 3599. That is
+      // the correct answer to the question actually asked — "whole seconds
+      // from now" — and pinning 3600 made this test fail roughly once per
+      // 30,000 runs on an idle machine, more under CI load. The invariant
+      // worth holding is the unit and the magnitude: seconds, and the window
+      // that was requested.
+      expect(Number(url.searchParams.get('X-Amz-Expires'))).toBeGreaterThanOrEqual(3599)
+      expect(Number(url.searchParams.get('X-Amz-Expires'))).toBeLessThanOrEqual(3600)
       expect(url.searchParams.get('X-Amz-Credential')).toMatch(/^AKIDEXAMPLE\/\d{8}\/auto\/s3\/aws4_request$/)
       expect(url.searchParams.get('X-Amz-Signature')).toMatch(/^[0-9a-f]{64}$/)
     })
