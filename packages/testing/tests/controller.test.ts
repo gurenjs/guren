@@ -391,6 +391,27 @@ describe('createControllerModuleMock', () => {
     expect(await controller.validateBody(allOptional)).toEqual({})
   })
 
+  // The upload helpers read the multipart body on their own rather than
+  // through the parser above, so they need their own guard on both sides —
+  // the runtime answers null/[] here, and a mock that threw would fail a
+  // controller test the real app passes.
+  it('file() / files() report no upload for a body the parser cannot decode', async () => {
+    const { Controller } = createControllerModuleMock()
+
+    class UploadController extends Controller {
+      async handle() {
+        return { avatar: await this.file('avatar'), gallery: await this.files('gallery') }
+      }
+    }
+
+    const controller = new UploadController()
+    controller.setContext(
+      createControllerContext('http://example.com/uploads', undecodableForm) as unknown as ControllerContext,
+    )
+
+    expect(await controller.handle()).toEqual({ avatar: null, gallery: [] })
+  })
+
   it('validateBody() accepts a non-object body, while input() keeps the record view', async () => {
     const { Controller } = createControllerModuleMock()
     const ctx = createControllerContext('http://example.com/bulk', {

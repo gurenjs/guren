@@ -211,7 +211,7 @@ export class Controller {
    * ```
    */
   protected async file(name: string): Promise<File | null> {
-    const body = await this.ctx.req.parseBody({ all: true })
+    const body = await this.parseUploads()
     const value = body[name]
     const candidate = Array.isArray(value) ? value[0] : value
     return candidate instanceof File && candidate.size > 0 ? candidate : null
@@ -222,10 +222,43 @@ export class Controller {
    * Returns an empty array when none were uploaded.
    */
   protected async files(name: string): Promise<File[]> {
-    const body = await this.ctx.req.parseBody({ all: true })
+    const body = await this.parseUploads()
     const value = body[name]
     const values = Array.isArray(value) ? value : value !== undefined ? [value] : []
     return values.filter((item): item is File => item instanceof File && item.size > 0)
+  }
+
+  /**
+   * The one multipart read behind {@link file} and {@link files}, guarded so a
+   * body the parser cannot decode carries no files rather than crashing the
+   * request: it reads as `{}`, which is the same answer both helpers already
+   * give for a field that is simply absent — `null` and `[]`. Left to throw,
+   * the parser's `TypeError` escaped as a 500 reporting the exception and a
+   * stack, the defect {@link parseRequestBody} fixes for the validation paths.
+   *
+   * Deliberately *not* routed through `parseRequestBody()`, which looks like
+   * the same rule and is not: it parses without `{ all: true }` and flattens a
+   * repeated field to its first value, so sharing it would silently reduce
+   * `files()` to one file per field. `{ all: true }` is the contract here, and
+   * a malformed-body test cannot see its loss — hence the separate helper.
+   *
+   * try/catch rather than `.catch()`, for the reason given on the shared
+   * fallback: `parseBody` may throw synchronously as well as reject, and only
+   * one of those two shapes reaches a `.catch()`.
+   *
+   * It fails open in one direction, deliberately and for the same reason
+   * {@link parseRequestBody} does: a body already consumed upstream reads as
+   * "no upload" rather than throwing, so a middleware-ordering bug loses the
+   * 500 that used to announce it. Telling that apart from a client's malformed
+   * body means matching runtime-specific error codes, which answer differently
+   * on Bun, Node and Workers.
+   */
+  private async parseUploads(): Promise<Record<string, string | File | (string | File)[]>> {
+    try {
+      return await this.ctx.req.parseBody({ all: true })
+    } catch {
+      return {}
+    }
   }
 
   protected get auth(): AuthContext {

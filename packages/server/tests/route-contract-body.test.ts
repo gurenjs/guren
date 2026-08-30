@@ -50,6 +50,12 @@ class BulkController extends Controller {
     const data = await new TitleFormRequest().handle(this.ctx)
     return this.json({ received: data })
   }
+
+  async upload() {
+    const avatar = await this.file('avatar')
+    const gallery = await this.files('gallery')
+    return this.json({ avatar: avatar?.name ?? null, gallery: gallery.map((item) => item.name) })
+  }
 }
 
 class TitleFormRequest extends FormRequest<{ title: string }> {
@@ -337,5 +343,45 @@ describe('a request body the form parser cannot decode', () => {
 
     expect(status).toBe(200)
     expect(JSON.parse(body)).toEqual({ received: { title: 'Guren' } })
+  })
+
+  // The upload helpers read the multipart body themselves rather than through
+  // the shared fallback, so they were the one path still answering 500 after
+  // it landed. An undecodable body carries no file, which is a state both
+  // helpers already have an answer for.
+  test('Controller.file() / files() report no upload rather than crashing the request', async () => {
+    const { status, body } = await post(
+      (router) => router.post('/uploads', [BulkController, 'upload']),
+      '/uploads',
+      UNDECODABLE_FORM.body,
+      UNDECODABLE_FORM.contentType,
+    )
+
+    expect(status).toBe(200)
+    expect(body).not.toContain('TypeError')
+    expect(JSON.parse(body)).toEqual({ avatar: null, gallery: [] })
+  })
+
+  // Pins `{ all: true }` on the guarded parse. Without it `parseBody` keeps one
+  // value per field and `gallery` comes back as a single file — a regression
+  // the malformed-body test above cannot see, because it asserts on `[]`.
+  test('a decodable upload still yields every part of a repeated field', async () => {
+    const form = new FormData()
+    form.append('avatar', new File(['a'], 'avatar.png', { type: 'image/png' }))
+    form.append('gallery', new File(['one'], 'one.png', { type: 'image/png' }))
+    form.append('gallery', new File(['two'], 'two.png', { type: 'image/png' }))
+
+    const app = new Application({
+      routes: (router) => {
+        router.post('/uploads', [BulkController, 'upload'])
+      },
+    })
+    await app.boot()
+    const response = await app.fetch(
+      new Request('http://localhost/uploads', { method: 'POST', body: form }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ avatar: 'avatar.png', gallery: ['one.png', 'two.png'] })
   })
 })
