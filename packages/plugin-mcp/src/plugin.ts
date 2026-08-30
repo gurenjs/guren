@@ -87,6 +87,12 @@ const factory = definePlugin<McpPluginConfig>({
       name: config.serverInfo?.name ?? 'guren-app',
       version: config.serverInfo?.version ?? '1.0.0',
     }
+    // Per-token, in this process. An app's *own* rate-limit middleware on an
+    // agent route keys on `server.requestIP()`, which is null for the
+    // synthesized re-entrant request (it never arrived over a socket) and so
+    // collapses to that route's shared bucket for every MCP caller. This
+    // limiter is the per-caller floor the app's cannot be on this surface; a
+    // global budget across instances still needs a shared store.
     const limiter = config.rateLimit === false ? undefined : new AgentRateLimiter(config.rateLimit)
 
     // Dynamic import, mirroring the Dev MCP provider: the SDK stays out of
@@ -183,26 +189,34 @@ async function dispatchThroughApp(
   args: Record<string, unknown>,
 ): Promise<ToolCallOutcome> {
   const built = buildToolRequest(tool, args, {
+    // The inbound request's own origin, so the re-entrant request carries the
+    // real Host the MCP client reached `/mcp` on. Defaulting to localhost
+    // (dispatch's fallback) makes host-authorization middleware — which RFC
+    // 0016's "in production" apps are encouraged to enable — reject every
+    // tool call with 403.
+    origin: new URL(c.req.url).origin,
     authorization: c.req.header('Authorization'),
   })
   if ('missing' in built) {
     // No HTTP happened, but the call did — recorded by the caller as an
     // invocation with the status the app would have answered.
-    return {
-      content: [
-        {
-          type: 'text',
-          text: `Missing required path parameter(s): ${built.missing.join(', ')}.`,
-        },
-      ],
-      isError: true,
-      status: 400,
-    }
+    return badRequest(`Missing required path parameter(s): ${built.missing.join(', ')}.`)
+  }
+  if ('invalidPath' in built) {
+    return badRequest(
+      `Path parameter(s) ${built.invalidPath.join(', ')} may not be "." or ".." — `
+      + 'a dot-segment would resolve to a different route than the one authorized.',
+    )
   }
 
   // env and execution context are forwarded explicitly — omitting them
   // silently loses D1/R2 bindings and waitUntil on Workers (RFC 0016 §3.1).
   return mapToolResponse(tool, await app.fetch(built.request, c.env, executionContext(c)))
+}
+
+/** A tool call the adapter rejected before HTTP — recorded as a 400 invocation. */
+function badRequest(text: string): ToolCallOutcome {
+  return { content: [{ type: 'text', text }], isError: true, status: 400 }
 }
 
 /** Hono throws on `executionCtx` outside Workers; absent is a normal answer here. */

@@ -2,7 +2,7 @@ import { describe, test, expect } from 'bun:test'
 import { z } from 'zod'
 import { Router, deriveAgentTools, type DerivedAgentTool } from '@guren/core'
 
-import { buildToolRequest, mapToolResponse } from './dispatch'
+import { advertisesStructuredOutput, buildToolRequest, mapToolResponse } from './dispatch'
 
 function toolFor(register: (router: Router) => void, name: string): DerivedAgentTool {
   const router = new Router()
@@ -196,5 +196,119 @@ describe('mapToolResponse', () => {
     })
     const outcome = await mapToolResponse(plainTool(), response)
     expect(outcome.content[0]!.text).toBe('<html>hi</html>')
+  })
+})
+
+describe('buildToolRequest security and collision fixes', () => {
+  test('should reject a dot-segment path value instead of substituting it', () => {
+    const tool = toolFor((router) => {
+      router.get('/files/:name/meta', handler).name('files.meta').agent({})
+    }, 'files.meta')
+
+    expect(buildToolRequest(tool, { name: '..' })).toEqual({ invalidPath: ['name'] })
+    expect(buildToolRequest(tool, { name: '.' })).toEqual({ invalidPath: ['name'] })
+    // A dot inside a longer value is fine — it is not a whole segment.
+    const ok = buildToolRequest(tool, { name: 'a.b' })
+    expect('request' in ok).toBe(true)
+  })
+
+  test('should forward the inbound origin into the synthesized URL', () => {
+    const tool = toolFor((router) => {
+      router.get('/posts', handler).name('posts.index').agent({})
+    }, 'posts.index')
+
+    const built = buildToolRequest(tool, {}, { origin: 'https://app.example.com' })
+    const request = ('request' in built ? built : undefined)!.request
+    expect(new URL(request.url).origin).toBe('https://app.example.com')
+  })
+
+  test('should keep a body-owned collision key in the body while filling the path', async () => {
+    const tool = toolFor((router) => {
+      router
+        .post(
+          '/posts/:id',
+          { body: z.object({ id: z.coerce.number(), title: z.string() }) },
+          handler,
+        )
+        .name('posts.update')
+        .agent({})
+    }, 'posts.update')
+
+    // The derivation resolves `id` to the body (it merges last), so the value
+    // fills the URL AND rides in the body the route validates.
+    const built = buildToolRequest(tool, { id: 7, title: 'T' })
+    const request = ('request' in built ? built : undefined)!.request
+    expect(new URL(request.url).pathname).toBe('/posts/7')
+    expect(await request.json()).toEqual({ id: 7, title: 'T' })
+  })
+
+  test('should keep a params-owned path key out of the body', async () => {
+    const tool = toolFor((router) => {
+      router
+        .post(
+          '/posts/:id',
+          { params: z.object({ id: z.coerce.number() }), body: z.object({ title: z.string() }) },
+          handler,
+        )
+        .name('posts.update')
+        .agent({})
+    }, 'posts.update')
+
+    const built = buildToolRequest(tool, { id: 7, title: 'T' })
+    const request = ('request' in built ? built : undefined)!.request
+    expect(new URL(request.url).pathname).toBe('/posts/7')
+    expect(await request.json()).toEqual({ title: 'T' })
+  })
+})
+
+describe('mapToolResponse structured-output reconciliation', () => {
+  function structuredTool(): DerivedAgentTool {
+    return toolFor((router) => {
+      router
+        .post('/posts', { output: z.object({ id: z.number() }) }, () => ({ id: 1 }))
+        .name('posts.store')
+        .agent({})
+    }, 'posts.store')
+  }
+
+  function arrayOutputTool(): DerivedAgentTool {
+    return toolFor((router) => {
+      router
+        .get('/nums', { output: z.array(z.number()) }, () => [1, 2])
+        .name('nums.index')
+        .agent({})
+    }, 'nums.index')
+  }
+
+  test('should not advertise a non-object output schema as structured', () => {
+    expect(advertisesStructuredOutput(arrayOutputTool())).toBe(false)
+    expect(advertisesStructuredOutput(structuredTool())).toBe(true)
+  })
+
+  test('should error a 204 for a tool that advertises an object output schema', async () => {
+    const outcome = await mapToolResponse(structuredTool(), new Response(null, { status: 204 }))
+    expect(outcome.isError).toBe(true)
+    expect(outcome.content[0]!.text).toContain('output schema')
+  })
+
+  test('should error a non-object success body for a structured tool', async () => {
+    const response = new Response(JSON.stringify([1, 2]), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })
+    const outcome = await mapToolResponse(structuredTool(), response)
+    expect(outcome.isError).toBe(true)
+    expect(outcome.content[0]!.text).toContain('JSON array')
+  })
+
+  test('should pass a non-object output tool result through as text', async () => {
+    const response = new Response(JSON.stringify([1, 2]), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })
+    const outcome = await mapToolResponse(arrayOutputTool(), response)
+    expect(outcome.isError).toBeUndefined()
+    expect(outcome.structuredContent).toBeUndefined()
+    expect(JSON.parse(outcome.content[0]!.text)).toEqual([1, 2])
   })
 })

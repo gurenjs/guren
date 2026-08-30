@@ -35,6 +35,16 @@ export type BuiltToolRequest =
   | { request: Request }
   /** Path parameters the call did not supply — the URL cannot be built. */
   | { missing: string[] }
+  /**
+   * Path parameter values that are URL dot-segments (`.` / `..`). Rejected,
+   * never substituted: `encodeURIComponent` leaves a dot untouched, and the
+   * `Request` URL parser then collapses the segment — so `{ name: '..' }` on
+   * `/files/:name/meta` would reach `/meta`, a route the scope check never
+   * saw. The only ASCII segments the WHATWG parser normalizes are `.` and
+   * `..`; every other separator (`/`, `\`) survives `encodeURIComponent`
+   * percent-encoded, so this is the complete set.
+   */
+  | { invalidPath: string[] }
 
 /**
  * Rebuild the HTTP request a tool call describes.
@@ -58,7 +68,12 @@ export function buildToolRequest(
 ): BuiltToolRequest {
   const origin = options.origin ?? 'http://localhost'
   const missing: string[] = []
-  const consumed = new Set<string>()
+  const invalidPath: string[] = []
+  // Path parameters consumed *exclusively* by the URL. A name the merge
+  // resolved to `query`/`body` (a collision the derivation warns about) fills
+  // the path — the URL needs it — and still flows to its declared sink below,
+  // so it is not added here.
+  const pathOnly = new Set<string>()
 
   // The one path lexer (PATH_PARAM_PATTERN) does the substitution, so the
   // names replaced here are exactly the names the derivation advertised —
@@ -71,12 +86,26 @@ export function buildToolRequest(
         missing.push(name)
         return `${lead}:${name}`
       }
-      consumed.add(name)
-      return `${lead}${encodeURIComponent(String(value))}`
+      const encoded = String(value)
+      if (encoded === '.' || encoded === '..') {
+        invalidPath.push(name)
+        return `${lead}:${name}`
+      }
+      // A name the merge assigned to query/body still substitutes into the
+      // URL, but keeps flowing to that sink — so a collision does not drop
+      // the argument from the body the route validates.
+      const source = Object.hasOwn(tool.inputSources, name) ? tool.inputSources[name] : undefined
+      if (source === undefined || source === 'params' || source === 'path') {
+        pathOnly.add(name)
+      }
+      return `${lead}${encodeURIComponent(encoded)}`
     },
   )
   if (missing.length > 0) {
     return { missing }
+  }
+  if (invalidPath.length > 0) {
+    return { invalidPath }
   }
 
   const method = tool.method
@@ -85,7 +114,7 @@ export function buildToolRequest(
   const query = new URLSearchParams()
   const bodyEntries: Array<[string, unknown]> = []
   for (const [key, value] of Object.entries(args)) {
-    if (consumed.has(key) || value === undefined) continue
+    if (pathOnly.has(key) || value === undefined) continue
     const source = Object.hasOwn(tool.inputSources, key) ? tool.inputSources[key] : undefined
     // Query-bound: everything on a bodyless method; declared `query` keys; a
     // `params`/`path` key the path never declared (a contract defect
@@ -180,10 +209,22 @@ export interface ToolCallOutcome {
 }
 
 /**
+ * Whether the tool advertises an object output schema — the only kind MCP
+ * lists, and therefore the only kind that obliges a success result to carry
+ * `structuredContent`. A route whose `output` is an array or primitive is not
+ * advertised as structured (MCP `outputSchema` must be an object), so its
+ * results ride as text. `describeTool` and `mapToolResponse` must agree on
+ * this exact predicate, or one advertises a schema the other cannot satisfy.
+ */
+export function advertisesStructuredOutput(tool: DerivedAgentTool): boolean {
+  return tool.outputSchema?.type === 'object'
+}
+
+/**
  * Map the application's response onto an MCP tool result (RFC 0016 §3.4).
  *
- * - 2xx JSON → serialized text, plus `structuredContent` when the tool
- *   advertises an `outputSchema` (the one shape the route validated).
+ * - 2xx JSON object → serialized text, plus `structuredContent` when the tool
+ *   advertises an object `outputSchema` (the one shape the route validated).
  * - 2xx Inertia page JSON → unwrapped to `page.props`, only for a tool with
  *   no `outputSchema` — unwrap and schema are mutually exclusive by
  *   derivation, so the advertised shape can never disagree with the result.
@@ -192,16 +233,26 @@ export interface ToolCallOutcome {
  *   a 422's `{ message, errors }` is an application-level failure the agent
  *   should read, not a protocol error.
  * - non-JSON → capped text.
+ *
+ * One MCP invariant overrides the table: a *non-error* result for a tool that
+ * advertises an object `outputSchema` must carry `structuredContent`, or the
+ * SDK client rejects it after the route has already run. A success response
+ * that yields no object to put there (204, 3xx, non-JSON, a non-object body)
+ * contradicts the route's own declared output, so it becomes an `isError`
+ * result naming the mismatch — which the SDK exempts from the rule — rather
+ * than a protocol fault the agent cannot interpret.
  */
 export async function mapToolResponse(
   tool: DerivedAgentTool,
   response: Response,
 ): Promise<ToolCallOutcome> {
   const status = response.status
+  const structured = advertisesStructuredOutput(tool)
 
   if (status === 204 || (status >= 300 && status < 400)) {
     const location = response.headers.get('Location')
     const text = location ? `HTTP ${status} (Location: ${location})` : `HTTP ${status}`
+    if (structured) return inconsistentOutput(tool, text, status)
     return { content: [{ type: 'text', text }], status }
   }
 
@@ -220,18 +271,45 @@ export async function mapToolResponse(
     const text = raw.length > TEXT_RESPONSE_CAP
       ? `${raw.slice(0, TEXT_RESPONSE_CAP)}… [truncated ${raw.length - TEXT_RESPONSE_CAP} characters]`
       : raw
+    if (structured) return inconsistentOutput(tool, `a non-JSON body (${text.slice(0, 200)})`, status)
     return { content: [{ type: 'text', text }], status }
   }
 
   const payload = unwrapInertiaProps(tool, response, parsed)
+
+  if (structured && !isRecord(payload)) {
+    return inconsistentOutput(tool, `a ${Array.isArray(payload) ? 'JSON array' : typeof payload} body`, status)
+  }
+
   const outcome: ToolCallOutcome = {
     content: [{ type: 'text', text: JSON.stringify(payload) }],
     status,
   }
-  if (tool.outputSchema && isRecord(payload)) {
+  if (structured && isRecord(payload)) {
     outcome.structuredContent = payload
   }
   return outcome
+}
+
+/**
+ * A success response that cannot satisfy the tool's advertised object output
+ * schema. Returned as an error result — the honest signal that the route and
+ * its declared `output` disagree — which also sidesteps the SDK's
+ * structuredContent requirement (errors are exempt).
+ */
+function inconsistentOutput(tool: DerivedAgentTool, detail: string, status: number): ToolCallOutcome {
+  return {
+    content: [
+      {
+        type: 'text',
+        text:
+          `The tool "${tool.toolName}" advertises an output schema, but the route returned ${detail} `
+          + `(HTTP ${status}) — no structured result could be produced.`,
+      },
+    ],
+    isError: true,
+    status,
+  }
 }
 
 function parseJsonBody(response: Response, raw: string): unknown | undefined {

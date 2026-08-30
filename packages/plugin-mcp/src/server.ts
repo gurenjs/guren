@@ -14,10 +14,10 @@ import {
   ListToolsRequestSchema,
   type CallToolResult,
 } from '@modelcontextprotocol/sdk/types.js'
-import { scopesAllowTool, type AgentToolDenialReason, type DerivedAgentTool } from '@guren/core'
+import type { AgentToolDenialReason, DerivedAgentTool } from '@guren/core'
 
-import { gateToolCall, scopedShape } from './gate'
-import type { ToolCallOutcome } from './dispatch'
+import { gateToolCall } from './gate'
+import { advertisesStructuredOutput, type ToolCallOutcome } from './dispatch'
 import type { AgentRateLimiter } from './rate-limit'
 
 export interface AppMcpServerOptions {
@@ -45,12 +45,17 @@ export interface AppMcpServerOptions {
 export function createAppMcpServer(options: AppMcpServerOptions): Server {
   const server = new Server(options.serverInfo, { capabilities: { tools: {} } })
 
-  // The catalog a token sees is the catalog it can call: listing ungranted
-  // tools would map the app's write surface for a read-only token, and MCP
-  // clients treat the list as an invitation.
+  // The catalog a token sees is the catalog it can call: a tool is listed
+  // only if `gateToolCall` would admit it, so scope *and* the current
+  // approval verdict decide both. Listing a tool a call then refuses (an
+  // ungranted one maps the write surface for a read-only token; an
+  // approval-required one with no queue is categorically uncallable today)
+  // makes the list lie, and MCP clients treat it as an invitation. Rate
+  // limits are deliberately not consulted — a budget is a runtime state, not
+  // a capability, and a temporarily-throttled tool is still in the catalog.
   server.setRequestHandler(ListToolsRequestSchema, () => ({
     tools: options.tools
-      .filter((tool) => scopesAllowTool(options.abilities, scopedShape(tool)))
+      .filter((tool) => gateToolCall(tool, options.abilities).allowed)
       .map((tool) => describeTool(tool)),
   }))
 
@@ -101,7 +106,15 @@ function describeTool(tool: DerivedAgentTool) {
     name: tool.toolName,
     ...(tool.description ? { description: tool.description } : {}),
     inputSchema: tool.inputSchema as { type: 'object'; [key: string]: unknown },
-    ...(tool.outputSchema ? { outputSchema: tool.outputSchema as { type: 'object'; [key: string]: unknown } } : {}),
+    // Only an object output schema is advertised: MCP requires
+    // `outputSchema.type === 'object'`, and a single array/primitive one
+    // would make the SDK client reject the *entire* tools/list. A route
+    // whose `output` is non-object still works — its results ride as text,
+    // the same branch `advertisesStructuredOutput` gates on the response
+    // side, so list and call stay in agreement.
+    ...(advertisesStructuredOutput(tool)
+      ? { outputSchema: tool.outputSchema as { type: 'object'; [key: string]: unknown } }
+      : {}),
     annotations: {
       readOnlyHint: tool.annotations.readOnlyHint,
       destructiveHint: tool.annotations.destructiveHint,
