@@ -626,3 +626,57 @@ describe('deriveAgentTools (RFC 0016)', () => {
     })
   })
 })
+
+describe('input sources (request reconstruction)', () => {
+  test('records which contract each merged property came from', () => {
+    const router = new Router()
+    router.post(
+      '/posts/:id/comments',
+      {
+        params: z.object({ id: z.coerce.number() }),
+        query: z.object({ notify: z.coerce.boolean().optional() }),
+        body: z.object({ text: z.string() }),
+      },
+      [PostController, 'store'],
+    ).name('comments.store').agent({})
+
+    const tool = toolNamed(router, 'comments.store')
+    expect(tool.inputSources).toEqual({ id: 'params', notify: 'query', text: 'body' })
+    expect(tool.inputBodyNested).toBe(false)
+  })
+
+  test('marks an undeclared path parameter as path-sourced', () => {
+    const router = new Router()
+    router.get('/posts/:slug', [PostController, 'show']).name('posts.show').agent({})
+
+    const tool = toolNamed(router, 'posts.show')
+    expect(tool.inputSources).toEqual({ slug: 'path' })
+  })
+
+  test('a collision winner owns the property source', () => {
+    const router = new Router()
+    router.post(
+      '/posts/:id',
+      {
+        query: z.object({ id: z.string() }),
+        body: z.object({ id: z.coerce.number() }),
+      },
+      [PostController, 'update'],
+    ).name('posts.update').agent({})
+
+    const tool = toolNamed(router, 'posts.update')
+    // body merges last and wins; the path token keeps id required either way.
+    expect(tool.inputSources.id).toBe('body')
+  })
+
+  test('flags a non-object body as nested under the body property', () => {
+    const router = new Router()
+    router.post('/bulk', { body: z.array(z.number()) }, [PostController, 'store'])
+      .name('bulk.store')
+      .agent({})
+
+    const tool = toolNamed(router, 'bulk.store')
+    expect(tool.inputBodyNested).toBe(true)
+    expect(tool.inputSources).toEqual({ body: 'body' })
+  })
+})

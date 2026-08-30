@@ -79,6 +79,24 @@ export interface DerivedAgentTool {
   description?: string
   /** Merged `params` + `query` + `body`, object root (MCP requires one). */
   inputSchema: AgentToolSchema
+  /**
+   * Which contract each advertised input property came from — the inverse of
+   * the merge, for the adapter that has to take a flat tool call apart again
+   * and rebuild the HTTP request: `params`/`path` substitute into the URL
+   * path, `query` joins the query string, `body` lands in the JSON body. The
+   * schema alone cannot answer this (the merge is flat by design), and an
+   * adapter guessing by method would put a POST route's `query` keys in the
+   * body, where `validateQuery` never looks.
+   */
+  inputSources: Record<string, AgentToolInputSource>
+  /**
+   * True when the route's `body` schema was not an object and therefore nests
+   * under a single `body` property (see {@link buildInputSchema}). The
+   * dispatching adapter must then send `arguments.body` *as* the HTTP body,
+   * not an object wrapping it — the flat reconstruction would post
+   * `{ body: [...] }` to a route that validates an array.
+   */
+  inputBodyNested: boolean
   /** Present only when the route binds an `output` schema — the one shape validated at runtime. */
   outputSchema?: AgentToolSchema
   /**
@@ -138,8 +156,15 @@ const READ_ONLY_METHODS: ReadonlySet<string> = new Set(['GET', 'QUERY'])
 /** HTTP methods that are idempotent whether or not they are read-only. */
 const IDEMPOTENT_METHODS: ReadonlySet<string> = new Set(['GET', 'QUERY', 'PUT', 'DELETE'])
 
-/** Where a merged input property came from, for collision reporting. */
-type InputSource = 'params' | 'path' | 'query' | 'body'
+/**
+ * Where a merged input property came from — collision reporting inside the
+ * merge, request reconstruction outside it ({@link DerivedAgentTool.inputSources}).
+ * `params` and `path` both mean URL substitution to an adapter; they stay
+ * distinct because a warning should name the schema the author actually wrote.
+ */
+export type AgentToolInputSource = 'params' | 'path' | 'query' | 'body'
+
+type InputSource = AgentToolInputSource
 
 interface MergedInput {
   properties: Record<string, AgentToolSchema>
@@ -203,13 +228,16 @@ export function deriveAgentTools(definitions: RouteDefinition[]): DeriveAgentToo
 
     const toolWarnings: string[] = []
     const readOnlyHint = agent.readOnlyHint ?? READ_ONLY_METHODS.has(method)
+    const input = buildInputSchema(definition, method, toolWarnings)
     const tool: DerivedAgentTool = {
       toolName,
       routeName,
       method,
       path: definition.path,
       description: agent.description ?? definition.description ?? definition.summary,
-      inputSchema: buildInputSchema(definition, method, toolWarnings),
+      inputSchema: input.schema,
+      inputSources: input.sources,
+      inputBodyNested: input.nestedBody,
       outputSchema: buildOutputSchema(definition, method, toolWarnings),
       // Declared, not derived — see the field's own doc for why an
       // unrepresentable `output` must still suppress the hint.
@@ -257,11 +285,17 @@ export function deriveAgentTools(definitions: RouteDefinition[]): DeriveAgentToo
  * URL cannot be built without it. That is applied after the merge, so it holds
  * however the parameter came to be described.
  */
+interface BuiltInput {
+  schema: AgentToolSchema
+  sources: Record<string, AgentToolInputSource>
+  nestedBody: boolean
+}
+
 function buildInputSchema(
   definition: RouteDefinition,
   method: string,
   warnings: string[],
-): AgentToolSchema {
+): BuiltInput {
   const label = `${method} ${definition.path}`
   // Null-prototype: a path parameter may legally be named `__proto__`
   // (`/posts/:__proto__` — the lexer accepts `[A-Za-z0-9_-]+`), and assigning
@@ -313,6 +347,7 @@ function buildInputSchema(
     mergeProperties(merged, queryDetails.properties, queryDetails.required, 'query', warnings)
   }
 
+  let nestedBody = false
   const body = definition.schemas?.body
     ? toJsonSchema(definition.schemas.body, warnings, `${label} body`, 'input')
     : undefined
@@ -331,6 +366,7 @@ function buildInputSchema(
       // through `.optional()` — and claiming it optional would advertise a call
       // the route rejects.)
       mergeProperties(merged, { body }, new Set(['body']), 'body', warnings)
+      nestedBody = true
     }
   }
 
@@ -345,13 +381,24 @@ function buildInputSchema(
   }
 
   const required = Array.from(merged.required)
+  // Accumulated on a null prototype for the same `__proto__` reason as
+  // `merged.properties`, then spread onto a normal object on the way out.
+  const sources = Object.create(null) as Record<string, AgentToolInputSource>
+  for (const [name, source] of merged.owner) {
+    sources[name] = source
+  }
+
   return {
-    type: 'object',
-    // Copied onto a normal object: `merged.properties` has a null prototype
-    // (see above), which JSON.stringify handles but a consumer calling
-    // `hasOwnProperty` on the returned schema would not.
-    properties: { ...merged.properties },
-    ...(required.length > 0 ? { required } : {}),
+    schema: {
+      type: 'object',
+      // Copied onto a normal object: `merged.properties` has a null prototype
+      // (see above), which JSON.stringify handles but a consumer calling
+      // `hasOwnProperty` on the returned schema would not.
+      properties: { ...merged.properties },
+      ...(required.length > 0 ? { required } : {}),
+    },
+    sources: { ...sources },
+    nestedBody,
   }
 }
 

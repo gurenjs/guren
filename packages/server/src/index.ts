@@ -39,6 +39,7 @@ export type {
 // `.guren/agents.gen.ts` and by protocol adapters, which must not derive twice.
 export { deriveAgentTools } from './agent/derive'
 export type {
+  AgentToolInputSource,
   AgentToolSchema,
   DeriveAgentToolsResult,
   DerivedAgentTool,
@@ -129,6 +130,7 @@ export {
   // API tokens
   createApiToken,
   parseApiToken,
+  readBearerToken,
   verifyApiToken,
   tokenCan,
   tokenCanAll,

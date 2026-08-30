@@ -36,6 +36,7 @@ export class AuthManager implements AuthManagerContract {
   private readonly providers = new Map<string, ProviderRegistryEntry<any>>()
   private defaultGuard: string
   private tokenGuard: string | null = null
+  private apiTokenStore: ApiTokenStore | null = null
 
   constructor(options: AuthManagerOptions = {}) {
     this.defaultGuard = options.defaultGuard ?? DEFAULT_GUARD
@@ -208,6 +209,20 @@ export class AuthManager implements AuthManagerContract {
     })
 
     this.tokenGuard = guardName
+    this.apiTokenStore = store
+  }
+
+  /**
+   * The `ApiTokenStore` the last `useTokens()` call configured, or undefined
+   * for an app that never opted into token auth. The store is otherwise
+   * closed over by the guard factory, so this accessor is the one way
+   * out-of-request machinery — `guren token:issue`, the App MCP adapter's
+   * principal lookup — reaches the same store the guard verifies against.
+   * Handing them a *different* store is how an issued token comes to fail
+   * verification.
+   */
+  getApiTokenStore(): ApiTokenStore | undefined {
+    return this.apiTokenStore ?? undefined
   }
 }
 
