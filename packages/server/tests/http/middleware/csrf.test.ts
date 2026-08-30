@@ -941,3 +941,135 @@ describe('mode enforcement between minting and verification', () => {
     expect(post.status).toBe(200)
   })
 })
+
+describe('cookie-less bearer requests (RFC 0016)', () => {
+  function createBearerApp() {
+    const store = new MemorySessionStore()
+    const app = new Hono()
+    app.use(createSessionMiddleware({ store }))
+    app.use(createCsrfMiddleware())
+    app.get('/login', (c) => {
+      getSessionFromContext(c)?.set('userId', 1)
+      return c.text('ok')
+    })
+    app.post('/submit', (c) => c.text('ok'))
+    return app
+  }
+
+  it('skips verification for a Bearer request carrying no cookies', async () => {
+    const app = createBearerApp()
+
+    const post = await app.request('/submit', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer 1|sometoken' },
+    })
+
+    expect(post.status).toBe(200)
+  })
+
+  it('still issues the XSRF cookie on the skipped request', async () => {
+    const app = createBearerApp()
+
+    const post = await app.request('/submit', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer 1|sometoken' },
+    })
+
+    expect(pickCookie(post, 'XSRF-TOKEN')).not.toBe('')
+  })
+
+  it('verifies as usual when the Bearer request carries the session cookie', async () => {
+    const app = createBearerApp()
+    const session = extractCookie(await app.request('/login'))
+
+    // A forged Authorization header on a victim-browser request: the cookies
+    // are what CSRF defends, so the bearer skip must not apply.
+    const post = await app.request('/submit', {
+      method: 'POST',
+      headers: { Cookie: session, Authorization: 'Bearer forged' },
+    })
+
+    expect(post.status).toBe(403)
+  })
+
+  it('verifies as usual when the Bearer request carries any cookie at all', async () => {
+    const app = createBearerApp()
+
+    // Even a cookie this app never reads keeps verification on: the
+    // predicate is the Cookie header, not what loaded from it.
+    const post = await app.request('/submit', {
+      method: 'POST',
+      headers: { Cookie: 'unrelated=1', Authorization: 'Bearer 1|sometoken' },
+    })
+
+    expect(post.status).toBe(403)
+  })
+
+  it('does not fail open when CSRF is mounted before the session middleware', async () => {
+    // A hand-composed chain in the wrong order: the skip decision must not
+    // depend on whether the session has loaded yet.
+    const store = new MemorySessionStore()
+    const setup = new Hono()
+    setup.use(createSessionMiddleware({ store }))
+    setup.use(createCsrfMiddleware())
+    setup.get('/login', (c) => {
+      getSessionFromContext(c)?.set('userId', 1)
+      return c.text('ok')
+    })
+    const session = extractCookie(await setup.request('/login'))
+
+    const app = new Hono()
+    app.use(createCsrfMiddleware())
+    app.use(createSessionMiddleware({ store }))
+    app.post('/submit', (c) => c.text('ok'))
+
+    const post = await app.request('/submit', {
+      method: 'POST',
+      headers: { Cookie: session, Authorization: 'Bearer forged' },
+    })
+
+    expect(post.status).toBe(403)
+  })
+
+  it('skips even when an intermediate middleware writes to the fresh session', async () => {
+    // A locale write between session and CSRF makes the new session persist,
+    // but a client that sent no cookies still holds no ambient authority.
+    const app = new Hono()
+    app.use(createSessionMiddleware({ store: new MemorySessionStore() }))
+    app.use(async (c, next) => {
+      getSessionFromContext(c)?.set('locale', 'en')
+      await next()
+    })
+    app.use(createCsrfMiddleware())
+    app.post('/submit', (c) => c.text('ok'))
+
+    const post = await app.request('/submit', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer 1|sometoken' },
+    })
+
+    expect(post.status).toBe(200)
+  })
+
+  it('does not skip for non-Bearer Authorization schemes', async () => {
+    const app = createBearerApp()
+
+    const post = await app.request('/submit', {
+      method: 'POST',
+      headers: { Authorization: 'Basic dXNlcjpwYXNz' },
+    })
+
+    expect(post.status).toBe(403)
+  })
+
+  it('does not skip for an empty Bearer credential', async () => {
+    const app = createBearerApp()
+
+    const post = await app.request('/submit', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' },
+    })
+
+    expect(post.status).toBe(403)
+  })
+})

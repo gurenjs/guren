@@ -167,6 +167,38 @@ path the agent-harness edit hook uses.
 
 Routes wrapped in named middleware (for example `router.middleware('auth').group(...)`) are recognized as protected. Guest flows such as `/login` and `/register` are excluded from authentication checks.
 
+### Agent-exposed routes
+
+Routes that declare `.agent()` metadata (see [Routing](./routing.md)) are checked by `check` and treated more strictly by `audit`. The rules run in the normal `check` suite and are content-activated: an app with no agent routes contributes no findings, and no controller is scanned.
+
+`check` **fails** on:
+
+| Finding key | Rule |
+|---|---|
+| `agent-route-name:*` | The route declares agent metadata but has no `.name()`. The tool name is the tool's identity, so a nameless route cannot become a tool. |
+| `agent-route-tool-name:*` | The tool name (`agent.toolName`, or the route name) falls outside the MCP grammar `^[A-Za-z0-9._-]{1,128}$`. A client rejects the whole tool list, not just the one tool. |
+| `agent-route-duplicate:*` | Two or more routes resolve to the same tool name. |
+| `agent-route-authorization:*` | A non-read-only tool whose middleware chain carries no authorization capability and whose controller action never calls `this.authorize(...)`. **Authentication is not authorization**: `this.auth.userOrFail()` or an API-token check satisfies neither, and produces its own message saying so. |
+
+`check` **warns** on:
+
+| Finding key | Rule |
+|---|---|
+| `agent-route-output:*` | The route declares neither an `output` schema nor a `resource` hint, so a tool derived from it advertises no output shape. Applies to write tools as much as read tools. |
+| `agent-route-inertia:*` | The action answers with `this.inertia(...)` and declares no output shape — such a tool returns whatever the page happens to pass its component. Replaces the finding above for that route. |
+| `agent-route-input:*` | A body-carrying route with no `body` schema, so the derived input schema is built from the path and query alone. On an inline handler that schema is also what validates at request time, so nothing checks the payload either. |
+| `agent-route-annotation:*` | The tool is read-only but its action deletes, updates, or force-writes records — either an explicit `readOnlyHint: true` on a mutating verb, or a GET/QUERY route, which is read-only by default. Read-only is what exempts a route from the authorization rule, so it is checked against the action. |
+| `agent-route-authorization:*` | The verdict could not be reached: the handler is an inline function, or the controller action is not among the sources the check reads. |
+| `agent-route-controller-collision:*` | Two controller classes share a name and an agent route uses one of them, so a verdict drawn from a controller body may describe the other class. |
+| `agent-route-controller-unreadable:*` | A controller file could not be read at all, so any agent route whose action lives there was checked against no body. |
+| `route-graph` | The routes file failed to load, so neither the route-contract nor the agent-route checks ran. |
+
+`audit` adds two rules for the same routes:
+
+- A body-validation finding that is a warning for an ordinary route becomes a **failure** when the route is agent-exposed, under the same `validation:*` key — so an existing `config/audit.ts` entry keeps applying.
+- `agent-annotation:*` warns when `destructiveHint: false` is declared on an action that deletes, updates, or force-writes records, and also when that claim could not be checked because the action body was unreadable.
+- `controller-unreadable:*` warns when a controller file could not be read, since every rule above saw no body for the actions it declares.
+
 Suppress a false positive by placing `// guren-audit-ignore` on the flagged line or the line above it:
 
 ```ts
@@ -174,7 +206,7 @@ Suppress a false positive by placing `// guren-audit-ignore` on the flagged line
 const apiKey = 'example-not-a-real-key'
 ```
 
-Route- and model-level findings (`authz:*`, `validation:*`, `mass-assignment:*`, `hidden-columns:*`) have no single line to attach a comment to — they come from executing your route registrar and inspecting your models. Ignore those with `config/audit.ts` instead, keyed by the finding's `key` (copy it straight from `--json` output) and a required `reason`:
+Route- and model-level findings (`authz:*`, `validation:*`, `agent-annotation:*`, `mass-assignment:*`, `hidden-columns:*`) have no single line to attach a comment to — they come from executing your route registrar and inspecting your models. Ignore those with `config/audit.ts` instead, keyed by the finding's `key` (copy it straight from `--json` output) and a required `reason`:
 
 ```ts
 // config/audit.ts
@@ -302,7 +334,7 @@ Install it at user scope: these skills are for the step *before* a project exist
 
 Framework-managed files (rules, skills, subagents, hooks) *are* overwritten by `agent:sync` — that is its job — so keep project-specific rules in files of your own instead of appending to the shipped ones. The sync makes every overwrite visible: files that already match the latest version are skipped, and any file that held different contents is called out as replaced. Run `agent:sync --dry-run` first to see what a sync would write, replace, or prune without changing anything — `agent:init` accepts `--dry-run` too, as the preview for `--force`.
 
-When a framework rule or skill is renamed or removed in a release, the old copies stay behind in every root that received them — and Cursor and Copilot keep auto-loading stale `.cursor/rules/guren-*.mdc` / `.github/instructions/guren-*.instructions.md` files. `agent:sync` lists any files in the framework-managed locations that are no longer part of the harness; `agent:sync --prune` deletes them. Everything is claimed **by name**: the rules roots (`.claude/rules/`, `.agents/rules/`) only for the rule filenames the harness ships or used to ship, the native rules only for the `guren-` prefix, and the skills roots (`.claude/skills/`, `.agents/skills/`) only for the skill directories the harness ships or used to ship. So a rules file of your own next to the shipped ones (in a subdirectory too), or a skill you added yourself (or one `npx skills add` and Agent Plugins clients install into those same directories), is never listed and never deleted — as long as its name is not one the harness itself ships: `dev-workflow`, `db-manage`, `scaffold`, `feature`, `guren-api`, `plugin-authoring` for skills, the rule filenames listed in your entry document for rules (compared ignoring case), and **any** `guren-`prefixed file for Cursor and Copilot, where the claim is the prefix rather than a list of names. Keep your own Cursor/Copilot rules under a different prefix, and review the report before `--prune`: a file of your own under a claimed name is the one case it removes.
+When a framework rule or skill is renamed or removed in a release, the old copies stay behind in every root that received them — and Cursor and Copilot keep auto-loading stale `.cursor/rules/guren-*.mdc` / `.github/instructions/guren-*.instructions.md` files. `agent:sync` lists any files in the framework-managed locations that are no longer part of the harness; `agent:sync --prune` deletes them. Everything is claimed **by name**: the rules roots (`.claude/rules/`, `.agents/rules/`) only for the rule filenames the harness ships or used to ship, the native rules only for the `guren-` prefix, and the skills roots (`.claude/skills/`, `.agents/skills/`) only for the skill directories the harness ships or used to ship. So a rules file of your own next to the shipped ones (in a subdirectory too), or a skill you added yourself (or one `npx skills add` and Agent Plugins clients install into those same directories), is never listed and never deleted — as long as its name is not one the harness itself ships: `dev-workflow`, `db-manage`, `scaffold`, `feature`, `guren-api`, `plugin-authoring`, `agent-interface` for skills, the rule filenames listed in your entry document for rules (compared ignoring case), and **any** `guren-`prefixed file for Cursor and Copilot, where the claim is the prefix rather than a list of names. Keep your own Cursor/Copilot rules under a different prefix, and review the report before `--prune`: a file of your own under a claimed name is the one case it removes.
 
 ## Deployment Recipes
 
@@ -420,6 +452,39 @@ bunx guren route:list --format table   # Default table format
 bunx guren route:list --format json    # JSON output
 bunx guren route:list --format compact # Compact single-line format
 ```
+
+## Agent Tool Commands
+
+Routes that declare `.agent()` metadata are exposed to AI agents as MCP tools (see [Routing — Agent tools](./routing.md)). These commands report what an agent would see, derived live from your route graph — not read from `.guren/agents.gen.ts`, so they answer correctly even when that manifest is missing or stale.
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `tool:list` | List the agent tools this application exposes | `bunx guren tool:list` |
+| `tool:inspect` | Show one tool's full derivation | `bunx guren tool:inspect posts.store` |
+
+```bash
+# Every exposed tool, with its method, path, protocol exposure,
+# authorization ability and MCP annotation hints
+bunx guren tool:list
+
+# The raw derivation, including any warnings
+bunx guren tool:list --json
+
+# One tool: input fields, output schema, authorization,
+# annotations, approval and redaction
+bunx guren tool:inspect posts.store
+bunx guren tool:inspect posts.store --json
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--routes` | `routes/web.ts` | Path to the routes entry file |
+| `--app` | Current directory | Application root directory |
+| `--json` | `false` | Output the derived tools as JSON |
+
+Everything shown is derived from contracts the route already carries: the input schema merges its `params`, `query` and `body` schemas, the output schema comes from `output`, and the authorization ability comes from the policy its middleware chain checks. Nothing is declared twice, so a tool cannot advertise a schema the endpoint does not validate.
+
+`bunx guren codegen` writes the same derivation to `.guren/agents.gen.ts` for apps that expose at least one tool, and removes that file for apps that expose none.
 
 ## Config Commands
 

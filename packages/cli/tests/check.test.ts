@@ -179,10 +179,94 @@ test('lists tasks', async () => {
 
       const manifestChecks = report.checks.filter(c => c.key.startsWith('manifest:'))
       expect(manifestChecks.length).toBeGreaterThan(0)
-      expect(manifestChecks.every(c => c.status === 'warn')).toBe(true)
+      // The agent manifest is the one conditional artifact: codegen writes it
+      // only for apps that derive a tool, so a workspace with none is not
+      // missing anything (RFC 0016).
+      const agentManifest = manifestChecks.find(c => c.key === 'manifest:.guren/agents.gen.ts')
+      expect(agentManifest?.status).toBe('pass')
+      expect(agentManifest?.message).toContain('not applicable')
+      const unconditional = manifestChecks.filter(c => c !== agentManifest)
+      expect(unconditional.length).toBeGreaterThan(0)
+      expect(unconditional.every(c => c.status === 'warn')).toBe(true)
     } finally {
       await workspace.cleanup()
     }
+  })
+
+  describe('agent manifest (RFC 0016)', () => {
+    const AGENT_ENTRY = `import { Router } from '@guren/core'
+
+export function registerWebRoutes(router: Router): void {
+  router.get('/posts', () => 'posts').name('posts.index').agent({})
+}
+`
+    const agentCheck = (report: CheckReport) =>
+      report.checks.find((c) => c.key === 'manifest:.guren/agents.gen.ts')
+
+    it('points the remedy at the same routes file the finding was derived from', async () => {
+      const report = await withWorkspace(
+        { 'routes/api.ts': AGENT_ENTRY },
+        { routesFile: 'routes/api.ts' },
+      )
+
+      const check = agentCheck(report)
+      expect(check?.status).toBe('warn')
+      // A bare `guren codegen` reads routes/web.ts, so it would write the
+      // manifest from a different route graph — a remedy that cannot clear the
+      // state it was printed for.
+      expect(check?.suggestion).toContain('--routes routes/api.ts')
+    })
+
+    it('prints the plain command when no custom routes file is in play', async () => {
+      const report = await withWorkspace({ 'routes/web.ts': AGENT_ENTRY })
+
+      expect(agentCheck(report)?.suggestion).toBe('Run: bunx guren codegen')
+    })
+
+    it('reports a stale manifest, with the same clearing remedy', async () => {
+      const report = await withWorkspace({
+        'routes/web.ts': `import { Router } from '@guren/core'
+
+export function registerWebRoutes(router: Router): void {
+  router.get('/posts', () => 'posts').name('posts.index')
+}
+`,
+        '.guren/agents.gen.ts': '// left over\n',
+      })
+
+      const check = agentCheck(report)
+      expect(check?.status).toBe('warn')
+      expect(check?.message).toContain('no longer exposes')
+      expect(check?.suggestion).toContain('it removes')
+    })
+
+    it('is skipped under --changed when only non-source files changed', async () => {
+      // The gate 7.7 and 8.7 share, and for their reason: this check loads the
+      // app's route graph and derives every tool, so a docs-only run must not
+      // pay a full module evaluation to re-derive an answer nothing in that
+      // run could have changed.
+      const workspace = await createTempWorkspace('guren-cli-check-agent-changed-')
+      try {
+        await writeWorkspaceFiles(workspace.dir, {
+          'routes/web.ts': AGENT_ENTRY,
+          'docs/notes.md': '# notes\n',
+        })
+        initGitRepo(workspace.dir)
+
+        await writeFile(join(workspace.dir, 'docs/notes.md'), '# notes, edited\n', 'utf8')
+        expect(agentCheck(await runCheck({ cwd: workspace.dir, changed: true }))).toBeUndefined()
+
+        // …and a source edit wakes it again, so the gate is not simply off.
+        await writeFile(
+          join(workspace.dir, 'routes/web.ts'),
+          `${AGENT_ENTRY}\n// touched\n`,
+          'utf8',
+        )
+        expect(agentCheck(await runCheck({ cwd: workspace.dir, changed: true }))).toBeDefined()
+      } finally {
+        await workspace.cleanup()
+      }
+    })
   })
 
   it('reports correct counts', async () => {

@@ -165,6 +165,38 @@ bunx guren check --spec    # docs/spec/ が再生成結果と一致するか
 
 名前付きミドルウェアで保護されたルート(例: `router.middleware('auth').group(...)`)は保護済みと認識されます。`/login` や `/register` などのゲストフローは認証チェックの対象外です。
 
+### エージェントに公開したルート
+
+`.agent()` メタデータを宣言したルート([ルーティング](./routing.md)を参照)は、`check` の検査対象になり、`audit` ではより厳しく扱われます。ルールは通常の `check` スイートで実行され、内容によって有効化されます。エージェント公開ルートが存在しないアプリでは findings は生成されず、コントローラの走査も行われません。
+
+`check` が **fail** にするもの:
+
+| Finding key | ルール |
+|---|---|
+| `agent-route-name:*` | agent メタデータを宣言しているのに `.name()` がない。ツール名はツールの識別子そのものなので、名前のないルートはツールになれません。 |
+| `agent-route-tool-name:*` | ツール名(`agent.toolName` またはルート名)が MCP の文法 `^[A-Za-z0-9._-]{1,128}$` から外れている。クライアントは該当ツールだけでなくツール一覧全体を拒否します。 |
+| `agent-route-duplicate:*` | 2つ以上のルートが同じツール名に解決される。 |
+| `agent-route-authorization:*` | read-only でないツールなのに、ミドルウェアチェーンに認可 capability がなく、コントローラアクションでも `this.authorize(...)` を呼んでいない。**認証は認可ではありません**。`this.auth.userOrFail()` や APIトークンの確認はどちらも認可の代わりにならず、その場合は専用のメッセージで報告されます。 |
+
+`check` が **warn** にするもの:
+
+| Finding key | ルール |
+|---|---|
+| `agent-route-output:*` | ルートに `output` スキーマも `resource` ヒントもないため、導出されるツールが出力の形を提示できない。読み取り系だけでなく書き込み系のツールにも適用されます。 |
+| `agent-route-inertia:*` | アクションが `this.inertia(...)` で応答し、出力の形も宣言していない。そのツールはページがコンポーネントに渡した内容をそのまま返すことになります。このルートでは上の finding の代わりに報告されます。 |
+| `agent-route-input:*` | ボディを持つメソッドのルートに `body` スキーマがなく、導出される入力スキーマがパスとクエリだけから組み立てられる。インラインハンドラの場合、そのスキーマはリクエスト時の検証そのものでもあるため、送られた内容を検証するものが存在しないことになります。 |
+| `agent-route-annotation:*` | read-only なツールなのに、アクションがレコードを削除・更新・force-write している。変更系メソッドに `readOnlyHint: true` を明示した場合と、既定で read-only になる GET・QUERY の場合の両方が対象です。read-only であること自体が認可ルールの適用を免除するため、アクションの内容と突き合わせて検査されます。 |
+| `agent-route-authorization:*` | 判定に到達できなかった。ハンドラがインライン関数であるか、コントローラアクションが check の読み取る対象に含まれていない場合です。 |
+| `agent-route-controller-collision:*` | 同名のコントローラクラスが2つあり、その一方をエージェント公開ルートが使っている。コントローラ本体から導いた判定が、もう一方のクラスを指している可能性があります。 |
+| `agent-route-controller-unreadable:*` | コントローラのファイルを読み取れなかった。そこに定義されたアクションを持つエージェント公開ルートは、本体を一切参照せずに検査されたことになります。 |
+| `route-graph` | ルートファイルの読み込みに失敗したため、ルート契約チェックとエージェントルートチェックのどちらも実行されませんでした。 |
+
+`audit` は同じルートに対して2つのルールを追加します。
+
+- 通常のルートでは warning になるボディ検証の finding が、エージェント公開ルートでは **failure** になります。key は `validation:*` のままなので、既存の `config/audit.ts` のエントリはそのまま効きます。
+- `agent-annotation:*` は、レコードを削除・更新・force-write するアクションに `destructiveHint: false` が宣言されている場合と、アクション本体を読み取れずその宣言を検査できなかった場合に warn します。
+- `controller-unreadable:*` は、コントローラのファイルを読み取れなかった場合に warn します。そこに定義されたアクションについては、上記のルールがどれも本体を参照できていないためです。
+
 誤検出は、対象行またはその直前の行に `// guren-audit-ignore` を置くことで抑制できます:
 
 ```ts
@@ -172,7 +204,7 @@ bunx guren check --spec    # docs/spec/ が再生成結果と一致するか
 const apiKey = 'example-not-a-real-key'
 ```
 
-ルートレベル・モデルレベルの findings(`authz:*`、`validation:*`、`mass-assignment:*`、`hidden-columns:*`)には、コメントを付けられる特定の行が存在しません。これらはルートレジストラを実行し、モデルを検査することで生成されるためです。代わりに `config/audit.ts` で finding の `key`(`--json` の出力からそのままコピーできます)と必須の `reason` を指定して無視します:
+ルートレベル・モデルレベルの findings(`authz:*`、`validation:*`、`agent-annotation:*`、`mass-assignment:*`、`hidden-columns:*`)には、コメントを付けられる特定の行が存在しません。これらはルートレジストラを実行し、モデルを検査することで生成されるためです。代わりに `config/audit.ts` で finding の `key`(`--json` の出力からそのままコピーできます)と必須の `reason` を指定して無視します:
 
 ```ts
 // config/audit.ts
@@ -300,7 +332,7 @@ npx skills add gurenjs/agent-skills
 
 フレームワーク管理ファイル(rules・skills・サブエージェント・hooks)は `agent:sync` が上書きします。それがこのコマンドの役割なので、プロジェクト固有のルールは配布ファイルに追記せず、自分のファイルとして別名で置いてください。上書きは必ず可視化されます。最新版と一致しているファイルはスキップされ、内容が異なっていたファイルは「置き換えた」として明示されます。`agent:sync --dry-run` を先に実行すると、何が書き込まれ・置き換えられ・削除候補になるかを、ファイルを一切変更せずに確認できます。`agent:init` も `--dry-run` を受け付けます(`--force` のプレビューとして使えます)。
 
-リリースでフレームワークのルールやスキルが改名・削除されると、旧ファイルは配布先の全ルートに残り続けます。特に Cursor・Copilot は古い `.cursor/rules/guren-*.mdc` / `.github/instructions/guren-*.instructions.md` を glob で読み込み続けます。`agent:sync` はフレームワーク管理の場所で現行ハーネスに含まれないファイルを一覧表示し、`agent:sync --prune` を付けるとそれらを削除します。対象は常に**名前**で判定します。rules のルート(`.claude/rules/`、`.agents/rules/`)はハーネスが配布している(または過去に配布した)ルールのファイル名だけ、ネイティブルールは `guren-` プレフィックスだけ、skills のルート(`.claude/skills/`、`.agents/skills/`)はハーネスが配布している(または過去に配布した)スキルディレクトリだけです。配布ルールの隣(サブディレクトリを含む)に置いた自作のルールファイルや、自分で追加したスキル(`npx skills add` や Agent Plugins クライアントが同じディレクトリに入れたものを含む)は、一覧にも出ず削除もされません。例外はハーネス自身が配布している名前と衝突した場合だけです。スキルなら `dev-workflow`・`db-manage`・`scaffold`・`feature`・`guren-api`・`plugin-authoring`、ルールならエントリードキュメントに載っているファイル名(大文字小文字は区別しません)、そして Cursor・Copilot では名前の一覧ではなくプレフィックス判定なので `guren-` で始まるファイル**すべて**です。Cursor/Copilot の自作ルールは別のプレフィックスにしておき、`--prune` の前には一覧を確認してください。
+リリースでフレームワークのルールやスキルが改名・削除されると、旧ファイルは配布先の全ルートに残り続けます。特に Cursor・Copilot は古い `.cursor/rules/guren-*.mdc` / `.github/instructions/guren-*.instructions.md` を glob で読み込み続けます。`agent:sync` はフレームワーク管理の場所で現行ハーネスに含まれないファイルを一覧表示し、`agent:sync --prune` を付けるとそれらを削除します。対象は常に**名前**で判定します。rules のルート(`.claude/rules/`、`.agents/rules/`)はハーネスが配布している(または過去に配布した)ルールのファイル名だけ、ネイティブルールは `guren-` プレフィックスだけ、skills のルート(`.claude/skills/`、`.agents/skills/`)はハーネスが配布している(または過去に配布した)スキルディレクトリだけです。配布ルールの隣(サブディレクトリを含む)に置いた自作のルールファイルや、自分で追加したスキル(`npx skills add` や Agent Plugins クライアントが同じディレクトリに入れたものを含む)は、一覧にも出ず削除もされません。例外はハーネス自身が配布している名前と衝突した場合だけです。スキルなら `dev-workflow`・`db-manage`・`scaffold`・`feature`・`guren-api`・`plugin-authoring`・`agent-interface`、ルールならエントリードキュメントに載っているファイル名(大文字小文字は区別しません)、そして Cursor・Copilot では名前の一覧ではなくプレフィックス判定なので `guren-` で始まるファイル**すべて**です。Cursor/Copilot の自作ルールは別のプレフィックスにしておき、`--prune` の前には一覧を確認してください。
 
 ## デプロイレシピ生成
 
@@ -418,6 +450,39 @@ bunx guren route:list --format table   # デフォルトのテーブル形式
 bunx guren route:list --format json    # JSON出力
 bunx guren route:list --format compact # コンパクトな1行形式
 ```
+
+## エージェントツールコマンド
+
+`.agent()` メタデータを宣言したルートは、MCP ツールとして AI エージェントに公開されます（[ルーティング](./routing.md)を参照）。これらのコマンドは、エージェントから見えるものをルートグラフから直接導出して表示します。`.guren/agents.gen.ts` を読むわけではないため、そのマニフェストが存在しない場合や古い場合でも正しく答えます。
+
+| コマンド | 説明 | 例 |
+|----------|------|----|
+| `tool:list` | このアプリが公開しているエージェントツールを一覧表示 | `bunx guren tool:list` |
+| `tool:inspect` | 1 つのツールの導出結果を表示 | `bunx guren tool:inspect posts.store` |
+
+```bash
+# 公開中の全ツールを、メソッド・パス・プロトコル別の公開状態・
+# 認可アビリティ・MCPアノテーションとともに表示
+bunx guren tool:list
+
+# 導出結果そのもの（警告を含む）
+bunx guren tool:list --json
+
+# 1つのツールの詳細: 入力フィールド・出力スキーマ・認可・
+# アノテーション・承認・マスク対象
+bunx guren tool:inspect posts.store
+bunx guren tool:inspect posts.store --json
+```
+
+| オプション | デフォルト | 説明 |
+|-----------|-----------|------|
+| `--routes` | `routes/web.ts` | ルートエントリファイルのパス |
+| `--app` | カレントディレクトリ | アプリケーションルートディレクトリ |
+| `--json` | `false` | 導出結果を JSON で出力 |
+
+表示される内容はすべて、ルートがすでに持っている契約から導出されます。入力スキーマは `params`・`query`・`body` をマージしたもの、出力スキーマは `output`、認可アビリティはミドルウェアチェーンが実際にチェックしているポリシーのものです。二重に宣言する箇所がないため、エンドポイントが検証しないスキーマをツールが広告することはありません。
+
+`bunx guren codegen` は同じ導出結果を `.guren/agents.gen.ts` に書き出します。ツールを 1 つも公開していないアプリでは、このファイルは生成されず、既存のものは削除されます。
 
 ## 設定コマンド
 

@@ -1,14 +1,17 @@
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'bun:test'
-import { CONTROLLER_MEMBER_KINDS } from '../src/audit'
+import { CONTROLLER_MEMBER_KINDS } from '../src/controller-methods'
 import { extractClassDeclaration } from '../src/model-parser'
 import { parseSourceFile } from '../src/parse-cache'
 
 /**
  * Pins `CONTROLLER_MEMBER_KINDS` to the real `Controller` surface, because a
  * member the audit's body-access rule doesn't know about is reported as a
- * *pass* — the gap looks like a clean bill of health.
+ * *pass* — the gap looks like a clean bill of health. The same map now backs
+ * the `this.<member>(` patterns both `guren audit` and the agent-route checks
+ * spell, so a rename that lands here fails their compile rather than leaving
+ * a regex quietly matching nothing.
  *
  * Reads the source rather than `Controller.prototype`: `packages/cli` resolves
  * `@guren/server` through `dist/`, so a prototype check would keep passing
@@ -32,7 +35,7 @@ async function publicControllerSurface(): Promise<string[]> {
   if (source === null) {
     throw new Error(
       `Could not read ${CONTROLLER_PATH}. If Controller.ts moved, update CONTROLLER_PATH here `
-      + 'and re-check CONTROLLER_MEMBER_KINDS in src/audit.ts against the new location.',
+      + 'and re-check CONTROLLER_MEMBER_KINDS in src/controller-methods.ts against the new location.',
     )
   }
 

@@ -29,7 +29,8 @@ export function registerWebRoutes(baseRouter: Router): void {
 
 Options object (second arg) is `RouteContractOptions`:
 `name?` · `middlewares?: MiddlewareHandler[]` · `params?` / `query?` / `body?` / `output?`
-(Zod schemas) · `bind?: Record<string, RouteModelBinding>` (`Post` or `[Post, 'slug']`) · plus OpenAPI metadata
+(Zod schemas) · `bind?: Record<string, RouteModelBinding>` (`Post` or `[Post, 'slug']`) ·
+`agent?: AgentRouteMetadata` · plus OpenAPI metadata
 (`summary?`, `description?`, `tags?`, `operationId?`, `deprecated?`).
 
 Schemas attached here do double duty: requests are **validated automatically**
@@ -46,6 +47,18 @@ method (RFC 10008): safe and idempotent like GET but carries a request body — 
 for complex search/filter endpoints, never for mutations (CSRF skips it on that
 assumption). Not expressible in OpenAPI 3.1 output, and Inertia forms cannot send it —
 call it via `createApiClient` or `fetch`.
+
+## Agent tools
+
+`.agent({ description })` (or `agent:` in the options object) exposes a route as an MCP tool;
+the tool's schemas are derived from the route's own `params`/`query`/`body`/`output`, never restated.
+Per-action on a resource: `router.resource('/posts', PostController, { agent: { index: {...} } })` —
+an action not listed is **not** exposed. One declaration per route — declaring it in the options
+*and* chaining `.agent()` throws. A route with no `.name()` cannot be a tool, and the name is used
+as the tool name verbatim.
+**Authentication is not authorization**: `guren check` fails a non-read-only agent route that has
+neither `authorizeMiddleware(...)` on the chain nor `this.authorize(...)` in the action, even when
+`this.auth.userOrFail()` is present.
 
 ## Route Schema Binding: concrete input → output
 

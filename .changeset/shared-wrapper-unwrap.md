@@ -1,9 +1,9 @@
 ---
-"@guren/core": patch
+"@guren/server": patch
 "@guren/cli": patch
 ---
 
-Host the single-child wrapper unwrap step once, in `@guren/core/internal/zod-compat`.
+Host the single-child wrapper unwrap step once, in `internal/zod-compat`.
 
 Three walks look through zod's wrappers for different reasons — finding the
 object behind a params schema, rendering a TypeScript type, deciding whether a
@@ -21,4 +21,5 @@ omission. No behaviour changes.
 
 Internal by `contributing/api-stability.md` — reachable only through a deep
 import, with no stability guarantee. `@guren/cli` is released alongside so its
-`@guren/core` range admits the version that introduces the helper it now calls.
+`@guren/server` range admits the version that introduces the helper it now
+reaches through `@guren/core/internal/zod-compat`.

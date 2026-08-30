@@ -59,12 +59,14 @@ import { generateTranslationTypes } from './i18n-types'
 import { generateDataTypes } from './data-types'
 import { generateAttachmentTypes } from './attachments-types'
 import { generateApiClientTypes } from './api-client-types'
+import { generateAgentTypes } from './agents-types'
 import { generateOpenApiSpec } from './openapi-generate'
 import { generateChannelTypes } from './channel-types'
 import { consoleCommand } from './console'
 import { bootstrapApplication, resolveMainEntry, type MaybeApplication } from './runtime'
 import { runQueueWorker, listFailedJobs, retryFailedJob, retryAllFailedJobs, flushFailedJobs } from './queue'
 import { displayRoutes } from './route-list'
+import { displayToolInspection, displayTools } from './tool-list'
 import { cacheConfig, clearConfigCache, showConfigCacheInfo } from './config-cache'
 import { createStorageLink, removeStorageLink } from './storage-link'
 import { listScheduledTasks, runScheduledTasks } from './schedule'
@@ -1240,6 +1242,22 @@ const codegenCommand = defineCommand({
       appRoot: args.app,
       ...writerOptions,
     })
+    // Agent tools sit between data and the API client: they consume the
+    // Resource definitions the data generator produced (a `resource` hint's
+    // payload type is embedded in a tool description), and the `Data` import
+    // they emit resolves against the sibling data.gen.ts.
+    const {
+      outputPath: agentsOutputPath,
+      tools: agentTools,
+      warnings: agentWarnings,
+    } = await generateAgentTypes(definitions, {
+      appRoot: args.app,
+      resources: resourceDefinitions,
+      ...writerOptions,
+    })
+    for (const warning of agentWarnings) {
+      consola.warn(warning)
+    }
     const { outputPath: apiClientOutputPath, warnings: apiClientWarnings } = await generateApiClientTypes(
       definitions,
       { appRoot: args.app, resources: resourceDefinitions, ...writerOptions },
@@ -1251,6 +1269,11 @@ const codegenCommand = defineCommand({
     consola.success(`Route helpers generated at ${runtimeOutputPath}`)
     consola.success(`Data types generated at ${dataOutputPath}`)
     consola.success(`Channel types generated at ${channelOutputPath}`)
+    if (agentsOutputPath) {
+      consola.success(
+        `Agent tools generated at ${agentsOutputPath} (${agentTools.length} ${agentTools.length === 1 ? 'tool' : 'tools'})`,
+      )
+    }
     consola.success(`API client generated at ${apiClientOutputPath}`)
     process.exit(0)
   },
@@ -1568,6 +1591,70 @@ const routeListCommand = defineCommand({
       format: args.format as 'table' | 'json' | 'compact',
       sort: args.sort as 'method' | 'path' | 'name',
       reverse: args.reverse,
+    })
+  },
+})
+
+// The `tool:` namespace is RFC 0016's; `agent:init` / `agent:sync` already own
+// `agent:` for the coding-agent harness, which is a different surface. Both
+// commands derive live from the route graph rather than reading
+// `.guren/agents.gen.ts`, so a stale or absent manifest cannot answer for what
+// an agent would actually see.
+const toolListCommand = defineCommand({
+  meta: {
+    name: 'tool:list',
+    description: 'List the agent tools this application exposes (RFC 0016).',
+  },
+  args: {
+    routes: {
+      type: 'string',
+      description: 'Path to the routes entry file',
+      valueHint: 'routes/web.ts',
+    },
+    app: {
+      type: 'string',
+      description: 'Application root directory',
+    },
+    json: {
+      type: 'boolean',
+      description: 'Output the derived tools as JSON',
+    },
+  },
+  async run({ args }) {
+    await displayTools({ routesFile: args.routes, appRoot: args.app, json: args.json })
+  },
+})
+
+const toolInspectCommand = defineCommand({
+  meta: {
+    name: 'tool:inspect',
+    description: 'Show one agent tool as it is derived: input, output, authorization, annotations.',
+  },
+  args: {
+    name: {
+      type: 'positional',
+      description: 'Tool name (defaults to the route name)',
+      required: true,
+    },
+    routes: {
+      type: 'string',
+      description: 'Path to the routes entry file',
+      valueHint: 'routes/web.ts',
+    },
+    app: {
+      type: 'string',
+      description: 'Application root directory',
+    },
+    json: {
+      type: 'boolean',
+      description: 'Output the derived tool as JSON',
+    },
+  },
+  async run({ args }) {
+    await displayToolInspection(args.name, {
+      routesFile: args.routes,
+      appRoot: args.app,
+      json: args.json,
     })
   },
 })
@@ -2968,6 +3055,8 @@ export const builtinSubCommands = {
   'routes:types': routeTypesCommand,
   codegen: codegenCommand,
   'route:list': routeListCommand,
+  'tool:list': toolListCommand,
+  'tool:inspect': toolInspectCommand,
   'openapi:generate': openApiGenerateCommand,
   'config:cache': configCacheCommand,
   'config:clear': configClearCommand,

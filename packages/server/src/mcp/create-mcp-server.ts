@@ -60,6 +60,8 @@ export interface GurenCliApi {
     framework: { name: string; version: string }
     models: Array<{ className: string }>
     routes: Array<unknown>
+    /** Why `routes` is empty, when it is empty because the load failed. */
+    routesError?: string
     pages: string[]
     controllers: string[]
     resources: string[]
@@ -116,11 +118,39 @@ export interface GurenCliApi {
     opts: CodegenOptions & { resources?: unknown[] },
   ): Promise<CodegenResult | void>
   /**
+   * Agent tools derived from the route manifest (RFC 0016), so it runs after
+   * `generateRouteTypes` and — because a `resource` hint's payload type is
+   * embedded in a tool description — after `generateDataTypes` too. Optional
+   * because `@guren/cli` is resolved from the app at runtime and may predate
+   * it; an older CLI simply generates no agent manifest.
+   */
+  generateAgentTypes?(
+    definitions: unknown[],
+    opts: CodegenOptions & { resources?: unknown[] },
+  ): Promise<CodegenResult | void>
+  /**
    * Route-dependent context generation that re-runs the CLI in a fresh
    * process. Optional because `@guren/cli` is resolved from the app at
    * runtime and may predate it — see `McpServiceProvider`.
    */
   createFreshContextApi?: () => Pick<GurenCliApi, 'generateContext' | 'generateEntityContext'>
+  /**
+   * Optional fields the CLI's context routes populate. Spelled exactly as
+   * `@guren/cli` exports it — this interface describes that module namespace,
+   * so a prettier camelCase name here would read `undefined` off every real
+   * CLI and silently answer "unsupported" forever.
+   *
+   * Optional for the same runtime-resolution reason as the members above, and
+   * read for exactly that reason: an older CLI emits routes with no `agent`
+   * field at all, which reads identically to an app exposing no agent tools.
+   */
+  CONTEXT_ROUTE_FEATURES?: readonly string[]
+  /**
+   * Every route as a context route, without building the rest of the project
+   * context. Optional like the above; `guren_agent_surface` falls back to
+   * `generateContext` when an older CLI does not provide it.
+   */
+  loadContextRoutes?(cwd: string, routesFile?: string, loadErrors?: string[]): Promise<unknown[]>
   /**
    * The OKF docs relation graph (RFC 0005). Optional for the same
    * runtime-resolution reason as above.
@@ -133,6 +163,67 @@ export interface CreateMcpServerOptions {
   cwd: string
   cli: GurenCliApi
   version?: string
+}
+
+/**
+ * A route in `generateContext()`'s output that declares agent metadata
+ * (RFC 0016). `GurenCliApi` types `routes` as `unknown[]` on purpose — this
+ * package carries the CLI's shapes rather than mirroring them — so the one
+ * tool that reads inside a route narrows it here, structurally and at
+ * runtime, instead of casting.
+ */
+interface AgentContextRoute {
+  method: string
+  path: string
+  name?: string
+  agent: {
+    description?: string
+    toolName?: string
+    expose?: { mcp?: boolean; webMcp?: boolean }
+    readOnlyHint?: boolean
+    destructiveHint?: boolean
+    idempotentHint?: boolean
+    approval?: 'required'
+  }
+  description?: string
+  summary?: string
+  authorization?: { ability?: string; abilities: string[]; mode: string; fromMethodMap?: boolean }
+}
+
+function isAgentRoute(route: unknown): route is AgentContextRoute {
+  if (!route || typeof route !== 'object') return false
+  const { agent, method, path } = route as Record<string, unknown>
+  return (
+    typeof method === 'string'
+    && typeof path === 'string'
+    && typeof agent === 'object'
+    && agent !== null
+  )
+}
+
+/**
+ * One tool as an agent editing the app should see it. Annotations are
+ * reported **as declared**, with no defaults filled in: the derivation layer
+ * owns the GET/QUERY → readOnlyHint rule, and restating it here would be a
+ * second copy of it that can disagree.
+ */
+function describeAgentRoute(route: AgentContextRoute) {
+  const { agent } = route
+  return {
+    toolName: agent.toolName ?? route.name,
+    routeName: route.name,
+    method: route.method,
+    path: route.path,
+    description: agent.description ?? route.description ?? route.summary,
+    expose: agent.expose,
+    annotations: {
+      readOnlyHint: agent.readOnlyHint,
+      destructiveHint: agent.destructiveHint,
+      idempotentHint: agent.idempotentHint,
+    },
+    approval: agent.approval ?? 'not-required',
+    authorization: route.authorization,
+  }
 }
 
 export function createMcpServer(options: CreateMcpServerOptions): McpServer {
@@ -215,6 +306,77 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServer {
       },
     )
   }
+
+  server.tool(
+    'guren_agent_surface',
+    "The app's agent-facing tool surface (RFC 0016): every route that declares agent metadata, with its tool name, method and path, description, exposed surfaces, MCP annotations as declared, and whether invocations need approval. Call it BEFORE editing a route or its controller to find out whether an autonomous agent can already invoke it — renaming such a route renames a tool, and loosening its authorization loosens the tool's.",
+    {},
+    async () => {
+      // An empty list has two causes that must not be conflated: an app that
+      // exposes nothing, and a @guren/cli — resolved from the app, so
+      // possibly older than this server — whose context output has no agent
+      // field to read. Say which one happened.
+      if (!cli.CONTEXT_ROUTE_FEATURES?.includes('agent')) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify(
+                {
+                  supported: false,
+                  reason:
+                    "The @guren/cli installed in this app predates agent route metadata, so the agent "
+                    + 'surface cannot be read. This is not the same as the app exposing no tools — the '
+                    + 'answer is unknown. Upgrade @guren/cli (bunx guren upgrade) to query it.',
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+        }
+      }
+
+      // The routes are all this tool reads, and building the rest of the
+      // project context — models, pages, controllers, resources — costs a
+      // full filesystem scan on an interactive path with no caching. Older
+      // CLIs without the routes-only entry still answer through the whole
+      // context, which is what they always did.
+      //
+      // Either way the reason the route list is empty travels with it: a
+      // routes file that throws degrades to zero routes, and reporting that
+      // as an empty tool surface would be the confident-looking "no routes"
+      // the CLI's own loader warns about — indistinguishable from an app
+      // that genuinely exposes nothing.
+      const loadErrors: string[] = []
+      let routes: unknown[]
+      if (cli.loadContextRoutes) {
+        routes = await cli.loadContextRoutes(cwd, undefined, loadErrors)
+      } else {
+        const context = await cli.generateContext({ cwd })
+        routes = context.routes
+        if (context.routesError) loadErrors.push(context.routesError)
+      }
+
+      const tools = routes.filter(isAgentRoute).map(describeAgentRoute)
+      const payload =
+        loadErrors.length > 0
+          ? {
+              supported: true,
+              routesLoaded: false,
+              loadErrors,
+              note:
+                'The route graph failed to load, so this list is incomplete — it is not evidence that '
+                + 'the app exposes no agent tools.',
+              tools,
+            }
+          : { supported: true, routesLoaded: true, tools }
+
+      return {
+        content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }],
+      }
+    },
+  )
 
   server.tool(
     'guren_check',
@@ -407,6 +569,18 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServer {
       await run(['.guren/pages.gen.ts'], () => cli.generatePageTypes(options))
       const data = await run(['.guren/data.gen.ts'], () => cli.generateDataTypes(options))
       await run(['.guren/channels.gen.ts'], () => cli.generateChannelTypes(options))
+      // Between data and the API client, exactly as `guren codegen` orders it:
+      // a `resource` hint's payload type comes from the Resource definitions,
+      // and the emitted `Data` import resolves against data.gen.ts.
+      if (cli.generateAgentTypes) {
+        const generateAgentTypes = cli.generateAgentTypes.bind(cli)
+        await run(['.guren/agents.gen.ts'], () => {
+          if (!routes?.definitions) {
+            throw new Error('route generation produced no manifest to derive agent tools from')
+          }
+          return generateAgentTypes(routes.definitions, { ...options, resources: data?.definitions })
+        })
+      }
       await run(['.guren/api-client.gen.ts'], () => {
         if (!routes?.definitions) {
           throw new Error('route generation produced no manifest to build a client from')

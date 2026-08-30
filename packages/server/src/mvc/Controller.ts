@@ -3,10 +3,10 @@ import type { FC } from 'hono/jsx'
 import { renderDocument, type ViewOptions } from './view'
 import { inertia, type InertiaOptions } from './inertia/InertiaEngine'
 import { resolveSharedInertiaProps, type ResolvedSharedInertiaProps } from './inertia/shared'
-import { AUTH_CONTEXT_KEY } from '../http/middleware/auth'
 import { getRequestLocale, getRequestTranslator, type TranslatorBinding } from '../http/middleware/detect-locale'
 import { tryGetI18n, type I18nManager, type RegisteredTranslationKey, type ReplacementValues } from '../i18n'
 import { flattenRequestQueries, parseRequestPayload } from '../http/request'
+import { getAuthContext } from '../auth/context'
 import type { AuthContext } from '../auth/types'
 import type { ServiceBindings } from '../container/bindings'
 import type { ContainerLike } from '../container/types'
@@ -229,7 +229,7 @@ export class Controller {
   }
 
   protected get auth(): AuthContext {
-    const auth = this.ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
+    const auth = getAuthContext(this.ctx)
     if (!auth) {
       throw new Error('Controller auth helper requires the auth middleware. Make sure AuthServiceProvider is registered.')
     }
@@ -305,7 +305,7 @@ export class Controller {
   }
 
   private async gateUser(): Promise<AuthUser | null> {
-    const auth = this.ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
+    const auth = getAuthContext(this.ctx)
     if (!auth) {
       return null
     }

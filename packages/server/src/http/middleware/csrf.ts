@@ -6,6 +6,7 @@ import { deriveAppKeyring, getAppKeyringFromEnv } from '../../encryption/app-key
 import { MessageSigner } from '../../encryption/MessageSigner'
 import { secureCompare } from '../../encryption/Hash'
 import { isMcpEndpointEnabled, MCP_ENDPOINT_PATH } from '../../mcp/endpoint'
+import { hasBearerHeader } from '../../auth/api-token'
 
 export const CSRF_TOKEN_KEY = '_csrf_token'
 export const CSRF_HEADER_NAME = 'X-CSRF-TOKEN'
@@ -152,6 +153,42 @@ function isExcluded(path: string, excludePatterns: string[]): boolean {
  */
 function isMcpEndpointRequest(path: string): boolean {
   return path === MCP_ENDPOINT_PATH && isMcpEndpointEnabled()
+}
+
+/**
+ * A bearer-authenticated request that carries no cookies at all (RFC 0016
+ * §3). CSRF defends cookie ambient authority — a browser attaching the
+ * victim's cookies to a request the victim never made. A request that
+ * authenticates by `Authorization: Bearer` and sends no `Cookie` header has
+ * none to attach: the token is the client's own credential, deliberately
+ * presented, and a browser cannot strip its cookies from a cross-site
+ * request. Agent tool dispatch is the intended caller — it synthesizes
+ * cookie-less bearer requests by construction.
+ *
+ * The predicate is the raw `Cookie` header, deliberately not the loaded
+ * session. Ambient authority *requires a cookie*, so the header's absence is
+ * proof by itself — independent of where this middleware sits relative to
+ * the session mount. A session-based predicate reads as more precise and is
+ * weaker on both edges: mounted before the session middleware it sees no
+ * session and fails open for a cookie-carrying victim browser, and an
+ * intermediate middleware that writes one value into a fresh session turns a
+ * genuinely cookie-less client into a 403. Any cookie — even one this app
+ * never reads — therefore keeps verification on; a bearer client that wants
+ * the skip sends none, which is what every non-browser client does.
+ *
+ * Bearer detection is `hasBearerHeader`, the same predicate
+ * `AuthManager.resolveGuardName` routes a request to the token guard by, so
+ * this rule and token authentication cannot disagree about what a bearer
+ * request is.
+ */
+function isBearerRequestWithoutCookies(ctx: Context): boolean {
+  if (!hasBearerHeader(ctx)) {
+    return false
+  }
+
+  // Only true absence skips: an empty `Cookie:` header is malformed enough
+  // to stay on the verifying path.
+  return ctx.req.header('Cookie') === undefined
 }
 
 /** The token issued so far this request, and the mode it was issued for. */
@@ -321,6 +358,9 @@ async function getTokenFromRequest(ctx: Context): Promise<string | undefined> {
  *   those sessions expire
  * - Exempts the dev-only MCP endpoint while it is mounted, since agent
  *   clients cannot fetch a token first (it guards local-only access instead)
+ * - Skips verification for `Authorization: Bearer` requests that carry no
+ *   cookies (RFC 0016) — token clients authenticate per request and hold no
+ *   cookie ambient authority for CSRF to defend
  *
  * `cookie: false` disables the `XSRF-TOKEN` cookie for apps that deliver the
  * token themselves (meta tag / form field). Session-bound tokens still
@@ -379,7 +419,9 @@ export function createCsrfMiddleware(options: CsrfOptions = {}): MiddlewareHandl
     // Excluded and MCP paths skip *verification*, not issuance: an exempt
     // endpoint that logs a user in (an OAuth callback is the usual one) still
     // has to hand back a bound token, or every later mutation is rejected.
-    if (isExcluded(path, exclude) || isMcpEndpointRequest(path)) {
+    // Cookie-less bearer requests skip on the same terms — see
+    // isBearerRequestWithoutCookies for why that is sound.
+    if (isExcluded(path, exclude) || isMcpEndpointRequest(path) || isBearerRequestWithoutCookies(ctx)) {
       await next()
       settleCookie(ctx)
       return

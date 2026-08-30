@@ -222,3 +222,29 @@ export async function loadRouteDefinitions(
 
   return router.definitions()
 }
+
+/**
+ * What a `route:list`-shaped command needs before it can report anything: the
+ * app root, the routes file under it, and the definitions that file registers
+ * — with a load failure re-thrown naming the file it came from.
+ *
+ * Shared rather than repeated because the preamble is not incidental: the
+ * resolution rule (`--app` defaults to cwd, `--routes` resolves against it,
+ * both default the same way) is what makes two commands agree about which app
+ * they are describing, and a bare import failure with no file in it is the
+ * least actionable error a CLI can print.
+ */
+export async function loadAppRouteDefinitions(
+  options: { appRoot?: string; routesFile?: string } = {},
+): Promise<{ appRoot: string; routesFile: string; definitions: RouteDefinition[] }> {
+  const appRoot = options.appRoot ? resolve(options.appRoot) : process.cwd()
+  const routesFile = resolve(appRoot, options.routesFile ?? DEFAULT_ROUTES_FILE)
+
+  try {
+    return { appRoot, routesFile, definitions: await loadRouteDefinitions(routesFile, appRoot) }
+  } catch (error) {
+    throw new Error(
+      `Failed to import routes file (${routesFile}): ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+}

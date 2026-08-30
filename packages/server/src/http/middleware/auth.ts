@@ -1,5 +1,6 @@
 import type { Context, MiddlewareHandler } from 'hono'
 import type { Authenticatable, AuthContext } from '../../auth/types'
+import { AUTH_CONTEXT_KEY, getAuthContext } from '../../auth/context'
 import { jsonResponse } from './index'
 import { stampCapabilities } from './capabilities'
 export type { AuthContext } from '../../auth/types'
@@ -10,7 +11,6 @@ export interface RequireAuthOptions {
   responseFactory?: () => Response
 }
 
-const AUTH_CONTEXT_KEY = 'guren:auth'
 const TESTING_USER_HEADER = 'x-testing-user'
 
 function resolveTestingUser(ctx: Context): Authenticatable | null {
@@ -70,15 +70,11 @@ export function attachAuthContext(contextFactory: (ctx: Context) => AuthContext)
   }
 }
 
-function resolveAuth(ctx: { get: (key: string) => unknown }): AuthContext | undefined {
-  return ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
-}
-
 export function requireAuthenticated(options: RequireAuthOptions = {}): MiddlewareHandler {
   const { redirectTo, status = 401, responseFactory } = options
 
   return stampCapabilities(async (ctx, next) => {
-    const auth = resolveAuth(ctx)
+    const auth = getAuthContext(ctx)
 
     if (!auth) {
       throw new Error('Auth context has not been attached. Did you register the auth middleware?')
@@ -104,7 +100,7 @@ export function requireGuest(options: RequireAuthOptions = {}): MiddlewareHandle
   const { redirectTo, status = 403, responseFactory } = options
 
   return stampCapabilities(async (ctx, next) => {
-    const auth = resolveAuth(ctx)
+    const auth = getAuthContext(ctx)
 
     if (!auth) {
       throw new Error('Auth context has not been attached. Did you register the auth middleware?')
@@ -126,4 +122,4 @@ export function requireGuest(options: RequireAuthOptions = {}): MiddlewareHandle
   }, { authentication: { mode: 'guest-only' } })
 }
 
-export { AUTH_CONTEXT_KEY }
+export { AUTH_CONTEXT_KEY, getAuthContext }

@@ -1,10 +1,8 @@
 import { resolve, relative } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import { consola } from 'consola'
-import type { File } from '@babel/types'
 import {
   collectFiles,
-  discoverControllerFiles,
   discoverModelFiles,
   classNameFromPath,
   listModuleNames,
@@ -26,7 +24,21 @@ import {
   resolveModelStringArrayConfig,
 } from './model-parser'
 import { parseSourceFile } from './parse-cache'
-import { walk } from './ast-walk'
+// The controller-body vocabulary lives beside the scan that produces the
+// bodies, so every command judging an action reads one copy of it — and every
+// pattern naming a `Controller` member stays inside the reach of
+// controller-surface.test.ts.
+import {
+  accessorCallPattern,
+  controllerMembers,
+  mutatesRecords,
+  parseControllerMethods,
+  AUTH_CALL_PATTERN,
+  FORCE_WRITE_PATTERN,
+  type ControllerMethodInfo,
+  type ControllerNameCollision,
+} from './controller-methods'
+import { describeMethod } from './http-methods'
 import { parseSchemaTableColumns } from './schema-parser'
 import { loadAuditConfig, type AuditIgnoreEntry } from './audit-config'
 
@@ -72,48 +84,6 @@ export interface RunAuditOptions {
 }
 
 /**
- * HTTP method semantics driving the two per-route phases in auditRoutes().
- * The two sets are orthogonal axes rather than a partition: unsafe methods
- * get the auth check, body-carrying methods get the validation check, and
- * QUERY (RFC 10008) is both — safe like GET, but body-carrying like POST.
- *
- * `SAFE_METHODS` holds the verbs the authentication phase trusts not to
- * change state. It is the RFC 9110 §9.2.1 safe set *minus TRACE*, on
- * purpose: an app registering a TRACE route is unusual enough that the
- * fail-closed default below is the better answer — do not "fix" the list
- * back to the RFC. It is the same axis as `DEFAULT_PROTECTED_METHODS` in
- * `@guren/server` (src/http/middleware/csrf.ts, expressed as its
- * complement) and the emitted `CSRF_SAFE_METHODS` in api-client-types.ts;
- * the packages share no dependency edge, so the list is duplicated by
- * convention (see trimSlashes in utils.ts for the precedent).
- *
- * `BODYLESS_METHODS` are the verbs whose requests conventionally carry no
- * body, so the validation phase demands no validateBody() for them.
- */
-const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS', 'QUERY'])
-const BODYLESS_METHODS = new Set(['GET', 'HEAD', 'OPTIONS', 'DELETE'])
-
-/**
- * Exported for tests. Classifies an HTTP method for the audit phases.
- *
- * Deliberately fail-closed: a verb neither set recognizes — anything an app
- * registers via `router.on('PURGE', ...)` — is treated as unsafe AND
- * body-carrying. The alternative (skipping it, as the pre-classification
- * enumerations did) made a custom-verb route with an unvalidated body and no
- * auth middleware produce zero findings, i.e. the routes the audit
- * understands least reported the cleanest pass. A false-positive finding on
- * a genuinely body-less custom verb can be suppressed via config/audit.ts;
- * a silently skipped route cannot be seen at all.
- */
-export function describeMethod(method: string): { safe: boolean; bodyCarrying: boolean } {
-  const upper = method.toUpperCase()
-  return {
-    safe: SAFE_METHODS.has(upper),
-    bodyCarrying: !BODYLESS_METHODS.has(upper),
-  }
-}
-
-/**
  * Paths that are expected to be reachable without authentication
  * (guest flows like login/registration).
  */
@@ -153,110 +123,6 @@ export function authMiddlewareVerdict(
     return nameMatches ? 'legacy-name-match' : 'none'
   }
   return nameMatches ? 'unverified-auth-name' : 'none'
-}
-
-/**
- * Calls that actually reject unauthenticated requests. Optional reads like
- * `auth.user()`, `auth.id()`, or `auth.check()` do not enforce anything on
- * their own, so they intentionally do not count as protection.
- */
-const AUTH_CALL_PATTERN = /\bauth\s*\.\s*userOrFail\s*(?:<[^>]*>)?\s*\(|\bthis\s*\.\s*apiToken(?:UserId)?\s*(?:<[^>]*>)?\s*\(/
-
-/**
- * What request data each member of `Controller` hands an action.
- *
- * The keys are the full public/protected method-and-getter surface of
- * `packages/server/src/mvc/Controller.ts` — the only members app code can
- * reach — and `controller-surface.test.ts` re-parses that file and fails when
- * the two lists diverge. That test is the point of enumerating members this
- * rule doesn't care about: a new accessor cannot be added over there and
- * quietly default to "harmless" here, which is exactly how `input()` came to
- * be missed. Which bucket a member belongs in is a semantic judgement about
- * its body, so it stays a deliberate classification rather than something
- * inferred from the name.
- *
- * Classifying a member is not the same as wiring it up: the patterns below are
- * derived from these names but still assume call syntax, so a body-reading
- * *getter* would need the pattern touched too, not just an entry here.
- */
-export type ControllerMemberKind =
-  /**
-   * Hands back request-body content nothing has validated. `file()`/`files()`
-   * belong here because they are `req.parseBody()` under the hood
-   * (Controller.ts) — the raw call this rule has always flagged — and a helper
-   * cannot be a clean pass while the call it delegates to is a failure.
-   */
-  | 'body-payload'
-  /**
-   * Reads the body but yields nothing a schema would have caught: `has()`
-   * answers only whether a key is present. Not flagged, but not "does not
-   * consume the request body" either — see the finding below.
-   */
-  | 'body-incidental'
-  /** Reads the body in order to validate it — the remedy, not the problem. */
-  | 'body-validation'
-  /** Never touches the request body. */
-  | 'non-body'
-
-export const CONTROLLER_MEMBER_KINDS: Readonly<Record<string, ControllerMemberKind>> = {
-  input: 'body-payload',
-  only: 'body-payload',
-  except: 'body-payload',
-  file: 'body-payload',
-  files: 'body-payload',
-
-  has: 'body-incidental',
-
-  validateBody: 'body-validation',
-  validateBodySafe: 'body-validation',
-
-  setContext: 'non-body',
-  setContainer: 'non-body',
-  setResolvedModel: 'non-body',
-  model: 'non-body',
-  ctx: 'non-body',
-  /** Reached by name through RAW_BODY_READ_PATTERN, not as `this.request(`. */
-  request: 'non-body',
-  auth: 'non-body',
-  make: 'non-body',
-  apiToken: 'non-body',
-  apiTokenUserId: 'non-body',
-  authorize: 'non-body',
-  can: 'non-body',
-  inertia: 'non-body',
-  view: 'non-body',
-  locale: 'non-body',
-  t: 'non-body',
-  tc: 'non-body',
-  json: 'non-body',
-  text: 'non-body',
-  redirect: 'non-body',
-  noContent: 'non-body',
-  created: 'non-body',
-  accepted: 'non-body',
-  query: 'non-body',
-  validateQuery: 'non-body',
-  validateParams: 'non-body',
-  validateQuerySafe: 'non-body',
-  validateParamsSafe: 'non-body',
-}
-
-function controllerMembers(kind: ControllerMemberKind): string[] {
-  return Object.entries(CONTROLLER_MEMBER_KINDS)
-    .filter(([, memberKind]) => memberKind === kind)
-    .map(([name]) => name)
-}
-
-/**
- * `name(`, plus the generic forms these helpers are declared with. `[^()]*`
- * rather than `[^>]*` so a nested type argument (`this.input<Array<string>>()`)
- * still reaches the closing `(` — stopping at the first `>` silently skipped
- * those calls. Longest name first so `validateBody` cannot shadow
- * `validateBodySafe`.
- */
-function accessorCallPattern(names: readonly string[]): string {
-  const alternation = [...names].sort((a, b) => b.length - a.length).join('|')
-  return `\\b(?:${alternation})\\s*(?:<[^()]*>)?\\s*\\(`
 }
 
 const VALIDATE_BODY_PATTERN = new RegExp(accessorCallPattern(controllerMembers('body-validation')))
@@ -342,7 +208,25 @@ export async function runAudit(options: RunAuditOptions = {}): Promise<AuditRepo
   // once the local scans are done.
   const dependencyScanOutput = options.deps ? startDependencyScan(cwd) : null
 
-  const controllerMethods = await parseControllerMethods(cwd, findings)
+  const { methods: controllerMethods, collisions, unreadableFiles } = await parseControllerMethods(cwd)
+  for (const collision of collisions) {
+    findings.push(controllerCollisionFinding(collision))
+  }
+  // A controller that would not open is judged against no body at all, which
+  // is a pass for every rule below. Reported so it cannot read as one.
+  for (const filePath of unreadableFiles) {
+    findings.push(
+      finding(
+        `controller-unreadable:${filePath}`,
+        `${filePath} unreadable`,
+        'warn',
+        `${filePath} could not be read, so the validation, authentication, and annotation rules saw no `
+        + 'body for any action it declares.',
+        `Check the file's permissions and that it still exists, then re-run: bunx guren audit`,
+        filePath,
+      ),
+    )
+  }
 
   const routesAnalyzed = await auditRoutes(cwd, options.routesFile, controllerMethods, findings)
   auditForceWrites(controllerMethods, findings)
@@ -496,127 +380,23 @@ function applyIgnoreEntries(
 
 // --- Route-level checks ---
 
-interface ControllerMethodInfo {
-  body: string
-  filePath: string
-}
-
 /**
- * Method bodies below are judged with regexes (VALIDATE_BODY_PATTERN,
- * AUTH_CALL_PATTERN, BODY_ACCESS_PATTERN, FORCE_WRITE_PATTERN), which cannot
- * tell live code from a commented-out line, a string that merely mentions an
- * API, JSX text, or a type-only declaration. A commented
- * `// await this.validateBody(...)` must not count as validation, a
- * `forceCreate` inside an error message must not warn, and neither must a
- * local `type Decoy = { validateBody(): void }` nested in the method body —
- * TS allows local type/interface declarations inside a function, and their
- * member signatures read exactly like the runtime call the regexes look for.
- * Blank comments, string/regex/JSX-text contents, template quasis, and whole
- * type-alias/interface declarations (never executable, so blanking the full
- * range is always safe) with spaces — offsets are preserved, so method-body
- * slices taken from the result line up with the original AST positions.
- * Template *expressions* are kept: they are live code.
+ * A same-named controller class in two files. The scan reports it (see
+ * `controller-methods.ts`); the audit fails on it, because every route-level
+ * verdict below is drawn from whichever file was scanned last and may
+ * therefore describe the other class entirely.
  */
-function blankCommentsAndStrings(source: string, ast: File): string {
-  const ranges: [number, number][] = []
-  for (const comment of ast.comments ?? []) {
-    if (typeof comment.start === 'number' && typeof comment.end === 'number') {
-      ranges.push([comment.start, comment.end])
-    }
-  }
-  walk(ast.program, (node) => {
-    const { type, start, end } = node
-    if (typeof start !== 'number' || typeof end !== 'number') return
-    if (type === 'StringLiteral' || type === 'DirectiveLiteral') {
-      ranges.push([start + 1, end - 1])
-    } else if (type === 'TemplateElement' || type === 'RegExpLiteral' || type === 'JSXText') {
-      ranges.push([start, end])
-    } else if (type === 'TSTypeAliasDeclaration' || type === 'TSInterfaceDeclaration') {
-      // Blank the whole declaration and stop descending — it contributes no
-      // runtime code, so there is nothing further inside worth walking.
-      ranges.push([start, end])
-      return false
-    }
-  })
-  if (ranges.length === 0) return source
-
-  // split('') keeps UTF-16 code-unit indexing — Babel offsets are code units,
-  // and a code-point spread would shift everything after an astral character.
-  const chars = source.split('')
-  for (const [start, end] of ranges) {
-    for (let i = start; i < end && i < chars.length; i++) {
-      if (chars[i] !== '\n') chars[i] = ' '
-    }
-  }
-  return chars.join('')
-}
-
-/**
- * Map of `ClassName.method` → method body source, for every controller in
- * app/Http/Controllers (module-aware — see discoverControllerFiles).
- *
- * The map is keyed by class name alone, with no file/module namespacing —
- * routes only carry `route.controller.name` (the class's runtime `.name`),
- * not an import path, so route-level checks below have no way to
- * disambiguate two same-named controllers in different modules. A flat
- * app/Http/Controllers/ directory can't produce this collision (the
- * filesystem itself enforces unique file names), but two modules each
- * scaffolding their own e.g. `PostController` legitimately can. When that
- * happens, findings for BOTH controllers' routes are checked against
- * whichever file was discovered last — a validated action in one module can
- * make an unsafe, same-named one in another module read as "pass". Push a
- * `fail` finding so this isn't silently wrong; renaming one class is the
- * fix (there's no reliable way to disambiguate further without threading
- * source-file identity through Router/RouteDefinition, a larger change).
- */
-async function parseControllerMethods(cwd: string, findings: AuditFinding[]): Promise<Map<string, ControllerMethodInfo>> {
-  const methods = new Map<string, ControllerMethodInfo>()
-  const classFiles = new Map<string, string>()
-  const controllerFiles = await discoverControllerFiles(cwd)
-
-  for (const filePath of controllerFiles) {
-    const source = await readFile(filePath, 'utf-8')
-    const relPath = relative(cwd, filePath)
-
-    const ast = parseSourceFile(source, filePath)
-    if (!ast) continue
-    const scrubbed = blankCommentsAndStrings(source, ast)
-
-    for (const node of ast.program.body) {
-      const classDecl = extractClassDeclaration(node)
-      if (!classDecl) continue
-      const className = classDecl.id?.name ?? classNameFromPath(filePath)
-
-      const previousFile = classFiles.get(className)
-      if (previousFile && previousFile !== relPath) {
-        findings.push(
-          finding(
-            `controller-name-collision:${className}`,
-            `${className} name collision`,
-            'fail',
-            `${className} is declared in both ${previousFile} and ${relPath} — route-level auth/validation `
-            + `checks for both controllers are checked against whichever file was scanned last, since routes `
-            + `only carry the class name, not its file. Findings for one may silently apply to the other.`,
-            `Rename one of the two ${className} classes so controller class names are unique across the app.`,
-          ),
-        )
-      }
-      classFiles.set(className, relPath)
-
-      for (const member of classDecl.body.body) {
-        if (member.type === 'ClassMethod' && member.key.type === 'Identifier') {
-          const start = member.body.start ?? 0
-          const end = member.body.end ?? 0
-          methods.set(`${className}.${member.key.name}`, {
-            body: scrubbed.slice(start, end),
-            filePath: relPath,
-          })
-        }
-      }
-    }
-  }
-
-  return methods
+function controllerCollisionFinding(collision: ControllerNameCollision): AuditFinding {
+  const { className, previousFile, currentFile } = collision
+  return finding(
+    `controller-name-collision:${className}`,
+    `${className} name collision`,
+    'fail',
+    `${className} is declared in both ${previousFile} and ${currentFile} — route-level auth/validation `
+    + `checks for both controllers are checked against whichever file was scanned last, since routes `
+    + `only carry the class name, not its file. Findings for one may silently apply to the other.`,
+    `Rename one of the two ${className} classes so controller class names are unique across the app.`,
+  )
 }
 
 /**
@@ -627,8 +407,6 @@ async function parseControllerMethods(cwd: string, findings: AuditFinding[]): Pr
  * trusted server-side values only. Static analysis cannot prove data flow,
  * so this is a review prompt (warn), never a fail.
  */
-const FORCE_WRITE_PATTERN = /\bforce(Create|Update)\s*\(/
-
 function auditForceWrites(controllerMethods: Map<string, ControllerMethodInfo>, findings: AuditFinding[]): void {
   for (const [methodKey, info] of controllerMethods) {
     if (!FORCE_WRITE_PATTERN.test(info.body)) continue
@@ -705,6 +483,8 @@ async function auditRoutes(
       ? `${route.controller.name}.${route.controller.action}`
       : undefined
     const methodInfo = controllerKey ? controllerMethods.get(controllerKey) : undefined
+    /** RFC 0016: the route is declared as an agent tool, which tightens rules below. */
+    const agentExposed = Boolean(route.agent)
 
     // 1. Input validation on body-carrying routes
     if (bodyCarrying) {
@@ -774,14 +554,24 @@ async function auditRoutes(
           ),
         )
       } else {
+        // An unanalyzable handler is a warn for an ordinary route and a fail
+        // for an agent-exposed one (RFC 0016 §13): the same unknown carries a
+        // different cost once a tool advertises the endpoint, because the
+        // caller is an autonomous agent composing payloads from a schema
+        // rather than a form the app itself rendered. Escalated in place
+        // rather than under a new key, so an existing config/audit.ts entry
+        // for this route keeps applying and the route is reported once.
         findings.push(
           finding(
             `validation:${routeLabel}`,
             routeLabel,
-            'warn',
-            route.controller
+            agentExposed ? 'fail' : 'warn',
+            (route.controller
               ? `Controller source for ${controllerKey} could not be analyzed — route body schemas are type-only for controller actions.`
-              : 'Handler source could not be analyzed and no body schema is attached.',
+              : 'Handler source could not be analyzed and no body schema is attached.')
+            + (agentExposed
+              ? ' The route is exposed as an agent tool, so nothing between the agent and the handler validates the payload.'
+              : ''),
             route.controller
               ? `Ensure ${controllerKey} calls this.validateBody(schema).`
               : 'Attach a body schema to the route, or validate the payload inside the handler.',
@@ -858,6 +648,45 @@ async function auditRoutes(
             `Mutating route has no authentication check${controllerKey ? ` (${controllerKey})` : ''}.`,
             "Wrap the route in router.middleware('auth').group(...) or call this.auth.userOrFail() in the controller.",
             methodInfo?.filePath,
+          ),
+        )
+      }
+    }
+
+    // 3. Annotation honesty (RFC 0016 §5.5). `destructiveHint: false` is the
+    // strong claim "additive updates only" — clients present such a tool as
+    // safe to call unattended, so an action that deletes behind it is a
+    // false statement about what the agent is authorizing. Only an explicit
+    // `false` is judged: the MCP spec's default for a non-read-only tool is
+    // already `true`, so an absent hint claims nothing.
+    if (route.agent?.destructiveHint === false) {
+      // An unread body is reported, not passed over. The escalation above
+      // states the rule this must not contradict twenty lines later: for an
+      // agent-exposed route, an unknown is a finding rather than silence.
+      if (!methodInfo) {
+        findings.push(
+          finding(
+            `agent-annotation:${routeLabel}`,
+            routeLabel,
+            'warn',
+            `The route declares destructiveHint: false, and the handler body that claim would be checked `
+            + `against could not be analyzed${controllerKey ? ` (${controllerKey})` : ''}.`,
+            'Ensure the action is among the controller sources the audit reads, or drop destructiveHint: false '
+            + '— the spec default for a non-read-only tool is destructive.',
+          ),
+        )
+      } else if (mutatesRecords(methodInfo.body)) {
+        findings.push(
+          finding(
+            `agent-annotation:${routeLabel}`,
+            routeLabel,
+            'warn',
+            `The route declares destructiveHint: false, but ${controllerKey} deletes, updates, or force-writes `
+            + 'records. Clients read that hint as "additive updates only" and may run the tool without asking '
+            + 'the user first.',
+            `Drop destructiveHint: false from the route's agent metadata (the spec default for a non-read-only `
+            + `tool is destructive), or move the state change out of ${controllerKey}.`,
+            methodInfo.filePath,
           ),
         )
       }

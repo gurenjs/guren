@@ -7,6 +7,7 @@ import { ValidationException } from '../errors/exceptions/ValidationException'
 import type { ValidationSchema } from '../http/middleware/validation'
 import { capabilitiesOf, mergeCapabilities, type MiddlewareCapabilities } from '../http/middleware/capabilities'
 import { trimSlashes } from '../support/trim-slashes'
+import { extractPathParamNames, PATH_PARAM_PATTERN } from '../internal/route-path'
 
 /**
  * Constructor type for Controller classes.
@@ -188,6 +189,8 @@ export interface RouteContractOptions<
    * and expose the record to the controller via `this.model(Post)`.
    */
   bind?: Record<string, RouteModelBinding>
+  /** Agent exposure metadata (RFC 0016). See {@link AgentRouteMetadata}. */
+  agent?: AgentRouteMetadata
 }
 
 export interface RouteOpenApiMetadata {
@@ -196,6 +199,51 @@ export interface RouteOpenApiMetadata {
   tags?: string[]
   operationId?: string
   deprecated?: boolean
+}
+
+/**
+ * Agent exposure metadata for a route (RFC 0016). Declaring it marks the
+ * route as an agent tool; everything else about the tool — its input schema,
+ * output schema, authorization — is derived from the contracts the route
+ * already carries, never restated here.
+ *
+ * Storage only: no defaults are applied at registration, and the router does
+ * not require a route name here — `.agent()` may legally be chained before
+ * `.name()`, so name-requirement enforcement is deliberately left to static
+ * checks over `definitions()` (a route without a name cannot become a tool;
+ * the name is the tool's identity).
+ */
+export interface AgentRouteMetadata {
+  /** Tool description. Absent, the route's OpenAPI `description` ?? `summary` stands in. */
+  description?: string
+  /** Tool name override. Defaults to the route name, used verbatim. */
+  toolName?: string
+  /** Protocol surfaces this tool appears on. Unset surfaces count as exposed. */
+  expose?: { mcp?: boolean; webMcp?: boolean }
+  /** MCP ToolAnnotations override: the tool does not modify its environment. Unset: GET/QUERY routes read-only. */
+  readOnlyHint?: boolean
+  /** MCP ToolAnnotations override. `false` is the strong claim "additive updates only"; unset keeps the spec default (true for non-read-only tools). */
+  destructiveHint?: boolean
+  /** MCP ToolAnnotations override: repeat calls with the same arguments have no additional effect. Unset: PUT/DELETE routes idempotent. */
+  idempotentHint?: boolean
+  /** Route invocations through an agent surface require server-side approval. */
+  approval?: 'required'
+  /** Argument fields masked in agent audit logs. */
+  redact?: string[]
+}
+
+/**
+ * One immutable snapshot of agent metadata, taken when the metadata is
+ * attached and again when `definitions()` hands it out — so neither a caller
+ * mutating its options object after registration nor a consumer mutating a
+ * definition can change the agent metadata the router actually holds. The
+ * claim is scoped to this field: other definition fields (`schemas`, the
+ * spread OpenAPI metadata) alias the registry. Plain data end to end, so
+ * `structuredClone` keeps future nested fields covered without a
+ * hand-maintained field list.
+ */
+function cloneAgentMetadata(metadata: AgentRouteMetadata): AgentRouteMetadata {
+  return structuredClone(metadata)
 }
 
 interface RegisteredRoute {
@@ -217,6 +265,7 @@ interface RegisteredRoute {
   resource?: ResourceResponseHint
   openapi?: RouteOpenApiMetadata
   bindings?: Map<string, ModelBinding>
+  agent?: AgentRouteMetadata
 }
 
 /**
@@ -263,6 +312,11 @@ export interface RouteDefinition {
   }
   /** Route model bindings: param name → bound model class name (from `bind`) */
   bindings?: Record<string, string>
+  /**
+   * Agent exposure metadata as declared (RFC 0016) — raw, no defaults
+   * applied. Absence means the route is not an agent tool.
+   */
+  agent?: AgentRouteMetadata
   summary?: string
   description?: string
   tags?: string[]
@@ -279,6 +333,8 @@ export interface RouteBuilder<M extends string = never> {
   name(routeName: string): RouteBuilder<M>
   /** Attach middleware to this specific route. See {@link RouteMiddlewareInput}. */
   middleware(...items: RouteMiddlewareInput<M>[]): RouteBuilder<M>
+  /** Expose this route as an agent tool (RFC 0016). See {@link AgentRouteMetadata}. */
+  agent(metadata: AgentRouteMetadata): RouteBuilder<M>
 }
 
 /**
@@ -357,6 +413,14 @@ export interface ResourceRouteOptions {
   param?: string
   only?: ResourceAction[]
   except?: ResourceAction[]
+  /**
+   * Per-action agent exposure (RFC 0016). An action not listed here is not
+   * exposed as a tool — deny by default, no `destroy: false` spelling needed.
+   * Listing an action this call does not register (excluded via `only`/
+   * `except`, or missing from the controller) throws: metadata for a tool
+   * that cannot exist is a wiring mistake, not a no-op.
+   */
+  agent?: Partial<Record<ResourceAction, AgentRouteMetadata>>
 }
 
 /**
@@ -639,18 +703,44 @@ export class Router<M extends string = never> {
   ): this {
     const baseName = options.name ?? path.replace(/^\//u, '').replace(/\//gu, '.')
     const paramName = options.param ?? 'id'
-    const { only, except } = options
+    const { only, except, agent } = options
 
-    for (const { method, suffix, httpMethod } of RESOURCE_ACTIONS) {
+    // The registration predicate is pure, so it runs once up front. That
+    // keeps the orphan check *before* any mutation: a rejected resource()
+    // leaves the router exactly as it was, never holding half its routes.
+    const registrable = new Set<ResourceAction>()
+    for (const { method } of RESOURCE_ACTIONS) {
       if (only && !only.includes(method)) continue
       if (except?.includes(method)) continue
+      if (typeof (controller.prototype as Record<string, unknown>)[method] === 'function') {
+        registrable.add(method)
+      }
+    }
+
+    if (agent) {
+      // An explicitly-undefined value (`destroy: enabled ? meta : undefined`)
+      // is not a declaration — only real metadata for an unregistrable action
+      // is a wiring mistake.
+      const orphaned = (Object.keys(agent) as ResourceAction[])
+        .filter((action) => agent[action] !== undefined && !registrable.has(action))
+      if (orphaned.length > 0) {
+        throw new Error(
+          `Router.resource('${path}'): agent metadata declared for ${orphaned.map((a) => `"${a}"`).join(', ')}, `
+            + 'but no such route was registered (excluded via only/except, or missing from the controller). '
+            + 'Agent metadata for a tool that cannot exist is a wiring mistake.',
+        )
+      }
+    }
+
+    for (const { method, suffix, httpMethod } of RESOURCE_ACTIONS) {
+      if (!registrable.has(method)) continue
 
       const actualSuffix = suffix.replace(':param', `:${paramName}`)
       const routePath = path + actualSuffix
 
-      if (typeof (controller.prototype as Record<string, unknown>)[method] === 'function') {
-        this[httpMethod](routePath, [controller, method as ControllerMethodFor<C>]).name(`${baseName}.${method}`)
-      }
+      const builder = this[httpMethod](routePath, [controller, method as ControllerMethodFor<C>]).name(`${baseName}.${method}`)
+      const agentMetadata = agent?.[method]
+      if (agentMetadata) builder.agent(agentMetadata)
     }
 
     return this
@@ -683,12 +773,13 @@ export class Router<M extends string = never> {
   }
 
   definitions(): RouteDefinition[] {
-    return this.registry.map(({ method, path, name, schemas, resource, openapi, routeMiddlewareNames, middlewares, scopedMiddlewares, handler, bindings }) => ({
+    return this.registry.map(({ method, path, name, schemas, resource, openapi, routeMiddlewareNames, middlewares, scopedMiddlewares, handler, bindings, agent }) => ({
       method,
       path,
       name,
       schemas,
       resource: serializeResourceHint(resource),
+      agent: agent ? cloneAgentMetadata(agent) : undefined,
       middlewareNames: [...routeMiddlewareNames],
       // Route-local only, so a group-scoped handler does not make every route
       // in the group report middleware it never attached (`guren audit` warns
@@ -867,6 +958,9 @@ function applyRouteContract(route: RegisteredRoute, options: RouteContractOption
     route.bindings = new Map(
       Object.entries(options.bind).map(([param, binding]) => [param, normalizeModelBinding(binding)]),
     )
+  }
+  if (options.agent) {
+    route.agent = cloneAgentMetadata(options.agent)
   }
 }
 
@@ -1081,25 +1175,21 @@ function createRouteBuilder<M extends string = never>(route: RegisteredRoute, na
       route.middlewares.push(...handlers)
       return this
     },
+    agent(metadata: AgentRouteMetadata): RouteBuilder<M> {
+      // Refuse a second declaration rather than replacing or merging: a
+      // wholesale replace silently drops security-relevant fields the first
+      // declaration carried (approval, redact), and merge semantics would be
+      // just as easy to weaken by accident. One route, one declaration.
+      if (route.agent) {
+        throw new Error(
+          `Route ${route.method} ${route.path} already carries agent metadata `
+            + '(declared via route options or an earlier .agent() call). Declare it once.',
+        )
+      }
+      route.agent = cloneAgentMetadata(metadata)
+      return this
+    },
   }
-}
-
-// Mirrors Hono's path lexing: a param starts only at a segment boundary
-// (`/status/foo:bar` is a literal), an attached regex constraint is consumed
-// whole (`{[0-9]{2}}` and `{[^/]{2}}` stay intact), and a trailing `?`/`*`
-// modifier belongs to the token. One pattern serves substitution and both
-// binding scanners below, so the lexing rule cannot drift between them.
-//
-// The constraint is spelled out to one level of nesting rather than with a
-// nested quantifier: every class here excludes both braces, so a scan stops
-// at the next brace instead of running to the end of the string. The
-// `\{[^}]*\}(?:[^/]*\})*` shape it replaces was quadratic (CodeQL
-// js/polynomial-redos; measured 2.9s for a 16k-char path, vs 1.9ms here).
-const PATH_PARAM_PATTERN = /(^|\/):([A-Za-z0-9_-]+\*?)(?:\{[^{}]*\{[^{}]*\}[^{}]*\}|\{[^{}]*\})?\??/gu
-
-/** Param labels in path order, with constraints and modifiers dropped. */
-function extractPathParamNames(path: string): string[] {
-  return Array.from(path.matchAll(PATH_PARAM_PATTERN), (match) => match[2]!)
 }
 
 function substituteParams(path: string, params: Record<string, string | number>): string {
@@ -1483,6 +1573,15 @@ function serializeResourceHint(hint: ResourceResponseHint | undefined): Resource
     return hint.name || undefined
   }
 
+  // Nothing validates the hint at runtime, so a value outside the type is
+  // reachable and voids the hint like an unnamed class does. A primitive has to
+  // be rejected before `Object.entries`, which turns a string into an infinite
+  // recursion (every character is itself a one-character string) and throws on
+  // `null`.
+  if (typeof hint !== 'object' || hint === null) {
+    return undefined
+  }
+
   // Array.isArray does not narrow the readonly tuple member of the union
   // (it is not assignable to `any[]`), so without the assertion the tuple
   // would fall through to the Object.entries path and serialize as
@@ -1490,6 +1589,14 @@ function serializeResourceHint(hint: ResourceResponseHint | undefined): Resource
   if (Array.isArray(hint)) {
     const inner = serializeResourceHint((hint as readonly ResourceResponseHint[])[0])
     return inner === undefined ? undefined : [inner]
+  }
+
+  // Only an envelope literal is left. A class instance enumerates to nothing
+  // through `Object.entries`, so without this it would serialize to `{}` — a
+  // response shape the server never sends.
+  const proto = Object.getPrototypeOf(hint)
+  if (proto !== Object.prototype && proto !== null) {
+    return undefined
   }
 
   const entries: Array<[string, ResourceResponseShape]> = []
@@ -1520,6 +1627,7 @@ function isRouteContractOptions(value: unknown): value is RouteContractOptions<S
     || 'bind' in value
     || 'name' in value
     || 'middlewares' in value
+    || 'agent' in value
     || 'summary' in value
     || 'description' in value
     || 'tags' in value

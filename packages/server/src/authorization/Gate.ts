@@ -11,8 +11,7 @@ import type {
   ResponseBuilder,
 } from './types'
 import { AuthorizationException, HttpException } from '../errors'
-import { AUTH_CONTEXT_KEY } from '../http/middleware/auth'
-import type { AuthContext } from '../auth/types'
+import { getAuthContext } from '../auth/context'
 
 /**
  * Response builder for authorization checks.
@@ -206,9 +205,10 @@ export class Gate {
     // carries a manually-set user), letting authorizeMiddleware pass where
     // requireAuthenticated denies (RFC 0016). The legacy fallback survives
     // only for requests with no auth context at all.
-    // Duck-typed on purpose: test doubles and exotic contexts may return
-    // arbitrary values for unknown keys.
-    const auth = ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
+    // Duck-typed on purpose: ctx.get returns arbitrary values for unknown
+    // keys, and here that answer decides whether the fallback below runs at
+    // all. getAuthContext deliberately does not probe — see its contract.
+    const auth = getAuthContext(ctx)
     if (auth && typeof auth.user === 'function') {
       return ((await auth.user()) as AuthUser | null) ?? null
     }

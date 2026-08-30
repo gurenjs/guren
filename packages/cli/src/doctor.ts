@@ -24,6 +24,7 @@ import {
   planPageManifest,
   type PageManifestPlan,
 } from './pages-types'
+import { AGENTS_MANIFEST_FILE, planAgentManifest, type AgentManifestPlan } from './agents-types'
 import { extractClassDeclaration } from './model-parser'
 import { parseSourceFile } from './parse-cache'
 import { ROUTES_ENTRY_CANDIDATES } from './route-registrar'
@@ -118,6 +119,11 @@ interface DoctorRuleContext {
   // snapshot of the filesystem — computing it per-rule would let concurrent
   // rules disagree if a page file were added or removed mid-run.
   pageManifest: Promise<PageManifestPlan>
+  // Whether codegen would write `.guren/agents.gen.ts`, and whether one on
+  // disk is stale (RFC 0016). Shared for the same reason as the pages plan —
+  // and computed once because, unlike that one, it may load the app's route
+  // graph (only for apps that have a manifest or mention agent metadata).
+  agentManifest: Promise<AgentManifestPlan>
 }
 
 interface DoctorRule {
@@ -134,7 +140,87 @@ type JsonReadResult<T> =
 
 const APP_ENTRY_CANDIDATES = ['src/main.ts', 'src/main.mts', 'src/main.js', 'src/main.mjs']
 const PAGE_CONTRACT_CANDIDATES = [PAGES_MANIFEST_FILE]
-const GENERATED_FILES = ['.guren/routes.gen.ts', PAGES_MANIFEST_FILE, '.guren/data.gen.ts', '.guren/api-client.gen.ts', '.guren/channels.gen.ts']
+const GENERATED_FILES = [
+  '.guren/routes.gen.ts',
+  PAGES_MANIFEST_FILE,
+  '.guren/data.gen.ts',
+  '.guren/api-client.gen.ts',
+  '.guren/channels.gen.ts',
+]
+
+/**
+ * The agent manifest's rule (RFC 0016). Separate from the generic one because
+ * its expectation runs in both directions: codegen writes
+ * `.guren/agents.gen.ts` only for apps that derive at least one tool, and
+ * deletes it otherwise — so an existing file can itself be the finding. Both
+ * findings name the same command, which is what keeps them clearable.
+ */
+function createAgentManifestRule(): DoctorRule {
+  const key = `generated:${AGENTS_MANIFEST_FILE}`
+
+  return {
+    key,
+    title: AGENTS_MANIFEST_FILE,
+    async detect(context) {
+      const plan = await context.agentManifest
+
+      if (plan.reason === 'unreadable') {
+        return createCheck(
+          key,
+          AGENTS_MANIFEST_FILE,
+          'warn',
+          `Could not tell whether ${AGENTS_MANIFEST_FILE} is needed: the route graph failed to load (${plan.loadError}).`,
+          {
+            fix: 'Fix the route graph, then run `guren doctor` again.',
+            manualFix: 'Fix the route graph, then run `guren doctor` again.',
+          },
+        )
+      }
+
+      if (plan.staleManifest) {
+        return createCheck(
+          key,
+          AGENTS_MANIFEST_FILE,
+          'warn',
+          `${AGENTS_MANIFEST_FILE} describes agent tools this app no longer exposes — no route derives one.`,
+          {
+            fix: `Run \`guren codegen --force\` to remove ${AGENTS_MANIFEST_FILE}.`,
+            manualFix: `Run \`guren codegen --force\` to remove ${AGENTS_MANIFEST_FILE}.`,
+          },
+        )
+      }
+
+      if (plan.reason === 'no-tools') {
+        return createCheck(
+          key,
+          AGENTS_MANIFEST_FILE,
+          'pass',
+          `No routes declare agent metadata; ${AGENTS_MANIFEST_FILE} is not applicable.`,
+        )
+      }
+
+      if (await fileExists(context.cwd, AGENTS_MANIFEST_FILE)) {
+        return createCheck(
+          key,
+          AGENTS_MANIFEST_FILE,
+          'pass',
+          `Generated manifest present at ${AGENTS_MANIFEST_FILE} (${plan.toolCount} ${plan.toolCount === 1 ? 'tool' : 'tools'}).`,
+        )
+      }
+
+      return createCheck(
+        key,
+        AGENTS_MANIFEST_FILE,
+        'warn',
+        `Missing generated manifest ${AGENTS_MANIFEST_FILE}.`,
+        {
+          fix: `Run \`guren codegen --force\` to regenerate ${AGENTS_MANIFEST_FILE}.`,
+          manualFix: `Run \`guren codegen --force\` to regenerate ${AGENTS_MANIFEST_FILE}.`,
+        },
+      )
+    },
+  }
+}
 
 export const DOCTOR_RECOMMENDED_COMMANDS = [
   'bunx guren codegen --force',
@@ -374,6 +460,7 @@ function createGeneratedManifestRule(generatedFile: string): DoctorRule {
           `No Inertia pages detected; ${generatedFile} is not applicable.`,
         )
       }
+
 
       return createCheck(
         key,
@@ -1261,6 +1348,7 @@ const doctorRules: DoctorRule[] = [
   { key: 'routes', title: 'Route Sources', detect: detectRoutes },
   { key: 'page-contracts', title: 'Page Types', detect: detectPageContracts },
   ...GENERATED_FILES.map((generatedFile) => createGeneratedManifestRule(generatedFile)),
+  createAgentManifestRule(),
   { key: 'tsconfig', title: 'TypeScript Config', detect: detectTsconfig, autofix: createTsconfigAutofix },
   { key: 'tsconfig-alias', title: 'Path Alias', detect: detectTsconfigAlias, autofix: createTsconfigAliasAutofix },
   { key: 'bootstrap', title: 'Bootstrap Style', detect: detectBootstrap },
@@ -1271,12 +1359,35 @@ const doctorRules: DoctorRule[] = [
   { key: 'plugin-compatibility', title: 'Plugin Compatibility', detect: detectPluginCompatibility },
 ]
 
-export async function getDoctorRuleEvaluations(options: { cwd?: string } = {}): Promise<{
+/**
+ * The manifest plans a doctor run needs, started once and awaited wherever
+ * they are used.
+ *
+ * Both are expensive for different reasons — the pages plan walks the pages
+ * directory, the agent plan may evaluate the app's whole module graph and
+ * derive every tool — and both are asked for twice in a `doctor --next` run:
+ * once by the rules, once by the next-step suggestions. Sharing the promises
+ * is what keeps that a single computation; each is a promise rather than an
+ * awaited value so a run that never reaches a consumer never pays for it.
+ */
+export interface DoctorManifestPlans {
+  pageManifest: Promise<PageManifestPlan>
+  agentManifest: Promise<AgentManifestPlan>
+}
+
+function createManifestPlans(cwd: string): DoctorManifestPlans {
+  return { pageManifest: planPageManifest(cwd), agentManifest: planAgentManifest(cwd) }
+}
+
+export async function getDoctorRuleEvaluations(
+  options: { cwd?: string } = {},
+  plans?: DoctorManifestPlans,
+): Promise<{
   cwd: string
   evaluations: DoctorRuleEvaluation[]
 }> {
   const cwd = resolve(options.cwd ?? process.cwd())
-  const context: DoctorRuleContext = { cwd, pageManifest: planPageManifest(cwd) }
+  const context: DoctorRuleContext = { cwd, ...(plans ?? createManifestPlans(cwd)) }
 
   // The deploy-runtime checks share one filesystem scan, computed once here
   // rather than through the DoctorRule interface (they need no autofix and no
@@ -1305,7 +1416,10 @@ export async function getDoctorRuleEvaluations(options: { cwd?: string } = {}): 
 }
 
 export async function runDoctor(options: RunDoctorOptions = {}): Promise<DoctorReport> {
-  const { cwd, evaluations } = await getDoctorRuleEvaluations({ cwd: options.cwd })
+  // One memo for the whole run: the rules and `--next` both read these plans,
+  // and the agent one can evaluate the app's module graph.
+  const plans = createManifestPlans(resolve(options.cwd ?? process.cwd()))
+  const { cwd, evaluations } = await getDoctorRuleEvaluations({ cwd: options.cwd }, plans)
   const checks = evaluations.map((evaluation) => evaluation.check)
   const fixableChecks = checks.filter((check) => check.status !== 'pass' && Boolean(check.canAutofix))
   const manualChecks = checks.filter((check) => check.status !== 'pass' && !check.canAutofix)
@@ -1321,7 +1435,7 @@ export async function runDoctor(options: RunDoctorOptions = {}): Promise<DoctorR
   }
 
   if (options.next) {
-    report.nextSteps = await suggestNextSteps({ cwd })
+    report.nextSteps = await suggestNextSteps({ cwd }, plans)
   }
 
   if (options.json) {
@@ -1366,8 +1480,14 @@ export function buildJsonOutput(report: DoctorReport): DoctorJsonOutput {
   }
 }
 
-export async function suggestNextSteps(options: { cwd?: string } = {}): Promise<NextStep[]> {
+export async function suggestNextSteps(
+  options: { cwd?: string } = {},
+  plans?: DoctorManifestPlans,
+): Promise<NextStep[]> {
   const cwd = resolve(options.cwd ?? process.cwd())
+  // Optional so a standalone caller (the MCP tool) still works; supplied by
+  // `runDoctor`, where the rules have already started these.
+  const manifestPlans = plans ?? createManifestPlans(cwd)
   const steps: NextStep[] = []
   let priority = 1
 
@@ -1468,14 +1588,19 @@ export async function suggestNextSteps(options: { cwd?: string } = {}): Promise<
     // Ignore
   }
 
-  const pagesPlan = await planPageManifest(cwd)
+  const [pagesPlan, agentPlan] = await Promise.all([manifestPlans.pageManifest, manifestPlans.agentManifest])
   const requiredManifests = [
     '.guren/routes.gen.ts',
     ...(pagesPlan.reason === 'pages' ? [PAGES_MANIFEST_FILE] : []),
     '.guren/data.gen.ts',
+    // Conditional, like the pages manifest, and on the derivation rather than
+    // on a route file mentioning `.agent()` — an app that derives no tool is
+    // not missing a manifest.
+    ...(agentPlan.reason === 'tools' ? [AGENTS_MANIFEST_FILE] : []),
     '.guren/api-client.gen.ts',
   ]
-  let missingManifests = false
+  // A stale agent manifest is the same next step: codegen removes it.
+  let missingManifests = agentPlan.staleManifest
   for (const manifest of requiredManifests) {
     if (!(await fileExists(cwd, manifest))) {
       missingManifests = true

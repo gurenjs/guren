@@ -68,7 +68,8 @@ under the managed locations that the current harness no longer writes;
 added to `.claude/skills/` or `.agents/skills/`, are never touched unless they
 sit under a name the harness itself ships — the claim is by name, so avoid the
 canonical skill names (`dev-workflow`, `db-manage`, `scaffold`, `feature`,
-`guren-api`, `plugin-authoring`) and the shipped rule filenames for your own.
+`guren-api`, `plugin-authoring`, `agent-interface`) and the shipped rule
+filenames for your own.
 
 ## The loop the harness expects
 

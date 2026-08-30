@@ -119,8 +119,20 @@ Implementation notes (the non-obvious parts):
 
 **One Zod → JSON Schema rule.** The existing walker in `@guren/openapi`
 (`toOpenApiSchema`, OpenAPI 3.1 = JSON Schema 2020-12) is promoted to a shared
-internal module (`packages/core/src/internal/zod-json-schema.ts`, beside
-`zod-compat.ts`); ~~`@guren/openapi` re-exports it~~ **Amended in implementation:**
+internal module (~~`packages/core/src/internal/zod-json-schema.ts`, beside
+`zod-compat.ts`~~ **Amended in implementation:** `packages/server/src/internal/`,
+both files, with `@guren/core/internal/zod-compat` and
+`@guren/core/internal/zod-json-schema` kept as re-export shims so every consumer
+outside `@guren/server` keeps writing the core specifier. The reason is build
+order, not layering: `@guren/core`'s index is `export * from '@guren/server'`, so
+core builds *after* server and a server module importing a core one closes a
+cycle — server's declaration build runs `tsc -p tsconfig.build.json` with
+`paths: {}` and full checking, so it would look for a core `dist/` that does not
+exist yet. Since §8 places `deriveAgentTools` in `@guren/server`, the one rule
+has to live in the package both it and the OpenAPI generator can see. The
+precedent is `@guren/server/support/expiry`, re-exported by core's
+`store-utils.ts` for the same reason);
+~~`@guren/openapi` re-exports it~~ **Amended in implementation:**
 `@guren/openapi` *imports* it and re-exports nothing. Re-exporting would publish an
 internal module through a package's stable index, which is exactly the tier
 `contributing/api-stability.md` says it must not reach — the walker stays behind one
@@ -173,11 +185,21 @@ Tool execution re-enters the application as a real HTTP request:
    body and validated by the route/controller as usual. Passing live Zod to the SDK
    would apply `coerce`/`default`/`transform` twice.
 3. **CSRF**: verification is skipped for requests that carry `Authorization: Bearer`
-   **and no session cookie**. CSRF defends cookie ambient authority; a cookie-less
-   request has none. The cookie condition matters because CSRF middleware runs before
-   auth context and cannot verify the bearer token — with it, a forged Bearer header
-   on a cookie-carrying (victim-browser) request is still verified. Cookie issuance
-   (`settleCookie`) is unchanged. No endpoint-specific CSRF exemption is needed.
+   **and ~~no session cookie~~ no `Cookie` header at all**. **Amended in
+   implementation:** the predicate is the raw `Cookie` header's absence, which is
+   both stricter and more robust than "no session cookie". The session cookie's
+   name is configuration owned by the session middleware mount and invisible to the
+   CSRF middleware, and the tempting refinement — keying on the *loaded* session —
+   is weaker on both edges: mounted before the session middleware it sees no
+   session and fails open for a cookie-carrying victim browser, and an intermediate
+   middleware writing one value into a fresh session turns a genuinely cookie-less
+   client into a 403. Ambient authority requires a cookie, so the header's absence
+   is proof by itself, independent of mount order; dispatch synthesizes cookie-less
+   bearer requests by construction, and a bearer request carrying any cookie simply
+   verifies as before. Bearer detection is the shared `readBearerToken()`, so this
+   rule and token authentication cannot disagree about what a bearer request is.
+   Cookie issuance (`settleCookie`) is unchanged. No endpoint-specific CSRF
+   exemption is needed.
 4. **Response mapping** to MCP results:
    - 2xx JSON → `structuredContent` (when an outputSchema is advertised) + serialized text content
    - 2xx Inertia page JSON → unwrapped to `page.props`, **only** for routes with no
@@ -247,9 +269,16 @@ Each feature maps to a measured failure mode of the MCP ecosystem.
    - `guren token:issue --tools 'posts.*' --read-only --expires 30d`.
 2. **Default audit logging** (vs. "no approval workflow / no traceability"):
    every invocation — and every denial — is recorded (principal, tool, arguments,
-   status, duration, surface) with automatic redaction of sensitive argument names
+   ~~status, duration,~~ surface) with automatic redaction of sensitive argument names
    plus explicit `redact` metadata. Emitted as framework events (`AgentToolInvoked`,
    `AgentToolDenied`) so existing listeners can forward anywhere. `guren tool:log --tail`.
+   **Amended in implementation:** status and duration belong to *invocations* only.
+   An adapter-level denial (`auth`, `scope`, `approval`, `rate-limit`) refuses before
+   synthesizing the request, so no HTTP happened and there is no status to record —
+   `AgentToolDenied` carries a `reason` instead. A `Gate` policy denial is not a
+   denial event at all: policies evaluate inside the dispatched request, so it is an
+   `AgentToolInvoked` with status 403 — which is why the reason union has no
+   `'policy'` member.
 3. **Rate limits by default**: the App MCP endpoint ships rate-limited (key = token id;
    `CF-Connecting-IP` fallback on Workers), stricter defaults for write tools.
 4. **Approval queue and preflight**: `approval: 'required'` tools create a pending
@@ -331,7 +360,7 @@ tools to elicitation / Workflow approvals server-side.
 | Layer | Package |
 |---|---|
 | `.agent()`, metadata, `definitions()`, `deriveAgentTools`, guard/Gate work, CSRF rule, scope grammar, event types | `@guren/server` (auto-exported by `@guren/core`) |
-| Zod → JSON Schema walker | `packages/core/src/internal/` (not public API) |
+| Zod → JSON Schema walker | `packages/server/src/internal/`, re-exported by `@guren/core/internal/*` (not public API — see the §2 amendment) |
 | codegen, `tool:*` commands, `token:issue`, checks, audits | `@guren/cli` |
 | App MCP endpoint, audit-log implementation, approval queue | `@guren/plugin-mcp` |
 | WebMCP client | `@guren/plugin-webmcp` |
