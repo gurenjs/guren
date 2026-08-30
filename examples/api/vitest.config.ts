@@ -17,24 +17,16 @@ export default defineConfig({
         replacement: resolveFromRoot('../../packages/testing/src/index.ts'),
       },
       {
-        find: /^@guren\/testing\//,
-        replacement: resolveFromRoot('../../packages/testing/src/'),
+        find: /^@guren\/testing\/(.+)$/,
+        replacement: `${resolveFromRoot('../../packages/testing/src')}/$1`,
       },
       {
         find: /^@guren\/core$/,
         replacement: resolveFromRoot('../../packages/core/src/index.ts'),
       },
       {
-        find: /^@guren\/core\//,
-        replacement: resolveFromRoot('../../packages/core/src/'),
-      },
-      {
-        find: /^@guren\/core$/,
-        replacement: resolveFromRoot('../../packages/core/src/index.ts'),
-      },
-      {
-        find: /^@guren\/core\//,
-        replacement: resolveFromRoot('../../packages/core/src/'),
+        find: /^@guren\/core\/(.+)$/,
+        replacement: `${resolveFromRoot('../../packages/core/src')}/$1`,
       },
       {
         find: /^@guren\/orm$/,
@@ -49,24 +41,24 @@ export default defineConfig({
         replacement: resolveFromRoot('../../packages/orm/src/drizzle/$1.ts'),
       },
       {
-        find: /^@guren\/orm\//,
-        replacement: resolveFromRoot('../../packages/orm/src/'),
+        find: /^@guren\/orm\/(.+)$/,
+        replacement: `${resolveFromRoot('../../packages/orm/src')}/$1`,
       },
       {
         find: /^@guren\/inertia-client$/,
         replacement: resolveFromRoot('../../packages/inertia-client/src/index.ts'),
       },
       {
-        find: /^@guren\/inertia-client\//,
-        replacement: resolveFromRoot('../../packages/inertia-client/src/'),
+        find: /^@guren\/inertia-client\/(.+)$/,
+        replacement: `${resolveFromRoot('../../packages/inertia-client/src')}/$1`,
       },
       {
         find: /^@guren\/cli$/,
         replacement: resolveFromRoot('../../packages/cli/src/index.ts'),
       },
       {
-        find: /^@guren\/cli\//,
-        replacement: resolveFromRoot('../../packages/cli/src/'),
+        find: /^@guren\/cli\/(.+)$/,
+        replacement: `${resolveFromRoot('../../packages/cli/src')}/$1`,
       },
       {
         find: /^bun:sqlite$/,
@@ -77,8 +69,8 @@ export default defineConfig({
         replacement: resolveFromRoot('../../packages/core/src/index.ts'),
       },
       {
-        find: /^guren\//,
-        replacement: resolveFromRoot('../../packages/core/src/'),
+        find: /^guren\/(.+)$/,
+        replacement: `${resolveFromRoot('../../packages/core/src')}/$1`,
       },
     ],
   },
