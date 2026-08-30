@@ -53,6 +53,18 @@ export interface ControllerMethodScan {
 }
 
 /**
+ * The scan an app contributes when there is nothing to scan — no agent route
+ * names a controller, so no body exists for any rule to read. A shared
+ * constant rather than a literal at each call site, so "we skipped the scan"
+ * and "the scan found nothing" stay the same shape to every consumer.
+ */
+export const EMPTY_CONTROLLER_SCAN: ControllerMethodScan = {
+  methods: new Map(),
+  collisions: [],
+  unreadableFiles: [],
+}
+
+/**
  * What request data each member of `Controller` hands an action.
  *
  * The keys are the full public/protected method-and-getter surface of
@@ -191,36 +203,50 @@ export const AUTHORIZE_CALL_PATTERN = controllerMemberCall('authorize')
 export const INERTIA_CALL_PATTERN = controllerMemberCall('inertia')
 
 /**
- * A record deletion, for the annotation-honesty rules (RFC 0016 §5.5).
- *
- * Two shapes, both constrained the way `MODEL_ATTACH_PATTERN` in audit.ts is:
- * a model static (`Post.delete(...)`, `Post.forceDelete(...)`), which requires
- * a PascalCase receiver, and a terminated query chain
+ * A call to one of `names` on a model, in the two shapes a model call takes:
+ * a static on the class itself (`Post.delete(...)`), which requires a
+ * PascalCase receiver, and a terminated query chain
  * (`Post.where(...).delete()`), which requires the call to follow a closing
- * paren. Without those constraints every `map.delete(key)` and
- * `cache.delete(...)` in an action would read as a record deletion.
+ * paren — the same discipline `MODEL_ATTACH_PATTERN` in audit.ts applies.
+ *
+ * Without it, every `map.delete(key)` and `cache.update(...)` in an action
+ * would read as a database write. Kept as a factory because the alternative
+ * is the same skeleton retyped per verb, which is how two of them drift.
  */
-export const DELETE_CALL_PATTERN =
-  /\b[A-Z][A-Za-z0-9_]*\s*\.\s*(?:delete|forceDelete)\s*\(|\)\s*\.\s*(?:delete|forceDelete)\s*\(/
+function modelCallPattern(...names: string[]): RegExp {
+  const alternation = names.join('|')
+  return new RegExp(
+    `\\b[A-Z][A-Za-z0-9_]*\\s*\\.\\s*(?:${alternation})\\s*\\(`
+    + `|\\)\\s*\\.\\s*(?:${alternation})\\s*\\(`,
+  )
+}
+
+/** A record deletion, for the annotation-honesty rules (RFC 0016 §5.5). */
+export const DELETE_CALL_PATTERN = modelCallPattern('delete', 'forceDelete')
 
 /**
- * A record update, in the same two receiver-disciplined shapes as
- * {@link DELETE_CALL_PATTERN}. `.update(` is a common enough method name that
- * without those constraints a `state.update(...)` or `progress.update(...)`
- * in an action would read as a database write.
+ * A record update. `.update(` is a common enough method name that without the
+ * receiver discipline a `state.update(...)` or `progress.update(...)` in an
+ * action would read as a database write.
  */
-export const UPDATE_CALL_PATTERN =
-  /\b[A-Z][A-Za-z0-9_]*\s*\.\s*update\s*\(|\)\s*\.\s*update\s*\(/
+const UPDATE_CALL_PATTERN = modelCallPattern('update')
 
 /**
  * A write that bypasses mass-assignment protection. Read by the audit's
  * force-write heuristic and by the agent-route annotation rules, which count
  * it as state change alongside a deletion.
  *
- * The receiver is required. Without it the pattern matched any bare
- * occurrence of the name — including a *declaration*, so an action defining
- * its own `function forceUpdate() {}` helper triggered the warning about
- * calling one.
+ * Deliberately looser than {@link modelCallPattern}: any receiver will do, so
+ * `repository.forceCreate(...)` and `this.posts.forceUpdate(...)` match as
+ * well as `Post.forceCreate(...)`. `forceCreate`/`forceUpdate` are Guren ORM
+ * names distinctive enough that a call to something else by those names is
+ * not a realistic false positive, where `update` and `delete` plainly are —
+ * and narrowing this would silently drop coverage the audit's force-write
+ * rule has always had.
+ *
+ * A receiver *is* required, though: matching the bare name also matched a
+ * **declaration**, so an action defining its own `function forceUpdate() {}`
+ * helper triggered the warning about calling one.
  */
 export const FORCE_WRITE_PATTERN = /\.\s*force(?:Create|Update)\s*\(/
 

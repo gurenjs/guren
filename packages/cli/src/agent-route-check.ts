@@ -6,6 +6,7 @@ import {
   parseControllerMethods,
   AUTHORIZE_CALL_PATTERN,
   AUTH_CALL_PATTERN,
+  EMPTY_CONTROLLER_SCAN,
   INERTIA_CALL_PATTERN,
   type ControllerMethodInfo,
 } from './controller-methods'
@@ -435,23 +436,20 @@ export async function checkAgentRoutes(options: AgentRouteCheckOptions): Promise
     }
   }
 
-  if (!definitions.some((definition) => definition.agent)) return []
+  const agentDefinitions = definitions.filter((definition) => definition.agent)
+  if (agentDefinitions.length === 0) return []
 
-  // Routes first, controllers only if one of them names a controller: an app
-  // whose agent routes are all inline handlers has no body for any rule here
-  // to read, so scanning every controller in it would buy nothing.
-  const bare = definitions
-    .map((definition) => toAgentRoute(definition, new Map()))
-    .filter((route): route is AgentRoute => route !== undefined)
-
-  const scan = bare.some((route) => route.controllerKey)
+  // The controller scan is skipped outright when no agent route names one: an
+  // app whose agent routes are all inline handlers has no body for any rule
+  // here to read, so parsing every controller in it would buy nothing.
+  const scan = agentDefinitions.some((definition) => definition.controller)
     ? await parseControllerMethods(cwd, options.cache)
-    : { methods: new Map<string, ControllerMethodInfo>(), collisions: [], unreadableFiles: [] }
+    : EMPTY_CONTROLLER_SCAN
 
-  const routes = bare.map((route) => ({
-    ...route,
-    methodInfo: route.controllerKey ? scan.methods.get(route.controllerKey) : undefined,
-  }))
+  const routes = agentDefinitions.flatMap((definition) => {
+    const route = toAgentRoute(definition, scan.methods)
+    return route ? [route] : []
+  })
 
   const results: CheckResult[] = []
 

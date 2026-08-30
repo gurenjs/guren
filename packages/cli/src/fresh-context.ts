@@ -135,7 +135,11 @@ export function createFreshContextApi(): {
     entity: string,
     options: { cwd: string; module?: string },
   ): Promise<EntityContext>
-  loadContextRoutes(cwd: string, routesFile?: string): Promise<ContextRoute[]>
+  loadContextRoutes(
+    cwd: string,
+    routesFile?: string,
+    loadErrors?: string[],
+  ): Promise<ContextRoute[]>
 } {
   return {
     generateContext: ({ cwd }) => runCliJson<ProjectContext>(['context'], cwd),
@@ -152,7 +156,19 @@ export function createFreshContextApi(): {
     // process still builds the whole context to hand back one field: the
     // routes-only saving is real for an in-process caller, and a routes-only
     // CLI output would be needed to extend it here.
-    loadContextRoutes: async (cwd) =>
-      (await runCliJson<ProjectContext>(['context'], cwd)).routes,
+    //
+    // Honours both remaining parameters rather than declaring and dropping
+    // them: `--routes` is a real flag on `guren context`, and `routesError`
+    // is exactly the reason the in-process function reports through
+    // `loadErrors` — without forwarding it, a routes file that throws comes
+    // back as an empty list no caller can tell from an app with no routes.
+    loadContextRoutes: async (cwd, routesFile, loadErrors) => {
+      const context = await runCliJson<ProjectContext>(
+        routesFile ? ['context', '--routes', routesFile] : ['context'],
+        cwd,
+      )
+      if (context.routesError) loadErrors?.push(context.routesError)
+      return context.routes
+    },
   }
 }

@@ -85,7 +85,7 @@ await this.authorize('delete', [Post, post])
 
 `this.can(...)` is not enough: it returns a boolean and enforces nothing. `guren check` **fails** a non-read-only agent route with neither.
 
-Do not reach for `agent: { readOnlyHint: true }` to quiet that failure. It is the one declaration that exempts a route from this rule, so `guren check` holds it against the action's body and warns when the action deletes or force-writes. Declare it only when the tool truly changes nothing.
+Do not reach for `agent: { readOnlyHint: true }` to quiet that failure. Being read-only is what exempts a route from this rule, so `guren check` holds the claim against the action's body and warns when the action deletes, updates, or force-writes — for the GET/QUERY default just as much as for a hint you wrote. Declare it only when the tool truly changes nothing.
 
 ## Give the tool its schemas
 
@@ -102,8 +102,8 @@ bunx guren check    # agent-route rules run in the normal suite
 bunx guren audit    # validation rules are stricter for agent-exposed routes
 ```
 
-`guren check` **fails** on: a nameless agent route, a tool name outside `^[A-Za-z0-9._-]{1,128}$`, two routes resolving to one tool name, and a non-read-only tool whose controller action shows no authorization. It **warns** on: a missing output or body schema, an Inertia response, a `readOnlyHint: true` contradicted by the action, and any verdict it could not reach because the handler body was one it does not read (an inline handler, or a controller outside `app/Http/Controllers/`).
+`guren check` **fails** on: a nameless agent route, a tool name outside `^[A-Za-z0-9._-]{1,128}$`, two routes resolving to one tool name, and a non-read-only tool whose controller action shows no authorization. It **warns** on: a missing output or body schema, an Inertia response, a read-only tool whose action mutates (declared or GET/QUERY-default), a controller file it could not read, and any verdict it could not reach because the handler body was one it does not read (an inline handler, or a controller outside `app/Http/Controllers/`).
 
-`guren audit` warns when `destructiveHint: false` sits on an action that deletes records, and treats an unverifiable body validation on an agent route as a failure rather than a warning. Suppress an audit finding you have judged safe by its exact key in `config/audit.ts`.
+`guren audit` warns when `destructiveHint: false` sits on an action that deletes, updates, or force-writes records, and treats an unverifiable body validation on an agent route as a failure rather than a warning. Suppress an audit finding you have judged safe by its exact key in `config/audit.ts`.
 
 Full routing reference: `__RULES_DIR__/routes-codegen.md`.

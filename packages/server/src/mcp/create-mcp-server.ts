@@ -60,6 +60,8 @@ export interface GurenCliApi {
     framework: { name: string; version: string }
     models: Array<{ className: string }>
     routes: Array<unknown>
+    /** Why `routes` is empty, when it is empty because the load failed. */
+    routesError?: string
     pages: string[]
     controllers: string[]
     resources: string[]
@@ -329,13 +331,38 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServer {
       // full filesystem scan on an interactive path with no caching. Older
       // CLIs without the routes-only entry still answer through the whole
       // context, which is what they always did.
-      const routes = cli.loadContextRoutes
-        ? await cli.loadContextRoutes(cwd)
-        : (await cli.generateContext({ cwd })).routes
+      //
+      // Either way the reason the route list is empty travels with it: a
+      // routes file that throws degrades to zero routes, and reporting that
+      // as an empty tool surface would be the confident-looking "no routes"
+      // the CLI's own loader warns about — indistinguishable from an app
+      // that genuinely exposes nothing.
+      const loadErrors: string[] = []
+      let routes: unknown[]
+      if (cli.loadContextRoutes) {
+        routes = await cli.loadContextRoutes(cwd, undefined, loadErrors)
+      } else {
+        const context = await cli.generateContext({ cwd })
+        routes = context.routes
+        if (context.routesError) loadErrors.push(context.routesError)
+      }
 
       const tools = routes.filter(isAgentRoute).map(describeAgentRoute)
+      const payload =
+        loadErrors.length > 0
+          ? {
+              supported: true,
+              routesLoaded: false,
+              loadErrors,
+              note:
+                'The route graph failed to load, so this list is incomplete — it is not evidence that '
+                + 'the app exposes no agent tools.',
+              tools,
+            }
+          : { supported: true, routesLoaded: true, tools }
+
       return {
-        content: [{ type: 'text', text: JSON.stringify({ supported: true, tools }, null, 2) }],
+        content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }],
       }
     },
   )

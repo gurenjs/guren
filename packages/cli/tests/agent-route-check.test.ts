@@ -355,18 +355,46 @@ describe('checkAgentRoutes', () => {
      * against a controller file holding `body` as that action's body. The
      * route carries an output schema so only the body-derived rules speak.
      */
-    async function runDestroy(body: string, agent: Record<string, unknown> = {}) {
+    /**
+     * Writes `PostController` with one action holding `body`, in either
+     * spelling — both are legal to `Router` and its dispatch, so every rule
+     * that reads a body has to see them alike.
+     */
+    async function writeController(
+      action: string,
+      body: string,
+      declaration: 'method' | 'field',
+    ): Promise<void> {
+      const member =
+        declaration === 'method'
+          ? `  async ${action}() {\n${body}\n  }`
+          : `  ${action} = async () => {\n${body}\n  }`
+
       await writeWorkspaceFiles(tempDir, {
         'app/Http/Controllers/PostController.ts': `
 import { Controller } from '@guren/core'
 
 export class PostController extends Controller {
-  async destroy() {
-${body}
-  }
+${member}
 }
 `,
       })
+    }
+
+    interface ActionCase {
+      agent?: Record<string, unknown>
+      declaration?: 'method' | 'field'
+      /** Omitted for the routes whose point is that nothing describes the output. */
+      schemas?: RouteDefinition['schemas']
+    }
+
+    /** A mutating agent route (DELETE) against `PostController.destroy`. */
+    async function runDestroy(body: string, options: ActionCase = {}) {
+      const { agent = {}, declaration = 'method' } = options
+      // `in`, not a destructuring default: a case that means "no output
+      // schema" passes `schemas: undefined`, which a default would overwrite.
+      const schemas = 'schemas' in options ? options.schemas : OUTPUT
+      await writeController('destroy', body, declaration)
 
       return run(
         [
@@ -376,7 +404,29 @@ ${body}
             name: 'posts.destroy',
             agent,
             controller: { name: 'PostController', action: 'destroy' },
-            schemas: OUTPUT,
+            schemas,
+          }),
+        ],
+        tempDir,
+      )
+    }
+
+    /** The read-only sibling: a GET route against `PostController.index`. */
+    async function runIndex(body: string, options: ActionCase = {}) {
+      const { agent = {}, declaration = 'method' } = options
+      // `in`, not a destructuring default: a case that means "no output
+      // schema" passes `schemas: undefined`, which a default would overwrite.
+      const schemas = 'schemas' in options ? options.schemas : OUTPUT
+      await writeController('index', body, declaration)
+
+      return run(
+        [
+          route({
+            path: '/posts',
+            name: 'posts.index',
+            agent,
+            controller: { name: 'PostController', action: 'index' },
+            schemas,
           }),
         ],
         tempDir,
@@ -433,29 +483,11 @@ ${body}
     })
 
     it('warns about an Inertia response instead of the generic output warning', async () => {
-      await writeWorkspaceFiles(tempDir, {
-        'app/Http/Controllers/PostController.ts': `
-import { Controller } from '@guren/core'
-
-export class PostController extends Controller {
-  async index() {
-    return this.inertia(pages.posts.Index, { posts: [] })
-  }
-}
-`,
+      // No output schema: the point of the case is what the tool would return
+      // when nothing describes it.
+      const results = await runIndex('    return this.inertia(pages.posts.Index, { posts: [] })', {
+        schemas: undefined,
       })
-
-      const results = await run(
-        [
-          route({
-            path: '/posts',
-            name: 'posts.index',
-            agent: {},
-            controller: { name: 'PostController', action: 'index' },
-          }),
-        ],
-        tempDir,
-      )
 
       expect(results).toHaveLength(1)
       expect(results[0]?.status).toBe('warn')
@@ -469,7 +501,7 @@ export class PostController extends Controller {
       it('warns when readOnlyHint: true sits on an action that deletes', async () => {
         const results = await runDestroy(
           '    await Post.delete({ id: 1 })\n    return this.noContent()',
-          { readOnlyHint: true },
+          { agent: { readOnlyHint: true } },
         )
 
         const honesty = results.find((r) => r.key === 'agent-route-annotation:DELETE:/posts/:id')
@@ -482,7 +514,7 @@ export class PostController extends Controller {
       it('warns on a force-write behind the same claim', async () => {
         const results = await runDestroy(
           '    await Post.forceUpdate({ id: 1 }, { archived: true })\n    return this.noContent()',
-          { readOnlyHint: true },
+          { agent: { readOnlyHint: true } },
         )
 
         expect(keys(results)).toContain('agent-route-annotation:DELETE:/posts/:id')
@@ -491,7 +523,7 @@ export class PostController extends Controller {
       it('stays quiet when the action really only reads', async () => {
         const results = await runDestroy(
           '    const post = await Post.find(1)\n    return this.json({ ok: Boolean(post) })',
-          { readOnlyHint: true },
+          { agent: { readOnlyHint: true } },
         )
 
         expect(keys(results)).not.toContain('agent-route-annotation:DELETE:/posts/:id')
@@ -500,30 +532,8 @@ export class PostController extends Controller {
       // Nobody wrote the GET default, but it carries the same exemption and
       // the same "safe to call unattended" promise to a client.
       it('judges the method default too, when a GET action mutates', async () => {
-        await writeWorkspaceFiles(tempDir, {
-          'app/Http/Controllers/PostController.ts': `
-import { Controller } from '@guren/core'
-
-export class PostController extends Controller {
-  async index() {
-    await Post.delete({ id: 1 })
-    return this.json({})
-  }
-}
-`,
-        })
-
-        const results = await run(
-          [
-            route({
-              path: '/posts',
-              name: 'posts.index',
-              agent: {},
-              controller: { name: 'PostController', action: 'index' },
-              schemas: OUTPUT,
-            }),
-          ],
-          tempDir,
+        const results = await runIndex(
+          '    await Post.delete({ id: 1 })\n    return this.json({})',
         )
 
         const honesty = results.find((r) => r.key === 'agent-route-annotation:GET:/posts')
@@ -551,52 +561,23 @@ export class PostController extends Controller {
       it('counts a plain update() as mutation evidence', async () => {
         const results = await runDestroy(
           "    await Post.update({ id: 1 }, { title: 'x' })\n    return this.noContent()",
-          { readOnlyHint: true },
+          { agent: { readOnlyHint: true } },
         )
 
         expect(keys(results)).toContain('agent-route-annotation:DELETE:/posts/:id')
       })
 
-      // The force-write pattern needs a receiver, or an action defining its
-      // own helper triggers the warning about calling one.
-      it('does not read a local function declaration as a force write', async () => {
-        const results = await runDestroy(
-          '    function forceUpdate() { return null }\n    forceUpdate()\n    return this.noContent()',
-          { readOnlyHint: true },
-        )
-
-        expect(keys(results)).not.toContain('agent-route-annotation:DELETE:/posts/:id')
-      })
+      // Receiver discipline is pinned where it lives: controller-methods.test.ts
+      // asserts it at the regex level and again through mutatesRecords(). A
+      // third copy here would re-test the same rule through a temp workspace.
     })
 
     // Both forms are legal to Router's types and its runtime dispatch, so a
     // scanner that saw only ClassMethod downgraded every class-field action.
     it('reads a class-field action, not just a method', async () => {
-      await writeWorkspaceFiles(tempDir, {
-        'app/Http/Controllers/PostController.ts': `
-import { Controller } from '@guren/core'
-
-export class PostController extends Controller {
-  destroy = async () => {
-    await this.authorize('delete', Post)
-    return this.noContent()
-  }
-}
-`,
-      })
-
-      const results = await run(
-        [
-          route({
-            method: 'DELETE',
-            path: '/posts/:id',
-            name: 'posts.destroy',
-            agent: {},
-            controller: { name: 'PostController', action: 'destroy' },
-            schemas: OUTPUT,
-          }),
-        ],
-        tempDir,
+      const results = await runDestroy(
+        "    await this.authorize('delete', Post)\n    return this.noContent()",
+        { declaration: 'field' },
       )
 
       // The authorize() in the class field is found, so this is a clean pass

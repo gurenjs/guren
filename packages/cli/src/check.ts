@@ -336,6 +336,10 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
       // only the registrar (`load-routes.ts` documents why nothing is
       // re-evaluated), but it would also produce the same load-failure
       // warning twice — one broken routes file reported as two findings.
+      //
+      // Scoped to these two, not to the run: check 10's screens view still
+      // loads the graph itself, for the reason the paragraph above gives.
+      // Any later check that reads registered routes belongs here too.
       const routesFile = options.routesFile ?? DEFAULT_ROUTES_FILE
       const graph = await loadRouteGraph(cwd, routesFile)
 

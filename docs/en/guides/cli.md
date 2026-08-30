@@ -187,14 +187,17 @@ Routes that declare `.agent()` metadata (see [Routing](./routing.md)) are checke
 | `agent-route-output:*` | The route declares neither an `output` schema nor a `resource` hint, so a tool derived from it advertises no output shape. Applies to write tools as much as read tools. |
 | `agent-route-inertia:*` | The action answers with `this.inertia(...)` and declares no output shape — such a tool returns whatever the page happens to pass its component. Replaces the finding above for that route. |
 | `agent-route-input:*` | A body-carrying route with no `body` schema, so the derived input schema is built from the path and query alone. On an inline handler that schema is also what validates at request time, so nothing checks the payload either. |
-| `agent-route-annotation:*` | `readOnlyHint: true` declared on a mutating verb whose action deletes or force-writes records. That hint is what exempts a route from the authorization rule, so it is checked against the action. |
+| `agent-route-annotation:*` | The tool is read-only but its action deletes, updates, or force-writes records — either an explicit `readOnlyHint: true` on a mutating verb, or a GET/QUERY route, which is read-only by default. Read-only is what exempts a route from the authorization rule, so it is checked against the action. |
 | `agent-route-authorization:*` | The verdict could not be reached: the handler is an inline function, or the controller action is not among the sources the check reads. |
 | `agent-route-controller-collision:*` | Two controller classes share a name and an agent route uses one of them, so a verdict drawn from a controller body may describe the other class. |
+| `agent-route-controller-unreadable:*` | A controller file could not be read at all, so any agent route whose action lives there was checked against no body. |
+| `route-graph` | The routes file failed to load, so neither the route-contract nor the agent-route checks ran. |
 
 `audit` adds two rules for the same routes:
 
 - A body-validation finding that is a warning for an ordinary route becomes a **failure** when the route is agent-exposed, under the same `validation:*` key — so an existing `config/audit.ts` entry keeps applying.
-- `agent-annotation:*` warns when `destructiveHint: false` is declared on an action that deletes records, and also when that claim could not be checked because the action body was unreadable.
+- `agent-annotation:*` warns when `destructiveHint: false` is declared on an action that deletes, updates, or force-writes records, and also when that claim could not be checked because the action body was unreadable.
+- `controller-unreadable:*` warns when a controller file could not be read, since every rule above saw no body for the actions it declares.
 
 Suppress a false positive by placing `// guren-audit-ignore` on the flagged line or the line above it:
 

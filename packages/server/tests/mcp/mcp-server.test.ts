@@ -377,6 +377,52 @@ describe('Guren MCP Server', () => {
     expect(called).toEqual(['loadContextRoutes'])
   })
 
+  // A routes file that throws degrades to zero routes. Reporting that as an
+  // empty tool surface is the confident-looking "no routes" the CLI's own
+  // loader warns about — indistinguishable from an app exposing nothing.
+  test('guren_agent_surface reports a route graph that failed to load', async () => {
+    const client = await createTestClient({
+      loadContextRoutes: async (_cwd, _routesFile, loadErrors) => {
+        loadErrors?.push('Cannot find module ./does-not-exist')
+        return []
+      },
+    })
+
+    const result = await client.callTool({ name: 'guren_agent_surface', arguments: {} })
+    const payload = JSON.parse((result.content as Array<{ type: string; text: string }>)[0].text)
+
+    expect(payload.routesLoaded).toBe(false)
+    expect(payload.loadErrors).toEqual(['Cannot find module ./does-not-exist'])
+    expect(payload.note).toContain('not evidence')
+  })
+
+  // The same degradation through the older whole-context path.
+  test('guren_agent_surface carries routesError from the fallback path', async () => {
+    const client = await createTestClient({
+      loadContextRoutes: undefined,
+      generateContext: async () => ({
+        framework: { name: 'guren', version: '0.2.0' },
+        models: [],
+        routes: [],
+        routesError: 'boom',
+        pages: [],
+        controllers: [],
+        resources: [],
+        events: [],
+        jobs: [],
+        middleware: [],
+        listeners: [],
+        validators: [],
+      }),
+    })
+
+    const result = await client.callTool({ name: 'guren_agent_surface', arguments: {} })
+    const payload = JSON.parse((result.content as Array<{ type: string; text: string }>)[0].text)
+
+    expect(payload.routesLoaded).toBe(false)
+    expect(payload.loadErrors).toEqual(['boom'])
+  })
+
   test('guren_agent_surface says so when the app CLI predates agent metadata', async () => {
     const client = await createTestClient({ CONTEXT_ROUTE_FEATURES: undefined })
 
