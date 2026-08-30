@@ -276,7 +276,6 @@ export function createGurenControllerModule() {
       }
       return loadedServer.viteAsset(entry, options)
     },
-    parseRequestBody: parseRequestBody,
     parseRequestPayload: async (ctx: ControllerContext) => asRecord(await parseRequestBody(ctx)),
     formatValidationErrors: (error: { issues?: Array<{ path: (string | number)[]; message: string }> }) => {
       const errors: Record<string, string> = {}
@@ -314,7 +313,7 @@ export function createControllerModuleMock() {
   }
 
   class TestController extends module.Controller {
-    public parsedBody?: { value: unknown }
+    public parsedBody?: Record<string, unknown>
 
     public runValidation<T>(
       schema: {
@@ -366,21 +365,30 @@ export function createControllerModuleMock() {
 
     // Mirrors the real Controller's split: validation sees the body as sent
     // (an array stays an array), while the field-by-field helpers see the
-    // record view. Boxed rather than truthiness-memoized so a body of `null`,
-    // `''`, `0` or `false` is cached like any other.
+    // record view.
+    //
+    // Deliberately the local raw parser, not `module.parseRequestPayload` —
+    // that one narrows, which is what made a non-object body unreachable.
+    // Unmemoized, because the parser clones the request: the real Controller
+    // boxes its cache to avoid re-reading a body Hono hands over once, and
+    // here there is nothing to exhaust. Errors fall back to `{}` as the real
+    // one does, so a malformed body is a validation failure rather than a
+    // throw out of validateBody().
     public async getRawBody(): Promise<unknown> {
-      if (this.parsedBody) {
-        return this.parsedBody.value
+      try {
+        return await parseRequestBody(this.ctx)
+      } catch {
+        return {}
       }
-
-      // Deliberately the raw parser, not `module.parseRequestPayload` — that
-      // one narrows, which is what made a non-object body unreachable.
-      this.parsedBody = { value: await module.parseRequestBody(this.ctx) }
-      return this.parsedBody.value
     }
 
     public async getBody(): Promise<Record<string, unknown>> {
-      return asRecord(await this.getRawBody())
+      if (this.parsedBody) {
+        return this.parsedBody
+      }
+
+      this.parsedBody = asRecord(await this.getRawBody())
+      return this.parsedBody
     }
 
     // Public like parsedBody above: TS4094 forbids private members on the

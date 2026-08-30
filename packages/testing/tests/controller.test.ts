@@ -211,25 +211,6 @@ describe('createGurenControllerModule', () => {
     expect(payload).toEqual({})
   })
 
-  it('parseRequestBody returns a non-object JSON body as sent', async () => {
-    const module = createGurenControllerModule()
-    const parse = (body: string) =>
-      module.parseRequestBody(
-        createControllerContext('http://example.com/', {
-          method: 'POST',
-          body,
-          headers: { 'Content-Type': 'application/json' },
-        }) as unknown as ControllerContext,
-      )
-
-    expect(await parse(JSON.stringify([1, 2, 3]))).toEqual([1, 2, 3])
-    expect(await parse(JSON.stringify('hello'))).toBe('hello')
-    // `null` is a parsed body, not an absent one — the runtime keeps it, so
-    // the mock must too, or validation sees a shape nobody sent.
-    expect(await parse(JSON.stringify(null))).toBeNull()
-    // And a malformed body falls back rather than throwing out of validateBody().
-    expect(await parse('{ not json')).toEqual({})
-  })
 
   it('file() returns an uploaded multipart file and composes with validateBody()', async () => {
     const { Controller } = createControllerModuleMock()
@@ -384,18 +365,12 @@ describe('createControllerModuleMock', () => {
     expect(await controller.input('title')).toBeUndefined()
   })
 
-  // `null` is a parsed body, not an absent one: it reaches validation as sent,
-  // and the boxed memo caches it rather than re-reading a consumed stream.
-  it('validateBody() sees a null body as null, and memoizes it', async () => {
+  // Every shape the runtime's parseRequestBody preserves, driven through the
+  // path that actually consumes it. `null` is the one worth naming: it is a
+  // parsed body, not an absent one, so coalescing it to `{}` would hand
+  // validation a shape nobody sent.
+  it('validateBody() sees the body as sent, whatever its shape', async () => {
     const { Controller } = createControllerModuleMock()
-    const ctx = createControllerContext('http://example.com/bulk', {
-      method: 'POST',
-      body: JSON.stringify(null),
-      headers: { 'Content-Type': 'application/json' },
-    })
-
-    const controller = new Controller()
-    controller.setContext(ctx as unknown as ControllerContext)
 
     const seen: unknown[] = []
     const capture = {
@@ -405,11 +380,43 @@ describe('createControllerModuleMock', () => {
       },
     }
 
-    await controller.validateBody(capture)
-    await controller.validateBody(capture)
+    const validate = async (body: string, contentType = 'application/json') => {
+      const controller = new Controller()
+      controller.setContext(
+        createControllerContext('http://example.com/bulk', {
+          method: 'POST',
+          body,
+          headers: { 'Content-Type': contentType },
+        }) as unknown as ControllerContext,
+      )
+      return controller.validateBody(capture)
+    }
 
-    expect(seen).toEqual([null, null])
-    expect(controller.parsedBody).toEqual({ value: null })
+    expect(await validate(JSON.stringify([1, 2, 3]))).toEqual([1, 2, 3])
+    expect(await validate(JSON.stringify('hello'))).toBe('hello')
+    expect(await validate(JSON.stringify(null))).toBeNull()
+    // Malformed bodies fall back to `{}` the way the real Controller does,
+    // rather than throwing out of validateBody(). Both parsers are covered:
+    // JSON by its own catch, form data by the controller's.
+    expect(await validate('{ not json')).toEqual({})
+    expect(await validate('broken', 'multipart/form-data')).toEqual({})
+    expect(seen).toHaveLength(5)
+  })
+
+  it('reads the body once per controller, memoizing the record view', async () => {
+    const { Controller } = createControllerModuleMock()
+    const ctx = createControllerContext('http://example.com/posts', {
+      method: 'POST',
+      body: JSON.stringify({ title: 'Guren' }),
+      headers: { 'Content-Type': 'application/json' },
+    })
+
+    const controller = new Controller()
+    controller.setContext(ctx as unknown as ControllerContext)
+
+    expect(await controller.input('title')).toBe('Guren')
+    expect(await controller.input('title')).toBe('Guren')
+    expect(controller.parsedBody).toEqual({ title: 'Guren' })
   })
 
   it('extends Controller with json method', () => {
