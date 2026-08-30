@@ -1359,16 +1359,35 @@ const doctorRules: DoctorRule[] = [
   { key: 'plugin-compatibility', title: 'Plugin Compatibility', detect: detectPluginCompatibility },
 ]
 
-export async function getDoctorRuleEvaluations(options: { cwd?: string } = {}): Promise<{
+/**
+ * The manifest plans a doctor run needs, started once and awaited wherever
+ * they are used.
+ *
+ * Both are expensive for different reasons — the pages plan walks the pages
+ * directory, the agent plan may evaluate the app's whole module graph and
+ * derive every tool — and both are asked for twice in a `doctor --next` run:
+ * once by the rules, once by the next-step suggestions. Sharing the promises
+ * is what keeps that a single computation; each is a promise rather than an
+ * awaited value so a run that never reaches a consumer never pays for it.
+ */
+export interface DoctorManifestPlans {
+  pageManifest: Promise<PageManifestPlan>
+  agentManifest: Promise<AgentManifestPlan>
+}
+
+function createManifestPlans(cwd: string): DoctorManifestPlans {
+  return { pageManifest: planPageManifest(cwd), agentManifest: planAgentManifest(cwd) }
+}
+
+export async function getDoctorRuleEvaluations(
+  options: { cwd?: string } = {},
+  plans?: DoctorManifestPlans,
+): Promise<{
   cwd: string
   evaluations: DoctorRuleEvaluation[]
 }> {
   const cwd = resolve(options.cwd ?? process.cwd())
-  const context: DoctorRuleContext = {
-    cwd,
-    pageManifest: planPageManifest(cwd),
-    agentManifest: planAgentManifest(cwd),
-  }
+  const context: DoctorRuleContext = { cwd, ...(plans ?? createManifestPlans(cwd)) }
 
   // The deploy-runtime checks share one filesystem scan, computed once here
   // rather than through the DoctorRule interface (they need no autofix and no
@@ -1397,7 +1416,10 @@ export async function getDoctorRuleEvaluations(options: { cwd?: string } = {}): 
 }
 
 export async function runDoctor(options: RunDoctorOptions = {}): Promise<DoctorReport> {
-  const { cwd, evaluations } = await getDoctorRuleEvaluations({ cwd: options.cwd })
+  // One memo for the whole run: the rules and `--next` both read these plans,
+  // and the agent one can evaluate the app's module graph.
+  const plans = createManifestPlans(resolve(options.cwd ?? process.cwd()))
+  const { cwd, evaluations } = await getDoctorRuleEvaluations({ cwd: options.cwd }, plans)
   const checks = evaluations.map((evaluation) => evaluation.check)
   const fixableChecks = checks.filter((check) => check.status !== 'pass' && Boolean(check.canAutofix))
   const manualChecks = checks.filter((check) => check.status !== 'pass' && !check.canAutofix)
@@ -1413,7 +1435,7 @@ export async function runDoctor(options: RunDoctorOptions = {}): Promise<DoctorR
   }
 
   if (options.next) {
-    report.nextSteps = await suggestNextSteps({ cwd })
+    report.nextSteps = await suggestNextSteps({ cwd }, plans)
   }
 
   if (options.json) {
@@ -1458,8 +1480,14 @@ export function buildJsonOutput(report: DoctorReport): DoctorJsonOutput {
   }
 }
 
-export async function suggestNextSteps(options: { cwd?: string } = {}): Promise<NextStep[]> {
+export async function suggestNextSteps(
+  options: { cwd?: string } = {},
+  plans?: DoctorManifestPlans,
+): Promise<NextStep[]> {
   const cwd = resolve(options.cwd ?? process.cwd())
+  // Optional so a standalone caller (the MCP tool) still works; supplied by
+  // `runDoctor`, where the rules have already started these.
+  const manifestPlans = plans ?? createManifestPlans(cwd)
   const steps: NextStep[] = []
   let priority = 1
 
@@ -1560,7 +1588,7 @@ export async function suggestNextSteps(options: { cwd?: string } = {}): Promise<
     // Ignore
   }
 
-  const [pagesPlan, agentPlan] = await Promise.all([planPageManifest(cwd), planAgentManifest(cwd)])
+  const [pagesPlan, agentPlan] = await Promise.all([manifestPlans.pageManifest, manifestPlans.agentManifest])
   const requiredManifests = [
     '.guren/routes.gen.ts',
     ...(pagesPlan.reason === 'pages' ? [PAGES_MANIFEST_FILE] : []),

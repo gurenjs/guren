@@ -366,7 +366,27 @@ function renderTool(tool: DerivedAgentTool, enrichment: ResourceEnrichment | und
   if (tool.redact) fields.push(`redact: ${renderLiteral(tool.redact, '    ')}`)
   fields.push(`expose: ${renderLiteral(tool.expose, '    ')}`)
 
-  return `  '${escapeSingleQuoted(tool.toolName)}': {\n${fields.map((field) => `    ${field},`).join('\n')}\n  },`
+  return `  ${renderToolKey(tool.toolName)}: {\n${fields.map((field) => `    ${field},`).join('\n')}\n  },`
+}
+
+/**
+ * The key a tool is registered under in `agentTools`.
+ *
+ * Same hazard as {@link renderLiteral}'s keys, one level up and with worse
+ * consequences: `'__proto__': { … }` in an object literal sets the object's
+ * [[Prototype]] rather than defining a property, so the tool would be missing
+ * from `Object.keys(agentTools)` and from every lookup — a manifest that
+ * silently does not contain a tool it appears to declare. A route may legally
+ * be named `__proto__`: the MCP tool-name grammar (`^[A-Za-z0-9._-]{1,128}$`,
+ * SEP-986) permits it, and tool names are route names verbatim.
+ *
+ * The `AgentToolOutputTypes` entries need no such care — an interface member
+ * named `__proto__` is a property signature, and nothing about a type is
+ * evaluated.
+ */
+function renderToolKey(toolName: string): string {
+  const quoted = `'${escapeSingleQuoted(toolName)}'`
+  return toolName === '__proto__' ? `[${quoted}]` : quoted
 }
 
 /**

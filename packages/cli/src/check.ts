@@ -94,6 +94,26 @@ export interface RunCheckOptions {
 }
 
 /**
+ * The `guren codegen` invocation that regenerates the artifacts *this* check
+ * read — carrying `--routes` when the caller passed one.
+ *
+ * Without it, a `guren check --routes routes/api.ts` run reports on one route
+ * graph and prints a remedy that reads a different one (`routes/web.ts`, the
+ * codegen default), so the command cannot clear the state it was printed for
+ * — and, worse, writes or deletes the manifest from the wrong graph. Same
+ * principle as keying the expectation on the derivation rather than a string
+ * scan: a remedy that does not resolve its own finding is a defect, not a
+ * cosmetic issue.
+ */
+function codegenCommandFor(routesFile?: string): string {
+  if (routesFile === undefined) return 'bunx guren codegen'
+  // Quoted only when it would not survive a shell word-split, so the ordinary
+  // `routes/api.ts` stays copy-pasteable as written.
+  const argument = /^[\w./@-]+$/u.test(routesFile) ? routesFile : `'${routesFile.replace(/'/gu, `'\\''`)}'`
+  return `bunx guren codegen --routes ${argument}`
+}
+
+/**
  * The agent manifest's own presence check (RFC 0016), which the generic
  * manifest loop cannot express: `.guren/agents.gen.ts` is expected only when
  * the derivation yields a tool, and an existing one is *wrong* when it does
@@ -103,6 +123,7 @@ export interface RunCheckOptions {
 async function checkAgentManifest(cwd: string, routesFile?: string): Promise<CheckResult> {
   const key = `manifest:${AGENTS_MANIFEST_FILE}`
   const plan = await planAgentManifest(cwd, routesFile)
+  const codegen = codegenCommandFor(routesFile)
 
   if (plan.reason === 'unreadable') {
     return check(
@@ -121,7 +142,7 @@ async function checkAgentManifest(cwd: string, routesFile?: string): Promise<Che
       AGENTS_MANIFEST_FILE,
       'warn',
       `${AGENTS_MANIFEST_FILE} describes agent tools this app no longer exposes — no route derives one.`,
-      `Run: bunx guren codegen (it removes ${AGENTS_MANIFEST_FILE})`,
+      `Run: ${codegen} (it removes ${AGENTS_MANIFEST_FILE})`,
     )
   }
 
@@ -142,7 +163,7 @@ async function checkAgentManifest(cwd: string, routesFile?: string): Promise<Che
     present
       ? `${AGENTS_MANIFEST_FILE} is present (${plan.toolCount} ${plan.toolCount === 1 ? 'tool' : 'tools'}).`
       : `${AGENTS_MANIFEST_FILE} is missing; ${plan.toolCount} ${plan.toolCount === 1 ? 'route derives' : 'routes derive'} an agent tool.`,
-    present ? undefined : 'Run: bunx guren codegen',
+    present ? undefined : `Run: ${codegen}`,
   )
 }
 
@@ -203,6 +224,11 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
   const changedFiles = options.changed ? await getChangedFiles(cwd) : null
   const filterChanged = (files: string[]): string[] =>
     changedFiles ? files.filter((f) => changedFiles.has(toPosixRelative(cwd, f))) : files
+  // Whether any changed file could affect what the app's modules evaluate to.
+  // The gate for every check that loads the route graph (5.5, 7.7, 8.7) —
+  // hoisted here rather than declared beside the first of them, because they
+  // are spread across the suite and each must ask the same question.
+  const sourceChanged = !changedFiles || [...changedFiles].some((file) => SOURCE_FILE_PATTERN.test(file))
 
   // `--arch` / `--docs` / `--spec` select suites; combining them runs the
   // union (never silently nothing). No flag = every suite.
@@ -303,7 +329,16 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     // rather than on the presence of `.agent()` in a source file, so the
     // remedy this prints always clears the state it reports — see
     // planAgentManifest.
-    checks.push(await checkAgentManifest(cwd, options.routesFile))
+    //
+    // Gated with 7.7 and 8.7 under --changed, and for their reason: on an app
+    // that exposes tools this loads the route graph and walks every schema, so
+    // a docs- or lang-only run would pay a full module evaluation to re-derive
+    // an answer nothing in that run could have changed. (Apps with no manifest
+    // and no `.agent()` in their sources never load anything either way — that
+    // fast path is inside planAgentManifest.)
+    if (sourceChanged) {
+      checks.push(await checkAgentManifest(cwd, options.routesFile))
+    }
 
     // 6. Check every module's db/schema.ts is re-exported from the root
     // db/schema.ts (the wiring make:module performs automatically — this
@@ -367,7 +402,6 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     // signature change: whichever runs first pays the module evaluation, and
     // the second call re-runs only the registrar (`load-routes.ts` documents
     // why nothing is re-evaluated).
-    const sourceChanged = !changedFiles || [...changedFiles].some((file) => SOURCE_FILE_PATTERN.test(file))
     if (sourceChanged) {
       checks.push(...(await checkRouteContracts({ cwd, routesFile: options.routesFile })))
     }

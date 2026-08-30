@@ -119,6 +119,32 @@ describe('@guren/openapi', () => {
     expect(extractPathParamNames('/files/:slug*')).toEqual(['slug*'])
   })
 
+  it('keeps the params schema a :slug* route declares', () => {
+    const definitions: RouteDefinition[] = [
+      {
+        method: 'GET',
+        path: '/files/:slug*',
+        name: 'files.show',
+        // Keyed the way Hono registers it, which is the key the route's
+        // handler receives — and the only key an app can write.
+        schemas: { params: z.object({ 'slug*': z.coerce.number().int().positive() }) },
+      },
+    ]
+
+    const { document, warnings } = generateOpenApiDocument(definitions, {
+      title: 'Blog API',
+      version: '1.0.0',
+    })
+
+    expect(warnings).toEqual([])
+    // Looked up by the raw label, rendered under the RFC 6570-safe name.
+    // Matching the two by the rendered name found nothing and fell back to a
+    // bare string, throwing away a declared contract.
+    expect(document.paths['/files/{slug}']?.get?.parameters).toEqual([
+      { name: 'slug', in: 'path', required: true, schema: { type: 'integer', exclusiveMinimum: 0 } },
+    ])
+  })
+
   it('returns warnings for non-zod schemas', () => {
     const definitions: RouteDefinition[] = [
       {

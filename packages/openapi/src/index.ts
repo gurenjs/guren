@@ -285,15 +285,20 @@ function buildOperation(definition: RouteDefinition, warnings: string[]): OpenAp
 
 function buildParameters(definition: RouteDefinition, warnings: string[]): OpenApiParameterObject[] {
   const parameters: OpenApiParameterObject[] = []
-  const pathParamNames = openApiPathParamNames(definition.path)
   const paramsDetails = readObjectSchema(definition.schemas?.params, warnings, `${definition.method} ${definition.path} params`, 'input')
 
-  for (const name of pathParamNames) {
+  // Raw label and rendered name are different strings for a `:slug*` param,
+  // and each is authoritative for a different half: the schema is keyed by
+  // what Hono registers (`slug*`, which is the key the app's `params` schema
+  // declares), while the document must show the RFC 6570-safe name. Looking
+  // the schema up by the rendered name silently missed it and fell back to
+  // `{ type: 'string' }`, discarding a declared contract.
+  for (const rawName of extractPathParamNames(definition.path)) {
     parameters.push({
-      name,
+      name: stripExplodeModifier(rawName),
       in: 'path',
       required: true,
-      schema: paramsDetails?.properties[name] ?? { type: 'string' },
+      schema: ownProperty(paramsDetails?.properties, rawName) ?? { type: 'string' },
     })
   }
 
@@ -392,8 +397,16 @@ function toOpenApiPath(path: string): string {
   )
 }
 
-function openApiPathParamNames(path: string): string[] {
-  return extractPathParamNames(path).map(stripExplodeModifier)
+/**
+ * A property by key, ignoring anything inherited. A path parameter may be
+ * named `__proto__`, and a plain index would then hand back `Object.prototype`
+ * as if it were the declared schema.
+ */
+function ownProperty(
+  properties: Record<string, OpenApiSchemaObject> | undefined,
+  key: string,
+): OpenApiSchemaObject | undefined {
+  return properties && Object.hasOwn(properties, key) ? properties[key] : undefined
 }
 
 function buildOperationId(definition: RouteDefinition): string {

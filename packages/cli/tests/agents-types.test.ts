@@ -179,6 +179,29 @@ describe('buildAgentToolsContent', () => {
     expect(content).not.toContain('"__proto__":')
   })
 
+  test('emits a tool named __proto__ as a computed key, and it survives evaluation', async () => {
+    const router = new Router()
+    // A legal tool name: the MCP grammar is ^[A-Za-z0-9._-]{1,128}$, and tool
+    // names are route names verbatim.
+    router.get('/posts', [PostController, 'index']).name('__proto__').agent({})
+    const { tools } = deriveAgentTools(router.definitions())
+
+    const content = buildAgentToolsContent(tools)
+    expect(content).toContain("['__proto__']: {")
+    expect(content).not.toContain("  '__proto__': {")
+
+    // Evaluated, not merely matched: with a plain-string key here the entry
+    // sets [[Prototype]] and the tool disappears from the manifest that
+    // appears to declare it.
+    const dir = await makeApp()
+    const modulePath = join(dir, 'agents.gen.mjs')
+    await writeFile(modulePath, new Bun.Transpiler({ loader: 'ts' }).transformSync(content), 'utf8')
+    const { agentTools } = (await import(modulePath)) as { agentTools: Record<string, unknown> }
+
+    expect(Object.keys(agentTools)).toEqual(['__proto__'])
+    expect(Object.hasOwn(agentTools, '__proto__')).toBe(true)
+  })
+
   test(
     'emits a module that type-checks beside data.gen.ts',
     async () => {

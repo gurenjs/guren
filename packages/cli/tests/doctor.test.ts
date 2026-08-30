@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
 import { consola } from 'consola'
@@ -9,6 +9,7 @@ import {
   API_ONLY_REFUSAL,
   BLOG_ROUTES_FIXTURE,
   createTempWorkspace,
+  linkWorkspaceCore,
   PAGE_COMPONENT_FIXTURE,
   seedApiOnlyApp,
   writeInstalledPackage,
@@ -25,6 +26,39 @@ beforeEach(() => {
 
 afterEach(() => {
   consoleLogSpy.mockRestore()
+})
+
+describe('runDoctor manifest plans', () => {
+  // The agent manifest plan may evaluate the app's whole module graph and
+  // derive every tool. The rules ask for it and `--next` asks again, so a run
+  // has to share one computation or `doctor --next` pays for two.
+  it('computes the agent manifest plan once across the rules and --next', async () => {
+    const workspace = await createTempWorkspace('guren-doctor-plan-memo-')
+    try {
+      const counter = join(workspace.dir, 'registrar-runs.log')
+      await writeWorkspaceFiles(workspace.dir, {
+        // Appends a line every time the registrar runs, which is once per
+        // loadRouteDefinitions() call — module evaluation is cached, the
+        // registrar run is not.
+        'routes/web.ts': `import { appendFileSync } from 'node:fs'
+import { Router } from '@guren/core'
+
+export function registerWebRoutes(router: Router): void {
+  appendFileSync(${JSON.stringify(counter)}, 'run\\n')
+  router.get('/posts', () => 'posts').name('posts.index').agent({})
+}
+`,
+      })
+      await linkWorkspaceCore(workspace.dir)
+
+      await runDoctor({ cwd: workspace.dir, next: true, json: true })
+
+      const runs = (await readFile(counter, 'utf8')).trim().split('\n').filter(Boolean)
+      expect(runs).toHaveLength(1)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
 })
 
 describe('runDoctor', () => {
