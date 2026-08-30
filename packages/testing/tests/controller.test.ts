@@ -724,6 +724,43 @@ describe('body content-type recognition', () => {
   }
 
   /**
+   * The same rule has to hold on the module's `parseRequestPayload`, not just
+   * on the class: a route contract's `body` and `validateRequest()` reach the
+   * body through that export and never touch a Controller instance, so an app
+   * that mocks `@guren/core` gets its contract validation from here.
+   */
+  it('parseRequestPayload applies the media-type rule in the mock and the runtime', async () => {
+    const init = urlencoded('Application/X-WWW-Form-Urlencoded')
+
+    const fromMock = await createGurenControllerModule().parseRequestPayload(
+      createControllerContext('http://example.com/posts', init) as unknown as ControllerContext
+    )
+
+    const { Controller, createApp } = await import('@guren/core')
+    const { parseRequestPayload } = await import('@guren/server')
+
+    class ReadController extends Controller {
+      async read() {
+        return this.json({ value: await parseRequestPayload(this.ctx) })
+      }
+    }
+
+    const app = createApp({
+      routes: (router) => {
+        router.post('/posts', [ReadController, 'read'])
+      },
+    })
+    await app.boot()
+
+    const response = await app.fetch(new Request('http://example.com/posts', init))
+    expect(response.status).toBe(200)
+    const fromRuntime = ((await response.json()) as { value: unknown }).value
+
+    expect(fromRuntime).toEqual({ [FIELD]: VALUE })
+    expect(fromMock).toEqual({ [FIELD]: VALUE })
+  })
+
+  /**
    * `file()` reads the multipart body through a separate gate in both — the
    * mock's `readMultipart()`, the runtime's `ctx.req.parseBody({ all: true })`
    * — so the media-type rule has to hold there too, or an upload test passes
