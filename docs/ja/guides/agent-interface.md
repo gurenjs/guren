@@ -300,20 +300,26 @@ mcpPlugin({
 ### トークンを発行する
 
 ```bash
-bunx guren token:issue --name blog-agent --user 42 --tools 'tools:read,posts.store' --expires 30d
+bunx guren token:issue --name blog-reader --user 42 --tools 'tools:read' --expires 30d
 ```
 
 ```
-✔ Issued token "blog-agent" for user 42.
+✔ Issued token "blog-reader" for user 42.
 
 Token (shown once — it is stored hashed and cannot be recovered)
   1|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 Expires  2026-09-29T09:00:00.000Z
-Abilities  tools:read, tool:posts.store
+Abilities  tools:read
 Granted tools
   read: posts.index, posts.show
-  write: posts.store
+  write: (none)
+```
+
+書き込みも行うエージェントには、このトークンのスコープを広げるのではなく、別のトークンを発行します。
+
+```bash
+bunx guren token:issue --name blog-writer --user 42 --tools 'posts.store' --expires 30d
 ```
 
 `--tools` は短縮形も受け付けます。名前だけなら `tool:<name>`、`posts.*` は `tools:posts.*`、`read` は `tools:read`、`*` は `tools:*` になります。

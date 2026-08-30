@@ -392,20 +392,27 @@ ungranted catalog cannot map your write surface for a read-only agent.
 ### Issuing a token
 
 ```bash
-bunx guren token:issue --name blog-agent --user 42 --tools 'tools:read,posts.store' --expires 30d
+bunx guren token:issue --name blog-reader --user 42 --tools 'tools:read' --expires 30d
 ```
 
 ```
-✔ Issued token "blog-agent" for user 42.
+✔ Issued token "blog-reader" for user 42.
 
 Token (shown once — it is stored hashed and cannot be recovered)
   1|xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 Expires  2026-09-29T09:00:00.000Z
-Abilities  tools:read, tool:posts.store
+Abilities  tools:read
 Granted tools
   read: posts.index, posts.show
-  write: posts.store
+  write: (none)
+```
+
+An agent that also writes gets its own token, rather than a wider scope on
+this one:
+
+```bash
+bunx guren token:issue --name blog-writer --user 42 --tools 'posts.store' --expires 30d
 ```
 
 `--tools` accepts shorthand: a bare name becomes `tool:<name>`, `posts.*`
