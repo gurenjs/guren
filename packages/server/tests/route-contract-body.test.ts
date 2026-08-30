@@ -1,6 +1,15 @@
 import { describe, test, expect } from 'bun:test'
 import { z } from 'zod'
-import { Application, Controller, validateRequest, getValidatedData, type Router } from '../src/index'
+import {
+  Application,
+  Controller,
+  FormRequest,
+  validateRequest,
+  validateRequestWith,
+  getValidatedData,
+  type Router,
+} from '../src/index'
+import { required, string } from '../src/http/validation/rules'
 
 /**
  * A route may bind any schema to `body`, not only an object one. The parsed
@@ -26,7 +35,34 @@ class BulkController extends Controller {
   async inputsStayObjectShaped() {
     return this.json({ title: (await this.input('title')) ?? null, has: await this.has('title') })
   }
+
+  async requireTitle() {
+    const data = await this.validateBody(RequiredTitle)
+    return this.json({ received: data })
+  }
+
+  async allowEmpty() {
+    const data = await this.validateBody(AllOptional)
+    return this.json({ received: data })
+  }
+
+  async viaFormRequest() {
+    const data = await new TitleFormRequest().handle(this.ctx)
+    return this.json({ received: data })
+  }
 }
+
+class TitleFormRequest extends FormRequest<{ title: string }> {
+  rules() {
+    return { title: [required(), string()] }
+  }
+}
+
+const RequiredTitle = z.object({ title: z.string() })
+const AllOptional = z.object({ title: z.string().optional() })
+
+/** A body no form parser can decode: the MIME type promises a multipart boundary there is none of. */
+const UNDECODABLE_FORM = { body: 'broken', contentType: 'multipart/form-data' }
 
 async function post(routes: (router: Router) => void, path: string, body: string, contentType = 'application/json') {
   const app = new Application({ routes })
@@ -147,5 +183,159 @@ describe('non-object request bodies', () => {
     )
 
     expect(status).toBe(422)
+  })
+})
+
+/**
+ * A body the form parser cannot decode used to get three different answers
+ * depending on which validation path read it: the route contract and the
+ * `validateRequest()` middleware let the parser's TypeError escape as a 500
+ * carrying a stack, while `Controller.validateBody()` caught it and validated
+ * `{}`. A malformed body is a client error, so all three now answer 422 —
+ * the same status every other body-validation failure gets.
+ *
+ * The fallback lives in `parseRequestBody()`, which is the one place all three
+ * reach it through. Each path keeps its own 422 body shape; only the status is
+ * common ground.
+ */
+describe('a request body the form parser cannot decode', () => {
+  test('a route contract answers 422, not a 500 reporting a TypeError', async () => {
+    const { status, body } = await post(
+      (router) => router.post('/posts', { body: RequiredTitle }, () => new Response('unreachable')),
+      '/posts',
+      UNDECODABLE_FORM.body,
+      UNDECODABLE_FORM.contentType,
+    )
+
+    expect(status).toBe(422)
+    // The parser's message and stack must not reach the client.
+    expect(body).not.toContain('TypeError')
+    expect(JSON.parse(body)).toHaveProperty('errors.title')
+  })
+
+  test('validateRequest() middleware answers 422', async () => {
+    const { status, body } = await post(
+      (router) =>
+        router.post('/posts', (c: any) => c.json({ reached: true }), validateRequest(RequiredTitle)),
+      '/posts',
+      UNDECODABLE_FORM.body,
+      UNDECODABLE_FORM.contentType,
+    )
+
+    expect(status).toBe(422)
+    expect(body).not.toContain('TypeError')
+    expect(JSON.parse(body)).toHaveProperty('errors.title')
+  })
+
+  // Named beside validateRequest() because it is the same body read behind a
+  // schema factory — the factory must not be what decides the status.
+  test('validateRequestWith() middleware answers 422', async () => {
+    const { status, body } = await post(
+      (router) =>
+        router.post(
+          '/posts',
+          (c: any) => c.json({ reached: true }),
+          validateRequestWith(() => RequiredTitle),
+        ),
+      '/posts',
+      UNDECODABLE_FORM.body,
+      UNDECODABLE_FORM.contentType,
+    )
+
+    expect(status).toBe(422)
+    expect(body).not.toContain('TypeError')
+    expect(JSON.parse(body)).toHaveProperty('errors.title')
+  })
+
+  test('Controller.validateBody() answers 422 rather than passing the request through', async () => {
+    const { status, body } = await post(
+      (router) => router.post('/posts', [BulkController, 'requireTitle']),
+      '/posts',
+      UNDECODABLE_FORM.body,
+      UNDECODABLE_FORM.contentType,
+    )
+
+    expect(status).toBe(422)
+    expect(body).not.toContain('TypeError')
+  })
+
+  // The fallback is `{}`, not `undefined` — which is what these pin. A
+  // fallback of `undefined` would 422 the three tests above just as well
+  // while breaking every all-optional schema, so without these the suite
+  // would go green on the wrong fix.
+  test('an all-optional contract still passes, receiving the empty-object fallback', async () => {
+    const { status, body } = await post(
+      (router) =>
+        router.post('/posts', { body: AllOptional }, ({ body }) =>
+          new Response(JSON.stringify({ received: body }), {
+            headers: { 'content-type': 'application/json' },
+          }),
+        ),
+      '/posts',
+      UNDECODABLE_FORM.body,
+      UNDECODABLE_FORM.contentType,
+    )
+
+    expect(status).toBe(200)
+    expect(JSON.parse(body)).toEqual({ received: {} })
+  })
+
+  test('an all-optional schema still passes through the middleware', async () => {
+    const { status, body } = await post(
+      (router) =>
+        router.post('/posts', (c: any) => c.json({ received: getValidatedData(c) }), validateRequest(AllOptional)),
+      '/posts',
+      UNDECODABLE_FORM.body,
+      UNDECODABLE_FORM.contentType,
+    )
+
+    expect(status).toBe(200)
+    expect(JSON.parse(body)).toEqual({ received: {} })
+  })
+
+  test('an all-optional schema still passes through Controller.validateBody()', async () => {
+    const { status, body } = await post(
+      (router) => router.post('/posts', [BulkController, 'allowEmpty']),
+      '/posts',
+      UNDECODABLE_FORM.body,
+      UNDECODABLE_FORM.contentType,
+    )
+
+    expect(status).toBe(200)
+    expect(JSON.parse(body)).toEqual({ received: {} })
+  })
+
+  // The fallback lives in the shared parser, so the paths that read the body
+  // field by field inherit it too — they are what `parseRequestPayload()`
+  // feeds. `FormRequest` stands in for that group here.
+  test('FormRequest rules see the empty-object fallback rather than a throw', async () => {
+    const { status, body } = await post(
+      (router) => router.post('/posts', [BulkController, 'viaFormRequest']),
+      '/posts',
+      UNDECODABLE_FORM.body,
+      UNDECODABLE_FORM.contentType,
+    )
+
+    expect(status).toBe(422)
+    expect(body).not.toContain('TypeError')
+  })
+
+  // A form body that *does* decode is untouched by the fallback — the point is
+  // to catch the parser's failure, not to swallow real payloads.
+  test('a decodable form body still reaches the schema', async () => {
+    const { status, body } = await post(
+      (router) =>
+        router.post('/posts', { body: RequiredTitle }, ({ body }) =>
+          new Response(JSON.stringify({ received: body }), {
+            headers: { 'content-type': 'application/json' },
+          }),
+        ),
+      '/posts',
+      'title=Guren',
+      'application/x-www-form-urlencoded',
+    )
+
+    expect(status).toBe(200)
+    expect(JSON.parse(body)).toEqual({ received: { title: 'Guren' } })
   })
 })

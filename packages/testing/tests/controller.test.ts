@@ -341,6 +341,56 @@ describe('createGurenControllerModule', () => {
 })
 
 describe('createControllerModuleMock', () => {
+  // The runtime falls back to `{}` for a body no form parser can decode, so a
+  // malformed body is a validation failure rather than a 500. The mock keeps
+  // its own copy of that parser, so the rule has to be pinned on both sides —
+  // otherwise a controller test passes here against behavior the runtime does
+  // not have.
+  const undecodableForm = {
+    method: 'POST',
+    body: 'broken',
+    headers: { 'Content-Type': 'multipart/form-data' },
+  }
+
+  const requireTitle = {
+    safeParse: (data: unknown) =>
+      typeof data === 'object' && data !== null && typeof (data as { title?: unknown }).title === 'string'
+        ? { success: true as const, data }
+        : { success: false as const, error: { issues: [{ path: ['title'], message: 'required' }] } },
+  }
+
+  it('parseRequestPayload falls back to {} for a body the form parser cannot decode', async () => {
+    const module = createGurenControllerModule()
+    const ctx = createControllerContext('http://example.com/posts', undecodableForm)
+
+    expect(await module.parseRequestPayload(ctx as unknown as ControllerContext)).toEqual({})
+  })
+
+  it('validateBody() fails validation on an undecodable body rather than throwing', async () => {
+    const { Controller } = createControllerModuleMock()
+    const ctx = createControllerContext('http://example.com/posts', undecodableForm)
+
+    const controller = new Controller()
+    controller.setContext(ctx as unknown as ControllerContext)
+
+    // The failure must be the validation one, not the parser's TypeError.
+    await expect(controller.validateBody(requireTitle)).rejects.toThrow(/valid/i)
+  })
+
+  // Pins that the fallback is `{}` and not `undefined`: an all-optional schema
+  // has to keep passing, exactly as it does on an empty body.
+  it('validateBody() passes an all-optional schema the empty-object fallback', async () => {
+    const { Controller } = createControllerModuleMock()
+    const ctx = createControllerContext('http://example.com/posts', undecodableForm)
+
+    const controller = new Controller()
+    controller.setContext(ctx as unknown as ControllerContext)
+
+    const allOptional = { safeParse: (data: unknown) => ({ success: true as const, data }) }
+
+    expect(await controller.validateBody(allOptional)).toEqual({})
+  })
+
   it('validateBody() accepts a non-object body, while input() keeps the record view', async () => {
     const { Controller } = createControllerModuleMock()
     const ctx = createControllerContext('http://example.com/bulk', {
