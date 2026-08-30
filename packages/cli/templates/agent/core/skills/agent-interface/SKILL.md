@@ -53,20 +53,22 @@ Declaring metadata for an action that was not registered (excluded via `only`/`e
 
 ## Metadata fields
 
-Everything below is **declared metadata** the runtime reads. `guren check` and `guren audit` hold you to it, `guren context <Entity>` and `guren tool:list` report it, and `@guren/plugin-mcp` serves the tools it derives from it. The one field still ahead of its runtime is `approval` — the queue that honours it ships in a later release, and until then a tool declaring it is refused rather than executed.
+Everything below is **declared metadata** on the route — there is still no tool definition to write. The metadata is read by `guren check`, `guren audit` and `guren context <Entity>`, and it is honoured at runtime by `@guren/plugin-mcp`, which serves the derived tools at `/mcp`: the annotation defaults are resolved during derivation, `expose.mcp` filters the served catalog, `redact` masks arguments in the audit events, and `approval: 'required'` fails closed. Two things in this table still describe surfaces that have not shipped, and both rows say so: `expose.webMcp` and the approval *queue*.
+
+Serving is a separate, app-level step: the endpoint mounts only when the app installs the plugin and configures a bearer token store. A route carries `.agent()` metadata whether or not it does — declaring it is your job, mounting the endpoint is the app's.
 
 | Field | Meaning |
 |-------|---------|
 | `description` | What the tool does. Falls back to the route's OpenAPI `description` ?? `summary`. Write it for an agent that has never seen your app. |
 | `toolName` | Overrides the route name as the tool name. |
-| `expose` | `{ mcp?, webMcp? }` — which protocol surfaces the tool should appear on. `mcp: false` hides the tool from the App MCP endpoint, which honours it today. |
+| `expose` | `{ mcp?, webMcp? }` — which protocol surfaces the tool appears on; both default to true. `mcp: false` keeps a tool out of the MCP endpoint's catalog today. `webMcp` is recorded for a browser surface that has not shipped. |
 | `readOnlyHint` | The tool changes nothing. On a mutating verb this is an explicit override — and it exempts the route from the authorization rule below, so `guren check` holds it against the action's body. |
 | `destructiveHint` | `false` is the strong claim "additive updates only" — `guren audit` checks it against the action. Unset keeps the spec default (destructive for a non-read-only tool). |
 | `idempotentHint` | Repeat calls with the same arguments add no effect. The derivation defaults it to true for PUT and DELETE; declaring it records your own claim. |
-| `approval` | `'required'` marks the tool as needing server-side approval before it executes. Until the queue ships, the App MCP endpoint refuses such a tool fail-closed and hides it from the catalog — declare it only when refusal is the behaviour you want. |
-| `redact` | Argument field names to mask in the agent audit log. Honoured today: the `AgentToolInvoked` / `AgentToolDenied` events carry arguments already masked, these names on top of a built-in list of sensitive key fragments. |
+| `approval` | `'required'` marks the tool as needing server-side approval before it executes. There is no approval queue yet, so the MCP endpoint **fails closed** on it: the tool is neither listed nor callable. |
+| `redact` | Argument field names to mask in the `AgentToolInvoked` / `AgentToolDenied` events the endpoint emits. Unioned with a built-in fragment list (`password`, `secret`, `token`, `apikey`, …), so it *adds* to a default rather than being the whole mask. Matching is lowercased, separator-stripped containment — `redact: ['id']` also masks `userId`. |
 
-Annotations are untrusted hints for client UX. **They enforce nothing** — enforcement lives in policies, token scopes and, later, the approval queue. That is exactly why the two hints that *weaken* a check are held against the controller body.
+Annotations are untrusted hints for client UX. **They enforce nothing** — enforcement lives in your policies (evaluated inside the dispatched request, exactly as for a browser) and in the calling token's tool scopes (evaluated before the request is synthesized); the approval queue is still to come. That is exactly why the two hints that *weaken* a check are held against the controller body.
 
 ## Authentication is not authorization
 
