@@ -114,6 +114,24 @@ function loadServer(): Promise<ServerModule> {
 }
 
 /**
+ * The mock's counterpart to the runtime's guarded multipart parse behind
+ * `Controller.file()` / `files()`: a body the parser cannot decode reads as
+ * `null`, so both helpers answer as they do for an absent field instead of
+ * throwing out of the controller.
+ *
+ * `await` inside try/catch rather than `.catch()`, for the same reason the
+ * runtime gives: `formData()` may throw synchronously as well as reject, and
+ * only one of those two shapes reaches a `.catch()`.
+ */
+async function readMultipartBody(request: Request): Promise<FormData | null> {
+  try {
+    return await request.clone().formData()
+  } catch {
+    return null
+  }
+}
+
+/**
  * The mock's counterpart to the runtime's `parseRequestBody`: the parsed body
  * as sent, so an array stays an array for `validateBody()` to judge.
  *
@@ -441,8 +459,15 @@ export function createControllerModuleMock() {
         // Clone for the same reason as parseRequestPayload: both may read the
         // body of the same request, mirroring Hono's parse cache — and the
         // memo keeps repeated file()/files() calls to one parse.
+        //
+        // A body the parser cannot decode resolves to `null`, matching the
+        // runtime's guarded parse: file() answers null and files() [], the
+        // same as for an absent field, rather than throwing out of the
+        // controller. Guarded here rather than in the two callers so the memo
+        // still holds — a rejected promise cached is one parse, a guard per
+        // call site is two.
         this.multipartBody = contentType.includes('multipart/form-data')
-          ? request.clone().formData()
+          ? readMultipartBody(request)
           : Promise.resolve(null)
       }
       return this.multipartBody
