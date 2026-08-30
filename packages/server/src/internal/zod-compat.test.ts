@@ -17,11 +17,30 @@ import {
   SINGLE_CHILD_WRAPPERS,
   TRANSPARENT_WRAPPERS,
   typeOf,
+  unwrapSingleChild,
 } from './zod-compat'
 
 /** Reach into a schema's `_def`, which is exactly what these helpers exist to read. */
 const defOf = (schema: unknown): Record<string, unknown> =>
   (schema as { _def: Record<string, unknown> })._def
+
+/**
+ * One node per member of the wrapper vocabulary, shared by every test that has
+ * to build them. Pinned to `SINGLE_CHILD_WRAPPERS` by the key-equality check in
+ * `wrapper vocabulary` below, so a wrapper added to the set with no builder here
+ * fails once rather than silently narrowing whatever iterates this.
+ */
+const WRAPPER_BUILDERS: Record<string, () => unknown> = {
+  catch: () => z.string().catch('x'),
+  readonly: () => z.string().readonly(),
+  lazy: () => z.lazy(() => z.string()),
+  optional: () => z.string().optional(),
+  default: () => z.string().default('x'),
+  prefault: () => z.string().prefault('x'),
+  nonoptional: () => z.string().optional().nonoptional(),
+  nullable: () => z.string().nullable(),
+  pipe: () => z.string().pipe(z.coerce.number()),
+}
 
 describe('isZod3Schema', () => {
   // zod 4 ships the v3 API as the `zod/v3` subpath, so a v3-shaped node can
@@ -151,11 +170,11 @@ describe('literalValues', () => {
 })
 
 describe('wrapper vocabulary', () => {
-  // The two walkers partition these differently — the CLI splits transparent
-  // from presence-deciding because it walks types and presence separately,
-  // while the OpenAPI walker looks through all of them uniformly. What they
-  // must never do is disagree about membership, so the partitions are pinned
-  // here rather than restated in each package.
+  // The walkers partition these differently — the CLI's type renderer splits
+  // transparent from presence-deciding because it walks types and presence
+  // separately, while the JSON Schema walker looks through all of them
+  // uniformly. What they must never do is disagree about membership, so the
+  // partitions are pinned here rather than restated in each package.
   test('SINGLE_CHILD_WRAPPERS is the union of both partitions plus the specially-rendered two', () => {
     expect([...SINGLE_CHILD_WRAPPERS].sort()).toEqual([
       'catch', 'default', 'lazy', 'nonoptional',
@@ -172,23 +191,61 @@ describe('wrapper vocabulary', () => {
   })
 
   test('every wrapper in the vocabulary really is a single-child node in zod 4', () => {
-    const build: Record<string, () => unknown> = {
-      catch: () => z.string().catch('x'),
-      readonly: () => z.string().readonly(),
-      lazy: () => z.lazy(() => z.string()),
-      optional: () => z.string().optional(),
-      default: () => z.string().default('x'),
-      prefault: () => z.string().prefault('x'),
-      nonoptional: () => z.string().optional().nonoptional(),
-      nullable: () => z.string().nullable(),
-      pipe: () => z.string().pipe(z.coerce.number()),
-    }
     // Key equality both ways: a wrapper without a builder AND a stale builder
-    // for a name no longer in the set fail here, before the loop runs.
-    expect(Object.keys(build).sort()).toEqual([...SINGLE_CHILD_WRAPPERS].sort())
-    for (const [name, make] of Object.entries(build)) {
+    // for a name no longer in the set fail here, before the loop runs. Every
+    // other test that iterates `WRAPPER_BUILDERS` inherits that guarantee.
+    expect(Object.keys(WRAPPER_BUILDERS).sort()).toEqual([...SINGLE_CHILD_WRAPPERS].sort())
+    for (const [name, make] of Object.entries(WRAPPER_BUILDERS)) {
       expect(typeOf(make() as never)).toBe(name)
     }
+  })
+})
+
+describe('unwrapSingleChild', () => {
+  // Three walks look through wrappers for different reasons and reach
+  // different conclusions from what they find; the step itself is shared so
+  // they cannot disagree about *which* child a wrapper has.
+  test('reaches the child of every wrapper that exposes one', () => {
+    for (const [name, make] of Object.entries(WRAPPER_BUILDERS)) {
+      // `lazy` hides its child from every walker and `pipe` has one per
+      // direction; both get their own test below.
+      if (name === 'lazy' || name === 'pipe') continue
+      const node = make() as never
+      // Identity against zod's own `_def.innerType`, not merely "defined": a
+      // step that returned the wrapper unchanged would satisfy a definedness
+      // check while silently failing to descend, which is the whole job.
+      expect(unwrapSingleChild(node, 'input'), name).toBe(defOf(node).innerType as never)
+    }
+  })
+
+  // The one member of the vocabulary with no reachable child: zod keeps it
+  // behind `_def.getter`, which no walker calls. Callers must read this as
+  // "contents unavailable" rather than "not a wrapper" — the JSON Schema
+  // walker warns instead of silently dropping the property.
+  test('cannot reach through a lazy schema', () => {
+    expect(unwrapSingleChild(z.lazy(() => z.string()) as never, 'input')).toBeUndefined()
+  })
+
+  // A pipe is the reason this takes an `io` at all: the two sides are
+  // different schemas, and reading the wrong one describes a value nobody
+  // sends or receives.
+  test('resolves a pipe to the side matching the direction', () => {
+    const piped = z.string().pipe(z.coerce.number()) as never
+    expect(typeOf(unwrapSingleChild(piped, 'input') as never)).toBe('string')
+    expect(typeOf(unwrapSingleChild(piped, 'output') as never)).toBe('number')
+  })
+
+  // A transform's out side is the transform function, so there is no schema to
+  // read there and both directions fall back to the input side.
+  test('falls back to the input side of a transform, which has no readable output', () => {
+    const transformed = z.string().transform((value) => value.length) as never
+    expect(typeOf(unwrapSingleChild(transformed, 'output') as never)).toBe('string')
+  })
+
+  test('returns undefined for a node that is not a wrapper', () => {
+    expect(unwrapSingleChild(z.string() as never, 'input')).toBeUndefined()
+    expect(unwrapSingleChild(z.object({ a: z.string() }) as never, 'input')).toBeUndefined()
+    expect(unwrapSingleChild({} as never, 'input')).toBeUndefined()
   })
 })
 

@@ -45,7 +45,6 @@ import {
   isZod3Schema,
   literalValues,
   objectShape,
-  pipeSide,
   pipeSides,
   recordValueType,
   type SchemaIo,
@@ -53,6 +52,7 @@ import {
   schemaFormat,
   SINGLE_CHILD_WRAPPERS,
   typeOf,
+  unwrapSingleChild,
   ZOD3_UNSUPPORTED_MESSAGE,
   type ZodCheckDef,
   type ZodSchemaLike,
@@ -196,7 +196,7 @@ export function toJsonSchema(
   // uniformly. `nullable` is the exception — it renders as a union with null —
   // and so keeps its own case below.
   if (typeName !== 'nullable' && SINGLE_CHILD_WRAPPERS.has(typeName)) {
-    const nested = unwrap(schema, io)
+    const nested = unwrapSingleChild(schema, io)
     if (!nested) {
       // Reaching a wrapper whose contents cannot be read drops the property,
       // so say so — `z.lazy()` hides its schema behind a getter this walker
@@ -248,7 +248,7 @@ export function toJsonSchema(
       }
     }
     case 'nullable': {
-      const nested = unwrap(schema, io)
+      const nested = unwrapSingleChild(schema, io)
       const nestedSchema = nested ? toJsonSchema(nested, warnings, label, io) : undefined
       return nestedSchema ? { anyOf: [nestedSchema, { type: 'null' }] } : { type: ['null'] }
     }
@@ -381,7 +381,7 @@ function readObjectSchemaDetails(
   }
 
   if (typeOf(schema) !== 'object') {
-    const nested = unwrap(schema, io)
+    const nested = unwrapSingleChild(schema, io)
     return nested ? readObjectSchemaDetails(nested, warnings, label, io) : undefined
   }
 
@@ -410,26 +410,13 @@ function readObjectSchemaDetails(
 }
 
 /**
- * The schema a wrapper wraps, in the direction being described. Three walks
- * look through wrappers for different reasons — finding the object behind a
- * parameter schema, rendering a type, deciding whether a property may be
- * omitted — and each layers its own handling on top (`nullable` renders as a
- * union; `optional` and friends decide presence). What none of them may do is
- * disagree about which names *are* wrappers, which is why the membership comes
- * from `SINGLE_CHILD_WRAPPERS` rather than a local list. See `pipeSides` for
- * why a pipe resolves per direction.
+ * Whether a caller may leave this property out — the `required` half of an
+ * object schema.
+ *
+ * Stays here rather than joining `unwrapSingleChild` in `zod-compat`: applying
+ * the wrapper vocabulary is schema-reading, but what to *conclude* from a
+ * wrapper is a policy each caller sets — see the `pipe` case.
  */
-function unwrap(schema: ZodSchemaLike, io: SchemaIo): ZodSchemaLike | undefined {
-  const def = schema._def ?? {}
-  const typeName = typeOf(schema)
-
-  if (typeName === 'pipe') {
-    return pipeSide(def, io)
-  }
-
-  return SINGLE_CHILD_WRAPPERS.has(typeName) ? innerSchema(def) : undefined
-}
-
 function isOptional(schema: ZodSchemaLike, io: SchemaIo): boolean {
   switch (typeOf(schema)) {
     case 'optional':
@@ -461,7 +448,7 @@ function isOptional(schema: ZodSchemaLike, io: SchemaIo): boolean {
       return to ? isOptional(from, io) && isOptional(to, io) : isOptional(from, io)
     }
     default: {
-      const nested = unwrap(schema, io)
+      const nested = unwrapSingleChild(schema, io)
       return nested ? isOptional(nested, io) : false
     }
   }

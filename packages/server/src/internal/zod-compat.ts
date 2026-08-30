@@ -1,7 +1,10 @@
 /**
- * Zod 4 schema-reading primitives shared by `@guren/cli`'s TypeScript-type
- * renderer (`src/schema-type-extractor.ts`) and the OpenAPI schema-object
- * renderer (`@guren/openapi`).
+ * Zod 4 schema-reading primitives shared by everything that has to read an
+ * application's schemas without parsing anything: the JSON Schema walker next
+ * door (`zod-json-schema.ts`, behind `@guren/openapi`, RFC 0016's agent tools,
+ * and `deriveAgentTools`), `@guren/cli`'s TypeScript-type renderer
+ * (`src/schema-type-extractor.ts`), and its route contract check
+ * (`src/route-contract-check.ts`).
  *
  * Internal by the rules in `contributing/api-stability.md`: reachable only
  * through a deep import under `internal/`, never re-exported from
@@ -20,17 +23,21 @@
  * below it assumes the v4 layout, where `_def.type` is always the type name.
  *
  * What does NOT belong here: the two type switches that turn a node into an
- * output (a TypeScript type string vs. an OpenAPI schema object). Their leaf
+ * output (a TypeScript type string vs. a JSON Schema object). Their leaf
  * vocabularies have legitimately diverged — the CLI renders `void`/`any`/
- * `never`, which OpenAPI has no way to express — and that is a rendering
+ * `never`, which JSON Schema has no way to express — and that is a rendering
  * decision, not schema-reading knowledge.
  *
- * Neither walker's `isOptional` belongs here either, but for a weaker reason
- * than "they are both right": the CLI reads only the side of a `.pipe()` it
- * renders, the OpenAPI walker requires both sides to permit omission, and
- * *both* are approximations that a sufficiently odd pipeline can fool. Fixing
- * them properly means simulating a parse, which is well beyond reading a
- * `_def`. They stay with their callers until someone does that.
+ * No caller's `isOptional` belongs here either, but for a weaker reason than
+ * "they are all right": the CLI's type renderer reads only the side of a
+ * `.pipe()` it renders, while the JSON Schema walker and the CLI's route
+ * contract check require both sides to permit omission, and *every* one of them
+ * is an approximation that a sufficiently odd pipeline can fool. Fixing them
+ * properly means simulating a parse, which is well beyond reading a `_def`.
+ * They stay with their callers until someone does that. Applying the wrapper
+ * vocabulary is not policy, though, which is why `unwrapSingleChild` does live
+ * here: reaching a wrapper's child is schema-reading, while what a caller
+ * *concludes* from that wrapper is the caller's to decide.
  */
 
 export interface ZodSchemaLike {
@@ -252,7 +259,7 @@ export const PRESENCE_WRAPPERS: ReadonlySet<string> = new Set([
  *
  * This is the vocabulary, not a policy: callers partition it however their
  * rendering needs (the CLI splits transparent from presence-deciding because
- * it walks types and presence separately; the OpenAPI walker looks through all
+ * it walks types and presence separately; the JSON Schema walker looks through all
  * of them uniformly). What none of them may do is disagree about *membership*
  * — a name known to one walker and not the other silently changes an output,
  * which is why the list lives here rather than once per package.
@@ -262,3 +269,22 @@ export const SINGLE_CHILD_WRAPPERS: ReadonlySet<string> = new Set([
   ...PRESENCE_WRAPPERS,
   'nullable', 'pipe',
 ])
+
+/**
+ * The schema a single-child wrapper wraps, in the direction being read; absent
+ * for a node that is not a wrapper, or one whose child cannot be reached
+ * (`z.lazy()` hides its schema behind a getter no walker calls).
+ *
+ * Membership comes from the set above, for the reason stated there; a pipe
+ * resolves per direction, for the reason stated on `pipeSides`.
+ */
+export function unwrapSingleChild(schema: ZodSchemaLike, io: SchemaIo): ZodSchemaLike | undefined {
+  const def = schema._def ?? {}
+  const typeName = typeOf(schema)
+
+  if (typeName === 'pipe') {
+    return pipeSide(def, io)
+  }
+
+  return SINGLE_CHILD_WRAPPERS.has(typeName) ? innerSchema(def) : undefined
+}
