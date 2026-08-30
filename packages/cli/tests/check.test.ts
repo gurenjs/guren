@@ -179,7 +179,15 @@ test('lists tasks', async () => {
 
       const manifestChecks = report.checks.filter(c => c.key.startsWith('manifest:'))
       expect(manifestChecks.length).toBeGreaterThan(0)
-      expect(manifestChecks.every(c => c.status === 'warn')).toBe(true)
+      // The agent manifest is the one conditional artifact: codegen writes it
+      // only for apps that derive a tool, so a workspace with none is not
+      // missing anything (RFC 0016).
+      const agentManifest = manifestChecks.find(c => c.key === 'manifest:.guren/agents.gen.ts')
+      expect(agentManifest?.status).toBe('pass')
+      expect(agentManifest?.message).toContain('not applicable')
+      const unconditional = manifestChecks.filter(c => c !== agentManifest)
+      expect(unconditional.length).toBeGreaterThan(0)
+      expect(unconditional.every(c => c.status === 'warn')).toBe(true)
     } finally {
       await workspace.cleanup()
     }

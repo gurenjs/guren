@@ -6,12 +6,19 @@ import { join } from 'node:path'
 import { z } from 'zod'
 import { Controller, Router, deriveAgentTools, type RouteDefinition } from '@guren/core'
 import { authorizeMiddleware } from '@guren/core'
-import { checkTypes, GENERATED_MODULE_COMPILER_OPTIONS, TSC_TIMEOUT, writeWorkspaceFiles } from './helpers'
+import {
+  checkTypes,
+  GENERATED_MODULE_COMPILER_OPTIONS,
+  linkWorkspaceCore,
+  TSC_TIMEOUT,
+  writeWorkspaceFiles,
+} from './helpers'
 import {
   AGENTS_MANIFEST_FILE,
   appDeclaresAgentRoutes,
   buildAgentToolsContent,
   generateAgentTypes,
+  planAgentManifest,
   type AgentResourceRef,
 } from '../src/agents-types'
 
@@ -159,6 +166,19 @@ describe('buildAgentToolsContent', () => {
     expect(content).toContain('No tool declares a resolvable resource response hint.')
   })
 
+  test('emits a __proto__ property as a computed key', () => {
+    const router = new Router()
+    router.get('/posts/:__proto__', [PostController, 'index']).name('posts.odd').agent({})
+    const { tools } = deriveAgentTools(router.definitions())
+
+    const content = buildAgentToolsContent(tools)
+    // A quoted `"__proto__":` key in an object literal sets [[Prototype]]
+    // instead of defining a property, so the manifest would describe a tool
+    // argument that is not there.
+    expect(content).toContain('["__proto__"]:')
+    expect(content).not.toContain('"__proto__":')
+  })
+
   test(
     'emits a module that type-checks beside data.gen.ts',
     async () => {
@@ -213,6 +233,103 @@ describe('generateAgentTypes', () => {
 
     const { warnings } = await generateAgentTypes(router.definitions(), { appRoot: dir })
     expect(warnings[0]).toContain('no route name')
+  })
+})
+
+describe('planAgentManifest', () => {
+  const AGENT_ROUTES = `import { Router } from '@guren/core'
+
+export function registerWebRoutes(router: Router): void {
+  router.get('/posts', () => 'posts').name('posts.index').agent({})
+}
+
+export default registerWebRoutes
+`
+
+  const NO_AGENT_ROUTES = `import { Router } from '@guren/core'
+
+export function registerWebRoutes(router: Router): void {
+  router.get('/posts', () => 'posts').name('posts.index')
+}
+
+export default registerWebRoutes
+`
+
+  // An .agent() route that cannot become a tool: no .name(). The string scan
+  // says "agent routes here", the derivation says "no tools" — the
+  // disagreement that used to strand check and doctor in a loop.
+  const UNNAMED_AGENT_ROUTE = `import { Router } from '@guren/core'
+
+export function registerWebRoutes(router: Router): void {
+  router.get('/posts', () => 'posts').agent({ description: 'List posts' })
+}
+
+export default registerWebRoutes
+`
+
+  async function makeLinkedApp(files: Record<string, string>): Promise<string> {
+    const dir = await makeApp(files)
+    await linkWorkspaceCore(dir)
+    return dir
+  }
+
+  test('expects a manifest when the derivation yields a tool', async () => {
+    const dir = await makeLinkedApp({ 'routes/web.ts': AGENT_ROUTES })
+
+    expect(await planAgentManifest(dir)).toEqual({ reason: 'tools', toolCount: 1, staleManifest: false })
+  })
+
+  test('expects none when no route declares agent metadata, without loading the app', async () => {
+    // The routes file throws on import, so a plan that comes back cleanly is
+    // proof the derivation was never attempted — the cheap path an app with
+    // no manifest and no `.agent()` in its sources must keep.
+    const dir = await makeLinkedApp({
+      'routes/web.ts': `throw new Error('the route graph must not be loaded here')\n`,
+    })
+
+    expect(await planAgentManifest(dir)).toEqual({ reason: 'no-tools', toolCount: 0, staleManifest: false })
+  })
+
+  test('expects none — and reports a stale file — when .agent() derives no tool', async () => {
+    const dir = await makeLinkedApp({
+      'routes/web.ts': UNNAMED_AGENT_ROUTE,
+      '.guren/agents.gen.ts': '// left over\n',
+    })
+
+    // The remedy both check and doctor print is `guren codegen`, which removes
+    // the file. Expecting one here instead would print a remedy that deletes
+    // what it just demanded.
+    expect(await planAgentManifest(dir)).toEqual({ reason: 'no-tools', toolCount: 0, staleManifest: true })
+  })
+
+  test('reports a manifest left behind after the last .agent() was removed', async () => {
+    const dir = await makeLinkedApp({
+      'routes/web.ts': NO_AGENT_ROUTES,
+      '.guren/agents.gen.ts': '// left over\n',
+    })
+
+    // Reached despite the string scan saying "no agent routes": a file on disk
+    // is itself reason enough to ask the derivation.
+    expect(await planAgentManifest(dir)).toEqual({ reason: 'no-tools', toolCount: 0, staleManifest: true })
+  })
+
+  test('claims nothing when the route graph cannot be loaded', async () => {
+    // Mentions agent metadata, so the cheap path does not apply — and then
+    // fails to load. Neither "expected" nor "stale" would be honest.
+    const dir = await makeLinkedApp({
+      'routes/web.ts': `// .agent(\nthrow new Error('boom')\n`,
+    })
+
+    const plan = await planAgentManifest(dir)
+    expect(plan.reason).toBe('unreadable')
+    expect(plan.staleManifest).toBe(false)
+    expect(plan.loadError).toContain('boom')
+  })
+
+  test('treats a missing routes file as nothing to derive', async () => {
+    const dir = await makeApp({ '.guren/agents.gen.ts': '// left over\n' })
+
+    expect(await planAgentManifest(dir)).toEqual({ reason: 'no-tools', toolCount: 0, staleManifest: true })
   })
 })
 

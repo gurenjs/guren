@@ -1,6 +1,5 @@
-import { resolve } from 'node:path'
 import { consola } from 'consola'
-import { loadRouteDefinitions, DEFAULT_ROUTES_FILE } from './load-routes'
+import { loadAppRouteDefinitions } from './load-routes'
 
 export interface RouteListOptions {
   /**
@@ -54,17 +53,7 @@ export interface RouteInfo {
  * List all registered routes.
  */
 export async function listRoutes(options: RouteListOptions = {}): Promise<RouteInfo[]> {
-  const appRoot = options.appRoot ? resolve(options.appRoot) : process.cwd()
-  const routesFile = resolve(appRoot, options.routesFile ?? DEFAULT_ROUTES_FILE)
-
-  let definitions
-  try {
-    definitions = await loadRouteDefinitions(routesFile, appRoot)
-  } catch (error) {
-    throw new Error(
-      `Failed to import routes file (${routesFile}): ${error instanceof Error ? error.message : String(error)}`
-    )
-  }
+  const { definitions } = await loadAppRouteDefinitions(options)
 
   let routes = definitions.map((def) => ({
     method: def.method.toUpperCase(),

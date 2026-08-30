@@ -421,6 +421,39 @@ bunx guren route:list --format json    # JSON output
 bunx guren route:list --format compact # Compact single-line format
 ```
 
+## Agent Tool Commands
+
+Routes that declare `.agent()` metadata are exposed to AI agents as MCP tools (see [Routing — Agent tools](./routing.md)). These commands report what an agent would see, derived live from your route graph — not read from `.guren/agents.gen.ts`, so they answer correctly even when that manifest is missing or stale.
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `tool:list` | List the agent tools this application exposes | `bunx guren tool:list` |
+| `tool:inspect` | Show one tool's full derivation | `bunx guren tool:inspect posts.store` |
+
+```bash
+# Every exposed tool, with its method, path, protocol exposure,
+# authorization ability and MCP annotation hints
+bunx guren tool:list
+
+# The raw derivation, including any warnings
+bunx guren tool:list --json
+
+# One tool: input fields, output schema, authorization,
+# annotations, approval and redaction
+bunx guren tool:inspect posts.store
+bunx guren tool:inspect posts.store --json
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--routes` | `routes/web.ts` | Path to the routes entry file |
+| `--app` | Current directory | Application root directory |
+| `--json` | `false` | Output the derived tools as JSON |
+
+Everything shown is derived from contracts the route already carries: the input schema merges its `params`, `query` and `body` schemas, the output schema comes from `output`, and the authorization ability comes from the policy its middleware chain checks. Nothing is declared twice, so a tool cannot advertise a schema the endpoint does not validate.
+
+`bunx guren codegen` writes the same derivation to `.guren/agents.gen.ts` for apps that expose at least one tool, and removes that file for apps that expose none.
+
 ## Config Commands
 
 | Command | Description | Example |

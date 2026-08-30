@@ -47,7 +47,7 @@ import { parseSchemaTables, schemaPathFor, type SchemaTable } from './schema-par
 import { ParseCache } from './parse-cache'
 import { extractInertiaPageRefs, resolveInertiaPageFile, expectedInertiaPagePath } from './inertia-pages'
 import { describePageManifestSuppression, PAGES_MANIFEST_FILE, planPageManifest } from './pages-types'
-import { AGENTS_MANIFEST_FILE, appDeclaresAgentRoutes } from './agents-types'
+import { AGENTS_MANIFEST_FILE, planAgentManifest } from './agents-types'
 import { runArchCheck } from './arch-check'
 import { runDocsCheck } from './docs-check'
 import { runI18nCheck } from './i18n-check'
@@ -91,6 +91,59 @@ export interface RunCheckOptions {
    * zero results.
    */
   i18n?: boolean
+}
+
+/**
+ * The agent manifest's own presence check (RFC 0016), which the generic
+ * manifest loop cannot express: `.guren/agents.gen.ts` is expected only when
+ * the derivation yields a tool, and an existing one is *wrong* when it does
+ * not — `guren codegen` deletes it. Both states point at the same command,
+ * which is the property that makes the check clearable.
+ */
+async function checkAgentManifest(cwd: string, routesFile?: string): Promise<CheckResult> {
+  const key = `manifest:${AGENTS_MANIFEST_FILE}`
+  const plan = await planAgentManifest(cwd, routesFile)
+
+  if (plan.reason === 'unreadable') {
+    return check(
+      key,
+      AGENTS_MANIFEST_FILE,
+      'warn',
+      `Skipped: the route graph failed to load: ${plan.loadError}`,
+      'Fix the error, then run: bunx guren check',
+      routesFile,
+    )
+  }
+
+  if (plan.staleManifest) {
+    return check(
+      key,
+      AGENTS_MANIFEST_FILE,
+      'warn',
+      `${AGENTS_MANIFEST_FILE} describes agent tools this app no longer exposes — no route derives one.`,
+      `Run: bunx guren codegen (it removes ${AGENTS_MANIFEST_FILE})`,
+    )
+  }
+
+  if (plan.reason === 'no-tools') {
+    return check(
+      key,
+      AGENTS_MANIFEST_FILE,
+      'pass',
+      `No route declares agent metadata; ${AGENTS_MANIFEST_FILE} is not applicable.`,
+    )
+  }
+
+  const present = await fileExists(cwd, AGENTS_MANIFEST_FILE)
+  return check(
+    key,
+    AGENTS_MANIFEST_FILE,
+    present ? 'pass' : 'warn',
+    present
+      ? `${AGENTS_MANIFEST_FILE} is present (${plan.toolCount} ${plan.toolCount === 1 ? 'tool' : 'tools'}).`
+      : `${AGENTS_MANIFEST_FILE} is missing; ${plan.toolCount} ${plan.toolCount === 1 ? 'route derives' : 'routes derive'} an agent tool.`,
+    present ? undefined : 'Run: bunx guren codegen',
+  )
 }
 
 /**
@@ -230,11 +283,6 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
       '.guren/routes.gen.ts',
       ...(pagesPlan.reason === 'pages' ? [PAGES_MANIFEST_FILE] : []),
       '.guren/data.gen.ts',
-      // Conditional on the same principle as the pages manifest: codegen
-      // writes an agent manifest only for apps whose routes declare
-      // `.agent()` metadata, so expecting one from every app would warn about
-      // a file that should not exist (RFC 0016).
-      ...((await appDeclaresAgentRoutes(cwd, options.routesFile)) ? [AGENTS_MANIFEST_FILE] : []),
     ]
     for (const manifest of manifests) {
       const exists = await fileExists(cwd, manifest)
@@ -248,6 +296,14 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
         ),
       )
     }
+
+    // 5.5. The agent manifest is conditional in both directions, so it cannot
+    // ride the loop above: codegen writes it only for apps that derive at
+    // least one tool, and *removes* it otherwise. Keyed on the derivation
+    // rather than on the presence of `.agent()` in a source file, so the
+    // remedy this prints always clears the state it reports — see
+    // planAgentManifest.
+    checks.push(await checkAgentManifest(cwd, options.routesFile))
 
     // 6. Check every module's db/schema.ts is re-exported from the root
     // db/schema.ts (the wiring make:module performs automatically — this

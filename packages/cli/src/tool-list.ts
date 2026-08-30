@@ -13,10 +13,14 @@
  * `agent:` for the coding-agent harness, which is a different surface
  * entirely.
  */
-import { resolve } from 'node:path'
 import { consola } from 'consola'
-import { deriveAgentTools, type DerivedAgentTool } from '@guren/core'
-import { DEFAULT_ROUTES_FILE, loadRouteDefinitions } from './load-routes'
+import {
+  deriveAgentTools,
+  type DeriveAgentToolsResult,
+  type DerivedAgentTool,
+  type ResourceResponseShape,
+} from '@guren/core'
+import { loadAppRouteDefinitions } from './load-routes'
 
 export interface ToolListOptions {
   /** Routes entry file path. */
@@ -25,24 +29,8 @@ export interface ToolListOptions {
   appRoot?: string
 }
 
-export interface DerivedToolReport {
-  tools: DerivedAgentTool[]
-  warnings: string[]
-}
-
-export async function listTools(options: ToolListOptions = {}): Promise<DerivedToolReport> {
-  const appRoot = options.appRoot ? resolve(options.appRoot) : process.cwd()
-  const routesFile = resolve(appRoot, options.routesFile ?? DEFAULT_ROUTES_FILE)
-
-  let definitions
-  try {
-    definitions = await loadRouteDefinitions(routesFile, appRoot)
-  } catch (error) {
-    throw new Error(
-      `Failed to import routes file (${routesFile}): ${error instanceof Error ? error.message : String(error)}`,
-    )
-  }
-
+export async function listTools(options: ToolListOptions = {}): Promise<DeriveAgentToolsResult> {
+  const { definitions } = await loadAppRouteDefinitions(options)
   return deriveAgentTools(definitions)
 }
 
@@ -54,6 +42,18 @@ function describeAnnotations(tool: DerivedAgentTool): string {
   if (tool.annotations.idempotentHint) flags.push('idempotent')
   if (tool.approval === 'required') flags.push('approval')
   return flags.length > 0 ? flags.join(', ') : '-'
+}
+
+/** Aligned `Label: value` lines — the longest label is `Authorization`. */
+function field(label: string, value: string): string {
+  return `${`${label}:`.padEnd(15)}${value}`
+}
+
+/** Every Resource class a hint names, in the order the shape declares them. */
+function resourceClassNames(shape: ResourceResponseShape): string[] {
+  if (typeof shape === 'string') return [shape]
+  if (Array.isArray(shape)) return resourceClassNames(shape[0])
+  return Object.values(shape).flatMap(resourceClassNames)
 }
 
 function describeAuthorization(tool: DerivedAgentTool): string {
@@ -128,8 +128,10 @@ export async function displayToolInspection(
 
   // Only this tool's warnings: the rest belong to routes the caller did not
   // ask about, and burying the one line that concerns this tool among them is
-  // how an inspect command stops being read.
-  const relevant = warnings.filter((warning) => warning.startsWith(`${tool.toolName}: `))
+  // how an inspect command stops being read. Read off the tool rather than
+  // filtered out of the aggregate by prefix — the prefix is a printing
+  // convention, not a contract to parse back.
+  const relevant = tool.warnings
 
   if (options.json) {
     console.log(JSON.stringify({ tool, warnings: relevant }, null, 2))
@@ -137,13 +139,13 @@ export async function displayToolInspection(
   }
 
   console.log(`\x1b[1m${tool.toolName}\x1b[0m  ${tool.method} ${tool.path}`)
-  if (tool.routeName !== tool.toolName) console.log(`Route:        ${tool.routeName}`)
-  console.log(`Description:  ${tool.description ?? '(none)'}`)
-  console.log(`Exposure:     mcp=${tool.expose.mcp ? 'yes' : 'no'} webMcp=${tool.expose.webMcp ? 'yes' : 'no'}`)
-  console.log(`Annotations:  ${describeAnnotations(tool)}`)
-  console.log(`Authorization: ${tool.authorization ? tool.authorization.ability : '(not statically derivable)'}`)
-  if (tool.approval) console.log(`Approval:     ${tool.approval}`)
-  if (tool.redact) console.log(`Redacted:     ${tool.redact.join(', ')}`)
+  if (tool.routeName !== tool.toolName) console.log(field('Route', tool.routeName))
+  console.log(field('Description', tool.description ?? '(none)'))
+  console.log(field('Exposure', `mcp=${tool.expose.mcp ? 'yes' : 'no'} webMcp=${tool.expose.webMcp ? 'yes' : 'no'}`))
+  console.log(field('Annotations', describeAnnotations(tool)))
+  console.log(field('Authorization', tool.authorization ? tool.authorization.ability : '(not statically derivable)'))
+  if (tool.approval) console.log(field('Approval', tool.approval))
+  if (tool.redact) console.log(field('Redacted', tool.redact.join(', ')))
 
   console.log('')
   console.log('\x1b[1mInput\x1b[0m')
@@ -165,10 +167,13 @@ export async function displayToolInspection(
   if (tool.outputSchema) {
     console.log(JSON.stringify(tool.outputSchema, null, 2))
   } else if (tool.resource) {
-    // The hint's payload *type* lives in the CLI's AST extraction, not in the
-    // route graph, so say where to read it rather than printing half of it.
-    console.log(`  resource hint: ${JSON.stringify(tool.resource)}`)
-    console.log('  (no output schema; the payload type is embedded in .guren/agents.gen.ts)')
+    // The hint's payload *type* lives in the CLI's AST extraction over
+    // app/Http/Resources, not in the route graph this command reads — so name
+    // the Resource class the reader can open, rather than pointing at a
+    // generated file that may not exist (this command derives live precisely
+    // because it must answer without one).
+    const classes = resourceClassNames(tool.resource)
+    console.log(`  (no output schema; response declared by ${classes.join(', ')})`)
   } else {
     console.log('  (no output schema)')
   }

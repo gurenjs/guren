@@ -33,6 +33,8 @@ import {
   type ResourceTypeRef,
 } from './api-client-types'
 import { discoverRoutePathFiles } from './route-path-check'
+import { fileExists } from './discovery'
+import { DEFAULT_ROUTES_FILE, loadRouteDefinitions } from './load-routes'
 import { escapeSingleQuoted, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
 
 export const AGENTS_MANIFEST_FILE = '.guren/agents.gen.ts'
@@ -70,20 +72,103 @@ export interface GenerateAgentTypesOptions extends WriterOptions {
  * warning), and metadata reaching a route through an options object built
  * elsewhere does not (a warning that never fires for a manifest codegen writes
  * anyway). Neither costs correctness, because nothing decides *exposure* from
- * this — that is `deriveAgentTools()`, over the real route graph.
+ * this — that is `deriveAgentTools()`, over the real route graph, which
+ * {@link planAgentManifest} falls through to whenever this says yes.
+ *
+ * A file that cannot be read counts as declaring. This gate's "no" is what
+ * skips the derivation entirely, so swallowing a read failure into "no agent
+ * routes" would turn an unreadable routes directory into a clean bill of
+ * health — the fail-open shape. Erring the other way costs one route-graph
+ * load, which then reports the real failure. (`discoverRoutePathFiles` is
+ * deliberately left unwrapped: a directory scan that throws is a broken app
+ * root, and propagating it says so.)
  */
 export async function appDeclaresAgentRoutes(cwd: string, routesFile?: string): Promise<boolean> {
   const files = await discoverRoutePathFiles(cwd, routesFile)
-  const sources = await Promise.all(
+  const declaring = await Promise.all(
     files.map(async (file) => {
       try {
-        return await readFile(file, 'utf-8')
+        return AGENT_DECLARATION_PATTERN.test(await readFile(file, 'utf-8'))
       } catch {
-        return ''
+        return true
       }
     }),
   )
-  return sources.some((source) => /\.agent\s*\(|(?:^|[{,(\s])agent\s*:/u.test(source))
+  return declaring.some(Boolean)
+}
+
+/** `.agent(` for the builder, `agent:` for the route-contract and `resource()` option keys. */
+const AGENT_DECLARATION_PATTERN = /\.agent\s*\(|(?:^|[{,(\s])agent\s*:/u
+
+export interface AgentManifestPlan {
+  /**
+   * `tools` — derivation produces at least one, so codegen writes the manifest.
+   * `no-tools` — it produces none, so codegen writes nothing and removes any
+   * file already there. `unreadable` — the route graph could not be loaded, so
+   * nothing is claimed either way.
+   */
+  reason: 'tools' | 'no-tools' | 'unreadable'
+  toolCount: number
+  /** A manifest on disk that codegen would not write — and would delete. */
+  staleManifest: boolean
+  /** Why the route graph could not be loaded (`reason: 'unreadable'` only). */
+  loadError?: string
+}
+
+/**
+ * The one rule for "does this app get a `.guren/agents.gen.ts`?" — codegen's
+ * own decision, which `check` and `doctor` read rather than restate. Mirrors
+ * `planPageManifest`, and for the same reason: an expectation those two
+ * derive independently is an expectation that drifts from what codegen does.
+ *
+ * The expectation is *derivation produces at least one tool*, not "a route
+ * mentions .agent()". Anything weaker loops: a lone `.agent()` route with no
+ * `.name()` cannot become a tool, so codegen removes the manifest — while a
+ * check keyed on the string scan keeps demanding one and prints `guren
+ * codegen` as the remedy, which deletes it again. A printed remedy that
+ * cannot clear the state it is printed for is worse than no check.
+ *
+ * The cheap path is preserved: an app with no manifest on disk and no route
+ * source mentioning agent metadata never loads the route graph. Everything
+ * else — including a manifest left behind after the last `.agent()` was
+ * removed, which is the stale case this reports — is worth one load.
+ */
+export async function planAgentManifest(
+  cwd: string,
+  routesFile: string = DEFAULT_ROUTES_FILE,
+): Promise<AgentManifestPlan> {
+  const present = await fileExists(cwd, AGENTS_MANIFEST_FILE)
+
+  if (!present && !(await appDeclaresAgentRoutes(cwd, routesFile))) {
+    return { reason: 'no-tools', toolCount: 0, staleManifest: false }
+  }
+
+  if (!(await fileExists(cwd, routesFile))) {
+    // No routes file at all: nothing can derive, and a manifest sitting beside
+    // it describes tools that cannot exist.
+    return { reason: 'no-tools', toolCount: 0, staleManifest: present }
+  }
+
+  let definitions
+  try {
+    definitions = await loadRouteDefinitions(resolve(cwd, routesFile), cwd)
+  } catch (error) {
+    // Reported, never swallowed: staying silent here is indistinguishable
+    // from an app that legitimately exposes nothing.
+    return {
+      reason: 'unreadable',
+      toolCount: 0,
+      staleManifest: false,
+      loadError: error instanceof Error ? error.message : String(error),
+    }
+  }
+
+  const { tools } = deriveAgentTools(definitions)
+  return {
+    reason: tools.length > 0 ? 'tools' : 'no-tools',
+    toolCount: tools.length,
+    staleManifest: present && tools.length === 0,
+  }
 }
 
 export async function generateAgentTypes(
@@ -285,11 +370,41 @@ function renderTool(tool: DerivedAgentTool, enrichment: ResourceEnrichment | und
 }
 
 /**
- * A JSON literal, re-indented to sit where it is written. `JSON.stringify` is
- * the renderer rather than a hand-rolled one because everything emitted here
- * *is* JSON — JSON Schema objects, booleans, string arrays — and it escapes
- * every string the same way TypeScript reads it.
+ * A JSON value as a TypeScript literal, indented to sit where it is written.
+ *
+ * Not `JSON.stringify`, for one reason: a JSON Schema property may legally be
+ * named `__proto__` (a path parameter can be — `/posts/:__proto__`), and
+ * `{ "__proto__": ... }` in an object literal sets the object's [[Prototype]]
+ * instead of defining a property. The generated manifest would then describe a
+ * tool argument that is not there. The computed form `{ ["__proto__"]: ... }`
+ * defines it, which is the same hazard `Router.serializeResourceHint` records
+ * for its envelope keys.
+ *
+ * Leaves still go through `JSON.stringify`, so every string is escaped exactly
+ * as TypeScript reads it.
  */
 function renderLiteral(value: unknown, indent: string): string {
-  return JSON.stringify(value, null, 2).split('\n').join(`\n${indent}`)
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value)
+  }
+
+  const inner = `${indent}  `
+
+  if (Array.isArray(value)) {
+    if (value.length === 0) return '[]'
+    const items = value.map((item) => `${inner}${renderLiteral(item, inner)}`)
+    return `[\n${items.join(',\n')}\n${indent}]`
+  }
+
+  const entries = Object.entries(value)
+  if (entries.length === 0) return '{}'
+  const rendered = entries.map(
+    ([key, item]) => `${inner}${renderObjectKey(key)}: ${renderLiteral(item, inner)}`,
+  )
+  return `{\n${rendered.join(',\n')}\n${indent}}`
+}
+
+/** See {@link renderLiteral}: only `__proto__` needs the computed form. */
+function renderObjectKey(key: string): string {
+  return key === '__proto__' ? `[${JSON.stringify(key)}]` : JSON.stringify(key)
 }

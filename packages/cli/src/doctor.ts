@@ -24,7 +24,7 @@ import {
   planPageManifest,
   type PageManifestPlan,
 } from './pages-types'
-import { AGENTS_MANIFEST_FILE, appDeclaresAgentRoutes } from './agents-types'
+import { AGENTS_MANIFEST_FILE, planAgentManifest, type AgentManifestPlan } from './agents-types'
 import { extractClassDeclaration } from './model-parser'
 import { parseSourceFile } from './parse-cache'
 import { ROUTES_ENTRY_CANDIDATES } from './route-registrar'
@@ -119,10 +119,11 @@ interface DoctorRuleContext {
   // snapshot of the filesystem — computing it per-rule would let concurrent
   // rules disagree if a page file were added or removed mid-run.
   pageManifest: Promise<PageManifestPlan>
-  // Whether any route source declares agent metadata (RFC 0016). Shared for
-  // the same reason, and cheap for a different one: it is a string scan over
-  // route files, not an evaluation of the app's module graph.
-  agentRoutes: Promise<boolean>
+  // Whether codegen would write `.guren/agents.gen.ts`, and whether one on
+  // disk is stale (RFC 0016). Shared for the same reason as the pages plan —
+  // and computed once because, unlike that one, it may load the app's route
+  // graph (only for apps that have a manifest or mention agent metadata).
+  agentManifest: Promise<AgentManifestPlan>
 }
 
 interface DoctorRule {
@@ -145,8 +146,81 @@ const GENERATED_FILES = [
   '.guren/data.gen.ts',
   '.guren/api-client.gen.ts',
   '.guren/channels.gen.ts',
-  AGENTS_MANIFEST_FILE,
 ]
+
+/**
+ * The agent manifest's rule (RFC 0016). Separate from the generic one because
+ * its expectation runs in both directions: codegen writes
+ * `.guren/agents.gen.ts` only for apps that derive at least one tool, and
+ * deletes it otherwise — so an existing file can itself be the finding. Both
+ * findings name the same command, which is what keeps them clearable.
+ */
+function createAgentManifestRule(): DoctorRule {
+  const key = `generated:${AGENTS_MANIFEST_FILE}`
+
+  return {
+    key,
+    title: AGENTS_MANIFEST_FILE,
+    async detect(context) {
+      const plan = await context.agentManifest
+
+      if (plan.reason === 'unreadable') {
+        return createCheck(
+          key,
+          AGENTS_MANIFEST_FILE,
+          'warn',
+          `Could not tell whether ${AGENTS_MANIFEST_FILE} is needed: the route graph failed to load (${plan.loadError}).`,
+          {
+            fix: 'Fix the route graph, then run `guren doctor` again.',
+            manualFix: 'Fix the route graph, then run `guren doctor` again.',
+          },
+        )
+      }
+
+      if (plan.staleManifest) {
+        return createCheck(
+          key,
+          AGENTS_MANIFEST_FILE,
+          'warn',
+          `${AGENTS_MANIFEST_FILE} describes agent tools this app no longer exposes — no route derives one.`,
+          {
+            fix: `Run \`guren codegen --force\` to remove ${AGENTS_MANIFEST_FILE}.`,
+            manualFix: `Run \`guren codegen --force\` to remove ${AGENTS_MANIFEST_FILE}.`,
+          },
+        )
+      }
+
+      if (plan.reason === 'no-tools') {
+        return createCheck(
+          key,
+          AGENTS_MANIFEST_FILE,
+          'pass',
+          `No routes declare agent metadata; ${AGENTS_MANIFEST_FILE} is not applicable.`,
+        )
+      }
+
+      if (await fileExists(context.cwd, AGENTS_MANIFEST_FILE)) {
+        return createCheck(
+          key,
+          AGENTS_MANIFEST_FILE,
+          'pass',
+          `Generated manifest present at ${AGENTS_MANIFEST_FILE} (${plan.toolCount} ${plan.toolCount === 1 ? 'tool' : 'tools'}).`,
+        )
+      }
+
+      return createCheck(
+        key,
+        AGENTS_MANIFEST_FILE,
+        'warn',
+        `Missing generated manifest ${AGENTS_MANIFEST_FILE}.`,
+        {
+          fix: `Run \`guren codegen --force\` to regenerate ${AGENTS_MANIFEST_FILE}.`,
+          manualFix: `Run \`guren codegen --force\` to regenerate ${AGENTS_MANIFEST_FILE}.`,
+        },
+      )
+    },
+  }
+}
 
 export const DOCTOR_RECOMMENDED_COMMANDS = [
   'bunx guren codegen --force',
@@ -387,17 +461,6 @@ function createGeneratedManifestRule(generatedFile: string): DoctorRule {
         )
       }
 
-      // Conditional artifacts: an app that exposes no agent tools has no
-      // manifest to miss, and warning about one would nag every app written
-      // before RFC 0016. Same shape as the pages exemption above.
-      if (generatedFile === AGENTS_MANIFEST_FILE && !(await context.agentRoutes)) {
-        return createCheck(
-          key,
-          generatedFile,
-          'pass',
-          `No routes declare agent metadata; ${generatedFile} is not applicable.`,
-        )
-      }
 
       return createCheck(
         key,
@@ -1285,6 +1348,7 @@ const doctorRules: DoctorRule[] = [
   { key: 'routes', title: 'Route Sources', detect: detectRoutes },
   { key: 'page-contracts', title: 'Page Types', detect: detectPageContracts },
   ...GENERATED_FILES.map((generatedFile) => createGeneratedManifestRule(generatedFile)),
+  createAgentManifestRule(),
   { key: 'tsconfig', title: 'TypeScript Config', detect: detectTsconfig, autofix: createTsconfigAutofix },
   { key: 'tsconfig-alias', title: 'Path Alias', detect: detectTsconfigAlias, autofix: createTsconfigAliasAutofix },
   { key: 'bootstrap', title: 'Bootstrap Style', detect: detectBootstrap },
@@ -1303,7 +1367,7 @@ export async function getDoctorRuleEvaluations(options: { cwd?: string } = {}): 
   const context: DoctorRuleContext = {
     cwd,
     pageManifest: planPageManifest(cwd),
-    agentRoutes: appDeclaresAgentRoutes(cwd),
+    agentManifest: planAgentManifest(cwd),
   }
 
   // The deploy-runtime checks share one filesystem scan, computed once here
@@ -1496,18 +1560,19 @@ export async function suggestNextSteps(options: { cwd?: string } = {}): Promise<
     // Ignore
   }
 
-  const [pagesPlan, hasAgentRoutes] = await Promise.all([planPageManifest(cwd), appDeclaresAgentRoutes(cwd)])
+  const [pagesPlan, agentPlan] = await Promise.all([planPageManifest(cwd), planAgentManifest(cwd)])
   const requiredManifests = [
     '.guren/routes.gen.ts',
     ...(pagesPlan.reason === 'pages' ? [PAGES_MANIFEST_FILE] : []),
     '.guren/data.gen.ts',
-    // Conditional, like the pages manifest: an app whose routes declare no
-    // agent metadata has no tools, so nothing is missing when it has no
-    // manifest.
-    ...(hasAgentRoutes ? [AGENTS_MANIFEST_FILE] : []),
+    // Conditional, like the pages manifest, and on the derivation rather than
+    // on a route file mentioning `.agent()` — an app that derives no tool is
+    // not missing a manifest.
+    ...(agentPlan.reason === 'tools' ? [AGENTS_MANIFEST_FILE] : []),
     '.guren/api-client.gen.ts',
   ]
-  let missingManifests = false
+  // A stale agent manifest is the same next step: codegen removes it.
+  let missingManifests = agentPlan.staleManifest
   for (const manifest of requiredManifests) {
     if (!(await fileExists(cwd, manifest))) {
       missingManifests = true
