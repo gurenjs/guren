@@ -196,6 +196,22 @@ describe('createGurenControllerModule', () => {
     expect(payload).toEqual({})
   })
 
+  // The runtime narrows here too: a non-object body has no field to read, so
+  // the record view is `{}`. `parseRequestBody` is the one that keeps it.
+  it('parseRequestPayload narrows a non-object JSON body to an empty object', async () => {
+    const module = createGurenControllerModule()
+    const ctx = createControllerContext('http://example.com/', {
+      method: 'POST',
+      body: JSON.stringify([1, 2, 3]),
+      headers: { 'Content-Type': 'application/json' },
+    })
+
+    const payload = await module.parseRequestPayload(ctx as unknown as ControllerContext)
+
+    expect(payload).toEqual({})
+  })
+
+
   it('file() returns an uploaded multipart file and composes with validateBody()', async () => {
     const { Controller } = createControllerModuleMock()
 
@@ -325,6 +341,84 @@ describe('createGurenControllerModule', () => {
 })
 
 describe('createControllerModuleMock', () => {
+  it('validateBody() accepts a non-object body, while input() keeps the record view', async () => {
+    const { Controller } = createControllerModuleMock()
+    const ctx = createControllerContext('http://example.com/bulk', {
+      method: 'POST',
+      body: JSON.stringify([1, 2, 3]),
+      headers: { 'Content-Type': 'application/json' },
+    })
+
+    const controller = new Controller()
+    controller.setContext(ctx as unknown as ControllerContext)
+
+    // Hand-rolled rather than a zod import: the mock takes any `safeParse`,
+    // and this test is about the shape reaching the schema at all.
+    const numberArray = {
+      safeParse: (data: unknown) =>
+        Array.isArray(data) && data.every((n) => typeof n === 'number')
+          ? { success: true as const, data: data as number[] }
+          : { success: false as const, error: { issues: [{ path: [], message: 'expected number[]' }] } },
+    }
+
+    expect(await controller.validateBody(numberArray)).toEqual([1, 2, 3])
+    expect(await controller.input('title')).toBeUndefined()
+  })
+
+  // Every shape the runtime's parseRequestBody preserves, driven through the
+  // path that actually consumes it. `null` is the one worth naming: it is a
+  // parsed body, not an absent one, so coalescing it to `{}` would hand
+  // validation a shape nobody sent.
+  it('validateBody() sees the body as sent, whatever its shape', async () => {
+    const { Controller } = createControllerModuleMock()
+
+    const seen: unknown[] = []
+    const capture = {
+      safeParse: (data: unknown) => {
+        seen.push(data)
+        return { success: true as const, data }
+      },
+    }
+
+    const validate = async (body: string, contentType = 'application/json') => {
+      const controller = new Controller()
+      controller.setContext(
+        createControllerContext('http://example.com/bulk', {
+          method: 'POST',
+          body,
+          headers: { 'Content-Type': contentType },
+        }) as unknown as ControllerContext,
+      )
+      return controller.validateBody(capture)
+    }
+
+    expect(await validate(JSON.stringify([1, 2, 3]))).toEqual([1, 2, 3])
+    expect(await validate(JSON.stringify('hello'))).toBe('hello')
+    expect(await validate(JSON.stringify(null))).toBeNull()
+    // Malformed bodies fall back to `{}` the way the real Controller does,
+    // rather than throwing out of validateBody(). Both parsers are covered:
+    // JSON by its own catch, form data by the controller's.
+    expect(await validate('{ not json')).toEqual({})
+    expect(await validate('broken', 'multipart/form-data')).toEqual({})
+    expect(seen).toHaveLength(5)
+  })
+
+  it('reads the body once per controller, memoizing the record view', async () => {
+    const { Controller } = createControllerModuleMock()
+    const ctx = createControllerContext('http://example.com/posts', {
+      method: 'POST',
+      body: JSON.stringify({ title: 'Guren' }),
+      headers: { 'Content-Type': 'application/json' },
+    })
+
+    const controller = new Controller()
+    controller.setContext(ctx as unknown as ControllerContext)
+
+    expect(await controller.input('title')).toBe('Guren')
+    expect(await controller.input('title')).toBe('Guren')
+    expect(controller.parsedBody).toEqual({ title: 'Guren' })
+  })
+
   it('extends Controller with json method', () => {
     const { Controller } = createControllerModuleMock()
     const ctx = createControllerContext('http://example.com/api')

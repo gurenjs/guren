@@ -1,6 +1,6 @@
 import type { Context, MiddlewareHandler } from 'hono'
 import { jsonResponse } from './index'
-import { parseRequestPayload, formatValidationErrors, type ValidationErrorLike } from '../request'
+import { parseRequestBody, formatValidationErrors, type ValidationErrorLike } from '../request'
 
 export const VALIDATED_DATA_KEY = 'guren:validated'
 
@@ -63,7 +63,7 @@ export function validateRequest<T>(
   const { onError, status = 422, fallbackMessage = 'The provided data is invalid.' } = options
 
   return async (ctx, next) => {
-    const payload = await parseRequestPayload(ctx)
+    const payload = await parseRequestBody(ctx)
     const result = schema.safeParse(payload)
 
     if (!result.success) {
@@ -101,7 +101,7 @@ export function validateRequestWith<T>(
 
   return async (ctx, next) => {
     const schema = schemaFactory(ctx)
-    const payload = await parseRequestPayload(ctx)
+    const payload = await parseRequestBody(ctx)
     const result = schema.safeParse(payload)
 
     if (!result.success) {

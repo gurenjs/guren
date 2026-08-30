@@ -17,6 +17,15 @@ export { generateApiClientTypes } from './api-client-types'
 export { generateAgentTypes, appDeclaresAgentRoutes, planAgentManifest, AGENTS_MANIFEST_FILE } from './agents-types'
 export type { AgentManifestPlan } from './agents-types'
 export { listTools, displayTools, displayToolInspection } from './tool-list'
+export {
+  planTokenIssue,
+  issueAgentToken,
+  normalizeToolScope,
+  parseExpiresDuration,
+  parseUserId,
+  runTokenIssue,
+} from './token-issue'
+export type { TokenIssueInput, TokenIssuePlan, TokenIssueOptions } from './token-issue'
 export { generateOpenApiSpec, loadOpenApiModule, resolveOpenApiInfo } from './openapi-generate'
 export { runDoctor, renderDoctorReport, suggestNextSteps, buildJsonOutput } from './doctor'
 export { upgradeCanary, DEFAULT_UPGRADE_TAG } from './upgrade'
