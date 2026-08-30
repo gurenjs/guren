@@ -461,6 +461,7 @@ Routes that declare `.agent()` metadata are exposed to AI agents as MCP tools (s
 |---------|-------------|---------|
 | `tool:list` | List the agent tools this application exposes | `bunx guren tool:list` |
 | `tool:inspect` | Show one tool's full derivation | `bunx guren tool:inspect posts.store` |
+| `tool:dev` | Serve the tools locally with a throwaway token | `bunx guren tool:dev` |
 
 ```bash
 # Every exposed tool, with its method, path, protocol exposure,
@@ -474,13 +475,37 @@ bunx guren tool:list --json
 # annotations, approval and redaction
 bunx guren tool:inspect posts.store
 bunx guren tool:inspect posts.store --json
+
+# Run the app's MCP endpoint locally with a token that lasts only as long
+# as the command, and print the MCP Inspector invocation for it
+bunx guren tool:dev
+bunx guren tool:dev --as 42 --port 4000
 ```
+
+`tool:list` and `tool:inspect` options:
 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--routes` | `routes/web.ts` | Path to the routes entry file |
 | `--app` | Current directory | Application root directory |
 | `--json` | `false` | Output the derived tools as JSON |
+
+`tool:dev` serves the application's *own* endpoint — it requires
+[`@guren/plugin-mcp`](./agent-interface.md) to be installed and registered, and
+says so if no endpoint answers. The token it issues lives in memory for that
+process only: nothing is written to your app's token store, and stopping the
+command revokes it. It refuses to run with `NODE_ENV=production`.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--as` | a placeholder id | User ID tool calls authenticate as. The default matches no record, so listing tools works while a call whose policy loads a user fails visibly |
+| `--path` | `/mcp` | Endpoint path, when the plugin is mounted elsewhere |
+| `--port` | `3333` | Port to listen on (`0` picks a free one) |
+| `--host` | `127.0.0.1` | Hostname to bind |
+| `--app` | Current directory | Application root directory |
+
+> [!WARNING]
+> The printed token grants `tools:*`. The default bind is loopback, so it stays on your machine; `--host 0.0.0.0` makes the endpoint — and that token — reachable from your network for as long as the command runs.
 
 Everything shown is derived from contracts the route already carries: the input schema merges its `params`, `query` and `body` schemas, the output schema comes from `output`, and the authorization ability comes from the policy its middleware chain checks. Nothing is declared twice, so a tool cannot advertise a schema the endpoint does not validate.
 
