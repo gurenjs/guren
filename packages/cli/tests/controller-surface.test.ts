@@ -21,10 +21,21 @@ import { parseSourceFile } from '../src/parse-cache'
 const CONTROLLER_PATH = fileURLToPath(new URL('../../server/src/mvc/Controller.ts', import.meta.url))
 
 /**
- * Method and getter names an action can call: instance members that are
- * `protected` or (explicitly or by omission) `public`. Class *properties* are
- * left out — the only one on the public surface is the static `inject` DI hint,
- * which is configuration, not something a method body invokes.
+ * Names an action can call as `this.<name>(...)`: instance members that are
+ * `protected` or (explicitly or by omission) `public`, written as a method, a
+ * getter, an overload signature, or a function-valued class field. That last
+ * form is included for the same reason `classActionMembers` exists — a
+ * function is a function whichever side of the `=` it is declared on, and a
+ * `protected helper = () => this.request().json()` added to `Controller.ts`
+ * would otherwise never reach `CONTROLLER_MEMBER_KINDS`, which is precisely
+ * the silent-pass this guard exists to prevent. It is a no-op today: the only
+ * class property on the reachable surface is the static `inject` DI hint,
+ * already excluded as static.
+ *
+ * Deliberately *not* `classActionMembers`, which asks a different question.
+ * That iterator wants members holding a body to read, so it excludes
+ * `TSDeclareMethod`; this guard wants the declared callable surface, so an
+ * overload signature counts and a body is irrelevant.
  *
  * Throws on any eligible member this cannot name (a computed or string-literal
  * key). Skipping those quietly would let one be added without classification,
@@ -48,8 +59,15 @@ async function publicControllerSurface(): Promise<string[]> {
 
     const names = new Set<string>()
     for (const member of classDecl.body.body) {
-      if (member.type !== 'ClassMethod' && member.type !== 'TSDeclareMethod') continue
-      if (member.static || member.accessibility === 'private' || member.kind === 'constructor') continue
+      const callable =
+        member.type === 'ClassMethod'
+        || member.type === 'TSDeclareMethod'
+        || (member.type === 'ClassProperty'
+          && (member.value?.type === 'ArrowFunctionExpression'
+            || member.value?.type === 'FunctionExpression'))
+      if (!callable) continue
+      if (member.static || member.accessibility === 'private') continue
+      if (member.type !== 'ClassProperty' && member.kind === 'constructor') continue
       if (member.key.type !== 'Identifier') {
         throw new Error(
           `Controller has a public/protected member with a ${member.key.type} key, which this guard `
