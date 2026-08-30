@@ -213,13 +213,22 @@ describe('createGurenControllerModule', () => {
 
   it('parseRequestBody returns a non-object JSON body as sent', async () => {
     const module = createGurenControllerModule()
-    const ctx = createControllerContext('http://example.com/', {
-      method: 'POST',
-      body: JSON.stringify([1, 2, 3]),
-      headers: { 'Content-Type': 'application/json' },
-    })
+    const parse = (body: string) =>
+      module.parseRequestBody(
+        createControllerContext('http://example.com/', {
+          method: 'POST',
+          body,
+          headers: { 'Content-Type': 'application/json' },
+        }) as unknown as ControllerContext,
+      )
 
-    expect(await module.parseRequestBody(ctx as unknown as ControllerContext)).toEqual([1, 2, 3])
+    expect(await parse(JSON.stringify([1, 2, 3]))).toEqual([1, 2, 3])
+    expect(await parse(JSON.stringify('hello'))).toBe('hello')
+    // `null` is a parsed body, not an absent one — the runtime keeps it, so
+    // the mock must too, or validation sees a shape nobody sent.
+    expect(await parse(JSON.stringify(null))).toBeNull()
+    // And a malformed body falls back rather than throwing out of validateBody().
+    expect(await parse('{ not json')).toEqual({})
   })
 
   it('file() returns an uploaded multipart file and composes with validateBody()', async () => {
@@ -373,6 +382,34 @@ describe('createControllerModuleMock', () => {
 
     expect(await controller.validateBody(numberArray)).toEqual([1, 2, 3])
     expect(await controller.input('title')).toBeUndefined()
+  })
+
+  // `null` is a parsed body, not an absent one: it reaches validation as sent,
+  // and the boxed memo caches it rather than re-reading a consumed stream.
+  it('validateBody() sees a null body as null, and memoizes it', async () => {
+    const { Controller } = createControllerModuleMock()
+    const ctx = createControllerContext('http://example.com/bulk', {
+      method: 'POST',
+      body: JSON.stringify(null),
+      headers: { 'Content-Type': 'application/json' },
+    })
+
+    const controller = new Controller()
+    controller.setContext(ctx as unknown as ControllerContext)
+
+    const seen: unknown[] = []
+    const capture = {
+      safeParse: (data: unknown) => {
+        seen.push(data)
+        return { success: true as const, data }
+      },
+    }
+
+    await controller.validateBody(capture)
+    await controller.validateBody(capture)
+
+    expect(seen).toEqual([null, null])
+    expect(controller.parsedBody).toEqual({ value: null })
   })
 
   it('extends Controller with json method', () => {

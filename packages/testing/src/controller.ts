@@ -125,7 +125,7 @@ async function parseRequestBody(ctx: ControllerContext): Promise<unknown> {
   const contentType = request.headers.get('Content-Type') ?? ''
 
   if (contentType.includes('application/json')) {
-    return request.json()
+    return request.json().catch(() => ({}))
   }
 
   if (contentType.includes('application/x-www-form-urlencoded')) {
@@ -375,7 +375,7 @@ export function createControllerModuleMock() {
 
       // Deliberately the raw parser, not `module.parseRequestPayload` — that
       // one narrows, which is what made a non-object body unreachable.
-      this.parsedBody = { value: (await module.parseRequestBody(this.ctx)) ?? {} }
+      this.parsedBody = { value: await module.parseRequestBody(this.ctx) }
       return this.parsedBody.value
     }
 
