@@ -1,6 +1,6 @@
 /**
  * Extracts TypeScript type literals from Zod 4 schema objects at runtime.
- * Every `_def` read the OpenAPI walker also performs goes through
+ * Every `_def` read the JSON Schema walker also performs goes through
  * `@guren/core/internal/zod-compat`, so the two cannot disagree about zod's
  * layout; rendering decisions live here.
  */
@@ -18,6 +18,7 @@ import {
   type SchemaIo,
   TRANSPARENT_WRAPPERS,
   typeOf,
+  unwrapSingleChild,
   ZOD3_UNSUPPORTED_MESSAGE,
   type ZodSchemaLike,
 } from '@guren/core/internal/zod-compat'
@@ -194,18 +195,21 @@ function zodToType(z: ZodSchemaLike, io: SchemaIo): string {
 
 /**
  * Whether a field may be omitted — the presence half of the input/output split
- * that `zodToType` handles for types.
+ * that `zodToType` handles for types. What each wrapper *means* for presence is
+ * this renderer's own policy; only the step that reaches the child is shared.
  */
 function isOptional(z: ZodSchemaLike, io: SchemaIo): boolean {
   const t = typeOf(z)
-  const def = z._def ?? {}
-  const look = (s: unknown): boolean => (s ? isOptional(s as ZodSchemaLike, io) : false)
+  const child = (): boolean => {
+    const wrapped = unwrapSingleChild(z, io)
+    return wrapped ? isOptional(wrapped, io) : false
+  }
 
   if (TRANSPARENT_WRAPPERS.has(t)) {
     // `.catch()` swallows any failure, so an omitted key is never rejected;
     // on the way out it is absent only if what it wraps could be.
     if (t === 'catch' && io === 'input') return true
-    return look(innerSchema(def))
+    return child()
   }
 
   switch (t) {
@@ -219,14 +223,14 @@ function isOptional(z: ZodSchemaLike, io: SchemaIo): boolean {
     case 'nonoptional':
       return false
     case 'nullable':
-      return look(innerSchema(def))
+      return child()
     // Read the side being rendered, so presence matches the type `zodToType`
     // reports for this node. An approximation: a pipeline runs both stages, so
     // `z.string().optional().pipe(z.string())` is reported omissible even
     // though the second stage rejects a missing value. Deciding that properly
     // means simulating a parse, not reading a `_def`.
     case 'pipe':
-      return look(pipeSide(def, io))
+      return child()
     default:
       return false
   }

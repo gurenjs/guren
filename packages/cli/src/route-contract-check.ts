@@ -1,13 +1,11 @@
 import { resolve } from 'node:path'
 import type { RouteDefinition } from '@guren/core'
 import {
-  innerSchema,
   isZod3Schema,
   objectShape,
-  pipeSide,
   pipeSides,
-  SINGLE_CHILD_WRAPPERS,
   typeOf,
+  unwrapSingleChild,
   ZOD3_UNSUPPORTED_MESSAGE,
   type ZodSchemaLike,
 } from '@guren/core/internal/zod-compat'
@@ -31,21 +29,10 @@ export interface RouteContractCheckOptions {
 }
 
 /**
- * The schema a wrapper wraps, on the side a *request* carries. Membership
- * comes from `SINGLE_CHILD_WRAPPERS` rather than a list of this file's own:
- * a wrapper name known to one walker and not another silently changes an
- * answer, which is the whole reason that set lives in `zod-compat`.
+ * The direction every walk in this file looks *through* a wrapper: a params
+ * schema describes what arrives in the URL, never what a parse produces.
  */
-function unwrapSingleChild(schema: ZodSchemaLike): ZodSchemaLike | undefined {
-  const def = schema._def ?? {}
-  const type = typeOf(schema)
-
-  if (type === 'pipe') {
-    return pipeSide(def, 'input')
-  }
-
-  return SINGLE_CHILD_WRAPPERS.has(type) ? innerSchema(def) : undefined
-}
+const REQUEST_SIDE = 'input'
 
 /**
  * The `object` node inside a params schema, looking through every wrapper
@@ -60,22 +47,32 @@ function objectNode(schema: ZodSchemaLike): ZodSchemaLike | undefined {
     return schema
   }
 
-  const nested = unwrapSingleChild(schema)
+  const nested = unwrapSingleChild(schema, REQUEST_SIDE)
   return nested ? objectNode(nested) : undefined
 }
 
 /**
  * Whether a request may leave this key out without the schema rejecting it.
  *
- * A third copy of a question two walkers already answer, and deliberately so:
- * `zod-compat` hosts the wrapper vocabulary but refuses to host this, because
- * each caller is asking something slightly different. The CLI's type renderer
- * reads only the side of a `.pipe()` it renders, which is right for naming a
- * type and wrong here — it calls `z.string().optional().pipe(z.string())`
- * omissible, when in fact the second stage rejects a missing value and every
- * request without the key gets a 422. This check errs the other way on
- * purpose: an approximation that over-reports severity costs a reader one
- * look, and one that under-reports files a real 422 as advice.
+ * Errs toward over-reporting on purpose: an approximation that over-reports
+ * severity costs a reader one look, and one that under-reports files a real
+ * 422 as advice. That is why the CLI's *type* renderer cannot answer this —
+ * it reads only the side of a `.pipe()` it renders, which is right for naming
+ * a type and wrong here, calling `z.string().optional().pipe(z.string())`
+ * omissible when the second stage rejects a missing value and every request
+ * without the key gets a 422.
+ *
+ * `zod-compat` hosts the vocabulary and the step that applies it
+ * (`unwrapSingleChild`), but no caller's optionality policy, and this is the
+ * third such policy. Be aware it is currently *identical* to the JSON Schema
+ * walker's `isOptional(schema, 'input')` — that convergence is deliberate, not
+ * an oversight, and it is still kept apart for two reasons. Hosting one of the
+ * three centrally would make it read as authoritative and the other two as
+ * deviants, when all three are documented approximations a sufficiently odd
+ * pipeline can fool. And it would put this check's user-visible severity
+ * downstream of the JSON Schema walker's `required` semantics, so a change
+ * made to fix an OpenAPI document would silently reclassify a `guren check`
+ * finding.
  */
 function permitsOmission(schema: ZodSchemaLike): boolean {
   const def = schema._def ?? {}
@@ -109,7 +106,7 @@ function permitsOmission(schema: ZodSchemaLike): boolean {
     }
 
     default: {
-      const nested = unwrapSingleChild(schema)
+      const nested = unwrapSingleChild(schema, REQUEST_SIDE)
       return nested ? permitsOmission(nested) : false
     }
   }
