@@ -23,7 +23,6 @@
  * silently does not apply is worse than an absent one.
  */
 import { consola } from 'consola'
-import { pathToFileURL } from 'node:url'
 import {
   buildToolRequest,
   deriveAgentTools,
@@ -32,12 +31,7 @@ import {
   type RouteDefinition,
   type ToolCallOutcome,
 } from '@guren/core'
-import {
-  bootstrapApplication,
-  ensureApplicationBooted,
-  resolveMainEntry,
-  type MaybeApplication,
-} from './runtime'
+import { loadBootedApplication } from './runtime'
 import { parseUserId } from './token-issue'
 
 /** Origin the synthesized request is built on — never leaves the process. */
@@ -151,21 +145,10 @@ function testingUserHeader(userId: string | number): string {
 async function loadAgentSurface(
   appRoot?: string,
 ): Promise<{ definitions: RouteDefinition[]; fetch: (request: Request) => Promise<Response> }> {
-  const entry = await resolveMainEntry(appRoot)
-
-  let moduleExports: Record<string, unknown>
-  try {
-    moduleExports = (await import(pathToFileURL(entry).href)) as Record<string, unknown>
-  } catch (error) {
-    throw new Error(
-      `Failed to import application entry (${entry}): ${error instanceof Error ? error.message : String(error)}`,
-    )
-  }
-
-  const app: MaybeApplication = await bootstrapApplication(moduleExports)
-  // Fail rather than warn: a tool dispatched into a half-booted app reaches a
-  // route graph whose configuration never completed.
-  await ensureApplicationBooted(app, moduleExports, { rethrow: true })
+  // Booted, and failing rather than warning if it cannot be: a tool dispatched
+  // into a half-booted app reaches a route graph whose configuration never
+  // completed.
+  const app = await loadBootedApplication(appRoot)
 
   const definitions = app.router?.definitions?.()
   if (!definitions) {
@@ -185,6 +168,14 @@ async function loadAgentSurface(
   return { definitions, fetch: async (request) => fetch(request) }
 }
 
+/** RFC 6265 §5.1.4: does a cookie scoped to `cookiePath` travel to `requestPath`? */
+function pathMatches(requestPath: string, cookiePath: string): boolean {
+  if (cookiePath === '' || cookiePath === '/') return true
+  if (requestPath === cookiePath) return true
+  if (!requestPath.startsWith(cookiePath)) return false
+  return cookiePath.endsWith('/') || requestPath[cookiePath.length] === '/'
+}
+
 /**
  * Fetch a CSRF token pair the way a browser does, and hand back the headers
  * that present it.
@@ -197,14 +188,6 @@ async function loadAgentSurface(
  * nothing with. Priming is not a bypass: it performs exactly the round-trip a
  * browser performs, and an app that issues no token gets no headers added.
  */
-/** RFC 6265 §5.1.4: does a cookie scoped to `cookiePath` travel to `requestPath`? */
-function pathMatches(requestPath: string, cookiePath: string): boolean {
-  if (cookiePath === '' || cookiePath === '/') return true
-  if (requestPath === cookiePath) return true
-  if (!requestPath.startsWith(cookiePath)) return false
-  return cookiePath.endsWith('/') || requestPath[cookiePath.length] === '/'
-}
-
 async function primeCsrfHeaders(
   fetch: (request: Request) => Promise<Response>,
   toolPath: string,
@@ -255,6 +238,13 @@ export interface ToolCallResult {
   verdict?: Record<string, unknown>
   /** `--preflight` was asked for but the app ran the call instead. */
   preflightUnanswered: boolean
+  /**
+   * Derivation warnings for this tool alone, for the reason `tool:inspect`
+   * gives: the rest belong to routes the caller did not ask about, and burying
+   * the one line that concerns this call among them is how a warning stops
+   * being read.
+   */
+  warnings: string[]
 }
 
 /**
@@ -267,7 +257,7 @@ export async function dispatchToolCall(
   definitions: readonly RouteDefinition[],
   fetch: (request: Request) => Promise<Response>,
   options: { name: string; args: Record<string, unknown>; actingAs?: string | number; preflight?: boolean },
-): Promise<ToolCallResult & { warnings: string[] }> {
+): Promise<ToolCallResult> {
   const { tools } = deriveAgentTools([...definitions])
   const tool = tools.find((candidate) => candidate.toolName === options.name)
 
@@ -333,9 +323,7 @@ export async function dispatchToolCall(
     outcome,
     verdict,
     preflightUnanswered: Boolean(options.preflight) && verdict === undefined && !outcome.isError,
-    // Only this tool's warnings, for the reason `tool:inspect` gives: the rest
-    // belong to routes the caller did not ask about, and burying the one line
-    // that concerns this call among them is how a warning stops being read.
+    // Only this tool's warnings — see `ToolCallResult.warnings`.
     warnings: tool.warnings,
   }
 }
@@ -401,7 +389,7 @@ export async function runToolCall(options: ToolCallOptions): Promise<void> {
   }
 }
 
-function printJson(result: ToolCallResult & { warnings: string[] }): void {
+function printJson(result: ToolCallResult): void {
   // One JSON object on stdout and nothing beside it — warnings ride inside,
   // because a consola line next to it makes the output unparseable for
   // exactly the callers that pass this flag.
@@ -426,7 +414,7 @@ function printJson(result: ToolCallResult & { warnings: string[] }): void {
   )
 }
 
-function printReport(result: ToolCallResult & { warnings: string[] }): void {
+function printReport(result: ToolCallResult): void {
   const { tool, outcome, verdict } = result
 
   for (const warning of result.warnings) consola.warn(warning)

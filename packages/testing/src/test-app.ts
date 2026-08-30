@@ -598,17 +598,15 @@ export class TestApp {
   }
 
   private agentBridge(): AgentTestBridge {
-    // eslint-disable-next-line @typescript-eslint/no-this-alias
-    const app = this
     return {
-      baseUrl: app.baseUrl,
-      routeDefinitions: () => app.routeDefinitions,
-      headers: () => app.requestHeaders(),
+      baseUrl: this.baseUrl,
+      routeDefinitions: () => this.routeDefinitions,
+      headers: () => this.requestHeaders(),
       // Through `fetchFn`, not an Application: `fromWorkers` closes over the
       // env and ExecutionContext there, so a tool call inherits the bindings
       // and `waitUntil` that RFC 0016 §3.1 warns about losing.
-      dispatch: (request) => app.fetchFn(request),
-      actingAs: (user) => app.actingAs(user).agentBridge(),
+      dispatch: (request) => this.fetchFn(request),
+      actingAs: (user) => this.actingAs(user).agentBridge(),
     }
   }
 

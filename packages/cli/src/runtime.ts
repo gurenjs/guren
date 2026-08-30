@@ -105,6 +105,34 @@ export async function bootstrapApplication(mod: Record<string, unknown>): Promis
   throw new Error('Application entry must export a default or ready/bootstrap that yields an object with a listen() method.')
 }
 
+/**
+ * Resolve the app's entry, import it, bootstrap it, and boot it — the block
+ * every command that must reach a *live* application performs.
+ *
+ * `boot()` failures are rethrown rather than warned about, because a command
+ * reaching into a half-booted app reads state whose configuration never
+ * completed. What that costs differs per command, so each call site says so in
+ * its own words.
+ */
+export async function loadBootedApplication(appRoot?: string): Promise<MaybeApplication> {
+  // The same root everything else about the app was resolved from — see
+  // `resolveMainEntry`.
+  const entry = await resolveMainEntry(appRoot)
+
+  let moduleExports: Record<string, unknown>
+  try {
+    moduleExports = (await import(pathToFileURL(entry).href)) as Record<string, unknown>
+  } catch (error) {
+    throw new Error(
+      `Failed to import application entry (${entry}): ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+
+  const app: MaybeApplication = await bootstrapApplication(moduleExports)
+  await ensureApplicationBooted(app, moduleExports, { rethrow: true })
+  return app
+}
+
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
