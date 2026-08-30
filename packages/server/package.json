@@ -106,6 +106,10 @@
       "types": "./dist/support/expiry.d.ts",
       "default": "./dist/support/expiry.js"
     },
+    "./internal/request": {
+      "types": "./dist/internal/request.d.ts",
+      "default": "./dist/internal/request.js"
+    },
     "./internal/route-path": {
       "types": "./dist/internal/route-path.d.ts",
       "default": "./dist/internal/route-path.js"

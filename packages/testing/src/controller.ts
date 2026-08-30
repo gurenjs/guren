@@ -1,3 +1,16 @@
+import { HonoRequest } from 'hono/request'
+import {
+  asRecord,
+  parseRequestBody as parseRequestBodyByRuntimeRules,
+} from '@guren/server/internal/request'
+
+/**
+ * The context shape the runtime's parser reads. Deriving it keeps the cast in
+ * {@link parseRequestBody} honest without a second `@guren/server` import —
+ * the specifier this module must not name, being the factory that replaces it.
+ */
+type RuntimeBodyContext = Parameters<typeof parseRequestBodyByRuntimeRules>[0]
+
 const HTML_ENTITIES: Record<string, string> = {
   '<': '\\u003c',
   '>': '\\u003e',
@@ -114,42 +127,33 @@ function loadServer(): Promise<ServerModule> {
 }
 
 /**
- * The mock's counterpart to the runtime's `parseRequestBody`: the parsed body
- * as sent, so an array stays an array for `validateBody()` to judge.
+ * The mock's request body: the parsed value as sent, so an array stays an
+ * array for `validateBody()` to judge.
+ *
+ * Nothing about a body is decided here. Which content types are read, how a
+ * repeated `field[]` collapses, what an unreadable body falls back to — all of
+ * it comes from the runtime's own parser, reached through
+ * `@guren/server/internal/request`. The mock used to carry a second copy of
+ * those rules, and the copies disagreed: on an uppercase media type, on a
+ * `;`-parameterized one, and on a repeated `field[]`. A mocked controller then
+ * passed on behavior the runtime does not have.
+ *
+ * What stays local is the adapter, because the two hold different things — the
+ * runtime is handed a Hono context, the mock holds a `Request`. A
+ * `HonoRequest` bridges them: it supplies the three members the parser reads
+ * (`header()`, `json()`, `parseBody()`) from the same class a live request
+ * uses, so even the media-type decision inside `parseBody()` is Hono's own
+ * rather than a restatement of it.
  */
 async function parseRequestBody(ctx: ControllerContext): Promise<unknown> {
   // Clone so the raw body stays readable — the real runtime caches the
   // parsed body in Hono, letting validateBody() and file() compose on one
   // request; here the clone is what preserves that property.
-  const request = ctx.req.raw.clone()
-  const contentType = request.headers.get('Content-Type') ?? ''
+  const req = new HonoRequest(ctx.req.raw.clone())
 
-  if (contentType.includes('application/json')) {
-    return request.json().catch(() => ({}))
-  }
-
-  if (contentType.includes('application/x-www-form-urlencoded')) {
-    const text = await request.text()
-    return Object.fromEntries(new URLSearchParams(text))
-  }
-
-  if (contentType.includes('multipart/form-data')) {
-    const formData = await request.formData()
-    const result: Record<string, unknown> = {}
-    formData.forEach((value, key) => {
-      result[key] = value
-    })
-    return result
-  }
-
-  return {}
-}
-
-/** The record view of {@link parseRequestBody}, as the runtime narrows it. */
-function asRecord(body: unknown): Record<string, unknown> {
-  return typeof body === 'object' && body !== null && !Array.isArray(body)
-    ? (body as Record<string, unknown>)
-    : {}
+  // The parser reads `ctx.req` and nothing else, which is all a HonoRequest
+  // can stand in for; the surrounding Hono context has no part in the answer.
+  return parseRequestBodyByRuntimeRules({ req } as unknown as RuntimeBodyContext)
 }
 
 /**

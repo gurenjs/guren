@@ -689,3 +689,262 @@ describe('repeated query parameters', () => {
     expect(ctx.req.query('tag')).toBe('core')
   })
 })
+
+/**
+ * The runtime-versus-mock table for request bodies.
+ *
+ * Every row runs one request through a real `Application.fetch()` controller
+ * and through a mocked one, and both must answer the same thing. The suites
+ * either side of this one exercise each implementation separately, which is
+ * exactly why three divergences lived here unnoticed: a test can only catch a
+ * disagreement it puts side by side.
+ *
+ * What the rows are chosen to cover — the axes the two used to disagree on:
+ *
+ * - **Case.** Hono lowercases the media type before deciding; the mock tested
+ *   the raw header with `includes()`, so `APPLICATION/X-WWW-FORM-URLENCODED`
+ *   parsed in production and read as `{}` in a test.
+ * - **Parameters.** Hono compares against `contentType.split(';')[0]`, so a
+ *   `;`-parameterized type is the form type, while a type that merely mentions
+ *   one in a parameter is not. The mock's substring test could not tell those
+ *   apart.
+ * - **Repeated fields.** Hono collects keys ending in `[]` into an array
+ *   (other repeats are last-wins), and the runtime then takes `value[0]` —
+ *   first wins. The mock's `Object.fromEntries(new URLSearchParams(...))` took
+ *   the last.
+ *
+ * Two rows deserve their expectation spelled out, because both look wrong:
+ *
+ * - `APPLICATION/JSON` reads as `{}` on BOTH sides. The runtime's JSON branch
+ *   is a case-sensitive `contentType.includes('application/json')` on the raw
+ *   header, so an uppercase one misses it and falls through to Hono, which
+ *   does not call it a form either. That is the runtime's behavior, and this
+ *   table's job is to state it, not to improve it.
+ * - `text/plain; profile=application/json` parses AS JSON, for the same
+ *   reason read the other way: the substring is present. This is the one place
+ *   the runtime is not Hono-normalized, and so the one row that would break
+ *   first if the mock ever grew its own JSON test again.
+ *
+ * `text/plain; profile=application/x-www-form-urlencoded` is `{}` on both
+ * sides today, but it is not a vacuous row: before the fix the mock reached
+ * that `{}` by parsing the body as a form and the runtime by refusing it, so
+ * the two agreed on this body and would have parted on the next one.
+ */
+describe('request body parity', () => {
+  const URL_UNDER_TEST = 'http://example.com/parity'
+  const BOUNDARY = 'guren-parity-boundary'
+
+  /** Passes anything through, so a divergence shows up as a shape rather than a 422. */
+  const identitySchema = {
+    safeParse: (data: unknown) => ({ success: true as const, data }),
+  }
+
+  /**
+   * Hand-built rather than `new FormData()`: `fetch` picks the boundary and
+   * the exact media-type casing for a FormData body, and the casing is one of
+   * the things under test here.
+   */
+  function multipartBody(fields: Array<[string, string]>): string {
+    const parts = fields.map(
+      ([name, value]) =>
+        `--${BOUNDARY}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`,
+    )
+
+    return `${parts.join('')}--${BOUNDARY}--\r\n`
+  }
+
+  interface BodyCase {
+    name: string
+    /** Left unset only by the "no content type" row, which asserts its absence. */
+    contentType?: string
+    body?: BodyInit
+    expected: unknown
+  }
+
+  const CASES: BodyCase[] = [
+    {
+      name: 'json',
+      contentType: 'application/json',
+      body: '{"title":"Guren"}',
+      expected: { title: 'Guren' },
+    },
+    {
+      name: 'json with a charset parameter',
+      contentType: 'application/json; charset=utf-8',
+      body: '{"title":"Guren"}',
+      expected: { title: 'Guren' },
+    },
+    {
+      // The parser hands the value over as sent; the schema decides the shape.
+      name: 'a json array body, which must reach validation unnarrowed',
+      contentType: 'application/json',
+      body: '[1,2]',
+      expected: [1, 2],
+    },
+    {
+      name: 'a malformed json body',
+      contentType: 'application/json',
+      body: '{oops',
+      expected: {},
+    },
+    {
+      name: 'an uppercase json media type, which neither side reads as json',
+      contentType: 'APPLICATION/JSON',
+      body: '{"title":"Guren"}',
+      expected: {},
+    },
+    {
+      name: 'a media type that merely mentions application/json, which both read as json',
+      contentType: 'text/plain; profile=application/json',
+      body: '{"title":"Guren"}',
+      expected: { title: 'Guren' },
+    },
+    {
+      name: 'urlencoded',
+      contentType: 'application/x-www-form-urlencoded',
+      body: 'title=Guren',
+      expected: { title: 'Guren' },
+    },
+    {
+      name: 'an uppercase urlencoded media type',
+      contentType: 'APPLICATION/X-WWW-FORM-URLENCODED',
+      body: 'title=Guren',
+      expected: { title: 'Guren' },
+    },
+    {
+      name: 'urlencoded with a charset parameter',
+      contentType: 'application/x-www-form-urlencoded; charset=utf-8',
+      body: 'title=Guren',
+      expected: { title: 'Guren' },
+    },
+    {
+      name: 'a repeated urlencoded field[], which keeps the first value',
+      contentType: 'application/x-www-form-urlencoded',
+      body: 'tag[]=a&tag[]=b',
+      expected: { 'tag[]': 'a' },
+    },
+    {
+      // Hono only arrays the `[]` keys, so a plain repeat is last-wins on both
+      // sides. Pinned so a fix aimed at the row above cannot silently take
+      // this one with it.
+      name: 'a repeated plain urlencoded field, which keeps the last value',
+      contentType: 'application/x-www-form-urlencoded',
+      body: 'tag=a&tag=b',
+      expected: { tag: 'b' },
+    },
+    {
+      name: 'a media type that merely mentions the urlencoded one, which is not a form',
+      contentType: 'text/plain; profile=application/x-www-form-urlencoded',
+      body: 'title=Guren',
+      expected: {},
+    },
+    {
+      name: 'multipart',
+      contentType: `multipart/form-data; boundary=${BOUNDARY}`,
+      body: multipartBody([['title', 'Guren']]),
+      expected: { title: 'Guren' },
+    },
+    {
+      name: 'an uppercase multipart media type',
+      contentType: `MULTIPART/FORM-DATA; boundary=${BOUNDARY}`,
+      body: multipartBody([['title', 'Guren']]),
+      expected: { title: 'Guren' },
+    },
+    {
+      name: 'a repeated multipart field[], which keeps the first value',
+      contentType: `multipart/form-data; boundary=${BOUNDARY}`,
+      body: multipartBody([
+        ['tag[]', 'a'],
+        ['tag[]', 'b'],
+      ]),
+      expected: { 'tag[]': 'a' },
+    },
+    {
+      name: 'an unsupported media type',
+      contentType: 'text/plain',
+      body: 'title=Guren',
+      expected: {},
+    },
+    {
+      // A view body sets no Content-Type, unlike a string one.
+      name: 'no content type at all',
+      body: new Uint8Array([0x74, 0x69, 0x74, 0x6c, 0x65, 0x3d, 0x41]),
+      expected: {},
+    },
+  ]
+
+  function initFor(testCase: BodyCase): RequestInit {
+    return {
+      method: 'POST',
+      ...(testCase.contentType ? { headers: { 'Content-Type': testCase.contentType } } : {}),
+      body: testCase.body,
+    }
+  }
+
+  async function readThroughMock(testCase: BodyCase): Promise<unknown> {
+    const { Controller } = createControllerModuleMock()
+
+    class ReadController extends Controller {
+      read(): Promise<unknown> {
+        return this.validateBody(identitySchema)
+      }
+    }
+
+    const controller = new ReadController()
+    controller.setContext(
+      createControllerContext(URL_UNDER_TEST, initFor(testCase)) as unknown as ControllerContext,
+    )
+
+    return controller.read()
+  }
+
+  /**
+   * One booted app serves every row. Lazy, like the rest of this package: the
+   * mock resolves @guren/server on demand so a suite that mocks it still gets
+   * the real module here.
+   */
+  let runtimeApp: Promise<{ fetch: (request: Request) => Response | Promise<Response> }> | undefined
+
+  function bootRuntime() {
+    runtimeApp ??= import('@guren/core').then(async ({ Controller, createApp }) => {
+      class ReadController extends Controller {
+        async read() {
+          return this.json({ body: await this.validateBody(identitySchema) })
+        }
+      }
+
+      const app = createApp({
+        routes: (router) => {
+          router.post('/parity', [ReadController, 'read'])
+        },
+      })
+      await app.boot()
+
+      return app
+    })
+
+    return runtimeApp
+  }
+
+  async function readThroughRuntime(testCase: BodyCase): Promise<unknown> {
+    const app = await bootRuntime()
+    const response = await app.fetch(new Request(URL_UNDER_TEST, initFor(testCase)))
+
+    expect(response.status).toBe(200)
+
+    return ((await response.json()) as { body: unknown }).body
+  }
+
+  it.each(CASES)('agrees on $name', async (testCase) => {
+    // A row claiming no content type has to prove it: `fetch` supplies one for
+    // a string body, which would quietly turn this into some other row.
+    if (!testCase.contentType) {
+      expect(new Request(URL_UNDER_TEST, initFor(testCase)).headers.get('content-type')).toBeNull()
+    }
+
+    const fromRuntime = await readThroughRuntime(testCase)
+    expect(fromRuntime).toEqual(testCase.expected)
+
+    expect(await readThroughMock(testCase)).toEqual(fromRuntime)
+  })
+})

@@ -40,6 +40,10 @@ export default defineConfig({
     // @guren/cli keep one Zod → JSON Schema rule with `deriveAgentTools`.
     // Declarations come from tsc, JS from here — a path listed in
     // package.json `exports` but missing below emits a .d.ts with no .js.
+    // Not public API either: @guren/testing's controller mock reads the one
+    // request-body rule from here, so a mocked controller and a real one
+    // cannot disagree about a body.
+    'src/internal/request.ts',
     'src/internal/route-path.ts',
     'src/internal/zod-compat.ts',
     'src/internal/zod-json-schema.ts',
