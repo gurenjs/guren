@@ -134,12 +134,22 @@ async function parseRequestBody(ctx: ControllerContext): Promise<unknown> {
   }
 
   if (contentType.includes('multipart/form-data')) {
-    const formData = await request.formData()
-    const result: Record<string, unknown> = {}
-    formData.forEach((value, key) => {
-      result[key] = value
-    })
-    return result
+    // The fallback sits here, not in the callers, for the same reason the
+    // runtime's does: a body the form parser cannot decode is a client error,
+    // so it reaches the schema as `{}` and fails validation rather than
+    // throwing. Both views of the body — this one and `parseRequestPayload`
+    // below — get that answer, which is what keeps the mock and the runtime
+    // agreeing on a malformed form body.
+    try {
+      const formData = await request.formData()
+      const result: Record<string, unknown> = {}
+      formData.forEach((value, key) => {
+        result[key] = value
+      })
+      return result
+    } catch {
+      return {}
+    }
   }
 
   return {}
@@ -398,15 +408,11 @@ export function createControllerModuleMock() {
     // that one narrows, which is what made a non-object body unreachable.
     // Unmemoized, because the parser clones the request: the real Controller
     // boxes its cache to avoid re-reading a body Hono hands over once, and
-    // here there is nothing to exhaust. Errors fall back to `{}` as the real
-    // one does, so a malformed body is a validation failure rather than a
-    // throw out of validateBody().
+    // here there is nothing to exhaust. No fallback of its own either — an
+    // unparseable body already arrives as `{}` from the parser above, exactly
+    // as it does in the runtime.
     public async getRawBody(): Promise<unknown> {
-      try {
-        return await parseRequestBody(this.ctx)
-      } catch {
-        return {}
-      }
+      return parseRequestBody(this.ctx)
     }
 
     public async getBody(): Promise<Record<string, unknown>> {

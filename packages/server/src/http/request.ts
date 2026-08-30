@@ -11,10 +11,11 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  * contract's `body`, `Controller.validateBody()`, `validateRequest()`.
  *
  * Falls back to an empty object when the body cannot be parsed (malformed
- * JSON, an empty POST, an unsupported content type). That fallback is load
- * bearing: an all-optional object schema has to keep passing on an empty
- * body, which `undefined` would break. The cost is that a non-object schema
- * sees `{}` there and fails validation, rather than receiving nothing.
+ * JSON, a form body the parser cannot decode, an empty POST, an unsupported
+ * content type). That fallback is load bearing: an all-optional object schema
+ * has to keep passing on an empty body, which `undefined` would break. The
+ * cost is that a non-object schema sees `{}` there and fails validation,
+ * rather than receiving nothing.
  *
  * Form submissions have no non-object shape to preserve, so they normalize to
  * a record exactly as {@link parseRequestPayload} does.
@@ -27,10 +28,23 @@ export async function parseRequestBody(ctx: Context): Promise<unknown> {
   }
 
   if (typeof ctx.req.parseBody === 'function') {
-    const form = await ctx.req.parseBody()
-    return Object.fromEntries(
-      Object.entries(form).map(([key, value]) => [key, Array.isArray(value) ? value[0] : value]),
-    )
+    // This catch is the single fallback every caller depends on, which is why
+    // it lives here rather than in any one of them: a form body the parser
+    // cannot decode (wrong MIME type, missing multipart boundary) is a client
+    // error, so it reaches the schema as `{}` and fails validation like any
+    // other bad payload. Left to throw, it surfaced as a 500 reporting a
+    // TypeError and a stack on every path that did not catch it.
+    //
+    // try/catch rather than `.catch()`: `parseBody` may throw synchronously
+    // as well as reject, and only one of those two shapes reaches a `.catch()`.
+    try {
+      const form = await ctx.req.parseBody()
+      return Object.fromEntries(
+        Object.entries(form).map(([key, value]) => [key, Array.isArray(value) ? value[0] : value]),
+      )
+    } catch {
+      return {}
+    }
   }
 
   return {}
