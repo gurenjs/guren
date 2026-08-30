@@ -66,10 +66,10 @@ export default defineConfig({
       // Capture the subpath and restore the separator. The prefix form the
       // sibling rules still use consumes the separator without putting it
       // back — `resolve()` normalizes the replacement's trailing slash away —
-      // so `@guren/server/internal/request` became '.../server/srcinternal/
-      // request'. `support/expiry` used to need an exact-match entry above
-      // this one for that reason; this form needs none. `web/vitest.config.ts`
-      // has always aliased the server tree this way.
+      // so a subpath under this tree resolved to '.../src' + 'internal/request'
+      // run together, which exists nowhere. `support/expiry` needed an
+      // exact-match entry above this one for that reason; this form needs
+      // none. `web/vitest.config.ts` has always aliased this tree the same way.
       {
         find: /^@guren\/server\/(.+)$/,
         replacement: `${resolve(rootDir, '../../packages/server/src')}/$1`,

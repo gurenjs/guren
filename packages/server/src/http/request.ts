@@ -11,10 +11,19 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  * contract's `body`, `Controller.validateBody()`, `validateRequest()`.
  *
  * Falls back to an empty object when the body cannot be parsed (malformed
- * JSON, an empty POST, an unsupported content type). That fallback is load
- * bearing: an all-optional object schema has to keep passing on an empty
- * body, which `undefined` would break. The cost is that a non-object schema
- * sees `{}` there and fails validation, rather than receiving nothing.
+ * JSON, a form body the parser cannot decode, an empty POST, an unsupported
+ * content type). That fallback is load bearing: an all-optional object schema
+ * has to keep passing on an empty body, which `undefined` would break. The
+ * cost is that a non-object schema sees `{}` there and fails validation,
+ * rather than receiving nothing.
+ *
+ * The fallback does not distinguish whose fault the failure was: a body the
+ * client could never have sent correctly and a body already consumed upstream
+ * (middleware reading `ctx.req.raw` directly, bypassing Hono's cache) both read
+ * as `{}` here. That is deliberate — the JSON branch above has always behaved
+ * this way, and telling the two apart means matching runtime-specific error
+ * codes, which would answer differently on Bun, Node and Workers. A parser
+ * error is a poor signal for a middleware-ordering bug either way.
  *
  * Form submissions have no non-object shape to preserve, so they normalize to
  * a record exactly as {@link parseRequestPayload} does.
@@ -27,10 +36,23 @@ export async function parseRequestBody(ctx: Context): Promise<unknown> {
   }
 
   if (typeof ctx.req.parseBody === 'function') {
-    const form = await ctx.req.parseBody()
-    return Object.fromEntries(
-      Object.entries(form).map(([key, value]) => [key, Array.isArray(value) ? value[0] : value]),
-    )
+    // This catch is the single fallback every caller depends on, which is why
+    // it lives here rather than in any one of them: a form body the parser
+    // cannot decode (wrong MIME type, missing multipart boundary) is a client
+    // error, so it reaches the schema as `{}` and fails validation like any
+    // other bad payload. Left to throw, it surfaced as a 500 reporting a
+    // TypeError and a stack on every path that did not catch it.
+    //
+    // try/catch rather than `.catch()`: `parseBody` may throw synchronously
+    // as well as reject, and only one of those two shapes reaches a `.catch()`.
+    try {
+      const form = await ctx.req.parseBody()
+      return Object.fromEntries(
+        Object.entries(form).map(([key, value]) => [key, Array.isArray(value) ? value[0] : value]),
+      )
+    } catch {
+      return {}
+    }
   }
 
   return {}

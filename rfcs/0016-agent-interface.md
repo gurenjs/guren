@@ -285,7 +285,38 @@ Each feature maps to a measured failure mode of the MCP ecosystem.
    record and notify approvers through the existing notifications system instead of
    executing; the tool result carries the pending state. `_preflight: true` runs
    validation + scope + policy evaluation only and reports the verdict — the
-   middleware chain stopped just before the controller.
+   middleware chain stopped just before the controller. **Shipped as** a router
+   seam mounted last before the handler, so every gate in front of it is the
+   real one: an unauthenticated call is still the auth middleware's 401 and an
+   unauthorized one its 403, not a second copy of either rule. Two deviations
+   worth recording. The seam validates the *body* itself, although a controller
+   route normally leaves that to `validateBody()` — stopping before the
+   controller is the whole point, so the alternative was a verdict that silently
+   never checked the field an agent is most likely to get wrong. And only routes
+   declaring `.agent()` honour the header, so no ordinary endpoint changes
+   behaviour on a header any client can set.
+
+   **The `_preflight: true` argument does not ship on MCP, and neither can the
+   pending-approval result as described.** Both were specified as a *different
+   shape of success* from the same tool, and MCP forbids exactly that: a tool
+   advertising an `outputSchema` must answer with `structuredContent`
+   conforming to it unless the result is an error (verified against the SDK
+   client, which throws `-32600` on a conforming-schema tool that returns plain
+   content and `-32602` on structured content of the wrong shape). A verdict
+   conforms to no route's output, and reporting "allowed" as an error would be
+   worse than not offering it. So on MCP both need a **companion tool** with its
+   own result schema — one design problem, deferred to 2.5 rather than solved
+   twice, differently. The seam itself is server-side and unaffected: surfaces
+   not bound by that rule (`guren tool:call`, `@guren/testing`) reach it through
+   `BuildToolRequestOptions.preflight`. Nothing was lost in the meantime —
+   `_preflight` was never advertised in any tool's input schema, so no client
+   could have discovered it.
+
+   The verdict also reports what it could *not* check. A route may authorize
+   inside its action (`await this.authorize(...)`), which `guren check` accepts
+   and which a seam stopping before the handler structurally cannot reach, so
+   `allowed: true` carries `unverified: ['authorization']` whenever no
+   authorization capability is present on the middleware chain.
 5. **Static rules** (`guren check` / `guren audit`), beyond schema wiring:
    - authn is not authz: a non-read-only tool with neither an authorization capability
      nor a detected `this.authorize(` **fails**, even when `auth.userOrFail()` is present.
@@ -329,9 +360,10 @@ contract. The per-request server is the SDK's *low-level* `Server`, not
 live Zod, which §3.2 forbids handing over. Further shipped judgments:
 tools/list is filtered to the token's scopes (an ungranted catalog would map
 the write surface for a read-only token); an `approval: 'required'` tool is
-refused fail-closed until the 2.5 queue exists; `_preflight` is deferred to a
+refused fail-closed until the 2.5 queue exists; ~~`_preflight` is deferred to a
 follow-up (it needs a server-side seam to stop the chain before the
-controller); and bearer auth answers 401 + `WWW-Authenticate: Bearer` at the
+controller)~~ **— shipped since, as a router seam; see §5.4**; and bearer auth
+answers 401 + `WWW-Authenticate: Bearer` at the
 transport boundary, before any MCP framing. Mounts per-request stateless
 server + `WebStandardStreamableHTTPServerTransport`
 (the Dev MCP pattern), derives from the live router at boot, dispatches per §3.
