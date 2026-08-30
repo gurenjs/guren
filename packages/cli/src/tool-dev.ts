@@ -19,14 +19,8 @@
  * code in hand.
  */
 import { consola } from 'consola'
-import { pathToFileURL } from 'node:url'
 import { createApiToken, MemoryApiTokenStore } from '@guren/core'
-import {
-  bootstrapApplication,
-  ensureApplicationBooted,
-  resolveMainEntry,
-  type MaybeApplication,
-} from './runtime'
+import { loadBootedApplication } from './runtime'
 
 /** Default mount path of `@guren/plugin-mcp`. */
 const DEFAULT_MCP_PATH = '/mcp'
@@ -123,19 +117,7 @@ export async function runToolDev(options: ToolDevOptions = {}): Promise<ToolDevS
     )
   }
 
-  const entry = await resolveMainEntry(options.appRoot)
-
-  let moduleExports: Record<string, unknown>
-  try {
-    moduleExports = (await import(pathToFileURL(entry).href)) as Record<string, unknown>
-  } catch (error) {
-    throw new Error(
-      `Failed to import application entry (${entry}): ${error instanceof Error ? error.message : String(error)}`,
-    )
-  }
-
-  const app: MaybeApplication = await bootstrapApplication(moduleExports)
-  await ensureApplicationBooted(app, moduleExports, { rethrow: true })
+  const app = await loadBootedApplication(options.appRoot)
 
   if (typeof app.auth?.useTokens !== 'function') {
     throw new Error(
@@ -171,10 +153,11 @@ export async function runToolDev(options: ToolDevOptions = {}): Promise<ToolDevS
     abilities: ['tools:*'],
   })
 
-  const address = (await app.listen?.({
-    port: options.port ?? 3333,
-    hostname: options.hostname ?? '127.0.0.1',
-  })) as { url?: string; port?: number; hostname?: string } | undefined
+  const port = options.port ?? 3333
+  const hostname = options.hostname ?? '127.0.0.1'
+  const address = (await app.listen?.({ port, hostname })) as
+    | { url?: string; port?: number; hostname?: string }
+    | undefined
 
   // The address the app reports binding, never the one that was requested:
   // a listener may walk the port forward, and printing the asked-for one
@@ -190,7 +173,7 @@ export async function runToolDev(options: ToolDevOptions = {}): Promise<ToolDevS
         + 'requested one. If the port was taken, the listener may have moved.',
     )
   }
-  const base = address?.url ?? `http://${options.hostname ?? '127.0.0.1'}:${options.port ?? 3333}`
+  const base = address?.url ?? `http://${hostname}:${port}`
   const path = options.path ?? DEFAULT_MCP_PATH
   if (!path.startsWith('/')) {
     // Concatenated as given, `--path mcp` yields `http://host:3333mcp` — an
@@ -233,5 +216,5 @@ export async function runToolDev(options: ToolDevOptions = {}): Promise<ToolDevS
     consola.info(`Tool calls authenticate as user ${userId}.`)
   }
 
-  return { endpoint, token: plainTextToken, userId: String(userId) }
+  return { endpoint, token: plainTextToken, userId }
 }

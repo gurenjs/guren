@@ -25,7 +25,6 @@
  * against: an issuance screen listing tools the dispatcher then denies.
  */
 import { consola } from 'consola'
-import { pathToFileURL } from 'node:url'
 import {
   createApiToken,
   expandToolScopes,
@@ -35,12 +34,7 @@ import {
   type ScopedTool,
 } from '@guren/core'
 import { listTools } from './tool-list'
-import {
-  bootstrapApplication,
-  ensureApplicationBooted,
-  resolveMainEntry,
-  type MaybeApplication,
-} from './runtime'
+import { loadBootedApplication } from './runtime'
 
 /** `tool:` scope prefix, including the separator. */
 const SINGLE_PREFIX = 'tool:'
@@ -348,21 +342,7 @@ export interface TokenIssueOptions extends TokenIssueInput {
  */
 async function resolveApiTokenStore(appRoot?: string): Promise<ApiTokenStore> {
   // The same root the tool list was derived from — see `resolveMainEntry`.
-  const entry = await resolveMainEntry(appRoot)
-
-  let moduleExports: Record<string, unknown>
-  try {
-    moduleExports = (await import(pathToFileURL(entry).href)) as Record<string, unknown>
-  } catch (error) {
-    throw new Error(
-      `Failed to import application entry (${entry}): ${error instanceof Error ? error.message : String(error)}`,
-    )
-  }
-
-  const app: MaybeApplication = await bootstrapApplication(moduleExports)
-  // Fail rather than warn: a token written into a half-booted app is issued
-  // against a store whose configuration never completed.
-  await ensureApplicationBooted(app, moduleExports, { rethrow: true })
+  const app = await loadBootedApplication(appRoot)
 
   const store = app.auth?.getApiTokenStore?.()
   if (!store) {
