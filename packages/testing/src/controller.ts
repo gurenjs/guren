@@ -58,20 +58,20 @@ export function createControllerContext(
     method: request.method,
     query: (key?: string) => {
       if (!key) {
-        return Object.fromEntries(searchParams.entries())
+        // Hono's no-arg `query()` keeps the FIRST occurrence of a repeated
+        // key, so `?tag=a&tag=b` reads back as `a`. `Object.fromEntries` over
+        // the entries keeps the last one, which is how the mock came to
+        // disagree with the runtime here.
+        const first: Record<string, string> = {}
+        for (const [name, value] of searchParams) {
+          first[name] ??= value
+        }
+        return first
       }
 
       return searchParams.get(key) ?? undefined
     },
-    queries: () => {
-      const values = new Map<string, string[]>()
-      for (const [key, value] of searchParams.entries()) {
-        const existing = values.get(key) ?? []
-        existing.push(value)
-        values.set(key, existing)
-      }
-      return Object.fromEntries(values)
-    },
+    queries: () => groupSearchParams(searchParams),
     param: () => undefined,
     header: (name: string) => request.headers.get(name) ?? undefined,
   }
@@ -133,33 +133,49 @@ function isMediaType(contentType: string, mediaType: string): boolean {
 /**
  * The mock's counterpart to the runtime's `parseRequestBody`: the parsed body
  * as sent, so an array stays an array for `validateBody()` to judge.
+ *
+ * A body that cannot be parsed falls back to `{}` — a client error reaches the
+ * schema and fails validation rather than throwing, matching what the runtime's
+ * parser now does for a form body no parser can decode. The fallback wraps the
+ * whole parse, not just that one branch: `clone()` throws on an already-read
+ * body, and the callers this feeds have no fallback of their own to catch it.
  */
 async function parseRequestBody(ctx: ControllerContext): Promise<unknown> {
-  // Clone so the raw body stays readable — the real runtime caches the
-  // parsed body in Hono, letting validateBody() and file() compose on one
-  // request; here the clone is what preserves that property.
-  const request = ctx.req.raw.clone()
-  const contentType = request.headers.get('Content-Type') ?? ''
+  // Read outside the fallback on purpose: the fallback is for an unparseable
+  // *body*, and a ctx with no request at all is a broken test setup. Swallowing
+  // that into `{}` would turn a wiring mistake into a confusing validation
+  // failure, and the runtime's parser does not swallow it either.
+  const raw = ctx.req.raw
 
-  if (contentType.includes('application/json')) {
-    return request.json().catch(() => ({}))
+  try {
+    // Clone so the raw body stays readable — the real runtime caches the
+    // parsed body in Hono, letting validateBody() and file() compose on one
+    // request; here the clone is what preserves that property.
+    const request = raw.clone()
+    const contentType = request.headers.get('Content-Type') ?? ''
+
+    if (contentType.includes('application/json')) {
+      return await request.json().catch(() => ({}))
+    }
+
+    if (isMediaType(contentType, 'application/x-www-form-urlencoded')) {
+      const text = await request.text()
+      return Object.fromEntries(new URLSearchParams(text))
+    }
+
+    if (isMediaType(contentType, 'multipart/form-data')) {
+      const formData = await request.formData()
+      const result: Record<string, unknown> = {}
+      formData.forEach((value, key) => {
+        result[key] = value
+      })
+      return result
+    }
+
+    return {}
+  } catch {
+    return {}
   }
-
-  if (isMediaType(contentType, 'application/x-www-form-urlencoded')) {
-    const text = await request.text()
-    return Object.fromEntries(new URLSearchParams(text))
-  }
-
-  if (isMediaType(contentType, 'multipart/form-data')) {
-    const formData = await request.formData()
-    const result: Record<string, unknown> = {}
-    formData.forEach((value, key) => {
-      result[key] = value
-    })
-    return result
-  }
-
-  return {}
 }
 
 /** The record view of {@link parseRequestBody}, as the runtime narrows it. */
@@ -167,6 +183,33 @@ function asRecord(body: unknown): Record<string, unknown> {
   return typeof body === 'object' && body !== null && !Array.isArray(body)
     ? (body as Record<string, unknown>)
     : {}
+}
+
+/**
+ * The mock's counterpart to the runtime's `flattenRequestQueries`: query data
+ * as a validation schema sees it, keeping a repeated key as an array and a
+ * single occurrence as a plain string (`?tag=a&tag=b` → `{ tag: ['a', 'b'] }`,
+ * `?page=2` → `{ page: '2' }`).
+ *
+ * The runtime calls `ctx.req.queries()` unconditionally, so a context without
+ * one throws there. `queries()` is optional on {@link ControllerContext}, and
+ * the fallback re-derives the same grouping from `req.url` — which is required,
+ * and is what `createControllerContext` parses internally anyway. It must not
+ * fall back to `query()`: that surface is one value per key by construction,
+ * which is the divergence this function exists to close.
+ */
+function flattenContextQueries(ctx: ControllerContext): Record<string, unknown> {
+  const queries = ctx.req.queries?.() ?? groupSearchParams(new URL(ctx.req.url).searchParams)
+  const flat: Record<string, unknown> = {}
+  for (const [key, values] of Object.entries(queries)) {
+    flat[key] = values.length === 1 ? values[0] : values
+  }
+  return flat
+}
+
+/** Groups repeated search params into `queries()`' `Record<string, string[]>`. */
+function groupSearchParams(searchParams: URLSearchParams): Record<string, string[]> {
+  return Object.fromEntries([...searchParams.keys()].map((key) => [key, searchParams.getAll(key)]))
 }
 
 export function createGurenControllerModule() {
@@ -388,15 +431,11 @@ export function createControllerModuleMock() {
     // that one narrows, which is what made a non-object body unreachable.
     // Unmemoized, because the parser clones the request: the real Controller
     // boxes its cache to avoid re-reading a body Hono hands over once, and
-    // here there is nothing to exhaust. Errors fall back to `{}` as the real
-    // one does, so a malformed body is a validation failure rather than a
-    // throw out of validateBody().
+    // here there is nothing to exhaust. No fallback of its own either — an
+    // unparseable body already arrives as `{}` from the parser above, which is
+    // also what `parseRequestPayload` reads, so both views agree.
     public async getRawBody(): Promise<unknown> {
-      try {
-        return await parseRequestBody(this.ctx)
-      } catch {
-        return {}
-      }
+      return parseRequestBody(this.ctx)
     }
 
     public async getBody(): Promise<Record<string, unknown>> {
@@ -474,7 +513,7 @@ export function createControllerModuleMock() {
         | { success: true; data: T }
         | { success: false; error: { issues?: Array<{ path: (string | number)[]; message: string }> } }
     }): T {
-      return this.runValidation(schema, this.ctx.req.query(), 422)
+      return this.runValidation(schema, flattenContextQueries(this.ctx), 422)
     }
 
     public validateQuerySafe<T>(schema: {
@@ -482,7 +521,7 @@ export function createControllerModuleMock() {
         | { success: true; data: T }
         | { success: false; error: { issues?: Array<{ path: (string | number)[]; message: string }> } }
     }): { success: true; data: T } | { success: false; errors: Record<string, string> } {
-      return this.runValidationSafe(schema, this.ctx.req.query())
+      return this.runValidationSafe(schema, flattenContextQueries(this.ctx))
     }
 
     public validateParams<T>(schema: {

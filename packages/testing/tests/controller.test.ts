@@ -341,6 +341,56 @@ describe('createGurenControllerModule', () => {
 })
 
 describe('createControllerModuleMock', () => {
+  // The runtime falls back to `{}` for a body no form parser can decode, so a
+  // malformed body is a validation failure rather than a 500. The mock keeps
+  // its own copy of that parser, so the rule has to be pinned on both sides —
+  // otherwise a controller test passes here against behavior the runtime does
+  // not have.
+  const undecodableForm = {
+    method: 'POST',
+    body: 'broken',
+    headers: { 'Content-Type': 'multipart/form-data' },
+  }
+
+  const requireTitle = {
+    safeParse: (data: unknown) =>
+      typeof data === 'object' && data !== null && typeof (data as { title?: unknown }).title === 'string'
+        ? { success: true as const, data }
+        : { success: false as const, error: { issues: [{ path: ['title'], message: 'required' }] } },
+  }
+
+  it('parseRequestPayload falls back to {} for a body the form parser cannot decode', async () => {
+    const module = createGurenControllerModule()
+    const ctx = createControllerContext('http://example.com/posts', undecodableForm)
+
+    expect(await module.parseRequestPayload(ctx as unknown as ControllerContext)).toEqual({})
+  })
+
+  it('validateBody() fails validation on an undecodable body rather than throwing', async () => {
+    const { Controller } = createControllerModuleMock()
+    const ctx = createControllerContext('http://example.com/posts', undecodableForm)
+
+    const controller = new Controller()
+    controller.setContext(ctx as unknown as ControllerContext)
+
+    // The failure must be the validation one, not the parser's TypeError.
+    await expect(controller.validateBody(requireTitle)).rejects.toThrow(/valid/i)
+  })
+
+  // Pins that the fallback is `{}` and not `undefined`: an all-optional schema
+  // has to keep passing, exactly as it does on an empty body.
+  it('validateBody() passes an all-optional schema the empty-object fallback', async () => {
+    const { Controller } = createControllerModuleMock()
+    const ctx = createControllerContext('http://example.com/posts', undecodableForm)
+
+    const controller = new Controller()
+    controller.setContext(ctx as unknown as ControllerContext)
+
+    const allOptional = { safeParse: (data: unknown) => ({ success: true as const, data }) }
+
+    expect(await controller.validateBody(allOptional)).toEqual({})
+  })
+
   it('validateBody() accepts a non-object body, while input() keeps the record view', async () => {
     const { Controller } = createControllerModuleMock()
     const ctx = createControllerContext('http://example.com/bulk', {
@@ -581,6 +631,116 @@ describe('readInertiaResponse', () => {
 })
 
 /**
+ * The mock and the runtime must hand a validation schema the same query data,
+ * or a controller test passes on behavior production does not have.
+ *
+ * The runtime validates against `flattenRequestQueries`, which reads
+ * `ctx.req.queries()` and returns `values.length === 1 ? values[0] : values` —
+ * so a repeated key arrives as an ARRAY and a single occurrence as a string.
+ * The mock validated against `ctx.req.query()`, one value per key, so
+ * `?tag=a&tag=b` reached a `z.array(...)` schema as `'b'`.
+ *
+ * The probe is `validateQuery`/`validateQuerySafe` specifically: `input()`
+ * takes the keyed `query(key)` form on both sides and already agreed, so an
+ * `input()`-based test here could never fail. The schema is an identity one so
+ * the buggy mock returns a wrong shape instead of throwing 422, which is what
+ * lets the two sides be compared directly. Both keys are asserted on purpose:
+ * a repeated-only case also passes under a mock that wraps every value in an
+ * array, which would agree on `tag` while newly disagreeing on `page`.
+ */
+describe('repeated query parameters', () => {
+  const URL_UNDER_TEST = 'http://example.com/posts?tag=core&tag=framework&page=2'
+  const EXPECTED = { tag: ['core', 'framework'], page: '2' }
+
+  const identitySchema = {
+    safeParse: (data: unknown) => ({ success: true as const, data }),
+  }
+
+  /** Both surfaces read the same context, so one pass answers for both. */
+  interface BothSurfaces {
+    validateQuery: unknown
+    validateQuerySafe: unknown
+  }
+
+  function readThroughMock(ctx: ControllerContext): BothSurfaces {
+    const { Controller } = createControllerModuleMock()
+
+    class ReadController extends Controller {
+      read(): BothSurfaces {
+        const safe = this.validateQuerySafe(identitySchema)
+        return {
+          validateQuery: this.validateQuery(identitySchema),
+          validateQuerySafe: safe.success ? safe.data : safe.errors,
+        }
+      }
+    }
+
+    const controller = new ReadController()
+    controller.setContext(ctx)
+
+    return controller.read()
+  }
+
+  async function readThroughRuntime(): Promise<BothSurfaces> {
+    // Lazy, like the rest of this package: the mock resolves @guren/server on
+    // demand so a suite that mocks it still gets the real module here.
+    const { Controller, createApp } = await import('@guren/core')
+
+    class ReadController extends Controller {
+      read() {
+        const safe = this.validateQuerySafe(identitySchema)
+        return this.json({
+          validateQuery: this.validateQuery(identitySchema),
+          validateQuerySafe: safe.success ? safe.data : safe.errors,
+        })
+      }
+    }
+
+    const app = createApp({
+      routes: (router) => {
+        router.get('/posts', [ReadController, 'read'])
+      },
+    })
+    await app.boot()
+
+    const response = await app.fetch(new Request(URL_UNDER_TEST))
+    expect(response.status).toBe(200)
+
+    return (await response.json()) as BothSurfaces
+  }
+
+  it('validateQuery()/validateQuerySafe() see repeated keys as arrays in the mock and the runtime', async () => {
+    const fromRuntime = await readThroughRuntime()
+    const fromMock = readThroughMock(
+      createControllerContext(URL_UNDER_TEST) as unknown as ControllerContext
+    )
+
+    expect(fromRuntime).toEqual({ validateQuery: EXPECTED, validateQuerySafe: EXPECTED })
+    expect(fromMock).toEqual(fromRuntime)
+  })
+
+  it('flattens from req.url when the context has no queries()', () => {
+    // The fallback branch of flattenContextQueries: `queries()` is optional on
+    // ControllerContext, and a hand-rolled context without one must still see
+    // the array — falling back to `query()` would quietly restore the bug.
+    const full = createControllerContext(URL_UNDER_TEST)
+    const withoutQueries = {
+      ...full,
+      req: { ...full.req, queries: undefined },
+    } as unknown as ControllerContext
+
+    expect(readThroughMock(withoutQueries).validateQuery).toEqual(EXPECTED)
+  })
+
+  it('reads back the first occurrence from the mock context, as Hono does', () => {
+    const ctx = createControllerContext(URL_UNDER_TEST)
+
+    expect(ctx.req.query()).toEqual({ tag: 'core', page: '2' })
+    expect(ctx.req.query('tag')).toBe('core')
+  })
+})
+
+/**
  * The mock and the runtime must agree on *which* bodies they read, or a
  * controller test passes on behavior production does not have.
  *
@@ -817,14 +977,14 @@ describe('body content-type recognition', () => {
 
   /**
    * A body the parser cannot read must reach the field helpers as `{}`, not
-   * as a throw. The runtime swallows it in exactly one place — the private
-   * `getRawBody()` in `Controller` — while the exported `parseRequestPayload`
-   * lets it out; the mock mirrors that split, so these pin the class layer.
+   * as a throw. Both sides swallow it in `parseRequestBody` itself, so every
+   * caller inherits the fallback — the field helpers here and the exported
+   * `parseRequestPayload` alike.
    *
    * Both encodings are here because they fail differently: malformed JSON is
-   * caught inside the parser (`.catch(() => ({}))`), while a multipart body
-   * with no boundary rejects out of `formData()` and is only caught one level
-   * up.
+   * caught by the JSON branch's own `.catch(() => ({}))`, while a multipart
+   * body with no boundary rejects out of the form parse and is caught by the
+   * fallback wrapping the whole function.
    */
   const MALFORMED = [
     {
