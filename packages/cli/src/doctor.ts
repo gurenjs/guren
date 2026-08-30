@@ -25,7 +25,7 @@ import {
   type PageManifestPlan,
 } from './pages-types'
 import { AGENTS_MANIFEST_FILE, planAgentManifest, type AgentManifestPlan } from './agents-types'
-import { extractClassDeclaration } from './model-parser'
+import { emptyActions } from './controller-methods'
 import { parseSourceFile } from './parse-cache'
 import { ROUTES_ENTRY_CANDIDATES } from './route-registrar'
 import {
@@ -1509,26 +1509,13 @@ export async function suggestNextSteps(
       const ast = parseSourceFile(source, filePath)
       if (!ast) continue
 
-      for (const node of ast.program.body) {
-        const classDecl = extractClassDeclaration(node)
-        if (!classDecl) continue
-        const className = classDecl.id?.name ?? classNameFromPath(filePath)
-
-        for (const member of classDecl.body.body) {
-          if (
-            member.type === 'ClassMethod' &&
-            member.key.type === 'Identifier' &&
-            member.key.name !== 'constructor' &&
-            member.body.body.length === 0
-          ) {
-            steps.push({
-              priority: priority++,
-              title: `Implement ${className}.${member.key.name}()`,
-              description: 'Method has an empty body.',
-              filePath: relative(cwd, filePath),
-            })
-          }
-        }
+      for (const { className, name } of emptyActions(ast, filePath)) {
+        steps.push({
+          priority: priority++,
+          title: `Implement ${className}.${name}()`,
+          description: 'Method has an empty body.',
+          filePath: relative(cwd, filePath),
+        })
       }
     }
   } catch {

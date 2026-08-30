@@ -8,6 +8,7 @@ import {
   type ContextRoute,
 } from './context-route'
 import { loadRouteDefinitions, resolveRoutesFile, type RoutesFileTarget } from './load-routes'
+import { classActionMembers } from './controller-methods'
 import { extractClassDeclaration } from './model-parser'
 import { parseSourceFile } from './parse-cache'
 import {
@@ -28,7 +29,8 @@ interface Screen extends InertiaPageDescription {
 /**
  * Where a controller file's `this.inertia(...)` references live: attributed
  * to the action whose body contains them, plus the leftovers that sit
- * outside any action (a helper function, a class field initializer).
+ * outside any action (a helper function, a field initializer that is not
+ * itself an action).
  */
 interface ControllerPageRefs {
   /** Action name → page IDs referenced in that action's body. */
@@ -67,20 +69,21 @@ function collectControllerPageRefs(source: string, filePath: string): Controller
   const attributed = new Set<string>()
 
   const classDecl = findControllerClass(source, filePath)
-  for (const member of classDecl?.body.body ?? []) {
-    if (member.type !== 'ClassMethod') continue
-    if (member.key.type !== 'Identifier') continue
+  // Field actions (`show = () => this.inertia(...)`) are attributed like
+  // methods: `Router` dispatches to both, so a page one renders belongs to
+  // its routes, not to the file-level leftovers below.
+  for (const { member, name } of classDecl ? classActionMembers(classDecl) : []) {
     if (member.start === null || member.end === null) continue
 
     const ids = extractInertiaPageRefs(source.slice(member.start, member.end)).map((ref) => ref.id)
     if (ids.length === 0) continue
 
-    const bucket = byAction.get(member.key.name) ?? new Set<string>()
+    const bucket = byAction.get(name) ?? new Set<string>()
     for (const id of ids) {
       bucket.add(id)
       attributed.add(id)
     }
-    byAction.set(member.key.name, bucket)
+    byAction.set(name, bucket)
   }
 
   // Everything the file references, minus what an action claimed — an

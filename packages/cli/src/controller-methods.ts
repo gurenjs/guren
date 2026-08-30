@@ -1,9 +1,16 @@
 import { relative } from 'node:path'
-import type { ClassDeclaration, File } from '@babel/types'
+import type {
+  BlockStatement,
+  ClassDeclaration,
+  ClassMethod,
+  ClassProperty,
+  Expression,
+  File,
+} from '@babel/types'
 import { classNameFromPath, discoverControllerFiles } from './discovery'
 import { extractClassDeclaration } from './model-parser'
 import { ParseCache } from './parse-cache'
-import { walk } from './ast-walk'
+import { memberKeyName, walk } from './ast-walk'
 
 /**
  * Controller action bodies, extracted once and judged by regex afterwards.
@@ -381,11 +388,9 @@ export async function parseControllerMethods(
       }
       classFiles.set(className, relPath)
 
-      for (const member of classDecl.body.body) {
-        const found = memberBodyRange(member)
-        if (!found) continue
-        methods.set(`${className}.${found.name}`, {
-          body: scrubbed.slice(found.start, found.end),
+      for (const { name, body } of classActionMembers(classDecl)) {
+        methods.set(`${className}.${name}`, {
+          body: scrubbed.slice(body.start ?? 0, body.end ?? 0),
           filePath: relPath,
         })
       }
@@ -396,7 +401,8 @@ export async function parseControllerMethods(
 }
 
 /**
- * The source range of one controller action, whichever way it is written.
+ * Every member of a controller class that holds a function body, in whichever
+ * of the two forms it is written.
  *
  * Both forms are legal to `Router`'s types and to its runtime dispatch, so
  * collecting only `ClassMethod` silently downgraded every class-field action:
@@ -410,25 +416,107 @@ export async function parseControllerMethods(
  * }
  * ```
  *
- * For an expression-bodied arrow (`store = () => this.json({})`) the range is
- * the expression itself — there is no block, and the expression is the body.
+ * Shared from this module for the same reason the member vocabulary above is:
+ * five scanners across three commands ask which members of a controller are
+ * actions, and a second copy of the answer is how the class-field blind spot
+ * survived in four of them after the fifth was fixed. `guren check`'s
+ * empty-body rule, `guren doctor`'s next steps, `guren context <Entity>`, and
+ * the `spec:generate` screens view all read this list.
+ *
+ * Member names come from `memberKeyName`, so a quoted key (`'store'() {}`)
+ * counts — it dispatches as `controller['store']` like any other — and a
+ * computed key (`[store]() {}`) does not: it names whatever the expression
+ * holds at runtime, which this scan cannot know, and guessing the literal
+ * text would attribute a body to an action that may not exist.
+ *
+ * One declaration is yielded per member, not one per *name*: a name declared
+ * twice yields twice. TypeScript rejects that outright (TS2300), so it needs a
+ * hand-written `.js`/`.mjs` controller — which `discoverControllerFiles` does
+ * collect. Collapsing to the name would be wrong for the shape that actually
+ * occurs, a `get x()`/`set x()` pair, which is two members legitimately
+ * sharing one name. Callers that report per name may therefore report a
+ * duplicated name twice, as they did when they walked members themselves.
+ * Worth knowing if you key on the name: an instance field shadows a prototype
+ * method whatever the source order, so the last declaration is not always the
+ * one that dispatches.
+ *
+ * The question it answers is structural — *is this member function-shaped* —
+ * and nothing more. Which of those members a given scanner cares about is
+ * policy each one owns: `constructor` is yielded (three of the five skip it,
+ * this scan deliberately does not), as are `static` and `private` members,
+ * because a filter hoisted in here would apply to callers that never asked
+ * for it. `TSDeclareMethod` (a bare overload signature) and
+ * `ClassAccessorProperty` are excluded by the type tests below: neither
+ * carries a body a scanner could read.
  */
-function memberBodyRange(
-  member: ClassDeclaration['body']['body'][number],
-): { name: string; start: number; end: number } | undefined {
-  if (member.type === 'ClassMethod' && member.key.type === 'Identifier') {
-    return { name: member.key.name, start: member.body.start ?? 0, end: member.body.end ?? 0 }
-  }
+export interface ClassActionMember {
+  /** The member node itself, for its source span, `accessibility`, and `static`. */
+  member: ClassMethod | ClassProperty
+  name: string
+  /**
+   * The function body. A `BlockStatement` for a method or a block-bodied
+   * arrow; for an expression-bodied arrow (`store = () => this.json({})`)
+   * the expression itself, since there is no block and the expression *is*
+   * the body. A caller asking whether a body is empty must therefore test
+   * for the block first — an expression body is never empty.
+   */
+  body: BlockStatement | Expression
+}
 
-  if (member.type === 'ClassProperty' && member.key.type === 'Identifier') {
-    const { value } = member
-    if (
-      value
-      && (value.type === 'ArrowFunctionExpression' || value.type === 'FunctionExpression')
-    ) {
-      return { name: member.key.name, start: value.body.start ?? 0, end: value.body.end ?? 0 }
+export function* classActionMembers(
+  classDecl: ClassDeclaration,
+): Generator<ClassActionMember> {
+  for (const member of classDecl.body.body) {
+    if (member.type === 'ClassMethod') {
+      const name = memberKeyName(member)
+      if (name !== undefined) yield { member, name, body: member.body }
+      continue
+    }
+
+    if (member.type === 'ClassProperty') {
+      const { value } = member
+      if (
+        value
+        && (value.type === 'ArrowFunctionExpression' || value.type === 'FunctionExpression')
+      ) {
+        const name = memberKeyName(member)
+        if (name !== undefined) yield { member, name, body: value.body }
+      }
     }
   }
+}
 
-  return undefined
+/**
+ * Controller actions declared with an empty body, per class in one file.
+ *
+ * The rule behind two findings that are the same observation rendered twice:
+ * `guren check`'s `empty-method:` warning and `guren doctor --next`'s
+ * "Implement X()" step. They read the same AST the same way and differ only in
+ * the record they emit, so the walk lives here and each command keeps its own
+ * file I/O and result shape. Written out twice, the block-before-length test
+ * below is a trap one copy can lose.
+ *
+ * `constructor` is filtered here rather than by the callers because this is a
+ * rule, not the structural iterator: a constructor is not an action to
+ * implement under either command's reading.
+ */
+export interface EmptyAction {
+  className: string
+  name: string
+}
+
+export function* emptyActions(ast: File, filePath: string): Generator<EmptyAction> {
+  for (const node of ast.program.body) {
+    const classDecl = extractClassDeclaration(node)
+    if (!classDecl) continue
+    const className = classDecl.id?.name ?? classNameFromPath(filePath)
+
+    for (const { name, body } of classActionMembers(classDecl)) {
+      if (name === 'constructor') continue
+      // An expression-bodied arrow has no block; its expression is its body,
+      // so it is never empty. The block test has to come first.
+      if (body.type !== 'BlockStatement' || body.body.length > 0) continue
+      yield { className, name }
+    }
+  }
 }

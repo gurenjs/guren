@@ -17,13 +17,13 @@ import {
 } from './discovery'
 import {
   classUsesAuthenticatableBase,
-  extractClassDeclaration,
   extractTableIdentifier,
   findStaticClassProperty,
   firstClassDeclaration,
   resolveModelStringArrayConfig,
   staticStringProperty,
 } from './model-parser'
+import { emptyActions } from './controller-methods'
 import { checkConsoleCommandRegistration } from './console-check'
 import { checkRoutePathParams, discoverRoutePathFiles } from './route-path-check'
 import { affectsRouteWiring, checkRouteRegistrarWiring } from './routes-check'
@@ -752,32 +752,18 @@ async function checkEmptyMethods(cache: ParseCache, filePath: string, relPath: s
   const results: CheckResult[] = []
   const parsed = await cache.get(filePath)
   if (!parsed) return results
-  const { ast } = parsed
 
-  for (const node of ast.program.body) {
-    const classDecl = extractClassDeclaration(node)
-    if (!classDecl) continue
-    const className = classDecl.id?.name ?? classNameFromPath(filePath)
-
-    for (const member of classDecl.body.body) {
-      if (member.type === 'ClassMethod' && member.key.type === 'Identifier') {
-        if (member.key.name === 'constructor') continue
-        const body = member.body
-        const isEmpty = body.body.length === 0
-        if (isEmpty) {
-          results.push(
-            check(
-              `empty-method:${className}.${member.key.name}`,
-              `${className}.${member.key.name}()`,
-              'warn',
-              `Method ${member.key.name}() has an empty body.`,
-              `Implement ${className}.${member.key.name}() in ${relPath}.`,
-              relPath,
-            ),
-          )
-        }
-      }
-    }
+  for (const { className, name } of emptyActions(parsed.ast, filePath)) {
+    results.push(
+      check(
+        `empty-method:${className}.${name}`,
+        `${className}.${name}()`,
+        'warn',
+        `Method ${name}() has an empty body.`,
+        `Implement ${className}.${name}() in ${relPath}.`,
+        relPath,
+      ),
+    )
   }
 
   return results
