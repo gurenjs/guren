@@ -108,6 +108,8 @@ setInertiaDocument({
 
 マークアップはそのまま出力されるため、開発者が記述した文字列のみを渡してください。`public/` 直下のファイルは Bun ランタイムが配信します。Node ベースのデプロイでは CDN から配信してください。
 
+ブラウザがドキュメントとして描画する形式のファイル (`.html`、`.svg`、`.xml`) は、`public/` から配信される際に `Content-Disposition: attachment`、`X-Content-Type-Options: nosniff`、`Content-Security-Policy: sandbox` が付きます。URL を直接開いてもダウンロードになり、スクリプトが自サイトのオリジンで実行されることはありません。画像・スクリプト・スタイルシート・フォントは影響を受けません。`<img src="/logo.svg">`、CSS の `url()`、`<link rel="icon">` はいずれも従来どおり読み込まれます。Content-Disposition が決めるのは「遷移するかダウンロードするか」だけだからです。静的な HTML ページをそのまま表示したい場合は、`public/` ではなくコントローラーから返してください。
+
 ## サーバーサイドレンダリング
 各アプリには既定で `resources/js/ssr.tsx` が入り、`@guren/inertia-client` の `renderInertiaServer()` を呼び出します。`autoConfigureInertiaAssets(app, { importMeta })` でブートすると、Guren は次を自動で処理します。
 

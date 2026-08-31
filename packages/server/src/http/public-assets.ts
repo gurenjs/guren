@@ -2,6 +2,7 @@ import { extname, resolve } from 'node:path'
 import type { Application } from './Application'
 import { trimTrailingSlashes } from '../support/trim-slashes'
 import { isPathWithin, isRealPathWithin } from '../support/contained-path'
+import { staticDocumentHeaders } from './static-documents'
 
 declare const Bun: any
 
@@ -103,9 +104,14 @@ export function registerRootPublicAssets(app: Application, publicDir: string, co
       return next()
     }
 
+    const contentType = contentTypeMap?.[extension] ?? DEFAULT_CONTENT_TYPES[extension] ?? 'application/octet-stream'
+
     const headers = new Headers({
       'Cache-Control': cacheControlHeader,
-      'Content-Type': contentTypeMap?.[extension] ?? DEFAULT_CONTENT_TYPES[extension] ?? 'application/octet-stream',
+      'Content-Type': contentType,
+      // `.svg` is in the default extension list, so this mount is the one an
+      // app reaches for a logo — and the one a browser would run as a page.
+      ...staticDocumentHeaders(contentType),
     })
 
     return new Response(file, { headers })

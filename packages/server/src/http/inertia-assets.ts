@@ -11,6 +11,7 @@ import {
 } from './dev-assets'
 import { registerRootPublicAssets } from './public-assets'
 import { isPathWithin, isRealPathWithin } from '../support/contained-path'
+import { applyStaticDocumentHeaders, staticDocumentHeaders } from './static-documents'
 import { parseImportMap } from '../support/import-map'
 import { DEFAULT_DEV_STYLES_ENTRY } from '../support/inertia-defaults'
 import { trimTrailingSlashes } from '../support/trim-slashes'
@@ -102,13 +103,15 @@ export function configureInertiaAssets(app: Application, options: InertiaAssetsO
     serveStatic({
       root: publicDir,
       rewriteRequestPath,
-      // Vite writes content-hashed filenames under `assets/`, so those
-      // responses can be cached forever. Files elsewhere in public/ keep
-      // stable names and must stay revalidatable.
-      onFound: (_path, ctx) => {
+      onFound: (path, ctx) => {
+        // Vite writes content-hashed filenames under `assets/`, so those
+        // responses can be cached forever. Files elsewhere in public/ keep
+        // stable names and must stay revalidatable.
         if (ctx.req.path.startsWith(hashedAssetsPrefix)) {
           ctx.header('Cache-Control', 'public, max-age=31536000, immutable')
         }
+
+        applyStaticDocumentHeaders(path, ctx)
       },
     }),
   )
@@ -195,6 +198,7 @@ export function registerBuiltInertiaClient(
       headers: {
         'Content-Type': contentType,
         'Cache-Control': 'public, max-age=31536000',
+        ...staticDocumentHeaders(contentType),
       },
     })
   })

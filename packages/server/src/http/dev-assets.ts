@@ -6,6 +6,7 @@ import { createRequire } from 'node:module'
 import type { Application } from './Application'
 import { registerRootPublicAssets, type RootPublicAssetsConfig } from './public-assets'
 import { isPathWithin, isRealPathWithin } from '../support/contained-path'
+import { applyStaticDocumentHeaders, staticDocumentHeaders } from './static-documents'
 
 declare const Bun: any
 
@@ -151,6 +152,7 @@ export function registerDevAssets(app: Application, options: DevAssetsOptions): 
       serveStatic({
         root: cssDir,
         rewriteRequestPath: cssRewrite,
+        onFound: applyStaticDocumentHeaders,
       }),
     )
   }
@@ -195,6 +197,7 @@ export function registerDevAssets(app: Application, options: DevAssetsOptions): 
       serveStatic({
         root: publicDir,
         rewriteRequestPath,
+        onFound: applyStaticDocumentHeaders,
       }),
     )
 
@@ -318,10 +321,13 @@ async function transpileFile(
   }
 
   const body = await file.arrayBuffer()
+  const contentType = file.type || 'application/octet-stream'
+
   return new Response(body, {
     headers: {
-      'Content-Type': file.type || 'application/octet-stream',
+      'Content-Type': contentType,
       'Cache-Control': isDev() ? 'no-cache' : 'public, max-age=31536000',
+      ...staticDocumentHeaders(contentType),
     },
   })
 }
