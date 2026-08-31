@@ -1,3 +1,9 @@
+import { HonoRequest } from 'hono/request'
+import {
+  asRecord,
+  parseRequestBody as parseRequestBodyByRuntimeRules,
+} from '@guren/server/internal/request'
+
 const HTML_ENTITIES: Record<string, string> = {
   '<': '\\u003c',
   '>': '\\u003e',
@@ -39,39 +45,6 @@ export interface InertiaPayload {
   props: Record<string, unknown>
   url: string
   version?: string
-}
-
-/**
- * Applies Hono's `parseBody()` rule for repeated form fields, as the real
- * runtime then flattens it in `parseRequestPayload`.
- *
- * Hono collects every value only when the key ends with `[]` (its
- * `shouldParseAllValues`); any other repeated key keeps just the last one.
- * The runtime then flattens with `Array.isArray(v) ? v[0] : v`, so the
- * observable contract is: **`[]`-suffixed keys keep the FIRST value, every
- * other key keeps the LAST**. Taking the first directly is equivalent to
- * collecting the array and slicing it, and both content types go through
- * this one function — a per-branch rule is how the mock came to disagree
- * with production on `tags[]` while agreeing on `tags`.
- */
-function collectFormEntries(
-  entries: Iterable<[string, FormDataEntryValue]>,
-): Record<string, unknown> {
-  // Collected in a Map and materialized with `Object.fromEntries`, never by
-  // assigning into an object literal: `result['__proto__'] = v` hits the
-  // inherited setter and silently drops the field, where the runtime — whose
-  // own last step is `Object.fromEntries` over Hono's null-prototype object —
-  // keeps it as an own property.
-  const collected = new Map<string, FormDataEntryValue>()
-
-  for (const [key, value] of entries) {
-    if (key.endsWith('[]') && collected.has(key)) {
-      continue
-    }
-    collected.set(key, value)
-  }
-
-  return Object.fromEntries(collected)
 }
 
 export function createControllerContext(
@@ -123,8 +96,6 @@ export function createControllerContext(
   }
 }
 
-
-
 /**
  * `@guren/server` is loaded lazily and memoized: this module is the factory
  * behind `vi.mock('@guren/core', …)` — and the testing package's own suite
@@ -165,31 +136,47 @@ async function readMultipartBody(request: Request): Promise<FormData | null> {
 }
 
 /**
- * Hono's media-type rule, which is what every form body in the runtime is
- * gated on: `parseBody()` takes `Content-Type` up to the first `;`, trims it,
- * lowercases it, and compares with `===` (hono/utils/body). A substring test
- * diverges in *both* directions — it misses `Application/X-WWW-Form-Urlencoded`,
- * which the runtime parses, and it accepts
- * `application/x-www-form-urlencoded-evil`, which the runtime does not.
+ * Hono's media-type rule — `Content-Type` up to the first `;`, trimmed,
+ * lowercased, compared with `===` (hono/utils/body) — restated for the one
+ * caller left that needs it: {@link readMultipart}, behind `file()` / `files()`.
  *
- * The JSON branch below deliberately keeps its case-sensitive `includes()`
- * instead: the runtime reaches `ctx.req.json()` through exactly that test, so
- * `application/json-evil` is read as JSON and `Application/JSON` falls past it
- * to the form rule — in the mock and in the runtime alike.
+ * The body parser below no longer restates it. It hands the request to Hono's
+ * `parseBody()` through the runtime, which applies the rule itself.
+ *
+ * Do not read this as "the runtime gates the same way". It does not: the
+ * runtime's upload read is `ctx.req.parseBody({ all: true })` in a try/catch
+ * with no gate at all (`Controller.parseUploads`), because Hono decides the
+ * media type inside `parseBody`. The gate exists here because this mock reads
+ * uploads through `Request.formData()` instead, which is case-sensitive where
+ * Hono lowercases first — so *removing* the gate without also moving off
+ * `formData()` would reintroduce the uppercase-multipart divergence, not fix
+ * it. The real fix is to share the runtime's upload read the way the body
+ * parser is now shared; it is filed separately because it changes the
+ * published type of the public `readMultipart()`.
  */
-function isMediaType(contentType: string, mediaType: string): boolean {
-  return contentType.split(';')[0]?.trim().toLowerCase() === mediaType
+function isMultipartBody(contentType: string): boolean {
+  return contentType.split(';')[0]?.trim().toLowerCase() === 'multipart/form-data'
 }
 
 /**
- * The mock's counterpart to the runtime's `parseRequestBody`: the parsed body
- * as sent, so an array stays an array for `validateBody()` to judge.
+ * The mock's request body: the parsed value as sent, so an array stays an
+ * array for `validateBody()` to judge.
  *
- * A body that cannot be parsed falls back to `{}` — a client error reaches the
- * schema and fails validation rather than throwing, matching what the runtime's
- * parser now does for a form body no parser can decode. The fallback wraps the
- * whole parse, not just that one branch: `clone()` throws on an already-read
- * body, and the callers this feeds have no fallback of their own to catch it.
+ * Nothing about a body is decided here. Which content types are read, how a
+ * repeated `field[]` collapses, what an undecodable body falls back to — all
+ * of it comes from the runtime's own parser, reached through
+ * `@guren/server/internal/request`. The mock used to carry a second copy of
+ * those rules, and every one of them drifted at least once: an uppercase media
+ * type, a `;`-parameterized one, a repeated `field[]`, a `__proto__` field,
+ * an undecodable body. Each was fixed in the copy; sharing the parser is what
+ * stops the next one.
+ *
+ * What stays local is the adapter, because the two hold different things — the
+ * runtime is handed a Hono context, the mock holds a `Request`. A
+ * `HonoRequest` bridges them: it supplies the three members the parser reads
+ * (`header()`, `json()`, `parseBody()`) from the same class a live request
+ * uses, so even the media-type decision inside `parseBody()` is Hono's own
+ * rather than a restatement of it.
  */
 async function parseRequestBody(ctx: ControllerContext): Promise<unknown> {
   // Read outside the fallback on purpose: the fallback is for an unparseable
@@ -198,37 +185,23 @@ async function parseRequestBody(ctx: ControllerContext): Promise<unknown> {
   // failure, and the runtime's parser does not swallow it either.
   const raw = ctx.req.raw
 
+  let req: HonoRequest
   try {
     // Clone so the raw body stays readable — the real runtime caches the
     // parsed body in Hono, letting validateBody() and file() compose on one
     // request; here the clone is what preserves that property.
-    const request = raw.clone()
-    const contentType = request.headers.get('Content-Type') ?? ''
-
-    if (contentType.includes('application/json')) {
-      return await request.json().catch(() => ({}))
-    }
-
-    if (isMediaType(contentType, 'application/x-www-form-urlencoded')) {
-      const text = await request.text()
-      return collectFormEntries(new URLSearchParams(text))
-    }
-
-    if (isMediaType(contentType, 'multipart/form-data')) {
-      return collectFormEntries(await request.formData())
-    }
-
-    return {}
+    req = new HonoRequest(raw.clone())
   } catch {
+    // The one failure that is the adapter's own: `clone()` throws on a body
+    // already read, which cannot happen to the runtime because Hono hands it
+    // the request before anything else touches it. Everything past this point
+    // is the shared parser's to answer, including the `{}` it returns for a
+    // body no parser can decode — catching that here too would let the mock
+    // swallow a throw the runtime would surface.
     return {}
   }
-}
 
-/** The record view of {@link parseRequestBody}, as the runtime narrows it. */
-function asRecord(body: unknown): Record<string, unknown> {
-  return typeof body === 'object' && body !== null && !Array.isArray(body)
-    ? (body as Record<string, unknown>)
-    : {}
+  return parseRequestBodyByRuntimeRules({ req })
 }
 
 /**
@@ -473,15 +446,27 @@ export function createControllerModuleMock() {
     // (an array stays an array), while the field-by-field helpers see the
     // record view.
     //
+    // Public like parsedBody below: TS4094 forbids private members on the
+    // exported anonymous class type this factory returns. Boxed rather than
+    // memoized by truthiness, because `null`, `''`, `0` and `false` are all
+    // parsed bodies.
+    public rawBody?: { value: unknown }
+
     // Deliberately the local raw parser, not `module.parseRequestPayload` —
-    // that one narrows, which is what made a non-object body unreachable.
-    // Unmemoized, because the parser clones the request: the real Controller
-    // boxes its cache to avoid re-reading a body Hono hands over once, and
-    // here there is nothing to exhaust. No fallback of its own either — an
-    // unparseable body already arrives as `{}` from the parser above, which is
-    // also what `parseRequestPayload` reads, so both views agree.
+    // that one narrows, which is what made a non-object body unreachable. No
+    // fallback of its own either: an unparseable body already arrives as `{}`
+    // from the parser above, which is also what `parseRequestPayload` reads,
+    // so both views agree.
+    //
+    // Memoized for parity rather than for speed. Cloning the request means
+    // there is nothing to exhaust here, so re-parsing is safe — but it is not
+    // *equal*: the real Controller boxes its parse, so two `validateBody()`
+    // calls in one action are handed the same object, where re-parsing hands
+    // out two. A schema that mutates what it validates, or an identity check
+    // across two reads, saw the mock and the runtime disagree.
     public async getRawBody(): Promise<unknown> {
-      return parseRequestBody(this.ctx)
+      this.rawBody ??= { value: await parseRequestBody(this.ctx) }
+      return this.rawBody.value
     }
 
     public async getBody(): Promise<Record<string, unknown>> {
@@ -512,9 +497,10 @@ export function createControllerModuleMock() {
         // still holds — a rejected promise cached is one parse, a guard per
         // call site is two.
         //
-        // The runtime's file()/files() read ctx.req.parseBody(), so they are
-        // gated on Hono's media-type rule too — see isMediaType.
-        this.multipartBody = isMediaType(contentType, 'multipart/form-data')
+        // Hono applies the same media-type rule inside the parseBody() the
+        // runtime uses here — see isMultipartBody for why this side states
+        // it rather than inheriting it.
+        this.multipartBody = isMultipartBody(contentType)
           ? readMultipartBody(request)
           : Promise.resolve(null)
       }
