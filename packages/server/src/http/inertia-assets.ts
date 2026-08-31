@@ -10,6 +10,7 @@ import {
   type DevAssetsOptions,
 } from './dev-assets'
 import { registerRootPublicAssets } from './public-assets'
+import { guardStaticDocument } from './static-documents'
 import { isPathWithin, isRealPathWithin } from '../support/contained-path'
 import { parseImportMap } from '../support/import-map'
 import { DEFAULT_DEV_STYLES_ENTRY } from '../support/inertia-defaults'
@@ -105,7 +106,11 @@ export function configureInertiaAssets(app: Application, options: InertiaAssetsO
       // Vite writes content-hashed filenames under `assets/`, so those
       // responses can be cached forever. Files elsewhere in public/ keep
       // stable names and must stay revalidatable.
-      onFound: (_path, ctx) => {
+      onFound: (path, ctx) => {
+        if (!options.inlineDocuments) {
+          guardStaticDocument(path, ctx)
+        }
+
         if (ctx.req.path.startsWith(hashedAssetsPrefix)) {
           ctx.header('Cache-Control', 'public, max-age=31536000, immutable')
         }
