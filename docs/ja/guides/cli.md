@@ -459,6 +459,7 @@ bunx guren route:list --format compact # コンパクトな1行形式
 |----------|------|----|
 | `tool:list` | このアプリが公開しているエージェントツールを一覧表示 | `bunx guren tool:list` |
 | `tool:inspect` | 1 つのツールの導出結果を表示 | `bunx guren tool:inspect posts.store` |
+| `tool:call` | エージェントと同じ経路で 1 つのツールを呼び出す | `bunx guren tool:call posts.index` |
 | `tool:dev` | 使い捨てトークン付きでツールをローカルに提供 | `bunx guren tool:dev` |
 
 ```bash
@@ -487,6 +488,29 @@ bunx guren tool:dev --as 42 --port 4000
 | `--routes` | `routes/web.ts` | ルートエントリファイルのパス |
 | `--app` | カレントディレクトリ | アプリケーションルートディレクトリ |
 | `--json` | `false` | 導出結果を JSON で出力 |
+
+`tool:call` はさらに一歩進んで、MCP クライアントからの呼び出しと同じディスパッチ契約でツールを実際に呼び出します。アプリケーションを起動するので、ツールの一覧は稼働中のアプリが提供するグラフから取ります。`--routes` を受け付けないのはそのためです。
+
+```bash
+# 引数付きでツールを呼ぶ
+bunx guren tool:call posts.store --input '{"title":"Hello agents"}'
+
+# 予行演習: ミドルウェアを通し契約を検証して、ハンドラーの手前で止める
+bunx guren tool:call posts.store --input '{"title":"Hello"}' --preflight
+
+# ユーザーとして呼び、結果を JSON で読む
+bunx guren tool:call posts.index --as user:42 --json
+```
+
+| オプション | デフォルト | 説明 |
+|-----------|-----------|------|
+| `--input` | `{}` | ツールの引数を JSON オブジェクトで指定 |
+| `--as` | (未認証) | 指定ユーザーとして呼び出す(`user:42`)。開発専用: プロセスに `GUREN_TESTING=1` を設定し、実際の資格情報の代わりに注入されたユーザーをアプリが受け入れるようにします |
+| `--preflight` | `false` | 実行ではなく verdict を要求する。ハンドラーは実行されません |
+| `--app` | カレントディレクトリ | アプリケーションルートディレクトリ |
+| `--json` | `false` | 呼び出し結果を JSON で出力 |
+
+呼び出しがエラー結果として返った場合、コマンドは 0 以外で終了します。スクリプトが 422 や 403 を成功と読み違えないためです。[エージェントインターフェース: 自分でツールを呼ぶ](./agent-interface.md#自分でツールを呼ぶ)も参照してください。
 
 `tool:dev` が提供するのはアプリ自身のエンドポイントです。
 [`@guren/plugin-mcp`](./agent-interface.md) のインストールと登録が必要で、

@@ -341,7 +341,9 @@ export interface TokenIssueOptions extends TokenIssueInput {
  * all, and that must land on the message below instead of a `TypeError`.
  */
 async function resolveApiTokenStore(appRoot?: string): Promise<ApiTokenStore> {
-  // The same root the tool list was derived from — see `resolveMainEntry`.
+  // The same root the tool list was derived from (see `resolveMainEntry`), and
+  // booted or nothing: a token written into a half-booted app is issued
+  // against a store whose configuration never completed.
   const app = await loadBootedApplication(appRoot)
 
   const store = app.auth?.getApiTokenStore?.()

@@ -2,7 +2,7 @@ import { access } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { consola } from 'consola'
-import type { ApiTokenStore } from '@guren/core'
+import type { ApiTokenStore, RouteDefinition } from '@guren/core'
 
 const MAIN_ENTRY_CANDIDATES = [
   'src/main.ts',
@@ -47,6 +47,18 @@ export type MaybeApplication = {
      */
     useTokens?: (store: ApiTokenStore, options?: { provider?: string; guardName?: string }) => void
   }
+  /**
+   * The app-local route registry, for the commands that must read the graph
+   * the *booted* app serves rather than the one on disk (`guren tool:call`).
+   * Optional for the same reason `auth` is: an app resolving a `@guren/core`
+   * without the agent interface has no such registry, and that must reach the
+   * caller's own diagnostic instead of a `TypeError`.
+   */
+  router?: {
+    definitions?: () => RouteDefinition[]
+  }
+  /** The app's HTTP entry, when it has one — `tool:call` re-enters through it. */
+  fetch?: (request: Request) => Response | Promise<Response>
 }
 
 export async function resolveMainEntry(appRoot?: string): Promise<string> {
@@ -106,6 +118,37 @@ export async function bootstrapApplication(mod: Record<string, unknown>): Promis
   throw new Error('Application entry must export a default or ready/bootstrap that yields an object with a listen() method.')
 }
 
+/**
+ * Resolve the app's entry, import it, bootstrap it, and boot it — the block
+ * every command that must reach a *live* application performs.
+ *
+ * `boot()` failures are rethrown rather than warned about, and that is the
+ * whole reason this is a helper rather than four lines at each call site: a
+ * command reaching into a half-booted app reads state whose configuration
+ * never completed. A provider that failed after auth registered leaves a store
+ * that *looks* configured, so a token minted against it is written into an
+ * application that never finished booting — and reported as a success. What
+ * that costs differs per command, so each call site says so in its own words.
+ */
+export async function loadBootedApplication(appRoot?: string): Promise<MaybeApplication> {
+  // The same root everything else about the app was resolved from — see
+  // `resolveMainEntry`.
+  const entry = await resolveMainEntry(appRoot)
+
+  let moduleExports: Record<string, unknown>
+  try {
+    moduleExports = (await import(pathToFileURL(entry).href)) as Record<string, unknown>
+  } catch (error) {
+    throw new Error(
+      `Failed to import application entry (${entry}): ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+
+  const app: MaybeApplication = await bootstrapApplication(moduleExports)
+  await ensureApplicationBooted(app, moduleExports, { rethrow: true })
+  return app
+}
+
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
@@ -149,34 +192,6 @@ export async function ensureApplicationBooted(
     if (options.rethrow) throw error
     consola.warn('Application boot() rejected:', error)
   }
-}
-
-/**
- * Resolve this app's entry, import it, and hand back a booted application.
- *
- * Boot failure is rethrown rather than warned about, and that is the whole
- * reason this is a helper rather than three lines at each call site: a command
- * that *writes* through the app it loaded must not accept a half-built one. A
- * provider that failed after auth registered leaves a store that looks
- * configured, so a token minted against it is written into an application
- * whose configuration never completed — and reported as a success.
- */
-export async function loadBootedApplication(appRoot?: string): Promise<MaybeApplication> {
-  const entry = await resolveMainEntry(appRoot)
-
-  let moduleExports: Record<string, unknown>
-  try {
-    moduleExports = (await import(pathToFileURL(entry).href)) as Record<string, unknown>
-  } catch (error) {
-    throw new Error(
-      `Failed to import application entry (${entry}): ${error instanceof Error ? error.message : String(error)}`,
-    )
-  }
-
-  const app: MaybeApplication = await bootstrapApplication(moduleExports)
-  await ensureApplicationBooted(app, moduleExports, { rethrow: true })
-
-  return app
 }
 
 export async function importFirstAvailableApplicationModule(paths: string[]): Promise<{ module: Record<string, unknown>; path: string } | undefined> {
