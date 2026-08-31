@@ -845,7 +845,7 @@ describe('repeated query parameters', () => {
     return controller.read()
   }
 
-  async function readThroughRuntime(): Promise<BothSurfaces> {
+  async function readThroughRuntime(url: string = URL_UNDER_TEST): Promise<BothSurfaces> {
     // Lazy, like the rest of this package: the mock resolves @guren/server on
     // demand so a suite that mocks it still gets the real module here.
     const { Controller, createApp } = await import('@guren/core')
@@ -867,7 +867,7 @@ describe('repeated query parameters', () => {
     })
     await app.boot()
 
-    const response = await app.fetch(new Request(URL_UNDER_TEST))
+    const response = await app.fetch(new Request(url))
     expect(response.status).toBe(200)
 
     return (await response.json()) as BothSurfaces
@@ -896,11 +896,130 @@ describe('repeated query parameters', () => {
     expect(readThroughMock(withoutQueries).validateQuery).toEqual(EXPECTED)
   })
 
+  /**
+   * The same `__proto__` key as the raw-surface test below, but carried all
+   * the way through `validateQuery()` — the surface an application actually
+   * uses, and the one the flattening step sits on.
+   *
+   * Worth its own case because the two halves failed differently: a single
+   * `?__proto__=x` was silently dropped before reaching the schema, while a
+   * repeated one replaced the flattened record's prototype outright. Reading
+   * the raw `queries()` would have shown neither, because Hono hands the key
+   * over intact and only the flattening lost it.
+   */
+  it('validateQuery() keeps a __proto__ key in the mock and the runtime alike', async () => {
+    const url = 'http://example.com/posts?__proto__=one&__proto__=two&page=2'
+
+    const fromRuntime = await readThroughRuntime(url)
+    const fromMock = readThroughMock(
+      createControllerContext(url) as unknown as ControllerContext
+    )
+
+    const expected = Object.fromEntries([
+      ['__proto__', ['one', 'two']],
+      ['page', '2'],
+    ])
+
+    expect(Object.hasOwn(fromMock.validateQuery as object, '__proto__')).toBe(true)
+    expect(Object.getPrototypeOf(fromMock.validateQuery as object)).toBe(Object.prototype)
+    expect(fromMock).toEqual({ validateQuery: expected, validateQuerySafe: expected })
+    expect(fromMock).toEqual(fromRuntime)
+  })
+
+  it('honors a queries() override that reads `this`', () => {
+    // `queries?: () => Record<string, string[]>` is satisfied by a method as
+    // readily as by an arrow, so an override may legitimately read `this.url`.
+    // The shared rule is reached by handing it an object with a `queries`
+    // member; passing the bare `ctx.req.queries` reference would re-`this` it
+    // onto that object and read `undefined` — the receiver has to survive.
+    const full = createControllerContext(URL_UNDER_TEST)
+    const withThisOverride = {
+      ...full,
+      req: {
+        ...full.req,
+        queries(this: { url: string }) {
+          const params = new URL(this.url).searchParams
+          return Object.fromEntries([...params.keys()].map((key) => [key, params.getAll(key)]))
+        },
+      },
+    } as unknown as ControllerContext
+
+    expect(readThroughMock(withThisOverride).validateQuery).toEqual(EXPECTED)
+  })
+
   it('reads back the first occurrence from the mock context, as Hono does', () => {
     const ctx = createControllerContext(URL_UNDER_TEST)
 
     expect(ctx.req.query()).toEqual({ tag: 'core', page: '2' })
     expect(ctx.req.query('tag')).toBe('core')
+  })
+
+  /**
+   * A `__proto__` query key, which is where the mock's hand-rolled `query()`
+   * diverged from the runtime it was imitating.
+   *
+   * The copy built its record by assignment (`first[name] ??= value`), so the
+   * key hit `Object.prototype`'s inherited `__proto__` setter and the field
+   * vanished — a controller read it as absent while production read it as a
+   * value. Hono builds a null-prototype object, which has no setter to hit.
+   * Delegating to `HonoRequest` is what closes it; asserting against a real
+   * `Application.fetch()` is what keeps it closed.
+   *
+   * `queries()` never had the bug — it was already `Object.fromEntries`, which
+   * defines an own property — but it is asserted alongside so the pair cannot
+   * drift apart in the other direction either.
+   */
+  it('keeps a __proto__ query key in the mock and the runtime alike', async () => {
+    const url = 'http://example.com/posts?__proto__=pwned&tag=core&tag=framework'
+
+    const { Controller, createApp } = await import('@guren/core')
+
+    class ReadController extends Controller {
+      read() {
+        return this.json({
+          query: this.ctx.req.query(),
+          queries: this.ctx.req.queries(),
+        })
+      }
+    }
+
+    const app = createApp({
+      routes: (router) => {
+        router.get('/posts', [ReadController, 'read'])
+      },
+    })
+    await app.boot()
+
+    const response = await app.fetch(new Request(url))
+    expect(response.status).toBe(200)
+    const fromRuntime = (await response.json()) as Record<string, unknown>
+
+    const ctx = createControllerContext(url)
+    const fromMock = {
+      query: ctx.req.query(),
+      queries: ctx.req.queries?.(),
+    }
+
+    // Asserted concretely as well as for parity, so the two cannot agree on
+    // the wrong answer — `toEqual` alone would pass if both dropped the key.
+    //
+    // The expectations are built with `Object.fromEntries`, never as object
+    // literals: a bare `__proto__:` key in a literal sets the prototype rather
+    // than defining an own property, so `{ __proto__: 'pwned', tag: 'core' }`
+    // is just `{ tag: 'core' }` and this test would assert the bug it exists
+    // to catch. That is the same footgun the code under test hits.
+    expect(Object.hasOwn(fromMock.query as object, '__proto__')).toBe(true)
+    expect(fromMock).toEqual({
+      query: Object.fromEntries([
+        ['__proto__', 'pwned'],
+        ['tag', 'core'],
+      ]),
+      queries: Object.fromEntries([
+        ['__proto__', ['pwned']],
+        ['tag', ['core', 'framework']],
+      ]),
+    })
+    expect(fromMock).toEqual(fromRuntime)
   })
 })
 

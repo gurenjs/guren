@@ -96,18 +96,49 @@ export function asRecord(body: unknown): Record<string, unknown> {
 }
 
 /**
+ * What {@link flattenRequestQueries} actually reads: one no-arg `queries()` off
+ * `ctx.req`, not a whole Hono context.
+ *
+ * Spelled as the call shape rather than as `Pick<HonoRequest, 'queries'>` — the
+ * one place this departs from {@link RequestBodyContext} above, and not by
+ * preference. `HonoRequest.queries` is *overloaded* (`queries(key)` returning
+ * `string[] | undefined`, `queries()` returning the record), and a `Pick` keeps
+ * both signatures, so the plain `() => Record<string, string[]>` that
+ * `@guren/testing`'s `ControllerContext` declares cannot satisfy it. Naming the
+ * one signature this function calls admits both: an overloaded member is
+ * assignable to any of its own signatures, so a real `HonoRequest` still passes.
+ *
+ * Narrowing a parameter accepts strictly more callers, so every existing one
+ * keeps passing a real `Context` unchanged.
+ */
+export interface RequestQueryContext {
+  req: {
+    queries(): Record<string, string[]>
+  }
+}
+
+/**
  * Collects query parameters preserving repeated keys as arrays while keeping
  * single occurrences as plain strings (`?tag=a&tag=b` → `{ tag: ['a', 'b'] }`,
  * `?page=2` → `{ page: '2' }`). Use this instead of `ctx.req.query()` when
  * feeding query data into validation schemas.
+ *
+ * Materialized with `Object.fromEntries`, never by assigning into an object
+ * literal — the same rule, and for the same reason, as the form branch of
+ * {@link parseRequestBody} above. Query keys are attacker-controlled, and
+ * `flat['__proto__'] = …` hits `Object.prototype`'s inherited setter instead
+ * of defining a field: `?__proto__=one` silently vanished before reaching the
+ * schema, and `?__proto__=one&__proto__=two` set the returned record's own
+ * prototype to that array. Hono hands over a null-prototype object, so the
+ * key arrives here intact; only this last step could lose it.
  */
-export function flattenRequestQueries(ctx: Context): Record<string, unknown> {
-  const queries = ctx.req.queries()
-  const flat: Record<string, unknown> = {}
-  for (const [key, values] of Object.entries(queries)) {
-    flat[key] = values.length === 1 ? values[0] : values
-  }
-  return flat
+export function flattenRequestQueries(ctx: RequestQueryContext): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(ctx.req.queries()).map(([key, values]) => [
+      key,
+      values.length === 1 ? values[0] : values,
+    ]),
+  )
 }
 
 export interface ValidationIssueLike {

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'bun:test'
-import { formatValidationErrors, parseRequestBody, parseRequestPayload } from '../../src/http/request'
+import { HonoRequest } from 'hono/request'
+import {
+  flattenRequestQueries,
+  formatValidationErrors,
+  parseRequestBody,
+  parseRequestPayload,
+} from '../../src/http/request'
 
 interface TestContext {
   req: {
@@ -163,5 +169,46 @@ describe('formatValidationErrors', () => {
     const errors = formatValidationErrors({ issues: [{ path: [0], message: 'Invalid' }] }, 'Try again')
 
     expect(errors).toEqual({ message: 'Try again' })
+  })
+})
+
+/**
+ * The flattener is handed attacker-controlled keys, so it must define fields
+ * rather than assign them. Hono groups into a null-prototype object, which has
+ * no inherited `__proto__` setter to hit; the flattening step is the one place
+ * the key can still be lost, and assigning into an object literal lost it two
+ * different ways depending on how many times the key was repeated.
+ *
+ * Built through a real `HonoRequest` rather than a hand-written `queries()`, so
+ * the null-prototype input this relies on comes from Hono itself.
+ */
+describe('flattenRequestQueries', () => {
+  const flattenFor = (query: string) =>
+    flattenRequestQueries({ req: new HonoRequest(new Request(`http://example.com/posts${query}`)) })
+
+  it('keeps a repeated key as an array and a single occurrence as a string', () => {
+    expect(flattenFor('?tag=a&tag=b&page=2')).toEqual({ tag: ['a', 'b'], page: '2' })
+  })
+
+  it('defines a single `__proto__` as an own field instead of dropping it', () => {
+    const flat = flattenFor('?__proto__=one')
+
+    // Assigned rather than defined, this silently became a no-op: setting
+    // `__proto__` to a string does nothing, so the field never reached the
+    // schema at all.
+    expect(Object.hasOwn(flat, '__proto__')).toBe(true)
+    expect(flat).toEqual(Object.fromEntries([['__proto__', 'one']]))
+    expect(Object.getPrototypeOf(flat)).toBe(Object.prototype)
+  })
+
+  it('defines a repeated `__proto__` as an own field instead of replacing the prototype', () => {
+    const flat = flattenFor('?__proto__=one&__proto__=two')
+
+    // The worse half of the same bug: assigning an *array* to `__proto__` does
+    // not no-op, it replaces the record's prototype — so the object handed to
+    // the schema had `Array.prototype`-shaped inheritance and still no field.
+    expect(Object.hasOwn(flat, '__proto__')).toBe(true)
+    expect(flat).toEqual(Object.fromEntries([['__proto__', ['one', 'two']]]))
+    expect(Object.getPrototypeOf(flat)).toBe(Object.prototype)
   })
 })
