@@ -1,5 +1,33 @@
 # web
 
+## 0.1.29
+
+### Patch Changes
+
+- Updated dependencies [e72244a]
+- Updated dependencies [8f43757]
+- Updated dependencies [327b4b5]
+- Updated dependencies [327b4b5]
+- Updated dependencies [51e5d6a]
+- Updated dependencies [0c7d28e]
+- Updated dependencies [ec10be6]
+- Updated dependencies [1161036]
+- Updated dependencies [3eea236]
+- Updated dependencies [a259c3b]
+- Updated dependencies [3b55863]
+- Updated dependencies [cfb4a8d]
+- Updated dependencies [58cadd2]
+- Updated dependencies [c9ee2ea]
+- Updated dependencies [89aa23f]
+- Updated dependencies [a748a05]
+- Updated dependencies [ea515ae]
+- Updated dependencies [9e19202]
+- Updated dependencies [4335cbc]
+  - @guren/cli@2.13.0
+  - @guren/core@1.12.0
+  - @guren/testing@1.8.0
+  - @guren/plugin-markdown@0.3.0
+
 ## 0.1.28
 
 ### Patch Changes

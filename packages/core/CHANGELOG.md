@@ -1,5 +1,68 @@
 # @guren/core
 
+## 1.12.0
+
+### Minor Changes
+
+- 327b4b5: Derive agent tools from route contracts (RFC 0016 PR-1b).
+
+  - `deriveAgentTools(definitions)` turns the route definitions a router hands out into MCP-shaped tools: name, description, input/output JSON Schema (2020-12), annotation hints, authorization, approval and redaction. Only routes that declare `.agent()` _and_ carry a name become tools; everything else about a tool derives from contracts the route already has, so a tool cannot advertise a schema the endpoint does not validate.
+  - Input merges `params` + `query` + `body` into one object schema, supplements path parameters the `params` schema omits as required strings, and nests a non-object `body` under a `body` key. Path parameters are required whatever describes them — a schema declaring one optional gives its _type_, not permission to omit it from a URL. Nothing throws: a key collision is reported as a warning and resolved deterministically in the body's favour, so the runtime derivation stays total (the static check fails the build instead).
+  - Annotation defaults follow the MCP spec: GET/QUERY are `readOnlyHint`, read-only tools are non-destructive, GET/QUERY/PUT/DELETE are idempotent. Explicit metadata always wins.
+  - Authorization is emitted only when the route's stamped capabilities make it unambiguous — one ability checked with `mode: 'all'`, or a resource check that resolves its ability from the built-in verb map. Anything else is omitted rather than guessed.
+  - A route's `resource` hint is carried only when the route declares no `output` schema — declared, not merely renderable, so an `output` the walker cannot express still outranks the hint rather than letting an unvalidated claim describe the response.
+  - The Hono path lexer is now shared too (`@guren/server/internal/route-path`, re-exported by `@guren/core/internal/route-path`). `@guren/openapi` had its own copy that dropped a trailing `*` while lexing, so `/files/:name*` named the parameter `name` there and `name*` — what Hono registers — everywhere else. Its documents are byte-identical: OpenAPI path templates are RFC 6570 URI templates where `{name*}` means "explode", so the asterisk is now stripped where the document renders instead of where the path is read.
+  - The Zod → JSON Schema walker moved from `packages/core/src/internal/` to `packages/server/src/internal/`, with `@guren/core/internal/zod-compat` and `@guren/core/internal/zod-json-schema` kept as re-exports. `@guren/core` builds after `@guren/server`, so the walker had to move down to the package the derivation and the OpenAPI generator can both import. No consumer's import specifier changes.
+
+- 1161036: Add the `@guren/core/internal/zod-json-schema` entry point: the one Zod 4 → JSON
+  Schema 2020-12 walker, promoted out of `@guren/openapi` so every surface that
+  describes an application's contracts to something outside the process derives
+  the same schema. It now carries Zod's checks into JSON Schema constraints —
+  string `minLength`/`maxLength`/`pattern`/`format` (`email`, `uri`, `uuid`,
+  `date-time`, `date`, `duration`, `hostname`, `ipv4`, `ipv6`), number
+  `minimum`/`maximum`/`exclusiveMinimum`/`exclusiveMaximum`/`multipleOf`, and
+  array `minItems`/`maxItems` — where before it dropped them. An integer-formatted
+  number (`z.int()`, `z.int32()`, `z.uint32()`) now renders as `type: "integer"`
+  rather than `type: "number"`, and a surplus `pattern` or `multipleOf` that one
+  keyword cannot hold is conjoined under `allOf` rather than dropped.
+
+  `internal/zod-compat` gains `schemaChecks()` and `schemaFormat()`, the two reads
+  that made this possible: zod stores refinements in a heterogeneous `_def.checks`
+  array, and records a format either on the node (`z.email()`) or as a check
+  (`z.string().email()`).
+
+  Internal by `contributing/api-stability.md` — no stability guarantee.
+
+### Patch Changes
+
+- Updated dependencies [8f43757]
+- Updated dependencies [e72244a]
+- Updated dependencies [0cf0260]
+- Updated dependencies [a3a96ae]
+- Updated dependencies [8f43757]
+- Updated dependencies [e72244a]
+- Updated dependencies [327b4b5]
+- Updated dependencies [327b4b5]
+- Updated dependencies [ea515ae]
+- Updated dependencies [5cbccb0]
+- Updated dependencies [51e5d6a]
+- Updated dependencies [a9077f4]
+- Updated dependencies [ec10be6]
+- Updated dependencies [a259c3b]
+- Updated dependencies [15f969a]
+- Updated dependencies [bc70b7f]
+- Updated dependencies [a259c3b]
+- Updated dependencies [3b55863]
+- Updated dependencies [cfb4a8d]
+- Updated dependencies [89aa23f]
+- Updated dependencies [1218a8a]
+- Updated dependencies [a748a05]
+- Updated dependencies [ea515ae]
+- Updated dependencies [9e19202]
+- Updated dependencies [4335cbc]
+  - @guren/server@2.14.0
+  - @guren/cli@2.13.0
+
 ## 1.11.0
 
 ### Minor Changes

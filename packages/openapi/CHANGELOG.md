@@ -1,5 +1,38 @@
 # @guren/openapi
 
+## 1.4.0
+
+### Minor Changes
+
+- 1161036: Generated documents now carry the constraints a route's Zod schemas declare,
+  instead of only their types: `minLength`/`maxLength`/`pattern`/`format` on
+  strings, `minimum`/`maximum`/`exclusiveMinimum`/`exclusiveMaximum`/`multipleOf`
+  on numbers, and `minItems`/`maxItems` on arrays. A `z.string().min(1).max(120)`
+  body field used to document as a bare `{ "type": "string" }`.
+
+  A schema built with `z.int()`, `z.number().int()`, `z.int32()` or `z.uint32()`
+  now documents as `{ "type": "integer" }` rather than `{ "type": "number" }` —
+  the previous output advertised a contract accepting `3.14` that the route then
+  rejected. The same reasoning applies to a schema carrying two patterns or two
+  `multipleOf` values: the surplus is now conjoined under `allOf` instead of
+  dropped, so the document can no longer accept input the route refuses.
+
+  The schema walker itself moved to `@guren/core/internal/zod-json-schema`, so an
+  OpenAPI document and anything else derived from the same route cannot disagree
+  about a schema. The public API is unchanged.
+
+### Patch Changes
+
+- 327b4b5: Fix: a path parameter carrying an explode modifier (`/files/:slug*`) now documents the schema its route declares, instead of falling back to `{ "type": "string" }`.
+
+  The parameter's schema was looked up by the name the document renders (`slug`), while a route's `params` schema is keyed by the name Hono registers and hands the handler (`slug*`) — the only name an app can write. The two never matched, so a declared `z.object({ 'slug*': z.coerce.number().int().positive() })` was discarded and the document advertised a bare string where the endpoint requires a positive integer. The lookup now uses the raw parameter name, while the rendered name keeps the modifier stripped, as OpenAPI path templating requires (RFC 6570 reads `{slug*}` as "explode").
+
+  The same lookup now reads own properties only, so a parameter named `__proto__` can no longer resolve to `Object.prototype` as though it were a declared schema.
+
+- Updated dependencies [327b4b5]
+- Updated dependencies [1161036]
+  - @guren/core@1.12.0
+
 ## 1.3.1
 
 ### Patch Changes

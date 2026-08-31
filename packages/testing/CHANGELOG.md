@@ -1,5 +1,116 @@
 # @guren/testing
 
+## 1.8.0
+
+### Minor Changes
+
+- ec10be6: Route contracts and `validateBody()` accept non-object request bodies.
+
+  A body that parsed to anything other than a plain object was replaced with `{}` before validation ever saw it, so a route declaring `body: z.array(z.number())` or `body: z.string()` could not receive its payload — every request 422'd against an empty object, whatever the client sent. This affected every HTTP caller, not one dispatch path.
+
+  The parse step now has two shapes, and the caller picks by what it does with the result:
+
+  - `parseRequestBody()` (internal) returns the parsed value as sent — an array stays an array, a string stays a string — and is what feeds a route contract's `body`, `Controller.validateBody()` / `validateBodySafe()`, and the `validateRequest()` / `validateRequestWith()` middleware. The schema decides the shape.
+  - `parseRequestPayload()` (unchanged, still exported) is the record view, for callers that read the body field by field: `Controller.input()` / `only()` / `except()` / `has()`, `FormRequest` rules, and broadcast channel authorization. A non-object body reads as `{}` there, exactly as before, because there is no field to read on one.
+
+  Two behaviors are deliberately preserved. A malformed or empty JSON body still parses to `{}`, so an all-optional object schema keeps passing on an empty POST — the cost is that a non-object schema sees that `{}` and returns 422 rather than receiving nothing. And form submissions still normalize to a record, since they have no non-object shape to keep. (A form body that fails to parse at all is unchanged and still separate: `Controller` catches it and validates `{}`, while a route contract or `validateRequest()` lets it surface as a 500.)
+
+  `@guren/testing`'s controller mock gains the same split. Its `parseRequestPayload` now narrows exactly as the runtime's does, and the mock `Controller` gains `getRawBody()`, which validation reads instead. Previously the mock narrowed nowhere, so a mocked controller and a real one disagreed on every non-object body — a test written against the mock could pass on code the runtime would 422. Two divergences on the same path close with it: a JSON body of literal `null` is no longer coalesced to `{}` before validation, and a body the parser rejects falls back to `{}` as the real `Controller` does rather than throwing out of `validateBody()`.
+
+  The change to the mock is additive — `getRawBody()` is the only new member on the exported class type, and `parsedBody` keeps both its declared shape and its role as the record-view memo.
+
+- a259c3b: Add `guren tool:call` and `TestApp.agent()` for invoking agent tools (RFC 0016 §6)
+
+  `guren tool:call <name> --input '{"title":"x"}'` boots the application and
+  invokes one agent tool through the framework's own dispatch contract — the same
+  derivation, request building and response mapping an MCP client's call goes
+  through, so there is no CLI-only code path to drift. Its tools come from the
+  booted app's route graph rather than a routes file, so a tool it can name is a
+  tool it can reach. `--as user:42` authenticates the call (development only: it
+  sets `GUREN_TESTING=1` for the process, and says so), `--preflight` asks for a
+  verdict instead of an execution, and `--json` emits a machine-readable result.
+  A call that comes back as an error result exits non-zero.
+
+  `@guren/testing` gains `app.agent()`: `call(name, input, { as, preflight })`
+  returns a result carrying `assertOk`, `assertStatus`, `assertDenied` and
+  `assertStructured<T>()`, chainable on the pending call like every other
+  `TestApp` request, plus `tools()` for the derived catalog. Calls inherit the
+  app's standing headers, so `(await app.withCsrf()).agent()` composes.
+  `TestApp.fromFetch()` and `fromWorkers()` carry no route graph and say which
+  constructor to use instead of reporting an empty tool list.
+
+- 89aa23f: Stop `@guren/testing`'s controller mock keeping its own copy of the request-body parser.
+
+  The mock reimplemented the runtime's rules for reading a body, and the copy drifted from the original repeatedly. Every one of these was a separate fix to the copy, each landing after a mocked controller test had already passed on behavior the runtime does not have: an uppercase media type, a `;`-parameterized one, a repeated `field[]`, a `__proto__` field, and a body no parser can decode.
+
+  Those fixes stand; this removes what made them necessary. The mock now reads the runtime's parser through the new `@guren/server/internal/request` subpath, wrapping its `Request` in a `HonoRequest` so the parser finds the three members it reads — `header()`, `json()`, `parseBody()` — from the same class a live request supplies. The media-type decision inside `parseBody()` is then Hono's own rather than a restatement of it, and the repeated-field collapse, the `{}` fallback and the record view (`asRecord`, behind `parseRequestPayload`) are single copies shared with the runtime. Only the adapter stays local, because the runtime is handed a Hono context and the mock holds a `Request`.
+
+  Sharing the parser closed one divergence the earlier fixes could not reach, because it is not about _what_ a body parses to. The runtime boxes its parse, so two `validateBody()` calls in one action are handed the same object; the mock re-parsed and handed out two, and a schema that mutates what it validates then saw a different body on its second read. The mock now memoizes the raw body as the runtime does, in a new `rawBody` box beside the existing `parsedBody` record memo — additive, and `parsedBody` keeps both its declared shape and its role. Apart from that, behavior is unchanged: the copies had already been brought into agreement, so the rest is the structural half.
+
+  One restatement remains, and its previous justification was wrong. `Controller.file()` / `files()` do **not** gate the multipart read on the media type — the runtime's `parseUploads()` is `ctx.req.parseBody({ all: true })` in a try/catch, with Hono deciding the media type inside. The mock gates because it reads uploads through `Request.formData()`, which is case-sensitive where Hono lowercases first, so dropping the gate without also moving off `formData()` would reintroduce the uppercase-multipart divergence rather than fix it. Sharing the runtime's upload read is the actual fix and is filed separately, because it changes the published type of the public `readMultipart()`.
+
+  `parseRequestBody()` also stops declaring a full Hono `Context` it never reads. It now takes a structural `RequestBodyContext` — `header`, `json`, and an optional `parseBody` — which is what the mock adapts to without a cast, and which makes the existing `typeof ctx.req.parseBody === 'function'` guard meaningful instead of looking dead against a type that always has one. Narrowing a parameter accepts strictly more callers, so `Router`, `Controller`, the validation middleware, `FormRequest` and `BroadcastManager` are untouched.
+
+  `packages/testing/tests/controller.test.ts` gains a parity table running json, urlencoded, multipart, unsupported and absent content types — plus uppercase and `;`-parameterized ones, repeated fields, and a body that must reach validation unnarrowed — through a real `Application.fetch()` controller and a mocked one, requiring the same answer from both. It complements the per-divergence tests already there by covering the space rather than the known cases, and it guards the runtime as well as the mock: each row asserts the runtime's answer first, so a change to `parseRequestBody` surfaces here instead of in a mock that silently followed it. A separate case pins the parse memo by object identity, which is the only probe that separates one parse from two. Note where it runs — `@guren/testing`'s suite is not part of `bun run test`, so `bun run test:testing` is the gate that speaks for this parity.
+
+  Two runtime behaviors the table pins deserve naming, since both look like bugs and neither changed here: `Content-Type: APPLICATION/JSON` is **not** read as JSON, and `text/plain; profile=application/json` **is**. The runtime's JSON branch is a case-sensitive substring test on the raw header, the one part of the decision Hono does not normalize.
+
+  `@guren/server` gains only that subpath — no behavior change, and nothing new on the package root. It is internal by the rules in `contributing/api-stability.md`: reachable only through a deep import under `internal/`, carrying no stability guarantee, and existing so the two packages cannot drift apart, exactly as `@guren/server/support/expiry` and `@guren/server/internal/route-path` do.
+
+  **Upgrade note:** this package's required `@guren/server` peer moves from `>=2.2.0` to `>=2.14.0`, the first release carrying the subpath. Upgrade the two together — an install that pins an older `@guren/server` and takes this version of `@guren/testing` alone cannot resolve the deep import.
+
+### Patch Changes
+
+- 0c7d28e: Match the runtime's `Content-Type` rule in the controller mock's body parsing.
+
+  The mock gated its form branches on a case-sensitive `contentType.includes(...)` substring test, while the runtime reaches form bodies through `ctx.req.parseBody()`, which compares the media type — `Content-Type` up to the first `;`, trimmed and lowercased — with `===`. The substring test diverged in both directions: `Application/X-WWW-Form-Urlencoded` and `Multipart/Form-Data; boundary=…` were ignored by the mock and parsed by the runtime, and `application/x-www-form-urlencoded-evil` was parsed by the mock and ignored by the runtime. Either way a controller test could pass on behavior production does not have. The same gate sits in front of `file()`/`files()`, so a mixed-case multipart upload read as `null` in the mock while the runtime delivered the file.
+
+  Both gates now apply the media-type rule. The JSON branch deliberately keeps its case-sensitive `includes('application/json')`: the runtime reaches `ctx.req.json()` through exactly that test, so `application/json-evil` is read as JSON and `Application/JSON` is not, in the mock and the runtime alike. All three are now pinned by tests that run one request through the mock and through a real `Application.fetch()` controller and assert both the agreement and the concrete value, alongside tests that pin where a malformed body is swallowed.
+
+- 58cadd2: Fix the controller mock reading repeated form fields differently from the runtime.
+
+  `createGurenControllerModule()`'s `parseRequestPayload` built urlencoded bodies with `Object.fromEntries(new URLSearchParams(text))` and multipart bodies with `formData.forEach((value, key) => { result[key] = value })`. Both keep the **last** value of a repeated field, so for `tags[]=core&tags[]=framework` the mock's `this.input('tags[]')` returned `"framework"` while the runtime returned `"core"` — a controller test could pass on behavior production does not have.
+
+  The rule the mock now mirrors is Hono's, not a blanket "first value wins". `parseBody()` collects every value only for a `[]`-suffixed key (its `shouldParseAllValues`), and the runtime's `parseRequestPayload` then flattens the result with `Array.isArray(v) ? v[0] : v`. So the observable contract is: a `[]`-suffixed key keeps the **first** value, and any other repeated key keeps the **last**. The mock previously agreed with the runtime on the plain key and diverged only on the bracketed one; making it first-wins for both would have fixed `tags[]` while newly breaking `tags`.
+
+  Both content types now go through one shared rule, which collects into a `Map` and materializes with `Object.fromEntries` rather than assigning into an object literal: `result['__proto__'] = v` hits the inherited setter and drops the field, where the runtime keeps it as an own property. And `packages/testing/tests/controller.test.ts` pins all four combinations ({urlencoded, multipart} × {`tags[]`, `tags`}) by running the same body through the mock and through a real `Application.fetch()` controller, so the two cannot drift apart again.
+
+- c9ee2ea: Fix the controller mock reading repeated query parameters differently from the runtime.
+
+  The mock's `validateQuery()` / `validateQuerySafe()` validated against `this.ctx.req.query()`, which is one value per key. The runtime validates against `flattenRequestQueries`, which reads `ctx.req.queries()` and returns `values.length === 1 ? values[0] : values` — so a repeated key arrives as an **array** and a single occurrence as a string. For `?tag=a&tag=b`, a `z.array(...)` schema saw `['a', 'b']` in production and `'b'` in the mock, letting a controller test pass on behavior production does not have (or fail on behavior it does).
+
+  Both surfaces now flatten through one shared rule that mirrors `flattenRequestQueries` exactly. `queries()` is optional on `ControllerContext`, so a context that lacks one re-derives the same grouping from the required `req.url`; the one thing it must not fall back to is `query()`, which is single-valued by construction and is the divergence being closed.
+
+  The mock's no-arg `ctx.req.query()` was built with `Object.fromEntries(searchParams.entries())`, keeping the **last** occurrence of a repeated key, while Hono's keeps the **first** (`?tag=a&tag=b` reads back as `a`). That second divergence is fixed too.
+
+  `packages/testing/tests/controller.test.ts` pins the parity by running the same URL through the mock and through a real `Application.fetch()` controller, covering a repeated key and a single-occurrence key in one comparison, so the two cannot drift apart again.
+
+- 9e19202: A request body the form parser cannot decode fails validation instead of crashing the request.
+
+  Sending a body the form parser rejects — a `Content-Type: multipart/form-data` with no usable boundary, say — used to get a different answer depending on which validation path read it. A route contract and the `validateRequest()` / `validateRequestWith()` middleware let the parser's `TypeError` escape, so the client got a **500** whose body reported the exception and a stack trace; `Controller.validateBody()` caught it and validated `{}` instead. Three readers of the same request, three answers.
+
+  A malformed body is a client error, so it is now treated as one: the parse step falls back to `{}` and the schema decides, which puts it alongside every other body-validation failure — a 422 for any schema that rejects `{}`. The fallback lives in `parseRequestBody()`, which is also what `parseRequestPayload()` reads, so the field-by-field callers stop throwing on one too: `Controller.input()` / `only()` / `except()` / `has()`, `FormRequest` rules, and broadcast channel authorization, which answers its usual 400 (`No channel specified`) rather than a 500.
+
+  **This changes a status code.** A client branching on 500 for a malformed form body now sees whatever its schema decides — 422 for the common case. The response body is the ordinary validation-error shape rather than an exception report; leaking the parser's message and stack to the client was itself part of the old behavior.
+
+  Two things this deliberately does not change. An all-optional object schema keeps _passing_ on an undecodable body, because the fallback is `{}` and not `undefined` — the same answer it has always given for an empty POST or malformed JSON. And it covers the paths that hand the body to a schema, not every read of one: CSRF token extraction catches the parser's error itself and fails closed at 403, unchanged. `Controller.file()` / `files()` parse the multipart body themselves rather than through this fallback, and get their own guard — see the accompanying note.
+
+  `Controller.getRawBody()` drops its own now-redundant fallback and reads the shared one. `@guren/testing`'s controller mock does the same, and its parser's fallback now covers the whole body read rather than one content type, so the mock and the runtime give the same answer for an undecodable body. A ctx carrying no request at all still throws there rather than reading as `{}` — that is a broken test setup, not an unparseable body.
+
+- 4335cbc: `Controller.file()` / `files()` report no upload for a request body the form parser cannot decode, instead of crashing the request.
+
+  Both helpers parsed the multipart body themselves, unguarded. A body the parser rejects — a `Content-Type: multipart/form-data` carrying no usable boundary, say — made that parse throw a `TypeError`, which escaped the action as a **500** whose body reported the exception and a stack trace. Any route reading an upload was one malformed request away from that, whether or not it also validated a body.
+
+  An undecodable body carries no file, so it is now answered as one: `file()` returns `null` and `files()` returns `[]` — the same answers both already give for a field that is simply absent. Callers that already handle "no file was uploaded" need no change; the throw is what goes away.
+
+  This finishes the surface started by the empty-object fallback in `parseRequestBody()`, which fixed the body-_validation_ paths and named these two as a known exclusion. They stay separate on purpose rather than sharing that fallback: it parses without `{ all: true }` and flattens a repeated field to its first value, so routing the upload helpers through it would silently reduce `files()` to one file per field. The shared rule is a guarded multipart parse of their own, which keeps `{ all: true }`.
+
+  Like the fallback it sits beside, the guard does not distinguish whose fault the parse failure was: a body the client could never have sent correctly and a body already consumed upstream — middleware reading `ctx.req.raw` directly, bypassing Hono's cache — both read as "no upload" here. That is deliberate for the same reason, telling the two apart means matching runtime-specific error codes that differ on Bun, Node and Workers. The cost is worth naming: a middleware-ordering bug that used to surface as a loud 500 now reads as an absent file.
+
+  **This changes a status code.** A client branching on 500 for a malformed upload now gets whatever the action does with no file — often its own validation error rather than an exception report. Leaking the parser's message and stack to the client was itself part of the old behavior.
+
+  `@guren/testing`'s controller mock has the same guard, so a controller test and the runtime give the same answer for an undecodable upload.
+
 ## 1.7.0
 
 ### Minor Changes

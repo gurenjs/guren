@@ -19,8 +19,8 @@
     "db:seed": "bunx guren db:seed"
   },
   "dependencies": {
-    "@guren/cli": "^2.12.0",
-    "@guren/core": "^1.11.0",
+    "@guren/cli": "^2.13.0",
+    "@guren/core": "^1.12.0",
     "@guren/inertia-client": "^1.1.2",
     "@guren/orm": "^2.6.1",
     "@inertiajs/react": "^3.6.1",
@@ -30,7 +30,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@guren/testing": "^1.7.0",
+    "@guren/testing": "^1.8.0",
     "@tailwindcss/vite": "^4.2.2",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",

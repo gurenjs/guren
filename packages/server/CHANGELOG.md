@@ -1,5 +1,196 @@
 # @guren/server
 
+## 2.14.0
+
+### Minor Changes
+
+- 8f43757: Move the agent dispatch contract into `@guren/server` and add the preflight seam (RFC 0016 §3, §5.4).
+
+  `buildToolRequest` / `mapToolResponse` / `advertisesStructuredOutput` now ship from `@guren/core` rather than from the MCP plugin. Every surface that invokes a tool — the App MCP endpoint, `guren tool:call`, `@guren/testing` — has to build the same request and read the same response, and none of them can depend on an optional plugin; a second copy is how one of them comes to send a POST route's `query` keys in the body.
+
+  Preflight answers "would this be allowed" without the write happening. A dispatch carrying `preflight: true` runs the route's middleware and validates the contract the tool advertises, then stops before the handler and reports what it checked — including what it could _not_ check: a route that authorizes inside its action gets `unverified: ['authorization']`, because a seam that stops before the handler never reaches that call. The seam is mounted last, so every gate in front of it is the real one: an unauthenticated call is still the auth middleware's 401 and an unauthorized one its 403. Only routes declaring `.agent()` honour it, so no ordinary endpoint changes behaviour on a header any client can set.
+
+  Preflight is not offered over MCP itself. The spec requires a tool advertising an `outputSchema` to answer with conforming `structuredContent` unless the result is an error, and a verdict conforms to no route's output — so the MCP form needs a companion tool, which is the same problem the approval queue has and belongs with it. `guren tool:call` and `@guren/testing` reach the seam through `BuildToolRequestOptions.preflight` instead.
+
+- 0cf0260: Add agent exposure metadata to routes (RFC 0016 Phase 1).
+
+  - `RouteBuilder.agent(metadata)` and the `agent` key on `RouteContractOptions` mark a route as an agent tool. The metadata (`AgentRouteMetadata`: description, toolName, expose, MCP annotation hint overrides, approval, redact) is storage-only — input/output schemas, authorization, and annotation defaults derive from the contracts the route already carries.
+  - `resource()` accepts per-action metadata via `ResourceRouteOptions.agent`; an action not listed is not exposed (deny by default), and metadata for an action the call does not register (excluded via `only`/`except`, or missing from the controller) throws.
+  - `RouteDefinition.agent` carries the declared metadata through `definitions()`. Metadata is snapshotted on attach and on read, so neither side can mutate the router's copy.
+
+- a3a96ae: Add the agent security primitives (RFC 0016 Phase 2): tool scopes, audit events, and argument redaction.
+
+  - Tool scope grammar for API token abilities: `tool:<name>`, `tools:read`, `tools:*`, and `tools:<prefix>.*`, with `parseToolScope`, `scopesAllowTool`, and `expandToolScopes` (a filter over `scopesAllowTool`, so a consent screen and the dispatcher cannot list different tools). Only `tool:`/`tools:` entries are considered — every other ability, including the `ApiToken` default `['*']`, grants no tool, so tokens an app already issued for its own API do not silently gain the agent surface when the first `.agent()` route appears. The judge ignores a malformed entry rather than throwing; refusing one is the issuer's job. `AGENT_TOOL_NAME_PATTERN` exports the MCP tool-name grammar (SEP-986) a `tool:` scope and a wildcard prefix must satisfy.
+  - `AgentToolInvoked` and `AgentToolDenied` events carrying the principal (`AgentPrincipal`), tool, arguments, surface, and either status and duration or a denial reason (`auth`, `scope`, `approval`, `rate-limit`). Declarations only: the dispatch path emits them, and their `arguments` are a contract that the emitter has already redacted.
+  - `redactAgentArguments(args, redact)` deep-copies arguments and masks sensitive fields, unioning a built-in fragment list (password, secret, token, authorization, cookie, session, …) with a route's `.agent({ redact })` names. Matching is a substring test on the key after lowercasing and stripping separators — `apiKey`, `api_key`, `api-key` and `X-Api-Key` are all one name to it — applied before the value's shape is considered; nested objects and arrays are walked, and the copy accumulates on a null-prototype object so a `__proto__` argument cannot reach the prototype chain from the logging path. The walk is total, because it runs while recording what happened — including a denial taken before the route's own validation: a non-object root yields an empty record, a cycle terminates as `[Circular]` without mistaking a shared reference for one, and a payload nested past the depth limit as `[Truncated]` rather than overflowing the stack.
+
+- e72244a: Add a `guren_agent_surface` tool to the development MCP endpoint (RFC 0016 §9).
+
+  Reports every route that declares agent metadata — tool name, method and path, description, exposed surfaces, MCP annotations as declared, approval requirement, and derivable authorization — so a coding agent can see whether the route it is about to edit is already reachable by an autonomous agent. Reads the project context the CLI produces, so it inherits the same fresh-process route loading the other route-dependent tools use; annotation defaults are deliberately not filled in here, since the derivation layer owns that rule.
+
+  It stays a separate tool rather than a field on `guren_get_context` for the reason the agent-interface guidance itself gives: a catalog an agent must read in full is a catalog that costs context, and the exposure question is asked about one route at a time, usually right before editing it. `guren_get_context` answers "what is in this project" for a whole session; this answers "what can an autonomous agent already invoke" in a payload small enough to ask casually. When the app's `@guren/cli` predates agent metadata, the tool says so explicitly instead of returning an empty list — "nothing exposed" and "this CLI cannot answer" are different facts.
+
+- 327b4b5: Derive agent tools from route contracts (RFC 0016 PR-1b).
+
+  - `deriveAgentTools(definitions)` turns the route definitions a router hands out into MCP-shaped tools: name, description, input/output JSON Schema (2020-12), annotation hints, authorization, approval and redaction. Only routes that declare `.agent()` _and_ carry a name become tools; everything else about a tool derives from contracts the route already has, so a tool cannot advertise a schema the endpoint does not validate.
+  - Input merges `params` + `query` + `body` into one object schema, supplements path parameters the `params` schema omits as required strings, and nests a non-object `body` under a `body` key. Path parameters are required whatever describes them — a schema declaring one optional gives its _type_, not permission to omit it from a URL. Nothing throws: a key collision is reported as a warning and resolved deterministically in the body's favour, so the runtime derivation stays total (the static check fails the build instead).
+  - Annotation defaults follow the MCP spec: GET/QUERY are `readOnlyHint`, read-only tools are non-destructive, GET/QUERY/PUT/DELETE are idempotent. Explicit metadata always wins.
+  - Authorization is emitted only when the route's stamped capabilities make it unambiguous — one ability checked with `mode: 'all'`, or a resource check that resolves its ability from the built-in verb map. Anything else is omitted rather than guessed.
+  - A route's `resource` hint is carried only when the route declares no `output` schema — declared, not merely renderable, so an `output` the walker cannot express still outranks the hint rather than letting an unvalidated claim describe the response.
+  - The Hono path lexer is now shared too (`@guren/server/internal/route-path`, re-exported by `@guren/core/internal/route-path`). `@guren/openapi` had its own copy that dropped a trailing `*` while lexing, so `/files/:name*` named the parameter `name` there and `name*` — what Hono registers — everywhere else. Its documents are byte-identical: OpenAPI path templates are RFC 6570 URI templates where `{name*}` means "explode", so the asterisk is now stripped where the document renders instead of where the path is read.
+  - The Zod → JSON Schema walker moved from `packages/core/src/internal/` to `packages/server/src/internal/`, with `@guren/core/internal/zod-compat` and `@guren/core/internal/zod-json-schema` kept as re-exports. `@guren/core` builds after `@guren/server`, so the walker had to move down to the package the derivation and the OpenAPI generator can both import. No consumer's import specifier changes.
+
+- 5cbccb0: Stamp authorization capabilities on the authorize middlewares, so a route's
+  required ability is derivable from its middleware chain instead of from
+  controller bodies (RFC 0016 §4).
+
+  `authorizeMiddleware`, `authorizeAllMiddleware`, and
+  `authorizeResourceMiddleware` now carry an RFC 0007 capability stamp, which
+  `Router.definitions()` aggregates into `RouteDefinition.capabilities`
+  alongside the existing authentication capability. A single ability reports
+  `{ abilities: ['update'], mode: 'all' }` however it was written; two or more
+  alternatives report `'any'`; `authorizeAllMiddleware` reports `'all'`; the
+  resource variant
+  reports a `resource` marker, whose `fromMethodMap` says whether the built-in
+  HTTP verb map decides the ability (it does not when an `abilityFor` callback
+  overrides it). A chain carrying several checks that do not combine into a
+  single all-of reports `mode: 'mixed'` — authorization is present, but no one
+  ability may be named for it.
+
+  Three behaviour changes come with it:
+
+  - `authorizeAllMiddleware([])` now throws at creation. `Gate.all([])` is
+    vacuously true, so an empty list mounted a route that advertised
+    authorization and enforced none.
+  - All three middlewares now snapshot their arguments at creation
+    (the ability array, and `options.abilityFor`), so mutating them afterwards
+    can no longer change what is enforced or make the stamp disagree with it.
+  - `authorizeMiddleware(['one-ability'])` is now treated exactly like
+    `authorizeMiddleware('one-ability')`, so its denial carries the policy's own
+    message and status instead of the generic any-of message. Two or more
+    alternatives are unchanged.
+
+  The capability shape stays internal (nothing new is exported from the package
+  root) and may change in any release.
+
+- a9077f4: Skip CSRF verification for `Authorization: Bearer` requests that carry no `Cookie` header (RFC 0016). CSRF defends cookie ambient authority, and a cookie-less bearer request has none to attach — the token is the client's own deliberately presented credential. A request carrying any cookie verifies exactly as before, so a forged Bearer header on a victim-browser request skips nothing, regardless of middleware mount order. Token issuance is unchanged.
+- 15f969a: Add `@guren/plugin-mcp`: the production App MCP endpoint (RFC 0016 §7). `mcpPlugin()` mounts a bearer-authenticated Model Context Protocol endpoint (default `/mcp`) serving the tools the app's `.agent()` routes derive. Every call re-enters the application through `app.fetch` as a real HTTP request — validation, policies, and middleware run exactly once, in the app — with `env` and execution context forwarded for Workers bindings. The adapter enforces what must precede HTTP: bearer verification against the app's `ApiTokenStore`, token scopes (a token's catalog lists only what it can call; the `ApiToken` default `['*']` grants nothing), fail-closed refusal of `approval: 'required'` tools until the approval queue ships, and per-token rate limits with a stricter write budget. Each refusal emits `AgentToolDenied` and each execution `AgentToolInvoked`, arguments redacted.
+
+  `@guren/server` grows the adapter-facing surface: `DerivedAgentTool.inputSources` and `inputBodyNested` record how a flat tool call maps back onto path, query, and body (the merge's inverse, so a POST route's `query` keys land where `validateQuery` reads them), `AuthManager.getApiTokenStore()` exposes the store `useTokens()` configured, and `readBearerToken` joins the root exports.
+
+- 89aa23f: Stop `@guren/testing`'s controller mock keeping its own copy of the request-body parser.
+
+  The mock reimplemented the runtime's rules for reading a body, and the copy drifted from the original repeatedly. Every one of these was a separate fix to the copy, each landing after a mocked controller test had already passed on behavior the runtime does not have: an uppercase media type, a `;`-parameterized one, a repeated `field[]`, a `__proto__` field, and a body no parser can decode.
+
+  Those fixes stand; this removes what made them necessary. The mock now reads the runtime's parser through the new `@guren/server/internal/request` subpath, wrapping its `Request` in a `HonoRequest` so the parser finds the three members it reads — `header()`, `json()`, `parseBody()` — from the same class a live request supplies. The media-type decision inside `parseBody()` is then Hono's own rather than a restatement of it, and the repeated-field collapse, the `{}` fallback and the record view (`asRecord`, behind `parseRequestPayload`) are single copies shared with the runtime. Only the adapter stays local, because the runtime is handed a Hono context and the mock holds a `Request`.
+
+  Sharing the parser closed one divergence the earlier fixes could not reach, because it is not about _what_ a body parses to. The runtime boxes its parse, so two `validateBody()` calls in one action are handed the same object; the mock re-parsed and handed out two, and a schema that mutates what it validates then saw a different body on its second read. The mock now memoizes the raw body as the runtime does, in a new `rawBody` box beside the existing `parsedBody` record memo — additive, and `parsedBody` keeps both its declared shape and its role. Apart from that, behavior is unchanged: the copies had already been brought into agreement, so the rest is the structural half.
+
+  One restatement remains, and its previous justification was wrong. `Controller.file()` / `files()` do **not** gate the multipart read on the media type — the runtime's `parseUploads()` is `ctx.req.parseBody({ all: true })` in a try/catch, with Hono deciding the media type inside. The mock gates because it reads uploads through `Request.formData()`, which is case-sensitive where Hono lowercases first, so dropping the gate without also moving off `formData()` would reintroduce the uppercase-multipart divergence rather than fix it. Sharing the runtime's upload read is the actual fix and is filed separately, because it changes the published type of the public `readMultipart()`.
+
+  `parseRequestBody()` also stops declaring a full Hono `Context` it never reads. It now takes a structural `RequestBodyContext` — `header`, `json`, and an optional `parseBody` — which is what the mock adapts to without a cast, and which makes the existing `typeof ctx.req.parseBody === 'function'` guard meaningful instead of looking dead against a type that always has one. Narrowing a parameter accepts strictly more callers, so `Router`, `Controller`, the validation middleware, `FormRequest` and `BroadcastManager` are untouched.
+
+  `packages/testing/tests/controller.test.ts` gains a parity table running json, urlencoded, multipart, unsupported and absent content types — plus uppercase and `;`-parameterized ones, repeated fields, and a body that must reach validation unnarrowed — through a real `Application.fetch()` controller and a mocked one, requiring the same answer from both. It complements the per-divergence tests already there by covering the space rather than the known cases, and it guards the runtime as well as the mock: each row asserts the runtime's answer first, so a change to `parseRequestBody` surfaces here instead of in a mock that silently followed it. A separate case pins the parse memo by object identity, which is the only probe that separates one parse from two. Note where it runs — `@guren/testing`'s suite is not part of `bun run test`, so `bun run test:testing` is the gate that speaks for this parity.
+
+  Two runtime behaviors the table pins deserve naming, since both look like bugs and neither changed here: `Content-Type: APPLICATION/JSON` is **not** read as JSON, and `text/plain; profile=application/json` **is**. The runtime's JSON branch is a case-sensitive substring test on the raw header, the one part of the decision Hono does not normalize.
+
+  `@guren/server` gains only that subpath — no behavior change, and nothing new on the package root. It is internal by the rules in `contributing/api-stability.md`: reachable only through a deep import under `internal/`, carrying no stability guarantee, and existing so the two packages cannot drift apart, exactly as `@guren/server/support/expiry` and `@guren/server/internal/route-path` do.
+
+  **Release step:** `@guren/testing`'s required `@guren/server` peer must be raised from `>=2.2.0` to the version this release publishes for `@guren/server` — the first one carrying the subpath. It cannot be raised in the pull request that adds it: `audit:plugin-compat` requires every `@guren/*` range to admit the version the workspace currently publishes, and that is still 2.13.0 until `changeset version` runs. So the edit belongs in the release pull request, beside the generated version bumps, and nothing catches it if it is skipped — the floor would then claim a compatibility this package does not have, and an install pinning an older `@guren/server` while upgrading `@guren/testing` alone would fail to resolve the deep import.
+
+- 1218a8a: Add `TokenGuard` and unify bearer-token authentication with the auth context (RFC 0016 Phase 0).
+
+  - `TokenGuard` implements the `Guard` contract backed by an `ApiTokenStore`: `requireAuthenticated()`, `Controller.auth`, and `Gate` now treat token-authenticated requests exactly like session-authenticated ones. Successful verification also populates `ctx[API_TOKEN_KEY]`, so `getApiToken()` and `tokenCan*` keep working. `logout()` revokes the presented token; credential flows (`login`/`attempt`/`validate`) throw.
+  - `AuthManager.useTokens(store, { provider?, guardName?, updateLastUsed? })` registers the guard and enables header-based selection: an unqualified `auth.guard()` resolves to the token guard when the request carries `Authorization: Bearer`, and to the default (session) guard otherwise. Explicit guard names always win; session-only apps are unaffected.
+  - `Gate.resolveUser()` now treats an attached framework auth context (`guren:auth`) as authoritative — including when it resolves no user — so policies receive the principal for both session and bearer requests, and a rejected authentication can no longer be shadowed by a manually-set `ctx.set('user', ...)`. An explicit `userResolver` still takes precedence, and the legacy `ctx.get('user')` fallback continues to work for requests with no auth context attached. **Behavior note:** apps that attach the auth context _and_ set a reduced/impersonated principal via `ctx.set('user', ...)` for Gate evaluation should move that logic to `defineGate({ userResolver })` or `gate.forUser(...)`, which keep precedence.
+  - With a configured user provider, `TokenGuard.check()` requires the token's user to resolve — an unrevoked token for a deleted account is not authenticated. `logout()` also clears the request's `API_TOKEN_KEY`, and `useTokens()` refuses a `guardName` that would shadow an already registered guard.
+  - New export: `VerifiedApiToken` (the result shape of `verifyApiToken`).
+
+### Patch Changes
+
+- ea515ae: Remember the options `useTokens()` configured its guard with, and expose them as `AuthManager.getApiTokenOptions()`. Machinery that replaces the token store without meaning to change anything else — `guren tool:dev` installs an ephemeral store over the app's — could otherwise only call `useTokens(store)`, which silently dropped the app's `provider`: a token then resolved to a bare `{ id }` instead of the real user record, and every policy reading a user field behaved differently for no stated reason.
+- ec10be6: Route contracts and `validateBody()` accept non-object request bodies.
+
+  A body that parsed to anything other than a plain object was replaced with `{}` before validation ever saw it, so a route declaring `body: z.array(z.number())` or `body: z.string()` could not receive its payload — every request 422'd against an empty object, whatever the client sent. This affected every HTTP caller, not one dispatch path.
+
+  The parse step now has two shapes, and the caller picks by what it does with the result:
+
+  - `parseRequestBody()` (internal) returns the parsed value as sent — an array stays an array, a string stays a string — and is what feeds a route contract's `body`, `Controller.validateBody()` / `validateBodySafe()`, and the `validateRequest()` / `validateRequestWith()` middleware. The schema decides the shape.
+  - `parseRequestPayload()` (unchanged, still exported) is the record view, for callers that read the body field by field: `Controller.input()` / `only()` / `except()` / `has()`, `FormRequest` rules, and broadcast channel authorization. A non-object body reads as `{}` there, exactly as before, because there is no field to read on one.
+
+  Two behaviors are deliberately preserved. A malformed or empty JSON body still parses to `{}`, so an all-optional object schema keeps passing on an empty POST — the cost is that a non-object schema sees that `{}` and returns 422 rather than receiving nothing. And form submissions still normalize to a record, since they have no non-object shape to keep. (A form body that fails to parse at all is unchanged and still separate: `Controller` catches it and validates `{}`, while a route contract or `validateRequest()` lets it surface as a 500.)
+
+  `@guren/testing`'s controller mock gains the same split. Its `parseRequestPayload` now narrows exactly as the runtime's does, and the mock `Controller` gains `getRawBody()`, which validation reads instead. Previously the mock narrowed nowhere, so a mocked controller and a real one disagreed on every non-object body — a test written against the mock could pass on code the runtime would 422. Two divergences on the same path close with it: a JSON body of literal `null` is no longer coalesced to `{}` before validation, and a body the parser rejects falls back to `{}` as the real `Controller` does rather than throwing out of `validateBody()`.
+
+  The change to the mock is additive — `getRawBody()` is the only new member on the exported class type, and `parsedBody` keeps both its declared shape and its role as the record-view memo.
+
+- a259c3b: Validate a route's `output` schema against successful responses only. `output` states what the action _returns_, so a failure response is outside it by construction — the exception handler wrote that body, not the action. Validating it anyway rewrote every `validateBody()` rejection on such a route into `500 Response validation failed`, hiding the real 422 behind a report that the app had violated its own contract. RFC 0016 makes the combination usual rather than exotic, since `guren check` warns about an agent route with no `output` schema.
+
+  A 3xx response with a JSON body is no longer validated either, which was mostly latent already (a redirect's empty body tripped the parse guard and skipped validation). The agent surface is unaffected: `mapToolResponse` independently reports a 204 or 3xx from a tool advertising an object output schema as an error result.
+
+- bc70b7f: Stop `Router.definitions()` from recursing forever on a route `resource` hint
+  that is neither a Resource class, a single-element array, nor a plain object.
+
+  The hint is purely declarative and nothing validates it at runtime, so a value
+  outside `ResourceResponseHint` reaches the serializer. A string recursed until
+  the stack overflowed (every character is itself a one-character string), `null`
+  threw out of `Object.entries`, and a class instance serialized to `{}` — a
+  response shape the server never sends. All three now void the whole hint, the
+  same all-or-nothing rule an unnamed Resource class already followed.
+
+- 3b55863: Serve opt-in root public assets with the right content type, and export `escapeHtml`.
+
+  `registerRootPublicAssets` now knows the content types for `.js`, `.mjs`, and `.css`. They stay out of the default extension allowlist, so nothing new is exposed — but an app that opts one in no longer has to restate its type to stop the browser refusing an `application/octet-stream` script or stylesheet.
+
+  `@guren/plugin-markdown` exports `escapeHtml`, which consumers passing `sanitize: false` need for anything they hand back through the `highlight` callback.
+
+- cfb4a8d: Host the single-child wrapper unwrap step once, in `internal/zod-compat`.
+
+  Three walks look through zod's wrappers for different reasons — finding the
+  object behind a params schema, rendering a TypeScript type, deciding whether a
+  property may be omitted — and each carried its own copy of the traversal. The
+  copies agreed, but nothing made them: a wrapper name or pipe direction known to
+  one and not another silently changes an answer, which is the whole reason the
+  vocabulary itself already lived in one place.
+
+  `unwrapSingleChild(schema, io)` now applies that vocabulary for all of them.
+  What each caller _concludes_ from a wrapper stays with the caller, because those
+  conclusions legitimately differ: the CLI's type renderer reads only the side of
+  a `.pipe()` it renders so presence matches the type it names, while the JSON
+  Schema walker and the route contract check require both sides to permit
+  omission. No behaviour changes.
+
+  Internal by `contributing/api-stability.md` — reachable only through a deep
+  import, with no stability guarantee. `@guren/cli` is released alongside so its
+  `@guren/server` range admits the version that introduces the helper it now
+  reaches through `@guren/core/internal/zod-compat`.
+
+- 9e19202: A request body the form parser cannot decode fails validation instead of crashing the request.
+
+  Sending a body the form parser rejects — a `Content-Type: multipart/form-data` with no usable boundary, say — used to get a different answer depending on which validation path read it. A route contract and the `validateRequest()` / `validateRequestWith()` middleware let the parser's `TypeError` escape, so the client got a **500** whose body reported the exception and a stack trace; `Controller.validateBody()` caught it and validated `{}` instead. Three readers of the same request, three answers.
+
+  A malformed body is a client error, so it is now treated as one: the parse step falls back to `{}` and the schema decides, which puts it alongside every other body-validation failure — a 422 for any schema that rejects `{}`. The fallback lives in `parseRequestBody()`, which is also what `parseRequestPayload()` reads, so the field-by-field callers stop throwing on one too: `Controller.input()` / `only()` / `except()` / `has()`, `FormRequest` rules, and broadcast channel authorization, which answers its usual 400 (`No channel specified`) rather than a 500.
+
+  **This changes a status code.** A client branching on 500 for a malformed form body now sees whatever its schema decides — 422 for the common case. The response body is the ordinary validation-error shape rather than an exception report; leaking the parser's message and stack to the client was itself part of the old behavior.
+
+  Two things this deliberately does not change. An all-optional object schema keeps _passing_ on an undecodable body, because the fallback is `{}` and not `undefined` — the same answer it has always given for an empty POST or malformed JSON. And it covers the paths that hand the body to a schema, not every read of one: CSRF token extraction catches the parser's error itself and fails closed at 403, unchanged. `Controller.file()` / `files()` parse the multipart body themselves rather than through this fallback, and get their own guard — see the accompanying note.
+
+  `Controller.getRawBody()` drops its own now-redundant fallback and reads the shared one. `@guren/testing`'s controller mock does the same, and its parser's fallback now covers the whole body read rather than one content type, so the mock and the runtime give the same answer for an undecodable body. A ctx carrying no request at all still throws there rather than reading as `{}` — that is a broken test setup, not an unparseable body.
+
+- 4335cbc: `Controller.file()` / `files()` report no upload for a request body the form parser cannot decode, instead of crashing the request.
+
+  Both helpers parsed the multipart body themselves, unguarded. A body the parser rejects — a `Content-Type: multipart/form-data` carrying no usable boundary, say — made that parse throw a `TypeError`, which escaped the action as a **500** whose body reported the exception and a stack trace. Any route reading an upload was one malformed request away from that, whether or not it also validated a body.
+
+  An undecodable body carries no file, so it is now answered as one: `file()` returns `null` and `files()` returns `[]` — the same answers both already give for a field that is simply absent. Callers that already handle "no file was uploaded" need no change; the throw is what goes away.
+
+  This finishes the surface started by the empty-object fallback in `parseRequestBody()`, which fixed the body-_validation_ paths and named these two as a known exclusion. They stay separate on purpose rather than sharing that fallback: it parses without `{ all: true }` and flattens a repeated field to its first value, so routing the upload helpers through it would silently reduce `files()` to one file per field. The shared rule is a guarded multipart parse of their own, which keeps `{ all: true }`.
+
+  Like the fallback it sits beside, the guard does not distinguish whose fault the parse failure was: a body the client could never have sent correctly and a body already consumed upstream — middleware reading `ctx.req.raw` directly, bypassing Hono's cache — both read as "no upload" here. That is deliberate for the same reason, telling the two apart means matching runtime-specific error codes that differ on Bun, Node and Workers. The cost is worth naming: a middleware-ordering bug that used to surface as a loud 500 now reads as an absent file.
+
+  **This changes a status code.** A client branching on 500 for a malformed upload now gets whatever the action does with no file — often its own validation error rather than an exception report. Leaking the parser's message and stack to the client was itself part of the old behavior.
+
+  `@guren/testing`'s controller mock has the same guard, so a controller test and the runtime give the same answer for an undecodable upload.
+
 ## 2.13.0
 
 ### Minor Changes
