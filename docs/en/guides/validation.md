@@ -407,3 +407,25 @@ router.post('/posts', async (ctx) => {
   return ctx.json({ post: await Post.create(data) })
 }, validateRequest(schema))
 ```
+
+## Compiled Parsing (zod 4.5+)
+
+zod 4.5 can compile schemas into a generated fast path. Apps scaffolded with `create-guren-app` enable it out of the box: the first import in `src/app.ts` is
+
+```ts
+import 'zod/compile'
+```
+
+Every schema built after that import parses through the compiled path automatically. Because Guren's validation helpers, route contracts (`params`, `query`, `body`, `output`), and validation middleware all call your schema's own `parse`/`safeParse`, they speed up without any further changes.
+
+To adopt it in an existing app, move your `zod` dependency to `^4.5.0` and add the import as the **first** line of your entry module, before any module that defines schemas.
+
+In our benchmarks on Bun, validating a 100-item list output dropped from about 19µs to 1.2µs, and a five-field body parsed about four times faster. End to end, an API endpoint returning a validated 100-item list served roughly 10% more requests per second at a lower median latency. Your numbers will scale with how much of a route's time is spent validating.
+
+Three things to know:
+
+- **Import order matters.** Schemas built before the import keep the regular parser. Keep the import first in the entry module.
+- **Restricted runtimes are handled.** Call `z.config({ jitless: true })` if your runtime forbids generated code (strict CSP); compilation is skipped and everything still works. Unsupported schema features silently keep the regular parser too — compilation never throws.
+- **Keep refinements side-effect free.** On invalid input, `.refine()` and `.transform()` callbacks can run twice (the fast path first, then the fallback that builds the full error). Validation results are unchanged, but side effects inside those callbacks would double.
+
+Schema-agnostic validation is unaffected: Valibot or custom validators simply keep their own `parse`/`safeParse` behavior.
