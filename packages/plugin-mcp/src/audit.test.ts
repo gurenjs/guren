@@ -1,4 +1,4 @@
-import { describe, test, expect, afterEach, spyOn, type Mock } from 'bun:test'
+import { describe, test, expect, beforeEach, afterEach, spyOn, type Mock } from 'bun:test'
 import { readFileSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -65,24 +65,24 @@ function flush(): Promise<void> {
 }
 
 describe('the audit emitter', () => {
-  let warn: Mock<typeof console.warn> | undefined
+  // Captured for every case, not only the ones asserting a warning: several
+  // here assert that nothing was warned, which is only a claim if the spy was
+  // installed before the emitter ran.
+  let warn: Mock<typeof console.warn>
 
-  afterEach(() => {
-    warn?.mockRestore()
-    warn = undefined
+  beforeEach(() => {
+    warn = spyOn(console, 'warn').mockImplementation(() => {})
   })
 
-  function captureWarnings(): Mock<typeof console.warn> {
-    warn = spyOn(console, 'warn').mockImplementation(() => {})
-    return warn
-  }
+  afterEach(() => {
+    warn.mockRestore()
+  })
 
   function warnings(): string {
-    return (warn?.mock.calls ?? []).flat().map(String).join('\n')
+    return warn.mock.calls.flat().map(String).join('\n')
   }
 
   test('should hand the sink a record for an invocation and for a denial', async () => {
-    captureWarnings()
     const records: AgentAuditRecord[] = []
     const emit = createAuditEmitter((record) => void records.push(record), new EventManager(), () => NOW)
 
@@ -127,7 +127,6 @@ describe('the audit emitter', () => {
     // only evidence of that would have been an empty file. A record of what
     // agents did may not be contingent on what else the application listens
     // for.
-    captureWarnings()
     const events = new EventManager()
     const records: AgentAuditRecord[] = []
     const listenerRan: string[] = []
@@ -155,7 +154,6 @@ describe('the audit emitter', () => {
     // An application that registered no `EventServiceProvider` still gets its
     // trail. The sink's delivery does not run through the event system, so
     // there is nothing here for a missing event manager to break.
-    captureWarnings()
     const records: AgentAuditRecord[] = []
     const emit = createAuditEmitter((record) => void records.push(record), undefined, () => NOW)
 
@@ -168,7 +166,6 @@ describe('the audit emitter', () => {
   })
 
   test('should warn and not throw when the sink throws synchronously', async () => {
-    captureWarnings()
     const emit = createAuditEmitter(() => {
       throw new Error('sink exploded')
     }, new EventManager(), () => NOW)
@@ -185,7 +182,6 @@ describe('the audit emitter', () => {
   })
 
   test('should warn and not reject when the sink returns a rejected promise', async () => {
-    captureWarnings()
     const emit = createAuditEmitter(() => Promise.reject(new Error('delivery refused')), new EventManager(), () => NOW)
 
     expect(() => emit(INVOKED)).not.toThrow()
@@ -196,7 +192,6 @@ describe('the audit emitter', () => {
   })
 
   test('should emit the events with no sink configured', async () => {
-    captureWarnings()
     const events = new EventManager()
     const seen: string[] = []
     events.on(AgentToolInvoked, (event) => void seen.push(event.tool))

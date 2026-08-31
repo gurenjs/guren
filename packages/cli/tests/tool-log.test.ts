@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, setSystemTime, spyOn, type Mock } from 'bun:test'
+import { writeFileSync } from 'node:fs'
 import { appendFile, mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { runCommand } from 'citty'
@@ -544,6 +545,36 @@ describe('guren tool:log', () => {
       await poll()
 
       expect(tools()).toEqual(['held.over'])
+      expect(running.settled()).toBe(false)
+    }, 20_000)
+
+    it('does not prepend a stale fragment when the file is truncated before the rollover', async () => {
+      // A follow holds two things between polls: the bytes after the last
+      // newline, and a character whose bytes a read split. Both describe
+      // positions in the file as it was. Truncated, they describe nothing —
+      // and prepending them to the bytes that replaced them corrupts the first
+      // line of what remains, which at a rollover is the last chance anything
+      // in that file has to be read.
+      setSystemTime(new Date(`${TODAY}T23:59:40.000Z`))
+      await seed(TODAY, [line({ tool: 'before.truncate', args: { padding: 'x'.repeat(400) } })])
+
+      const running = follow({ json: true })
+      await waitFor('the backlog row', () => printed().length >= 1)
+
+      // Held, not printed: no trailing newline.
+      await appendFile(logFile(TODAY), line({ tool: 'never.completed', args: { padding: 'y'.repeat(400) } }))
+      await poll(2)
+      expect(tools()).toEqual(['before.truncate'])
+
+      // Synchronous, and with no `await` between the two, so the follow cannot
+      // wake in the middle: a poll landing between the truncation and the
+      // clock change would drain or restart before the case under test exists,
+      // and the assertion below would then hold for the wrong reason.
+      writeFileSync(logFile(TODAY), line({ tool: 'after.truncate' }))
+      setSystemTime(new Date(`${TOMORROW}T00:00:10.000Z`))
+      await poll()
+
+      expect(tools()).toEqual(['before.truncate', 'after.truncate'])
       expect(running.settled()).toBe(false)
     }, 20_000)
 

@@ -190,7 +190,7 @@ async function listRotationFiles(basePath: string): Promise<string[] | null> {
 }
 
 /**
- * The newest `limit` records satisfying `filters`, oldest first.
+ * The newest `limit` matching records across `files` (newest first), oldest first.
  *
  * Files are visited newest first and records accumulated until the limit is
  * reached, so a `-n` spanning a rollover is answered from two files without
@@ -198,22 +198,7 @@ async function listRotationFiles(basePath: string): Promise<string[] | null> {
  * — `--denied -n 50` means the last fifty denials, not the denials among the
  * last fifty records, which over a busy trail is reliably empty and reads as
  * "there were none".
- *
- * `null` distinguishes "no trail here at all" from an empty array, which means
- * "a trail, holding nothing that matches".
  */
-export async function readAuditRecords(
-  basePath: string,
-  filters: AuditFilters,
-  limit: number,
-): Promise<AgentAuditRecord[] | null> {
-  const files = await listRotationFiles(basePath)
-  if (files === null || files.length === 0) return null
-
-  return collectRecords(files, filters, limit)
-}
-
-/** The newest `limit` matching records across `files` (newest first), oldest first. */
 async function collectRecords(
   files: string[],
   filters: AuditFilters,
@@ -247,8 +232,13 @@ async function readAuditFile(file: string): Promise<string | null> {
 export async function runToolLog(options: ToolLogOptions): Promise<void> {
   const basePath = resolve(options.appRoot ?? process.cwd(), options.file ?? DEFAULT_AGENT_AUDIT_PATH)
 
-  if (options.surface !== undefined && !SURFACES.includes(options.surface as (typeof SURFACES)[number])) {
-    throw new Error(`Unknown --surface "${options.surface}". The surfaces an audit record carries are: ${SURFACES.join(', ')}.`)
+  // Widened to `string` to ask the question, rather than asserting the value
+  // into the union the question is about.
+  if (options.surface !== undefined && !(SURFACES as readonly string[]).includes(options.surface)) {
+    throw new Error(
+      `Unknown --surface "${options.surface}". `
+        + `The surfaces an audit record carries are: ${SURFACES.join(', ')}.`,
+    )
   }
 
   const filters: AuditFilters = {
@@ -264,11 +254,18 @@ export async function runToolLog(options: ToolLogOptions): Promise<void> {
     return
   }
 
-  const records = await readAuditRecords(basePath, filters, limit)
-  if (records === null) {
+  // The two silences this command has to keep apart, decided in the order they
+  // can be told apart in: no trail at all, then a trail holding nothing that
+  // matches. `listRotationFiles` answers the first — `null` for a directory
+  // that does not exist, an empty list for one holding none of ours — and only
+  // here does either become something to say.
+  const files = await listRotationFiles(basePath)
+  if (files === null || files.length === 0) {
     printNoTrail(basePath, options.json, false)
     return
   }
+
+  const records = await collectRecords(files, filters, limit)
   if (records.length === 0) {
     // A trail exists and holds nothing matching. Said out loud, because the
     // silence is otherwise identical to the one an unwired sink produces, and
@@ -343,11 +340,13 @@ function print(record: AgentAuditRecord, json?: boolean): void {
  * Print the backlog, then follow the trail across midnight.
  *
  * Today's file is read through the very cursor that goes on to follow it, and
- * that is the point of this function existing beside {@link readAuditRecords}
- * rather than after it. A snapshot followed by a `stat` is two observations of
- * a growing file, and a record appended between them belongs to neither: the
- * snapshot was taken before it arrived and the follow resumes past it. Reading
- * once and keeping the position that read reached leaves it nowhere to fall.
+ * that is why this function reads its own backlog rather than taking the one
+ * {@link collectRecords} would hand it. A snapshot followed by a `stat` is two
+ * observations of a growing file, and a record appended between them belongs to
+ * neither: the snapshot was taken before it arrived and the follow resumes past
+ * it. Reading once and keeping the position that read reached leaves it nowhere
+ * to fall. Only the *older* files, which nothing is appending to, go through
+ * the ordinary read.
  *
  * The followed path is recomputed every poll from the same rule the writer
  * names files with, because the file being appended to changes name at UTC
@@ -451,6 +450,14 @@ class FileCursor {
    */
   async drain(): Promise<AgentAuditRecord[]> {
     const read = await readFrom(this.file, this.offset)
+    // The same restart check `pull` makes, for the same reason. A file
+    // truncated between the last poll and this drain is read from its
+    // beginning, so the fragment and the half-decoded character held over
+    // describe bytes that are no longer there; prepending them corrupts the
+    // first line of what remains. That line is a record, and this is the last
+    // chance anything in this file has to be read.
+    if (read?.restarted === true) this.reset()
+
     const text = this.partial + (read === null ? '' : this.decoder.write(read.buffer))
     this.reset()
     return parseAuditLines(text)
