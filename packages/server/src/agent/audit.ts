@@ -155,7 +155,10 @@ export function parseAuditRecord(line: string): AgentAuditRecord | null {
   const tool = candidate.tool
   const surface = candidate.surface
   if (typeof ts !== 'string' || typeof tool !== 'string') return null
-  if (typeof surface !== 'string' || !(surface in AGENT_SURFACES)) return null
+  // `Object.hasOwn`, never `in`: `in` walks the prototype, so a record
+  // claiming a surface of "constructor" or "toString" would be accepted as a
+  // valid one — an attacker-supplied line in a trail read as genuine.
+  if (typeof surface !== 'string' || !Object.hasOwn(AGENT_SURFACES, surface)) return null
 
   const base = {
     ts,
@@ -176,7 +179,7 @@ export function parseAuditRecord(line: string): AgentAuditRecord | null {
 
   if (candidate.outcome === 'denied') {
     const reason = candidate.reason
-    if (typeof reason !== 'string' || !(reason in DENIAL_REASONS)) return null
+    if (typeof reason !== 'string' || !Object.hasOwn(DENIAL_REASONS, reason)) return null
     return { ...base, outcome: 'denied', reason: reason as AgentToolDenialReason }
   }
 

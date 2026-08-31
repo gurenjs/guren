@@ -26,8 +26,9 @@
  * every other failure.
  */
 import { consola } from 'consola'
-import { readdir, readFile, open, stat } from 'node:fs/promises'
+import { readdir, readFile, open } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
+import { StringDecoder } from 'node:string_decoder'
 import {
   DEFAULT_AGENT_AUDIT_PATH,
   dailyFilePath,
@@ -71,6 +72,22 @@ export interface ToolLogOptions {
   limit?: number
   /** One raw record per line, for piping. */
   json?: boolean
+  /**
+   * Stops a `--tail`, which otherwise runs until the process is interrupted.
+   *
+   * A follow has no completion condition of its own, so a caller embedding this
+   * command — a supervisor watching a trail for the duration of a deploy, a
+   * harness that has seen what it was waiting for — has no way to end one
+   * except by ending the process. The signal is that way out.
+   *
+   * It cuts the poll sleep short rather than only being read between polls: a
+   * follow that took up to a further {@link FOLLOW_INTERVAL_MS} to notice would
+   * make an abort feel like a hang on the one path that has no other output.
+   * Nothing is flushed on the way out — records that arrived since the last
+   * poll are still on disk, and the next reader starts from the file, not from
+   * this command's memory.
+   */
+  signal?: AbortSignal
 }
 
 /**
@@ -91,7 +108,16 @@ export function parseSinceDuration(raw: string): number {
   }
 
   const units: Record<string, number> = { s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 }
-  return Number(match[1]) * units[match[2]]
+  const span = Number(match[1]) * units[match[2]]
+  // A digit string long enough to overflow a double passes the pattern above
+  // and arrives here as Infinity, whose cutoff is -Infinity — every record
+  // newer than the beginning of time, which is to say no filter at all. The
+  // shape was right and the answer would be silently wrong, so it is refused
+  // like any other unusable duration.
+  if (!Number.isFinite(span)) {
+    throw new Error(`--since "${raw}" is too large to be a duration.`)
+  }
+  return span
 }
 
 /** The filters a record has to satisfy to be printed. */
@@ -184,6 +210,15 @@ export async function readAuditRecords(
   const files = await listRotationFiles(basePath)
   if (files === null || files.length === 0) return null
 
+  return collectRecords(files, filters, limit)
+}
+
+/** The newest `limit` matching records across `files` (newest first), oldest first. */
+async function collectRecords(
+  files: string[],
+  filters: AuditFilters,
+  limit: number,
+): Promise<AgentAuditRecord[]> {
   let collected: AgentAuditRecord[] = []
   for (const file of files) {
     const text = await readAuditFile(file)
@@ -224,15 +259,25 @@ export async function runToolLog(options: ToolLogOptions): Promise<void> {
   }
   const limit = options.limit ?? DEFAULT_LIMIT
 
+  if (options.tail) {
+    await tailAuditLog(basePath, filters, limit, options.json, options.signal)
+    return
+  }
+
   const records = await readAuditRecords(basePath, filters, limit)
   if (records === null) {
-    printNoTrail(basePath, options.json)
+    printNoTrail(basePath, options.json, false)
+    return
+  }
+  if (records.length === 0) {
+    // A trail exists and holds nothing matching. Said out loud, because the
+    // silence is otherwise identical to the one an unwired sink produces, and
+    // this command has already gone to some length to keep those apart.
+    if (!options.json) consola.info('The audit trail holds no records matching those filters.')
     return
   }
 
   for (const record of records) print(record, options.json)
-
-  if (options.tail) await followAuditLog(basePath, filters, options.json)
 }
 
 /**
@@ -248,7 +293,7 @@ export async function runToolLog(options: ToolLogOptions): Promise<void> {
  * redirecting stdout into a parser gets zero records, which is the truthful
  * machine answer, and still sees the explanation.
  */
-function printNoTrail(basePath: string, json?: boolean): void {
+function printNoTrail(basePath: string, json: boolean | undefined, following: boolean): void {
   consola.warn(`No agent audit trail found at ${dailyFilePath(basePath, new Date())}.`)
   if (json) return
 
@@ -257,8 +302,14 @@ function printNoTrail(basePath: string, json?: boolean): void {
       + 'events whether or not anything records them, so until a sink is configured there is\n'
       + 'nothing on disk to read. Add one to the MCP plugin:\n'
       + `\n  mcpPlugin({ audit: { file: '${DEFAULT_AGENT_AUDIT_PATH}' } })\n`
-      + '\nIf it is already configured, either no tool has been called yet, or the trail is\n'
-      + 'somewhere else — pass --file to point this command at it.',
+      + (following
+        // Said and then followed anyway. A sink wired a minute ago has no file
+        // until the first tool call, and that call is exactly what someone
+        // running --tail is waiting for; exiting because it has not happened
+        // yet would refuse the command's own purpose.
+        ? '\nIf it is already configured, waiting here for the first record.\n'
+        : '\nIf it is already configured, either no tool has been called yet, or the trail is\n'
+          + 'somewhere else — pass --file to point this command at it.'),
   )
 }
 
@@ -271,88 +322,162 @@ function print(record: AgentAuditRecord, json?: boolean): void {
     return
   }
 
+  // Escape codes only for a terminal. Without `--json` this listing is still
+  // routinely piped — into `grep`, into a file kept with an incident — and a
+  // colour code embedded in a stored audit line is noise a later reader has no
+  // way to attribute.
+  const paint = process.stdout.isTTY === true
+    ? (code: string, text: string) => `\x1b[${code}m${text}\x1b[0m`
+    : (_code: string, text: string) => text
+
   const outcome = record.outcome === 'denied'
-    ? `\x1b[31mdenied\x1b[0m  ${record.reason}`
+    ? `${paint('31', 'denied')}  ${record.reason}`
     : `invoked ${record.status} (${record.durationMs}ms)`
   const principal = record.principal ? `${record.principal.kind}:${record.principal.id}` : 'anonymous'
   const args = Object.keys(record.arguments).length > 0 ? `  ${JSON.stringify(record.arguments)}` : ''
 
-  console.log(`${record.ts}  ${outcome}  \x1b[1m${record.tool}\x1b[0m  ${record.surface}  ${principal}${args}`)
+  console.log(`${record.ts}  ${outcome}  ${paint('1', record.tool)}  ${record.surface}  ${principal}${args}`)
 }
 
 /**
- * Follow the trail, across midnight.
+ * Print the backlog, then follow the trail across midnight.
  *
- * Two things this cannot do the simple way. The file being appended to changes
- * name at UTC midnight, so the followed path is recomputed every poll from the
- * same rule the writer names it with — watching one path would go quiet at
- * midnight and look like an application that stopped being used. And an append
- * is not atomic, so a poll can land mid-record: the bytes after the last
- * newline are held over rather than parsed, because {@link parseAuditRecord}
- * would correctly reject that fragment and the record would then be lost for
- * good when its remainder arrived headless.
+ * Today's file is read through the very cursor that goes on to follow it, and
+ * that is the point of this function existing beside {@link readAuditRecords}
+ * rather than after it. A snapshot followed by a `stat` is two observations of
+ * a growing file, and a record appended between them belongs to neither: the
+ * snapshot was taken before it arrived and the follow resumes past it. Reading
+ * once and keeping the position that read reached leaves it nowhere to fall.
  *
- * Runs until interrupted; there is no completion condition for a follow.
+ * The followed path is recomputed every poll from the same rule the writer
+ * names files with, because the file being appended to changes name at UTC
+ * midnight — following one path would go quiet then and read as an application
+ * nobody is using any more.
+ *
+ * Runs until interrupted, or until `signal` aborts; a follow has no completion
+ * condition of its own.
  */
-async function followAuditLog(basePath: string, filters: AuditFilters, json?: boolean): Promise<void> {
-  let followed = dailyFilePath(basePath, new Date())
-  let offset = await fileSize(followed)
-  let partial = ''
+async function tailAuditLog(
+  basePath: string,
+  filters: AuditFilters,
+  limit: number,
+  json?: boolean,
+  signal?: AbortSignal,
+): Promise<void> {
+  let cursor = new FileCursor(dailyFilePath(basePath, new Date()))
+  const todayRecords = await cursor.pull()
+
+  const files = await listRotationFiles(basePath)
+  const older = (files ?? []).filter((file) => file !== cursor.file)
+  const backlog = await collectRecords(older, filters, limit)
+
+  if (files === null || files.length === 0) printNoTrail(basePath, json, true)
+
+  const matchedToday = todayRecords.filter((record) => matchesFilters(record, filters))
+  for (const record of backlog.concat(matchedToday).slice(-limit)) print(record, json)
 
   for (;;) {
-    await sleep(FOLLOW_INTERVAL_MS)
+    // The sleep is where an iteration spends all but a moment of its time, so
+    // aborting is answered there and confirmed here — one check per poll,
+    // taken before any further reading, so a stopped follow prints nothing it
+    // was not already going to.
+    await sleep(FOLLOW_INTERVAL_MS, signal)
+    if (signal?.aborted === true) return
 
     const current = dailyFilePath(basePath, new Date())
-    if (current !== followed) {
-      // Drain what the old file received before the rollover, then start the
-      // new one from its beginning — otherwise the last records of a day are
-      // dropped by the switch that was supposed to keep following them.
-      offset = await drain(followed, offset, partial, filters, json)
-      followed = current
-      offset = 0
-      partial = ''
+    if (current !== cursor.file) {
+      // Everything the old file still holds, including the fragment held over
+      // from the last poll of it. Nothing more is coming to that file, so a
+      // complete record whose trailing newline had not arrived when it was
+      // last read has to be taken now or lost.
+      printAll(await cursor.drain(), filters, json)
+      cursor = new FileCursor(current)
     }
 
-    const read = await readFrom(followed, offset)
-    if (read === null) continue
-
-    offset = read.offset
-    const text = partial + read.text
-    const lastNewline = text.lastIndexOf('\n')
-    partial = text.slice(lastNewline + 1)
-
-    for (const record of parseAuditLines(text.slice(0, lastNewline + 1))) {
-      if (matchesFilters(record, filters)) print(record, json)
-    }
+    printAll(await cursor.pull(), filters, json)
   }
 }
 
-/** Print whatever the file gained since `offset`, and report the new offset. */
-async function drain(
-  file: string,
-  offset: number,
-  partial: string,
-  filters: AuditFilters,
-  json?: boolean,
-): Promise<number> {
-  const read = await readFrom(file, offset)
-  if (read === null) return offset
-
-  for (const record of parseAuditLines(partial + read.text)) {
+function printAll(records: AgentAuditRecord[], filters: AuditFilters, json?: boolean): void {
+  for (const record of records) {
     if (matchesFilters(record, filters)) print(record, json)
   }
-  return read.offset
 }
 
 /**
- * The bytes a file holds past `offset`.
+ * One dated file being followed: how far into it we have read, the character
+ * whose bytes a read split, and the line a read split.
+ *
+ * The three belong together — each is meaningless except relative to the same
+ * position — so a rollover becomes one `new FileCursor(...)` rather than three
+ * assignments that can be forgotten one at a time.
+ */
+class FileCursor {
+  private decoder = new StringDecoder('utf8')
+  private partial = ''
+  private offset = 0
+
+  constructor(readonly file: string) {}
+
+  /** Whatever the file has gained since the last pull, in the order written. */
+  async pull(): Promise<AgentAuditRecord[]> {
+    const read = await readFrom(this.file, this.offset)
+    if (read === null) return []
+    if (read.restarted) this.reset()
+
+    this.offset = read.offset
+    // Decoded through a decoder held across polls, so a character whose bytes
+    // straddle a read boundary is completed by the next read rather than
+    // becoming replacement bytes. Decoding each read on its own loses the
+    // record carrying that character — which is to say, an audit trail would
+    // drop a call because one of its arguments was not written in ASCII.
+    const text = this.partial + this.decoder.write(read.buffer)
+    // An append is not atomic, so a poll can land mid-record. The bytes after
+    // the last newline are held rather than parsed: `parseAuditRecord` would
+    // correctly reject the fragment, and the record would then be lost for
+    // good when its remainder arrived headless.
+    const cut = text.lastIndexOf('\n')
+    this.partial = text.slice(cut + 1)
+    return parseAuditLines(text.slice(0, cut + 1))
+  }
+
+  /**
+   * Everything left, parsed whether or not a closing newline ever arrived.
+   *
+   * Correct only at the end of a file's life. Holding a fragment back is right
+   * on every ordinary poll, because its remainder is still on the way; after a
+   * rollover nothing further is coming, and the same restraint would silently
+   * discard a record that is already complete.
+   */
+  async drain(): Promise<AgentAuditRecord[]> {
+    const read = await readFrom(this.file, this.offset)
+    const text = this.partial + (read === null ? '' : this.decoder.write(read.buffer))
+    this.reset()
+    return parseAuditLines(text)
+  }
+
+  private reset(): void {
+    this.decoder = new StringDecoder('utf8')
+    this.partial = ''
+    this.offset = 0
+  }
+}
+
+/**
+ * The bytes a file holds past `offset`, undecoded.
+ *
+ * Bytes rather than a string because only the caller knows whether the read
+ * ends at a character boundary; see {@link FileCursor.pull}.
  *
  * A file shorter than the offset was replaced or truncated under us — the
  * retention sweep and an operator with a text editor can both do it — so
- * reading resumes from the beginning rather than from a position that no
- * longer means anything.
+ * reading resumes from the beginning, and says so, since every other piece of
+ * position-dependent state the caller holds is invalid too.
  */
-async function readFrom(file: string, offset: number): Promise<{ text: string; offset: number } | null> {
+async function readFrom(
+  file: string,
+  offset: number,
+): Promise<{ buffer: Buffer; offset: number; restarted: boolean } | null> {
   let handle
   try {
     handle = await open(file, 'r')
@@ -365,29 +490,36 @@ async function readFrom(file: string, offset: number): Promise<{ text: string; o
 
   try {
     const { size } = await handle.stat()
-    const from = size < offset ? 0 : offset
+    const restarted = size < offset
+    const from = restarted ? 0 : offset
     if (size === from) return null
 
     const buffer = Buffer.alloc(size - from)
     await handle.read(buffer, 0, buffer.length, from)
-    return { text: buffer.toString('utf8'), offset: size }
+    return { buffer, offset: size, restarted }
   } finally {
     await handle.close()
   }
 }
 
-/** A file's current length, or 0 if it is not there yet. */
-async function fileSize(file: string): Promise<number> {
-  try {
-    return (await stat(file)).size
-  } catch (error) {
-    if (isErrnoCode(error, 'ENOENT')) return 0
-    throw new Error(`Could not read the audit log ${file}: ${errorMessage(error)}.`)
-  }
-}
+/** Resolves after `ms`, or as soon as `signal` aborts, whichever comes first. */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((done) => {
+    if (signal?.aborted === true) {
+      done()
+      return
+    }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((done) => setTimeout(done, ms))
+    const onAbort = (): void => {
+      clearTimeout(timer)
+      done()
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      done()
+    }, ms)
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
 }
 
 function isErrnoCode(error: unknown, code: string): boolean {

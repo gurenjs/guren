@@ -96,4 +96,42 @@ describe('DailyFileChannel through the extracted rule', () => {
     expect(remaining).toContain('other-2020-01-01.log')
     expect(remaining).toContain('app-2020-01-01.log.bak')
   })
+
+  test('should sweep a base path that names no directory, against the working directory', () => {
+    // `path.parse('audit.log').dir` is the empty string, and `existsSync('')`
+    // is false — so a channel configured with a bare filename used to return
+    // from `cleanup()` before looking at anything, and its retention window
+    // never expired a single file however old. `path.dirname` answers `'.'`
+    // for the same input, which is the directory the channel is already
+    // writing into, so the sweep now runs where the files are.
+    //
+    // Pinned because that is a behaviour change to shared logging
+    // infrastructure, not only to the audit trail: every `DailyFileChannel`
+    // configured with a relative bare name starts deleting files it previously
+    // left alone, and the only thing that keeps it to its own is
+    // `matchDailyFileDate`.
+    const dir = tempDir()
+    const originalCwd = process.cwd()
+    try {
+      process.chdir(dir)
+      writeFileSync(join(dir, 'audit-2020-01-01.log'), 'expired\n')
+      writeFileSync(join(dir, 'other-2020-01-01.log'), 'not ours\n')
+
+      const channel = new DailyFileChannel({ driver: 'daily', path: 'audit.log', days: 14, level: 'debug' })
+      channel.log({ level: 'info', message: 'hello', context: {}, timestamp: NOW })
+
+      const remaining = readdirSync(dir).sort()
+      expect(remaining).not.toContain('audit-2020-01-01.log')
+      // Only its own, even now that the sweep reaches a directory it never used
+      // to — a working directory holds far more than a log directory does.
+      expect(remaining).toContain('other-2020-01-01.log')
+      // And the write landed here too, which is what makes `'.'` the right
+      // answer rather than merely a non-empty one.
+      expect(remaining).toContain('audit-2087-03-14.log')
+    } finally {
+      // Unconditionally, so a failed expectation above does not hand the next
+      // test file a working directory inside a directory this one deletes.
+      process.chdir(originalCwd)
+    }
+  })
 })

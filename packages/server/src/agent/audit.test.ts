@@ -98,6 +98,23 @@ describe('parseAuditRecord', () => {
     expect(parseAuditRecord(JSON.stringify({ ...denied, reason: 'vibes' }))).toBeNull()
   })
 
+  test('should refuse a surface or reason that is only a prototype member', () => {
+    // The membership test is `Object.hasOwn`, not `in`, and this is the whole
+    // reason. `in` walks the prototype chain, so `"constructor"` and
+    // `"toString"` are members of *every* object literal — a line naming one of
+    // them would be read back as a genuine record, and the surface or reason it
+    // reported would be a value the framework has never had. An audit trail is
+    // exactly the file where a forged line must not read as real.
+    const invoked = toAuditRecord(new AgentToolInvoked(PRINCIPAL, 'posts.index', {}, 200, 1, 'mcp'), NOW)
+    const denied = toAuditRecord(new AgentToolDenied(PRINCIPAL, 'posts.store', {}, 'scope', 'mcp'), NOW)
+
+    expect(parseAuditRecord(JSON.stringify({ ...invoked, surface: 'constructor' }))).toBeNull()
+    expect(parseAuditRecord(JSON.stringify({ ...denied, reason: 'toString' }))).toBeNull()
+    // The denial's own surface stays valid above, so this pins the `reason`
+    // check rather than passing because the surface check already refused.
+    expect(parseAuditRecord(JSON.stringify({ ...denied, surface: 'toString' }))).toBeNull()
+  })
+
   test('should refuse an invocation missing its status or duration', () => {
     const invoked = toAuditRecord(new AgentToolInvoked(PRINCIPAL, 'posts.index', {}, 200, 1, 'mcp'), NOW)
     const withoutStatus: Record<string, unknown> = { ...invoked }
