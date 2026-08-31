@@ -41,8 +41,24 @@ describe('gateToolCall', () => {
     if (!verdict.allowed) expect(verdict.reason).toBe('approval')
   })
 
+  // The same tool with a queue behind it. Admitting it here is what puts it in
+  // `tools/list`: the call becomes a pending request, which is the interaction
+  // the queue exists to offer, and hiding a tool whose whole point is to ask
+  // would make the queue unreachable.
+  test('should admit an approval-required tool once a queue is configured', () => {
+    expect(gateToolCall(tools().approval, ['tools:*'], { approvalsConfigured: true })).toEqual({
+      allowed: true,
+    })
+  })
+
   test('should report scope before approval, so probes cannot map approval gates', () => {
     const verdict = gateToolCall(tools().approval, [])
+    expect(verdict.allowed).toBe(false)
+    if (!verdict.allowed) expect(verdict.reason).toBe('scope')
+  })
+
+  test('should still take scope first when a queue is configured', () => {
+    const verdict = gateToolCall(tools().approval, [], { approvalsConfigured: true })
     expect(verdict.allowed).toBe(false)
     if (!verdict.allowed) expect(verdict.reason).toBe('scope')
   })
