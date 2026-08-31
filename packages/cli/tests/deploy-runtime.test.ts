@@ -375,6 +375,27 @@ export const app = createApp({ auth: { autoSession: false } })
     })
   })
 
+  // The `auth` key is read off createApp's first argument positionally, and a
+  // transparent assertion around the options object is not the object — the
+  // generic identifier scan walks through `satisfies`/`as const`, but this
+  // positional read did not, so an app written this way lost the session
+  // signal entirely and passed a check it should fail.
+  it.each([' satisfies Record<string, unknown>', ' as const'])(
+    'reads createApp options written with %s',
+    async (suffix) => {
+      const files = {
+        'src/app.ts': `import { createApp } from '@guren/core'\nexport const app = createApp({ auth: {} }${suffix})\n`,
+      }
+
+      await withApp('guren-stores-wrapped-auth-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+        const check = (await deployChecks(dir))['deploy-runtime-stores']
+
+        expect(check.status).toBe('warn')
+        expect(check.message).toContain('sessions are enabled')
+      })
+    },
+  )
+
   // The `auth: {` match alone can't see what's inside the object it opens, so
   // suppression must come from a whole-app check for `autoSession: false`,
   // not from excluding it within the same regex pass (that reintroduces the

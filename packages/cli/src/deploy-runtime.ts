@@ -1,7 +1,7 @@
 import { readFile, readdir } from 'node:fs/promises'
 import { extname, join, resolve } from 'node:path'
-import type { File } from '@babel/types'
-import { memberKeyName, walk, type BabelNode } from './ast-walk'
+import type { File, Node } from '@babel/types'
+import { memberKeyName, objectLiteral, walk, type BabelNode } from './ast-walk'
 import {
   collectFiles,
   toPosixRelative,
@@ -364,9 +364,12 @@ function extractSignals(ast: File): ExtractedSignal[] {
           // object) keeps SMTP-style `auth: { user, pass }` mailer config
           // from reading as a session.
           if (name === 'createApp') {
-            const first = (node.arguments as BabelNode[])[0]
-            if (first?.type === 'ObjectExpression') {
-              for (const property of first.properties as BabelNode[]) {
+            // Unlike the generic identifier scan, which walks through
+            // `satisfies`/`as const` (see TYPE_ONLY_NODES above), this
+            // positional read has to unwrap them itself.
+            const options = objectLiteral((node.arguments as Node[])[0])
+            if (options) {
+              for (const property of options.properties as unknown as BabelNode[]) {
                 if (property.type === 'ObjectProperty' && propertyKeyName(property) === 'auth') {
                   emit('session', 'auth', lineOf(property))
                 }
