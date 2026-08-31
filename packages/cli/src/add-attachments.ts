@@ -1,7 +1,7 @@
 import { writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { consola } from 'consola'
-import { collectFiles, fileExists, listAppRoots, readIfExists } from './discovery'
+import { collectFiles, fileExists, findFirstExisting, listAppRoots, readIfExists } from './discovery'
 import {
   addImport,
   addToArrayArgument,
@@ -14,6 +14,7 @@ import {
   type SchemaDialect,
 } from './patch-helpers'
 import { wireProviders } from './provider-registrar'
+import { ROUTES_ENTRY_CANDIDATES, wireRouteRegistrar } from './route-registrar'
 import { scaffoldTemplateFile } from './scaffold-templates'
 import { writeScaffoldFiles, type ScaffoldFileEntry, type WriterOptions } from './utils'
 
@@ -107,7 +108,8 @@ const ATTACHMENTS_TABLE_PATTERN = /\bexport\s+(?:const|let)\s+attachments\b|\bex
 /**
  * `guren add attachments`: append the attachments table to `db/schema.ts`
  * (per dialect), write `config/attachments.ts` + `AttachmentsProvider`, wire
- * the provider, and register the `attachments:prune` console command.
+ * the provider, mount the signed delivery route, and register the
+ * `attachments:prune` console command.
  *
  * Works on API-only apps — nothing here renders a page. Requires a storage
  * manager; when the app has no `StorageProvider`, the storage blueprint is
@@ -133,10 +135,12 @@ export async function addAttachments(options: WriterOptions): Promise<string[]> 
   created.push(...(await writeScaffoldFiles(pending, options)))
 
   await wireProviders([{ name: 'AttachmentsProvider' }])
+  await registerDeliveryRoute()
   await registerPruneCommand()
 
   consola.info('Next steps:')
   consola.info('  • Generate and run the migration: bun run db:make && bun run db:migrate')
+  consola.info('  • Uploads are stored on the private `local` disk and served through the signed delivery route — keep them out of public/, which is served statically')
   consola.info("  • Declare collections on a model: class Post extends Attachable(defineModel(posts), { cover: hasOneAttached({ image: 'require' }) }) {}")
   consola.info('  • Register models that declare attachments in Model.morphMap so attachments:prune can verify their records')
 
@@ -187,6 +191,35 @@ export async function appBindsStorage(): Promise<boolean> {
     if (source && bindingPattern.test(source)) return true
   }
   return false
+}
+
+/**
+ * Mount the signed delivery route the scaffolded `config/attachments.ts`
+ * configures (`delivery: {}`).
+ *
+ * Not optional decoration: the config stores uploads on a private disk, whose
+ * URLs point at this route. See the `attachments-delivery` rule in
+ * attachments-check.ts for why an unmounted route is invisible at runtime.
+ *
+ * The entry file is probed rather than assumed: attachments work on an
+ * API-only app, which ships `routes/api.ts` and no `routes/web.ts`.
+ */
+async function registerDeliveryRoute(): Promise<void> {
+  const routesFile = await findFirstExisting(process.cwd(), ROUTES_ENTRY_CANDIDATES)
+
+  if (routesFile === null) {
+    consola.warn(
+      'No routes entry found — call registerAttachmentRoutes(router) from your route registrar, '
+      + 'or attachment URLs will 404.',
+    )
+    return
+  }
+
+  await wireRouteRegistrar(
+    'registerAttachmentRoutes',
+    "import { registerAttachmentRoutes } from '@guren/core'",
+    routesFile,
+  )
 }
 
 async function registerPruneCommand(): Promise<void> {

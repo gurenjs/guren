@@ -13,11 +13,20 @@ import { attachments } from '../db/schema'
 export const { Attachment } = configureAttachments({
   table: attachments,
   storage: () => getContainer().make('storage'),
-  // Where new attachments are stored, and how their URLs are built: 'public'
-  // disks serve via disk.url(); 'private' ones serve through the signed
-  // delivery route once you add `delivery: {}` here and mount
-  // registerAttachmentRoutes(router) in routes/web.ts (without that,
-  // private disks fall back to disk.temporaryUrl()).
-  disk: 'public',
-  disks: { public: 'public' },
+  // Uploads are bytes a stranger chose, so they are stored on a disk that
+  // nothing serves statically — `local` is rooted at ./storage/app, outside
+  // public/ — and handed out through the signed delivery route that
+  // registerAttachmentRoutes(router) mounts in your route registrar. That
+  // route serves only an allowlist of types inline, forces a download for the
+  // rest, and adds nosniff plus a sandbox CSP. Rooting this disk inside
+  // public/ instead would bypass all of it; `guren check` fails that shape,
+  // and StorageProvider.ts says why at the disk in question.
+  disk: 'local',
+  // Per-disk visibility. 'public' disks build URLs with disk.url(); 'private'
+  // ones go through the delivery route below. Undeclared disks count as
+  // public, so a private disk has to say so.
+  disks: { local: 'private', public: 'public' },
+  // Presence is the switch: private-disk URLs become signed delivery-route
+  // URLs instead of disk.temporaryUrl(). Accepts `prefix` and `routeName`.
+  delivery: {},
 })

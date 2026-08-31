@@ -2,7 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
 import { AttachmentDeliveryController, type RouteDefinition } from '@guren/core'
-import { checkAttachmentsDelivery } from '../src/attachments-check'
+import { checkAttachmentsDelivery, checkAttachmentsPublicDisk } from '../src/attachments-check'
 import { runCheck } from '../src/check'
 import { ParseCache } from '../src/parse-cache'
 import { createTempWorkspace } from './helpers'
@@ -561,6 +561,215 @@ export const { Attachment } = configureAttachments({
       // No routes entry exists, which is itself the wiring failure.
       expect(
         report.checks.find((c) => c.key.startsWith('attachments-delivery:'))?.status,
+      ).toBe('fail')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+})
+describe('checkAttachmentsPublicDisk — uploads inside the served tree', () => {
+  async function write(dir: string, name: string, source: string): Promise<string> {
+    const filePath = join(dir, name)
+    await mkdir(dirname(filePath), { recursive: true })
+    await writeFile(filePath, source, 'utf8')
+    return filePath
+  }
+
+  function attachmentsConfig(disk: string): string {
+    return `import { configureAttachments } from '@guren/core'
+
+export const { Attachment } = configureAttachments({
+  table: {} as never,
+  storage: () => ({}) as never,
+  disk: '${disk}',
+})`
+  }
+
+  function storageProvider(entries: string): string {
+    return `const disks = { ${entries} }
+export function register(): unknown {
+  return { disks }
+}`
+  }
+
+  function run(dir: string, files: string[]): Promise<Awaited<ReturnType<typeof checkAttachmentsPublicDisk>>> {
+    return checkAttachmentsPublicDisk({ cwd: dir, cache: new ParseCache(), files })
+  }
+
+  // The shape every app scaffolded before the default changed is still in.
+  it('fails a local disk rooted inside public/', async () => {
+    const workspace = await createTempWorkspace('guren-cli-public-disk-fail-')
+    try {
+      const config = await write(workspace.dir, 'config/attachments.ts', attachmentsConfig('public'))
+      const provider = await write(
+        workspace.dir,
+        'app/Providers/StorageProvider.ts',
+        storageProvider("public: { driver: 'local', root: './public/storage', url: '/storage' }"),
+      )
+
+      const results = await run(workspace.dir, [config, provider])
+      const result = results.find((c) => c.key.startsWith('attachments-public-disk:'))
+
+      expect(result?.status).toBe('fail')
+      expect(result?.message).toContain('./public/storage')
+      expect(result?.suggestion).toContain('registerAttachmentRoutes(router)')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('passes a local disk rooted outside public/', async () => {
+    const workspace = await createTempWorkspace('guren-cli-public-disk-pass-')
+    try {
+      const config = await write(workspace.dir, 'config/attachments.ts', attachmentsConfig('local'))
+      const provider = await write(
+        workspace.dir,
+        'app/Providers/StorageProvider.ts',
+        storageProvider("local: { driver: 'local', root: './storage/app' }"),
+      )
+
+      const results = await run(workspace.dir, [config, provider])
+
+      expect(results.find((c) => c.key.startsWith('attachments-public-disk:'))?.status).toBe('pass')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  // `./public` itself, not only a subdirectory of it — the containment test
+  // has to accept the boundary, and must not accept a sibling whose name
+  // merely extends it.
+  it('fails a root that is the public directory itself, and passes public-facing siblings', async () => {
+    const workspace = await createTempWorkspace('guren-cli-public-disk-edge-')
+    try {
+      const config = await write(workspace.dir, 'config/attachments.ts', attachmentsConfig('root'))
+      const provider = await write(
+        workspace.dir,
+        'app/Providers/StorageProvider.ts',
+        storageProvider("root: { driver: 'local', root: './public' }"),
+      )
+
+      expect((await run(workspace.dir, [config, provider]))[0]?.status).toBe('fail')
+
+      const sibling = await write(
+        workspace.dir,
+        'app/Providers/StorageProvider.ts',
+        storageProvider("root: { driver: 'local', root: './public-uploads' }"),
+      )
+      expect((await run(workspace.dir, [config, sibling]))[0]?.status).toBe('pass')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  // The rule fails a build, so a false positive costs more than a miss:
+  // anything it cannot read positively is skipped rather than guessed at.
+  it('stays silent on a non-local driver, an unreadable root, and conflicting evidence', async () => {
+    const workspace = await createTempWorkspace('guren-cli-public-disk-skip-')
+    try {
+      const config = await write(workspace.dir, 'config/attachments.ts', attachmentsConfig('media'))
+
+      // s3: not on the local filesystem at all, whatever `root` says.
+      const s3 = await write(
+        workspace.dir,
+        'app/Providers/StorageProvider.ts',
+        storageProvider("media: { driver: 's3', root: './public/media' }"),
+      )
+      expect(await run(workspace.dir, [config, s3])).toEqual([])
+
+      // A computed root is not a string literal this scan can judge.
+      const computed = await write(
+        workspace.dir,
+        'app/Providers/StorageProvider.ts',
+        storageProvider('media: { driver: \'local\', root: process.env.MEDIA_ROOT }'),
+      )
+      expect(await run(workspace.dir, [config, computed])).toEqual([])
+
+      // Two declarations disagreeing about the root: unreadable, not
+      // first-match-wins.
+      const conflicting = await write(
+        workspace.dir,
+        'config/storage.ts',
+        `export const storageConfig = { disks: { media: { driver: 'local', root: './storage/media' } } }`,
+      )
+      const inPublic = await write(
+        workspace.dir,
+        'app/Providers/StorageProvider.ts',
+        storageProvider("media: { driver: 'local', root: './public/media' }"),
+      )
+      expect(await run(workspace.dir, [config, conflicting, inPublic])).toEqual([])
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  // The scaffolded StorageProvider ends its map with `as const`, so the disk
+  // scan reads a TSAsExpression rather than an object literal. Getting this
+  // wrong is silent: "cannot read the config" and "nothing to flag" are the
+  // same empty result, and the app it blinds is the scaffold's own shape.
+  it('reads a disks map written `as const`', async () => {
+    const workspace = await createTempWorkspace('guren-cli-public-disk-asconst-')
+    try {
+      const config = await write(workspace.dir, 'config/attachments.ts', attachmentsConfig('public'))
+      const provider = await write(
+        workspace.dir,
+        'app/Providers/StorageProvider.ts',
+        `const disks = {
+  public: { driver: 'local', root: './public/storage', url: '/storage' },
+} as const
+export function register(): unknown {
+  return { disks }
+}`,
+      )
+
+      expect((await run(workspace.dir, [config, provider]))[0]?.status).toBe('fail')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  // `satisfies` on the options object used to make every attachments rule —
+  // this one included — return nothing at all, because the shared entry scan
+  // tested the argument for ObjectExpression without unwrapping first. A
+  // security rule that a type annotation silently switches off is worse than
+  // no rule, and the failure is invisible: it looks exactly like a clean app.
+  it('reads options written with `satisfies` or `as const`', async () => {
+    const workspace = await createTempWorkspace('guren-cli-public-disk-wrapped-')
+    try {
+      const provider = await write(
+        workspace.dir,
+        'app/Providers/StorageProvider.ts',
+        storageProvider("public: { driver: 'local', root: './public/storage', url: '/storage' }"),
+      )
+
+      for (const suffix of [' satisfies Record<string, unknown>', ' as const']) {
+        const config = await write(
+          workspace.dir,
+          'config/attachments.ts',
+          attachmentsConfig('public').replace(/\}\)$/, `}${suffix})`),
+        )
+        const results = await run(workspace.dir, [config, provider])
+        expect(results[0]?.status).toBe('fail')
+      }
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('reports through runCheck on a whole app', async () => {
+    const workspace = await createTempWorkspace('guren-cli-public-disk-runcheck-')
+    try {
+      await write(workspace.dir, 'config/attachments.ts', attachmentsConfig('public'))
+      await write(
+        workspace.dir,
+        'app/Providers/StorageProvider.ts',
+        storageProvider("public: { driver: 'local', root: './public/storage', url: '/storage' }"),
+      )
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      expect(
+        report.checks.find((c) => c.key.startsWith('attachments-public-disk:'))?.status,
       ).toBe('fail')
     } finally {
       await workspace.cleanup()

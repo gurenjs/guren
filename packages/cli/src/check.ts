@@ -44,6 +44,7 @@ import {
   checkAttachableModels,
   checkAttachmentsConfig,
   checkAttachmentsDelivery,
+  checkAttachmentsPublicDisk,
   discoverAttachmentsConfigFiles,
 } from './attachments-check'
 import { parseSchemaTables, schemaPathFor, type SchemaTable } from './schema-parser'
@@ -498,6 +499,17 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     // Attachable models contribute nothing.
     checks.push(
       ...(await checkAttachableModels({ cwd, cache, files: allModelFiles, configFiles: attachmentsFiles })),
+    )
+
+    // 8.65. The attachments disk rooted inside the statically served
+    // public/ tree — uploaded bytes reachable as static assets, which makes
+    // an uploaded .svg stored XSS on the app's own origin. Purely a config
+    // read (no route loading), so it is not gated on sourceChanged like 8.7,
+    // and not changed-filtered: the two halves of the finding live in
+    // different files (the attachments config names the disk, the storage
+    // provider roots it), so filtering by either would hide it.
+    checks.push(
+      ...(await checkAttachmentsPublicDisk({ cwd, cache, files: attachmentsFiles })),
     )
 
     // 8.7. Delivery-route wiring (RFC 0015): a `delivery` config with no
