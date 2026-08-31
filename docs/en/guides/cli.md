@@ -463,6 +463,7 @@ Routes that declare `.agent()` metadata are exposed to AI agents as MCP tools (s
 | `tool:inspect` | Show one tool's full derivation | `bunx guren tool:inspect posts.store` |
 | `tool:call` | Invoke one tool the way an agent would | `bunx guren tool:call posts.index` |
 | `tool:dev` | Serve the tools locally with a throwaway token | `bunx guren tool:dev` |
+| `tool:log` | Read the agent audit trail | `bunx guren tool:log --tail` |
 
 ```bash
 # Every exposed tool, with its method, path, protocol exposure,
@@ -530,6 +531,37 @@ command revokes it. It refuses to run with `NODE_ENV=production`.
 
 > [!WARNING]
 > The printed token grants `tools:*`. The default bind is loopback, so it stays on your machine; `--host 0.0.0.0` makes the endpoint — and that token — reachable from your network for as long as the command runs.
+
+`tool:log` reads the audit trail back. Unlike its neighbours it boots nothing — an audit trail has to be readable when the application it records is not startable.
+
+```bash
+# The last 50 records
+bunx guren tool:log
+
+# Follow, including the rollover into tomorrow's file
+bunx guren tool:log --tail
+
+# Only denials, only this tool, only the last two hours
+bunx guren tool:log --denied
+bunx guren tool:log --tool posts.store --since 2h -n 200
+
+# Raw records, one per line, for piping
+bunx guren tool:log --json | jq 'select(.status >= 400)'
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--file` | `storage/logs/agent-audit.log` | Base path of the trail; dated files sit beside it |
+| `--tail`, `-f` | `false` | Follow the trail as records arrive, across the midnight rollover |
+| `--tool` | (all tools) | Only records for this tool |
+| `--surface` | (all surfaces) | Only `mcp`, `dev-mcp`, `cli`, or `webmcp` |
+| `--denied` | `false` | Only denials |
+| `--since` | (no cutoff) | Only records newer than a duration such as `30m`, `2h`, `7d` |
+| `-n` | `50` | How many records to show |
+| `--app` | Current directory | Application root directory |
+| `--json` | `false` | Output one raw record per line, for piping |
+
+`-n` applies **after** filtering, so `--denied -n 50` is the last fifty denials rather than the denials among the last fifty records. Records only exist once a sink is configured — the trail is opt-in, and the command prints the configuration line to add when it finds none. See [Agent Interface — The audit trail](./agent-interface.md#the-audit-trail).
 
 Everything shown is derived from contracts the route already carries: the input schema merges its `params`, `query` and `body` schemas, the output schema comes from `output`, and the authorization ability comes from the policy its middleware chain checks. Nothing is declared twice, so a tool cannot advertise a schema the endpoint does not validate.
 

@@ -1,13 +1,16 @@
 import {
   AgentToolDenied,
   AgentToolInvoked,
+  DEFAULT_AGENT_AUDIT_PATH,
   buildToolRequest,
   definePlugin,
   deriveAgentTools,
   mapToolResponse,
   readBearerToken,
   redactAgentArguments,
+  toAuditRecord,
   verifyApiToken,
+  type AgentAuditRecord,
   type AgentPrincipal,
   type AgentToolDenialReason,
   type Application,
@@ -42,6 +45,39 @@ export interface McpPluginConfig {
    * @default true
    */
   updateLastUsed?: boolean
+  /**
+   * Where the audit trail is written (RFC 0016 §5.2). Omitted, there is no
+   * sink and nothing is written — `AgentToolInvoked` / `AgentToolDenied` are
+   * still emitted exactly as before, so an application that already forwards
+   * events is already forwarding these.
+   *
+   * Opt-in on purpose. The runtimes this endpoint runs on include Workers and
+   * Lambda, where a framework that started appending to a file on its own
+   * would be writing to a read-only or ephemeral filesystem — and an audit
+   * trail that silently degrades per runtime is worse than one an operator
+   * knows is absent. What the default costs is one line of configuration; what
+   * it would buy is a false sense of a record existing.
+   *
+   * `{ file, days }` appends JSONL through {@link DailyFileChannel}: one
+   * record per line, rotated daily, files older than `days` swept on rotation.
+   * `file` is a *base* path — the trail lands in `agent-audit-YYYY-MM-DD.log`
+   * beside it — and is resolved by the filesystem, so an absolute path or one
+   * relative to the process's working directory. It is not resolved against an
+   * application root: `Application` exposes none, and guessing one would put
+   * the trail somewhere the operator did not ask for.
+   *
+   * `{ sink }` hands each record to a function instead — the seam for a log
+   * aggregator, a database, or anything else with its own delivery. A sink
+   * that throws is warned about and does not fail the tool call it was
+   * recording.
+   *
+   * @default undefined — no sink; events are emitted, nothing is written
+   * @example
+   * ```typescript
+   * mcpPlugin({ audit: { file: 'storage/logs/agent-audit.log', days: 30 } })
+   * ```
+   */
+  audit?: { file?: string; days?: number } | { sink: (record: AgentAuditRecord) => void | Promise<void> }
 }
 
 /**
@@ -76,6 +112,22 @@ const factory = definePlugin<McpPluginConfig>({
         '[@guren/plugin-mcp] No event manager is bound (register EventServiceProvider); '
         + 'agent audit events (AgentToolInvoked / AgentToolDenied) will not be emitted.',
       )
+    }
+
+    if (config.audit) {
+      if (events) {
+        await attachAuditSink(events, config.audit)
+      } else {
+        // Named separately from the warning above, which says only that events
+        // are not emitted. An operator who *asked* for a trail has to be told
+        // that the thing they configured will never see a record — otherwise
+        // the configuration reads as wired, the file never appears, and the
+        // absence looks like "no agent calls happened".
+        console.warn(
+          '[@guren/plugin-mcp] An audit sink is configured, but no event manager is bound, so it will '
+          + 'never receive a record. Register EventServiceProvider in your application to enable it.',
+        )
+      }
     }
 
     const { tools, warnings } = deriveAgentTools(app.router.definitions())
@@ -183,6 +235,50 @@ const factory = definePlugin<McpPluginConfig>({
     })
   },
 })
+
+/**
+ * Subscribe the configured sink to the two audit events.
+ *
+ * A *listener*, not a second call site inside the dispatch path. RFC 0016
+ * §5.2's whole point is that these are ordinary framework events: the sink
+ * therefore sees exactly what any other listener sees, and an application that
+ * wants a second destination adds `events.on(...)` rather than a second plugin
+ * option. A call inside dispatch would also have to be written twice, once per
+ * outcome, at the two places that already emit.
+ */
+async function attachAuditSink(
+  events: EventManager,
+  config: NonNullable<McpPluginConfig['audit']>,
+): Promise<void> {
+  const sink = 'sink' in config
+    ? config.sink
+    // Dynamic, so a `{ sink }` application never evaluates the filesystem
+    // module — the same discipline the MCP SDK import above follows.
+    : (await import('./audit-file')).createFileAuditSink(config.file ?? DEFAULT_AGENT_AUDIT_PATH, config.days)
+
+  const record = (event: AgentToolInvoked | AgentToolDenied): void => {
+    // The clock is read once, here, and the record carries the instant it
+    // produced — see `toAuditRecord`.
+    //
+    // Caught in both directions rather than left to the event manager. The
+    // manager isolates a listener's failure so it cannot fail the tool call,
+    // which is right — but isolation means *swallowed*, and a sink dropping
+    // records in silence is precisely the failure this feature exists to
+    // prevent. So the call is failed softly and said out loud.
+    try {
+      void Promise.resolve(sink(toAuditRecord(event, new Date()))).catch(warnSinkFailure)
+    } catch (error) {
+      warnSinkFailure(error)
+    }
+  }
+
+  events.on(AgentToolInvoked, record)
+  events.on(AgentToolDenied, record)
+}
+
+function warnSinkFailure(error: unknown): void {
+  console.warn(`[@guren/plugin-mcp] agent audit sink failed, record dropped: ${String(error)}`)
+}
 
 async function dispatchThroughApp(
   app: Application,

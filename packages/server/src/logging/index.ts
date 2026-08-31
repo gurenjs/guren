@@ -24,6 +24,8 @@ export {
   getLogManager,
 } from './LogManager'
 
+export { dailyFileDateStamp, dailyFilePath, matchDailyFileDate } from './daily-file-path'
+
 export { ConsoleChannel } from './channels/ConsoleChannel'
 export { FileChannel } from './channels/FileChannel'
 export { DailyFileChannel } from './channels/DailyFileChannel'
