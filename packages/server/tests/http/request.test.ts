@@ -194,9 +194,11 @@ describe('parseRequestUploads', () => {
       .filter((item): item is File => item instanceof File)
       .map((file) => file.name)
 
-  // `{ all: true }` is the contract, and this is the only assertion that can
-  // lose it: without it Hono keeps one value per repeated field and `files()`
-  // silently reduces to a single file per `<input multiple>`.
+  // `{ all: true }` is the contract: without it Hono keeps one value per
+  // repeated field and `files()` silently reduces to a single file per
+  // `<input multiple>`. `@guren/testing`'s upload table catches that mutation
+  // too; this is the assertion that names the flag rather than an effect of
+  // it, so the reason survives a rewrite of that table.
   it('keeps every part of a repeated field, which files() depends on', async () => {
     const uploads = await parseRequestUploads({
       req: uploadRequest(`multipart/form-data; boundary=${BOUNDARY}`, [

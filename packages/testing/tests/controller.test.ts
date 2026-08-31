@@ -1608,7 +1608,7 @@ describe('request body parity', () => {
     expect(await response.json()).toEqual({ same: true })
   })
 
-/**
+  /**
    * The same table for uploads, which travel a second read the rows above
    * never touch: `file()` and `files()` do not go through the body parser at
    * all. Both sides now call the runtime's `parseRequestUploads` — Hono's
@@ -1764,7 +1764,7 @@ describe('request body parity', () => {
     expect(await readUploadsThroughMock(testCase)).toEqual(fromRuntime)
   })
 
-    it.each(CASES)('agrees on $name', async (testCase) => {
+  it.each(CASES)('agrees on $name', async (testCase) => {
     // A row claiming no content type has to prove it: `fetch` supplies one for
     // a string body, which would quietly turn this into some other row.
     if (!testCase.contentType) {
