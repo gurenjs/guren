@@ -29,6 +29,27 @@ function multipartBody(boundary: string, fields: Array<[string, string]>): strin
   return `${parts.join('')}--${boundary}--\r\n`
 }
 
+/**
+ * The same builder for file parts. A part is a file to every parser here only
+ * because it carries a `filename`, so that is the one thing this adds — an
+ * empty `content` still produces a zero-byte File, which is what the `size > 0`
+ * filter in `file()` / `files()` exists to reject.
+ */
+function multipartFileBody(
+  boundary: string,
+  files: Array<[field: string, filename: string, content: string]>,
+): string {
+  const parts = files.map(
+    ([field, filename, content]) =>
+      `--${boundary}\r\n` +
+      `Content-Disposition: form-data; name="${field}"; filename="${filename}"\r\n` +
+      'Content-Type: text/plain\r\n\r\n' +
+      `${content}\r\n`,
+  )
+
+  return `${parts.join('')}--${boundary}--\r\n`
+}
+
 describe('createControllerContext', () => {
   it('creates context with correct URL parsing', () => {
     const ctx = createControllerContext('http://example.com/users/123?page=1')
@@ -1334,6 +1355,7 @@ describe('body content-type recognition', () => {
  */
 describe('request body parity', () => {
   const URL_UNDER_TEST = 'http://example.com/parity'
+  const UPLOADS_URL_UNDER_TEST = 'http://example.com/uploads'
   const BOUNDARY = 'guren-parity-boundary'
 
   interface BodyCase {
@@ -1496,9 +1518,24 @@ describe('request body parity', () => {
         }
       }
 
+      // Files cannot survive the JSON hop back, so the upload route answers
+      // with the projection the rows compare: which names `file()` and
+      // `files()` selected. Both helpers read the same field, so a row that
+      // moved one and not the other would show up as a disagreement.
+      class UploadController extends Controller {
+        async read() {
+          const field = this.ctx.req.query('field') ?? 'doc'
+          return this.json({
+            file: (await this.file(field))?.name ?? null,
+            files: (await this.files(field)).map((upload) => upload.name),
+          })
+        }
+      }
+
       const app = createApp({
         routes: (router) => {
           router.post('/parity', [ReadController, 'read'])
+          router.post('/uploads', [UploadController, 'read'])
         },
       })
       await app.boot()
@@ -1571,7 +1608,163 @@ describe('request body parity', () => {
     expect(await response.json()).toEqual({ same: true })
   })
 
-  it.each(CASES)('agrees on $name', async (testCase) => {
+/**
+   * The same table for uploads, which travel a second read the rows above
+   * never touch: `file()` and `files()` do not go through the body parser at
+   * all. Both sides now call the runtime's `parseRequestUploads` — Hono's
+   * `parseBody({ all: true })` in a try/catch, with no media-type gate — so
+   * the axes that separated them are worth pinning as a pair.
+   *
+   * **What these rows guard is `{ all: true }`, on the runtime side.** Drop it
+   * and Hono keeps one value per repeated field, so `files()` silently reduces
+   * to a single file per `<input multiple>`. Two rows go red on that mutation
+   * — the repeated plain field and the leading empty upload. The `doc[]` row
+   * does not: Hono arrays a `[]`-suffixed key with or without the flag, so it
+   * pins that rule rather than this one. They belong here rather than with the
+   * body table's repeated-field rows, which pin the opposite behavior — the
+   * body parser *does* flatten.
+   *
+   * **What they cannot catch is the mock reading uploads the old way**, and
+   * that is stated rather than left to be discovered. Run against the exact
+   * pre-change mock — gate on Hono's lowercased media type, then
+   * `Request.formData()` — every row here passes, the uppercase one included.
+   * `formData()` is case-sensitive on Bun and case-insensitive on Node, and
+   * vitest runs this suite on Node, so the divergence the shared read exists
+   * to close (`MULTIPART/FORM-DATA` throwing out of `formData()`, `file()`
+   * answering `null` for a file the runtime delivers) is invisible from here.
+   * Measured on both runtimes rather than assumed.
+   *
+   * So the uppercase row states a contract it cannot enforce, and the
+   * assertion that *can* fail lives in
+   * `packages/server/tests/http/request.test.ts`, whose suite runs on Bun.
+   * These rows are still the ones that keep the two implementations pinned to
+   * each other as the runtime's read changes — which is what the mutation
+   * above shows them doing.
+   */
+  interface UploadCase {
+    name: string
+    contentType: string
+    body: BodyInit
+    /** The field `file()` / `files()` read. Defaults to `doc`. */
+    field?: string
+    expected: { file: string | null; files: string[] }
+  }
+
+  const UPLOAD_CASES: UploadCase[] = [
+    {
+      name: 'a single uploaded file',
+      contentType: `multipart/form-data; boundary=${BOUNDARY}`,
+      body: multipartFileBody(BOUNDARY, [['doc', 'a.txt', 'a']]),
+      expected: { file: 'a.txt', files: ['a.txt'] },
+    },
+    {
+      name: 'an uppercase multipart media type carrying a file',
+      contentType: `MULTIPART/FORM-DATA; boundary=${BOUNDARY}`,
+      body: multipartFileBody(BOUNDARY, [['doc', 'a.txt', 'a']]),
+      expected: { file: 'a.txt', files: ['a.txt'] },
+    },
+    {
+      // `{ all: true }`: every repeated key arrays, not only the `[]` ones,
+      // which is the whole difference between files() and one file.
+      name: 'a repeated file field, which files() sees every part of',
+      contentType: `multipart/form-data; boundary=${BOUNDARY}`,
+      body: multipartFileBody(BOUNDARY, [
+        ['doc', 'a.txt', 'a'],
+        ['doc', 'b.txt', 'b'],
+      ]),
+      expected: { file: 'a.txt', files: ['a.txt', 'b.txt'] },
+    },
+    {
+      name: 'a repeated file field[], which files() sees every part of',
+      contentType: `multipart/form-data; boundary=${BOUNDARY}`,
+      body: multipartFileBody(BOUNDARY, [
+        ['doc[]', 'a.txt', 'a'],
+        ['doc[]', 'b.txt', 'b'],
+      ]),
+      field: 'doc[]',
+      expected: { file: 'a.txt', files: ['a.txt', 'b.txt'] },
+    },
+    {
+      // file() takes the FIRST part and then requires it to be non-empty — a
+      // leading empty upload is `null`, not "skip to the next one" — while
+      // files() filters the empty one out and keeps the rest.
+      name: 'a leading empty upload, which file() refuses and files() skips',
+      contentType: `multipart/form-data; boundary=${BOUNDARY}`,
+      body: multipartFileBody(BOUNDARY, [
+        ['doc', 'empty.txt', ''],
+        ['doc', 'b.txt', 'b'],
+      ]),
+      expected: { file: null, files: ['b.txt'] },
+    },
+    {
+      // The field parses on both sides; it is simply not a file. This is the
+      // row that shows why dropping the mock's media-type gate is safe.
+      name: 'a multipart text field, which is not an upload',
+      contentType: `multipart/form-data; boundary=${BOUNDARY}`,
+      body: multipartBody(BOUNDARY, [['doc', 'Guren']]),
+      expected: { file: null, files: [] },
+    },
+    {
+      // Same point on the other encoding: the shared read parses it happily
+      // and hands back strings, which fail `instanceof File`. The mock used to
+      // reach the same answer by refusing to parse it at all.
+      name: 'a urlencoded body, which carries no uploads',
+      contentType: 'application/x-www-form-urlencoded',
+      body: 'doc=Guren',
+      expected: { file: null, files: [] },
+    },
+    {
+      name: 'a multipart body with no boundary, which carries no uploads',
+      contentType: 'multipart/form-data',
+      body: 'not a multipart body',
+      expected: { file: null, files: [] },
+    },
+  ]
+
+  async function readUploadsThroughMock(testCase: UploadCase) {
+    const { Controller } = createControllerModuleMock()
+
+    class UploadController extends Controller {
+      async read() {
+        const field = testCase.field ?? 'doc'
+        return {
+          file: (await this.file(field))?.name ?? null,
+          files: (await this.files(field)).map((upload) => upload.name),
+        }
+      }
+    }
+
+    const controller = new UploadController()
+    controller.setContext(
+      createControllerContext(
+        UPLOADS_URL_UNDER_TEST,
+        initFor(testCase),
+      ) as unknown as ControllerContext,
+    )
+
+    return controller.read()
+  }
+
+  async function readUploadsThroughRuntime(testCase: UploadCase) {
+    const app = await bootRuntime()
+    const url = testCase.field
+      ? `${UPLOADS_URL_UNDER_TEST}?field=${encodeURIComponent(testCase.field)}`
+      : UPLOADS_URL_UNDER_TEST
+    const response = await app.fetch(new Request(url, initFor(testCase)))
+
+    expect(response.status).toBe(200)
+
+    return (await response.json()) as { file: string | null; files: string[] }
+  }
+
+  it.each(UPLOAD_CASES)('agrees on uploads for $name', async (testCase) => {
+    const fromRuntime = await readUploadsThroughRuntime(testCase)
+    expect(fromRuntime).toEqual(testCase.expected)
+
+    expect(await readUploadsThroughMock(testCase)).toEqual(fromRuntime)
+  })
+
+    it.each(CASES)('agrees on $name', async (testCase) => {
     // A row claiming no content type has to prove it: `fetch` supplies one for
     // a string body, which would quietly turn this into some other row.
     if (!testCase.contentType) {

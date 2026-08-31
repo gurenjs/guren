@@ -80,6 +80,67 @@ export async function parseRequestBody(ctx: RequestBodyContext): Promise<unknown
 }
 
 /**
+ * What {@link parseRequestUploads} reads: one member off `ctx.req`, not a whole
+ * Hono context — the same narrowing, and for the same caller, as
+ * {@link RequestBodyContext}.
+ *
+ * `parseBody` is required here where the body parser makes it optional. That
+ * parser has a fallback for a context without one; this has none, because
+ * there is no second way to read an upload. A caller that cannot supply
+ * `parseBody` should fail to compile rather than silently answer "no files".
+ */
+export interface RequestUploadsContext {
+  req: Pick<HonoRequest, 'parseBody'>
+}
+
+/**
+ * The shape an upload read answers with: Hono's `{ all: true }` record, where a
+ * field repeated in the body is an array and a single one is not.
+ */
+export type RequestUploads = Record<string, string | File | (string | File)[]>
+
+/**
+ * The one multipart read behind `Controller.file()` and `Controller.files()`,
+ * guarded so a body the parser cannot decode carries no files rather than
+ * crashing the request: it reads as `{}`, which is the same answer both helpers
+ * already give for a field that is simply absent — `null` and `[]`. Left to
+ * throw, the parser's `TypeError` escaped as a 500 reporting the exception and
+ * a stack, the defect {@link parseRequestBody} fixes for the validation paths.
+ *
+ * Deliberately *not* routed through {@link parseRequestBody}, which looks like
+ * the same rule and is not: it parses without `{ all: true }` and flattens a
+ * repeated field to its first value, so sharing it would silently reduce
+ * `files()` to one file per field. `{ all: true }` is the contract here, and a
+ * malformed-body test cannot see its loss — hence the separate function.
+ *
+ * There is no media-type gate, deliberately: Hono decides the media type inside
+ * `parseBody()`, having lowercased it first. A caller that gates before calling
+ * — or that reads uploads through `Request.formData()` instead, which is
+ * case-sensitive on Bun where Hono is not — answers `null` for an uppercase
+ * `MULTIPART/FORM-DATA` body this returns the file for. That is measured, and
+ * it is why `@guren/testing`'s controller mock reaches this function rather
+ * than restating it.
+ *
+ * try/catch rather than `.catch()`, for the reason given on the shared
+ * fallback: `parseBody` may throw synchronously as well as reject, and only one
+ * of those two shapes reaches a `.catch()`.
+ *
+ * It fails open in one direction, deliberately and for the same reason
+ * {@link parseRequestBody} does: a body already consumed upstream reads as
+ * "no upload" rather than throwing, so a middleware-ordering bug loses the 500
+ * that used to announce it. Telling that apart from a client's malformed body
+ * means matching runtime-specific error codes, which answer differently on Bun,
+ * Node and Workers.
+ */
+export async function parseRequestUploads(ctx: RequestUploadsContext): Promise<RequestUploads> {
+  try {
+    return await ctx.req.parseBody({ all: true })
+  } catch {
+    return {}
+  }
+}
+
+/**
  * The record-shaped view of {@link parseRequestBody}, for callers that read the
  * payload field by field (`payload.channel`, per-field validation rules,
  * `Controller.input()`/`only()`/`except()`/`has()`). A body that is not a plain
