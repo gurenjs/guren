@@ -9,10 +9,6 @@ export default defineConfig({
   resolve: {
     alias: [
       {
-        find: /^@guren\/testing\/controller$/,
-        replacement: resolveFromRoot('../../packages/testing/src/controller.ts'),
-      },
-      {
         find: /^@guren\/testing$/,
         replacement: resolveFromRoot('../../packages/testing/src/index.ts'),
       },
@@ -45,6 +41,12 @@ export default defineConfig({
         find: /^@guren\/orm$/,
         replacement: resolveFromRoot('../../packages/orm/src/index.ts'),
       },
+      // The only explicit subpath entries here, and first match wins, so both
+      // must stay above the generic orm rule. Every other subpath is served by
+      // a generic `/(.+)$/` rule, whose replacement is extensionless on purpose
+      // so that vite's resolver completes it. The drizzle mapping is pinned
+      // anyway because 'src/drizzle.ts' and the 'src/drizzle/' directory
+      // coexist.
       {
         find: /^@guren\/orm\/drizzle$/,
         replacement: resolveFromRoot('../../packages/orm/src/drizzle.ts'),
