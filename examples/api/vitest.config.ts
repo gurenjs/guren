@@ -28,6 +28,19 @@ export default defineConfig({
         find: /^@guren\/core\/(.+)$/,
         replacement: `${resolveFromRoot('../../packages/core/src')}/$1`,
       },
+      // `@guren/core`'s index re-exports the server package wholesale, so
+      // without these two the suite runs core from src while the server it
+      // re-exports comes from dist. The generic form deliberately does not
+      // append '.ts': a subpath may name a file ('internal/route-path') or a
+      // directory resolved by index ('vite').
+      {
+        find: /^@guren\/server$/,
+        replacement: resolveFromRoot('../../packages/server/src/index.ts'),
+      },
+      {
+        find: /^@guren\/server\/(.+)$/,
+        replacement: `${resolveFromRoot('../../packages/server/src')}/$1`,
+      },
       {
         find: /^@guren\/orm$/,
         replacement: resolveFromRoot('../../packages/orm/src/index.ts'),
@@ -81,7 +94,7 @@ export default defineConfig({
     setupFiles: ['./tests/setup.ts'],
     server: {
       deps: {
-        inline: ['@guren/core', '@guren/orm', '@guren/core', '@guren/testing'],
+        inline: ['@guren/core', '@guren/orm', '@guren/testing'],
       },
     },
   },
