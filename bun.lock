@@ -12,7 +12,7 @@
         "typescript": "^7.0.2",
         "vite": "^8.2.0",
         "vitest": "^3.2.7",
-        "zod": "^4.4.3",
+        "zod": "^4.5.4",
       },
     },
     "examples/api": {
@@ -157,7 +157,7 @@
       "name": "@guren/openapi",
       "version": "1.3.1",
       "dependencies": {
-        "@guren/core": "^1.6.0",
+        "@guren/core": "^1.8.1",
       },
       "devDependencies": {
         "@types/node": "^20.14.10",
@@ -194,7 +194,7 @@
       "name": "@guren/plugin-cloudflare",
       "version": "0.5.0",
       "dependencies": {
-        "@guren/core": "^1.6.2",
+        "@guren/core": "^1.11.0",
         "citty": "^0.1.6",
       },
       "devDependencies": {
@@ -232,7 +232,7 @@
       "name": "@guren/plugin-markdown",
       "version": "0.2.1",
       "dependencies": {
-        "@guren/core": "^1.7.0",
+        "@guren/core": "^1.8.1",
         "@types/sanitize-html": "^2.16.1",
         "marked": "^18.0.10",
         "marked-highlight": "^2.2.4",
@@ -1899,7 +1899,7 @@
 
     "yuku-parser": ["yuku-parser@0.8.7", "", { "dependencies": { "@yuku-toolchain/types": "^0.8.7", "yuku-ast": "^0.8.7" }, "optionalDependencies": { "@yuku-parser/binding-android-arm64": "0.8.7", "@yuku-parser/binding-darwin-arm64": "0.8.7", "@yuku-parser/binding-darwin-x64": "0.8.7", "@yuku-parser/binding-freebsd-x64": "0.8.7", "@yuku-parser/binding-linux-arm-gnu": "0.8.7", "@yuku-parser/binding-linux-arm-musl": "0.8.7", "@yuku-parser/binding-linux-arm64-gnu": "0.8.7", "@yuku-parser/binding-linux-arm64-musl": "0.8.7", "@yuku-parser/binding-linux-x64-gnu": "0.8.7", "@yuku-parser/binding-linux-x64-musl": "0.8.7", "@yuku-parser/binding-win32-arm64": "0.8.7", "@yuku-parser/binding-win32-x64": "0.8.7" } }, "sha512-vRD9nwt4L3aYpxNqeSC4WqLv58xrXef0Ong1Mc45CTXTIpvLafx7JO05sczmQZwdLEZvywrLOGdNC5+Rp5N1BQ=="],
 
-    "zod": ["zod@4.4.3", "", {}, "sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ=="],
+    "zod": ["zod@4.5.4", "", {}, "sha512-sC95tT5iHHH9gtpj6A81kh+NEaRAUFN+qlUPDUbRfOMvNf5QCBqsb3WgvnpVtK5Y+4UfA6KqufotuTvMGiTlsA=="],
 
     "zod-to-json-schema": ["zod-to-json-schema@3.25.2", "", { "peerDependencies": { "zod": "^3.25.28 || ^4" } }, "sha512-O/PgfnpT1xKSDeQYSCfRI5Gy3hPf91mKVDuYLUHZJMiDFptvP41MSnWofm8dnCm0256ZNfZIM7DSzuSMAFnjHA=="],
 
