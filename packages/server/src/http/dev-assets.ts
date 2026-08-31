@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 import type { Application } from './Application'
 import { registerRootPublicAssets, type RootPublicAssetsConfig } from './public-assets'
+import { guardStaticDocument } from './static-documents'
 import { isPathWithin, isRealPathWithin } from '../support/contained-path'
 
 declare const Bun: any
@@ -72,6 +73,22 @@ export interface DevAssetsOptions {
   favicon?: boolean
   /** Serve selected files from the public directory without the `/public` prefix. */
   rootPublicAssets?: RootPublicAssetsConfig
+  /**
+   * Serve document types (`.svg`, `.html`, XML) from `/public/*` and
+   * `/resources/css/*` inline instead of forcing them to download. Defaults to
+   * false.
+   *
+   * Off by default because `public/` is also where an app's uploads land, and
+   * a stored `.html` or `.svg` served inline is script in the app's own
+   * origin. Turn it on for a public directory holding nothing user-supplied —
+   * a static microsite under `public/docs/index.html`, say, which Hono resolves
+   * from a directory request and would otherwise hand back as a download.
+   *
+   * The root-level allowlist route has its own switch,
+   * `rootPublicAssets: { inlineDocuments: true }`; an app serving documents
+   * both ways sets both.
+   */
+  inlineDocuments?: boolean
 }
 
 // Resolve the inertia client lazily: @guren/inertia-client is an optional
@@ -151,6 +168,7 @@ export function registerDevAssets(app: Application, options: DevAssetsOptions): 
       serveStatic({
         root: cssDir,
         rewriteRequestPath: cssRewrite,
+        onFound: options.inlineDocuments ? undefined : guardStaticDocument,
       }),
     )
   }
@@ -195,6 +213,7 @@ export function registerDevAssets(app: Application, options: DevAssetsOptions): 
       serveStatic({
         root: publicDir,
         rewriteRequestPath,
+        onFound: options.inlineDocuments ? undefined : guardStaticDocument,
       }),
     )
 
