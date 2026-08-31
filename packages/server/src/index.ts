@@ -80,6 +80,12 @@ export type { AgentPrincipal, AgentSurface, AgentToolDenialReason } from './agen
 // wants that literal, while the walk's own terminator markers are an internal
 // detail of a total function, not a vocabulary a consumer matches on.
 export { AGENT_REDACTED, redactAgentArguments } from './agent/redact'
+export { DEFAULT_AGENT_AUDIT_PATH, parseAuditRecord, toAuditRecord } from './agent/audit'
+export type {
+  AgentAuditDeniedRecord,
+  AgentAuditInvokedRecord,
+  AgentAuditRecord,
+} from './agent/audit'
 export { ViewEngine } from './mvc/ViewEngine'
 export { inertia, setInertiaSsrRenderer, setInertiaDocument } from './mvc/inertia/InertiaEngine'
 export { setInertiaSharedProps, getInertiaSharedPropsResolver, shareInertiaProps } from './mvc/inertia/shared'
@@ -525,6 +531,9 @@ export {
   ConsoleChannel,
   FileChannel,
   DailyFileChannel,
+  dailyFileDateStamp,
+  dailyFilePath,
+  matchDailyFileDate,
   LOG_LEVEL_PRIORITY,
   createLogManager,
   setLogManager,

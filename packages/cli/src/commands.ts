@@ -68,6 +68,7 @@ import { runQueueWorker, listFailedJobs, retryFailedJob, retryAllFailedJobs, flu
 import { displayRoutes } from './route-list'
 import { displayToolInspection, displayTools } from './tool-list'
 import { runToolCall } from './tool-call'
+import { runToolLog } from './tool-log'
 import { runTokenIssue } from './token-issue'
 import { runToolDev } from './tool-dev'
 import { cacheConfig, clearConfigCache, showConfigCacheInfo } from './config-cache'
@@ -1719,6 +1720,95 @@ const toolCallCommand = defineCommand({
   },
 })
 
+// Reads the trail the MCP plugin's `audit` sink writes; unlike its `tool:`
+// neighbours it boots nothing, because an audit trail has to be readable when
+// the application it records is not startable.
+const toolLogCommand = defineCommand({
+  meta: {
+    name: 'tool:log',
+    description: 'Read this application\'s agent audit trail (RFC 0016).',
+  },
+  args: {
+    file: {
+      type: 'string',
+      description: 'Base path of the audit trail; dated files sit beside it',
+      valueHint: 'storage/logs/agent-audit.log',
+    },
+    tail: {
+      type: 'boolean',
+      alias: 'f',
+      description: 'Follow the trail as records arrive, across the midnight rollover',
+    },
+    tool: {
+      type: 'string',
+      description: 'Only records for this tool',
+      valueHint: 'posts.store',
+    },
+    surface: {
+      type: 'string',
+      description: 'Only records from this surface (mcp, dev-mcp, cli, webmcp)',
+      valueHint: 'mcp',
+    },
+    denied: {
+      type: 'boolean',
+      description: 'Only denials',
+    },
+    since: {
+      type: 'string',
+      description: 'Only records newer than this duration ago',
+      valueHint: '30m',
+    },
+    number: {
+      type: 'string',
+      alias: 'n',
+      description: 'How many records to show (default 50)',
+      valueHint: '50',
+    },
+    app: {
+      type: 'string',
+      description: 'Application root directory',
+    },
+    json: {
+      type: 'boolean',
+      description: 'Output one raw record per line, for piping',
+    },
+  },
+  async run({ args }) {
+    // Every flag through `lastFlagValue`/`lastBooleanFlag`: citty arrays a
+    // repeated flag whatever its declared type and every array is truthy, so
+    // `--denied=false --denied=false` would otherwise read as *on* and quietly
+    // hide every invocation from a listing that looks complete.
+    const rawNumber = lastFlagValue(args.number)
+    await runToolLog({
+      file: lastFlagValue(args.file),
+      tail: lastBooleanFlag(args.tail),
+      tool: lastFlagValue(args.tool),
+      surface: lastFlagValue(args.surface),
+      denied: lastBooleanFlag(args.denied),
+      since: lastFlagValue(args.since),
+      limit: rawNumber === undefined ? undefined : parseRecordCount(rawNumber),
+      appRoot: lastFlagValue(args.app),
+      json: lastBooleanFlag(args.json),
+    })
+  },
+})
+
+/**
+ * Read `-n` as a count.
+ *
+ * A `string` arg rather than citty's `number`, because citty hands a
+ * non-numeric `--number abc` across as `NaN` and every comparison against it
+ * is false — the listing would come back empty, which on this command reads as
+ * "no agent calls happened". Refused by name instead.
+ */
+function parseRecordCount(raw: string): number {
+  const count = Number(raw)
+  if (!Number.isInteger(count) || count < 1) {
+    throw new Error(`-n must be a positive whole number of records — received "${raw}".`)
+  }
+  return count
+}
+
 // `token:` is its own namespace, distinct from the `tool:` commands above
 // (which only *describe* the surface) and from `agent:` (the coding-agent
 // harness). This one writes into the application's store, so unlike its
@@ -3267,6 +3357,7 @@ export const builtinSubCommands = {
   'tool:list': toolListCommand,
   'tool:inspect': toolInspectCommand,
   'tool:call': toolCallCommand,
+  'tool:log': toolLogCommand,
   'token:issue': tokenIssueCommand,
   'tool:dev': toolDevCommand,
   'openapi:generate': openApiGenerateCommand,

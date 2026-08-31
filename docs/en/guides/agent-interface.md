@@ -652,6 +652,92 @@ An event manager has to be bound for any of this to happen — register
 `EventServiceProvider` (or your app's own event provider) alongside
 `mcpPlugin()`. Without one the plugin warns at boot and emits nothing.
 
+### Writing the trail down
+
+The events fire whether or not anything records them. To keep a durable trail,
+configure a sink on the plugin:
+
+```ts
+import { mcpPlugin } from '@guren/plugin-mcp'
+
+createApp({
+  providers: [
+    EventServiceProvider,
+    mcpPlugin({
+      audit: { file: 'storage/logs/agent-audit.log', days: 30 },
+    }),
+  ],
+})
+```
+
+One JSON record per line, rotated daily into `agent-audit-YYYY-MM-DD.log`
+beside the path you name, with files older than `days` swept on rotation
+(14 by default). `file` is resolved by the filesystem, so give an absolute path
+or one relative to the process's working directory — it is not resolved against
+an application root.
+
+For anywhere other than a file, pass a function instead:
+
+```ts
+mcpPlugin({
+  audit: {
+    sink: async (record) => {
+      await auditStream.write(record)
+    },
+  },
+})
+```
+
+A sink that throws is warned about and does not fail the tool call it was
+recording.
+
+**The sink is opt-in on purpose.** The endpoint runs on Workers, where there is
+no writable filesystem, and on Lambda, where it is ephemeral — a framework that
+started appending on its own would give you a trail that quietly degrades per
+deployment while the configuration looks identical. An audit trail is only
+worth something if you know whether it is complete, so Guren makes you say
+where it goes.
+
+### Reading the trail
+
+```bash
+# The last 50 records
+bunx guren tool:log
+
+# Follow, including the rollover into tomorrow's file
+bunx guren tool:log --tail
+
+# Only denials, only this tool, only the last two hours
+bunx guren tool:log --denied
+bunx guren tool:log --tool posts.store --since 2h -n 200
+
+# Raw records, one per line, for piping
+bunx guren tool:log --json | jq 'select(.status >= 400)'
+```
+
+| Option | Meaning |
+|---|---|
+| `--file <path>` | Base path of the trail (default `storage/logs/agent-audit.log`) |
+| `--tail`, `-f` | Follow as records arrive |
+| `--tool <name>` | Only this tool |
+| `--surface <s>` | Only `mcp`, `dev-mcp`, `cli`, or `webmcp` |
+| `--denied` | Only denials |
+| `--since <duration>` | Only records newer than `30m`, `2h`, `7d`… |
+| `-n <count>` | How many records (default 50) |
+| `--app <dir>` | Application root the base path is resolved against |
+| `--json` | One raw record per line |
+
+`tool:log` boots nothing — an audit trail has to be readable when the
+application it records is not startable. It reads across the rotation set
+newest-file-first, so `-n` spanning a midnight boundary works, and applies
+`-n` **after** filtering: `--denied -n 50` is the last fifty denials, not the
+denials among the last fifty records.
+
+If there is no trail, the command says so and prints the configuration line to
+add rather than an empty list — an empty listing here would read as "no agent
+touched this application", which is exactly the wrong conclusion to draw from a
+sink that was never wired.
+
 ### Redaction
 
 `event.arguments` is masked before the event is constructed. Two sources are

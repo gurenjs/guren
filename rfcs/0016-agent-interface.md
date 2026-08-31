@@ -267,11 +267,24 @@ Each feature maps to a measured failure mode of the MCP ecosystem.
      CLI confirmation and is an audit warning, as are non-expiring tokens
      (`ApiToken.expiresAt` already exists).
    - `guren token:issue --tools 'posts.*' --read-only --expires 30d`.
-2. **Default audit logging** (vs. "no approval workflow / no traceability"):
-   every invocation — and every denial — is recorded (principal, tool, arguments,
+2. ~~**Default audit logging**~~ **Audit logging** (vs. "no approval workflow / no
+   traceability"):
+   every invocation — and every denial — is ~~recorded~~ reported (principal, tool, arguments,
    ~~status, duration,~~ surface) with automatic redaction of sensitive argument names
    plus explicit `redact` metadata. Emitted as framework events (`AgentToolInvoked`,
    `AgentToolDenied`) so existing listeners can forward anywhere. `guren tool:log --tail`.
+   **Amended in implementation:** the *events* are default-on; the *sink that writes them
+   down* is opt-in — one line of configuration, `mcpPlugin({ audit: { file } })` for JSONL
+   through the existing daily-file channel, or `{ sink }` for anything else. Nothing is
+   written until an application asks for it. A framework that appended to a file on its
+   own would be wrong on two of the runtimes this endpoint is specified to run on: Workers
+   has no writable filesystem, and Lambda's is ephemeral, so the trail would degrade
+   differently per deployment while the configuration looked identical. An audit trail
+   whose completeness depends on where it happens to be running is worse than one an
+   operator knows is absent — the second can be fixed, the first is trusted. What makes
+   the opt-in cheap is that the events fire regardless: an application already forwarding
+   framework events is already forwarding these, and `guren tool:log` names the missing
+   configuration line rather than printing an empty list.
    **Amended in implementation:** status and duration belong to *invocations* only.
    An adapter-level denial (`auth`, `scope`, `approval`, `rate-limit`) refuses before
    synthesizing the request, so no HTTP happened and there is no status to record —
