@@ -45,6 +45,51 @@ function isInMemory(dbPath: string): boolean {
 }
 
 /**
+ * The filesystem path sqlite will open for `dbPath`, or undefined when there is
+ * no file to prepare a directory for.
+ *
+ * `file:` is sqlite's own URI scheme, so `file://…` names a *file* and not a
+ * server — which is why the connection-URI guard below lets every form of it
+ * through. What it is not is a path: handed to `resolve()` it is taken as a
+ * relative name, and the `mkdir -p` below then creates a `file:/…` tree under
+ * the cwd while sqlite opens the real path the URI meant. The stray tree is
+ * empty and untracked, so nothing fails and nothing reports it.
+ *
+ * The rules are sqlite's (https://sqlite.org/uri.html), not the WHATWG URL
+ * parser's — `new URL('file:local.db')` resolves to `/local.db`, an absolute
+ * path at the filesystem root, where sqlite resolves it against the cwd.
+ * A URI sqlite itself rejects (an authority that is neither empty nor
+ * `localhost`) resolves to undefined: `new Database()` is left to raise it,
+ * with no directory created on the way.
+ */
+function sqliteFilePath(dbPath: string): string | undefined {
+  if (isInMemory(dbPath)) return undefined
+  // Scheme comparison is case-sensitive here because it is in sqlite: `FILE:x`
+  // opens a file whose name literally starts with `FILE:`.
+  if (!dbPath.startsWith('file:')) return resolve(dbPath)
+
+  let rest = dbPath.slice('file:'.length)
+  if (rest.startsWith('//')) {
+    const pathStart = rest.indexOf('/', 2)
+    const authority = pathStart === -1 ? rest.slice(2) : rest.slice(2, pathStart)
+    if (authority !== '' && authority !== 'localhost') return undefined
+    rest = pathStart === -1 ? '' : rest.slice(pathStart)
+  }
+
+  // Split before decoding: a percent-encoded `?` belongs to the filename, and
+  // decoding first would hand the query it introduces to the filesystem.
+  const encodedPath = rest.split(/[?#]/, 1)[0] ?? ''
+  if (encodedPath === '') return undefined
+
+  try {
+    return resolve(decodeURIComponent(encodedPath))
+  } catch {
+    // Malformed escape — sqlite reports it far better than a mkdir would.
+    return undefined
+  }
+}
+
+/**
  * A scheme *with an authority* — the `//` is what separates a connection URI
  * from a filename — for every scheme that could name a database server.
  *
@@ -124,13 +169,20 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
   const database = singleFlight(async (): Promise<unknown> => {
     const dbPath = resolveFilename()
 
+    // The path sqlite will actually open, resolved once: the mkdir below and the
+    // hot-reload key both have to name the same file, and `dbPath` may be a
+    // `file:` URI that is neither.
+    const dbFile = sqliteFilePath(dbPath)
+
     // Ensure the directory exists
-    const { mkdirSync } = await import('node:fs')
-    const { dirname } = await import('node:path')
-    try {
-      mkdirSync(dirname(resolve(dbPath)), { recursive: true })
-    } catch {
-      // directory may already exist
+    if (dbFile) {
+      const { mkdirSync } = await import('node:fs')
+      const { dirname } = await import('node:path')
+      try {
+        mkdirSync(dirname(dbFile), { recursive: true })
+      } catch {
+        // directory may already exist
+      }
     }
 
     // Both driver modules are resolved before any client exists. An attempt
@@ -155,7 +207,9 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
 
     // In-memory databases share no underlying file, so two of them are distinct
     // handles even when every option matches — there is nothing to key them on.
-    activeKey = isInMemory(dbPath) ? undefined : hotReloadKey('sqlite', callSite, resolve(dbPath))
+    // Keying on the resolved file rather than on `dbPath` is what makes
+    // `file:///data/app.db` and `/data/app.db` one database across a reload.
+    activeKey = dbFile === undefined ? undefined : hotReloadKey('sqlite', callSite, dbFile)
     if (activeKey) {
       await replaceActiveConnection(activeKey, closeDatabase)
     }

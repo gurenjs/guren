@@ -99,6 +99,30 @@ describe('createSqliteDatabase hot-reload teardown', () => {
     await third.closeDatabase()
   })
 
+  // The same file under two spellings is one database, so the second evaluation
+  // has to take the first one's slot. The key is built from the path the driver
+  // resolved, and a `file:` URI resolved as a relative name lands somewhere no
+  // plain path ever will — so a reload that merely restyled the filename would
+  // orphan the open handle instead of replacing it.
+  test('should replace the handle when the filename changes to its file: URI', async () => {
+    const filename = join(workDir, 'app.db')
+
+    const before = createSqliteDatabase({ migrationsFolder: join(workDir, 'migrations'), filename })
+    const beforeDb = await before.getDatabase()
+    expect(isOpen(beforeDb)).toBe(true)
+
+    const asUri = createSqliteDatabase({
+      migrationsFolder: join(workDir, 'migrations'),
+      filename: `file://${filename}`,
+    })
+    const asUriDb = await asUri.getDatabase()
+
+    expect(isOpen(beforeDb)).toBe(false)
+    expect(isOpen(asUriDb)).toBe(true)
+
+    await asUri.closeDatabase()
+  })
+
   test('should leave a handle for a different database file open', async () => {
     const opened: SqliteDatabase[] = []
     for (const name of ['first.db', 'second.db']) {
@@ -279,7 +303,13 @@ describe('createSqliteDatabase connection-URI filenames', () => {
   const POSTGRES_URI = 'postgres://guren:guren@localhost:54322/guren'
   let originalDatabaseUrl: string | undefined
 
+  // The artifact both URI cases below assert the absence of: a directory named
+  // after the scheme, created under the cwd. Cleared up front so a tree left by
+  // a run from before this guard reds them once and not forever.
+  const strayUriRoot = resolve('file:')
+
   beforeEach(() => {
+    rmSync(strayUriRoot, { recursive: true, force: true })
     originalDatabaseUrl = process.env.DATABASE_URL
     delete process.env.DATABASE_URL
   })
@@ -348,6 +378,63 @@ describe('createSqliteDatabase connection-URI filenames', () => {
     expect(isOpen(db)).toBe(true)
 
     await database.closeDatabase()
+    expect(existsSync(strayUriRoot)).toBe(false)
+  })
+
+  // Accepting the URI is only half of it: the driver `mkdir -p`s the database's
+  // directory, and a URI handed to `resolve()` is taken as a *relative* name —
+  // so the tree it prepares is `<cwd>/file:/…` while sqlite opens the path the
+  // URI actually meant. Both halves are asserted here because each alone admits
+  // a wrong fix: the target directory does not exist yet, so an implementation
+  // that just skips the mkdir for `file:` URIs fails to open at all, and one
+  // that keeps concatenating leaves the stray tree behind. It is empty and
+  // untracked, which is why no build, typecheck or test gate ever reported it.
+  test('should create the directory the URI names, not one named after the URI', async () => {
+    const target = join(workDir, 'nested', 'deep.db')
+    const database = createSqliteDatabase({
+      migrationsFolder: join(workDir, 'migrations'),
+      filename: `file://${target}`,
+    })
+
+    const db = await database.getDatabase()
+    expect(isOpen(db)).toBe(true)
+    await database.closeDatabase()
+
+    expect(existsSync(target)).toBe(true)
+    expect(existsSync(strayUriRoot)).toBe(false)
+  })
+
+  // `%20` is a space in the *directory* segment, so decoding is load-bearing on
+  // the mkdir and not only on the open: prepare `deep%20dir` and sqlite, which
+  // decodes, then opens into a directory that was never created.
+  test('should percent-decode the URI before preparing its directory', async () => {
+    const database = createSqliteDatabase({
+      migrationsFolder: join(workDir, 'migrations'),
+      filename: `file://${workDir}/deep%20dir/app.db`,
+    })
+
+    const db = await database.getDatabase()
+    expect(isOpen(db)).toBe(true)
+    await database.closeDatabase()
+
+    expect(existsSync(join(workDir, 'deep dir', 'app.db'))).toBe(true)
+    expect(existsSync(strayUriRoot)).toBe(false)
+  })
+
+  // The one authority sqlite accepts besides an empty one. Anything else it
+  // rejects outright, which is why the driver prepares no directory for it.
+  test('should accept file://localhost with an absolute path', async () => {
+    const database = createSqliteDatabase({
+      migrationsFolder: join(workDir, 'migrations'),
+      filename: `file://localhost${join(workDir, 'nested', 'loopback.db')}`,
+    })
+
+    const db = await database.getDatabase()
+    expect(isOpen(db)).toBe(true)
+    await database.closeDatabase()
+
+    expect(existsSync(join(workDir, 'nested', 'loopback.db'))).toBe(true)
+    expect(existsSync(strayUriRoot)).toBe(false)
   })
 
   // A one-letter scheme is always a Windows drive, never a registered scheme.
@@ -371,6 +458,9 @@ describe('createSqliteDatabase connection-URI filenames', () => {
   test('should accept file:local.db, which sqlite resolves to a real file', async () => {
     // sqlite resolves this URI against the cwd rather than workDir, so the file it
     // creates is cleaned up here rather than by the suite's workDir teardown.
+    // That cwd-relative rule is sqlite's, not the URL parser's: `new URL()` reads
+    // the same string as `/local.db`, so resolving these URIs through it would
+    // point the mkdir at the filesystem root.
     const database = createSqliteDatabase({
       migrationsFolder: join(workDir, 'migrations'),
       filename: 'file:local.db',
@@ -380,6 +470,7 @@ describe('createSqliteDatabase connection-URI filenames', () => {
       const db = await database.getDatabase()
       expect(isOpen(db)).toBe(true)
       await database.closeDatabase()
+      expect(existsSync(resolve('local.db'))).toBe(true)
     } finally {
       rmSync(resolve('local.db'), { force: true })
     }
