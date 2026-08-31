@@ -1632,11 +1632,12 @@ describe('request body parity', () => {
    * that is stated rather than left to be discovered. Run against the exact
    * pre-change mock — gate on Hono's lowercased media type, then
    * `Request.formData()` — every row here passes, the uppercase one included.
-   * `formData()` is case-sensitive on Bun and case-insensitive on Node, and
-   * vitest runs this suite on Node, so the divergence the shared read exists
-   * to close (`MULTIPART/FORM-DATA` throwing out of `formData()`, `file()`
-   * answering `null` for a file the runtime delivers) is invisible from here.
-   * Measured on both runtimes rather than assumed.
+   * `formData()`'s answer for `MULTIPART/FORM-DATA` depends on the host: Bun
+   * 1.3.14 rejects it, Bun 1.4.0 accepts it, Node always accepted it. Vitest
+   * runs this suite on Node, so the divergence the shared read exists to close
+   * (`file()` answering `null` for a file the runtime delivers) is invisible
+   * from here on every one of them. Measured across all three rather than
+   * assumed.
    *
    * So the uppercase row states a contract it cannot enforce, and the
    * assertion that *can* fail on that axis lives in

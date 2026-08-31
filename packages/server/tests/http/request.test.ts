@@ -158,12 +158,19 @@ describe('parseRequestBody', () => {
  * both properties under test live *inside* Hono's `parseBody()` — a stub would
  * only re-assert its own return value.
  *
- * This suite runs on Bun (`bun run test:bun`), which is the point of it living
- * here. The uppercase case below is the divergence the shared read closed, and
- * Bun is the only runtime that can see it: `Request.formData()` is
- * case-sensitive here and case-insensitive on Node, so the same assertion in
- * `@guren/testing`'s vitest suite passes against an implementation that reads
- * uploads through `formData()` and one that does not. Measured both ways.
+ * This suite runs on Bun (`bun run test:bun`), which is where the uppercase
+ * case below was worth writing: `Request.formData()`'s handling of the media
+ * type has differed by runtime and by Bun version, and the point of
+ * `parseRequestUploads` is that none of that reaches `file()` / `files()`.
+ *
+ * Measured, because the numbers moved under this test once already: Bun 1.3.14
+ * rejects `MULTIPART/FORM-DATA` out of `formData()` (case-sensitive where Hono
+ * lowercases first), while **Bun 1.4.0 accepts it** — the same CI run, same
+ * Linux runner, 1.3.14 green and 1.4.0 red on a hard assertion that the host
+ * refuses. Node has always accepted it. So the host's behavior is recorded
+ * here rather than required; what is required is that this function answers
+ * with the file either way, which is the assertion the media-type-gate
+ * mutation still turns red.
  */
 describe('parseRequestUploads', () => {
   const BOUNDARY = 'guren-uploads-boundary'
@@ -215,19 +222,20 @@ describe('parseRequestUploads', () => {
 
   // No media-type gate, deliberately: Hono lowercases before deciding. Gating
   // outside `parseBody()` — or reading uploads through `Request.formData()`,
-  // which on Bun refuses this exact header — loses the file entirely.
-  it('reads an uppercase multipart media type, which Request.formData() refuses on Bun', async () => {
-    const contentType = `MULTIPART/FORM-DATA; boundary=${BOUNDARY}`
-    const body = uploadBody([['doc', 'a.txt', 'a']])
-
-    // Pins the premise, so this test cannot quietly become vacuous on a runtime
-    // whose formData() stops refusing: the assertion below is only interesting
-    // while the two answers differ.
-    await expect(
-      new Request('http://example.com/uploads', uploadInit(contentType, body)).formData(),
-    ).rejects.toThrow()
-
-    const uploads = await parseRequestUploads({ req: uploadRequest(contentType, body) })
+  // whose answer for this header is runtime- and version-dependent per the
+  // note above — is what loses the file.
+  //
+  // Not vacuous without a premise assertion about the host: adding a gate on
+  // the raw media type makes this red on every runtime, including the ones
+  // whose `formData()` would have accepted the body anyway. That mutation is
+  // what this test is for; the host's own answer is context, not a contract.
+  it('reads an uppercase multipart media type, whatever the host formData() makes of it', async () => {
+    const uploads = await parseRequestUploads({
+      req: uploadRequest(
+        `MULTIPART/FORM-DATA; boundary=${BOUNDARY}`,
+        uploadBody([['doc', 'a.txt', 'a']]),
+      ),
+    })
 
     expect(names(uploads.doc)).toEqual(['a.txt'])
   })

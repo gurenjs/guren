@@ -115,11 +115,16 @@ export type RequestUploads = Record<string, string | File | (string | File)[]>
  *
  * There is no media-type gate, deliberately: Hono decides the media type inside
  * `parseBody()`, having lowercased it first. A caller that gates before calling
- * — or that reads uploads through `Request.formData()` instead, which is
- * case-sensitive on Bun where Hono is not — answers `null` for an uppercase
- * `MULTIPART/FORM-DATA` body this returns the file for. That is measured, and
- * it is why `@guren/testing`'s controller mock reaches this function rather
- * than restating it.
+ * — or that reads uploads through `Request.formData()`, whose handling of the
+ * media type is not Hono's — answers `null` for an uppercase
+ * `MULTIPART/FORM-DATA` body this returns the file for.
+ *
+ * That was measured on Bun 1.3.14, and the host half of it has already moved:
+ * Bun 1.4.0 accepts the same header `1.3.14` rejects, and Node always did. The
+ * divergence is therefore a property of *where the media type is decided*, not
+ * of any one runtime — which is the argument for deciding it in one place, and
+ * why `@guren/testing`'s controller mock reaches this function rather than
+ * restating it.
  *
  * try/catch rather than `.catch()`, for the reason given on the shared
  * fallback: `parseBody` may throw synchronously as well as reject, and only one
