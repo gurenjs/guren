@@ -1,6 +1,6 @@
 {
   "name": "@guren/openapi",
-  "version": "1.3.1",
+  "version": "1.4.0",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -33,7 +33,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@guren/core": "^1.8.1"
+    "@guren/core": "^1.12.0"
   },
   "devDependencies": {
     "@types/node": "^20.14.10",

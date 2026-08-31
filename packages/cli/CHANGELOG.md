@@ -1,5 +1,122 @@
 # @guren/cli
 
+## 2.13.0
+
+### Minor Changes
+
+- e72244a: Check, audit, and context support for agent-exposed routes (RFC 0016 Phase 1c).
+
+  - `guren check` gains agent-route rules, running in the normal suite for any app whose routes declare `.agent()` metadata (an app with none contributes nothing). Failures: a route with agent metadata and no name (the tool name is the tool's identity), a tool name outside the MCP grammar `^[A-Za-z0-9._-]{1,128}$`, two routes resolving to one tool name, and a non-read-only tool with neither an authorization capability on its middleware chain nor `this.authorize(...)` in the action — authentication is not authorization, so `this.auth.userOrFail()` or an API-token check still fails, with its own message. Warnings: a route that declares no output schema or resource hint, an action that answers with `this.inertia(...)`, a body-carrying route with no `body` schema, a read-only tool whose action deletes, updates, or force-writes records (both an explicit `readOnlyHint: true` on a mutating verb and the GET/QUERY default — read-only is what exempts a route from the authorization rule, so it is held against the body), a controller file that could not be read at all, and any verdict the check could not reach because the handler body is one it does not read — an inline handler, or a controller outside the sources it scans. A routes file that fails to load is reported once, as `route-graph`, for the route-contract and agent-route checks together.
+  - `guren audit` treats agent-exposed routes more strictly: a body-validation finding that is a warning for an ordinary route becomes a failure when the route is an agent tool (same finding key, so existing `config/audit.ts` entries keep applying). New `agent-annotation:` rule: `destructiveHint: false` declared on an action that deletes, updates, or force-writes records warns, as does the same claim over an action body the audit could not read; a controller file that could not be read is reported as `controller-unreadable:`.
+  - `guren context <Entity>` gains an `## Agent Interfaces` section describing each agent-declared route as the tool it becomes (name, description, input parts, output, authorization, annotations, approval). `ContextRoute` carries the declared `agent` metadata and a derived `authorization` field, which names an ability only when the middleware chain makes exactly one derivable.
+  - The coding-agent harness gains an `agent-interface` skill, plus `.agent()` coverage in the routing rule file and the API digest. `CONTEXT_ROUTE_FEATURES` is exported so a consumer resolving this package from an app — the development MCP endpoint does — can tell "this app exposes no agent tools" from "this CLI is too old to answer".
+
+- 327b4b5: Generate the agent tool manifest, and inspect it from the CLI (RFC 0016 PR-1b).
+
+  - `guren codegen` writes `.guren/agents.gen.ts` for apps whose routes declare `.agent()` metadata, between the data types and the API client. Every tool is derived through `deriveAgentTools()` — the same call a protocol adapter makes — so the manifest and a live server cannot disagree about a tool's name, schemas, or exposure. What codegen adds is the half only the CLI can see: a route's `resource` hint carries a Resource _class name_, so the payload type behind it is appended to the tool description and emitted as a `Data.*` reference in `AgentToolOutputTypes`. Apps with no agent routes get no file, and a previously generated one is removed.
+  - `guren tool:list` prints the tools an app exposes (method, path, MCP/WebMCP exposure, ability, annotations); `guren tool:inspect <name>` shows one tool's full derivation. Both derive live from the route graph rather than reading the manifest, so a stale or absent one cannot answer for what an agent would see. `--json` on either.
+  - `guren check` and `guren doctor` account for `.guren/agents.gen.ts` conditionally, and in both directions: the manifest is expected when the derivation yields at least one tool, and a file left behind after the last `.agent()` was removed is reported as stale rather than passing green. Both findings name `guren codegen`, which is the command that resolves either — so the remedy always clears the state it was printed for.
+
+- a259c3b: Add `guren tool:call` and `TestApp.agent()` for invoking agent tools (RFC 0016 §6)
+
+  `guren tool:call <name> --input '{"title":"x"}'` boots the application and
+  invokes one agent tool through the framework's own dispatch contract — the same
+  derivation, request building and response mapping an MCP client's call goes
+  through, so there is no CLI-only code path to drift. Its tools come from the
+  booted app's route graph rather than a routes file, so a tool it can name is a
+  tool it can reach. `--as user:42` authenticates the call (development only: it
+  sets `GUREN_TESTING=1` for the process, and says so), `--preflight` asks for a
+  verdict instead of an execution, and `--json` emits a machine-readable result.
+  A call that comes back as an error result exits non-zero.
+
+  `@guren/testing` gains `app.agent()`: `call(name, input, { as, preflight })`
+  returns a result carrying `assertOk`, `assertStatus`, `assertDenied` and
+  `assertStructured<T>()`, chainable on the pending call like every other
+  `TestApp` request, plus `tools()` for the derived catalog. Calls inherit the
+  app's standing headers, so `(await app.withCsrf()).agent()` composes.
+  `TestApp.fromFetch()` and `fromWorkers()` carry no route graph and say which
+  constructor to use instead of reporting an empty tool list.
+
+- a748a05: Add `guren token:issue`, which mints an API token scoped to the agent tools an app exposes (RFC 0016 §5.1).
+
+  ```
+  guren token:issue --name ci-agent --user 42 --tools 'posts.*' --read-only --expires 30d
+  ```
+
+  `--tools` takes a comma-separated list of full scopes (`tool:posts.store`, `tools:read`, `tools:*`, `tools:posts.*`) or their shorthands (`posts.store`, `read`, `*`, `posts.*`). The tool list every scope is judged against is derived live from the route graph — the same `deriveAgentTools()` call `tool:list` and a running adapter make — so what the command prints is what a dispatcher will honour.
+
+  This is the issuer half of the split the scope grammar describes: a token guard must grant less on anything it cannot parse, so it ignores a malformed ability silently, while here the same entry is a typo a human is still looking at. Every refusal happens before anything is written:
+
+  - a scope the grammar cannot parse is rejected by name, showing how a shorthand was read when that differs from what was typed;
+  - a scope matching no current tool is rejected too — it is either a typo or a _latent grant_, a stored pattern that would activate with no further consent the moment a matching tool is added. `--allow-unmatched` accepts one deliberately and warns in exactly those terms;
+  - `tools:*` requires `--yes`;
+  - `--expires` accepts `30d` / `12h` / `45m` and refuses both zero and a duration past the Date range — either end mints a token every expiry check reads as already expired. Omitting it issues a non-expiring token and warns.
+  - an empty `--user` or `--name` is refused, which a `required` flag alone does not catch: a token with no user authenticates as nobody, and one with no name is unidentifiable when someone comes to revoke it.
+
+  `--read-only` intersects the grant with the read-only tools and stores the concrete `tool:<name>` entries it resolved to, never the pattern: the grammar has no "read-only subset of `posts.*`" form, so a concrete list is the only faithful encoding — and it is fail-closed, since a write tool later joining that family joins no stored entry. Under `--read-only` a scope resolving only to write tools is refused rather than silently dropped, `--allow-unmatched` included: concrete entries cannot activate later, so that combination could not keep the flag's promise.
+
+  A grant covering both read-only and write tools warns about the lethal-trifecta shape without refusing it. `--json` emits one machine-readable object carrying the token, the granted tools split read/write, and the warnings. The plain token is printed once and stored hashed.
+
+  Repeated flags are read last-wins throughout: citty arrays a repeated flag and an array is truthy, so `--yes=false --yes=false` would otherwise authorize a `tools:*` grant the user twice declined, and a repeated `--user` would be stored comma-joined as a principal nobody is. `--user` keeps a digit string that is not its own numeric spelling (`0042` stays a string; `42` becomes a number for a serial key). `--app` now resolves the application entry from the root it names, so the token lands in the store of the same app its tools were derived from. Only tools exposed on MCP count toward a grant — a bearer token reaches no other surface. An application whose `boot()` rejects fails the command instead of minting against a half-configured store.
+
+- ea515ae: Add `guren tool:dev`, which serves this application's agent tools locally with a throwaway bearer token and prints the MCP Inspector invocation that connects to it (RFC 0016 §6).
+
+  The endpoint is the application's own — the command mounts nothing and inspects nothing. What it adds is the one thing that makes the real endpoint awkward to try: a token, without asking anyone to mint a lasting credential to look at a catalogue.
+
+  The token is ephemeral by construction rather than by policy. It is issued into a `MemoryApiTokenStore` the command creates and then installs over whatever store the app configured, so nothing is written to the app's real store and nothing survives the process — "revoking" it is exiting. The override works because `@guren/plugin-mcp` resolves the store per request rather than at boot.
+
+  Before printing anything the command asks the running app whether the endpoint is really there: a mounted one answers 401 without a bearer, an app that never registered the plugin answers 404, so a missing `mcpPlugin()` is named as such instead of surfacing later as a confusing client error. `--path` covers a plugin mounted elsewhere, `--as <id>` picks the user tool calls authenticate as (the default is a placeholder matching no record, so listing works and a call whose policy loads a user fails visibly), and the command refuses to run with `NODE_ENV=production`.
+
+### Patch Changes
+
+- 8f43757: Correct the agent-interface skill's account of what ships. It told every scaffolded app that `expose`, `approval`, and `redact` were "recorded now; acted on when those surfaces ship" — `@guren/plugin-mcp` honours all three today, hiding unexposed tools, refusing approval-required ones fail-closed, and masking the named fields in the audit events. Two things in that table genuinely have not shipped — `expose.webMcp` and the approval _queue_ — and the skill now names those two instead of disclaiming the whole set.
+- 51e5d6a: Controller actions written as class fields (`store = async () => {}`, `show = () => this.inertia(...)`) are now recognised everywhere the CLI reads a controller.
+
+  `Router` dispatches to a function-valued class field exactly as it does to a method declaration, but four of the five class-member walks in the CLI tested only for a method declaration. `guren check` and `guren doctor --next` never reported an empty field action, `guren context <Entity>` left one out of the bundle entirely with nothing to say it had been skipped, and `spec:generate`'s screens view attributed the page such an action renders to no route at all. All five now share one answer to which members of a controller are actions, and member names are read through the same rule the rest of the CLI uses — so a quoted key (`'store'() {}`) counts, and a computed one (`[store]() {}`) is skipped rather than guessed at from its literal text.
+
+- cfb4a8d: Host the single-child wrapper unwrap step once, in `internal/zod-compat`.
+
+  Three walks look through zod's wrappers for different reasons — finding the
+  object behind a params schema, rendering a TypeScript type, deciding whether a
+  property may be omitted — and each carried its own copy of the traversal. The
+  copies agreed, but nothing made them: a wrapper name or pipe direction known to
+  one and not another silently changes an answer, which is the whole reason the
+  vocabulary itself already lived in one place.
+
+  `unwrapSingleChild(schema, io)` now applies that vocabulary for all of them.
+  What each caller _concludes_ from a wrapper stays with the caller, because those
+  conclusions legitimately differ: the CLI's type renderer reads only the side of
+  a `.pipe()` it renders so presence matches the type it names, while the JSON
+  Schema walker and the route contract check require both sides to permit
+  omission. No behaviour changes.
+
+  Internal by `contributing/api-stability.md` — reachable only through a deep
+  import, with no stability guarantee. `@guren/cli` is released alongside so its
+  `@guren/server` range admits the version that introduces the helper it now
+  reaches through `@guren/core/internal/zod-compat`.
+
+- Updated dependencies [8f43757]
+- Updated dependencies [0cf0260]
+- Updated dependencies [a3a96ae]
+- Updated dependencies [e72244a]
+- Updated dependencies [327b4b5]
+- Updated dependencies [ea515ae]
+- Updated dependencies [5cbccb0]
+- Updated dependencies [a9077f4]
+- Updated dependencies [ec10be6]
+- Updated dependencies [a259c3b]
+- Updated dependencies [15f969a]
+- Updated dependencies [1161036]
+- Updated dependencies [bc70b7f]
+- Updated dependencies [3b55863]
+- Updated dependencies [cfb4a8d]
+- Updated dependencies [89aa23f]
+- Updated dependencies [1218a8a]
+- Updated dependencies [9e19202]
+- Updated dependencies [4335cbc]
+  - @guren/server@2.14.0
+  - @guren/core@1.12.0
+
 ## 2.12.0
 
 ### Minor Changes
