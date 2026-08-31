@@ -1,3 +1,10 @@
+// Every zod schema built after this import parses through a compiled fast
+// path. Keep it the first import so it runs before any module that defines
+// schemas. It honors z.config({ jitless: true }) for CSP-restricted runtimes
+// and never throws — unsupported schemas keep the regular parser. One caveat:
+// on invalid input, refinements/transforms can run twice (fast path, then
+// fallback), so keep .refine()/.transform() free of side effects.
+import 'zod/compile'
 import {
   createApp,
   NotificationServiceProvider as CoreNotificationServiceProvider,
