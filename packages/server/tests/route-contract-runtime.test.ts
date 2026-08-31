@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test'
 import { z } from 'zod'
-import { Application, Controller, type Router } from '../src/index'
+import { Application, Controller, NotFoundHttpException, type Router } from '../src/index'
 
 /**
  * The runtime failure modes `guren check`'s route contract check describes in
@@ -185,5 +185,34 @@ describe('output schema scope', () => {
 
     expect(status).toBe(200)
     expect(JSON.parse(body)).toEqual({ id: 1, title: 'hello' })
+  })
+
+  // Not the same path as the 422 above: that one is thrown by `validateBody()`
+  // inside the action, this one stands in for a `Model.findOrFail()` miss. Both
+  // reach the contract middleware the same counterintuitive way — Hono's
+  // `compose` catches at the inner dispatch frame, calls `onError`, assigns the
+  // rendered response to `context.res` and returns normally, so the error body
+  // arrives at `await next()` as an ordinary return rather than as a throw.
+  test('a 404 from the exception handler keeps its status', async () => {
+    class MissingController extends Controller {
+      async show(): Promise<never> {
+        throw new NotFoundHttpException('Post not found')
+      }
+    }
+
+    const app = new Application({
+      routes: (router: Router) => {
+        router.get('/posts/:id', { output: Output }, [MissingController, 'show']).name('posts.show')
+      },
+    })
+    await app.boot()
+    const response = await app.fetch(
+      new Request('http://localhost/posts/1', { headers: { Accept: 'application/json' } }),
+    )
+
+    expect(response.status).toBe(404)
+    // Debug mode adds `exception` and `stack` beside it; the message is the
+    // part that is the app's own answer.
+    expect((await response.json() as { message: string }).message).toBe('Post not found')
   })
 })

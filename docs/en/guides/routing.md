@@ -314,7 +314,7 @@ Available contract fields:
 | `params` | Zod schema for path parameters |
 | `query` | Zod schema for query string parameters |
 | `body` | Zod schema for the request body |
-| `output` | Zod schema for the response body |
+| `output` | Zod schema for the response body — validated on 2xx answers only, so error responses and redirects pass through as the application wrote them |
 | `resource` | Resource class response hint — types the API client without a schema |
 | `bind` | Route model binding map — `{ id: Post }` (primary key) or `{ slug: [Post, 'slug'] }` (another column) |
 | `middlewares` | Array of middleware handlers |
