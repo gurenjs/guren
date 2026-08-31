@@ -42,12 +42,15 @@ export interface BuildToolRequestOptions {
  * The argument-level spelling of a preflight request (RFC 0016 §5.4), for a
  * surface whose callers pass flat arguments rather than dispatch options.
  *
- * No adapter strips it today: MCP does not offer preflight at all (see
- * `mapToolResponse` and the plugin), and the surfaces that do reach the seam
- * ask through `BuildToolRequestOptions.preflight`. A surface that adopts this
- * key owns the stripping — it is an instruction to the adapter, not a field of
- * any route's contract, and forwarding it would fail the very validation the
- * caller asked to rehearse.
+ * No adapter strips it today, because none accepts it. Every surface that
+ * reaches the seam asks through `BuildToolRequestOptions.preflight` instead:
+ * `guren tool:call` and `@guren/testing` from their own flags, and MCP from
+ * the `guren.preflight` companion tool, which takes the target tool's name
+ * and arguments rather than smuggling a directive through them (RFC 0016
+ * §5.4 — a verdict conforms to no route's output schema, so it needs a tool
+ * of its own). A surface that adopts this key owns the stripping — it is an
+ * instruction to the adapter, not a field of any route's contract, and
+ * forwarding it would fail the very validation the caller asked to rehearse.
  */
 export const PREFLIGHT_ARGUMENT = '_preflight'
 

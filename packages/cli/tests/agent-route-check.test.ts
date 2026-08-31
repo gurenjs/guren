@@ -99,6 +99,48 @@ describe('checkAgentRoutes', () => {
       expect(results[0]?.status).toBe('pass')
     })
 
+    // The endpoint adds `guren.preflight` to the catalogue itself, and drops
+    // any route claiming it — two tools with one name makes an MCP client
+    // reject the whole list. A route that took it would otherwise be silently
+    // absent from the surface it declared itself for.
+    it('fails a route claiming a reserved meta-tool name', async () => {
+      const results = await run([
+        route({ path: '/preflight', name: 'guren.preflight', agent: {}, schemas: OUTPUT }),
+      ])
+
+      expect(results).toHaveLength(1)
+      expect(results[0]?.status).toBe('fail')
+      expect(results[0]?.key).toBe('agent-route-reserved-name:GET:/preflight')
+      expect(results[0]?.message).toContain('reserved')
+      expect(results[0]?.message).toContain('guren.preflight')
+    })
+
+    it('fails a reserved name that arrived through the toolName override', async () => {
+      const results = await run([
+        route({
+          path: '/checks',
+          name: 'checks.index',
+          agent: { toolName: 'guren.preflight' },
+          schemas: OUTPUT,
+        }),
+      ])
+
+      expect(results[0]?.status).toBe('fail')
+      expect(results[0]?.message).toContain('agent toolName override')
+    })
+
+    // The reservation is one name, not the `guren.` namespace: reserving a
+    // namespace nothing occupies fails routes over a collision that does not
+    // exist.
+    it('accepts a name that merely resembles a reserved one', async () => {
+      const results = await run([
+        route({ path: '/preflight', name: 'guren.preflights', agent: {}, schemas: OUTPUT }),
+      ])
+
+      expect(results).toHaveLength(1)
+      expect(results[0]?.status).toBe('pass')
+    })
+
     it('fails once per collision group, naming both routes', async () => {
       const results = await run([
         route({ path: '/posts', name: 'posts.index', agent: {}, schemas: OUTPUT }),

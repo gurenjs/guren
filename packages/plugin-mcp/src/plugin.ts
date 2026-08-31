@@ -5,6 +5,7 @@ import {
   buildToolRequest,
   definePlugin,
   deriveAgentTools,
+  isReservedAgentToolName,
   mapToolResponse,
   readBearerToken,
   redactAgentArguments,
@@ -132,6 +133,20 @@ const factory = definePlugin<McpPluginConfig>({
     }
     const exposed = tools.filter((tool) => tool.expose.mcp)
 
+    // A route whose tool name is one the endpoint adds itself (RFC 0016
+    // §5.4). `createAppMcpServer` drops it — two tools with one name makes an
+    // MCP client reject the entire catalogue — but silently dropping a route
+    // an application declared would be the endpoint deciding not to serve it
+    // without saying so. `guren check` fails the build over the same
+    // collision; this is what an app that never ran the check sees.
+    for (const tool of exposed.filter((candidate) => isReservedAgentToolName(candidate.toolName))) {
+      console.warn(
+        `[@guren/plugin-mcp] The route "${tool.routeName}" claims the reserved tool name `
+        + `"${tool.toolName}", which this endpoint serves itself. It is not exposed. `
+        + 'Rename the route or set agent.toolName.',
+      )
+    }
+
     const path = config.path ?? '/mcp'
     const serverInfo = {
       name: config.serverInfo?.name ?? 'guren-app',
@@ -190,7 +205,8 @@ const factory = definePlugin<McpPluginConfig>({
         serverInfo,
         limiter,
         rateKey: verified.token.id,
-        dispatch: (tool, args) => dispatchThroughApp(app, c, tool, args),
+        dispatch: (tool, args, dispatchOptions) =>
+          dispatchThroughApp(app, c, tool, args, dispatchOptions?.preflight),
         onInvoked: (tool, args, status, durationMs) => {
           emit(
             new AgentToolInvoked(
@@ -247,24 +263,22 @@ async function dispatchThroughApp(
   c: Context,
   tool: DerivedAgentTool,
   args: Record<string, unknown>,
+  preflight?: boolean,
 ): Promise<ToolCallOutcome> {
-  // No `preflight` option below, deliberately: preflight is *not* offered on
-  // this surface, though the seam it uses is server-side and available to
-  // every other one (RFC 0016 §5.4).
+  // `preflight` is never an argument of the tool being checked on this
+  // surface, and the flag below is not reachable from one: it comes from the
+  // `guren.preflight` companion tool, which takes the checked tool's name and
+  // arguments and answers with its own output schema (RFC 0016 §5.4).
   //
-  // MCP leaves no room for it inside a tool that advertises an `outputSchema`:
-  // the spec requires such a tool to answer with `structuredContent`
-  // conforming to that schema unless the result is an error, and a verdict
-  // conforms to no route's output. Reporting "allowed" as `isError` would be
-  // worse than not offering it. So the MCP form needs a companion tool with
-  // its own result schema — which is the same problem the approval queue has
-  // ("the tool result carries the pending state"), and belongs with it in
-  // Phase 2.5 rather than being solved twice, differently.
+  // MCP leaves no room for the argument form. A tool advertising an
+  // `outputSchema` must answer with `structuredContent` conforming to it
+  // unless the result is an error, and a verdict conforms to no route's
+  // output — so a tool that sometimes returns a verdict is a tool that
+  // sometimes violates its own contract, and reporting "allowed" as `isError`
+  // to escape that would be worse than not offering preflight at all.
   //
-  // Nothing is lost meanwhile: `_preflight` was never advertised in any
-  // tool's input schema, so no client could discover it. It reaches
-  // `guren tool:call` and `@guren/testing` through the dispatch option
-  // instead, neither of which is bound by that rule.
+  // The seam it reaches is the same one `guren tool:call` and `@guren/testing`
+  // use through this option directly; neither is bound by that rule.
   const built = buildToolRequest(tool, args, {
     // The inbound request's own origin, so the re-entrant request carries the
     // real Host the MCP client reached `/mcp` on. Defaulting to localhost
@@ -273,6 +287,7 @@ async function dispatchThroughApp(
     // tool call with 403.
     origin: new URL(c.req.url).origin,
     authorization: c.req.header('Authorization'),
+    preflight,
   })
   if ('missing' in built) {
     // No HTTP happened, but the call did — recorded by the caller as an

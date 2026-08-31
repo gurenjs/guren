@@ -177,6 +177,7 @@ Routes that declare `.agent()` metadata (see [Routing](./routing.md)) are checke
 |---|---|
 | `agent-route-name:*` | The route declares agent metadata but has no `.name()`. The tool name is the tool's identity, so a nameless route cannot become a tool. |
 | `agent-route-tool-name:*` | The tool name (`agent.toolName`, or the route name) falls outside the MCP grammar `^[A-Za-z0-9._-]{1,128}$`. A client rejects the whole tool list, not just the one tool. |
+| `agent-route-reserved-name:*` | The tool name is reserved by the framework — `guren.preflight` is a meta-tool the MCP endpoint adds itself. A route claiming it is not exposed at all. |
 | `agent-route-duplicate:*` | Two or more routes resolve to the same tool name. |
 | `agent-route-authorization:*` | A non-read-only tool whose middleware chain carries no authorization capability and whose controller action never calls `this.authorize(...)`. **Authentication is not authorization**: `this.auth.userOrFail()` or an API-token check satisfies neither, and produces its own message saying so. |
 

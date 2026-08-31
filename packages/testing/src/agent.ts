@@ -107,10 +107,12 @@ export interface AgentCallOptions {
    * the route's middleware and validates the advertised contract, then stops
    * before the handler.
    *
-   * MCP does not offer preflight at all — a tool that advertises an
-   * `outputSchema` must answer with conforming `structuredContent`, and a
-   * verdict conforms to no route's output. This surface is not bound by that
-   * rule, so it offers what the seam supports.
+   * MCP cannot offer this as an argument of the tool being checked — a tool
+   * that advertises an `outputSchema` must answer with conforming
+   * `structuredContent`, and a verdict conforms to no route's output — so it
+   * reaches the same seam through a `guren.preflight` companion tool with its
+   * own result schema. This surface is not bound by that rule, so it asks for
+   * a verdict on the call itself.
    */
   preflight?: boolean
 }

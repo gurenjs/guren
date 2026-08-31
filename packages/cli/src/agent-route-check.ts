@@ -1,4 +1,5 @@
 import { resolve } from 'node:path'
+import { isReservedAgentToolName, RESERVED_AGENT_TOOL_NAMES } from '@guren/core'
 import type { AgentRouteMetadata, RouteDefinition } from '@guren/core'
 import { check, type CheckResult } from './check-result'
 import {
@@ -114,6 +115,36 @@ function toolNameFinding(route: AgentRoute): CheckResult | undefined {
     + '^[A-Za-z0-9._-]{1,128}$. A client rejects the whole tool list rather than the one tool.',
     'Rename the route, or set agent.toolName to a name matching that grammar (dots are allowed, so '
     + '\'posts.store\' needs no transformation).',
+  )
+}
+
+/**
+ * A tool name the framework occupies (RFC 0016 §5.4).
+ *
+ * The reserved list is imported, never restated: `@guren/plugin-mcp` adds
+ * `guren.preflight` to the catalogue it serves, and if the two lists drift
+ * this check keeps passing a route whose tool the endpoint has already
+ * shadowed. The endpoint drops the colliding route rather than serving two
+ * tools with one name — an MCP client answers that by rejecting the whole
+ * catalogue — so the cost of not failing here is a route that is silently
+ * absent from the surface it declared itself for.
+ *
+ * A fail rather than a warn for the same reason the duplicate rule is one:
+ * the tool name is the tool's identity, and the route does not get it.
+ */
+function reservedNameFinding(route: AgentRoute): CheckResult | undefined {
+  const { toolName } = route
+  if (toolName === undefined || !isReservedAgentToolName(toolName)) return undefined
+
+  const source = route.agent.toolName !== undefined ? 'agent toolName override' : 'route name'
+  return check(
+    `agent-route-reserved-name:${route.keySuffix}`,
+    `${route.label} agent tool`,
+    'fail',
+    `The tool name '${toolName}' (from the ${source}) is reserved by the framework: agent surfaces `
+    + 'add it to the catalogue themselves as a meta-tool. A route claiming it is not exposed at all. '
+    + `Reserved names: ${RESERVED_AGENT_TOOL_NAMES.join(', ')}.`,
+    'Rename the route, or set agent.toolName to a name outside the reserved list.',
   )
 }
 
@@ -509,7 +540,14 @@ export async function checkAgentRoutes(options: AgentRouteCheckOptions): Promise
       results.push(nameResult)
     } else {
       const toolNameResult = toolNameFinding(route)
-      if (toolNameResult) results.push(toolNameResult)
+      if (toolNameResult) {
+        results.push(toolNameResult)
+      } else {
+        // Only for a grammar-legal name: an illegal one is already failing,
+        // renaming it fixes both, and no reserved name is illegal anyway.
+        const reserved = reservedNameFinding(route)
+        if (reserved) results.push(reserved)
+      }
     }
 
     const authorization = authorizationFinding(route)
@@ -533,7 +571,7 @@ export async function checkAgentRoutes(options: AgentRouteCheckOptions): Promise
       'Agent routes',
       'pass',
       `${routes.length} agent-exposed route${routes.length === 1 ? '' : 's'} checked: every tool name is `
-      + 'legal and unique, every non-read-only tool carries authorization evidence, every declared '
+      + 'legal, unreserved and unique, every non-read-only tool carries authorization evidence, every declared '
       + 'readOnlyHint holds against the action, and every route declares the schemas a tool is derived '
       + 'from. Nothing here validates the derived tools themselves, or any behaviour outside the '
       + 'controller bodies this check reads.',

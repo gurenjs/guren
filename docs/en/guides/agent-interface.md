@@ -184,10 +184,12 @@ advertises, then stops before the handler. `unverified` names what a real call
 would still evaluate — a route that authorizes inside its action is a check this
 seam structurally cannot reach.
 
-The MCP endpoint does not offer preflight. A tool that advertises an
-`outputSchema` must answer with `structuredContent` conforming to it, and a
-verdict conforms to no route's output; `tool:call` and `@guren/testing` are not
-bound by that rule, so they offer what the seam supports.
+MCP reaches the same seam through a companion tool rather than a flag — see
+[Rehearsing a call over MCP](#rehearsing-a-call-over-mcp). A tool that
+advertises an `outputSchema` must answer with `structuredContent` conforming to
+it, and a verdict conforms to no route's output, so the verdict needs a tool of
+its own. `tool:call` and `@guren/testing` are not bound by that rule and ask
+for a verdict on the call itself.
 
 ## Testing a tool
 
@@ -525,6 +527,66 @@ per instance. A global budget still needs a shared store and your app's own
 > request never arrived over a socket — so every MCP caller collapses into that
 > route's shared bucket.
 
+### Rehearsing a call over MCP
+
+The endpoint adds one tool of its own, `guren.preflight`. It answers whether a
+call to another tool would be allowed, and never performs it:
+
+```json
+{
+  "name": "guren.preflight",
+  "arguments": { "tool": "posts.store", "input": { "title": "Rehearsal" } }
+}
+```
+
+```json
+{
+  "tool": "posts.store",
+  "allowed": true,
+  "status": 200,
+  "validated": ["body"],
+  "unverified": ["authorization"],
+  "message": "Preflight only: the request passed this route's middleware and its body schema. …"
+}
+```
+
+It reaches the same seam `--preflight` does: the checked tool's own
+middleware runs, its advertised contract is validated, and the request stops
+before the handler. Nothing is created, changed, or deleted.
+
+A refusal is a **successful** result, not an error — the caller asked whether
+the call would be allowed, and "no, here is why" answers that:
+
+```json
+{
+  "tool": "posts.store",
+  "allowed": false,
+  "status": 422,
+  "message": "The given data was invalid.",
+  "errors": { "title": ["Required"] }
+}
+```
+
+`validated` and `unverified` are present only when the request reached the
+seam. A call refused earlier — by authentication or authorization middleware —
+has no answer to give about checks it never reached, so those fields are
+absent rather than empty.
+
+Four rules worth knowing:
+
+- **Checking a tool needs the same scope as calling it.** Otherwise the
+  companion would be a way to probe the authorization surface of tools the
+  token cannot call. An ungranted name is refused as an error result, the way a
+  direct call to it is.
+- **A tool that requires approval can still be checked.** It is not callable
+  and not listed, which is precisely when "would this be accepted?" is worth
+  asking — and the rehearsal executes nothing.
+- **`guren.preflight` is listed only for a token that grants at least one
+  tool.** A token that can call nothing has nothing to rehearse.
+- **The name is reserved.** A route whose `.agent()` tool name claims it fails
+  `bunx guren check`, and the endpoint refuses to serve it — two tools under
+  one name makes an MCP client reject the whole catalogue.
+
 ## Tokens and scopes
 
 **An existing `['*']` token grants no agent tools.** Only `tool:` and `tools:`
@@ -626,6 +688,13 @@ the checks that precede the request. **A policy denial is not one of them:**
 policies evaluate inside the dispatched request, so it arrives as an
 `AgentToolInvoked` with status `403`. A denial carries no status or duration
 because nothing ran.
+
+A `guren.preflight` call is recorded like any other invocation, under
+`tool: 'guren.preflight'` — an agent probing what it is allowed to do is
+exactly what a trail wants to show. The tool it checked gets no record of its
+own, because nothing was invoked. A scope refusal is the exception: it is an
+`AgentToolDenied` naming the **checked** tool, so the trail says which tool was
+probed.
 
 ```ts
 // app/Providers/EventServiceProvider.ts (or wherever you register listeners)
@@ -795,7 +864,8 @@ content-activated: an app with no agent routes produces no findings and has no
 controller scanned.
 
 `check` **fails** on a nameless agent route, a tool name outside the MCP
-grammar, two routes resolving to one tool name, and a non-read-only tool whose
+grammar, a tool name reserved by the framework (`guren.preflight`), two routes
+resolving to one tool name, and a non-read-only tool whose
 middleware chain carries no authorization capability and whose action never
 calls `this.authorize(...)`.
 

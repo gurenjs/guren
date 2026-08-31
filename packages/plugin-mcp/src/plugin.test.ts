@@ -93,7 +93,13 @@ describe('mcpPlugin (integration)', () => {
   test('should list the app tools to a granted token', async () => {
     const client = await connectClient(token)
     const { tools } = await client.listTools()
-    expect(tools.map((tool) => tool.name).sort()).toEqual(['posts.index', 'posts.store'])
+    // The preflight companion rides alongside the app's own tools for any
+    // token that grants at least one of them (RFC 0016 §5.4).
+    expect(tools.map((tool) => tool.name).sort()).toEqual([
+      'guren.preflight',
+      'posts.index',
+      'posts.store',
+    ])
   })
 
   test('should execute a read tool through the app and return its JSON', async () => {
@@ -141,7 +147,7 @@ describe('mcpPlugin (integration)', () => {
     const client = await connectClient(readOnly.plainTextToken)
 
     const { tools } = await client.listTools()
-    expect(tools.map((tool) => tool.name)).toEqual(['posts.index'])
+    expect(tools.map((tool) => tool.name)).toEqual(['posts.index', 'guren.preflight'])
 
     const result = await client.callTool({ name: 'posts.store', arguments: { title: 'x', password: 'y' } })
     expect(result.isError).toBe(true)

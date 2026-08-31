@@ -13,12 +13,41 @@ function deriveFixtureTools(): DerivedAgentTool[] {
   router.get('/posts', handler).name('posts.index').agent({ description: 'List posts' })
   router.post('/posts', handler).name('posts.store').agent({})
   router.get('/hidden', handler).name('hidden.index').agent({ expose: { mcp: false } })
+  // Uncallable until the approval queue ships, and therefore unlisted — but
+  // still checkable, which is what the preflight cases below turn on.
+  router.post('/approvals', handler).name('approvals.store').agent({ approval: 'required' })
   return deriveAgentTools(router.definitions()).tools.filter((tool) => tool.expose.mcp)
 }
 
 interface Recorded {
-  invoked: Array<{ tool: string; status: number }>
+  invoked: Array<{ tool: string; status: number; args: Record<string, unknown> }>
   denied: Array<{ tool: string; reason: AgentToolDenialReason }>
+}
+
+/**
+ * What the router's preflight seam answers for an allowed rehearsal — the
+ * shape pinned in `packages/server/src/mvc/Router.ts`. Stubbed here because
+ * these cases are about the companion tool's own rules; the seam itself is
+ * driven for real in `preflight.test.ts`.
+ */
+function seamVerdict(overrides: Record<string, unknown> = {}): ToolCallOutcome {
+  return {
+    content: [
+      {
+        type: 'text',
+        text: JSON.stringify({
+          preflight: true,
+          allowed: true,
+          route: 'posts.store',
+          validated: ['body'],
+          unverified: ['authorization'],
+          message: 'Preflight only: the handler did not run.',
+          ...overrides,
+        }),
+      },
+    ],
+    status: 200,
+  }
 }
 
 async function connect(overrides: Partial<AppMcpServerOptions> = {}): Promise<{ client: Client; recorded: Recorded }> {
@@ -32,7 +61,7 @@ async function connect(overrides: Partial<AppMcpServerOptions> = {}): Promise<{ 
       content: [{ type: 'text', text: '{"ok":true}' }],
       status: 200,
     }),
-    onInvoked: (tool, _args, status) => recorded.invoked.push({ tool: tool.toolName, status }),
+    onInvoked: (tool, args, status) => recorded.invoked.push({ tool: tool.toolName, status, args }),
     onDenied: (tool, _args, reason) => recorded.denied.push({ tool: tool.toolName, reason }),
     ...overrides,
   })
@@ -47,7 +76,8 @@ describe('createAppMcpServer', () => {
   test('should list only the tools the abilities grant', async () => {
     const { client } = await connect({ abilities: ['tools:read'] })
     const { tools } = await client.listTools()
-    expect(tools.map((tool) => tool.name)).toEqual(['posts.index'])
+    // Plus the preflight companion, which any token granting a tool can use.
+    expect(tools.map((tool) => tool.name)).toEqual(['posts.index', 'guren.preflight'])
   })
 
   test('should advertise schema and annotations on listed tools', async () => {
@@ -67,7 +97,7 @@ describe('createAppMcpServer', () => {
     const { client, recorded } = await connect()
     const result = await client.callTool({ name: 'posts.store', arguments: {} })
     expect(result.isError).toBeUndefined()
-    expect(recorded.invoked).toEqual([{ tool: 'posts.store', status: 200 }])
+    expect(recorded.invoked).toEqual([{ tool: 'posts.store', status: 200, args: {} }])
     expect(recorded.denied).toEqual([])
   })
 
@@ -112,6 +142,195 @@ describe('createAppMcpServer', () => {
     })
     const result = await client.callTool({ name: 'posts.index', arguments: {} })
     expect(result.isError).toBe(true)
-    expect(recorded.invoked).toEqual([{ tool: 'posts.index', status: 500 }])
+    expect(recorded.invoked).toEqual([{ tool: 'posts.index', status: 500, args: {} }])
+  })
+})
+
+/**
+ * The companion tool's own rules (RFC 0016 §5.4): what it advertises, what it
+ * is allowed to check, and what it records. The verdict it reports is
+ * whatever the seam answered, stubbed here — `preflight.test.ts` drives the
+ * real one.
+ */
+describe('createAppMcpServer: guren.preflight', () => {
+  async function connectPreflight(overrides: Partial<AppMcpServerOptions> = {}) {
+    const dispatched: Array<{ tool: string; args: Record<string, unknown>; preflight: boolean }> = []
+    const connected = await connect({
+      dispatch: async (tool, args, options) => {
+        dispatched.push({ tool: tool.toolName, args, preflight: Boolean(options?.preflight) })
+        return options?.preflight
+          ? seamVerdict({ route: tool.toolName })
+          : { content: [{ type: 'text', text: '{"ok":true}' }], status: 200 }
+      },
+      ...overrides,
+    })
+    return { ...connected, dispatched }
+  }
+
+  test('should advertise itself as read-only and non-destructive', async () => {
+    const { client } = await connectPreflight()
+    const { tools } = await client.listTools()
+    const preflight = tools.find((tool) => tool.name === 'guren.preflight')!
+
+    expect(preflight.annotations).toEqual({
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+    })
+    expect(preflight.description).toContain('without performing it')
+    expect(preflight.inputSchema.required).toEqual(['tool'])
+    expect(preflight.outputSchema?.required).toEqual(['tool', 'allowed', 'status', 'message'])
+  })
+
+  // A token that can call nothing has nothing to rehearse, and listing the
+  // companion to it would tell a caller with no access that agent tools exist.
+  test('should omit itself from a catalogue that grants nothing', async () => {
+    const { client } = await connectPreflight({ abilities: [] })
+    const { tools } = await client.listTools()
+    expect(tools).toEqual([])
+  })
+
+  test('should answer a verdict as a success result, not an error', async () => {
+    const { client, dispatched } = await connectPreflight()
+    await client.listTools()
+    const result = await client.callTool({
+      name: 'guren.preflight',
+      arguments: { tool: 'posts.store', input: { title: 'Hello' } },
+    })
+
+    expect(result.isError).toBeUndefined()
+    expect(result.structuredContent).toEqual({
+      tool: 'posts.store',
+      allowed: true,
+      status: 200,
+      message: 'Preflight only: the handler did not run.',
+      validated: ['body'],
+      unverified: ['authorization'],
+    })
+    // The checked tool's own arguments went to the route, and the request
+    // asked for a verdict rather than an execution.
+    expect(dispatched).toEqual([
+      { tool: 'posts.store', args: { title: 'Hello' }, preflight: true },
+    ])
+  })
+
+  // The verdict the seam produced, carried through rather than rebuilt: a
+  // route with no authorization middleware cannot be checked past the seam,
+  // and the companion must not lose that half of the answer.
+  test('should carry the seam\'s unverified list through unchanged', async () => {
+    const { client } = await connectPreflight({
+      dispatch: async () => seamVerdict({ unverified: [], validated: [] }),
+    })
+    const result = await client.callTool({
+      name: 'guren.preflight',
+      arguments: { tool: 'posts.index' },
+    })
+    expect((result.structuredContent as { unverified: string[] }).unverified).toEqual([])
+  })
+
+  test('should report a refusal as a success result carrying the errors', async () => {
+    const { client } = await connectPreflight({
+      dispatch: async () => ({
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              message: 'The given data was invalid.',
+              errors: { title: ['Required'] },
+            }),
+          },
+        ],
+        isError: true,
+        status: 422,
+      }),
+    })
+    const result = await client.callTool({ name: 'guren.preflight', arguments: { tool: 'posts.store' } })
+
+    // The *call to the companion* succeeded; what it reports is a refusal.
+    expect(result.isError).toBeUndefined()
+    expect(result.structuredContent).toEqual({
+      tool: 'posts.store',
+      allowed: false,
+      status: 422,
+      message: 'The given data was invalid.',
+      errors: { title: ['Required'] },
+    })
+  })
+
+  test('should deny a check of a tool the scopes do not grant', async () => {
+    const { client, recorded, dispatched } = await connectPreflight({ abilities: ['tools:read'] })
+    const result = await client.callTool({
+      name: 'guren.preflight',
+      arguments: { tool: 'posts.store', input: { title: 'Hello' } },
+    })
+
+    expect(result.isError).toBe(true)
+    // Named against the checked tool, exactly as a direct call would be.
+    expect(recorded.denied).toEqual([{ tool: 'posts.store', reason: 'scope' }])
+    expect(recorded.invoked).toEqual([])
+    expect(dispatched).toEqual([])
+  })
+
+  test('should refuse an unknown tool name and name it', async () => {
+    const { client, recorded } = await connectPreflight()
+    const result = await client.callTool({ name: 'guren.preflight', arguments: { tool: 'nope' } })
+
+    expect(result.isError).toBe(true)
+    expect((result.content as Array<{ text: string }>)[0]!.text).toContain('"nope"')
+    expect(recorded.denied).toEqual([])
+    expect(recorded.invoked).toEqual([])
+  })
+
+  test('should refuse arguments that name no tool', async () => {
+    const { client } = await connectPreflight()
+    const result = await client.callTool({ name: 'guren.preflight', arguments: {} })
+    expect(result.isError).toBe(true)
+    expect((result.content as Array<{ text: string }>)[0]!.text).toContain('"tool" argument')
+  })
+
+  // An approval-gated tool is uncallable and therefore unlisted, which is
+  // exactly the case where "would this be accepted?" is worth asking.
+  test('should answer for a tool that requires approval', async () => {
+    const { client, dispatched } = await connectPreflight()
+    const { tools } = await client.listTools()
+    expect(tools.map((tool) => tool.name)).not.toContain('approvals.store')
+
+    const result = await client.callTool({
+      name: 'guren.preflight',
+      arguments: { tool: 'approvals.store' },
+    })
+    expect(result.isError).toBeUndefined()
+    expect((result.structuredContent as { allowed: boolean }).allowed).toBe(true)
+    expect(dispatched).toEqual([{ tool: 'approvals.store', args: {}, preflight: true }])
+  })
+
+  test('should record the invocation under the meta-tool name only', async () => {
+    const { client, recorded } = await connectPreflight()
+    await client.callTool({
+      name: 'guren.preflight',
+      arguments: { tool: 'posts.store', input: { title: 'Hello' } },
+    })
+
+    expect(recorded.invoked).toEqual([
+      {
+        tool: 'guren.preflight',
+        status: 200,
+        args: { tool: 'posts.store', input: { title: 'Hello' } },
+      },
+    ])
+  })
+
+  // A rehearsal that ran is not a rehearsal. Reporting the handler's own
+  // answer as `allowed: true` would describe a write that happened as one
+  // that did not.
+  test('should error rather than report a verdict when the app ran the call', async () => {
+    const { client } = await connectPreflight({
+      dispatch: async () => ({ content: [{ type: 'text', text: '{"created":1}' }], status: 201 }),
+    })
+    const result = await client.callTool({ name: 'guren.preflight', arguments: { tool: 'posts.store' } })
+
+    expect(result.isError).toBe(true)
+    expect((result.content as Array<{ text: string }>)[0]!.text).toContain('its handler ran')
+    expect(result.structuredContent).toBeUndefined()
   })
 })
