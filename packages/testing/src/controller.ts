@@ -142,18 +142,10 @@ async function parseRequestBody(ctx: ControllerContext): Promise<unknown> {
  * — the same delegation as {@link parseRequestBody}, to the runtime's
  * `parseRequestUploads` rather than to its body parser.
  *
- * The two are a deliberate pair and not interchangeable: this one parses with
- * `{ all: true }`, so a field repeated in the body stays an array and `files()`
- * sees every part. The body parser flattens the same field to its first value.
- *
- * There is no media-type gate on this side either, and its absence is the fix.
- * The mock used to gate on Hono's rule and then read the body with
- * `Request.formData()`, which is case-sensitive on Bun where Hono lowercases
- * first — so `MULTIPART/FORM-DATA` threw out of `formData()` and `file()`
- * answered `null` for a body the runtime delivered the file for. Measured on
- * Bun; Node's `formData()` is case-insensitive, so the same suite run there
- * could not see it. Hono decides the media type inside `parseBody()` now, on
- * both sides, so there is nothing left to disagree about.
+ * The two are a deliberate pair and not interchangeable, and there is no
+ * media-type gate on this side — `parseRequestUploads` in the runtime owns both
+ * reasons, including the `Request.formData()` divergence whose absence here is
+ * the fix. Restating them is what this file is being emptied of.
  */
 async function parseRequestUploads(ctx: ControllerContext): Promise<RequestUploads> {
   const req = honoRequestFor(ctx)
@@ -488,15 +480,13 @@ export function createControllerModuleMock() {
     public multipartBody?: Promise<RequestUploads>
 
     public readMultipart(): Promise<RequestUploads> {
-      if (!this.multipartBody) {
-        // Memoized so repeated file()/files() calls are one parse, and that
-        // parse clones the request, mirroring Hono's cache. The undecodable
-        // body is already handled inside the shared read, so what is memoized
-        // is always a resolved promise — never a rejected one the two callers
-        // would each have to guard.
-        this.multipartBody = parseRequestUploads(this.ctx)
-      }
-      return this.multipartBody
+      // Memoized so repeated file()/files() calls are one parse, and that parse
+      // clones the request, mirroring Hono's cache. The undecodable body is
+      // already handled inside the shared read, so what is memoized is always a
+      // resolved promise — never a rejected one the two callers would each have
+      // to guard. `??=` like getRawBody() above: the memo is a promise, so
+      // there is no falsy value to confuse it.
+      return (this.multipartBody ??= parseRequestUploads(this.ctx))
     }
 
     public async file(name: string): Promise<File | null> {

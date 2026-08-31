@@ -168,8 +168,8 @@ describe('parseRequestBody', () => {
 describe('parseRequestUploads', () => {
   const BOUNDARY = 'guren-uploads-boundary'
 
-  function uploadRequest(contentType: string, files: Array<[string, string, string]>): HonoRequest {
-    const body =
+  function uploadBody(files: Array<[field: string, filename: string, content: string]>): string {
+    return (
       files
         .map(
           ([field, filename, content]) =>
@@ -179,14 +179,15 @@ describe('parseRequestUploads', () => {
             `${content}\r\n`,
         )
         .join('') + `--${BOUNDARY}--\r\n`
-
-    return new HonoRequest(
-      new Request('http://example.com/uploads', {
-        method: 'POST',
-        headers: { 'Content-Type': contentType },
-        body,
-      }),
     )
+  }
+
+  function uploadInit(contentType: string, body: string): RequestInit {
+    return { method: 'POST', headers: { 'Content-Type': contentType }, body }
+  }
+
+  function uploadRequest(contentType: string, body: string): HonoRequest {
+    return new HonoRequest(new Request('http://example.com/uploads', uploadInit(contentType, body)))
   }
 
   const names = (value: unknown): string[] =>
@@ -194,17 +195,19 @@ describe('parseRequestUploads', () => {
       .filter((item): item is File => item instanceof File)
       .map((file) => file.name)
 
-  // `{ all: true }` is the contract: without it Hono keeps one value per
-  // repeated field and `files()` silently reduces to a single file per
-  // `<input multiple>`. `@guren/testing`'s upload table catches that mutation
-  // too; this is the assertion that names the flag rather than an effect of
-  // it, so the reason survives a rewrite of that table.
+  // `{ all: true }` is the contract — `parseRequestUploads` says why.
+  // `@guren/testing`'s upload table catches this mutation too; what this one
+  // adds is naming the flag rather than an effect of it, so the reason survives
+  // a rewrite of that table.
   it('keeps every part of a repeated field, which files() depends on', async () => {
     const uploads = await parseRequestUploads({
-      req: uploadRequest(`multipart/form-data; boundary=${BOUNDARY}`, [
-        ['doc', 'a.txt', 'a'],
-        ['doc', 'b.txt', 'b'],
-      ]),
+      req: uploadRequest(
+        `multipart/form-data; boundary=${BOUNDARY}`,
+        uploadBody([
+          ['doc', 'a.txt', 'a'],
+          ['doc', 'b.txt', 'b'],
+        ]),
+      ),
     })
 
     expect(names(uploads.doc)).toEqual(['a.txt', 'b.txt'])
@@ -214,23 +217,17 @@ describe('parseRequestUploads', () => {
   // outside `parseBody()` — or reading uploads through `Request.formData()`,
   // which on Bun refuses this exact header — loses the file entirely.
   it('reads an uppercase multipart media type, which Request.formData() refuses on Bun', async () => {
-    const init = {
-      method: 'POST',
-      headers: { 'Content-Type': `MULTIPART/FORM-DATA; boundary=${BOUNDARY}` },
-      body:
-        `--${BOUNDARY}\r\n` +
-        'Content-Disposition: form-data; name="doc"; filename="a.txt"\r\n' +
-        'Content-Type: text/plain\r\n\r\n' +
-        'a\r\n' +
-        `--${BOUNDARY}--\r\n`,
-    }
+    const contentType = `MULTIPART/FORM-DATA; boundary=${BOUNDARY}`
+    const body = uploadBody([['doc', 'a.txt', 'a']])
 
     // Pins the premise, so this test cannot quietly become vacuous on a runtime
     // whose formData() stops refusing: the assertion below is only interesting
     // while the two answers differ.
-    await expect(new Request('http://example.com/uploads', init).formData()).rejects.toThrow()
+    await expect(
+      new Request('http://example.com/uploads', uploadInit(contentType, body)).formData(),
+    ).rejects.toThrow()
 
-    const uploads = await parseRequestUploads({ req: new HonoRequest(new Request('http://example.com/uploads', init)) })
+    const uploads = await parseRequestUploads({ req: uploadRequest(contentType, body) })
 
     expect(names(uploads.doc)).toEqual(['a.txt'])
   })
@@ -239,13 +236,7 @@ describe('parseRequestUploads', () => {
   // crashing the request — the same answer `file()` already gives for an
   // absent field.
   it('falls back to an empty record when the body cannot be decoded', async () => {
-    const req = new HonoRequest(
-      new Request('http://example.com/uploads', {
-        method: 'POST',
-        headers: { 'Content-Type': 'multipart/form-data' },
-        body: 'not a multipart body',
-      }),
-    )
+    const req = uploadRequest('multipart/form-data', 'not a multipart body')
 
     expect(await parseRequestUploads({ req })).toEqual({})
   })

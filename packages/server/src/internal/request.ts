@@ -12,12 +12,9 @@
  * on an uppercase media type, on a `;`-parameterized one, and on a repeated
  * `field[]`.
  *
- * `parseRequestUploads` is here for the same reason and one of its own. It is
- * not `parseRequestBody` with a different name: it parses with `{ all: true }`,
- * so a field repeated in the body stays an array for `files()` instead of
- * collapsing to its first value. Routing uploads through the body parser would
- * silently reduce `files()` to one file per field, which no malformed-body test
- * can see.
+ * `parseRequestUploads` is here for the same reason. It is deliberately not
+ * `parseRequestBody` under another name — its own doc comment owns why, and is
+ * the one place that argument is written out.
  *
  * Internal by the rules in `contributing/api-stability.md` — reachable only
  * through a deep import under `internal/`, never re-exported from an index.

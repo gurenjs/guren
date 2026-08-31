@@ -20,31 +20,29 @@ const identitySchema = {
  * `fetch` a FormData body lets it pick the boundary *and* the media-type
  * casing, and the casing is one of the things these suites test.
  */
-function multipartBody(boundary: string, fields: Array<[string, string]>): string {
-  const parts = fields.map(
-    ([name, value]) =>
-      `--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`,
-  )
-
-  return `${parts.join('')}--${boundary}--\r\n`
-}
-
 /**
- * The same builder for file parts. A part is a file to every parser here only
- * because it carries a `filename`, so that is the one thing this adds — an
- * empty `content` still produces a zero-byte File, which is what the `size > 0`
- * filter in `file()` / `files()` exists to reject.
+ * One wire format, one builder. A third element makes the part a file: that is
+ * the only thing separating an upload from a text field here, so it is the only
+ * thing the signature adds. An empty `value` beside a filename still produces a
+ * zero-byte File, which is what the `size > 0` filter in `file()` / `files()`
+ * exists to reject.
+ *
+ * The part-level `Content-Type` is emitted only alongside a filename. Adding it
+ * unconditionally would change what the text-field callers send — including the
+ * "a multipart text field, which is not an upload" row, whose whole point is
+ * that the part parses as a string.
  */
-function multipartFileBody(
+function multipartBody(
   boundary: string,
-  files: Array<[field: string, filename: string, content: string]>,
+  fields: Array<[name: string, value: string, filename?: string]>,
 ): string {
-  const parts = files.map(
-    ([field, filename, content]) =>
-      `--${boundary}\r\n` +
-      `Content-Disposition: form-data; name="${field}"; filename="${filename}"\r\n` +
-      'Content-Type: text/plain\r\n\r\n' +
-      `${content}\r\n`,
+  const parts = fields.map(([name, value, filename]) =>
+    filename === undefined
+      ? `--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`
+      : `--${boundary}\r\n` +
+        `Content-Disposition: form-data; name="${name}"; filename="${filename}"\r\n` +
+        'Content-Type: text/plain\r\n\r\n' +
+        `${value}\r\n`,
   )
 
   return `${parts.join('')}--${boundary}--\r\n`
@@ -1478,7 +1476,12 @@ describe('request body parity', () => {
     },
   ]
 
-  function initFor(testCase: BodyCase): RequestInit {
+  /**
+   * Narrowed to the two fields it reads, so the direct `readMultipart()` cases
+   * below can call it with a content type and a body rather than padding out a
+   * whole row.
+   */
+  function initFor(testCase: Pick<BodyCase, 'contentType' | 'body'>): RequestInit {
     return {
       method: 'POST',
       ...(testCase.contentType ? { headers: { 'Content-Type': testCase.contentType } } : {}),
@@ -1524,7 +1527,9 @@ describe('request body parity', () => {
       // moved one and not the other would show up as a disagreement.
       class UploadController extends Controller {
         async read() {
-          const field = this.ctx.req.query('field') ?? 'doc'
+          // Every row supplies `field`, so the parameter is always there; the
+          // fallback exists only because `query()` is typed as optional.
+          const field = this.ctx.req.query('field') ?? ''
           return this.json({
             file: (await this.file(field))?.name ?? null,
             files: (await this.files(field)).map((upload) => upload.name),
@@ -1615,14 +1620,13 @@ describe('request body parity', () => {
    * `parseBody({ all: true })` in a try/catch, with no media-type gate — so
    * the axes that separated them are worth pinning as a pair.
    *
-   * **What these rows guard is `{ all: true }`, on the runtime side.** Drop it
-   * and Hono keeps one value per repeated field, so `files()` silently reduces
-   * to a single file per `<input multiple>`. Two rows go red on that mutation
-   * — the repeated plain field and the leading empty upload. The `doc[]` row
-   * does not: Hono arrays a `[]`-suffixed key with or without the flag, so it
-   * pins that rule rather than this one. They belong here rather than with the
-   * body table's repeated-field rows, which pin the opposite behavior — the
-   * body parser *does* flatten.
+   * **What these rows guard is `{ all: true }`, on the runtime side** — see
+   * `parseRequestUploads` for why that flag is the contract. Two rows go red
+   * when it is dropped: the repeated plain field and the leading empty upload.
+   * The `doc[]` row does not, because Hono arrays a `[]`-suffixed key with or
+   * without the flag, so it pins that rule rather than this one. They belong
+   * here rather than with the body table's repeated-field rows, which pin the
+   * opposite behavior — the body parser *does* flatten.
    *
    * **What they cannot catch is the mock reading uploads the old way**, and
    * that is stated rather than left to be discovered. Run against the exact
@@ -1649,8 +1653,8 @@ describe('request body parity', () => {
     name: string
     contentType: string
     body: BodyInit
-    /** The field `file()` / `files()` read. Defaults to `doc`. */
-    field?: string
+    /** The field `file()` / `files()` read. Required, so it is stated once. */
+    field: string
     expected: { file: string | null; files: string[] }
   }
 
@@ -1658,13 +1662,15 @@ describe('request body parity', () => {
     {
       name: 'a single uploaded file',
       contentType: `multipart/form-data; boundary=${BOUNDARY}`,
-      body: multipartFileBody(BOUNDARY, [['doc', 'a.txt', 'a']]),
+      body: multipartBody(BOUNDARY, [['doc', 'a', 'a.txt']]),
+      field: 'doc',
       expected: { file: 'a.txt', files: ['a.txt'] },
     },
     {
       name: 'an uppercase multipart media type carrying a file',
       contentType: `MULTIPART/FORM-DATA; boundary=${BOUNDARY}`,
-      body: multipartFileBody(BOUNDARY, [['doc', 'a.txt', 'a']]),
+      body: multipartBody(BOUNDARY, [['doc', 'a', 'a.txt']]),
+      field: 'doc',
       expected: { file: 'a.txt', files: ['a.txt'] },
     },
     {
@@ -1672,18 +1678,19 @@ describe('request body parity', () => {
       // which is the whole difference between files() and one file.
       name: 'a repeated file field, which files() sees every part of',
       contentType: `multipart/form-data; boundary=${BOUNDARY}`,
-      body: multipartFileBody(BOUNDARY, [
-        ['doc', 'a.txt', 'a'],
-        ['doc', 'b.txt', 'b'],
+      body: multipartBody(BOUNDARY, [
+        ['doc', 'a', 'a.txt'],
+        ['doc', 'b', 'b.txt'],
       ]),
+      field: 'doc',
       expected: { file: 'a.txt', files: ['a.txt', 'b.txt'] },
     },
     {
       name: 'a repeated file field[], which files() sees every part of',
       contentType: `multipart/form-data; boundary=${BOUNDARY}`,
-      body: multipartFileBody(BOUNDARY, [
-        ['doc[]', 'a.txt', 'a'],
-        ['doc[]', 'b.txt', 'b'],
+      body: multipartBody(BOUNDARY, [
+        ['doc[]', 'a', 'a.txt'],
+        ['doc[]', 'b', 'b.txt'],
       ]),
       field: 'doc[]',
       expected: { file: 'a.txt', files: ['a.txt', 'b.txt'] },
@@ -1694,10 +1701,11 @@ describe('request body parity', () => {
       // files() filters the empty one out and keeps the rest.
       name: 'a leading empty upload, which file() refuses and files() skips',
       contentType: `multipart/form-data; boundary=${BOUNDARY}`,
-      body: multipartFileBody(BOUNDARY, [
-        ['doc', 'empty.txt', ''],
-        ['doc', 'b.txt', 'b'],
+      body: multipartBody(BOUNDARY, [
+        ['doc', '', 'empty.txt'],
+        ['doc', 'b', 'b.txt'],
       ]),
+      field: 'doc',
       expected: { file: null, files: ['b.txt'] },
     },
     {
@@ -1706,6 +1714,7 @@ describe('request body parity', () => {
       name: 'a multipart text field, which is not an upload',
       contentType: `multipart/form-data; boundary=${BOUNDARY}`,
       body: multipartBody(BOUNDARY, [['doc', 'Guren']]),
+      field: 'doc',
       expected: { file: null, files: [] },
     },
     {
@@ -1715,12 +1724,14 @@ describe('request body parity', () => {
       name: 'a urlencoded body, which carries no uploads',
       contentType: 'application/x-www-form-urlencoded',
       body: 'doc=Guren',
+      field: 'doc',
       expected: { file: null, files: [] },
     },
     {
       name: 'a multipart body with no boundary, which carries no uploads',
       contentType: 'multipart/form-data',
       body: 'not a multipart body',
+      field: 'doc',
       expected: { file: null, files: [] },
     },
   ]
@@ -1730,10 +1741,9 @@ describe('request body parity', () => {
 
     class UploadController extends Controller {
       async read() {
-        const field = testCase.field ?? 'doc'
         return {
-          file: (await this.file(field))?.name ?? null,
-          files: (await this.files(field)).map((upload) => upload.name),
+          file: (await this.file(testCase.field))?.name ?? null,
+          files: (await this.files(testCase.field)).map((upload) => upload.name),
         }
       }
     }
@@ -1751,9 +1761,7 @@ describe('request body parity', () => {
 
   async function readUploadsThroughRuntime(testCase: UploadCase) {
     const app = await bootRuntime()
-    const url = testCase.field
-      ? `${UPLOADS_URL_UNDER_TEST}?field=${encodeURIComponent(testCase.field)}`
-      : UPLOADS_URL_UNDER_TEST
+    const url = `${UPLOADS_URL_UNDER_TEST}?field=${encodeURIComponent(testCase.field)}`
     const response = await app.fetch(new Request(url, initFor(testCase)))
 
     expect(response.status).toBe(200)
@@ -1761,7 +1769,7 @@ describe('request body parity', () => {
     return (await response.json()) as { file: string | null; files: string[] }
   }
 
-/**
+  /**
    * The rows above compare `file()` / `files()`, and on Node they cannot tell
    * the shared read from the `Request.formData()` one it replaced — measured,
    * and said at length in the comment on the table. These two do tell them
@@ -1779,20 +1787,22 @@ describe('request body parity', () => {
    * and a test that only went through `file()` would be back to observing an
    * answer both implementations agree on.
    */
-  it('reads uploads as the runtime record rather than as FormData', async () => {
+  function mockControllerAt(contentType: string, body: BodyInit) {
     const { Controller } = createControllerModuleMock()
-
     const controller = new Controller()
     controller.setContext(
       createControllerContext(
         UPLOADS_URL_UNDER_TEST,
-        initFor({
-          name: 'multipart with one file',
-          contentType: `multipart/form-data; boundary=${BOUNDARY}`,
-          body: multipartFileBody(BOUNDARY, [['doc', 'a.txt', 'a']]),
-          expected: undefined,
-        }),
+        initFor({ contentType, body }),
       ) as unknown as ControllerContext,
+    )
+    return controller
+  }
+
+  it('reads uploads as the runtime record rather than as FormData', async () => {
+    const controller = mockControllerAt(
+      `multipart/form-data; boundary=${BOUNDARY}`,
+      multipartBody(BOUNDARY, [['doc', 'a', 'a.txt']]),
     )
 
     const uploads = await controller.readMultipart()
@@ -1803,20 +1813,7 @@ describe('request body parity', () => {
   })
 
   it('has no media-type gate, so a non-multipart body reads as its fields', async () => {
-    const { Controller } = createControllerModuleMock()
-
-    const controller = new Controller()
-    controller.setContext(
-      createControllerContext(
-        UPLOADS_URL_UNDER_TEST,
-        initFor({
-          name: 'urlencoded',
-          contentType: 'application/x-www-form-urlencoded',
-          body: 'doc=Guren',
-          expected: undefined,
-        }),
-      ) as unknown as ControllerContext,
-    )
+    const controller = mockControllerAt('application/x-www-form-urlencoded', 'doc=Guren')
 
     // `null` is what the gated implementation answered here. The runtime has
     // no gate to answer it from, so the shared read parses the body and hands
@@ -1825,7 +1822,7 @@ describe('request body parity', () => {
     expect(await controller.file('doc')).toBeNull()
   })
 
-    it.each(UPLOAD_CASES)('agrees on uploads for $name', async (testCase) => {
+  it.each(UPLOAD_CASES)('agrees on uploads for $name', async (testCase) => {
     const fromRuntime = await readUploadsThroughRuntime(testCase)
     expect(fromRuntime).toEqual(testCase.expected)
 
