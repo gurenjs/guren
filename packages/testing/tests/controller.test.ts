@@ -902,6 +902,74 @@ describe('repeated query parameters', () => {
     expect(ctx.req.query()).toEqual({ tag: 'core', page: '2' })
     expect(ctx.req.query('tag')).toBe('core')
   })
+
+  /**
+   * A `__proto__` query key, which is where the mock's hand-rolled `query()`
+   * diverged from the runtime it was imitating.
+   *
+   * The copy built its record by assignment (`first[name] ??= value`), so the
+   * key hit `Object.prototype`'s inherited `__proto__` setter and the field
+   * vanished — a controller read it as absent while production read it as a
+   * value. Hono builds a null-prototype object, which has no setter to hit.
+   * Delegating to `HonoRequest` is what closes it; asserting against a real
+   * `Application.fetch()` is what keeps it closed.
+   *
+   * `queries()` never had the bug — it was already `Object.fromEntries`, which
+   * defines an own property — but it is asserted alongside so the pair cannot
+   * drift apart in the other direction either.
+   */
+  it('keeps a __proto__ query key in the mock and the runtime alike', async () => {
+    const url = 'http://example.com/posts?__proto__=pwned&tag=core&tag=framework'
+
+    const { Controller, createApp } = await import('@guren/core')
+
+    class ReadController extends Controller {
+      read() {
+        return this.json({
+          query: this.ctx.req.query(),
+          queries: this.ctx.req.queries(),
+        })
+      }
+    }
+
+    const app = createApp({
+      routes: (router) => {
+        router.get('/posts', [ReadController, 'read'])
+      },
+    })
+    await app.boot()
+
+    const response = await app.fetch(new Request(url))
+    expect(response.status).toBe(200)
+    const fromRuntime = (await response.json()) as Record<string, unknown>
+
+    const ctx = createControllerContext(url)
+    const fromMock = {
+      query: ctx.req.query(),
+      queries: ctx.req.queries?.(),
+    }
+
+    // Asserted concretely as well as for parity, so the two cannot agree on
+    // the wrong answer — `toEqual` alone would pass if both dropped the key.
+    //
+    // The expectations are built with `Object.fromEntries`, never as object
+    // literals: a bare `__proto__:` key in a literal sets the prototype rather
+    // than defining an own property, so `{ __proto__: 'pwned', tag: 'core' }`
+    // is just `{ tag: 'core' }` and this test would assert the bug it exists
+    // to catch. That is the same footgun the code under test hits.
+    expect(Object.hasOwn(fromMock.query as object, '__proto__')).toBe(true)
+    expect(fromMock).toEqual({
+      query: Object.fromEntries([
+        ['__proto__', 'pwned'],
+        ['tag', 'core'],
+      ]),
+      queries: Object.fromEntries([
+        ['__proto__', ['pwned']],
+        ['tag', ['core', 'framework']],
+      ]),
+    })
+    expect(fromMock).toEqual(fromRuntime)
+  })
 })
 
 /**

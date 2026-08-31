@@ -1,6 +1,7 @@
 import { HonoRequest } from 'hono/request'
 import {
   asRecord,
+  flattenRequestQueries as flattenRequestQueriesByRuntimeRules,
   parseRequestBody as parseRequestBodyByRuntimeRules,
 } from '@guren/server/internal/request'
 
@@ -54,30 +55,27 @@ export function createControllerContext(
 ): ControllerContext {
   const request = new Request(url, init)
   const parsedUrl = new URL(request.url)
-  const searchParams = parsedUrl.searchParams
   const store = new Map<string, unknown>(Object.entries(contextValues))
+
+  // The same class a live request is read through, so both query surfaces
+  // below are Hono's own rather than a restatement of them. Both were restated
+  // here once and both drifted: `query()` kept the LAST occurrence of a
+  // repeated key where Hono keeps the FIRST, and — fixed by delegating rather
+  // than by patching the copy again — it dropped a `__proto__` key outright,
+  // because building the record by assignment hits the inherited setter where
+  // Hono's null-prototype object has no setter to hit.
+  //
+  // Reading a body is what needs a `clone()` (see parseRequestBody); these two
+  // read only the URL, so this wraps `request` directly and leaves it intact.
+  const honoRequest = new HonoRequest(request)
 
   const req = {
     raw: request,
     path: parsedUrl.pathname,
     url: request.url,
     method: request.method,
-    query: (key?: string) => {
-      if (!key) {
-        // Hono's no-arg `query()` keeps the FIRST occurrence of a repeated
-        // key, so `?tag=a&tag=b` reads back as `a`. `Object.fromEntries` over
-        // the entries keeps the last one, which is how the mock came to
-        // disagree with the runtime here.
-        const first: Record<string, string> = {}
-        for (const [name, value] of searchParams) {
-          first[name] ??= value
-        }
-        return first
-      }
-
-      return searchParams.get(key) ?? undefined
-    },
-    queries: () => groupSearchParams(searchParams),
+    query: (key?: string) => (key === undefined ? honoRequest.query() : honoRequest.query(key)),
+    queries: () => honoRequest.queries(),
     param: () => undefined,
     header: (name: string) => request.headers.get(name) ?? undefined,
   }
@@ -205,30 +203,34 @@ async function parseRequestBody(ctx: ControllerContext): Promise<unknown> {
 }
 
 /**
- * The mock's counterpart to the runtime's `flattenRequestQueries`: query data
- * as a validation schema sees it, keeping a repeated key as an array and a
+ * Query data as a validation schema sees it: a repeated key as an array, a
  * single occurrence as a plain string (`?tag=a&tag=b` → `{ tag: ['a', 'b'] }`,
  * `?page=2` → `{ page: '2' }`).
  *
- * The runtime calls `ctx.req.queries()` unconditionally, so a context without
- * one throws there. `queries()` is optional on {@link ControllerContext}, and
- * the fallback re-derives the same grouping from `req.url` — which is required,
- * and is what `createControllerContext` parses internally anyway. It must not
- * fall back to `query()`: that surface is one value per key by construction,
- * which is the divergence this function exists to close.
+ * Nothing about that shape is decided here — it is the runtime's own
+ * `flattenRequestQueries`, reached through `@guren/server/internal/request`,
+ * exactly as the body parser above reaches the runtime's parser. Only the
+ * adapter is local, and it exists for one reason: the runtime calls
+ * `ctx.req.queries()` unconditionally, while `queries()` is *optional* on
+ * {@link ControllerContext}, so a hand-built context may not carry one.
+ *
+ * For a context that does, its own `queries()` is handed to the shared rule —
+ * an override on a published type stays honored. For one that does not, the
+ * grouping is re-derived from the required `req.url` through a `HonoRequest`,
+ * which is the same grouping `createControllerContext` gets. That branch must
+ * not fall back to `query()`: that surface is one value per key by
+ * construction, which is the divergence this function exists to close.
+ *
+ * `ctx.req.queries` is tested for truthiness, never with `'queries' in ctx.req`
+ * — a context built by spreading one and blanking the member carries the key
+ * with an explicit `undefined`, so an `in` test would take the override branch
+ * and call `undefined()`.
  */
 function flattenContextQueries(ctx: ControllerContext): Record<string, unknown> {
-  const queries = ctx.req.queries?.() ?? groupSearchParams(new URL(ctx.req.url).searchParams)
-  const flat: Record<string, unknown> = {}
-  for (const [key, values] of Object.entries(queries)) {
-    flat[key] = values.length === 1 ? values[0] : values
-  }
-  return flat
-}
-
-/** Groups repeated search params into `queries()`' `Record<string, string[]>`. */
-function groupSearchParams(searchParams: URLSearchParams): Record<string, string[]> {
-  return Object.fromEntries([...searchParams.keys()].map((key) => [key, searchParams.getAll(key)]))
+  const queries = ctx.req.queries
+  return flattenRequestQueriesByRuntimeRules({
+    req: queries ? { queries } : new HonoRequest(new Request(ctx.req.url)),
+  })
 }
 
 export function createGurenControllerModule() {

@@ -96,12 +96,34 @@ export function asRecord(body: unknown): Record<string, unknown> {
 }
 
 /**
+ * What {@link flattenRequestQueries} actually reads: one no-arg `queries()` off
+ * `ctx.req`, not a whole Hono context.
+ *
+ * Spelled as the call shape rather than as `Pick<HonoRequest, 'queries'>` — the
+ * one place this departs from {@link RequestBodyContext} above, and not by
+ * preference. `HonoRequest.queries` is *overloaded* (`queries(key)` returning
+ * `string[] | undefined`, `queries()` returning the record), and a `Pick` keeps
+ * both signatures, so the plain `() => Record<string, string[]>` that
+ * `@guren/testing`'s `ControllerContext` declares cannot satisfy it. Naming the
+ * one signature this function calls admits both: an overloaded member is
+ * assignable to any of its own signatures, so a real `HonoRequest` still passes.
+ *
+ * Narrowing a parameter accepts strictly more callers, so every existing one
+ * keeps passing a real `Context` unchanged.
+ */
+export interface RequestQueryContext {
+  req: {
+    queries(): Record<string, string[]>
+  }
+}
+
+/**
  * Collects query parameters preserving repeated keys as arrays while keeping
  * single occurrences as plain strings (`?tag=a&tag=b` → `{ tag: ['a', 'b'] }`,
  * `?page=2` → `{ page: '2' }`). Use this instead of `ctx.req.query()` when
  * feeding query data into validation schemas.
  */
-export function flattenRequestQueries(ctx: Context): Record<string, unknown> {
+export function flattenRequestQueries(ctx: RequestQueryContext): Record<string, unknown> {
   const queries = ctx.req.queries()
   const flat: Record<string, unknown> = {}
   for (const [key, values] of Object.entries(queries)) {
