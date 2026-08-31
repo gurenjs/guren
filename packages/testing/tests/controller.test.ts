@@ -845,7 +845,7 @@ describe('repeated query parameters', () => {
     return controller.read()
   }
 
-  async function readThroughRuntime(): Promise<BothSurfaces> {
+  async function readThroughRuntime(url: string = URL_UNDER_TEST): Promise<BothSurfaces> {
     // Lazy, like the rest of this package: the mock resolves @guren/server on
     // demand so a suite that mocks it still gets the real module here.
     const { Controller, createApp } = await import('@guren/core')
@@ -867,7 +867,7 @@ describe('repeated query parameters', () => {
     })
     await app.boot()
 
-    const response = await app.fetch(new Request(URL_UNDER_TEST))
+    const response = await app.fetch(new Request(url))
     expect(response.status).toBe(200)
 
     return (await response.json()) as BothSurfaces
@@ -894,6 +894,36 @@ describe('repeated query parameters', () => {
     } as unknown as ControllerContext
 
     expect(readThroughMock(withoutQueries).validateQuery).toEqual(EXPECTED)
+  })
+
+  /**
+   * The same `__proto__` key as the raw-surface test below, but carried all
+   * the way through `validateQuery()` — the surface an application actually
+   * uses, and the one the flattening step sits on.
+   *
+   * Worth its own case because the two halves failed differently: a single
+   * `?__proto__=x` was silently dropped before reaching the schema, while a
+   * repeated one replaced the flattened record's prototype outright. Reading
+   * the raw `queries()` would have shown neither, because Hono hands the key
+   * over intact and only the flattening lost it.
+   */
+  it('validateQuery() keeps a __proto__ key in the mock and the runtime alike', async () => {
+    const url = 'http://example.com/posts?__proto__=one&__proto__=two&page=2'
+
+    const fromRuntime = await readThroughRuntime(url)
+    const fromMock = readThroughMock(
+      createControllerContext(url) as unknown as ControllerContext
+    )
+
+    const expected = Object.fromEntries([
+      ['__proto__', ['one', 'two']],
+      ['page', '2'],
+    ])
+
+    expect(Object.hasOwn(fromMock.validateQuery as object, '__proto__')).toBe(true)
+    expect(Object.getPrototypeOf(fromMock.validateQuery as object)).toBe(Object.prototype)
+    expect(fromMock).toEqual({ validateQuery: expected, validateQuerySafe: expected })
+    expect(fromMock).toEqual(fromRuntime)
   })
 
   it('honors a queries() override that reads `this`', () => {
