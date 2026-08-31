@@ -478,7 +478,8 @@ router
 既定のストアはありません。pending の申請をどこに置くかはアプリケーションの判断です。理由は監査シンクに既定値がないのと同じで、このエンドポイントは Workers や Lambda でも動きます。フレームワークが黙ってプロセスメモリにフォールバックすれば、次の isolate が知らない申請を承認済みとして扱ってしまいます。
 
 ```ts
-import { AgentApprovalRequested, mcpPlugin } from '@guren/core'
+import { AgentApprovalRequested } from '@guren/core'
+import { mcpPlugin } from '@guren/plugin-mcp'
 
 mcpPlugin({
   approvals: {

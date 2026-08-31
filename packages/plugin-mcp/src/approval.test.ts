@@ -32,6 +32,7 @@ import {
   type ToolCallOutcome,
 } from '@guren/core'
 
+import { gateApproval } from './gate'
 import { notifyApprovers } from './plugin'
 import { AgentRateLimiter } from './rate-limit'
 import { createAppMcpServer, type AppMcpServerOptions } from './server'
@@ -304,6 +305,27 @@ describe('the approval gate with a queue', () => {
     expect(notified).toEqual([])
   })
 
+  test('should let an expired rejection be asked again as a new question', async () => {
+    // A rejection blocks while its record is live, which is what stops a retry
+    // from costing a human's "no" nothing. Blocking *forever* is a different
+    // claim: one premature rejection would denylist that exact call for that
+    // principal permanently, with no remedy short of an operator deleting the
+    // row. `guren.approval_status` still reports it as rejected — a human's
+    // answer stays true — but the gate stops holding it against a new request
+    // once the window has closed.
+    const store = new MemoryApprovalStore()
+    await seedApproved(store, { id: 5 }, {
+      status: 'rejected',
+      expiresAt: new Date(NOW.getTime() - 1_000).toISOString(),
+    })
+    const { client, notified } = await connect({ store })
+
+    const body = refusalBody(await client.callTool({ name: 'posts.destroy', arguments: { id: 5 } }))
+    expect(body.status).toBe('pending')
+    expect(store.records.length).toBe(2)
+    expect(notified.length).toBe(1)
+  })
+
   test('should let an approved call through exactly once', async () => {
     const store = new MemoryApprovalStore()
     await seedApproved(store, { id: 5 })
@@ -319,6 +341,83 @@ describe('the approval gate with a queue', () => {
     // Still one dispatch: the approval was spent by the first call.
     expect(dispatched.length).toBe(1)
     expect(denied).toEqual([{ tool: 'posts.destroy', reason: 'approval' }])
+  })
+
+  test('should refuse to bind an approval to a call with no identified caller', async () => {
+    // `agentApprovalPrincipalKey` answers 'anonymous' for every principal-less
+    // caller, so a record filed for one would be spendable — and readable
+    // through guren.approval_status — by any other. No surface reaches the
+    // gate without a verified bearer today; this refuses at the gate so the
+    // first adapter that passes null gets a refusal rather than a shared
+    // bucket. Driven directly: the plugin cannot produce this call.
+    const store = new MemoryApprovalStore()
+    const notified: AgentApprovalRequest[] = []
+
+    const destroy = fixtureTools().find((tool) => tool.toolName === 'posts.destroy')!
+    const verdict = await gateApproval(destroy, { id: 5 }, {
+      store,
+      principal: null,
+      now: () => NOW,
+      redact: (args) => args,
+      notify: (request) => {
+        notified.push(request)
+      },
+    })
+
+    expect(verdict.allowed).toBe(false)
+    expect(store.records).toEqual([])
+    expect(notified).toEqual([])
+  })
+
+  test('should meter the request before filing it or paging anyone', async () => {
+    // The gate writes a record and sends mail, and it deduplicates only on
+    // identical arguments — so a caller varying one field files one request
+    // and pages a human per call. Metering after that work would leave the
+    // budget guarding the execution while the amplification happened in front
+    // of it.
+    const store = new MemoryApprovalStore()
+    const limiter = new AgentRateLimiter({ max: 10, writeMax: 1, windowMs: 60_000 })
+    const { client, denied, notified } = await connect({ store, overrides: { limiter } })
+
+    await client.callTool({ name: 'posts.destroy', arguments: { id: 1 } })
+    const second = await client.callTool({ name: 'posts.destroy', arguments: { id: 2 } })
+
+    expect(second.isError).toBe(true)
+    expect(denied.at(-1)).toEqual({ tool: 'posts.destroy', reason: 'rate-limit' })
+    // The refused call filed nothing and paged nobody; the first still did.
+    expect(store.records.length).toBe(1)
+    expect(notified.length).toBe(1)
+  })
+
+  test('should refuse a lost consume race as spent, without filing a new request', async () => {
+    // The concurrent shape of "exactly once". Both calls read the same
+    // unconsumed record and both pass the usability check; one wins `consume`.
+    // The loser holds a copy that still says approved and unspent, so falling
+    // through to the generic branch would read it as "no usable match" and
+    // open a fresh request — N concurrent calls on one approval producing N-1
+    // records and N-1 pages to a human, which is the unbounded-records failure
+    // the pending-match lookup exists to prevent.
+    //
+    // Driven by a store whose `consume` always loses rather than by real
+    // concurrency: a scheduler race is not a test, and the branch under test
+    // is exactly "findMatch returned it, consume said no".
+    class ContendedStore extends MemoryApprovalStore {
+      override async consume(): Promise<boolean> {
+        return false
+      }
+    }
+    const store = new ContendedStore()
+    await seedApproved(store, { id: 5 })
+    const { client, dispatched, notified } = await connect({ store })
+
+    const result = await client.callTool({ name: 'posts.destroy', arguments: { id: 5 } })
+
+    expect(result.isError).toBe(true)
+    expect(refusalBody(result).status).toBe('spent')
+    expect(dispatched).toEqual([])
+    // The two that matter: no new record, and nobody paged.
+    expect(store.records.length).toBe(1)
+    expect(notified).toEqual([])
   })
 
   test('should not let an approval for {id: 5} authorize {id: 9}', async () => {
@@ -486,11 +585,13 @@ describe('guren.approval_status', () => {
     const owned = await seedApproved(owning, { id: 5 })
     const empty = new MemoryApprovalStore()
 
-    const foreign = await (await connect({ store: owning, principal: OTHER })).client.callTool({
+    const foreignHarness = await connect({ store: owning, principal: OTHER })
+    const foreign = await foreignHarness.client.callTool({
       name: 'guren.approval_status',
       arguments: { requestId: owned.id },
     })
-    const unknown = await (await connect({ store: empty, principal: OTHER })).client.callTool({
+    const unknownHarness = await connect({ store: empty, principal: OTHER })
+    const unknown = await unknownHarness.client.callTool({
       name: 'guren.approval_status',
       arguments: { requestId: owned.id },
     })
@@ -501,6 +602,14 @@ describe('guren.approval_status', () => {
     // straight through that difference.
     expect(foreign).toEqual(unknown)
     expect(foreign.isError).toBe(true)
+
+    // And the other half of the same rule: the audit trail *does* keep the
+    // distinction the caller is denied. Without this the claim is true of
+    // nothing — both cases reach the trail as an identical 404, and a caller
+    // walking ids to find other principals' pending actions is indistinguish-
+    // able from one mistyping its own.
+    expect(foreignHarness.invoked.at(-1)?.status).toBe(403)
+    expect(unknownHarness.invoked.at(-1)?.status).toBe(404)
   })
 
   test('should record a status check as an invocation under the meta-tool', async () => {

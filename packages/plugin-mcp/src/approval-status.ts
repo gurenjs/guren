@@ -171,8 +171,17 @@ export function approvalStatusNotFoundMessage(requestId: string): string {
 
 export type ApprovalStatusOutcome =
   | { report: ApprovalStatusReport }
-  /** Unknown, or not this caller's — the two are one answer. See above. */
-  | { notFound: string }
+  /**
+   * Unknown, or not this caller's — one answer to the caller. See above.
+   *
+   * `foreign` is the half the *operator* gets and the caller does not: the
+   * record exists and belongs to someone else. Without it, the claim above —
+   * that the audit trail keeps the distinction the caller is denied — is not
+   * true of anything, because both cases reach the audit event as an identical
+   * 404. It must never reach the result: the message is the same either way,
+   * and this rides beside it rather than in it.
+   */
+  | { notFound: string; foreign: boolean }
 
 /**
  * Read a stored record as an answer for `principal` at `now`.
@@ -189,7 +198,7 @@ export function toApprovalStatusReport(
   now: Date,
 ): ApprovalStatusOutcome {
   if (!record || !agentApprovalVisibleTo(record, principal)) {
-    return { notFound: approvalStatusNotFoundMessage(requestId) }
+    return { notFound: approvalStatusNotFoundMessage(requestId), foreign: record !== null }
   }
 
   return {

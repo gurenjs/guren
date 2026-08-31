@@ -13,6 +13,7 @@
  * The approval half is {@link gateApproval}, reached only from the call path.
  */
 import {
+  agentApprovalExpiredAt,
   agentApprovalFingerprint,
   agentApprovalPrincipalKey,
   agentApprovalStatusAt,
@@ -147,6 +148,25 @@ export async function gateApproval(
   args: Record<string, unknown>,
   context: ApprovalGateContext,
 ): Promise<GateVerdict> {
+  if (context.principal === null) {
+    // An approval is permission granted to *someone*, and it is spent by
+    // matching that someone. With no principal there is nothing to match on:
+    // `agentApprovalPrincipalKey` answers `'anonymous'` for every such caller,
+    // so one unidentified caller could spend an approval a human granted to
+    // another, and `guren.approval_status` would show each of them the other's
+    // pending actions. No surface reaches here without a verified bearer
+    // today — this refuses now, while the surface is small, rather than
+    // leaving the hole for the first adapter that passes null.
+    return {
+      allowed: false,
+      reason: 'approval',
+      message:
+        `The tool "${tool.toolName}" requires approval, and this request carries no identified `
+        + 'caller. An approval is granted to a principal and spent by one, so it cannot be bound '
+        + 'to an anonymous call. Nothing was executed and no request was recorded.',
+    }
+  }
+
   const fingerprint = await agentApprovalFingerprint(args)
   const principalKey = agentApprovalPrincipalKey(context.principal)
   const now = context.now()
@@ -154,13 +174,34 @@ export async function gateApproval(
   const existing = await context.store.findMatch({ tool: tool.toolName, fingerprint, principalKey })
 
   if (existing) {
-    if (agentApprovalUsableAt(existing, now) && (await context.store.consume(existing.id))) {
-      return { allowed: true }
+    if (agentApprovalUsableAt(existing, now)) {
+      if (await context.store.consume(existing.id)) {
+        return { allowed: true }
+      }
+      // Another call spent this approval between the lookup and here. Refused
+      // as spent, and pointedly *without* filing a new request: `existing` is
+      // the copy read before the race, so its `status` is still 'approved' and
+      // its `consumedAt` still unset, and falling through would read it as
+      // "no usable match" and open a fresh one. N concurrent calls on one
+      // approval would then produce N-1 new records and N-1 notifications —
+      // the unbounded-records failure the pending-match lookup exists to
+      // prevent, arrived at through concurrency instead of polling.
+      return spentVerdict(tool, existing)
     }
 
     const status = agentApprovalStatusAt(existing, now)
     if (status === 'pending') return pendingVerdict(tool, existing, 'pending')
-    if (status === 'rejected') return rejectedVerdict(tool, existing)
+    // Expiry is asked separately here, and only here. `agentApprovalStatusAt`
+    // reports a rejection as a rejection forever, which is right for
+    // `guren.approval_status` — a human said no, and that stays true. Reading
+    // the same answer as *blocking* forever is a different claim, and the
+    // wrong one: one premature rejection would denylist that exact call for
+    // that principal permanently, with no remedy short of an operator deleting
+    // the row. A rejection blocks while its record is live; past that, asking
+    // again is a new question.
+    if (status === 'rejected' && !agentApprovalExpiredAt(existing, now)) {
+      return rejectedVerdict(tool, existing)
+    }
   }
 
   const request = buildAgentApprovalRequest(
@@ -233,6 +274,33 @@ function rejectedVerdict(tool: DerivedAgentTool, request: AgentApprovalRequest):
       expiresAt: request.expiresAt,
       executed: false,
       ...(request.resolvedAt ? { resolvedAt: request.resolvedAt } : {}),
+    },
+  }
+}
+
+/**
+ * An approval another call spent first.
+ *
+ * Its own answer rather than a fresh request, and the distinction is the whole
+ * point: an approval is permission for one call, so the second of two
+ * concurrent calls has not been refused for want of approval — it lost a race
+ * for one that existed. Telling it to ask again is right; filing that new
+ * request on its behalf, and paging a human for it, is not.
+ */
+function spentVerdict(tool: DerivedAgentTool, request: AgentApprovalRequest): GateVerdict {
+  return {
+    allowed: false,
+    reason: 'approval',
+    message:
+      `The tool "${tool.toolName}" requires approval, and the approval for this exact call was `
+      + 'already used by another call. Nothing was executed. Ask again to request a new one.',
+    body: {
+      status: 'spent',
+      requestId: request.id,
+      tool: request.tool,
+      requestedAt: request.requestedAt,
+      expiresAt: request.expiresAt,
+      executed: false,
     },
   }
 }

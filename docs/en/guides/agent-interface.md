@@ -638,7 +638,8 @@ and Lambda, where a framework that quietly fell back to process memory would
 approve a record the next isolate has never heard of.
 
 ```ts
-import { AgentApprovalRequested, mcpPlugin } from '@guren/core'
+import { AgentApprovalRequested } from '@guren/core'
+import { mcpPlugin } from '@guren/plugin-mcp'
 
 mcpPlugin({
   approvals: {

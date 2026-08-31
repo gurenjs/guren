@@ -190,6 +190,22 @@ export function createAppMcpServer(options: AppMcpServerOptions): Server {
       return refusal(verdict.message, verdict.body)
     }
 
+    // Metered before the approval gate, not after. That gate writes a record
+    // and pages a human, and it deduplicates only on *identical* arguments, so
+    // a caller varying one field (`{id: 1}`, `{id: 2}`, …) files an unbounded
+    // number of requests and sends an unbounded number of notifications. An
+    // unmetered path that reaches the store is a hole in the per-token budget —
+    // the reason `guren.preflight` and `guren.approval_status` both meter
+    // first — and this is the one that additionally sends mail, so it is the
+    // last place the exemption belongs. A write tool spends the write budget
+    // whether it executes or queues: what is being limited is the request.
+    if (options.limiter && !options.limiter.take(options.rateKey, { write: !tool.annotations.readOnlyHint })) {
+      options.onDenied(tool, args, 'rate-limit')
+      return errorResult(
+        `Rate limit exceeded for this token${tool.annotations.readOnlyHint ? '' : ' (write budget)'}. Retry later.`,
+      )
+    }
+
     if (tool.approval === 'required' && options.approvals) {
       const { approvals } = options
       let approval: GateVerdict
@@ -214,13 +230,6 @@ export function createAppMcpServer(options: AppMcpServerOptions): Server {
         options.onDenied(tool, args, approval.reason)
         return refusal(approval.message, approval.body)
       }
-    }
-
-    if (options.limiter && !options.limiter.take(options.rateKey, { write: !tool.annotations.readOnlyHint })) {
-      options.onDenied(tool, args, 'rate-limit')
-      return errorResult(
-        `Rate limit exceeded for this token${tool.annotations.readOnlyHint ? '' : ' (write budget)'}. Retry later.`,
-      )
     }
 
     const startedAt = performance.now()
@@ -372,7 +381,12 @@ async function handleApprovalStatus(
     )
 
     if ('notFound' in outcome) {
-      options.onInvoked(audited, args, 404, elapsed(startedAt))
+      // 404 to the caller either way; 403 in the trail when the record exists
+      // and belongs to someone else. That asymmetry is the point — the caller
+      // must not be able to tell the two apart, and the operator must. A
+      // caller walking ids to find other principals' pending actions is
+      // otherwise a run of ordinary not-founds.
+      options.onInvoked(audited, args, outcome.foreign ? 403 : 404, elapsed(startedAt))
       return errorResult(outcome.notFound)
     }
 
