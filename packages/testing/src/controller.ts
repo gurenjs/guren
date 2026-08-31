@@ -3,6 +3,8 @@ import {
   asRecord,
   flattenRequestQueries as flattenRequestQueriesByRuntimeRules,
   parseRequestBody as parseRequestBodyByRuntimeRules,
+  parseRequestUploads as parseRequestUploadsByRuntimeRules,
+  type RequestUploads,
 } from '@guren/server/internal/request'
 
 const HTML_ENTITIES: Record<string, string> = {
@@ -116,47 +118,6 @@ function loadServer(): Promise<ServerModule> {
 }
 
 /**
- * The mock's counterpart to the runtime's guarded multipart parse behind
- * `Controller.file()` / `files()`: a body the parser cannot decode reads as
- * `null`, so both helpers answer as they do for an absent field instead of
- * throwing out of the controller.
- *
- * `await` inside try/catch rather than `.catch()`, for the same reason the
- * runtime gives: `formData()` may throw synchronously as well as reject, and
- * only one of those two shapes reaches a `.catch()`.
- */
-async function readMultipartBody(request: Request): Promise<FormData | null> {
-  try {
-    return await request.clone().formData()
-  } catch {
-    return null
-  }
-}
-
-/**
- * Hono's media-type rule — `Content-Type` up to the first `;`, trimmed,
- * lowercased, compared with `===` (hono/utils/body) — restated for the one
- * caller left that needs it: {@link readMultipart}, behind `file()` / `files()`.
- *
- * The body parser below no longer restates it. It hands the request to Hono's
- * `parseBody()` through the runtime, which applies the rule itself.
- *
- * Do not read this as "the runtime gates the same way". It does not: the
- * runtime's upload read is `ctx.req.parseBody({ all: true })` in a try/catch
- * with no gate at all (`Controller.parseUploads`), because Hono decides the
- * media type inside `parseBody`. The gate exists here because this mock reads
- * uploads through `Request.formData()` instead, which is case-sensitive where
- * Hono lowercases first — so *removing* the gate without also moving off
- * `formData()` would reintroduce the uppercase-multipart divergence, not fix
- * it. The real fix is to share the runtime's upload read the way the body
- * parser is now shared; it is filed separately because it changes the
- * published type of the public `readMultipart()`.
- */
-function isMultipartBody(contentType: string): boolean {
-  return contentType.split(';')[0]?.trim().toLowerCase() === 'multipart/form-data'
-}
-
-/**
  * The mock's request body: the parsed value as sent, so an array stays an
  * array for `validateBody()` to judge.
  *
@@ -169,37 +130,58 @@ function isMultipartBody(contentType: string): boolean {
  * an undecodable body. Each was fixed in the copy; sharing the parser is what
  * stops the next one.
  *
- * What stays local is the adapter, because the two hold different things — the
- * runtime is handed a Hono context, the mock holds a `Request`. A
- * `HonoRequest` bridges them: it supplies the three members the parser reads
- * (`header()`, `json()`, `parseBody()`) from the same class a live request
- * uses, so even the media-type decision inside `parseBody()` is Hono's own
- * rather than a restatement of it.
+ * What stays local is the adapter — see {@link honoRequestFor}.
  */
 async function parseRequestBody(ctx: ControllerContext): Promise<unknown> {
+  const req = honoRequestFor(ctx)
+  return req ? parseRequestBodyByRuntimeRules({ req }) : {}
+}
+
+/**
+ * The mock's uploads, behind {@link Controller.file} / {@link Controller.files}
+ * — the same delegation as {@link parseRequestBody}, to the runtime's
+ * `parseRequestUploads` rather than to its body parser.
+ *
+ * The two are a deliberate pair and not interchangeable, and there is no
+ * media-type gate on this side — `parseRequestUploads` in the runtime owns both
+ * reasons, including the `Request.formData()` divergence whose absence here is
+ * the fix. Restating them is what this file is being emptied of.
+ */
+async function parseRequestUploads(ctx: ControllerContext): Promise<RequestUploads> {
+  const req = honoRequestFor(ctx)
+  return req ? parseRequestUploadsByRuntimeRules({ req }) : {}
+}
+
+/**
+ * The whole of what stays local, because the two sides hold different things:
+ * the runtime is handed a Hono context, the mock holds a `Request`. A
+ * `HonoRequest` bridges them, supplying the members the shared parsers read
+ * (`header()`, `json()`, `parseBody()`) from the same class a live request
+ * does — so even the media-type decision inside `parseBody()` is Hono's own
+ * rather than a restatement of it.
+ *
+ * Answers `null` on the one failure that is the adapter's own: `clone()` throws
+ * on a body already read, which cannot happen to the runtime because Hono hands
+ * it the request before anything else touches it. Callers turn that into the
+ * empty answer. Everything past this point is the shared parser's to answer,
+ * including the `{}` it returns for a body no parser can decode — catching that
+ * here too would let the mock swallow a throw the runtime would surface.
+ */
+function honoRequestFor(ctx: ControllerContext): HonoRequest | null {
   // Read outside the fallback on purpose: the fallback is for an unparseable
   // *body*, and a ctx with no request at all is a broken test setup. Swallowing
   // that into `{}` would turn a wiring mistake into a confusing validation
-  // failure, and the runtime's parser does not swallow it either.
+  // failure, and the runtime's parsers do not swallow it either.
   const raw = ctx.req.raw
 
-  let req: HonoRequest
   try {
     // Clone so the raw body stays readable — the real runtime caches the
     // parsed body in Hono, letting validateBody() and file() compose on one
     // request; here the clone is what preserves that property.
-    req = new HonoRequest(raw.clone())
+    return new HonoRequest(raw.clone())
   } catch {
-    // The one failure that is the adapter's own: `clone()` throws on a body
-    // already read, which cannot happen to the runtime because Hono hands it
-    // the request before anything else touches it. Everything past this point
-    // is the shared parser's to answer, including the `{}` it returns for a
-    // body no parser can decode — catching that here too would let the mock
-    // swallow a throw the runtime would surface.
-    return {}
+    return null
   }
-
-  return parseRequestBodyByRuntimeRules({ req })
 }
 
 /**
@@ -487,46 +469,41 @@ export function createControllerModuleMock() {
 
     // Public like parsedBody above: TS4094 forbids private members on the
     // exported anonymous class type this factory returns.
-    public multipartBody?: Promise<FormData | null>
+    //
+    // Its type follows the runtime's upload read, which is what it now is: the
+    // `{ all: true }` record `parseBody()` answers with, not the `FormData`
+    // this used to hold. A non-multipart body is `{}` here rather than `null`
+    // for the same reason — the runtime has no media-type gate to answer
+    // `null` from. `file()` and `files()` are unaffected: a urlencoded field
+    // arrives as a string, which fails their `instanceof File` test exactly as
+    // an absent field does.
+    public multipartBody?: Promise<RequestUploads>
 
-    public readMultipart(): Promise<FormData | null> {
-      if (!this.multipartBody) {
-        const request = this.ctx.req.raw
-        const contentType = request.headers.get('Content-Type') ?? ''
-        // Clone for the same reason as parseRequestPayload: both may read the
-        // body of the same request, mirroring Hono's parse cache — and the
-        // memo keeps repeated file()/files() calls to one parse.
-        //
-        // A body the parser cannot decode resolves to `null`, matching the
-        // runtime's guarded parse: file() answers null and files() [], the
-        // same as for an absent field, rather than throwing out of the
-        // controller. Guarded here rather than in the two callers so the memo
-        // still holds — a rejected promise cached is one parse, a guard per
-        // call site is two.
-        //
-        // Hono applies the same media-type rule inside the parseBody() the
-        // runtime uses here — see isMultipartBody for why this side states
-        // it rather than inheriting it.
-        this.multipartBody = isMultipartBody(contentType)
-          ? readMultipartBody(request)
-          : Promise.resolve(null)
-      }
-      return this.multipartBody
+    public readMultipart(): Promise<RequestUploads> {
+      // Memoized so repeated file()/files() calls are one parse, and that parse
+      // clones the request, mirroring Hono's cache. The undecodable body is
+      // already handled inside the shared read, so what is memoized is always a
+      // resolved promise — never a rejected one the two callers would each have
+      // to guard. `??=` like getRawBody() above: the memo is a promise, so
+      // there is no falsy value to confuse it.
+      return (this.multipartBody ??= parseRequestUploads(this.ctx))
     }
 
     public async file(name: string): Promise<File | null> {
-      // Mirrors the real Controller.file(): take the FIRST part of the field,
-      // then require it to be a non-empty File — a leading empty part means
-      // null, not "skip to the next one".
-      const formData = await this.readMultipart()
-      const candidate = formData?.getAll(name)[0]
+      // Character for character the real Controller.file(): take the FIRST
+      // part of the field, then require it to be a non-empty File — a leading
+      // empty part means null, not "skip to the next one".
+      const body = await this.readMultipart()
+      const value = body[name]
+      const candidate = Array.isArray(value) ? value[0] : value
       return candidate instanceof File && candidate.size > 0 ? candidate : null
     }
 
     public async files(name: string): Promise<File[]> {
-      const formData = await this.readMultipart()
-      return (formData?.getAll(name) ?? [])
-        .filter((value): value is File => value instanceof File && value.size > 0)
+      const body = await this.readMultipart()
+      const value = body[name]
+      const values = Array.isArray(value) ? value : value !== undefined ? [value] : []
+      return values.filter((item): item is File => item instanceof File && item.size > 0)
     }
 
     public async input<T = unknown>(key: string, defaultValue?: T): Promise<T | undefined> {

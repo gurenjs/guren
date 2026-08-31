@@ -1,0 +1,43 @@
+---
+"@guren/server": minor
+"@guren/testing": minor
+---
+
+Stop `@guren/testing`'s controller mock keeping its own copy of the multipart upload read.
+
+This is the follow-up the body-parser change filed. That one moved `validateBody()` and the field helpers onto the runtime's parser and left exactly one restatement behind: `file()` and `files()` do not go through the body parser, so the mock still gated on Hono's media-type rule and then read the body with `Request.formData()`.
+
+`Controller.parseUploads()`'s body moves to `parseRequestUploads(ctx)` in `packages/server/src/http/request.ts`, re-exported from the internal `@guren/server/internal/request` subpath beside `parseRequestBody`. `Controller.file()` / `files()` call it, and the mock calls it through the same `HonoRequest` adapter the body parser already uses — so the mock's `isMultipartBody` and `readMultipartBody` are gone, and the adapter is now the whole of what stays local.
+
+It is a second function rather than a second caller of `parseRequestBody`, deliberately: uploads parse with `{ all: true }`, so a field repeated in the body stays an array and `files()` sees every part. The body parser flattens that same field to its first value, so routing uploads through it would silently reduce `files()` to one file per `<input multiple>` — a loss no malformed-body test can see.
+
+**The divergence this closes, and where it is visible.** The mock answered `null` from `file()` for a `Content-Type: MULTIPART/FORM-DATA` body the runtime delivers the file for. The gate was not the cause: it lowercases like Hono does. `Request.formData()` was — the gate passed and the read then threw.
+
+Where that throws is host-dependent, and the ground moved under this change while it was open. Measured: **Bun 1.3.14 rejects the header, Bun 1.4.0 accepts it, Node always accepted it** — the 1.4.0 trial lane caught this by failing a hard assertion that the host refuses, on the same CI run where 1.3.14 was green. So the concrete symptom is confined to Bun 1.3.x, which is the version every workflow currently pins; on the other two the mock and the runtime already agreed by accident.
+
+That narrows the bug, not the argument. The defect was never "Bun is case-sensitive" — it was that the mock decided the media type somewhere Hono does not, so its answer tracked whatever the host happened to do. Deciding it in one place is what makes the two agree on every runtime, including ones whose `formData()` has not been written yet. Nothing gates now, on either side, because Hono decides the media type inside `parseBody()`.
+
+**`readMultipart()` changes shape, and this is the deliberate part.** It is public only because TS4094 forbids private members on the exported anonymous class type the mock factory returns, but it appears in the published `packages/testing/dist/index.d.ts`, so the change is stated here rather than left to ride. Two things change together:
+
+- Its return type goes from `Promise<FormData | null>` to `Promise<Record<string, string | File | (string | File)[]>>` — the runtime's `{ all: true }` record. The `multipartBody` memo beside it follows.
+- `null` is gone. A non-multipart body now reads back as its parsed fields rather than as `null`, because the runtime has no media-type gate to answer `null` from.
+
+`file()` and `files()` are unaffected when they read through `readMultipart()` themselves: a urlencoded field arrives as a string and fails their `instanceof File` test exactly as an absent field does. Two other cases are affected and are worth naming rather than rounding off. `multipartBody`, the memo beside it, is public for the same TS4094 reason and changes type with it. And a subclass that *overrides* `readMultipart()` to return a `FormData` — legal against the old declared type — now feeds that object into record indexing, so `file()` and `files()` would read `undefined` off it rather than calling `getAll`. Nothing in this repository does either, but "only direct callers of `readMultipart()`" would have been too narrow.
+
+One knock-on lands on the published surface: both members are typed as `RequestUploads`, so `packages/testing/dist/index.d.ts` now opens with `import { RequestUploads } from "@guren/server/internal/request"` — a *type*-level dependency on that subpath, where the previous release only reached it at runtime. Naming the runtime's type rather than respelling its shape is the point.
+
+It does **not** turn the version floor into a compile-time check, which is the tempting thing to claim and is wrong. `skipLibCheck: true` suppresses the `TS2307` that an unresolvable import inside a dependency's `.d.ts` would otherwise raise, and it is on both in this repository's root `tsconfig.json` and in the `create-guren-app` default template — so the consumers most likely to hit this are exactly the ones who would not see it. Measured against `tsc` directly rather than reasoned from the flag's name. A consumer on too old a `@guren/server` therefore still fails the way the previous release did: at runtime, on first import. The release step below is what prevents it, and nothing else does.
+
+The precedent here is the opposite of the one set when the mock's `parsedBody` box was reverted to keep the published shape. That break was avoidable — the mock clones the request, so re-parsing cost nothing and the memo could stay as it was. This one is not: `FormData | null` *is* the second implementation. Keeping it would mean converting the runtime's record back into a `FormData`, which reintroduces the copy this removes. `createControllerModuleMock()`'s members are Experimental by the decision tree in `contributing/api-stability.md` — exported from the package index, not from `@guren/core`, with no stability annotation on the package — which is what allows a minor here.
+
+`packages/testing/tests/controller.test.ts` gains an upload table beside the body one, running `file()` and `files()` through a real `Application.fetch()` controller and a mocked one on the same request: a single upload, an uppercase media type, a repeated file field, a repeated `field[]`, a leading empty upload, a multipart text field, a urlencoded body, and a body with no boundary. Both sides must answer the same names.
+
+What that table can and cannot do is worth stating, because it was measured rather than assumed. Dropping `{ all: true }` turns two rows red, which is the guard it is really carrying. But run against the exact pre-change mock, **every row passes** — including the uppercase one, because vitest runs that suite on Node, which accepts the header. The uppercase assertion therefore lives in `packages/server/tests/http/request.test.ts`, under `bun run test:bun`.
+
+That test asserts `parseRequestUploads` answers with the file and says nothing about what the host's `formData()` would do — deliberately, and the second version of it. The first pinned the host's refusal as a premise, which is exactly the assertion Bun 1.4.0 broke. Adding a media-type gate to `parseRequestUploads` still turns it red on every runtime, which is the property worth holding; the host's own answer is recorded in the comment as context that has already changed once.
+
+Two further cases sit after the table and cover the delegation itself, which comparing `file()` / `files()` cannot: they read `readMultipart()` directly and assert it answers the runtime's record rather than a `FormData`, and that a urlencoded body reads back as its fields rather than as the `null` the gate used to short-circuit to. Both go red against the pre-change mock on any runtime, so reverting the mock to `Request.formData()` is a test failure rather than a silent one.
+
+`@guren/server` gains one function on the existing internal subpath — no behavior change, and nothing new on the package root. The subpath carries no stability guarantee, by the same rules that put `parseRequestBody` on it.
+
+**Release step:** the same one the change that added the subpath carried, and it comes due again. v2.14.0 already raised `@guren/testing`'s `@guren/server` peer to `>=2.14.0`, which is the release that first carried `internal/request` — but this change puts a *new* export on that subpath, so the floor has to move again to whatever version publishes `parseRequestUploads`. Raise it in the release pull request beside the generated version bumps; it cannot be raised earlier, because `audit:plugin-compat` requires every `@guren/*` range to admit the version the workspace currently publishes. Skipping it leaves `>=2.14.0` claiming a compatibility this package does not have: `@guren/testing` upgraded alone against a pinned `@guren/server` 2.14.0 resolves the subpath and then fails on the missing export.
