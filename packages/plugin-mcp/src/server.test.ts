@@ -1,11 +1,17 @@
 import { describe, test, expect } from 'bun:test'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
-import { Router, deriveAgentTools, mapToolResponse, type AgentToolDenialReason, type DerivedAgentTool } from '@guren/core'
+import {
+  Router,
+  deriveAgentTools,
+  mapToolResponse,
+  type AgentToolDenialReason,
+  type DerivedAgentTool,
+  type ToolCallOutcome,
+} from '@guren/core'
 
 import { AgentRateLimiter } from './rate-limit'
 import { createAppMcpServer, type AppMcpServerOptions } from './server'
-import type { ToolCallOutcome } from '@guren/core'
 
 function deriveFixtureTools(): DerivedAgentTool[] {
   const router = new Router()
@@ -23,6 +29,18 @@ interface Recorded {
   invoked: Array<{ tool: string; status: number; args: Record<string, unknown> }>
   denied: Array<{ tool: string; reason: AgentToolDenialReason; args: Record<string, unknown> }>
 }
+
+/**
+ * The verdict header, by name.
+ *
+ * Written out rather than imported: the constant is internal to
+ * `@guren/server` on purpose, and widening its export surface for a fixture
+ * would be the wrong trade. Spelling it here is safe in the direction that
+ * matters — the seam and `mapToolResponse` share the real constant, so a
+ * rename moves both together and leaves this string classifying nothing,
+ * which turns every case below red. It cannot quietly keep passing.
+ */
+const VERDICT_HEADER = 'X-Guren-Agent-Preflight-Verdict'
 
 /**
  * What the router's preflight seam answers for an allowed rehearsal.
@@ -52,18 +70,6 @@ async function seamVerdict(
   )
   return mapToolResponse(tool, response)
 }
-
-/**
- * The verdict header, by name.
- *
- * Written out rather than imported: the constant is internal to
- * `@guren/server` on purpose, and widening its export surface for a fixture
- * would be the wrong trade. Spelling it here is safe in the direction that
- * matters — the seam and `mapToolResponse` share the real constant, so a
- * rename moves both together and leaves this string classifying nothing,
- * which turns every case below red. It cannot quietly keep passing.
- */
-const VERDICT_HEADER = 'X-Guren-Agent-Preflight-Verdict'
 
 async function connect(overrides: Partial<AppMcpServerOptions> = {}): Promise<{ client: Client; recorded: Recorded }> {
   const recorded: Recorded = { invoked: [], denied: [] }

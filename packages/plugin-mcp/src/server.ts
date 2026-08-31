@@ -14,15 +14,16 @@ import {
   ListToolsRequestSchema,
   type CallToolResult,
 } from '@modelcontextprotocol/sdk/types.js'
-import type { AgentToolDenialReason, DerivedAgentTool } from '@guren/core'
-
-import { gatePreflight, gateToolCall } from './gate'
 import {
   advertisesStructuredOutput,
   isReservedAgentToolName,
   PREFLIGHT_TOOL_NAME,
+  type AgentToolDenialReason,
+  type DerivedAgentTool,
   type ToolCallOutcome,
 } from '@guren/core'
+
+import { gatePreflight, gateToolCall } from './gate'
 import { describePreflightTool, readPreflightArguments, toPreflightVerdict } from './preflight'
 import type { AgentRateLimiter } from './rate-limit'
 
@@ -93,7 +94,7 @@ export function createAppMcpServer(options: AppMcpServerOptions): Server {
   // limits are deliberately not consulted — a budget is a runtime state, not
   // a capability, and a temporarily-throttled tool is still in the catalog.
   server.setRequestHandler(ListToolsRequestSchema, () => {
-    const listed: ReturnType<typeof describeTool>[] = tools
+    const listed = tools
       .filter((tool) => gateToolCall(tool, options.abilities).allowed)
       .map((tool) => describeTool(tool))
 

@@ -533,22 +533,14 @@ export async function checkAgentRoutes(options: AgentRouteCheckOptions): Promise
   results.push(...duplicateFindings(routes))
 
   for (const route of routes) {
-    const nameResult = nameFinding(route)
-    if (nameResult) {
-      // The tool-name grammar has nothing to test on a route with no name;
-      // reporting both would name one defect twice.
-      results.push(nameResult)
-    } else {
-      const toolNameResult = toolNameFinding(route)
-      if (toolNameResult) {
-        results.push(toolNameResult)
-      } else {
-        // Only for a grammar-legal name: an illegal one is already failing,
-        // renaming it fixes both, and no reserved name is illegal anyway.
-        const reserved = reservedNameFinding(route)
-        if (reserved) results.push(reserved)
-      }
-    }
+    // At most one naming finding per route, first applicable wins. The
+    // tool-name grammar has nothing to test on a route with no name, and the
+    // reserved-name rule applies only to a grammar-legal one: an illegal name
+    // is already failing, renaming it fixes both, and no reserved name is
+    // illegal anyway. Reporting more than one would name a single defect
+    // twice.
+    const nameResult = nameFinding(route) ?? toolNameFinding(route) ?? reservedNameFinding(route)
+    if (nameResult) results.push(nameResult)
 
     const authorization = authorizationFinding(route)
     if (authorization) results.push(authorization)
