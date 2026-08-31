@@ -31,8 +31,21 @@ export type MaybeApplication = {
    * reach the caller's own diagnostic ("call `useTokens(store)`") rather than
    * a `TypeError` naming an internal.
    */
+  /** Bun's listener handle, when the app is one that reports having a server. */
+  stop?: (closeConnections?: boolean) => void | Promise<void>
   auth?: {
     getApiTokenStore?: () => ApiTokenStore | undefined
+    /**
+     * The options the app's own `useTokens()` used, so machinery replacing
+     * the store changes where tokens live and nothing else.
+     */
+    getApiTokenOptions?: () => { provider?: string; guardName?: string; updateLastUsed?: boolean }
+    /**
+     * Installs a token store over whatever the app configured, which is how
+     * `tool:dev` issues a credential that cannot outlive its process. Same
+     * structural-and-optional reasoning as the accessor above.
+     */
+    useTokens?: (store: ApiTokenStore, options?: { provider?: string; guardName?: string }) => void
   }
 }
 
@@ -136,6 +149,34 @@ export async function ensureApplicationBooted(
     if (options.rethrow) throw error
     consola.warn('Application boot() rejected:', error)
   }
+}
+
+/**
+ * Resolve this app's entry, import it, and hand back a booted application.
+ *
+ * Boot failure is rethrown rather than warned about, and that is the whole
+ * reason this is a helper rather than three lines at each call site: a command
+ * that *writes* through the app it loaded must not accept a half-built one. A
+ * provider that failed after auth registered leaves a store that looks
+ * configured, so a token minted against it is written into an application
+ * whose configuration never completed — and reported as a success.
+ */
+export async function loadBootedApplication(appRoot?: string): Promise<MaybeApplication> {
+  const entry = await resolveMainEntry(appRoot)
+
+  let moduleExports: Record<string, unknown>
+  try {
+    moduleExports = (await import(pathToFileURL(entry).href)) as Record<string, unknown>
+  } catch (error) {
+    throw new Error(
+      `Failed to import application entry (${entry}): ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+
+  const app: MaybeApplication = await bootstrapApplication(moduleExports)
+  await ensureApplicationBooted(app, moduleExports, { rethrow: true })
+
+  return app
 }
 
 export async function importFirstAvailableApplicationModule(paths: string[]): Promise<{ module: Record<string, unknown>; path: string } | undefined> {

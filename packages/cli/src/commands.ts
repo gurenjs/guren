@@ -68,6 +68,7 @@ import { runQueueWorker, listFailedJobs, retryFailedJob, retryAllFailedJobs, flu
 import { displayRoutes } from './route-list'
 import { displayToolInspection, displayTools } from './tool-list'
 import { runTokenIssue } from './token-issue'
+import { runToolDev } from './tool-dev'
 import { cacheConfig, clearConfigCache, showConfigCacheInfo } from './config-cache'
 import { createStorageLink, removeStorageLink } from './storage-link'
 import { listScheduledTasks, runScheduledTasks } from './schedule'
@@ -1750,6 +1751,65 @@ const tokenIssueCommand = defineCommand({
   },
 })
 
+const toolDevCommand = defineCommand({
+  meta: {
+    name: 'tool:dev',
+    description: 'Serve this application\'s agent tools locally with a throwaway token (RFC 0016).',
+  },
+  args: {
+    as: {
+      type: 'string',
+      description: 'User ID tool calls authenticate as (default: a placeholder matching no record)',
+    },
+    path: {
+      type: 'string',
+      description: 'Endpoint path, if the app mounted the MCP plugin somewhere other than /mcp',
+      valueHint: '/mcp',
+    },
+    port: {
+      type: 'string',
+      description: 'Port to listen on (default 3333)',
+    },
+    host: {
+      type: 'string',
+      description: 'Hostname to bind (default 127.0.0.1)',
+    },
+    app: {
+      type: 'string',
+      description: 'Application root directory',
+    },
+  },
+  async run({ args }) {
+    // Repeat-safe like every other flag reader here: citty arrays a repeated
+    // flag, and this one picks the port a listener binds.
+    //
+    // Decimal digits and nothing else. `parseInt` stops at the first
+    // non-digit, so `3333abc` would bind 3333; `Number` accepts what a port
+    // is not — `--port=` and whitespace become 0, `0x10` becomes 16, `1e3`
+    // becomes 1000. Each of those binds a real port nobody asked for.
+    const rawPort = lastFlagValue(args.port)
+    const port = rawPort === undefined ? undefined : Number(rawPort)
+    if (
+      rawPort !== undefined
+      && (!/^\d+$/u.test(rawPort.trim()) || port === undefined || port > 65535)
+    ) {
+      throw new Error(`Invalid --port value "${rawPort}". Use a port number between 0 and 65535.`)
+    }
+
+    await runToolDev({
+      as: lastFlagValue(args.as),
+      path: lastFlagValue(args.path),
+      port,
+      hostname: lastFlagValue(args.host),
+      appRoot: lastFlagValue(args.app),
+    })
+
+    // Deliberately no process.exit: unlike the one-shot commands beside it,
+    // this one is the server. It ends when the developer stops it, which is
+    // also when the token stops existing.
+  },
+})
+
 const configCacheCommand = defineCommand({
   meta: {
     name: 'config:cache',
@@ -3149,6 +3209,7 @@ export const builtinSubCommands = {
   'tool:list': toolListCommand,
   'tool:inspect': toolInspectCommand,
   'token:issue': tokenIssueCommand,
+  'tool:dev': toolDevCommand,
   'openapi:generate': openApiGenerateCommand,
   'config:cache': configCacheCommand,
   'config:clear': configClearCommand,

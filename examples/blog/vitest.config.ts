@@ -48,28 +48,30 @@ export default defineConfig({
         replacement: resolve(rootDir, '../../packages/testing/src/index.ts'),
       },
       {
-        find: /^@guren\/testing\//,
-        replacement: resolve(rootDir, '../../packages/testing/src/'),
+        find: /^@guren\/testing\/(.+)$/,
+        replacement: `${resolve(rootDir, '../../packages/testing/src')}/$1`,
       },
       {
         find: /^@guren\/core$/,
         replacement: resolve(rootDir, '../../packages/core/src/index.ts'),
       },
       {
-        find: /^@guren\/core\//,
-        replacement: resolve(rootDir, '../../packages/core/src/'),
+        find: /^@guren\/core\/(.+)$/,
+        replacement: `${resolve(rootDir, '../../packages/core/src')}/$1`,
       },
       {
         find: /^@guren\/server$/,
         replacement: resolve(rootDir, '../../packages/server/src/index.ts'),
       },
-      // Capture the subpath and restore the separator. The prefix form the
-      // sibling rules still use consumes the separator without putting it
-      // back — `resolve()` normalizes the replacement's trailing slash away —
-      // so a subpath under this tree resolved to '.../src' + 'internal/request'
-      // run together, which exists nowhere. `support/expiry` needed an
-      // exact-match entry above this one for that reason; this form needs
-      // none. `web/vitest.config.ts` has always aliased this tree the same way.
+      // First match wins, so every explicit subpath entry must precede the
+      // generic `/(.+)$/` rule for its package. The generic form deliberately
+      // does not append '.ts': a subpath may name a file ('internal/route-path')
+      // or a directory resolved by index ('vite'). The orm's drizzle entries
+      // stay explicit because they do append it.
+      {
+        find: /^@guren\/server\/support\/expiry$/,
+        replacement: resolve(rootDir, '../../packages/server/src/support/expiry.ts'),
+      },
       {
         find: /^@guren\/server\/(.+)$/,
         replacement: `${resolve(rootDir, '../../packages/server/src')}/$1`,
@@ -87,24 +89,24 @@ export default defineConfig({
         replacement: resolve(rootDir, '../../packages/orm/src/drizzle/$1.ts'),
       },
       {
-        find: /^@guren\/orm\//,
-        replacement: resolve(rootDir, '../../packages/orm/src/'),
+        find: /^@guren\/orm\/(.+)$/,
+        replacement: `${resolve(rootDir, '../../packages/orm/src')}/$1`,
       },
       {
         find: /^@guren\/inertia-client$/,
         replacement: resolve(rootDir, '../../packages/inertia-client/src/index.ts'),
       },
       {
-        find: /^@guren\/inertia-client\//,
-        replacement: resolve(rootDir, '../../packages/inertia-client/src/'),
+        find: /^@guren\/inertia-client\/(.+)$/,
+        replacement: `${resolve(rootDir, '../../packages/inertia-client/src')}/$1`,
       },
       {
         find: /^@guren\/cli$/,
         replacement: resolve(rootDir, '../../packages/cli/src/index.ts'),
       },
       {
-        find: /^@guren\/cli\//,
-        replacement: resolve(rootDir, '../../packages/cli/src/'),
+        find: /^@guren\/cli\/(.+)$/,
+        replacement: `${resolve(rootDir, '../../packages/cli/src')}/$1`,
       },
       {
         find: /^bun:sqlite$/,
@@ -115,8 +117,8 @@ export default defineConfig({
         replacement: resolve(rootDir, '../../packages/core/src/index.ts'),
       },
       {
-        find: /^guren\//,
-        replacement: resolve(rootDir, '../../packages/core/src/'),
+        find: /^guren\/(.+)$/,
+        replacement: `${resolve(rootDir, '../../packages/core/src')}/$1`,
       },
     ],
     dedupe: ['react', 'react-dom'],

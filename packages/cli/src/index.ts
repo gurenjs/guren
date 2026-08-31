@@ -26,6 +26,7 @@ export {
   runTokenIssue,
 } from './token-issue'
 export type { TokenIssueInput, TokenIssuePlan, TokenIssueOptions } from './token-issue'
+export { runToolDev, type ToolDevOptions } from './tool-dev'
 export { generateOpenApiSpec, loadOpenApiModule, resolveOpenApiInfo } from './openapi-generate'
 export { runDoctor, renderDoctorReport, suggestNextSteps, buildJsonOutput } from './doctor'
 export { upgradeCanary, DEFAULT_UPGRADE_TAG } from './upgrade'

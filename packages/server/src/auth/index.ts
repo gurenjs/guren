@@ -1,4 +1,5 @@
 export { AuthManager } from './AuthManager'
+export type { ApiTokenGuardOptions } from './AuthManager'
 export { SessionGuard } from './SessionGuard'
 export { TokenGuard } from './TokenGuard'
 export type { TokenGuardOptions } from './TokenGuard'
