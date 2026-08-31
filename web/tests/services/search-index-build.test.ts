@@ -1,0 +1,139 @@
+import { describe, expect, it } from 'vitest'
+
+import {
+  collectRows,
+  computeBuildId,
+  renderIndexSql,
+  MAX_STATEMENT_BYTES,
+  type DocsByLocale,
+} from '../../app/Services/search-index-build.js'
+import { MAX_SECTION_BODY } from '../../app/Services/search-sections.js'
+
+function corpus(overrides: Partial<Record<string, string>> = {}): DocsByLocale {
+  return {
+    en: {
+      guides: {
+        routing: {
+          title: 'Routing',
+          html: `<h1 id="routing">Routing</h1><p>${overrides.body ?? 'Define routes.'}</p><h2 id="groups">Groups</h2><p>Nest them.</p>`,
+        },
+      },
+    },
+    ja: {
+      guides: {
+        routing: {
+          title: 'ルーティング',
+          html: '<h1 id="ルーティング">ルーティング</h1><p>ルートを定義する。</p>',
+        },
+      },
+    },
+  }
+}
+
+describe('collectRows', () => {
+  it('numbers rows from one, in traversal order', () => {
+    const rows = collectRows(corpus())
+
+    expect(rows.map((row) => row.id)).toEqual([1, 2, 3])
+    expect(rows.map((row) => `${row.locale}#${row.anchor}`)).toEqual([
+      'en#routing',
+      'en#groups',
+      'ja#ルーティング',
+    ])
+  })
+
+  it('carries the doc title onto every section', () => {
+    expect(collectRows(corpus()).map((row) => row.docTitle)).toEqual([
+      'Routing',
+      'Routing',
+      'ルーティング',
+    ])
+  })
+
+  it('collects unigrams from the title, heading, and body together', () => {
+    const japanese = collectRows(corpus()).at(-1)
+    expect(japanese?.unigrams).toContain('ル')
+    expect(japanese?.bodyTokens).toBe('ルー ート トを を定 定義 義す する')
+  })
+})
+
+describe('computeBuildId', () => {
+  it('is stable across calls', () => {
+    expect(computeBuildId(collectRows(corpus()))).toBe(computeBuildId(collectRows(corpus())))
+  })
+
+  it('does not depend on key insertion order', () => {
+    // The deploy gate compares this id; a traversal that followed insertion
+    // order would report a content change on every unrelated docs edit.
+    const reordered: DocsByLocale = { ja: corpus().ja, en: corpus().en }
+    expect(computeBuildId(collectRows(reordered))).toBe(computeBuildId(collectRows(corpus())))
+  })
+
+  it('moves when a single character of the corpus changes', () => {
+    expect(computeBuildId(collectRows(corpus({ body: 'Define route.' })))).not.toBe(
+      computeBuildId(collectRows(corpus())),
+    )
+  })
+
+  it('takes nothing from outside the rows', () => {
+    // If a clock or a git sha reached the id, a docs-unchanged deploy would
+    // skip reindexing and then bake a name for tables nobody created.
+    const rows = collectRows(corpus())
+    const copy = rows.map((row) => ({ ...row }))
+    expect(computeBuildId(copy)).toBe(computeBuildId(rows))
+  })
+})
+
+describe('renderIndexSql', () => {
+  const sql = renderIndexSql(collectRows(corpus()), 'abc123')
+
+  it('names both tables after the build', () => {
+    expect(sql).toContain('CREATE TABLE "doc_sections_abc123"')
+    expect(sql).toContain('CREATE VIRTUAL TABLE "doc_search_abc123"')
+  })
+
+  it('writes the FTS rowid explicitly', () => {
+    // It is the only key a contentless table has, and the join back to
+    // doc_sections depends on it lining up with the section id.
+    expect(sql).toContain('INSERT INTO "doc_search_abc123" (rowid,')
+  })
+
+  it('does not drop the previous build', () => {
+    // Retiring the old tables belongs after a successful deploy: doing it here
+    // would leave the live Worker pointing at nothing if the deploy failed.
+    expect(sql.match(/DROP TABLE IF EXISTS/gu)).toHaveLength(2)
+    expect(sql).not.toContain('doc_sections_%')
+  })
+
+  it('records the build id in the state row', () => {
+    expect(sql).toContain(
+      `INSERT INTO "search_index_state" (id, build_id, updated_at) VALUES (1, 'abc123', unixepoch())`,
+    )
+  })
+
+  it('doubles quotes in content', () => {
+    const quoted = renderIndexSql(
+      collectRows({
+        en: {
+          guides: {
+            a: { title: 'A', html: `<h1 id="a">A</h1><p>console.log('x; y')</p>` },
+          },
+        },
+      }),
+      'abc123',
+    )
+    expect(quoted).toContain(`'console.log(''x; y'')'`)
+  })
+
+  it('batches rows into statements that stay under the D1 budget', () => {
+    const rows = collectRows(corpus({ body: 'word '.repeat(MAX_SECTION_BODY * 10) }))
+    const generated = renderIndexSql(rows, 'abc123')
+
+    // Enough content that one statement could not hold it — otherwise the
+    // batching this asserts would never run.
+    expect(generated.match(/INSERT INTO "doc_sections_abc123"/gu)?.length).toBeGreaterThan(1)
+    for (const statement of generated.split(/;\n/u)) {
+      expect(Buffer.byteLength(statement, 'utf8')).toBeLessThanOrEqual(MAX_STATEMENT_BYTES)
+    }
+  })
+})

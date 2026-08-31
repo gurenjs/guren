@@ -1,4 +1,4 @@
-import { integer, sqliteTable, text } from '@guren/orm/drizzle/sqlite'
+import { check, integer, sql, sqliteTable, text } from '@guren/orm/drizzle/sqlite'
 
 export const users = sqliteTable('users', {
   id: integer('id').primaryKey({ autoIncrement: true }),
@@ -47,3 +47,23 @@ export const posts = sqliteTable('posts', {
     .notNull()
     .$defaultFn(() => new Date()),
 })
+
+/**
+ * Which build of the docs search index is currently in D1 (RFC-less, see
+ * web/scripts/build-search-index.ts). One row, by construction.
+ *
+ * `buildId` is a pure hash of the indexed docs corpus, and also names the
+ * tables that build created (`doc_sections_<buildId>` / `doc_search_<buildId>`).
+ * The deploy workflow compares it against the id of the build it just
+ * produced and skips reindexing when they match — without that gate, a busy
+ * day of deploys exceeds D1's free write budget on its own.
+ */
+export const searchIndexState = sqliteTable(
+  'search_index_state',
+  {
+    id: integer('id').primaryKey(),
+    buildId: text('build_id').notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+  },
+  (table) => [check('search_index_state_single_row', sql`${table.id} = 1`)],
+)
