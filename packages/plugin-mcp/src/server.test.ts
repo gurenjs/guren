@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'bun:test'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
-import { Router, deriveAgentTools, type AgentToolDenialReason, type DerivedAgentTool } from '@guren/core'
+import { Router, deriveAgentTools, mapToolResponse, type AgentToolDenialReason, type DerivedAgentTool } from '@guren/core'
 
 import { AgentRateLimiter } from './rate-limit'
 import { createAppMcpServer, type AppMcpServerOptions } from './server'
@@ -21,34 +21,49 @@ function deriveFixtureTools(): DerivedAgentTool[] {
 
 interface Recorded {
   invoked: Array<{ tool: string; status: number; args: Record<string, unknown> }>
-  denied: Array<{ tool: string; reason: AgentToolDenialReason }>
+  denied: Array<{ tool: string; reason: AgentToolDenialReason; args: Record<string, unknown> }>
 }
 
 /**
- * What the router's preflight seam answers for an allowed rehearsal — the
- * shape pinned in `packages/server/src/mvc/Router.ts`. Stubbed here because
- * these cases are about the companion tool's own rules; the seam itself is
- * driven for real in `preflight.test.ts`.
+ * What the router's preflight seam answers for an allowed rehearsal.
+ *
+ * Built by handing a real `Response` — carrying the real verdict header — to
+ * the real `mapToolResponse`, rather than by writing the resulting outcome
+ * out by hand. What marks an outcome as a verdict is a decision that module
+ * owns, and a fixture that stated the answer itself would keep passing after
+ * that decision changed. These cases are still about the companion tool's own
+ * rules; the seam is driven end to end in `preflight.test.ts`.
  */
-function seamVerdict(overrides: Record<string, unknown> = {}): ToolCallOutcome {
-  return {
-    content: [
-      {
-        type: 'text',
-        text: JSON.stringify({
-          preflight: true,
-          allowed: true,
-          route: 'posts.store',
-          validated: ['body'],
-          unverified: ['authorization'],
-          message: 'Preflight only: the handler did not run.',
-          ...overrides,
-        }),
-      },
-    ],
-    status: 200,
-  }
+async function seamVerdict(
+  tool: DerivedAgentTool,
+  overrides: Record<string, unknown> = {},
+): Promise<ToolCallOutcome> {
+  const response = new Response(
+    JSON.stringify({
+      preflight: true,
+      allowed: true,
+      route: 'posts.store',
+      validated: ['body'],
+      unverified: ['authorization'],
+      message: 'Preflight only: the handler did not run.',
+      ...overrides,
+    }),
+    { status: 200, headers: { 'Content-Type': 'application/json', [VERDICT_HEADER]: '1' } },
+  )
+  return mapToolResponse(tool, response)
 }
+
+/**
+ * The verdict header, by name.
+ *
+ * Written out rather than imported: the constant is internal to
+ * `@guren/server` on purpose, and widening its export surface for a fixture
+ * would be the wrong trade. Spelling it here is safe in the direction that
+ * matters — the seam and `mapToolResponse` share the real constant, so a
+ * rename moves both together and leaves this string classifying nothing,
+ * which turns every case below red. It cannot quietly keep passing.
+ */
+const VERDICT_HEADER = 'X-Guren-Agent-Preflight-Verdict'
 
 async function connect(overrides: Partial<AppMcpServerOptions> = {}): Promise<{ client: Client; recorded: Recorded }> {
   const recorded: Recorded = { invoked: [], denied: [] }
@@ -62,7 +77,7 @@ async function connect(overrides: Partial<AppMcpServerOptions> = {}): Promise<{ 
       status: 200,
     }),
     onInvoked: (tool, args, status) => recorded.invoked.push({ tool: tool.toolName, status, args }),
-    onDenied: (tool, _args, reason) => recorded.denied.push({ tool: tool.toolName, reason }),
+    onDenied: (tool, args, reason) => recorded.denied.push({ tool: tool.toolName, reason, args }),
     ...overrides,
   })
 
@@ -105,7 +120,7 @@ describe('createAppMcpServer', () => {
     const { client, recorded } = await connect({ abilities: ['tools:read'] })
     const result = await client.callTool({ name: 'posts.store', arguments: {} })
     expect(result.isError).toBe(true)
-    expect(recorded.denied).toEqual([{ tool: 'posts.store', reason: 'scope' }])
+    expect(recorded.denied).toEqual([{ tool: 'posts.store', reason: 'scope', args: {} }])
     expect(recorded.invoked).toEqual([])
   })
 
@@ -131,7 +146,7 @@ describe('createAppMcpServer', () => {
     await client.callTool({ name: 'posts.store', arguments: {} })
     const second = await client.callTool({ name: 'posts.store', arguments: {} })
     expect(second.isError).toBe(true)
-    expect(recorded.denied).toEqual([{ tool: 'posts.store', reason: 'rate-limit' }])
+    expect(recorded.denied).toEqual([{ tool: 'posts.store', reason: 'rate-limit', args: {} }])
   })
 
   test('should convert a dispatch throw into an error result recorded as a 500', async () => {
@@ -159,7 +174,7 @@ describe('createAppMcpServer: guren.preflight', () => {
       dispatch: async (tool, args, options) => {
         dispatched.push({ tool: tool.toolName, args, preflight: Boolean(options?.preflight) })
         return options?.preflight
-          ? seamVerdict({ route: tool.toolName })
+          ? await seamVerdict(tool, { route: tool.toolName })
           : { content: [{ type: 'text', text: '{"ok":true}' }], status: 200 }
       },
       ...overrides,
@@ -219,7 +234,7 @@ describe('createAppMcpServer: guren.preflight', () => {
   // and the companion must not lose that half of the answer.
   test('should carry the seam\'s unverified list through unchanged', async () => {
     const { client } = await connectPreflight({
-      dispatch: async () => seamVerdict({ unverified: [], validated: [] }),
+      dispatch: async (tool) => seamVerdict(tool, { unverified: [], validated: [] }),
     })
     const result = await client.callTool({
       name: 'guren.preflight',
@@ -265,10 +280,41 @@ describe('createAppMcpServer: guren.preflight', () => {
     })
 
     expect(result.isError).toBe(true)
-    // Named against the checked tool, exactly as a direct call would be.
-    expect(recorded.denied).toEqual([{ tool: 'posts.store', reason: 'scope' }])
+    // Recorded as the rehearsal it was, not as an attempted call to
+    // `posts.store`: an operator reading the trail must not be shown a refused
+    // check where a refused write would be. The probed tool is still there, in
+    // the arguments.
+    expect(recorded.denied).toEqual([
+      {
+        tool: 'guren.preflight',
+        reason: 'scope',
+        args: { tool: 'posts.store', input: { title: 'Hello' } },
+      },
+    ])
     expect(recorded.invoked).toEqual([])
     expect(dispatched).toEqual([])
+  })
+
+  test('should keep a route claiming the reserved name out of the catalogue', async () => {
+    // `guren check` fails an app that does this, but the endpoint must not
+    // depend on the check having been run: two tools sharing one name makes an
+    // MCP client reject the *entire* catalogue, so one bad route would take
+    // every other tool down with it. The runtime filter is the backstop, and
+    // without a case here it can be deleted with every test still green.
+    const router = new Router()
+    router.get('/posts', () => new Response('ok')).name('posts.index').agent({})
+    router.post('/impostor', () => new Response('ok')).name('guren.preflight').agent({})
+    const tools = deriveAgentTools(router.definitions()).tools.filter((tool) => tool.expose.mcp)
+
+    const { client } = await connectPreflight({ tools })
+    const listed = await client.listTools()
+
+    const claimed = listed.tools.filter((tool) => tool.name === 'guren.preflight')
+    expect(claimed).toHaveLength(1)
+    // The companion's schema, not the route's: the survivor has to be the one
+    // that answers preflight calls.
+    expect(claimed[0]!.inputSchema.required).toEqual(['tool'])
+    expect(listed.tools.map((tool) => tool.name)).toEqual(['posts.index', 'guren.preflight'])
   })
 
   test('should refuse an unknown tool name and name it', async () => {

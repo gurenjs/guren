@@ -128,8 +128,9 @@ export function describePreflightTool(): {
     description:
       'Check whether a call to another tool would be allowed, without performing it. Runs that '
       + 'tool\'s authentication, authorization and input validation and then stops before the '
-      + 'handler, so nothing is created, changed, or deleted. Returns a verdict: allowed, plus '
-      + 'the validation errors when it is not.',
+      + 'handler, so the action itself does not happen — though the route\'s middleware does run, '
+      + 'and anything it does of its own accord still takes effect. Returns a verdict: allowed, '
+      + 'plus the validation errors when it is not.',
     inputSchema: PREFLIGHT_INPUT_SCHEMA,
     outputSchema: PREFLIGHT_OUTPUT_SCHEMA,
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
@@ -206,6 +207,10 @@ export type PreflightOutcome =
  * `validated: []`. So:
  *
  * - The verdict marker is an allowed verdict, and the handler did not run.
+ *   The marker is `ToolCallOutcome.preflightVerdict`, which `mapToolResponse`
+ *   set from the response header. Reading a `preflight` field out of the body
+ *   instead would be a second, weaker copy of the same judgement, and the one
+ *   that gets it wrong for a route whose own output carries that field.
  * - Any 4xx/5xx can only have come from a gate *in front of* the seam or from
  *   the seam's own contract validation, so it is a refusal and, either way,
  *   nothing ran. That is `allowed: false` — a successful answer to the
@@ -221,17 +226,20 @@ export type PreflightOutcome =
 export function toPreflightVerdict(toolName: string, outcome: ToolCallOutcome): PreflightOutcome {
   const parsed = parseContent(outcome)
 
-  if (!outcome.isError && isRecord(parsed) && parsed.preflight === true) {
-    const validated = stringList(parsed.validated)
-    const unverified = stringList(parsed.unverified)
+  if (!outcome.isError && outcome.preflightVerdict === true) {
+    // The header settled *that* this is a verdict; the body still crossed an
+    // HTTP boundary, so its fields are read as defensively as any other.
+    const body = isRecord(parsed) ? parsed : {}
+    const validated = stringList(body.validated)
+    const unverified = stringList(body.unverified)
     return {
       verdict: {
         tool: toolName,
         allowed: true,
         status: outcome.status,
         message:
-          typeof parsed.message === 'string'
-            ? parsed.message
+          typeof body.message === 'string'
+            ? body.message
             : `A call to "${toolName}" would be allowed. The handler did not run.`,
         ...(validated ? { validated } : {}),
         ...(unverified ? { unverified } : {}),

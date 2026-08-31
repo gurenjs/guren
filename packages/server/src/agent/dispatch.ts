@@ -244,6 +244,18 @@ export interface ToolCallOutcome {
   isError?: boolean
   /** The HTTP status the dispatch resolved to, for the audit event. */
   status: number
+  /**
+   * The response carried the preflight verdict header, so this is the seam's
+   * answer and not the route's own output.
+   *
+   * Carried here because `mapToolResponse` is the only place that sees the
+   * header — an outcome has no headers — and the fact is otherwise lost. A
+   * caller that re-derived it by looking for a `preflight` field in the body
+   * would read an ordinary route whose output happens to carry that field as a
+   * rehearsal that never ran, which is the exact confusion the header was
+   * introduced to prevent.
+   */
+  preflightVerdict?: boolean
 }
 
 /**
@@ -321,7 +333,7 @@ export async function mapToolResponse(
   // output schema and throw, turning an allowed rehearsal into a protocol
   // error.
   if (response.headers.get(AGENT_PREFLIGHT_VERDICT_HEADER) !== null) {
-    return { content: [{ type: 'text', text: JSON.stringify(parsed) }], status }
+    return { content: [{ type: 'text', text: JSON.stringify(parsed) }], status, preflightVerdict: true }
   }
 
   const payload = unwrapInertiaProps(tool, response, parsed)

@@ -174,15 +174,23 @@ Validated: body
 Unverified: authorization
 
 Preflight only: the request passed this route's middleware and its body schema.
-The handler did not run, so nothing was created, changed, or deleted. No
-authorization middleware was found on this route, so any check inside the
-handler itself was not evaluated.
+The handler did not run. The route's own middleware did run, so any effect a
+middleware on this route has of its own has already happened. No authorization
+middleware was found on this route, so any check inside the handler itself was
+not evaluated.
 ```
 
 The request runs the route's middleware and validates the contract the tool
 advertises, then stops before the handler. `unverified` names what a real call
 would still evaluate — a route that authorizes inside its action is a check this
 seam structurally cannot reach.
+
+**A rehearsal is not a dry run of the whole request.** The seam is mounted last
+so that every gate in front of it is the real one, which is what makes the
+verdict worth having. It also means the route's middleware genuinely ran: a
+middleware that increments a quota, consumes a rate-limit bucket, touches a
+session, or calls something else has already done so. Only the handler is
+skipped.
 
 MCP reaches the same seam through a companion tool rather than a flag — see
 [Rehearsing a call over MCP](#rehearsing-a-call-over-mcp). A tool that
@@ -552,7 +560,8 @@ call to another tool would be allowed, and never performs it:
 
 It reaches the same seam `--preflight` does: the checked tool's own
 middleware runs, its advertised contract is validated, and the request stops
-before the handler. Nothing is created, changed, or deleted.
+before the handler. The action itself does not happen — but the middleware
+really did run, so anything it does of its own accord has taken effect.
 
 A refusal is a **successful** result, not an error — the caller asked whether
 the call would be allowed, and "no, here is why" answers that:
@@ -692,9 +701,10 @@ because nothing ran.
 A `guren.preflight` call is recorded like any other invocation, under
 `tool: 'guren.preflight'` — an agent probing what it is allowed to do is
 exactly what a trail wants to show. The tool it checked gets no record of its
-own, because nothing was invoked. A scope refusal is the exception: it is an
-`AgentToolDenied` naming the **checked** tool, so the trail says which tool was
-probed.
+own, because nothing was invoked. A refusal is recorded the same way, as an
+`AgentToolDenied` for `guren.preflight`: naming the checked tool instead would
+make a refused rehearsal indistinguishable from a refused real call to a
+mutating tool. The tool that was probed is in the record's arguments.
 
 ```ts
 // app/Providers/EventServiceProvider.ts (or wherever you register listeners)

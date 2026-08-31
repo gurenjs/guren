@@ -195,10 +195,13 @@ async function handlePreflight(
 
   const verdict = gatePreflight(target, options.abilities)
   if (!verdict.allowed) {
-    // Recorded against the *checked* tool, exactly as a direct call to it
-    // would be: the scope that was refused is that tool's, and an audit trail
-    // that named the meta-tool would not say which tool was probed.
-    options.onDenied(target, request.input, verdict.reason)
+    // Recorded as a `guren.preflight` call, like every other outcome of this
+    // handler. Naming the *checked* tool reads better in isolation — it says
+    // which tool was probed — but it makes a refused rehearsal
+    // indistinguishable from a refused real call to a mutating tool, and of
+    // the two things an operator can be told wrongly, that is the worse one.
+    // Nothing is lost: the probed tool rides in `args.tool`.
+    options.onDenied(audited, args, verdict.reason)
     return errorResult(verdict.message)
   }
 

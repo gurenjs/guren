@@ -54,6 +54,15 @@ export function gateToolCall(tool: DerivedAgentTool, abilities: readonly string[
  * "would this be accepted if it were approved?" is the question an approval
  * gate creates — and the rehearsal executes nothing, so answering it cannot
  * be the unapproved execution the fail-closed refusal exists to prevent.
+ *
+ * The cost, stated because it is a real one: such a tool is currently absent
+ * from `tools/list` (uncallable until the queue ships), so preflight reveals
+ * that it exists and what it validates. That is not the leak the scope rule
+ * guards against — the scope check above still ran, so the token holds this
+ * very ability, and what the rule protects is knowledge of tools the caller
+ * was never granted. Approval gates an ability the caller has; it is not a
+ * boundary on what it may know. Revisit if approval ever comes to mean "may
+ * not know this tool exists".
  */
 export function gatePreflight(tool: DerivedAgentTool, abilities: readonly string[]): GateVerdict {
   if (!scopesAllowTool(abilities, scopedShape(tool))) {
