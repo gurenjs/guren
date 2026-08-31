@@ -896,6 +896,27 @@ describe('repeated query parameters', () => {
     expect(readThroughMock(withoutQueries).validateQuery).toEqual(EXPECTED)
   })
 
+  it('honors a queries() override that reads `this`', () => {
+    // `queries?: () => Record<string, string[]>` is satisfied by a method as
+    // readily as by an arrow, so an override may legitimately read `this.url`.
+    // The shared rule is reached by handing it an object with a `queries`
+    // member; passing the bare `ctx.req.queries` reference would re-`this` it
+    // onto that object and read `undefined` — the receiver has to survive.
+    const full = createControllerContext(URL_UNDER_TEST)
+    const withThisOverride = {
+      ...full,
+      req: {
+        ...full.req,
+        queries(this: { url: string }) {
+          const params = new URL(this.url).searchParams
+          return Object.fromEntries([...params.keys()].map((key) => [key, params.getAll(key)]))
+        },
+      },
+    } as unknown as ControllerContext
+
+    expect(readThroughMock(withThisOverride).validateQuery).toEqual(EXPECTED)
+  })
+
   it('reads back the first occurrence from the mock context, as Hono does', () => {
     const ctx = createControllerContext(URL_UNDER_TEST)
 

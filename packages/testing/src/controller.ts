@@ -227,9 +227,14 @@ async function parseRequestBody(ctx: ControllerContext): Promise<unknown> {
  * and call `undefined()`.
  */
 function flattenContextQueries(ctx: ControllerContext): Record<string, unknown> {
-  const queries = ctx.req.queries
+  const { req } = ctx
   return flattenRequestQueriesByRuntimeRules({
-    req: queries ? { queries } : new HonoRequest(new Request(ctx.req.url)),
+    // Invoked as a method on `ctx.req`, never handed over as a bare reference.
+    // `queries?: () => …` is satisfied by a *method* as readily as by an arrow,
+    // and a method reading `this.url` is a reasonable way to write an override;
+    // passing `{ queries }` would re-`this` it onto that fresh literal and read
+    // `undefined`. The wrapper is what keeps the receiver.
+    req: req.queries ? { queries: () => req.queries!() } : new HonoRequest(new Request(req.url)),
   })
 }
 
