@@ -1635,11 +1635,15 @@ describe('request body parity', () => {
    * Measured on both runtimes rather than assumed.
    *
    * So the uppercase row states a contract it cannot enforce, and the
-   * assertion that *can* fail lives in
+   * assertion that *can* fail on that axis lives in
    * `packages/server/tests/http/request.test.ts`, whose suite runs on Bun.
    * These rows are still the ones that keep the two implementations pinned to
    * each other as the runtime's read changes — which is what the mutation
    * above shows them doing.
+   *
+   * The delegation itself is not left to the uppercase axis, though: the two
+   * cases after this table observe `readMultipart()`'s shape directly, and
+   * both go red against the pre-change mock on any runtime.
    */
   interface UploadCase {
     name: string
@@ -1757,7 +1761,71 @@ describe('request body parity', () => {
     return (await response.json()) as { file: string | null; files: string[] }
   }
 
-  it.each(UPLOAD_CASES)('agrees on uploads for $name', async (testCase) => {
+/**
+   * The rows above compare `file()` / `files()`, and on Node they cannot tell
+   * the shared read from the `Request.formData()` one it replaced — measured,
+   * and said at length in the comment on the table. These two do tell them
+   * apart, without needing Bun, by observing the thing that actually changed:
+   * `readMultipart()` answers with the runtime's `{ all: true }` record rather
+   * than a `FormData`, and it has no media-type gate to answer `null` from.
+   *
+   * That makes them the regression test for the delegation itself. Restore the
+   * pre-change mock and both go red on any runtime — the first because a
+   * `FormData` has no `doc` property, the second because a non-multipart body
+   * used to short-circuit to `null` before the parser ever ran.
+   *
+   * They read `readMultipart()` directly, which is unusual for this suite and
+   * deliberate: it is a published member, its shape is what this change alters,
+   * and a test that only went through `file()` would be back to observing an
+   * answer both implementations agree on.
+   */
+  it('reads uploads as the runtime record rather than as FormData', async () => {
+    const { Controller } = createControllerModuleMock()
+
+    const controller = new Controller()
+    controller.setContext(
+      createControllerContext(
+        UPLOADS_URL_UNDER_TEST,
+        initFor({
+          name: 'multipart with one file',
+          contentType: `multipart/form-data; boundary=${BOUNDARY}`,
+          body: multipartFileBody(BOUNDARY, [['doc', 'a.txt', 'a']]),
+          expected: undefined,
+        }),
+      ) as unknown as ControllerContext,
+    )
+
+    const uploads = await controller.readMultipart()
+
+    expect(uploads).not.toBeInstanceOf(FormData)
+    expect(uploads.doc).toBeInstanceOf(File)
+    expect((uploads.doc as File).name).toBe('a.txt')
+  })
+
+  it('has no media-type gate, so a non-multipart body reads as its fields', async () => {
+    const { Controller } = createControllerModuleMock()
+
+    const controller = new Controller()
+    controller.setContext(
+      createControllerContext(
+        UPLOADS_URL_UNDER_TEST,
+        initFor({
+          name: 'urlencoded',
+          contentType: 'application/x-www-form-urlencoded',
+          body: 'doc=Guren',
+          expected: undefined,
+        }),
+      ) as unknown as ControllerContext,
+    )
+
+    // `null` is what the gated implementation answered here. The runtime has
+    // no gate to answer it from, so the shared read parses the body and hands
+    // back its fields; `file()` still says null, because a string is not a File.
+    expect(await controller.readMultipart()).toEqual({ doc: 'Guren' })
+    expect(await controller.file('doc')).toBeNull()
+  })
+
+    it.each(UPLOAD_CASES)('agrees on uploads for $name', async (testCase) => {
     const fromRuntime = await readUploadsThroughRuntime(testCase)
     expect(fromRuntime).toEqual(testCase.expected)
 
