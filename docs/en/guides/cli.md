@@ -461,11 +461,8 @@ Routes that declare `.agent()` metadata are exposed to AI agents as MCP tools (s
 |---------|-------------|---------|
 | `tool:list` | List the agent tools this application exposes | `bunx guren tool:list` |
 | `tool:inspect` | Show one tool's full derivation | `bunx guren tool:inspect posts.store` |
-<<<<<<< HEAD
 | `tool:call` | Invoke one tool the way an agent would | `bunx guren tool:call posts.index` |
-=======
 | `tool:dev` | Serve the tools locally with a throwaway token | `bunx guren tool:dev` |
->>>>>>> origin/main
 
 ```bash
 # Every exposed tool, with its method, path, protocol exposure,
@@ -494,7 +491,6 @@ bunx guren tool:dev --as 42 --port 4000
 | `--app` | Current directory | Application root directory |
 | `--json` | `false` | Output the derived tools as JSON |
 
-<<<<<<< HEAD
 `tool:call` goes one step further and actually invokes a tool, through the same dispatch contract an MCP client's call goes through. It boots the application, so its tools come from the graph the running app serves — which is why it takes no `--routes`.
 
 ```bash
@@ -517,7 +513,7 @@ bunx guren tool:call posts.index --as user:42 --json
 | `--json` | `false` | Output the call result as JSON |
 
 The command exits non-zero when the call comes back as an error result, so a 422 or a 403 is not read as a success by a script. See [Agent Interface — Calling a tool yourself](./agent-interface.md#calling-a-tool-yourself).
-=======
+
 `tool:dev` serves the application's *own* endpoint — it requires
 [`@guren/plugin-mcp`](./agent-interface.md) to be installed and registered, and
 says so if no endpoint answers. The token it issues lives in memory for that
@@ -534,7 +530,6 @@ command revokes it. It refuses to run with `NODE_ENV=production`.
 
 > [!WARNING]
 > The printed token grants `tools:*`. The default bind is loopback, so it stays on your machine; `--host 0.0.0.0` makes the endpoint — and that token — reachable from your network for as long as the command runs.
->>>>>>> origin/main
 
 Everything shown is derived from contracts the route already carries: the input schema merges its `params`, `query` and `body` schemas, the output schema comes from `output`, and the authorization ability comes from the policy its middleware chain checks. Nothing is declared twice, so a tool cannot advertise a schema the endpoint does not validate.
 
