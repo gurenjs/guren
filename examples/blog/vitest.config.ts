@@ -40,10 +40,6 @@ export default defineConfig({
         replacement: reactDomClientEntry,
       },
       {
-        find: /^@guren\/testing\/vitest$/,
-        replacement: resolve(rootDir, '../../packages/testing/src/vitest.ts'),
-      },
-      {
         find: /^@guren\/testing$/,
         replacement: resolve(rootDir, '../../packages/testing/src/index.ts'),
       },
@@ -63,15 +59,6 @@ export default defineConfig({
         find: /^@guren\/server$/,
         replacement: resolve(rootDir, '../../packages/server/src/index.ts'),
       },
-      // First match wins, so every explicit subpath entry must precede the
-      // generic `/(.+)$/` rule for its package. The generic form deliberately
-      // does not append '.ts': a subpath may name a file ('internal/route-path')
-      // or a directory resolved by index ('vite'). The orm's drizzle entries
-      // stay explicit because they do append it.
-      {
-        find: /^@guren\/server\/support\/expiry$/,
-        replacement: resolve(rootDir, '../../packages/server/src/support/expiry.ts'),
-      },
       {
         find: /^@guren\/server\/(.+)$/,
         replacement: `${resolve(rootDir, '../../packages/server/src')}/$1`,
@@ -80,6 +67,12 @@ export default defineConfig({
         find: /^@guren\/orm$/,
         replacement: resolve(rootDir, '../../packages/orm/src/index.ts'),
       },
+      // The only explicit subpath entries left, and first match wins, so both
+      // must stay above the generic orm rule. Every other subpath is served by
+      // a generic `/(.+)$/` rule, whose replacement is extensionless on purpose
+      // so that vite's resolver completes it ('src/support/expiry' -> the
+      // neighbouring expiry.ts). The drizzle mapping is pinned anyway because
+      // 'src/drizzle.ts' and the 'src/drizzle/' directory coexist.
       {
         find: /^@guren\/orm\/drizzle$/,
         replacement: resolve(rootDir, '../../packages/orm/src/drizzle.ts'),
