@@ -244,7 +244,7 @@ This single method call:
 - Registers a `ModelUserProvider` with the specified columns
 - Creates a `SessionGuard` with proper session handling
 - Sets up the default guard as 'web'
-- Uses `ScryptHasher` (based on Bun's native scrypt) by default
+- Uses `Hash` (`DefaultHasher`) by default, which hashes with `Bun.password` on Bun and `node:crypto` scrypt elsewhere
 
 ### Manual Configuration (Advanced)
 

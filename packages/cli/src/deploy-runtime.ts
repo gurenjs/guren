@@ -24,10 +24,15 @@ type DeployTargetId = 'cloudflare' | 'vercel' | 'lambda'
 export interface DeployTargetProfile {
   label: string
   /**
-   * Whether `Bun.password` — the backend behind the default `ScryptHasher` —
-   * exists at runtime. Vercel functions are built by `@guren/plugin-vercel`
-   * with `runtime: 'bun1.x'`, so Bun's password APIs are present there; only
-   * Workers (workerd) and Lambda (Node.js) lose them.
+   * Whether `Bun.password` exists at runtime. Vercel functions are built by
+   * `@guren/plugin-vercel` with `runtime: 'bun1.x'`, so Bun's password APIs
+   * are present there; only Workers (workerd) and Lambda (Node.js) lose them.
+   *
+   * The default hasher no longer depends on this — `DefaultHasher` falls back
+   * to `node:crypto` scrypt, which workerd's `nodejs_compat` implements in
+   * full (RFC 0003 §4). What still breaks on these targets is an *explicit*
+   * `new ScryptHasher()`, because the Argon2id it writes cannot be read back
+   * without `Bun.password`.
    */
   hasBunRuntime: boolean
   /** Why filesystem-scanning provider discovery cannot work on this target. */
@@ -84,7 +89,9 @@ export interface DeployRuntimeAnalysis {
   targets: DeployTargetDetection[]
   /** Evidence that the app authenticates with passwords at all. */
   passwordAuthSignals: SourceSignal[]
-  /** `NodeHasher` constructions — the remediation for a Bun-less runtime. */
+  /** `ScryptHasher` constructions — a hash format only Bun can read back. */
+  bunOnlyHasherSignals: SourceSignal[]
+  /** Hashers that work without `Bun.password`: `NodeHasher`, `Hash`. */
   nodeHasherSignals: SourceSignal[]
   /** Evidence that sessions are enabled. */
   sessionSignals: SourceSignal[]
@@ -141,6 +148,7 @@ const TEST_FILE_PATTERN = /\.(test|spec)\.[cm]?[jt]sx?$/
 
 type SignalKind =
   | 'passwordAuth'
+  | 'bunOnlyHasher'
   | 'nodeHasher'
   | 'session'
   | 'sessionDisabled'
@@ -163,15 +171,20 @@ interface ExtractedSignal {
  * stops using the thing it names, and must neither satisfy a remediation
  * (NodeHasher, the backed stores) nor raise a warning (AutoDiscovery).
  *
- * ScryptHasher counts as password authentication because constructing one is
- * only ever done to hash a password (seeders do this). AutoDiscovery maps to
+ * ScryptHasher is `bunOnlyHasher` rather than `passwordAuth`: constructing one
+ * is only ever done to hash a password (seeders do this), and unlike the
+ * default it pins the app to a format only `Bun.password` can read.
+ * `DefaultHasher` / `Hash` count as remediation because they pick their
+ * delegate from the runtime and from the stored hash. AutoDiscovery maps to
  * `discovery`; a `discover: true` option in `createApp()` is deliberately not
  * a signal — the option never had an effect (`ApplicationOptions` no longer
  * declares it), so a leftover in an older app is inert, not discovery.
  */
 const CONSTRUCTED_SIGNALS: Record<string, SignalKind> = {
-  ScryptHasher: 'passwordAuth',
+  ScryptHasher: 'bunOnlyHasher',
   NodeHasher: 'nodeHasher',
+  DefaultHasher: 'nodeHasher',
+  Hash: 'nodeHasher',
   DatabaseSessionStore: 'backedSession',
   RedisSessionStore: 'backedSession',
   DatabaseOAuthStateStore: 'backedOAuth',
@@ -568,6 +581,7 @@ export async function analyzeDeployRuntime(cwd: string): Promise<DeployRuntimeAn
   return {
     targets,
     passwordAuthSignals: collect('passwordAuth'),
+    bunOnlyHasherSignals: collect('bunOnlyHasher'),
     nodeHasherSignals: collect('nodeHasher'),
     sessionSignals: collect('session'),
     sessionDisabledSignals: collect('sessionDisabled'),
@@ -592,7 +606,7 @@ export function formatParseCaveat(analysis: DeployRuntimeAnalysis): string {
   return ` Note: ${unparsedFiles.length} file(s) could not be read or parsed and were not scanned: ${shown}.`
 }
 
-/** Targets that lack `Bun.password`, so the default `ScryptHasher` breaks. */
+/** Targets that lack `Bun.password`, so an explicit `ScryptHasher` breaks. */
 export function bunlessTargets(analysis: DeployRuntimeAnalysis): DeployTargetDetection[] {
   return analysis.targets.filter((target) => !target.profile.hasBunRuntime)
 }

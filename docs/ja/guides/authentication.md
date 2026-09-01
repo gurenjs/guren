@@ -243,7 +243,7 @@ export default class AuthProvider extends ServiceProvider {
 - 指定されたカラムで `ModelUserProvider` を登録
 - 適切なセッション処理を備えた `SessionGuard` を作成
 - デフォルトガードを 'web' に設定
-- `ScryptHasher`（Bun ネイティブの scrypt ベース）をデフォルトで使用
+- `Hash`（`DefaultHasher`）をデフォルトで使用。Bun 上では `Bun.password`、それ以外では `node:crypto` の scrypt でハッシュ化します
 
 ### 手動設定（上級者向け）
 

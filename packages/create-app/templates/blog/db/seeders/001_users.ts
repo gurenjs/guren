@@ -1,4 +1,4 @@
-import { defineSeeder, ScryptHasher } from '@guren/core'
+import { defineSeeder, Hash } from '@guren/core'
 import { eq } from 'drizzle-orm'
 import type { AppSeederContext } from '../../config/database.js'
 import { users } from '../schema.js'
@@ -13,7 +13,7 @@ export default defineSeeder(async ({ db }: AppSeederContext) => {
     return
   }
 
-  const hasher = new ScryptHasher()
+  const hasher = new Hash()
 
   await db.insert(users).values({
     name: '__APP_TITLE__ Demo',

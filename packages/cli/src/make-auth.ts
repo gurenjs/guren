@@ -1096,11 +1096,11 @@ function buildSeederTemplate(dialect: SchemaDialect): string {
 
   const context = seederContextTypes[dialect]
 
-  return `import { defineSeeder, ScryptHasher, type ${context} } from '@guren/core'
+  return `import { defineSeeder, Hash, type ${context} } from '@guren/core'
 import { users } from '../schema.js'
 
 export default defineSeeder(async ({ db }: ${context}) => {
-  const hasher = new ScryptHasher()
+  const hasher = new Hash()
   const passwordHash = await hasher.hash('secret')
 
   await db

@@ -130,20 +130,13 @@ The two runtimes produce different hash formats, so a hash written under one can
 ### Creating a Hasher
 
 ```typescript
-import { Hash, ScryptHasher, NodeHasher } from '@guren/core'
+import { Hash } from '@guren/core'
 
 // Runtime-detecting. Takes no options.
 const hash = new Hash()
-
-// Bun's Argon2id with explicit cost parameters
-const argon2 = new ScryptHasher({ algorithm: 'argon2id', memoryCost: 65536, timeCost: 3 })
-
-// Bun's bcrypt
-const bcrypt = new ScryptHasher({ algorithm: 'bcrypt', cost: 12 })
-
-// Node's crypto.scrypt
-const scrypt = new NodeHasher({ cost: 16384, memory: 8, saltLength: 16, keyLength: 64 })
 ```
+
+To pin an algorithm or its cost parameters, construct `ScryptHasher` or `NodeHasher` directly — see [Algorithm Options](#algorithm-options).
 
 ### Hashing Passwords
 
@@ -164,7 +157,7 @@ const isValid = await hash.verify(hashedPassword, 'user-password')
 
 That order is the inverse of `Bun.password.verify(plain, hashed)` and of the standalone `verifyPassword(plain, hashed)` helper, so it is worth checking at every call site. Both parameters are `string`, so a swapped call compiles and no type error points at it; the built-in hashers detect the obvious case at runtime and throw a `TypeError` naming the order.
 
-Most apps never need to call this. If you have an `AuthManager` configured, the guard does the lookup and the comparison together:
+Most apps never need to call this. If you have an `AuthManager` configured, a **session** guard does the lookup and the comparison together, including the dummy hash that keeps a missing account from being distinguishable by response time:
 
 ```typescript
 const user = await this.auth.guard('web').validate({ email, password })
@@ -172,6 +165,8 @@ if (!user) {
   return this.json({ error: 'Invalid credentials' }, { status: 401 })
 }
 ```
+
+Name the guard. `TokenGuard.validate()` throws — bearer tokens are not credential-based — so a token-only API issuing a token from an email and password has to reach a session guard, or a `ModelUserProvider`, explicitly.
 
 ### Checking If Rehash Needed
 

@@ -130,20 +130,13 @@ try {
 ### ハッシャーの作成
 
 ```typescript
-import { Hash, ScryptHasher, NodeHasher } from '@guren/core'
+import { Hash } from '@guren/core'
 
 // ランタイムを自動判定する。オプションは取らない
 const hash = new Hash()
-
-// BunのArgon2id（コストパラメータを明示）
-const argon2 = new ScryptHasher({ algorithm: 'argon2id', memoryCost: 65536, timeCost: 3 })
-
-// Bunのbcrypt
-const bcrypt = new ScryptHasher({ algorithm: 'bcrypt', cost: 12 })
-
-// Nodeのcrypto.scrypt
-const scrypt = new NodeHasher({ cost: 16384, memory: 8, saltLength: 16, keyLength: 64 })
 ```
+
+アルゴリズムやコストパラメータを固定したい場合は `ScryptHasher` / `NodeHasher` を直接構築してください。[アルゴリズムオプション](#アルゴリズムオプション)を参照。
 
 ### パスワードのハッシュ化
 
@@ -164,7 +157,7 @@ const isValid = await hash.verify(hashedPassword, 'user-password')
 
 この順序は`Bun.password.verify(plain, hashed)`および単体関数の`verifyPassword(plain, hashed)`とは逆なので、呼び出しごとに確認する価値があります。どちらの引数も`string`なので入れ替えてもコンパイルは通り、型エラーは出ません。同梱のハッシャーは明らかな入れ替えを実行時に検出し、順序を明示した`TypeError`をスローします。
 
-多くのアプリではこれを直接呼ぶ必要はありません。`AuthManager`を設定していれば、ガードが検索と照合をまとめて行います。
+多くのアプリではこれを直接呼ぶ必要はありません。`AuthManager`を設定していれば、**セッション**ガードが検索と照合をまとめて行います。アカウントが存在しない場合にダミーハッシュを走らせる処理も含まれるので、応答時間からアカウントの有無を判別されずに済みます。
 
 ```typescript
 const user = await this.auth.guard('web').validate({ email, password })
@@ -172,6 +165,8 @@ if (!user) {
   return this.json({ error: 'Invalid credentials' }, { status: 401 })
 }
 ```
+
+ガード名は明示してください。`TokenGuard.validate()` はスローします（ベアラートークンは資格情報ベースではないため）。メールとパスワードからトークンを発行するトークン専用 API は、セッションガードか `ModelUserProvider` を明示的に取得する必要があります。
 
 ### 再ハッシュが必要かチェック
 

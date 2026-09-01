@@ -40,12 +40,9 @@ import AuthController from '../app/Http/Controllers/AuthController.js'
 // the inverse of `PasswordHasher.verify(hashed, plain)`, and so agreed with a
 // login that was broken in production and kept this suite green.
 let passwordHash: string
-let otherPasswordHash: string
 
 beforeAll(async () => {
-  const hasher = new Hash()
-  passwordHash = await hasher.hash('password123')
-  otherPasswordHash = await hasher.hash('correctpassword')
+  passwordHash = await new Hash().hash('password123')
 })
 
 function createController(ctx: Context): AuthController {
@@ -179,7 +176,7 @@ describe('AuthController', () => {
     })
 
     it('returns 401 for wrong password', async () => {
-      const user = { id: 1, name: 'Test', email: 'test@example.com', passwordHash: otherPasswordHash, createdAt: new Date() }
+      const user = { id: 1, name: 'Test', email: 'test@example.com', passwordHash, createdAt: new Date() }
       mockUserFirst.mockResolvedValue(user)
 
       const ctx = createControllerContext('http://api.test/api/auth/login', {
