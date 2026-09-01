@@ -69,11 +69,16 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
   assertOutputDirOutsideRoot(out, root, 'Cloudflare build')
 
   const packageJson = readPackageJson(root)
+  // One read of the app's App MCP opt-in, threaded to both halves of the
+  // decision below — the guard on the committed config, and the alias set the
+  // scaffold writes. Two independent reads would be two places for them to
+  // disagree, silently; the other two deploy plugins thread it the same way.
+  const mcpPlugin = appUsesMcpPlugin(root)
 
   // Checked here, before the app build: this is a one-line edit to a file the
   // developer owns, and reporting it after several minutes of Vite output is
   // reporting it where nobody reads.
-  assertMcpTransportNotAliased(root)
+  assertMcpTransportNotAliased(root, mcpPlugin)
 
   if (!options.skipAppBuild) {
     runAppBuild(root, packageJson.scripts ?? {})
@@ -107,7 +112,7 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
 
   writeDevOnlyStubs(out)
 
-  scaffoldWranglerConfig(root, out, packageJson.name, appUsesMcpPlugin(root))
+  scaffoldWranglerConfig(root, out, packageJson.name, mcpPlugin)
 }
 
 const MCP_UNAVAILABLE = 'The MCP endpoint is unavailable on Cloudflare Workers — it generates files on disk.'
@@ -202,6 +207,10 @@ function devOnlyAliases(outRelative: string, mcpPlugin: boolean): Record<string,
  * A warning would be the wrong instrument: this is one line to delete, in a
  * file the developer owns, and the build can name it exactly.
  *
+ * `mcpPlugin` arrives as an argument rather than being read here, so this and
+ * the alias set the scaffold writes cannot end up disagreeing about the same
+ * manifest.
+ *
  * Read through `parseJsonc` rather than as text, for the same reason
  * `warnMissingBuildOwnedKeys` does: a config carries comments, and a comment
  * mentioning the specifier — including the one the failure message itself
@@ -209,9 +218,9 @@ function devOnlyAliases(outRelative: string, mcpPlugin: boolean): Record<string,
  * left to that function's warning; failing a deploy on a file this build
  * could not read would be worse than the defect.
  */
-function assertMcpTransportNotAliased(root: string): void {
+function assertMcpTransportNotAliased(root: string, mcpPlugin: boolean): void {
   const configPath = resolve(root, 'wrangler.jsonc')
-  if (!existsSync(configPath) || !appUsesMcpPlugin(root)) {
+  if (!mcpPlugin || !existsSync(configPath)) {
     return
   }
 
