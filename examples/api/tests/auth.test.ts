@@ -1,9 +1,9 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { beforeAll, describe, expect, it, vi, beforeEach } from 'vitest'
 import {
   createControllerContext,
   createControllerModuleMock,
 } from '@guren/testing/controller'
-import type { Context } from '@guren/core'
+import { type Context, Hash } from '@guren/core'
 
 // Mock dependencies
 vi.mock('@guren/core', async () => {
@@ -12,14 +12,6 @@ vi.mock('@guren/core', async () => {
     ...actual,
     ...createControllerModuleMock(),
     ServiceProvider: actual.ServiceProvider,
-    ScryptHasher: class {
-      async hash(password: string) {
-        return `hashed_${password}`
-      }
-      async verify(password: string, hash: string) {
-        return hash === `hashed_${password}`
-      }
-    },
   }
 })
 
@@ -42,6 +34,20 @@ vi.mock('../app/Models/User.js', () => ({
 
 import AuthController from '../app/Http/Controllers/AuthController.js'
 
+// Hashes produced by the hasher the controller actually verifies with, rather
+// than by a hand-written double. A double is a copy of a contract no type
+// constrains: the one this file used to carry defined `verify(password, hash)`,
+// the inverse of `PasswordHasher.verify(hashed, plain)`, and so agreed with a
+// login that was broken in production and kept this suite green.
+let passwordHash: string
+let otherPasswordHash: string
+
+beforeAll(async () => {
+  const hasher = new Hash()
+  passwordHash = await hasher.hash('password123')
+  otherPasswordHash = await hasher.hash('correctpassword')
+})
+
 function createController(ctx: Context): AuthController {
   const controller = new AuthController()
   controller.setContext(ctx)
@@ -55,7 +61,7 @@ describe('AuthController', () => {
 
   describe('register()', () => {
     it('creates a new user and returns token', async () => {
-      const newUser = { id: 1, name: 'Test User', email: 'test@example.com', passwordHash: 'hashed_password123', createdAt: new Date() }
+      const newUser = { id: 1, name: 'Test User', email: 'test@example.com', passwordHash, createdAt: new Date() }
       mockUserFirst.mockResolvedValue(null) // No existing user
       mockUserCreate.mockResolvedValue(newUser)
 
@@ -127,7 +133,7 @@ describe('AuthController', () => {
 
   describe('login()', () => {
     it('returns token for valid credentials', async () => {
-      const user = { id: 1, name: 'Test', email: 'test@example.com', passwordHash: 'hashed_password123', createdAt: new Date() }
+      const user = { id: 1, name: 'Test', email: 'test@example.com', passwordHash, createdAt: new Date() }
       mockUserFirst.mockResolvedValue(user)
 
       const ctx = createControllerContext('http://api.test/api/auth/login', {
@@ -173,7 +179,7 @@ describe('AuthController', () => {
     })
 
     it('returns 401 for wrong password', async () => {
-      const user = { id: 1, name: 'Test', email: 'test@example.com', passwordHash: 'hashed_correctpassword', createdAt: new Date() }
+      const user = { id: 1, name: 'Test', email: 'test@example.com', passwordHash: otherPasswordHash, createdAt: new Date() }
       mockUserFirst.mockResolvedValue(user)
 
       const ctx = createControllerContext('http://api.test/api/auth/login', {
