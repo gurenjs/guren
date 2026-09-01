@@ -32,7 +32,7 @@
  *                                              # module if none exists, so
  *                                              # tsc/dev/test resolve it
  */
-import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
+import { closeSync, mkdirSync, openSync, statSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -74,16 +74,34 @@ export const searchIndexBuild: SearchIndexBuild = ${JSON.stringify(build, null, 
 `
 }
 
+/**
+ * Claim the file with `wx` rather than testing for it first: this runs from
+ * `prerender:stub`, which several scripts invoke concurrently, and a real
+ * build's output must never be replaced by a stub that a check-then-write
+ * raced into.
+ */
 function writeStub(): void {
   mkdirSync(outDir, { recursive: true })
-  if (existsSync(genPath)) {
-    return
+
+  let handle: number
+  try {
+    handle = openSync(genPath, 'wx')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+      return
+    }
+    throw error
   }
-  writeFileSync(
-    genPath,
-    renderModule({ indexed: false, buildId: '', sectionsTable: '', searchTable: '' }),
-    'utf8',
-  )
+
+  try {
+    writeFileSync(
+      handle,
+      renderModule({ indexed: false, buildId: '', sectionsTable: '', searchTable: '' }),
+      'utf8',
+    )
+  } finally {
+    closeSync(handle)
+  }
   console.log('  web/.guren/search-index.gen.ts — stub')
 }
 
