@@ -108,6 +108,8 @@ setInertiaDocument({
 
 The markup is emitted verbatim, so keep it to developer-authored strings. Files at the root of `public/` are served by the Bun runtime; on Node-based deployments serve them from a CDN.
 
+Files a browser would render as a *document* — `.html`, `.svg`, `.xml` — are served with `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff`, so navigating straight to one downloads it instead of running its script on your origin. Images, scripts, stylesheets and fonts are unaffected: an `<img src="/logo.svg">`, a CSS `url()` and a `<link rel="icon">` all still load, because the disposition only decides navigate-versus-download. An `<iframe>` or `<object>` embed *is* a navigation, so a document embedded that way stops rendering. For a public directory holding nothing user-supplied, `rootPublicAssets: { inlineDocuments: true }` and `inlineDocuments: true` turn this off per route family; otherwise serve the page from a controller.
+
 ## Server-Side Rendering
 Each application ships with a default `resources/js/ssr.tsx` entry that calls `renderInertiaServer()` from `@guren/inertia-client`. When you bootstrap the app with `autoConfigureInertiaAssets(app, { importMeta })`, Guren will:
 

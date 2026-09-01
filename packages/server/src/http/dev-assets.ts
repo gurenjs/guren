@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 import type { Application } from './Application'
 import { registerRootPublicAssets, type RootPublicAssetsConfig } from './public-assets'
-import { guardStaticDocument } from './static-documents'
+import { applyDocumentDisposition, guardStaticDocument } from './static-documents'
 import { isPathWithin, isRealPathWithin } from '../support/contained-path'
 
 declare const Bun: any
@@ -337,12 +337,20 @@ async function transpileFile(
   }
 
   const body = await file.arrayBuffer()
-  return new Response(body, {
-    headers: {
-      'Content-Type': file.type || 'application/octet-stream',
-      'Cache-Control': isDev() ? 'no-cache' : 'public, max-age=31536000',
-    },
+  const contentType = file.type || 'application/octet-stream'
+  const headers = new Headers({
+    'Content-Type': contentType,
+    'Cache-Control': isDev() ? 'no-cache' : 'public, max-age=31536000',
   })
+
+  // Anything this route resolves that is not TypeScript is handed back as it
+  // sits on disk — a `.html` beside a page component comes back as text/html.
+  // No `inlineDocuments` switch: the two directories reachable here hold the
+  // app's own sources and the vendored client, not the uploads that escape
+  // hatch exists for.
+  applyDocumentDisposition(headers, contentType)
+
+  return new Response(body, { headers })
 }
 
 function buildCandidatePaths(fsPath: string): string[] {
