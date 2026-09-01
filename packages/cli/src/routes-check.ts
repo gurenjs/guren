@@ -1,7 +1,7 @@
 import { stat } from 'node:fs/promises'
 import { dirname, extname, isAbsolute, join, relative, resolve } from 'node:path'
-import type { Statement } from '@babel/types'
-import { walk } from './ast-walk'
+import type { CallExpression, Statement } from '@babel/types'
+import { memberKeyName, objectLiteral, walk } from './ast-walk'
 import {
   discoverModuleRoutesFiles,
   discoverRoutesFiles,
@@ -425,29 +425,24 @@ async function resolveModuleEntry(
 
   walk(parsed.ast.program, (node) => {
     if (sawDefineModule || node.type !== 'CallExpression') return
-    const callee = node.callee as { type?: string; name?: string } | undefined
-    if (callee?.type !== 'Identifier' || callee.name !== 'defineModule') return
-    const [argument] = (node.arguments ?? []) as Array<{
-      type?: string
-      properties?: Array<{
-        type?: string
-        computed?: boolean
-        key?: { type?: string; name?: string; value?: unknown }
-        value?: { type?: string; name?: string }
-      }>
-    }>
-    if (argument?.type !== 'ObjectExpression') return
+    const call = node as unknown as CallExpression
+    if (call.callee.type !== 'Identifier' || call.callee.name !== 'defineModule') return
+    // `defineModule({ … } satisfies ModuleDefinition)` describes the same
+    // module, so unwrap before judging the argument's shape. Reading it bare
+    // made the descriptor invisible and dropped the scope back to the
+    // conventional `routes.ts` — a wired module reported as unmounted, with
+    // nothing to distinguish that from a descriptor naming no routes.
+    const argument = objectLiteral(call.arguments[0])
+    if (!argument) return
     sawDefineModule = true
 
-    for (const property of argument.properties ?? []) {
+    for (const property of argument.properties) {
       if (property.type === 'SpreadElement') {
         hasSpread = true
         continue
       }
-      if (property.computed) continue
-      const key = property.key
-      const name = key?.type === 'Identifier' ? key.name : key?.type === 'StringLiteral' ? String(key.value) : undefined
-      if (name !== 'routes') continue
+      // Computed keys answer `undefined` here, which is the skip this wants.
+      if (memberKeyName(property) !== 'routes') continue
       // A method shorthand (`routes(router) {...}`) is an inline registrar,
       // same as an arrow value.
       routesValue = property.type === 'ObjectMethod' ? { type: 'FunctionExpression' } : (property.value ?? null)
