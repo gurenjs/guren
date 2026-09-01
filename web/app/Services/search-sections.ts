@@ -18,6 +18,13 @@ const HEADING_OPEN = /<h([1-3])\s+id="([^"]*)"\s*>/giu
 const MERMAID_BLOCK = /<pre class="mermaid">[\s\S]*?<\/pre>/giu
 
 /**
+ * Elements whose text is not prose either. Docs render with `sanitize: false`
+ * because some pages embed raw HTML on purpose, so nothing upstream would
+ * stop a `<script>` body from being indexed as though a reader could read it.
+ */
+const NON_PROSE_BLOCK = /<(script|style)\b[\s\S]*?<\/\1\s*>/giu
+
+/**
  * Tags that do not interrupt a word. Everything else is a block boundary and
  * becomes whitespace — without that, `…/routing</p><h3>Controllers` collapses
  * into one nonsense token. Inline tags must *not* become whitespace, or shiki's
@@ -67,12 +74,34 @@ function collapseWhitespace(text: string): string {
 }
 
 /**
+ * Where the tag opening at `start` ends, skipping over quoted attribute
+ * values. A bare `indexOf('>')` ends the tag early on `<p title="1 > 0">`,
+ * spilling the rest of the attribute into the text as `0">`.
+ */
+function tagEnd(html: string, start: number): number {
+  let quote: string | undefined
+  for (let index = start + 1; index < html.length; index++) {
+    const char = html[index]
+    if (quote !== undefined) {
+      if (char === quote) {
+        quote = undefined
+      }
+    } else if (char === '"' || char === "'") {
+      quote = char
+    } else if (char === '>') {
+      return index
+    }
+  }
+  return -1
+}
+
+/**
  * Visible text of an HTML fragment. Safe to scan for `<` because everything
  * upstream is renderer output: literal angle brackets in prose and in code
  * blocks arrive here already escaped as entities.
  */
 export function htmlToText(html: string): string {
-  const source = html.replace(MERMAID_BLOCK, ' ')
+  const source = html.replace(MERMAID_BLOCK, ' ').replace(NON_PROSE_BLOCK, ' ')
   let out = ''
   let index = 0
 
@@ -82,7 +111,7 @@ export function htmlToText(html: string): string {
       out += decodeEntities(source.slice(index))
       break
     }
-    const close = source.indexOf('>', open + 1)
+    const close = tagEnd(source, open)
     if (close === -1) {
       out += decodeEntities(source.slice(index))
       break
@@ -152,7 +181,6 @@ export function splitDocSections(
   const limit = options.maxBodyLength ?? MAX_SECTION_BODY
   const headings: { anchor: string; heading: string; headingStart: number; bodyStart: number }[] = []
 
-  HEADING_OPEN.lastIndex = 0
   for (const match of html.matchAll(HEADING_OPEN)) {
     const level = Number(match[1])
     const openEnd = match.index + match[0].length

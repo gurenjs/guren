@@ -50,23 +50,22 @@ type Run = { kind: 'cjk' | 'word'; text: string }
  */
 function segment(text: string): Run[] {
   const runs: Run[] = []
-  // Whether the previous character continued a run, as opposed to ending one:
-  // a separator has to break `a b` into two runs even though both are words.
-  let running = false
+  // The run still being extended, or null once a separator ended one: `a b`
+  // has to become two runs even though both characters are words.
+  let current: Run | null = null
 
   for (const char of text.normalize('NFKC')) {
     if (!WORD_CHAR.test(char)) {
-      running = false
+      current = null
       continue
     }
 
     const kind = CJK_CHAR.test(char) ? 'cjk' : 'word'
-    const previous = runs.at(-1)
-    if (running && previous !== undefined && previous.kind === kind) {
-      previous.text += char
+    if (current !== null && current.kind === kind) {
+      current.text += char
     } else {
-      runs.push({ kind, text: char })
-      running = true
+      current = { kind, text: char }
+      runs.push(current)
     }
   }
 
@@ -120,6 +119,18 @@ export function tokenizeText(text: string): TokenizedText {
   }
 
   return { tokens: tokens.join(' '), unigrams: unigrams.join(' ') }
+}
+
+/**
+ * The literal runs a query was written as, lowercased — not its tokens.
+ *
+ * Snippets are cut from the stored body, which holds prose rather than
+ * bigrams, so locating the hit there takes the words the reader actually
+ * typed. Case is folded because the body keeps its original casing while a
+ * token stream does not.
+ */
+export function queryTerms(query: string): string[] {
+  return segment(query).map((run) => run.text.toLowerCase())
 }
 
 /** FTS5 string literal. Tokens never contain a quote; double it regardless. */

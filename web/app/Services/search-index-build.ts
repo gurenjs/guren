@@ -59,10 +59,19 @@ export function collectRows(docs: DocsByLocale): IndexRow[] {
       for (const slug of Object.keys(slugs).sort()) {
         const doc = slugs[slug]
         const docTitle = tokenizeText(doc.title)
+        let titleCarried = false
 
         for (const section of splitDocSections(doc.html)) {
           const heading = tokenizeText(section.heading)
           const body = tokenizeText(section.body)
+          // The title is searchable on the doc's first section only — its h1,
+          // which is where a "this whole guide" hit should land. Repeating it
+          // on every section made a title match fan out across the document:
+          // searching `database` returned six sections of guides/database
+          // ahead of every other doc, led by whichever of them bm25 happened
+          // to favour, with snippets that had nothing to do with the query.
+          const carryTitle = !titleCarried
+          titleCarried = true
           rows.push({
             id: rows.length + 1,
             locale,
@@ -72,10 +81,10 @@ export function collectRows(docs: DocsByLocale): IndexRow[] {
             docTitle: doc.title,
             heading: section.heading,
             body: section.body,
-            docTitleTokens: docTitle.tokens,
+            docTitleTokens: carryTitle ? docTitle.tokens : '',
             headingTokens: heading.tokens,
             bodyTokens: body.tokens,
-            unigrams: [docTitle.unigrams, heading.unigrams, body.unigrams]
+            unigrams: [carryTitle ? docTitle.unigrams : '', heading.unigrams, body.unigrams]
               .filter((part) => part.length > 0)
               .join(' '),
           })
@@ -143,20 +152,21 @@ function quote(value: string): string {
  */
 function batchInserts(prefix: string, tuples: string[]): string[] {
   const statements: string[] = []
+  const prefixBytes = Buffer.byteLength(prefix, 'utf8')
   let batch: string[] = []
-  let bytes = Buffer.byteLength(prefix, 'utf8')
+  let bytes = prefixBytes
 
   const flush = (): void => {
     if (batch.length > 0) {
       statements.push(`${prefix}\n${batch.join(',\n')};`)
       batch = []
-      bytes = Buffer.byteLength(prefix, 'utf8')
+      bytes = prefixBytes
     }
   }
 
   for (const tuple of tuples) {
     const size = Buffer.byteLength(tuple, 'utf8') + 2
-    if (size + Buffer.byteLength(prefix, 'utf8') > MAX_STATEMENT_BYTES) {
+    if (size + prefixBytes > MAX_STATEMENT_BYTES) {
       throw new Error(
         `A single row serializes to ${size} bytes, over the ${MAX_STATEMENT_BYTES} byte ` +
           'statement budget. Lower MAX_SECTION_BODY in app/Services/search-sections.ts.',

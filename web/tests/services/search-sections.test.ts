@@ -35,6 +35,20 @@ describe('htmlToText', () => {
     expect(htmlToText('<p>&#xD800; &#0;</p>')).toBe('&#xD800; &#0;')
   })
 
+  it('keeps an attribute containing a bracket out of the text', () => {
+    // Docs render with sanitize: false, so raw HTML reaches this walker. A
+    // bare indexOf('>') ends the tag early and spills `0">` into the prose.
+    expect(htmlToText('<p title="1 > 0">visible</p>')).toBe('visible')
+    expect(htmlToText(`<p data-x='a > b'>visible</p>`)).toBe('visible')
+  })
+
+  it('does not index script or style bodies as prose', () => {
+    expect(htmlToText('<p>before</p><script>doNotIndex()</script><p>after</p>')).toBe(
+      'before\nafter',
+    )
+    expect(htmlToText('<style>.a { color: red }</style><p>after</p>')).toBe('after')
+  })
+
   it('drops mermaid diagram source', () => {
     // Diagram source is not prose, and it ranks on words nobody searches for.
     expect(htmlToText('<p>before</p><pre class="mermaid">graph TD;\nA--&gt;B;</pre>')).toBe(

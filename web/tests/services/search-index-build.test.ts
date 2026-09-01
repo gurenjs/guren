@@ -42,11 +42,22 @@ describe('collectRows', () => {
     ])
   })
 
-  it('carries the doc title onto every section', () => {
+  it('carries the doc title onto every section for display', () => {
     expect(collectRows(corpus()).map((row) => row.docTitle)).toEqual([
       'Routing',
       'Routing',
       'ルーティング',
+    ])
+  })
+
+  it('makes the doc title searchable on the first section only', () => {
+    // Repeating it made one title match fan out across a whole document:
+    // `database` returned six sections of guides/database ahead of every
+    // other doc, and their snippets had nothing to do with the query.
+    expect(collectRows(corpus()).map((row) => row.docTitleTokens)).toEqual([
+      'routing',
+      '',
+      'ルー ーテ ティ ィン ング',
     ])
   })
 
@@ -75,12 +86,14 @@ describe('computeBuildId', () => {
     )
   })
 
-  it('takes nothing from outside the rows', () => {
-    // If a clock or a git sha reached the id, a docs-unchanged deploy would
-    // skip reindexing and then bake a name for tables nobody created.
-    const rows = collectRows(corpus())
-    const copy = rows.map((row) => ({ ...row }))
-    expect(computeBuildId(copy)).toBe(computeBuildId(rows))
+  it('is the same value this corpus has always produced', () => {
+    // A golden value, because the property that matters is a negative one:
+    // if a clock, a git sha or a build counter ever reached the id, a
+    // docs-unchanged deploy would skip reindexing and then bake a table name
+    // nobody created. Nothing weaker than a fixed expectation catches that.
+    // Update it deliberately, together with INDEX_FORMAT, when the stored
+    // shape changes.
+    expect(computeBuildId(collectRows(corpus()))).toBe('23e8605200829a53')
   })
 })
 

@@ -11,8 +11,6 @@
  * interchangeable.
  */
 import { Database } from 'bun:sqlite'
-import { readdirSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
 
 import { beforeAll, describe, expect, test } from 'bun:test'
 
@@ -25,8 +23,7 @@ import {
   type DocsByLocale,
 } from '../../app/Services/search-index-build.js'
 import { BM25_WEIGHTS, buildSearchMatch } from '../../app/Services/search-tokenize.js'
-
-const migrationsDir = join(import.meta.dir, '../../db/migrations')
+import { applyMigrations } from './migrations.js'
 
 const docs: DocsByLocale = {
   en: {
@@ -84,12 +81,7 @@ function find(query: string, locale: 'en' | 'ja'): { slug: string; anchor: strin
 beforeAll(() => {
   db = new Database(':memory:')
   // The committed migrations, so `search_index_state` is exercised as shipped.
-  for (const entry of readdirSync(migrationsDir, { withFileTypes: true })
-    .filter((dirent) => dirent.isDirectory())
-    .map((dirent) => dirent.name)
-    .sort()) {
-    db.exec(readFileSync(join(migrationsDir, entry, 'migration.sql'), 'utf8'))
-  }
+  applyMigrations(db)
   db.exec(renderIndexSql(rows, buildId))
 })
 
