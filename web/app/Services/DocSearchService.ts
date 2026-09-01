@@ -129,49 +129,51 @@ export class DocSearchService {
     const sections = sql.identifier(this.#build.sectionsTable)
     const [titleLead, title, heading, body, localeWeight, unigram] = BM25_WEIGHTS[match.mode]
 
-    // FTS5 refuses a table alias on the left of MATCH ("no such column"), so
-    // the search table is named outright and only the sections table is
-    // aliased. Both names come from the generated module rather than from the
-    // request, and everything else is bound — including the bm25 weights.
+    // A long section is stored as several rows sharing one anchor, and the
+    // reader should see that heading once, at its best-ranked chunk. Collapsed
+    // here rather than after the fact: fetching a fixed multiple of the limit
+    // and deduplicating in JS is only right while no section has more chunks
+    // than that multiple. One that did returned a single result for a query
+    // with twenty-six distinct matches. Partitioning by category too, because
+    // a slug is not unique across them — `guides/overview` and
+    // `tutorials/overview` both exist.
+    //
+    // FTS5 refuses a table alias on the left of MATCH ("no such column"), and
+    // bm25() only works in a query directly over the table, so the ranking
+    // subquery is separate from the one that windows over it. Both table names
+    // come from the generated module; everything else is bound, weights
+    // included.
     const database = (await this.#database()) as QueryableDatabase
     const rows = (await database.all(sql`
-      SELECT s.category AS category, s.slug AS slug, s.anchor AS anchor,
-             s.doc_title AS doc_title, s.heading AS heading, s.body AS body
-      FROM ${search}
-      JOIN ${sections} s ON s.id = ${search}.rowid
-      WHERE ${search} MATCH ${match.match}
-      ORDER BY bm25(${search}, ${titleLead}, ${title}, ${heading}, ${body}, ${localeWeight}, ${unigram})
-      LIMIT ${limit * 2}
+      SELECT category, slug, anchor, doc_title, heading, body FROM (
+        SELECT s.category AS category, s.slug AS slug, s.anchor AS anchor,
+               s.doc_title AS doc_title, s.heading AS heading, s.body AS body,
+               ranked.rank AS rank,
+               row_number() OVER (
+                 PARTITION BY s.category, s.slug, s.anchor ORDER BY ranked.rank
+               ) AS chunk
+        FROM (
+          SELECT ${search}.rowid AS id,
+                 bm25(${search}, ${titleLead}, ${title}, ${heading}, ${body}, ${localeWeight}, ${unigram}) AS rank
+          FROM ${search}
+          WHERE ${search} MATCH ${match.match}
+        ) AS ranked
+        JOIN ${sections} s ON s.id = ranked.id
+      )
+      WHERE chunk = 1
+      ORDER BY rank
+      LIMIT ${limit}
     `)) as SectionRow[]
 
-    const seen = new Set<string>()
-    const results: DocSearchResult[] = []
-    for (const row of rows) {
-      // A long section is stored as several rows sharing one anchor; the
-      // reader should see the heading once, at its best-ranked occurrence.
-      // Keyed on the category too, because the slug alone is not unique —
-      // `guides/overview` and `tutorials/overview` both exist, and one would
-      // otherwise suppress the other.
-      const key = `${row.category}/${row.slug}#${row.anchor}`
-      if (seen.has(key)) {
-        continue
-      }
-      seen.add(key)
-      results.push({
-        category: row.category,
-        slug: row.slug,
-        anchor: row.anchor,
-        docTitle: row.doc_title,
-        heading: row.heading,
-        snippet: buildSnippet(row.body, query),
-        url: `${docPaths(row.category, row.slug)[locale]}#${encodeURIComponent(row.anchor)}`,
-      })
-      if (results.length === limit) {
-        break
-      }
-    }
-
-    return results
+    return rows.map((row) => ({
+      category: row.category,
+      slug: row.slug,
+      anchor: row.anchor,
+      docTitle: row.doc_title,
+      heading: row.heading,
+      snippet: buildSnippet(row.body, query),
+      url: `${docPaths(row.category, row.slug)[locale]}#${encodeURIComponent(row.anchor)}`,
+    }))
   }
 }
 

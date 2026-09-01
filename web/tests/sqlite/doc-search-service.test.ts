@@ -27,12 +27,23 @@ import { applyMigrations } from './migrations.js'
 const docs: DocsByLocale = {
   en: {
     guides: {
-      // Long enough that section splitting stores it as several rows under one
-      // anchor, which is what the deduplication below has to collapse.
+      // Long enough that section splitting stores it as many rows under one
+      // anchor — more than any fixed over-fetch would leave room for.
       operations: {
         title: 'Operations',
-        html: `<h1 id="operations">Operations</h1><p>${'Rotate the paginated ledger. '.repeat(400)}</p>`,
+        html: `<h1 id="operations">Operations</h1><p>${'Rotate the paginated ledger. '.repeat(4000)}</p>`,
       },
+      // Nine more documents mentioning the same word once, so a crowding-out
+      // failure is visible as their absence rather than as a reordering.
+      ...Object.fromEntries(
+        Array.from({ length: 9 }, (_, index) => [
+          `note-${index}`,
+          {
+            title: `Note ${index}`,
+            html: `<h1 id="note-${index}">Note ${index}</h1><p>A paginated note.</p>`,
+          },
+        ]),
+      ),
       overview: {
         title: 'Guide overview',
         html: '<h1 id="overview">Overview</h1><p>Guren at a glance, step by step.</p>',
@@ -152,6 +163,17 @@ describe('DocSearchService', () => {
   test('returns as many distinct sections as the limit allows', async () => {
     expect(await service.search('step by step', 'en', 1)).toHaveLength(1)
     expect(await service.search('step by step', 'en', 2)).toHaveLength(2)
+  })
+
+  test('is not crowded out by one section with many chunks', async () => {
+    // Deduplicating after a fixed over-fetch only works while no section has
+    // more chunks than the multiple. `paginated` appears in one very long
+    // section and in nine short docs; over-fetching 2x the limit returned the
+    // long section alone and dropped the other nine.
+    const results = await service.search('paginated', 'en', 5)
+
+    expect(results.map((result) => result.slug)).toContain('operations')
+    expect(new Set(results.map((result) => result.slug)).size).toBe(5)
   })
 
   test('refuses to answer when the index was never built', async () => {

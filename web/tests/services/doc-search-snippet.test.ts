@@ -53,9 +53,11 @@ describe('buildSnippet', () => {
     // indices 159 and 160, so a 160-character window ends inside it.
     expect(buildSnippet(`${'a'.repeat(159)}${'🎉'.repeat(50)}`, 'a')).not.toMatch(lone)
 
-    // The leading cut: the window opens 48 characters before the hit, and an
-    // odd offset puts that opening inside an emoji.
-    expect(buildSnippet(`${'🎉'.repeat(100)}x needle ${'b'.repeat(300)}`, 'needle')).not.toMatch(
+    // The leading cut: the window opens 48 characters before the hit, and the
+    // padding is sized so that opening lands on the *second* code unit of an
+    // emoji. One character less and it lands on the first, where an unguarded
+    // slice is accidentally valid and the assertion proves nothing.
+    expect(buildSnippet(`${'🎉'.repeat(100)}xy needle ${'b'.repeat(300)}`, 'needle')).not.toMatch(
       lone,
     )
   })
