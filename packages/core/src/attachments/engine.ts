@@ -187,6 +187,24 @@ export interface DeliveryOptions {
   routeName?: string
 }
 
+/**
+ * The single storage key prefix every attachment object lives under:
+ * `attachments/<id>/<name>` for an original, `attachments/<id>/variants/…`
+ * for a derivative, and `attachments/` itself for the prune sweep's
+ * directory listing.
+ *
+ * Exported, and re-exported from `@guren/core`, because the layout is not
+ * private to this file. `guren check`'s attachments rules judge, from
+ * another package, whether uploaded bytes land somewhere the app serves
+ * statically — and the ones that reach the objects themselves have to name
+ * `<disk root>/attachments` to do it. A restated copy of the prefix over
+ * there does not fail loudly when this layout moves (a shard level, a
+ * rename): it stops matching, answers "not reachable", and reports an
+ * exposed app as safe. A build-failing security rule failing *open*, with
+ * nothing going red anywhere. Import this instead of restating it.
+ */
+export const ATTACHMENT_OBJECT_PREFIX = 'attachments'
+
 export const DEFAULT_DELIVERY_PREFIX = '/attachments'
 export const DEFAULT_DELIVERY_ROUTE_NAME = 'attachments.show'
 
@@ -364,7 +382,7 @@ export class AttachmentEngine {
 
     const id = ulid()
     const name = inspection.name
-    const path = `attachments/${id}/${name}`
+    const path = `${ATTACHMENT_OBJECT_PREFIX}/${id}/${name}`
     const diskName = options.disk ?? this.defaultDisk
     const disk = this.storage().disk(diskName)
     const contentType = inspection.contentType ?? normalized.declaredContentType ?? 'application/octet-stream'
@@ -724,7 +742,7 @@ export class AttachmentEngine {
       try {
         const result = await this.processor.process(inspection.bytes, variantSpec)
         const extension = VARIANT_EXTENSION[result.format] ?? result.format
-        const path = `attachments/${id}/variants/${name}.${extension}`
+        const path = `${ATTACHMENT_OBJECT_PREFIX}/${id}/variants/${name}.${extension}`
         await disk.put(path, Buffer.from(result.bytes), {
           contentType: IMAGE_MIME[result.format] ?? 'application/octet-stream',
         })
@@ -807,7 +825,7 @@ export class AttachmentEngine {
     if (sniffed?.format === 'heic' && payload.heic === 'convert') {
       const converted = await this.processor.process(bytes, { format: 'jpeg' })
       const name = replaceExtension(row.name, 'jpg')
-      const path = `attachments/${row.id}/${name}`
+      const path = `${ATTACHMENT_OBJECT_PREFIX}/${row.id}/${name}`
       await disk.put(path, Buffer.from(converted.bytes), { contentType: 'image/jpeg' })
       // The old object is deleted only after the row commit below repoints
       // to the new one: deleting first would leave the row referencing
@@ -843,7 +861,7 @@ export class AttachmentEngine {
     // would find.
     const still = await this.model.where({ id: row.id }).first()
     if (!still) {
-      await disk.deleteDirectory(`attachments/${row.id}`)
+      await disk.deleteDirectory(`${ATTACHMENT_OBJECT_PREFIX}/${row.id}`)
       return
     }
     await this.model.forceUpdate({ id: row.id }, updates)
@@ -982,7 +1000,7 @@ export class AttachmentEngine {
   private async purgeRows(rows: PlainObject[]): Promise<void> {
     for (const row of rows) {
       const disk = this.storage().disk(String(row.disk))
-      await disk.deleteDirectory(`attachments/${String(row.id)}`)
+      await disk.deleteDirectory(`${ATTACHMENT_OBJECT_PREFIX}/${String(row.id)}`)
     }
     const ids = rows.map((row) => String(row.id))
     // Chunked like the prune lookups: a sweep can hand this thousands of
@@ -1126,7 +1144,7 @@ export class AttachmentEngine {
       let disk: StorageDriver
       try {
         disk = this.storage().disk(diskName)
-        prefixes = await disk.directories('attachments')
+        prefixes = await disk.directories(ATTACHMENT_OBJECT_PREFIX)
       } catch (error) {
         report.skippedDisks.push({
           disk: diskName,
