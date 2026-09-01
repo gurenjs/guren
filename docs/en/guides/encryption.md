@@ -113,98 +113,115 @@ try {
 
 ## Hashing
 
-The `Hash` class provides secure password hashing using bcrypt, argon2, or scrypt algorithms.
+Password hashing goes through a `PasswordHasher`. Three implementations ship:
+
+| Class | Algorithm | Runtime |
+| --- | --- | --- |
+| `Hash` (alias of `DefaultHasher`) | Delegates to `ScryptHasher` on Bun, `NodeHasher` elsewhere | Both |
+| `ScryptHasher` | `Bun.password` — Argon2id by default, bcrypt on request | Bun only |
+| `NodeHasher` | `crypto.scrypt` | Any |
+
+Reach for `Hash` unless you have a reason not to: it is the only one that works both on Bun and on a Node runtime such as AWS Lambda, and it is what `AuthenticatableModel` and `ModelUserProvider` use by default.
+
+> `ScryptHasher` produces Argon2id, not scrypt. The name predates the implementation; only `NodeHasher` uses scrypt.
+
+The two runtimes produce different hash formats, so a hash written under one cannot be verified under the other. That only matters for an app that moves an existing password column between runtimes.
 
 ### Creating a Hasher
 
 ```typescript
-import { Hash } from '@guren/core'
+import { Hash, ScryptHasher, NodeHasher } from '@guren/core'
 
-// Default bcrypt hasher
+// Runtime-detecting. Takes no options.
 const hash = new Hash()
 
-// Argon2 hasher
-const argon2Hash = new Hash({ driver: 'argon2' })
+// Bun's Argon2id with explicit cost parameters
+const argon2 = new ScryptHasher({ algorithm: 'argon2id', memoryCost: 65536, timeCost: 3 })
 
-// Scrypt hasher
-const scryptHash = new Hash({ driver: 'scrypt' })
+// Bun's bcrypt
+const bcrypt = new ScryptHasher({ algorithm: 'bcrypt', cost: 12 })
 
-// Bcrypt with custom rounds
-const bcryptHash = new Hash({ driver: 'bcrypt', rounds: 12 })
+// Node's crypto.scrypt
+const scrypt = new NodeHasher({ cost: 16384, memory: 8, saltLength: 16, keyLength: 64 })
 ```
 
 ### Hashing Passwords
 
 ```typescript
-const hash = new Hash()
-
-// Hash a password
-const hashedPassword = await hash.make('user-password')
-// Returns: $2b$10$...
-
-// Hash is async for security (uses worker threads)
+const hashedPassword = await hash.hash('user-password')
+// Returns: $argon2id$v=19$m=65536,t=2,p=1$...
 ```
+
+Models extending `AuthenticatableModel` do this for you: pass a plain `password` on `create()` and the model hashes it into the `passwordHash` column. See [Authentication](/docs/guides/authentication).
 
 ### Verifying Passwords
 
+**The stored hash comes first.**
+
 ```typescript
-// Check if a password matches
-const isValid = await hash.check('user-password', hashedPassword)
-// Returns: true or false
+const isValid = await hash.verify(hashedPassword, 'user-password')
+```
+
+That order is the inverse of `Bun.password.verify(plain, hashed)` and of the standalone `verifyPassword(plain, hashed)` helper, so it is worth checking at every call site. Both parameters are `string`, so a swapped call compiles and no type error points at it; the built-in hashers detect the obvious case at runtime and throw a `TypeError` naming the order.
+
+Most apps never need to call this. If you have an `AuthManager` configured, the guard does the lookup and the comparison together:
+
+```typescript
+const user = await this.auth.guard('web').validate({ email, password })
+if (!user) {
+  return this.json({ error: 'Invalid credentials' }, { status: 401 })
+}
 ```
 
 ### Checking If Rehash Needed
 
 ```typescript
-// Check if hash needs to be rehashed (e.g., rounds changed)
-const needsRehash = hash.needsRehash(hashedPassword)
-
-if (needsRehash) {
-  const newHash = await hash.make(plainPassword)
-  await user.update({ password: newHash })
+if (hash.needsRehash(user.passwordHash)) {
+  await user.update({ password: plainPassword })
 }
 ```
 
-### Getting Hash Info
-
-```typescript
-const info = hash.info(hashedPassword)
-// Returns: { algorithm: 'bcrypt', options: { rounds: 10 } }
-```
+`needsRehash()` compares the parameters encoded in the hash against the ones the hasher is configured with, so it reports `true` after you raise a cost factor. Nothing in the framework calls it for you.
 
 ## Algorithm Options
 
-### Bcrypt (Default)
+### Argon2 (Bun default)
 
 ```typescript
-const hash = new Hash({
-  driver: 'bcrypt',
-  rounds: 10, // Cost factor (default: 10, recommended: 10-12)
+const hash = new ScryptHasher({
+  algorithm: 'argon2id', // 'argon2i', 'argon2d', or 'argon2id' (default)
+  memoryCost: 65536,     // Memory usage in KiB
+  timeCost: 3,           // Iterations
 })
 ```
 
-### Argon2
+### Bcrypt
 
 ```typescript
-const hash = new Hash({
-  driver: 'argon2',
-  memoryCost: 65536,  // Memory usage in KB (default: 65536)
-  timeCost: 3,        // Iterations (default: 3)
-  parallelism: 4,     // Parallel threads (default: 4)
-  type: 'argon2id',   // 'argon2i', 'argon2d', or 'argon2id' (default)
+const hash = new ScryptHasher({
+  algorithm: 'bcrypt',
+  cost: 12, // Log rounds
 })
 ```
 
-### Scrypt
+### Scrypt (Node)
 
 ```typescript
-const hash = new Hash({
-  driver: 'scrypt',
-  cost: 16384,      // CPU/memory cost (N)
-  blockSize: 8,     // Block size (r)
-  parallelization: 1, // Parallelization (p)
-  keyLength: 64,    // Output length
+const hash = new NodeHasher({
+  cost: 16384,     // CPU/memory cost (N)
+  memory: 8,       // Block size (r)
+  saltLength: 16,  // Salt bytes
+  keyLength: 64,   // Output bytes
 })
+```
+
+The same scrypt implementation is available as standalone functions, which take the **plaintext first** — the opposite of `PasswordHasher.verify()`:
+
+```typescript
+import { hashPassword, verifyPassword, needsRehash } from '@guren/core'
+
+const stored = await hashPassword('user-password')
+const ok = await verifyPassword('user-password', stored)
 ```
 
 ## Using in Controllers
@@ -216,29 +233,26 @@ export default class AuthController extends Controller {
   private hash = new Hash()
 
   async register() {
-    const { email, password } = await this.request.json()
+    const { email, password } = await this.validateBody(RegisterSchema)
 
-    const user = await User.create({
-      email,
-      password: await this.hash.make(password),
-    })
+    // AuthenticatableModel hashes `password` into `passwordHash` for you.
+    const user = await User.create({ email, password })
 
     return this.json({ user })
   }
 
   async login() {
-    const { email, password } = await this.request.json()
-    const user = await User.findBy('email', email)
+    const { email, password } = await this.validateBody(LoginSchema)
+    const user = await User.first({ email })
 
-    if (!user || !await this.hash.check(password, user.password)) {
-      return this.json({ error: 'Invalid credentials' }, 401)
+    // Stored hash first. `verify(password, user.passwordHash)` type-checks
+    // and is wrong.
+    if (!user || !(await this.hash.verify(user.passwordHash, password))) {
+      return this.json({ error: 'Invalid credentials' }, { status: 401 })
     }
 
-    // Check if rehash needed
-    if (this.hash.needsRehash(user.password)) {
-      await user.update({
-        password: await this.hash.make(password),
-      })
+    if (this.hash.needsRehash(user.passwordHash)) {
+      await user.update({ password })
     }
 
     return this.json({ user })
@@ -252,7 +266,7 @@ export default class AuthController extends Controller {
 2. **Use a strong APP_KEY** — Run `bunx guren key:generate --write` to generate one. Never commit it to version control.
 3. **Don't roll your own crypto** — Use the provided utilities.
 4. **Rotate keys periodically** — Use `APP_PREVIOUS_KEYS` to rotate without downtime (see [Key Rotation](#key-rotation)).
-5. **Use Scrypt for new projects** — It's Guren's default and recommended password hashing algorithm.
+5. **Let `Hash` pick the algorithm** — it is Argon2id on Bun and scrypt on Node, and it is the only hasher that runs on both.
 
 ## Testing
 
@@ -275,8 +289,8 @@ describe('Hashing', () => {
   it('hashes and verifies passwords', async () => {
     const hash = new Hash()
 
-    const hashed = await hash.make('password123')
-    const valid = await hash.check('password123', hashed)
+    const hashed = await hash.hash('password123')
+    const valid = await hash.verify(hashed, 'password123')
 
     expect(valid).toBe(true)
   })
@@ -284,8 +298,8 @@ describe('Hashing', () => {
   it('rejects invalid passwords', async () => {
     const hash = new Hash()
 
-    const hashed = await hash.make('password123')
-    const valid = await hash.check('wrong-password', hashed)
+    const hashed = await hash.hash('password123')
+    const valid = await hash.verify(hashed, 'wrong-password')
 
     expect(valid).toBe(false)
   })
