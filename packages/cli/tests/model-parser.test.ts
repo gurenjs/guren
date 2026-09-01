@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'bun:test'
-import { parseModelSource } from '../src/model-parser'
+import {
+  classUsesAuthenticatableBase,
+  firstClassDeclaration,
+  hasModelConfig,
+  parseModelSource,
+  resolveModelStringArrayConfig,
+  staticStringProperty,
+} from '../src/model-parser'
+import { parseSourceFile } from '../src/parse-cache'
 
 describe('parseModelSource', () => {
   it('parses defineModel pattern with belongsTo', () => {
@@ -88,6 +96,104 @@ if (typeof User.hasMany === 'function') {
     expect(result!.usesAuth).toBe(true)
     expect(result!.relationships).toHaveLength(1)
     expect(result!.relationships[0].name).toBe('posts')
+  })
+
+  it('parses a defineModel options object written behind an as-const wrapper', () => {
+    const source = `
+import { AuthenticatableModel, defineModel } from '@guren/core'
+import { users } from '../../db/schema.js'
+
+export class User extends defineModel(users, {
+  base: AuthenticatableModel,
+  name: 'Account',
+} as const) {}
+`
+    const result = parseModelSource(source, '/app/Models/User.ts')
+
+    expect(result).not.toBeNull()
+    expect(result!.usesAuth).toBe(true)
+  })
+
+  it('reads a string-array config written behind an as-const wrapper', () => {
+    const source = `
+import { defineModel } from '@guren/orm'
+import { posts } from '../../db/schema.js'
+
+export class Post extends defineModel(posts) {
+  static override fillable = ['title', 'body'] as const
+}
+`
+    const ast = parseSourceFile(source, '/app/Models/Post.ts')
+    const classDecl = firstClassDeclaration(ast!.program.body)!
+
+    expect(resolveModelStringArrayConfig(classDecl, 'fillable')).toEqual(['title', 'body'])
+  })
+
+  it('reads a string-array defineModel option written behind an as-const wrapper', () => {
+    // The composed path `guren audit` walks: findDefineModelOption reaches the
+    // property, stringArrayEntries has to see through the array's own wrapper.
+    const source = `
+import { defineModel } from '@guren/orm'
+import { posts } from '../../db/schema.js'
+
+export class Post extends defineModel(posts, { fillable: ['title'] as const }) {}
+`
+    const ast = parseSourceFile(source, '/app/Models/Post.ts')
+    const classDecl = firstClassDeclaration(ast!.program.body)!
+
+    expect(resolveModelStringArrayConfig(classDecl, 'fillable')).toEqual(['title'])
+  })
+
+  it('reads a defineModel base, a static string and array entries through wrappers', () => {
+    const source = `
+import { AuthenticatableModel, defineModel } from '@guren/core'
+import { users } from '../../db/schema.js'
+
+export class User extends defineModel(users, {
+  base: AuthenticatableModel satisfies typeof AuthenticatableModel,
+}) {
+  static override passwordHashField = 'secretHash' as const
+  static override fillable = [('name' satisfies keyof UserRecord)]
+}
+`
+    const ast = parseSourceFile(source, '/app/Models/User.ts')
+    const classDecl = firstClassDeclaration(ast!.program.body)!
+
+    expect(classUsesAuthenticatableBase(classDecl)).toBe(true)
+    expect(staticStringProperty(classDecl, 'passwordHashField')).toBe('secretHash')
+    expect(resolveModelStringArrayConfig(classDecl, 'fillable')).toEqual(['name'])
+  })
+
+  it('still treats a wrapped `undefined` option as the absent option it is', () => {
+    // `defineModel` skips the assignment either way, so reading this as a
+    // declared allowlist would report mass-assignment protection the runtime
+    // does not have — the widening the unwrap could otherwise cause.
+    const source = `
+import { defineModel } from '@guren/orm'
+import { posts } from '../../db/schema.js'
+
+export class Post extends defineModel(posts, {
+  fillable: undefined as string[] | undefined,
+} as const) {}
+`
+    const ast = parseSourceFile(source, '/app/Models/Post.ts')
+    const classDecl = firstClassDeclaration(ast!.program.body)!
+
+    expect(hasModelConfig(classDecl, 'fillable')).toBe(false)
+  })
+
+  it('reads a relationship name written behind a wrapper', () => {
+    const source = `
+import { defineModel } from '@guren/orm'
+import { posts } from '../../db/schema.js'
+
+export class Post extends defineModel(posts) {}
+
+Post.belongsTo('author' as const, (() => null) as any, 'authorId', 'id')
+`
+    const result = parseModelSource(source, '/app/Models/Post.ts')
+
+    expect(result!.relationships.map((r) => r.name)).toEqual(['author'])
   })
 
   it('does not flag a plain defineModel model as authenticatable', () => {

@@ -8,7 +8,7 @@ import {
   toPosixRelative,
   moduleNameFor,
 } from './discovery'
-import { memberKeyName, walk } from './ast-walk'
+import { memberKeyName, unwrapTypeAssertion, walk } from './ast-walk'
 import { camelCase, escapeRegExp, referencesIdentifier } from './utils'
 import { ParseCache } from './parse-cache'
 import { check, type CheckResult } from './check-result'
@@ -90,12 +90,15 @@ function declaresCommand(ast: File): boolean {
     // surface a command — the same evidence-of-absence direction as the class
     // branch below, so `export default new SendDigestCommand()` stays in while
     // `export default TABLES` in an object-literal helper does not
-    if (
-      node.type === 'ExportDefaultDeclaration' &&
-      node.declaration.type !== 'ClassDeclaration' &&
-      !INERT_DEFAULT_EXPORTS.has(node.declaration.type)
-    ) {
-      return true
+    if (node.type === 'ExportDefaultDeclaration') {
+      // Judged on the unwrapped node: `export default { … } as const` is a
+      // TSAsExpression, absent from the inert set, so the bare test read the
+      // module as possibly holding a command and asked for a registration
+      // that could never exist.
+      const declaration = unwrapTypeAssertion(node.declaration)
+      if (declaration.type !== 'ClassDeclaration' && !INERT_DEFAULT_EXPORTS.has(declaration.type)) {
+        return true
+      }
     }
   }
 

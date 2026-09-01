@@ -191,6 +191,29 @@ kernel.registerMany([SendDigestCommand])`,
     }
   })
 
+  it('ignores a default-exported object literal written behind an as-const wrapper', async () => {
+    const workspace = await createTempWorkspace('guren-cli-check-console-inert-as-const-')
+
+    try {
+      await mkdir(join(workspace.dir, 'app/Console/Commands'), { recursive: true })
+      // `export default { … } as const` is a TSAsExpression, so the inert-shape
+      // test used to miss it and the module was treated as possibly holding a
+      // command — a registration warning nothing could ever resolve.
+      await writeFile(
+        join(workspace.dir, 'app/Console/Commands/table-config.ts'),
+        `export default { users: 'users', posts: 'posts' } as const`,
+        'utf8',
+      )
+
+      const report = await runCheck({ cwd: workspace.dir })
+
+      expect(report.checks.some(c => c.key.startsWith('console-command:'))).toBe(false)
+      expect(report.checks.some(c => c.key.startsWith('console-entry:'))).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('keeps a re-export shim in the check', async () => {
     const workspace = await createTempWorkspace('guren-cli-check-console-shim-')
 

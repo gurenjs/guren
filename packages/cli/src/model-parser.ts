@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import type { Statement, Expression, ClassDeclaration, ClassBody, ClassProperty, CallExpression, Node, ObjectProperty } from '@babel/types'
-import { memberKeyName, unwrapTypeAssertion } from './ast-walk'
+import { literalString, memberKeyName, objectLiteral, unwrapTypeAssertion } from './ast-walk'
 import { extractDocsTags } from './docs-index'
 import { discoverModelFiles, toPosixRelative, moduleNameFromRelPath } from './discovery'
 import { parseSourceFile } from './parse-cache'
@@ -141,7 +141,8 @@ export function firstClassDeclaration(body: Statement[]): ClassDeclaration | nul
  * here. Matching is by name only — an aliased import is not resolved.
  */
 function isAuthenticatableBase(node: Node): boolean {
-  const target = node.type === 'TSInstantiationExpression' ? node.expression : node
+  const unwrapped = unwrapTypeAssertion(node)
+  const target = unwrapped.type === 'TSInstantiationExpression' ? unwrapped.expression : unwrapped
   return target.type === 'Identifier' && target.name === 'AuthenticatableModel'
 }
 
@@ -223,7 +224,7 @@ export function findStaticClassProperty(classDecl: ClassDeclaration, name: strin
 /** Value of `static <name> = '<literal>'`, or undefined when absent or not a string literal. */
 export function staticStringProperty(classDecl: ClassDeclaration, name: string): string | undefined {
   const property = findStaticClassProperty(classDecl, name)
-  return property?.value?.type === 'StringLiteral' ? property.value.value : undefined
+  return literalString(property?.value) ?? undefined
 }
 
 /**
@@ -234,11 +235,18 @@ export function staticStringProperty(classDecl: ClassDeclaration, name: string):
  * runtime exposes.
  */
 function stringArrayEntries(node: Node | null | undefined): string[] | undefined {
-  if (node?.type !== 'ArrayExpression') return undefined
+  // `static fillable = ['title'] as const` is the idiomatic spelling of a
+  // read-only allowlist, and reads as a non-array without this: the config
+  // then resolves to undefined and every check that consults it — the
+  // mass-assignment audit, the denied-credential-column check — reports the
+  // model as having no allowlist at all rather than one it could not read.
+  const array = node ? unwrapTypeAssertion(node) : null
+  if (array?.type !== 'ArrayExpression') return undefined
   const entries: string[] = []
-  for (const element of node.elements) {
-    if (element?.type !== 'StringLiteral') return undefined
-    entries.push(element.value)
+  for (const element of array.elements) {
+    const entry = literalString(element)
+    if (entry === null) return undefined
+    entries.push(entry)
   }
   return entries
 }
@@ -278,8 +286,8 @@ export function extractModelAttachments(
   const call = classDecl.superClass ? findMixinCall(classDecl.superClass, 'Attachable') : null
   if (!call) return null
 
-  const declaration = call.arguments[1] === undefined ? undefined : unwrapTypeAssertion(call.arguments[1])
-  if (declaration?.type !== 'ObjectExpression') return 'unreadable'
+  const declaration = objectLiteral(call.arguments[1])
+  if (!declaration) return 'unreadable'
 
   const collections: ModelAttachmentCollection[] = []
   for (const property of declaration.properties) {
@@ -317,7 +325,7 @@ function parseAttachmentSpec(node: Node): { kind: 'one' | 'many'; variants: stri
     const key = memberKeyName(property)
     if (!key) return null
     if (key !== 'variants') continue
-    const names = attachmentVariantNames(unwrapTypeAssertion(property.value))
+    const names = attachmentVariantNames(property.value)
     if (!names) return null
     variants = names
   }
@@ -326,9 +334,10 @@ function parseAttachmentSpec(node: Node): { kind: 'one' | 'many'; variants: stri
 
 /** Keys of a `variants: { thumb: {...}, og: {...} }` object literal, or null when not fully readable. */
 function attachmentVariantNames(node: Node): string[] | null {
-  if (node.type !== 'ObjectExpression') return null
+  const variants = objectLiteral(node)
+  if (!variants) return null
   const names: string[] = []
-  for (const property of node.properties) {
+  for (const property of variants.properties) {
     if (property.type !== 'ObjectProperty') return null
     const name = memberKeyName(property)
     if (!name) return null
@@ -346,11 +355,15 @@ function attachmentVariantNames(node: Node): string[] | null {
 export function findDefineModelOption(classDecl: ClassDeclaration, name: string): ObjectProperty | null {
   if (!classDecl.superClass) return null
   const call = findMixinCall(classDecl.superClass, 'defineModel')
-  const options = call?.arguments[1]
-  if (options?.type !== 'ObjectExpression') return null
+  const options = objectLiteral(call?.arguments[1])
+  if (!options) return null
   for (const property of options.properties) {
     if (property.type !== 'ObjectProperty' || propertyKeyName(property) !== name) continue
-    if (property.value.type === 'Identifier' && property.value.name === 'undefined') return null
+    // Through a wrapper too: `fillable: undefined as string[] | undefined` is
+    // the same skipped assignment, and reading it as a declared option
+    // reports mass-assignment protection the runtime does not have.
+    const value = unwrapTypeAssertion(property.value)
+    if (value.type === 'Identifier' && value.name === 'undefined') return null
     return property
   }
   return null
@@ -500,10 +513,10 @@ function extractRelationshipsFromCalls(
               prop.type === 'Identifier' &&
               relMethods.has(prop.name)
             ) {
-              const relName = call.arguments[0]
-              if (relName?.type === 'StringLiteral') {
+              const relName = literalString(call.arguments[0])
+              if (relName !== null) {
                 relationships.push({
-                  name: relName.value,
+                  name: relName,
                   type: prop.name as ModelRelationship['type'],
                 })
               }
@@ -521,10 +534,10 @@ function extractRelationshipsFromCalls(
       expr.callee.property.type === 'Identifier' &&
       relMethods.has(expr.callee.property.name)
     ) {
-      const relName = expr.arguments[0]
-      if (relName?.type === 'StringLiteral') {
+      const relName = literalString(expr.arguments[0])
+      if (relName !== null) {
         relationships.push({
-          name: relName.value,
+          name: relName,
           type: expr.callee.property.name as ModelRelationship['type'],
         })
       }

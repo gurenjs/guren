@@ -1,6 +1,6 @@
 import { readdir, readFile } from 'node:fs/promises'
 import { relative, resolve } from 'node:path'
-import { literalString, walk, type BabelNode } from './ast-walk'
+import { literalString, unwrapTypeAssertion, walk, type BabelNode } from './ast-walk'
 import { parseSourceFile } from './parse-cache'
 import { escapeSingleQuoted as esc, escapeTemplateLiteral as escapeTemplatePart, resolveAppRoot, writeGeneratedFileIn, type WriterOptions } from './utils'
 
@@ -289,7 +289,13 @@ function renderPayloadType(value: unknown): string {
   return normalizePayloadType(node)
 }
 
-function normalizePayloadType(node: BabelNode): string {
+function normalizePayloadType(input: BabelNode): string {
+  // Unwrapped here rather than at the caller so the recursive descent below
+  // covers nested values too: `{ tags: ['a'] as const } as const` wraps at
+  // two levels, and a payload read as "not an object" renders as `unknown`,
+  // which types every listener's argument as unusable.
+  const node = unwrapTypeAssertion(input)
+
   switch (node.type) {
     case 'StringLiteral':
       return 'string'

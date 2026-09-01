@@ -222,6 +222,117 @@ export const posts = pgTable('posts', {
     }
   })
 
+  it('reads a column map written behind a transparent wrapper', async () => {
+    const workspace = await createTempWorkspace('guren-cli-schema-wrapped-')
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'db/schema.ts'),
+        `import { pgTable, serial, timestamp } from 'drizzle-orm/pg-core'
+
+export const posts = pgTable('posts', {
+  id: serial('id').primaryKey(),
+  createdAt: timestamp('created_at', { withTimezone: false } as const),
+} satisfies Record<string, unknown>)
+`,
+        'utf8',
+      )
+
+      const tables = await parseSchemaTables(workspace.dir)
+
+      // The wrapped column map used to make the whole table invisible.
+      expect(tables.map((t) => t.identifier)).toEqual(['posts'])
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('reads column options written behind a transparent wrapper', async () => {
+    const workspace = await createTempWorkspace('guren-cli-schema-wrapped-options-')
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'db/schema.ts'),
+        `import { pgTable, timestamp } from 'drizzle-orm/pg-core'
+
+export const posts = pgTable('posts', {
+  createdAt: timestamp('created_at', { withTimezone: false } as const),
+})
+`,
+        'utf8',
+      )
+
+      const [posts] = await parseSchemaTables(workspace.dir)
+      const createdAt = posts.columns.find((c) => c.name === 'createdAt')!
+
+      // Wrapped options used to read as opaque, so a written `false` looked
+      // like an unknown and the timestamptz check skipped the column.
+      expect(createdAt.opaqueOptions).toBeUndefined()
+      expect(createdAt.withTimezone).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('reads a table and column name written behind a transparent wrapper', async () => {
+    const workspace = await createTempWorkspace('guren-cli-schema-wrapped-names-')
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'db/schema.ts'),
+        `import { pgTable, timestamp } from 'drizzle-orm/pg-core'
+
+export const posts = pgTable('blog_posts' as const, {
+  createdAt: timestamp('created_at' as const),
+})
+`,
+        'utf8',
+      )
+
+      const [posts] = await parseSchemaTables(workspace.dir)
+
+      // A lost name is not a lost column: the timestamptz warning names the
+      // property, suggests the name-less builder form, and drops the SQL hint.
+      expect(posts.tableName).toBe('blog_posts')
+      expect(posts.columns.find((c) => c.name === 'createdAt')?.columnName).toBe('created_at')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('treats an options object carrying a spread as unreadable, wrapped or not', async () => {
+    const workspace = await createTempWorkspace('guren-cli-schema-spread-')
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'db/schema.ts'),
+        `import { pgTable, timestamp } from 'drizzle-orm/pg-core'
+
+const SHARED = { withTimezone: true }
+
+export const posts = pgTable('posts', {
+  spread: timestamp('spread', { ...SHARED }),
+  wrappedSpread: timestamp('wrapped_spread', { ...SHARED } as const),
+  absent: timestamp('absent'),
+})
+`,
+        'utf8',
+      )
+
+      const [posts] = await parseSchemaTables(workspace.dir)
+      const columns = new Map(posts.columns.map((c) => [c.name, c]))
+
+      // The spread may carry `withTimezone`, so its absence proves nothing —
+      // concluding "unset" here warns about a column the runtime got right.
+      expect(columns.get('spread')?.opaqueOptions).toBe(true)
+      expect(columns.get('wrappedSpread')?.opaqueOptions).toBe(true)
+      // Control: a genuinely option-less builder stays readable and warnable.
+      expect(columns.get('absent')?.opaqueOptions).toBeUndefined()
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('ignores a computed option key rather than reading the identifier as its name', async () => {
     const workspace = await createTempWorkspace('guren-cli-schema-computed-key-')
     try {
