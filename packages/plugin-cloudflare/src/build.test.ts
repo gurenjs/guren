@@ -382,6 +382,7 @@ describe('workers runtime configuration', () => {
     // the guard below fails on.
     expect(warning).not.toContain(MCP_TRANSPORT_SPECIFIER)
   })
+
   test('should define import.meta.url so module-scope URL resolution survives', async () => {
     scaffoldApp(root)
 

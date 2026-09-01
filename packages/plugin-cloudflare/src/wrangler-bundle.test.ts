@@ -34,6 +34,9 @@ function wrangler(cwd: string, args: string[]): { exitCode: number; output: stri
   return { exitCode: result.exitCode, output: `${result.stdout.toString()}${result.stderr.toString()}` }
 }
 
+/** As much of a `DEV_ONLY_MODULES` / `SQL_CLIENT_MODULES` entry as a stub needs. */
+type StubbedModule = { specifier: string; exportNames: readonly string[] }
+
 /**
  * Write the stub files and the `wrangler.jsonc` aliasing `modules` to them —
  * what `cloudflare:build` scaffolds, written directly so a probe pins the
@@ -43,11 +46,7 @@ function wrangler(cwd: string, args: string[]): { exitCode: number; output: stri
  * stubs everything, and the App MCP probe stubs everything *except* the
  * transport, which is the configuration RFC 0016 Phase 4a produces.
  */
-function writeWranglerConfig(
-  root: string,
-  name: string,
-  modules: readonly { specifier: string; exportNames: readonly string[] }[],
-): void {
+function writeWranglerConfig(root: string, name: string, modules: readonly StubbedModule[]): void {
   mkdirSync(join(root, 'stubs'), { recursive: true })
 
   const alias: Record<string, string> = {}
@@ -174,6 +173,9 @@ const FREE_PLAN_GZIP_BUDGET = 3 * 1024 * 1024
 /** Extensions that count toward the upload; sourcemaps do not, and dwarf it. */
 const UPLOADED_EXTENSIONS = ['.js', '.mjs', '.wasm']
 
+/** A package of this workspace, as the probe vendors it: its directory and manifest. */
+type WorkspacePackage = { dir: string; manifest: Record<string, unknown> }
+
 /**
  * The `@guren/*` packages a probe must resolve from this checkout, derived
  * rather than listed: seed with the one the worker imports and close over the
@@ -183,9 +185,9 @@ const UPLOADED_EXTENSIONS = ['.js', '.mjs', '.wasm']
  * (see `scripts/smoke/local-packages.ts`, which owns the same rule for the
  * smokes).
  */
-function workspaceClosure(seed: string): Map<string, { dir: string; manifest: Record<string, unknown> }> {
+function workspaceClosure(seed: string): Map<string, WorkspacePackage> {
   const packagesDir = new URL('../../', import.meta.url).pathname
-  const byName = new Map<string, { dir: string; manifest: Record<string, unknown> }>()
+  const byName = new Map<string, WorkspacePackage>()
   for (const entry of readdirSync(packagesDir, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue
     const manifestPath = join(packagesDir, entry.name, 'package.json')
@@ -194,7 +196,7 @@ function workspaceClosure(seed: string): Map<string, { dir: string; manifest: Re
     byName.set(manifest.name as string, { dir: join(packagesDir, entry.name), manifest })
   }
 
-  const closure = new Map<string, { dir: string; manifest: Record<string, unknown> }>()
+  const closure = new Map<string, WorkspacePackage>()
   const queue = [seed]
   while (queue.length > 0) {
     const name = queue.shift() as string
@@ -287,7 +289,6 @@ describe.skipIf(!enabled)('wrangler bundles a worker importing @guren/plugin-mcp
         + `  },\n`
         + `}\n`,
     )
-
   })
 
   afterAll(() => {
@@ -304,10 +305,7 @@ describe.skipIf(!enabled)('wrangler bundles a worker importing @guren/plugin-mcp
    * beside the bundle is several times its size and the limit does not count
    * it, so a whole-directory sum would fail for a file that never ships.
    */
-  function bundleSize(
-    label: string,
-    modules: readonly { specifier: string; exportNames: readonly string[] }[],
-  ): number {
+  function bundleSize(label: string, modules: readonly StubbedModule[]): number {
     writeWranglerConfig(root, 'mcp-bundle-probe', modules)
     const out = join(root, `out-${label}`)
     const result = wrangler(root, ['deploy', '--dry-run', '--outdir', out])

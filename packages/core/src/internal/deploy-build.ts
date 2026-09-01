@@ -786,17 +786,6 @@ export function unusedSqlClients(input: {
 export type DevOnlySpecifier = (typeof DEV_ONLY_MODULES)[number]['specifier']
 
 /**
- * Source for a stub replacing one dev-only module. Shared because what it
- * encodes is a bundler constraint, not a platform choice: every name the
- * importer destructures must be present or the bundle fails with "no matching
- * export", and each is emitted as a throwing *function* because the stubbed
- * names mix constructors (`new Database()`) with plain calls
- * (`createServer()`) — a class invoked without `new` reports "Class
- * constructor cannot be invoked without 'new'" instead of the real reason.
- *
- * @param message Platform-specific explanation, including the replacement API.
- */
-/**
  * A JavaScript string literal for `value`.
  *
  * `JSON.stringify` alone is not one: JSON and JavaScript disagree about
@@ -808,6 +797,17 @@ function toJsStringLiteral(value: string): string {
   return JSON.stringify(value).replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')
 }
 
+/**
+ * Source for a stub replacing one dev-only module. Shared because what it
+ * encodes is a bundler constraint, not a platform choice: every name the
+ * importer destructures must be present or the bundle fails with "no matching
+ * export", and each is emitted as a throwing *function* because the stubbed
+ * names mix constructors (`new Database()`) with plain calls
+ * (`createServer()`) — a class invoked without `new` reports "Class
+ * constructor cannot be invoked without 'new'" instead of the real reason.
+ *
+ * @param message Platform-specific explanation, including the replacement API.
+ */
 export function renderDevOnlyStub(module: DevOnlyModule, message: string): string {
   // The message reaches the file twice and needs different escaping each
   // time: as a string literal in the thrown error, and as text in a comment

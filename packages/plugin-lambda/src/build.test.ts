@@ -472,7 +472,6 @@ describe('buildLambdaOutput', () => {
     // @guren/plugin-mcp imports it *statically*, so a catch-all still in
     // force would leave the endpoint just as compiled shut.
     expect(probeHttpExport(root)).toBe(`${SDK_SERVER_INDEX_MARKER}|${SDK_TRANSPORT_MARKER}`)
-
   })
 
   test('should keep the Dev MCP server stubbed even for an app depending on the plugin', async () => {

@@ -121,15 +121,15 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
 const MCP_UNAVAILABLE = 'The MCP endpoint is unavailable on Cloudflare Workers — it generates files on disk.'
 
 /**
- * Why the dev-only modules in `DEV_ONLY_MODULES` cannot run here, worded for
- * this platform: each names the Workers-appropriate replacement.
- */
-/**
  * Both lists: on Workers the SQL clients are as unreachable as the dev-only
  * modules, because D1 is the only database the platform has.
  */
 const STUBBED_MODULES = [...DEV_ONLY_MODULES, ...SQL_CLIENT_MODULES]
 
+/**
+ * Why the stubbed modules cannot run here, worded for this platform: each
+ * names the Workers-appropriate replacement.
+ */
 const UNAVAILABLE_ON_WORKERS: Record<(typeof STUBBED_MODULES)[number]['kind'], string> = {
   sqlite: 'bun:sqlite is unavailable on Cloudflare Workers — use createD1Database().',
   vite: 'The Vite dev server is unavailable on Cloudflare Workers — assets are served by Workers Static Assets.',
@@ -161,28 +161,6 @@ const STUB_FILES: Record<DevOnlySpecifier | SqlClientSpecifier, string> = {
   mysql2: 'stub-mysql2.js',
   'mysql2/promise': 'stub-mysql2-promise.js',
   '@aws-sdk/client-rds-data': 'stub-rds-data.js',
-}
-
-/**
- * Does this alias target name the stub file *this build generates* for
- * `specifier`, rather than something of the app's own?
- *
- * Answered from `STUB_FILES` rather than a re-spelled literal: the filename
- * has exactly one definition, and a rename there must not leave a second
- * spelling behind that silently stops matching.
- *
- * The comparison is on the last path segment, because the directory the alias
- * points into is `outputDir`, an option — the same generated stub is
- * `./.cloudflare/stub-mcp-transport.js` in one app and `./dist/cf/…` in the
- * next. Both separators are split on: the value is a specifier wrangler
- * resolves, so it is written with forward slashes, but a config hand-edited
- * on Windows need not be.
- */
-function isGeneratedStubPath(
-  target: string,
-  specifier: DevOnlySpecifier | SqlClientSpecifier,
-): boolean {
-  return target.split(/[\\/]/).pop() === STUB_FILES[specifier]
 }
 
 function writeDevOnlyStubs(out: string): void {
@@ -239,11 +217,16 @@ function devOnlyAliases(outRelative: string, mcpPlugin: boolean): Record<string,
  * Failing on the key alone would refuse a config that has nothing wrong with
  * it, while asserting in the message that a stub is there when it is not.
  *
- * The test is on the filename from `STUB_FILES`, not on the whole path: the
- * output directory the alias points into is an option, so the same residue
- * reads as `./.cloudflare/…` or `./dist/cf/…`. A developer shim that happens
- * to be named `stub-mcp-transport.js` would be misread, which is the one
- * false positive left and is a name this build generates.
+ * The test is on the last path segment, not on the whole path: the output
+ * directory the alias points into is an option, so the same residue reads as
+ * `./.cloudflare/…` in one app and `./dist/cf/…` in the next. The filename
+ * comes from `STUB_FILES` rather than a re-spelled literal — it has exactly
+ * one definition, and a rename there must not leave a second spelling behind
+ * that silently stops matching. Both separators are split on: the value is a
+ * specifier wrangler resolves, so it is written with forward slashes, but a
+ * config hand-edited on Windows need not be. A developer shim that happens to
+ * be named `stub-mcp-transport.js` would be misread, which is the one false
+ * positive left and is a name this build generates.
  *
  * `mcpPlugin` arrives as an argument rather than being read here, so this and
  * the alias set the scaffold writes cannot end up disagreeing about the same
@@ -275,7 +258,7 @@ function assertMcpTransportNotAliased(root: string, mcpPlugin: boolean): void {
   }
 
   const target = (alias as Record<string, unknown>)[MCP_TRANSPORT_SPECIFIER]
-  if (typeof target !== 'string' || !isGeneratedStubPath(target, MCP_TRANSPORT_SPECIFIER)) {
+  if (typeof target !== 'string' || target.split(/[\\/]/).pop() !== STUB_FILES[MCP_TRANSPORT_SPECIFIER]) {
     return
   }
 

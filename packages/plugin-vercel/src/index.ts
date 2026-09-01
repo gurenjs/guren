@@ -256,6 +256,32 @@ function stubbedModules(
  */
 const unlistedMcpStub = `throw new Error(${JSON.stringify(MCP_UNAVAILABLE)})\n`
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+// Derived from the stubs actually rendered so it stays the only enumeration
+// of stubbed specifiers — a hand-maintained regex could silently fall out of
+// sync, and a specifier that is filtered but has no stub would load as an
+// empty module instead of failing.
+//
+// The catch-all is the one term that cannot be derived from the stubs, and
+// the tempting derivation is actively wrong: "include it while any MCP SDK
+// subpath is still stubbed" holds always, because
+// `@modelcontextprotocol/sdk/server/mcp.js` stays stubbed for every app —
+// so the catch-all would keep swallowing `server/index.js` and `types.js`
+// and undo RFC 0016 Phase 4a silently. So it is gated on the same `mcpPlugin`
+// decision that produced the stubs, threaded from one read of the app's
+// manifest rather than re-derived here.
+function stubFilter(stubs: Record<string, string>, mcpPlugin: boolean): RegExp {
+  const terms = Object.keys(stubs).map(escapeRegExp)
+  if (!mcpPlugin) {
+    terms.push(`${escapeRegExp(MCP_SDK_SUBPATH_PREFIX)}.+`)
+  }
+
+  return new RegExp(`^(?:${terms.join('|')})$`)
+}
+
 /**
  * Bundle the function with Bun's JS API rather than by spawning `bun build`.
  *
@@ -271,26 +297,12 @@ async function bundleFunction(input: {
   viteManifest: string | undefined
 }): Promise<void> {
   // One read of the app's manifest, threaded to both halves of the stub
-  // decision below: two independent reads would be two places for them to
-  // disagree, silently.
+  // decision: which modules are rendered, and whether unlisted MCP SDK
+  // subpaths are swallowed by the catch-all. Two independent reads would be
+  // two places for them to disagree, silently.
   const mcpPlugin = appUsesMcpPlugin(input.root)
   const stubs = stubbedModules(input.root, input.dialects, mcpPlugin)
-  // Derived from the stubs actually rendered so it stays the only enumeration
-  // of stubbed specifiers — a hand-maintained regex could silently fall out of
-  // sync, and a specifier that is filtered but has no stub would load as an
-  // empty module instead of failing.
-  //
-  // The catch-all is the one term that cannot be derived from the stubs, and
-  // the tempting derivation is actively wrong: "include it while any MCP SDK
-  // subpath is still stubbed" holds always, because
-  // `@modelcontextprotocol/sdk/server/mcp.js` stays stubbed for every app —
-  // so the catch-all would keep swallowing `server/index.js` and `types.js`
-  // and undo RFC 0016 Phase 4a silently. Gate it on `mcpPlugin` instead.
-  const terms = Object.keys(stubs).map(escapeRegExp)
-  if (!mcpPlugin) {
-    terms.push(`${escapeRegExp(MCP_SDK_SUBPATH_PREFIX)}.+`)
-  }
-  const filter = new RegExp(`^(?:${terms.join('|')})$`)
+  const filter = stubFilter(stubs, mcpPlugin)
 
   const result = await Bun.build({
     entrypoints: [input.entrypoint],
@@ -342,10 +354,6 @@ async function bundleFunction(input: {
   if (!result.success) {
     throw new Error(`${LABEL}: bun build failed.\n${result.logs.map((log) => String(log)).join('\n')}`)
   }
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 function buildVercelEnvironment(publicDir: string, ssrDir: string): Record<string, string> {
