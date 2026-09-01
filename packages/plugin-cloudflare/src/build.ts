@@ -366,6 +366,13 @@ function renderAssetHeaders(): string {
  * the value it finds. Going second would turn an app's own
  * `Content-Disposition` into "inline, attachment"; going first leaves the
  * app's rules appending to ours, which is the harmless direction.
+ *
+ * The trade the direction costs: the platform parses at most 100 rules and
+ * *stops* at the hundredth, so these five push an app's own rules five closer
+ * to a cap past which the remainder is dropped rather than reported. Warned
+ * about here rather than resolved, because reordering to spend the budget on
+ * the app's rules first is the change that breaks the set-versus-append
+ * reasoning above.
  */
 function writeAssetHeaders(assetsOut: string): void {
   const headersFile = resolve(assetsOut, '_headers')
@@ -705,14 +712,6 @@ function warnMissingBuildOwnedKeys(
   if (!define?.['process.env.NODE_ENV']) {
     missing.push('"process.env.NODE_ENV": "\\"production\\"" (inside "define")')
   }
-  // Absent, never merely different: naming any other value is a decision
-  // an app had to type, and this warning must not read as an instruction to
-  // undo it. A config with no `assets` at all serves no static files, so it
-  // has nothing for the rules in `_headers` to protect.
-  const assets = config.assets as Record<string, unknown> | undefined
-  if (assets && assets.html_handling === undefined) {
-    missing.push(`"html_handling": "${HTML_HANDLING}" (inside "assets")`)
-  }
   const d1 = (config.d1_databases as Array<Record<string, unknown>> | undefined)?.[0]
   if (d1 && d1.migrations_dir !== `${outRelative}/d1-migrations`) {
     missing.push(`"migrations_dir": "${outRelative}/d1-migrations" (inside d1_databases[0])`)
@@ -723,5 +722,31 @@ function warnMissingBuildOwnedKeys(
       `Cloudflare build: ${configPath} predates this plugin version. Add these entries, alongside whatever the file already has under the same keys, or the worker will fail to start or skip migrations:\n  ${missing.join('\n  ')}`,
     )
   }
+
+  warnMissingHtmlHandling(configPath, config)
+}
+
+/**
+ * Kept out of `warnMissingBuildOwnedKeys` even though it fires beside it: the
+ * entries there are invariants pointing into the output directory, and their
+ * shared sentence ends "the worker will fail to start or skip migrations",
+ * which is not true of this one. What is true of it is the opposite kind of
+ * consequence — adding it *changes* how the app's own HTML is served — so it
+ * needs a message that says that rather than a line in that list.
+ *
+ * Warned only when the key is absent. Naming any other value is a decision an
+ * app had to type, and a config with no `assets` at all serves no static
+ * files, so it has nothing for the rules in `_headers` to protect.
+ */
+function warnMissingHtmlHandling(configPath: string, config: Record<string, unknown>): void {
+  const assets = config.assets as Record<string, unknown> | undefined
+
+  if (!assets || assets.html_handling !== undefined) {
+    return
+  }
+
+  console.warn(
+    `Cloudflare build: ${configPath} does not set "html_handling" under "assets", so a document staged from public/ is still served at its extensionless path — where the /*.html rule in _headers does not reach it, and where it shadows any route of that name in your app. Add "html_handling": "${HTML_HANDLING}" to close both. Note this changes how those files are served: public/about.html stops answering at /about.`,
+  )
 }
 

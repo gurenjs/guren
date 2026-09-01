@@ -328,17 +328,27 @@ describe('static document headers', () => {
 
   test('should name html_handling for a config that predates it', async () => {
     scaffoldApp(root)
-    writeJson(join(root, 'wrangler.jsonc'), {
-      name: 'legacy',
-      main: '.cloudflare/worker.js',
-      assets: { directory: '.cloudflare/assets' },
-    })
+    const configPath = join(root, 'wrangler.jsonc')
+
+    // Scaffold a complete config and take only html_handling back out, so the
+    // build-owned warning stays silent and this asserts the new message rather
+    // than whatever else an incomplete fixture would have triggered.
+    await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
+    const scaffolded = JSON.parse(readFileSync(configPath, 'utf8'))
+    delete scaffolded.assets.html_handling
+    writeJson(configPath, scaffolded)
 
     const warning = await captureWarnings(async () => {
       await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
     })
 
-    expect(warning).toContain('"html_handling": "none" (inside "assets")')
+    // Its own message, with its own consequence. Folded into the build-owned
+    // list it would arrive under "the worker will fail to start or skip
+    // migrations", which is not true of it, and would never say the thing the
+    // reader most needs to know — that adding it changes how HTML is served.
+    expect(warning).toContain('"html_handling": "none"')
+    expect(warning).toContain('stops answering at /about')
+    expect(warning).not.toContain('predates this plugin version')
   })
 
   test('should leave an app that named another html_handling alone', async () => {

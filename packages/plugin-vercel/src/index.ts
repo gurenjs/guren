@@ -131,16 +131,23 @@ export async function buildVercelOutput(options: BuildVercelOutputOptions = {}):
           { src: '/public/(.*)', dest: '/$1' },
           { handle: 'filesystem' },
           { src: '/(.*)', dest: '/index' },
-          // Everything below runs only for a request the filesystem answered,
-          // which is what confines the rule to staged files. In the initial
-          // phase the same pattern would also match a path the function
-          // serves, and a dynamic /sitemap.xml would come back as a download.
+          // Everything below runs only once a build match was found, and is
+          // matched against the *resolved* destination rather than the
+          // requested path (vercel's dev router passes getReqUrl(routeResult),
+          // i.e. routeResult.dest). Both halves matter: a request the CDN
+          // answered keeps its own path and matches, while one that fell
+          // through the rule above arrives here as "/index" and cannot. In the
+          // initial phase the same pattern would match either, so a dynamic
+          // /sitemap.xml would come back as a download.
           { handle: 'hit' },
           {
             src: documentAssetPattern(),
             headers: { ...DOCUMENT_ASSET_HEADERS },
-            // Required of every route after `handle: 'hit'`, and what it
-            // means here: attach the headers and carry on rather than answer.
+            // Required of every route after `handle: 'hit'`, which also
+            // forbids `dest` and `status` — the phase exists to decorate a
+            // response, not to route one. A header the function already set is
+            // left alone in this phase, so a route serving its own
+            // Content-Disposition keeps it.
             continue: true,
           },
         ],
