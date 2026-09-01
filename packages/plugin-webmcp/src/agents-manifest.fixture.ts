@@ -237,4 +237,3 @@ export type AgentToolName = keyof typeof agentTools
 export interface AgentToolOutputTypes {
   // No tool declares a resolvable resource response hint.
 }
-
