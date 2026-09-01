@@ -95,6 +95,13 @@ export type {
   AgentAuditInvokedRecord,
   AgentAuditRecord,
 } from './agent/audit'
+// The one rule for *announcing* an audit event — sink first, then listeners.
+// Exported because it has two readers and the seam between them is a container
+// binding: `@guren/plugin-mcp` builds one and binds it as `'agent.audit'`,
+// `guren tool:call` resolves that binding to record the `'cli'` surface. Two
+// copies of the rule is how one surface's trail comes to differ from another's.
+export { AGENT_AUDIT_BINDING, createAuditEmitter } from './agent/audit-emitter'
+export type { AgentAuditEmitter, AgentAuditSink } from './agent/audit-emitter'
 // The approval queue (RFC 0016 §5.4 item 4): the store an application
 // implements, and the pure rules that decide whether a record authorizes a
 // call. Here rather than in the adapter because `guren check` reads the

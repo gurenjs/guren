@@ -292,6 +292,38 @@ Each feature maps to a measured failure mode of the MCP ecosystem.
    denial event at all: policies evaluate inside the dispatched request, so it is an
    `AgentToolInvoked` with status 403 — which is why the reason union has no
    `'policy'` member.
+   **Amended in implementation:** the `'cli'` surface records too. `guren tool:call`
+   was the one member of `AgentSurface` that emitted nothing, so a developer could
+   call a write tool from a terminal — as any user, via `--as` — and the trail would
+   show that nothing happened. It now records an `AgentToolInvoked` carrying
+   `surface: 'cli'`, the tool name, the arguments masked through the *called* route's
+   own `.agent({ redact })` list, the HTTP status, and the duration of the dispatch.
+   It records through the emitter the **application** configured, resolved from the
+   service container rather than constructed: `@guren/plugin-mcp` publishes the one it
+   built from its `audit` option, so a CLI call lands in the same file, in the same
+   format, as an MCP call. An application that configured no sink publishes none, and
+   the command records nothing — the same absence the endpoint has, not a second sink
+   writing somewhere the operator does not look.
+   A `--preflight` is recorded as `guren.preflight`, never under the tool it rehearsed,
+   which is the rule the App MCP endpoint already follows: the handler did not run, so a
+   record naming `posts.destroy` with a success status would be indistinguishable from a
+   destroy that happened. The probed tool rides in the record's arguments, in the same
+   `{ tool, input }` shape the meta-tool's own arguments take on MCP. That is decided by
+   the *answer*, not by the flag — a `--preflight` against an application predating the
+   preflight seam runs the call for real, and that write is recorded under the real tool.
+   This surface emits **no** `AgentToolDenied`. Each of the four reasons names a check
+   an adapter performs before synthesizing a request, and this one performs none: it
+   holds no token to scope and no rate budget, and it dispatches directly. Its own two
+   refusals — a missing path parameter, a URL dot-segment — are argument errors that
+   none of the four reasons describes, and no request is sent for them, so there is no
+   status a record could carry. What the *application* refuses is a response, and so an
+   invocation with that status, exactly as on every other surface.
+   The principal is `{ kind: 'user', id }` when `--as` names one and `null` otherwise,
+   with `abilities` omitted rather than empty: abilities belong to a token, and this
+   surface presents none. `surface: 'cli'` is what carries the standing fact that no
+   credential was verified, which is why the principal does not have to hedge — and why
+   collapsing it to `null` would be worse, making an impersonation indistinguishable
+   from an anonymous call.
 3. **Rate limits by default**: the App MCP endpoint ships rate-limited (key = token id;
    `CF-Connecting-IP` fallback on Workers), stricter defaults for write tools.
 4. **Approval queue and preflight**: `approval: 'required'` tools create a pending

@@ -1,9 +1,11 @@
 import {
+  AGENT_AUDIT_BINDING,
   AgentToolDenied,
   AgentToolInvoked,
   DEFAULT_AGENT_AUDIT_PATH,
   DEFAULT_AGENT_APPROVAL_TTL_MS,
   buildToolRequest,
+  createAuditEmitter,
   definePlugin,
   deriveAgentTools,
   isReservedAgentToolName,
@@ -14,6 +16,7 @@ import {
   type AgentApprovalRequest,
   type AgentApprovalStore,
   type AgentAuditRecord,
+  type AgentAuditSink,
   type AgentPrincipal,
   type AgentToolDenialReason,
   type Application,
@@ -25,7 +28,6 @@ import {
 } from '@guren/core'
 import type { Context } from 'hono'
 
-import { createAuditEmitter, type AgentAuditSink } from './audit-emitter'
 import { AgentRateLimiter, type RateLimitConfig } from './rate-limit'
 import { createAppMcpServer } from './server'
 
@@ -162,7 +164,10 @@ export interface McpPluginConfig {
 const factory = definePlugin<McpPluginConfig>({
   name: 'mcp',
   register(): void {
-    // Everything binds per request; there is no container service to offer.
+    // The endpoint's own state binds per request. The one service this plugin
+    // offers — the audit emitter, under `AGENT_AUDIT_BINDING` — cannot be
+    // registered here: it closes over a sink resolved asynchronously and over
+    // the event manager, neither of which exists until `boot`.
   },
   async boot(container, config): Promise<void> {
     const app = container.make<Application>('app')
@@ -217,6 +222,30 @@ const factory = definePlugin<McpPluginConfig>({
     )
 
     const emit = createAuditEmitter(sink, events)
+    if (sink) {
+      // Published under the name `ServiceBindings` declares, so a surface that
+      // is not this endpoint records into the same trail rather than standing
+      // up a second one. `guren tool:call` is the first such caller: it boots
+      // the app, resolves this, and records its own invocations with
+      // `surface: 'cli'` (RFC 0016 §5.2). It cannot import this package — the
+      // CLI does not depend on it — and a CLI that built its own emitter
+      // around its own sink would be a second audit configuration the
+      // application never asked for, disagreeing with this one about where
+      // records go.
+      //
+      // Bound only when a sink was configured, because the binding's whole
+      // meaning to another surface is "there is somewhere to write". This
+      // endpoint emits the *events* either way — it is long-lived, and its
+      // listeners are the application's own — but a one-shot `guren tool:call`
+      // resolving an emitter with no sink would run application listeners in a
+      // process about to exit and still write nothing. Absent binding, absent
+      // trail: the same absence this option's own default has.
+      //
+      // `instance`, not `singleton`: the emitter closes over the sink resolved
+      // above and the app's event manager, both settled here, so there is
+      // nothing left to construct lazily.
+      container.instance(AGENT_AUDIT_BINDING, emit)
+    }
 
     app.hono.all(path, async (c) => {
       const store = auth.getApiTokenStore()

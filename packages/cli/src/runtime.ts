@@ -59,6 +59,23 @@ export type MaybeApplication = {
   }
   /** The app's HTTP entry, when it has one — `tool:call` re-enters through it. */
   fetch?: (request: Request) => Response | Promise<Response>
+  /**
+   * The app's service container, for the commands that must reach a service
+   * the *application* configured rather than one they can construct
+   * (`guren tool:call` resolves `'agent.audit'` through it).
+   *
+   * Structural and optional like everything else here, and deliberately down
+   * to the method level: an app on a `@guren/core` predating a binding, or one
+   * whose container is some other object entirely, must reach the caller's own
+   * fallback rather than a `TypeError`. `make` is declared as *possibly*
+   * throwing in the caller's handling, not in this type — a container resolving
+   * a factory that fails does throw, and a command recording what it did may
+   * not fail the thing it is recording.
+   */
+  container?: {
+    has?: (key: string) => boolean
+    make?: <T>(key: string) => T
+  }
 }
 
 export async function resolveMainEntry(appRoot?: string): Promise<string> {
