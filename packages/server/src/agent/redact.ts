@@ -70,6 +70,15 @@ const DEFAULT_SENSITIVE_KEY_FRAGMENTS: readonly string[] = [
   'credential',
   'cookie',
   'session',
+  // Spellings the list above does not reach on its own: `privateKey` shares no
+  // fragment with `secret`, a field named `jwt` or `pwd` shares none with
+  // `token` or `password`. Deliberately absent: a bare `otp`, which at three
+  // characters is a substring of ordinary names (`slotProvider`, `notPublic`)
+  // and would mask them — over-masking is the safe direction for a *credential*
+  // fragment, not for one that mostly hits non-credentials.
+  'privatekey',
+  'pwd',
+  'jwt',
 ]
 
 /**
