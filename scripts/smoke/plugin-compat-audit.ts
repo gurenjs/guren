@@ -221,122 +221,122 @@ export function auditPackages(
   let rangesChecked = 0
   let manifestsChecked = 0
 
-for (const pkg of packages) {
-  if (pkg.private) continue
+  for (const pkg of packages) {
+    if (pkg.private) continue
 
-  const manifest = pkg.manifest
-  const file = `${pkg.relativeDir}/package.json`
-  const coreRanges: string[] = []
+    const manifest = pkg.manifest
+    const file = `${pkg.relativeDir}/package.json`
+    const coreRanges: string[] = []
 
-  // (b) every @guren/* range must admit what this workspace publishes — or,
-  // failing that, what this release plan will publish (see plannedVersions).
-  for (const group of DEPENDENCY_GROUPS) {
-    for (const [dependency, range] of Object.entries(manifest[group] ?? {})) {
-      const version = workspaceVersions.get(dependency)
-      // A @guren/* package this workspace does not publish resolves from npm
-      // on its own terms; there is no workspace claim to contradict.
-      if (!version) continue
+    // (b) every @guren/* range must admit what this workspace publishes — or,
+    // failing that, what this release plan will publish (see plannedVersions).
+    for (const group of DEPENDENCY_GROUPS) {
+      for (const [dependency, range] of Object.entries(manifest[group] ?? {})) {
+        const version = workspaceVersions.get(dependency)
+        // A @guren/* package this workspace does not publish resolves from npm
+        // on its own terms; there is no workspace claim to contradict.
+        if (!version) continue
 
-      if (dependency === CORE) coreRanges.push(range)
-      rangesChecked += 1
+        if (dependency === CORE) coreRanges.push(range)
+        rangesChecked += 1
 
-      if (Bun.semver.satisfies(version, range)) continue
-      const next = planned.get(dependency)
-      if (next && Bun.semver.satisfies(next, range)) continue
+        if (Bun.semver.satisfies(version, range)) continue
+        const next = planned.get(dependency)
+        if (next && Bun.semver.satisfies(next, range)) continue
+        drift.push(
+          `${file}: ${group}["${dependency}"] is "${range}", which excludes the workspace ` +
+            `${dependency} ${version}${next ? ` and the ${next} this release plan publishes` : ''}. ` +
+            'Installing from npm would resolve a second, older copy alongside the app\'s.',
+        )
+      }
+    }
+
+    const plugin = manifest.gurenPlugin
+
+    // The fields under audit are also what makes a package discoverable here, so
+    // deleting one would otherwise buy silence. A packages/plugin-* directory is
+    // asserted to be a plugin regardless of what its manifest currently says.
+    if (!plugin) {
+      if (pkg.dirName.startsWith('plugin-')) {
+        drift.push(
+          `${file}: ${pkg.name} lives in packages/${pkg.dirName} but declares no "gurenPlugin" ` +
+            'manifest, so `guren plugin` cannot check it against any core version.',
+        )
+      }
+      continue
+    }
+    manifestsChecked += 1
+
+    if (coreRanges.length === 0) {
       drift.push(
-        `${file}: ${group}["${dependency}"] is "${range}", which excludes the workspace ` +
-          `${dependency} ${version}${next ? ` and the ${next} this release plan publishes` : ''}. ` +
-          'Installing from npm would resolve a second, older copy alongside the app\'s.',
+        `${file}: declares a "gurenPlugin" manifest but no ${CORE} dependency in ` +
+          `${DEPENDENCY_GROUPS.join(' or ')}. Its compatibility claim is then about a package ` +
+          'the install never pulls in.',
       )
     }
-  }
 
-  const plugin = manifest.gurenPlugin
-
-  // The fields under audit are also what makes a package discoverable here, so
-  // deleting one would otherwise buy silence. A packages/plugin-* directory is
-  // asserted to be a plugin regardless of what its manifest currently says.
-  if (!plugin) {
-    if (pkg.dirName.startsWith('plugin-')) {
+    if (!plugin.compatibility) {
       drift.push(
-        `${file}: ${pkg.name} lives in packages/${pkg.dirName} but declares no "gurenPlugin" ` +
-          'manifest, so `guren plugin` cannot check it against any core version.',
+        `${file}: gurenPlugin declares no "compatibility" range. A first-party plugin has to ` +
+          `state which ${CORE} majors it supports, or this audit has nothing to hold to and ` +
+          'the claim can rot unnoticed.',
       )
+      continue
     }
-    continue
-  }
-  manifestsChecked += 1
+    const compatibility = plugin.compatibility
 
-  if (coreRanges.length === 0) {
-    drift.push(
-      `${file}: declares a "gurenPlugin" manifest but no ${CORE} dependency in ` +
-        `${DEPENDENCY_GROUPS.join(' or ')}. Its compatibility claim is then about a package ` +
-        'the install never pulls in.',
-    )
-  }
-
-  if (!plugin.compatibility) {
-    drift.push(
-      `${file}: gurenPlugin declares no "compatibility" range. A first-party plugin has to ` +
-        `state which ${CORE} majors it supports, or this audit has nothing to hold to and ` +
-        'the claim can rot unnoticed.',
-    )
-    continue
-  }
-  const compatibility = plugin.compatibility
-
-  if (!contiguous(compatibility)) {
-    unreasoned.push(
-      `${file}: gurenPlugin.compatibility "${compatibility}" is a union range. Probing the ends ` +
-        `of a dependency range cannot prove a union covers its interior — extend this audit ` +
-        'before declaring one.',
-    )
-    continue
-  }
-
-  // (b) the compatibility range must admit what this workspace publishes —
-  // or, failing that, what this plan will publish, the same allowance the
-  // dependency ranges get above. Asked through the same function `guren
-  // plugin` and `guren doctor` call, so CI predicts the runtime decision
-  // instead of re-deriving it.
-  const current = checkPluginCompatibility(plugin, coreVersion)
-  const againstPlan = plannedCore ? checkPluginCompatibility(plugin, plannedCore) : null
-  if (current === null) {
-    unreasoned.push(
-      `${file}: checkPluginCompatibility() declined to judge "${compatibility}" against ` +
-        `${CORE} ${coreVersion}.`,
-    )
-  } else if (!current.compatible && !againstPlan?.compatible) {
-    drift.push(
-      `${file}: gurenPlugin.compatibility is "${compatibility}", which excludes the workspace ` +
-        `${CORE} ${coreVersion}` +
-        `${plannedCore ? ` and the ${plannedCore} this release plan publishes` : ''}. ` +
-        `\`guren plugin ${pkg.name}\` would throw for anyone installing it against this release.`,
-    )
-  }
-
-  // (a) compatibility must cover everything the core range can resolve to.
-  for (const declared of coreRanges) {
-    const probes = rangeProbes(declared)
-    if (!probes) {
+    if (!contiguous(compatibility)) {
       unreasoned.push(
-        `${file}: the ${CORE} range "${declared}" is a shape this audit cannot reason about ` +
-          `(it understands carets). Extend rangeProbes() in ${import.meta.path} rather than ` +
-          'leaving the compatibility check silently vacuous.',
+        `${file}: gurenPlugin.compatibility "${compatibility}" is a union range. Probing the ends ` +
+          `of a dependency range cannot prove a union covers its interior — extend this audit ` +
+          'before declaring one.',
       )
       continue
     }
 
-    for (const { end, version } of probes) {
-      if (checkPluginCompatibility(plugin, version)?.compatible) continue
+    // (b) the compatibility range must admit what this workspace publishes —
+    // or, failing that, what this plan will publish, the same allowance the
+    // dependency ranges get above. Asked through the same function `guren
+    // plugin` and `guren doctor` call, so CI predicts the runtime decision
+    // instead of re-deriving it.
+    const current = checkPluginCompatibility(plugin, coreVersion)
+    const againstPlan = plannedCore ? checkPluginCompatibility(plugin, plannedCore) : null
+    if (current === null) {
+      unreasoned.push(
+        `${file}: checkPluginCompatibility() declined to judge "${compatibility}" against ` +
+          `${CORE} ${coreVersion}.`,
+      )
+    } else if (!current.compatible && !againstPlan?.compatible) {
       drift.push(
-        `${file}: gurenPlugin.compatibility "${compatibility}" excludes ${CORE} ${version}, ` +
-          `which the declared range "${declared}" admits (${end} of its range). npm would ` +
-          'install a combination the plugin loader then refuses.',
+        `${file}: gurenPlugin.compatibility is "${compatibility}", which excludes the workspace ` +
+          `${CORE} ${coreVersion}` +
+          `${plannedCore ? ` and the ${plannedCore} this release plan publishes` : ''}. ` +
+          `\`guren plugin ${pkg.name}\` would throw for anyone installing it against this release.`,
       )
     }
+
+    // (a) compatibility must cover everything the core range can resolve to.
+    for (const declared of coreRanges) {
+      const probes = rangeProbes(declared)
+      if (!probes) {
+        unreasoned.push(
+          `${file}: the ${CORE} range "${declared}" is a shape this audit cannot reason about ` +
+            `(it understands carets). Extend rangeProbes() in ${import.meta.path} rather than ` +
+            'leaving the compatibility check silently vacuous.',
+        )
+        continue
+      }
+
+      for (const { end, version } of probes) {
+        if (checkPluginCompatibility(plugin, version)?.compatible) continue
+        drift.push(
+          `${file}: gurenPlugin.compatibility "${compatibility}" excludes ${CORE} ${version}, ` +
+            `which the declared range "${declared}" admits (${end} of its range). npm would ` +
+            'install a combination the plugin loader then refuses.',
+        )
+      }
+    }
   }
-}
 
   return { drift, unreasoned, rangesChecked, manifestsChecked }
 }
