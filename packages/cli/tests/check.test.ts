@@ -1455,6 +1455,15 @@ export function registerBillingRoutes(router: Router): void {
 }
 `
 
+  /** A registrar at `routes/index.ts`, mounting `routes/invoice.ts`. */
+  const BILLING_ROUTES_INDEX = `import { Router } from '@guren/core'
+import { registerRoutes } from './invoice.js'
+
+export function registerBillingRoutes(router: Router): void {
+  registerRoutes(router)
+}
+`
+
   /** `make:route Invoice --module billing` output, wired to nothing. */
   const MODULE_ROUTE = `import { Router } from '@guren/core'
 import InvoiceController from '../app/Http/Controllers/InvoiceController.js'
@@ -1526,19 +1535,39 @@ import { registerBillingRoutes } from './routes/index.js'
 
 export const billingModule = defineModule({ name: 'billing', routes: registerBillingRoutes })
 `,
-      'modules/billing/routes/index.ts': `import { Router } from '@guren/core'
-import { registerRoutes } from './invoice.js'
-
-export function registerBillingRoutes(router: Router): void {
-  registerRoutes(router)
-}
-`,
+      'modules/billing/routes/index.ts': BILLING_ROUTES_INDEX,
       'modules/billing/routes/invoice.ts': MODULE_ROUTE,
     })
 
     expect(statusOf(report, 'modules/billing/routes/invoice.ts')).toBe('pass')
     expect(wiring(report).has('modules/billing/routes/index.ts')).toBe(false)
   })
+
+  // `defineModule({ … } satisfies ModuleDefinition)` is still a module
+  // descriptor: the assertion changes nothing the runtime sees. Reading the
+  // call's argument without unwrapping it made the descriptor invisible, and
+  // the module then fell back to the conventional `routes.ts` — the stale
+  // registrar this fixture keeps in place — so a wired directory reported as
+  // unmounted. Silent by construction: "cannot read the descriptor" and
+  // "the descriptor names nothing" are the same absence.
+  it.each([' satisfies Record<string, unknown>', ' as const'])(
+    'reads a defineModule descriptor written with %s',
+    async (suffix) => {
+      const report = await withWorkspace({
+        'routes/web.ts': PLAIN_ENTRY,
+        'modules/billing/routes.ts': BILLING_ENTRY,
+        'modules/billing/index.ts': `import { defineModule } from '@guren/core'
+import { registerBillingRoutes } from './routes/index.js'
+
+export const billingModule = defineModule({ name: 'billing', routes: registerBillingRoutes }${suffix})
+`,
+        'modules/billing/routes/index.ts': BILLING_ROUTES_INDEX,
+        'modules/billing/routes/invoice.ts': MODULE_ROUTE,
+      })
+
+      expect(statusOf(report, 'modules/billing/routes/invoice.ts')).toBe('pass')
+    },
+  )
 
   // The runtime mounts only what `defineModule({ routes })` names — a
   // descriptor without `routes` mounts nothing, however well-wired the

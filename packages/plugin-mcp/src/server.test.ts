@@ -19,8 +19,10 @@ function deriveFixtureTools(): DerivedAgentTool[] {
   router.get('/posts', handler).name('posts.index').agent({ description: 'List posts' })
   router.post('/posts', handler).name('posts.store').agent({})
   router.get('/hidden', handler).name('hidden.index').agent({ expose: { mcp: false } })
-  // Uncallable until the approval queue ships, and therefore unlisted — but
-  // still checkable, which is what the preflight cases below turn on.
+  // These fixtures configure no approval queue, so this tool is refused
+  // fail-closed and is therefore unlisted — but still checkable, which is what
+  // the preflight cases below turn on. The configured half lives in
+  // `approval.test.ts`.
   router.post('/approvals', handler).name('approvals.store').agent({ approval: 'required' })
   return deriveAgentTools(router.definitions()).tools.filter((tool) => tool.expose.mcp)
 }
@@ -340,8 +342,9 @@ describe('createAppMcpServer: guren.preflight', () => {
     expect((result.content as Array<{ text: string }>)[0]!.text).toContain('"tool" argument')
   })
 
-  // An approval-gated tool is uncallable and therefore unlisted, which is
-  // exactly the case where "would this be accepted?" is worth asking.
+  // With no queue configured an approval-gated tool is uncallable and
+  // therefore unlisted, which is exactly the case where "would this be
+  // accepted?" is worth asking.
   test('should answer for a tool that requires approval', async () => {
     const { client, dispatched } = await connectPreflight()
     const { tools } = await client.listTools()

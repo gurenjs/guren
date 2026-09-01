@@ -258,7 +258,11 @@ ${dataImport}
  * \`inputSchema\` merges the route's \`params\`, \`query\` and \`body\` schemas into
  * one JSON Schema 2020-12 object, with path parameters supplemented as
  * required strings; it describes what a caller *sends*, so a coercing schema
- * appears as the type it accepts. \`outputSchema\` is present only for routes
+ * appears as the type it accepts. \`inputSources\` records which of those
+ * contracts each merged property came from, and \`inputBodyNested\` marks a
+ * route whose non-object body was nested under a \`body\` key to give the tool
+ * an object root; together they are what lets a client rebuild the HTTP
+ * request from a flat tool call. \`outputSchema\` is present only for routes
  * that bind an \`output\` schema — the one shape validated at runtime. Routes
  * that instead declare a \`resource\` hint carry its payload type in the
  * description and in {@link AgentToolOutputTypes}.
@@ -367,6 +371,12 @@ function renderTool(tool: DerivedAgentTool, enrichment: ResourceEnrichment | und
   ]
   if (description !== undefined) fields.push(`description: ${JSON.stringify(description)}`)
   fields.push(`inputSchema: ${renderLiteral(tool.inputSchema, '    ')}`)
+  // Beside `inputSchema` because they describe the same merge: the schema says
+  // what the flat argument object looks like, these two say how to take it
+  // apart again. Through `renderLiteral`, not `JSON.stringify` — the keys are
+  // argument names, and an argument may legally be called `__proto__`.
+  fields.push(`inputSources: ${renderLiteral(tool.inputSources, '    ')}`)
+  fields.push(`inputBodyNested: ${JSON.stringify(tool.inputBodyNested)}`)
   if (tool.outputSchema) fields.push(`outputSchema: ${renderLiteral(tool.outputSchema, '    ')}`)
   fields.push(`annotations: ${renderLiteral(tool.annotations, '    ')}`)
   if (tool.authorization) fields.push(`authorization: ${renderLiteral(tool.authorization, '    ')}`)

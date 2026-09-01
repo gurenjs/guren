@@ -72,8 +72,11 @@ export function memberKeyName(member: {
  * turning that option on stays a one-line change rather than a silent
  * regression in every scanner at once.
  */
-export function unwrapTypeAssertion(node: Node): Node {
-  let current = node
+export function unwrapTypeAssertion(node: Node): Node
+export function unwrapTypeAssertion(node: BabelNode): BabelNode
+export function unwrapTypeAssertion(node: Node | BabelNode): Node | BabelNode {
+  let current = node as Node
+  if (!current || typeof current !== 'object') return current
   while (
     current.type === 'TSAsExpression' ||
     current.type === 'TSSatisfiesExpression' ||
@@ -81,6 +84,11 @@ export function unwrapTypeAssertion(node: Node): Node {
     current.type === 'TSTypeAssertion' ||
     current.type === 'ParenthesizedExpression'
   ) {
+    // A wrapper always carries an expression when Babel built it, but
+    // `literalString` accepts `unknown` and hands whatever it was given
+    // straight here. Stopping on a missing one keeps a malformed node
+    // answering "not a wrapper" rather than throwing out of a scan.
+    if (!current.expression) return current
     current = current.expression
   }
   return current
@@ -94,6 +102,22 @@ export function unwrapTypeAssertion(node: Node): Node {
  * bare test reads `{ … } as const` — the shape the storage and module
  * scaffolds actually emit — as "not an object", and the scan then skips the
  * one config it most needed to read.
+ *
+ * A source-level guard over quoted `'ObjectExpression'`, in the style of
+ * `class-member-walk-guard.test.ts`, was considered for this rule and
+ * deliberately rejected: the invariant is a dataflow property, not a lexical
+ * one. `model-parser.ts` spells the bare test in several places and each is
+ * *correct*, because the node was unwrapped by its caller; `findDefineModelOption`
+ * in that same file spelled the identical test and was a bug. A grep cannot
+ * separate the two, so the allowlist would have had to name the whole file and
+ * would have blinded the guard to the one site it was meant to catch. The
+ * class-member rule that a guard here does pin has no "already handled
+ * upstream" spelling, which is why it works there and not this rule.
+ *
+ * The rule also deliberately stops short of the shape tests on other node
+ * types: a drizzle table factory call, a route registrar's arrow function and
+ * a `.references(() => …)` callback have no idiomatic wrapped spelling, so
+ * unwrapping there would widen the rule without widening what it can read.
  */
 export function objectLiteral(node: Node | null | undefined): ObjectExpression | null {
   if (!node) return null
@@ -109,10 +133,19 @@ export function objectLiteral(node: Node | null | undefined): ObjectExpression |
  * knows only `StringLiteral` reads the first as no route at all. Anything with
  * an interpolation, or a reference to a constant declared elsewhere, is `null`:
  * these scanners miss rather than invent.
+ *
+ * Reading `null` for a wrapped literal is not always a mere gap: it took
+ * `broadcast.channel('announcements' as const, …)` out of the generated
+ * channel types entirely, rather than degrading what it generated for it.
  */
 export function literalString(value: unknown): string | null {
   if (!value || typeof value !== 'object') return null
-  const node = value as {
+  // `disk: 'media' as const` and `root: './x' satisfies string` spell a
+  // string as plainly as the bare literal does. Unwrapped here rather than
+  // at each caller because the miss is silent: a scanner reading `null` here
+  // reports "no value declared", which is the same answer it gives for a
+  // genuinely dynamic value — so the rule withdraws instead of failing.
+  const node = unwrapTypeAssertion(value as Node) as {
     type?: string
     value?: unknown
     quasis?: Array<{ value?: { cooked?: string } }>

@@ -752,6 +752,203 @@ export class InvoiceController extends Controller {
     })
   })
 
+  describe('the approval queue', () => {
+    let tempDir: string
+
+    beforeEach(async () => {
+      tempDir = await mkdtemp(join(tmpdir(), 'guren-agent-routes-approval-'))
+    })
+
+    afterEach(async () => {
+      await rm(tempDir, { recursive: true, force: true })
+    })
+
+    const gated = () =>
+      route({
+        method: 'DELETE',
+        path: '/posts/:id',
+        name: 'posts.destroy',
+        agent: { approval: 'required', readOnlyHint: true },
+        schemas: OUTPUT,
+      })
+
+    async function writeAppFile(contents: string): Promise<void> {
+      await writeWorkspaceFiles(tempDir, { 'src/app.ts': contents })
+    }
+
+    it('fails when a readable mcpPlugin call configures no approvals', async () => {
+      await writeAppFile(`
+import { mcpPlugin } from '@guren/plugin-mcp'
+
+export const providers = [mcpPlugin({ path: '/mcp' })]
+`)
+
+      const results = await checkAgentRoutes({ cwd: tempDir, definitions: [gated()] })
+      const finding = results.find((result) => result.key === 'agent-route-approval-store')
+
+      expect(finding?.status).toBe('fail')
+      expect(finding?.message).toContain('posts.destroy')
+      expect(finding?.message).toContain('approvals')
+      expect(finding?.filePath).toBe('src/app.ts')
+    })
+
+    it('fails on mcpPlugin() with no options at all', async () => {
+      await writeAppFile(`
+import { mcpPlugin } from '@guren/plugin-mcp'
+
+export const providers = [mcpPlugin()]
+`)
+
+      const results = await checkAgentRoutes({ cwd: tempDir, definitions: [gated()] })
+      expect(keys(results)).toContain('agent-route-approval-store')
+    })
+
+    it('passes when the call carries an approvals queue', async () => {
+      await writeAppFile(`
+import { mcpPlugin } from '@guren/plugin-mcp'
+import { store } from './approvals'
+
+export const providers = [mcpPlugin({ approvals: { store, notify: () => {} } })]
+`)
+
+      const results = await checkAgentRoutes({ cwd: tempDir, definitions: [gated()] })
+      expect(keys(results)).not.toContain('agent-route-approval-store')
+    })
+
+    it('reads plugin options written behind a transparent wrapper', async () => {
+      await writeAppFile(`
+import { mcpPlugin, type McpPluginOptions } from '@guren/plugin-mcp'
+
+export const providers = [mcpPlugin({ path: '/mcp' } satisfies McpPluginOptions)]
+`)
+
+      const results = await checkAgentRoutes({ cwd: tempDir, definitions: [gated()] })
+      // Wrapped options used to read as unreadable, and the scan's
+      // positive-evidence-only rule then turned that into silence — a gated
+      // route with nowhere to queue its approvals went unreported.
+      expect(keys(results)).toContain('agent-route-approval-store')
+    })
+
+    it('reads an approvals queue written behind a transparent wrapper', async () => {
+      // The unwrapped call is what makes this test able to fail: on its own, a
+      // wrapped configured call is indistinguishable from an unreadable one —
+      // both produce no finding. Pairing it with a readable call that has no
+      // queue means the wrapped one has to be understood as *configured* to
+      // keep the finding away.
+      await writeAppFile(`
+import { mcpPlugin } from '@guren/plugin-mcp'
+import { store } from './approvals'
+
+export const providers = [
+  mcpPlugin({ path: '/mcp' }),
+  mcpPlugin({ approvals: { store, notify: () => {} } } as const),
+]
+`)
+
+      const results = await checkAgentRoutes({ cwd: tempDir, definitions: [gated()] })
+      expect(keys(results)).not.toContain('agent-route-approval-store')
+    })
+
+    it('follows a local alias of the factory', async () => {
+      await writeAppFile(`
+import { mcpPlugin as mcp } from '@guren/plugin-mcp'
+
+export const providers = [mcp({ path: '/mcp' })]
+`)
+
+      const results = await checkAgentRoutes({ cwd: tempDir, definitions: [gated()] })
+      expect(keys(results)).toContain('agent-route-approval-store')
+    })
+
+    // Positive evidence only. Each of these is a shape the scan cannot read,
+    // and `guren check` has no per-finding ignore configuration — an
+    // unsuppressible false positive is the thing to avoid here.
+    it('stays silent when the plugin options are not an object literal', async () => {
+      await writeAppFile(`
+import { mcpPlugin } from '@guren/plugin-mcp'
+import { mcpConfig } from './config'
+
+export const providers = [mcpPlugin(mcpConfig)]
+`)
+
+      const results = await checkAgentRoutes({ cwd: tempDir, definitions: [gated()] })
+      expect(keys(results)).not.toContain('agent-route-approval-store')
+    })
+
+    it('stays silent when the options object spreads another', async () => {
+      await writeAppFile(`
+import { mcpPlugin } from '@guren/plugin-mcp'
+import { base } from './config'
+
+export const providers = [mcpPlugin({ ...base, path: '/mcp' })]
+`)
+
+      const results = await checkAgentRoutes({ cwd: tempDir, definitions: [gated()] })
+      expect(keys(results)).not.toContain('agent-route-approval-store')
+    })
+
+    it('stays silent for an app that never mounts the endpoint', async () => {
+      await writeAppFile('export const providers = []\n')
+
+      const results = await checkAgentRoutes({ cwd: tempDir, definitions: [gated()] })
+      expect(keys(results)).not.toContain('agent-route-approval-store')
+    })
+
+    it('stays silent when a same-named factory comes from elsewhere', async () => {
+      await writeAppFile(`
+import { mcpPlugin } from './my-own-plugin'
+
+export const providers = [mcpPlugin({ path: '/mcp' })]
+`)
+
+      const results = await checkAgentRoutes({ cwd: tempDir, definitions: [gated()] })
+      expect(keys(results)).not.toContain('agent-route-approval-store')
+    })
+
+    it('reports the missing queue once, naming every gated route', async () => {
+      await writeAppFile(`
+import { mcpPlugin } from '@guren/plugin-mcp'
+
+export const providers = [mcpPlugin({})]
+`)
+
+      const results = await checkAgentRoutes({
+        cwd: tempDir,
+        definitions: [
+          gated(),
+          route({
+            method: 'POST',
+            path: '/payouts',
+            name: 'payouts.store',
+            agent: { approval: 'required', readOnlyHint: true },
+            schemas: OUTPUT,
+          }),
+        ],
+      })
+
+      const findings = results.filter((result) => result.key === 'agent-route-approval-store')
+      expect(findings).toHaveLength(1)
+      expect(findings[0]?.message).toContain('posts.destroy')
+      expect(findings[0]?.message).toContain('payouts.store')
+    })
+
+    it('says nothing about the queue when no route declares approval', async () => {
+      await writeAppFile(`
+import { mcpPlugin } from '@guren/plugin-mcp'
+
+export const providers = [mcpPlugin({ path: '/mcp' })]
+`)
+
+      const results = await checkAgentRoutes({
+        cwd: tempDir,
+        definitions: [route({ path: '/posts', name: 'posts.index', agent: {}, schemas: OUTPUT })],
+      })
+
+      expect(keys(results)).not.toContain('agent-route-approval-store')
+      expect(results[0]?.status).toBe('pass')
+    })
+  })
+
   describe('loading', () => {
     let tempDir: string
 

@@ -129,7 +129,15 @@ export class ExceptionHandler {
     // rendered page and nothing else — on a hosted runtime, where stdout is
     // the only channel back to the operator, that leaves the failure
     // undiagnosable. Anything registering a reporter owns the reporting.
-    if (this.reporters.length === 0) {
+    //
+    // Server failures only. A 4xx is already delivered to the caller in full —
+    // a `ValidationException`'s field errors are the response body — so
+    // logging it adds nothing an operator can act on, while a route that
+    // rejects invalid input as designed prints a stack trace per request.
+    // This gate is deliberately *not* `shouldNotReport()`: a registered
+    // reporter still receives 4xx, because an app tracking auth failures or
+    // validation churn through one is asking for exactly those.
+    if (this.reporters.length === 0 && resolveExceptionStatus(error) >= 500) {
       console.error('Unhandled exception:', error)
     }
 
@@ -183,22 +191,20 @@ export class ExceptionHandler {
    */
   protected renderDefaultException(error: Error, ctx: Context): Response {
     const debug = this.shouldShowDetails()
+    // Resolved before the branch, so the status this renders with is the same
+    // number `reportException` judged it by. `toResponse()` supplies the body;
+    // the status comes from the one rule either way.
+    const statusCode = resolveExceptionStatus(error)
 
     if (HttpException.isHttpException(error)) {
-      const { status, body } = error.toResponse(debug)
+      const { body } = error.toResponse(debug)
 
       if (this.wantsHtmlResponse(ctx) && !debug) {
-        return ctx.html(renderErrorPage(status, body.message), status as ContentfulStatusCode)
+        return ctx.html(renderErrorPage(statusCode, body.message), statusCode as ContentfulStatusCode)
       }
 
-      return ctx.json(body, status as ContentfulStatusCode)
+      return ctx.json(body, statusCode as ContentfulStatusCode)
     }
-
-    // Use duck-typed statusCode if present (e.g. ModelNotFoundException → 404)
-    const statusCode =
-      'statusCode' in error && typeof (error as Record<string, unknown>).statusCode === 'number'
-        ? (error as Record<string, unknown>).statusCode as number
-        : 500
 
     const body: ErrorResponse = {
       message: statusCode < 500 || debug ? error.message : 'Internal Server Error',
@@ -250,6 +256,27 @@ export class ExceptionHandler {
       }
     }
   }
+}
+
+/**
+ * The HTTP status an exception carries, or 500 when it names none.
+ *
+ * Duck-typed on `statusCode` rather than on `instanceof HttpException`, which
+ * is what lets a foreign exception (`ModelNotFoundException` from
+ * `@guren/orm`, crossing a package boundary) render as its own 404 rather than
+ * a 500. `HttpException.isHttpException()` treats the same property as the
+ * authority, so this reads what that check already required.
+ *
+ * One rule, read by both halves of the handler: what an exception is delivered
+ * as and whether the fallback logger treats it as a server failure must be the
+ * same number, or an exception could be sent as a 422 and reported as a crash.
+ * That is why `renderDefaultException` takes the status from here rather than
+ * from `toResponse()`, whose `status` a duck-typed implementation could spell
+ * differently from its own `statusCode`.
+ */
+function resolveExceptionStatus(error: unknown): number {
+  const statusCode = (error as { statusCode?: unknown } | null | undefined)?.statusCode
+  return typeof statusCode === 'number' ? statusCode : 500
 }
 
 /**

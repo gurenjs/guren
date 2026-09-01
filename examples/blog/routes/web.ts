@@ -1,4 +1,4 @@
-import { Router, requireAuthenticated, requireGuest } from '@guren/core'
+import { Router, registerAttachmentRoutes, requireAuthenticated, requireGuest } from '@guren/core'
 import PostController from '../app/Http/Controllers/PostController.js'
 import { Post } from '../app/Models/Post.js'
 import { PostPayloadSchema } from '../app/Http/Validators/PostValidator.js'
@@ -8,6 +8,11 @@ export function registerWebRoutes(baseRouter: Router): void {
   const router = baseRouter
     .aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
     .aliasMiddleware('guest', requireGuest({ redirectTo: '/dashboard' }))
+
+  // Attachments live on the private `local` disk, so their URLs point at this
+  // signed delivery route. Unmounted, every cover image 404s — and the 404 is
+  // the route's own uniform failure, so nothing at runtime names the cause.
+  registerAttachmentRoutes(router)
 
   router.get('/', [PostController, 'index']).name('home')
 

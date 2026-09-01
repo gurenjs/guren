@@ -1005,6 +1005,32 @@ export class Post extends defineModel(posts, {
     }
   })
 
+  it('counts a fillable option written behind a satisfies wrapper', async () => {
+    const workspace = await createTempWorkspace('guren-cli-audit-mass-option-satisfies-')
+
+    try {
+      await mkdir(join(workspace.dir, 'app/Models'), { recursive: true })
+      await writeFile(
+        join(workspace.dir, 'app/Models/Post.ts'),
+        `import { defineModel, type ModelOptions } from '@guren/core'
+import { posts } from '../../db/schema.js'
+
+export class Post extends defineModel(posts, {
+  fillable: ['title', 'body'],
+} satisfies ModelOptions) {}`,
+        'utf8',
+      )
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      const post = report.findings.find(f => f.key === 'mass-assignment:Post')
+      expect(post).toBeDefined()
+      expect(post!.status).toBe('pass')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('counts hidden passed as a defineModel option, with static shadowing it', async () => {
     const workspace = await createTempWorkspace('guren-cli-audit-hidden-option-')
 

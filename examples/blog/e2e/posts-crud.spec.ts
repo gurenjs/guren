@@ -1,8 +1,19 @@
 import { test, expect, type Page } from '@playwright/test'
+import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { gotoHydrated, waitForHydrated } from './helpers.js'
 
 const coverFixture = fileURLToPath(new URL('./fixtures/cover.png', import.meta.url))
+
+/**
+ * Where the `local` disk (StorageProvider's ./storage/app, relative to the app
+ * root the E2E server runs from) holds one attachment's objects, given the
+ * signed delivery URL its id came from.
+ */
+function storageDirFor(deliveryUrl: string): string {
+  const id = decodeURIComponent(new URL(deliveryUrl, 'http://localhost').pathname.split('/')[2] ?? '')
+  return fileURLToPath(new URL(`../storage/app/attachments/${id}`, import.meta.url))
+}
 
 /** Creates a post and returns its show-page URL. */
 async function createPost(page: Page, title: string, options: { cover?: boolean } = {}): Promise<string> {
@@ -71,10 +82,11 @@ test.describe('Posts — authenticated CRUD', () => {
     const title = `E2E Cover Post ${Date.now()}`
     const postUrl = await createPost(page, title, { cover: true })
 
-    // The show page renders the stored attachment from the public disk.
+    // The cover lives on the private disk, so the show page renders it through
+    // the signed delivery route rather than as a static asset.
     const cover = page.getByTestId('post-cover')
     await expect(cover).toBeVisible()
-    await expect(cover).toHaveAttribute('src', /\/storage\/attachments\//)
+    await expect(cover).toHaveAttribute('src', /^\/attachments\/[^/]+\/.*[?&]signature=/)
 
     // The bytes must actually come back over HTTP — a broken image keeps
     // naturalWidth at 0 even though the element is "visible".
@@ -93,7 +105,12 @@ test.describe('Posts — authenticated CRUD', () => {
     const postUrl = await createPost(page, title, { cover: true })
 
     const coverSrc = await page.getByTestId('post-cover').getAttribute('src')
-    expect(coverSrc).toMatch(/\/storage\/attachments\//)
+    expect(coverSrc).toMatch(/^\/attachments\/[^/]+\/.*[?&]signature=/)
+
+    // Assert the bytes are on disk *before* deleting, so the "gone afterwards"
+    // check below cannot pass by pointing at a path that never existed.
+    const storedObjects = storageDirFor(coverSrc!)
+    expect(existsSync(storedObjects)).toBe(true)
 
     // The Delete button's confirm dialog only exists once React has hydrated.
     await gotoHydrated(page, `${postUrl}/edit`)
@@ -107,9 +124,14 @@ test.describe('Posts — authenticated CRUD', () => {
     const showResponse = await page.request.get(postUrl)
     expect(showResponse.status()).toBe(404)
 
-    // …and purgeAttachments removed the stored object too.
+    // …its signed URL stops resolving…
     const coverResponse = await page.request.get(coverSrc!)
     expect(coverResponse.status()).toBe(404)
+
+    // …and purgeAttachments removed the stored object too. Worth asserting
+    // separately: the delivery route 404s on the missing row before it ever
+    // touches storage, so the status above says nothing about the bytes.
+    expect(existsSync(storedObjects)).toBe(false)
   })
 
   test('edit an existing post', async ({ page }) => {

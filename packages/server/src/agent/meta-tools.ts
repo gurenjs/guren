@@ -35,8 +35,29 @@
  */
 export const PREFLIGHT_TOOL_NAME = 'guren.preflight'
 
+/**
+ * The approval-status companion tool (RFC 0016 §5.4 item 4).
+ *
+ * A tool declaring `approval: 'required'` answers its first call with a
+ * pending record rather than an execution, and the caller is handed a request
+ * id. Something has to be able to say what became of that id, and it cannot be
+ * the gated tool itself for the reason preflight cannot be an argument of one:
+ * a status is not that route's output, and a tool advertising an `outputSchema`
+ * may not answer with a different shape of success.
+ *
+ * A second meta-tool rather than a mode of the first: `guren.preflight`
+ * rehearses a call and answers a verdict, this reads a record and answers its
+ * state. Folding both under one name would mean one tool whose output schema
+ * is the union of two unrelated shapes, which is the thing a schema is for
+ * preventing.
+ */
+export const APPROVAL_STATUS_TOOL_NAME = 'guren.approval_status'
+
 /** Every meta-tool name an adapter may occupy. */
-export const RESERVED_AGENT_TOOL_NAMES: readonly string[] = [PREFLIGHT_TOOL_NAME]
+export const RESERVED_AGENT_TOOL_NAMES: readonly string[] = [
+  PREFLIGHT_TOOL_NAME,
+  APPROVAL_STATUS_TOOL_NAME,
+]
 
 /**
  * Whether a tool name belongs to the framework rather than the application.

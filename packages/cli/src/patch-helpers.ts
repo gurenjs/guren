@@ -1,5 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { readIfExists } from './discovery'
+import { parseSourceFile } from './parse-cache'
 import { resolve } from 'node:path'
 import { escapeRegExp } from './utils'
 
@@ -139,6 +140,88 @@ function appendArrayEntry(arrayInterior: string, valueSource: string): string {
 }
 
 /**
+ * Whether every value binding `importStatement` asks for is already imported
+ * from the same module.
+ *
+ * The literal-line test in {@link insertImport} only recognizes the exact
+ * statement this package would have written, so an import that has since been
+ * *merged* — `import { Router, registerAttachmentRoutes } from '@guren/core'`,
+ * the idiomatic form and what any formatter produces — reads as absent. The
+ * patch then appends a second import of the same name and the app stops
+ * compiling on a duplicate binding. Re-running a scaffolder must repair, not
+ * break.
+ *
+ * Decided on the AST rather than by regex, unlike the rest of this file. The
+ * file locates *edit sites* textually on purpose (see `maskNonCode`) because
+ * it must preserve formatting it did not write — but this function performs no
+ * edit, and a wrong answer here is silent in the worst direction: it makes a
+ * scaffolder skip an import the generated code needs. Regex got five distinct
+ * cases wrong, each of which the AST answers for free: an import inside a
+ * comment or template literal, a `type`-only import (which binds no value),
+ * `X as wanted` (which binds the name from a *different* symbol), a comment
+ * between the braces, and a pattern spanning two imports.
+ *
+ * Unparseable content answers `false` — insert, and let the duplicate-binding
+ * error surface — rather than `true`, which would silently drop the import.
+ */
+function namedBindingsAlreadyImported(content: string, importStatement: string): boolean {
+  const requested = parseNamedImport(importStatement)
+  if (!requested || requested.bindings.length === 0) return false
+
+  const ast = parseSourceFile(content)
+  if (!ast) return false
+
+  const bound = new Set<string>()
+  for (const statement of ast.program.body) {
+    if (statement.type !== 'ImportDeclaration') continue
+    if (statement.source.value !== requested.source) continue
+    // A type-only import binds no value, so it cannot satisfy a value import.
+    if (statement.importKind === 'type') continue
+    for (const specifier of statement.specifiers) {
+      if (specifier.type !== 'ImportSpecifier') continue
+      if (specifier.importKind === 'type') continue
+      // Both halves must match: `Router as wanted` binds the wanted *name*,
+      // but to the wrong symbol, so skipping the insert would leave the
+      // generated call invoking Router.
+      const imported = specifierName(specifier.imported)
+      if (imported === specifier.local.name) bound.add(imported)
+    }
+  }
+
+  return requested.bindings.every((binding) => bound.has(binding))
+}
+
+/** The name an import specifier refers to — `import { "a-b" as c }` is legal. */
+function specifierName(node: { type: string; name?: string; value?: string }): string {
+  return node.type === 'Identifier' ? (node.name ?? '') : (node.value ?? '')
+}
+
+/**
+ * The bindings and module of a plain named import, or `null` for any other
+ * form. Parsed from the caller-supplied statement, which is first-party
+ * literal text — the file's own callers pass a string constant.
+ */
+function parseNamedImport(statement: string): { bindings: string[]; source: string } | null {
+  const ast = parseSourceFile(statement)
+  const declaration = ast?.program.body[0]
+  if (!declaration || declaration.type !== 'ImportDeclaration') return null
+  if (declaration.importKind === 'type') return null
+
+  const bindings: string[] = []
+  for (const specifier of declaration.specifiers) {
+    // A default or namespace import is a different question than this
+    // function answers, so decline the whole statement rather than half of it.
+    if (specifier.type !== 'ImportSpecifier') return null
+    if (specifier.importKind === 'type') return null
+    const imported = specifierName(specifier.imported)
+    if (imported !== specifier.local.name) return null
+    bindings.push(imported)
+  }
+
+  return { bindings, source: declaration.source.value }
+}
+
+/**
  * `content` with `importStatement` inserted after the last existing import, or
  * `null` when it is already there.
  *
@@ -152,6 +235,10 @@ export function insertImport(content: string, importStatement: string): string |
   const regex = new RegExp(`^\\s*${importPattern}\\s*$`, 'm')
 
   if (regex.test(content)) {
+    return null
+  }
+
+  if (namedBindingsAlreadyImported(content, normalizedImport)) {
     return null
   }
 

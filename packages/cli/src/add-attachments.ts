@@ -1,7 +1,7 @@
 import { writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { consola } from 'consola'
-import { collectFiles, fileExists, findFirstExisting, listAppRoots, readIfExists } from './discovery'
+import { collectFiles, fileExists, listAppRoots, readIfExists } from './discovery'
 import {
   addImport,
   addToArrayArgument,
@@ -14,7 +14,7 @@ import {
   type SchemaDialect,
 } from './patch-helpers'
 import { wireProviders } from './provider-registrar'
-import { ROUTES_ENTRY_CANDIDATES, wireRouteRegistrar } from './route-registrar'
+import { resolveRoutesEntry, wireRouteRegistrar } from './route-registrar'
 import { scaffoldTemplateFile } from './scaffold-templates'
 import { writeScaffoldFiles, type ScaffoldFileEntry, type WriterOptions } from './utils'
 
@@ -205,7 +205,7 @@ export async function appBindsStorage(): Promise<boolean> {
  * API-only app, which ships `routes/api.ts` and no `routes/web.ts`.
  */
 async function registerDeliveryRoute(): Promise<void> {
-  const routesFile = await findFirstExisting(process.cwd(), ROUTES_ENTRY_CANDIDATES)
+  const routesFile = await resolveRoutesEntry(process.cwd())
 
   if (routesFile === null) {
     consola.warn(

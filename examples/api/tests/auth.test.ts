@@ -1,9 +1,9 @@
-import { beforeAll, describe, expect, it, vi, beforeEach } from 'vitest'
+import { describe, expect, it, vi, beforeAll, beforeEach } from 'vitest'
 import {
   createControllerContext,
   createControllerModuleMock,
 } from '@guren/testing/controller'
-import { type Context, Hash } from '@guren/core'
+import { NodeHasher, type Context } from '@guren/core'
 
 // Mock dependencies
 vi.mock('@guren/core', async () => {
@@ -12,6 +12,11 @@ vi.mock('@guren/core', async () => {
     ...actual,
     ...createControllerModuleMock(),
     ServiceProvider: actual.ServiceProvider,
+    // No hasher override. The controller verifies through `Hash`, which picks
+    // NodeHasher off Bun, so the real implementation runs here. A hand-rolled
+    // fake would be the hazard: its argument order can drift from
+    // `verify(hashed, plain)` with no type error, which is what let a swapped
+    // call site in the controller ship green.
   }
 })
 
@@ -34,24 +39,23 @@ vi.mock('../app/Models/User.js', () => ({
 
 import AuthController from '../app/Http/Controllers/AuthController.js'
 
-// Hashes produced by the hasher the controller actually verifies with, rather
-// than by a hand-written double. A double is a copy of a contract no type
-// constrains: the one this file used to carry defined `verify(password, hash)`,
-// the inverse of `PasswordHasher.verify(hashed, plain)`, and so agreed with a
-// login that was broken in production and kept this suite green.
-let passwordHash: string
-
-beforeAll(async () => {
-  passwordHash = await new Hash().hash('password123')
-})
-
 function createController(ctx: Context): AuthController {
   const controller = new AuthController()
   controller.setContext(ctx)
   return controller
 }
 
+const hasher = new NodeHasher()
+
 describe('AuthController', () => {
+  let passwordHash: string
+  let correctPasswordHash: string
+
+  beforeAll(async () => {
+    passwordHash = await hasher.hash('password123')
+    correctPasswordHash = await hasher.hash('correctpassword')
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
   })
@@ -176,7 +180,7 @@ describe('AuthController', () => {
     })
 
     it('returns 401 for wrong password', async () => {
-      const user = { id: 1, name: 'Test', email: 'test@example.com', passwordHash, createdAt: new Date() }
+      const user = { id: 1, name: 'Test', email: 'test@example.com', passwordHash: correctPasswordHash, createdAt: new Date() }
       mockUserFirst.mockResolvedValue(user)
 
       const ctx = createControllerContext('http://api.test/api/auth/login', {
@@ -194,6 +198,60 @@ describe('AuthController', () => {
       const response = await controller.login()
 
       expect(response.status).toBe(401)
+    })
+  })
+
+  describe('register() then login()', () => {
+    it('accepts the registered password against the stored hash', async () => {
+      // `AuthenticatableModel` hashes the plain password on create; `User` is
+      // mocked here, so do that step ourselves with the same hasher.
+      const created: Record<string, unknown> = {}
+      mockUserCreate.mockImplementation(async (data: { name: string; email: string; password: string }) => {
+        Object.assign(created, {
+          id: 1,
+          name: data.name,
+          email: data.email,
+          passwordHash: await hasher.hash(data.password),
+          createdAt: new Date(),
+        })
+        return created
+      })
+      mockUserFirst.mockResolvedValueOnce(null) // no existing user at register time
+
+      const registerCtx = createControllerContext('http://api.test/api/auth/register', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: 'Round Trip',
+          email: 'roundtrip@example.com',
+          password: 'password123',
+        }),
+        headers: { 'Content-Type': 'application/json' },
+      }, {
+        events: { emit: mockEmit },
+      }) as unknown as Context
+
+      const registerResponse = await createController(registerCtx).register()
+      expect(registerResponse.status).toBe(201)
+
+      mockUserFirst.mockResolvedValue(created)
+
+      const loginCtx = createControllerContext('http://api.test/api/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({
+          email: 'roundtrip@example.com',
+          password: 'password123',
+        }),
+        headers: { 'Content-Type': 'application/json' },
+      }, {
+        events: { emit: mockEmit },
+      }) as unknown as Context
+
+      const loginResponse = await createController(loginCtx).login()
+
+      expect(loginResponse.status).toBe(200)
+      const json = await loginResponse.json()
+      expect(json.token).toBeDefined()
+      expect(json.user.email).toBe('roundtrip@example.com')
     })
   })
 

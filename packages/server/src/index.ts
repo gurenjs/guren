@@ -67,6 +67,7 @@ export type {
 // may not claim (RFC 0016 §5.4). Exported so `@guren/plugin-mcp` and
 // `guren check` read one list instead of restating the string.
 export {
+  APPROVAL_STATUS_TOOL_NAME,
   isReservedAgentToolName,
   PREFLIGHT_TOOL_NAME,
   RESERVED_AGENT_TOOL_NAMES,
@@ -94,6 +95,38 @@ export type {
   AgentAuditInvokedRecord,
   AgentAuditRecord,
 } from './agent/audit'
+// The one rule for *announcing* an audit event — sink first, then listeners.
+// Exported because it has two readers and the seam between them is a container
+// binding: `@guren/plugin-mcp` builds one and binds it as `'agent.audit'`,
+// `guren tool:call` resolves that binding to record the `'cli'` surface. Two
+// copies of the rule is how one surface's trail comes to differ from another's.
+export { AGENT_AUDIT_BINDING, createAuditEmitter } from './agent/audit-emitter'
+export type { AgentAuditEmitter, AgentAuditSink } from './agent/audit-emitter'
+// The approval queue (RFC 0016 §5.4 item 4): the store an application
+// implements, and the pure rules that decide whether a record authorizes a
+// call. Here rather than in the adapter because `guren check` reads the
+// configuration key from the same module the plugin does, and because the
+// binding, expiry and single-use rules must have exactly one definition.
+export {
+  AGENT_APPROVAL_CONFIG_KEY,
+  agentApprovalExpiredAt,
+  agentApprovalFingerprint,
+  agentApprovalPrincipalKey,
+  agentApprovalStatusAt,
+  agentApprovalUsableAt,
+  agentApprovalVisibleTo,
+  buildAgentApprovalRequest,
+  canonicalizeAgentApprovalInput,
+  DEFAULT_AGENT_APPROVAL_TTL_MS,
+} from './agent/approval'
+export type {
+  AgentApprovalMatch,
+  AgentApprovalRequest,
+  AgentApprovalRequestInput,
+  AgentApprovalStatus,
+  AgentApprovalStore,
+} from './agent/approval'
+export { AgentApprovalRequested } from './agent/AgentApprovalRequested'
 export { ViewEngine } from './mvc/ViewEngine'
 export { inertia, setInertiaSsrRenderer, setInertiaDocument } from './mvc/inertia/InertiaEngine'
 export { setInertiaSharedProps, getInertiaSharedPropsResolver, shareInertiaProps } from './mvc/inertia/shared'

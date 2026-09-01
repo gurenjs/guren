@@ -10,7 +10,7 @@ import {
   type DevAssetsOptions,
 } from './dev-assets'
 import { registerRootPublicAssets } from './public-assets'
-import { guardStaticDocument } from './static-documents'
+import { applyDocumentDisposition, guardStaticDocument } from './static-documents'
 import { isPathWithin, isRealPathWithin } from '../support/contained-path'
 import { parseImportMap } from '../support/import-map'
 import { DEFAULT_DEV_STYLES_ENTRY } from '../support/inertia-defaults'
@@ -195,13 +195,18 @@ export function registerBuiltInertiaClient(
     }
 
     const contentType = file.type || 'application/javascript; charset=utf-8'
-
-    return new Response(file, {
-      headers: {
-        'Content-Type': contentType,
-        'Cache-Control': 'public, max-age=31536000',
-      },
+    const headers = new Headers({
+      'Content-Type': contentType,
+      'Cache-Control': 'public, max-age=31536000',
     })
+
+    // Serving a package directory rather than the app's own tree, so a document
+    // type here is whatever @guren/inertia-client happens to ship. Guarded on
+    // the same rule anyway: what makes the rule dependable is that no mount
+    // gets to decide it is the safe one.
+    applyDocumentDisposition(headers, contentType)
+
+    return new Response(file, { headers })
   })
 }
 
