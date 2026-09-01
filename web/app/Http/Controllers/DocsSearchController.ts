@@ -20,9 +20,11 @@ export const DocSearchQuerySchema = z.object({
 })
 
 /**
- * The index only changes when a deploy rebuilds it, so results are safe to
- * cache at the edge for a short window — the same query from many readers
- * then costs one D1 read rather than one each.
+ * The index only changes when a deploy rebuilds it, so a repeated query is
+ * safe to serve from cache for a short window. This is the browser's cache
+ * only: the Worker runs on every request, and nothing here or in
+ * wrangler.jsonc puts the response in Cloudflare's cache, so two readers
+ * asking the same thing are still two D1 reads.
  */
 const SEARCH_CACHE_CONTROL = 'public, max-age=60'
 

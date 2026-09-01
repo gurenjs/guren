@@ -5,8 +5,6 @@
  * FTS5 module, so vitest cannot host any of this.
  */
 import { Database } from 'bun:sqlite'
-import { readdirSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
 
 import { drizzle } from 'drizzle-orm/bun-sqlite'
 
@@ -24,6 +22,7 @@ import {
   sectionsTableName,
   type DocsByLocale,
 } from '../../app/Services/search-index-build.js'
+import { applyMigrations } from './migrations.js'
 
 const docs: DocsByLocale = {
   en: {
@@ -34,12 +33,22 @@ const docs: DocsByLocale = {
         title: 'Operations',
         html: `<h1 id="operations">Operations</h1><p>${'Rotate the paginated ledger. '.repeat(400)}</p>`,
       },
+      overview: {
+        title: 'Guide overview',
+        html: '<h1 id="overview">Overview</h1><p>Guren at a glance, step by step.</p>',
+      },
       cloudflare: {
         title: 'Cloudflare',
         html:
           '<h1 id="cloudflare">Cloudflare</h1><p>Deploy the app to Workers.</p>' +
           '<h2 id="database-d1">Database (D1)</h2>' +
           '<p>Call <code>createD1Database</code> with the binding from wrangler.jsonc.</p>',
+      },
+    },
+    tutorials: {
+      overview: {
+        title: 'Tutorial overview',
+        html: '<h1 id="overview">Overview</h1><p>Build a blog with Guren, step by step.</p>',
       },
     },
   },
@@ -69,13 +78,7 @@ let service: DocSearchService
 
 beforeAll(() => {
   const client = new Database(':memory:')
-  const migrations = join(import.meta.dir, '../../db/migrations')
-  for (const entry of readdirSync(migrations, { withFileTypes: true })
-    .filter((dirent) => dirent.isDirectory())
-    .map((dirent) => dirent.name)
-    .sort()) {
-    client.exec(readFileSync(join(migrations, entry, 'migration.sql'), 'utf8'))
-  }
+  applyMigrations(client)
   client.exec(renderIndexSql(rows, buildId))
   const db = drizzle({ client })
   service = new DocSearchService(async () => db, build)
@@ -137,8 +140,18 @@ describe('DocSearchService', () => {
     }
   })
 
-  test('honours the result limit', async () => {
-    expect((await service.search('the', 'en', 1)).length).toBeLessThanOrEqual(1)
+  test('keeps two categories that share a slug and an anchor apart', async () => {
+    // `guides/overview` and `tutorials/overview` both exist in the real docs,
+    // and their h1 anchors are identical — a key without the category shows
+    // one of them and silently drops the other.
+    const results = await service.search('step by step', 'en')
+
+    expect(results.map((result) => result.category).sort()).toEqual(['guides', 'tutorials'])
+  })
+
+  test('returns as many distinct sections as the limit allows', async () => {
+    expect(await service.search('step by step', 'en', 1)).toHaveLength(1)
+    expect(await service.search('step by step', 'en', 2)).toHaveLength(2)
   })
 
   test('refuses to answer when the index was never built', async () => {

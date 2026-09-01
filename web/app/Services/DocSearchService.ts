@@ -89,13 +89,13 @@ export function buildSnippet(body: string, query: string, length = SNIPPET_LENGT
   // Case folding is length-preserving for everything in these docs, but not in
   // general (İ folds to two code units). Rather than track a shifted index,
   // fall back to the head of the section when it is not.
-  const at =
+  const positions =
     lower.length === flat.length
       ? queryTerms(query)
           .map((term) => lower.indexOf(term))
           .filter((index) => index >= 0)
-          .reduce<number>((best, index) => (best < 0 ? index : Math.min(best, index)), -1)
-      : -1
+      : []
+  const at = positions.length > 0 ? Math.min(...positions) : -1
 
   if (at < 0) {
     return `${flat.slice(0, safeBoundary(flat, length)).trimEnd()}…`
@@ -113,10 +113,6 @@ export class DocSearchService {
   constructor(database: () => Promise<unknown>, build: SearchIndexBuild) {
     this.#database = database
     this.#build = build
-  }
-
-  get indexed(): boolean {
-    return this.#build.indexed
   }
 
   async search(query: string, locale: SearchLocale, limit = 20): Promise<DocSearchResult[]> {
@@ -137,9 +133,8 @@ export class DocSearchService {
     // the search table is named outright and only the sections table is
     // aliased. Both names come from the generated module rather than from the
     // request, and everything else is bound — including the bm25 weights.
-    const rows = (await (
-      (await this.#database()) as QueryableDatabase
-    ).all(sql`
+    const database = (await this.#database()) as QueryableDatabase
+    const rows = (await database.all(sql`
       SELECT s.category AS category, s.slug AS slug, s.anchor AS anchor,
              s.doc_title AS doc_title, s.heading AS heading, s.body AS body
       FROM ${search}
@@ -154,7 +149,10 @@ export class DocSearchService {
     for (const row of rows) {
       // A long section is stored as several rows sharing one anchor; the
       // reader should see the heading once, at its best-ranked occurrence.
-      const key = `${row.slug}#${row.anchor}`
+      // Keyed on the category too, because the slug alone is not unique —
+      // `guides/overview` and `tutorials/overview` both exist, and one would
+      // otherwise suppress the other.
+      const key = `${row.category}/${row.slug}#${row.anchor}`
       if (seen.has(key)) {
         continue
       }
