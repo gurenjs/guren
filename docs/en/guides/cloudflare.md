@@ -259,6 +259,15 @@ APP_KEY=base64:...
 
 Your normal `bun run dev` server is still the faster loop for day-to-day work. Reach for `wrangler dev` when you are about to deploy, or when something behaves differently in production.
 
+## Static Assets
+
+Everything under `public/` is staged into `.cloudflare/assets/` and served by Workers Static Assets, which answers **before** the worker runs. Two consequences the build handles for you:
+
+- It writes a `_headers` file alongside the staged files, giving the types a browser renders as a document — `.html`, `.htm`, `.svg`, `.xhtml`, `.xml` — `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff`. This is the same policy the framework applies to `public/` locally, which the worker never gets the chance to apply here. Images, scripts, stylesheets and fonts are untouched. A `_headers` of your own under `public/` is kept, with the generated rules placed ahead of it.
+- It sets `"html_handling": "none"` on the `assets` binding, so a staged `page.html` is served at `/page.html` and nowhere else. Under the platform default it would also answer at `/page` — which both shadows any route of that name in your app and moves the file off the path the `_headers` rule matches. Requests that no staged file answers fall through to the worker, which is where your pages come from.
+
+If your app deliberately serves pretty-URL HTML out of `public/`, set `"html_handling"` yourself in `wrangler.jsonc`; the build leaves any value you name alone, and the `.html` rule is weaker for it.
+
 ## Upgrading an Existing App
 
 `wrangler.jsonc` is scaffolded once and never overwritten, so an app created before a plugin update keeps its original config. The build prints exactly which entries are missing when it finds an outdated one — add them and rebuild.

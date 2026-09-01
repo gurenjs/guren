@@ -6,6 +6,8 @@ import {
   assertOutputDirOutsideRoot,
   clientManifestJson,
   DEV_ONLY_MODULES,
+  DOCUMENT_ASSET_EXTENSIONS,
+  DOCUMENT_ASSET_HEADERS,
   MCP_SDK_SUBPATH_PREFIX,
   renderDevOnlyStub,
   stubbableDevOnlyModules,
@@ -129,6 +131,18 @@ export async function buildVercelOutput(options: BuildVercelOutputOptions = {}):
           { src: '/public/(.*)', dest: '/$1' },
           { handle: 'filesystem' },
           { src: '/(.*)', dest: '/index' },
+          // Everything below runs only for a request the filesystem answered,
+          // which is what confines the rule to staged files. In the initial
+          // phase the same pattern would also match a path the function
+          // serves, and a dynamic /sitemap.xml would come back as a download.
+          { handle: 'hit' },
+          {
+            src: documentAssetPattern(),
+            headers: { ...DOCUMENT_ASSET_HEADERS },
+            // Required of every route after `handle: 'hit'`, and what it
+            // means here: attach the headers and carry on rather than answer.
+            continue: true,
+          },
         ],
       },
       null,
@@ -177,6 +191,27 @@ export async function buildVercelOutput(options: BuildVercelOutputOptions = {}):
   if (existsSync(publicDir)) {
     cpSync(publicDir, resolve(out, 'static'), { recursive: true })
   }
+}
+
+/**
+ * Matches a staged path whose extension a browser would render as a document.
+ *
+ * The CDN serves `.vercel/output/static` ahead of the function, so the
+ * framework's own guard never sees these files. This is the same policy
+ * expressed in the one place that still reaches them.
+ *
+ * Spelled with a character class per letter because Vercel compiles `src`
+ * case-sensitively: a plain extension would leave logo.SVG inline, while the
+ * framework guard lowercases before its mime lookup and catches it. An inline
+ * case-insensitive flag is not an option, because `src` is validated by
+ * constructing a JavaScript `RegExp` from it.
+ */
+function documentAssetPattern(): string {
+  const alternatives = DOCUMENT_ASSET_EXTENSIONS.map((extension) =>
+    [...extension].map((character) => `[${character}${character.toUpperCase()}]`).join(''),
+  ).join('|')
+
+  return `^/.*\\.(?:${alternatives})$`
 }
 
 const MCP_UNAVAILABLE =

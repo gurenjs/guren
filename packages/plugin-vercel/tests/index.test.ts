@@ -2,6 +2,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
+import { DOCUMENT_ASSET_EXTENSIONS } from '@guren/core/internal/deploy-build'
 import { buildVercelOutput, createVercelHandler, vercelPlugin } from '../src/index'
 
 const DEFAULT_ENTRYPOINT_SOURCE = "export default { fetch() { return new Response('ok') } }\n"
@@ -260,6 +261,50 @@ describe('@guren/plugin-vercel', () => {
       // It has to win before the filesystem handler, which would otherwise
       // miss and fall through to the function.
       expect(routes.findIndex((route) => route.handle === 'filesystem')).toBeGreaterThan(0)
+    })
+
+    it('forces the document types under static/ to download', async () => {
+      // The CDN answers for .vercel/output/static before the function runs,
+      // so the framework's own static guard never sees these files.
+      const app = scaffoldApp(root, { entrypoint: 'src/vercel.ts' })
+
+      await buildVercelOutput(app)
+
+      const config = JSON.parse(readFileSync(join(app.outputDir, 'config.json'), 'utf8'))
+      const routes = config.routes as Array<Record<string, unknown>>
+
+      const hit = routes.findIndex((route) => route.handle === 'hit')
+      const rule = routes.find((route) => route.headers !== undefined)
+
+      expect(rule).toBeDefined()
+      expect(rule!.headers).toEqual({
+        'Content-Disposition': 'attachment',
+        'X-Content-Type-Options': 'nosniff',
+      })
+      // Only routes after `handle: 'hit'` are confined to what the filesystem
+      // answered. In the initial phase the same pattern would also match a
+      // path the function serves, and a dynamic /sitemap.xml would download.
+      expect(hit).toBeGreaterThanOrEqual(0)
+      expect(routes.indexOf(rule!)).toBeGreaterThan(hit)
+      // Required of every route in that phase; without it the rule answers the
+      // request instead of decorating the response.
+      expect(rule!.continue).toBe(true)
+
+      // A real regular expression, matched case-sensitively by Vercel — the
+      // assertions below are what stop it from being one that matches nothing.
+      const pattern = new RegExp(rule!.src as string)
+      for (const extension of DOCUMENT_ASSET_EXTENSIONS) {
+        expect(pattern.test(`/logo.${extension}`)).toBe(true)
+        expect(pattern.test(`/nested/deep/logo.${extension}`)).toBe(true)
+        // The framework guard lowercases before its mime lookup, so it catches
+        // this too and the deploy target has to as well.
+        expect(pattern.test(`/logo.${extension.toUpperCase()}`)).toBe(true)
+      }
+      // Subresources must keep loading inline, which is the whole reason
+      // `attachment` is usable on a general asset route.
+      for (const path of ['/app.js', '/app.css', '/logo.png', '/logo.svgx', '/index']) {
+        expect(pattern.test(path)).toBe(false)
+      }
     })
 
     it('copies the docs directory into the function bundle', async () => {

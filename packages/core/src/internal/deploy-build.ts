@@ -382,6 +382,43 @@ export function stageStaticAssets(publicDir: string, assetsOut: string): void {
   }
 }
 
+/**
+ * Extensions a browser renders as a *document* in the serving origin, for a
+ * platform that answers for `public/` before the app ever runs.
+ *
+ * Exactly the set `@guren/server`'s `rendersAsDocument` matches over Hono's
+ * mime table — the same two inputs the framework's own static guard reads, so
+ * a file that downloads locally downloads on a deploy target too. Written out
+ * rather than derived because this module imports nothing from the framework
+ * (see the header); `packages/server/tests/http/static-documents.test.ts`
+ * recomputes it from that table and fails when the two disagree, so a document
+ * type Hono adds cannot pass unnoticed.
+ *
+ * Two things the list does not reach, both of them the framework's own
+ * blind spots rather than new ones. `text/xsl` is a document type
+ * `rendersAsDocument` matches, but Hono's table names no extension for it, so
+ * `getMimeType` returns nothing for a `.xsl` file and the framework serves it
+ * unguarded too — adding it here would make a deploy target stricter than the
+ * app it deployed. And extension *case*: `getMimeType`
+ * lowercases before its lookup, so the framework guard does fire for
+ * `logo.SVG`, and a platform matching a literal pattern does not. Each plugin closes
+ * that where its own matcher allows — Vercel's `src` is a regular expression
+ * and does, Cloudflare's `_headers` takes literal patterns and cannot.
+ */
+export const DOCUMENT_ASSET_EXTENSIONS = ['htm', 'html', 'svg', 'xhtml', 'xml'] as const
+
+/**
+ * The pair `applyDocumentDisposition` sets, for a platform to set on the same
+ * files. Same reasoning as the framework's: `attachment` is honoured for
+ * navigations and ignored for subresource loads, so `<img src="/logo.svg">`
+ * and a CSS `url()` keep working while the URL opened directly downloads;
+ * `nosniff` stops the promotion a browser would otherwise do on its own.
+ */
+export const DOCUMENT_ASSET_HEADERS: Readonly<Record<string, string>> = {
+  'Content-Disposition': 'attachment',
+  'X-Content-Type-Options': 'nosniff',
+}
+
 /** What a dev-only module is needed for, so a plugin can word its own message. */
 export type DevOnlyModuleKind = 'sqlite' | 'vite' | 'mcp' | 'sql-driver'
 
