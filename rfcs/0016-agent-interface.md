@@ -626,7 +626,7 @@ workerd-compatible by construction; the build must stop killing it:
   render the manifest-derived consent screen. `props` map to `AgentPrincipal`.
 
 **Amended in implementation (first two bullets; `--mcp-oauth` is a later PR).**
-Two corrections, both widening what the bullets described:
+Corrections, each widening what the bullets above described:
 
 - **Open Question 5 resolved: dependency sniffing.** `@guren/plugin-mcp` under the
   app's `dependencies` *is* the opt-in — nothing else is asked, because there is
