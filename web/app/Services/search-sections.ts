@@ -11,8 +11,9 @@
 // side effect, a `##` inside a fenced code block cannot be mistaken for a
 // heading, because by this point it is text inside a `<pre>`.
 
-/** Emitted by the markdown renderer as `<h2 id="slug">text</h2>`. */
-const HEADING_OPEN = /<h([1-3])\s+id="([^"]*)"\s*>/giu
+/** The renderer emits `<h2 id="slug">`; a hand-written one may order its attributes freely. */
+const HEADING_TAG = /^<h([1-3])\b/iu
+const ID_ATTRIBUTE = /\bid\s*=\s*("([^"]*)"|'([^']*)')/iu
 
 /** Diagram source, not prose: it would rank on words nobody is looking for. */
 const MERMAID_BLOCK = /<pre class="mermaid">[\s\S]*?<\/pre>/giu
@@ -107,11 +108,8 @@ export function htmlToText(html: string): string {
 
   while (index < source.length) {
     const open = source.indexOf('<', index)
-    if (open === -1) {
-      out += decodeEntities(source.slice(index))
-      break
-    }
-    const close = tagEnd(source, open)
+    const close = open === -1 ? -1 : tagEnd(source, open)
+    // No tag left, or one that never closes: the rest is text either way.
     if (close === -1) {
       out += decodeEntities(source.slice(index))
       break
@@ -119,8 +117,8 @@ export function htmlToText(html: string): string {
 
     out += decodeEntities(source.slice(index, open))
 
-    const name = /^<\/?\s*([a-z0-9]+)/iu.exec(source.slice(open, close + 1))?.[1]?.toLowerCase()
-    if (name === undefined || !INLINE_TAGS.has(name)) {
+    const name = /^<\/?\s*([a-z0-9]+)/iu.exec(source.slice(open, close + 1))?.[1] ?? ''
+    if (!INLINE_TAGS.has(name.toLowerCase())) {
       out += '\n'
     }
 
@@ -174,26 +172,40 @@ function chunkBody(body: string, limit: number): string[] {
  * none in practice, and a section with no anchor could not be linked to.
  * Deeper headings (`h4`+) stay inside their parent section's body.
  */
-export function splitDocSections(
-  html: string,
-  options: { maxBodyLength?: number } = {},
-): DocSectionText[] {
-  const limit = options.maxBodyLength ?? MAX_SECTION_BODY
+export function splitDocSections(html: string): DocSectionText[] {
   const headings: { anchor: string; heading: string; headingStart: number; bodyStart: number }[] = []
 
-  for (const match of html.matchAll(HEADING_OPEN)) {
-    const level = Number(match[1])
-    const openEnd = match.index + match[0].length
-    const closeAt = html.indexOf(`</h${level}`, openEnd)
-    const closeEnd = closeAt === -1 ? -1 : html.indexOf('>', closeAt)
-    if (closeEnd === -1) {
+  // Walked with the same quote-aware scanner as the text, not matched with a
+  // regex over the raw HTML. Docs render with `sanitize: false`, and a `<h2
+  // id="…">` written inside an attribute value — a page documenting this
+  // markup, say — otherwise invents a section and swallows the real heading
+  // that follows it.
+  for (let index = 0; index < html.length; ) {
+    const open = html.indexOf('<', index)
+    const close = open === -1 ? -1 : tagEnd(html, open)
+    if (close === -1) {
+      break
+    }
+    index = close + 1
+
+    const tag = html.slice(open, close + 1)
+    const level = HEADING_TAG.exec(tag)?.[1]
+    const id = ID_ATTRIBUTE.exec(tag)
+    if (level === undefined || id === null) {
       continue
     }
+
+    // A heading with no closing tag is not a section boundary anyone can trust.
+    const closeAt = html.indexOf(`</h${level}`, close + 1)
+    if (closeAt === -1) {
+      continue
+    }
+
     headings.push({
-      anchor: match[2],
-      heading: htmlToText(html.slice(openEnd, closeAt)),
-      headingStart: match.index,
-      bodyStart: closeEnd + 1,
+      anchor: id[2] ?? id[3] ?? '',
+      heading: htmlToText(html.slice(close + 1, closeAt)),
+      headingStart: open,
+      bodyStart: html.indexOf('>', closeAt) + 1,
     })
   }
 
@@ -202,7 +214,7 @@ export function splitDocSections(
     const bodyEnd = headings[position + 1]?.headingStart ?? html.length
     const body = htmlToText(html.slice(heading.bodyStart, bodyEnd))
 
-    for (const chunk of chunkBody(body, limit)) {
+    for (const chunk of chunkBody(body, MAX_SECTION_BODY)) {
       sections.push({ anchor: heading.anchor, heading: heading.heading, body: chunk })
     }
   })

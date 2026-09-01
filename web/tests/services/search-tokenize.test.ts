@@ -64,11 +64,23 @@ describe('buildSearchMatch', () => {
     expect(buildSearchMatch('型')).toEqual({ mode: 'unigram', match: 'cjk_unigrams:"型"' })
   })
 
-  it('drops a one-character CJK run from a longer query', () => {
-    // 「型」has no bigram, so it cannot narrow a multi-term query; the unigram
-    // column is reserved for the query that consists of nothing else. Pinned
-    // so the asymmetry is a decision rather than a surprise.
-    expect(buildSearchMatch('型 safety')).toEqual({ mode: 'tokens', match: '"safety"' })
+  it('keeps a one-character CJK run as a unigram constraint', () => {
+    // 「型」has no bigram. Dropping it made `D1 型` a D1-only search, which
+    // returns documents the reader can see do not contain what they typed.
+    expect(buildSearchMatch('型 safety')).toEqual({
+      mode: 'tokens',
+      match: 'cjk_unigrams:"型" AND "safety"',
+    })
+  })
+
+  it('ranks on the unigram column only when nothing else can rank', () => {
+    // Weighting a column 0.0 when it is the only one matched collapses every
+    // row to the same score, so the mode is what picks the weight vector.
+    expect(buildSearchMatch('値 型')).toEqual({
+      mode: 'unigram',
+      match: 'cjk_unigrams:"値" AND cjk_unigrams:"型"',
+    })
+    expect(buildSearchMatch('D1 型')?.mode).toBe('tokens')
   })
 
   it('scopes to a locale inside MATCH rather than filtering afterwards', () => {

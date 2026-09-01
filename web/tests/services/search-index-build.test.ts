@@ -50,15 +50,37 @@ describe('collectRows', () => {
     ])
   })
 
-  it('makes the doc title searchable on the first section only', () => {
-    // Repeating it made one title match fan out across a whole document:
-    // `database` returned six sections of guides/database ahead of every
-    // other doc, and their snippets had nothing to do with the query.
-    expect(collectRows(corpus()).map((row) => row.docTitleTokens)).toEqual([
+  it('weights the doc title on the first section and matches it on all of them', () => {
+    // Two columns, because matching and ranking want opposite things. Weighted
+    // everywhere, one title hit swept the list with sections of a single doc;
+    // present on the first section only, `ルーティング ミドルウェア` could not
+    // match at all, since FTS5 ANDs terms within a row.
+    const rows = collectRows(corpus())
+
+    expect(rows.map((row) => row.docTitleLead)).toEqual([
       'routing',
       '',
       'ルー ーテ ティ ィン ング',
     ])
+    expect(rows.map((row) => row.docTitleTokens)).toEqual([
+      'routing',
+      'routing',
+      'ルー ーテ ティ ィン ング',
+    ])
+  })
+
+  it('hashes the text it stores, not the text it was given', () => {
+    // A NUL truncates a SQL literal inside the parser, so it is dropped before
+    // storage. Hashing it anyway would give two corpora that generate
+    // byte-identical SQL different ids, and reindex production for nothing.
+    // One NUL against two: they tokenize identically (a NUL separates, like
+    // any other non-letter) and they store identically once it is dropped, so
+    // the SQL is byte for byte the same and the id has to be too.
+    const one = collectRows(corpus({ body: 'a\u0000b' }))
+    const two = collectRows(corpus({ body: 'a\u0000\u0000b' }))
+
+    expect(renderIndexSql(one, 'x')).toBe(renderIndexSql(two, 'x'))
+    expect(computeBuildId(one)).toBe(computeBuildId(two))
   })
 
   it('collects unigrams from the title, heading, and body together', () => {
@@ -93,7 +115,7 @@ describe('computeBuildId', () => {
     // nobody created. Nothing weaker than a fixed expectation catches that.
     // Update it deliberately, together with INDEX_FORMAT, when the stored
     // shape changes.
-    expect(computeBuildId(collectRows(corpus()))).toBe('23e8605200829a53')
+    expect(computeBuildId(collectRows(corpus()))).toBe('2b92f12c25318af8')
   })
 })
 

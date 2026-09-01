@@ -76,6 +76,33 @@ describe('splitDocSections', () => {
     }
   })
 
+  it('does not invent a section from a heading written inside an attribute', async () => {
+    // Docs render with sanitize: false, and a page documenting this markup
+    // would otherwise create a section named `fake` and swallow the real
+    // heading that follows it.
+    const html =
+      `<h2 id="real">Real</h2><p data-demo='<h2 id="fake">'>x</p><h2 id="next">Next</h2>`
+
+    expect(splitDocSections(html).map((section) => section.anchor)).toEqual(['real', 'next'])
+  })
+
+  it('does not read a heading out of an attribute that also contains a bracket', () => {
+    // The bracket ends the tag for a scanner that does not track quotes, and
+    // everything after it — including the heading inside the same attribute —
+    // is then read as markup.
+    const html = `<p title="a > <h2 id='fake'>b">x</p><h2 id="real">Real</h2>`
+
+    expect(splitDocSections(html).map((section) => section.anchor)).toEqual(['real'])
+  })
+
+  it('accepts a hand-written heading whose attributes are in another order', () => {
+    // The renderer always puts `id` first, but raw HTML in a doc need not, and
+    // a heading carrying an id is linkable however it was written.
+    expect(splitDocSections('<h2 class="x" id="custom">Custom</h2><p>body</p>')).toEqual([
+      { anchor: 'custom', heading: 'Custom', body: 'body' },
+    ])
+  })
+
   it('does not treat a heading inside a code fence as a heading', async () => {
     const html = await renderMarkdownToHtml('# Guide\n\n```md\n## Not a heading\n```\n')
 

@@ -15,7 +15,7 @@ import { SEARCH_COLUMNS, tokenizeText } from './search-tokenize.js'
  * splitting. Without it, a change to this pipeline would leave the previous
  * shape in D1 behind an id that still matches.
  */
-export const INDEX_FORMAT = 1
+export const INDEX_FORMAT = 2
 
 /**
  * D1 rejects a SQL statement over 100,000 bytes. Rows are batched up to this
@@ -41,10 +41,21 @@ export interface IndexRow {
   docTitle: string
   heading: string
   body: string
+  docTitleLead: string
   docTitleTokens: string
   headingTokens: string
   bodyTokens: string
   unigrams: string
+}
+
+/**
+ * A NUL truncates a SQL string literal inside the parser rather than failing,
+ * so `quote()` drops them — and the build id has to hash what is stored, or
+ * two corpora that produce byte-identical SQL would get different ids and
+ * reindex for nothing.
+ */
+function withoutNul(value: string): string {
+  return value.replace(/\u0000/gu, '')
 }
 
 export function collectRows(docs: DocsByLocale): IndexRow[] {
@@ -59,9 +70,8 @@ export function collectRows(docs: DocsByLocale): IndexRow[] {
       for (const slug of Object.keys(slugs).sort()) {
         const doc = slugs[slug]
         const docTitle = tokenizeText(doc.title)
-        let titleCarried = false
 
-        for (const section of splitDocSections(doc.html)) {
+        for (const [position, section] of splitDocSections(doc.html).entries()) {
           const heading = tokenizeText(section.heading)
           const body = tokenizeText(section.body)
           // The title is searchable on the doc's first section only — its h1,
@@ -70,21 +80,23 @@ export function collectRows(docs: DocsByLocale): IndexRow[] {
           // searching `database` returned six sections of guides/database
           // ahead of every other doc, led by whichever of them bm25 happened
           // to favour, with snippets that had nothing to do with the query.
-          const carryTitle = !titleCarried
-          titleCarried = true
           rows.push({
             id: rows.length + 1,
             locale,
             category,
             slug,
             anchor: section.anchor,
-            docTitle: doc.title,
-            heading: section.heading,
-            body: section.body,
-            docTitleTokens: carryTitle ? docTitle.tokens : '',
+            docTitle: withoutNul(doc.title),
+            heading: withoutNul(section.heading),
+            body: withoutNul(section.body),
+            // Only the first section takes the weighted copy; every section
+            // takes the unweighted one, so a query pairing the title with a
+            // later heading still has a row that satisfies both.
+            docTitleLead: position === 0 ? docTitle.tokens : '',
+            docTitleTokens: docTitle.tokens,
             headingTokens: heading.tokens,
             bodyTokens: body.tokens,
-            unigrams: [carryTitle ? docTitle.unigrams : '', heading.unigrams, body.unigrams]
+            unigrams: [docTitle.unigrams, heading.unigrams, body.unigrams]
               .filter((part) => part.length > 0)
               .join(' '),
           })
@@ -120,6 +132,7 @@ export function computeBuildId(rows: IndexRow[]): string {
         row.docTitle,
         row.heading,
         row.body,
+        row.docTitleLead,
         row.docTitleTokens,
         row.headingTokens,
         row.bodyTokens,
@@ -237,8 +250,9 @@ ${SEARCH_COLUMNS.map((column) => `  ${column},`).join('\n')}
       `INSERT INTO "${search}" (rowid, ${SEARCH_COLUMNS.join(', ')}) VALUES`,
       rows.map(
         (row) =>
-          `(${row.id}, ${quote(row.docTitleTokens)}, ${quote(row.headingTokens)}, ` +
-          `${quote(row.bodyTokens)}, ${quote(row.locale)}, ${quote(row.unigrams)})`,
+          `(${row.id}, ${quote(row.docTitleLead)}, ${quote(row.docTitleTokens)}, ` +
+          `${quote(row.headingTokens)}, ${quote(row.bodyTokens)}, ` +
+          `${quote(row.locale)}, ${quote(row.unigrams)})`,
       ),
     ),
     `INSERT INTO "search_index_state" (id, build_id, updated_at) VALUES (1, ${quote(buildId)}, unixepoch())

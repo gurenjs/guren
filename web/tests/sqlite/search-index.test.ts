@@ -36,6 +36,24 @@ const docs: DocsByLocale = {
           `<p>Call <code>createD1Database</code> with a binding; it returns <code>getDatabase()</code>.</p>`,
       },
     },
+    // A title match plus several sections, against another doc whose *heading*
+    // matches the same word — the shape that exposes title fan-out.
+    tutorials: {
+      database: {
+        title: 'Database',
+        html:
+          '<h1 id="database">Database</h1><p>Connect and query.</p>' +
+          '<h2 id="mutators">Accessors and mutators</h2><p>Shape a column on the way out.</p>' +
+          '<h2 id="serialization">Serialization</h2><p>Turn a record into JSON.</p>' +
+          '<h2 id="relations">Relationships</h2><p>Join one table to another.</p>',
+      },
+      health: {
+        title: 'Health checks',
+        html:
+          '<h1 id="health-checks">Health checks</h1><p>Probe a running app.</p>' +
+          '<h2 id="database-check">Database check</h2><p>Confirm the connection answers.</p>',
+      },
+    },
   },
   ja: {
     guides: {
@@ -119,6 +137,25 @@ describe('queries', () => {
 
   test('finds an identifier by its camel-case parts', () => {
     expect(find('d1 database', 'en')[0]).toEqual({ slug: 'cloudflare', anchor: 'database-d1' })
+  })
+
+  test('does not let one title match sweep the results with a single doc', () => {
+    // The title is matchable on every section but weighted on the first, so a
+    // document whose *heading* is about the query outranks the rest of the
+    // document whose title merely mentions it.
+    const results = find('database', 'en').map((row) => `${row.slug}#${row.anchor}`)
+
+    expect(results[0]).toBe('database#database')
+    expect(results.indexOf('health#database-check')).toBeLessThan(
+      results.indexOf('database#relations'),
+    )
+  })
+
+  test('pairs a doc title with a heading from a later section', () => {
+    // The title is weighted on the first section only, so it has to be
+    // *matchable* on every one — FTS5 ANDs terms within a row, and without
+    // the second title column this query has nowhere to land.
+    expect(find('コントローラー 型安全', 'ja').map((row) => row.anchor)).toContain('型安全')
   })
 
   test('finds a one-character CJK query through the unigram column', () => {

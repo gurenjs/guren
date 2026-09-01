@@ -144,6 +144,13 @@ function quote(token: string): string {
  * script creates and the weights below.
  */
 export const SEARCH_COLUMNS = [
+  // Two title columns, because matching and ranking want opposite things.
+  // `doc_title_lead` carries the title on the doc's first section alone and
+  // takes the weight; `doc_title_tokens` carries it on every section and takes
+  // none. With the title on one row only, `ルーティング ミドルウェア` could
+  // not match at all — FTS5 ANDs terms within a row. With it weighted on every
+  // row, one title hit swept the result list with sections of a single doc.
+  'doc_title_lead',
   'doc_title_tokens',
   'heading_tokens',
   'body_tokens',
@@ -161,8 +168,8 @@ export const SEARCH_COLUMNS = [
  * ignored when it is not.
  */
 export const BM25_WEIGHTS = {
-  tokens: [8.0, 4.0, 1.0, 0.0, 0.0],
-  unigram: [0.0, 0.0, 0.0, 0.0, 1.0],
+  tokens: [8.0, 0.0, 4.0, 1.0, 0.0, 0.0],
+  unigram: [0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
 } as const
 
 export type SearchLocale = 'en' | 'ja'
@@ -190,28 +197,25 @@ export interface SearchMatch {
  * query when it is all the user typed.
  */
 export function buildSearchMatch(query: string, locale?: SearchLocale): SearchMatch | null {
-  const runs = segment(query)
-
-  const soleCjkChar =
-    runs.length === 1 && runs[0].kind === 'cjk' && [...runs[0].text].length === 1
-      ? runs[0].text
-      : null
-
-  const scope = locale ? `locale_tokens:${quote(locale)} AND ` : ''
-
-  if (soleCjkChar) {
-    return { mode: 'unigram', match: `${scope}cjk_unigrams:${quote(soleCjkChar)}` }
-  }
-
   const terms: string[] = []
-  for (const run of runs) {
-    if (run.kind === 'cjk') {
-      const pairs = bigrams(run.text)
-      if (pairs.length > 0) {
-        terms.push(quote(pairs.join(' ')))
-      }
-    } else {
+  let ranked = false
+
+  for (const run of segment(query)) {
+    if (run.kind !== 'cjk') {
       terms.push(quote(run.text.toLowerCase()))
+      ranked = true
+      continue
+    }
+
+    const pairs = bigrams(run.text)
+    if (pairs.length > 0) {
+      terms.push(quote(pairs.join(' ')))
+      ranked = true
+    } else {
+      // One character, so no bigram exists to constrain on. Dropping it made
+      // `D1 型` a D1-only search and `値 型` no search at all, both of which
+      // return documents the reader can see do not contain what they typed.
+      terms.push(`cjk_unigrams:${quote(run.text)}`)
     }
   }
 
@@ -219,7 +223,13 @@ export function buildSearchMatch(query: string, locale?: SearchLocale): SearchMa
     return null
   }
 
+  const scope = locale ? `locale_tokens:${quote(locale)} AND ` : ''
   // FTS5's implicit operator is AND, but spelling it out keeps the expression
   // readable in logs and immune to a future default change.
-  return { mode: 'tokens', match: `${scope}${terms.join(' AND ')}` }
+  const match = `${scope}${terms.join(' AND ')}`
+
+  // The unigram column only drives the ranking when nothing else matched:
+  // weighting a column 0.0 when it is the only one hit collapses every row to
+  // the same score. A mixed query has a bigram or a word to rank by instead.
+  return { mode: ranked ? 'tokens' : 'unigram', match }
 }
