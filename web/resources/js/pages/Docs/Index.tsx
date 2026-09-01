@@ -32,6 +32,7 @@ interface Props {
   basePath: string
 }
 import { SITE_DESCRIPTION, pageTitle } from '../../../../config/site.js'
+import { DocSearch } from '../../components/DocSearch.js'
 import { Footer } from '../../components/Footer.js'
 import { Header } from '../../components/Header.js'
 import { Seo } from '../../components/Seo.js'
@@ -86,6 +87,7 @@ export default function DocsIndex({ categories, locale, locales = [], basePath }
             <p className="max-w-[640px] text-xl leading-relaxed text-docs-text-secondary">
               {copy.lead}
             </p>
+            <DocSearch locale={locale} className="mt-8 max-w-[420px]" />
           </header>
 
           <div className="grid gap-16">
