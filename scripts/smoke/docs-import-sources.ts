@@ -120,6 +120,14 @@ export interface DocsImportReport {
 const FIRST_PARTY_SCOPE = '@guren/'
 
 /**
+ * One plugin list for both parses. `crossCheckExtraction()` compares the
+ * textual scan against a parse of the same fence, so a list that drifted
+ * between the two would report the *parser* disagreeing with itself as
+ * extractor blindness — a gate failure whose message names the wrong cause.
+ */
+const BABEL_PLUGINS = ['typescript', 'jsx', 'decorators-legacy', 'explicitResourceManagement'] as const
+
+/**
  * A fenced block and the 1-based line its content starts on. The backreference
  * pins the closing fence to the opening fence's indentation, so a nested fence
  * inside an indented block does not close its parent early.
@@ -173,6 +181,20 @@ async function isFile(path: string): Promise<boolean> {
 }
 
 /**
+ * The source file an extensionless base path stands for. Both callers below
+ * arrive at a base and then face the same three spellings TypeScript allows
+ * for it.
+ */
+async function firstExistingSource(base: string): Promise<string | null> {
+  for (const candidate of [`${base}.ts`, `${base}.tsx`, join(base, 'index.ts')]) {
+    if (await isFile(candidate)) {
+      return candidate
+    }
+  }
+  return null
+}
+
+/**
  * `./dist/X.js` and `./dist/X/index.js` both come from `src/`; tsdown's output
  * layout mirrors the source tree, so undoing it is a path rewrite rather than a
  * build-config read.
@@ -182,13 +204,7 @@ async function sourceForDistTarget(packageDir: string, target: string): Promise<
     return null
   }
   const stem = target.slice('./dist/'.length).replace(/\.d\.ts$|\.js$/u, '')
-  for (const candidate of [`src/${stem}.ts`, `src/${stem}.tsx`, `src/${stem}/index.ts`]) {
-    const absolute = join(packageDir, candidate)
-    if (await isFile(absolute)) {
-      return absolute
-    }
-  }
-  return null
+  return firstExistingSource(join(packageDir, 'src', stem))
 }
 
 /**
@@ -251,7 +267,7 @@ function parseModule(source: string, path: string): Statement[] {
   try {
     return parse(source, {
       sourceType: 'module',
-      plugins: ['typescript', 'jsx', 'decorators-legacy', 'explicitResourceManagement'],
+      plugins: [...BABEL_PLUGINS],
     }).program.body
   } catch (error) {
     throw new Error(`Cannot parse ${path}: ${(error as Error).message}`)
@@ -289,13 +305,7 @@ function declaredNames(statement: Statement): string[] {
  * with `.js` extensions (`./attachments/index.js`) that resolve to `.ts`.
  */
 async function resolveRelative(fromFile: string, specifier: string): Promise<string | null> {
-  const base = resolve(dirname(fromFile), specifier).replace(/\.js$/u, '')
-  for (const candidate of [`${base}.ts`, `${base}.tsx`, join(base, 'index.ts')]) {
-    if (await isFile(candidate)) {
-      return candidate
-    }
-  }
-  return null
+  return firstExistingSource(resolve(dirname(fromFile), specifier).replace(/\.js$/u, ''))
 }
 
 class SurfaceResolver {
@@ -357,32 +367,30 @@ class SurfaceResolver {
     let openedBy: string | null = null
 
     const absorb = async (target: string, statementLabel: string): Promise<void> => {
+      let inner: Surface
       if (target.startsWith('.')) {
         const resolved = await resolveRelative(file, target)
         if (!resolved) {
           throw new Error(`${file}: ${statementLabel} targets '${target}', which does not resolve to a source file`)
         }
-        const inner = await this.forFile(resolved)
-        for (const name of inner.names) {
-          names.add(name)
-        }
-        openedBy ??= inner.openedBy
-        return
-      }
-      if (target.startsWith(FIRST_PARTY_SCOPE)) {
-        const inner = await this.forSpecifier(target)
-        if (!inner) {
+        inner = await this.forFile(resolved)
+      } else if (target.startsWith(FIRST_PARTY_SCOPE)) {
+        const sibling = await this.forSpecifier(target)
+        if (!sibling) {
           throw new Error(`${file}: ${statementLabel} targets '${target}', which is not a declared entry point`)
         }
-        for (const name of inner.names) {
-          names.add(name)
-        }
-        openedBy ??= inner.openedBy
+        inner = sibling
+      } else {
+        // A third-party wholesale re-export. The names cannot be enumerated from
+        // first-party source, so absence stops being provable here.
+        openedBy ??= target
         return
       }
-      // A third-party wholesale re-export. The names cannot be enumerated from
-      // first-party source, so absence stops being provable here.
-      openedBy ??= target
+
+      for (const name of inner.names) {
+        names.add(name)
+      }
+      openedBy ??= inner.openedBy
     }
 
     for (const statement of body) {
@@ -472,7 +480,7 @@ function crossCheckExtraction(code: string, extracted: readonly ExtractedImport[
     const result = parse(code, {
       sourceType: 'module',
       errorRecovery: true,
-      plugins: ['typescript', 'jsx', 'decorators-legacy', 'explicitResourceManagement'],
+      plugins: [...BABEL_PLUGINS],
       allowReturnOutsideFunction: true,
       allowAwaitOutsideFunction: true,
       allowSuperOutsideMethod: true,
