@@ -26,6 +26,14 @@
       "@guren/server": [
         "./packages/server/src/index.ts"
       ],
+      // Explicit, like "@guren/cli/vite" below: the wildcard would resolve
+      // "@guren/server/agent" to the src/agent *directory*, which holds the
+      // internal agent modules and deliberately has no index — the published
+      // entry is one curated file beside them. Without this line the subpath
+      // is unresolvable in-repo, for tsc and for Bun alike.
+      "@guren/server/agent": [
+        "./packages/server/src/agent/public.ts"
+      ],
       "@guren/server/*": [
         "./packages/server/src/*"
       ],
