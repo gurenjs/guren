@@ -11,7 +11,13 @@ import type { Context, RateLimitEntry, RateLimitStore } from '@guren/core'
  * varies. It stops a loop hammering the endpoint, which is what it is for;
  * Cloudflare's own protections are the perimeter.
  */
-const REQUESTS_PER_MINUTE = 60
+/**
+ * Above what typing can reach. The client debounces, but a debounce collapses
+ * a burst rather than bounding a minute: 61 pauses longer than 150 ms is 61
+ * requests, which a reader editing a query steadily does reach. This is a
+ * ceiling on abuse, and it should never be the thing a reader runs into.
+ */
+const REQUESTS_PER_MINUTE = 240
 
 interface BunServeEnv {
   server?: { requestIP?: (request: Request) => { address?: string } | null }
