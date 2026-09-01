@@ -72,6 +72,10 @@ export const PREFLIGHT_ARGUMENT = '_preflight'
 
 export type BuiltToolRequest =
   | { request: Request }
+  | ToolRequestBuildFailure
+
+/** The ways `buildToolRequest` refuses to build — no HTTP has happened. */
+export type ToolRequestBuildFailure =
   /** Path parameters the call did not supply — the URL cannot be built. */
   | { missing: string[] }
   /**
@@ -84,6 +88,24 @@ export type BuiltToolRequest =
    * percent-encoded, so this is the complete set.
    */
   | { invalidPath: string[] }
+
+/**
+ * The agent-facing diagnosis of a {@link ToolRequestBuildFailure}.
+ *
+ * One function rather than a string per adapter: the same tool is reachable
+ * from several surfaces (App MCP, WebMCP, `guren tool:call`), and an agent
+ * that reads a different diagnosis depending on which one it reached would
+ * be debugging the client instead of its own call.
+ */
+export function describeBuildFailure(failure: ToolRequestBuildFailure): string {
+  if ('missing' in failure) {
+    return `Missing required path parameter(s): ${failure.missing.join(', ')}.`
+  }
+  return (
+    `Path parameter(s) ${failure.invalidPath.join(', ')} may not be "." or ".." — `
+    + 'a dot-segment would resolve to a different route than the one authorized.'
+  )
+}
 
 /**
  * Rebuild the HTTP request a tool call describes.

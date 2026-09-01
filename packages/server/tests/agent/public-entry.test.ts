@@ -15,6 +15,7 @@ import { deriveAgentTools, type DerivedAgentTool } from '../../src/agent/derive'
 import {
   advertisesStructuredOutput,
   buildToolRequest,
+  describeBuildFailure,
   mapToolResponse,
   PREFLIGHT_ARGUMENT,
 } from '../../src/agent/public'
@@ -37,9 +38,17 @@ describe('@guren/server/agent entry', () => {
     // can be asserted at runtime. The type exports are held by the consumers
     // that import them (packages/plugin-webmcp) and by `bun run typecheck`.
     expect(typeof buildToolRequest).toBe('function')
+    expect(typeof describeBuildFailure).toBe('function')
     expect(typeof mapToolResponse).toBe('function')
     expect(typeof advertisesStructuredOutput).toBe('function')
     expect(PREFLIGHT_ARGUMENT).toBe('_preflight')
+  })
+
+  test('should diagnose both failure shapes', () => {
+    expect(describeBuildFailure({ missing: ['id'] })).toBe(
+      'Missing required path parameter(s): id.',
+    )
+    expect(describeBuildFailure({ invalidPath: ['name'] })).toContain('may not be "." or ".."')
   })
 })
 

@@ -30,6 +30,7 @@
 export {
   advertisesStructuredOutput,
   buildToolRequest,
+  describeBuildFailure,
   mapToolResponse,
   PREFLIGHT_ARGUMENT,
 } from './dispatch'
@@ -37,6 +38,7 @@ export type {
   BuildToolRequestOptions,
   BuiltToolRequest,
   ToolCallOutcome,
+  ToolRequestBuildFailure,
 } from './dispatch'
 export type {
   AgentToolInputSource,

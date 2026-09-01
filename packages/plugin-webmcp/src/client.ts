@@ -22,6 +22,7 @@
  */
 import {
   buildToolRequest,
+  describeBuildFailure,
   mapToolResponse,
   type AgentToolInputSource,
   type DerivedAgentTool,
@@ -349,17 +350,8 @@ async function executeTool(
     surface: 'webmcp',
   })
 
-  // Wording matched to @guren/plugin-mcp's dispatch: one tool, two surfaces,
-  // and an agent that reads a different diagnosis depending on which one it
-  // reached would be debugging the client instead of its own call.
-  if ('missing' in built) {
-    return errorResult(`Missing required path parameter(s): ${built.missing.join(', ')}.`)
-  }
-  if ('invalidPath' in built) {
-    return errorResult(
-      `Path parameter(s) ${built.invalidPath.join(', ')} may not be "." or ".." — `
-      + 'a dot-segment would resolve to a different route than the one authorized.',
-    )
+  if (!('request' in built)) {
+    return errorResult(describeBuildFailure(built))
   }
 
   applyCsrfToken(built.request)
