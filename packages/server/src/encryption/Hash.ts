@@ -151,6 +151,20 @@ export async function verifyPassword(
   const salt = Buffer.from(saltB64, 'base64')
   const expectedHash = Buffer.from(hashB64, 'base64')
 
+  // A hash whose digest decodes to nothing authenticates *every* password:
+  // scrypt asked for a zero-length key returns zero bytes, and
+  // timingSafeEqual() of two empty buffers is true. A truncated column, a
+  // partial write, or a digest that is not valid base64 all reach this shape,
+  // so the guard is on the decoded lengths rather than on the string. The
+  // parameters get the same treatment: parseInt() yields NaN for a corrupt
+  // segment, which scrypt would otherwise coerce into defaults of its own.
+  if (salt.length === 0 || expectedHash.length === 0) {
+    throw new Error('Invalid password hash format.')
+  }
+  if (!isPositiveInteger(params.N) || !isPositiveInteger(params.r) || !isPositiveInteger(params.p ?? 1)) {
+    throw new Error('Invalid password hash format.')
+  }
+
   const derived = await scryptAsync(password, salt, expectedHash.length, {
     N: params.N,
     r: params.r,
@@ -158,6 +172,10 @@ export async function verifyPassword(
   })
 
   return timingSafeEqual(derived, expectedHash)
+}
+
+function isPositiveInteger(value: number): boolean {
+  return Number.isInteger(value) && value > 0
 }
 
 /**

@@ -121,7 +121,7 @@ try {
 | `ScryptHasher` | `Bun.password`。既定はArgon2id、指定でbcrypt | Bunのみ |
 | `NodeHasher` | `crypto.scrypt` | すべて |
 
-特別な理由がなければ`Hash`を使ってください。BunでもAWS LambdaのようなNodeランタイムでも動く唯一の実装で、`AuthenticatableModel`と`ModelUserProvider`の既定値でもあります。
+特別な理由がなければ`Hash`を使ってください。`AuthenticatableModel`と`ModelUserProvider`の既定値であり、動作環境に合わせて自分で切り替わる唯一の実装です。`NodeHasher`も両方で動きます（Bunは`node:crypto`を実装しているため）。Bun専用なのは`ScryptHasher`だけです。
 
 > `ScryptHasher`が生成するのはscryptではなくArgon2idです。名前が実装より古いだけで、scryptを使うのは`NodeHasher`だけです。
 
@@ -142,7 +142,8 @@ const hash = new Hash()
 
 ```typescript
 const hashedPassword = await hash.hash('user-password')
-// 戻り値: $argon2id$v=19$m=65536,t=2,p=1$...
+// Bun上:  $argon2id$v=19$m=65536,t=2,p=1$...
+// Node上: $scrypt$N=16384,r=8,p=1$...
 ```
 
 `AuthenticatableModel`を継承したモデルはこれを自動で行います。`create()`に平文の`password`を渡すと、モデルが`passwordHash`カラムへハッシュ化して格納します。[認証](/docs/guides/authentication)を参照してください。
@@ -172,7 +173,7 @@ if (!user) {
 
 ```typescript
 if (hash.needsRehash(user.passwordHash)) {
-  await user.update({ password: plainPassword })
+  await User.update({ id: user.id }, { password: plainPassword })
 }
 ```
 
@@ -247,7 +248,7 @@ export default class AuthController extends Controller {
     }
 
     if (this.hash.needsRehash(user.passwordHash)) {
-      await user.update({ password })
+      await User.update({ id: user.id }, { password })
     }
 
     return this.json({ user })

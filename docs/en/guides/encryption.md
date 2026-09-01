@@ -121,7 +121,7 @@ Password hashing goes through a `PasswordHasher`. Three implementations ship:
 | `ScryptHasher` | `Bun.password` — Argon2id by default, bcrypt on request | Bun only |
 | `NodeHasher` | `crypto.scrypt` | Any |
 
-Reach for `Hash` unless you have a reason not to: it is the only one that works both on Bun and on a Node runtime such as AWS Lambda, and it is what `AuthenticatableModel` and `ModelUserProvider` use by default.
+Reach for `Hash` unless you have a reason not to: it is what `AuthenticatableModel` and `ModelUserProvider` use by default, and the only one that adapts to wherever it runs. `NodeHasher` also runs on both (Bun implements `node:crypto`); `ScryptHasher` is the Bun-only one.
 
 > `ScryptHasher` produces Argon2id, not scrypt. The name predates the implementation; only `NodeHasher` uses scrypt.
 
@@ -142,7 +142,8 @@ To pin an algorithm or its cost parameters, construct `ScryptHasher` or `NodeHas
 
 ```typescript
 const hashedPassword = await hash.hash('user-password')
-// Returns: $argon2id$v=19$m=65536,t=2,p=1$...
+// On Bun:  $argon2id$v=19$m=65536,t=2,p=1$...
+// On Node: $scrypt$N=16384,r=8,p=1$...
 ```
 
 Models extending `AuthenticatableModel` do this for you: pass a plain `password` on `create()` and the model hashes it into the `passwordHash` column. See [Authentication](/docs/guides/authentication).
@@ -172,7 +173,7 @@ Name the guard. `TokenGuard.validate()` throws — bearer tokens are not credent
 
 ```typescript
 if (hash.needsRehash(user.passwordHash)) {
-  await user.update({ password: plainPassword })
+  await User.update({ id: user.id }, { password: plainPassword })
 }
 ```
 
@@ -247,7 +248,7 @@ export default class AuthController extends Controller {
     }
 
     if (this.hash.needsRehash(user.passwordHash)) {
-      await user.update({ password })
+      await User.update({ id: user.id }, { password })
     }
 
     return this.json({ user })

@@ -9,8 +9,20 @@ export const NODE_SCRYPT_PREFIX = '$scrypt$'
  * This is a *shape* test, not a validity test. It answers "could this string
  * be a password hash at all", which is all the argument-order check below
  * needs; whether the hash is well-formed stays the implementation's job.
+ *
+ * Full prefixes rather than the `$argon2` / `$2` stems they share: a password
+ * of `$2fast4u` is not bcrypt, and treating it as one turns a correct call
+ * against a non-hash credential column into a false accusation.
  */
-const HASH_PREFIXES = ['$argon2', '$2', NODE_SCRYPT_PREFIX]
+const HASH_PREFIXES = [
+  '$argon2id$',
+  '$argon2i$',
+  '$argon2d$',
+  '$2a$',
+  '$2b$',
+  '$2y$',
+  NODE_SCRYPT_PREFIX,
+]
 
 function looksLikePasswordHash(value: string): boolean {
   return HASH_PREFIXES.some((prefix) => value.startsWith(prefix))

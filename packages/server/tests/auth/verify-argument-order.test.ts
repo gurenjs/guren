@@ -43,6 +43,18 @@ describe.each(HASHERS)('%s', (_name, create) => {
     await expect(hasher.verify('oauth:github:12345', 'password123')).rejects.not.toThrow(TypeError)
   })
 
+  // The combination that a `$argon2` / `$2` stem match would misdiagnose: a
+  // non-hash credential column paired with a password that merely looks
+  // prefix-shaped. Neither is a format any built-in writes, so this is a
+  // correct call and must reach the implementation.
+  test('does not fire on a non-hash column with a prefix-shaped password', async () => {
+    const hasher = create()
+
+    for (const password of ['$2fast4u', '$argon2-is-my-password', '$scrypt-ish']) {
+      await expect(hasher.verify('oauth:github:12345', password)).rejects.not.toThrow(TypeError)
+    }
+  })
+
   test('does not fire when the plaintext merely starts with a dollar sign', async () => {
     const hasher = create()
     const hashed = await hasher.hash('$argon2-but-actually-a-password')
