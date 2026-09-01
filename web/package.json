@@ -20,7 +20,7 @@
     "cloudflare:build": "bun run build && bun scripts/cloudflare-build.ts && bun scripts/build-search-index.ts",
     "search:prune": "bun scripts/prune-search-tables.ts",
     "search:apply": "bun scripts/apply-search-index.ts",
-    "deploy:cloudflare": "bun run cloudflare:build && bun run search:prune && bun run search:apply && bunx wrangler deploy"
+    "deploy:cloudflare": "bun run cloudflare:build && bunx wrangler d1 migrations apply guren-web --remote && bun run search:apply && bunx wrangler deploy && bun run search:prune"
   },
   "dependencies": {
     "@guren/cli": "workspace:*",

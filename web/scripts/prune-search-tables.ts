@@ -1,17 +1,24 @@
 /**
- * Drop the search tables no build is using any more.
+ * Drop the search tables no build can still be asked for.
  *
- * Runs at the *start* of a deploy, not the end, and keeps whichever build id
- * D1 currently records — which is the one the Worker now serving the site was
- * deployed with. So after each deploy two builds exist, and the older one is
- * only retired by the deploy after that. That one-build lag is the point:
- * `wrangler rollback` puts the previous Worker back, and it names the
- * previous tables. Pruning at the end of a deploy would leave that rollback
- * querying tables that no longer exist.
+ * Runs *after* a successful deploy, and keeps two: the build just deployed and
+ * the one it replaced. Both halves of that matter.
  *
- * Doing this rather than dropping at the head of the index SQL is the same
- * argument one step earlier: a failed deploy would otherwise leave the live
- * Worker naming tables the SQL had already removed.
+ * After, because the state row records what has been *loaded*, not what is
+ * live — the index goes in before `wrangler deploy`. A deploy that fails at
+ * that last step leaves the row ahead of the Worker, and a prune trusting it
+ * would delete the tables the live Worker is still naming. Running only on
+ * the success path means the row and the Worker agree by the time this reads
+ * it.
+ *
+ * Two, because `wrangler rollback` activates an earlier Worker version and
+ * does not roll D1 back with it. The previous build's tables have to still be
+ * there for the Worker that names them. Rolling back more than one docs
+ * change is not covered; a redeploy is the way out of that.
+ *
+ * Dropping at the head of the index SQL instead would be the same mistake one
+ * step earlier: a failed deploy leaving the live Worker naming tables the SQL
+ * had already removed.
  *
  *   bun scripts/prune-search-tables.ts            # remote (deploy)
  *   bun scripts/prune-search-tables.ts --local    # rehearse against wrangler dev
@@ -20,6 +27,7 @@ import { createD1Client, isRemote } from './d1.js'
 
 interface StateRow {
   build_id: string
+  previous_build_id: string | null
 }
 
 interface TableRow {
@@ -28,11 +36,18 @@ interface TableRow {
 
 const d1 = createD1Client(isRemote(process.argv))
 
-const [state] = await d1.query<StateRow>('SELECT build_id FROM search_index_state WHERE id = 1')
+const [state] = await d1.query<StateRow>(
+  'SELECT build_id, previous_build_id FROM search_index_state WHERE id = 1',
+)
 if (!state?.build_id) {
   console.log(`${d1.label} records no search index — nothing to prune.`)
   process.exit(0)
 }
+
+const keep = [state.build_id, state.previous_build_id].filter(
+  (id): id is string => typeof id === 'string' && id.length > 0,
+)
+const keepList = keep.map((id) => `'${id}'`).join(', ')
 
 /**
  * `sql LIKE 'CREATE VIRTUAL TABLE%'` picks the FTS5 table itself and skips the
@@ -43,8 +58,7 @@ if (!state?.build_id) {
 const stale = await d1.query<TableRow>(
   `SELECT name FROM sqlite_master
    WHERE type = 'table'
-     AND name <> 'doc_sections_${state.build_id}'
-     AND name <> 'doc_search_${state.build_id}'
+     AND replace(replace(name, 'doc_sections_', ''), 'doc_search_', '') NOT IN (${keepList})
      AND (
        name GLOB 'doc_sections_*'
        OR (name GLOB 'doc_search_*' AND sql LIKE 'CREATE VIRTUAL TABLE%')
@@ -52,7 +66,7 @@ const stale = await d1.query<TableRow>(
 )
 
 if (stale.length === 0) {
-  console.log(`${d1.label} holds only build ${state.build_id} — nothing to prune.`)
+  console.log(`${d1.label} holds only ${keep.join(' and ')} — nothing to prune.`)
   process.exit(0)
 }
 
@@ -62,6 +76,6 @@ const drops = stale.map((table) => `DROP TABLE IF EXISTS "${table.name}";`).join
 await d1.query(drops)
 
 console.log(
-  `Retired ${stale.length} table(s) from ${d1.label}, keeping build ${state.build_id}: ` +
+  `Retired ${stale.length} table(s) from ${d1.label}, keeping ${keep.join(' and ')}: ` +
     stale.map((table) => table.name).join(', '),
 )
