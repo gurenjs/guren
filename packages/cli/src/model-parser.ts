@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import type { Statement, Expression, ClassDeclaration, ClassBody, ClassProperty, CallExpression, Node, ObjectProperty } from '@babel/types'
-import { memberKeyName } from './ast-walk'
+import { memberKeyName, unwrapTypeAssertion } from './ast-walk'
 import { extractDocsTags } from './docs-index'
 import { discoverModelFiles, toPosixRelative, moduleNameFromRelPath } from './discovery'
 import { parseSourceFile } from './parse-cache'
@@ -249,34 +249,13 @@ function staticStringArrayProperty(classDecl: ClassDeclaration, name: string): s
 }
 
 /**
- * The expression under any transparent TypeScript wrapping — `x as const`,
- * `x satisfies T`, `x!`, `<T>x`, `(x)`. These change nothing about what the
- * runtime receives, so every heritage-clause reader unwraps them before
- * judging shape; treating `{...} as const` as unreadable would misreport a
- * fully static declaration.
- */
-function unwrapExpression(node: Node): Node {
-  let current = node
-  while (
-    current.type === 'TSAsExpression' ||
-    current.type === 'TSSatisfiesExpression' ||
-    current.type === 'TSNonNullExpression' ||
-    current.type === 'TSTypeAssertion' ||
-    current.type === 'ParenthesizedExpression'
-  ) {
-    current = current.expression
-  }
-  return current
-}
-
-/**
  * The named call in an extends clause, however wrapped — `defineModel(posts)`
  * or `Attachable(defineModel(posts), {...})` directly, or inside another
  * mixin such as `SoftDeletes(Attachable(...))`. Matching is by name only,
  * like the other heritage-clause checks — an aliased import is not resolved.
  */
 function findMixinCall(node: Node, mixinName: string): CallExpression | null {
-  const unwrapped = unwrapExpression(node)
+  const unwrapped = unwrapTypeAssertion(node)
   if (unwrapped.type !== 'CallExpression') return null
   if (unwrapped.callee.type === 'Identifier' && unwrapped.callee.name === mixinName) return unwrapped
   for (const argument of unwrapped.arguments) {
@@ -299,7 +278,7 @@ export function extractModelAttachments(
   const call = classDecl.superClass ? findMixinCall(classDecl.superClass, 'Attachable') : null
   if (!call) return null
 
-  const declaration = call.arguments[1] === undefined ? undefined : unwrapExpression(call.arguments[1])
+  const declaration = call.arguments[1] === undefined ? undefined : unwrapTypeAssertion(call.arguments[1])
   if (declaration?.type !== 'ObjectExpression') return 'unreadable'
 
   const collections: ModelAttachmentCollection[] = []
@@ -307,7 +286,7 @@ export function extractModelAttachments(
     if (property.type !== 'ObjectProperty') return 'unreadable'
     const name = memberKeyName(property)
     if (!name) return 'unreadable'
-    const spec = parseAttachmentSpec(unwrapExpression(property.value))
+    const spec = parseAttachmentSpec(unwrapTypeAssertion(property.value))
     if (!spec) return 'unreadable'
     collections.push({ name, ...spec })
   }
@@ -328,7 +307,7 @@ function parseAttachmentSpec(node: Node): { kind: 'one' | 'many'; variants: stri
     : null
   if (!kind) return null
 
-  const options = node.arguments[0] === undefined ? undefined : unwrapExpression(node.arguments[0])
+  const options = node.arguments[0] === undefined ? undefined : unwrapTypeAssertion(node.arguments[0])
   if (options === undefined) return { kind, variants: [] }
   if (options.type !== 'ObjectExpression') return null
 
@@ -338,7 +317,7 @@ function parseAttachmentSpec(node: Node): { kind: 'one' | 'many'; variants: stri
     const key = memberKeyName(property)
     if (!key) return null
     if (key !== 'variants') continue
-    const names = attachmentVariantNames(unwrapExpression(property.value))
+    const names = attachmentVariantNames(unwrapTypeAssertion(property.value))
     if (!names) return null
     variants = names
   }

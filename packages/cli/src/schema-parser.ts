@@ -7,7 +7,7 @@ import type {
   ObjectProperty,
   Statement,
 } from '@babel/types'
-import { memberKeyName } from './ast-walk'
+import { memberKeyName, unwrapTypeAssertion } from './ast-walk'
 import { listAppRoots } from './discovery'
 import { parseSourceFile } from './parse-cache'
 
@@ -180,10 +180,7 @@ function booleanOption(builder: CallExpression | undefined, option: string): boo
 
   for (const prop of options.properties) {
     if (prop.type !== 'ObjectProperty' || propertyKeyName(prop) !== option) continue
-    let value = prop.value
-    while (value.type === 'TSAsExpression' || value.type === 'TSSatisfiesExpression') {
-      value = value.expression
-    }
+    const value = unwrapTypeAssertion(prop.value)
     return value.type === 'BooleanLiteral' ? value.value : undefined
   }
   return undefined

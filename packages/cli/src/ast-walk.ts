@@ -1,3 +1,5 @@
+import type { Node, ObjectExpression } from '@babel/types'
+
 /**
  * A Babel AST node, typed loosely so a walker can reach children the
  * `@babel/types` unions don't make ergonomic to traverse generically.
@@ -51,6 +53,52 @@ export function memberKeyName(member: {
   if (member.key.type === 'Identifier') return member.key.name
   if (member.key.type === 'StringLiteral' && typeof member.key.value === 'string') return member.key.value
   return undefined
+}
+
+/**
+ * The expression under any transparent TypeScript wrapping — `x as const`,
+ * `x satisfies T`, `x!`, `<T>x`, `(x)`. These change nothing about what the
+ * runtime receives, so every scanner judging a node's *shape* unwraps first.
+ *
+ * The one rule for it, because the cost of a second copy is silence rather
+ * than a wrong answer: these scanners report "cannot read" and "nothing to
+ * flag" as the same empty result, so a scanner missing a wrapper reports a
+ * fully static declaration as unreadable and says nothing. Three spellings
+ * of this loop had already drifted apart across the package before it was
+ * hoisted here.
+ *
+ * `ParenthesizedExpression` cannot currently occur — `parseSourceFile` does
+ * not enable `createParenthesizedExpressions` — but it is kept so that
+ * turning that option on stays a one-line change rather than a silent
+ * regression in every scanner at once.
+ */
+export function unwrapTypeAssertion(node: Node): Node {
+  let current = node
+  while (
+    current.type === 'TSAsExpression' ||
+    current.type === 'TSSatisfiesExpression' ||
+    current.type === 'TSNonNullExpression' ||
+    current.type === 'TSTypeAssertion' ||
+    current.type === 'ParenthesizedExpression'
+  ) {
+    current = current.expression
+  }
+  return current
+}
+
+/**
+ * The object literal a node denotes, through any transparent wrapping, or
+ * `null` when it does not denote one.
+ *
+ * Every `x.type !== 'ObjectExpression'` test in a scanner wants this: the
+ * bare test reads `{ … } as const` — the shape the storage and module
+ * scaffolds actually emit — as "not an object", and the scan then skips the
+ * one config it most needed to read.
+ */
+export function objectLiteral(node: Node | null | undefined): ObjectExpression | null {
+  if (!node) return null
+  const unwrapped = unwrapTypeAssertion(node)
+  return unwrapped.type === 'ObjectExpression' ? unwrapped : null
 }
 
 /**
