@@ -9,10 +9,16 @@
 > the agent *runtime* — the thing that calls those tools over hours and days —
 > depends on a platform substrate that was still moving when 0016 was accepted.
 > The substrate has since stabilized enough to design against: the Cloudflare
-> Agents SDK's `Agent` class reached a coherent surface (v0.8.x: readable
-> state, idempotent schedules, typed clients), `McpAgent` was deprecated and
-> feature-frozen in favor of `createMcpHandler`, and MCP itself shipped a
-> stateless core (2026-07-28) that RFC 0016's endpoint already anticipates.
+> Agents SDK's `Agent` class has a coherent surface (state, per-instance
+> SQLite, alarm-backed schedules, fibers, workflows; `agents` 0.20.x at the
+> time of writing — the package moves fast, and §8 pins how this RFC tracks
+> it), `McpAgent` is deprecated and feature-frozen in favor of
+> `createMcpHandler`, and MCP itself shipped a stateless core (2026-07-28).
+>
+> **Prerequisite:** RFC 0016 Phase 4a (the deploy builds stop stubbing the MCP
+> SDK transport for apps that depend on `@guren/plugin-mcp`) is in flight and
+> must land first. Until it does, nothing from `@guren/plugin-mcp` — including
+> the approval queue this RFC reuses — exists on a deployed Worker.
 
 ## Problem
 
@@ -36,256 +42,352 @@ Guren's existing execution primitives are the wrong shape for this:
 What an agent runtime needs is durable identity (one addressable instance per
 conversation/task), persistent state that survives deploys, per-instance
 timers, and the ability to suspend for human input without holding a
-connection. This is exactly the shape of a Cloudflare Durable Object, and the
+connection. This is the shape of a Cloudflare Durable Object, and the
 Cloudflare Agents SDK (`agents` npm package) packages it as an `Agent` class:
 embedded per-instance SQLite (`this.sql`), synced state (`this.state` /
-`this.setState`), durable schedules (`this.schedule`, alarm-backed), WebSocket
-and email entry points, and workflow suspension (`waitForApproval`). Guren
-already deploys to Workers (RFC 0003), and Phase 4a made the App MCP endpoint
-survive that build.
+`this.setState`), durable schedules (`this.schedule`), WebSocket and email
+entry points, fibers, and workflow integration. Guren already deploys to
+Workers (RFC 0003).
+
+One precision the design must not blur: **an Agent instance is durable
+identity and durable state, not a durable JavaScript stack.** Instances are
+evicted after inactivity; an in-flight method does not survive eviction. Work
+that must survive is checkpointed into state or DO SQLite, resumed by a
+schedule, run as a fiber, or delegated to a Workflow — and this RFC's own
+constructs (§5, the pending-approval ledger) follow that rule rather than
+pretending a `await` can sleep for a week.
 
 Two constraints sharpen the design, both inherited from 0016:
 
-1. **No second privileged path.** The measured failure mode of agent frameworks
-   is an agent layer that reaches into application internals directly —
-   models, raw SQL — acquiring authority no policy ever granted and leaving no
-   trail. An agent that is *part of* the application is the easiest place in
-   the world to commit this sin, because the internals are right there in
-   scope.
+1. **No second privileged path.** The measured failure mode of agent
+   frameworks is an agent layer that reaches into application internals
+   directly — models, raw SQL — acquiring authority no policy ever granted
+   and leaving no trail. An agent that is *part of* the application is the
+   easiest place in the world to commit this sin.
 2. **Opt-in attack surface** (RFC 0007 lineage). An agent runtime adds
-   externally reachable entry points (agent routes, email handlers) and a new
-   class of autonomous principal. Nothing here may mount by default.
+   externally reachable entry points and a new class of autonomous principal.
+   Nothing here may mount by default, and every new entry point is
+   default-deny.
 
 ## Proposed Solution
 
-### 1. `@guren/plugin-agents`
+### 1. The invocation pipeline moves down to `@guren/server`
 
-A new plugin package, installed via `guren plugin @guren/plugin-agents`. It
-depends on the `agents` SDK and is therefore Workers-only at runtime; the
-package boundary keeps that dependency out of every app that doesn't opt in
-(the same bundle discipline that keeps the MCP SDK out of non-MCP apps).
+Today the steps that make a tool call trustworthy — scope check, approval
+gate, redaction, audit emission, duration measurement — live in
+`@guren/plugin-mcp`, wrapped around the shared dispatch (`buildToolRequest` /
+`app.fetch` / `mapToolResponse`). `app.fetch` itself only executes the HTTP
+request. A durable agent that called `app.fetch` directly would therefore
+*bypass* scopes, approvals, and the audit trail while this RFC claimed
+otherwise.
 
-`make:agent Triager` scaffolds `app/Agents/Triager.ts`:
+So the first deliverable is an extraction, not an addition: a
+protocol-neutral **invocation pipeline** in `@guren/server` —
+
+```
+resolve principal → scope gate → approval gate → dispatch → redact → audit
+```
+
+— that `@guren/plugin-mcp` refactors onto (transport, bearer verification,
+and rate limiting stay in the plugin) and the durable tool client consumes
+from day one. The approval gate is part of the pipeline from Part 1: a call to
+an `approval: 'required'` tool with no approval store configured **fails
+closed**, exactly as an unconfigured App MCP server refuses it today. The
+audit emitter binding (`AGENT_AUDIT_BINDING`) already lives in
+`@guren/server`; the pipeline emits through it, so a durable call is audited
+without `plugin-mcp` present.
+
+This is the RFC's largest refactor and it is behavior-preserving for MCP by
+construction: the pipeline's tests move with the code, and the plugin's
+existing suite (scope denial, approval verdicts, redaction, audit records)
+runs unchanged on top.
+
+### 2. The principal handoff is a seam, never a header
+
+The durable client dispatches in-process. Its principal —
+`{ kind: 'service', id }` with the scopes declared at registration — is
+handed to the pipeline as a **dispatch option**, and the pipeline installs it
+into the request's auth context through a server-internal seam (the pattern
+the preflight seam established: a leaf module both halves import, nothing
+published, nothing spelled as an HTTP header). `Gate` accepts the installed
+principal the way it accepts a token-authenticated user today.
+
+What this is *not*: it is not a header (`X-Guren-*` anything a network caller
+could forge), not a stored `ApiToken` (nothing to store — the principal is
+minted from the registration each call, inside the trust boundary), and not a
+change to bearer auth. The one schema prerequisite recorded in 0016 —
+`ApiToken.userId` optionality for `kind: 'service'` — is *dropped* from this
+RFC: it belongs to stored service tokens, which this design no longer needs.
+
+Principal identity is **per instance**: `id = 'agent:<name>:<instance>'`.
+Approvals are isolated by `kind + id` in the queue, so a class-wide id would
+let one instance observe and spend an approval another instance requested —
+the per-instance id closes that.
+
+### 3. `@guren/plugin-agents`
+
+A new plugin package, installed via `guren plugin @guren/plugin-agents`,
+depending on the `agents` SDK; the package boundary keeps that dependency out
+of every app that doesn't opt in. `make:agent Triager` scaffolds
+`app/Agents/Triager.ts`:
 
 ```ts
 import { GurenAgent } from '@guren/plugin-agents'
 
 interface TriagerState {
   lastRunAt: string | null
-  openFindings: Finding[]
 }
 
 export class Triager extends GurenAgent<Env, TriagerState> {
-  initialState: TriagerState = { lastRunAt: null, openFindings: [] }
-
-  async onRequest(request: Request): Promise<Response> { /* … */ }
+  initialState: TriagerState = { lastRunAt: null }
 
   async onStart() {
-    await this.schedule('0 7 * * *', 'sweep')   // durable, alarm-backed
+    await this.schedule('0 7 * * *', 'sweep')      // cron form
   }
 
   async sweep() {
     const posts = await this.tools.call('posts.index', { published: false })
-    // …
+    // … checkpoint conclusions into this.setState / this.sql, not locals
+    await this.schedule(3600, 'sweep')             // delay-seconds form
   }
 }
 ```
 
-`GurenAgent` extends the SDK's `Agent` — every SDK capability (state, `sql`,
-schedules, WebSockets, `onEmail`) passes through untouched. What Guren adds is
-the glue that keeps constraint 1 honest, below.
-
-### 2. Agents act through the tool surface — `this.tools`
-
-`GurenAgent` carries a tool client built on the same dispatch module every
-other surface uses (`buildToolRequest` / `mapToolResponse` from
-`@guren/core/agent`, shipped for WebMCP in Phase 3). A call re-enters the
-application as a real HTTP request via `app.fetch` — same process, no network
-hop — so validation, policies, redaction, and the audit trail all run exactly
-once, in the app. The agent holds an `AgentPrincipal` of `kind: 'service'`
-with explicit scopes declared at registration:
+`GurenAgent` extends the SDK's `Agent`; every SDK capability passes through
+untouched. Registration is a config file the build can also read:
 
 ```ts
 // config/agents.ts
 export default defineAgentsConfig({
   agents: {
-    triager: { class: Triager, scopes: ['posts.index', 'tickets.store'] },
+    triager: {
+      module: 'app/Agents/Triager.ts',
+      export: 'Triager',
+      scopes: ['tool:posts.index', 'tool:tickets.store'],
+    },
   },
 })
 ```
 
-- A tool outside the agent's scopes is refused before dispatch, exactly as the
-  App MCP endpoint refuses it — same denial event, same audit record.
-- `AgentSurface` gains a `'durable'` value; the exhaustiveness pattern in
-  `agent/audit.ts` turns the addition into a compile error at every consumer.
-- Prerequisite recorded in 0016 and now in scope: `kind: 'service'` principals
-  require `ApiToken.userId` to become optional — the service principal here is
-  minted in-process from the registration, not from a stored token, which
-  sidesteps the storage question but still needs `Gate` to accept a userless
-  principal.
+- `module` / `export` are explicit because the build's named-export injection
+  (§6) cannot recover a source path from a runtime class value. The grammar
+  is deliberately static: literal strings only; a spread, computed key, or
+  re-exported config fails `guren check` with the reason.
+- Scopes use the shipped grammar (`tool:<name>`, `tools:read`) — bare names
+  grant nothing in that grammar and the config validator rejects them.
+  `tools:*` and prefix grants are rejected at registration for the same
+  reason 0016 rejected them for stored tokens: an unattended principal must
+  not acquire consent to tools that don't exist yet. `tools:read` is expanded
+  to the read-only tools *at registration check time* by `guren check`, and
+  the runtime re-expands at boot — both fail closed on drift.
 
-**Direct model/ORM access from an agent is deliberately not wrapped, and the
-`guren audit` treatment is extended to notice it**: an `app/Agents/*.ts` file
-importing from `@/app/Models` or `@/db` gets the same fail-closed warning an
-unvalidated mutating route gets today. Reads through models may be legitimate
-(a summarizer over its own DO SQLite is always fine); writes that bypass the
-contract layer are the anti-pattern this RFC exists to prevent. The audit
-warns rather than fails — the boundary is a default, not a prison — and the
-warning names the tool-surface alternative.
+### 4. Agents act through the tool surface — and the boundary is enforced
 
-### 3. Human-in-the-loop through the RFC 0016 approval queue
+`this.tools.call(name, args)` enters the §1 pipeline with the agent's
+principal. Same scope denial, same approval gate, same redacted audit record
+as every other surface; `AgentSurface` gains a `'durable'` value, and the
+exhaustiveness pattern in `agent/audit.ts` turns that into a compile error at
+every consumer. A per-instance rate budget (calls per minute, pending
+approvals cap) is part of the client from Part 1 — an unattended loop
+otherwise mints unbounded approval records and notifications.
 
-This is where the two RFCs meet. A tool with `approval: 'required'` behaves
-for a durable agent exactly as it behaves for an App MCP caller: the call
-returns a pending-approval result carrying an approval id. The agent then
-*parks*:
+Direct write access to application internals from agent code is an
+**architecture rule, not advice**: `make:agent` extends `guren.arch.ts` with a
+rule forbidding `app/Agents/**` from importing the app's models, `db/`, or
+`@guren/orm`, enforced by the existing `guren check --arch` CI gate, with the
+existing per-rule escape (an explicit, reasoned exemption in the config —
+visible in review, not a comment). The honest limits are stated rather than
+papered over: an import rule catches the straightforward violation, not a
+helper that launders a write through another module — that residue is what
+`guren audit`'s existing route-level checks and review culture remain for.
+The agent's own DO SQLite (`this.sql`) is its private state and is exempt by
+definition.
+
+### 5. Human-in-the-loop through the RFC 0016 approval queue
+
+A durable call to an `approval: 'required'` tool returns a pending result
+carrying the queue's `requestId`. The queue stores only redacted input and a
+non-reversible fingerprint — by design it can neither return the raw
+arguments nor execute anything later. So **the agent side owns the retry
+material**: `this.tools` checkpoints `{ requestId, tool, args }` into a
+pending-calls table in the agent's DO SQLite before returning, and
 
 ```ts
 const result = await this.tools.call('posts.destroy', { id })
-if (result.pending) {
-  await this.schedule({ delaySeconds: 3600 }, 'checkApproval', result.approvalId)
-  return
-}
+if (result.pending) return   // parked; resumption is scheduled below
 ```
 
-`GurenAgent.waitForToolApproval(approvalId)` packages that pattern (schedule +
-`guren.approval_status`-equivalent check + resume/expire). The human approves
-through the same queue the App MCP surface uses — one queue, one audit trail,
-one place to look. The SDK's own `waitForApproval` workflow primitive remains
-available for app-defined approvals that are not tool calls.
+`GurenAgent` schedules a `checkPendingApprovals` callback (delay-form
+schedule, backoff capped at the approval TTL). On wake it asks the queue for
+each pending request's status — through the pipeline, so the check is itself
+audited — and on `approved` **repeats the original call** with the stored
+arguments; the queue's consume-on-use and fingerprint match make the retry
+spend exactly the approval that was granted. `rejected` and `expired` rows
+are pruned and surfaced to an overridable `onToolApprovalSettled` hook. The
+SDK's `waitForApproval` workflow primitive is unrelated machinery (it pauses
+an `AgentWorkflow`, not an ordinary method) and remains available for
+app-defined approvals; this RFC's mechanism deliberately uses only state +
+schedules, per the eviction rule in the Problem statement.
 
-### 4. Build integration (lands in `@guren/plugin-cloudflare`)
+### 6. Build integration (lands in `@guren/plugin-cloudflare`)
 
-The prerequisites recorded in 0016 §7, now specified:
+- **Boot topology.** Only `createWorkersHandler.fetch` boots the app today;
+  an alarm can wake an agent DO before any Worker request has, and a direct
+  `app.fetch` would then hit an unbooted app whose env capture throws. The
+  handler's capture-and-boot moves into a shared `bootAndFetch(app, request,
+  env, ctx)` used by both the worker's `fetch` export and `GurenAgent`
+  (whose DO constructor receives the same env). Direct in-isolate dispatch is
+  the default topology — lowest latency, no network hop — with its costs
+  stated: the agent-hosting isolate loads the app's module graph under the
+  shared 128 MB limit, and the Phase 4a bundle probe grows a budget line for
+  the agent entry. For apps that want isolation instead, the recorded
+  alternative is splitting agents into their own Worker reaching the app over
+  a **service binding** (never a public callback URL); that split is an open
+  question's worth of scaffolding, not Part 2.
+- **Named-export injection.** `buildCloudflareOutput` reads `config/agents.ts`
+  (the static grammar from §3) and appends
+  `export { Triager } from '<module>'` lines to the generated `worker.js`.
+- **Bindings verification.** The wrangler scaffold writes DO configuration
+  for registered agents; for existing apps the committed config is verified,
+  not rewritten: `cloudflare:build` fails with the exact JSON to add when a
+  registered agent has no binding. Cloudflare now prefers declarative class
+  `exports` with SQLite storage over the legacy `migrations` list, and the
+  two are mutually exclusive — the verifier accepts either mode and the
+  scaffold emits the preferred one current wrangler documents. (guren.dev's
+  own adoption sits on the legacy list today; its cutover is a dogfooding
+  detail, not normative.)
+- **Routing, default-deny.** `routeAgentRequest` is a router, not an auth
+  layer. The generated worker mounts it under `/agents/*` only when agents
+  are registered, and always through the SDK's `onBeforeRequest` /
+  `onBeforeConnect` hooks wired to a Guren authorizer: session or token
+  authentication, an instance-ownership check (`agents/:name/:instance` —
+  who may address this instance is app policy, scaffolded deny-all with a
+  documented override), and a creation rate limit. An unauthorized request
+  never reaches the DO, so it also never pays a DO cold start.
+- **Email** is out of Part 2: `onEmail` requires an `email` worker export,
+  `routeAgentEmail`, and account-level routing configuration. Recorded as
+  Part 4 scope with the same default-deny stance.
 
-- **Named-export injection.** Durable Object classes must be named exports of
-  the worker entry. `buildCloudflareOutput` reads the agents config and
-  appends `export { Triager } from '<app entry's agent module>'` lines to the
-  generated `worker.js`. Discovery is the config file, not a directory scan —
-  registration is the opt-in, so an unregistered class in `app/Agents/` is
-  scaffolding in progress, not an export.
-- **Bindings + migrations.** The wrangler scaffold gains a `durable_objects`
-  binding per registered agent and a `migrations` entry with
-  `new_sqlite_classes` (the SDK requires SQLite-backed DOs). The scaffold
-  writes once and never overwrites (the Phase 4a lesson), so `cloudflare:build`
-  *verifies* the committed config covers every registered agent and fails with
-  the exact JSON to add when it doesn't — the same shape as 4a's stale-alias
-  guard. guren.dev's own adoption will use migration tag `v3`.
-- **Routing.** `routeAgentRequest` is mounted under `/agents/*` in the
-  generated worker, before `app.fetch`, only when agents are registered.
-  Agent HTTP entry points are therefore reachable only on the Workers build —
-  which is the truth of the runtime, stated by construction.
-- **Queues driver and `scheduled` export.** Platform parity work that agents
-  make urgent but that stands alone: a Cloudflare Queues driver for Guren's
-  queue subsystem (the `queue` worker export feeding the existing job
-  machinery) and a `scheduled` export driving Guren's scheduler from cron
-  triggers. Specified here, shippable independently as Part 3.
-
-### 5. Local development and testing
+### 7. Local development and testing
 
 The `agents` SDK runs on workerd. Guren's dev server runs on Bun. This RFC
 does **not** propose a Bun emulation of Durable Objects — a fake DO runtime
-would be the mocked-driver trap (a driver mock that keeps tests green while
-every real query dies is a documented failure in this repo). Instead:
+would be the mocked-driver trap. Instead:
 
-- **Tests**: `@guren/testing` gains a miniflare-backed harness
-  (`TestAgent.create(Triager)`) that runs the real SDK against real workerd,
-  the way the wrangler bundle probe already runs real wrangler. Gated like
-  that probe (network on first run), on by nightly.
-- **Dev**: `guren dev` is unchanged. Agent development runs `wrangler dev`
-  against the built output (`guren cloudflare:build --watch` is a nice-to-have
-  recorded as an open question, not promised).
-- The tool client is the escape hatch that keeps most agent *logic* testable
-  on Bun: everything an agent does through `this.tools` can be driven against
-  a `TestApp` with an injected fetch, no workerd required. Only DO-specific
-  behavior (state persistence, alarms, hibernation) needs the harness.
+- **Per-PR tests, not nightly-only**: the runtime pieces under design here —
+  boot-from-alarm, named exports, auth hooks, approval retry after eviction —
+  are exactly the pieces a mock cannot exercise, so they are tested with the
+  Workers Vitest integration (`@cloudflare/vitest-plugin`) against the
+  **generated worker entry** (the build wiring under review, not a bypass),
+  in `packages/plugin-agents`' own suite. Wrangler-download-dependent probes
+  stay nightly like the Phase 4a bundle probe; the Vitest integration itself
+  runs per PR.
+- **Agent logic on Bun**: everything an agent does through `this.tools` is
+  the RFC 0016 dispatch contract, driveable against a `TestApp` with an
+  injected pipeline — no workerd required. Only DO-specific behavior needs
+  workerd.
+- **Dev**: `guren dev` is unchanged; agent development runs `wrangler dev`
+  against built output. A `cloudflare:build --watch` loop is an open
+  question, not a promise.
 
-### 6. What this RFC does not do
+### 8. What this RFC does not do
 
 - **`McpAgent` is not used** (deprecated, feature-frozen upstream). MCP
-  serving remains `@guren/plugin-mcp` — stateless by design, no Durable
-  Objects, aligned with MCP 2026-07-28. An agent is not an MCP server; it is
-  an MCP-shaped *consumer* of its own application.
-- **No MCP SDK v2 migration.** The TypeScript SDK's replatform
-  (`@modelcontextprotocol/server@2.x`, web-standard, stateless) is real and
-  eventually matters to `plugin-mcp`, but it is a transport-layer migration
-  with its own compatibility story — separate work, noted here so the two
-  don't get entangled.
+  serving remains `@guren/plugin-mcp` — stateless, no Durable Objects. An
+  agent is not an MCP server; it is a consumer of its own application.
+- **No MCP SDK v2 migration, stated precisely**: `plugin-mcp` today speaks
+  the 2025 Streamable HTTP protocol through `@modelcontextprotocol/sdk` 1.x —
+  operationally sessionless, but *not* an implementation of the 2026-07-28
+  wire protocol, which lives in the replatformed
+  `@modelcontextprotocol/server` 2.x line. That migration is real future work
+  for `plugin-mcp`, out of scope here, and nothing in this RFC may depend on
+  either side of it.
+- **No Queues driver, no `scheduled` export.** Both were recorded as
+  prerequisites in 0016's Phase 4b note, and both turn out to be independent
+  platform-parity work that nothing in Parts 1–2 consumes. They move to their
+  own release train (tracked, not designed, here).
 - **No model/inference opinions.** Which LLM an agent calls, through AI
   Gateway or directly, is app code. The runtime moves state and time, not
   tokens.
+- **SDK version policy**: `@guren/plugin-agents` pins a tested `agents` range
+  (0.20.x at time of writing) and its CI exercises the real package; the SDK
+  is pre-1.0 and its compatibility story is the plugin's to absorb, never the
+  app's.
 
 ## Package Boundaries
 
 | Layer | Package |
 |---|---|
-| `GurenAgent`, `defineAgentsConfig`, tool client, `waitForToolApproval` | `@guren/plugin-agents` |
-| Named-export injection, DO bindings/migrations verification, `routeAgentRequest` mount, Queues driver glue, `scheduled` export | `@guren/plugin-cloudflare` |
-| `make:agent`, config discovery for build, audit extension | `@guren/cli` |
-| `'durable'` surface value, `Gate` userless-service acceptance | `@guren/server` (+ core minor) |
-| `TestAgent` miniflare harness | `@guren/testing` |
+| Invocation pipeline (scope gate, approval gate, redaction, audit), principal seam, `'durable'` surface | `@guren/server` (+ core minor) |
+| `GurenAgent`, `defineAgentsConfig`, `this.tools`, pending-approval ledger, rate budget | `@guren/plugin-agents` |
+| Named-export injection, `bootAndFetch`, bindings verification, `/agents/*` default-deny mount | `@guren/plugin-cloudflare` |
+| `make:agent`, config grammar validation, arch-rule scaffolding, registration checks | `@guren/cli` |
+| Transport, bearer verification, rate limiting (unchanged); refactor onto the pipeline | `@guren/plugin-mcp` |
 
 ## Phasing
 
-- **Part 1**: `@guren/plugin-agents` (`GurenAgent`, config, tool client with
-  scopes + audit), `make:agent`, the `'durable'` surface, `Gate` acceptance.
-  Testable on Bun via the tool client.
-- **Part 2**: build integration — named-export injection, bindings/migrations
-  verification, `routeAgentRequest` mount. First end-to-end agent on Workers.
-- **Part 3**: Queues driver + `scheduled` export (independent platform parity).
-- **Part 4**: `waitForToolApproval` + approval-queue integration, `TestAgent`
-  harness, docs, and guren.dev dogfooding (migration tag `v3`).
+- **Part 1** (no Cloudflare dependency): pipeline extraction into
+  `@guren/server` + `plugin-mcp` refactor onto it, behavior-preserving;
+  principal seam; `'durable'` surface; fail-closed approval gate.
+- **Part 2**: `@guren/plugin-agents` (`GurenAgent`, config grammar,
+  `this.tools` with scopes/budget), `make:agent` + arch rule, build
+  integration (named exports, `bootAndFetch`, bindings verification,
+  default-deny routing). First end-to-end agent on Workers, tested per PR via
+  the Workers Vitest integration.
+- **Part 3**: pending-approval ledger + retry + `onToolApprovalSettled`.
+- **Part 4**: email entry points, docs, guren.dev dogfooding, and the
+  service-binding split topology if demand materializes.
 
 ## Alternatives Considered
 
 - **A hand-rolled Durable Object base class, no Agents SDK.** Fewer
   dependencies, but re-implements schedules, state sync, hibernation-safe
-  WebSockets, and email routing — the SDK's actual value — and tracks none of
-  the platform's improvements. The SDK is Cloudflare-maintained and the DO
-  primitives it wraps are the ones this design needs.
-- **Workflows-only (no resident agents).** Cloudflare Workflows covers
-  suspend/resume, but has no per-instance addressable state or inbound entry
-  points; "an agent you can talk to" degenerates into a workflow per message
-  with external state. The SDK composes Workflows where they fit
-  (`runWorkflow`) instead.
-- **A vendor-neutral agent abstraction with per-platform drivers.** There is
-  exactly one substrate today that provides durable identity + alarms +
-  embedded state at the edge. An abstraction over one implementation is
-  speculation; the honest boundary is a Cloudflare-named plugin, with the tool
-  client (the part that touches the application) already portable because it
-  is the RFC 0016 dispatch contract.
-- **Agents as privileged internals (direct ORM access, blessed).** Rejected as
-  constraint 1. The entire value of 0016's surface is that every agent action
-  is a contract-validated, policy-checked, audited request; an in-house agent
-  deserves less trust than an external one, not more, because it runs
-  unattended.
+  WebSockets — the SDK's actual value — and tracks none of the platform's
+  improvements.
+- **Workflows-only (no resident agents).** Workflows cover suspend/resume but
+  have no addressable per-instance state or inbound entry points; "an agent
+  you can talk to" degenerates into a workflow per message with external
+  state. The SDK composes Workflows where they fit.
+- **A vendor-neutral agent abstraction with per-platform drivers.** Exactly
+  one substrate today provides durable identity + alarms + embedded state at
+  the edge. An abstraction over one implementation is speculation; the
+  portable part — the tool client — is already portable because it is the
+  RFC 0016 dispatch contract.
+- **Agents as privileged internals (direct ORM access, blessed).** Rejected
+  as constraint 1. An in-house agent deserves less trust than an external
+  one, not more, because it runs unattended.
+- **Principal via signed internal token or header.** Anything spelled as a
+  header is reachable from the network and becomes a forgery surface to
+  misconfigure; an HMAC token adds key management for a hop that never
+  leaves the isolate. The in-process seam has no wire representation at all.
 
 ## Migration Path
 
-Purely additive. No existing API changes shape; `AgentSurface` gains a value
-(compile-caught at consumers); `ApiToken.userId` optionality is a widening.
-New packages declare `gurenPlugin.compatibility`. Server/core ship minors.
+Additive for applications. Internally, the Part 1 pipeline extraction moves
+code out of `@guren/plugin-mcp` into `@guren/server`; the plugin's public
+surface and behavior are unchanged (its tests run unchanged on the refactor),
+and the plugin gains a floor on the server version that ships the pipeline —
+the Phase 4a release-engineering lesson (ranges must admit the workspace
+version; `changeset version` writes the published floor) applies verbatim.
+`AgentSurface` gains a value (compile-caught). New packages declare
+`gurenPlugin.compatibility`. Server/core ship minors.
 
 ## Open Questions
 
-1. Whether `defineAgentsConfig` lives in `config/agents.ts` (a new config
-   file, discovered by the build) or inside the plugin's factory options —
-   the build generator runs in a separate process and cannot read runtime
-   plugin config, which is the same constraint that made `--mcp-oauth` a
-   build flag in 0016 §7.
-2. Scope grammar for agent registrations: exact tool names only, or the
-   `tools:*` / prefix grammar tokens already parse? Prefix grammars for an
-   unattended principal have the same future-tool consent problem 0016
-   recorded for stored tokens (`--read-only` expansion at issue time); the
-   same fail-closed expansion likely applies at *registration* time.
-3. Whether reads through models from agent code should be exempted from the
-   audit warning structurally (allowlist read methods?) or the warning stays
-   uniform and the escape is per-file suppression. The warning's value decays
-   fast if half the scaffolded agents ship with suppressions.
-4. `guren cloudflare:build --watch` for a tighter agent dev loop, and whether
-   `wrangler dev` against built output is tolerable before it exists.
+1. Pipeline shape: one exported function with option hooks, or a small
+   middleware chain? The MCP plugin needs to interpose bearer verification
+   and rate limiting between principal resolution and the scope gate; the
+   durable client needs the budget check there instead. Settled in Part 1's
+   PR, recorded here as the one deliberate seam.
+2. Whether `tools:read` registration expansion should pin the expanded list
+   into a generated artifact (visible in review, like the manifest) or stay a
+   check-time computation.
+3. The instance-ownership policy vocabulary for `/agents/*` (per-agent
+   policy class? reuse Gate abilities?) — scaffolded deny-all until settled.
+4. `cloudflare:build --watch` for the agent dev loop.
 5. How agent DO SQLite schemas migrate across deploys (the SDK gives raw
-   `this.sql`; Guren's migration culture will want more than "CREATE TABLE IF
-   NOT EXISTS in onStart").
-6. Whether the Queues driver belongs to this RFC's release train or ships
-   earlier — nothing in Parts 1–2 depends on it.
+   `this.sql`; "CREATE TABLE IF NOT EXISTS in onStart" will not satisfy
+   Guren's migration culture; per-agent versioned migrations in the config
+   grammar are the likely shape).
+6. Whether the service-binding split (agents in their own Worker) deserves
+   first-class scaffolding in Part 4 or stays documented-manual.
