@@ -17,6 +17,7 @@ import {
   type WebMcpToolDescriptor,
   type WebMcpToolSource,
 } from './client'
+import { agentTools as generatedManifest } from './agents-manifest.fixture'
 
 class PostController extends Controller {
   async index() {
@@ -167,6 +168,47 @@ describe('registerAgentTools', () => {
     expect(registration.supported).toBe(false)
     expect(registration.registered).toEqual([])
     await registration.unregister()
+  })
+
+  test('should accept a manifest exactly as codegen emits it', async () => {
+    const anchor = new FakeModelContext()
+
+    // The load-bearing half of this test is that it *compiles*: no cast, no
+    // helper, the one line the README documents. `generatedManifest` is
+    // `as const`, so it is readonly to the leaves and its properties are
+    // literal types — the shape `WebMcpToolSource` exists to admit, and the
+    // shape every other fixture here (built from `deriveAgentTools`, hence
+    // mutable) would keep satisfying even if the interface stopped admitting
+    // it.
+    const registration = await registerAgentTools(generatedManifest, { modelContext: anchor })
+
+    expect(registration.supported).toBe(true)
+    expect(registration.registered.sort()).toEqual([
+      'comments.store',
+      'posts.bulk',
+      'posts.index',
+      'posts.summary',
+    ])
+    expect([...registration.skipped].sort((a, b) => a.tool.localeCompare(b.tool))).toEqual([
+      { tool: 'internal.index', reason: 'expose' },
+      { tool: 'payouts.store', reason: 'approval' },
+    ])
+  })
+
+  test('should dispatch a call from a codegen-emitted manifest', async () => {
+    const anchor = new FakeModelContext()
+    const wire = recordingFetch(() => json({ ok: true }, 201))
+    stubDocument({ modelContext: anchor, cookie: 'XSRF-TOKEN=t0k' })
+
+    await registerAgentTools(generatedManifest, { modelContext: anchor, fetch: wire.fetch })
+    await anchor.descriptor('comments.store').execute({ id: 7, text: 'hello' })
+
+    // The manifest's own inputSources drive the split, so this is the whole
+    // path an installed app takes: generated file in, HTTP request out.
+    const request = wire.requests[0]!
+    expect(new URL(request.url).pathname).toBe('/posts/7/comments')
+    expect(request.headers.get('X-XSRF-TOKEN')).toBe('t0k')
+    expect(await request.json()).toEqual({ text: 'hello' })
   })
 
   test('should find the anchor on document', async () => {
