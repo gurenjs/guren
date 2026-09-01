@@ -86,7 +86,7 @@
   "dependencies": {
     "@guren/cli": "^2.13.0",
     "@guren/orm": "^2.6.1",
-    "@guren/server": "^2.14.0"
+    "@guren/server": "^2.15.0"
   },
   "devDependencies": {
     "@types/node": "^20.14.10",
