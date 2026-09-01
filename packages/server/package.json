@@ -94,6 +94,10 @@
       "types": "./dist/mcp/index.d.ts",
       "default": "./dist/mcp/index.js"
     },
+    "./agent": {
+      "types": "./dist/agent/public.d.ts",
+      "default": "./dist/agent/public.js"
+    },
     "./lambda": {
       "types": "./dist/lambda/index.d.ts",
       "default": "./dist/lambda/index.js"

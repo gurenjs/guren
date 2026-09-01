@@ -32,6 +32,11 @@ export default defineConfig({
     'src/vite/index.ts',
     'src/lambda/index.ts',
     'src/mcp/index.ts',
+    // The browser-safe dispatch surface, its own entry so a client bundle
+    // gets buildToolRequest/mapToolResponse without the application graph the
+    // package index pulls in. src/agent/public.ts states what that entry may
+    // and may not re-export.
+    'src/agent/public.ts',
     // Not public API: @guren/core's database stores re-export the expiry
     // rules from here so the two packages cannot drift apart.
     'src/support/expiry.ts',
