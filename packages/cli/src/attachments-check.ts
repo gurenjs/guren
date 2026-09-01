@@ -1,10 +1,12 @@
-import { dirname, relative, resolve, sep } from 'node:path'
+import { readdir, readlink, realpath } from 'node:fs/promises'
+import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import type { CallExpression, ObjectExpression, ObjectProperty } from '@babel/types'
 import { AttachmentDeliveryController, type RouteDefinition } from '@guren/core'
 import { literalString, memberKeyName, objectLiteral, unwrapTypeAssertion, walk } from './ast-walk'
 import { check, type CheckResult } from './check-result'
 import { collectFiles, fileExists, listAppRoots } from './discovery'
 import { DEFAULT_ROUTES_FILE, loadRouteDefinitions } from './load-routes'
+import { resolveRoutesEntry } from './route-registrar'
 import { parseModelSource } from './model-parser'
 import type { ParseCache, ParsedFile } from './parse-cache'
 import { schemaPathFor, type SchemaTable } from './schema-parser'
@@ -519,6 +521,120 @@ function isAtOrWithin(root: string, candidate: string): boolean {
 }
 
 /**
+ * Is the disk rooted at `root` reachable through the served `publicDir`?
+ *
+ * Two ways it can be, and the lexical test sees neither:
+ *
+ * 1. The disk root is itself a symlink into the served tree. Canonicalizing
+ *    both sides catches this — and both sides, for the reason the runtime's
+ *    `isRealPathWithin` gives: a project reached through a symlink is routine
+ *    (workspace layouts, macOS `/var`), so canonicalizing one side alone
+ *    misjudges those.
+ *
+ *    The plain lexical test stays first and is not subsumed by that one: a
+ *    root that does not exist yet cannot be canonicalized, so the canonical
+ *    comparison would weigh a resolved `publicDir` against an unresolved root
+ *    (`/private/var/...` against `/var/...` on macOS) and answer false for the
+ *    plain in-`public/` case. Deleting it silently breaks the base case.
+ *
+ * 2. The served tree contains a symlink pointing *out* at the disk root —
+ *    which is exactly what `guren storage:link` creates (`public/storage` to
+ *    `storage/app/public`). Nothing about the root's own path reveals this,
+ *    so the served directory's entries have to be read.
+ *
+ * Case 2 is not hypothetical. The storage guide documents `local: { root:
+ * './storage/app/public' }` and the attachments scaffold defaults `disk:
+ * 'local'`, so an app that followed the documentation and ran a first-party
+ * command has its uploads statically reachable while the root sits lexically
+ * nowhere near `public/`.
+ *
+ * Scope, stated because it bounds the rule rather than the implementation:
+ * only the immediate entries of `publicDir` are examined. That is where
+ * `storage:link` puts its link, and it holds the check to one `readdir`; a
+ * symlink hand-buried deeper goes unjudged rather than hunted for.
+ */
+async function isReachableFromPublicDir(publicDir: string, root: string): Promise<boolean> {
+  if (isAtOrWithin(publicDir, root)) return true
+
+  const [realPublic, realRoot] = await Promise.all([canonicalize(publicDir), canonicalize(root)])
+  if (isAtOrWithin(realPublic, realRoot)) return true
+
+  // ENOENT read directly rather than probed for: an existsSync-style
+  // pre-check turns a permissions error on the parent into "absent", which
+  // would fail this rule open exactly where the filesystem is unusual.
+  const entries = await readdir(publicDir, { withFileTypes: true }).catch(() => null)
+  if (!entries) return false
+
+  const links = entries.filter((entry) => entry.isSymbolicLink())
+  const targets = await Promise.all(links.map((entry) => linkTarget(join(publicDir, entry.name))))
+
+  // Judged against the directory attachments are actually written to
+  // (`<root>/attachments`, the engine's object key prefix) rather than
+  // against the disk root. `storage:link` exposes `storage/app/public`,
+  // which is *inside* the scaffold's own root (`storage/app`) but does not
+  // contain `storage/app/attachments` — so asking whether the link and the
+  // root merely overlap would fail the default scaffold the moment anyone
+  // ran a first-party command.
+  //
+  // Both directions against that prefix, though: a link may expose a
+  // directory containing the uploads, or one *inside* them
+  // (`public/leak -> storage/app/attachments/<id>` exposes that id's files).
+  // Neither direction reintroduces the false positive above, because
+  // `storage/app/public` neither contains nor sits inside
+  // `storage/app/attachments`.
+  const prefix = join(realRoot, 'attachments')
+  return targets.some((target) => isAtOrWithin(target, prefix) || isAtOrWithin(prefix, target))
+}
+
+/**
+ * `realpath` for a path that need not exist: the deepest ancestor that does
+ * exist is resolved, and the remaining segments are appended unchanged.
+ *
+ * Plain `realpath`-or-fall-back-to-the-input is not enough, and the way it
+ * fails is a false pass. These comparisons weigh a disk root against a
+ * symlink target, and both routinely point at directories the app has not
+ * created yet — a disk receives its first upload, a link is made before its
+ * target exists. If one side resolves and the other does not, the two are
+ * written in different vocabularies and never match: on macOS a temp dir is
+ * `/var/folders/…` resolved and `/private/var/folders/…` unresolved, so the
+ * comparison silently answers "unrelated" for two paths that are the same
+ * directory. Resolving as far as each path allows puts both in the same
+ * vocabulary whether or not the leaves exist.
+ */
+async function canonicalize(path: string): Promise<string> {
+  let current = path
+  const trailing: string[] = []
+
+  // Bounded by the path's own depth: `dirname` reaches the root and stops.
+  while (true) {
+    const resolved = await realpath(current).catch(() => null)
+    if (resolved !== null) return trailing.length === 0 ? resolved : join(resolved, ...trailing)
+    const parent = dirname(current)
+    if (parent === current) return path
+    trailing.unshift(basename(current))
+    current = parent
+  }
+}
+
+/**
+ * Where a symlink points, canonicalized — falling back to the link's own
+ * resolved target when the destination does not exist yet.
+ *
+ * `realpath` alone fails open here. A link created before its target
+ * (`public/uploads` to `storage/app/attachments`, with no upload written yet)
+ * cannot be resolved, so `canonicalize` would answer with the link's *own*
+ * path — which lives under `public/` and so matches nothing — and the scan
+ * would report safe. The first upload then creates the directory and every
+ * attachment is served. Reading the link itself gives the intended
+ * destination whether or not it exists.
+ */
+async function linkTarget(path: string): Promise<string> {
+  const target = await readlink(path).catch(() => null)
+  if (target === null) return canonicalize(path)
+  return canonicalize(resolve(dirname(path), target))
+}
+
+/**
  * The disk new attachments are written to, per config file — the `disk`
  * option, which is required and names one entry of the storage manager's
  * map.
@@ -544,15 +660,20 @@ async function scanAttachmentsDefaultDisks(
  * `configureAttachments({ disk })` pointing at a local disk rooted inside
  * the app's public directory.
  *
- * Uploaded bytes then sit in the statically served tree, and the root asset
- * server returns them by extension with the content type that matches: an
- * uploaded `.svg` comes back as `image/svg+xml`, inline, and its script runs
- * on the app's own origin with the app's own cookies. The attachments
- * delivery route exists precisely to avoid this — it serves only an
- * allowlist of types inline, forces a download for the rest, and adds
- * nosniff plus a sandbox CSP — but a disk rooted under `public/` is reachable
- * without ever going through it, so no amount of delivery configuration
- * repairs this shape. Only moving the root does.
+ * Uploaded bytes then sit in the statically served tree, where they are
+ * fetchable by URL with no signature, no expiry and no authorization check.
+ * The delivery route exists to impose exactly those three things, and a disk
+ * rooted under `public/` is reachable without ever going through it, so no
+ * amount of delivery configuration repairs this shape — only moving the root
+ * does.
+ *
+ * Deliberately *not* stated as stored XSS any more. The static mounts force
+ * a download for document content types since the `static-documents` guard
+ * landed, so an uploaded `.svg` no longer executes on the app's origin by
+ * default — a build-failing rule must not assert something the framework
+ * stopped doing. What survives is the access-control half, which the guard
+ * never addressed, plus the XSS case returning wholesale under
+ * `rootPublicAssets: { inlineDocuments: true }`.
  *
  * This is the rule that tells an app scaffolded before the default changed
  * that it is still in the old shape; nothing at runtime reports it, because
@@ -590,17 +711,20 @@ export async function checkAttachmentsPublicDisk(options: {
     const title = 'Attachments disk outside public/'
     const root = resolve(cwd, declaration.root)
 
-    if (isAtOrWithin(publicDir, root)) {
+    if (await isReachableFromPublicDir(publicDir, root)) {
       results.push(
         check(
           key,
           title,
           'fail',
           `configureAttachments() in ${relPath} stores new attachments on disk '${disk}', which is ` +
-            `rooted at ${declaration.root} — inside the public directory the app serves statically. ` +
-            `An uploaded .svg or .html is then reachable as a static asset and renders on the app's ` +
-            `own origin, which is stored XSS; the attachments delivery route cannot intervene, ` +
-            `because nothing has to go through it to reach the file.`,
+            `rooted at ${declaration.root} — reachable through the public directory the app serves ` +
+            `statically. Every upload is then fetchable by URL with no signature, no expiry and no ` +
+            `authorization check, whatever the delivery route is configured to do, because nothing ` +
+            `has to go through it to reach the file. Serving those bytes is only as safe as the ` +
+            `static mount's own defences: they force a download for document types today, but ` +
+            `rootPublicAssets: { inlineDocuments: true } opts back out and restores the stored-XSS ` +
+            `case for an uploaded .svg or .html.`,
           `Point disk at a disk rooted outside public/ (the scaffold's 'local', at ./storage/app), ` +
             `declare it private in disks, and serve it through delivery: {} plus ` +
             `registerAttachmentRoutes(router) in your route registrar.`,
@@ -674,7 +798,11 @@ export async function checkAttachmentsDelivery(options: {
   const results: CheckResult[] = []
 
   if (scan.deliveryConfigs.length > 0) {
-    const routesFile = options.routesFile ?? DEFAULT_ROUTES_FILE
+    // The app's own entry, not routes/web.ts: an API-only app mounts the
+    // delivery route in routes/api.ts, and judging it against a file it was
+    // never going to have reports the route as unmounted right after the
+    // scaffold mounted it.
+    const routesFile = options.routesFile ?? (await resolveRoutesEntry(cwd)) ?? DEFAULT_ROUTES_FILE
     let definitions = options.definitions
     let routesEntryMissing = false
     if (!definitions) {

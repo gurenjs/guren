@@ -30,6 +30,7 @@ import { affectsRouteWiring, checkRouteRegistrarWiring } from './routes-check'
 import { checkRouteContracts } from './route-contract-check'
 import { checkAgentRoutes } from './agent-route-check'
 import { DEFAULT_ROUTES_FILE, loadRouteDefinitions } from './load-routes'
+import { resolveRoutesEntry } from './route-registrar'
 import type { RouteDefinition } from '@guren/core'
 
 /**
@@ -371,7 +372,16 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     // Gated with 7.7 and 7.8 under --changed, and for their reason: this is
     // a full module evaluation, which a docs- or lang-only run would pay to
     // re-derive an answer nothing in that run could have changed.
-    const routeGraphFile = options.routesFile ?? DEFAULT_ROUTES_FILE
+    //
+    // 8.7 reads these definitions too, and takes them from here rather than
+    // loading its own. Two loads would not only evaluate the app's module
+    // twice — they could resolve *different* routes entries and disagree, in
+    // the same run, about what the app mounted.
+    // Probed, not assumed: the API-only template ships routes/api.ts and no
+    // routes/web.ts, so assuming the default made every consumer of this
+    // graph — the agent manifest, 7.7, 7.8 and 8.7 — judge such an app
+    // against a file it was never going to have.
+    const routeGraphFile = options.routesFile ?? (await resolveRoutesEntry(cwd)) ?? DEFAULT_ROUTES_FILE
     let graph: Awaited<ReturnType<typeof loadRouteGraph>> | undefined
     if (sourceChanged) {
       graph = await loadRouteGraph(cwd, routeGraphFile)
@@ -528,7 +538,8 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
           cwd,
           cache,
           files: attachmentsFiles,
-          routesFile: options.routesFile,
+          routesFile: routeGraphFile,
+          definitions: graph?.definitions,
         })),
       )
     }

@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
-import { addImport, addToArrayArgument, addToArrayOption } from '../src/patch-helpers'
+import { addImport, addToArrayArgument, addToArrayOption, insertImport } from '../src/patch-helpers'
 import { createTempWorkspace } from './helpers'
 
 describe('addImport', () => {
@@ -429,5 +429,56 @@ describe('addToArrayArgument — safe declines', () => {
     } finally {
       await workspace.cleanup()
     }
+  })
+})
+
+describe('insertImport — already-imported detection', () => {
+  const STATEMENT = "import { registerAttachmentRoutes } from '@guren/core'"
+
+  // The literal-line test only recognizes the exact statement a scaffolder
+  // would have written. Merging that import into a neighbouring one — the
+  // idiomatic form, and what any formatter produces — used to read as absent,
+  // so a re-run appended a second one and the app stopped compiling on a
+  // duplicate binding.
+  it('treats a binding merged into another import from the same module as present', () => {
+    const merged = "import { Router, registerAttachmentRoutes, requireAuthenticated } from '@guren/core'\n"
+    expect(insertImport(merged, STATEMENT)).toBeNull()
+  })
+
+  it('sees through a multi-line import block', () => {
+    const multiline = "import {\n  Router,\n  registerAttachmentRoutes,\n} from '@guren/core'\n"
+    expect(insertImport(multiline, STATEMENT)).toBeNull()
+  })
+
+  // Conservative on purpose: each of these leaves the local name unbound, so
+  // inserting is correct and skipping would drop a needed import.
+  it('still inserts when the binding is absent, aliased away, or from another module', () => {
+    expect(insertImport("import { Router } from '@guren/core'\n", STATEMENT)).not.toBeNull()
+    expect(insertImport("import { registerAttachmentRoutes as mount } from '@guren/core'\n", STATEMENT)).not.toBeNull()
+    expect(insertImport("import { registerAttachmentRoutes } from './local'\n", STATEMENT)).not.toBeNull()
+  })
+
+  // Each of these binds no usable value, so reading it as "already imported"
+  // makes a scaffolder omit an import its generated code calls. Text that
+  // merely looks like an import is the failure mode this file names in
+  // maskNonCode's docblock; the type and alias cases are ones only the AST
+  // distinguishes.
+  it('does not mistake a lookalike or a non-value import for the binding', () => {
+    const cases = [
+      `// ${STATEMENT}\nimport { Router } from '@guren/core'\n`,
+      `const example = \`${STATEMENT}\`\n`,
+      "import type { registerAttachmentRoutes } from '@guren/core'\n",
+      "import { type registerAttachmentRoutes } from '@guren/core'\n",
+      // Binds the wanted name to a different symbol entirely.
+      "import { Router as registerAttachmentRoutes } from '@guren/core'\n",
+    ]
+    for (const content of cases) {
+      expect(insertImport(content, STATEMENT)).not.toBeNull()
+    }
+  })
+
+  it('sees a binding through a comment between the braces', () => {
+    const commented = "import {\n  Router,\n  /* delivery helper */ registerAttachmentRoutes,\n} from '@guren/core'\n"
+    expect(insertImport(commented, STATEMENT)).toBeNull()
   })
 })

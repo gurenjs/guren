@@ -12,7 +12,7 @@ import {
   toPosixRelative,
 } from './discovery'
 import type { ParseCache } from './parse-cache'
-import { DEFAULT_ROUTES_FILE, isRegistrarExportName, ROUTES_ENTRY_CANDIDATES, specifierName } from './route-registrar'
+import { DEFAULT_ROUTES_FILE, isRegistrarExportName, resolveRoutesEntry, specifierName } from './route-registrar'
 import { pascalCase, referencesIdentifier, relativeImportPath } from './utils'
 import { check, type CheckResult } from './check-result'
 
@@ -547,7 +547,7 @@ export async function checkRouteRegistrarWiring(options: RoutesCheckOptions): Pr
   // An explicit `--routes` is honoured as given, including when it names a
   // file that doesn't exist — reporting that is the point. Otherwise probe,
   // for the reason ROUTES_ENTRY_CANDIDATES documents.
-  const entryFile = options.routesFile ?? (await findFirstExisting(cwd, ROUTES_ENTRY_CANDIDATES)) ?? DEFAULT_ROUTES_FILE
+  const entryFile = options.routesFile ?? (await resolveRoutesEntry(cwd)) ?? DEFAULT_ROUTES_FILE
 
   const results = await checkScope(cwd, cache, {
     module: null,
