@@ -18,7 +18,13 @@ vi.mock('../../app/Services/DocSearchService.js', () => {
   class SearchIndexUnavailableError extends Error {
     readonly statusCode = 503
     constructor() {
-      super('The docs search index has not been built.')
+      // Shaped like the real one, which names the commands and the artifact
+      // path that fix the deployment — otherwise the test below that the
+      // response withholds them would pass on a message with nothing in it.
+      super(
+        'The docs search index has not been built. Run `bun run --cwd web cloudflare:build` ' +
+          'first, then load .guren/search-index.sql into the database this app opens.',
+      )
       this.name = 'SearchIndexUnavailableError'
     }
   }
@@ -100,6 +106,18 @@ describe('DocsSearchController', () => {
     expect(status).toBe(503)
     expect(body).toHaveProperty('error')
     expect(body).not.toHaveProperty('results')
+  })
+
+  it('does not hand the reader the commands that would fix the deployment', async () => {
+    // The error's own text names build commands and a repo path. Useful in a
+    // log; not something this endpoint should return to the public.
+    const detail = new SearchIndexUnavailableError()
+    search.mockRejectedValue(detail)
+    const { body } = await call('http://localhost/docs/search?q=routing')
+
+    expect(detail.message).toContain('.guren/')
+    expect(JSON.stringify(body)).not.toContain('bun ')
+    expect(JSON.stringify(body)).not.toContain('.guren/')
   })
 
   it('does not swallow an unexpected failure', async () => {

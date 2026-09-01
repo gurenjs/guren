@@ -50,8 +50,16 @@ export default class DocsSearchController extends Controller {
       )
     } catch (error) {
       if (error instanceof SearchIndexUnavailableError) {
+        // The error's own text names the build commands and the artifact path
+        // that fix this. That belongs in a log, where whoever deploys will
+        // read it — not in a response to whoever happened to search. Returning
+        // it also walked around the sanitizing the framework's exception
+        // handler does in production.
+        console.error(error.message)
         // Not cached: the next deploy is expected to fix it.
-        return this.json({ error: error.message }, { status: error.statusCode })
+        return this.json({ error: 'Search is not available on this deployment.' }, {
+          status: error.statusCode,
+        })
       }
       throw error
     }
