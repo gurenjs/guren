@@ -1420,7 +1420,16 @@ function createAgentPreflightMiddleware(
       message:
         'Preflight only: the request passed this route\'s middleware'
         + (validated.length > 0 ? ` and its ${validated.join(', ')} schema${validated.length > 1 ? 's' : ''}` : '')
-        + '. The handler did not run, so nothing was created, changed, or deleted.'
+        // Precisely "the handler did not run", and no more. The seam is mounted
+        // last, so every middleware on the route *did* run — that is the point,
+        // since a rehearsal past fake gates would answer a different question
+        // than the one asked. But a middleware can have effects of its own (a
+        // quota counter, a rate-limit bucket, a touched session), and this
+        // sentence is read by an agent deciding whether asking is safe.
+        // "Nothing was created, changed, or deleted" is a promise the seam
+        // structurally cannot keep, and it used to make it.
+        + '. The handler did not run. The route\'s own middleware did run, so any effect a'
+        + ' middleware on this route has of its own has already happened.'
         + (unverified.length > 0
           ? ' No authorization middleware was found on this route, so any check inside the'
             + ' handler itself was not evaluated.'

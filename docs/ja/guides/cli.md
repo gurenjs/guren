@@ -175,6 +175,7 @@ bunx guren check --spec    # docs/spec/ が再生成結果と一致するか
 |---|---|
 | `agent-route-name:*` | agent メタデータを宣言しているのに `.name()` がない。ツール名はツールの識別子そのものなので、名前のないルートはツールになれません。 |
 | `agent-route-tool-name:*` | ツール名(`agent.toolName` またはルート名)が MCP の文法 `^[A-Za-z0-9._-]{1,128}$` から外れている。クライアントは該当ツールだけでなくツール一覧全体を拒否します。 |
+| `agent-route-reserved-name:*` | フレームワークが予約しているツール名を使っている。`guren.preflight` は MCP エンドポイントが自分で追加するメタツールです。この名前を取ったルートはまったく公開されません。 |
 | `agent-route-duplicate:*` | 2つ以上のルートが同じツール名に解決される。 |
 | `agent-route-authorization:*` | read-only でないツールなのに、ミドルウェアチェーンに認可 capability がなく、コントローラアクションでも `this.authorize(...)` を呼んでいない。**認証は認可ではありません**。`this.auth.userOrFail()` や APIトークンの確認はどちらも認可の代わりにならず、その場合は専用のメッセージで報告されます。 |
 

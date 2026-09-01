@@ -63,6 +63,14 @@ export type {
   BuiltToolRequest,
   ToolCallOutcome,
 } from './agent/dispatch'
+// Meta-tool names an adapter adds to the catalogue and an application route
+// may not claim (RFC 0016 §5.4). Exported so `@guren/plugin-mcp` and
+// `guren check` read one list instead of restating the string.
+export {
+  isReservedAgentToolName,
+  PREFLIGHT_TOOL_NAME,
+  RESERVED_AGENT_TOOL_NAMES,
+} from './agent/meta-tools'
 // Agent Security Layer (RFC 0016 §5): the token scope grammar that gates the
 // agent surface, the audit events every surface emits, and the argument
 // masking those events' payloads must already have been through. Pure logic —

@@ -49,6 +49,18 @@ describe('mcpPlugin (integration)', () => {
       )
       .name('posts.store')
       .agent({})
+    // `ssn` on purpose, and not `password`: the default fragment list masks
+    // anything password-shaped whichever redact list is in play, so a case
+    // written with it passes even when the *checked* tool's own list is
+    // dropped. Only a field the defaults do not know can tell the two apart.
+    router
+      .post(
+        '/profiles',
+        { body: z.object({ ssn: z.string(), title: z.string() }) },
+        () => Response.json({ ok: true }),
+      )
+      .name('profiles.store')
+      .agent({ redact: ['ssn'] })
   }
 
   beforeAll(async () => {
@@ -93,7 +105,14 @@ describe('mcpPlugin (integration)', () => {
   test('should list the app tools to a granted token', async () => {
     const client = await connectClient(token)
     const { tools } = await client.listTools()
-    expect(tools.map((tool) => tool.name).sort()).toEqual(['posts.index', 'posts.store'])
+    // The preflight companion rides alongside the app's own tools for any
+    // token that grants at least one of them (RFC 0016 §5.4).
+    expect(tools.map((tool) => tool.name).sort()).toEqual([
+      'guren.preflight',
+      'posts.index',
+      'posts.store',
+      'profiles.store',
+    ])
   })
 
   test('should execute a read tool through the app and return its JSON', async () => {
@@ -132,6 +151,34 @@ describe('mcpPlugin (integration)', () => {
     expect(invoked!.surface).toBe('mcp')
   })
 
+  test('should redact a preflight through the checked tool\'s own redact list', async () => {
+    // The record is a `guren.preflight` invocation, but the redaction rules
+    // that apply to it are the *checked* tool's: the meta-tool declares none,
+    // and using its empty list would write a route's declared-secret field
+    // into the audit trail in the clear.
+    const seen: AgentToolInvoked[] = []
+    events.on(AgentToolInvoked, (event) => {
+      seen.push(event)
+    })
+
+    const client = await connectClient(token)
+    await client.listTools()
+    const result = await client.callTool({
+      name: 'guren.preflight',
+      arguments: { tool: 'profiles.store', input: { ssn: '123-45-6789', title: 'ok' } },
+    })
+    expect(result.isError).toBeUndefined()
+
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const invoked = seen.find((event) => event.tool === 'guren.preflight')
+    expect(invoked).toBeDefined()
+    const input = invoked!.arguments.input as Record<string, unknown>
+    expect(input.ssn).toBe('[REDACTED]')
+    // The rest survives: redaction that masked everything would pass this test
+    // for the wrong reason.
+    expect(input.title).toBe('ok')
+  })
+
   test('should hide and deny tools outside the token scopes', async () => {
     const readOnly = await createApiToken(store, {
       name: 'ro',
@@ -141,7 +188,7 @@ describe('mcpPlugin (integration)', () => {
     const client = await connectClient(readOnly.plainTextToken)
 
     const { tools } = await client.listTools()
-    expect(tools.map((tool) => tool.name)).toEqual(['posts.index'])
+    expect(tools.map((tool) => tool.name)).toEqual(['posts.index', 'guren.preflight'])
 
     const result = await client.callTool({ name: 'posts.store', arguments: { title: 'x', password: 'y' } })
     expect(result.isError).toBe(true)
