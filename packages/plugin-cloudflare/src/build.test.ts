@@ -583,6 +583,56 @@ describe('buildCloudflareOutput with a stale committed wrangler.jsonc', () => {
     expect(message).toContain('@modelcontextprotocol/sdk/server/mcp.js')
   })
 
+  test('should fail on generated residue under a custom output directory', async () => {
+    scaffoldApp(root, { mcpPlugin: true })
+    // Same residue, different outputDir — the alias target is a path this
+    // build chose, so matching the whole of it would miss every app that
+    // moved its output.
+    writeFileSync(
+      join(root, 'wrangler.jsonc'),
+      `{\n  "name": "legacy",\n  "alias": {\n`
+        + `    ${JSON.stringify(MCP_TRANSPORT_SPECIFIER)}: "./dist/cf/stub-mcp-transport.js"\n`
+        + `  }\n}\n`,
+    )
+
+    await expect(buildCloudflareOutput({ rootDir: root, skipAppBuild: true })).rejects.toThrow(
+      /@guren\/plugin-mcp/,
+    )
+  })
+
+  test('should leave an alias pointing at the developer own shim alone', async () => {
+    scaffoldApp(root, { mcpPlugin: true })
+    // An alias on this specifier is only *build residue* when it names the
+    // stub file this build writes. Pointing it somewhere else is a deliberate
+    // override — an alternative transport, an instrumented wrapper — and
+    // failing on it would refuse a config with nothing wrong with it, while
+    // claiming in the message that a stub is there when it is not.
+    writeFileSync(
+      join(root, 'wrangler.jsonc'),
+      `{\n  "name": "legacy",\n  "alias": {\n`
+        + `    ${JSON.stringify(MCP_TRANSPORT_SPECIFIER)}: "./shims/my-transport.js"\n`
+        + `  }\n}\n`,
+    )
+
+    await captureWarnings(() => buildCloudflareOutput({ rootDir: root, skipAppBuild: true }))
+
+    expect(existsSync(join(root, '.cloudflare/worker.js'))).toBe(true)
+  })
+
+  test('should leave a non-string alias target alone', async () => {
+    scaffoldApp(root, { mcpPlugin: true })
+    // Malformed rather than stale, and this guard exists to name one editable
+    // line — it cannot name one in a value that is not a path.
+    writeFileSync(
+      join(root, 'wrangler.jsonc'),
+      `{\n  "name": "legacy",\n  "alias": { ${JSON.stringify(MCP_TRANSPORT_SPECIFIER)}: 42 }\n}\n`,
+    )
+
+    await captureWarnings(() => buildCloudflareOutput({ rootDir: root, skipAppBuild: true }))
+
+    expect(existsSync(join(root, '.cloudflare/worker.js'))).toBe(true)
+  })
+
   test('should build normally when the app does not depend on the plugin', async () => {
     scaffoldApp(root)
     writeStaleConfig(root)

@@ -69,10 +69,13 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
   assertOutputDirOutsideRoot(out, root, 'Cloudflare build')
 
   const packageJson = readPackageJson(root)
-  // One read of the app's App MCP opt-in, threaded to both halves of the
+  // The App MCP opt-in is decided once and threaded to both halves of the
   // decision below — the guard on the committed config, and the alias set the
-  // scaffold writes. Two independent reads would be two places for them to
+  // scaffold writes. Deciding it twice would be two places for one answer to
   // disagree, silently; the other two deploy plugins thread it the same way.
+  // This does parse package.json a second time, after `readPackageJson` above
+  // answered a different question (scripts, name): a second parse is cheap and
+  // cannot disagree with anything, a second *decision* is neither.
   const mcpPlugin = appUsesMcpPlugin(root)
 
   // Checked here, before the app build: this is a one-line edit to a file the
@@ -160,6 +163,28 @@ const STUB_FILES: Record<DevOnlySpecifier | SqlClientSpecifier, string> = {
   '@aws-sdk/client-rds-data': 'stub-rds-data.js',
 }
 
+/**
+ * Does this alias target name the stub file *this build generates* for
+ * `specifier`, rather than something of the app's own?
+ *
+ * Answered from `STUB_FILES` rather than a re-spelled literal: the filename
+ * has exactly one definition, and a rename there must not leave a second
+ * spelling behind that silently stops matching.
+ *
+ * The comparison is on the last path segment, because the directory the alias
+ * points into is `outputDir`, an option — the same generated stub is
+ * `./.cloudflare/stub-mcp-transport.js` in one app and `./dist/cf/…` in the
+ * next. Both separators are split on: the value is a specifier wrangler
+ * resolves, so it is written with forward slashes, but a config hand-edited
+ * on Windows need not be.
+ */
+function isGeneratedStubPath(
+  target: string,
+  specifier: DevOnlySpecifier | SqlClientSpecifier,
+): boolean {
+  return target.split(/[\\/]/).pop() === STUB_FILES[specifier]
+}
+
 function writeDevOnlyStubs(out: string): void {
   for (const module of STUBBED_MODULES) {
     writeFileSync(
@@ -196,9 +221,9 @@ function devOnlyAliases(outRelative: string, mcpPlugin: boolean): Record<string,
 }
 
 /**
- * Fail rather than deploy an app whose committed `wrangler.jsonc` still
- * aliases the App MCP transport to a stub while its manifest declares
- * `@guren/plugin-mcp`.
+ * Fail rather than deploy an app whose committed `wrangler.jsonc` still points
+ * the App MCP transport at a stub *this build generated*, while its manifest
+ * declares `@guren/plugin-mcp`.
  *
  * The scaffold writes `wrangler.jsonc` once and never overwrites it, so an
  * app that adds the plugin later keeps an alias nothing in the build controls
@@ -206,6 +231,19 @@ function devOnlyAliases(outRelative: string, mcpPlugin: boolean): Record<string,
  * appearing only as `tools/list` returning nothing against a deployed worker.
  * A warning would be the wrong instrument: this is one line to delete, in a
  * file the developer owns, and the build can name it exactly.
+ *
+ * The *value* is what decides, not the key. An alias on this specifier is only
+ * build residue when it names the stub file this build writes; pointing it at
+ * a shim of the developer's own is a deliberate override — an alternative
+ * transport, an instrumented wrapper — and none of this build's business.
+ * Failing on the key alone would refuse a config that has nothing wrong with
+ * it, while asserting in the message that a stub is there when it is not.
+ *
+ * The test is on the filename from `STUB_FILES`, not on the whole path: the
+ * output directory the alias points into is an option, so the same residue
+ * reads as `./.cloudflare/…` or `./dist/cf/…`. A developer shim that happens
+ * to be named `stub-mcp-transport.js` would be misread, which is the one
+ * false positive left and is a name this build generates.
  *
  * `mcpPlugin` arrives as an argument rather than being read here, so this and
  * the alias set the scaffold writes cannot end up disagreeing about the same
@@ -232,11 +270,15 @@ function assertMcpTransportNotAliased(root: string, mcpPlugin: boolean): void {
   }
 
   const alias = config.alias
-  if (typeof alias !== 'object' || alias === null || !(MCP_TRANSPORT_SPECIFIER in alias)) {
+  if (typeof alias !== 'object' || alias === null) {
     return
   }
 
   const target = (alias as Record<string, unknown>)[MCP_TRANSPORT_SPECIFIER]
+  if (typeof target !== 'string' || !isGeneratedStubPath(target, MCP_TRANSPORT_SPECIFIER)) {
+    return
+  }
+
   throw new Error(
     `Cloudflare build: ${configPath} aliases the App MCP transport to a stub, but this app depends on ${MCP_PLUGIN_PACKAGE} — the endpoint would deploy compiled shut. Delete this one line from "alias":\n`
     + `  ${JSON.stringify(MCP_TRANSPORT_SPECIFIER)}: ${JSON.stringify(target)}\n`

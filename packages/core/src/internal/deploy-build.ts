@@ -511,9 +511,16 @@ export function appUsesMcpPlugin(root: string): boolean {
  * for it either way. Same for `@guren/cli` behind it, and for `bun:sqlite`
  * and `vite`, none of which the App MCP endpoint touches.
  *
- * The return type keeps the entries' narrow `kind` union, so a platform's
- * `Record<kind, message>` table stays exhaustively keyed on the three kinds
- * this list actually contains rather than widening to `DevOnlyModuleKind`.
+ * The return type keeps each entry's narrow `kind` so that a platform can
+ * index its `Record<kind, message>` table with `module.kind` at all. What
+ * makes those tables exhaustive is not this function — each is keyed off
+ * `DEV_ONLY_MODULES` directly (on Workers, that list plus
+ * `SQL_CLIENT_MODULES`), which is what turns a new kind there into a compile
+ * error there. Widening the return to `readonly DevOnlyModule[]` would leave
+ * that exhaustiveness untouched and instead break every one of the lookups,
+ * since `DevOnlyModuleKind` includes `'sql-driver'` — a kind Lambda's and
+ * Vercel's tables deliberately omit, because those two platforms decide the
+ * SQL clients per app rather than per platform.
  */
 export function stubbableDevOnlyModules(options: {
   mcpPlugin: boolean
