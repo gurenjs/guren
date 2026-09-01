@@ -212,7 +212,17 @@ function resolveAuditEmitter(app: MaybeApplication): AgentAuditEmitter | undefin
   try {
     if (!container.has(AGENT_AUDIT_BINDING)) return undefined
     const emitter = container.make<unknown>(AGENT_AUDIT_BINDING)
-    if (typeof emitter !== 'function') return undefined
+    if (typeof emitter !== 'function') {
+      // Said out loud, unlike the absent binding above. Nothing bound is an
+      // application that asked for no trail; something bound that cannot be
+      // called is one that asked for a trail and will not get it — and from
+      // the outside those two produce the same empty log.
+      consola.warn(
+        `This application binds "${AGENT_AUDIT_BINDING}" to a ${typeof emitter} rather than a function, `
+          + 'so this call is not being recorded. Bind what createAuditEmitter() returns.',
+      )
+      return undefined
+    }
     return emitter as AgentAuditEmitter
   } catch (error) {
     consola.warn(
@@ -450,13 +460,11 @@ export async function dispatchToolCall(
     throw error
   }
 
-  // The verdict marker is a field of the body, not the response header the
-  // seam sets: that header is deliberately not published API (see
-  // `internal/agent-preflight.ts`), and the body says `preflight: true` for
-  // exactly this reason. Reading it back also tells us when a `--preflight`
-  // went unanswered — an app on a @guren/core predating the seam runs the
-  // call, and reporting that as a rehearsal would be a lie about a write that
-  // happened.
+  // Read once, from the marker `mapToolResponse` carried off the seam's
+  // response header — see `readVerdict` for why the body is not where this
+  // question is answered. It also tells us when a `--preflight` went
+  // unanswered: an app on a `@guren/core` predating the seam runs the call,
+  // and reporting that as a rehearsal would be a lie about a write.
   const verdict = options.preflight ? readVerdict(outcome) : undefined
 
   // Recorded *after* the verdict is read, because the verdict is what decides
@@ -509,11 +517,20 @@ export async function dispatchToolCall(
  * probed tool is not lost: it rides in the record's arguments, exactly as the
  * meta-tool's own arguments carry it on MCP.
  *
- * `rehearsed` is decided by the *answer*, not by the flag. A `--preflight`
- * against an application whose `@guren/core` predates the preflight seam runs
- * the call for real, and that write is recorded under the real tool — the
+ * `rehearsed` is decided by the *answer*, not by the flag, and specifically by
+ * the seam's own marker on the response — see {@link readVerdict}. A
+ * `--preflight` against an application whose `@guren/core` predates the seam
+ * runs the call for real, and that write is recorded under the real tool; the
  * command warns about the same thing on stdout. Naming it a rehearsal because
  * the caller asked for one would be the trail lying about a write.
+ *
+ * One case the marker cannot settle: a `--preflight` that comes back an error.
+ * The seam marks only the verdict it answers with, so a 401 from an auth
+ * middleware, a 422 from the seam's own contract validation, and a 500 from
+ * the handler of an app that has no seam are indistinguishable here. Recorded
+ * under the real tool, which is the reading that claims least: an invocation
+ * with a 4xx says a call was made and refused, while `guren.preflight` would
+ * assert the handler did not run — a thing this surface would be guessing.
  */
 function record(
   audit: AgentAuditEmitter | undefined,
@@ -527,32 +544,71 @@ function record(
   // parses `guren.preflight` records from either surface.
   const args = rehearsed ? { tool: tool.toolName, input: options.args } : options.args
 
-  audit?.(
-    new AgentToolInvoked(
-      auditPrincipal(options.actingAs),
-      rehearsed ? PREFLIGHT_TOOL_NAME : tool.toolName,
-      redactAgentArguments(args, tool.redact),
-      status,
-      Math.round(performance.now() - startedAt),
-      'cli',
-    ),
-  )
+  // Guarded at the call, not only at the resolution. `agent.audit` is a public
+  // binding an application writes itself — the fixtures in this package's own
+  // tests do — so nothing guarantees the bound value is what
+  // `createAuditEmitter` returns, and any function satisfies the typeof check
+  // that resolved it. What `createAuditEmitter` returns never throws
+  // synchronously; something else might, and by this point on the ordinary
+  // path the tool's write has already happened. Failing the command then would
+  // be the inversion this whole emitter is built to prevent: the mutation
+  // taken, the report unprinted, the exit code non-zero. So the record is
+  // attempted, its failure is said, and the call still answers.
+  try {
+    audit?.(
+      new AgentToolInvoked(
+        auditPrincipal(options.actingAs),
+        rehearsed ? PREFLIGHT_TOOL_NAME : tool.toolName,
+        redactAgentArguments(args, tool.redact),
+        status,
+        Math.round(performance.now() - startedAt),
+        'cli',
+      ),
+    )
+  } catch (error) {
+    consola.warn(
+      'The agent audit emitter this application bound threw, so this call was not recorded: '
+        + `${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
 }
 
-function readVerdict(outcome: ToolCallOutcome): Record<string, unknown> | undefined {
-  if (outcome.isError) return undefined
+/**
+ * Whether the app answered a rehearsal, and with what.
+ *
+ * **The answer comes from `outcome.preflightVerdict`, never from the body.**
+ * `mapToolResponse` sets that field from the seam's response header and is the
+ * one place that sees it; re-deriving the same conclusion here by looking for
+ * a `preflight` field in the JSON would be the second, weaker copy the header
+ * exists to make unnecessary — and it fails in the direction an audit trail
+ * cannot afford. An app whose `@guren/core` predates the seam runs a
+ * `--preflight` call *for real*; if that route's own output happens to carry a
+ * `preflight` field, the body test reads a write that happened as a rehearsal
+ * that did not, and the mutation leaves no trace. A route's output cannot set
+ * the header.
+ *
+ * The body is still where the verdict's *contents* come from — what was
+ * validated, what went unverified — once the header has settled that this is a
+ * verdict at all.
+ */
+export function readVerdict(outcome: ToolCallOutcome): Record<string, unknown> | undefined {
+  if (outcome.preflightVerdict !== true) return undefined
+
   const text = outcome.content[0]?.text
-  if (!text) return undefined
+  if (!text) return {}
 
   try {
     const parsed = JSON.parse(text) as unknown
-    if (parsed !== null && typeof parsed === 'object' && (parsed as { preflight?: unknown }).preflight === true) {
+    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
       return parsed as Record<string, unknown>
     }
   } catch {
-    // Not JSON; the app answered with the route's own output.
+    // Marked as a verdict but unreadable. The marker is what establishes that
+    // the handler did not run, so the caller still gets a verdict — an empty
+    // one. Falling back to `undefined` here would file the call under the
+    // rehearsed tool's name, which is the claim this whole branch avoids.
   }
-  return undefined
+  return {}
 }
 
 export async function runToolCall(options: ToolCallOptions): Promise<void> {

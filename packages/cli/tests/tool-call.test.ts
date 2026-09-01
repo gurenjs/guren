@@ -6,7 +6,15 @@ import { describe, it, expect, beforeEach, afterEach, spyOn } from 'bun:test'
 import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { createTempWorkspace, linkWorkspaceCore, type TempWorkspace } from './helpers'
-import { parseActingAs, parseToolInput, runToolCall } from '../src/tool-call'
+import { dispatchToolCall, parseActingAs, parseToolInput, readVerdict, runToolCall } from '../src/tool-call'
+import {
+  AgentToolInvoked,
+  Router,
+  type AgentAuditEmitter,
+  type RouteDefinition,
+  type ToolCallOutcome,
+} from '@guren/core'
+import { consola } from 'consola'
 
 const repoRoot = resolve(import.meta.dir, '../../..')
 
@@ -482,5 +490,173 @@ describe('tool:call --as', () => {
   it('refuses an empty id', () => {
     expect(() => parseActingAs('user:')).toThrow('requires an id after the prefix')
     expect(() => parseActingAs('   ')).toThrow('--as requires a user id')
+  })
+})
+
+/**
+ * What decides that a response is a rehearsal rather than an execution.
+ *
+ * Driven as a unit because the interesting case cannot be built from a real
+ * application: it needs a response whose *body* claims to be a verdict while
+ * the seam never marked it, and any app this suite can boot has a `@guren/core`
+ * new enough that its seam intercepts a `--preflight` call before the handler.
+ * The case is real for an installed app older than the seam, which runs the
+ * call for real — and that is precisely the one where reading the body instead
+ * of the marker files a write that happened as a rehearsal that did not.
+ */
+describe('readVerdict', () => {
+  function outcome(body: unknown, extra: Partial<ToolCallOutcome> = {}): ToolCallOutcome {
+    return {
+      content: [{ type: 'text', text: JSON.stringify(body) }],
+      status: 200,
+      ...extra,
+    }
+  }
+
+  it('reads a verdict the seam marked', () => {
+    const verdict = readVerdict(outcome({ preflight: true, allowed: true, validated: ['body'] }, {
+      preflightVerdict: true,
+    }))
+
+    expect(verdict).toMatchObject({ allowed: true, validated: ['body'] })
+  })
+
+  it('does not read a route\'s own output as a verdict, whatever it says', () => {
+    // The mutation this pins: a `preflight: true` in the body, with no marker,
+    // is an ordinary response. An app predating the seam answers exactly this
+    // for a `--preflight` call it ran for real, and calling it a rehearsal
+    // would drop the write from the trail.
+    expect(readVerdict(outcome({ preflight: true, allowed: true }))).toBeUndefined()
+    expect(readVerdict(outcome({ ok: true }))).toBeUndefined()
+  })
+
+  it('still reports a verdict when the marked body cannot be read', () => {
+    // The marker is what establishes that the handler did not run. Returning
+    // `undefined` for an unreadable body would file the call under the tool it
+    // rehearsed — the claim this branch exists to avoid — so an empty verdict
+    // is the right answer.
+    const unreadable: ToolCallOutcome = {
+      content: [{ type: 'text', text: 'not json' }],
+      status: 200,
+      preflightVerdict: true,
+    }
+
+    expect(readVerdict(unreadable)).toEqual({})
+  })
+
+  it('does not read an error response as a verdict', () => {
+    expect(readVerdict(outcome({ message: 'nope' }, { isError: true, status: 422 }))).toBeUndefined()
+  })
+})
+
+/**
+ * The recording rules against a hand-built route graph and an injected
+ * `fetch`, which is what `dispatchToolCall` takes them for.
+ *
+ * One case here cannot be built any other way. A `--preflight` whose header the
+ * application *ignored* — an installed `@guren/core` predating the seam, which
+ * runs the call for real — needs a response that carries a `preflight` body
+ * with no verdict header, and no app this suite can boot will produce one: the
+ * seam is mounted on every `.agent()` route of the linked core and answers
+ * before the handler. Injecting the response is the only honest way to reach
+ * the case, and it is the case where reading the body instead of the marker
+ * files a write that happened as a rehearsal that did not.
+ */
+describe('dispatchToolCall recording', () => {
+  function definitions(): RouteDefinition[] {
+    const router = new Router()
+    router
+      .post('/notes', () => new Response('ok'))
+      .name('notes.store')
+      .agent({ description: 'File a note.', redact: ['note'] })
+    return router.definitions()
+  }
+
+  function collect(): { records: AgentToolInvoked[]; audit: AgentAuditEmitter } {
+    const records: AgentToolInvoked[] = []
+    // Only invocations reach this surface — it runs none of the four adapter
+    // checks a denial names — so the narrowing is an assertion about the
+    // command, not a convenience.
+    return { records, audit: (event) => records.push(event as AgentToolInvoked) }
+  }
+
+  it('records a write the app ran despite --preflight under the real tool', async () => {
+    const { records, audit } = collect()
+    const result = await dispatchToolCall(
+      definitions(),
+      // The shape an app with no seam answers with: a real 201, a body that
+      // happens to say `preflight`, and no verdict header.
+      async () => Response.json({ preflight: true, id: 1 }, { status: 201 }),
+      { name: 'notes.store', args: { title: 'Real', note: 'private' }, preflight: true, audit },
+    )
+
+    expect(result.verdict).toBeUndefined()
+    expect(result.preflightUnanswered).toBe(true)
+    expect(records).toHaveLength(1)
+    expect(records[0]!.tool).toBe('notes.store')
+    expect(records[0]!.status).toBe(201)
+    // Masked by the checked route's own list, flat rather than wrapped: this
+    // was an execution, not a rehearsal.
+    expect(records[0]!.arguments).toEqual({ title: 'Real', note: '[REDACTED]' })
+  })
+
+  it('records a dispatch that threw as a 500 under the real tool', async () => {
+    const { records, audit } = collect()
+
+    await expect(
+      dispatchToolCall(
+        definitions(),
+        () => Promise.reject(new Error('socket closed')),
+        { name: 'notes.store', args: { title: 'Lost', note: 'private' }, preflight: true, audit },
+      ),
+    ).rejects.toThrow('socket closed')
+
+    // Recorded before the rethrow, and under the real tool even though
+    // `--preflight` was asked for: with no answer to read, nothing here can
+    // say the handler did not run.
+    expect(records).toHaveLength(1)
+    expect(records[0]!.tool).toBe('notes.store')
+    expect(records[0]!.status).toBe(500)
+    expect(records[0]!.arguments).toEqual({ title: 'Lost', note: '[REDACTED]' })
+  })
+
+  it('keeps a string acting-as id a string in the record', async () => {
+    const { records, audit } = collect()
+    await dispatchToolCall(definitions(), async () => Response.json({ ok: true }, { status: 201 }), {
+      name: 'notes.store',
+      args: { title: 'Padded', note: 'private' },
+      actingAs: '0042',
+      audit,
+    })
+
+    // `0042` and `42` are different ids to any store that distinguishes them,
+    // and the record is where that distinction has to survive.
+    expect(records[0]!.principal).toEqual({ kind: 'user', id: '0042' })
+  })
+
+  it('answers the call even when the bound emitter throws', async () => {
+    // `agent.audit` is a public binding an application writes itself, so
+    // nothing guarantees the bound value is what `createAuditEmitter` returns.
+    // A command that failed a tool call in order to record it would invert the
+    // whole point — and by this line the write has already happened.
+    const warn = spyOn(consola, 'warn').mockImplementation((() => {}) as never)
+    try {
+      const result = await dispatchToolCall(
+        definitions(),
+        async () => Response.json({ ok: true }, { status: 201 }),
+        {
+          name: 'notes.store',
+          args: { title: 'Kept', note: 'private' },
+          audit: () => {
+            throw new Error('sink exploded')
+          },
+        },
+      )
+
+      expect(result.outcome.status).toBe(201)
+      expect(warn).toHaveBeenCalled()
+    } finally {
+      warn.mockRestore()
+    }
   })
 })
