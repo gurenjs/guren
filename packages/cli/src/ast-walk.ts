@@ -74,6 +74,7 @@ export function memberKeyName(member: {
  */
 export function unwrapTypeAssertion(node: Node): Node {
   let current = node
+  if (!current || typeof current !== 'object') return current
   while (
     current.type === 'TSAsExpression' ||
     current.type === 'TSSatisfiesExpression' ||
@@ -112,7 +113,12 @@ export function objectLiteral(node: Node | null | undefined): ObjectExpression |
  */
 export function literalString(value: unknown): string | null {
   if (!value || typeof value !== 'object') return null
-  const node = value as {
+  // `disk: 'media' as const` and `root: './x' satisfies string` spell a
+  // string as plainly as the bare literal does. Unwrapped here rather than
+  // at each caller because the miss is silent: a scanner reading `null` here
+  // reports "no value declared", which is the same answer it gives for a
+  // genuinely dynamic value — so the rule withdraws instead of failing.
+  const node = unwrapTypeAssertion(value as Node) as {
     type?: string
     value?: unknown
     quasis?: Array<{ value?: { cooked?: string } }>

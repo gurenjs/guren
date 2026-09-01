@@ -326,13 +326,18 @@ const url = await disk.temporaryUrl('private/document.pdf', expiration)
 const storage = createStorageManager({
   default: process.env.STORAGE_DISK ?? 'local',
   disks: {
-    local: { driver: 'local', root: './storage/app/public', url: '/storage' },
+    // 何からも配信されません。アップロードはこちらへ（下の注記を参照）。
+    local: { driver: 'local', root: './storage/app' },
+    // public/ の中にあるため配信されます。自分で用意するアセット向け。
+    public: { driver: 'local', root: './public/storage', url: '/storage', visibility: 'public' },
     s3: { driver: 's3', bucket: process.env.S3_BUCKET!, region: 'ap-northeast-1' },
   },
 })
 ```
 
 開発では `STORAGE_DISK=local`、本番では `STORAGE_DISK=s3`。コードの変更は不要で、`storage.disk()` は選ばれた方を返します。
+
+> **アップロードを受け取るディスクを `public/` 配下、および `guren storage:link` が公開する場所に置かないでください。** 配信ツリー配下のファイルは、署名も有効期限も認可チェックもなしに URL で取得できます。見知らぬ相手がアップロードしたファイルも同様です。アップロードは上記の `local` のようなディスクに置き、[attachments の配信ルート](./attachments.md)経由で渡してください。`guren check` は、その形になっている attachments 設定を失敗として報告します。
 
 この形について、2点注意があります。
 

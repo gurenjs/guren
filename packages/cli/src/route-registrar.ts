@@ -3,7 +3,7 @@ import { writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import type { ArrowFunctionExpression, File, FunctionDeclaration, FunctionExpression, Statement } from '@babel/types'
 import { walk } from './ast-walk'
-import { readIfExists } from './discovery'
+import { findFirstExisting, readIfExists } from './discovery'
 import { parseSourceFile } from './parse-cache'
 import { insertImport, PATCH_REASONS, type PatchResult } from './patch-helpers'
 
@@ -62,6 +62,27 @@ export const DEFAULT_ROUTES_FILE = 'routes/web.ts'
  * no routes at all. Shared with `doctor`, which has always probed this list.
  */
 export const ROUTES_ENTRY_CANDIDATES = [DEFAULT_ROUTES_FILE, 'routes/web.js', 'routes/api.ts', 'routes/api.js']
+
+/**
+ * The app's routes entry, or `null` when it has none.
+ *
+ * The one rule for "which file is this app's routes entry", next to the
+ * candidate list it reads. Four callers had open-coded
+ * `findFirstExisting(cwd, ROUTES_ENTRY_CANDIDATES)`, each with its own
+ * not-found policy, and a fifth assumed {@link DEFAULT_ROUTES_FILE} outright
+ * — which is how `guren add attachments` came to mount a delivery route in
+ * `routes/api.ts` and `guren check` came to report, in the same app, that
+ * nothing had mounted it.
+ *
+ * `null` rather than a fallback: "no routes entry" is a real answer that
+ * callers act on differently — the check rules treat it as positive evidence
+ * that nothing can be mounted, the scaffolders warn, `doctor` reports it.
+ * Baking {@link DEFAULT_ROUTES_FILE} in here would hand every one of them the
+ * name of a file that does not exist.
+ */
+export async function resolveRoutesEntry(cwd: string): Promise<string | null> {
+  return findFirstExisting(cwd, ROUTES_ENTRY_CANDIDATES)
+}
 
 export interface RouteRegistrar {
   /**

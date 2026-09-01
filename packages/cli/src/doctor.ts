@@ -27,7 +27,7 @@ import {
 import { AGENTS_MANIFEST_FILE, planAgentManifest, type AgentManifestPlan } from './agents-types'
 import { emptyActions } from './controller-methods'
 import { parseSourceFile } from './parse-cache'
-import { ROUTES_ENTRY_CANDIDATES } from './route-registrar'
+import { resolveRoutesEntry } from './route-registrar'
 import {
   analyzeDeployRuntime,
   bunlessTargets,
@@ -366,7 +366,7 @@ async function detectAppEntry(context: DoctorRuleContext): Promise<DoctorCheck> 
 }
 
 async function detectRoutes(context: DoctorRuleContext): Promise<DoctorCheck> {
-  const routesFile = await findFirstExisting(context.cwd, ROUTES_ENTRY_CANDIDATES)
+  const routesFile = await resolveRoutesEntry(context.cwd)
   if (!routesFile) {
     return createCheck(
       'routes',
@@ -874,7 +874,7 @@ async function detectConfigDrift(context: DoctorRuleContext): Promise<DoctorChec
     combinedSource.includes('routes:') ||
     combinedSource.includes('routes,')
   )
-  const routeFileExists = await findFirstExisting(context.cwd, ROUTES_ENTRY_CANDIDATES)
+  const routeFileExists = await resolveRoutesEntry(context.cwd)
 
   if (routeFileExists && !hasRoutesImport) {
     issues.push('Route file exists but may not be wired into createApp()')

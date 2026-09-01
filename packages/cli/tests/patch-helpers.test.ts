@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
-import { addImport, addToArrayArgument, addToArrayOption } from '../src/patch-helpers'
+import { addImport, addToArrayArgument, addToArrayOption, insertImport } from '../src/patch-helpers'
 import { createTempWorkspace } from './helpers'
 
 describe('addImport', () => {
@@ -429,5 +429,32 @@ describe('addToArrayArgument — safe declines', () => {
     } finally {
       await workspace.cleanup()
     }
+  })
+})
+
+describe('insertImport — already-imported detection', () => {
+  const STATEMENT = "import { registerAttachmentRoutes } from '@guren/core'"
+
+  // The literal-line test only recognizes the exact statement a scaffolder
+  // would have written. Merging that import into a neighbouring one — the
+  // idiomatic form, and what any formatter produces — used to read as absent,
+  // so a re-run appended a second one and the app stopped compiling on a
+  // duplicate binding.
+  it('treats a binding merged into another import from the same module as present', () => {
+    const merged = "import { Router, registerAttachmentRoutes, requireAuthenticated } from '@guren/core'\n"
+    expect(insertImport(merged, STATEMENT)).toBeNull()
+  })
+
+  it('sees through a multi-line import block', () => {
+    const multiline = "import {\n  Router,\n  registerAttachmentRoutes,\n} from '@guren/core'\n"
+    expect(insertImport(multiline, STATEMENT)).toBeNull()
+  })
+
+  // Conservative on purpose: each of these leaves the local name unbound, so
+  // inserting is correct and skipping would drop a needed import.
+  it('still inserts when the binding is absent, aliased away, or from another module', () => {
+    expect(insertImport("import { Router } from '@guren/core'\n", STATEMENT)).not.toBeNull()
+    expect(insertImport("import { registerAttachmentRoutes as mount } from '@guren/core'\n", STATEMENT)).not.toBeNull()
+    expect(insertImport("import { registerAttachmentRoutes } from './local'\n", STATEMENT)).not.toBeNull()
   })
 })

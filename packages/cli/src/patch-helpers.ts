@@ -139,6 +139,65 @@ function appendArrayEntry(arrayInterior: string, valueSource: string): string {
 }
 
 /**
+ * Whether every binding `importStatement` asks for is already imported from
+ * the same module, however that import is spelled.
+ *
+ * The literal-line test above only recognizes the exact statement this
+ * package would have written, so an import that has since been *merged* —
+ * `import { Router, registerAttachmentRoutes } from '@guren/core'`, which is
+ * the idiomatic form and what any formatter produces — reads as absent. The
+ * patch then appends a second `import { registerAttachmentRoutes } from
+ * '@guren/core'` and the app stops compiling on a duplicate binding. Re-running
+ * a scaffolder is supposed to repair, not break.
+ *
+ * Deliberately conservative: it answers only for plain named imports of the
+ * same module, and only when *every* requested binding is present. A default
+ * or namespace import, a different module, or a partial overlap falls through
+ * to the insert, because merging into someone else's import statement is a
+ * bigger edit than this function is allowed to make.
+ */
+function namedBindingsAlreadyImported(content: string, importStatement: string): boolean {
+  const requested = parseNamedImport(importStatement)
+  if (!requested) return false
+
+  const existing = new Set<string>()
+  // `[\s\S]` rather than `.` so a multi-line import block is one match.
+  const pattern = new RegExp(
+    `import\\s+(?:type\\s+)?\\{([\\s\\S]*?)\\}\\s*from\\s*['"]${escapeRegExp(requested.source)}['"]`,
+    'g',
+  )
+  for (const match of content.matchAll(pattern)) {
+    for (const binding of splitBindings(match[1] ?? '')) existing.add(binding)
+  }
+
+  return requested.bindings.length > 0 && requested.bindings.every((binding) => existing.has(binding))
+}
+
+/** `{ a, b as c }` from `'mod'` → bindings `['a', 'c']`; `null` for any other import form. */
+function parseNamedImport(statement: string): { bindings: string[]; source: string } | null {
+  const match = /^import\s+(?:type\s+)?\{([\s\S]*?)\}\s*from\s*['"]([^'"]+)['"];?$/.exec(statement)
+  if (!match) return null
+  return { bindings: splitBindings(match[1] ?? ''), source: match[2] ?? '' }
+}
+
+/**
+ * The local names a binding list introduces. `x as y` binds `y` — the local
+ * name is what can collide, and what TypeScript reports as a duplicate.
+ */
+function splitBindings(list: string): string[] {
+  return list
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const aliased = /\bas\s+([A-Za-z_$][\w$]*)$/.exec(entry)
+      if (aliased) return aliased[1] ?? ''
+      return entry.replace(/^type\s+/, '').trim()
+    })
+    .filter(Boolean)
+}
+
+/**
  * `content` with `importStatement` inserted after the last existing import, or
  * `null` when it is already there.
  *
@@ -152,6 +211,10 @@ export function insertImport(content: string, importStatement: string): string |
   const regex = new RegExp(`^\\s*${importPattern}\\s*$`, 'm')
 
   if (regex.test(content)) {
+    return null
+  }
+
+  if (namedBindingsAlreadyImported(content, normalizedImport)) {
     return null
   }
 

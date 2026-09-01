@@ -13,11 +13,15 @@ const disks = {
   // disk.url() returns a URL that actually resolves (images and the other
   // allowlisted extensions; add a route for anything else).
   //
-  // For assets you ship, then. Never for bytes someone uploaded: served
-  // straight off this disk, an uploaded .svg comes back as image/svg+xml and
-  // its script runs on your origin. Uploads belong on `local` above, handed
-  // out through the attachments delivery route — which is what `guren add
-  // attachments` configures, and what `guren check` verifies.
+  // For assets you ship, then. Never for bytes someone uploaded: anything on
+  // this disk is fetchable by URL with no signature, no expiry and no
+  // authorization check. The framework forces a download for document types
+  // served out of public/, so an uploaded .svg will not execute on your
+  // origin — but that is a backstop against one consequence, not access
+  // control, and inlineDocuments: true opts out of it. Uploads belong on
+  // `local` above, handed out through the attachments delivery route — which
+  // is what `guren add attachments` configures, and what `guren check`
+  // verifies.
   public: { driver: 'local', root: './public/storage', url: '/storage', visibility: 'public' },
 } as const
 

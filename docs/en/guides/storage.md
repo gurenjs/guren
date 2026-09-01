@@ -326,13 +326,18 @@ Declare every disk once and pick one with an environment variable, the way `bunx
 const storage = createStorageManager({
   default: process.env.STORAGE_DISK ?? 'local',
   disks: {
-    local: { driver: 'local', root: './storage/app/public', url: '/storage' },
+    // Not served by anything. Uploads belong here — see the note below.
+    local: { driver: 'local', root: './storage/app' },
+    // Served, because it is inside public/. For assets you ship.
+    public: { driver: 'local', root: './public/storage', url: '/storage', visibility: 'public' },
     s3: { driver: 's3', bucket: process.env.S3_BUCKET!, region: 'ap-northeast-1' },
   },
 })
 ```
 
 `STORAGE_DISK=local` in development, `STORAGE_DISK=s3` in production — no code change, and `storage.disk()` returns whichever one is selected.
+
+> **Do not root a disk that receives uploads inside `public/`, or anywhere `guren storage:link` exposes.** Everything under the served tree is fetchable by URL with no signature, no expiry and no authorization check — including files a stranger uploaded. Keep uploads on a disk like `local` above and hand them out through the [attachments delivery route](./attachments.md); `guren check` fails an attachments config whose disk is reachable that way.
 
 Two things to know about this shape:
 
