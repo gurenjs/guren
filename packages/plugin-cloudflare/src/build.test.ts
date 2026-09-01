@@ -644,15 +644,19 @@ describe('buildCloudflareOutput with a stale committed wrangler.jsonc', () => {
     expect(existsSync(join(root, '.cloudflare/worker.js'))).toBe(true)
   })
 
-  test('should not fail on a comment mentioning the transport specifier', async () => {
+  test('should not fail on the alias line commented out rather than deleted', async () => {
     scaffoldApp(root, { mcpPlugin: true })
-    // Exactly what a developer following the failure message leaves behind.
+    // What a developer following the failure message actually leaves behind:
+    // the line commented out, not deleted. Both the specifier and the stub
+    // filename are still in the file, so a guard that matched the text rather
+    // than the parsed keys would fail this build permanently, with the
+    // instruction it prints already carried out.
     writeFileSync(
       join(root, 'wrangler.jsonc'),
-      `{\n  // Deleted the ${MCP_TRANSPORT_SPECIFIER} alias so the App MCP\n`
-        + `  // endpoint works on Workers.\n`
-        + `  "name": "legacy",\n  "main": ".cloudflare/worker.js",\n  "alias": {\n`
+      `{\n  "name": "legacy",\n  "main": ".cloudflare/worker.js",\n  "alias": {\n`
         + `    "bun:sqlite": "./.cloudflare/stub-bun-sqlite.js",\n`
+        + `    // Removed for the App MCP endpoint (RFC 0016):\n`
+        + `    // ${JSON.stringify(MCP_TRANSPORT_SPECIFIER)}: "./.cloudflare/stub-mcp-transport.js"\n`
         + `  }\n}\n`,
     )
 
