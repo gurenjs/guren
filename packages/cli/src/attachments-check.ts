@@ -1,5 +1,5 @@
-import { readdir, realpath } from 'node:fs/promises'
-import { dirname, join, relative, resolve, sep } from 'node:path'
+import { readdir, readlink, realpath } from 'node:fs/promises'
+import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import type { CallExpression, ObjectExpression, ObjectProperty } from '@babel/types'
 import { AttachmentDeliveryController, type RouteDefinition } from '@guren/core'
 import { literalString, memberKeyName, objectLiteral, unwrapTypeAssertion, walk } from './ast-walk'
@@ -531,6 +531,12 @@ function isAtOrWithin(root: string, candidate: string): boolean {
  *    (workspace layouts, macOS `/var`), so canonicalizing one side alone
  *    misjudges those.
  *
+ *    The plain lexical test stays first and is not subsumed by that one: a
+ *    root that does not exist yet cannot be canonicalized, so the canonical
+ *    comparison would weigh a resolved `publicDir` against an unresolved root
+ *    (`/private/var/...` against `/var/...` on macOS) and answer false for the
+ *    plain in-`public/` case. Deleting it silently breaks the base case.
+ *
  * 2. The served tree contains a symlink pointing *out* at the disk root —
  *    which is exactly what `guren storage:link` creates (`public/storage` to
  *    `storage/app/public`). Nothing about the root's own path reveals this,
@@ -553,44 +559,79 @@ async function isReachableFromPublicDir(publicDir: string, root: string): Promis
   const [realPublic, realRoot] = await Promise.all([canonicalize(publicDir), canonicalize(root)])
   if (isAtOrWithin(realPublic, realRoot)) return true
 
-
   // ENOENT read directly rather than probed for: an existsSync-style
   // pre-check turns a permissions error on the parent into "absent", which
   // would fail this rule open exactly where the filesystem is unusual.
-  let entries
-  try {
-    entries = await readdir(publicDir, { withFileTypes: true })
-  } catch {
-    return false
-  }
+  const entries = await readdir(publicDir, { withFileTypes: true }).catch(() => null)
+  if (!entries) return false
 
   const links = entries.filter((entry) => entry.isSymbolicLink())
-  const targets = await Promise.all(links.map((entry) => canonicalize(join(publicDir, entry.name))))
-  // Judged against the directory attachments are actually written to, not
-  // against the disk root, and in one direction only. `storage:link` exposes
-  // `storage/app/public`, which is *inside* the scaffold's own root
-  // (`storage/app`) but does not contain `storage/app/attachments` — so
-  // asking whether the link and the root overlap at all would fail the
-  // default scaffold the moment a user ran a first-party command.
-  return targets.some((target) => isAtOrWithin(target, attachmentsPrefix(realRoot)))
+  const targets = await Promise.all(links.map((entry) => linkTarget(join(publicDir, entry.name))))
+
+  // Judged against the directory attachments are actually written to
+  // (`<root>/attachments`, the engine's object key prefix) rather than
+  // against the disk root. `storage:link` exposes `storage/app/public`,
+  // which is *inside* the scaffold's own root (`storage/app`) but does not
+  // contain `storage/app/attachments` — so asking whether the link and the
+  // root merely overlap would fail the default scaffold the moment anyone
+  // ran a first-party command.
+  //
+  // Both directions against that prefix, though: a link may expose a
+  // directory containing the uploads, or one *inside* them
+  // (`public/leak -> storage/app/attachments/<id>` exposes that id's files).
+  // Neither direction reintroduces the false positive above, because
+  // `storage/app/public` neither contains nor sits inside
+  // `storage/app/attachments`.
+  const prefix = join(realRoot, 'attachments')
+  return targets.some((target) => isAtOrWithin(target, prefix) || isAtOrWithin(prefix, target))
 }
 
 /**
- * Where the engine writes attachment objects under a disk root — it keys
- * every object on `attachments/<id>/<name>`, so exposing any ancestor of
- * this directory exposes the uploads.
+ * `realpath` for a path that need not exist: the deepest ancestor that does
+ * exist is resolved, and the remaining segments are appended unchanged.
+ *
+ * Plain `realpath`-or-fall-back-to-the-input is not enough, and the way it
+ * fails is a false pass. These comparisons weigh a disk root against a
+ * symlink target, and both routinely point at directories the app has not
+ * created yet — a disk receives its first upload, a link is made before its
+ * target exists. If one side resolves and the other does not, the two are
+ * written in different vocabularies and never match: on macOS a temp dir is
+ * `/var/folders/…` resolved and `/private/var/folders/…` unresolved, so the
+ * comparison silently answers "unrelated" for two paths that are the same
+ * directory. Resolving as far as each path allows puts both in the same
+ * vocabulary whether or not the leaves exist.
  */
-function attachmentsPrefix(root: string): string {
-  return join(root, 'attachments')
+async function canonicalize(path: string): Promise<string> {
+  let current = path
+  const trailing: string[] = []
+
+  // Bounded by the path's own depth: `dirname` reaches the root and stops.
+  while (true) {
+    const resolved = await realpath(current).catch(() => null)
+    if (resolved !== null) return trailing.length === 0 ? resolved : join(resolved, ...trailing)
+    const parent = dirname(current)
+    if (parent === current) return path
+    trailing.unshift(basename(current))
+    current = parent
+  }
 }
 
-/** `realpath`, or the path unchanged when it does not exist yet. */
-async function canonicalize(path: string): Promise<string> {
-  try {
-    return await realpath(path)
-  } catch {
-    return path
-  }
+/**
+ * Where a symlink points, canonicalized — falling back to the link's own
+ * resolved target when the destination does not exist yet.
+ *
+ * `realpath` alone fails open here. A link created before its target
+ * (`public/uploads` to `storage/app/attachments`, with no upload written yet)
+ * cannot be resolved, so `canonicalize` would answer with the link's *own*
+ * path — which lives under `public/` and so matches nothing — and the scan
+ * would report safe. The first upload then creates the directory and every
+ * attachment is served. Reading the link itself gives the intended
+ * destination whether or not it exists.
+ */
+async function linkTarget(path: string): Promise<string> {
+  const target = await readlink(path).catch(() => null)
+  if (target === null) return canonicalize(path)
+  return canonicalize(resolve(dirname(path), target))
 }
 
 /**

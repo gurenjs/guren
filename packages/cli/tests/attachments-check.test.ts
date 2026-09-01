@@ -856,6 +856,40 @@ export function register(): unknown {
       }
     })
 
+    // The link is created before its target — routine, since the directory
+    // appears on first upload. `realpath` cannot resolve it, and resolving
+    // only the side that exists puts the two paths in different vocabularies
+    // (/var vs /private/var on macOS), so they never compare equal and the
+    // scan reports safe. The first upload then creates the target and serves
+    // every attachment.
+    it('fails a link whose target does not exist yet', async () => {
+      const workspace = await createTempWorkspace('guren-cli-public-disk-dangling-')
+      try {
+        const files = await app(workspace.dir, './storage/app')
+        await symlink(join(workspace.dir, 'storage/app/attachments'), join(workspace.dir, 'public/uploads'))
+
+        expect((await run(workspace.dir, files))[0]?.status).toBe('fail')
+      } finally {
+        await workspace.cleanup()
+      }
+    })
+
+    // A link into the uploads rather than around them still exposes the files
+    // it points at, so containment is tested in both directions against the
+    // attachments/ prefix.
+    it('fails a link exposing one attachment directory', async () => {
+      const workspace = await createTempWorkspace('guren-cli-public-disk-descendant-')
+      try {
+        const files = await app(workspace.dir, './storage/app')
+        await mkdir(join(workspace.dir, 'storage/app/attachments/known-id'), { recursive: true })
+        await symlink(join(workspace.dir, 'storage/app/attachments/known-id'), join(workspace.dir, 'public/leak'))
+
+        expect((await run(workspace.dir, files))[0]?.status).toBe('fail')
+      } finally {
+        await workspace.cleanup()
+      }
+    })
+
     it('fails when the link exposes the root itself', async () => {
       const workspace = await createTempWorkspace('guren-cli-public-disk-link-root-')
       try {
