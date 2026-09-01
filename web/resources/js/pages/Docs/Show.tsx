@@ -111,6 +111,19 @@ function loadMermaid(): Promise<MermaidApi> {
   return mermaidLoader
 }
 
+/**
+ * A hash is whatever is in the address bar, not necessarily something this
+ * page wrote: `#%` makes decodeURIComponent throw, and an exception here
+ * would take the whole effect — and with it the router subscription — down.
+ */
+function decodeFragment(hash: string): string {
+  try {
+    return decodeURIComponent(hash)
+  } catch {
+    return hash
+  }
+}
+
 interface TocItem {
   id: string
   text: string
@@ -231,7 +244,7 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
     let pending: ReturnType<typeof setTimeout> | undefined
 
     const scrollToFragment = () => {
-      const id = decodeURIComponent(window.location.hash.slice(1))
+      const id = decodeFragment(window.location.hash.slice(1))
       if (!id) return
 
       // Inertia announces the navigation before React has necessarily

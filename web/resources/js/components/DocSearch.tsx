@@ -18,6 +18,7 @@ const COPY = {
     idle: 'Type to search the guides and tutorials.',
     empty: 'No matches.',
     error: 'Search is unavailable right now. Try again in a moment.',
+    throttled: 'Too many searches. Give it a moment.',
     unavailable: 'The search index has not been built for this deployment yet.',
     close: 'Close search',
     hint: 'to select',
@@ -30,6 +31,7 @@ const COPY = {
     idle: '入力するとガイドとチュートリアルを検索します。',
     empty: '一致するものがありません。',
     error: '検索を利用できません。しばらくしてからお試しください。',
+    throttled: '検索の回数が多すぎます。少し待ってからお試しください。',
     unavailable: 'このデプロイでは検索インデックスがまだ作られていません。',
     close: '検索を閉じる',
     hint: 'で移動',
@@ -45,6 +47,7 @@ type Display =
   | { kind: 'results'; hits: DocSearchHit[] }
   | { kind: 'empty' }
   | { kind: 'error' }
+  | { kind: 'throttled' }
   | { kind: 'unavailable' }
 
 /** The line shown in place of a result list, for every state that has none. */
@@ -56,12 +59,17 @@ function statusMessage(kind: Display['kind'], copy: (typeof COPY)[DocSearchLocal
       return copy.error
     case 'unavailable':
       return copy.unavailable
+    case 'throttled':
+      return copy.throttled
     case 'loading':
       return '…'
     default:
       return copy.idle
   }
 }
+
+/** Everything inside the dialog that Tab can reach, in document order. */
+const FOCUSABLE = 'a[href], button, input, select, [tabindex]:not([tabindex="-1"])'
 
 /** A text field the reader is already typing in should keep the `/` key. */
 function isTypingTarget(target: EventTarget | null): boolean {
@@ -93,6 +101,7 @@ export function DocSearch({ locale, className = '' }: DocSearchProps) {
   // rendering a guess would mismatch during hydration.
   const [isApple, setIsApple] = useState(false)
 
+  const dialogRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const optionRefs = useRef<Array<HTMLAnchorElement | null>>([])
@@ -115,11 +124,18 @@ export function DocSearch({ locale, className = '' }: DocSearchProps) {
     triggerRef.current?.focus()
   }, [search])
 
+  // Re-subscribed whenever the dialog opens or closes, so the shortcut can
+  // route through close() — which retires the queued search and returns focus
+  // — rather than flipping the flag and leaving both behind.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault()
-        setOpen((wasOpen) => !wasOpen)
+        if (open) {
+          close()
+        } else {
+          setOpen(true)
+        }
         return
       }
       if (event.key === '/' && !isTypingTarget(event.target) && !event.metaKey && !event.ctrlKey) {
@@ -130,7 +146,7 @@ export function DocSearch({ locale, className = '' }: DocSearchProps) {
 
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
-  }, [])
+  }, [open, close])
 
   useEffect(() => {
     if (!open) {
@@ -165,6 +181,8 @@ export function DocSearch({ locale, className = '' }: DocSearchProps) {
     search.schedule(trimmed, searchLocale, (outcome: DocSearchOutcome) => {
       if (outcome.status === 'unavailable') {
         setDisplay({ kind: 'unavailable' })
+      } else if (outcome.status === 'throttled') {
+        setDisplay({ kind: 'throttled' })
       } else if (outcome.status === 'error') {
         setDisplay({ kind: 'error' })
       } else {
@@ -181,12 +199,30 @@ export function DocSearch({ locale, className = '' }: DocSearchProps) {
     optionRefs.current[selected]?.scrollIntoView({ block: 'nearest' })
   }, [selected])
 
-  const onInputKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+  /**
+   * Escape and Tab belong to the dialog rather than to the input: `aria-modal`
+   * promises that the keyboard cannot leave, and Escape has to work from the
+   * close button and the locale select too.
+   */
+  const onDialogKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'Escape') {
       event.preventDefault()
       close()
       return
     }
+    if (event.key !== 'Tab') {
+      return
+    }
+
+    const focusable = [...(dialogRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [])]
+    const edge = event.shiftKey ? focusable[0] : focusable.at(-1)
+    if (focusable.length > 0 && document.activeElement === edge) {
+      event.preventDefault()
+      ;(event.shiftKey ? focusable.at(-1) : focusable[0])?.focus()
+    }
+  }
+
+  const onInputKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (hits.length === 0) {
       return
     }
@@ -229,9 +265,11 @@ export function DocSearch({ locale, className = '' }: DocSearchProps) {
           }}
         >
           <div
+            ref={dialogRef}
             role="dialog"
             aria-modal="true"
             aria-label={copy.dialogLabel}
+            onKeyDown={onDialogKeyDown}
             className="flex max-h-[70vh] w-full max-w-[640px] flex-col overflow-hidden rounded-xl border border-docs-border bg-docs-page shadow-2xl"
           >
             <div className="flex items-center gap-2 border-b border-docs-border px-4 py-3">
@@ -287,7 +325,19 @@ export function DocSearch({ locale, className = '' }: DocSearchProps) {
                     role="option"
                     aria-selected={index === selected}
                     href={result.url}
-                    onClick={() => setOpen(false)}
+                    onClick={(event: React.MouseEvent<HTMLAnchorElement>) => {
+                      setOpen(false)
+                      // A result inside the document already open is a
+                      // same-URL visit, which Inertia treats as a replacement:
+                      // it remounts the page, skips the navigate event, and
+                      // resets scroll afterwards — so the page's own fragment
+                      // effect cannot put the reader on the heading. Let the
+                      // browser do it instead.
+                      if (result.url.split('#')[0] === window.location.pathname) {
+                        event.preventDefault()
+                        window.location.hash = result.url.slice(result.url.indexOf('#') + 1)
+                      }
+                    }}
                     onMouseEnter={() => setSelected(index)}
                     className={`block border-b border-docs-border px-4 py-3 no-underline last:border-b-0 ${
                       index === selected ? 'bg-docs-accent-tint' : ''
@@ -309,7 +359,12 @@ export function DocSearch({ locale, className = '' }: DocSearchProps) {
                   </Link>
                 ))
               ) : (
-                <p className="px-4 py-8 text-center text-sm text-docs-text-muted">
+                <p
+                  // Announced when it changes: every one of these states
+                  // arrives after an await, with no other cue that it did.
+                  aria-live="polite"
+                  className="px-4 py-8 text-center text-sm text-docs-text-muted"
+                >
                   {statusMessage(display.kind, copy)}
                 </p>
               )}

@@ -19,6 +19,7 @@ export interface DocSearchHit {
 export type DocSearchOutcome =
   | { status: 'ok'; hits: DocSearchHit[] }
   | { status: 'unavailable' }
+  | { status: 'throttled' }
   | { status: 'error' }
 
 export type DocSearchLocale = 'en' | 'ja'
@@ -98,6 +99,13 @@ export function createDocSearchRunner(options: RunnerOptions = {}): DocSearchRun
         return { status: 'unavailable' }
       }
 
+      // A debounce collapses a burst; it is not a rate bound, and sustained
+      // editing can still reach the endpoint's limit. Saying so beats the
+      // generic failure message, which invites the reader to keep typing.
+      if (response.status === 429) {
+        return { status: 'throttled' }
+      }
+
       if (!response.ok) {
         return { status: 'error' }
       }
@@ -118,7 +126,12 @@ export function createDocSearchRunner(options: RunnerOptions = {}): DocSearchRun
   }
 }
 
-/** Long enough that a burst of typing is one request, short enough to feel live. */
+/**
+ * Long enough that a burst of typing is one request, short enough to feel
+ * live. Note what it is not: every pause longer than this sends a request, so
+ * this bounds a burst and not a minute. The endpoint's own limit is what
+ * bounds the minute, and the UI has to say so when it is reached.
+ */
 export const SEARCH_DEBOUNCE_MS = 150
 
 export interface DebouncedDocSearch {
@@ -154,7 +167,11 @@ export function createDebouncedDocSearch(
     cancel,
 
     schedule(query, locale, deliver) {
-      clearTimeout(timer)
+      // Cancel rather than only clearing the timer: a request already in
+      // flight still held the current token, so for the 150 ms until the new
+      // one starts it could deliver its results into the new query's loading
+      // state — stale rows, clickable, under something else the reader typed.
+      cancel()
       timer = setTimeout(() => {
         timer = undefined
         void runner.run(query, locale).then((outcome) => {

@@ -188,6 +188,18 @@ describe('createDocSearchRunner', () => {
     expect(await fresh).toEqual({ status: 'ok', hits: [hit('routing')] })
   })
 
+  it('distinguishes being rate limited from a failure', async () => {
+    // The reader is told to wait rather than to try again, which is what the
+    // generic failure message invites.
+    const deferred = deferredFetch()
+    const runner = createDocSearchRunner({ fetch: deferred.fetch })
+
+    const pending = runner.run('routing', 'en')
+    deferred.releases[0](new Response('{}', { status: 429 }))
+
+    expect(await pending).toEqual({ status: 'throttled' })
+  })
+
   it('reports a server failure', async () => {
     const deferred = deferredFetch()
     const runner = createDocSearchRunner({ fetch: deferred.fetch })
@@ -275,6 +287,23 @@ describe('createDebouncedDocSearch', () => {
     await vi.advanceTimersByTimeAsync(200)
 
     expect(deliver).not.toHaveBeenCalled()
+    vi.useRealTimers()
+  })
+
+  it('retires a running request when a newer query is scheduled', async () => {
+    // Only the timer used to be cleared, so for the debounce interval the
+    // in-flight request still held the current token — long enough to deliver
+    // its rows into the loading state of a query the reader had moved on from.
+    vi.useFakeTimers()
+    const spy = runnerSpy()
+    const search = createDebouncedDocSearch({ runner: spy.runner, delayMs: 150 })
+
+    search.schedule('old', 'en', () => {})
+    await vi.advanceTimersByTimeAsync(200)
+    expect(spy.run).toHaveBeenCalledTimes(1)
+
+    search.schedule('new', 'en', () => {})
+    expect(spy.cancel).toHaveBeenCalled()
     vi.useRealTimers()
   })
 
