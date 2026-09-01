@@ -383,12 +383,13 @@ describe('createSqliteDatabase connection-URI filenames', () => {
 
   // Accepting the URI is only half of it: the driver `mkdir -p`s the database's
   // directory, and a URI handed to `resolve()` is taken as a *relative* name —
-  // so the tree it prepares is `<cwd>/file:/…` while sqlite opens the path the
-  // URI actually meant. Both halves are asserted here because each alone admits
-  // a wrong fix: the target directory does not exist yet, so an implementation
-  // that just skips the mkdir for `file:` URIs fails to open at all, and one
-  // that keeps concatenating leaves the stray tree behind. It is empty and
-  // untracked, which is why no build, typecheck or test gate ever reported it.
+  // so the tree it prepares is `<cwd>/file:/…`. Both halves are asserted here
+  // because each alone admits a wrong fix: the target directory does not exist
+  // yet, so an implementation that just skips the mkdir for `file:` URIs fails
+  // to open at all, and one that keeps concatenating leaves the stray tree
+  // behind. Untracked, which is why no build, typecheck or test gate reported
+  // it — and empty only where the host's sqlite parses the URI, which is the
+  // half of this that is not portable and why the driver resolves it itself.
   test('should create the directory the URI names, not one named after the URI', async () => {
     const target = join(workDir, 'nested', 'deep.db')
     const database = createSqliteDatabase({
@@ -437,6 +438,35 @@ describe('createSqliteDatabase connection-URI filenames', () => {
     expect(existsSync(strayUriRoot)).toBe(false)
   })
 
+  // Resolving the URI to a path is what makes it portable, and a path cannot
+  // carry the parameters a URI can. Dropping them silently is the one outcome
+  // worth refusing: `mode=ro` would come back as a writable database on a host
+  // that used to honour it.
+  test('should reject a file: URI carrying query parameters', async () => {
+    const database = createSqliteDatabase({
+      migrationsFolder: join(workDir, 'migrations'),
+      filename: `file://${join(workDir, 'ro.db')}?mode=ro`,
+    })
+
+    await expect(database.getDatabase()).rejects.toThrow(/cannot honour the URI parameters/)
+    expect(existsSync(strayUriRoot)).toBe(false)
+  })
+
+  // A fragment carries nothing, so it is dropped rather than refused — the same
+  // thing sqlite does with it.
+  test('should ignore a fragment on a file: URI', async () => {
+    const database = createSqliteDatabase({
+      migrationsFolder: join(workDir, 'migrations'),
+      filename: `file://${join(workDir, 'frag.db')}#section`,
+    })
+
+    const db = await database.getDatabase()
+    expect(isOpen(db)).toBe(true)
+    await database.closeDatabase()
+
+    expect(existsSync(join(workDir, 'frag.db'))).toBe(true)
+  })
+
   // A one-letter scheme is always a Windows drive, never a registered scheme.
   test('should accept a Windows drive path whose separator got doubled', async () => {
     const database = createSqliteDatabase({
@@ -456,11 +486,13 @@ describe('createSqliteDatabase connection-URI filenames', () => {
   })
 
   test('should accept file:local.db, which sqlite resolves to a real file', async () => {
-    // sqlite resolves this URI against the cwd rather than workDir, so the file it
+    // The URI resolves against the cwd rather than workDir, so the file it
     // creates is cleaned up here rather than by the suite's workDir teardown.
     // That cwd-relative rule is sqlite's, not the URL parser's: `new URL()` reads
     // the same string as `/local.db`, so resolving these URIs through it would
-    // point the mkdir at the filesystem root.
+    // point the mkdir at the filesystem root. Asserting *where* the file lands
+    // is what makes this portable: a host whose sqlite does not parse URI
+    // filenames opens one named literally `file:local.db` and reports success.
     const database = createSqliteDatabase({
       migrationsFolder: join(workDir, 'migrations'),
       filename: 'file:local.db',
@@ -473,6 +505,9 @@ describe('createSqliteDatabase connection-URI filenames', () => {
       expect(existsSync(resolve('local.db'))).toBe(true)
     } finally {
       rmSync(resolve('local.db'), { force: true })
+      // The name an implementation that resolved the URI as a relative path
+      // would have opened. Cleaned so a red run leaves nothing in the tree.
+      rmSync(resolve('file:local.db'), { force: true })
     }
   })
 })
