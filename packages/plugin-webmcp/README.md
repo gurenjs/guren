@@ -65,6 +65,16 @@ no equivalent, so registering such a tool here would offer an agent a call your
 application asked a human to confirm. Turn the option on only if the page itself
 confirms them.
 
+### Options
+
+```ts
+await registerAgentTools(agentTools, {
+  includeApprovalRequired: false, // default
+  modelContext: myShim,           // override anchor detection
+  fetch: myFetch,                 // override the dispatching fetch
+})
+```
+
 ## How this differs from the App MCP endpoint
 
 Both surfaces serve the same derived tools, but they are not equivalent, and the
@@ -83,18 +93,8 @@ the signed-in user's full authority. Your policies still gate execution —
 exposure is not permission — but on this surface `expose.webMcp` is the whole
 exposure decision.
 
-**Redirects are not followed.** See [Browser requirements](#browser-requirements)
-below.
-
-### Options
-
-```ts
-await registerAgentTools(agentTools, {
-  includeApprovalRequired: false, // default
-  modelContext: myShim,           // override anchor detection
-  fetch: myFetch,                 // override the dispatching fetch
-})
-```
+**Redirects are not followed.** See
+[How a call reaches your route](#how-a-call-reaches-your-route) below.
 
 ## Server
 
