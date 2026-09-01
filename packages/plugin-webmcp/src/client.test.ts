@@ -14,6 +14,7 @@ import { Controller, Router, deriveAgentTools, authorizeMiddleware } from '@gure
 import {
   registerAgentTools,
   type ModelContextLike,
+  type WebMcpRegisterToolOptions,
   type WebMcpToolDescriptor,
   type WebMcpToolSource,
 } from './client'
@@ -71,28 +72,29 @@ function standardManifest(): Record<string, WebMcpToolSource> {
 
 interface RegisteredCall {
   descriptor: WebMcpToolDescriptor
+  options?: WebMcpRegisterToolOptions
 }
 
-/** A recording `modelContext`, standing in for the browser's. */
+/**
+ * A host implementing the *current* draft: `registerTool(descriptor,
+ * { signal })`, no `unregisterTool` at all, and aborting the signal is what
+ * removes the tool. `live` is what the page would still expose.
+ */
 class FakeModelContext implements ModelContextLike {
   readonly calls: RegisteredCall[] = []
-  readonly unregistered: string[] = []
+  readonly live = new Set<string>()
   /** Tool names whose registration should throw, by name. */
   failOn = new Set<string>()
-  /** Whether this host offers unregisterTool at all (the draft has churned). */
-  supportsUnregister = true
 
-  registerTool(descriptor: WebMcpToolDescriptor): unknown {
+  registerTool(descriptor: WebMcpToolDescriptor, options?: WebMcpRegisterToolOptions): unknown {
     if (this.failOn.has(descriptor.name)) {
       throw new Error(`duplicate tool name: ${descriptor.name}`)
     }
-    this.calls.push({ descriptor })
-    return undefined
-  }
-
-  unregisterTool(name: string): unknown {
-    if (!this.supportsUnregister) throw new Error('unsupported')
-    this.unregistered.push(name)
+    this.calls.push({ descriptor, options })
+    this.live.add(descriptor.name)
+    options?.signal?.addEventListener('abort', () => {
+      this.live.delete(descriptor.name)
+    })
     return undefined
   }
 
@@ -100,6 +102,26 @@ class FakeModelContext implements ModelContextLike {
     const found = this.calls.find((call) => call.descriptor.name === name)
     expect(found).toBeDefined()
     return found!.descriptor
+  }
+}
+
+/**
+ * A host of the earlier generation: it has `unregisterTool` and ignores the
+ * options argument entirely, the way WebIDL conversion drops a dictionary
+ * member the host does not declare.
+ */
+class LegacyModelContext implements ModelContextLike {
+  readonly registeredNames: string[] = []
+  readonly unregistered: string[] = []
+
+  registerTool(descriptor: WebMcpToolDescriptor): unknown {
+    this.registeredNames.push(descriptor.name)
+    return undefined
+  }
+
+  unregisterTool(name: string): unknown {
+    this.unregistered.push(name)
+    return undefined
   }
 }
 
@@ -290,25 +312,85 @@ describe('registerAgentTools', () => {
     // posts.index registered first, so the page would otherwise be left with
     // half a catalogue and no result object to find it through.
     expect(anchor.calls.map((call) => call.descriptor.name)).toEqual(['posts.index'])
-    expect(anchor.unregistered).toEqual(['posts.index'])
+    // Rolled back through the signal, which is all this generation of host
+    // offers.
+    expect([...anchor.live]).toEqual([])
   })
 
-  test('should unregister on request, and tolerate a host that cannot', async () => {
+  test('should roll back on a legacy host through unregisterTool', async () => {
+    const anchor = new LegacyModelContext()
+    let calls = 0
+    const failing: ModelContextLike = {
+      registerTool: (descriptor) => {
+        if (++calls === 2) throw new Error('duplicate tool name')
+        return anchor.registerTool(descriptor)
+      },
+      unregisterTool: (name) => anchor.unregisterTool(name),
+    }
+
+    await expect(
+      registerAgentTools(standardManifest(), { modelContext: failing }),
+    ).rejects.toThrow('duplicate tool name')
+
+    expect(anchor.unregistered).toEqual(anchor.registeredNames)
+    expect(anchor.unregistered).toHaveLength(1)
+  })
+
+  test('should register with an abort signal and unregister by aborting it', async () => {
     const anchor = new FakeModelContext()
     const registration = await registerAgentTools(standardManifest(), { modelContext: anchor })
-    await registration.unregister()
-    expect(anchor.unregistered.sort()).toEqual(['comments.store', 'posts.index'])
 
-    const older = new FakeModelContext()
-    // A revision of the draft with no unregisterTool at all.
-    const withoutUnregister: ModelContextLike = {
-      registerTool: (descriptor) => older.registerTool(descriptor),
+    // The current draft has no unregisterTool: `registerTool` takes
+    // ModelContextRegisterToolOptions and aborting the signal is the removal.
+    for (const call of anchor.calls) {
+      expect(call.options?.signal).toBeInstanceOf(AbortSignal)
+      expect(call.options!.signal!.aborted).toBe(false)
     }
-    const second = await registerAgentTools(standardManifest(), {
-      modelContext: withoutUnregister,
+    // One controller for the whole call, so a single abort clears everything.
+    const signals = new Set(anchor.calls.map((call) => call.options!.signal))
+    expect(signals.size).toBe(1)
+    expect([...anchor.live].sort()).toEqual(['comments.store', 'posts.index'])
+
+    await registration.unregister()
+
+    expect([...anchor.live]).toEqual([])
+    expect(anchor.calls[0]!.options!.signal!.aborted).toBe(true)
+  })
+
+  test('should also unregister by name on a host of the earlier generation', async () => {
+    const legacy = new LegacyModelContext()
+    const registration = await registerAgentTools(standardManifest(), { modelContext: legacy })
+
+    // This host ignores the options argument, so the abort reaches nothing and
+    // the per-name call is the only thing that cleans up. Both generations
+    // have to be covered, because they are not distinguishable from here.
+    expect(legacy.registeredNames.sort()).toEqual(['comments.store', 'posts.index'])
+    await registration.unregister()
+    expect(legacy.unregistered.sort()).toEqual(['comments.store', 'posts.index'])
+  })
+
+  test('should give a description-less tool a derived one', async () => {
+    const anchor = new FakeModelContext()
+    const tools = manifest((router) => {
+      router.get('/posts', handler).name('posts.index').agent({})
     })
-    await second.unregister()
-    expect(older.unregistered).toEqual([])
+
+    await registerAgentTools(tools, { modelContext: anchor })
+
+    // ModelContextTool.description is required and an empty string is
+    // rejected with InvalidStateError, while a Guren route's description is
+    // optional — forwarding the absence would throw on page load.
+    expect(anchor.descriptor('posts.index').description).toBe('GET /posts')
+  })
+
+  test('should treat a blank description as absent', async () => {
+    const anchor = new FakeModelContext()
+    const tools = manifest((router) => {
+      router.get('/posts', handler).name('posts.index').agent({ description: '   ' })
+    })
+
+    await registerAgentTools(tools, { modelContext: anchor })
+    expect(anchor.descriptor('posts.index').description).toBe('GET /posts')
   })
 })
 
@@ -477,5 +559,47 @@ describe('tool execution', () => {
     await anchor.descriptor('posts.index').execute({}, { signal: controller.signal })
 
     expect(wire.inits[0]?.signal).toBe(controller.signal)
+  })
+
+  test('should pin the request to this origin and refuse to follow redirects', async () => {
+    const anchor = new FakeModelContext()
+    const wire = recordingFetch(() => json({ ok: true }))
+    stubDocument({ modelContext: anchor, cookie: 'XSRF-TOKEN=t0k' })
+
+    await registerAgentTools(standardManifest(), { modelContext: anchor, fetch: wire.fetch })
+    await anchor.descriptor('comments.store').execute({ id: 1, text: 'hi' })
+
+    // Without these the Request defaults to cors + follow, and `fetch` strips
+    // only Authorization across a cross-origin redirect — so one open
+    // redirect in the app would replay this body and X-XSRF-TOKEN to another
+    // host. Asserted as exact init members because that is the whole fix.
+    const init = wire.inits[0]!
+    expect(init.mode).toBe('same-origin')
+    expect(init.redirect).toBe('manual')
+  })
+
+  test('should report an opaque redirect as a plain result, not an error', async () => {
+    const anchor = new FakeModelContext()
+    // `redirect: 'manual'` yields type 'opaqueredirect' with status 0, which
+    // `new Response()` cannot produce — a stub is the only way to present the
+    // shape the browser would.
+    const opaque = {
+      type: 'opaqueredirect' as const,
+      status: 0,
+      headers: new Headers(),
+      text: async () => '',
+    }
+    const opaqueFetch = (async () => opaque) as unknown as typeof fetch
+
+    await registerAgentTools(standardManifest(), { modelContext: anchor, fetch: opaqueFetch })
+    const result = await anchor.descriptor('comments.store').execute({ id: 1, text: 'hi' })
+
+    expect(result.content[0]!.text).toContain('answered with a redirect')
+    // Not an error: the route answered and the client declined to chase it.
+    // An isError result would make an agent retry a call that behaved.
+    expect(result.isError).toBeUndefined()
+    // Never reaches mapToolResponse, which would read status 0 as a response
+    // the route produced.
+    expect(result.structuredContent).toBeUndefined()
   })
 })

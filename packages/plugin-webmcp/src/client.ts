@@ -87,16 +87,32 @@ export interface WebMcpToolResult {
   isError?: boolean
 }
 
-/** The descriptor handed to `modelContext.registerTool`. */
+/**
+ * The descriptor handed to `modelContext.registerTool`.
+ *
+ * `description` is **required** by the draft's `ModelContextTool`, and an
+ * empty string is rejected with `InvalidStateError` — which is why
+ * {@link registerAgentTools} substitutes a fallback rather than forwarding
+ * the optional description a Guren route carries.
+ */
 export interface WebMcpToolDescriptor {
   name: string
-  description?: string
+  description: string
   inputSchema: unknown
   annotations?: unknown
   execute: (
     args?: Record<string, unknown>,
     context?: { readonly signal?: AbortSignal },
   ) => Promise<WebMcpToolResult>
+}
+
+/**
+ * `ModelContextRegisterToolOptions`, the draft's second `registerTool`
+ * argument. Aborting `signal` is how the current draft unregisters a tool;
+ * there is no `unregisterTool` in it at all.
+ */
+export interface WebMcpRegisterToolOptions {
+  signal?: AbortSignal
 }
 
 /**
@@ -107,11 +123,12 @@ export interface WebMcpToolDescriptor {
  * also what makes the anchor injectable in a test.
  */
 export interface ModelContextLike {
-  registerTool(descriptor: WebMcpToolDescriptor): unknown
+  registerTool(descriptor: WebMcpToolDescriptor, options?: WebMcpRegisterToolOptions): unknown
   /**
-   * Optional because it is not in every revision of the draft. Feature-
-   * detected at unregistration time rather than at registration: a host that
-   * cannot unregister should still be able to register.
+   * Present in earlier shipped hosts, absent from the current draft — which
+   * replaced it with the abort signal above. Feature-detected at
+   * unregistration time rather than at registration, so a host of either
+   * generation can still register.
    */
   unregisterTool?(name: string): unknown
 }
@@ -146,9 +163,12 @@ export interface WebMcpRegistration {
   /** Tools deliberately not registered, and why. */
   skipped: Array<{ tool: string; reason: 'expose' | 'approval' }>
   /**
-   * Remove the tools this call registered. Best-effort: a host with no
-   * `unregisterTool` is a no-op, and a name that fails to unregister does not
-   * stop the rest. Safe to call on an unsupported environment.
+   * Remove the tools this call registered, by both mechanisms the two
+   * generations of host offer: aborting the signal handed to `registerTool`
+   * (the current draft's only way) and calling `unregisterTool` per name
+   * (earlier shipped hosts). Best-effort — a host that has neither, or one
+   * name that refuses, does not stop the rest. Safe on an unsupported
+   * environment.
    */
   unregister(): Promise<void>
 }
@@ -182,6 +202,17 @@ export async function registerAgentTools(
     return { supported: false, registered, skipped, unregister: async () => {} }
   }
 
+  // One controller for the whole call, so `unregister()` is a single abort
+  // whatever the host does with it. Handed to every `registerTool` alongside
+  // the descriptor: a host implementing the current draft unregisters on
+  // abort, and a host predating the option ignores an unknown dictionary
+  // member (WebIDL conversion drops what the dictionary does not declare),
+  // so passing it costs nothing there and `unregisterTool` covers that
+  // generation instead. Both paths run on teardown rather than one being
+  // feature-detected as the winner — the two are not distinguishable from
+  // outside, and doing both is idempotent.
+  const lifetime = new AbortController()
+
   const candidates: WebMcpToolSource[] = []
   for (const tool of Object.values(tools)) {
     if (!tool.expose.webMcp) {
@@ -199,13 +230,23 @@ export async function registerAgentTools(
     try {
       // `registerTool` returns a promise in some hosts and nothing in
       // others; awaiting a non-promise is a no-op, so this covers both.
-      await anchor.registerTool({
-        name: tool.toolName,
-        description: tool.description,
-        inputSchema: tool.inputSchema,
-        annotations: tool.annotations,
-        execute: (args, context) => executeTool(tool, args, context, options),
-      })
+      await anchor.registerTool(
+        {
+          name: tool.toolName,
+          description: describeTool(tool),
+          inputSchema: tool.inputSchema,
+          // Passed through unchanged. The draft's annotations dictionary is a
+          // superset of what the derivation resolves, and WebIDL conversion
+          // ignores members a dictionary does not declare — so a host that
+          // knows fewer of them drops the rest rather than rejecting the
+          // tool. (`untrustedContentHint` is the one going the other way:
+          // nothing in a route contract says whether a response embeds
+          // third-party content, so it is not derivable and not sent.)
+          annotations: tool.annotations,
+          execute: (args, context) => executeTool(tool, args, context, options),
+        },
+        { signal: lifetime.signal },
+      )
     } catch (error) {
       // Propagated, not collected. A registration failure means the manifest
       // and the host disagree — a duplicate name, a schema the host rejects
@@ -213,7 +254,7 @@ export async function registerAgentTools(
       // silently exposed nine of ten tools would look like it worked. The
       // ones already registered come back off first, so a caller that
       // catches and retries is not fighting a half-registered page.
-      await unregisterAll(anchor, registered)
+      await teardown(anchor, lifetime, registered)
       throw error
     }
     registered.push(tool.toolName)
@@ -223,8 +264,23 @@ export async function registerAgentTools(
     supported: true,
     registered,
     skipped,
-    unregister: () => unregisterAll(anchor, registered),
+    unregister: () => teardown(anchor, lifetime, registered),
   }
+}
+
+/**
+ * The description the host is given.
+ *
+ * `ModelContextTool.description` is required, and an empty one is rejected
+ * with `InvalidStateError` — while a Guren route's `.agent()` description is
+ * optional and `guren check` only warns about its absence. Forwarding the
+ * absence would turn a warning into a page that throws on load, so the method
+ * and path stand in: not a good description, but a true one, and the tool it
+ * names is still callable.
+ */
+function describeTool(tool: WebMcpToolSource): string {
+  const declared = tool.description?.trim()
+  return declared ? declared : `${tool.method} ${tool.path}`
 }
 
 /**
@@ -245,8 +301,21 @@ function resolveModelContext(override?: ModelContextLike): ModelContextLike | un
   return scope.document?.modelContext ?? scope.navigator?.modelContext
 }
 
-/** Best-effort removal; see {@link WebMcpRegistration.unregister}. */
-async function unregisterAll(anchor: ModelContextLike, names: readonly string[]): Promise<void> {
+/**
+ * Remove the registered tools by both mechanisms; see
+ * {@link WebMcpRegistration.unregister}.
+ *
+ * The abort goes first because it is the current draft's only way and cannot
+ * fail, then the legacy per-name call for hosts that predate it. Neither is
+ * conditional on the other: from outside, a host that ignored the signal is
+ * indistinguishable from one that honoured it.
+ */
+async function teardown(
+  anchor: ModelContextLike,
+  lifetime: AbortController,
+  names: readonly string[],
+): Promise<void> {
+  lifetime.abort()
   if (typeof anchor.unregisterTool !== 'function') return
   for (const name of names) {
     try {
@@ -302,13 +371,52 @@ async function executeTool(
 
   let response: Response
   try {
-    response = await dispatch(built.request, { signal: context?.signal })
+    response = await dispatch(built.request, {
+      signal: context?.signal,
+      // Both pin the request to the app that served the page, and both are
+      // load-bearing rather than defensive tidying. The synthesized Request
+      // would otherwise default to `cors` + `follow`, and this call carries
+      // two things that must never leave the origin: the session cookie's
+      // authority and the `X-XSRF-TOKEN` header. `fetch` strips
+      // `Authorization` across a cross-origin redirect but *not* custom
+      // headers, so a single open redirect anywhere in the application would
+      // replay the body and the CSRF token to whatever host it names.
+      // `same-origin` refuses the cross-origin request outright; `manual`
+      // makes sure no redirect is followed to find out.
+      mode: 'same-origin',
+      redirect: 'manual',
+    })
   } catch (error) {
     // Returned rather than thrown. A rejected `execute` reaches the agent as
     // a host-level failure whose message is flattened or dropped, so an
     // offline tab would report "tool failed" with nothing to act on; as a
     // result it reads like any other error the tool can answer with.
     return errorResult(`Request failed: ${describeError(error)}`)
+  }
+
+  // `redirect: 'manual'` turns *any* redirect into an opaque response: type
+  // `opaqueredirect`, status 0, no readable headers. Caught before
+  // `mapToolResponse`, which would read that as a status-0 non-JSON body and
+  // describe it as something the route returned.
+  //
+  // A parity gap with the App MCP surface, accepted knowingly: that adapter
+  // dispatches in-process, so it can report `HTTP 302 (Location: …)`. A
+  // browser cannot see the Location of an opaque redirect at all, and the
+  // alternative — following it — is the hazard above. Not an error result:
+  // the route answered, the client declined to chase it, and an agent that
+  // sees `isError` would retry a call that did exactly what it should.
+  if (response.type === 'opaqueredirect') {
+    return {
+      content: [
+        {
+          type: 'text',
+          text:
+            `The route "${tool.toolName}" answered with a redirect, which this client does not `
+            + 'follow — a redirect off this origin would replay the request, its body and its '
+            + 'CSRF token to another host. The redirect target is not readable from the page.',
+        },
+      ],
+    }
   }
 
   return toWireResult(await mapToolResponse(derived, response))
