@@ -1,5 +1,6 @@
 import { readdir, readFile } from 'node:fs/promises'
 import { join, relative, resolve } from 'node:path'
+import { auditDocsImportSources, formatReport } from './docs-import-sources'
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
@@ -396,11 +397,39 @@ async function auditDocLineRules(root: string): Promise<void> {
   }
 }
 
+/**
+ * Every named import in a TypeScript fence must name a symbol its specifier
+ * exports. Reports the whole batch before failing — the assertions above die on
+ * the first miss, which is right for a claim about one file and wrong for a
+ * sweep over every fence in `docs/`. See docs-import-sources.ts for what the
+ * check can and cannot prove.
+ */
+async function auditImportSources(root: string): Promise<void> {
+  const report = await auditDocsImportSources(root)
+
+  if (report.openEntryPoints.length > 0) {
+    console.log(
+      `Docs import audit: no absence verdict for ${report.openEntryPoints.length} entry point(s) that re-export a third-party package wholesale — ${report.openEntryPoints.join('; ')}`,
+    )
+  }
+
+  const failures = report.unresolvable.length + report.unexported.length
+  assert(
+    failures === 0,
+    `${formatReport(report)}\n\n(${report.symbolsChecked} named imports checked across ${report.fencesScanned} TypeScript fences.)`,
+  )
+
+  console.log(
+    `Docs import audit passed: ${report.symbolsChecked} named imports across ${report.importsChecked} first-party import statements in ${report.fencesScanned} TypeScript fences.`,
+  )
+}
+
 async function main(): Promise<void> {
   const root = resolve(process.argv[2] ?? '.')
   await auditEnglishDocs(root)
   await auditJapaneseDocs(root)
   await auditDocLineRules(root)
+  await auditImportSources(root)
   console.log(`Docs audit passed for ${root}`)
 }
 
