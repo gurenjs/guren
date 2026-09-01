@@ -225,57 +225,77 @@ export async function gateApproval(
 }
 
 /**
- * The refusal for a call that is waiting on a human.
+ * The shape every approval refusal carries: which request it is about, and
+ * what state that request is in.
+ *
+ * One builder for the three, so the fields an agent parses cannot come to
+ * differ between them — a refusal is only useful to a caller that can read the
+ * same keys out of each. What differs is what each *means*, which is the
+ * message and the `extra` its own builder passes.
  *
  * Every refusal states that nothing was executed, in the message *and* in the
  * body. An agent reading only one of the two must not be left to infer it: the
  * result is an error, and "error" plus a tool name is exactly the shape an
  * agent retries.
  */
+function approvalRefusal(
+  status: 'pending' | 'rejected' | 'spent',
+  message: string,
+  request: AgentApprovalRequest,
+  extra: Record<string, unknown> = {},
+): GateVerdict {
+  return {
+    allowed: false,
+    reason: 'approval',
+    message,
+    body: {
+      status,
+      requestId: request.id,
+      tool: request.tool,
+      requestedAt: request.requestedAt,
+      expiresAt: request.expiresAt,
+      executed: false,
+      ...extra,
+    },
+  }
+}
+
+/**
+ * The refusal for a call that is waiting on a human.
+ *
+ * `pollWith` rides only here, and that is the point of it: this is the one
+ * answer a caller should come back to, so it is the one that names the tool to
+ * come back with. A rejection is told not to poll and a spent approval to ask
+ * again, and offering either of them a poll target would contradict its own
+ * message.
+ */
 function pendingVerdict(
   tool: DerivedAgentTool,
   request: AgentApprovalRequest,
   origin: 'created' | 'pending',
 ): GateVerdict {
-  return {
-    allowed: false,
-    reason: 'approval',
-    message:
-      `The tool "${tool.toolName}" requires approval. Nothing was executed. `
-      + (origin === 'created'
-        ? 'A request was created and the approvers have been notified. '
-        : 'A request for this exact call is already waiting. ')
-      + `Check it with ${APPROVAL_STATUS_TOOL_NAME} using requestId "${request.id}". `
-      + 'Once it is approved, repeat this call with the same arguments to perform it.',
-    body: {
-      status: 'pending',
-      requestId: request.id,
-      tool: request.tool,
-      requestedAt: request.requestedAt,
-      expiresAt: request.expiresAt,
-      executed: false,
-      pollWith: APPROVAL_STATUS_TOOL_NAME,
-    },
-  }
+  return approvalRefusal(
+    'pending',
+    `The tool "${tool.toolName}" requires approval. Nothing was executed. `
+    + (origin === 'created'
+      ? 'A request was created and the approvers have been notified. '
+      : 'A request for this exact call is already waiting. ')
+    + `Check it with ${APPROVAL_STATUS_TOOL_NAME} using requestId "${request.id}". `
+    + 'Once it is approved, repeat this call with the same arguments to perform it.',
+    request,
+    { pollWith: APPROVAL_STATUS_TOOL_NAME },
+  )
 }
 
+/** A call a human answered "no" to, reported distinctly from a pending wait. */
 function rejectedVerdict(tool: DerivedAgentTool, request: AgentApprovalRequest): GateVerdict {
-  return {
-    allowed: false,
-    reason: 'approval',
-    message:
-      `The tool "${tool.toolName}" requires approval, and this exact call was rejected. Nothing was `
-      + 'executed, and polling will not change that. Do not repeat the call with these arguments.',
-    body: {
-      status: 'rejected',
-      requestId: request.id,
-      tool: request.tool,
-      requestedAt: request.requestedAt,
-      expiresAt: request.expiresAt,
-      executed: false,
-      ...(request.resolvedAt ? { resolvedAt: request.resolvedAt } : {}),
-    },
-  }
+  return approvalRefusal(
+    'rejected',
+    `The tool "${tool.toolName}" requires approval, and this exact call was rejected. Nothing was `
+    + 'executed, and polling will not change that. Do not repeat the call with these arguments.',
+    request,
+    request.resolvedAt ? { resolvedAt: request.resolvedAt } : {},
+  )
 }
 
 /**
@@ -288,21 +308,12 @@ function rejectedVerdict(tool: DerivedAgentTool, request: AgentApprovalRequest):
  * request on its behalf, and paging a human for it, is not.
  */
 function spentVerdict(tool: DerivedAgentTool, request: AgentApprovalRequest): GateVerdict {
-  return {
-    allowed: false,
-    reason: 'approval',
-    message:
-      `The tool "${tool.toolName}" requires approval, and the approval for this exact call was `
-      + 'already used by another call. Nothing was executed. Ask again to request a new one.',
-    body: {
-      status: 'spent',
-      requestId: request.id,
-      tool: request.tool,
-      requestedAt: request.requestedAt,
-      expiresAt: request.expiresAt,
-      executed: false,
-    },
-  }
+  return approvalRefusal(
+    'spent',
+    `The tool "${tool.toolName}" requires approval, and the approval for this exact call was `
+    + 'already used by another call. Nothing was executed. Ask again to request a new one.',
+    request,
+  )
 }
 
 /**

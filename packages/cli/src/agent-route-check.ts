@@ -1,11 +1,12 @@
 import { relative, resolve } from 'node:path'
+import type { CallExpression } from '@babel/types'
 import {
   AGENT_APPROVAL_CONFIG_KEY,
   isReservedAgentToolName,
   RESERVED_AGENT_TOOL_NAMES,
 } from '@guren/core'
 import type { AgentRouteMetadata, RouteDefinition } from '@guren/core'
-import { memberKeyName, walk, type BabelNode } from './ast-walk'
+import { memberKeyName, walk } from './ast-walk'
 import { check, type CheckResult } from './check-result'
 import {
   mutatesRecords,
@@ -489,11 +490,13 @@ function readMcpPluginCalls(parsed: ParsedFile): 'configured' | 'absent' | undef
   let answer: 'configured' | 'absent' | undefined
   walk(parsed.ast.program, (node) => {
     if (node.type !== 'CallExpression') return
-    const callee = node.callee as BabelNode | undefined
-    if (!callee || callee.type !== 'Identifier' || !locals.has(callee.name as string)) return
+    // Typed once at the seam, the way the attachments scan reads its own
+    // calls: everything below is `@babel/types` rather than a cast per field.
+    const call = node as unknown as CallExpression
+    const callee = call.callee
+    if (callee.type !== 'Identifier' || !locals.has(callee.name)) return
 
-    const args = node.arguments as BabelNode[] | undefined
-    const options = args?.[0]
+    const options = call.arguments[0]
     // `mcpPlugin()` with no argument is a readable call with no queue: the
     // default is the unconfigured one.
     if (!options) {
@@ -502,14 +505,12 @@ function readMcpPluginCalls(parsed: ParsedFile): 'configured' | 'absent' | undef
     }
     if (options.type !== 'ObjectExpression') return
 
-    const properties = options.properties as BabelNode[]
-    const carriesQueue = properties.some((property) => {
-      if (property.type !== 'ObjectProperty' && property.type !== 'ObjectMethod') return false
-      return (
-        memberKeyName(property as unknown as Parameters<typeof memberKeyName>[0])
-        === AGENT_APPROVAL_CONFIG_KEY
-      )
-    })
+    const properties = options.properties
+    const carriesQueue = properties.some(
+      (property) =>
+        (property.type === 'ObjectProperty' || property.type === 'ObjectMethod')
+        && memberKeyName(property) === AGENT_APPROVAL_CONFIG_KEY,
+    )
     // A spread makes an absence unreadable — the queue may be in the spread
     // object — but a key that is literally there is still positive evidence.
     const spreads = properties.some((property) => property.type === 'SpreadElement')
