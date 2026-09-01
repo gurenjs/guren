@@ -49,6 +49,11 @@ export function createDocSearchRunner(options: RunnerOptions = {}): DocSearchRun
   let inFlight: AbortController | null = null
 
   const cancel = (): void => {
+    // The token moves too, not just the abort. Aborting a request whose
+    // response is already buffered does not necessarily reject it, so without
+    // this a cancelled search still resolves and delivers — repainting
+    // results under an input the reader has just cleared.
+    latest++
     inFlight?.abort()
     inFlight = null
   }
@@ -57,8 +62,10 @@ export function createDocSearchRunner(options: RunnerOptions = {}): DocSearchRun
     cancel,
 
     async run(query, locale) {
-      const token = ++latest
+      // Cancel first: it advances the token to retire the previous run, so
+      // this one has to claim its own afterwards.
       cancel()
+      const token = ++latest
 
       const controller = new AbortController()
       inFlight = controller
@@ -136,11 +143,10 @@ export function createDebouncedDocSearch(
   const delayMs = options.delayMs ?? SEARCH_DEBOUNCE_MS
   let timer: ReturnType<typeof setTimeout> | undefined
 
+  // clearTimeout ignores an undefined id, so neither call needs a guard.
   const cancel = (): void => {
-    if (timer !== undefined) {
-      clearTimeout(timer)
-      timer = undefined
-    }
+    clearTimeout(timer)
+    timer = undefined
     runner.cancel()
   }
 
@@ -148,9 +154,7 @@ export function createDebouncedDocSearch(
     cancel,
 
     schedule(query, locale, deliver) {
-      if (timer !== undefined) {
-        clearTimeout(timer)
-      }
+      clearTimeout(timer)
       timer = setTimeout(() => {
         timer = undefined
         void runner.run(query, locale).then((outcome) => {

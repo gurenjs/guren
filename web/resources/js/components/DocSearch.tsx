@@ -47,6 +47,22 @@ type Display =
   | { kind: 'error' }
   | { kind: 'unavailable' }
 
+/** The line shown in place of a result list, for every state that has none. */
+function statusMessage(kind: Display['kind'], copy: (typeof COPY)[DocSearchLocale]): string {
+  switch (kind) {
+    case 'empty':
+      return copy.empty
+    case 'error':
+      return copy.error
+    case 'unavailable':
+      return copy.unavailable
+    case 'loading':
+      return '…'
+    default:
+      return copy.idle
+  }
+}
+
 /** A text field the reader is already typing in should keep the `/` key. */
 function isTypingTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) {
@@ -294,15 +310,7 @@ export function DocSearch({ locale, className = '' }: DocSearchProps) {
                 ))
               ) : (
                 <p className="px-4 py-8 text-center text-sm text-docs-text-muted">
-                  {display.kind === 'empty'
-                    ? copy.empty
-                    : display.kind === 'error'
-                      ? copy.error
-                      : display.kind === 'unavailable'
-                        ? copy.unavailable
-                        : display.kind === 'loading'
-                          ? '…'
-                          : copy.idle}
+                  {statusMessage(display.kind, copy)}
                 </p>
               )}
             </div>

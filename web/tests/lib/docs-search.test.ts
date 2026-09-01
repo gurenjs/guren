@@ -108,6 +108,20 @@ describe('createDocSearchRunner', () => {
     expect(await pending).toBeNull()
   })
 
+  it('discards a cancelled response the abort did not reject', async () => {
+    // Clearing the input cancels without starting a newer search. If the
+    // response was already buffered the abort does not reject it, and the
+    // results would repaint under an input the reader has just emptied.
+    const deferred = deferredFetch({ ignoreAbort: true })
+    const runner = createDocSearchRunner({ fetch: deferred.fetch })
+
+    const pending = runner.run('routing', 'en')
+    runner.cancel()
+    deferred.releases[0](jsonResponse([hit('routing')]))
+
+    expect(await pending).toBeNull()
+  })
+
   it('distinguishes an unbuilt index from a failure', async () => {
     const deferred = deferredFetch()
     const runner = createDocSearchRunner({ fetch: deferred.fetch })
