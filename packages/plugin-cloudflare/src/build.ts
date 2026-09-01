@@ -2,11 +2,15 @@ import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, write
 import { relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
+  appUsesMcpPlugin,
   DEV_ONLY_MODULES,
+  MCP_PLUGIN_PACKAGE,
+  MCP_TRANSPORT_SPECIFIER,
   SQL_CLIENT_MODULES,
   clientManifestJson,
   importSpecifier,
   renderDevOnlyStub,
+  stubbableDevOnlyModules,
   assertOutputDirOutsideRoot,
   resetOutputDir,
   resolveClientAssetEnv,
@@ -66,6 +70,11 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
 
   const packageJson = readPackageJson(root)
 
+  // Checked here, before the app build: this is a one-line edit to a file the
+  // developer owns, and reporting it after several minutes of Vite output is
+  // reporting it where nobody reads.
+  assertMcpTransportNotAliased(root)
+
   if (!options.skipAppBuild) {
     runAppBuild(root, packageJson.scripts ?? {})
   }
@@ -98,7 +107,7 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
 
   writeDevOnlyStubs(out)
 
-  scaffoldWranglerConfig(root, out, packageJson.name)
+  scaffoldWranglerConfig(root, out, packageJson.name, appUsesMcpPlugin(root))
 }
 
 const MCP_UNAVAILABLE = 'The MCP endpoint is unavailable on Cloudflare Workers — it generates files on disk.'
@@ -160,13 +169,69 @@ function writeDevOnlyStubs(out: string): void {
  * including each MCP SDK subpath — needs its own entry. Unlike the Lambda
  * plugin's bundler hook, wrangler cannot match a prefix, so an SDK subpath
  * added upstream needs a new `DEV_ONLY_MODULES` entry to stay stubbed here.
+ *
+ * `mcpPlugin` drops the App MCP transport's entry (RFC 0016 §7): an app that
+ * declares `@guren/plugin-mcp` serves the endpoint from the worker, and the
+ * adapter is workerd-compatible by construction — the alias was the only
+ * thing killing it. The Dev MCP's `McpServer` keeps its alias either way.
+ *
+ * The *files* are written unconditionally by `writeDevOnlyStubs`; only the
+ * alias set varies. A stub file costs nothing, and an app whose committed
+ * `wrangler.jsonc` still points at one must keep finding it.
  */
-function devOnlyAliases(outRelative: string): Record<string, string> {
+function devOnlyAliases(outRelative: string, mcpPlugin: boolean): Record<string, string> {
+  const stubbed = [...stubbableDevOnlyModules({ mcpPlugin }), ...SQL_CLIENT_MODULES]
+
   return Object.fromEntries(
-    STUBBED_MODULES.map((module) => [
+    stubbed.map((module) => [
       module.specifier,
       `./${outRelative}/${STUB_FILES[module.specifier]}`,
     ]),
+  )
+}
+
+/**
+ * Fail rather than deploy an app whose committed `wrangler.jsonc` still
+ * aliases the App MCP transport to a stub while its manifest declares
+ * `@guren/plugin-mcp`.
+ *
+ * The scaffold writes `wrangler.jsonc` once and never overwrites it, so an
+ * app that adds the plugin later keeps an alias nothing in the build controls
+ * — and the endpoint stays compiled shut with every gate green, the failure
+ * appearing only as `tools/list` returning nothing against a deployed worker.
+ * A warning would be the wrong instrument: this is one line to delete, in a
+ * file the developer owns, and the build can name it exactly.
+ *
+ * Read through `parseJsonc` rather than as text, for the same reason
+ * `warnMissingBuildOwnedKeys` does: a config carries comments, and a comment
+ * mentioning the specifier — including the one the failure message itself
+ * suggests writing — must not fail the build. A file that does not parse is
+ * left to that function's warning; failing a deploy on a file this build
+ * could not read would be worse than the defect.
+ */
+function assertMcpTransportNotAliased(root: string): void {
+  const configPath = resolve(root, 'wrangler.jsonc')
+  if (!existsSync(configPath) || !appUsesMcpPlugin(root)) {
+    return
+  }
+
+  let config: Record<string, unknown>
+  try {
+    config = parseJsonc(readFileSync(configPath, 'utf8')) as Record<string, unknown>
+  } catch {
+    return
+  }
+
+  const alias = config.alias
+  if (typeof alias !== 'object' || alias === null || !(MCP_TRANSPORT_SPECIFIER in alias)) {
+    return
+  }
+
+  const target = (alias as Record<string, unknown>)[MCP_TRANSPORT_SPECIFIER]
+  throw new Error(
+    `Cloudflare build: ${configPath} aliases the App MCP transport to a stub, but this app depends on ${MCP_PLUGIN_PACKAGE} — the endpoint would deploy compiled shut. Delete this one line from "alias":\n`
+    + `  ${JSON.stringify(MCP_TRANSPORT_SPECIFIER)}: ${JSON.stringify(target)}\n`
+    + `Leave every other alias entry in place; ${JSON.stringify('@modelcontextprotocol/sdk/server/mcp.js')} in particular must stay stubbed — that is the dev-only MCP server, which generates files on disk.`,
   )
 }
 
@@ -366,7 +431,12 @@ function renderWorkerModule(input: {
   return lines.join('\n')
 }
 
-function scaffoldWranglerConfig(root: string, out: string, packageName: string | undefined): void {
+function scaffoldWranglerConfig(
+  root: string,
+  out: string,
+  packageName: string | undefined,
+  mcpPlugin: boolean,
+): void {
   const configPath = resolve(root, 'wrangler.jsonc')
   const appName = (packageName ?? 'guren-app').replace(/^@[^/]+\//, '')
   const outRelative = relative(root, out).split(sep).join('/')
@@ -376,7 +446,7 @@ function scaffoldWranglerConfig(root: string, out: string, packageName: string |
     main: `${outRelative}/worker.js`,
     compatibility_date: new Date().toISOString().slice(0, 10),
     compatibility_flags: ['nodejs_compat'],
-    alias: devOnlyAliases(outRelative),
+    alias: devOnlyAliases(outRelative, mcpPlugin),
     define: {
       // Statements in the generated worker cannot beat ESM import hoisting,
       // and wrangler `vars` are not guaranteed to reach `process.env` before
@@ -410,7 +480,7 @@ function scaffoldWranglerConfig(root: string, out: string, packageName: string |
     writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, { flag: 'wx' })
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
-      warnMissingBuildOwnedKeys(configPath, outRelative)
+      warnMissingBuildOwnedKeys(configPath, outRelative, mcpPlugin)
       return
     }
     throw error
@@ -501,7 +571,11 @@ function parseJsonc(text: string): unknown {
  * an extra `define` — and a suggestion shaped like a complete object reads as
  * one to paste over what is there, which would drop them.
  */
-function warnMissingBuildOwnedKeys(configPath: string, outRelative: string): void {
+function warnMissingBuildOwnedKeys(
+  configPath: string,
+  outRelative: string,
+  mcpPlugin: boolean,
+): void {
   let config: Record<string, unknown>
   try {
     config = parseJsonc(readFileSync(configPath, 'utf8')) as Record<string, unknown>
@@ -523,7 +597,7 @@ function warnMissingBuildOwnedKeys(configPath: string, outRelative: string): voi
   const alias = (
     typeof configAlias === 'object' && configAlias !== null ? configAlias : {}
   ) as Record<string, string>
-  for (const [specifier, target] of Object.entries(devOnlyAliases(outRelative))) {
+  for (const [specifier, target] of Object.entries(devOnlyAliases(outRelative, mcpPlugin))) {
     if (!(specifier in alias)) {
       missing.push(`${JSON.stringify(specifier)}: ${JSON.stringify(target)} (inside "alias")`)
     }

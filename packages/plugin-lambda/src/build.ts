@@ -1,11 +1,13 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import {
+  appUsesMcpPlugin,
   DEV_ONLY_MODULES,
   clientManifestJson,
   importSpecifier,
   MCP_SDK_SUBPATH_PREFIX,
   renderDevOnlyStub,
+  stubbableDevOnlyModules,
   assertOutputDirOutsideRoot,
   resetOutputDir,
   resolveClientAssetEnv,
@@ -75,20 +77,26 @@ const UNAVAILABLE_ON_LAMBDA: Record<(typeof DEV_ONLY_MODULES)[number]['kind'], s
  * would fail at import time on Lambda even though no code path ever runs it.
  * Stubbing also keeps megabytes of dev tooling out of the bundle.
  *
- * Unconditional, unlike the database clients: nothing an app can declare makes
- * the Vite dev server or the MCP endpoint's generators run on Lambda.
+ * Which of them are in force is per app, and for one reason only: an app that
+ * declares `@guren/plugin-mcp` serves the App MCP endpoint here, so its
+ * transport must reach the bundle rather than a stub (RFC 0016 §7). The rest
+ * are unconditional — nothing an app can declare makes the Vite dev server or
+ * the *Dev* MCP's generators run on Lambda. `stubbableDevOnlyModules` owns
+ * that distinction; this function only renders what it is handed.
  */
-const DEV_ONLY_STUBS: Record<string, string> = Object.fromEntries(
-  DEV_ONLY_MODULES.map((module) => [
-    module.specifier,
-    renderDevOnlyStub(module, UNAVAILABLE_ON_LAMBDA[module.kind]),
-  ]),
-)
+function devOnlyStubs(mcpPlugin: boolean): Record<string, string> {
+  return Object.fromEntries(
+    stubbableDevOnlyModules({ mcpPlugin }).map((module) => [
+      module.specifier,
+      renderDevOnlyStub(module, UNAVAILABLE_ON_LAMBDA[module.kind]),
+    ]),
+  )
+}
 
 /**
  * The dev-only stubs plus one per database client this app does not connect
- * through. Unlike the dev-only set this depends on the app, so it is built
- * per build rather than at module scope.
+ * through. Both halves depend on the app, so it is built per build rather
+ * than at module scope.
  *
  * A stub here also *overrides* `external`, verified against Bun 1.3.14: the
  * bundler consults plugins before it consults the external list, so stubbing
@@ -96,11 +104,15 @@ const DEV_ONLY_STUBS: Record<string, string> = Object.fromEntries(
  * than leaving `external: ['@aws-sdk/*']` to keep drizzle's hoisted top-level
  * import of a package the runtime may not provide.
  */
-function stubsFor(root: string, dialects: readonly DatabaseDialect[] | undefined): Record<string, string> {
+function stubsFor(
+  root: string,
+  dialects: readonly DatabaseDialect[] | undefined,
+  mcpPlugin: boolean,
+): Record<string, string> {
   const unused = unusedSqlClients({ root, label: 'Lambda build', dialects })
 
   return {
-    ...DEV_ONLY_STUBS,
+    ...devOnlyStubs(mcpPlugin),
     ...Object.fromEntries(
       unused.map(({ module, message }) => [module.specifier, renderDevOnlyStub(module, message)]),
     ),
@@ -113,6 +125,12 @@ function stubsFor(root: string, dialects: readonly DatabaseDialect[] | undefined
  * rather than resolving to an empty module: a subpath reached from app code
  * (not Guren's disabled MCP endpoint) must fail loudly at build or cold start,
  * never silently hand back missing exports.
+ *
+ * Reachable only for an app that does *not* declare `@guren/plugin-mcp`. For
+ * one that does, the SDK is a dependency it deliberately ships, and this
+ * fallback would stub `server/index.js` and `types.js` — which
+ * `@guren/plugin-mcp` imports statically — leaving the endpoint just as
+ * compiled shut as the transport stub did. See `stubFilter`.
  */
 const unlistedMcpStub = `throw new Error(${JSON.stringify(MCP_UNAVAILABLE)})\n`
 
@@ -124,13 +142,22 @@ function escapeRegExp(value: string): string {
 // of stubbed specifiers — a hand-maintained regex could silently fall out of
 // sync, and a client that is filtered but has no stub loads as an empty
 // module instead of failing.
-function stubFilter(stubs: Record<string, string>): RegExp {
-  return new RegExp(
-    `^(?:${[
-      ...Object.keys(stubs).map(escapeRegExp),
-      `${escapeRegExp(MCP_SDK_SUBPATH_PREFIX)}.+`,
-    ].join('|')})$`,
-  )
+//
+// The catch-all is the one term that cannot be derived from the stubs, and
+// the tempting derivation is actively wrong: "include it while any MCP SDK
+// subpath is still stubbed" reads well and holds always, because
+// `@modelcontextprotocol/sdk/server/mcp.js` stays stubbed for every app —
+// which would leave the catch-all swallowing `server/index.js` and `types.js`
+// and undo the whole of RFC 0016 Phase 4a silently. So it is gated on the
+// same `mcpPlugin` decision that produced the stubs, threaded from one read
+// of the app's manifest rather than re-derived here.
+function stubFilter(stubs: Record<string, string>, mcpPlugin: boolean): RegExp {
+  const terms = Object.keys(stubs).map(escapeRegExp)
+  if (!mcpPlugin) {
+    terms.push(`${escapeRegExp(MCP_SDK_SUBPATH_PREFIX)}.+`)
+  }
+
+  return new RegExp(`^(?:${terms.join('|')})$`)
 }
 
 /**
@@ -187,7 +214,19 @@ export async function buildLambdaOutput(options: BuildLambdaOutputOptions = {}):
   const wrapperPath = resolve(out, `${LAMBDA_HANDLER_MODULE}.ts`)
   writeFileSync(wrapperPath, renderHandlerModule({ out, entrypoint, env: bakedEnv }))
 
-  await bundleHandler(wrapperPath, funcDir, stubsFor(root, options.databaseDialects))
+  // One read of the app's manifest, threaded to both halves of the stub
+  // decision: which modules are rendered, and whether unlisted MCP SDK
+  // subpaths are swallowed by the catch-all. Two independent reads would be
+  // two places for them to disagree, and the disagreement is silent — the
+  // catch-all would stub what the stub map deliberately released.
+  const mcpPlugin = appUsesMcpPlugin(root)
+
+  await bundleHandler(
+    wrapperPath,
+    funcDir,
+    stubsFor(root, options.databaseDialects, mcpPlugin),
+    mcpPlugin,
+  )
 
   // Lambda's Node.js runtime treats `.js` as CommonJS unless the package is
   // marked as a module; the bundle and the SSR chunks are both ESM.
@@ -282,8 +321,9 @@ async function bundleHandler(
   handlerEntry: string,
   funcDir: string,
   stubs: Record<string, string>,
+  mcpPlugin: boolean,
 ): Promise<void> {
-  const filter = stubFilter(stubs)
+  const filter = stubFilter(stubs, mcpPlugin)
 
   const result = await Bun.build({
     entrypoints: [handlerEntry],

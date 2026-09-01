@@ -2,11 +2,13 @@ import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node
 import { basename, extname, resolve } from 'node:path'
 import { definePlugin, type ServiceProviderConstructor } from '@guren/core'
 import {
+  appUsesMcpPlugin,
   assertOutputDirOutsideRoot,
   clientManifestJson,
   DEV_ONLY_MODULES,
   MCP_SDK_SUBPATH_PREFIX,
   renderDevOnlyStub,
+  stubbableDevOnlyModules,
   resetOutputDir,
   resolveClientAssetEnv,
   resolvePathLike,
@@ -214,9 +216,19 @@ const UNAVAILABLE_ON_VERCEL: Record<(typeof DEV_ONLY_MODULES)[number]['kind'], s
  * - The database clients for dialects the app does not use, decided per app
  *   rather than per platform — the ones it *does* use are load-bearing here,
  *   unlike on Workers where D1 is the only database.
+ *
+ * The dev-only set is per app in one respect too: an app declaring
+ * `@guren/plugin-mcp` serves the App MCP endpoint from this function, so its
+ * transport must reach the bundle (RFC 0016 §7). The *Dev* MCP's `McpServer`
+ * and the CLI behind it stay stubbed regardless — see
+ * `stubbableDevOnlyModules`.
  */
-function stubbedModules(root: string, dialects: readonly DatabaseDialect[] | undefined): Record<string, string> {
-  const devOnly = DEV_ONLY_MODULES.flatMap((module) => {
+function stubbedModules(
+  root: string,
+  dialects: readonly DatabaseDialect[] | undefined,
+  mcpPlugin: boolean,
+): Record<string, string> {
+  const devOnly = stubbableDevOnlyModules({ mcpPlugin }).flatMap((module) => {
     const message = UNAVAILABLE_ON_VERCEL[module.kind]
     return message === null ? [] : [[module.specifier, renderDevOnlyStub(module, message)]]
   })
@@ -235,6 +247,12 @@ function stubbedModules(root: string, dialects: readonly DatabaseDialect[] | und
  * rather than resolving to an empty module: a subpath reached from app code
  * (not Guren's disabled MCP endpoint) must fail loudly at build or cold start,
  * never silently hand back missing exports.
+ *
+ * Reachable only for an app that does *not* declare `@guren/plugin-mcp`. For
+ * one that does, the SDK is a dependency it deliberately ships, and this
+ * fallback would stub `server/index.js` and `types.js` — which
+ * `@guren/plugin-mcp` imports statically — leaving the endpoint just as
+ * compiled shut as the transport stub did.
  */
 const unlistedMcpStub = `throw new Error(${JSON.stringify(MCP_UNAVAILABLE)})\n`
 
@@ -252,14 +270,27 @@ async function bundleFunction(input: {
   dialects: readonly DatabaseDialect[] | undefined
   viteManifest: string | undefined
 }): Promise<void> {
-  const stubs = stubbedModules(input.root, input.dialects)
+  // One read of the app's manifest, threaded to both halves of the stub
+  // decision below: two independent reads would be two places for them to
+  // disagree, silently.
+  const mcpPlugin = appUsesMcpPlugin(input.root)
+  const stubs = stubbedModules(input.root, input.dialects, mcpPlugin)
   // Derived from the stubs actually rendered so it stays the only enumeration
   // of stubbed specifiers — a hand-maintained regex could silently fall out of
   // sync, and a specifier that is filtered but has no stub would load as an
   // empty module instead of failing.
-  const filter = new RegExp(
-    `^(?:${[...Object.keys(stubs).map(escapeRegExp), `${escapeRegExp(MCP_SDK_SUBPATH_PREFIX)}.+`].join('|')})$`,
-  )
+  //
+  // The catch-all is the one term that cannot be derived from the stubs, and
+  // the tempting derivation is actively wrong: "include it while any MCP SDK
+  // subpath is still stubbed" holds always, because
+  // `@modelcontextprotocol/sdk/server/mcp.js` stays stubbed for every app —
+  // so the catch-all would keep swallowing `server/index.js` and `types.js`
+  // and undo RFC 0016 Phase 4a silently. Gate it on `mcpPlugin` instead.
+  const terms = Object.keys(stubs).map(escapeRegExp)
+  if (!mcpPlugin) {
+    terms.push(`${escapeRegExp(MCP_SDK_SUBPATH_PREFIX)}.+`)
+  }
+  const filter = new RegExp(`^(?:${terms.join('|')})$`)
 
   const result = await Bun.build({
     entrypoints: [input.entrypoint],
