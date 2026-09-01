@@ -1,8 +1,12 @@
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test'
-import { existsSync, mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { DEV_ONLY_MODULES, SQL_CLIENT_MODULES } from '@guren/core/internal/deploy-build'
+import {
+  DEV_ONLY_MODULES,
+  SQL_CLIENT_MODULES,
+  stubbableDevOnlyModules,
+} from '@guren/core/internal/deploy-build'
 
 // Opt-in end-to-end contract test: proves wrangler can actually bundle a
 // worker that imports `@guren/orm`, with only the stubs `cloudflare:build`
@@ -28,6 +32,48 @@ const DRIVER_PACKAGES = ['postgres', 'mysql2', '@aws-sdk']
 function wrangler(cwd: string, args: string[]): { exitCode: number; output: string } {
   const result = Bun.spawnSync({ cmd: ['bunx', 'wrangler', ...args], cwd, stdout: 'pipe', stderr: 'pipe' })
   return { exitCode: result.exitCode, output: `${result.stdout.toString()}${result.stderr.toString()}` }
+}
+
+/**
+ * Write the stub files and the `wrangler.jsonc` aliasing `modules` to them —
+ * what `cloudflare:build` scaffolds, written directly so a probe pins the
+ * contract rather than the command that emits it.
+ *
+ * Which modules a probe passes is the whole variable: the ORM probe below
+ * stubs everything, and the App MCP probe stubs everything *except* the
+ * transport, which is the configuration RFC 0016 Phase 4a produces.
+ */
+function writeWranglerConfig(
+  root: string,
+  name: string,
+  modules: readonly { specifier: string; exportNames: readonly string[] }[],
+): void {
+  mkdirSync(join(root, 'stubs'), { recursive: true })
+
+  const alias: Record<string, string> = {}
+  for (const module of modules) {
+    const file = `${module.specifier.replace(/[^a-zA-Z0-9]+/g, '-')}.js`
+    const throwing = module.exportNames
+      .map((exportName) => `export function ${exportName}() { throw new Error('stubbed') }`)
+      .join('\n')
+    const named = module.exportNames.length > 0 ? `, { ${module.exportNames.join(', ')} }` : ''
+    writeFileSync(
+      join(root, 'stubs', file),
+      `${throwing}\nfunction unavailable() { throw new Error('stubbed') }\nexport default Object.assign(unavailable${named})\n`,
+    )
+    alias[module.specifier] = `./stubs/${file}`
+  }
+
+  writeFileSync(
+    join(root, 'wrangler.jsonc'),
+    JSON.stringify({
+      name,
+      main: 'worker.ts',
+      compatibility_date: '2026-07-01',
+      compatibility_flags: ['nodejs_compat'],
+      alias,
+    }),
+  )
 }
 
 describe.skipIf(!enabled)('wrangler bundles a worker importing @guren/orm', () => {
@@ -97,31 +143,7 @@ describe.skipIf(!enabled)('wrangler bundles a worker importing @guren/orm', () =
 
     // The stubs and aliases `cloudflare:build` scaffolds, written directly so
     // the test pins the contract rather than the command that emits it.
-    const stubbed = [...DEV_ONLY_MODULES, ...SQL_CLIENT_MODULES]
-    const alias: Record<string, string> = {}
-    for (const module of stubbed) {
-      const file = `${module.specifier.replace(/[^a-zA-Z0-9]+/g, '-')}.js`
-      const throwing = module.exportNames
-        .map((name) => `export function ${name}() { throw new Error('stubbed') }`)
-        .join('\n')
-      const named = module.exportNames.length > 0 ? `, { ${module.exportNames.join(', ')} }` : ''
-      writeFileSync(
-        join(root, 'stubs', file),
-        `${throwing}\nfunction unavailable() { throw new Error('stubbed') }\nexport default Object.assign(unavailable${named})\n`,
-      )
-      alias[module.specifier] = `./stubs/${file}`
-    }
-
-    writeFileSync(
-      join(root, 'wrangler.jsonc'),
-      JSON.stringify({
-        name: 'bundle-probe',
-        main: 'worker.ts',
-        compatibility_date: '2026-07-01',
-        compatibility_flags: ['nodejs_compat'],
-        alias,
-      }),
-    )
+    writeWranglerConfig(root, 'bundle-probe', [...DEV_ONLY_MODULES, ...SQL_CLIENT_MODULES])
   })
 
   afterAll(() => {
@@ -139,5 +161,208 @@ describe.skipIf(!enabled)('wrangler bundles a worker importing @guren/orm', () =
       expect(result.exitCode).toBe(0)
     },
     180_000,
+  )
+})
+
+/**
+ * The free plan's compressed worker limit. Written as a byte count rather than
+ * copied from the RFC's prose "3 MB", which is loose about MB vs MiB — the
+ * platform's limit is 3 MiB of gzipped upload.
+ */
+const FREE_PLAN_GZIP_BUDGET = 3 * 1024 * 1024
+
+/** Extensions that count toward the upload; sourcemaps do not, and dwarf it. */
+const UPLOADED_EXTENSIONS = ['.js', '.mjs', '.wasm']
+
+/**
+ * The `@guren/*` packages a probe must resolve from this checkout, derived
+ * rather than listed: seed with the one the worker imports and close over the
+ * workspace `dependencies`. A package added to `@guren/plugin-mcp`'s graph
+ * enters the probe by itself — a hand-kept list is how a package comes to be
+ * installed from npm and silently verified in its *published* form instead
+ * (see `scripts/smoke/local-packages.ts`, which owns the same rule for the
+ * smokes).
+ */
+function workspaceClosure(seed: string): Map<string, { dir: string; manifest: Record<string, unknown> }> {
+  const packagesDir = new URL('../../', import.meta.url).pathname
+  const byName = new Map<string, { dir: string; manifest: Record<string, unknown> }>()
+  for (const entry of readdirSync(packagesDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue
+    const manifestPath = join(packagesDir, entry.name, 'package.json')
+    if (!existsSync(manifestPath)) continue
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, unknown>
+    byName.set(manifest.name as string, { dir: join(packagesDir, entry.name), manifest })
+  }
+
+  const closure = new Map<string, { dir: string; manifest: Record<string, unknown> }>()
+  const queue = [seed]
+  while (queue.length > 0) {
+    const name = queue.shift() as string
+    if (closure.has(name)) continue
+    const found = byName.get(name)
+    if (!found) {
+      throw new Error(`bundle probe: ${name} is not a package in this workspace`)
+    }
+    closure.set(name, found)
+    for (const dep of Object.keys((found.manifest.dependencies ?? {}) as Record<string, string>)) {
+      if (dep.startsWith('@guren/')) queue.push(dep)
+    }
+  }
+
+  return closure
+}
+
+describe.skipIf(!enabled)('wrangler bundles a worker importing @guren/plugin-mcp', () => {
+  let root: string
+
+  beforeAll(() => {
+    root = mkdtempSync(join(tmpdir(), 'guren-wrangler-mcp-'))
+
+    const closure = workspaceClosure('@guren/plugin-mcp')
+
+    // Every third-party dependency of the closure, flattened to the probe's
+    // top level. Vendoring the workspace packages by *copy* rather than by
+    // tarball is not a shortcut: `bun add` of a tarball leaves the packages'
+    // own `@guren/*` ranges to resolve, which npm satisfies with published
+    // copies nested under each vendored package — measured directly, and the
+    // published `@guren/core` predates RFC 0016, so the bundle failed on
+    // exports the checkout has.
+    const thirdParty: Record<string, string> = {}
+    for (const { manifest } of closure.values()) {
+      for (const [name, range] of Object.entries((manifest.dependencies ?? {}) as Record<string, string>)) {
+        if (!name.startsWith('@guren/')) thirdParty[name] = range
+      }
+    }
+    // The real SDK, from npm: what the transport actually costs is the number
+    // this probe exists to report.
+    if (!thirdParty['@modelcontextprotocol/sdk']) {
+      throw new Error('bundle probe: no @modelcontextprotocol/sdk in the closure; the probe would measure nothing')
+    }
+
+    writeFileSync(
+      join(root, 'package.json'),
+      JSON.stringify({ name: 'mcp-bundle-probe', type: 'module', private: true, dependencies: thirdParty }),
+    )
+    const install = Bun.spawnSync({ cmd: ['bun', 'install'], cwd: root, stdout: 'pipe', stderr: 'pipe' })
+    if (install.exitCode !== 0) {
+      throw new Error(`bundle probe setup failed to install dependencies:\n${install.stderr.toString()}`)
+    }
+
+    for (const [name, { dir, manifest }] of closure) {
+      const dist = join(dir, 'dist')
+      if (!existsSync(dist)) {
+        throw new Error(`bundle probe: ${name} has no dist/; run \`bun run build\` first`)
+      }
+      const target = join(root, 'node_modules', name)
+      mkdirSync(target, { recursive: true })
+      cpSync(dist, join(target, 'dist'), { recursive: true })
+      // Dependencies stripped from the copied manifest: everything is
+      // flattened at the probe's top level already, and leaving the ranges in
+      // is what would invite a resolver to fetch a second copy.
+      const { dependencies, devDependencies, peerDependencies, ...rest } = manifest
+      writeFileSync(join(target, 'package.json'), JSON.stringify(rest))
+    }
+
+    // Asserted rather than assumed, and this is the assertion the whole probe
+    // rests on: a package resolving *out* of the probe measures this monorepo
+    // rather than an installed app, which has reported a real bundle change
+    // as no change at all before.
+    for (const name of [...closure.keys(), '@modelcontextprotocol/sdk']) {
+      if (!existsSync(join(root, 'node_modules', name))) {
+        throw new Error(`bundle probe: ${name} did not land in the probe's node_modules`)
+      }
+    }
+    for (const name of closure.keys()) {
+      if (existsSync(join(root, 'node_modules', name, 'node_modules'))) {
+        throw new Error(`bundle probe: ${name} has nested node_modules; it would resolve a second copy`)
+      }
+    }
+
+    writeFileSync(
+      join(root, 'worker.ts'),
+      `import { mcpPlugin } from '@guren/plugin-mcp'\n`
+        + `export default {\n`
+        + `  async fetch(): Promise<Response> {\n`
+        + `    return new Response(typeof mcpPlugin)\n`
+        + `  },\n`
+        + `}\n`,
+    )
+
+  })
+
+  afterAll(() => {
+    if (root) rmSync(root, { recursive: true, force: true })
+  })
+
+  /**
+   * Bundle the probe with `modules` stubbed and report the gzipped bytes
+   * wrangler would upload.
+   *
+   * Gzipped here rather than parsed out of wrangler's own "Total Upload /
+   * gzip" line — that line is prose and can be reworded — but printed beside
+   * it so a human can reconcile the two. Sourcemaps are excluded: the `.map`
+   * beside the bundle is several times its size and the limit does not count
+   * it, so a whole-directory sum would fail for a file that never ships.
+   */
+  function bundleSize(
+    label: string,
+    modules: readonly { specifier: string; exportNames: readonly string[] }[],
+  ): number {
+    writeWranglerConfig(root, 'mcp-bundle-probe', modules)
+    const out = join(root, `out-${label}`)
+    const result = wrangler(root, ['deploy', '--dry-run', '--outdir', out])
+
+    // Name what is missing rather than only that something is: with the
+    // transport unstubbed, a bundle that cannot resolve reports the SDK
+    // subpath by name.
+    expect(result.output).not.toMatch(/Could not resolve/)
+    expect(result.exitCode).toBe(0)
+
+    let gzipped = 0
+    let files = 0
+    for (const file of readdirSync(out)) {
+      if (!UPLOADED_EXTENSIONS.some((extension) => file.endsWith(extension))) continue
+      gzipped += Bun.gzipSync(readFileSync(join(out, file))).byteLength
+      files += 1
+    }
+
+    // A worker with nothing measured passes any budget.
+    expect(files).toBeGreaterThan(0)
+
+    console.log(
+      `App MCP probe [${label}]: ${(gzipped / 1024).toFixed(1)} KiB gzipped over ${files} file(s) — `
+        + result.output.split('\n').find((line) => line.includes('Total Upload'))?.trim(),
+    )
+
+    return gzipped
+  }
+
+  test(
+    'bundles the App MCP transport and stays inside the free-plan budget',
+    () => {
+      // Everything `cloudflare:build` stubs for an app that declares
+      // `@guren/plugin-mcp` — which is everything except the transport.
+      const served = bundleSize('transport-served', [
+        ...stubbableDevOnlyModules({ mcpPlugin: true }),
+        ...SQL_CLIENT_MODULES,
+      ])
+      // And the same worker as every deploy plugin built it before RFC 0016
+      // Phase 4a. Both are measured because "the bundle resolves" cannot tell
+      // them apart: the stub declares the transport's export name, so the
+      // stubbed configuration bundles perfectly well — it just deploys an
+      // endpoint that throws. The size difference is the only observable
+      // proof that the real transport reached the bundle, and it is also the
+      // number the RFC asks this probe to report.
+      const stubbed = bundleSize('transport-stubbed', [...DEV_ONLY_MODULES, ...SQL_CLIENT_MODULES])
+
+      console.log(
+        `App MCP transport costs ${((served - stubbed) / 1024).toFixed(1)} KiB gzipped `
+          + `(${((served / FREE_PLAN_GZIP_BUDGET) * 100).toFixed(1)}% of the ${FREE_PLAN_GZIP_BUDGET / 1024 / 1024} MiB free-plan budget used in total)`,
+      )
+
+      expect(served).toBeGreaterThan(stubbed)
+      expect(served).toBeLessThan(FREE_PLAN_GZIP_BUDGET)
+    },
+    300_000,
   )
 })
