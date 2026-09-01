@@ -43,11 +43,13 @@ export interface BuildToolRequestOptions {
    * only one when this header was introduced, so every existing caller keeps
    * sending exactly what it sent before.
    *
-   * The header is informational — a route reads it to distinguish an
-   * in-browser session call from a bearer-token one, and the audit trail
-   * records the same vocabulary ({@link AgentSurface}). Nothing authorizes on
-   * it: a client sets any header it likes, which is why the surface never
-   * relaxes a check.
+   * The header is informational and, in the framework, write-only: nothing
+   * here reads it back. It is there for an *application* that wants to tell
+   * an in-browser session call from a bearer-token one, and it borrows the
+   * audit trail's vocabulary ({@link AgentSurface}) so the two agree — but
+   * the trail's own `surface` comes from the adapter that recorded it, not
+   * from this header. Nothing must ever authorize on it: any client sets any
+   * header it likes, so a surface can never relax a check.
    */
   surface?: AgentSurface
 }
