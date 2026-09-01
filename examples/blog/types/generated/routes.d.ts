@@ -10,6 +10,7 @@ declare namespace Guren {
 
   export type RoutePath =
     '/'
+    | `/attachments/${string}/${string}`
     | `/auth/${string}`
     | `/auth/${string}/callback`
     | '/dashboard'
