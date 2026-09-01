@@ -446,6 +446,79 @@ describe('ExceptionHandler', () => {
     })
   })
 
+  /**
+   * The console fallback exists so an app with no reporter still surfaces a
+   * *server* failure on stdout. A 4xx is not one: it is delivered to the
+   * caller in full, so logging it turns a route rejecting invalid input as
+   * designed into a stack trace per request — which is how a correct 422 came
+   * to be printed as `Unhandled exception:`.
+   */
+  describe('fallback console reporting', () => {
+    const captureConsoleError = () => {
+      const calls: unknown[][] = []
+      const original = console.error
+      console.error = (...args: unknown[]) => {
+        calls.push(args)
+      }
+      return {
+        calls,
+        restore: () => {
+          console.error = original
+        },
+      }
+    }
+
+    it('should not log client errors when no reporter is registered', async () => {
+      const captured = captureConsoleError()
+      try {
+        await handler.handle(
+          new ValidationException({ title: ['Too short'] }),
+          createMockContext() as any
+        )
+        await handler.handle(new AuthorizationException(), createMockContext() as any)
+        await handler.handle(new NotFoundHttpException(), createMockContext() as any)
+      } finally {
+        captured.restore()
+      }
+
+      expect(captured.calls).toEqual([])
+    })
+
+    it('should log server errors when no reporter is registered', async () => {
+      const captured = captureConsoleError()
+      const httpFailure = new HttpException(500, 'Boom')
+      const bare = new Error('Bare failure')
+      try {
+        await handler.handle(httpFailure, createMockContext() as any)
+        await handler.handle(bare, createMockContext() as any)
+      } finally {
+        captured.restore()
+      }
+
+      expect(captured.calls).toHaveLength(2)
+      expect(captured.calls[0]).toEqual(['Unhandled exception:', httpFailure])
+      expect(captured.calls[1]).toEqual(['Unhandled exception:', bare])
+    })
+
+    it('should still hand client errors to a registered reporter', async () => {
+      const reported: Error[] = []
+      handler.report((error) => {
+        reported.push(error)
+      })
+
+      const error = new ValidationException({ title: ['Too short'] })
+      const captured = captureConsoleError()
+      try {
+        await handler.handle(error, createMockContext() as any)
+      } finally {
+        captured.restore()
+      }
+
+      expect(reported).toEqual([error])
+      expect(captured.calls).toEqual([])
+    })
+  })
+
   describe('dontReport', () => {
     it('should not report excluded exceptions', async () => {
       const reported: Error[] = []
