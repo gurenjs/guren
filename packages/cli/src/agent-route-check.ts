@@ -6,7 +6,7 @@ import {
   RESERVED_AGENT_TOOL_NAMES,
 } from '@guren/core'
 import type { AgentRouteMetadata, RouteDefinition } from '@guren/core'
-import { memberKeyName, walk } from './ast-walk'
+import { memberKeyName, objectLiteral, walk } from './ast-walk'
 import { check, type CheckResult } from './check-result'
 import {
   mutatesRecords,
@@ -496,14 +496,20 @@ function readMcpPluginCalls(parsed: ParsedFile): 'configured' | 'absent' | undef
     const callee = call.callee
     if (callee.type !== 'Identifier' || !locals.has(callee.name)) return
 
-    const options = call.arguments[0]
+    const argument = call.arguments[0]
     // `mcpPlugin()` with no argument is a readable call with no queue: the
     // default is the unconfigured one.
-    if (!options) {
+    if (!argument) {
       answer ??= 'absent'
       return
     }
-    if (options.type !== 'ObjectExpression') return
+    // Read through transparent wrapping: `mcpPlugin({ … } satisfies
+    // McpPluginOptions)` is the same options object at runtime, and the bare
+    // shape test read it as unreadable — which this scan's positive-evidence
+    // rule then turns into silence, so a gated route with nowhere to queue
+    // its approvals went unreported.
+    const options = objectLiteral(argument)
+    if (!options) return
 
     const properties = options.properties
     const carriesQueue = properties.some(

@@ -7,7 +7,7 @@ import type {
   ObjectProperty,
   Statement,
 } from '@babel/types'
-import { memberKeyName, unwrapTypeAssertion } from './ast-walk'
+import { literalString, memberKeyName, objectLiteral, unwrapTypeAssertion } from './ast-walk'
 import { listAppRoots } from './discovery'
 import { parseSourceFile } from './parse-cache'
 
@@ -149,7 +149,11 @@ function propertyKeyName(property: ObjectProperty): string | undefined {
  * name-less `timestamp({ … })`.
  */
 function firstObjectArgument(call: CallExpression | undefined): ObjectExpression | undefined {
-  return call?.arguments.find((arg): arg is ObjectExpression => arg.type === 'ObjectExpression')
+  for (const argument of call?.arguments ?? []) {
+    const literal = objectLiteral(argument)
+    if (literal) return literal
+  }
+  return undefined
 }
 
 /**
@@ -161,18 +165,30 @@ function firstObjectArgument(call: CallExpression | undefined): ObjectExpression
  */
 function hasOpaqueOptions(call: CallExpression | undefined): boolean {
   if (!call) return false
-  return call.arguments.some(
-    (arg) => arg.type !== 'ObjectExpression' && arg.type !== 'StringLiteral',
-  )
+  return call.arguments.some((arg) => {
+    // Both tests apply to the unwrapped node: `{ … } as const` is the same
+    // object drizzle receives, and `timestamp('x' as const)` is the same
+    // name — reading either as opaque turns a fully static declaration into
+    // an unknown, which is how a written option stops being checked.
+    const argument = unwrapTypeAssertion(arg)
+    if (argument.type === 'StringLiteral') return false
+    if (argument.type !== 'ObjectExpression') return true
+    // A spread hides every option it carries, so an inline object holding one
+    // proves no more than an identifier does: `timestamp('c', { ...SHARED })`
+    // has to read as unknown, not as "withTimezone absent", or the check
+    // warns about a column the runtime already got right.
+    return argument.properties.some((property) => property.type === 'SpreadElement')
+  })
 }
 
 /**
  * A boolean option off the builder's own options object, e.g. the
  * `withTimezone` in `timestamp('created_at', { withTimezone: true })`.
  * Undefined when absent or not written as a boolean literal. A `satisfies`
- * or `as const` wrapper is unwrapped first — `withTimezone: true as const`
- * is the same `true` to Postgres, and reading it as "unset" would be a
- * false alarm.
+ * or `as const` wrapper is unwrapped on both sides — the options object via
+ * {@link firstObjectArgument} and the value here — because
+ * `{ withTimezone: true } as const` is the same `true` to Postgres either
+ * way, and reading it as "unset" would be a false alarm.
  */
 function booleanOption(builder: CallExpression | undefined, option: string): boolean | undefined {
   const options = firstObjectArgument(builder)
@@ -235,9 +251,10 @@ function columnsFromObject(columnsArg: ObjectExpression): SchemaColumn[] {
 
     const { type, builder, methods } = unwrapColumnChain(prop.value)
     const nameArg = builder?.arguments[0]
+
     columns.push({
       name,
-      columnName: nameArg?.type === 'StringLiteral' ? nameArg.value : undefined,
+      columnName: literalString(nameArg) ?? undefined,
       type: type && methods.has('array') ? `${type}[]` : type,
       notNull: methods.has('notNull'),
       primaryKey: methods.has('primaryKey'),
@@ -292,8 +309,7 @@ async function parseSchemaFile(schemaPath: string, module: string | null): Promi
       const dialect = tableFactoryDialect(declarator.init, aliases)
       if (!dialect) continue
 
-      const nameArg = declarator.init.arguments[0]
-      const tableName = nameArg?.type === 'StringLiteral' ? nameArg.value : undefined
+      const tableName = literalString(declarator.init.arguments[0]) ?? undefined
 
       const columnsArg = firstObjectArgument(declarator.init)
       if (!columnsArg) continue

@@ -815,6 +815,40 @@ export const providers = [mcpPlugin({ approvals: { store, notify: () => {} } })]
       expect(keys(results)).not.toContain('agent-route-approval-store')
     })
 
+    it('reads plugin options written behind a transparent wrapper', async () => {
+      await writeAppFile(`
+import { mcpPlugin, type McpPluginOptions } from '@guren/plugin-mcp'
+
+export const providers = [mcpPlugin({ path: '/mcp' } satisfies McpPluginOptions)]
+`)
+
+      const results = await checkAgentRoutes({ cwd: tempDir, definitions: [gated()] })
+      // Wrapped options used to read as unreadable, and the scan's
+      // positive-evidence-only rule then turned that into silence — a gated
+      // route with nowhere to queue its approvals went unreported.
+      expect(keys(results)).toContain('agent-route-approval-store')
+    })
+
+    it('reads an approvals queue written behind a transparent wrapper', async () => {
+      // The unwrapped call is what makes this test able to fail: on its own, a
+      // wrapped configured call is indistinguishable from an unreadable one —
+      // both produce no finding. Pairing it with a readable call that has no
+      // queue means the wrapped one has to be understood as *configured* to
+      // keep the finding away.
+      await writeAppFile(`
+import { mcpPlugin } from '@guren/plugin-mcp'
+import { store } from './approvals'
+
+export const providers = [
+  mcpPlugin({ path: '/mcp' }),
+  mcpPlugin({ approvals: { store, notify: () => {} } } as const),
+]
+`)
+
+      const results = await checkAgentRoutes({ cwd: tempDir, definitions: [gated()] })
+      expect(keys(results)).not.toContain('agent-route-approval-store')
+    })
+
     it('follows a local alias of the factory', async () => {
       await writeAppFile(`
 import { mcpPlugin as mcp } from '@guren/plugin-mcp'
