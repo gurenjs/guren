@@ -289,13 +289,28 @@ per disk:
 
   The third argument is a new **additive optional options bag on
   `temporaryUrl`** — S3 maps it to `ResponseContentDisposition` /
-  `ResponseContentType` on the presigned `GetObjectCommand`, R2 to
+  `ResponseContentType` on the presigned `GetObjectCommand`, ~~R2 to
   the standard `response-content-disposition` /
-  `response-content-type` signed query parameters in `sigv4.ts`. It
-  is how the §4 disposition policy survives the redirect instead of
-  being silently dropped at the bucket. A third-party driver that
+  `response-content-type` signed query parameters in `sigv4.ts`~~. On a driver
+  that honours it, it is how the §4 disposition policy survives the
+  redirect instead of being silently dropped at the bucket. A driver that
   ignores the bag serves its own object metadata; apps that need the
   disposition guarantee on such a disk force `serve: 'proxy'`.
+
+  **Amended in implementation:** R2 does *not* map the bag — it is
+  one of the drivers the sentence above describes, not a peer of S3.
+  R2's S3 API does not implement GetObject's `response-*` query
+  parameters, so signing them in would *look* like the §4 policy
+  survives the redirect while the bucket serves the object's own
+  `httpMetadata`. `R2Driver.temporaryUrl()` therefore discards the
+  bag deliberately, with that reasoning in the code. Two consequences
+  worth reading together: `serve: 'proxy'` is the only way to get the
+  disposition guarantee on a presign-capable R2 disk (and `'auto'`
+  picks redirect, so it is an opt-in), and the redirect lands on
+  `<accountid>.r2.cloudflarestorage.com` — an origin the app does not
+  control and does not share cookies with, which is why the gap is a
+  hosted-content concern rather than a same-origin one. See
+  `docs/en/guides/cloudflare.md`.
 - **Proxy** — the app streams the object body itself with the
   hardened headers of §4. For `local`, `memory`, R2 on the binding
   alone, and any driver that cannot presign.
@@ -544,14 +559,14 @@ closed:
 | T2 | **Replay after expiry** | `expires` is signed and mandatory (`requireExpiration: true`); verification rejects past timestamps before any I/O. |
 | T3 | **Enumeration / IDOR** | The id is a ULID (unguessable before insert) *and* no response differs before signature verification — invalid signature, unknown id, and undeclared variant are all 404. The signature, not the id's secrecy, is the boundary. |
 | T4 | **Key compromise blast radius** | HKDF purpose `'attachment-delivery'`: a leaked delivery key forges delivery URLs and nothing else — not sessions, not CSRF, not password-reset links, and not the future direct-upload tokens (separate purpose). Rotation rides `APP_KEY`/`APP_PREVIOUS_KEYS` (verify walks previous keys). |
-| T5 | **Stored XSS via uploads served same-origin** (SVG/HTML with scripts) | Inline allowlist forces non-listed types to `attachment`; `nosniff` pins the recorded type; `CSP: sandbox` de-origins whatever renders inline anyway. Scope: this is the *proxy* path's defense — a redirect lands on the bucket's origin, where same-origin is not at stake and the disposition still travels via the presign response-override (§3). |
+| T5 | **Stored XSS via uploads served same-origin** (SVG/HTML with scripts) | Inline allowlist forces non-listed types to `attachment`; `nosniff` pins the recorded type; `CSP: sandbox` de-origins whatever renders inline anyway. Scope: this is the *proxy* path's defense — a redirect lands on the bucket's origin, where same-origin is not at stake. **Amended in implementation:** on the redirect path the disposition travels via the presign response-override only where the driver honours it (S3 does; R2 does not — see §3), so on R2 the bytes are served under the recorded `Content-Type` with no disposition at all. Still off the app's origin, so not stored XSS, but an app handing out signed links to *unvalidated* uploads on R2 is hosting attacker-authored HTML/SVG behind its own branding: use `serve: 'proxy'`, or an `image` policy on the collection. |
 | T6 | **Host-header poisoning of generated or verified URLs** | URLs are generated path-relative and signatures canonicalize to path+query — the `Host` header is never read on either side. The deliberate flip side: a signed URL verifies on any hostname the app answers on (multi-domain and proxied deployments keep working; the signature never gates *which* origin, only *what*). The assumption this rests on, stated explicitly: **one `APP_KEY` = one authorization domain** — the same assumption sessions and CSRF already ride, so a deployment sharing keys across tenants or environments is already broken in worse ways than attachment URLs. An app genuinely serving multiple security domains from one keyring can be given a signed, *configured* audience claim later (still no request-header trust); not in v1. |
 | T7 | **Path traversal / key injection** | The object key comes from the row (written by the attach pipeline's sanitizer), never from the request. The `:filename` segment is decorative for `Content-Disposition` only, single-segment by route shape, and signed. |
 | T8 | **Cache poisoning / leak via shared caches** | Proxy: `Cache-Control: private`, max-age capped at remaining signature lifetime. Redirect: `no-store` (the `Location` is a credential). Signed query params make cache keys unique per grant anyway. |
 | T9 | **"Signed URL" misread as revocable authorization** | Stated contract: this is a capability URL — anyone holding it reads the bytes until expiry. Revocation means **removing** the compromised key: rotation alone revokes nothing while the old key sits in `APP_PREVIOUS_KEYS`, because verification deliberately walks previous keys — and a browser-cached response stays usable until its `max-age` ends regardless. Per-request authorization (`authorize(row, ctx)` callback) is deliberately **not** in v1, unchanged from RFC 0010 §3: apps needing it wrap `attachmentUrl()` in their own controller behind their own middleware and hand out short-lived URLs. Revisit if the wrapper turns out to be the common case. |
 | T10 | **Resource exhaustion through the proxy** | Verification costs at most one HMAC per keyring key before any DB or storage I/O, so garbage URLs are cheap to reject, and streaming (`getStream`) keeps large bodies out of app memory where drivers implement it. **Partially open, stated honestly:** the buffered fallback has no framework-level size bound for opaque (non-image) collections — `maxImageBytes` gates only the image-policied attach path — and streaming caps memory, not bandwidth, open-stream concurrency, or storage read cost for a repeatedly fetched valid link. The route ships no rate limiter of its own; it composes with app middleware (`.middleware(...)`), and the docs tell bandwidth-sensitive apps to rate-limit the prefix and prefer redirect-capable disks. |
 | T11 | **Open redirect** | The 302 `Location` is exclusively `disk.temporaryUrl()` output — driver-built from row data, no request input. |
-| T12 | **Signature-verification bypass via canonicalization disagreement** | The `localeCompare` sort is replaced by code-unit comparison (§2) so signer and verifier can never canonicalize differently across runtimes/locales. |
+| T12 | **Signature-verification bypass via canonicalization disagreement** | The `localeCompare` sort is replaced by code-unit comparison (§2) so signer and verifier can never canonicalize differently across runtimes/locales. **Amended in implementation:** the canonical form must also be *injective* over its input, which `pathname + search` alone is not — `//host/path` and `/\host/path` both begin with `/` yet the WHATWG parser folds the first segment into the authority, which the canonical form then drops, so an authority prefixed onto a signed relative URL was covered by no signature. `parseUrl` now rejects app-relative input whose parsed origin moved off the placeholder base, checked against the parsed origin rather than a prefix list (which spellings fold into an authority is the parser's rule to change, not ours). Unreachable through this route — `${prefix}/:id/:filename` never matches a `//`-leading path — but `signUrl`/`verifySignedUrl` are public exports. |
 | T13 | **Signed-URL leakage via logs, referrers, history** | The signature is a bearer credential in a query string. Route responses set `Referrer-Policy: no-referrer` (the app-wide default `strict-origin-when-cross-origin` still sends the full URL on same-origin navigation, and apps can weaken it); expiry bounds the damage window — one reason the default lifetime is minutes, not days; the docs require query redaction in access logs for the route prefix and note browser-history exposure. |
 | T14 | **"Private" disk whose backing store is itself public** | The route is a lock on the app path only — it cannot un-publish an S3/R2 bucket configured public or a local directory the app still serves statically. `disks` visibility is policy metadata, not proof: nothing at attach time verifies the bucket's actual ACL or the static mounts. Adoption therefore includes closing the direct path (Migration Path spells out the local two-step), and a `guren check` candidate rule flags a `'private'` disk whose storage config carries a public `url`/`publicUrl` or whose local root sits under the app's public directory. |
 

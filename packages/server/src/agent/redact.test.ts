@@ -28,6 +28,9 @@ describe('redactAgentArguments', () => {
       credential: 'c',
       cookie: 'session=1',
       session: 'sid',
+      privateKey: 'p',
+      pwd: 'p',
+      jwt: 'j',
       title: 'kept',
     })
 
@@ -42,7 +45,19 @@ describe('redactAgentArguments', () => {
       credential: AGENT_REDACTED,
       cookie: AGENT_REDACTED,
       session: AGENT_REDACTED,
+      privateKey: AGENT_REDACTED,
+      pwd: AGENT_REDACTED,
+      jwt: AGENT_REDACTED,
       title: 'kept',
+    })
+  })
+
+  test('should keep ordinary names that merely contain a short credential-ish substring', () => {
+    // The reason `otp` is not a default fragment: over-masking is the safe
+    // direction only while a fragment mostly hits credentials.
+    expect(redactAgentArguments({ slotProvider: 'a', notPublic: false })).toEqual({
+      slotProvider: 'a',
+      notPublic: false,
     })
   })
 
