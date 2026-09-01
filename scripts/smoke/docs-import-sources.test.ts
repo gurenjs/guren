@@ -190,6 +190,33 @@ describe('specifiers the gate cannot resolve', () => {
     expect(report.unresolvable[0]?.reason).toContain('static asset')
   })
 
+  // Two import forms name no symbols, which is exactly why they slipped past
+  // the specifier check once: the loop skipped ahead when there was nothing to
+  // look up, and skipped the "does this package even exist" question with it.
+  test('fails a namespace import of a package that does not exist', async () => {
+    const report = await auditSnippet("import * as everything from '@guren/not-a-package'")
+
+    expect(report.unresolvable).toHaveLength(1)
+    expect(report.unresolvable[0]?.reason).toContain('no such first-party package')
+  })
+
+  test('fails a bare side-effect import of a subpath that does not exist', async () => {
+    const report = await auditSnippet("import '@guren/core/not-a-subpath'")
+
+    expect(report.unresolvable).toHaveLength(1)
+    expect(report.unresolvable[0]?.reason).toContain('exports map')
+  })
+
+  test('allows a bare side-effect import of a real asset subpath', async () => {
+    // What a bare import is usually for, and what `docs/{en,ja}/guides/markdown.md`
+    // actually does. A stylesheet having no named exports is not a finding —
+    // the subpath existing is the whole of what can be asked here.
+    const report = await auditSnippet("import '@guren/plugin-markdown/styles.css'")
+
+    expect(report.unresolvable).toEqual([])
+    expect(report.unexported).toEqual([])
+  })
+
   test('leaves a third-party specifier alone', async () => {
     const report = await auditSnippet("import { z } from 'zod'", "import React from 'react'")
 

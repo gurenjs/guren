@@ -618,7 +618,22 @@ export async function auditDocsImportSources(root: string, docsDir = 'docs'): Pr
           })
           continue
         }
-        if (names.length === 0) {
+        // The *specifier* is resolved for every import; only the per-symbol
+        // loop further down is skipped when nothing is named. An
+        // `import * as x from '@guren/typo'` and a bare `import '@guren/typo'`
+        // name no symbols, and returning here would exempt them from the one
+        // check that still applies — that the package and subpath exist at
+        // all. Decision 4 says an unresolvable specifier fails rather than
+        // being skipped; a short-circuit on the symbol count quietly carved
+        // two import forms out of it.
+        //
+        // With one exception, which is what a bare import is usually *for*:
+        // `import '@guren/plugin-markdown/styles.css'` names a stylesheet, and
+        // a stylesheet having no named exports is not a finding. The subpath
+        // still has to exist in the exports map — a typo in it is refused by
+        // Node exactly as a typo in a module path is — so what is skipped here
+        // is reading a surface out of a file that has none, not the check.
+        if (names.length === 0 && entryPoints.get(entry.specifier)?.kind === 'asset') {
           continue
         }
 

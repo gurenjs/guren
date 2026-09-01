@@ -413,6 +413,25 @@ async function auditImportSources(root: string): Promise<void> {
     )
   }
 
+  // A *root* entry point going open is not a note, it is the check switching
+  // itself off. The exempt ones are all subpaths — `@guren/orm/drizzle/pg`,
+  // the jsx runtimes — each reached by a handful of snippets. `@guren/core` is
+  // reached by most of them, so one `export *` from a third-party package
+  // added to its barrel drops what this audit verifies from about a thousand
+  // symbols to roughly a hundred, and the only trace is the line above,
+  // printed directly beneath the word "passed". Derived rather than listed:
+  // whichever roots exist, a root is the shape that collapses coverage, while
+  // a new subpath that legitimately re-exports a dependency still costs only
+  // its own snippets.
+  const openRoots = report.openEntryPoints.filter((entry) => entry.split(' ')[0]!.split('/').length === 2)
+  assert(
+    openRoots.length === 0,
+    `Docs import audit cannot verify anything imported from ${openRoots.join('; ')}: a package root that `
+      + 're-exports a third-party package wholesale makes every symbol imported from it unprovable, and '
+      + 'most snippets import from a root. Re-export the names the package means to publish, or move the '
+      + 'wholesale re-export to a subpath.',
+  )
+
   const failures = report.unresolvable.length + report.unexported.length
   assert(
     failures === 0,
