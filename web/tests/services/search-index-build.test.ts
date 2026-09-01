@@ -140,10 +140,11 @@ describe('renderIndexSql', () => {
     expect(sql).not.toContain('doc_sections_%')
   })
 
-  it('records the build id in the state row', () => {
-    expect(sql).toContain(
-      `INSERT INTO "search_index_state" (id, build_id, updated_at) VALUES (1, 'abc123', unixepoch())`,
-    )
+  it('records the build id and keeps the one it replaces', () => {
+    // The replaced build has to stay nameable: a rollback activates an
+    // earlier Worker and does not bring D1 back with it.
+    expect(sql).toContain(`VALUES (1, 'abc123', NULL, unixepoch())`)
+    expect(sql).toContain('previous_build_id = "search_index_state".build_id')
   })
 
   it('doubles quotes in content', () => {

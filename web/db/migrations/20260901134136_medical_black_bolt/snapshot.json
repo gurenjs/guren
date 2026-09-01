@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "48d20fed-df4b-4586-8220-7da2e6d0e178",
+  "id": "77eb0a08-fa35-4e8a-8f6e-c44d547ee42f",
   "prevIds": [
     "632cfb20-9a53-4d35-ba99-923a2a4f498a"
   ],
@@ -183,6 +183,16 @@
       "default": null,
       "generated": null,
       "name": "build_id",
+      "entityType": "columns",
+      "table": "search_index_state"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "previous_build_id",
       "entityType": "columns",
       "table": "search_index_state"
     },

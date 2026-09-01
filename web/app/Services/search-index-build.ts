@@ -255,8 +255,15 @@ ${SEARCH_COLUMNS.map((column) => `  ${column},`).join('\n')}
           `${quote(row.locale)}, ${quote(row.unigrams)})`,
       ),
     ),
-    `INSERT INTO "search_index_state" (id, build_id, updated_at) VALUES (1, ${quote(buildId)}, unixepoch())
-  ON CONFLICT(id) DO UPDATE SET build_id = excluded.build_id, updated_at = excluded.updated_at;`,
+    // The pointer rotates here rather than in the deploy script: whatever this
+    // build replaces has to stay nameable, because `wrangler rollback` brings
+    // an earlier Worker back and does not bring D1 with it.
+    `INSERT INTO "search_index_state" (id, build_id, previous_build_id, updated_at)
+  VALUES (1, ${quote(buildId)}, NULL, unixepoch())
+  ON CONFLICT(id) DO UPDATE SET
+    previous_build_id = "search_index_state".build_id,
+    build_id = excluded.build_id,
+    updated_at = excluded.updated_at;`,
   )
 
   return `${statements.join('\n')}\n`

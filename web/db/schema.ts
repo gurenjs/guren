@@ -57,12 +57,20 @@ export const posts = sqliteTable('posts', {
  * The deploy workflow compares it against the id of the build it just
  * produced and skips reindexing when they match — without that gate, a busy
  * day of deploys exceeds D1's free write budget on its own.
+ *
+ * It records what has been *loaded*, which is not always what is live: the
+ * index goes in before `wrangler deploy`, so a deploy that fails after that
+ * leaves this row ahead of the Worker. That is why two builds are kept.
  */
 export const searchIndexState = sqliteTable(
   'search_index_state',
   {
     id: integer('id').primaryKey(),
     buildId: text('build_id').notNull(),
+    // The build this one replaced, kept so its tables survive a rollback:
+    // `wrangler rollback` activates an earlier Worker, which names earlier
+    // tables, and Cloudflare does not roll a D1 database back with it.
+    previousBuildId: text('previous_build_id'),
     updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
   },
   (table) => [check('search_index_state_single_row', sql`${table.id} = 1`)],
