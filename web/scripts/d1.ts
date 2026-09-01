@@ -60,7 +60,7 @@ export function createD1Client(remote: boolean): D1Client {
   const target = remote ? '--remote' : '--local'
 
   return {
-    label: remote ? `${DATABASE} (remote)` : `${DATABASE} (local)`,
+    label: `${DATABASE} (${remote ? 'remote' : 'local'})`,
 
     async query<TRow>(sql: string): Promise<TRow[]> {
       const output = await wrangler([
