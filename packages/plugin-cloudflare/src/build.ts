@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
@@ -63,6 +63,7 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
   // but the delete waits until every check below has passed — a failed build
   // must not take the previous deploy output with it.
   assertOutputDirOutsideRoot(out, root, 'Cloudflare build')
+  assertWranglerJsoncIsAuthoritative(root)
 
   const packageJson = readPackageJson(root)
 
@@ -364,6 +365,55 @@ function renderWorkerModule(input: {
   lines.push('export default createWorkersHandler(app)', '')
 
   return lines.join('\n')
+}
+
+/**
+ * wrangler resolves its config as `wrangler.json` ?? `wrangler.jsonc` ??
+ * `wrangler.toml` — first match wins, silently (workers-sdk
+ * config-helpers.ts). This plugin manages `wrangler.jsonc`, which makes each
+ * neighbour a trap: a `wrangler.json` outranks everything the build scaffolds
+ * or checks, and scaffolding beside a lone `wrangler.toml` would make
+ * wrangler silently stop reading the user's own config. Neither state can be
+ * repaired here, so name the migration and stop before the app build spends
+ * minutes on output wrangler would never serve.
+ */
+function assertWranglerJsoncIsAuthoritative(root: string): void {
+  if (wranglerConfigExists(resolve(root, 'wrangler.json'))) {
+    throw new Error(
+      'Cloudflare build: found wrangler.json. wrangler reads it before the wrangler.jsonc this plugin manages, so the build-owned keys would never reach a deploy. Rename it to wrangler.jsonc — every JSON file is already valid JSONC.',
+    )
+  }
+
+  if (!wranglerConfigExists(resolve(root, 'wrangler.toml'))) {
+    return
+  }
+
+  if (wranglerConfigExists(resolve(root, 'wrangler.jsonc'))) {
+    console.warn(
+      'Cloudflare build: wrangler.toml is dead weight — wrangler reads wrangler.jsonc first. Port anything still missing into wrangler.jsonc, then delete wrangler.toml so edits to it stop looking like configuration.',
+    )
+    return
+  }
+
+  throw new Error(
+    'Cloudflare build: found wrangler.toml, but this plugin manages wrangler.jsonc — it cannot read TOML to check the build-owned keys, and scaffolding wrangler.jsonc beside it would make wrangler silently ignore wrangler.toml. Move wrangler.toml aside, rerun the build to scaffold a reference wrangler.jsonc, then port your settings into it.',
+  )
+}
+
+/**
+ * `existsSync` folds an unreadable entry into "absent", and absent is the
+ * branch that scaffolds a config file beside it — only ENOENT may mean no.
+ */
+function wranglerConfigExists(path: string): boolean {
+  try {
+    statSync(path)
+    return true
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return false
+    }
+    throw error
+  }
 }
 
 function scaffoldWranglerConfig(root: string, out: string, packageName: string | undefined): void {
