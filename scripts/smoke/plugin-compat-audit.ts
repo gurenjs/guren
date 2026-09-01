@@ -185,6 +185,51 @@ export function plannedVersions(
   return planned
 }
 
+/**
+ * The dependency range that will actually be *published*, which is not always
+ * the one written in the manifest.
+ *
+ * `changeset version` rewrites an internal `@guren/*` range whenever the
+ * dependency is bumped — this workspace sets `updateInternalDependencies:
+ * "patch"`, so the rewrite happens on any bump, not only when the new version
+ * escapes the old range. Measured by running `changeset version` against a
+ * disposable copy of this workspace rather than read off the changesets
+ * documentation: `^1.12.0` became `^1.13.0` and `^2.14.0` became `^2.15.0`,
+ * while `gurenPlugin.compatibility` was left exactly as written (changesets
+ * has no idea the field exists — that asymmetry is this whole script's
+ * subject).
+ *
+ * Which is what makes one otherwise inexpressible release expressible. A
+ * plugin needing a subpath introduced in *this* release has to declare a
+ * range that admits the version the workspace holds today, because Bun
+ * resolves a workspace dependency only through a range that admits it and
+ * otherwise falls through to npm — `bun install --frozen-lockfile` then fails
+ * outright on a floor that does not exist yet. Meanwhile `compatibility`
+ * states the truth about which core versions actually work, and legitimately
+ * leads the range for exactly one release. Probing the declared range would
+ * report that transient state as drift; probing the range at release reports
+ * what npm will see.
+ *
+ * Only ever raises, never lowers, and only for the shapes
+ * {@link rangeProbes} already understands — anything else is returned
+ * untouched, so an unrecognised range still reaches the `unreasoned` path
+ * rather than being quietly rewritten here.
+ *
+ * Note it raises the whole *interval*, not just the floor: the operator is
+ * preserved and `rangeProbes` recomputes the ceiling from the new version, so
+ * a plan that majors the dependency yields `^1.12.0` -> `^2.0.0` and is
+ * probed across 2.x — which is what changesets writes, and what must make a
+ * compatibility range stuck below that major fail rather than pass.
+ */
+export function rangeAtRelease(declared: string, planned: string | undefined): string {
+  if (!planned) return declared
+  const match = /^([\^~]?)(\d+\.\d+\.\d+)$/.exec(declared.trim())
+  if (!match) return declared
+  const [, operator, version] = match as unknown as [string, string, string]
+  if (Bun.semver.order(planned, version) <= 0) return declared
+  return `${operator}${planned}`
+}
+
 /** One package's claims, as the audit reads them. */
 export interface AuditablePackage {
   name: string
@@ -228,8 +273,20 @@ export function auditPackages(
     const file = `${pkg.relativeDir}/package.json`
     const coreRanges: string[] = []
 
-    // (b) every @guren/* range must admit what this workspace publishes — or,
-    // failing that, what this release plan will publish (see plannedVersions).
+    // (b) every @guren/* range must admit what this workspace publishes.
+    //
+    // No release-plan allowance here, deliberately, and this is the one place
+    // it would be tempting: a range whose floor is the version *this* release
+    // introduces reads as the honest claim. It cannot ship. Bun links a
+    // workspace dependency only through a range that admits the version on
+    // disk, and otherwise falls through to npm, where that version does not
+    // exist yet — `bun install --frozen-lockfile`, which is what CI runs,
+    // then fails to resolve the package at all. So a forward floor is never
+    // "not yet true", it is broken now, and tolerating it here would hide a
+    // red CI behind a green audit. The honest floor is reached the other way:
+    // `changeset version` rewrites these ranges at release (see
+    // rangeAtRelease), so the published manifest carries it without anyone
+    // writing it by hand.
     for (const group of DEPENDENCY_GROUPS) {
       for (const [dependency, range] of Object.entries(manifest[group] ?? {})) {
         const version = workspaceVersions.get(dependency)
@@ -241,12 +298,11 @@ export function auditPackages(
         rangesChecked += 1
 
         if (Bun.semver.satisfies(version, range)) continue
-        const next = planned.get(dependency)
-        if (next && Bun.semver.satisfies(next, range)) continue
         drift.push(
           `${file}: ${group}["${dependency}"] is "${range}", which excludes the workspace ` +
-            `${dependency} ${version}${next ? ` and the ${next} this release plan publishes` : ''}. ` +
-            'Installing from npm would resolve a second, older copy alongside the app\'s.',
+            `${dependency} ${version}. Bun cannot link the workspace copy through a range that ` +
+            'excludes it, so `bun install --frozen-lockfile` fails to resolve it from npm; and ' +
+            'an install that did succeed would resolve a second, older copy alongside the app\'s.',
         )
       }
     }
@@ -315,12 +371,15 @@ export function auditPackages(
       )
     }
 
-    // (a) compatibility must cover everything the core range can resolve to.
+    // (a) compatibility must cover everything the core range can resolve to —
+    // the range as *published*, which is not always the one written here.
+    // See rangeAtRelease.
     for (const declared of coreRanges) {
-      const probes = rangeProbes(declared)
+      const shipped = rangeAtRelease(declared, plannedCore)
+      const probes = rangeProbes(shipped)
       if (!probes) {
         unreasoned.push(
-          `${file}: the ${CORE} range "${declared}" is a shape this audit cannot reason about ` +
+          `${file}: the ${CORE} range "${shipped}" is a shape this audit cannot reason about ` +
             `(it understands carets). Extend rangeProbes() in ${import.meta.path} rather than ` +
             'leaving the compatibility check silently vacuous.',
         )
@@ -329,9 +388,13 @@ export function auditPackages(
 
       for (const { end, version } of probes) {
         if (checkPluginCompatibility(plugin, version)?.compatible) continue
+        const which =
+          shipped === declared
+            ? `the declared range "${declared}"`
+            : `the range "${shipped}" this release will publish (declared "${declared}")`
         drift.push(
           `${file}: gurenPlugin.compatibility "${compatibility}" excludes ${CORE} ${version}, ` +
-            `which the declared range "${declared}" admits (${end} of its range). npm would ` +
+            `which ${which} admits (${end} of its range). npm would ` +
             'install a combination the plugin loader then refuses.',
         )
       }
