@@ -1,0 +1,155 @@
+/**
+ * DocSearchService against a real FTS5 engine, through the same generated SQL
+ * a deploy applies. Runs under `bun test` for the reason
+ * `tests/sqlite/search-index.test.ts` explains: Node's bundled SQLite has no
+ * FTS5 module, so vitest cannot host any of this.
+ */
+import { Database } from 'bun:sqlite'
+import { readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+
+import { drizzle } from 'drizzle-orm/bun-sqlite'
+
+import { beforeAll, describe, expect, test } from 'bun:test'
+
+import {
+  DocSearchService,
+  SearchIndexUnavailableError,
+} from '../../app/Services/DocSearchService.js'
+import {
+  collectRows,
+  computeBuildId,
+  renderIndexSql,
+  searchTableName,
+  sectionsTableName,
+  type DocsByLocale,
+} from '../../app/Services/search-index-build.js'
+
+const docs: DocsByLocale = {
+  en: {
+    guides: {
+      // Long enough that section splitting stores it as several rows under one
+      // anchor, which is what the deduplication below has to collapse.
+      operations: {
+        title: 'Operations',
+        html: `<h1 id="operations">Operations</h1><p>${'Rotate the paginated ledger. '.repeat(400)}</p>`,
+      },
+      cloudflare: {
+        title: 'Cloudflare',
+        html:
+          '<h1 id="cloudflare">Cloudflare</h1><p>Deploy the app to Workers.</p>' +
+          '<h2 id="database-d1">Database (D1)</h2>' +
+          '<p>Call <code>createD1Database</code> with the binding from wrangler.jsonc.</p>',
+      },
+    },
+  },
+  ja: {
+    guides: {
+      controllers: {
+        title: 'コントローラー',
+        html:
+          '<h1 id="コントローラー">コントローラー</h1>' +
+          '<p>コントローラーはリクエストを受け取り、レスポンスを返す。</p>' +
+          '<h2 id="型安全">型安全</h2><p>型安全なリクエストパースを行う。</p>',
+      },
+    },
+  },
+}
+
+const rows = collectRows(docs)
+const buildId = computeBuildId(rows)
+const build = {
+  indexed: true,
+  buildId,
+  sectionsTable: sectionsTableName(buildId),
+  searchTable: searchTableName(buildId),
+}
+
+let service: DocSearchService
+
+beforeAll(() => {
+  const client = new Database(':memory:')
+  const migrations = join(import.meta.dir, '../../db/migrations')
+  for (const entry of readdirSync(migrations, { withFileTypes: true })
+    .filter((dirent) => dirent.isDirectory())
+    .map((dirent) => dirent.name)
+    .sort()) {
+    client.exec(readFileSync(join(migrations, entry, 'migration.sql'), 'utf8'))
+  }
+  client.exec(renderIndexSql(rows, buildId))
+  const db = drizzle({ client })
+  service = new DocSearchService(async () => db, build)
+})
+
+describe('DocSearchService', () => {
+  test('finds a Japanese heading and links to its anchor', async () => {
+    const [first] = await service.search('コントローラー', 'ja')
+
+    expect(first).toMatchObject({
+      category: 'guides',
+      slug: 'controllers',
+      docTitle: 'コントローラー',
+      url: `/docs/ja/guides/controllers#${encodeURIComponent('コントローラー')}`,
+    })
+  })
+
+  test('finds an identifier through its camel-case parts', async () => {
+    const results = await service.search('d1 database', 'en')
+
+    expect(results[0]).toMatchObject({ slug: 'cloudflare', anchor: 'database-d1' })
+    expect(results[0].snippet).toContain('createD1Database')
+  })
+
+  test('finds a one-character CJK query', async () => {
+    const results = await service.search('型', 'ja')
+
+    expect(results.map((result) => result.anchor)).toContain('型安全')
+  })
+
+  test('links English results to the English path', async () => {
+    const [first] = await service.search('workers', 'en')
+
+    expect(first.url).toBe('/docs/guides/cloudflare#cloudflare')
+  })
+
+  test('shows a split section once, at its best-ranked row', async () => {
+    // A body over the row cap becomes several rows sharing one anchor. Without
+    // deduplication the same heading fills the whole result list.
+    const results = await service.search('ledger', 'en')
+
+    expect(results.filter((result) => result.anchor === 'operations')).toHaveLength(1)
+  })
+
+  test('scopes results to the requested locale', async () => {
+    // The filter lives inside MATCH rather than in a WHERE after it: filtering
+    // afterwards makes FTS5 read every matching row before discarding half.
+    expect(await service.search('コントローラー', 'en')).toEqual([])
+    expect(await service.search('workers', 'ja')).toEqual([])
+  })
+
+  test('returns nothing for a query with no searchable characters', async () => {
+    expect(await service.search('***', 'en')).toEqual([])
+  })
+
+  test('does not turn FTS5 syntax into a query error', async () => {
+    for (const hostile of ['a OR b', 'NEAR(x, y)', 'body:*', '"']) {
+      expect(await service.search(hostile, 'en')).toBeArray()
+    }
+  })
+
+  test('honours the result limit', async () => {
+    expect((await service.search('the', 'en', 1)).length).toBeLessThanOrEqual(1)
+  })
+
+  test('refuses to answer when the index was never built', async () => {
+    // A checkout that has not run the build carries a stub module. Returning
+    // an empty list there would present a broken deploy as "nothing matched".
+    const unbuilt = new DocSearchService(async () => {
+      throw new Error('should not reach the database')
+    }, { indexed: false, buildId: '', sectionsTable: '', searchTable: '' })
+
+    await expect(unbuilt.search('anything', 'en')).rejects.toBeInstanceOf(
+      SearchIndexUnavailableError,
+    )
+  })
+})
