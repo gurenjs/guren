@@ -107,10 +107,25 @@ runs unchanged on top.
 The durable client dispatches in-process. Its principal —
 `{ kind: 'service', id }` with the scopes declared at registration — is
 handed to the pipeline as a **dispatch option**, and the pipeline installs it
-into the request's auth context through a server-internal seam (the pattern
-the preflight seam established: a leaf module both halves import, nothing
-published, nothing spelled as an HTTP header). `Gate` accepts the installed
-principal the way it accepts a token-authenticated user today.
+through a server-internal seam (the pattern the preflight seam established: a
+leaf module both halves import, nothing published, nothing spelled as an HTTP
+header). Concretely: the seam is a `WeakMap<Request, InstalledPrincipal>` in
+that leaf module — the pipeline registers the exact `Request` object it hands
+to `app.fetch`, and the auth context's lazy resolution consults the map before
+any header-based guard. A value keyed on object identity has no wire
+representation to forge, needs no AsyncLocalStorage (works identically on
+workerd and Bun), and is garbage-collected with the request. `Gate` accepts
+the installed principal the way it accepts a token-authenticated user today.
+
+The same seam mark settles CSRF. A seam-marked request carries no cookies by
+construction — the pipeline builds it from scratch — and CSRF exists to stop
+cookie-borne ambient authority, so the CSRF middleware treats a seam-marked
+request the way it treats a cookie-less bearer request today (RFC 0016's §3
+rule). The middleware *asserts* the no-cookie invariant rather than assuming
+it: a seam-marked request that somehow carries a `Cookie` header is refused
+outright, so the exemption cannot be widened by a bug elsewhere. Without
+this, a mutating durable call — no cookies, no `Authorization` header, no
+XSRF token — would 419 before ever reaching the scope gate.
 
 What this is *not*: it is not a header (`X-Guren-*` anything a network caller
 could forge), not a stored `ApiToken` (nothing to store — the principal is
@@ -188,8 +203,11 @@ principal. Same scope denial, same approval gate, same redacted audit record
 as every other surface; `AgentSurface` gains a `'durable'` value, and the
 exhaustiveness pattern in `agent/audit.ts` turns that into a compile error at
 every consumer. A per-instance rate budget (calls per minute, pending
-approvals cap) is part of the client from Part 1 — an unattended loop
-otherwise mints unbounded approval records and notifications.
+approvals cap) ships **in the same part as the client itself** — there is no
+release in which an unattended caller exists without its meter, because an
+unattended loop otherwise mints unbounded approval records and notifications.
+(Part 1's pipeline has no unattended callers; the budget hook is designed
+into the pipeline there and first *used* by the client in Part 2.)
 
 Direct write access to application internals from agent code is an
 **architecture rule, not advice**: `make:agent` extends `guren.arch.ts` with a
@@ -210,7 +228,14 @@ carrying the queue's `requestId`. The queue stores only redacted input and a
 non-reversible fingerprint — by design it can neither return the raw
 arguments nor execute anything later. So **the agent side owns the retry
 material**: `this.tools` checkpoints `{ requestId, tool, args }` into a
-pending-calls table in the agent's DO SQLite before returning, and
+pending-calls table in the agent's DO SQLite before returning. This is a
+deliberate, bounded exception to 0016's "no reversible copy of arguments"
+rule, and the bounds are the design: the queue avoided raw storage because it
+is a *shared, operator-surfaced* store; the ledger is per-instance private
+storage no API surfaces, holding exactly the rows whose approvals are alive —
+each row is **purged when its approval settles or expires** (the TTL is the
+queue's, not the agent's to extend), and rows are encrypted with the app key
+at rest so a leaked DO snapshot alone does not disclose arguments. Then:
 
 ```ts
 const result = await this.tools.call('posts.destroy', { id })
@@ -236,9 +261,17 @@ schedules, per the eviction rule in the Problem statement.
   `app.fetch` would then hit an unbooted app whose env capture throws. The
   handler's capture-and-boot moves into a shared `bootAndFetch(app, request,
   env, ctx)` used by both the worker's `fetch` export and `GurenAgent`
-  (whose DO constructor receives the same env). Direct in-isolate dispatch is
-  the default topology — lowest latency, no network hop — with its costs
-  stated: the agent-hosting isolate loads the app's module graph under the
+  (whose DO constructor receives the same env). This is **not** trivial code
+  motion: the current env-capture holder documents a one-handler-per-module
+  invariant precisely because a second entrypoint sharing the module-global
+  holder races it. `bootAndFetch` replaces that invariant rather than
+  violating it — capture becomes an idempotent, promise-latched boot keyed on
+  env identity (first caller wins, everyone awaits the same latch; a
+  *different* env object after capture is a hard error, since two envs in one
+  isolate means the module graph is being shared in a way the design forbids)
+  — and the one-handler comment moves onto the new primitive as its
+  specification. Direct in-isolate dispatch is the default topology — lowest
+  latency, no network hop — with its costs stated: the agent-hosting isolate loads the app's module graph under the
   shared 128 MB limit, and the Phase 4a bundle probe grows a budget line for
   the agent entry. For apps that want isolation instead, the recorded
   alternative is splitting agents into their own Worker reaching the app over
