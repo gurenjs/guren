@@ -19,6 +19,7 @@ export default defineConfig({
     'src/vite.ts',
     'src/lambda.ts',
     'src/redis.ts',
+    'src/agent.ts',
     'src/internal/deploy-build.ts',
     'src/internal/route-path.ts',
     'src/internal/zod-compat.ts',

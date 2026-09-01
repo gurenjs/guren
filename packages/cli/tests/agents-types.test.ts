@@ -127,6 +127,37 @@ describe('buildAgentToolsContent', () => {
     expect(content).toContain('"token"')
   })
 
+  test('carries the merge inverse a client needs to rebuild the request', () => {
+    const { tools } = deriveAgentTools(fixtureDefinitions())
+    const content = buildAgentToolsContent(tools, { resources })
+
+    // posts.store is POST /posts/:id with an object body: `id` substitutes
+    // into the path, `title` rides in the JSON body. Without these fields a
+    // client can only guess by method, and would post `id` in the body of a
+    // route whose URL cannot be built without it.
+    expect(content).toContain('"id": "path"')
+    expect(content).toContain('"title": "body"')
+    expect(content).toContain('inputBodyNested: false')
+  })
+
+  test('marks a non-object body as nested', () => {
+    const router = new Router()
+    router
+      .post('/posts/bulk', { name: 'posts.bulk', body: z.array(z.string()) }, [
+        PostController,
+        'store',
+      ])
+      .agent({})
+    const { tools } = deriveAgentTools(router.definitions())
+    const content = buildAgentToolsContent(tools)
+
+    // The derivation nested the array under `body` to give the tool an object
+    // root; a client that missed this flag would post `{ body: [...] }` to a
+    // route that validates the array itself.
+    expect(content).toContain('inputBodyNested: true')
+    expect(content).toContain('"body": "body"')
+  })
+
   test('embeds a resource hint’s type text in the description and references Data', () => {
     const { tools } = deriveAgentTools(fixtureDefinitions())
     const content = buildAgentToolsContent(tools, { resources })
@@ -166,7 +197,7 @@ describe('buildAgentToolsContent', () => {
     expect(content).toContain('No tool declares a resolvable resource response hint.')
   })
 
-  test('emits a __proto__ property as a computed key', () => {
+  test('emits a __proto__ property as a computed key, in every map keyed by argument name', async () => {
     const router = new Router()
     router.get('/posts/:__proto__', [PostController, 'index']).name('posts.odd').agent({})
     const { tools } = deriveAgentTools(router.definitions())
@@ -177,6 +208,20 @@ describe('buildAgentToolsContent', () => {
     // argument that is not there.
     expect(content).toContain('["__proto__"]:')
     expect(content).not.toContain('"__proto__":')
+
+    // Evaluated rather than matched, because two maps are keyed by argument
+    // name now — `inputSchema.properties` and `inputSources` — and a string
+    // assertion passes as soon as *one* of them uses the computed form.
+    const dir = await makeApp()
+    const modulePath = join(dir, 'proto-property.gen.mjs')
+    await writeFile(modulePath, new Bun.Transpiler({ loader: 'ts' }).transformSync(content), 'utf8')
+    const { agentTools } = (await import(modulePath)) as {
+      agentTools: Record<string, { inputSchema: { properties: object }; inputSources: object }>
+    }
+
+    const tool = agentTools['posts.odd']!
+    expect(Object.hasOwn(tool.inputSchema.properties, '__proto__')).toBe(true)
+    expect(Object.hasOwn(tool.inputSources, '__proto__')).toBe(true)
   })
 
   test('emits a tool named __proto__ as a computed key, and it survives evaluation', async () => {

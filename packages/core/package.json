@@ -45,6 +45,10 @@
       "types": "./dist/redis.d.ts",
       "default": "./dist/redis.js"
     },
+    "./agent": {
+      "types": "./dist/agent.d.ts",
+      "default": "./dist/agent.js"
+    },
     "./internal/deploy-build": {
       "types": "./dist/internal/deploy-build.d.ts",
       "default": "./dist/internal/deploy-build.js"

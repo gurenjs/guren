@@ -10,6 +10,7 @@
  * app's policies do).
  */
 import type { AgentToolInputSource, DerivedAgentTool } from './derive'
+import type { AgentSurface } from './events'
 import { PATH_PARAM_PATTERN } from '../internal/route-path'
 import { AGENT_PREFLIGHT_HEADER, AGENT_PREFLIGHT_VERDICT_HEADER } from '../internal/agent-preflight'
 
@@ -36,6 +37,21 @@ export interface BuildToolRequestOptions {
    * stops before the handler. Only routes declaring `.agent()` honour it.
    */
   preflight?: boolean
+  /**
+   * Which protocol surface the call arrived on, announced to the application
+   * as `X-Guren-Agent-Surface`. Defaults to `'mcp'`, the surface that was the
+   * only one when this header was introduced, so every existing caller keeps
+   * sending exactly what it sent before.
+   *
+   * The header is informational and, in the framework, write-only: nothing
+   * here reads it back. It is there for an *application* that wants to tell
+   * an in-browser session call from a bearer-token one, and it borrows the
+   * audit trail's vocabulary ({@link AgentSurface}) so the two agree — but
+   * the trail's own `surface` comes from the adapter that recorded it, not
+   * from this header. Nothing must ever authorize on it: any client sets any
+   * header it likes, so a surface can never relax a check.
+   */
+  surface?: AgentSurface
 }
 
 /**
@@ -165,7 +181,7 @@ export function buildToolRequest(
     // — without engaging the `X-Inertia` visit protocol and its 409 version
     // negotiation, which a stateless tool call has no version to answer.
     Accept: 'application/json',
-    'X-Guren-Agent-Surface': 'mcp',
+    'X-Guren-Agent-Surface': options.surface ?? 'mcp',
   })
   if (options.authorization) {
     headers.set('Authorization', options.authorization)

@@ -574,6 +574,43 @@ this app's tools", derived from the manifest) ship here; `guren skill:export`
 executing through the typed API client with the normal session + CSRF token flow.
 Explicitly experimental while the spec churns.
 
+**Amended in implementation.** Execution goes through `buildToolRequest` /
+`mapToolResponse` directly rather than the typed API client — the same dispatch
+contract §3 defines, reached through a new browser-safe `@guren/core/agent`
+subpath. The API client keys on route *names* and knows nothing of
+`inputSources`, so it cannot take a flat tool call apart; routing WebMCP
+through it would have meant a second request-splitting rule beside the one §2
+already derives. Three further judgments, each a deliberate asymmetry with App
+MCP rather than an oversight:
+
+- **No audit-sink coverage.** A WebMCP call is an ordinary same-origin `fetch`
+  from the page; it reaches no `AgentToolInvoked` / `AgentToolDenied` sink,
+  because there is no server-side adapter in the path to emit one. The
+  `X-Guren-Agent-Surface: webmcp` header is *client-controlled* — an audit
+  keyed on it would be suppressible by the very caller it claims to record,
+  which is worse than no audit at all. Application-level HTTP logging covers
+  these requests exactly as it covers every other browser request, and the
+  route's own policies still run.
+- **No scope filtering.** App MCP filters `tools/list` to the token's scopes; a
+  session carries no scopes, so the in-page agent sees every `expose.webMcp`
+  tool at the signed-in user's full authority. Policies still gate execution —
+  exposure is not permission — but on this surface `expose.webMcp` is the whole
+  exposure decision, and it defaults to `true`.
+- **Redirects are refused, not followed.** Dispatch pins the request to
+  `mode: 'same-origin'` and `redirect: 'manual'`. A tool call carries the
+  session cookie's authority and the CSRF token header, and `fetch` strips only
+  `Authorization` across a cross-origin redirect — so one open redirect in the
+  application would replay both to another host. The cost is that a redirecting
+  route reports "a redirect the client did not follow" rather than App MCP's
+  `HTTP 302 (Location: …)`: an opaque redirect has no readable Location in a
+  page. Accepted.
+
+**Open Question 3 resolved:** published normally — not withheld until the origin
+trial concludes, and not behind a dist-tag. The `0.x` version line is the
+experimental signal. A tag would keep the package out of the one mechanism that
+delivers fixes to the people already using it, which is exactly what a surface
+tracking a moving draft needs most.
+
 **`@guren/plugin-cloudflare` (Phase 4a — small).** The adapter itself is
 workerd-compatible by construction; the build must stop killing it:
 - `buildCloudflareOutput` drops the two MCP SDK stubs when `@guren/plugin-mcp` is a
@@ -692,8 +729,10 @@ Purely additive; no existing API changes shape or behavior. Two soft edges:
    already-validated output body (double-validation cost; implementation detail).
 2. The exact glue mapping Cloudflare `OAuthProvider` `props`/scopes onto the
    `AgentPrincipal` ability vocabulary.
-3. WebMCP shipping posture: keep `@guren/plugin-webmcp` unpublished until the origin
-   trial concludes, or publish under an experimental tag.
+3. ~~WebMCP shipping posture: keep `@guren/plugin-webmcp` unpublished until the origin
+   trial concludes, or publish under an experimental tag.~~ **Resolved in
+   implementation:** published normally, with the `0.x` line as the experimental
+   signal. See the §7 amendment.
 4. `listChanged` / tool pagination for large catalogs, and whether `tags` should
    drive filtered exposure.
 5. How the Workers build detects `@guren/plugin-mcp` (dependency sniffing vs. an

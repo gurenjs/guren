@@ -1,0 +1,51 @@
+{
+  "name": "@guren/plugin-webmcp",
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Experimental WebMCP client for Guren: registers an app's agent tools on the browser's modelContext API (RFC 0016 Phase 3). The WebMCP specification is a W3C Community Group draft and its API churns.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gurenjs/guren",
+    "directory": "packages/plugin-webmcp"
+  },
+  "homepage": "https://github.com/gurenjs/guren#readme",
+  "bugs": {
+    "url": "https://github.com/gurenjs/guren/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "gurenPlugin": {
+    "compatibility": ">=1.13.0 <2.0.0"
+  },
+  "files": [
+    "dist"
+  ],
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "default": "./dist/client.js"
+    }
+  },
+  "scripts": {
+    "build": "bun --bun tsdown",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@guren/core": "^1.12.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.10",
+    "hono": "^4.11.7",
+    "tsdown": "^0.22.14",
+    "typescript": "^7.0.2"
+  }
+}
