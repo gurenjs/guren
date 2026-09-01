@@ -117,4 +117,62 @@ describe('signUrl / verifySignedUrl', () => {
       expect(verifySignedUrl('/no-signature-param', keyring)).toBe(false)
     })
   })
+
+  describe('authority absorption', () => {
+    // The canonical form is path + query, so an authority the parser folds out
+    // of a `/`-leading value is covered by no signature at all. Both spellings
+    // are the WHATWG parser's, not a guess: `new URL('/\\evil/a', base)` puts
+    // `evil` in `host` exactly as `//evil/a` does, because `\` is `/` for a
+    // special scheme.
+    const authorityPrefixes = ['//evil.example', '/\\evil.example', '/\\\\evil.example']
+
+    test('an authority prefixed onto a signed relative URL does not verify', () => {
+      const keyring = makeKeyring()
+      const signed = signUrl('/attachments/01J8ZK/report.pdf', keyring, { expiresIn: 60_000 })
+
+      expect(verifySignedUrl(signed, keyring)).toBe(true)
+
+      for (const prefix of authorityPrefixes) {
+        expect(verifySignedUrl(`${prefix}${signed}`, keyring)).toBe(false)
+      }
+    })
+
+    test('signUrl refuses to sign a value whose authority it would silently drop', () => {
+      const keyring = makeKeyring()
+
+      for (const prefix of authorityPrefixes) {
+        expect(() => signUrl(`${prefix}/attachments/a.pdf`, keyring)).toThrow(TypeError)
+      }
+    })
+
+    test('a single-slash first segment that merely looks host-like still signs', () => {
+      // The near miss the guard must not swallow: `/evil.example/...` is an
+      // ordinary app-relative path, and the parser leaves it on the
+      // placeholder origin.
+      const keyring = makeKeyring()
+
+      for (const path of ['/evil.example/a.pdf', '/api/v1/x?a=1', '/a//b/c']) {
+        const signed = signUrl(path, keyring, { expiresIn: 60_000 })
+        expect(verifySignedUrl(signed, keyring)).toBe(true)
+      }
+    })
+
+    test('signUrl refuses a path that normalizes onto an authority in its output', () => {
+      // `/.//host/a` parses onto the placeholder origin, so the input side of
+      // the guard says nothing — but its pathname is `//host/a`, and the
+      // returned relative string would not parse back to the same thing.
+      // signUrl must not hand back a URL its own verifier rejects.
+      const keyring = makeKeyring()
+
+      expect(() => signUrl('/.//evil.example/a', keyring)).toThrow(TypeError)
+    })
+
+    test('an absolute URL still carries its own authority unharmed', () => {
+      const keyring = makeKeyring()
+      const signed = signUrl('https://app.example/files/a.png', keyring, { expiresIn: 60_000 })
+
+      expect(signed.startsWith('https://app.example/files/a.png?')).toBe(true)
+      expect(verifySignedUrl(signed, keyring)).toBe(true)
+    })
+  })
 })

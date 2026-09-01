@@ -17,6 +17,7 @@ const EXPIRES_PARAM = 'expires'
 // must never reach the signature (the canonical form is path + query) or the
 // return value (relative in, relative out) — RFC 0015 §2.
 const RELATIVE_BASE = 'https://relative.invalid'
+const RELATIVE_ORIGIN = new URL(RELATIVE_BASE).origin
 
 // `expires` must be a plain positive decimal integer in unix seconds. The
 // bound matters: `Number(expires) < now` alone lets `NaN` and `Infinity`
@@ -25,7 +26,31 @@ const EXPIRES_SHAPE = /^[0-9]{1,15}$/
 
 function parseUrl(value: string): { url: URL; relative: boolean } {
   const relative = value.startsWith('/')
-  return { url: relative ? new URL(value, RELATIVE_BASE) : new URL(value), relative }
+  const url = relative ? new URL(value, RELATIVE_BASE) : new URL(value)
+
+  // The invariant an app-relative value has to satisfy: `pathname + search`,
+  // which is both the canonical form and the returned string, must mean the
+  // same thing when it is parsed again. Two ways it does not, and the guard
+  // is one check because they are one failure.
+  //
+  // Reading in: `//host/path` and `/\host/path` both start with `/`, yet the
+  // parser folds the first segment into the *authority*, which the canonical
+  // form then drops. Signer and verifier would agree on `/path` for whatever
+  // host an attacker prefixes, so `verifySignedUrl('//evil' + signed)`
+  // verifies against a signature that never covered `evil`.
+  //
+  // Writing out: a value whose *normalized* pathname begins with `//`
+  // (`/.//host/a`) parses onto this origin but serializes to a string that
+  // does not — `signUrl` would hand back a URL its own verifier rejects.
+  //
+  // The origin half is compared against the *parsed* origin rather than
+  // matched as a prefix: which spellings the parser folds into an authority
+  // is the parser's rule, not ours, and a prefix list goes stale in silence.
+  if (relative && (url.origin !== RELATIVE_ORIGIN || url.pathname.startsWith('//'))) {
+    throw new TypeError(`signed-url: an app-relative URL must not begin with an authority, got ${value}`)
+  }
+
+  return { url, relative }
 }
 
 function serializeUrl(url: URL, relative: boolean): string {
