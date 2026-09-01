@@ -296,7 +296,8 @@ Each feature maps to a measured failure mode of the MCP ecosystem.
    `CF-Connecting-IP` fallback on Workers), stricter defaults for write tools.
 4. **Approval queue and preflight**: `approval: 'required'` tools create a pending
    record and notify approvers through the existing notifications system instead of
-   executing; the tool result carries the pending state. `_preflight: true` runs
+   executing; ~~the tool result carries the pending state~~ the tool result carries
+   the pending state **as an error result with a JSON body**. `_preflight: true` runs
    validation + scope + policy evaluation only and reports the verdict — the
    middleware chain stopped just before the controller. **Shipped as** a router
    seam mounted last before the handler, so every gate in front of it is the
@@ -336,6 +337,99 @@ Each feature maps to a measured failure mode of the MCP ecosystem.
    2.5; it needs a record to report, which the meta-tool has nothing to say
    about.
 
+   **Amended in implementation (Phase 2.5b): the approval queue ships.** The
+   pending-approval result *is* expressible on MCP after all, on one measured
+   fact that was not established when the paragraph above was written: an
+   `isError: true` result is delivered to the client with its `content`
+   intact, **including for a tool that declares an `outputSchema`** — no
+   `-32600`, no structured-content validation. Measured directly against the
+   SDK client with a two-tool server, one plain and one with an output schema,
+   both returning `isError` with a JSON body; both bodies arrived whole. So a
+   refusal can carry a machine-readable body, and the `requestId` an agent has
+   to poll with reaches the caller. It rides as a second content block rather
+   than as `structuredContent`, which MCP defines for *successful* results.
+
+   What shipped, and every deviation from the design as written:
+
+   - **The store is the application's** (`AgentApprovalStore`, four methods:
+     `create`, `find`, `findMatch`, `consume`), opt-in through
+     `mcpPlugin({ approvals: { store, notify, ttlMs } })` with no default
+     implementation — the audit sink's precedent, for the audit sink's reason.
+     Unconfigured, an `approval: 'required'` tool is still refused fail-closed
+     and is absent from `tools/list`; the refusal names the configuration line.
+     A queue that quietly fell back to process memory on Workers would answer
+     "approved" for a record the next isolate never saw.
+   - **Approval binds to the arguments**, through one canonicalization
+     (`canonicalizeAgentApprovalInput`) hashed by `agentApprovalFingerprint`,
+     with both the creation and the lookup path reading that single function.
+     Key order does not change the answer, at any depth; types, array order,
+     and absent-vs-null deliberately do. The fingerprint is taken over the
+     **raw** arguments while the stored record carries the *redacted* copy —
+     fingerprinting the redacted copy would make approving
+     `users.setPassword {id: 5, password: '…'}` authorize the same call with a
+     different password. The record stores only the hash, so the queue does
+     not become a second place secrets live.
+   - **Single-use and expiring.** `consume` is a compare-and-set the store
+     owns; expiry is judged by framework code against a clock passed in, never
+     filtered by the store, because a store that forgot to compare would fail
+     open silently. **Consumption happens before dispatch**: an approval is
+     permission for one attempt, not one success. Consuming afterwards would
+     let concurrent calls all pass the same check and would make a call that
+     crashed mid-flight replayable. An approval burned on a call that then
+     answered 500 is the accepted cost, and the operator is told which half
+     failed.
+   - **Deviation, forced: a pending match is reused rather than re-filed.** The
+     design specified the lookup as "the record that is currently approved and
+     unconsumed". Implemented that way, an agent polling by re-calling the tool
+     creates an unbounded number of records and notifies the approvers once per
+     poll, so `findMatch` returns the unconsumed record in *any* state and a
+     second call quotes the id of the one already waiting.
+   - **Deviation, chosen: a rejected call is not re-asked** while its record
+     is unexpired. A human answered this exact call; letting the next call
+     re-file it would make a rejection cost nothing to overturn by retrying.
+     The refusal reports `status: 'rejected'` distinctly so the caller can tell
+     it from a pending wait worth polling. After expiry, asking again is a new
+     question and files a new record.
+   - **Notifications are the application's decision.** `notify(request)` hands
+     the record over; the framework never chooses recipients, because it cannot
+     see the list. `AgentApprovalRequested` ships as a ready-made
+     `Notification` so the common case is one line through the existing system.
+     The record is persisted *before* `notify` is called and the call is not
+     awaited: a channel that is down costs an approver an email, never the
+     request or the tool call, and the failure is warned about with the request
+     id in it.
+   - **`guren.approval_status`** is a second reserved meta-tool,
+     `{ requestId }` in, its own output schema out. A caller may read only the
+     status of a request it created: an id belonging to someone else answers
+     *exactly* as an unknown id does, converged on one branch in code rather
+     than left to two call sites to agree, because any difference between the
+     two answers enumerates other principals' pending actions. The audit trail
+     is where the distinction is kept (200 vs 404 under
+     `tool: 'guren.approval_status'`); the caller is told the same thing either
+     way.
+   - **Deviation, chosen: the status tool is listed only when a queue exists**,
+     as well as when the token grants at least one tool. The design gave only
+     the second half. On a server with no queue the tool could answer nothing
+     but "no such request", and advertising it would be the unconfigured queue
+     looking like a working one. The `preflightable` value is reused rather
+     than recomputed, so the two meta-tools cannot drift on what a token grants.
+   - **An approval-gated tool is listed once a queue exists.** Without one it
+     stays out of `tools/list`, uncallable. `gateToolCall` therefore keeps that
+     question synchronous and side-effect-free: `tools/list` calls it per tool
+     per listing, and an approval *resolution* there would file a request and
+     page the approvers every time any client connected.
+   - **`guren check` reports an `approval: 'required'` route in an app whose
+     `mcpPlugin({ … })` call configures no queue** — a **fail**, on positive
+     evidence only. A call whose options this check cannot read (a variable, a
+     spread) and an app with no readable call at all both say nothing: `guren
+     check` has no per-finding ignore configuration, so an unsuppressible false
+     positive is the failure to avoid, which is the same reason the
+     authorization rule warns on a body it could not read. Given readable
+     evidence the tool is categorically uncallable, which is a wiring mistake
+     with a one-line fix rather than a policy, so it fails like the naming
+     rules do. The option key is read from `@guren/core`, never restated,
+     because the CLI cannot import the plugin.
+
    Four consequences the implementation settled. Checking a tool requires the
    **same scope** as calling it, or the companion becomes a way to probe the
    authorization surface of tools the token cannot call. A tool declaring
@@ -344,7 +438,8 @@ Each feature maps to a measured failure mode of the MCP ecosystem.
    approval gate creates, and the rehearsal executes nothing. `guren.preflight`
    is listed only for a token that grants at least one tool, since a token that
    can call nothing has nothing to rehearse and listing it would map the
-   surface. And the invocation is audited as `AgentToolInvoked` with
+   surface. Rehearsing is not requesting: preflight of an approval-gated tool
+   creates no pending record and notifies nobody. And the invocation is audited as `AgentToolInvoked` with
    `tool: 'guren.preflight'` — an agent probing what it may do is what an audit
    trail wants to show — while the checked tool gets no record, because nothing
    was invoked. The name is reserved: an application route whose `.agent()`
@@ -393,7 +488,22 @@ Each feature maps to a measured failure mode of the MCP ecosystem.
   the gate that would produce a pending verdict lives in `@guren/plugin-mcp`,
   while `app.agent()` dispatches straight into the application. An assertion
   that can only ever fail, or only ever pass vacuously, is worse than an absent
-  one. `assertDenied` is likewise narrower than it reads on this surface and
+  one.
+  **Amended again in implementation (Phase 2.5b): the queue shipped and
+  `assertPendingApproval` still does not.** The reason is now measured rather
+  than predicted. The queue lives entirely in `@guren/plugin-mcp`'s gate — the
+  store, the fingerprint match, `consume`, the pending refusal — and
+  `app.agent()` reaches `buildToolRequest` directly, so no code path under
+  `@guren/testing` can produce a pending state for the assertion to find. The
+  two ways to change that were both rejected: making `@guren/testing` depend on
+  a protocol adapter inverts the layering the whole dispatch contract exists to
+  keep (`@guren/testing` reaches the *same seam* the adapter does, which is
+  what makes its assertions meaningful), and reimplementing the gate inside the
+  testing package would be a second copy of the binding, expiry and single-use
+  rules — the one thing §5.4's implementation is written to avoid. The queue is
+  tested where it lives, through the real MCP client, in
+  `packages/plugin-mcp/src/approval.test.ts`. An application testing its own
+  approval-gated route asserts against its own store, which it owns. `assertDenied` is likewise narrower than it reads on this surface and
   says so: it means the *application* answered 401/403, because `@guren/testing`
   has no token issuer and therefore cannot reach a scope denial.
   `guren tool:call` makes the same distinction for the same reason.
@@ -409,9 +519,12 @@ contract. The per-request server is the SDK's *low-level* `Server`, not
 `McpServer` — the tools already carry JSON Schema and the high-level API wants
 live Zod, which §3.2 forbids handing over. Further shipped judgments:
 tools/list is filtered to the token's scopes (an ungranted catalog would map
-the write surface for a read-only token); an `approval: 'required'` tool is
+the write surface for a read-only token); ~~an `approval: 'required'` tool is
 refused fail-closed until the 2.5 queue exists (though it can still be
-*checked* — see the preflight amendment in §5.4); ~~`_preflight` is deferred to a
+*checked* — see the preflight amendment in §5.4)~~ **— the queue shipped in
+2.5b; such a tool is now listed and callable when `approvals` is configured,
+and the fail-closed refusal remains exactly what an unconfigured server
+answers, naming the configuration line (see §5.4)**; ~~`_preflight` is deferred to a
 follow-up (it needs a server-side seam to stop the chain before the
 controller)~~ **— shipped since, as a router seam reached from the
 `guren.preflight` meta-tool; see §5.4**; and bearer auth
@@ -491,7 +604,7 @@ catalog and `agent:sync`.
   PR-1c checks + audits + entity-context + harness.
 - **Phase 2**: `@guren/plugin-mcp` with the Security Layer items (scopes, `token:issue`,
   audit log, rate limits, preflight); the `guren.preflight` companion tool in 2.5a,
-  the approval queue in 2.5.
+  the approval queue and `guren.approval_status` in 2.5b.
 - **Phase 3**: WebMCP (experimental). **Phase 4a**: Workers support. **Phase 4b**: separate RFC.
 
 The first PR is PR-1a alone: the contract types, the builder, serialization, and their

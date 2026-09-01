@@ -16,6 +16,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js'
 import {
   advertisesStructuredOutput,
+  APPROVAL_STATUS_TOOL_NAME,
   isReservedAgentToolName,
   PREFLIGHT_TOOL_NAME,
   type AgentToolDenialReason,
@@ -23,7 +24,18 @@ import {
   type ToolCallOutcome,
 } from '@guren/core'
 
-import { gatePreflight, gateToolCall } from './gate'
+import {
+  describeApprovalStatusTool,
+  readApprovalStatusArguments,
+  toApprovalStatusReport,
+} from './approval-status'
+import {
+  gateApproval,
+  gatePreflight,
+  gateToolCall,
+  type ApprovalGateContext,
+  type GateVerdict,
+} from './gate'
 import { describePreflightTool, readPreflightArguments, toPreflightVerdict } from './preflight'
 import type { AgentRateLimiter } from './rate-limit'
 
@@ -64,6 +76,19 @@ export interface AppMcpServerOptions {
     args: Record<string, unknown>,
     options?: { preflight?: boolean },
   ): Promise<ToolCallOutcome>
+  /**
+   * The approval queue, when the application configured one (RFC 0016 §5.4
+   * item 4). Absent, an `approval: 'required'` tool is refused fail-closed and
+   * is absent from the catalogue — an unconfigured queue must never look like
+   * a working one.
+   *
+   * `redact` takes the tool as well as the arguments: the record a human reads
+   * carries the *route's* masking rules, and this one context serves every
+   * tool. The gate is handed a bound copy per call.
+   */
+  approvals?: Omit<ApprovalGateContext, 'redact'> & {
+    redact(tool: DerivedAgentTool, args: Record<string, unknown>): Record<string, unknown>
+  }
   /** Audit hooks — the emitter owns redaction and event construction. */
   onInvoked(tool: AuditedTool, args: Record<string, unknown>, status: number, durationMs: number): void
   onDenied(tool: AuditedTool, args: Record<string, unknown>, reason: AgentToolDenialReason): void
@@ -85,17 +110,29 @@ export function createAppMcpServer(options: AppMcpServerOptions): Server {
   // catalogue. The plugin warns at boot naming the route.
   const tools = options.tools.filter((tool) => !isReservedAgentToolName(tool.toolName))
 
+  const approvalsConfigured = options.approvals !== undefined
+
   // The catalog a token sees is the catalog it can call: a tool is listed
   // only if `gateToolCall` would admit it, so scope *and* the current
   // approval verdict decide both. Listing a tool a call then refuses (an
   // ungranted one maps the write surface for a read-only token; an
-  // approval-required one with no queue is categorically uncallable today)
-  // makes the list lie, and MCP clients treat it as an invitation. Rate
-  // limits are deliberately not consulted — a budget is a runtime state, not
-  // a capability, and a temporarily-throttled tool is still in the catalog.
+  // approval-required one on a server with no queue is categorically
+  // uncallable) makes the list lie, and MCP clients treat it as an invitation.
+  // With a queue, such a tool *is* callable — the call becomes a pending
+  // request, which is the interaction the queue exists to offer — so it is
+  // listed. Rate limits are deliberately not consulted: a budget is a runtime
+  // state, not a capability, and a temporarily-throttled tool is still in the
+  // catalog.
+  //
+  // `gateToolCall` is synchronous and writes nothing, which is what makes it
+  // safe to run per tool per listing. The approval *resolution* — the half
+  // that creates a pending record and notifies approvers — is `gateApproval`,
+  // reached only from the call path below. A listing that resolved approvals
+  // would file a request and page the approvers once per gated tool, every
+  // time any client connected.
   server.setRequestHandler(ListToolsRequestSchema, () => {
     const listed = tools
-      .filter((tool) => gateToolCall(tool, options.abilities).allowed)
+      .filter((tool) => gateToolCall(tool, options.abilities, { approvalsConfigured }).allowed)
       .map((tool) => describeTool(tool))
 
     // `guren.preflight` is listed only for a token that can check something.
@@ -103,13 +140,28 @@ export function createAppMcpServer(options: AppMcpServerOptions): Server {
     // companion to it would map the existence of the agent surface to a
     // caller with no access to it.
     //
-    // The condition is the *scope* gate, not the catalog filter above: an
-    // approval-gated tool is missing from the list precisely because it
-    // cannot be called, which is the case where asking "would this be
-    // allowed" is worth the most.
+    // The condition is the *scope* gate, not the catalog filter above. On a
+    // server with no queue an approval-gated tool is missing from the list
+    // precisely because it cannot be called, which is the case where asking
+    // "would this be allowed" is worth the most; with a queue it is listed,
+    // and rehearsing it before spending an approver's attention on it is
+    // worth about as much.
     const preflightable = tools.some((tool) => gatePreflight(tool, options.abilities).allowed)
+    if (!preflightable) return { tools: listed }
 
-    return { tools: preflightable ? [...listed, describePreflightTool()] : listed }
+    // `guren.approval_status` rides that same condition — a token that can
+    // call nothing has no request of its own to ask after — and one more: a
+    // server with no queue holds no record any id could name, so the tool
+    // could only ever answer "no such request". Advertising it there would be
+    // the unconfigured queue looking like a working one, which is what the
+    // fail-closed refusal exists to prevent. The `preflightable` value is
+    // reused rather than recomputed, so the two meta-tools cannot come to
+    // disagree about what a token grants.
+    return {
+      tools: approvalsConfigured
+        ? [...listed, describePreflightTool(), describeApprovalStatusTool()]
+        : [...listed, describePreflightTool()],
+    }
   })
 
   server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToolResult> => {
@@ -120,22 +172,64 @@ export function createAppMcpServer(options: AppMcpServerOptions): Server {
       return handlePreflight(options, tools, args)
     }
 
+    // Only when a queue exists, matching what `tools/list` advertised. On a
+    // server without one the name falls through to the unknown-tool answer,
+    // which is what a caller that never saw it listed should be told.
+    if (name === APPROVAL_STATUS_TOOL_NAME && approvalsConfigured) {
+      return handleApprovalStatus(options, args)
+    }
+
     const tool = tools.find((candidate) => candidate.toolName === name)
     if (!tool) {
       return errorResult(`Unknown tool "${name}".`)
     }
 
-    const verdict = gateToolCall(tool, options.abilities)
+    const verdict = gateToolCall(tool, options.abilities, { approvalsConfigured })
     if (!verdict.allowed) {
       options.onDenied(tool, args, verdict.reason)
-      return errorResult(verdict.message)
+      return refusal(verdict.message, verdict.body)
     }
 
+    // Metered before the approval gate, not after. That gate writes a record
+    // and pages a human, and it deduplicates only on *identical* arguments, so
+    // a caller varying one field (`{id: 1}`, `{id: 2}`, …) files an unbounded
+    // number of requests and sends an unbounded number of notifications. An
+    // unmetered path that reaches the store is a hole in the per-token budget —
+    // the reason `guren.preflight` and `guren.approval_status` both meter
+    // first — and this is the one that additionally sends mail, so it is the
+    // last place the exemption belongs. A write tool spends the write budget
+    // whether it executes or queues: what is being limited is the request.
     if (options.limiter && !options.limiter.take(options.rateKey, { write: !tool.annotations.readOnlyHint })) {
       options.onDenied(tool, args, 'rate-limit')
       return errorResult(
         `Rate limit exceeded for this token${tool.annotations.readOnlyHint ? '' : ' (write budget)'}. Retry later.`,
       )
+    }
+
+    if (tool.approval === 'required' && options.approvals) {
+      const { approvals } = options
+      let approval: GateVerdict
+      try {
+        approval = await gateApproval(tool, args, {
+          ...approvals,
+          redact: (callArgs) => approvals.redact(tool, callArgs),
+        })
+      } catch (error) {
+        // The queue itself failed: the store threw, or the arguments could not
+        // be fingerprinted. Fail closed, and say which half broke. An approval
+        // gate that fell open on a storage error would execute exactly the
+        // class of tool the whole feature exists to hold back, and it would do
+        // it on the day the database was already having a bad time.
+        options.onDenied(tool, args, 'approval')
+        return errorResult(
+          `The approval queue could not be reached, so "${tool.toolName}" was not run and no request `
+          + `was recorded: ${error instanceof Error ? error.message : String(error)}`,
+        )
+      }
+      if (!approval.allowed) {
+        options.onDenied(tool, args, approval.reason)
+        return refusal(approval.message, approval.body)
+      }
     }
 
     const startedAt = performance.now()
@@ -236,6 +330,80 @@ async function handlePreflight(
   }
 }
 
+/**
+ * `guren.approval_status`: what became of one approval request (RFC 0016 §5.4
+ * item 4).
+ *
+ * Audited as an ordinary invocation under the meta-tool's own name — an agent
+ * asking after a request is something an operator wants in the trail — with
+ * the status the answer corresponds to: 200 for a report, 404 for a request
+ * this caller has none of. The trail is where the found/not-found distinction
+ * is allowed to live; the *caller* is told the same thing either way, which is
+ * why `toApprovalStatusReport` converges both on one branch rather than
+ * leaving two call sites to agree.
+ *
+ * No redaction list is passed: the only argument is a request id the caller
+ * supplied, and the built-in fragments still apply through the emitter.
+ */
+async function handleApprovalStatus(
+  options: AppMcpServerOptions,
+  args: Record<string, unknown>,
+): Promise<CallToolResult> {
+  const request = readApprovalStatusArguments(args)
+  if ('error' in request) return errorResult(request.error)
+
+  const approvals = options.approvals
+  // Unreachable through the call path above, which checks the same thing;
+  // present because this function must not depend on that check for its own
+  // soundness.
+  if (!approvals) return errorResult('This server has no approval queue configured.')
+
+  const audited: AuditedTool = { toolName: APPROVAL_STATUS_TOOL_NAME }
+
+  if (options.limiter && !options.limiter.take(options.rateKey, { write: false })) {
+    // Metered as a read, like preflight and for the neighbouring reason: a
+    // status check reaches the application's own storage through the store, so
+    // an unmetered one is a hole in the per-token budget that an agent can
+    // poll through. The cost is that a throttled caller cannot learn its
+    // request landed, which the pending refusal already told it.
+    options.onDenied(audited, args, 'rate-limit')
+    return errorResult('Rate limit exceeded for this token. Retry later.')
+  }
+
+  const startedAt = performance.now()
+  try {
+    const record = await approvals.store.find(request.requestId)
+    const outcome = toApprovalStatusReport(
+      request.requestId,
+      record,
+      approvals.principal,
+      approvals.now(),
+    )
+
+    if ('notFound' in outcome) {
+      // 404 to the caller either way; 403 in the trail when the record exists
+      // and belongs to someone else. That asymmetry is the point — the caller
+      // must not be able to tell the two apart, and the operator must. A
+      // caller walking ids to find other principals' pending actions is
+      // otherwise a run of ordinary not-founds.
+      options.onInvoked(audited, args, outcome.foreign ? 403 : 404, elapsed(startedAt))
+      return errorResult(outcome.notFound)
+    }
+
+    options.onInvoked(audited, args, 200, elapsed(startedAt))
+    // Both halves, as `guren.preflight` returns: `structuredContent` because
+    // the tool advertises an output schema and MCP requires a conforming one
+    // on success, and the text beside it for a client that reads only content.
+    return {
+      content: [{ type: 'text', text: JSON.stringify(outcome.report) }],
+      structuredContent: outcome.report,
+    }
+  } catch (error) {
+    options.onInvoked(audited, args, 500, elapsed(startedAt))
+    return errorResult(error instanceof Error ? error.message : String(error))
+  }
+}
+
 function describeTool(tool: DerivedAgentTool) {
   return {
     name: tool.toolName,
@@ -260,6 +428,32 @@ function describeTool(tool: DerivedAgentTool) {
 
 function errorResult(text: string): CallToolResult {
   return { content: [{ type: 'text', text }], isError: true }
+}
+
+/**
+ * A refusal, carrying the gate's machine-readable body beside the message when
+ * it has one.
+ *
+ * An `isError: true` result reaches the client with its `content` intact —
+ * measured against the SDK client, including for a tool that declares an
+ * `outputSchema`, where neither a `-32600` nor structured-content validation
+ * intervenes. That measurement is what makes a pending-approval answer
+ * expressible at all on this protocol: the requestId an agent has to poll with
+ * rides in the refusal itself (RFC 0016 §5.4).
+ *
+ * It rides as a second content block rather than as `structuredContent`, which
+ * MCP defines for *successful* results — a refusal carrying one would be
+ * claiming a shape of success the tool's own `outputSchema` does not describe.
+ */
+function refusal(message: string, body?: Record<string, unknown>): CallToolResult {
+  if (!body) return errorResult(message)
+  return {
+    content: [
+      { type: 'text', text: message },
+      { type: 'text', text: JSON.stringify(body) },
+    ],
+    isError: true,
+  }
 }
 
 function elapsed(startedAt: number): number {

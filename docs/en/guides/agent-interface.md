@@ -327,7 +327,7 @@ mistake, not a no-op.
 | `readOnlyHint` | The tool changes nothing. See [Annotations](#annotations). |
 | `destructiveHint` | `false` is the strong claim "additive updates only". |
 | `idempotentHint` | Repeat calls with the same arguments add no effect. |
-| `approval` | `'required'` marks the tool as needing server-side approval. Until an approval queue ships, the MCP endpoint fails closed on it: the tool is neither listed nor callable. |
+| `approval` | `'required'` means a call becomes a pending request for a human to approve instead of executing. See [Approval-gated tools](#approval-gated-tools). With no queue configured the endpoint fails closed: the tool is neither listed nor callable. |
 | `redact` | Argument field names to mask in the audit trail. See [The audit trail](#the-audit-trail). |
 
 ## The input schema
@@ -523,6 +523,7 @@ mcpPlugin({
 | `serverInfo` | `{ name: 'guren-app', version: '1.0.0' }` | Server identity advertised to clients |
 | `rateLimit` | `{ max: 60, writeMax: 20, windowMs: 60_000 }` | Per-token budget; `false` disables it |
 | `updateLastUsed` | `true` | Whether verifying a bearer writes the token's `lastUsedAt` |
+| `approvals` | none | The approval queue: `{ store, notify, ttlMs? }`. See [Approval-gated tools](#approval-gated-tools) |
 
 Rate limits are keyed on the **token id**, not an IP: budgets follow
 credentials. They are enforced in process memory, so one long-running server
@@ -595,6 +596,149 @@ Four rules worth knowing:
 - **The name is reserved.** A route whose `.agent()` tool name claims it fails
   `bunx guren check`, and the endpoint refuses to serve it — two tools under
   one name makes an MCP client reject the whole catalogue.
+
+Rehearsing is not requesting. Preflighting an approval-gated tool creates no
+pending request and notifies nobody.
+
+## Approval-gated tools
+
+Some actions should not happen because an agent asked. Mark the route, and a
+call becomes a request for a human instead of an execution:
+
+```ts
+router
+  .delete('/posts/:id', { params: PostIdParamSchema }, [PostController, 'destroy'])
+  .name('posts.destroy')
+  .agent({ description: 'Delete a post.', approval: 'required' })
+```
+
+The first call is refused. Nothing runs, a pending record is created, your
+approvers are notified, and the agent is handed the request id:
+
+```json
+{
+  "status": "pending",
+  "requestId": "8f0c…",
+  "tool": "posts.destroy",
+  "requestedAt": "2026-09-01T12:00:00.000Z",
+  "expiresAt": "2026-09-01T13:00:00.000Z",
+  "executed": false,
+  "pollWith": "guren.approval_status"
+}
+```
+
+Once a human approves the record, the agent repeats **the same call with the
+same arguments** and it goes through — once.
+
+### Configuring the queue
+
+There is no default store. Where pending approvals live is your decision, for
+the same reason the audit sink has no default: this endpoint runs on Workers
+and Lambda, where a framework that quietly fell back to process memory would
+approve a record the next isolate has never heard of.
+
+```ts
+import { AgentApprovalRequested } from '@guren/core'
+import { mcpPlugin } from '@guren/plugin-mcp'
+
+mcpPlugin({
+  approvals: {
+    store: new DrizzleApprovalStore(db),
+    notify: (request) => notifications.sendToMany(admins, new AgentApprovalRequested(request)),
+    ttlMs: 60 * 60 * 1000,
+  },
+})
+```
+
+`store` implements `AgentApprovalStore`:
+
+| Method | What it does |
+|---|---|
+| `create(request)` | Persist a new pending request |
+| `find(id)` | The request with this id, or `null` |
+| `findMatch({ tool, fingerprint, principalKey })` | The **unconsumed** record for this exact call, whatever its status; the most recent when several match |
+| `consume(id)` | Spend the approval, returning whether *this* call won it |
+
+Two guarantees an implementation owes:
+
+- **`consume` must be a compare-and-set** — set `consumedAt` only if it is not
+  already set, and answer `false` when it was. Two concurrent calls will find
+  the same approved record, and an unconditional write hands the approval to
+  both.
+- **`findMatch` filters neither expiry nor status.** The framework judges both,
+  so a store that judged them too would be a second copy of the rule — and the
+  copy that fails open, because a comparison it forgets is an approval granted
+  last month letting a call through today.
+
+`notify` hands the request over and you decide who hears about it: the
+framework never picks approvers, because it cannot see your list.
+`AgentApprovalRequested` is a ready-made notification for the common case, and
+you can subclass it or send anything else. The record is persisted *before*
+`notify` runs and is not awaited afterwards, so a mail channel that is down
+costs an approver an email, never the request — the failure is logged with the
+request id in it.
+
+Resolving a request is your application's job, over your own storage: set
+`status` to `'approved'` or `'rejected'`, with `resolvedAt` and `resolvedBy`.
+The framework offers no `approve()`, because approving is a human action taken
+through an interface it cannot see.
+
+### The rules the gate enforces
+
+- **An approval is bound to the arguments.** Approving `posts.destroy {id: 5}`
+  does not authorize `{id: 9}`. Key order and nesting do not change the match;
+  types do, so `{id: 5}` and `{id: '5'}` are different calls. The match is a
+  SHA-256 of a canonical form of the **raw** arguments — the stored record
+  carries the hash and the *redacted* copy of the arguments, so the queue never
+  becomes a second place your secrets live.
+- **An approval is single-use, and it expires.** One call goes through; the
+  next is a fresh request. Past `expiresAt` the record authorizes nothing.
+- **An approval is bound to the caller.** Another principal's approval
+  authorizes nothing, even for the same arguments.
+- **The approval is spent before the call is dispatched.** A call that then
+  fails has still spent it: approve again rather than have a destructive action
+  run twice on one approval.
+- **Repeating a pending call does not re-file it.** The same request id comes
+  back and your approvers are not notified a second time.
+- **A rejected call is not re-asked.** The refusal says `"status": "rejected"`,
+  so an agent can tell it from a wait worth polling. After the record expires,
+  asking again is a new question.
+
+### `guren.approval_status`
+
+The endpoint adds a second tool of its own when a queue is configured. Pass the
+`requestId` from a refusal:
+
+```json
+{ "name": "guren.approval_status", "arguments": { "requestId": "8f0c…" } }
+```
+
+```json
+{
+  "requestId": "8f0c…",
+  "status": "approved",
+  "tool": "posts.destroy",
+  "requestedAt": "2026-09-01T12:00:00.000Z",
+  "expiresAt": "2026-09-01T13:00:00.000Z",
+  "resolvedAt": "2026-09-01T12:04:11.000Z",
+  "resolvedBy": "ops@example.com",
+  "executed": false
+}
+```
+
+Reading a status performs nothing: `"approved"` means "call it again now". It
+counts against the token's read budget, like `guren.preflight`, so polling in a
+tight loop throttles.
+
+A caller may read only the status of a request **it** created. Another
+principal's id answers exactly as an unknown id does — otherwise the tool would
+be a way to enumerate what your colleagues are waiting to have approved. Your
+audit trail keeps the distinction the caller does not get; a status check is an
+ordinary invocation recorded under `guren.approval_status`.
+
+`bunx guren check` fails a route declaring `approval: 'required'` when it can
+see your `mcpPlugin({ … })` call and finds no `approvals` in it: without a
+queue the tool is not guarded, it is uncallable.
 
 ## Tokens and scopes
 
