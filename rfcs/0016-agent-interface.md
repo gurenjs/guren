@@ -625,6 +625,31 @@ workerd-compatible by construction; the build must stop killing it:
   and DCR; Guren scaffolds the session-authenticated authorize/consent routes, which
   render the manifest-derived consent screen. `props` map to `AgentPrincipal`.
 
+**Amended in implementation (first two bullets; `--mcp-oauth` is a later PR).**
+Corrections, each widening what the bullets above described:
+
+- **Open Question 5 resolved: dependency sniffing.** `@guren/plugin-mcp` under the
+  app's `dependencies` *is* the opt-in — nothing else is asked, because there is
+  nothing else to ask. An app that installed the plugin and mounted it wants the
+  endpoint to work, and a build flag it must also remember to pass is one more way
+  for the endpoint to be silently compiled shut on a platform. `devDependencies` do
+  not count: they never ship, so there is no deployed endpoint to protect.
+  `appUsesMcpPlugin()` answers `false` for an absent or unreadable manifest — no
+  opt-in evidence is not opt-in, and that direction preserves today's behaviour.
+- **The fix is not Cloudflare-only.** Lambda and Vercel read the same
+  `DEV_ONLY_MODULES` list and carried the same defect; both additionally routed
+  *every* unlisted `@modelcontextprotocol/sdk/*` subpath to a throwing stub, which
+  also killed the plugin's static imports of `server/index.js` and `types.js`. So
+  the rule lives in `@guren/core/internal/deploy-build`
+  (`appUsesMcpPlugin` + `stubbableDevOnlyModules`) and all three platforms read it.
+- Exactly **one** entry is dropped: the transport. `server/mcp.js` (the Dev MCP's
+  `McpServer`), `@guren/cli`, `bun:sqlite` and `vite` stay stubbed for every app —
+  "the two MCP SDK stubs" in the bullet above overstated it.
+- Cloudflare's aliases are baked into the app's *committed* `wrangler.jsonc`, which
+  the scaffold writes once and never overwrites. An app that adds the plugin later
+  would keep the stale alias forever, so the build **fails** and names the one line
+  to delete rather than warning.
+
 **Phase 4b (separate RFC).** Durable agent runtime on the Cloudflare Agents SDK
 (`make:agent`). `McpAgent` is deprecated/frozen and is not used; MCP serving needs no
 Durable Objects. Known prerequisites recorded now: named-export injection into the
@@ -735,8 +760,10 @@ Purely additive; no existing API changes shape or behavior. Two soft edges:
    signal. See the §7 amendment.
 4. `listChanged` / tool pagination for large catalogs, and whether `tags` should
    drive filtered exposure.
-5. How the Workers build detects `@guren/plugin-mcp` (dependency sniffing vs. an
-   explicit `BuildCloudflareOutputOptions` flag).
+5. ~~How the Workers build detects `@guren/plugin-mcp` (dependency sniffing vs. an
+   explicit `BuildCloudflareOutputOptions` flag).~~ **Resolved in implementation:**
+   dependency sniffing, shared by all three deploy plugins rather than Workers
+   alone. See the §7 amendment.
 6. `loadRouteDefinitions()` scans `modules/*` on disk regardless of
    `createApp({ modules })`; an unmounted module's `.agent()` routes would appear in
    generated manifests but not the live registry. Whether routes-check should warn on

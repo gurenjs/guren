@@ -6,19 +6,69 @@ import { buildVercelOutput, createVercelHandler, vercelPlugin } from '../src/ind
 
 const DEFAULT_ENTRYPOINT_SOURCE = "export default { fetch() { return new Response('ok') } }\n"
 
+/** Markers the fake SDK exports, so a test can tell "resolved" from "stubbed". */
+const SDK_SERVER_INDEX_MARKER = 'fake-sdk-server-index'
+const SDK_TRANSPORT_MARKER = 'fake-sdk-transport'
+
+/**
+ * An entrypoint importing both SDK subpaths and reporting what it got.
+ *
+ * `server/index.js` comes in as a *namespace*: the catch-all stub for an
+ * unlisted subpath is a bare `throw` with no exports at all, so a named import
+ * of it fails the bundle rather than the bundled module, and the stubbed and
+ * unstubbed cases would then fail at different stages.
+ */
+const SDK_ENTRY_SOURCE =
+  "import * as serverIndex from '@modelcontextprotocol/sdk/server/index.js'\n"
+  + "import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'\n"
+  + 'export default { fetch() { return new Response(`${serverIndex.MARKER}|${WebStandardStreamableHTTPServerTransport}`) } }\n'
+
+/**
+ * A stand-in for `@modelcontextprotocol/sdk` inside the scaffolded app.
+ *
+ * Deliberately without an `exports` map: a subpath under one that is slightly
+ * wrong fails to resolve and reads exactly like the stub still intercepting,
+ * which is the verdict these tests exist to distinguish.
+ */
+function installFakeMcpSdk(root: string): void {
+  const pkg = join(root, 'node_modules/@modelcontextprotocol/sdk')
+  mkdirSync(join(pkg, 'server'), { recursive: true })
+  writeFileSync(
+    join(pkg, 'package.json'),
+    JSON.stringify({ name: '@modelcontextprotocol/sdk', version: '1.30.0', type: 'module' }),
+    'utf8',
+  )
+  writeFileSync(join(pkg, 'server/index.js'), `export const MARKER = '${SDK_SERVER_INDEX_MARKER}'\n`, 'utf8')
+  writeFileSync(
+    join(pkg, 'server/webStandardStreamableHttp.js'),
+    `export const WebStandardStreamableHTTPServerTransport = '${SDK_TRANSPORT_MARKER}'\n`,
+    'utf8',
+  )
+}
+
 /**
  * Writes a minimal buildable app under `root` and returns it as
  * `buildVercelOutput` options, so a test can just `await buildVercelOutput(app)`.
  */
 function scaffoldApp(
   root: string,
-  options: { entrypoint?: string; source?: string } = {},
+  options: { entrypoint?: string; source?: string; mcpPlugin?: boolean } = {},
 ): { rootDir: string; entrypoint: string; outputDir: string } {
-  const { entrypoint = 'src/index.ts', source = DEFAULT_ENTRYPOINT_SOURCE } = options
+  const { entrypoint = 'src/index.ts', source = DEFAULT_ENTRYPOINT_SOURCE, mcpPlugin = false } = options
   const entrypointPath = join(root, entrypoint)
 
   mkdirSync(dirname(entrypointPath), { recursive: true })
   writeFileSync(entrypointPath, source, 'utf8')
+
+  if (mcpPlugin) {
+    // Declaring the plugin under `dependencies` is the App MCP opt-in the
+    // build reads (RFC 0016 §7).
+    writeFileSync(
+      join(root, 'package.json'),
+      JSON.stringify({ name: 'demo-app', dependencies: { '@guren/plugin-mcp': '^0.2.0' } }),
+      'utf8',
+    )
+  }
 
   return { rootDir: root, entrypoint: entrypointPath, outputDir: join(root, '.vercel/output') }
 }
@@ -259,6 +309,62 @@ describe('@guren/plugin-vercel', () => {
       )
 
       expect(copied).toContain('Parent docs.')
+    })
+
+    it('stubs both MCP SDK subpaths for an app that does not depend on the plugin', async () => {
+      // The regression hold: nothing about RFC 0016 Phase 4a reaches an app
+      // that never asked for the App MCP endpoint.
+      const app = scaffoldApp(root, { source: SDK_ENTRY_SOURCE })
+      installFakeMcpSdk(root)
+
+      await buildVercelOutput(app)
+
+      const bundle = readFileSync(join(app.outputDir, 'functions/index.func/index.js'), 'utf8')
+      expect(bundle).toContain('The MCP endpoint is unavailable on Vercel')
+      // The SDK sits installed beside the app, so its markers reaching the
+      // bundle is what "resolved for real" would look like.
+      expect(bundle).not.toContain(SDK_TRANSPORT_MARKER)
+      expect(bundle).not.toContain(SDK_SERVER_INDEX_MARKER)
+    })
+
+    it('bundles the real MCP SDK for an app depending on @guren/plugin-mcp', async () => {
+      const app = scaffoldApp(root, { source: SDK_ENTRY_SOURCE, mcpPlugin: true })
+      installFakeMcpSdk(root)
+
+      await buildVercelOutput(app)
+
+      // Two mechanisms had to stop firing, and the markers tell them apart
+      // from "resolved nothing": `webStandardStreamableHttp.js` is the entry
+      // the stub map releases, and `server/index.js` is one no entry ever
+      // named — only the SDK-prefix catch-all could have stubbed it, and
+      // @guren/plugin-mcp imports it *statically*, so a catch-all still in
+      // force would leave the endpoint just as compiled shut.
+      const bundle = readFileSync(join(app.outputDir, 'functions/index.func/index.js'), 'utf8')
+      expect(bundle).toContain(SDK_TRANSPORT_MARKER)
+      expect(bundle).toContain(SDK_SERVER_INDEX_MARKER)
+      expect(bundle).not.toContain('The MCP endpoint is unavailable on Vercel')
+    })
+
+    it('keeps the Dev MCP server stubbed even for an app depending on the plugin', async () => {
+      // Its McpServer drives the CLI's code generators against a filesystem
+      // the function does not have, and the App MCP endpoint never touches it.
+      const app = scaffoldApp(root, {
+        source:
+          "import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'\n"
+          + 'export default { fetch() { return new Response(String(McpServer)) } }\n',
+        mcpPlugin: true,
+      })
+      installFakeMcpSdk(root)
+      writeFileSync(
+        join(root, 'node_modules/@modelcontextprotocol/sdk/server/mcp.js'),
+        "export const McpServer = 'fake-sdk-mcp-server'\n",
+      )
+
+      await buildVercelOutput(app)
+
+      const bundle = readFileSync(join(app.outputDir, 'functions/index.func/index.js'), 'utf8')
+      expect(bundle).toContain('The MCP endpoint is unavailable on Vercel')
+      expect(bundle).not.toContain('fake-sdk-mcp-server')
     })
   })
 })

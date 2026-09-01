@@ -436,6 +436,102 @@ export const DEV_ONLY_MODULES = [
   },
 ] as const satisfies readonly DevOnlyModule[]
 
+/** One entry of `DEV_ONLY_MODULES`, with its `kind` still narrowed. */
+export type DevOnlyModuleEntry = (typeof DEV_ONLY_MODULES)[number]
+
+/**
+ * The specifier `@guren/plugin-mcp` dynamically imports to serve the App MCP
+ * endpoint (RFC 0016 §7). Named here rather than inline in three plugins
+ * because it is the one entry of `DEV_ONLY_MODULES` whose stubbing is
+ * conditional, and each platform has to recognise it.
+ */
+export const MCP_TRANSPORT_SPECIFIER =
+  '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'
+
+/** The package an app declares to opt into the App MCP endpoint. */
+export const MCP_PLUGIN_PACKAGE = '@guren/plugin-mcp'
+
+/**
+ * Whether the app has opted into the App MCP endpoint (RFC 0016 §7).
+ *
+ * Resolves the RFC's Open Question 5 — how a build learns that an app wants
+ * the MCP transport — as **dependency sniffing**: declaring
+ * `@guren/plugin-mcp` in `dependencies` *is* the opt-in. Nothing else is
+ * asked of the developer, because there is nothing else to ask: an app that
+ * installed the plugin and mounted it wants the endpoint to work, and a build
+ * flag it must also remember to pass is a way for the endpoint to be silently
+ * compiled shut on a platform. The build does not *enable* anything here — it
+ * stops sabotaging what the app already configured.
+ *
+ * `dependencies` only, never `devDependencies`: a devDependency does not ship,
+ * so an app that has one has no MCP endpoint at runtime to protect. Reading
+ * both would keep the transport in the bundle of every app that merely
+ * develops against the plugin.
+ *
+ * Absent, unreadable, or malformed manifest answers `false` — no opt-in
+ * evidence is not the same as opt-in, and the false direction is the safe
+ * one: the transport stays stubbed, which is exactly today's behaviour.
+ */
+export function appUsesMcpPlugin(root: string): boolean {
+  try {
+    const manifest = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as {
+      dependencies?: Record<string, string>
+    }
+    const dependencies = manifest.dependencies
+    return (
+      typeof dependencies === 'object'
+      && dependencies !== null
+      && MCP_PLUGIN_PACKAGE in dependencies
+    )
+  } catch {
+    return false
+  }
+}
+
+/**
+ * The dev-only modules that must stay stubbed for this app.
+ *
+ * The policy layer over `DEV_ONLY_MODULES`, which stays exported and
+ * unchanged: it is the full inventory, and other consumers (the wrangler
+ * bundle probe, the stub-filename table) read it as such. What varies per app
+ * is only whether the *transport* entry is in force.
+ *
+ * `@guren/plugin-mcp` reaches the App MCP endpoint through exactly one lazy
+ * import — `MCP_TRANSPORT_SPECIFIER` — plus static imports of the SDK's
+ * `server/index.js` and `types.js`, which no entry here names. Stubbing the
+ * transport therefore compiles the endpoint shut on every platform, which is
+ * what the three deploy plugins did until RFC 0016 Phase 4a. Dropping the
+ * entry for an app that declared the plugin is the whole of the fix.
+ *
+ * `@modelcontextprotocol/sdk/server/mcp.js` stays stubbed regardless, and the
+ * distinction matters: that is the **Dev** MCP's `McpServer`, reached from
+ * `@guren/server`'s `McpServiceProvider`, which drives the CLI's code
+ * generators against the filesystem. It is compiled shut by the `NODE_ENV`
+ * define anyway; the stub is the second guard, and a deployed app has no use
+ * for it either way. Same for `@guren/cli` behind it, and for `bun:sqlite`
+ * and `vite`, none of which the App MCP endpoint touches.
+ *
+ * The return type keeps each entry's narrow `kind` so that a platform can
+ * index its `Record<kind, message>` table with `module.kind` at all. What
+ * makes those tables exhaustive is not this function — each is keyed off
+ * `DEV_ONLY_MODULES` directly (on Workers, that list plus
+ * `SQL_CLIENT_MODULES`), which is what turns a new kind there into a compile
+ * error there. Widening the return to `readonly DevOnlyModule[]` would leave
+ * that exhaustiveness untouched and instead break every one of the lookups,
+ * since `DevOnlyModuleKind` includes `'sql-driver'` — a kind Lambda's and
+ * Vercel's tables deliberately omit, because those two platforms decide the
+ * SQL clients per app rather than per platform.
+ */
+export function stubbableDevOnlyModules(options: {
+  mcpPlugin: boolean
+}): readonly DevOnlyModuleEntry[] {
+  if (!options.mcpPlugin) {
+    return DEV_ONLY_MODULES
+  }
+
+  return DEV_ONLY_MODULES.filter((module) => module.specifier !== MCP_TRANSPORT_SPECIFIER)
+}
+
 /**
  * A database `@guren/orm` can connect through, named after the factory an
  * app's database config calls to declare it.
@@ -690,17 +786,6 @@ export function unusedSqlClients(input: {
 export type DevOnlySpecifier = (typeof DEV_ONLY_MODULES)[number]['specifier']
 
 /**
- * Source for a stub replacing one dev-only module. Shared because what it
- * encodes is a bundler constraint, not a platform choice: every name the
- * importer destructures must be present or the bundle fails with "no matching
- * export", and each is emitted as a throwing *function* because the stubbed
- * names mix constructors (`new Database()`) with plain calls
- * (`createServer()`) — a class invoked without `new` reports "Class
- * constructor cannot be invoked without 'new'" instead of the real reason.
- *
- * @param message Platform-specific explanation, including the replacement API.
- */
-/**
  * A JavaScript string literal for `value`.
  *
  * `JSON.stringify` alone is not one: JSON and JavaScript disagree about
@@ -712,6 +797,17 @@ function toJsStringLiteral(value: string): string {
   return JSON.stringify(value).replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')
 }
 
+/**
+ * Source for a stub replacing one dev-only module. Shared because what it
+ * encodes is a bundler constraint, not a platform choice: every name the
+ * importer destructures must be present or the bundle fails with "no matching
+ * export", and each is emitted as a throwing *function* because the stubbed
+ * names mix constructors (`new Database()`) with plain calls
+ * (`createServer()`) — a class invoked without `new` reports "Class
+ * constructor cannot be invoked without 'new'" instead of the real reason.
+ *
+ * @param message Platform-specific explanation, including the replacement API.
+ */
 export function renderDevOnlyStub(module: DevOnlyModule, message: string): string {
   // The message reaches the file twice and needs different escaping each
   // time: as a string literal in the thrown error, and as text in a comment
