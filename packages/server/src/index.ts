@@ -55,6 +55,7 @@ export type {
 export {
   advertisesStructuredOutput,
   buildToolRequest,
+  describeBuildFailure,
   mapToolResponse,
   PREFLIGHT_ARGUMENT,
 } from './agent/dispatch'
@@ -62,6 +63,7 @@ export type {
   BuildToolRequestOptions,
   BuiltToolRequest,
   ToolCallOutcome,
+  ToolRequestBuildFailure,
 } from './agent/dispatch'
 // Meta-tool names an adapter adds to the catalogue and an application route
 // may not claim (RFC 0016 §5.4). Exported so `@guren/plugin-mcp` and

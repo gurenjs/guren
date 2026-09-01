@@ -7,6 +7,7 @@ import {
   buildToolRequest,
   createAuditEmitter,
   definePlugin,
+  describeBuildFailure,
   deriveAgentTools,
   isReservedAgentToolName,
   mapToolResponse,
@@ -421,16 +422,10 @@ async function dispatchThroughApp(
     authorization: c.req.header('Authorization'),
     preflight,
   })
-  if ('missing' in built) {
+  if (!('request' in built)) {
     // No HTTP happened, but the call did — recorded by the caller as an
     // invocation with the status the app would have answered.
-    return badRequest(`Missing required path parameter(s): ${built.missing.join(', ')}.`)
-  }
-  if ('invalidPath' in built) {
-    return badRequest(
-      `Path parameter(s) ${built.invalidPath.join(', ')} may not be "." or ".." — `
-      + 'a dot-segment would resolve to a different route than the one authorized.',
-    )
+    return badRequest(describeBuildFailure(built))
   }
 
   // env and execution context are forwarded explicitly — omitting them

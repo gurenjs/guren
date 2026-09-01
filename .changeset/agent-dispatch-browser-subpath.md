@@ -8,4 +8,6 @@ Add `@guren/server/agent`, the browser-safe half of the agent dispatch surface (
 
 The entry deliberately re-exports **no value** from `agent/derive`. `dispatch.ts` imports `DerivedAgentTool` with `import type`, which is what keeps the derivation — and through it `Router` and the authorization middleware — out of the graph; a value re-export would undo that with nothing failing.
 
+The entry also exports `describeBuildFailure` (with its `ToolRequestBuildFailure` input type): the one wording for the two ways `buildToolRequest` refuses to build — a missing path parameter, a `.`/`..` path value. One function rather than a string per adapter, because the same tool is reachable from several surfaces and an agent that reads a different diagnosis depending on which one it reached would be debugging the client instead of its own call. `@guren/plugin-mcp` and the WebMCP client both read it.
+
 `BuildToolRequestOptions` gains `surface`, which sets the `X-Guren-Agent-Surface` header the builder previously hardcoded to `'mcp'`. It defaults to `'mcp'`, so every existing caller sends exactly what it sent before, and `'webmcp'` is what an in-browser call announces. The header is informational and write-only inside the framework — it is there for an application that wants to tell the surfaces apart, and no check may ever rest on it, since any client sets any header it likes.
