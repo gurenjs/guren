@@ -323,7 +323,7 @@ mistake, not a no-op.
 |-------|---------|
 | `description` | What the tool does. Falls back to the route's OpenAPI `description`, then its `summary`. Write it for an agent that has never seen your app. |
 | `toolName` | Overrides the route name as the tool name. |
-| `expose` | `{ mcp?, webMcp? }` — which protocol surfaces the tool appears on. Both default to true; `expose: { mcp: false }` keeps a tool out of the MCP endpoint. `webMcp` is recorded for a browser surface that is not shipped yet. |
+| `expose` | `{ mcp?, webMcp? }` — which protocol surfaces the tool appears on. Both default to true; `expose: { mcp: false }` keeps a tool out of the MCP endpoint, and `expose: { webMcp: false }` out of the in-browser surface `@guren/plugin-webmcp` registers (experimental). |
 | `readOnlyHint` | The tool changes nothing. See [Annotations](#annotations). |
 | `destructiveHint` | `false` is the strong claim "additive updates only". |
 | `idempotentHint` | Repeat calls with the same arguments add no effect. |

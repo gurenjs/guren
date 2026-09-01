@@ -240,7 +240,7 @@ router.resource('/posts', PostController, {
 |-------|---------|
 | `description` | ツールが何をするか。未指定ならルートの OpenAPI `description`、次に `summary` が使われます。あなたのアプリを見たことのないエージェントに向けて書いてください。 |
 | `toolName` | ツール名をルート名から上書きします。 |
-| `expose` | `{ mcp?, webMcp? }` で、ツールが現れるプロトコル面を指定します。どちらも既定は true です。`expose: { mcp: false }` にすると MCP エンドポイントに載らなくなります。`webMcp` はまだ出荷されていないブラウザ側の面のために記録されます。 |
+| `expose` | `{ mcp?, webMcp? }` で、ツールが現れるプロトコル面を指定します。どちらも既定は true です。`expose: { mcp: false }` にすると MCP エンドポイントに載らなくなり、`expose: { webMcp: false }` にすると `@guren/plugin-webmcp`（実験的）が登録するブラウザ側の面に載らなくなります。 |
 | `readOnlyHint` | ツールが何も変更しないという宣言です。[アノテーション](#アノテーション)を参照してください。 |
 | `destructiveHint` | `false` は「追加のみで破壊しない」という強い主張です。 |
 | `idempotentHint` | 同じ引数で繰り返し呼んでも追加の効果がないという宣言です。 |
