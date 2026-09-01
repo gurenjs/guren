@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import * as core from '../src/index'
 import { ATTACHMENT_OBJECT_PREFIX } from '../src/attachments/engine'
+import { blankComments } from './source-scan'
 
 /**
  * The object-key prefix is a cross-package contract, not an engine detail.
@@ -50,64 +51,3 @@ describe('attachment object key prefix', () => {
     }
   })
 })
-
-/**
- * Replace every comment body with spaces, leaving string and template
- * literals untouched. A scanner rather than a regex sweep because the two
- * classes nest both ways: `//` inside a string opens no comment, and a quote
- * inside a comment opens no string.
- */
-function blankComments(source: string): string {
-  let out = ''
-  let index = 0
-
-  while (index < source.length) {
-    const char = source[index]!
-    const next = source[index + 1]
-
-    if (char === '/' && next === '/') {
-      const end = source.indexOf('\n', index)
-      index = end === -1 ? source.length : end
-      continue
-    }
-    if (char === '/' && next === '*') {
-      const end = source.indexOf('*/', index + 2)
-      index = end === -1 ? source.length : end + 2
-      continue
-    }
-    if (char === "'" || char === '"' || char === '`') {
-      const end = endOfLiteral(source, index, char)
-      out += source.slice(index, end)
-      index = end
-      continue
-    }
-
-    out += char
-    index += 1
-  }
-
-  return out
-}
-
-/**
- * End index (exclusive) of the literal opening at `start`. Template literals
- * are taken whole, interpolations included: the key shapes this file looks
- * for live in exactly that text, and a comment cannot legally sit between a
- * backtick and its `${`.
- */
-function endOfLiteral(source: string, start: number, quote: string): number {
-  let index = start + 1
-  while (index < source.length) {
-    const char = source[index]
-    if (char === '\\') {
-      index += 2
-      continue
-    }
-    if (char === quote) return index + 1
-    // An unterminated single- or double-quoted literal cannot span a line;
-    // stopping here keeps a stray apostrophe from swallowing the rest.
-    if (char === '\n' && quote !== '`') return index
-    index += 1
-  }
-  return source.length
-}
