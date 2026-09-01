@@ -456,7 +456,7 @@ export async function dispatchToolCall(
     // so the trail keeps a call whose error the caller is about to see. Under
     // `--preflight` too, and under the real tool's name: with no answer to
     // read, nothing here can say the handler did not run.
-    record(options.audit, tool, options, 500, startedAt, false)
+    record(tool, options, 500, startedAt, false)
     throw error
   }
 
@@ -471,7 +471,7 @@ export async function dispatchToolCall(
   // which tool the record names. A rehearsal that answered goes down as
   // `guren.preflight`; anything else — including a `--preflight` the app ran
   // anyway — goes down as the tool that actually executed. See `record`.
-  record(options.audit, tool, options, outcome.status, startedAt, verdict !== undefined)
+  record(tool, options, outcome.status, startedAt, verdict !== undefined)
 
   return {
     tool,
@@ -533,9 +533,10 @@ export async function dispatchToolCall(
  * assert the handler did not run — a thing this surface would be guessing.
  */
 function record(
-  audit: AgentAuditEmitter | undefined,
   tool: DerivedAgentTool,
-  options: { args: Record<string, unknown>; actingAs?: string | number },
+  // Narrower than what `dispatchToolCall` holds, and deliberately so: these
+  // three fields are the whole of what a record is made of.
+  options: { args: Record<string, unknown>; actingAs?: string | number; audit?: AgentAuditEmitter },
   status: number,
   startedAt: number,
   rehearsed: boolean,
@@ -555,7 +556,7 @@ function record(
   // taken, the report unprinted, the exit code non-zero. So the record is
   // attempted, its failure is said, and the call still answers.
   try {
-    audit?.(
+    options.audit?.(
       new AgentToolInvoked(
         auditPrincipal(options.actingAs),
         rehearsed ? PREFLIGHT_TOOL_NAME : tool.toolName,
