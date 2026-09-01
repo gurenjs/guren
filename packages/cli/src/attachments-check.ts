@@ -1,7 +1,7 @@
-import { dirname, relative, resolve } from 'node:path'
+import { dirname, relative, resolve, sep } from 'node:path'
 import type { CallExpression, ObjectExpression, ObjectProperty } from '@babel/types'
 import { AttachmentDeliveryController, type RouteDefinition } from '@guren/core'
-import { literalString, memberKeyName, walk } from './ast-walk'
+import { literalString, memberKeyName, objectLiteral, unwrapTypeAssertion, walk } from './ast-walk'
 import { check, type CheckResult } from './check-result'
 import { collectFiles, fileExists, listAppRoots } from './discovery'
 import { DEFAULT_ROUTES_FILE, loadRouteDefinitions } from './load-routes'
@@ -274,8 +274,8 @@ export async function checkAttachmentsConfig(options: {
       const call = node as unknown as CallExpression
       if (call.callee.type !== 'Identifier' || call.callee.name !== configureLocal) return
 
-      const argument = call.arguments[0]
-      if (!argument || argument.type !== 'ObjectExpression') return
+      const argument = objectLiteral(call.arguments[0])
+      if (!argument) return
       const tableProperty = argument.properties.find(
         (property) =>
           property.type === 'ObjectProperty' &&
@@ -360,8 +360,8 @@ async function forEachConfigureAttachmentsCall(
           callee.property.type === 'Identifier' &&
           callee.property.name === 'configureAttachments')
       if (!matches) return
-      const argument = call.arguments[0]
-      if (!argument || argument.type !== 'ObjectExpression') return
+      const argument = objectLiteral(call.arguments[0])
+      if (!argument) return
       visit({ filePath, options: argument })
     })
   }
@@ -379,8 +379,9 @@ function* diskObjectEntries(disks: ObjectExpression): Generator<[string, ObjectE
   for (const entry of disks.properties) {
     if (entry.type !== 'ObjectProperty') continue
     const disk = memberKeyName(entry)
-    if (!disk || entry.value.type !== 'ObjectExpression') continue
-    yield [disk, entry.value]
+    const config = objectLiteral(entry.value)
+    if (!disk || !config) continue
+    yield [disk, config]
   }
 }
 
@@ -412,16 +413,14 @@ async function scanAttachmentsDelivery(
     // A literal `delivery: undefined` is the documented inline "off".
     if (delivery && !(delivery.value.type === 'Identifier' && delivery.value.name === 'undefined')) {
       deliveryConfigs.add(relPath)
-      const routeName =
-        delivery.value.type === 'ObjectExpression'
-          ? literalString(propertyNamed(delivery.value, 'routeName')?.value)
-          : null
+      const deliveryOptions = objectLiteral(delivery.value)
+      const routeName = deliveryOptions ? literalString(propertyNamed(deliveryOptions, 'routeName')?.value) : null
       routeNames.add(routeName ?? DEFAULT_DELIVERY_ROUTE_NAME)
     }
 
-    const disks = propertyNamed(options, 'disks')
-    if (disks?.value.type !== 'ObjectExpression') return
-    for (const [disk, config] of diskObjectEntries(disks.value)) {
+    const disks = objectLiteral(propertyNamed(options, 'disks')?.value)
+    if (!disks) return
+    for (const [disk, config] of diskObjectEntries(disks)) {
       if (literalString(propertyNamed(config, 'serve')?.value) === 'redirect') {
         redirectDisks.add(`${relPath}\u0000${disk}`)
       }
@@ -439,23 +438,41 @@ async function scanAttachmentsDelivery(
 }
 
 /**
- * The storage drivers the app's config declares, per disk name. Positive
- * evidence only, in both directions: an entry counts when a `disks`
+ * What a `disks` map declares about one disk. Each field is read
+ * independently, and `null` means "this scan cannot say": absent, not a
+ * string literal, or declared two different ways in two places. Kept
+ * per-field rather than per-disk so that conflicting evidence about one
+ * property never silently withdraws a rule that reads the other.
+ */
+interface StorageDiskDeclaration {
+  /** `driver: 'local' | 's3' | …` */
+  driver?: string | null
+  /** `root: './public/storage'` — the local driver's base directory. */
+  root?: string | null
+}
+
+/**
+ * The storage disks the app's config declares, per disk name. Positive
+ * evidence only, in both directions: a field counts when a `disks`
  * property carries (inline, or through a same-file `const` the property
  * references — the `StorageProvider` scaffold's shape) an object literal
- * with a string-literal `driver`; two sources disagreeing about one disk
- * makes that disk unreadable (`null`) rather than first-match-wins. The
- * scan cannot prove a map reaches `createStorageManager()`, so the
+ * with a string-literal value for it; two sources disagreeing about one
+ * field makes that field unreadable (`null`) rather than first-match-wins.
+ * The scan cannot prove a map reaches `createStorageManager()`, so the
  * candidate set must keep sweeping all of config/, src/, and app/ — a
  * discovery narrowed to attachments configs would silently blind the
  * redirect rule (the runCheck-level test pins this).
  */
-async function scanStorageDiskDrivers(cache: ParseCache, files: string[]): Promise<Map<string, string | null>> {
-  const drivers = new Map<string, string | null>()
-  const record = (disk: string, driver: string) => {
-    const existing = drivers.get(disk)
-    if (existing === undefined) drivers.set(disk, driver)
-    else if (existing !== driver) drivers.set(disk, null)
+async function scanStorageDisks(cache: ParseCache, files: string[]): Promise<Map<string, StorageDiskDeclaration>> {
+  const disks = new Map<string, StorageDiskDeclaration>()
+  const record = (disk: string, field: keyof StorageDiskDeclaration, value: string) => {
+    const existing = disks.get(disk) ?? {}
+    // Never declared adopts the value; a second, disagreeing declaration
+    // makes the field unreadable — and stays that way, since a sticky `null`
+    // is never equal to a later value either.
+    if (existing[field] === undefined) existing[field] = value
+    else if (existing[field] !== value) existing[field] = null
+    disks.set(disk, existing)
   }
 
   for (const filePath of files) {
@@ -469,8 +486,9 @@ async function scanStorageDiskDrivers(cache: ParseCache, files: string[]): Promi
     for (const statement of parsed.ast.program.body) {
       if (statement.type !== 'VariableDeclaration') continue
       for (const declarator of statement.declarations) {
-        if (declarator.id.type === 'Identifier' && declarator.init?.type === 'ObjectExpression') {
-          constObjects.set(declarator.id.name, declarator.init)
+        const init = objectLiteral(declarator.init)
+        if (declarator.id.type === 'Identifier' && init) {
+          constObjects.set(declarator.id.name, init)
         }
       }
     }
@@ -479,20 +497,124 @@ async function scanStorageDiskDrivers(cache: ParseCache, files: string[]): Promi
       if (node.type !== 'ObjectProperty') return
       const property = node as unknown as ObjectProperty
       if (memberKeyName(property) !== 'disks') return
+      const propertyValue = unwrapTypeAssertion(property.value)
       const value =
-        property.value.type === 'ObjectExpression'
-          ? property.value
-          : property.value.type === 'Identifier'
-            ? constObjects.get(property.value.name)
-            : undefined
+        objectLiteral(propertyValue) ??
+        (propertyValue.type === 'Identifier' ? constObjects.get(propertyValue.name) : undefined)
       if (!value) return
       for (const [disk, config] of diskObjectEntries(value)) {
         const driver = literalString(propertyNamed(config, 'driver')?.value)
-        if (driver) record(disk, driver)
+        if (driver) record(disk, 'driver', driver)
+        const root = literalString(propertyNamed(config, 'root')?.value)
+        if (root) record(disk, 'root', root)
       }
     })
   }
-  return drivers
+  return disks
+}
+
+/** Is `candidate` the directory `root`, or a path below it? Lexical: neither side need exist yet. */
+function isAtOrWithin(root: string, candidate: string): boolean {
+  return candidate === root || candidate.startsWith(root.endsWith(sep) ? root : root + sep)
+}
+
+/**
+ * The disk new attachments are written to, per config file — the `disk`
+ * option, which is required and names one entry of the storage manager's
+ * map.
+ */
+async function scanAttachmentsDefaultDisks(
+  cwd: string,
+  cache: ParseCache,
+  files: string[],
+): Promise<Array<{ relPath: string; disk: string }>> {
+  const found: Array<{ relPath: string; disk: string }> = []
+  await forEachConfigureAttachmentsCall(cache, files, ({ filePath, options }) => {
+    const disk = literalString(propertyNamed(options, 'disk')?.value)
+    if (!disk) return
+    const relPath = relative(cwd, filePath)
+    if (!found.some((entry) => entry.relPath === relPath && entry.disk === disk)) {
+      found.push({ relPath, disk })
+    }
+  })
+  return found
+}
+
+/**
+ * `configureAttachments({ disk })` pointing at a local disk rooted inside
+ * the app's public directory.
+ *
+ * Uploaded bytes then sit in the statically served tree, and the root asset
+ * server returns them by extension with the content type that matches: an
+ * uploaded `.svg` comes back as `image/svg+xml`, inline, and its script runs
+ * on the app's own origin with the app's own cookies. The attachments
+ * delivery route exists precisely to avoid this — it serves only an
+ * allowlist of types inline, forces a download for the rest, and adds
+ * nosniff plus a sandbox CSP — but a disk rooted under `public/` is reachable
+ * without ever going through it, so no amount of delivery configuration
+ * repairs this shape. Only moving the root does.
+ *
+ * This is the rule that tells an app scaffolded before the default changed
+ * that it is still in the old shape; nothing at runtime reports it, because
+ * serving the file *is* the intended behaviour of the disk it was put on.
+ *
+ * Positive evidence only, and deliberately narrow — it fires when the
+ * driver is literally `local` and the declared `root` is at or below
+ * `<cwd>/public`. An app that relocated its public directory, or that
+ * computes either value, is not judged rather than guessed at: this rule
+ * fails a build, so a false positive costs more than the miss.
+ */
+export async function checkAttachmentsPublicDisk(options: {
+  cwd: string
+  cache: ParseCache
+  /** Candidate config files, from {@link discoverAttachmentsConfigFiles}. */
+  files: string[]
+}): Promise<CheckResult[]> {
+  const { cwd, cache, files } = options
+  const defaults = await scanAttachmentsDefaultDisks(cwd, cache, files)
+  if (defaults.length === 0) return []
+
+  const declarations = await scanStorageDisks(cache, files)
+  // The statically served directory, by convention and by the framework's own
+  // default (`publicPath` defaults to `../public` relative to the server module).
+  const publicDir = resolve(cwd, 'public')
+  const results: CheckResult[] = []
+
+  for (const { relPath, disk } of defaults) {
+    const declaration = declarations.get(disk)
+    // Unreadable in either field: skip, never guess.
+    if (!declaration || declaration.root == null) continue
+    if (!KNOWN_FILESYSTEM_DRIVERS.has(declaration.driver ?? '')) continue
+
+    const key = `attachments-public-disk:${relPath}:${disk}`
+    const title = 'Attachments disk outside public/'
+    const root = resolve(cwd, declaration.root)
+
+    if (isAtOrWithin(publicDir, root)) {
+      results.push(
+        check(
+          key,
+          title,
+          'fail',
+          `configureAttachments() in ${relPath} stores new attachments on disk '${disk}', which is ` +
+            `rooted at ${declaration.root} — inside the public directory the app serves statically. ` +
+            `An uploaded .svg or .html is then reachable as a static asset and renders on the app's ` +
+            `own origin, which is stored XSS; the attachments delivery route cannot intervene, ` +
+            `because nothing has to go through it to reach the file.`,
+          `Point disk at a disk rooted outside public/ (the scaffold's 'local', at ./storage/app), ` +
+            `declare it private in disks, and serve it through delivery: {} plus ` +
+            `registerAttachmentRoutes(router) in your route registrar.`,
+          relPath,
+        ),
+      )
+    } else {
+      results.push(
+        check(key, title, 'pass', `Attachments disk '${disk}' is rooted outside public/ (${declaration.root}).`),
+      )
+    }
+  }
+
+  return results
 }
 
 /**
@@ -506,6 +628,19 @@ async function scanStorageDiskDrivers(cache: ParseCache, files: string[]): Promi
  */
 const KNOWN_NON_PRESIGNING_DRIVERS = new Set(['local', 'memory'])
 const KNOWN_PRESIGNING_DRIVERS = new Set(['s3'])
+
+/**
+ * Drivers whose `root` is a filesystem path, so that "is this disk inside
+ * public/?" is a question about it at all. Same never-guess policy as the
+ * presigning sets above: a driver name outside this set is a disk this scan
+ * cannot place, skipped rather than judged.
+ *
+ * Unlike those, this has no runtime twin to mirror — `root` is meaningful
+ * only to `LocalDriver`, and nothing at serve time would read a capability
+ * flag for it. A named set rather than a bare `!== 'local'` so that the
+ * file's three driver judgements are found together.
+ */
+const KNOWN_FILESYSTEM_DRIVERS = new Set(['local'])
 
 /**
  * The RFC 0015 delivery-route wiring rules:
@@ -614,9 +749,9 @@ export async function checkAttachmentsDelivery(options: {
   }
 
   if (scan.redirectDisks.length > 0) {
-    const drivers = await scanStorageDiskDrivers(cache, files)
+    const declarations = await scanStorageDisks(cache, files)
     for (const { relPath, disk } of scan.redirectDisks) {
-      const driver = drivers.get(disk)
+      const driver = declarations.get(disk)?.driver
       // Unreadable (absent or conflicting evidence): skip, never guess.
       if (driver == null) continue
       const key = `attachments-serve-redirect:${relPath}:${disk}`

@@ -1,5 +1,12 @@
-import { resolve } from 'node:path'
+import { relative, resolve } from 'node:path'
+import type { CallExpression } from '@babel/types'
+import {
+  AGENT_APPROVAL_CONFIG_KEY,
+  isReservedAgentToolName,
+  RESERVED_AGENT_TOOL_NAMES,
+} from '@guren/core'
 import type { AgentRouteMetadata, RouteDefinition } from '@guren/core'
+import { memberKeyName, walk } from './ast-walk'
 import { check, type CheckResult } from './check-result'
 import {
   mutatesRecords,
@@ -10,10 +17,10 @@ import {
   INERTIA_CALL_PATTERN,
   type ControllerMethodInfo,
 } from './controller-methods'
-import { fileExists } from './discovery'
+import { collectFiles, fileExists, listAppRoots } from './discovery'
 import { describeMethod } from './http-methods'
 import { DEFAULT_ROUTES_FILE, loadRouteDefinitions } from './load-routes'
-import type { ParseCache } from './parse-cache'
+import { ParseCache, type ParsedFile } from './parse-cache'
 
 export interface AgentRouteCheckOptions {
   cwd: string
@@ -114,6 +121,36 @@ function toolNameFinding(route: AgentRoute): CheckResult | undefined {
     + '^[A-Za-z0-9._-]{1,128}$. A client rejects the whole tool list rather than the one tool.',
     'Rename the route, or set agent.toolName to a name matching that grammar (dots are allowed, so '
     + '\'posts.store\' needs no transformation).',
+  )
+}
+
+/**
+ * A tool name the framework occupies (RFC 0016 §5.4).
+ *
+ * The reserved list is imported, never restated: `@guren/plugin-mcp` adds
+ * `guren.preflight` to the catalogue it serves, and if the two lists drift
+ * this check keeps passing a route whose tool the endpoint has already
+ * shadowed. The endpoint drops the colliding route rather than serving two
+ * tools with one name — an MCP client answers that by rejecting the whole
+ * catalogue — so the cost of not failing here is a route that is silently
+ * absent from the surface it declared itself for.
+ *
+ * A fail rather than a warn for the same reason the duplicate rule is one:
+ * the tool name is the tool's identity, and the route does not get it.
+ */
+function reservedNameFinding(route: AgentRoute): CheckResult | undefined {
+  const { toolName } = route
+  if (toolName === undefined || !isReservedAgentToolName(toolName)) return undefined
+
+  const source = route.agent.toolName !== undefined ? 'agent toolName override' : 'route name'
+  return check(
+    `agent-route-reserved-name:${route.keySuffix}`,
+    `${route.label} agent tool`,
+    'fail',
+    `The tool name '${toolName}' (from the ${source}) is reserved by the framework: agent surfaces `
+    + 'add it to the catalogue themselves as a meta-tool. A route claiming it is not exposed at all. '
+    + `Reserved names: ${RESERVED_AGENT_TOOL_NAMES.join(', ')}.`,
+    'Rename the route, or set agent.toolName to a name outside the reserved list.',
   )
 }
 
@@ -365,6 +402,168 @@ function inputFinding(route: AgentRoute): CheckResult | undefined {
   )
 }
 
+/**
+ * The package the App MCP plugin's factory comes from. A local alias is
+ * followed (`import { mcpPlugin as mcp }`), because the binding is what the
+ * call site spells; a same-named function from anywhere else is not, because
+ * it is not this plugin.
+ */
+const MCP_PLUGIN_SPECIFIER = '@guren/plugin-mcp'
+const MCP_PLUGIN_EXPORT = 'mcpPlugin'
+
+/** What one readable `mcpPlugin({ … })` call says about the approval queue. */
+type ApprovalConfigEvidence =
+  /** A call whose options are an object literal carrying the queue. */
+  | { kind: 'configured'; relPath: string }
+  /** A call whose options are an object literal *without* the queue. */
+  | { kind: 'absent'; relPath: string }
+
+/**
+ * Whether this app configures an approval queue, judged from the one place it
+ * can be: the `mcpPlugin({ … })` call that mounts the endpoint.
+ *
+ * **Positive evidence only**, the rule `app-surface.ts` states for the same
+ * class of question. A call whose options are not an object literal
+ * (`mcpPlugin(config)`, a spread, a helper that builds them elsewhere) says
+ * nothing this scan may act on, and an app with no readable call at all is an
+ * app that may not mount App MCP — where `approval: 'required'` costs nothing
+ * because no adapter reads it. Both answer `undefined`: silence, not a guess.
+ * `guren check` has no per-finding ignore configuration, so a false positive
+ * here would be unsuppressible, which is the reason `authorizationFinding`
+ * warns rather than fails on a body it could not read.
+ *
+ * The key is `AGENT_APPROVAL_CONFIG_KEY` from `@guren/core`, never the literal
+ * string: the CLI cannot import `@guren/plugin-mcp` (it does not depend on it,
+ * and an app that never installs App MCP is still checked), so restating the
+ * option name is how renaming it would leave this check quietly passing every
+ * app — the same drift the reserved-name rule refuses.
+ */
+async function scanApprovalConfig(
+  cwd: string,
+  cache: ParseCache,
+): Promise<ApprovalConfigEvidence | undefined> {
+  const roots = await listAppRoots(cwd)
+  const groups = await Promise.all(
+    roots.flatMap((root) => ['config', 'src', 'app'].map((dir) => collectFiles(resolve(root.dir, dir)))),
+  )
+  const files = groups.flat().filter((file) => !/\.test\.[jt]sx?$/.test(file))
+
+  let absent: ApprovalConfigEvidence | undefined
+  for (const filePath of files) {
+    // String pre-filter before any parse, the way the attachments scan does:
+    // the overwhelming majority of an app's sources never mention the plugin.
+    const source = await cache.source(filePath)
+    if (!source || !source.includes(MCP_PLUGIN_EXPORT)) continue
+    const parsed = await cache.get(filePath)
+    if (!parsed) continue
+
+    const relPath = relative(cwd, filePath).replace(/\\/g, '/')
+    const evidence = readMcpPluginCalls(parsed)
+    // A configured call anywhere settles it: an app may mount the endpoint
+    // from more than one place, and one queue is a queue.
+    if (evidence === 'configured') return { kind: 'configured', relPath }
+    if (evidence === 'absent') absent ??= { kind: 'absent', relPath }
+  }
+
+  return absent
+}
+
+/**
+ * What the `mcpPlugin(...)` calls in one file say: `'configured'` if any
+ * carries the queue key, `'absent'` if one has readable options without it,
+ * `undefined` if none was readable.
+ */
+function readMcpPluginCalls(parsed: ParsedFile): 'configured' | 'absent' | undefined {
+  const locals = new Set<string>()
+  for (const declaration of parsed.ast.program.body) {
+    if (declaration.type !== 'ImportDeclaration') continue
+    if (declaration.source.value !== MCP_PLUGIN_SPECIFIER) continue
+    for (const specifier of declaration.specifiers) {
+      if (specifier.type !== 'ImportSpecifier') continue
+      const imported =
+        specifier.imported.type === 'Identifier' ? specifier.imported.name : specifier.imported.value
+      if (imported === MCP_PLUGIN_EXPORT) locals.add(specifier.local.name)
+    }
+  }
+  if (locals.size === 0) return undefined
+
+  let answer: 'configured' | 'absent' | undefined
+  walk(parsed.ast.program, (node) => {
+    if (node.type !== 'CallExpression') return
+    // Typed once at the seam, the way the attachments scan reads its own
+    // calls: everything below is `@babel/types` rather than a cast per field.
+    const call = node as unknown as CallExpression
+    const callee = call.callee
+    if (callee.type !== 'Identifier' || !locals.has(callee.name)) return
+
+    const options = call.arguments[0]
+    // `mcpPlugin()` with no argument is a readable call with no queue: the
+    // default is the unconfigured one.
+    if (!options) {
+      answer ??= 'absent'
+      return
+    }
+    if (options.type !== 'ObjectExpression') return
+
+    const properties = options.properties
+    const carriesQueue = properties.some(
+      (property) =>
+        (property.type === 'ObjectProperty' || property.type === 'ObjectMethod')
+        && memberKeyName(property) === AGENT_APPROVAL_CONFIG_KEY,
+    )
+    // A spread makes an absence unreadable — the queue may be in the spread
+    // object — but a key that is literally there is still positive evidence.
+    const spreads = properties.some((property) => property.type === 'SpreadElement')
+    if (carriesQueue) answer = 'configured'
+    else if (!spreads) answer ??= 'absent'
+  })
+
+  return answer
+}
+
+/**
+ * A route declaring `approval: 'required'` on a server whose App MCP endpoint
+ * has no approval queue (RFC 0016 §5.4 item 4).
+ *
+ * A **fail**, unlike the "could not verify" warns above, and the difference is
+ * what the check knows rather than how serious the defect is. This finding is
+ * only ever raised on positive evidence: a `mcpPlugin({ … })` call whose
+ * options this check read, in which the queue key is not present. Given that,
+ * the tool is categorically uncallable — every call is refused fail-closed and
+ * the tool is not even in `tools/list` — which is a wiring mistake with a
+ * one-line fix, not a policy someone might have meant. The same reasoning
+ * makes the name and duplicate rules fails: the route does not become a tool
+ * at all.
+ *
+ * One finding per app, not per route: the missing configuration line is one
+ * defect however many routes declare approval, and naming them all in one
+ * message is what tells the reader the scale of it.
+ */
+function approvalStoreFinding(
+  routes: AgentRoute[],
+  evidence: ApprovalConfigEvidence | undefined,
+): CheckResult | undefined {
+  if (!evidence || evidence.kind === 'configured') return undefined
+
+  const gated = routes.filter((route) => route.agent.approval === 'required')
+  if (gated.length === 0) return undefined
+
+  return check(
+    'agent-route-approval-store',
+    'Agent approval queue',
+    'fail',
+    `${gated.length} route${gated.length === 1 ? '' : 's'} declare approval: 'required' `
+    + `(${gated.map((route) => route.toolName ?? route.label).join(', ')}), but the mcpPlugin({ … }) call `
+    + `in ${evidence.relPath} configures no ${AGENT_APPROVAL_CONFIG_KEY}. Without a queue there is `
+    + 'nowhere to record a pending request, so every call to those tools is refused fail-closed and they '
+    + 'are absent from tools/list entirely — the declaration makes them uncallable rather than guarded.',
+    `Pass ${AGENT_APPROVAL_CONFIG_KEY}: { store, notify } to mcpPlugin() — store is your own `
+    + 'AgentApprovalStore, notify hands the request to whoever approves — or drop '
+    + "agent: { approval: 'required' } from those routes.",
+    evidence.relPath,
+  )
+}
+
 // TODO(RFC 0016 §2): the input key-collision rule — a path parameter
 // supplemented into the merged input schema colliding with a `query` or
 // `body` key — needs the merged schema `deriveAgentTools()` builds, and is
@@ -501,16 +700,25 @@ export async function checkAgentRoutes(options: AgentRouteCheckOptions): Promise
 
   results.push(...duplicateFindings(routes))
 
+  // Only asked when a route declares approval: the scan reads app sources, and
+  // an app with no approval-gated route has no question for it to answer.
+  if (routes.some((route) => route.agent.approval === 'required')) {
+    const approval = approvalStoreFinding(
+      routes,
+      await scanApprovalConfig(cwd, options.cache ?? new ParseCache()),
+    )
+    if (approval) results.push(approval)
+  }
+
   for (const route of routes) {
-    const nameResult = nameFinding(route)
-    if (nameResult) {
-      // The tool-name grammar has nothing to test on a route with no name;
-      // reporting both would name one defect twice.
-      results.push(nameResult)
-    } else {
-      const toolNameResult = toolNameFinding(route)
-      if (toolNameResult) results.push(toolNameResult)
-    }
+    // At most one naming finding per route, first applicable wins. The
+    // tool-name grammar has nothing to test on a route with no name, and the
+    // reserved-name rule applies only to a grammar-legal one: an illegal name
+    // is already failing, renaming it fixes both, and no reserved name is
+    // illegal anyway. Reporting more than one would name a single defect
+    // twice.
+    const nameResult = nameFinding(route) ?? toolNameFinding(route) ?? reservedNameFinding(route)
+    if (nameResult) results.push(nameResult)
 
     const authorization = authorizationFinding(route)
     if (authorization) results.push(authorization)
@@ -533,10 +741,10 @@ export async function checkAgentRoutes(options: AgentRouteCheckOptions): Promise
       'Agent routes',
       'pass',
       `${routes.length} agent-exposed route${routes.length === 1 ? '' : 's'} checked: every tool name is `
-      + 'legal and unique, every non-read-only tool carries authorization evidence, every declared '
-      + 'readOnlyHint holds against the action, and every route declares the schemas a tool is derived '
-      + 'from. Nothing here validates the derived tools themselves, or any behaviour outside the '
-      + 'controller bodies this check reads.',
+      + 'legal, unreserved and unique, every non-read-only tool carries authorization evidence, every declared '
+      + 'readOnlyHint holds against the action, every approval-gated tool has a queue to record into, and '
+      + 'every route declares the schemas a tool is derived from. Nothing here validates the derived tools '
+      + 'themselves, or any behaviour outside the controller bodies this check reads.',
     ),
   ]
 }

@@ -2,7 +2,7 @@ import { extname, resolve } from 'node:path'
 import type { Application } from './Application'
 import { trimTrailingSlashes } from '../support/trim-slashes'
 import { isPathWithin, isRealPathWithin } from '../support/contained-path'
-import { staticDocumentHeaders } from './static-documents'
+import { applyDocumentDisposition } from './static-documents'
 
 declare const Bun: any
 
@@ -40,6 +40,16 @@ export interface RootPublicAssetsOptions {
   routePrefix?: string
   /** Override content types per extension. */
   contentTypeMap?: Record<string, string>
+  /**
+   * Serve document types (`.svg`, `.html`, XML) inline instead of forcing them
+   * to download. Defaults to false.
+   *
+   * The default exists because this directory is also where an app's uploads
+   * land — `.svg` is in the default extension list, and an SVG navigated to
+   * directly is script in the app's own origin. Turn it on only for a
+   * directory holding nothing user-supplied.
+   */
+  inlineDocuments?: boolean
 }
 
 type NormalizedConfig = {
@@ -47,6 +57,7 @@ type NormalizedConfig = {
   cacheControlHeader: string
   routePrefix?: string
   contentTypeMap?: Record<string, string>
+  inlineDocuments: boolean
 }
 
 export function registerRootPublicAssets(app: Application, publicDir: string, config?: RootPublicAssetsConfig): void {
@@ -61,7 +72,7 @@ export function registerRootPublicAssets(app: Application, publicDir: string, co
     return
   }
 
-  const { extensions, cacheControlHeader, routePrefix, contentTypeMap } = normalized
+  const { extensions, cacheControlHeader, routePrefix, contentTypeMap, inlineDocuments } = normalized
   const normalizedPrefix = routePrefix ? trimTrailingSlashes(routePrefix) || '/' : undefined
 
   app.hono.use(async (ctx, next) => {
@@ -105,14 +116,14 @@ export function registerRootPublicAssets(app: Application, publicDir: string, co
     }
 
     const contentType = contentTypeMap?.[extension] ?? DEFAULT_CONTENT_TYPES[extension] ?? 'application/octet-stream'
-
     const headers = new Headers({
       'Cache-Control': cacheControlHeader,
       'Content-Type': contentType,
-      // `.svg` is in the default extension list, so this mount is the one an
-      // app reaches for a logo — and the one a browser would run as a page.
-      ...staticDocumentHeaders(contentType),
     })
+
+    if (!inlineDocuments) {
+      applyDocumentDisposition(headers, contentType)
+    }
 
     return new Response(file, { headers })
   })
@@ -127,6 +138,7 @@ function normalizeConfig(config?: RootPublicAssetsConfig): NormalizedConfig | un
     return {
       extensions: new Set(DEFAULT_EXTENSIONS),
       cacheControlHeader: DEFAULT_CACHE_CONTROL,
+      inlineDocuments: false,
     }
   }
 
@@ -147,6 +159,7 @@ function normalizeConfig(config?: RootPublicAssetsConfig): NormalizedConfig | un
     cacheControlHeader: config.cacheControlHeader ?? DEFAULT_CACHE_CONTROL,
     routePrefix: config.routePrefix,
     contentTypeMap: config.contentTypeMap,
+    inlineDocuments: config.inlineDocuments ?? false,
   }
 }
 

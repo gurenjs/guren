@@ -2,13 +2,17 @@ import {
   AgentToolDenied,
   AgentToolInvoked,
   DEFAULT_AGENT_AUDIT_PATH,
+  DEFAULT_AGENT_APPROVAL_TTL_MS,
   buildToolRequest,
   definePlugin,
   deriveAgentTools,
+  isReservedAgentToolName,
   mapToolResponse,
   readBearerToken,
   redactAgentArguments,
   verifyApiToken,
+  type AgentApprovalRequest,
+  type AgentApprovalStore,
   type AgentAuditRecord,
   type AgentPrincipal,
   type AgentToolDenialReason,
@@ -88,6 +92,53 @@ export interface McpPluginConfig {
    * ```
    */
   audit?: { file?: string; days?: number } | { sink: (record: AgentAuditRecord) => void | Promise<void> }
+  /**
+   * The approval queue (RFC 0016 §5.4 item 4). A route declaring
+   * `agent({ approval: 'required' })` does not execute on request: the call
+   * becomes a pending record, the approvers are told, and the tool answers
+   * with the request id instead. Once a human approves it, repeating the same
+   * call with the same arguments performs it — once.
+   *
+   * Opt-in, with no default implementation, for the reason `audit` has none:
+   * this endpoint runs on Workers and Lambda, where a queue that quietly fell
+   * back to process memory would answer "approved" for a record the next
+   * isolate never saw, and would do it differently per deployment while the
+   * configuration looked identical. Unconfigured, an `approval: 'required'`
+   * tool is **refused fail-closed** and is absent from `tools/list`; the
+   * refusal names this option. What the opt-in costs is a line of
+   * configuration; what a default would buy is a gate that looks present.
+   *
+   * `store` is the application's own persistence — see `AgentApprovalStore`
+   * for the four methods and the two guarantees an implementation owes
+   * (`consume` is a compare-and-set; `findMatch` filters neither expiry nor
+   * status).
+   *
+   * `notify` hands the request to the application, which decides who hears
+   * about it: the framework never chooses approvers, because it cannot see the
+   * list. `AgentApprovalRequested` is the ready-made notification for the
+   * common case. A `notify` that throws or rejects is warned about and does
+   * **not** fail the tool call or lose the record — the record is persisted
+   * before `notify` is called, and is not awaited after.
+   *
+   * `ttlMs` is how long a new request stays answerable.
+   *
+   * @default undefined — no queue; approval-gated tools are refused fail-closed
+   * @example
+   * ```typescript
+   * mcpPlugin({
+   *   approvals: {
+   *     store: new DrizzleApprovalStore(db),
+   *     notify: (request) => notifications.sendToMany(admins, new AgentApprovalRequested(request)),
+   *   },
+   * })
+   * ```
+   */
+  approvals?: {
+    store: AgentApprovalStore
+    notify: (request: AgentApprovalRequest) => void | Promise<void>
+    /** @default 1 hour ({@link DEFAULT_AGENT_APPROVAL_TTL_MS}) */
+    ttlMs?: number
+  }
 }
 
 /**
@@ -131,6 +182,20 @@ const factory = definePlugin<McpPluginConfig>({
       console.warn(`[@guren/plugin-mcp] ${warning}`)
     }
     const exposed = tools.filter((tool) => tool.expose.mcp)
+
+    // A route whose tool name is one the endpoint adds itself (RFC 0016
+    // §5.4). `createAppMcpServer` drops it — two tools with one name makes an
+    // MCP client reject the entire catalogue — but silently dropping a route
+    // an application declared would be the endpoint deciding not to serve it
+    // without saying so. `guren check` fails the build over the same
+    // collision; this is what an app that never ran the check sees.
+    for (const tool of exposed.filter((candidate) => isReservedAgentToolName(candidate.toolName))) {
+      console.warn(
+        `[@guren/plugin-mcp] The route "${tool.routeName}" claims the reserved tool name `
+        + `"${tool.toolName}", which this endpoint serves itself. It is not exposed. `
+        + 'Rename the route or set agent.toolName.',
+      )
+    }
 
     const path = config.path ?? '/mcp'
     const serverInfo = {
@@ -187,10 +252,29 @@ const factory = definePlugin<McpPluginConfig>({
       const server = createAppMcpServer({
         tools: exposed,
         abilities: verified.abilities,
+        // Rebuilt per request because the principal is: an approval is bound
+        // to who asked for it, and a context hoisted to boot would carry
+        // whichever caller happened to arrive first.
+        ...(config.approvals
+          ? {
+              approvals: {
+                store: config.approvals.store,
+                principal,
+                ttlMs: config.approvals.ttlMs ?? DEFAULT_AGENT_APPROVAL_TTL_MS,
+                now: () => new Date(),
+                // The route's own masking rules, the same walk the audit trail
+                // uses. A record a human reads and a store persists must not
+                // carry a field the route declared must never be written down.
+                redact: (tool, args) => redactAgentArguments(args, tool.redact),
+                notify: notifyApprovers(config.approvals.notify),
+              },
+            }
+          : {}),
         serverInfo,
         limiter,
         rateKey: verified.token.id,
-        dispatch: (tool, args) => dispatchThroughApp(app, c, tool, args),
+        dispatch: (tool, args, dispatchOptions) =>
+          dispatchThroughApp(app, c, tool, args, dispatchOptions?.preflight),
         onInvoked: (tool, args, status, durationMs) => {
           emit(
             new AgentToolInvoked(
@@ -226,6 +310,41 @@ const factory = definePlugin<McpPluginConfig>({
 })
 
 /**
+ * Wrap the application's `notify` so a notification failure can neither fail
+ * the tool call nor lose the record.
+ *
+ * The same fire-and-forget-but-say-so discipline as the audit sink, and for
+ * the same reason: the record is already persisted when this runs, so a
+ * channel that is down costs an approver an email, not a request. Silence
+ * would be worse than the failure — an approval nobody was told about looks
+ * exactly like one nobody has answered yet — so the failure is warned about
+ * with the request id in it, which is what an operator needs to find the
+ * record that is sitting there unannounced.
+ *
+ * Both failure shapes are covered: a synchronous throw and a rejected promise.
+ * The first is the one a hand-written `notify` produces before it ever reaches
+ * its first `await`.
+ */
+export function notifyApprovers(
+  notify: (request: AgentApprovalRequest) => void | Promise<void>,
+): (request: AgentApprovalRequest) => void {
+  return (request) => {
+    try {
+      void Promise.resolve(notify(request)).catch((error) => warnNotifyFailure(request, error))
+    } catch (error) {
+      warnNotifyFailure(request, error)
+    }
+  }
+}
+
+function warnNotifyFailure(request: AgentApprovalRequest, error: unknown): void {
+  console.warn(
+    `[@guren/plugin-mcp] approval notification failed for request ${request.id} `
+    + `(${request.tool}); the request is recorded and pending, but nobody was told: ${String(error)}`,
+  )
+}
+
+/**
  * The function records are handed to, resolved once at boot.
  *
  * `{ sink }` is the application's own; `{ file }` is built here, behind a
@@ -247,24 +366,22 @@ async function dispatchThroughApp(
   c: Context,
   tool: DerivedAgentTool,
   args: Record<string, unknown>,
+  preflight?: boolean,
 ): Promise<ToolCallOutcome> {
-  // No `preflight` option below, deliberately: preflight is *not* offered on
-  // this surface, though the seam it uses is server-side and available to
-  // every other one (RFC 0016 §5.4).
+  // `preflight` is never an argument of the tool being checked on this
+  // surface, and the flag below is not reachable from one: it comes from the
+  // `guren.preflight` companion tool, which takes the checked tool's name and
+  // arguments and answers with its own output schema (RFC 0016 §5.4).
   //
-  // MCP leaves no room for it inside a tool that advertises an `outputSchema`:
-  // the spec requires such a tool to answer with `structuredContent`
-  // conforming to that schema unless the result is an error, and a verdict
-  // conforms to no route's output. Reporting "allowed" as `isError` would be
-  // worse than not offering it. So the MCP form needs a companion tool with
-  // its own result schema — which is the same problem the approval queue has
-  // ("the tool result carries the pending state"), and belongs with it in
-  // Phase 2.5 rather than being solved twice, differently.
+  // MCP leaves no room for the argument form. A tool advertising an
+  // `outputSchema` must answer with `structuredContent` conforming to it
+  // unless the result is an error, and a verdict conforms to no route's
+  // output — so a tool that sometimes returns a verdict is a tool that
+  // sometimes violates its own contract, and reporting "allowed" as `isError`
+  // to escape that would be worse than not offering preflight at all.
   //
-  // Nothing is lost meanwhile: `_preflight` was never advertised in any
-  // tool's input schema, so no client could discover it. It reaches
-  // `guren tool:call` and `@guren/testing` through the dispatch option
-  // instead, neither of which is bound by that rule.
+  // The seam it reaches is the same one `guren tool:call` and `@guren/testing`
+  // use through this option directly; neither is bound by that rule.
   const built = buildToolRequest(tool, args, {
     // The inbound request's own origin, so the re-entrant request carries the
     // real Host the MCP client reached `/mcp` on. Defaulting to localhost
@@ -273,6 +390,7 @@ async function dispatchThroughApp(
     // tool call with 403.
     origin: new URL(c.req.url).origin,
     authorization: c.req.header('Authorization'),
+    preflight,
   })
   if ('missing' in built) {
     // No HTTP happened, but the call did — recorded by the caller as an

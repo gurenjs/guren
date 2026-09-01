@@ -12,6 +12,12 @@ const disks = {
   // Rooted inside public/ so the root asset server serves these files and
   // disk.url() returns a URL that actually resolves (images and the other
   // allowlisted extensions; add a route for anything else).
+  //
+  // For assets you ship, then. Never for bytes someone uploaded: served
+  // straight off this disk, an uploaded .svg comes back as image/svg+xml and
+  // its script runs on your origin. Uploads belong on `local` above, handed
+  // out through the attachments delivery route — which is what `guren add
+  // attachments` configures, and what `guren check` verifies.
   public: { driver: 'local', root: './public/storage', url: '/storage', visibility: 'public' },
 } as const
 

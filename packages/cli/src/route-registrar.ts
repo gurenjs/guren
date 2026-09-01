@@ -293,7 +293,7 @@ export async function addRouteRegistrarCall(
 }
 
 /**
- * `addRouteRegistrarCall` against the app's `routes/web.ts`, reporting every
+ * `addRouteRegistrarCall` against the app's routes entry, reporting every
  * outcome.
  *
  * Nothing here may be silent. This replaced a `try {} catch {}` around a regex
@@ -302,12 +302,23 @@ export async function addRouteRegistrarCall(
  * wrote its routes file, wired nothing, and said nothing — and a routes file
  * that is never mounted looks exactly like a working one until someone requests
  * the route.
+ *
+ * `routesFile` defaults to {@link DEFAULT_ROUTES_FILE} because most callers
+ * scaffold a page-rendering feature, which an API-only app cannot have anyway.
+ * A caller whose feature *does* work on an API-only app passes the entry it
+ * probed from {@link ROUTES_ENTRY_CANDIDATES} — that template ships
+ * `routes/api.ts` and no `routes/web.ts`, so defaulting would report a
+ * freshly scaffolded API app as having no routes file to wire.
  */
-export async function wireRouteRegistrar(functionName: string, importStatement: string): Promise<void> {
-  const result = await addRouteRegistrarCall(DEFAULT_ROUTES_FILE, functionName, importStatement)
+export async function wireRouteRegistrar(
+  functionName: string,
+  importStatement: string,
+  routesFile: string = DEFAULT_ROUTES_FILE,
+): Promise<void> {
+  const result = await addRouteRegistrarCall(routesFile, functionName, importStatement)
 
   if (result.modified) {
-    consola.success(`Registered ${functionName}() inside ${DEFAULT_ROUTES_FILE}`)
+    consola.success(`Registered ${functionName}() inside ${routesFile}`)
     return
   }
 
@@ -316,10 +327,10 @@ export async function wireRouteRegistrar(functionName: string, importStatement: 
   }
 
   if (result.reason === PATCH_REASONS.fileNotFound) {
-    consola.warn(`Could not find ${DEFAULT_ROUTES_FILE} — import ${functionName} and call it from your route registrar once you add one.`)
+    consola.warn(`Could not find ${routesFile} — import ${functionName} and call it from your route registrar once you add one.`)
     return
   }
 
-  consola.warn(`Could not wire ${functionName}() into ${DEFAULT_ROUTES_FILE}: ${result.reason}.`)
+  consola.warn(`Could not wire ${functionName}() into ${routesFile}: ${result.reason}.`)
   consola.info(`Import ${functionName} there and call it from your route registrar, passing that registrar's router.`)
 }

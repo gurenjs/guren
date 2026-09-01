@@ -42,12 +42,15 @@ export interface BuildToolRequestOptions {
  * The argument-level spelling of a preflight request (RFC 0016 §5.4), for a
  * surface whose callers pass flat arguments rather than dispatch options.
  *
- * No adapter strips it today: MCP does not offer preflight at all (see
- * `mapToolResponse` and the plugin), and the surfaces that do reach the seam
- * ask through `BuildToolRequestOptions.preflight`. A surface that adopts this
- * key owns the stripping — it is an instruction to the adapter, not a field of
- * any route's contract, and forwarding it would fail the very validation the
- * caller asked to rehearse.
+ * No adapter strips it today, because none accepts it. Every surface that
+ * reaches the seam asks through `BuildToolRequestOptions.preflight` instead:
+ * `guren tool:call` and `@guren/testing` from their own flags, and MCP from
+ * the `guren.preflight` companion tool, which takes the target tool's name
+ * and arguments rather than smuggling a directive through them (RFC 0016
+ * §5.4 — a verdict conforms to no route's output schema, so it needs a tool
+ * of its own). A surface that adopts this key owns the stripping — it is an
+ * instruction to the adapter, not a field of any route's contract, and
+ * forwarding it would fail the very validation the caller asked to rehearse.
  */
 export const PREFLIGHT_ARGUMENT = '_preflight'
 
@@ -241,6 +244,18 @@ export interface ToolCallOutcome {
   isError?: boolean
   /** The HTTP status the dispatch resolved to, for the audit event. */
   status: number
+  /**
+   * The response carried the preflight verdict header, so this is the seam's
+   * answer and not the route's own output.
+   *
+   * Carried here because `mapToolResponse` is the only place that sees the
+   * header — an outcome has no headers — and the fact is otherwise lost. A
+   * caller that re-derived it by looking for a `preflight` field in the body
+   * would read an ordinary route whose output happens to carry that field as a
+   * rehearsal that never ran, which is the exact confusion the header was
+   * introduced to prevent.
+   */
+  preflightVerdict?: boolean
 }
 
 /**
@@ -318,7 +333,7 @@ export async function mapToolResponse(
   // output schema and throw, turning an allowed rehearsal into a protocol
   // error.
   if (response.headers.get(AGENT_PREFLIGHT_VERDICT_HEADER) !== null) {
-    return { content: [{ type: 'text', text: JSON.stringify(parsed) }], status }
+    return { content: [{ type: 'text', text: JSON.stringify(parsed) }], status, preflightVerdict: true }
   }
 
   const payload = unwrapInertiaProps(tool, response, parsed)

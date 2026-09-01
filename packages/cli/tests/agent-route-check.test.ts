@@ -99,6 +99,48 @@ describe('checkAgentRoutes', () => {
       expect(results[0]?.status).toBe('pass')
     })
 
+    // The endpoint adds `guren.preflight` to the catalogue itself, and drops
+    // any route claiming it — two tools with one name makes an MCP client
+    // reject the whole list. A route that took it would otherwise be silently
+    // absent from the surface it declared itself for.
+    it('fails a route claiming a reserved meta-tool name', async () => {
+      const results = await run([
+        route({ path: '/preflight', name: 'guren.preflight', agent: {}, schemas: OUTPUT }),
+      ])
+
+      expect(results).toHaveLength(1)
+      expect(results[0]?.status).toBe('fail')
+      expect(results[0]?.key).toBe('agent-route-reserved-name:GET:/preflight')
+      expect(results[0]?.message).toContain('reserved')
+      expect(results[0]?.message).toContain('guren.preflight')
+    })
+
+    it('fails a reserved name that arrived through the toolName override', async () => {
+      const results = await run([
+        route({
+          path: '/checks',
+          name: 'checks.index',
+          agent: { toolName: 'guren.preflight' },
+          schemas: OUTPUT,
+        }),
+      ])
+
+      expect(results[0]?.status).toBe('fail')
+      expect(results[0]?.message).toContain('agent toolName override')
+    })
+
+    // The reservation is one name, not the `guren.` namespace: reserving a
+    // namespace nothing occupies fails routes over a collision that does not
+    // exist.
+    it('accepts a name that merely resembles a reserved one', async () => {
+      const results = await run([
+        route({ path: '/preflight', name: 'guren.preflights', agent: {}, schemas: OUTPUT }),
+      ])
+
+      expect(results).toHaveLength(1)
+      expect(results[0]?.status).toBe('pass')
+    })
+
     it('fails once per collision group, naming both routes', async () => {
       const results = await run([
         route({ path: '/posts', name: 'posts.index', agent: {}, schemas: OUTPUT }),
@@ -706,6 +748,169 @@ export class InvoiceController extends Controller {
       const results = await run(router.definitions())
 
       expect(keys(results)).not.toContain('agent-route-authorization:DELETE:/posts/:id')
+      expect(results[0]?.status).toBe('pass')
+    })
+  })
+
+  describe('the approval queue', () => {
+    let tempDir: string
+
+    beforeEach(async () => {
+      tempDir = await mkdtemp(join(tmpdir(), 'guren-agent-routes-approval-'))
+    })
+
+    afterEach(async () => {
+      await rm(tempDir, { recursive: true, force: true })
+    })
+
+    const gated = () =>
+      route({
+        method: 'DELETE',
+        path: '/posts/:id',
+        name: 'posts.destroy',
+        agent: { approval: 'required', readOnlyHint: true },
+        schemas: OUTPUT,
+      })
+
+    async function writeAppFile(contents: string): Promise<void> {
+      await writeWorkspaceFiles(tempDir, { 'src/app.ts': contents })
+    }
+
+    it('fails when a readable mcpPlugin call configures no approvals', async () => {
+      await writeAppFile(`
+import { mcpPlugin } from '@guren/plugin-mcp'
+
+export const providers = [mcpPlugin({ path: '/mcp' })]
+`)
+
+      const results = await checkAgentRoutes({ cwd: tempDir, definitions: [gated()] })
+      const finding = results.find((result) => result.key === 'agent-route-approval-store')
+
+      expect(finding?.status).toBe('fail')
+      expect(finding?.message).toContain('posts.destroy')
+      expect(finding?.message).toContain('approvals')
+      expect(finding?.filePath).toBe('src/app.ts')
+    })
+
+    it('fails on mcpPlugin() with no options at all', async () => {
+      await writeAppFile(`
+import { mcpPlugin } from '@guren/plugin-mcp'
+
+export const providers = [mcpPlugin()]
+`)
+
+      const results = await checkAgentRoutes({ cwd: tempDir, definitions: [gated()] })
+      expect(keys(results)).toContain('agent-route-approval-store')
+    })
+
+    it('passes when the call carries an approvals queue', async () => {
+      await writeAppFile(`
+import { mcpPlugin } from '@guren/plugin-mcp'
+import { store } from './approvals'
+
+export const providers = [mcpPlugin({ approvals: { store, notify: () => {} } })]
+`)
+
+      const results = await checkAgentRoutes({ cwd: tempDir, definitions: [gated()] })
+      expect(keys(results)).not.toContain('agent-route-approval-store')
+    })
+
+    it('follows a local alias of the factory', async () => {
+      await writeAppFile(`
+import { mcpPlugin as mcp } from '@guren/plugin-mcp'
+
+export const providers = [mcp({ path: '/mcp' })]
+`)
+
+      const results = await checkAgentRoutes({ cwd: tempDir, definitions: [gated()] })
+      expect(keys(results)).toContain('agent-route-approval-store')
+    })
+
+    // Positive evidence only. Each of these is a shape the scan cannot read,
+    // and `guren check` has no per-finding ignore configuration — an
+    // unsuppressible false positive is the thing to avoid here.
+    it('stays silent when the plugin options are not an object literal', async () => {
+      await writeAppFile(`
+import { mcpPlugin } from '@guren/plugin-mcp'
+import { mcpConfig } from './config'
+
+export const providers = [mcpPlugin(mcpConfig)]
+`)
+
+      const results = await checkAgentRoutes({ cwd: tempDir, definitions: [gated()] })
+      expect(keys(results)).not.toContain('agent-route-approval-store')
+    })
+
+    it('stays silent when the options object spreads another', async () => {
+      await writeAppFile(`
+import { mcpPlugin } from '@guren/plugin-mcp'
+import { base } from './config'
+
+export const providers = [mcpPlugin({ ...base, path: '/mcp' })]
+`)
+
+      const results = await checkAgentRoutes({ cwd: tempDir, definitions: [gated()] })
+      expect(keys(results)).not.toContain('agent-route-approval-store')
+    })
+
+    it('stays silent for an app that never mounts the endpoint', async () => {
+      await writeAppFile('export const providers = []\n')
+
+      const results = await checkAgentRoutes({ cwd: tempDir, definitions: [gated()] })
+      expect(keys(results)).not.toContain('agent-route-approval-store')
+    })
+
+    it('stays silent when a same-named factory comes from elsewhere', async () => {
+      await writeAppFile(`
+import { mcpPlugin } from './my-own-plugin'
+
+export const providers = [mcpPlugin({ path: '/mcp' })]
+`)
+
+      const results = await checkAgentRoutes({ cwd: tempDir, definitions: [gated()] })
+      expect(keys(results)).not.toContain('agent-route-approval-store')
+    })
+
+    it('reports the missing queue once, naming every gated route', async () => {
+      await writeAppFile(`
+import { mcpPlugin } from '@guren/plugin-mcp'
+
+export const providers = [mcpPlugin({})]
+`)
+
+      const results = await checkAgentRoutes({
+        cwd: tempDir,
+        definitions: [
+          gated(),
+          route({
+            method: 'POST',
+            path: '/payouts',
+            name: 'payouts.store',
+            agent: { approval: 'required', readOnlyHint: true },
+            schemas: OUTPUT,
+          }),
+        ],
+      })
+
+      const findings = results.filter((result) => result.key === 'agent-route-approval-store')
+      expect(findings).toHaveLength(1)
+      expect(findings[0]?.message).toContain('posts.destroy')
+      expect(findings[0]?.message).toContain('payouts.store')
+    })
+
+    it('says nothing about the queue when no route declares approval', async () => {
+      await writeAppFile(`
+import { mcpPlugin } from '@guren/plugin-mcp'
+
+export const providers = [mcpPlugin({ path: '/mcp' })]
+`)
+
+      const results = await checkAgentRoutes({
+        cwd: tempDir,
+        definitions: [route({ path: '/posts', name: 'posts.index', agent: {}, schemas: OUTPUT })],
+      })
+
+      expect(keys(results)).not.toContain('agent-route-approval-store')
       expect(results[0]?.status).toBe('pass')
     })
   })

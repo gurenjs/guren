@@ -5,8 +5,8 @@ import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 import type { Application } from './Application'
 import { registerRootPublicAssets, type RootPublicAssetsConfig } from './public-assets'
+import { applyDocumentDisposition, guardStaticDocument } from './static-documents'
 import { isPathWithin, isRealPathWithin } from '../support/contained-path'
-import { applyStaticDocumentHeaders, staticDocumentHeaders } from './static-documents'
 
 declare const Bun: any
 
@@ -73,6 +73,22 @@ export interface DevAssetsOptions {
   favicon?: boolean
   /** Serve selected files from the public directory without the `/public` prefix. */
   rootPublicAssets?: RootPublicAssetsConfig
+  /**
+   * Serve document types (`.svg`, `.html`, XML) from `/public/*` and
+   * `/resources/css/*` inline instead of forcing them to download. Defaults to
+   * false.
+   *
+   * Off by default because `public/` is also where an app's uploads land, and
+   * a stored `.html` or `.svg` served inline is script in the app's own
+   * origin. Turn it on for a public directory holding nothing user-supplied —
+   * a static microsite under `public/docs/index.html`, say, which Hono resolves
+   * from a directory request and would otherwise hand back as a download.
+   *
+   * The root-level allowlist route has its own switch,
+   * `rootPublicAssets: { inlineDocuments: true }`; an app serving documents
+   * both ways sets both.
+   */
+  inlineDocuments?: boolean
 }
 
 // Resolve the inertia client lazily: @guren/inertia-client is an optional
@@ -152,7 +168,7 @@ export function registerDevAssets(app: Application, options: DevAssetsOptions): 
       serveStatic({
         root: cssDir,
         rewriteRequestPath: cssRewrite,
-        onFound: applyStaticDocumentHeaders,
+        onFound: options.inlineDocuments ? undefined : guardStaticDocument,
       }),
     )
   }
@@ -197,7 +213,7 @@ export function registerDevAssets(app: Application, options: DevAssetsOptions): 
       serveStatic({
         root: publicDir,
         rewriteRequestPath,
-        onFound: applyStaticDocumentHeaders,
+        onFound: options.inlineDocuments ? undefined : guardStaticDocument,
       }),
     )
 
@@ -322,14 +338,19 @@ async function transpileFile(
 
   const body = await file.arrayBuffer()
   const contentType = file.type || 'application/octet-stream'
-
-  return new Response(body, {
-    headers: {
-      'Content-Type': contentType,
-      'Cache-Control': isDev() ? 'no-cache' : 'public, max-age=31536000',
-      ...staticDocumentHeaders(contentType),
-    },
+  const headers = new Headers({
+    'Content-Type': contentType,
+    'Cache-Control': isDev() ? 'no-cache' : 'public, max-age=31536000',
   })
+
+  // Anything this route resolves that is not TypeScript is handed back as it
+  // sits on disk — a `.html` beside a page component comes back as text/html.
+  // No `inlineDocuments` switch: the two directories reachable here hold the
+  // app's own sources and the vendored client, not the uploads that escape
+  // hatch exists for.
+  applyDocumentDisposition(headers, contentType)
+
+  return new Response(body, { headers })
 }
 
 function buildCandidatePaths(fsPath: string): string[] {

@@ -174,9 +174,10 @@ Validated: body
 Unverified: authorization
 
 Preflight only: the request passed this route's middleware and its body schema.
-The handler did not run, so nothing was created, changed, or deleted. No
-authorization middleware was found on this route, so any check inside the
-handler itself was not evaluated.
+The handler did not run. The route's own middleware did run, so any effect a
+middleware on this route has of its own has already happened. No authorization
+middleware was found on this route, so any check inside the handler itself was
+not evaluated.
 ```
 
 The request runs the route's middleware and validates the contract the tool
@@ -184,10 +185,19 @@ advertises, then stops before the handler. `unverified` names what a real call
 would still evaluate — a route that authorizes inside its action is a check this
 seam structurally cannot reach.
 
-The MCP endpoint does not offer preflight. A tool that advertises an
-`outputSchema` must answer with `structuredContent` conforming to it, and a
-verdict conforms to no route's output; `tool:call` and `@guren/testing` are not
-bound by that rule, so they offer what the seam supports.
+**A rehearsal is not a dry run of the whole request.** The seam is mounted last
+so that every gate in front of it is the real one, which is what makes the
+verdict worth having. It also means the route's middleware genuinely ran: a
+middleware that increments a quota, consumes a rate-limit bucket, touches a
+session, or calls something else has already done so. Only the handler is
+skipped.
+
+MCP reaches the same seam through a companion tool rather than a flag — see
+[Rehearsing a call over MCP](#rehearsing-a-call-over-mcp). A tool that
+advertises an `outputSchema` must answer with `structuredContent` conforming to
+it, and a verdict conforms to no route's output, so the verdict needs a tool of
+its own. `tool:call` and `@guren/testing` are not bound by that rule and ask
+for a verdict on the call itself.
 
 ## Testing a tool
 
@@ -317,7 +327,7 @@ mistake, not a no-op.
 | `readOnlyHint` | The tool changes nothing. See [Annotations](#annotations). |
 | `destructiveHint` | `false` is the strong claim "additive updates only". |
 | `idempotentHint` | Repeat calls with the same arguments add no effect. |
-| `approval` | `'required'` marks the tool as needing server-side approval. Until an approval queue ships, the MCP endpoint fails closed on it: the tool is neither listed nor callable. |
+| `approval` | `'required'` means a call becomes a pending request for a human to approve instead of executing. See [Approval-gated tools](#approval-gated-tools). With no queue configured the endpoint fails closed: the tool is neither listed nor callable. |
 | `redact` | Argument field names to mask in the audit trail. See [The audit trail](#the-audit-trail). |
 
 ## The input schema
@@ -513,6 +523,7 @@ mcpPlugin({
 | `serverInfo` | `{ name: 'guren-app', version: '1.0.0' }` | Server identity advertised to clients |
 | `rateLimit` | `{ max: 60, writeMax: 20, windowMs: 60_000 }` | Per-token budget; `false` disables it |
 | `updateLastUsed` | `true` | Whether verifying a bearer writes the token's `lastUsedAt` |
+| `approvals` | none | The approval queue: `{ store, notify, ttlMs? }`. See [Approval-gated tools](#approval-gated-tools) |
 
 Rate limits are keyed on the **token id**, not an IP: budgets follow
 credentials. They are enforced in process memory, so one long-running server
@@ -524,6 +535,210 @@ per instance. A global budget still needs a shared store and your app's own
 > this one. Its default key comes from the socket peer, and the re-entrant
 > request never arrived over a socket — so every MCP caller collapses into that
 > route's shared bucket.
+
+### Rehearsing a call over MCP
+
+The endpoint adds one tool of its own, `guren.preflight`. It answers whether a
+call to another tool would be allowed, and never performs it:
+
+```json
+{
+  "name": "guren.preflight",
+  "arguments": { "tool": "posts.store", "input": { "title": "Rehearsal" } }
+}
+```
+
+```json
+{
+  "tool": "posts.store",
+  "allowed": true,
+  "status": 200,
+  "validated": ["body"],
+  "unverified": ["authorization"],
+  "message": "Preflight only: the request passed this route's middleware and its body schema. …"
+}
+```
+
+It reaches the same seam `--preflight` does: the checked tool's own
+middleware runs, its advertised contract is validated, and the request stops
+before the handler. The action itself does not happen — but the middleware
+really did run, so anything it does of its own accord has taken effect.
+
+A refusal is a **successful** result, not an error — the caller asked whether
+the call would be allowed, and "no, here is why" answers that:
+
+```json
+{
+  "tool": "posts.store",
+  "allowed": false,
+  "status": 422,
+  "message": "The given data was invalid.",
+  "errors": { "title": ["Required"] }
+}
+```
+
+`validated` and `unverified` are present only when the request reached the
+seam. A call refused earlier — by authentication or authorization middleware —
+has no answer to give about checks it never reached, so those fields are
+absent rather than empty.
+
+Four rules worth knowing:
+
+- **Checking a tool needs the same scope as calling it.** Otherwise the
+  companion would be a way to probe the authorization surface of tools the
+  token cannot call. An ungranted name is refused as an error result, the way a
+  direct call to it is.
+- **A tool that requires approval can still be checked.** It is not callable
+  and not listed, which is precisely when "would this be accepted?" is worth
+  asking — and the rehearsal executes nothing.
+- **`guren.preflight` is listed only for a token that grants at least one
+  tool.** A token that can call nothing has nothing to rehearse.
+- **The name is reserved.** A route whose `.agent()` tool name claims it fails
+  `bunx guren check`, and the endpoint refuses to serve it — two tools under
+  one name makes an MCP client reject the whole catalogue.
+
+Rehearsing is not requesting. Preflighting an approval-gated tool creates no
+pending request and notifies nobody.
+
+## Approval-gated tools
+
+Some actions should not happen because an agent asked. Mark the route, and a
+call becomes a request for a human instead of an execution:
+
+```ts
+router
+  .delete('/posts/:id', { params: PostIdParamSchema }, [PostController, 'destroy'])
+  .name('posts.destroy')
+  .agent({ description: 'Delete a post.', approval: 'required' })
+```
+
+The first call is refused. Nothing runs, a pending record is created, your
+approvers are notified, and the agent is handed the request id:
+
+```json
+{
+  "status": "pending",
+  "requestId": "8f0c…",
+  "tool": "posts.destroy",
+  "requestedAt": "2026-09-01T12:00:00.000Z",
+  "expiresAt": "2026-09-01T13:00:00.000Z",
+  "executed": false,
+  "pollWith": "guren.approval_status"
+}
+```
+
+Once a human approves the record, the agent repeats **the same call with the
+same arguments** and it goes through — once.
+
+### Configuring the queue
+
+There is no default store. Where pending approvals live is your decision, for
+the same reason the audit sink has no default: this endpoint runs on Workers
+and Lambda, where a framework that quietly fell back to process memory would
+approve a record the next isolate has never heard of.
+
+```ts
+import { AgentApprovalRequested } from '@guren/core'
+import { mcpPlugin } from '@guren/plugin-mcp'
+
+mcpPlugin({
+  approvals: {
+    store: new DrizzleApprovalStore(db),
+    notify: (request) => notifications.sendToMany(admins, new AgentApprovalRequested(request)),
+    ttlMs: 60 * 60 * 1000,
+  },
+})
+```
+
+`store` implements `AgentApprovalStore`:
+
+| Method | What it does |
+|---|---|
+| `create(request)` | Persist a new pending request |
+| `find(id)` | The request with this id, or `null` |
+| `findMatch({ tool, fingerprint, principalKey })` | The **unconsumed** record for this exact call, whatever its status; the most recent when several match |
+| `consume(id)` | Spend the approval, returning whether *this* call won it |
+
+Two guarantees an implementation owes:
+
+- **`consume` must be a compare-and-set** — set `consumedAt` only if it is not
+  already set, and answer `false` when it was. Two concurrent calls will find
+  the same approved record, and an unconditional write hands the approval to
+  both.
+- **`findMatch` filters neither expiry nor status.** The framework judges both,
+  so a store that judged them too would be a second copy of the rule — and the
+  copy that fails open, because a comparison it forgets is an approval granted
+  last month letting a call through today.
+
+`notify` hands the request over and you decide who hears about it: the
+framework never picks approvers, because it cannot see your list.
+`AgentApprovalRequested` is a ready-made notification for the common case, and
+you can subclass it or send anything else. The record is persisted *before*
+`notify` runs and is not awaited afterwards, so a mail channel that is down
+costs an approver an email, never the request — the failure is logged with the
+request id in it.
+
+Resolving a request is your application's job, over your own storage: set
+`status` to `'approved'` or `'rejected'`, with `resolvedAt` and `resolvedBy`.
+The framework offers no `approve()`, because approving is a human action taken
+through an interface it cannot see.
+
+### The rules the gate enforces
+
+- **An approval is bound to the arguments.** Approving `posts.destroy {id: 5}`
+  does not authorize `{id: 9}`. Key order and nesting do not change the match;
+  types do, so `{id: 5}` and `{id: '5'}` are different calls. The match is a
+  SHA-256 of a canonical form of the **raw** arguments — the stored record
+  carries the hash and the *redacted* copy of the arguments, so the queue never
+  becomes a second place your secrets live.
+- **An approval is single-use, and it expires.** One call goes through; the
+  next is a fresh request. Past `expiresAt` the record authorizes nothing.
+- **An approval is bound to the caller.** Another principal's approval
+  authorizes nothing, even for the same arguments.
+- **The approval is spent before the call is dispatched.** A call that then
+  fails has still spent it: approve again rather than have a destructive action
+  run twice on one approval.
+- **Repeating a pending call does not re-file it.** The same request id comes
+  back and your approvers are not notified a second time.
+- **A rejected call is not re-asked.** The refusal says `"status": "rejected"`,
+  so an agent can tell it from a wait worth polling. After the record expires,
+  asking again is a new question.
+
+### `guren.approval_status`
+
+The endpoint adds a second tool of its own when a queue is configured. Pass the
+`requestId` from a refusal:
+
+```json
+{ "name": "guren.approval_status", "arguments": { "requestId": "8f0c…" } }
+```
+
+```json
+{
+  "requestId": "8f0c…",
+  "status": "approved",
+  "tool": "posts.destroy",
+  "requestedAt": "2026-09-01T12:00:00.000Z",
+  "expiresAt": "2026-09-01T13:00:00.000Z",
+  "resolvedAt": "2026-09-01T12:04:11.000Z",
+  "resolvedBy": "ops@example.com",
+  "executed": false
+}
+```
+
+Reading a status performs nothing: `"approved"` means "call it again now". It
+counts against the token's read budget, like `guren.preflight`, so polling in a
+tight loop throttles.
+
+A caller may read only the status of a request **it** created. Another
+principal's id answers exactly as an unknown id does — otherwise the tool would
+be a way to enumerate what your colleagues are waiting to have approved. Your
+audit trail keeps the distinction the caller does not get; a status check is an
+ordinary invocation recorded under `guren.approval_status`.
+
+`bunx guren check` fails a route declaring `approval: 'required'` when it can
+see your `mcpPlugin({ … })` call and finds no `approvals` in it: without a
+queue the tool is not guarded, it is uncallable.
 
 ## Tokens and scopes
 
@@ -626,6 +841,14 @@ the checks that precede the request. **A policy denial is not one of them:**
 policies evaluate inside the dispatched request, so it arrives as an
 `AgentToolInvoked` with status `403`. A denial carries no status or duration
 because nothing ran.
+
+A `guren.preflight` call is recorded like any other invocation, under
+`tool: 'guren.preflight'` — an agent probing what it is allowed to do is
+exactly what a trail wants to show. The tool it checked gets no record of its
+own, because nothing was invoked. A refusal is recorded the same way, as an
+`AgentToolDenied` for `guren.preflight`: naming the checked tool instead would
+make a refused rehearsal indistinguishable from a refused real call to a
+mutating tool. The tool that was probed is in the record's arguments.
 
 ```ts
 // app/Providers/EventServiceProvider.ts (or wherever you register listeners)
@@ -795,7 +1018,8 @@ content-activated: an app with no agent routes produces no findings and has no
 controller scanned.
 
 `check` **fails** on a nameless agent route, a tool name outside the MCP
-grammar, two routes resolving to one tool name, and a non-read-only tool whose
+grammar, a tool name reserved by the framework (`guren.preflight`), two routes
+resolving to one tool name, and a non-read-only tool whose
 middleware chain carries no authorization capability and whose action never
 calls `this.authorize(...)`.
 

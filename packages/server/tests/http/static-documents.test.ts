@@ -1,266 +1,254 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import { readdir } from 'node:fs/promises'
-import { join } from 'node:path'
+import { beforeEach, describe, expect, it } from 'bun:test'
 import { Application } from '../../src'
-import { configureInertiaAssets } from '../../src/http/inertia-assets'
-import { registerBuiltInertiaClient } from '../../src/http/inertia-assets'
+import { configureInertiaAssets, registerDevAssets } from '../../src/runtime'
 import { registerRootPublicAssets } from '../../src/http/public-assets'
-import { isDocumentContentType } from '../../src/http/static-documents'
-import { registerDevAssets } from '../../src/runtime'
+import { rendersAsDocument } from '../../src/http/static-documents'
 import { useAssetFixture } from './asset-fixture'
 
-const SVG = '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(document.cookie)</script></svg>\n'
+describe('rendersAsDocument', () => {
+  const documents = [
+    'text/html',
+    'text/html; charset=utf-8',
+    'TEXT/HTML',
+    ' text/html ',
+    'image/svg+xml',
+    'application/xhtml+xml',
+    'application/xslt+xml',
+    'text/xml',
+    'application/xml',
+    'text/xsl',
+  ]
 
-// Real files rather than a stubbed reader: what each mount puts on a response
-// is decided from the file it actually resolved.
-function expectAttachment(response: Response): void {
-  expect(response.status).toBe(200)
-  expect(response.headers.get('Content-Disposition')).toBe('attachment')
-  expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff')
-  expect(response.headers.get('Content-Security-Policy')).toBe('sandbox')
-}
+  const inert = [
+    'text/javascript; charset=utf-8',
+    'text/css; charset=utf-8',
+    'text/plain; charset=utf-8',
+    'image/png',
+    'application/pdf',
+    'application/octet-stream',
+    'application/json',
+    'font/woff2',
+  ]
 
-/** The negative control: an asset mount must keep serving assets inline. */
-function expectInline(response: Response): void {
-  expect(response.status).toBe(200)
-  expect(response.headers.get('Content-Disposition')).toBeNull()
-}
-
-describe('isDocumentContentType', () => {
-  it('recognizes the types a browser renders as a document', () => {
-    expect(isDocumentContentType('image/svg+xml')).toBe(true)
-    expect(isDocumentContentType('text/html; charset=utf-8')).toBe(true)
-    expect(isDocumentContentType('TEXT/HTML')).toBe(true)
-    expect(isDocumentContentType('application/xml')).toBe(true)
-    expect(isDocumentContentType('application/xhtml+xml')).toBe(true)
-    // The `+xml` structured suffix, so a feed is covered without listing it.
-    expect(isDocumentContentType('application/rss+xml')).toBe(true)
-  })
-
-  it('leaves assets alone', () => {
-    expect(isDocumentContentType('image/png')).toBe(false)
-    expect(isDocumentContentType('text/javascript; charset=utf-8')).toBe(false)
-    expect(isDocumentContentType('text/css')).toBe(false)
-    expect(isDocumentContentType('application/octet-stream')).toBe(false)
-    expect(isDocumentContentType(undefined)).toBe(false)
-    expect(isDocumentContentType('')).toBe(false)
-  })
-})
-
-describe('root public assets serving a document type', () => {
-  const fixture = useAssetFixture('guren-static-documents-root-')
-  let app: Application
-
-  beforeEach(async () => {
-    await fixture.write('public/logo.svg', SVG)
-    await fixture.write('public/photo.png', 'not really a png\n')
-
-    app = new Application()
-    registerRootPublicAssets(app, fixture.path('public'))
-  })
-
-  it('forces an SVG to download rather than render as a page', async () => {
-    const response = await app.fetch(new Request('http://example.com/logo.svg'))
-
-    expectAttachment(response)
-    expect(await response.text()).toContain('<svg')
-  })
-
-  it('keeps serving raster images inline', async () => {
-    expectInline(await app.fetch(new Request('http://example.com/photo.png')))
-  })
-
-  // Without this the `nosniff` assertion above is vacuous: `createSecurityHeaders`
-  // puts that header on every response by default, so only an app that turned
-  // its own header policy off can show the mount carrying it.
-  it('keeps the policy on an app that disabled the security headers middleware', async () => {
-    const bare = new Application({ securityHeaders: false })
-    registerRootPublicAssets(bare, fixture.path('public'))
-
-    expectAttachment(await bare.fetch(new Request('http://example.com/logo.svg')))
-    expect((await bare.fetch(new Request('http://example.com/photo.png'))).headers.get('X-Content-Type-Options')).toBeNull()
-  })
-
-  it('applies the policy to a content type the app configured itself', async () => {
-    const configured = new Application()
-    registerRootPublicAssets(configured, fixture.path('public'), {
-      extensions: ['png'],
-      contentTypeMap: { '.png': 'text/html' },
+  for (const contentType of documents) {
+    it(`treats ${JSON.stringify(contentType)} as a document`, () => {
+      expect(rendersAsDocument(contentType)).toBe(true)
     })
-
-    expectAttachment(await configured.fetch(new Request('http://example.com/photo.png')))
-  })
-})
-
-describe('dev asset serving of document types', () => {
-  const fixture = useAssetFixture('guren-static-documents-dev-')
-  let app: Application
-
-  beforeEach(async () => {
-    await fixture.write('resources/js/app.tsx', "export const noop = () => 'noop'\n")
-    await fixture.write('resources/js/embed.html', '<script>alert(1)</script>\n')
-    await fixture.write('resources/css/app.css', 'body { color: red }\n')
-    await fixture.write('resources/css/diagram.svg', SVG)
-    await fixture.write('public/uploads/avatar.svg', SVG)
-    await fixture.write('public/page.html', '<script>alert(1)</script>\n')
-    await fixture.write('public/photo.png', 'not really a png\n')
-
-    app = new Application()
-    registerDevAssets(app, {
-      resourcesDir: fixture.path('resources'),
-      publicDir: fixture.path('public'),
-      inertiaClient: false,
-    })
-  })
-
-  it('forces an SVG served from the public route to download', async () => {
-    expectAttachment(await app.fetch(new Request('http://example.com/public/uploads/avatar.svg')))
-  })
-
-  it('forces an HTML file served from the public route to download', async () => {
-    expectAttachment(await app.fetch(new Request('http://example.com/public/page.html')))
-  })
-
-  it('keeps serving raster images from the public route inline', async () => {
-    expectInline(await app.fetch(new Request('http://example.com/public/photo.png')))
-  })
-
-  it('forces a document type served by the transpile route to download', async () => {
-    expectAttachment(await app.fetch(new Request('http://example.com/resources/js/embed.html')))
-  })
-
-  it('keeps serving transpiled modules inline', async () => {
-    expectInline(await app.fetch(new Request('http://example.com/resources/js/app.tsx')))
-  })
-
-  it('keeps serving stylesheets inline', async () => {
-    expectInline(await app.fetch(new Request('http://example.com/resources/css/app.css')))
-  })
-
-  it('forces a document type served from the css route to download', async () => {
-    expectAttachment(await app.fetch(new Request('http://example.com/resources/css/diagram.svg')))
-  })
-})
-
-describe('production public asset serving of document types', () => {
-  const fixture = useAssetFixture('guren-static-documents-prod-')
-  const originalEnv = { ...process.env }
-  let app: Application
-
-  beforeEach(async () => {
-    process.env = { ...originalEnv }
-    process.env.NODE_ENV = 'production'
-
-    await fixture.write('public/uploads/avatar.svg', SVG)
-    await fixture.write('public/assets/app-4f2b1c8d.js', 'console.log("hashed")\n')
-
-    app = new Application()
-    configureInertiaAssets(app, {
-      publicDir: fixture.path('public'),
-      inertiaClient: false,
-    })
-  })
-
-  afterEach(() => {
-    process.env = { ...originalEnv }
-  })
-
-  it('forces an SVG under the public route to download', async () => {
-    expectAttachment(await app.fetch(new Request('http://example.com/public/uploads/avatar.svg')))
-  })
-
-  // The immutable-cache rule this policy now shares `onFound` with is pinned by
-  // public-cache-headers.test.ts; what is new here is that a hashed build asset
-  // is not treated as a document.
-  it('keeps serving hashed build assets inline', async () => {
-    expectInline(await app.fetch(new Request('http://example.com/public/assets/app-4f2b1c8d.js')))
-  })
-})
-
-describe('the built Inertia client mount', () => {
-  const fixture = useAssetFixture('guren-static-documents-client-')
-  let app: Application
-
-  beforeEach(async () => {
-    await fixture.write('dist/app.js', 'export const boot = () => {}\n')
-    await fixture.write('dist/widget.svg', SVG)
-
-    app = new Application()
-    registerBuiltInertiaClient(app, fixture.path('dist'), '/vendor/inertia-client.tsx')
-  })
-
-  it('forces a document type shipped in the client package to download', async () => {
-    expectAttachment(await app.fetch(new Request('http://example.com/vendor/widget.svg')))
-  })
-
-  it('keeps serving the client bundle inline', async () => {
-    expectInline(await app.fetch(new Request('http://example.com/vendor/inertia-client.tsx')))
-  })
-})
-
-/**
- * Every mount is covered above, but only the mounts that exist today — a
- * seventh added later would typecheck and pass. `serveStatic` builds its own
- * response, so a mount that does not compose the policy into `onFound` cannot
- * be reached from a test that does not know about it; these read the source
- * instead, the way tests/mcp/endpoint.test.ts pins a form nothing at runtime
- * can tell apart.
- */
-describe('the serveStatic mounts in @guren/server', () => {
-  // Paths relative to src/. A new entry here is the point: adding one is the
-  // moment someone has to decide whether the new mount carries the policy.
-  const KNOWN_MOUNTS = ['http/dev-assets.ts', 'http/inertia-assets.ts']
-
-  it('are the ones this policy has been wired into', async () => {
-    const sources = await sourceFiles(join(import.meta.dir, '../../src'))
-    const mounts = sources
-      .filter(([, code]) => code.includes('serveStatic('))
-      .map(([name]) => name)
-      .sort()
-
-    expect(mounts).toEqual(KNOWN_MOUNTS)
-  })
-
-  it('apply the document policy once per mount', async () => {
-    const sources = await sourceFiles(join(import.meta.dir, '../../src'))
-    const wired = sources.filter(([name]) => KNOWN_MOUNTS.includes(name))
-
-    expect(wired.map(([name]) => name).sort()).toEqual(KNOWN_MOUNTS)
-
-    for (const [name, code] of wired) {
-      const mounts = occurrences(code, 'serveStatic(')
-      // Every reference but the import binding is an application of the policy.
-      const applications = occurrences(code, 'applyStaticDocumentHeaders') - 1
-
-      expect(`${name}: ${applications} applied`).toBe(`${name}: ${mounts} applied`)
-    }
-  })
-})
-
-/**
- * Every `.ts` source under `dir`, as [path relative to `dir`, code], with the
- * comments stripped — a mount must not be talkable into passing. Bun's own
- * transpiler does the stripping because a regex cannot: `'/public/*'` is a
- * route pattern these very files are full of, and it opens a block comment.
- */
-async function sourceFiles(dir: string, prefix = ''): Promise<Array<[string, string]>> {
-  const transpiler = new Bun.Transpiler({ loader: 'ts' })
-  const entries = await readdir(dir, { withFileTypes: true })
-  const files: Array<[string, string]> = []
-
-  for (const entry of entries) {
-    const relative = prefix ? `${prefix}/${entry.name}` : entry.name
-
-    if (entry.isDirectory()) {
-      files.push(...(await sourceFiles(join(dir, entry.name), relative)))
-    } else if (entry.name.endsWith('.ts')) {
-      files.push([relative, transpiler.transformSync(await Bun.file(join(dir, entry.name)).text())])
-    }
   }
 
-  return files
-}
+  for (const contentType of inert) {
+    it(`leaves ${JSON.stringify(contentType)} inline`, () => {
+      expect(rendersAsDocument(contentType)).toBe(false)
+    })
+  }
 
-function occurrences(source: string, needle: string): number {
-  return source.split(needle).length - 1
-}
+  it('treats an absent content type as inline', () => {
+    expect(rendersAsDocument(undefined)).toBe(false)
+    expect(rendersAsDocument(null)).toBe(false)
+    expect(rendersAsDocument('')).toBe(false)
+  })
+})
+
+/**
+ * The `public/` tree is not only the app's build output: the attachments
+ * scaffold roots its `public` storage disk inside it, so a file there can be
+ * an upload that kept the uploader's own extension. Served as `text/html` or
+ * `image/svg+xml` from the app's origin, that is stored XSS.
+ *
+ * Both routes over the directory are asserted, in both modes, because the
+ * two are complementary and a patch to one leaves the other live: the
+ * extension allowlist skips `/public/` paths and serves `.svg` at the root,
+ * while the `/public/*` mount has no allowlist and serves everything.
+ *
+ * Written to fail before `guardStaticDocument` / `applyDocumentDisposition`
+ * existed: without them every assertion below reads a null header.
+ */
+describe('document types served out of public/', () => {
+  const fixture = useAssetFixture('guren-static-documents-')
+
+  async function seedUploads(): Promise<void> {
+    await fixture.write('public/storage/attachments/01ABC/evil.html', '<script>alert(1)</script>\n')
+    await fixture.write('public/storage/attachments/01ABC/evil.svg', '<svg xmlns="http://www.w3.org/2000/svg"/>\n')
+    await fixture.write('public/assets/app.js', 'export const app = 1\n')
+    await fixture.write('public/assets/app.css', 'body { color: red }\n')
+  }
+
+  describe('the dev /public/* mount', () => {
+    let app: Application
+
+    beforeEach(async () => {
+      await seedUploads()
+      app = new Application()
+      registerDevAssets(app, {
+        resourcesDir: fixture.path('resources'),
+        publicDir: fixture.path('public'),
+        inertiaClient: false,
+      })
+    })
+
+    it('forces an uploaded HTML file to download', async () => {
+      const response = await app.fetch(
+        new Request('http://example.com/public/storage/attachments/01ABC/evil.html'),
+      )
+
+      expect(response.status).toBe(200)
+      expect(response.headers.get('Content-Disposition')).toBe('attachment')
+      expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff')
+    })
+
+    it('forces an uploaded SVG to download', async () => {
+      const response = await app.fetch(
+        new Request('http://example.com/public/storage/attachments/01ABC/evil.svg'),
+      )
+
+      expect(response.status).toBe(200)
+      expect(response.headers.get('Content-Disposition')).toBe('attachment')
+    })
+
+    // Hono's Bun adapter supplies `isDir`, so a directory request resolves to
+    // `index.html` *before* onFound runs — which is why the guard is keyed on
+    // the path the middleware resolved rather than on `ctx.req.path`. Keying it
+    // on the request path would pass every other case in this file and let a
+    // directory request through.
+    it('forces a directory index to download', async () => {
+      await fixture.write('public/site/index.html', '<script>alert(1)</script>\n')
+
+      const response = await app.fetch(new Request('http://example.com/public/site/'))
+
+      expect(response.status).toBe(200)
+      expect(response.headers.get('Content-Disposition')).toBe('attachment')
+    })
+
+    it('forces a document under /resources/css/* to download', async () => {
+      await fixture.write('resources/css/evil.svg', '<svg xmlns="http://www.w3.org/2000/svg"/>\n')
+
+      const response = await app.fetch(new Request('http://example.com/resources/css/evil.svg'))
+
+      expect(response.status).toBe(200)
+      expect(response.headers.get('Content-Disposition')).toBe('attachment')
+    })
+
+    it('leaves scripts and stylesheets inline', async () => {
+      const script = await app.fetch(new Request('http://example.com/public/assets/app.js'))
+      const styles = await app.fetch(new Request('http://example.com/public/assets/app.css'))
+
+      expect(script.status).toBe(200)
+      expect(script.headers.get('Content-Disposition')).toBeNull()
+      expect(styles.status).toBe(200)
+      expect(styles.headers.get('Content-Disposition')).toBeNull()
+    })
+
+    // The escape hatch for a public directory holding no uploads — a static
+    // microsite under `public/site/index.html` is the case that needs it.
+    it('serves documents inline when the app opts in', async () => {
+      const inline = new Application()
+      registerDevAssets(inline, {
+        resourcesDir: fixture.path('resources'),
+        publicDir: fixture.path('public'),
+        inertiaClient: false,
+        inlineDocuments: true,
+      })
+
+      const response = await inline.fetch(
+        new Request('http://example.com/public/storage/attachments/01ABC/evil.html'),
+      )
+
+      expect(response.status).toBe(200)
+      expect(response.headers.get('Content-Disposition')).toBeNull()
+    })
+  })
+
+  describe('the production /public/* mount', () => {
+    const originalNodeEnv = process.env.NODE_ENV
+    let app: Application
+
+    beforeEach(async () => {
+      await seedUploads()
+      process.env.NODE_ENV = 'production'
+      app = new Application()
+      configureInertiaAssets(app, {
+        publicDir: fixture.path('public'),
+        inertiaClient: false,
+      })
+      process.env.NODE_ENV = originalNodeEnv
+    })
+
+    it('forces an uploaded HTML file to download', async () => {
+      const response = await app.fetch(
+        new Request('http://example.com/public/storage/attachments/01ABC/evil.html'),
+      )
+
+      expect(response.status).toBe(200)
+      expect(response.headers.get('Content-Disposition')).toBe('attachment')
+      expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff')
+    })
+
+    it('keeps the immutable cache header on hashed assets it does not guard', async () => {
+      const response = await app.fetch(new Request('http://example.com/public/assets/app.js'))
+
+      expect(response.status).toBe(200)
+      expect(response.headers.get('Cache-Control')).toContain('immutable')
+      expect(response.headers.get('Content-Disposition')).toBeNull()
+    })
+  })
+
+  describe('the root extension allowlist', () => {
+    let app: Application
+
+    beforeEach(async () => {
+      await seedUploads()
+      app = new Application()
+      registerRootPublicAssets(app, fixture.path('public'))
+    })
+
+    // The allowlist route is reachable for `.svg` even though `.html` is not,
+    // so a fix confined to the `/public/*` mount would leave this one serving
+    // active content.
+    it('forces an uploaded SVG to download', async () => {
+      const response = await app.fetch(
+        new Request('http://example.com/storage/attachments/01ABC/evil.svg'),
+      )
+
+      expect(response.status).toBe(200)
+      expect(response.headers.get('Content-Type')).toContain('image/svg+xml')
+      expect(response.headers.get('Content-Disposition')).toBe('attachment')
+      expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff')
+    })
+
+    it('honours a contentTypeMap that renames an extension into a document type', async () => {
+      await fixture.write('public/notes.txt', '<script>alert(1)</script>\n')
+
+      const mapped = new Application()
+      registerRootPublicAssets(mapped, fixture.path('public'), {
+        extensions: ['txt'],
+        contentTypeMap: { '.txt': 'text/html; charset=utf-8' },
+      })
+
+      const response = await mapped.fetch(new Request('http://example.com/notes.txt'))
+
+      expect(response.status).toBe(200)
+      expect(response.headers.get('Content-Disposition')).toBe('attachment')
+    })
+
+    it('leaves non-document assets inline', async () => {
+      await fixture.write('public/logo.png', 'not really a png')
+
+      const response = await app.fetch(new Request('http://example.com/logo.png'))
+
+      expect(response.status).toBe(200)
+      expect(response.headers.get('Content-Disposition')).toBeNull()
+    })
+
+    it('serves documents inline when the app opts in', async () => {
+      const inline = new Application()
+      registerRootPublicAssets(inline, fixture.path('public'), { inlineDocuments: true })
+
+      const response = await inline.fetch(
+        new Request('http://example.com/storage/attachments/01ABC/evil.svg'),
+      )
+
+      expect(response.status).toBe(200)
+      expect(response.headers.get('Content-Disposition')).toBeNull()
+    })
+  })
+})

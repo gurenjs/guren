@@ -10,8 +10,8 @@ import {
   type DevAssetsOptions,
 } from './dev-assets'
 import { registerRootPublicAssets } from './public-assets'
+import { applyDocumentDisposition, guardStaticDocument } from './static-documents'
 import { isPathWithin, isRealPathWithin } from '../support/contained-path'
-import { applyStaticDocumentHeaders, staticDocumentHeaders } from './static-documents'
 import { parseImportMap } from '../support/import-map'
 import { DEFAULT_DEV_STYLES_ENTRY } from '../support/inertia-defaults'
 import { trimTrailingSlashes } from '../support/trim-slashes'
@@ -103,15 +103,17 @@ export function configureInertiaAssets(app: Application, options: InertiaAssetsO
     serveStatic({
       root: publicDir,
       rewriteRequestPath,
+      // Vite writes content-hashed filenames under `assets/`, so those
+      // responses can be cached forever. Files elsewhere in public/ keep
+      // stable names and must stay revalidatable.
       onFound: (path, ctx) => {
-        // Vite writes content-hashed filenames under `assets/`, so those
-        // responses can be cached forever. Files elsewhere in public/ keep
-        // stable names and must stay revalidatable.
+        if (!options.inlineDocuments) {
+          guardStaticDocument(path, ctx)
+        }
+
         if (ctx.req.path.startsWith(hashedAssetsPrefix)) {
           ctx.header('Cache-Control', 'public, max-age=31536000, immutable')
         }
-
-        applyStaticDocumentHeaders(path, ctx)
       },
     }),
   )
@@ -193,14 +195,18 @@ export function registerBuiltInertiaClient(
     }
 
     const contentType = file.type || 'application/javascript; charset=utf-8'
-
-    return new Response(file, {
-      headers: {
-        'Content-Type': contentType,
-        'Cache-Control': 'public, max-age=31536000',
-        ...staticDocumentHeaders(contentType),
-      },
+    const headers = new Headers({
+      'Content-Type': contentType,
+      'Cache-Control': 'public, max-age=31536000',
     })
+
+    // Serving a package directory rather than the app's own tree, so a document
+    // type here is whatever @guren/inertia-client happens to ship. Guarded on
+    // the same rule anyway: what makes the rule dependable is that no mount
+    // gets to decide it is the safe one.
+    applyDocumentDisposition(headers, contentType)
+
+    return new Response(file, { headers })
   })
 }
 
