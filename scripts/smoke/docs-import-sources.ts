@@ -61,15 +61,20 @@
  *    check is not a green one, the rule `plugin-compat-audit.ts` already
  *    carries.
  *
- *    Three entry points are a genuinely different case. `@guren/orm/drizzle/pg`
+ *    A few *subpaths* are a genuinely different case. `@guren/orm/drizzle/pg`
  *    (and `/mysql`, `/sqlite`) do `export * from 'drizzle-orm/*-core'`, and the
- *    jsx runtimes do the same from `hono`, so their surfaces are *open*:
+ *    four jsx runtimes do the same from `hono`, so their surfaces are *open*:
  *    absence cannot be proven from first-party source, and every "not exported"
  *    verdict there would be unsound. No verdict is issued for an open entry
  *    point — but `openEntryPoints` names each one on every run, so "not
  *    checked" is on the record instead of being inferred from silence. Their
  *    known names still feed the reverse index; being unable to prove absence
- *    does not make presence unknown.
+ *    does not make presence unknown. A package *root* going open is not in
+ *    that category at all — `docs-audit.ts` fails on one, because most
+ *    snippets import from a root and exempting one turns the audit off. The
+ *    set is derived on every run rather than listed here, so this paragraph
+ *    cannot go stale about which entry points are open; the test pins the
+ *    count so it cannot grow unnoticed.
  *
  * A finding names the file, line, symbol, specifier, and which first-party
  * entry points *do* export the symbol — the part that makes it actionable.
@@ -121,7 +126,11 @@ const FIRST_PARTY_SCOPE = '@guren/'
  */
 const FENCE = /^([ \t]*)```([^\n`]*)\n([\s\S]*?)^\1```[ \t]*$/gm
 
-const TYPESCRIPT_FENCE = /^(ts|tsx|typescript)\b/
+// `js`/`jsx` too, though `docs/` has none today. A JavaScript snippet
+// importing from `@guren/*` is exactly as able to name something that is not
+// exported, and a filter that admitted only the tags in use would leave the
+// first such snippet unchecked with nothing to notice it.
+const TYPESCRIPT_FENCE = /^(ts|tsx|typescript|js|jsx|javascript)\b/
 
 /**
  * An import statement, from the leading keyword through the closing quote of

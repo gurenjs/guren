@@ -235,6 +235,28 @@ describe('entry points whose surface is open', () => {
     expect(report.unexported).toEqual([])
     expect(report.openEntryPoints).toContain("@guren/orm/drizzle/pg (re-exports 'drizzle-orm/pg-core')")
   })
+
+  test('the set of open entry points is exactly the subpaths that earn it', async () => {
+    // Pinned so it cannot grow unnoticed. Every exempt entry point is one this
+    // gate issues no verdict for, so each addition is a slice of `docs/` that
+    // stops being checked — a decision worth making on purpose. Roots are
+    // covered separately and harder: `docs-audit.ts` fails on one outright.
+    const report = await auditDocsImportSources(repoRoot, join(repoRoot, 'docs'))
+    const open = [...report.openEntryPoints].map((entry) => entry.split(' ')[0]).sort()
+
+    expect(open).toEqual([
+      '@guren/core/jsx-dev-runtime',
+      '@guren/core/jsx-runtime',
+      '@guren/orm/drizzle/mysql',
+      '@guren/orm/drizzle/pg',
+      '@guren/orm/drizzle/sqlite',
+      '@guren/server/jsx-dev-runtime',
+      '@guren/server/jsx-runtime',
+    ])
+    // None of them is a package root, which is the shape that would collapse
+    // coverage rather than trim it.
+    expect(open.filter((entry) => entry!.split('/').length === 2)).toEqual([])
+  })
 })
 
 describe('the docs tree as committed', () => {
