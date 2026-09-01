@@ -914,6 +914,32 @@ mcpPlugin({
 A sink that throws is warned about and does not fail the tool call it was
 recording.
 
+Configuring a sink also covers `bunx guren tool:call`. That command boots your
+application, so it finds the trail the application configured and writes to it
+— one record per call, `surface: 'cli'`, arguments masked by the same
+`.agent({ redact })` list, alongside your MCP records rather than in a second
+file. It is worth having: a call from a terminal runs as whoever `--as` names,
+with no credential to verify, which is exactly the kind of write an audit trail
+is for.
+
+A `bunx guren tool:call --preflight` is recorded as `guren.preflight`, exactly
+as a rehearsal over MCP is, with the tool it checked in the arguments. The
+handler did not run, so a record naming that tool would read as a call that
+completed. If your application's `@guren/core` predates the preflight seam it
+runs the call for real — the command warns about that — and the record then
+names the tool that actually executed.
+
+`tool:call` records only invocations, never denials. The four denial reasons
+name checks an adapter runs before sending a request, and this one runs none —
+it holds no token and dispatches straight into the app. A 401 or a 403 your
+application answers with is a response, so it is recorded as an invocation
+carrying that status, the same as everywhere else. The principal is the user
+`--as` named, or `null` when it named nobody; `abilities` is absent, because
+there is no token whose abilities they could be.
+
+An application with no sink configured records nothing here either, and the
+call still runs and reports normally.
+
 **The sink is opt-in on purpose.** The endpoint runs on Workers, where there is
 no writable filesystem, and on Lambda, where it is ephemeral — a framework that
 started appending on its own would give you a trail that quietly degrades per

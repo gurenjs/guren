@@ -516,6 +516,8 @@ bunx guren tool:call posts.index --as user:42 --json
 
 The command exits non-zero when the call comes back as an error result, so a 422 or a 403 is not read as a success by a script. See [Agent Interface — Calling a tool yourself](./agent-interface.md#calling-a-tool-yourself).
 
+If the application it boots has an [audit trail](./agent-interface.md#the-audit-trail) configured, the call is recorded in it as `surface: 'cli'` — the same file, the same masking, alongside the MCP records. A call from here runs as whoever `--as` names, with nothing verified, so it is worth being able to see later. An application with no trail configured records nothing and the call is unaffected.
+
 `tool:dev` serves the application's *own* endpoint — it requires
 [`@guren/plugin-mcp`](./agent-interface.md) to be installed and registered, and
 says so if no endpoint answers. The token it issues lives in memory for that

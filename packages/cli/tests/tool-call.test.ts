@@ -3,7 +3,7 @@
 process.env.APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
 
 import { describe, it, expect, beforeEach, afterEach, spyOn } from 'bun:test'
-import { mkdir, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { createTempWorkspace, linkWorkspaceCore, type TempWorkspace } from './helpers'
 import { parseActingAs, parseToolInput, runToolCall } from '../src/tool-call'
@@ -67,6 +67,57 @@ export class MeController extends Controller {
     return this.json({ id: user ? (user as { id: unknown }).id ?? null : null })
   }
 }
+`
+
+/**
+ * A route whose `.agent({ redact })` names a field the framework's own
+ * sensitive-fragment list does *not* cover.
+ *
+ * That choice is what gives the redaction assertion below any power. A test
+ * using `password` passes whether or not the route's list was threaded
+ * through — the built-in fragments mask it either way — and a review of the
+ * MCP surface found exactly that hole. `note` matches no default fragment, so
+ * a mask on it can only have come from this declaration.
+ */
+const AUDITED_ROUTES = `import { Router } from '@guren/core'
+import { z } from 'zod'
+
+export function registerWebRoutes(router: Router): void {
+  router
+    .post(
+      '/notes',
+      { body: z.object({ title: z.string(), note: z.string() }), output: z.object({ ok: z.boolean() }) },
+      () => Response.json({ ok: true }, { status: 201 }),
+    )
+    .name('notes.store')
+    .agent({ description: 'File a note.', redact: ['note'] })
+}
+`
+
+/**
+ * An application that configured an audit trail, without an MCP endpoint.
+ *
+ * The binding is what `guren tool:call` reaches, so a fixture that binds it
+ * directly tests exactly the seam — and can do so in a workspace where only
+ * `@guren/core` is linked. `@guren/plugin-mcp`'s own suite covers that its
+ * `audit` option produces this binding; nothing is being faked here that the
+ * plugin does differently.
+ */
+const MAIN_WITH_AUDIT = `import { appendFileSync } from 'node:fs'
+import { ServiceProvider, createApp, createAuditEmitter } from '@guren/core'
+import { registerWebRoutes } from '../routes/web'
+
+class AuditProvider extends ServiceProvider {
+  register() {
+    const emit = createAuditEmitter(
+      (record) => appendFileSync(process.env.GUREN_TEST_AUDIT_FILE, JSON.stringify(record) + '\\n'),
+      undefined,
+    )
+    this.container.instance('agent.audit', emit)
+  }
+}
+
+export default createApp({ routes: registerWebRoutes, providers: [AuditProvider] })
 `
 
 const MAIN = `import { createApp } from '@guren/core'
@@ -260,6 +311,140 @@ describe('tool:call', () => {
     await expect(
       runToolCall({ name: 'posts.index', input: '{title: 1}', appRoot: appDir, json: true }),
     ).rejects.toThrow(/received: \{title: 1\}/)
+  })
+
+  /**
+   * RFC 0016 §5.2 on this surface: `'cli'` is one of the four, and this
+   * command is the whole of it. A developer calling a write tool as any user
+   * they like is precisely the event a trail exists to hold, and until now it
+   * held nothing.
+   */
+  describe('the audit trail', () => {
+    let auditFile: string
+    let previousAuditFile: string | undefined
+
+    beforeEach(async () => {
+      auditFile = join(workspace.dir, 'agent-audit.log')
+      previousAuditFile = process.env.GUREN_TEST_AUDIT_FILE
+      process.env.GUREN_TEST_AUDIT_FILE = auditFile
+      await writeFile(join(appDir, 'routes/web.ts'), AUDITED_ROUTES)
+      await writeFile(join(appDir, 'src/main.ts'), MAIN_WITH_AUDIT)
+    })
+
+    afterEach(() => {
+      if (previousAuditFile === undefined) delete process.env.GUREN_TEST_AUDIT_FILE
+      else process.env.GUREN_TEST_AUDIT_FILE = previousAuditFile
+    })
+
+    /** Every record the fixture's sink wrote, in order. */
+    async function records(): Promise<Record<string, unknown>[]> {
+      let text: string
+      try {
+        text = await readFile(auditFile, 'utf8')
+      } catch (error) {
+        // A trail that was never opened is an empty one here, not a failure:
+        // the "records nothing" case below asserts exactly this.
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+        throw error
+      }
+      return text.split('\n').filter((line) => line !== '').map((line) => JSON.parse(line) as Record<string, unknown>)
+    }
+
+    it('records the call through the emitter the application bound', async () => {
+      await runToolCall({
+        name: 'notes.store',
+        input: '{"title":"Visible","note":"private"}',
+        appRoot: appDir,
+        json: true,
+      })
+
+      const written = await records()
+      expect(written).toHaveLength(1)
+      const [record] = written
+      expect(record).toMatchObject({
+        outcome: 'invoked',
+        surface: 'cli',
+        tool: 'notes.store',
+        status: 201,
+        // Nothing authenticated the call, and a record claiming a user where
+        // none was named would be worse than one saying so.
+        principal: null,
+      })
+      // Exact, not a `toMatchObject` on `note` alone: this catches the mask
+      // going missing *and* the whole payload being masked, which a
+      // sensitive-fragment list that grew a stray empty entry would do.
+      expect(record!.arguments).toEqual({ title: 'Visible', note: '[REDACTED]' })
+      expect(typeof record!.durationMs).toBe('number')
+      expect(record!.ts).toMatch(/^\d{4}-\d{2}-\d{2}T/)
+    })
+
+    it('records the user a --as call acted as, and claims no abilities for it', async () => {
+      const previousTesting = process.env.GUREN_TESTING
+      try {
+        await runToolCall({
+          name: 'notes.store',
+          input: '{"title":"As someone","note":"private"}',
+          as: 'user:42',
+          appRoot: appDir,
+          json: true,
+        })
+      } finally {
+        if (previousTesting === undefined) delete process.env.GUREN_TESTING
+        else process.env.GUREN_TESTING = previousTesting
+      }
+
+      const [record] = await records()
+      // Who the app acted as is the fact this trail most needs; `surface: 'cli'`
+      // is what carries the standing caveat that no credential was verified.
+      expect(record!.principal).toEqual({ kind: 'user', id: 42 })
+      // `abilities` are a token's, and there was no token. An empty array
+      // would be a claim about a credential that does not exist.
+      expect(record!.principal).not.toHaveProperty('abilities')
+    })
+
+    it('records the status of a call the application refused', async () => {
+      // A 422 is an invocation, not a denial: the request was sent and the
+      // application answered it. The four denial reasons name adapter checks
+      // this surface does not run.
+      await runToolCall({ name: 'notes.store', input: '{"title":"Only a title"}', appRoot: appDir, json: true })
+
+      const [record] = await records()
+      expect(record).toMatchObject({ outcome: 'invoked', surface: 'cli', tool: 'notes.store', status: 422 })
+    })
+
+    it('records a rehearsal as guren.preflight, not as the tool it rehearsed', async () => {
+      // The distinction the App MCP endpoint already draws, and the one this
+      // surface most needs: `--preflight` stops before the handler, so a record
+      // naming `notes.store` with a success status would be indistinguishable
+      // from a write that happened. The probed tool rides in the arguments.
+      await runToolCall({
+        name: 'notes.store',
+        input: '{"title":"Rehearsed","note":"private"}',
+        preflight: true,
+        appRoot: appDir,
+        json: true,
+      })
+
+      const [record] = await records()
+      expect(record).toMatchObject({ outcome: 'invoked', surface: 'cli', tool: 'guren.preflight' })
+      // The checked tool's own `redact` list still masks the payload it was
+      // checked with, one level down inside `input`.
+      expect(record!.arguments).toEqual({
+        tool: 'notes.store',
+        input: { title: 'Rehearsed', note: '[REDACTED]' },
+      })
+    })
+
+    it('records nothing, and still answers, when the app configured no sink', async () => {
+      // The absence is the same one the MCP endpoint has with no `audit`
+      // option: no binding, no trail, and no second sink invented here.
+      await writeFile(join(appDir, 'src/main.ts'), MAIN)
+
+      await runToolCall({ name: 'notes.store', input: '{"title":"Quiet","note":"private"}', appRoot: appDir, json: true })
+
+      expect(payload().status).toBe(201)
+      expect(await records()).toEqual([])
+    })
   })
 })
 
