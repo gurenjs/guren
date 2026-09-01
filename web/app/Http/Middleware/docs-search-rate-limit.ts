@@ -13,6 +13,10 @@ import type { Context, RateLimitEntry, RateLimitStore } from '@guren/core'
  */
 const REQUESTS_PER_MINUTE = 60
 
+interface BunServeEnv {
+  server?: { requestIP?: (request: Request) => { address?: string } | null }
+}
+
 /**
  * The framework default reads `server.requestIP()`, which only Bun provides —
  * on Workers it would fall back to one shared bucket for every visitor, and
@@ -26,9 +30,8 @@ export function docsSearchRateLimitKey(ctx: Context): string {
     return connectingIp
   }
 
-  const env = ctx.env as { server?: { requestIP?: (request: Request) => { address?: string } | null } } | undefined
-  const address = env?.server?.requestIP?.(ctx.req.raw)?.address
-  return address ?? '__shared__'
+  const env = ctx.env as BunServeEnv | undefined
+  return env?.server?.requestIP?.(ctx.req.raw)?.address ?? '__shared__'
 }
 
 /** Writes between sweeps. Small enough to bound the map, large enough to be rare. */

@@ -127,7 +127,7 @@ export class DocSearchService {
 
     const search = sql.identifier(this.#build.searchTable)
     const sections = sql.identifier(this.#build.sectionsTable)
-    const [title, heading, body, localeWeight, unigram] = BM25_WEIGHTS[match.mode]
+    const [titleLead, title, heading, body, localeWeight, unigram] = BM25_WEIGHTS[match.mode]
 
     // FTS5 refuses a table alias on the left of MATCH ("no such column"), so
     // the search table is named outright and only the sections table is
@@ -140,7 +140,7 @@ export class DocSearchService {
       FROM ${search}
       JOIN ${sections} s ON s.id = ${search}.rowid
       WHERE ${search} MATCH ${match.match}
-      ORDER BY bm25(${search}, ${title}, ${heading}, ${body}, ${localeWeight}, ${unigram})
+      ORDER BY bm25(${search}, ${titleLead}, ${title}, ${heading}, ${body}, ${localeWeight}, ${unigram})
       LIMIT ${limit * 2}
     `)) as SectionRow[]
 
