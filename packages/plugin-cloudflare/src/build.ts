@@ -376,7 +376,21 @@ function renderAssetHeaders(): string {
  */
 function writeAssetHeaders(assetsOut: string): void {
   const headersFile = resolve(assetsOut, '_headers')
-  const existing = existsSync(headersFile) ? readFileSync(headersFile, 'utf8') : ''
+
+  // The read is the existence test. Asking `existsSync` first and reading
+  // after it makes two syscalls answer for one file, and the direction this
+  // one fails in is the bad one: an "absent" that is wrong overwrites the
+  // app's own rules rather than keeping them, silently, which is the thing
+  // the ordering above exists to avoid. `readFileSync` reports absence
+  // itself, as ENOENT.
+  let existing = ''
+  try {
+    existing = readFileSync(headersFile, 'utf8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw error
+    }
+  }
 
   writeFileSync(headersFile, existing ? `${renderAssetHeaders()}\n${existing}` : renderAssetHeaders())
 }
