@@ -52,11 +52,39 @@ await registration.unregister()
 | `approval: 'required'` | No, unless you pass `includeApprovalRequired: true` |
 | everything else marked `.agent()` | Yes |
 
+> **`expose.webMcp` defaults to true.** One `registerAgentTools(agentTools)` line
+> therefore puts your *entire* `.agent()` catalog on the page. That is the intent
+> — the catalog is already opt-in per route — but it makes adopting this plugin a
+> single decision about every agent route at once. Review the list with
+> `bunx guren tool:list` first, and mark anything that should not be reachable
+> from a browser tab with `.agent({ expose: { webMcp: false } })`.
+
 Approval-gated tools are skipped by default on purpose. The server-side approval
 queue is reached through the App MCP endpoint (`@guren/plugin-mcp`); WebMCP has
 no equivalent, so registering such a tool here would offer an agent a call your
 application asked a human to confirm. Turn the option on only if the page itself
 confirms them.
+
+## How this differs from the App MCP endpoint
+
+Both surfaces serve the same derived tools, but they are not equivalent, and the
+gaps are deliberate rather than pending work.
+
+**No audit trail.** A WebMCP call is an ordinary same-origin `fetch` from your
+page. Nothing emits `AgentToolInvoked` / `AgentToolDenied` for it, because no
+server-side adapter sits in the path. The `X-Guren-Agent-Surface: webmcp` header
+the request carries is informational and set by the client, so an audit keyed on
+it would be suppressible by the caller it claims to record. Your ordinary HTTP
+request logging covers these calls like any other browser request.
+
+**No scope filtering.** App MCP filters its catalog to a bearer token's scopes. A
+session has no scopes, so the in-page agent sees every `expose.webMcp` tool at
+the signed-in user's full authority. Your policies still gate execution —
+exposure is not permission — but on this surface `expose.webMcp` is the whole
+exposure decision.
+
+**Redirects are not followed.** See [Browser requirements](#browser-requirements)
+below.
 
 ### Options
 
@@ -108,14 +136,27 @@ any other trial your app already serves rather than replacing it.
    `validateQuery` and `validateBody` look for them.
 3. For an unsafe method the `XSRF-TOKEN` cookie is copied into `X-XSRF-TOKEN`,
    the header Guren's CSRF middleware reads.
-4. The request goes out same-origin with the page's cookies, and
-   `X-Guren-Agent-Surface: webmcp`.
+4. The request goes out with `mode: 'same-origin'` and `redirect: 'manual'`,
+   carrying the page's cookies and `X-Guren-Agent-Surface: webmcp`.
 5. The response becomes an MCP tool result: `structuredContent` when the route
    binds an `output` schema, `isError` for a 4xx/5xx carrying the body your
    exception handler produced.
 
+**Redirects are refused, not followed.** A tool call carries the session
+cookie's authority *and* the CSRF token header, and `fetch` strips only
+`Authorization` across a cross-origin redirect — so a single open redirect
+anywhere in your app could replay the request body and the token to another
+host. A route that answers with a 3xx therefore reports that the client did not
+follow it; the target is not readable from the page. If a tool needs to redirect,
+give the route a JSON response for the agent instead.
+
 Your route's authorization is what authorizes the call. The MCP `annotations` in
-the manifest are hints for client UX and enforce nothing.
+the manifest are hints for client UX and enforce nothing. They are passed to the
+browser unchanged: WebIDL conversion ignores dictionary members a host does not
+know, so a host understanding fewer annotations drops the rest rather than
+rejecting the tool. `untrustedContentHint` is not sent — nothing in a route
+contract says whether a response embeds third-party content, so it is not
+derivable yet; set it yourself if you wrap `registerAgentTools`.
 
 ## License
 
