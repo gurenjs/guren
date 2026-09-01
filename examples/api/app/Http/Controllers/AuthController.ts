@@ -38,7 +38,7 @@ export default class AuthController extends Controller {
     const { email, password } = await this.validateBody(LoginSchema)
     const user = await User.first({ email })
 
-    if (!user || !(await new ScryptHasher().verify(password, user.passwordHash))) {
+    if (!user || !(await new ScryptHasher().verify(user.passwordHash, password))) {
       return this.json({ error: 'Invalid credentials' }, { status: 401 })
     }
 
