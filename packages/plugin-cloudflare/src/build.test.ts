@@ -5,59 +5,7 @@ import { join } from 'node:path'
 import { DOCUMENT_ASSET_EXTENSIONS, MCP_TRANSPORT_SPECIFIER } from '@guren/core/internal/deploy-build'
 import { buildCloudflareOutput } from './build'
 
-function writeJson(path: string, value: unknown): void {
-  writeFileSync(path, JSON.stringify(value, null, 2))
-}
-
-async function captureWarnings(run: () => Promise<void>): Promise<string> {
-  const warnings: string[] = []
-  const original = console.warn
-  console.warn = (message: string) => warnings.push(message)
-  try {
-    await run()
-  } finally {
-    console.warn = original
-  }
-  return warnings.join('\n')
-}
-
-/** The client manifest `scaffoldApp` writes — assertions derive from this. */
-const CLIENT_MANIFEST = {
-  'resources/js/app.tsx': { file: 'app-Abc123.js', css: ['app-Def456.css'] },
-}
-
-function scaffoldApp(
-  root: string,
-  options: { ssr?: boolean; renderExport?: string; mcpPlugin?: boolean } = {},
-): void {
-  const {
-    ssr = true,
-    renderExport = 'export const render = () => ({ body: "", head: [] })',
-    mcpPlugin = false,
-  } = options
-
-  mkdirSync(join(root, 'src'), { recursive: true })
-  writeFileSync(join(root, 'src/app.ts'), 'export default { boot: async () => {}, fetch: async () => new Response("ok") }\n')
-  // Declaring `@guren/plugin-mcp` under `dependencies` is the App MCP opt-in
-  // the build reads (RFC 0016 §7).
-  writeJson(join(root, 'package.json'), {
-    name: '@acme/demo-app',
-    ...(mcpPlugin ? { dependencies: { '@guren/plugin-mcp': '^0.2.0' } } : {}),
-  })
-
-  mkdirSync(join(root, 'public/assets/.vite'), { recursive: true })
-  writeFileSync(join(root, 'public/robots.txt'), 'User-agent: *\n')
-  writeFileSync(join(root, 'public/assets/app-Abc123.js'), 'console.log("client")\n')
-  writeJson(join(root, 'public/assets/.vite/manifest.json'), CLIENT_MANIFEST)
-
-  if (ssr) {
-    mkdirSync(join(root, '.guren/ssr/.vite'), { recursive: true })
-    writeFileSync(join(root, '.guren/ssr/ssr-Xyz789.js'), `${renderExport}\n`)
-    writeJson(join(root, '.guren/ssr/.vite/manifest.json'), {
-      'resources/js/ssr.tsx': { file: 'ssr-Xyz789.js' },
-    })
-  }
-}
+import { CLIENT_MANIFEST, captureWarnings, scaffoldApp, writeJson } from '../tests/app-fixture'
 
 describe('buildCloudflareOutput', () => {
   let root: string

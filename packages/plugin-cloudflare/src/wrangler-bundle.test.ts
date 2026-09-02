@@ -214,6 +214,79 @@ function workspaceClosure(seed: string): Map<string, WorkspacePackage> {
   return closure
 }
 
+/**
+ * Install a probe's third-party dependencies from npm and vendor this
+ * checkout's `@guren/*` packages over them, flat.
+ *
+ * Vendoring the workspace packages by *copy* rather than by tarball is not a
+ * shortcut: `bun add` of a tarball leaves the packages' own `@guren/*` ranges
+ * to resolve, which npm satisfies with published copies nested under each
+ * vendored package — measured directly, and a published `@guren/core` that
+ * predates the change under test made the bundle fail on exports the checkout
+ * has. Third-party deps are therefore flattened to the probe's top level and
+ * the copied manifests have their ranges stripped.
+ *
+ * `required` names packages the probe would be measuring nothing without, and
+ * `extra` adds dependencies no `@guren/*` manifest declares — the OAuth probe's
+ * provider package, which a real app installs itself.
+ *
+ * The two loops at the end are the assertion the whole probe rests on: a
+ * package resolving *out* of the probe measures this monorepo rather than an
+ * installed app, which has reported a real bundle change as no change at all
+ * before.
+ */
+function vendorClosure(
+  root: string,
+  name: string,
+  closure: Map<string, WorkspacePackage>,
+  options: { required?: readonly string[]; extra?: Record<string, string> } = {},
+): void {
+  const thirdParty: Record<string, string> = { ...options.extra }
+  for (const { manifest } of closure.values()) {
+    for (const [dep, range] of Object.entries((manifest.dependencies ?? {}) as Record<string, string>)) {
+      if (!dep.startsWith('@guren/')) thirdParty[dep] = range
+    }
+  }
+
+  for (const required of options.required ?? []) {
+    if (!thirdParty[required]) {
+      throw new Error(`bundle probe: no ${required} in the closure; the probe would measure nothing`)
+    }
+  }
+
+  writeFileSync(
+    join(root, 'package.json'),
+    JSON.stringify({ name, type: 'module', private: true, dependencies: thirdParty }),
+  )
+  const install = Bun.spawnSync({ cmd: ['bun', 'install'], cwd: root, stdout: 'pipe', stderr: 'pipe' })
+  if (install.exitCode !== 0) {
+    throw new Error(`bundle probe setup failed to install dependencies:\n${install.stderr.toString()}`)
+  }
+
+  for (const [packageName, { dir, manifest }] of closure) {
+    const dist = join(dir, 'dist')
+    if (!existsSync(dist)) {
+      throw new Error(`bundle probe: ${packageName} has no dist/; run \`bun run build\` first`)
+    }
+    const target = join(root, 'node_modules', packageName)
+    mkdirSync(target, { recursive: true })
+    cpSync(dist, join(target, 'dist'), { recursive: true })
+    const { dependencies, devDependencies, peerDependencies, ...rest } = manifest
+    writeFileSync(join(target, 'package.json'), JSON.stringify(rest))
+  }
+
+  for (const packageName of [...closure.keys(), ...(options.required ?? []), ...Object.keys(options.extra ?? {})]) {
+    if (!existsSync(join(root, 'node_modules', packageName))) {
+      throw new Error(`bundle probe: ${packageName} did not land in the probe's node_modules`)
+    }
+  }
+  for (const packageName of closure.keys()) {
+    if (existsSync(join(root, 'node_modules', packageName, 'node_modules'))) {
+      throw new Error(`bundle probe: ${packageName} has nested node_modules; it would resolve a second copy`)
+    }
+  }
+}
+
 describe.skipIf(!enabled)('wrangler bundles a worker importing @guren/plugin-mcp', () => {
   let root: string
 
@@ -229,56 +302,11 @@ describe.skipIf(!enabled)('wrangler bundles a worker importing @guren/plugin-mcp
     // copies nested under each vendored package — measured directly, and the
     // published `@guren/core` predates RFC 0016, so the bundle failed on
     // exports the checkout has.
-    const thirdParty: Record<string, string> = {}
-    for (const { manifest } of closure.values()) {
-      for (const [name, range] of Object.entries((manifest.dependencies ?? {}) as Record<string, string>)) {
-        if (!name.startsWith('@guren/')) thirdParty[name] = range
-      }
-    }
-    // The real SDK, from npm: what the transport actually costs is the number
-    // this probe exists to report.
-    if (!thirdParty['@modelcontextprotocol/sdk']) {
-      throw new Error('bundle probe: no @modelcontextprotocol/sdk in the closure; the probe would measure nothing')
-    }
-
-    writeFileSync(
-      join(root, 'package.json'),
-      JSON.stringify({ name: 'mcp-bundle-probe', type: 'module', private: true, dependencies: thirdParty }),
-    )
-    const install = Bun.spawnSync({ cmd: ['bun', 'install'], cwd: root, stdout: 'pipe', stderr: 'pipe' })
-    if (install.exitCode !== 0) {
-      throw new Error(`bundle probe setup failed to install dependencies:\n${install.stderr.toString()}`)
-    }
-
-    for (const [name, { dir, manifest }] of closure) {
-      const dist = join(dir, 'dist')
-      if (!existsSync(dist)) {
-        throw new Error(`bundle probe: ${name} has no dist/; run \`bun run build\` first`)
-      }
-      const target = join(root, 'node_modules', name)
-      mkdirSync(target, { recursive: true })
-      cpSync(dist, join(target, 'dist'), { recursive: true })
-      // Dependencies stripped from the copied manifest: everything is
-      // flattened at the probe's top level already, and leaving the ranges in
-      // is what would invite a resolver to fetch a second copy.
-      const { dependencies, devDependencies, peerDependencies, ...rest } = manifest
-      writeFileSync(join(target, 'package.json'), JSON.stringify(rest))
-    }
-
-    // Asserted rather than assumed, and this is the assertion the whole probe
-    // rests on: a package resolving *out* of the probe measures this monorepo
-    // rather than an installed app, which has reported a real bundle change
-    // as no change at all before.
-    for (const name of [...closure.keys(), '@modelcontextprotocol/sdk']) {
-      if (!existsSync(join(root, 'node_modules', name))) {
-        throw new Error(`bundle probe: ${name} did not land in the probe's node_modules`)
-      }
-    }
-    for (const name of closure.keys()) {
-      if (existsSync(join(root, 'node_modules', name, 'node_modules'))) {
-        throw new Error(`bundle probe: ${name} has nested node_modules; it would resolve a second copy`)
-      }
-    }
+    vendorClosure(root, 'mcp-bundle-probe', closure, {
+      // The real SDK, from npm: what the transport actually costs is the
+      // number this probe exists to report.
+      required: ['@modelcontextprotocol/sdk'],
+    })
 
     writeFileSync(
       join(root, 'worker.ts'),
@@ -360,6 +388,122 @@ describe.skipIf(!enabled)('wrangler bundles a worker importing @guren/plugin-mcp
 
       expect(served).toBeGreaterThan(stubbed)
       expect(served).toBeLessThan(FREE_PLAN_GZIP_BUDGET)
+    },
+    300_000,
+  )
+})
+
+/**
+ * The OAuth-fronted worker `cloudflare:build --mcp-oauth` generates, bundled
+ * for real.
+ *
+ * What only this can answer: whether `@guren/plugin-mcp/oauth` resolves from
+ * an *installed* copy of the package. That subpath is imported by code which
+ * exists nowhere in this repository — a worker generated into someone else's
+ * app — so an `exports` entry or a `files` list that publishes the wrong thing
+ * is invisible to every other gate, right up until a deploy cannot resolve it.
+ * The bundle also proves `@cloudflare/workers-oauth-provider` itself is
+ * workerd-compatible, which the build assumes and never checks.
+ *
+ * The worker source is the generator's own output, not a hand-written
+ * approximation: `renderWorkerModule` is what deploys, and a probe pinning a
+ * copy of it would keep passing after the generator changed.
+ */
+describe.skipIf(!enabled)('wrangler bundles the --mcp-oauth worker', () => {
+  let root: string
+
+  beforeAll(async () => {
+    root = mkdtempSync(join(tmpdir(), 'guren-wrangler-oauth-'))
+
+    vendorClosure(root, 'mcp-oauth-bundle-probe', workspaceClosure('@guren/plugin-mcp'), {
+      required: ['@modelcontextprotocol/sdk'],
+      // No `@guren/*` manifest declares it — a real app installs it itself,
+      // which is exactly what the build's guard demands.
+      extra: { '@cloudflare/workers-oauth-provider': '^0.10.3' },
+    })
+
+    // The generated worker imports `createWorkersHandler` from this package,
+    // which is not in @guren/plugin-mcp's closure. Vendored the same way.
+    const self = new URL('../', import.meta.url).pathname
+    const target = join(root, 'node_modules', '@guren/plugin-cloudflare')
+    mkdirSync(target, { recursive: true })
+    cpSync(join(self, 'dist'), join(target, 'dist'), { recursive: true })
+    const manifest = JSON.parse(readFileSync(join(self, 'package.json'), 'utf8')) as Record<string, unknown>
+    const { dependencies, devDependencies, peerDependencies, ...rest } = manifest
+    writeFileSync(join(target, 'package.json'), JSON.stringify(rest))
+
+    // A minimal app entry the generated worker can import, and the client
+    // manifest the generator reads, at the paths it looks for them.
+    mkdirSync(join(root, 'src'), { recursive: true })
+    writeFileSync(join(root, 'src/app.ts'), 'export default { boot: async () => {}, fetch: async () => new Response("ok") }\n')
+    mkdirSync(join(root, 'public/assets/.vite'), { recursive: true })
+    writeFileSync(join(root, 'public/assets/app.js'), 'console.log(1)\n')
+    writeFileSync(
+      join(root, 'public/assets/.vite/manifest.json'),
+      JSON.stringify({ 'resources/js/app.tsx': { file: 'app.js' } }),
+    )
+    // The probe's package.json is the vendoring's, so the dependency guards
+    // are satisfied by rewriting it rather than by a second install.
+    const probeManifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as {
+      dependencies: Record<string, string>
+    }
+    probeManifest.dependencies['@guren/plugin-mcp'] = '*'
+    writeFileSync(join(root, 'package.json'), JSON.stringify(probeManifest))
+
+    const { buildCloudflareOutput } = await import('./build')
+    await buildCloudflareOutput({
+      rootDir: root,
+      outputDir: join(root, 'cf-out'),
+      skipAppBuild: true,
+      mcpOAuth: true,
+    })
+  })
+
+  afterAll(() => {
+    if (root) rmSync(root, { recursive: true, force: true })
+  })
+
+  test(
+    'resolves the oauth subpath and the provider package',
+    () => {
+      // The build wrote its own wrangler.jsonc, aliases and all — including
+      // the OAUTH_KV binding, whose placeholder id a dry run does not resolve.
+      const config = JSON.parse(readFileSync(join(root, 'wrangler.jsonc'), 'utf8')) as Record<string, unknown>
+      config.kv_namespaces = [{ binding: 'OAUTH_KV', id: '0'.repeat(32) }]
+      delete config.d1_databases
+      delete config.assets
+      writeFileSync(join(root, 'wrangler.jsonc'), JSON.stringify(config))
+
+      const out = join(root, 'out')
+      const result = wrangler(root, ['deploy', '--dry-run', '--outdir', out])
+
+      expect(result.output).not.toMatch(/Could not resolve/)
+      expect(result.exitCode).toBe(0)
+
+      const bundle = readdirSync(out)
+        .filter((file) => file.endsWith('.js'))
+        .map((file) => readFileSync(join(out, file), 'utf8'))
+        .join('\n')
+
+      // No deploy generator in the deployed worker. `Cloudflare build:`
+      // prefixes every message `build.ts` emits and appears nowhere else, so
+      // its absence is the assertion.
+      //
+      // Note what this does *not* prove. The generated worker imports
+      // `createWorkersHandler` from the package root, which re-exports
+      // `buildCloudflareOutput` — and this passes anyway, because wrangler
+      // tree-shakes it out. So the bundle is safe by the bundler's grace, not
+      // by the import graph's shape. That is exactly why the scaffolded
+      // consent controller imports `@guren/plugin-cloudflare/env` instead:
+      // `bun run dev` has no bundler and no tree-shaking, it loads the module
+      // graph file by file, and there the root entry really does drag
+      // `node:fs` and the generator into every boot. This assertion guards the
+      // deploy path; `tests/lean-env-subpath.test.ts` guards the dev one, and
+      // neither substitutes for the other.
+      expect(bundle).not.toContain('Cloudflare build:')
+      // Which means something only if there is a real bundle to look at.
+      expect(bundle).toContain('OAuthProvider')
+      expect(bundle.length).toBeGreaterThan(1000)
     },
     300_000,
   )

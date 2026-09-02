@@ -23,6 +23,13 @@ export function cloudflarePlugin(config: CloudflarePluginConfig = {}): ServicePr
   return factory(config)
 }
 
+/**
+ * Kept for compatibility with everything that already imports these from the
+ * root. **Application code should import them from
+ * `@guren/plugin-cloudflare/env` instead**: this entry also exports
+ * `buildCloudflareOutput`, which drags the deploy generator and its node
+ * builtins in behind it. See the header of `./env`.
+ */
 export { captureWorkersEnv, getWorkersEnv, resetWorkersEnv } from './env'
 export { createWorkersHandler } from './handler'
 export type { WorkersAppLike, WorkersExecutionContext, WorkersHandler } from './handler'
