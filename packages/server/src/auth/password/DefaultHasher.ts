@@ -1,7 +1,7 @@
 import type { PasswordHasher } from './PasswordHasher'
 import { ScryptHasher } from './ScryptHasher'
 import { NodeHasher } from './NodeHasher'
-import { NODE_SCRYPT_PREFIX } from './hash-format'
+import { NODE_SCRYPT_PREFIX, looksLikePasswordHash } from './hash-format'
 
 /**
  * Runtime-detecting password hasher: hashes with `Bun.password` when running
@@ -55,6 +55,17 @@ export class DefaultHasher implements PasswordHasher {
     }
 
     if (!this.bun) {
+      if (!looksLikePasswordHash(hashed)) {
+        // Saying "written by Bun.password" about an `oauth:...` sentinel would
+        // be a confident wrong answer. `ModelUserProvider` never gets here;
+        // a direct caller might.
+        throw new Error(
+          'This value is not a password hash in any format the built-in hashers ' +
+            'produce, so it cannot be verified. A credential column holding a ' +
+            'sentinel for a passwordless account should not reach verify().',
+        )
+      }
+
       throw new Error(
         'This password hash was written by Bun.password (Argon2id or bcrypt) and ' +
           'cannot be verified on a runtime without Bun. Hash formats follow the ' +

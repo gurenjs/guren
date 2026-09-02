@@ -24,7 +24,7 @@ const HASH_PREFIXES = [
   NODE_SCRYPT_PREFIX,
 ]
 
-function looksLikePasswordHash(value: string): boolean {
+export function looksLikePasswordHash(value: string): boolean {
   return HASH_PREFIXES.some((prefix) => value.startsWith(prefix))
 }
 
