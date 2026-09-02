@@ -1,5 +1,92 @@
 # @guren/plugin-cloudflare
 
+## 0.6.0
+
+### Minor Changes
+
+- bf4020f: Carry the static-document download policy onto Cloudflare Workers and Vercel.
+
+  Files a browser renders as a document — `.html`, `.htm`, `.svg`, `.xhtml`,
+  `.xml` — are served from `public/` with `Content-Disposition: attachment` and
+  `X-Content-Type-Options: nosniff`, so navigating straight to one downloads it
+  instead of running its script on the app's origin. On both of these deploy
+  targets the platform answers for `public/` before the app runs, so the
+  framework's guard never saw those requests: the same app downloaded an SVG
+  locally and rendered it inline in production.
+
+  Each plugin now declares the policy to its platform at build time, keyed on
+  file extension because the platform, not the app, computes the content type.
+  The Cloudflare build writes a `_headers` file into the staged asset directory,
+  keeping and going ahead of any `_headers` the app ships under `public/`. The
+  Vercel build adds the rule to the generated `config.json` after
+  `handle: "hit"`, which confines it to files the CDN answered — in the initial
+  phase it would also have forced a download on a path the function serves, such
+  as a dynamic `/sitemap.xml`.
+
+  Cloudflare's `_headers` also names any staged document whose extension is not
+  already lowercase, as an exact rule. The platform compiles a pattern
+  case-sensitively while `getMimeType` lowercases before its lookup, so `/*.svg`
+  alone would leave `logo.SVG` inline there while the framework's own mounts
+  download it. Enumerating the case variants is not possible — one splat per
+  rule — but on this platform the asset set is closed at build time, so naming
+  the offenders exactly is complete, and an app spelling its extensions the
+  ordinary way gets no extra rules. The build now also warns when merging with an
+  app's own `_headers` crosses the 100 rules the platform reads, since it stops
+  there rather than reporting the rest.
+
+  The Cloudflare scaffold additionally sets `"html_handling": "none"` on the
+  `assets` binding. Under the platform default a staged `page.html` is served at
+  `/page` and `/page.html` merely redirects there, which both leaves the `.html`
+  rule landing on the redirect rather than the document and lets a file under
+  `public/` shadow an app route of the same name. An app that names another
+  `html_handling` itself is left alone; an existing `wrangler.jsonc` with no
+  value is named in the build's upgrade warning.
+
+  `inlineDocuments` does not reach either plugin — they read a built directory,
+  not the app's route configuration. The deployment guides say so and describe
+  how to undo the platform-side rules after a build.
+
+- 789cd34: Add `guren cloudflare:build --mcp-oauth`: front the worker with `@cloudflare/workers-oauth-provider` so the App MCP endpoint is reached by OAuth-authorized clients (RFC 0016 §7).
+
+  A **build** option and not plugin configuration, because the generator runs in a separate process and cannot read what `mcpPlugin()` was passed. `--mcp-path` accompanies it for an app that moved the endpoint, since a provider protecting a path the endpoint does not serve leaves that endpoint outside the OAuth boundary — silently, because the request still reaches the app.
+
+  **The generated worker exports one `OAuthProvider`.** Its protected `apiRoute` is the MCP path; the `apiHandler` maps `ctx.props` through `mcpOAuthPropsToAuth` and presents the result over `@guren/plugin-mcp/oauth`'s request-identity seam, refusing 401 when the grant does not map rather than forwarding a partial principal. The `defaultHandler` is the _same_ `createWorkersHandler` — one handler threaded through both halves, because it dedupes `boot()` per handler while the Workers env holder is module-global, and two would share the holder without sharing the boot slot. `clientRegistrationEndpoint` wires RFC 7591 dynamic client registration, knowingly on a path deprecated in the MCP 2026-07-28 line: it is what shipping MCP SDK 1.x clients use to register themselves today.
+
+  **Three guards, all ahead of the app build**, so a misconfigured app is told in a second rather than after several minutes of Vite output:
+
+  - The flag is refused on an app that does not depend on `@guren/plugin-mcp` — there would be no endpoint to protect, and the generated worker would import a seam that is not installed.
+  - It is refused on an app that does not depend on `@cloudflare/workers-oauth-provider`, with the `bun add` line to fix it. That package is deliberately **not** a dependency of this plugin: the large majority of Workers deployments will never front an OAuth provider, and the opt-in cost of an opt-in feature belongs to the people opting in. A devDependency does not count, for the reason `appUsesMcpPlugin` gives — wrangler resolves the import at deploy time, from a production install.
+  - A committed `wrangler.jsonc` binding no `OAUTH_KV` **fails**, with the exact JSON to paste and the `wrangler kv namespace create` line. Unlike the existing build-owned-key warnings this one has a deploy-time consequence nothing in the build output would otherwise reveal. A fresh config gets the binding scaffolded; a build without the flag never requires or writes it.
+
+  The flag records itself nowhere — passing it on every build is the contract. The drift that leaves is the other direction, and it is warned about by name: a config binding `OAUTH_KV` while today's build omitted the flag has just produced a worker whose `/oauth/token` and `/oauth/register` 404, breaking every already-authorized client.
+
+  **The consent flow ships as real template files** under `templates/mcp-oauth/`, written into the app once and never overwritten — `routes/mcp-oauth.ts`, `app/Http/Controllers/McpOAuthController.ts`, and two `hono/jsx` views in `app/View/`. The screen renders through `Controller.view()` (RFC 0014) rather than as an Inertia page, so an API-only app can serve it and it does not break when the asset pipeline does; escaping is the renderer's, not hand-rolled. Each view opens with `/** @jsxImportSource @guren/core */`, which is what lets it compile in an app whose tsconfig points `jsx: "react-jsx"` at React for `resources/js` — no tsconfig change is needed in the scaffolded app. It renders **tools, not scope strings**: nobody can read `tools:*` and say what it reaches, so the requested scopes are expanded against the application's _live_ router derivation — never `.guren/agents.gen.ts`, which can be stale — and rendered one checkbox per tool with its read-only and approval-required facts. Read-only tools arrive ticked and anything that can write does not: the default is what most people accept unread, so granting a write has to be a decision somebody made rather than one they failed to undo. Each checkbox carries the `tool:<name>` wire form the scope grammar parses, and the submission is intersected with what the client actually requested, so a grant is a subset of the request by construction. The build prints the two lines that wire the routes file into the app's registrar, once, on the build that created it.
+
+  **The consent POST verifies CSRF itself**, through `@guren/core`'s own `verifyCsrfToken`, rather than relying on the global middleware being mounted. An app with `autoSession: false` or a hand-composed chain may not have it — and `csrfField()` renders an entirely convincing token either way, so the screen would look protected while any site could POST a grant on a signed-in user's behalf. A malformed or tampered authorize query — a routine arrival at this URL, not an application fault — answers a clean 400 page rather than a 500 with a stack in it, and echoes nothing derived from the query.
+
+  **New lean subpath: `@guren/plugin-cloudflare/env`.** The package root exports `buildCloudflareOutput`, which pulls `node:fs`, `node:path` and the whole deploy generator behind it, so application code importing `getWorkersEnv` from the root drags the build tooling into its module graph. On a deploy that is tree-shaken away (measured — the OAuth bundle probe asserts it); on `bun run dev` there is no bundler and no tree-shaking, and it is loaded on every boot. The three env functions now have an entry of their own with an empty import graph, and the scaffolded controller uses it. The root keeps re-exporting the same names, so nothing that already imports them from there changes.
+
+  `--mcp-oauth` **also warns** when the committed config binds `OAUTH_KV` but its id is still the placeholder this build scaffolds: the guard passes, the build proceeds, and `wrangler deploy` would otherwise be the first thing to mention it. A warning rather than a failure — the id is not needed to build, and a `--dry-run` deploy is a reasonable thing to be doing with an unfinished config.
+
+### Patch Changes
+
+- f56d411: Refuse to build beside a wrangler config the plugin does not manage. wrangler resolves `wrangler.json` ?? `wrangler.jsonc` ?? `wrangler.toml` silently, so scaffolding `wrangler.jsonc` next to a lone `wrangler.toml` made wrangler stop reading the user's own config, and the build-owned key checks never ran on it. The build now fails up front with migration guidance when it finds a `wrangler.toml` (unreadable here) or a `wrangler.json` (outranks the managed file), and warns when a leftover `wrangler.toml` sits ignored beside `wrangler.jsonc`.
+- 691f12a: Stop compiling the App MCP endpoint shut when an app depends on `@guren/plugin-mcp`.
+
+  All three deploy plugins stubbed `@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js`, which `@guren/plugin-mcp` dynamically imports to serve the endpoint; Lambda and Vercel additionally routed _every_ unlisted `@modelcontextprotocol/sdk/*` subpath to a throwing stub, which also killed the plugin's static imports of `server/index.js` and `types.js`. A deployed endpoint could therefore never load, with no build error to say so.
+
+  Each platform now derives its stub set from `stubbableDevOnlyModules()`, and Lambda and Vercel drop the SDK-prefix catch-all, from one read of the app's manifest. The dev-only MCP server (`server/mcp.js`), `@guren/cli`, `bun:sqlite` and `vite` stay stubbed on every platform, for every app.
+
+  On Cloudflare the aliases are baked into the app's committed `wrangler.jsonc`, which the scaffold writes once and never overwrites — so an app that adds the plugin after its first deploy would keep the stale alias indefinitely. `cloudflare:build` now fails with the exact alias line to delete when that app depends on `@guren/plugin-mcp`, before it runs the app build.
+
+- Updated dependencies [0346aeb]
+- Updated dependencies [0a5dd3c]
+- Updated dependencies [39db410]
+- Updated dependencies [bf4020f]
+- Updated dependencies [691f12a]
+- Updated dependencies [a6e3a1f]
+  - @guren/core@1.13.0
+
 ## 0.5.0
 
 ### Minor Changes

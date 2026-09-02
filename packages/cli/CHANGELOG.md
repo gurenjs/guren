@@ -1,5 +1,159 @@
 # @guren/cli
 
+## 2.14.0
+
+### Minor Changes
+
+- 09c56ce: Add the agent approval queue and `guren.approval_status` (RFC 0016 §5.4 item 4).
+
+  A route declaring `agent({ approval: 'required' })` no longer refuses unconditionally. With `mcpPlugin({ approvals: { store, notify } })` configured, the first call becomes a pending record instead of an execution: nothing runs, the approvers are notified, and the caller is handed a request id. Once a human approves the record, repeating the same call with the same arguments performs it — once.
+
+  **The pending answer rides as an error result carrying JSON, on a measured protocol fact.** An MCP `isError: true` result is delivered to the client with its `content` intact, including for a tool that declares an `outputSchema` — no `-32600`, no structured-content validation. Measured directly against the SDK client with a two-tool server, one plain and one with an output schema, both returning `isError` with a JSON body; both bodies arrived whole. That is what makes the pending state expressible at all, and it rides as a second content block rather than as `structuredContent`, which MCP defines for _successful_ results.
+
+  **Approval binds to the arguments, not just the tool.** One canonicalization (`canonicalizeAgentApprovalInput`), hashed by `agentApprovalFingerprint`, read by both the creation and the lookup path — approving `posts.destroy {id: 5}` does not authorize `{id: 9}`. Key order does not change the match at any depth; types, array order, and absent-vs-null deliberately do. The fingerprint is taken over the **raw** arguments while the record stores the _redacted_ copy: fingerprinting the redacted copy would make approving `users.setPassword {id: 5, password: '…'}` authorize the same call with a different password. Only the hash is stored, so the queue does not become a second place secrets live. Approvals are **single-use** (`consume` is a compare-and-set the store owns) and **expire** (judged by framework code against a clock, never filtered by the store, because a store that forgot to compare would fail open silently), and are bound to the principal that asked. **Consumption happens before dispatch**: an approval is permission for one attempt, not one success — consuming afterwards would let concurrent calls pass the same check and make a crashed call replayable.
+
+  **The store is the application's, opt-in, with no default implementation** — the audit sink's precedent, for the audit sink's reason. This endpoint runs on Workers and Lambda, where a queue that quietly fell back to process memory would approve a record the next isolate never saw. Unconfigured, an `approval: 'required'` tool stays refused fail-closed and absent from `tools/list`, and the refusal names the configuration line. `notify` hands the request over and the application decides who hears about it; `AgentApprovalRequested` ships as a ready-made `Notification` for the common case. The record is persisted before `notify` runs and is not awaited after, so a channel that is down costs an approver a message, never the request or the call.
+
+  `guren.approval_status` is a second reserved meta-tool, `{ requestId }` in, its own output schema out, listed when a queue exists and the token grants at least one tool. **A caller may read only the status of a request it created**: another principal's id answers exactly as an unknown id does, converged on one branch in code, because any difference between the two answers enumerates other principals' pending actions. The audit trail keeps the distinction the caller does not get.
+
+  Two deviations from the design as specified, both recorded in the RFC. A **pending** match is reused rather than re-filed — without that, an agent polling by re-calling the tool creates unbounded records and notifies approvers once per poll. A **rejected** call is not re-asked while its record is unexpired, and the refusal reports `status: 'rejected'` distinctly so a caller can tell it from a wait worth polling.
+
+  `guren check` **fails** a route declaring `approval: 'required'` when it can read the app's `mcpPlugin({ … })` call and finds no `approvals` in it — without a queue the tool is uncallable rather than guarded. Positive evidence only: options this check cannot read (a variable, a spread) and an app with no readable call say nothing, since `guren check` has no per-finding ignore configuration. The option key is exported from `@guren/server` and read from there, never restated, because the CLI cannot import the plugin.
+
+- e4b1ba4: Record `guren tool:call` in the agent audit trail, closing the last unrecorded surface of RFC 0016 §5.2.
+
+  `'cli'` has been a member of `AgentSurface` since the events shipped, and `guren tool:call` is the whole of it — but the command emitted nothing. A developer could call a write tool from a terminal, acting as any user via `--as`, and the trail would show that nothing happened. It now records an `AgentToolInvoked` carrying `surface: 'cli'`, the tool name, the arguments masked through the _called_ route's own `.agent({ redact })` list, the HTTP status, and the duration of the dispatch — measured over the same span the App MCP endpoint measures, so the CSRF priming round-trip this surface needs is not billed to the tool.
+
+  `@guren/server` now owns `createAuditEmitter` (with `AgentAuditEmitter` and `AgentAuditSink`), which `@guren/plugin-mcp` previously defined privately. It is the one rule for announcing an audit event — the sink called directly and the events emitted beside it — and it now has two readers, so a second copy is how one surface comes to swallow a sink failure the other warns about. Every line of its reasoning moves with it, including the measured fact that keeps the sink off the listener list: `EventManager.emit` awaits listeners in priority order inside a bare loop, so one unrelated application listener throwing would end the loop and silence the trail.
+
+  The plugin publishes the emitter it built as the container service `AGENT_AUDIT_BINDING` (`'agent.audit'`), declared in `ServiceBindings` beside every other service name. The _emitter_ is bound rather than the sink, so a second caller cannot build a different one around the same sink and then disagree with the first about whether a failure warns. `guren tool:call` resolves that name — it does not, and must not, depend on `@guren/plugin-mcp`, which is not installed in every application. The name is a constant both sides import, because this is the first binding written by one package and read by another that cannot import it: two literals that drifted would leave the CLI recording nothing, which reads exactly like an application that configured no trail. The resolution is guarded at every step, including a container whose factory throws: a command that failed a tool call in order to record it would be the exact inversion the emitter is built to prevent.
+
+  A `--preflight` is recorded as `guren.preflight`, never under the tool it rehearsed, which is the rule the MCP surface already follows — the handler did not run, so a record naming `posts.destroy` with a success status would be indistinguishable from a destroy that happened. The probed tool rides in the arguments, in the `{ tool, input }` shape the meta-tool's own arguments take on MCP, and the checked route's `redact` list masks the payload inside it. The distinction is decided by the answer rather than the flag: a `--preflight` against an application whose `@guren/core` predates the preflight seam runs the call for real, and that write is recorded under the tool that executed.
+
+  Nothing is bound when no `audit` sink is configured, and then the command records nothing and runs unchanged — the same absence the endpoint already has, not a second sink writing somewhere an operator does not look.
+
+  This surface emits **no** `AgentToolDenied`. Each of the four reasons names a check an adapter performs before synthesizing a request, and this one performs none: it holds no token to scope and no rate budget, and it dispatches directly. Its own two refusals (a missing path parameter, a URL dot-segment) are argument errors none of those reasons describes, and no request is sent for them, so there is no status a record could honestly carry — a deliberate divergence from the MCP endpoint, which answers the same two conditions with a synthetic 400 inside a tool result and records that. What the _application_ refuses arrives as a response, and so as an invocation with that status, exactly as on every other surface.
+
+  The principal is `{ kind: 'user', id }` when `--as` names one and `null` otherwise, with `abilities` omitted rather than sent empty: abilities belong to a token and this surface presents none. `surface: 'cli'` carries the standing fact that no credential was verified, which is what lets the principal record who the application acted as without hedging — collapsing it to `null` would make an impersonation indistinguishable from an anonymous call, which is the one fact a reader of this trail most needs.
+
+- 1fbbb04: Add the agent audit sink and `guren tool:log`, the durable half of RFC 0016 §5.2's audit trail.
+
+  `@guren/server` gains the record: `AgentAuditRecord` is the one JSONL line shape a sink writes and a reader parses, `toAuditRecord(event, now)` derives one from an `AgentToolInvoked` or `AgentToolDenied`, and `parseAuditRecord(line)` reads one back — returning `null` for a blank line or the truncated final line a concurrent append leaves, so a reader stays usable against a file being written to. `DEFAULT_AGENT_AUDIT_PATH` names `storage/logs/agent-audit.log`. Redaction stays the emitter's contract: arguments arrive already masked and are carried across verbatim, because a second redaction rule beside the real one is one nothing reading a record could tell apart from it. The daily-file naming rule (`dir/name-YYYY-MM-DD.ext`) is now one exported function, `dailyFilePath` / `matchDailyFileDate`, that `DailyFileChannel` names its files with and the reader matches on — a second copy is how a writer and a reader drift apart, and the drift shows up as an empty log rather than an error. Extracting it also made the retention sweep's pattern escape its base path, so a log called `app.v1.log` no longer matches — and delete — files whose names merely differ in that position.
+
+  **One behaviour change reaches every `DailyFileChannel`, not only the audit trail.** The retention sweep used to resolve its directory with `path.parse(path).dir`, which is the empty string for a base path that names no directory (`'audit.log'`), and `existsSync('')` is false — so a channel configured that way returned before looking at anything, and its `days` window never expired a single file however old. It now uses `path.dirname`, which answers `'.'`, so the sweep runs in the working directory the channel is already writing into. A channel configured with a bare relative filename therefore starts deleting dated files it previously left alone; only its own, as `matchDailyFileDate` decides, but in a directory that holds far more than a log directory does. Configure such a channel with a path that names its directory if that is not what you want.
+
+  `@guren/plugin-mcp` gains `audit`: `{ file, days }` appends JSONL through the existing daily-file channel (rotation, retention, directory creation), `{ sink }` hands each record to a function. The sink is called **directly**, beside the event emit, and deliberately not subscribed as a listener: `EventManager.emit` awaits its listeners in priority order inside a bare loop with no try/catch, so the first one to throw ends the loop and every listener after it never runs. An unrelated application listener could therefore silence the audit trail, and the only evidence an operator would have of that is an empty file — a record of what agents did may not be contingent on what else the application happens to listen for. The events are still emitted unchanged for every consumer that legitimately is a listener, and a sink records with or without an event manager bound. A sink that throws, or returns a rejected promise, is warned about and does not fail the tool call it was recording; a sink dropping records in silence is the failure this feature exists to prevent.
+
+  **The sink is opt-in, and the RFC is amended in place to say so.** The events themselves are still emitted by default, unchanged; what an application now asks for is somewhere to put them. A framework that appended to a file on its own would be wrong on two of the runtimes this endpoint is specified to run on — Workers has no writable filesystem, Lambda's is ephemeral — so the trail would degrade differently per deployment while the configuration looked identical. An audit trail whose completeness depends on where it happens to be running is worse than one an operator knows is absent.
+
+  `guren tool:log` reads the trail back, with `--tail`/`-f` (following the midnight rollover to a new dated file), `--tool`, `--surface`, `--denied`, `--since 30m`, `-n`, and `--json`. It boots nothing: an audit trail has to be readable when the application it records is not startable. Files are read newest-first across the rotation set so `-n` spanning a rollover works, and `-n` applies after filtering — `--denied -n 50` is the last fifty denials, not the denials among the last fifty records, which over a busy trail is reliably empty and reads as "there were none". When there is no trail the command names the configuration line to add instead of printing an empty list, and it never pre-checks with `existsSync`: a permission error on a parent directory would answer "does not exist" and let the command make exactly the claim it must not. A `--tail` with no trail yet keeps waiting rather than exiting — the first record is exactly what someone running it is waiting for. `runToolLog` takes an optional `signal`, the only way to end a follow short of ending the process; it cuts the poll sleep short so an abort is answered promptly rather than up to one interval later.
+
+- 0346aeb: Emit `inputSources` and `inputBodyNested` in `.guren/agents.gen.ts` (RFC 0016 §2).
+
+  The manifest carried the merged `inputSchema` but not the inverse of that merge, so a client holding it could only guess which contract each argument came from. Guessing by HTTP method is wrong in both directions: a POST route's `query` keys would land in the body, where `validateQuery` never looks, and a path parameter would be posted instead of substituted into a URL that cannot be built without it.
+
+  `inputSources` records the contract each merged property came from (`params` / `path` / `query` / `body`), and `inputBodyNested` marks a route whose non-object body was nested under a `body` key to give the tool an object root — a client that missed it would post `{ body: [...] }` to a route that validates the array itself. Both come straight off `deriveAgentTools()`, so the manifest and a live adapter still cannot disagree.
+
+  Rendered through the same `__proto__`-safe literal writer as the rest of the manifest: the keys are argument names, and an argument may legally be called `__proto__`.
+
+- c9947b9: Add `guren.preflight`, the preflight companion tool on the App MCP surface (RFC 0016 §5.4).
+
+  Preflight could not be an argument of the tool being checked on MCP. A tool advertising an `outputSchema` must answer with `structuredContent` conforming to it unless the result is an error, and a verdict conforms to no route's output — so a tool that sometimes returned a verdict would sometimes violate its own contract, and reporting "allowed" as an error would be worse than not offering preflight at all. The verdict therefore gets a tool of its own: `guren.preflight`, taking `{ tool, input }` and answering with `{ tool, allowed, status, message }` plus the seam's `validated` / `unverified` and, for a refusal, the application's own `errors`. **One meta-tool for the whole catalogue, not one companion per tool** — per-tool companions double the tool count, against RFC 0016 §5.5's own catalogue-quality rule.
+
+  Nothing about it re-implements a check. It resolves the named tool from the same derived set the endpoint serves and dispatches the same re-entrant request an ordinary call does, with `BuildToolRequestOptions.preflight` set, so the route's real middleware runs and the router's preflight seam stops the chain before the handler. A refusal comes back as a **successful** result carrying `allowed: false`: the caller asked whether the call would be allowed, and "no, here is why" answers that. `validated` and `unverified` are absent, not empty, when the request was refused before it reached the seam — a call stopped by authentication has nothing to report about checks it never reached. A response that is neither a verdict nor a refusal means the handler ran, and is reported as an error rather than as a rehearsal that did not happen.
+
+  Checking a tool requires the **same scope** as calling it, or the companion becomes a way to probe the authorization surface of tools the token cannot call; an ungranted name produces the same `AgentToolDenied` (`reason: 'scope'`, naming the checked tool) a direct call would. A tool declaring `approval: 'required'` **is** checkable although it is not callable — that is exactly when "would this be accepted?" is worth asking, and the rehearsal executes nothing. `guren.preflight` is listed only for a token that grants at least one tool, since a token that can call nothing has nothing to rehearse and listing it would map the surface to a caller with no access to it. The call is audited as an `AgentToolInvoked` with `tool: 'guren.preflight'` — an agent probing what it may do is what an audit trail wants to show — recorded under the _checked_ tool's `redact` list, because the arguments being written down are that tool's. The checked tool gets no record: nothing was invoked.
+
+  `@guren/server` exports `PREFLIGHT_TOOL_NAME`, `RESERVED_AGENT_TOOL_NAMES` and `isReservedAgentToolName` — one list with two readers. `guren check` **fails** an agent route whose tool name claims a reserved one (`agent-route-reserved-name:*`), and the endpoint drops such a route rather than serving two tools under one name, which an MCP client answers by rejecting the entire catalogue. Restating the name in either place is how the check comes to keep passing a route the endpoint has already shadowed.
+
+- 2baf014: Stop the attachments scaffold from storing uploads inside the statically served tree, and add a `guren check` rule for apps already in that shape.
+
+  `guren add attachments` used to configure `disk: 'public'`, which the storage scaffold roots at `./public/storage` — inside the directory the root asset server serves. Uploaded bytes were therefore reachable as static assets, by extension, with the content type that matches: an uploaded `.svg` came back as `image/svg+xml`, inline, and its script ran on the app's own origin with the app's own cookies. RFC 0015 already built the way out; the scaffold just did not take it.
+
+  - The scaffolded `config/attachments.ts` now stores new attachments on the private `local` disk (`./storage/app`, outside `public/`) and enables the signed delivery route with `delivery: {}`. That route serves only an allowlist of content types inline, forces a download for everything else, and adds `nosniff` plus a `Content-Security-Policy: sandbox`.
+  - `guren add attachments` mounts that route, calling `registerAttachmentRoutes(router)` from the app's route registrar. The entry file is probed from the routes-entry candidates rather than assumed, because attachments work on an API-only app, which ships `routes/api.ts` and no `routes/web.ts`. Unmounted, every attachment URL would 404 — and a delivery failure is a uniform 404 by design, so nothing at runtime would name the cause.
+  - New `guren check` rule `attachments-public-disk`: `configureAttachments({ disk })` resolving to a `local` disk whose declared `root` is at or below the app's `public/` directory now fails. This is what tells an app scaffolded before this change that it is still in the old shape; nothing at runtime reports it, because serving the file is the intended behaviour of the disk it was put on. Positive evidence only — a non-`local` driver, a computed `root`, or two declarations disagreeing about one are skipped rather than guessed at, since the rule fails a build.
+  - The attachments scans now see through transparent TypeScript wrapping (`as const`, `satisfies`, `!`, `<T>x`) wherever they judge a node's shape. Three spellings of that unwrap had drifted apart across the package (covering 2, 4, and 5 node types), so `@guren/cli`'s `ast-walk` module gains `unwrapTypeAssertion` and `objectLiteral` as the one rule, and `model-parser` and `schema-parser` now call it too.
+
+    This is a behaviour fix, not tidying. The scaffolded `StorageProvider` ends its `disks` map with `as const`, so the `serve: 'redirect'` rule had never once read a real scaffolded app; and `configureAttachments({ … } satisfies T)` made _every_ attachments rule return nothing at all, because the shared entry scan tested for `ObjectExpression` without unwrapping. Both failed silently, since a scan that cannot read a config and a config with nothing to flag produce the same empty result.
+
+  Existing apps are not rewritten. An app that wants the old behaviour keeps it by leaving its config alone and is told so by name; an app that wants the new shape moves `disk` to a disk rooted outside `public/`, declares it private in `disks`, and adds `delivery: {}` plus `registerAttachmentRoutes(router)`. `examples/blog` is one of those apps and now fails this rule; migrating it changes the attachment URLs its pages and E2E specs assert against, so it is tracked separately.
+
+### Patch Changes
+
+- 0a5dd3c: Export `DEFAULT_DELIVERY_ROUTE_NAME` from `@guren/core`.
+
+  The delivery route's default name is a cross-package contract: `guren check`'s
+  attachments rules judge, from another package, whether the name the delivery
+  route registers under is claimed by more than one route. That rule kept its own
+  copy of `'attachments.show'`, which would not have failed loudly if the
+  framework's default moved — it would have stopped matching the route that was
+  actually registered and reported a genuine collision as fine. The check now
+  imports the constant instead of restating it.
+
+- 8c15984: Fix five ways the attachments check and its scaffold misjudged real apps.
+
+  All five were found by review after the rule shipped, and all five are silent by construction — the scans report "cannot read this" and "nothing to flag" as the same empty result, so each one looked like a clean app.
+
+  - **An API-only app failed `guren check` immediately after `guren add attachments` ran.** The scaffolder mounts the delivery route in `routes/api.ts`, but the delivery rule fell back to `routes/web.ts`, found no entry file, and treated that as positive evidence nothing could have mounted the route. `route-registrar` now owns `resolveRoutesEntry()`, and the rule, both `doctor` probes and `routes-check` all resolve the entry through it instead of open-coding the probe with four different not-found policies.
+  - **`as const` on a string switched the disk rule off.** `literalString()` read the assertion node rather than the literal under it, so `disk: 'media' as const` or `root: './public/uploads' satisfies string` answered "no value declared" — indistinguishable from a dynamic value, so the rule withdrew. It now unwraps, one level below the object unwrapping added with the rule.
+  - **A disk symlinked into the served tree passed.** The containment test was lexical, but `guren storage:link` symlinks `public/storage` to `storage/app/public` and the storage guide documented `local` rooted at exactly that path — so an app that followed the documentation had its uploads statically reachable and was told it was fine. Containment now canonicalizes both sides and reads the served directory's own entries, judged against the `attachments/` prefix the engine actually writes to (so the scaffold's own root, which `storage:link` does not expose, is not falsely failed).
+  - **The storage guide documented a shape `guren add storage` no longer scaffolds**, which is what made the previous item reachable. Both locales now show the scaffold's actual disks and carry an explicit warning against rooting an upload disk anywhere the served tree exposes.
+  - **Re-running a scaffolder could emit a duplicate import.** `insertImport()` tested for its own exact statement, so a binding merged into a neighbouring import — the idiomatic form, and what any formatter produces — read as absent and a second `import { x } from 'y'` was appended, breaking compilation. It now decides on the AST: a name counts only when the module imports it as a value under its own name, so a commented-out or template-literal lookalike, a `type`-only import, and `X as wanted` (which binds the name from a different symbol) all still insert.
+  - **The route graph `guren check` loads once and shares was itself read from `routes/web.ts`.** On an API-only app that left the agent-manifest, route-contract and agent-route checks judging a file the app never had, and the attachments delivery rule loaded the app's module a second time — two loads that could resolve different entries and disagree, in one run, about what the app mounted. The graph now resolves the entry the same way and the delivery rule reads its definitions.
+
+  The rule's failure message and the scaffold's comment no longer claim stored XSS. Document content types served out of `public/` are forced to download since the `static-documents` guard landed, so that claim would have been untrue — and a build-failing rule must not assert something the framework stopped doing. What the rule reports instead is the access-control half the guard never addressed: bytes reachable by URL with no signature, no expiry and no authorization check, with the XSS case returning wholesale under `rootPublicAssets: { inlineDocuments: true }`.
+
+- 29c4887: Fix two `guren check` scans that silently misread config wrapped in a transparent TypeScript assertion.
+
+  Both read a call argument positionally and tested it for `ObjectExpression` without unwrapping first, so `satisfies` or `as const` around the object made the whole declaration invisible. That failure is silent by construction: these scans report "cannot read this" and "nothing to flag" as the same empty result.
+
+  - Route registrar wiring read `defineModule({ … })` bare, so `defineModule({ … } satisfies ModuleDefinition)` looked like a module with no descriptor at all. The scope then fell back to the conventional `modules/<name>/routes.ts`, and a module whose registrar lives anywhere else — `routes/index.ts`, say — had its whole routes directory reported as unmounted.
+  - The deploy-runtime scan read `createApp({ … })` the same way, so `createApp({ auth: {} } satisfies AppOptions)` dropped the session signal and the app passed the backed-session-store check instead of being warned. The file's generic identifier scan already walked through these wrappers; only this positional read did not.
+
+  Both now go through `objectLiteral()` from `ast-walk`, the one rule for reading an object literal through transparent wrapping.
+
+- 7e4aed6: Fix the CLI reads that silently misread source wrapped in a transparent TypeScript assertion.
+
+  Each tested a node's shape (`ObjectExpression`, `ArrayExpression`) without unwrapping `as const` / `satisfies` / `!` / `<T>x` first, so a wrapper made the declaration invisible. The failure is silent by construction: these scans report "cannot read this" and "nothing to flag" as the same empty result.
+
+  - `defineModel(users, { … } satisfies ModelOptions)` dropped every option at once, so `guren audit` reported a model with a `fillable` allowlist as having none, and a wrapped `base: AuthenticatableModel` lost its authentication classification.
+  - A string-array config read as unreadable when the array itself carried the wrapper — `static fillable = ['title'] as const`, the idiomatic spelling — with the same consequences plus a skipped denied-credential-column check.
+  - A wrapped drizzle column map made the whole table invisible to `parseSchemaTables`, and so to the schema checks, attachments table bindings, `make:feature`, and `guren context`. Wrapped column options read as opaque, so `timestamp('created_at', { withTimezone: false } as const)` skipped the Postgres `timestamptz` warning instead of earning it.
+  - `broadcast('c', 'e', { id: 1 } as const)` rendered as `unknown` in `.guren/channels.gen.ts`, typing every listener's argument as unusable rather than as the shape it carries. A wrapped _name_ in the same call was worse still — the channel vanished from the generated types entirely — though that half is already fixed on main; a regression test now pins it.
+  - `export default { … } as const` was absent from the inert-default-export set, so a shared-constants module was treated as possibly holding a console command and drew a registration warning nothing could resolve.
+  - `mcpPlugin({ … } satisfies McpPluginOptions)` read as unreadable, and that scan's positive-evidence-only rule turned it into silence — an agent route requiring approval went unreported despite having nowhere to queue it.
+
+  A review sweep of the same files found more of the same class, now fixed too: a `defineModel` `base:` option, a `static passwordHashField = '…' as const`, the entries of a wrapped allowlist array, a relationship name, and the drizzle table and column names — a lost column name made the `timestamptz` warning cite the property instead of the SQL column and drop its `USING` hint.
+
+  Two widenings the unwrap could otherwise have caused are closed in the same pass. A `fillable: undefined as string[] | undefined` still reads as the absent option it is, rather than as mass-assignment protection the runtime does not apply. And a drizzle options object carrying a spread now reads as unreadable whether or not it is wrapped — `timestamp('c', { ...SHARED })` may well set `withTimezone`, so concluding "unset" warns about a column that was already right.
+
+  All now go through `objectLiteral()` / `literalString()` / `unwrapTypeAssertion()` from `ast-walk`, the one rule for reading through transparent wrapping. That rule also gains its first direct tests: five wrapper spellings were handled but only two were exercised anywhere, and `ParenthesizedExpression` was unreachable through the shared parser's plugin set at all.
+
+- Updated dependencies [09c56ce]
+- Updated dependencies [e4b1ba4]
+- Updated dependencies [1fbbb04]
+- Updated dependencies [0346aeb]
+- Updated dependencies [c9947b9]
+- Updated dependencies [0346aeb]
+- Updated dependencies [0a5dd3c]
+- Updated dependencies [39db410]
+- Updated dependencies [bf4020f]
+- Updated dependencies [691f12a]
+- Updated dependencies [1eb4303]
+- Updated dependencies [58f2835]
+- Updated dependencies [cfef2ad]
+- Updated dependencies [7bcd5d6]
+- Updated dependencies [202cd67]
+- Updated dependencies [a6e3a1f]
+- Updated dependencies [4831473]
+- Updated dependencies [1414267]
+- Updated dependencies [202cd67]
+- Updated dependencies [0076c39]
+  - @guren/server@2.15.0
+  - @guren/core@1.13.0
+  - @guren/orm@2.6.2
+
 ## 2.13.0
 
 ### Minor Changes

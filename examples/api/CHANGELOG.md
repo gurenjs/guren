@@ -1,5 +1,33 @@
 # @guren/example-api
 
+## 0.1.30
+
+### Patch Changes
+
+- Updated dependencies [09c56ce]
+- Updated dependencies [e4b1ba4]
+- Updated dependencies [1fbbb04]
+- Updated dependencies [0346aeb]
+- Updated dependencies [c9947b9]
+- Updated dependencies [0346aeb]
+- Updated dependencies [0a5dd3c]
+- Updated dependencies [39db410]
+- Updated dependencies [8c15984]
+- Updated dependencies [2baf014]
+- Updated dependencies [bf4020f]
+- Updated dependencies [691f12a]
+- Updated dependencies [cfef2ad]
+- Updated dependencies [a6e3a1f]
+- Updated dependencies [4831473]
+- Updated dependencies [202cd67]
+- Updated dependencies [0076c39]
+- Updated dependencies [29c4887]
+- Updated dependencies [7e4aed6]
+  - @guren/cli@2.14.0
+  - @guren/core@1.13.0
+  - @guren/testing@1.9.0
+  - @guren/orm@2.6.2
+
 ## 0.1.29
 
 ### Patch Changes
