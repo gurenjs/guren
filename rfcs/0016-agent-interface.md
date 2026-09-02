@@ -803,10 +803,9 @@ Purely additive; no existing API changes shape or behavior. Two soft edges:
 1. Whether the adapter re-parses the response for `structuredContent` or reuses the
    already-validated output body (double-validation cost; implementation detail).
 2. ~~The exact glue mapping Cloudflare `OAuthProvider` `props`/scopes onto the
-   `AgentPrincipal` ability vocabulary.~~ **Resolved in implementation:** `props` are
-   `{ userId, scopes }` written by a session-authenticated consent flow, mapped by
-   `mcpOAuthPropsToAuth` to a `kind: 'user'` principal whose abilities *are* those
-   scopes, in the §5.1 grammar. See the §7 amendment.
+   `AgentPrincipal` ability vocabulary.~~ **Resolved in implementation:**
+   `mcpOAuthPropsToAuth` maps `{ userId, scopes }` onto a `kind: 'user'` principal
+   whose abilities *are* those scopes. See the §7 amendment.
 3. ~~WebMCP shipping posture: keep `@guren/plugin-webmcp` unpublished until the origin
    trial concludes, or publish under an experimental tag.~~ **Resolved in
    implementation:** published normally, with the `0.x` line as the experimental
