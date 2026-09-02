@@ -152,8 +152,11 @@ describe('scaffolded McpOAuthController', () => {
     process.env.APP_KEY ??= generateAppKey()
 
     app = createApp({ routes: registerRoutes })
-    app.use(createSessionMiddleware({ store: new MemorySessionStore(), secret: 'test-secret' }))
-    app.use(createCsrfMiddleware())
+    // `'*'`, because `use()` takes a path first — and no `secret` option:
+    // `SessionOptions` has none, so one passed here would be silently ignored
+    // and this suite would read as configuring something it was not.
+    app.use('*', createSessionMiddleware({ store: new MemorySessionStore() }))
+    app.use('*', createCsrfMiddleware())
     await app.boot()
 
     // What `OAuthProvider` injects before either handler runs.
@@ -371,7 +374,8 @@ describe('scaffolded McpOAuthController', () => {
      */
     test('should still refuse a forged token with no CSRF middleware mounted', async () => {
       const bare = createApp({ routes: registerRoutes })
-      bare.use(createSessionMiddleware({ store: new MemorySessionStore(), secret: 'test-secret' }))
+      // Session, but deliberately no CSRF middleware — the whole point.
+      bare.use('*', createSessionMiddleware({ store: new MemorySessionStore() }))
       await bare.boot()
 
       const response = await bare.fetch(
