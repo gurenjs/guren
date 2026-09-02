@@ -2,7 +2,11 @@ import { describe, test, expect } from 'bun:test'
 import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-import { MCP_OAUTH_TEMPLATE_FILES, loadMcpOauthTemplate } from '../src/templates'
+import {
+  MCP_OAUTH_CONTROLLER_FILE,
+  MCP_OAUTH_TEMPLATE_FILES,
+  loadMcpOAuthTemplate,
+} from '../src/templates'
 
 /**
  * `@guren/plugin-cloudflare/env` exists so application code can reach the
@@ -24,7 +28,7 @@ const BUILD_ONLY_MARKER = 'Cloudflare build:'
 
 describe('lean env subpath', () => {
   test('should be what the consent controller imports getWorkersEnv from', () => {
-    const controller = loadMcpOauthTemplate('app/Http/Controllers/McpOAuthController.ts')
+    const controller = loadMcpOAuthTemplate(MCP_OAUTH_CONTROLLER_FILE)
 
     expect(controller).toContain("from '@guren/plugin-cloudflare/env'")
     // The root entry, imported by name, is the regression. Spelled as the
@@ -34,7 +38,7 @@ describe('lean env subpath', () => {
 
   test('should be the only plugin entry any template imports', () => {
     for (const path of MCP_OAUTH_TEMPLATE_FILES) {
-      expect(loadMcpOauthTemplate(path)).not.toContain("from '@guren/plugin-cloudflare'")
+      expect(loadMcpOAuthTemplate(path)).not.toContain("from '@guren/plugin-cloudflare'")
     }
   })
 

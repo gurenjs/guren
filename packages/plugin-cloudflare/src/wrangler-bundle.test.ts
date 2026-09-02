@@ -432,13 +432,8 @@ describe.skipIf(!enabled)('wrangler bundles the --mcp-oauth worker', () => {
     const { dependencies, devDependencies, peerDependencies, ...rest } = manifest
     writeFileSync(join(target, 'package.json'), JSON.stringify(rest))
 
-    // A minimal app entry the generated worker can import, and the generator's
-    // own output around it.
-    writeFileSync(
-      join(root, 'app.js'),
-      'export default { boot: async () => {}, fetch: async () => new Response("ok") }\n',
-    )
-    const { buildCloudflareOutput } = await import('./build')
+    // A minimal app entry the generated worker can import, and the client
+    // manifest the generator reads, at the paths it looks for them.
     mkdirSync(join(root, 'src'), { recursive: true })
     writeFileSync(join(root, 'src/app.ts'), 'export default { boot: async () => {}, fetch: async () => new Response("ok") }\n')
     mkdirSync(join(root, 'public/assets/.vite'), { recursive: true })
@@ -455,11 +450,12 @@ describe.skipIf(!enabled)('wrangler bundles the --mcp-oauth worker', () => {
     probeManifest.dependencies['@guren/plugin-mcp'] = '*'
     writeFileSync(join(root, 'package.json'), JSON.stringify(probeManifest))
 
+    const { buildCloudflareOutput } = await import('./build')
     await buildCloudflareOutput({
       rootDir: root,
       outputDir: join(root, 'cf-out'),
       skipAppBuild: true,
-      mcpOauth: true,
+      mcpOAuth: true,
     })
   })
 

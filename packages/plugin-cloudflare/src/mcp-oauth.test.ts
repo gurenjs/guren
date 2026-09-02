@@ -5,10 +5,11 @@ import { join } from 'node:path'
 
 import { buildCloudflareOutput } from './build'
 import {
+  MCP_OAUTH_CONTROLLER_FILE,
   MCP_OAUTH_REGISTRAR,
   MCP_OAUTH_ROUTES_FILE,
   MCP_OAUTH_TEMPLATE_FILES,
-  loadMcpOauthTemplate,
+  loadMcpOAuthTemplate,
 } from './templates'
 import { captureLogs, captureWarnings, scaffoldApp, writeJson } from '../tests/app-fixture'
 
@@ -37,7 +38,7 @@ describe('cloudflare:build --mcp-oauth', () => {
       scaffoldApp(root, { oauthProvider: true })
 
       await expect(
-        buildCloudflareOutput({ rootDir: root, skipAppBuild: true, mcpOauth: true }),
+        buildCloudflareOutput({ rootDir: root, skipAppBuild: true, mcpOAuth: true }),
       ).rejects.toThrow(/@guren\/plugin-mcp/)
     })
 
@@ -45,7 +46,7 @@ describe('cloudflare:build --mcp-oauth', () => {
       scaffoldApp(root, { mcpPlugin: true })
 
       await expect(
-        buildCloudflareOutput({ rootDir: root, skipAppBuild: true, mcpOauth: true }),
+        buildCloudflareOutput({ rootDir: root, skipAppBuild: true, mcpOAuth: true }),
       ).rejects.toThrow(/bun add @cloudflare\/workers-oauth-provider/)
     })
 
@@ -59,7 +60,7 @@ describe('cloudflare:build --mcp-oauth', () => {
       scaffoldApp(root, { mcpPlugin: true, oauthProviderAsDevDependency: true })
 
       await expect(
-        buildCloudflareOutput({ rootDir: root, skipAppBuild: true, mcpOauth: true }),
+        buildCloudflareOutput({ rootDir: root, skipAppBuild: true, mcpOAuth: true }),
       ).rejects.toThrow(/bun add @cloudflare\/workers-oauth-provider/)
     })
 
@@ -70,7 +71,7 @@ describe('cloudflare:build --mcp-oauth', () => {
       const failure = await buildCloudflareOutput({
         rootDir: root,
         skipAppBuild: true,
-        mcpOauth: true,
+        mcpOAuth: true,
       }).catch((error: Error) => error.message)
 
       expect(failure).toContain('"kv_namespaces"')
@@ -83,7 +84,7 @@ describe('cloudflare:build --mcp-oauth', () => {
       writeJson(join(root, 'wrangler.jsonc'), oauthReadyConfig())
 
       await captureWarnings(() =>
-        buildCloudflareOutput({ rootDir: root, skipAppBuild: true, mcpOauth: true }),
+        buildCloudflareOutput({ rootDir: root, skipAppBuild: true, mcpOAuth: true }),
       )
 
       expect(existsSync(join(root, '.cloudflare/worker.js'))).toBe(true)
@@ -104,7 +105,7 @@ describe('cloudflare:build --mcp-oauth', () => {
       })
 
       const warning = await captureWarnings(() =>
-        buildCloudflareOutput({ rootDir: root, skipAppBuild: true, mcpOauth: true }),
+        buildCloudflareOutput({ rootDir: root, skipAppBuild: true, mcpOAuth: true }),
       )
 
       expect(warning).toContain('placeholder id')
@@ -118,7 +119,7 @@ describe('cloudflare:build --mcp-oauth', () => {
       writeJson(join(root, 'wrangler.jsonc'), oauthReadyConfig())
 
       const warning = await captureWarnings(() =>
-        buildCloudflareOutput({ rootDir: root, skipAppBuild: true, mcpOauth: true }),
+        buildCloudflareOutput({ rootDir: root, skipAppBuild: true, mcpOAuth: true }),
       )
 
       expect(warning).not.toContain('placeholder id')
@@ -137,7 +138,7 @@ describe('cloudflare:build --mcp-oauth', () => {
       })
 
       await expect(
-        buildCloudflareOutput({ rootDir: root, skipAppBuild: true, mcpOauth: true }),
+        buildCloudflareOutput({ rootDir: root, skipAppBuild: true, mcpOAuth: true }),
       ).rejects.toThrow(/OAUTH_KV/)
     })
 
@@ -164,7 +165,7 @@ describe('cloudflare:build --mcp-oauth', () => {
       })
 
       await expect(
-        buildCloudflareOutput({ rootDir: root, mcpOauth: true }),
+        buildCloudflareOutput({ rootDir: root, mcpOAuth: true }),
       ).rejects.toThrow(/workers-oauth-provider/)
     })
   })
@@ -178,7 +179,7 @@ describe('cloudflare:build --mcp-oauth', () => {
       await buildCloudflareOutput({
         rootDir: root,
         skipAppBuild: true,
-        mcpOauth: true,
+        mcpOAuth: true,
         ...options,
       })
       return readFileSync(join(root, '.cloudflare/worker.js'), 'utf8')
@@ -312,7 +313,7 @@ describe('cloudflare:build --mcp-oauth', () => {
       scaffoldApp(root, { mcpPlugin: true, oauthProvider: true })
 
       await captureLogs(() =>
-        buildCloudflareOutput({ rootDir: root, skipAppBuild: true, mcpOauth: true }),
+        buildCloudflareOutput({ rootDir: root, skipAppBuild: true, mcpOAuth: true }),
       )
 
       const config = JSON.parse(readFileSync(join(root, 'wrangler.jsonc'), 'utf8'))
@@ -325,7 +326,7 @@ describe('cloudflare:build --mcp-oauth', () => {
       scaffoldApp(root, { mcpPlugin: true, oauthProvider: true })
 
       const logs = await captureLogs(() =>
-        buildCloudflareOutput({ rootDir: root, skipAppBuild: true, mcpOauth: true }),
+        buildCloudflareOutput({ rootDir: root, skipAppBuild: true, mcpOAuth: true }),
       )
 
       expect(logs).toContain('wrangler kv namespace create OAUTH_KV')
@@ -348,17 +349,17 @@ describe('cloudflare:build --mcp-oauth', () => {
 
     test('should write every template file at its template path', async () => {
       await captureLogs(() =>
-        buildCloudflareOutput({ rootDir: root, skipAppBuild: true, mcpOauth: true }),
+        buildCloudflareOutput({ rootDir: root, skipAppBuild: true, mcpOAuth: true }),
       )
 
       for (const path of MCP_OAUTH_TEMPLATE_FILES) {
-        expect(readFileSync(join(root, path), 'utf8')).toBe(loadMcpOauthTemplate(path))
+        expect(readFileSync(join(root, path), 'utf8')).toBe(loadMcpOAuthTemplate(path))
       }
     })
 
     test('should print the two lines that wire the routes file in', async () => {
       const logs = await captureLogs(() =>
-        buildCloudflareOutput({ rootDir: root, skipAppBuild: true, mcpOauth: true }),
+        buildCloudflareOutput({ rootDir: root, skipAppBuild: true, mcpOAuth: true }),
       )
 
       expect(logs).toContain(`import { ${MCP_OAUTH_REGISTRAR} } from './mcp-oauth'`)
@@ -368,12 +369,12 @@ describe('cloudflare:build --mcp-oauth', () => {
     test('should never overwrite a file the developer already has', async () => {
       const target = join(root, MCP_OAUTH_ROUTES_FILE)
       await captureLogs(() =>
-        buildCloudflareOutput({ rootDir: root, skipAppBuild: true, mcpOauth: true }),
+        buildCloudflareOutput({ rootDir: root, skipAppBuild: true, mcpOAuth: true }),
       )
       writeFileSync(target, '// mine now\n')
 
       await captureLogs(() =>
-        buildCloudflareOutput({ rootDir: root, skipAppBuild: true, mcpOauth: true }),
+        buildCloudflareOutput({ rootDir: root, skipAppBuild: true, mcpOAuth: true }),
       )
 
       expect(readFileSync(target, 'utf8')).toBe('// mine now\n')
@@ -381,11 +382,11 @@ describe('cloudflare:build --mcp-oauth', () => {
 
     test('should stop repeating the wiring instruction once the file exists', async () => {
       await captureLogs(() =>
-        buildCloudflareOutput({ rootDir: root, skipAppBuild: true, mcpOauth: true }),
+        buildCloudflareOutput({ rootDir: root, skipAppBuild: true, mcpOAuth: true }),
       )
 
       const second = await captureLogs(() =>
-        buildCloudflareOutput({ rootDir: root, skipAppBuild: true, mcpOauth: true }),
+        buildCloudflareOutput({ rootDir: root, skipAppBuild: true, mcpOAuth: true }),
       )
 
       expect(second).not.toContain(MCP_OAUTH_REGISTRAR)
@@ -407,17 +408,20 @@ describe('mcp-oauth templates', () => {
    * explaining the absence and reports it as the thing itself.
    */
   function code(path: string): string {
-    return new Bun.Transpiler({ loader: 'ts' }).transformSync(loadMcpOauthTemplate(path))
+    return new Bun.Transpiler({ loader: 'ts' }).transformSync(loadMcpOAuthTemplate(path))
   }
 
+  const routes = loadMcpOAuthTemplate(MCP_OAUTH_ROUTES_FILE)
+  const controller = loadMcpOAuthTemplate(MCP_OAUTH_CONTROLLER_FILE)
+  const controllerCode = code(MCP_OAUTH_CONTROLLER_FILE)
+
   test.each([...MCP_OAUTH_TEMPLATE_FILES])('should parse as TypeScript: %s', (path: string) => {
-    const source = loadMcpOauthTemplate(path)
+    const source = loadMcpOAuthTemplate(path)
     expect(() => new Bun.Transpiler({ loader: 'ts' }).transformSync(source)).not.toThrow()
   })
 
   test('should export a registrar under the name the scaffold instruction prints', () => {
-    const source = loadMcpOauthTemplate(MCP_OAUTH_ROUTES_FILE)
-    expect(source).toContain(`export function ${MCP_OAUTH_REGISTRAR}(`)
+    expect(routes).toContain(`export function ${MCP_OAUTH_REGISTRAR}(`)
   })
 
   /**
@@ -442,9 +446,10 @@ describe('mcp-oauth templates', () => {
   })
 
   test('should reach the controller by the path the scaffold writes it to', () => {
-    const routes = loadMcpOauthTemplate(MCP_OAUTH_ROUTES_FILE)
     // The layout invariant: a template's path under templates/mcp-oauth/ is the
     // path it lands on in the app, so this relative import resolves in both.
+    // Both paths spelled out rather than read from the constant — the constant
+    // is one of the two things this is checking agree.
     expect(routes).toContain("from '../app/Http/Controllers/McpOAuthController.js'")
     expect(MCP_OAUTH_TEMPLATE_FILES).toContain('app/Http/Controllers/McpOAuthController.ts')
   })
@@ -456,25 +461,21 @@ describe('mcp-oauth templates', () => {
    * entry outside `tool:` / `tools:`, silently and by design.
    */
   test('should submit granted scopes in the tool: wire form', () => {
-    const controller = loadMcpOauthTemplate('app/Http/Controllers/McpOAuthController.ts')
     expect(controller).toContain('value="tool:${name}"')
     expect(controller).toContain('`tool:${tool.toolName}`')
   })
 
   test('should derive the offered tools live rather than from a manifest', () => {
-    const controller = loadMcpOauthTemplate('app/Http/Controllers/McpOAuthController.ts')
     expect(controller).toContain('deriveAgentTools(')
-    expect(code('app/Http/Controllers/McpOAuthController.ts')).not.toContain('agents.gen')
+    expect(controllerCode).not.toContain('agents.gen')
   })
 
   test('should intersect the submission with what the client requested', () => {
-    const controller = loadMcpOauthTemplate('app/Http/Controllers/McpOAuthController.ts')
     expect(controller).toContain('expandToolScopes(')
     expect(controller).toContain('offeredScopes.has(scope)')
   })
 
   test('should carry the CSRF field into the consent form', () => {
-    const controller = loadMcpOauthTemplate('app/Http/Controllers/McpOAuthController.ts')
     expect(controller).toContain('csrfField(this.ctx)')
   })
 
@@ -487,18 +488,15 @@ describe('mcp-oauth templates', () => {
    * rule, and one of the two would eventually accept what the other rejects.
    */
   test('should verify the CSRF token itself, via the framework primitive', () => {
-    const controller = loadMcpOauthTemplate('app/Http/Controllers/McpOAuthController.ts')
     expect(controller).toContain('verifyCsrfToken(this.ctx, single(form[CSRF_FORM_FIELD]))')
-    expect(code('app/Http/Controllers/McpOAuthController.ts')).not.toContain('_csrf_token')
+    expect(controllerCode).not.toContain('_csrf_token')
   })
 
   test('should tick read-only tools only, leaving writes unchecked by default', () => {
-    const controller = loadMcpOauthTemplate('app/Http/Controllers/McpOAuthController.ts')
     expect(controller).toContain("tool.annotations.readOnlyHint ? ' checked' : ''")
   })
 
   test('should answer a malformed authorize request with a page, not a throw', () => {
-    const controller = loadMcpOauthTemplate('app/Http/Controllers/McpOAuthController.ts')
     // Both actions route through the wrapper rather than calling the provider
     // directly — a bare `parseAuthRequest` 500s with a stack trace on a
     // tampered query, which is a routine arrival at this URL.
@@ -507,12 +505,10 @@ describe('mcp-oauth templates', () => {
     // `private async parseAuthRequest(`, so it is not one of these.
     expect(controller.match(/this\.parseAuthRequest\(/g)).toHaveLength(2)
     // Exactly one place actually calls the provider: the wrapper's own try.
-    expect(code('app/Http/Controllers/McpOAuthController.ts').match(/provider\.parseAuthRequest\(/g))
-      .toHaveLength(1)
+    expect(controllerCode.match(/provider\.parseAuthRequest\(/g)).toHaveLength(1)
   })
 
   test('should store the app-typed user id and the granted scopes in props', () => {
-    const controller = loadMcpOauthTemplate('app/Http/Controllers/McpOAuthController.ts')
     expect(controller).toContain('props: { userId, scopes: granted }')
     // The provider's own identifier is a string; props keeps the app's type.
     expect(controller).toContain('userId: String(userId)')

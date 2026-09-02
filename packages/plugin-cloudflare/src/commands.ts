@@ -32,7 +32,7 @@ const cloudflareBuild = defineCommand({
     await buildCloudflareOutput({
       rootDir: args.root || process.cwd(),
       skipAppBuild: Boolean(args['skip-app-build']),
-      mcpOauth: Boolean(args['mcp-oauth']),
+      mcpOAuth: Boolean(args['mcp-oauth']),
       // Passed only when given, rather than defaulted here: the default
       // belongs to the option it documents, so a CLI caller and a programmatic
       // one cannot end up disagreeing about what "unset" means.

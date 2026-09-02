@@ -23,7 +23,10 @@ export const CLIENT_MANIFEST = {
 export interface ScaffoldAppOptions {
   ssr?: boolean
   renderExport?: string
-  /** Declare `@guren/plugin-mcp` under `dependencies` — the App MCP opt-in. */
+  /**
+   * Declare `@guren/plugin-mcp` under `dependencies` — the App MCP opt-in the
+   * build reads (RFC 0016 §7).
+   */
   mcpPlugin?: boolean
   /** Declare `@cloudflare/workers-oauth-provider` under `dependencies`. */
   oauthProvider?: boolean
@@ -47,8 +50,6 @@ export function scaffoldApp(root: string, options: ScaffoldAppOptions = {}): voi
   writeFileSync(join(root, 'src/app.ts'), 'export default { boot: async () => {}, fetch: async () => new Response("ok") }\n')
 
   const dependencies: Record<string, string> = {}
-  // Declaring `@guren/plugin-mcp` under `dependencies` is the App MCP opt-in
-  // the build reads (RFC 0016 §7).
   if (mcpPlugin) dependencies['@guren/plugin-mcp'] = '^0.2.0'
   if (oauthProvider) dependencies['@cloudflare/workers-oauth-provider'] = '^0.10.3'
 

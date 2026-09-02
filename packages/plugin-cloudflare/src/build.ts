@@ -30,7 +30,7 @@ import {
   MCP_OAUTH_REGISTRAR,
   MCP_OAUTH_ROUTES_FILE,
   MCP_OAUTH_TEMPLATE_FILES,
-  loadMcpOauthTemplate,
+  loadMcpOAuthTemplate,
 } from './templates'
 
 interface PackageJsonLike {
@@ -67,10 +67,10 @@ export interface BuildCloudflareOutputOptions {
    * a build omits the flag is warned about, which is the drift this leaves
    * detectable.
    */
-  mcpOauth?: boolean
+  mcpOAuth?: boolean
   /**
    * Path the App MCP endpoint is mounted at, used as the OAuth provider's
-   * protected `apiRoute`. Only read when `mcpOauth` is on.
+   * protected `apiRoute`. Only read when `mcpOAuth` is on.
    *
    * Defaults to `mcpPlugin()`'s own default. An app that passed
    * `mcpPlugin({ path })` must pass the same value here: the generator cannot
@@ -112,15 +112,17 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
   // cannot disagree with anything, a second *decision* is neither.
   const mcpPlugin = appUsesMcpPlugin(root)
 
-  const mcpOauth = options.mcpOauth === true
+  const mcpOAuth = options.mcpOAuth === true
   const mcpPath = options.mcpPath ?? DEFAULT_MCP_PATH
 
   // Checked here, before the app build: these are one-line edits to files the
   // developer owns, and reporting them after several minutes of Vite output is
   // reporting them where nobody reads.
   assertMcpTransportNotAliased(root, mcpPlugin)
-  assertMcpOauthUsable(root, mcpPlugin, mcpOauth)
-  assertOauthKvBound(root, mcpOauth)
+  if (mcpOAuth) {
+    assertMcpOAuthUsable(root, mcpPlugin)
+    assertOAuthKvBound(root)
+  }
 
   if (!options.skipAppBuild) {
     runAppBuild(root, packageJson.scripts ?? {})
@@ -153,7 +155,7 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
       appEntry,
       ssrImport,
       hasEnvModule: workerEnv !== undefined,
-      mcpOauth,
+      mcpOAuth,
       mcpPath,
     }),
   )
@@ -162,11 +164,11 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
 
   writeDevOnlyStubs(out)
 
-  if (mcpOauth) {
+  if (mcpOAuth) {
     scaffoldConsentFlow(root)
   }
 
-  scaffoldWranglerConfig(root, out, packageJson.name, mcpPlugin, mcpOauth)
+  scaffoldWranglerConfig(root, out, packageJson.name, mcpPlugin, mcpOAuth)
 }
 
 const MCP_UNAVAILABLE = 'The MCP endpoint is unavailable on Cloudflare Workers — it generates files on disk.'
@@ -215,11 +217,7 @@ const OAUTH_ENDPOINTS = {
  * whatever the deploy environment installed, and a production install has no
  * devDependencies to resolve it from.
  */
-function assertMcpOauthUsable(root: string, mcpPlugin: boolean, mcpOauth: boolean): void {
-  if (!mcpOauth) {
-    return
-  }
-
+function assertMcpOAuthUsable(root: string, mcpPlugin: boolean): void {
   if (!mcpPlugin) {
     throw new Error(
       `Cloudflare build: --mcp-oauth fronts the App MCP endpoint with an OAuth provider, but this app does not depend on ${MCP_PLUGIN_PACKAGE}, so it serves no such endpoint. Install and mount the plugin first:\n`
@@ -243,7 +241,8 @@ function assertMcpOauthUsable(root: string, mcpPlugin: boolean, mcpOauth: boolea
  * `OAUTH_KV`, and there is no default: without the binding the worker deploys
  * and then fails on its first authorize request.
  *
- * Build-owned **only while the flag is on**. A fresh scaffold gets the entry
+ * Build-owned **only while the flag is on**, which is why the caller and not
+ * this function decides whether to ask. A fresh scaffold gets the entry
  * written for it; an app whose `wrangler.jsonc` already exists — the file this
  * build never overwrites — is failed rather than warned, because unlike the
  * warnings in {@link warnMissingBuildOwnedKeys} this one has a deploy-time
@@ -255,9 +254,9 @@ function assertMcpOauthUsable(root: string, mcpPlugin: boolean, mcpOauth: boolea
  * this cannot read would be worse than the defect, and
  * {@link warnMissingBuildOwnedKeys} already reports the unreadable file.
  */
-function assertOauthKvBound(root: string, mcpOauth: boolean): void {
+function assertOAuthKvBound(root: string): void {
   const configPath = resolve(root, 'wrangler.jsonc')
-  if (!mcpOauth || !existsSync(configPath)) {
+  if (!existsSync(configPath)) {
     return
   }
 
@@ -724,7 +723,7 @@ function renderWorkerModule(input: {
   appEntry: string
   ssrImport: SsrImport | undefined
   hasEnvModule: boolean
-  mcpOauth: boolean
+  mcpOAuth: boolean
   mcpPath: string
 }): string {
   const lines: string[] = [
@@ -738,7 +737,7 @@ function renderWorkerModule(input: {
 
   lines.push("import { createWorkersHandler } from '@guren/plugin-cloudflare'")
 
-  if (input.mcpOauth) {
+  if (input.mcpOAuth) {
     lines.push(
       `import { OAuthProvider } from ${JSON.stringify(OAUTH_PROVIDER_PACKAGE)}`,
       `import { mcpOAuthPropsToAuth, presentExternalMcpAuth } from ${JSON.stringify(MCP_OAUTH_SEAM_SPECIFIER)}`,
@@ -758,12 +757,12 @@ function renderWorkerModule(input: {
     lines.push(`setInertiaSsrRenderer(ssrModule.${input.ssrImport.rendererExport})`, '')
   }
 
-  if (!input.mcpOauth) {
+  if (!input.mcpOAuth) {
     lines.push('export default createWorkersHandler(app)', '')
     return lines.join('\n')
   }
 
-  lines.push(...renderOauthWorker(input.mcpPath), '')
+  lines.push(renderOAuthWorker(input.mcpPath), '')
 
   return lines.join('\n')
 }
@@ -854,44 +853,44 @@ const HTML_HANDLING = 'none'
  * MCP endpoint — the consent screen included — is served by the application
  * exactly as it would be without the provider.
  */
-function renderOauthWorker(mcpPath: string): string[] {
-  return [
-    '// One handler for both halves of the provider: it dedupes boot() per',
-    '// handler while the Workers env holder is module-global, so a second one',
-    '// would share the holder without sharing the boot slot.',
-    'const handler = createWorkersHandler(app)',
-    '',
-    'export default new OAuthProvider({',
-    `  apiRoute: ${JSON.stringify(mcpPath)},`,
-    '  apiHandler: {',
-    '    fetch(request, env, ctx) {',
-    '      // ctx.props is the grant the provider decrypted from the access',
-    '      // token it has already validated. A shape the endpoint cannot read',
-    '      // is refused here, never forwarded as a partial principal.',
-    '      const auth = mcpOAuthPropsToAuth(ctx.props)',
-    '      if (!auth) {',
-    '        return new Response(',
-    '          JSON.stringify({',
-    "            error: 'unauthorized',",
-    "            message: 'This access token carries no readable grant. Re-authorize the client.',",
-    '          }),',
-    "          { status: 401, headers: { 'Content-Type': 'application/json' } },",
-    '        )',
-    '      }',
-    '      // The seam is keyed on this exact Request object — dispatch the one',
-    '      // presentExternalMcpAuth returns, never a copy of it.',
-    '      return handler.fetch(presentExternalMcpAuth(request, auth), env, ctx)',
-    '    },',
-    '  },',
-    '  defaultHandler: handler,',
-    `  authorizeEndpoint: ${JSON.stringify(OAUTH_ENDPOINTS.authorize)},`,
-    `  tokenEndpoint: ${JSON.stringify(OAUTH_ENDPOINTS.token)},`,
-    '  // Dynamic client registration (RFC 7591). Deprecated in the MCP',
-    "  // 2026-07-28 line in favour of Client ID Metadata Documents, but it is",
-    '  // what shipping MCP SDK 1.x clients use to register themselves today.',
-    `  clientRegistrationEndpoint: ${JSON.stringify(OAUTH_ENDPOINTS.register)},`,
-    '})',
-  ]
+function renderOAuthWorker(mcpPath: string): string {
+  // A template literal rather than a line array: this is a *program*, and the
+  // one thing a reviewer has to be able to do with it is read it as one.
+  return `// One handler for both halves of the provider: it dedupes boot() per
+// handler while the Workers env holder is module-global, so a second one
+// would share the holder without sharing the boot slot.
+const handler = createWorkersHandler(app)
+
+export default new OAuthProvider({
+  apiRoute: ${JSON.stringify(mcpPath)},
+  apiHandler: {
+    fetch(request, env, ctx) {
+      // ctx.props is the grant the provider decrypted from the access
+      // token it has already validated. A shape the endpoint cannot read
+      // is refused here, never forwarded as a partial principal.
+      const auth = mcpOAuthPropsToAuth(ctx.props)
+      if (!auth) {
+        return new Response(
+          JSON.stringify({
+            error: 'unauthorized',
+            message: 'This access token carries no readable grant. Re-authorize the client.',
+          }),
+          { status: 401, headers: { 'Content-Type': 'application/json' } },
+        )
+      }
+      // The seam is keyed on this exact Request object — dispatch the one
+      // presentExternalMcpAuth returns, never a copy of it.
+      return handler.fetch(presentExternalMcpAuth(request, auth), env, ctx)
+    },
+  },
+  defaultHandler: handler,
+  authorizeEndpoint: ${JSON.stringify(OAUTH_ENDPOINTS.authorize)},
+  tokenEndpoint: ${JSON.stringify(OAUTH_ENDPOINTS.token)},
+  // Dynamic client registration (RFC 7591). Deprecated in the MCP
+  // 2026-07-28 line in favour of Client ID Metadata Documents, but it is
+  // what shipping MCP SDK 1.x clients use to register themselves today.
+  clientRegistrationEndpoint: ${JSON.stringify(OAUTH_ENDPOINTS.register)},
+})`
 }
 
 function scaffoldWranglerConfig(
@@ -899,7 +898,7 @@ function scaffoldWranglerConfig(
   out: string,
   packageName: string | undefined,
   mcpPlugin: boolean,
-  mcpOauth: boolean,
+  mcpOAuth: boolean,
 ): void {
   const configPath = resolve(root, 'wrangler.jsonc')
   const appName = (packageName ?? 'guren-app').replace(/^@[^/]+\//, '')
@@ -939,7 +938,7 @@ function scaffoldWranglerConfig(
     // MCP endpoint with OAuth has nothing to store in this namespace, and a
     // binding scaffolded "just in case" is a namespace someone has to create
     // before the config validates.
-    ...(mcpOauth ? { kv_namespaces: [oauthKvNamespace()] } : {}),
+    ...(mcpOAuth ? { kv_namespaces: [oauthKvNamespace()] } : {}),
     vars: { NODE_ENV: 'production' },
   }
 
@@ -949,13 +948,13 @@ function scaffoldWranglerConfig(
     writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, { flag: 'wx' })
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
-      warnMissingBuildOwnedKeys(configPath, outRelative, mcpPlugin, mcpOauth)
+      warnMissingBuildOwnedKeys(configPath, outRelative, mcpPlugin, mcpOAuth)
       return
     }
     throw error
   }
   const notes = ['fill in d1_databases[0].database_id']
-  if (mcpOauth) {
+  if (mcpOAuth) {
     notes.push(`create the ${OAUTH_KV_BINDING} namespace (wrangler kv namespace create ${OAUTH_KV_BINDING}) and fill in its id`)
   }
   console.log(`Cloudflare build: scaffolded ${configPath} — ${notes.join(', and ')} before deploying.`)
@@ -977,7 +976,7 @@ function scaffoldConsentFlow(root: string): void {
     const target = resolve(root, ...path.split('/'))
     mkdirSync(resolve(target, '..'), { recursive: true })
     try {
-      writeFileSync(target, loadMcpOauthTemplate(path), { flag: 'wx' })
+      writeFileSync(target, loadMcpOAuthTemplate(path), { flag: 'wx' })
       written.push(path)
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
@@ -1095,7 +1094,7 @@ function warnMissingBuildOwnedKeys(
   configPath: string,
   outRelative: string,
   mcpPlugin: boolean,
-  mcpOauth: boolean,
+  mcpOAuth: boolean,
 ): void {
   let config: Record<string, unknown>
   try {
@@ -1139,7 +1138,7 @@ function warnMissingBuildOwnedKeys(
   }
 
   warnMissingHtmlHandling(configPath, config)
-  warnOauthDrift(configPath, config, mcpOauth)
+  warnOAuthDrift(configPath, config, mcpOAuth)
 }
 
 /**
@@ -1182,12 +1181,12 @@ function warnMissingHtmlHandling(configPath: string, config: Record<string, unkn
  * binding is inert either way. What must not happen is the build passing in
  * silence.
  */
-function warnOauthDrift(
+function warnOAuthDrift(
   configPath: string,
   config: Record<string, unknown>,
-  mcpOauth: boolean,
+  mcpOAuth: boolean,
 ): void {
-  if (mcpOauth || !oauthKvBinding(config)) {
+  if (mcpOAuth || !oauthKvBinding(config)) {
     return
   }
 

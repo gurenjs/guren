@@ -17,8 +17,8 @@ import { fileURLToPath } from 'node:url'
  * not TypeScript to any tool, so nothing typechecks it, nothing parses it, and
  * an editor shows it as a string. These files are inside the root `tsconfig`
  * program (`packages/**` less the explicitly excluded trees), so
- * `bun run typecheck` compiles them as app-shaped code, and
- * `tests/mcp-oauth-templates.test.ts` gates the rest.
+ * `bun run typecheck` compiles them as app-shaped code, and the
+ * `mcp-oauth templates` block in `src/mcp-oauth.test.ts` gates the rest.
  *
  * `templates/` is listed in this package's `files`, so it is published. It is
  * outside `dist/`, which is why the URL below climbs one level — the same
@@ -26,6 +26,12 @@ import { fileURLToPath } from 'node:url'
  * from `src/` alike.
  */
 const templateDir = fileURLToPath(new URL('../templates/mcp-oauth', import.meta.url))
+
+/** The routes template, named once — the scaffold reports on it specifically. */
+export const MCP_OAUTH_ROUTES_FILE = 'routes/mcp-oauth.ts'
+
+/** The controller template, named for the assertions that read its source. */
+export const MCP_OAUTH_CONTROLLER_FILE = 'app/Http/Controllers/McpOAuthController.ts'
 
 /**
  * Every file the consent-flow scaffold writes, in the order it writes them.
@@ -36,22 +42,20 @@ const templateDir = fileURLToPath(new URL('../templates/mcp-oauth', import.meta.
  * declaration emit, for instance.
  */
 export const MCP_OAUTH_TEMPLATE_FILES = [
-  'app/Http/Controllers/McpOAuthController.ts',
-  'routes/mcp-oauth.ts',
+  MCP_OAUTH_CONTROLLER_FILE,
+  MCP_OAUTH_ROUTES_FILE,
 ] as const
-
-/** The routes template, named once — the scaffold reports on it specifically. */
-export const MCP_OAUTH_ROUTES_FILE = 'routes/mcp-oauth.ts'
 
 /**
  * The registrar the routes template exports. Named here because two places
  * spell it — the template, and the wiring instruction the scaffold prints —
  * and a rename that updated only one would print an import of a function that
- * does not exist. `tests/mcp-oauth-templates.test.ts` pins the pair.
+ * does not exist. The `mcp-oauth templates` block in `src/mcp-oauth.test.ts`
+ * pins the pair.
  */
 export const MCP_OAUTH_REGISTRAR = 'registerMcpOAuthRoutes'
 
 /** Read one shipped template, `path` in POSIX form and relative to the tree. */
-export function loadMcpOauthTemplate(path: string): string {
+export function loadMcpOAuthTemplate(path: string): string {
   return readFileSync(join(templateDir, ...path.split('/')), 'utf8')
 }
