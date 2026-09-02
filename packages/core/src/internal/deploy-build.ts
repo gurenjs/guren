@@ -353,14 +353,39 @@ export function ssrRuntimePaths(
 }
 
 /**
+ * Delete the dev-mode `index.html` shell from a directory a platform serves
+ * statically.
+ *
+ * Guren-specific knowledge, not platform policy, which is why it is shared:
+ * the shell exists so Vite can serve the app in dev, and every deploy target
+ * answers for its static directory before the function runs — so shipping it
+ * shadows the app's own root route, which then never executes. Exact name
+ * only: the shell is written by the framework's own scaffolding, so there is
+ * no case variant of it to catch, and a platform's asset directory otherwise
+ * belongs to the app.
+ *
+ * Separate from `stageStaticAssets` because a platform whose layout differs
+ * needs this rule without the rest — `@guren/plugin-vercel` stages `public/`
+ * itself, having no `/public/assets` mirror to build (its generated
+ * `config.json` carries a rewrite instead), and shipped the shadowing shell
+ * for exactly as long as the rule lived inside the function it could not call.
+ */
+export function removeShadowingIndex(assetsOut: string): void {
+  const shadowingIndex = resolve(assetsOut, 'index.html')
+  if (existsSync(shadowingIndex)) {
+    rmSync(shadowingIndex)
+  }
+}
+
+/**
  * Copy `public/` into a platform's static-asset staging directory.
  *
- * Two pieces of Guren-specific knowledge, not platform policy, which is why
- * this is shared: the dev-mode `index.html` shell must never ship (it would
- * shadow the app's root route on any host that serves static files first), and
- * built assets self-reference the Vite plugin's derived base `/public/assets/`
- * while HTML references use `/assets/` — so on a host without rewrites the
- * built-assets directory has to appear under both prefixes.
+ * Carries one piece of Guren-specific knowledge of its own, which is why it is
+ * shared rather than per-plugin: built assets self-reference the Vite plugin's
+ * derived base `/public/assets/` while HTML references use `/assets/` — so on
+ * a host without rewrites the built-assets directory has to appear under both
+ * prefixes. The shadowing-shell rule it also applies belongs to
+ * `removeShadowingIndex`, stated there.
  */
 export function stageStaticAssets(publicDir: string, assetsOut: string): void {
   mkdirSync(assetsOut, { recursive: true })
@@ -371,10 +396,7 @@ export function stageStaticAssets(publicDir: string, assetsOut: string): void {
 
   cpSync(publicDir, assetsOut, { recursive: true })
 
-  const shadowingIndex = resolve(assetsOut, 'index.html')
-  if (existsSync(shadowingIndex)) {
-    rmSync(shadowingIndex)
-  }
+  removeShadowingIndex(assetsOut)
 
   const clientAssetsDir = resolve(publicDir, 'assets')
   if (existsSync(clientAssetsDir)) {
