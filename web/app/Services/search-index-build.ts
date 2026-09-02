@@ -49,10 +49,11 @@ export interface IndexRow {
 }
 
 /**
- * A NUL truncates a SQL string literal inside the parser rather than failing,
- * so `quote()` drops them — and the build id has to hash what is stored, or
- * two corpora that produce byte-identical SQL would get different ids and
- * reindex for nothing.
+ * A NUL ends a SQL string literal inside the parser rather than failing, so it
+ * cannot reach the generated file. Dropped here rather than at quoting time
+ * because the build id hashes these fields: strip them later and two corpora
+ * producing byte-identical SQL would get different ids and reindex for
+ * nothing.
  */
 function withoutNul(value: string): string {
   return value.replace(/\u0000/gu, '')
@@ -85,7 +86,7 @@ export function collectRows(docs: DocsByLocale): IndexRow[] {
             locale,
             category,
             slug,
-            anchor: section.anchor,
+            anchor: withoutNul(section.anchor),
             docTitle: withoutNul(doc.title),
             heading: withoutNul(section.heading),
             body: withoutNul(section.body),
@@ -152,9 +153,16 @@ export function searchTableName(buildId: string): string {
   return `doc_search_${buildId}`
 }
 
-/** SQL string literal. A NUL would truncate it inside the parser, silently. */
+/**
+ * SQL string literal, quoted the way drizzle would quote it — checked against
+ * its inliner over a few hundred hostile values in `tests/sqlite`.
+ *
+ * Only the quoting. A NUL would end the literal inside SQLite's parser rather
+ * than fail, and it is dropped upstream by `withoutNul()`, where the build id
+ * can see the same text this writes.
+ */
 function quote(value: string): string {
-  return `'${value.replace(/\u0000/gu, '').replace(/'/gu, "''")}'`
+  return `'${value.replace(/'/gu, "''")}'`
 }
 
 /**

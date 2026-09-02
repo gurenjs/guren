@@ -12,6 +12,9 @@
  */
 import { Database } from 'bun:sqlite'
 
+import { drizzle } from 'drizzle-orm/bun-sqlite'
+import { sql } from 'drizzle-orm'
+
 import { beforeAll, describe, expect, test } from 'bun:test'
 
 import {
@@ -196,5 +199,94 @@ describe('bm25 weights', () => {
     // it removes it: every row comes back with the same score.
     expect(new Set(ranks(BM25_WEIGHTS.tokens)).size).toBe(1)
     expect(new Set(ranks(BM25_WEIGHTS.unigram)).size).toBeGreaterThan(1)
+  })
+})
+
+describe('SQL string escaping', () => {
+  /**
+   * What drizzle would put in the statement for this value, had it built one.
+   *
+   * `inlineParams()` is public; reaching the dialect that renders it is not,
+   * which is why the generator does its own quoting rather than depending on
+   * this. Using it here is the point: it turns three lines of hand-written
+   * `replace` into something checked against a parser-aware implementation,
+   * and if the internal moves, only this test breaks.
+   */
+  const inlineAsDrizzleWould = (() => {
+    const handle = drizzle({ client: new Database(':memory:') }) as unknown as {
+      dialect: { sqlToQuery(query: unknown): { sql: string } }
+    }
+    return (value: string): string => handle.dialect.sqlToQuery(sql`${value}`.inlineParams()).sql
+  })()
+
+  /**
+   * Every hostile fragment on its own and in every ordered pair — a few
+   * hundred values, which is more of the space than any fixture spells out.
+   * The corpus is TypeScript documentation, so quotes, semicolons, backslashes
+   * and template syntax are ordinary content rather than edge cases.
+   */
+  const FRAGMENTS = [
+    "it's",
+    "''",
+    '"',
+    '`',
+    ';',
+    '--',
+    '/*',
+    '\\',
+    '${x}',
+    '\n',
+    '\t',
+    ')',
+    'x',
+    '認証',
+    '🎉',
+  ]
+  const VALUES = FRAGMENTS.flatMap((a) => FRAGMENTS.map((b) => `${a}${b}`)).concat(FRAGMENTS)
+
+  test('quotes every value the way drizzle would', () => {
+    const rows = VALUES.map((value, index) => ({
+      title: `t${index}`,
+      html: `<h1 id="h${index}">H</h1><p>${value.replace(/</gu, '&lt;')}</p>`,
+    }))
+    const corpus: DocsByLocale = {
+      en: { guides: Object.fromEntries(rows.map((doc, index) => [`doc-${index}`, doc])) },
+    }
+
+    const collected = collectRows(corpus)
+    const generated = renderIndexSql(collected, 'escapecheck')
+
+    expect(collected.length).toBeGreaterThanOrEqual(VALUES.length)
+    for (const row of collected) {
+      for (const value of [row.docTitle, row.heading, row.body, row.bodyTokens]) {
+        expect(generated).toContain(inlineAsDrizzleWould(value))
+      }
+    }
+  })
+
+  test('drops a NUL that drizzle would pass through', () => {
+    // The one deliberate difference, and it is upstream of quoting: a NUL ends
+    // the literal inside SQLite's parser instead of failing, so it cannot
+    // reach the file — from the body, from a heading, or from an anchor a
+    // hand-written `id` put there.
+    const value = 'a' + '\u0000' + 'b'
+    expect(inlineAsDrizzleWould(value)).toContain('\u0000')
+
+    const generated = renderIndexSql(
+      collectRows({
+        en: {
+          guides: {
+            doc: {
+              title: `T${value}`,
+              html: `<h1 id="h${value}">H${value}</h1><p>${value}</p>`,
+            },
+          },
+        },
+      }),
+      'nulcheck',
+    )
+
+    expect(generated).not.toContain('\u0000')
+    expect(generated).toContain('doc_sections_nulcheck')
   })
 })
