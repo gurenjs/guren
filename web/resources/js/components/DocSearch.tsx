@@ -1,5 +1,6 @@
 import { Link } from '@inertiajs/react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 import {
   createDebouncedDocSearch,
@@ -255,7 +256,13 @@ export function DocSearch({ locale, className = '' }: DocSearchProps) {
         </kbd>
       </button>
 
-      {open && (
+      {open &&
+        // Rendered into the body rather than in place. The trigger sits inside
+        // `.docs-sidebar`, which is `position: sticky` — and sticky creates a
+        // stacking context, so `z-50` here only ordered the dialog *within the
+        // sidebar*. The article's code blocks are `position: relative` and come
+        // later in the document, so they painted over it.
+        createPortal(
         <div
           className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-4 pt-[10vh]"
           onMouseDown={(event) => {
@@ -376,8 +383,9 @@ export function DocSearch({ locale, className = '' }: DocSearchProps) {
               <span className="docs-mono ml-auto">esc</span>
             </div>
           </div>
-        </div>
-      )}
+        </div>,
+          document.body,
+        )}
     </>
   )
 }
