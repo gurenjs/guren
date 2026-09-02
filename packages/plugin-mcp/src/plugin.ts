@@ -29,6 +29,7 @@ import {
 } from '@guren/core'
 import type { Context } from 'hono'
 
+import { readExternalMcpAuth, type ExternalMcpAuth } from './external-auth'
 import { AgentRateLimiter, type RateLimitConfig } from './rate-limit'
 import { createAppMcpServer } from './server'
 
@@ -52,6 +53,40 @@ export interface McpPluginConfig {
    * @default true
    */
   updateLastUsed?: boolean
+  /**
+   * How a request to this endpoint is authenticated.
+   *
+   * Unset (the default) is the bearer contract this endpoint has always had:
+   * the app must call `auth.useTokens(store)`, every request presents an
+   * `Authorization: Bearer`, and the token's `abilities` are the scopes.
+   *
+   * `'external'` declares that **every** request arrives already verified by
+   * something in front of the app — today, the OAuth provider a worker built
+   * with `guren cloudflare:build --mcp-oauth` wraps the app in. That authority
+   * hands the principal in over an in-process request-identity seam (see
+   * `./external-auth`), never a header.
+   *
+   * Fail-closed in both directions, which is the whole reason this is an
+   * explicit option rather than an inference:
+   *
+   * - **With** `'external'`, a request carrying no seam auth is refused 401.
+   *   It never falls back to bearer verification, so an OAuth-fronted
+   *   deployment cannot be reached by presenting a token the provider was
+   *   supposed to be the only issuer of, and a deployment whose provider
+   *   wrapping was lost in a rebuild fails loudly instead of quietly
+   *   accepting a different credential.
+   * - **Without** it, seam auth is still honoured when present — the generated
+   *   worker is inside the trust boundary — but a request without it takes the
+   *   unchanged bearer path, including the 500 an app with no token store
+   *   already answers. An app that has both surfaces keeps both.
+   *
+   * An app configured `'external'` needs no `ApiToken` store at all: the store
+   * is consulted only to verify a bearer, and under this option there is never
+   * a bearer to verify.
+   *
+   * @default undefined — bearer tokens
+   */
+  auth?: 'external'
   /**
    * Where the audit trail is written (RFC 0016 §5.2). Omitted, there is no
    * sink and nothing is written — `AgentToolInvoked` / `AgentToolDenied` are
@@ -161,6 +196,13 @@ export interface McpPluginConfig {
  * against the same store the token guard uses. The check is per request, not
  * at boot — provider order does not guarantee the app's auth configuration
  * has run before this plugin boots.
+ *
+ * The one exception is a request whose caller some authority *in front of* the
+ * app already verified, presented over the request-identity seam in
+ * `./external-auth` — an OAuth-fronted Workers deployment built with
+ * `guren cloudflare:build --mcp-oauth`. Such a request never touches the token
+ * store, so an app serving only that surface configures `auth: 'external'` and
+ * needs no store at all.
  */
 const factory = definePlugin<McpPluginConfig>({
   name: 'mcp',
@@ -249,39 +291,25 @@ const factory = definePlugin<McpPluginConfig>({
     }
 
     app.hono.all(path, async (c) => {
-      const store = auth.getApiTokenStore()
-      if (!store) {
-        return c.json(
-          {
-            error: 'misconfigured',
-            message:
-              'The MCP endpoint requires token auth: call auth.useTokens(store) in your '
-              + 'application so bearer tokens can be verified.',
-          },
-          500,
-        )
+      // Consulted *first*, and on the raw request object rather than anything
+      // rebuilt from it: a hit means an authority in front of the app already
+      // verified this caller, so the bearer machinery below — the token store
+      // included — is not merely unnecessary but wrong to consult.
+      const external = readExternalMcpAuth(c.req.raw)
+
+      const resolved = external
+        ? fromExternalAuth(external)
+        : await verifyBearer(c, auth, config)
+
+      if (resolved instanceof Response) {
+        return resolved
       }
 
-      const bearer = readBearerToken(c.req.header('Authorization'))
-      if (!bearer) {
-        return unauthorized(c, 'A bearer token is required.')
-      }
-      const verified = await verifyApiToken(bearer, store, {
-        updateLastUsed: config.updateLastUsed ?? true,
-      })
-      if (!verified) {
-        return unauthorized(c, 'The bearer token is invalid, expired, or revoked.')
-      }
-
-      const principal: AgentPrincipal = {
-        kind: 'user',
-        id: verified.userId,
-        abilities: verified.abilities,
-      }
+      const { principal, abilities, rateKey, authorization } = resolved
 
       const server = createAppMcpServer({
         tools: exposed,
-        abilities: verified.abilities,
+        abilities,
         // Rebuilt per request because the principal is: an approval is bound
         // to who asked for it, and a context hoisted to boot would carry
         // whichever caller happened to arrive first.
@@ -302,9 +330,9 @@ const factory = definePlugin<McpPluginConfig>({
           : {}),
         serverInfo,
         limiter,
-        rateKey: verified.token.id,
+        rateKey,
         dispatch: (tool, args, dispatchOptions) =>
-          dispatchThroughApp(app, c, tool, args, dispatchOptions?.preflight),
+          dispatchThroughApp(app, c, tool, args, authorization, dispatchOptions?.preflight),
         onInvoked: (tool, args, status, durationMs) => {
           emit(
             new AgentToolInvoked(
@@ -338,6 +366,115 @@ const factory = definePlugin<McpPluginConfig>({
     })
   },
 })
+
+/**
+ * Everything a resolved caller settles for the rest of the request: who they
+ * are, what they may reach, what the rate limiter counts them under, and what
+ * — if anything — the re-entrant HTTP request should present as its own
+ * credential.
+ */
+interface ResolvedCaller {
+  principal: AgentPrincipal
+  abilities: readonly string[]
+  /**
+   * The rate limiter's bucket key. Never `undefined`: a missing key silently
+   * turns the per-caller limiter into no limiter at all, which is a security
+   * regression that no test of the *happy* path can see.
+   */
+  rateKey: string
+  /**
+   * `Authorization` to forward into the dispatched request, or `undefined` for
+   * a surface whose credential the application cannot verify.
+   */
+  authorization: string | undefined
+}
+
+/**
+ * A caller the seam presented — verified by an authority in front of the app.
+ *
+ * Two deliberate differences from the bearer path, both narrowing:
+ *
+ * - **`rateKey` is per principal, not per token.** There is no token here to
+ *   key on. Coarser by construction: two OAuth grants to the same user share
+ *   one bucket, where two API tokens for that user would not. That is the
+ *   right direction for a floor — it can only limit more, never less — and a
+ *   per-grant budget is the provider's to enforce, not this endpoint's.
+ * - **No `Authorization` is forwarded.** The bearer the caller presented is
+ *   the *provider's* access token; the application's own token guard has never
+ *   seen it and cannot verify it, so forwarding it would hand the app a
+ *   credential nothing in it can judge — and put an unrelated authority's
+ *   secret into whatever the app does with that header. The re-entrant request
+ *   is therefore unauthenticated as far as the app's own guards are concerned:
+ *   this endpoint's scope gate and the route's policies still run, but a route
+ *   behind `requireApiToken` answers 401 on this surface. Closing that needs
+ *   the auth context itself to consult a principal seam, which is RFC 0017 §2
+ *   and not this change.
+ */
+function fromExternalAuth(external: ExternalMcpAuth): ResolvedCaller {
+  return {
+    principal: external.principal,
+    abilities: external.scopes,
+    rateKey: `external:${external.principal.kind}:${String(external.principal.id)}`,
+    authorization: undefined,
+  }
+}
+
+/**
+ * The bearer path, unchanged in behaviour and in order — store, then header,
+ * then verification — so an app that never presents the seam sees exactly what
+ * it saw before.
+ *
+ * `auth: 'external'` short-circuits it entirely: that option declares every
+ * request arrives seam-authenticated, so a request without the seam is refused
+ * rather than offered a second way in.
+ *
+ * @returns the resolved caller, or the `Response` to answer with.
+ */
+async function verifyBearer(
+  c: Context,
+  auth: AuthManager,
+  config: McpPluginConfig,
+): Promise<ResolvedCaller | Response> {
+  if (config.auth === 'external') {
+    return unauthorized(
+      c,
+      'This endpoint is configured for external authentication (mcpPlugin({ auth: \'external\' })): '
+      + 'requests must arrive through the authenticating layer in front of the application.',
+    )
+  }
+
+  const store = auth.getApiTokenStore()
+  if (!store) {
+    return c.json(
+      {
+        error: 'misconfigured',
+        message:
+          'The MCP endpoint requires token auth: call auth.useTokens(store) in your '
+          + 'application so bearer tokens can be verified.',
+      },
+      500,
+    )
+  }
+
+  const header = c.req.header('Authorization')
+  const bearer = readBearerToken(header)
+  if (!bearer) {
+    return unauthorized(c, 'A bearer token is required.')
+  }
+  const verified = await verifyApiToken(bearer, store, {
+    updateLastUsed: config.updateLastUsed ?? true,
+  })
+  if (!verified) {
+    return unauthorized(c, 'The bearer token is invalid, expired, or revoked.')
+  }
+
+  return {
+    principal: { kind: 'user', id: verified.userId, abilities: verified.abilities },
+    abilities: verified.abilities,
+    rateKey: verified.token.id,
+    authorization: header,
+  }
+}
 
 /**
  * Wrap the application's `notify` so a notification failure can neither fail
@@ -396,6 +533,7 @@ async function dispatchThroughApp(
   c: Context,
   tool: DerivedAgentTool,
   args: Record<string, unknown>,
+  authorization: string | undefined,
   preflight?: boolean,
 ): Promise<ToolCallOutcome> {
   // `preflight` is never an argument of the tool being checked on this
@@ -419,7 +557,10 @@ async function dispatchThroughApp(
     // 0016's "in production" apps are encouraged to enable — reject every
     // tool call with 403.
     origin: new URL(c.req.url).origin,
-    authorization: c.req.header('Authorization'),
+    // Passed in rather than read off the inbound request: on the seam surface
+    // the inbound `Authorization` belongs to an authority the application
+    // cannot verify — see `fromExternalAuth`.
+    authorization,
     preflight,
   })
   if (!('request' in built)) {
