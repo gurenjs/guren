@@ -147,6 +147,8 @@ vercel deploy --prebuilt
 > [!NOTE]
 > このプラグインは SSR アプリ専用です。Vite マニフェストを読み取り、サーバーレス関数に正しい `GUREN_INERTIA_*` 環境変数を注入します。API-only アプリは Docker や Lambda を使ってください。
 
+`public/` は `.vercel/output/static` にコピーされ、関数より先に CDN が配信します。そのため生成される `config.json` には、ブラウザがドキュメントとして描画する形式 (`.html`、`.htm`、`.svg`、`.xhtml`、`.xml`) に `Content-Disposition: attachment` と `X-Content-Type-Options: nosniff` を付けるルートが入ります。フレームワークが自分で `public/` を配信するときと同じ扱いです。このルートは `handle: "hit"` の後ろに置かれるため、CDN が応答したファイルにだけ適用され、動的な `/sitemap.xml` のように関数が返すパスには影響しません。
+
 ## Cloudflare Workers
 
 公式プラグインを使うと、データベースに D1 を用いて Cloudflare Workers 上でアプリを動かせます。

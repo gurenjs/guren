@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { MCP_TRANSPORT_SPECIFIER } from '@guren/core/internal/deploy-build'
+import { DOCUMENT_ASSET_EXTENSIONS, MCP_TRANSPORT_SPECIFIER } from '@guren/core/internal/deploy-build'
 import { buildCloudflareOutput } from './build'
 
 function writeJson(path: string, value: unknown): void {
@@ -267,6 +267,117 @@ describe('buildCloudflareOutput', () => {
     await expect(buildCloudflareOutput({ rootDir: root, skipAppBuild: true })).rejects.toThrow(
       /app entry not found/,
     )
+  })
+})
+
+describe('static document headers', () => {
+  let root: string
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'guren-cf-doc-headers-'))
+  })
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  test('should write a _headers rule for every document extension', async () => {
+    scaffoldApp(root)
+
+    await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
+
+    const headers = readFileSync(join(root, '.cloudflare/assets/_headers'), 'utf8')
+    // Derived from the shared list rather than spelled out here, so an
+    // extension added there fails this until it has a rule. One splat per
+    // pattern: a second one is a parse error the platform answers by dropping
+    // the rule, which would read as a rule that is present and matches nothing.
+    for (const extension of DOCUMENT_ASSET_EXTENSIONS) {
+      expect(headers).toContain(
+        `/*.${extension}\n  Content-Disposition: attachment\n  X-Content-Type-Options: nosniff`,
+      )
+    }
+  })
+
+  test('should leave the types a browser cannot render as a document alone', async () => {
+    scaffoldApp(root)
+
+    await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
+
+    const headers = readFileSync(join(root, '.cloudflare/assets/_headers'), 'utf8')
+    // The whole point of the disposition is that subresources keep loading;
+    // a rule reaching scripts, stylesheets or images would break the app.
+    expect(headers).not.toContain('/*.js')
+    expect(headers).not.toContain('/*.css')
+    expect(headers).not.toContain('/*.png')
+  })
+
+  test('should keep an app-authored _headers and rule ahead of it', async () => {
+    scaffoldApp(root)
+    writeFileSync(join(root, 'public/_headers'), '/*\n  X-Frame-Options: DENY\n')
+
+    await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
+
+    const headers = readFileSync(join(root, '.cloudflare/assets/_headers'), 'utf8')
+    expect(headers).toContain('X-Frame-Options: DENY')
+    // Only the first rule naming a header sets it, so going second would turn
+    // an app's own Content-Disposition into "inline, attachment".
+    expect(headers.indexOf('Content-Disposition: attachment')).toBeLessThan(
+      headers.indexOf('X-Frame-Options: DENY'),
+    )
+  })
+
+  test('should name html_handling for a config that predates it', async () => {
+    scaffoldApp(root)
+    const configPath = join(root, 'wrangler.jsonc')
+
+    // Scaffold a complete config and take only html_handling back out, so the
+    // build-owned warning stays silent and this asserts the new message rather
+    // than whatever else an incomplete fixture would have triggered.
+    await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
+    const scaffolded = JSON.parse(readFileSync(configPath, 'utf8'))
+    delete scaffolded.assets.html_handling
+    writeJson(configPath, scaffolded)
+
+    const warning = await captureWarnings(async () => {
+      await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
+    })
+
+    // Its own message, with its own consequence. Folded into the build-owned
+    // list it would arrive under "the worker will fail to start or skip
+    // migrations", which is not true of it, and would never say the thing the
+    // reader most needs to know — that adding it changes how HTML is served.
+    expect(warning).toContain('"html_handling": "none"')
+    expect(warning).toContain('stops answering at /about')
+    expect(warning).not.toContain('predates this plugin version')
+  })
+
+  test('should leave an app that named another html_handling alone', async () => {
+    scaffoldApp(root)
+    writeJson(join(root, 'wrangler.jsonc'), {
+      name: 'legacy',
+      main: '.cloudflare/worker.js',
+      // Typed by hand, so it is a decision rather than an omission — the
+      // /*.html rule is weaker for it, and that is the app's call to make.
+      assets: { directory: '.cloudflare/assets', html_handling: 'auto-trailing-slash' },
+    })
+
+    const warning = await captureWarnings(async () => {
+      await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
+    })
+
+    expect(warning).not.toContain('html_handling')
+  })
+
+  test('should serve staged HTML at its own path so the html rule is not vacuous', async () => {
+    scaffoldApp(root)
+
+    await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
+
+    const config = JSON.parse(readFileSync(join(root, 'wrangler.jsonc'), 'utf8'))
+    // The platform default serves public/page.html at /page and redirects
+    // /page.html there, so the /*.html rule would only ever land on the
+    // redirect and the document itself would stay inline.
+    expect(config.assets.html_handling).toBe('none')
   })
 })
 
