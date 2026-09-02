@@ -9,6 +9,7 @@ import {
   DOCUMENT_ASSET_EXTENSIONS,
   DOCUMENT_ASSET_HEADERS,
   MCP_SDK_SUBPATH_PREFIX,
+  removeShadowingIndex,
   renderDevOnlyStub,
   stubbableDevOnlyModules,
   resetOutputDir,
@@ -196,7 +197,12 @@ export async function buildVercelOutput(options: BuildVercelOutputOptions = {}):
   }
 
   if (existsSync(publicDir)) {
+    // No `/public/assets` mirror here, unlike `stageStaticAssets`: the
+    // generated `config.json` rewrites `/public/(.*)` onto the output root
+    // instead. The dev shell still has to go — the CDN answers for `static/`
+    // ahead of the function, so `index.html` would shadow the app's root route.
     cpSync(publicDir, resolve(out, 'static'), { recursive: true })
+    removeShadowingIndex(resolve(out, 'static'))
   }
 }
 

@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
@@ -261,6 +261,24 @@ describe('@guren/plugin-vercel', () => {
       // It has to win before the filesystem handler, which would otherwise
       // miss and fall through to the function.
       expect(routes.findIndex((route) => route.handle === 'filesystem')).toBeGreaterThan(0)
+    })
+
+    it('drops the dev index.html shell so it cannot shadow the app root route', async () => {
+      // `{ handle: 'filesystem' }` runs ahead of the catch-all to the
+      // function, so a staged index.html answers `/` before the app's root
+      // route ever runs. Cloudflare and Lambda already dropped it, through
+      // `stageStaticAssets`; this build stages `public/` itself.
+      const app = scaffoldApp(root, { entrypoint: 'src/vercel.ts' })
+      mkdirSync(join(root, 'public'), { recursive: true })
+      writeFileSync(join(root, 'public/index.html'), '<!doctype html><div id="app"></div>\n')
+      writeFileSync(join(root, 'public/robots.txt'), 'User-agent: *\n')
+
+      await buildVercelOutput(app)
+
+      expect(existsSync(join(app.outputDir, 'static/index.html'))).toBe(false)
+      // The sibling proves the copy ran at all: without it a fixture writing
+      // to the wrong path would pass the assertion above unchanged.
+      expect(existsSync(join(app.outputDir, 'static/robots.txt'))).toBe(true)
     })
 
     it('forces the document types under static/ to download', async () => {
