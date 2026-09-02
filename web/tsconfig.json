@@ -28,6 +28,7 @@
     "jsx": "react-jsx"
   },
   "include": [
+    "scripts",
     "src",
     "app",
     "modules",

@@ -7,16 +7,15 @@
  *   .guren/search-index.sql     — applied to D1 by the deploy workflow
  *   .guren/search-index.gen.ts  — the table names, baked into the Worker
  *
- * Ordering matters, and it is possible to get wrong in both directions. The
- * generated module has to exist *before* `vite build`, or the bundle ships
- * without the table names it needs; the SQL has to be applied *before*
- * `wrangler deploy`, or the deployed Worker names tables nobody created. And
- * nothing goes in `.cloudflare/` — `buildCloudflareOutput()` deletes that
- * directory wholesale (packages/plugin-cloudflare/src/build.ts).
+ * Ordering matters in both directions, and `vite build` is not one of them:
+ * `.cloudflare/worker.js` imports `src/app.ts` by path, so wrangler bundles
+ * the app — and reads the generated module — at deploy time. What this has to
+ * sit between is the docs prerender, which it reads, and `wrangler deploy`,
+ * which is what bakes the table names in and what the SQL has to precede.
+ * Nothing goes in `.cloudflare/` either: `buildCloudflareOutput()` deletes
+ * that directory wholesale (packages/plugin-cloudflare/src/build.ts).
  *
- *   bun run prerender
- *   bun scripts/build-search-index.ts
- *   bun run build && bun scripts/cloudflare-build.ts
+ *   bun run --cwd web cloudflare:build    # prerenders, then builds this
  *   wrangler d1 execute … --file=.guren/search-index.sql   # if the id moved
  *   wrangler deploy
  *

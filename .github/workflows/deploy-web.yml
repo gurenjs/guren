@@ -53,6 +53,9 @@ jobs:
       - name: Build packages
         run: bun run build
 
+      # Also builds the docs search index, which the deploy needs: wrangler
+      # bundles src/app.ts itself, so the table names reach the Worker from
+      # .guren/search-index.gen.ts when `wrangler deploy` runs, not earlier.
       - name: Build worker
         run: bun run --cwd web cloudflare:build
 
@@ -61,5 +64,21 @@ jobs:
       - name: Apply D1 migrations
         run: cd web && bunx wrangler d1 migrations apply guren-web --remote
 
+      # Skips when the corpus is unchanged, which is most deploys. Reindexing
+      # every time would exceed D1's free write budget on a busy day. A
+      # changed corpus does import ~4 MB here, and D1 does not serve the
+      # database while an import runs — the site's other D1 routes stall for
+      # those seconds too. The import is atomic, which is worth that.
+      - name: Load the docs search index
+        run: cd web && bun run search:apply
+
       - name: Deploy
         run: cd web && bunx wrangler deploy
+
+      # Only on the success path: the state row records what has been loaded,
+      # not what is live, so a deploy that failed at the step above would have
+      # this delete the tables the still-live Worker is naming. Keeps two
+      # builds, because `wrangler rollback` brings back an earlier Worker and
+      # not an earlier database.
+      - name: Retire superseded search tables
+        run: cd web && bun run search:prune
