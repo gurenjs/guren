@@ -1,5 +1,53 @@
 # @guren/plugin-lambda
 
+## 0.4.0
+
+### Minor Changes
+
+- 2d99a8c: Carry the static-document download policy onto AWS Lambda's CloudFront distribution.
+
+  The CDK construct stages `public/` into S3 and puts a cache behavior for it in
+  front of the app, so CloudFront answers for those files before the function
+  runs and the framework's own guard never sees the request: an `.svg` under
+  `public/` rendered inline, script and all, on the app's origin. This is the
+  same gap the Cloudflare and Vercel builds close, on the third target that
+  serves `public/` off-app.
+
+  The construct now attaches a viewer-response CloudFront function to the asset
+  behaviors, setting `Content-Disposition: attachment` and
+  `X-Content-Type-Options: nosniff` on the types a browser renders as a
+  document. Its extensions come from the same `DOCUMENT_ASSET_EXTENSIONS` the
+  other two plugins read, so the three targets cannot drift apart.
+
+  A function rather than one cache behavior per extension: a behavior is chosen
+  by path, so `*.svg` would also capture a `/feed.svg` the _app_ renders and
+  send it to S3, and CloudFront's default limit of 25 behaviors is already spent
+  one per staged root entry. The association rides on the asset behaviors alone,
+  so the default behavior — your app — keeps answering with its own headers.
+  Reading the extension off the path also covers `logo.SVG`, which the framework
+  guard catches and a literal pattern cannot.
+
+  Deploying `.lambda/assets` by hand, without the construct, still serves those
+  files inline; the serverless guide says so.
+
+### Patch Changes
+
+- 691f12a: Stop compiling the App MCP endpoint shut when an app depends on `@guren/plugin-mcp`.
+
+  All three deploy plugins stubbed `@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js`, which `@guren/plugin-mcp` dynamically imports to serve the endpoint; Lambda and Vercel additionally routed _every_ unlisted `@modelcontextprotocol/sdk/*` subpath to a throwing stub, which also killed the plugin's static imports of `server/index.js` and `types.js`. A deployed endpoint could therefore never load, with no build error to say so.
+
+  Each platform now derives its stub set from `stubbableDevOnlyModules()`, and Lambda and Vercel drop the SDK-prefix catch-all, from one read of the app's manifest. The dev-only MCP server (`server/mcp.js`), `@guren/cli`, `bun:sqlite` and `vite` stay stubbed on every platform, for every app.
+
+  On Cloudflare the aliases are baked into the app's committed `wrangler.jsonc`, which the scaffold writes once and never overwrites — so an app that adds the plugin after its first deploy would keep the stale alias indefinitely. `cloudflare:build` now fails with the exact alias line to delete when that app depends on `@guren/plugin-mcp`, before it runs the app build.
+
+- Updated dependencies [0346aeb]
+- Updated dependencies [0a5dd3c]
+- Updated dependencies [39db410]
+- Updated dependencies [bf4020f]
+- Updated dependencies [691f12a]
+- Updated dependencies [a6e3a1f]
+  - @guren/core@1.13.0
+
 ## 0.3.0
 
 ### Minor Changes

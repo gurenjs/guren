@@ -1,9 +1,0 @@
----
-'@guren/server': patch
----
-
-Apply the document-disposition guard to the two file-serving routes it had missed, and pin the set of mounts that must carry it.
-
-The guard added for `public/` covers the four routes that reach that directory. Two more routes build file responses of their own and were still serving whatever they found inline: the dev transpile route's static fallback (anything under `resources/js/` that is not TypeScript is handed back as it sits on disk, so a `.html` beside a page component comes back as `text/html`), and the mount serving the built Inertia client out of its package directory. Neither is where an upload lands, which is exactly why they were easy to leave out — but a rule with an exception nobody can name is one nobody can rely on, and `resources/` is a directory a project's own tooling writes into. Both now go through `applyDocumentDisposition`. Neither takes the `inlineDocuments` switch: that escape hatch exists for a `public/` directory holding nothing user-supplied, and these two serve the app's sources and a vendored package.
-
-**The mounts are now pinned in the source, not just covered by tests.** A seventh mount added later would typecheck and pass every existing test, because `serveStatic` builds its own response and a test cannot reach a route it does not know about. Two source-level assertions close that: the set of modules calling `serveStatic(` must equal the known list, and each of those modules must reference `guardStaticDocument` once per mount. Both were mutation-checked against the three ways such a scan can pass while a mount is unprotected — a mount added in a new file, a mount added to an already-listed file, and the guard replaced by a comment naming it. Comments are stripped with `Bun.Transpiler` rather than a regex, because these files are full of route patterns like `'/public/*'` and `/*` opens a block comment.

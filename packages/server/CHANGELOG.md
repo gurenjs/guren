@@ -1,5 +1,246 @@
 # @guren/server
 
+## 2.15.0
+
+### Minor Changes
+
+- 09c56ce: Add the agent approval queue and `guren.approval_status` (RFC 0016 §5.4 item 4).
+
+  A route declaring `agent({ approval: 'required' })` no longer refuses unconditionally. With `mcpPlugin({ approvals: { store, notify } })` configured, the first call becomes a pending record instead of an execution: nothing runs, the approvers are notified, and the caller is handed a request id. Once a human approves the record, repeating the same call with the same arguments performs it — once.
+
+  **The pending answer rides as an error result carrying JSON, on a measured protocol fact.** An MCP `isError: true` result is delivered to the client with its `content` intact, including for a tool that declares an `outputSchema` — no `-32600`, no structured-content validation. Measured directly against the SDK client with a two-tool server, one plain and one with an output schema, both returning `isError` with a JSON body; both bodies arrived whole. That is what makes the pending state expressible at all, and it rides as a second content block rather than as `structuredContent`, which MCP defines for _successful_ results.
+
+  **Approval binds to the arguments, not just the tool.** One canonicalization (`canonicalizeAgentApprovalInput`), hashed by `agentApprovalFingerprint`, read by both the creation and the lookup path — approving `posts.destroy {id: 5}` does not authorize `{id: 9}`. Key order does not change the match at any depth; types, array order, and absent-vs-null deliberately do. The fingerprint is taken over the **raw** arguments while the record stores the _redacted_ copy: fingerprinting the redacted copy would make approving `users.setPassword {id: 5, password: '…'}` authorize the same call with a different password. Only the hash is stored, so the queue does not become a second place secrets live. Approvals are **single-use** (`consume` is a compare-and-set the store owns) and **expire** (judged by framework code against a clock, never filtered by the store, because a store that forgot to compare would fail open silently), and are bound to the principal that asked. **Consumption happens before dispatch**: an approval is permission for one attempt, not one success — consuming afterwards would let concurrent calls pass the same check and make a crashed call replayable.
+
+  **The store is the application's, opt-in, with no default implementation** — the audit sink's precedent, for the audit sink's reason. This endpoint runs on Workers and Lambda, where a queue that quietly fell back to process memory would approve a record the next isolate never saw. Unconfigured, an `approval: 'required'` tool stays refused fail-closed and absent from `tools/list`, and the refusal names the configuration line. `notify` hands the request over and the application decides who hears about it; `AgentApprovalRequested` ships as a ready-made `Notification` for the common case. The record is persisted before `notify` runs and is not awaited after, so a channel that is down costs an approver a message, never the request or the call.
+
+  `guren.approval_status` is a second reserved meta-tool, `{ requestId }` in, its own output schema out, listed when a queue exists and the token grants at least one tool. **A caller may read only the status of a request it created**: another principal's id answers exactly as an unknown id does, converged on one branch in code, because any difference between the two answers enumerates other principals' pending actions. The audit trail keeps the distinction the caller does not get.
+
+  Two deviations from the design as specified, both recorded in the RFC. A **pending** match is reused rather than re-filed — without that, an agent polling by re-calling the tool creates unbounded records and notifies approvers once per poll. A **rejected** call is not re-asked while its record is unexpired, and the refusal reports `status: 'rejected'` distinctly so a caller can tell it from a wait worth polling.
+
+  `guren check` **fails** a route declaring `approval: 'required'` when it can read the app's `mcpPlugin({ … })` call and finds no `approvals` in it — without a queue the tool is uncallable rather than guarded. Positive evidence only: options this check cannot read (a variable, a spread) and an app with no readable call say nothing, since `guren check` has no per-finding ignore configuration. The option key is exported from `@guren/server` and read from there, never restated, because the CLI cannot import the plugin.
+
+- e4b1ba4: Record `guren tool:call` in the agent audit trail, closing the last unrecorded surface of RFC 0016 §5.2.
+
+  `'cli'` has been a member of `AgentSurface` since the events shipped, and `guren tool:call` is the whole of it — but the command emitted nothing. A developer could call a write tool from a terminal, acting as any user via `--as`, and the trail would show that nothing happened. It now records an `AgentToolInvoked` carrying `surface: 'cli'`, the tool name, the arguments masked through the _called_ route's own `.agent({ redact })` list, the HTTP status, and the duration of the dispatch — measured over the same span the App MCP endpoint measures, so the CSRF priming round-trip this surface needs is not billed to the tool.
+
+  `@guren/server` now owns `createAuditEmitter` (with `AgentAuditEmitter` and `AgentAuditSink`), which `@guren/plugin-mcp` previously defined privately. It is the one rule for announcing an audit event — the sink called directly and the events emitted beside it — and it now has two readers, so a second copy is how one surface comes to swallow a sink failure the other warns about. Every line of its reasoning moves with it, including the measured fact that keeps the sink off the listener list: `EventManager.emit` awaits listeners in priority order inside a bare loop, so one unrelated application listener throwing would end the loop and silence the trail.
+
+  The plugin publishes the emitter it built as the container service `AGENT_AUDIT_BINDING` (`'agent.audit'`), declared in `ServiceBindings` beside every other service name. The _emitter_ is bound rather than the sink, so a second caller cannot build a different one around the same sink and then disagree with the first about whether a failure warns. `guren tool:call` resolves that name — it does not, and must not, depend on `@guren/plugin-mcp`, which is not installed in every application. The name is a constant both sides import, because this is the first binding written by one package and read by another that cannot import it: two literals that drifted would leave the CLI recording nothing, which reads exactly like an application that configured no trail. The resolution is guarded at every step, including a container whose factory throws: a command that failed a tool call in order to record it would be the exact inversion the emitter is built to prevent.
+
+  A `--preflight` is recorded as `guren.preflight`, never under the tool it rehearsed, which is the rule the MCP surface already follows — the handler did not run, so a record naming `posts.destroy` with a success status would be indistinguishable from a destroy that happened. The probed tool rides in the arguments, in the `{ tool, input }` shape the meta-tool's own arguments take on MCP, and the checked route's `redact` list masks the payload inside it. The distinction is decided by the answer rather than the flag: a `--preflight` against an application whose `@guren/core` predates the preflight seam runs the call for real, and that write is recorded under the tool that executed.
+
+  Nothing is bound when no `audit` sink is configured, and then the command records nothing and runs unchanged — the same absence the endpoint already has, not a second sink writing somewhere an operator does not look.
+
+  This surface emits **no** `AgentToolDenied`. Each of the four reasons names a check an adapter performs before synthesizing a request, and this one performs none: it holds no token to scope and no rate budget, and it dispatches directly. Its own two refusals (a missing path parameter, a URL dot-segment) are argument errors none of those reasons describes, and no request is sent for them, so there is no status a record could honestly carry — a deliberate divergence from the MCP endpoint, which answers the same two conditions with a synthetic 400 inside a tool result and records that. What the _application_ refuses arrives as a response, and so as an invocation with that status, exactly as on every other surface.
+
+  The principal is `{ kind: 'user', id }` when `--as` names one and `null` otherwise, with `abilities` omitted rather than sent empty: abilities belong to a token and this surface presents none. `surface: 'cli'` carries the standing fact that no credential was verified, which is what lets the principal record who the application acted as without hedging — collapsing it to `null` would make an impersonation indistinguishable from an anonymous call, which is the one fact a reader of this trail most needs.
+
+- 1fbbb04: Add the agent audit sink and `guren tool:log`, the durable half of RFC 0016 §5.2's audit trail.
+
+  `@guren/server` gains the record: `AgentAuditRecord` is the one JSONL line shape a sink writes and a reader parses, `toAuditRecord(event, now)` derives one from an `AgentToolInvoked` or `AgentToolDenied`, and `parseAuditRecord(line)` reads one back — returning `null` for a blank line or the truncated final line a concurrent append leaves, so a reader stays usable against a file being written to. `DEFAULT_AGENT_AUDIT_PATH` names `storage/logs/agent-audit.log`. Redaction stays the emitter's contract: arguments arrive already masked and are carried across verbatim, because a second redaction rule beside the real one is one nothing reading a record could tell apart from it. The daily-file naming rule (`dir/name-YYYY-MM-DD.ext`) is now one exported function, `dailyFilePath` / `matchDailyFileDate`, that `DailyFileChannel` names its files with and the reader matches on — a second copy is how a writer and a reader drift apart, and the drift shows up as an empty log rather than an error. Extracting it also made the retention sweep's pattern escape its base path, so a log called `app.v1.log` no longer matches — and delete — files whose names merely differ in that position.
+
+  **One behaviour change reaches every `DailyFileChannel`, not only the audit trail.** The retention sweep used to resolve its directory with `path.parse(path).dir`, which is the empty string for a base path that names no directory (`'audit.log'`), and `existsSync('')` is false — so a channel configured that way returned before looking at anything, and its `days` window never expired a single file however old. It now uses `path.dirname`, which answers `'.'`, so the sweep runs in the working directory the channel is already writing into. A channel configured with a bare relative filename therefore starts deleting dated files it previously left alone; only its own, as `matchDailyFileDate` decides, but in a directory that holds far more than a log directory does. Configure such a channel with a path that names its directory if that is not what you want.
+
+  `@guren/plugin-mcp` gains `audit`: `{ file, days }` appends JSONL through the existing daily-file channel (rotation, retention, directory creation), `{ sink }` hands each record to a function. The sink is called **directly**, beside the event emit, and deliberately not subscribed as a listener: `EventManager.emit` awaits its listeners in priority order inside a bare loop with no try/catch, so the first one to throw ends the loop and every listener after it never runs. An unrelated application listener could therefore silence the audit trail, and the only evidence an operator would have of that is an empty file — a record of what agents did may not be contingent on what else the application happens to listen for. The events are still emitted unchanged for every consumer that legitimately is a listener, and a sink records with or without an event manager bound. A sink that throws, or returns a rejected promise, is warned about and does not fail the tool call it was recording; a sink dropping records in silence is the failure this feature exists to prevent.
+
+  **The sink is opt-in, and the RFC is amended in place to say so.** The events themselves are still emitted by default, unchanged; what an application now asks for is somewhere to put them. A framework that appended to a file on its own would be wrong on two of the runtimes this endpoint is specified to run on — Workers has no writable filesystem, Lambda's is ephemeral — so the trail would degrade differently per deployment while the configuration looked identical. An audit trail whose completeness depends on where it happens to be running is worse than one an operator knows is absent.
+
+  `guren tool:log` reads the trail back, with `--tail`/`-f` (following the midnight rollover to a new dated file), `--tool`, `--surface`, `--denied`, `--since 30m`, `-n`, and `--json`. It boots nothing: an audit trail has to be readable when the application it records is not startable. Files are read newest-first across the rotation set so `-n` spanning a rollover works, and `-n` applies after filtering — `--denied -n 50` is the last fifty denials, not the denials among the last fifty records, which over a busy trail is reliably empty and reads as "there were none". When there is no trail the command names the configuration line to add instead of printing an empty list, and it never pre-checks with `existsSync`: a permission error on a parent directory would answer "does not exist" and let the command make exactly the claim it must not. A `--tail` with no trail yet keeps waiting rather than exiting — the first record is exactly what someone running it is waiting for. `runToolLog` takes an optional `signal`, the only way to end a follow short of ending the process; it cuts the poll sleep short so an abort is answered promptly rather than up to one interval later.
+
+- 0346aeb: Add `@guren/server/agent`, the browser-safe half of the agent dispatch surface (RFC 0016 §3, §8).
+
+  `buildToolRequest`, `mapToolResponse` and `advertisesStructuredOutput` were reachable only through the package index, which pulls in the container, Hono, the ORM and the rest of the application graph — everything a client bundle must not carry. The new subpath re-exports exactly the names an _out-of-process_ dispatcher needs, plus types only, and its two transitive imports (`internal/route-path`, `internal/agent-preflight`) are string and regex constants. Pure Web API throughout: nothing from `node:`, nothing Bun-specific, no DOM access at module scope, so it is importable under SSR as well as in a browser.
+
+  The entry deliberately re-exports **no value** from `agent/derive`. `dispatch.ts` imports `DerivedAgentTool` with `import type`, which is what keeps the derivation — and through it `Router` and the authorization middleware — out of the graph; a value re-export would undo that with nothing failing.
+
+  The entry also exports `describeBuildFailure` (with its `ToolRequestBuildFailure` input type): the one wording for the two ways `buildToolRequest` refuses to build — a missing path parameter, a `.`/`..` path value. One function rather than a string per adapter, because the same tool is reachable from several surfaces and an agent that reads a different diagnosis depending on which one it reached would be debugging the client instead of its own call. `@guren/plugin-mcp` and the WebMCP client both read it.
+
+  `BuildToolRequestOptions` gains `surface`, which sets the `X-Guren-Agent-Surface` header the builder previously hardcoded to `'mcp'`. It defaults to `'mcp'`, so every existing caller sends exactly what it sent before, and `'webmcp'` is what an in-browser call announces. The header is informational and write-only inside the framework — it is there for an application that wants to tell the surfaces apart, and no check may ever rest on it, since any client sets any header it likes.
+
+- c9947b9: Add `guren.preflight`, the preflight companion tool on the App MCP surface (RFC 0016 §5.4).
+
+  Preflight could not be an argument of the tool being checked on MCP. A tool advertising an `outputSchema` must answer with `structuredContent` conforming to it unless the result is an error, and a verdict conforms to no route's output — so a tool that sometimes returned a verdict would sometimes violate its own contract, and reporting "allowed" as an error would be worse than not offering preflight at all. The verdict therefore gets a tool of its own: `guren.preflight`, taking `{ tool, input }` and answering with `{ tool, allowed, status, message }` plus the seam's `validated` / `unverified` and, for a refusal, the application's own `errors`. **One meta-tool for the whole catalogue, not one companion per tool** — per-tool companions double the tool count, against RFC 0016 §5.5's own catalogue-quality rule.
+
+  Nothing about it re-implements a check. It resolves the named tool from the same derived set the endpoint serves and dispatches the same re-entrant request an ordinary call does, with `BuildToolRequestOptions.preflight` set, so the route's real middleware runs and the router's preflight seam stops the chain before the handler. A refusal comes back as a **successful** result carrying `allowed: false`: the caller asked whether the call would be allowed, and "no, here is why" answers that. `validated` and `unverified` are absent, not empty, when the request was refused before it reached the seam — a call stopped by authentication has nothing to report about checks it never reached. A response that is neither a verdict nor a refusal means the handler ran, and is reported as an error rather than as a rehearsal that did not happen.
+
+  Checking a tool requires the **same scope** as calling it, or the companion becomes a way to probe the authorization surface of tools the token cannot call; an ungranted name produces the same `AgentToolDenied` (`reason: 'scope'`, naming the checked tool) a direct call would. A tool declaring `approval: 'required'` **is** checkable although it is not callable — that is exactly when "would this be accepted?" is worth asking, and the rehearsal executes nothing. `guren.preflight` is listed only for a token that grants at least one tool, since a token that can call nothing has nothing to rehearse and listing it would map the surface to a caller with no access to it. The call is audited as an `AgentToolInvoked` with `tool: 'guren.preflight'` — an agent probing what it may do is what an audit trail wants to show — recorded under the _checked_ tool's `redact` list, because the arguments being written down are that tool's. The checked tool gets no record: nothing was invoked.
+
+  `@guren/server` exports `PREFLIGHT_TOOL_NAME`, `RESERVED_AGENT_TOOL_NAMES` and `isReservedAgentToolName` — one list with two readers. `guren check` **fails** an agent route whose tool name claims a reserved one (`agent-route-reserved-name:*`), and the endpoint drops such a route rather than serving two tools under one name, which an MCP client answers by rejecting the entire catalogue. Restating the name in either place is how the check comes to keep passing a route the endpoint has already shadowed.
+
+- cfef2ad: Diagnose a swapped `PasswordHasher.verify()` call, and stop the built-in defaults from being Bun-only.
+
+  `verify(hashed, plain)` takes two same-typed strings in the inverse order of both the `Bun.password.verify(plain, hashed)` that `ScryptHasher` delegates to and this package's own `verifyPassword(plain, hashed)`, so a swapped call is a type-correct program that no compiler can reject. It surfaced as an opaque `UnsupportedAlgorithm` (or `Invalid password hash format.`) at runtime, naming neither the parameter nor the order — a 500 on every login. `ScryptHasher` and `NodeHasher` now throw a `TypeError` that says so.
+
+  The check is deliberately **two-sided**: it fires only when the second argument looks like a hash _and_ the first does not. A one-sided "the first argument must look like a hash" precondition would misdiagnose a legitimate non-hash credential column — `passwordHash: 'oauth:...'`, the sentinel this repo documents for OAuth-only accounts — as a caller mistake; those keep falling through to the implementation and are rejected as before. Neither argument appears in the message, because one of them is a plaintext password and this throw is reached on a live login attempt.
+
+  **`AuthenticatableModel`, `ModelUserProvider`, and `AuthManager.useModel()` now default to `DefaultHasher` rather than `ScryptHasher`.** On Bun that is the same hasher and the same hash format. Off Bun it is the difference between working and not: `ScryptHasher` calls `Bun.password` unconditionally, so a model with a plain `password` field threw on `create()` under Node — the runtime the Lambda guide tells you to deploy to, and the runtime an app's own Vitest suite runs on. `DefaultHasher` also forwards `needsRehash()` now, so `Hash` is genuinely a drop-in for the runtime-specific hashers rather than silently dropping that member.
+
+  `@guren/testing`'s `configureInertiaVitest({ stubBun: true })` now installs a **working** `Bun.password` built on `node:crypto` scrypt, in the `$scrypt$` format `verifyPassword()` can read back, instead of stubs that throw. A stub that throws forces every app test touching a password into hand-writing its own hasher double, and a hand-written double is a copy of a contract that no type constrains — which is exactly how the swapped call above shipped with a green suite, its double having encoded the same inversion. The fake throws on a hash it cannot parse, as `Bun.password.verify` does, so a swapped call fails in a test the way it fails in production rather than looking like a wrong password.
+
+  **Security: a malformed `$scrypt$` hash authenticated every password.** `verifyPassword()` derived a key of `expectedHash.length` bytes and compared it with `timingSafeEqual` — for a hash whose digest decodes to zero bytes, that is two empty buffers, which compare equal. A truncated column, a partial write, or a digest that is not valid base64 all reach that shape, and `NodeHasher` is the delegate the runtime-detecting default now uses off Bun. The decoded salt and digest must be non-empty and the cost parameters positive integers; anything else is `Invalid password hash format.` as it always should have been.
+
+  `configureInertiaVitest`'s `Bun.password` stand-in delegates to `hashPassword`/`verifyPassword` rather than reimplementing scrypt, so the format, the parameter parsing, and that rejection are the same code the application runs and cannot drift from it.
+
+- 7bcd5d6: Deny a password login against an account that has no password, instead of turning it into a 500.
+
+  `ModelUserProvider.validateCredentials()` handed whatever sat in the credential column straight to the hasher. A column holding a sentinel rather than a hash — `passwordHash: 'oauth:...'`, which this repo's own JSDoc, `MassAssignmentException` message, database guide and agent skill all suggest for an OAuth-only account — reached `Bun.password.verify()` and threw. The login came back as a 500 while an unknown address came back as a 401, so the pair of responses told an attacker which addresses belong to OAuth accounts. A null column was already handled; the sentinel was not.
+
+  Such a column now means what it says: the account cannot authenticate with a password, so the login is denied. It runs through the same dummy-hash path a null column already took, so the two answers cost the same work and the channel does not reopen as a timing difference. `make:auth --oauth` was never affected — it scaffolds a nullable column — so the reachable population is applications that followed the documented sentinel.
+
+  **A value that _claims_ a hash format and fails to satisfy it keeps throwing.** That is the other half of the rule and it is deliberate: a truncated or corrupt digest is not a passwordless account, and denying that login in silence would leave nothing to notice the corruption by. `looksLikePasswordHash()` is what separates the two, so the prefixes this check trusts are the same ones the swapped-argument diagnostic trusts.
+
+  `DefaultHasher` no longer tells a non-hash value that it "was written by Bun.password". That message is for a genuine Argon2id or bcrypt hash met on a runtime that cannot read it; a sentinel now gets one that says what is actually wrong. `ModelUserProvider` never reaches it, but a direct caller can.
+
+- a6e3a1f: Reject app-relative signed URLs that begin with an authority, and widen the agent audit sink's default redaction vocabulary.
+
+  `signUrl` / `verifySignedUrl` canonicalize to `pathname + search`, which is what makes a signature host-portable (RFC 0015 §2, T6) — and what made the canonical form non-injective over its own input. `//host/path` and `/\host/path` both begin with `/`, so both took the app-relative branch, and the WHATWG parser folded the first segment into the URL's _authority_, which the canonical form then dropped. The consequences ran in both directions: `verifySignedUrl('//evil.example' + signed)` returned `true` against a signature that never covered `evil.example`, and `signUrl('//evil.example/a.pdf')` returned `/a.pdf?signature=…`, silently discarding the host the caller asked to sign. `parseUrl` now holds app-relative input to the invariant that makes the canonical form usable at all: `pathname + search`, which is both what gets signed and what gets returned, has to mean the same thing when it is parsed again. That fails in two directions, so the guard is one check. Reading in, an authority the parser folds out of a `/`-leading value is covered by no signature. Writing out, a value whose _normalized_ pathname begins with `//` (`/.//host/a`) parses onto the placeholder origin but serializes to a string that does not, so `signUrl` would hand back a URL its own verifier rejects. Both now throw a `TypeError`; `verifySignedUrl` reports that as a failed verification, as it already does for any malformed input. Paths that merely contain a doubled slash (`/a//b/c`) or whose first segment looks host-like (`/evil.example/a.pdf`) are unaffected.
+
+  The check compares the _parsed_ origin rather than matching a prefix. Which spellings fold into an authority is the URL parser's rule to change, not the framework's — a list of prefixes would go stale in silence, which is the failure mode a signature check can least afford.
+
+  Not reachable through the attachment delivery route this primitive was written for: `registerAttachmentRoutes` registers `${prefix}/:id/:filename`, and no `//`-leading path matches it, so a request that reaches the handler always carried a fully signed three-segment path. `signUrl` and `verifySignedUrl` are public exports, though, and an app calling them directly had no such route shape protecting it. RFC 0015's T12 row is amended in place with the injectivity requirement; §3 and T5 are amended separately to record that R2 deliberately does not forward the presign response-overrides, which the RFC text still described it as doing.
+
+  `redactAgentArguments` gains `privatekey`, `pwd` and `jwt` as default sensitive-key fragments — spellings that share no fragment with `secret`, `password` or `token` and so were carried into audit records in the clear. A bare `otp` is deliberately _not_ added: at three characters it is a substring of ordinary argument names (`slotProvider`, `notPublic`), and over-masking is the safe direction for a fragment that mostly hits credentials, not for one that mostly hits everything else.
+
+- 202cd67: Stop `@guren/testing`'s controller mock keeping its own copy of the query-reading rules.
+
+  Follows the split the request-body change made: the rule is shared, the adapter stays local. Two restatements of runtime behavior are gone from `packages/testing/src/controller.ts`.
+
+  `flattenContextQueries()` was a line-for-line copy of the runtime's `flattenRequestQueries()` — same loop, same `values.length === 1 ? values[0] : values`. It now calls that function, reached through `@guren/server/internal/request`. To make it reachable, `flattenRequestQueries()` takes a structural parameter naming the one member it reads (`RequestQueryContext`) instead of a whole Hono `Context`. Narrowing a parameter accepts strictly more callers, so every existing caller passes a real `Context` unchanged. It is spelled as the call shape rather than as `Pick<HonoRequest, 'queries'>`, because `HonoRequest.queries` is overloaded and a `Pick` keeps both signatures, which the plain `() => Record<string, string[]>` on `ControllerContext` cannot satisfy.
+
+  `groupSearchParams()` restated `HonoRequest.queries()`; both of its call sites now use `HonoRequest` itself, and it is deleted.
+
+  **`queries?()` stays optional on `ControllerContext`, and an override supplied there is still honored.** The published type is consumed by application test suites, and the fallback for a context lacking one is load bearing — it re-derives the grouping from the required `req.url` and must never fall back to `query()`, which is single-valued by construction. So the adapter keeps that branch: a context that carries `queries()` hands it to the shared rule, one that does not is re-derived through a `HonoRequest`. Building the `HonoRequest` unconditionally from `req.url` would have read past the override silently.
+
+  The adapter invokes an override as a _method_ on `ctx.req` rather than handing the shared rule a bare function reference. `queries?: () => Record<string, string[]>` is satisfied by a method as readily as by an arrow, so an override may read `this.url`; rebinding it onto a fresh object would silently give it the wrong receiver.
+
+  This also fixes a real divergence, not just duplication. The mock's no-arg `ctx.req.query()` built its record by assignment (`first[name] ??= value`), so a `__proto__` query key hit `Object.prototype`'s inherited setter and vanished: `?__proto__=x` read as absent in a controller test and as a value in production. Hono builds a null-prototype object, which has no setter to hit, and `query()` now delegates to it. This is the same footgun the mock's form-body collection was fixed for earlier.
+
+  Sharing the rule also exposed a `__proto__` bug in the runtime's own flattener, released separately below.
+
+  One deliberate behavior change to note: `createControllerContext()`'s no-arg `query()` and `queries()` now return **null-prototype** objects, because that is what Hono returns and they now delegate to it. `Record<string, string[]>` promises no prototype, and a real controller's `ctx.req` has always behaved this way, so this brings the mock into line with production rather than away from it — but a test calling `ctx.req.queries().hasOwnProperty(...)` on the result would need `Object.hasOwn(...)` instead, exactly as it would against a live request.
+
+  `packages/testing/tests/controller.test.ts` keeps pinning the parity by running one URL through the mock and through a real `Application.fetch()`, covering the repeated key, the single occurrence, and the no-`queries()` fallback, with new cases for the `__proto__` key on the raw surfaces and through `validateQuery()`.
+
+- 0076c39: Stop `@guren/testing`'s controller mock keeping its own copy of the multipart upload read.
+
+  This is the follow-up the body-parser change filed. That one moved `validateBody()` and the field helpers onto the runtime's parser and left exactly one restatement behind: `file()` and `files()` do not go through the body parser, so the mock still gated on Hono's media-type rule and then read the body with `Request.formData()`.
+
+  `Controller.parseUploads()`'s body moves to `parseRequestUploads(ctx)` in `packages/server/src/http/request.ts`, re-exported from the internal `@guren/server/internal/request` subpath beside `parseRequestBody`. `Controller.file()` / `files()` call it, and the mock calls it through the same `HonoRequest` adapter the body parser already uses — so the mock's `isMultipartBody` and `readMultipartBody` are gone, and the adapter is now the whole of what stays local.
+
+  It is a second function rather than a second caller of `parseRequestBody`, deliberately: uploads parse with `{ all: true }`, so a field repeated in the body stays an array and `files()` sees every part. The body parser flattens that same field to its first value, so routing uploads through it would silently reduce `files()` to one file per `<input multiple>` — a loss no malformed-body test can see.
+
+  **The divergence this closes, and where it is visible.** The mock answered `null` from `file()` for a `Content-Type: MULTIPART/FORM-DATA` body the runtime delivers the file for. The gate was not the cause: it lowercases like Hono does. `Request.formData()` was — the gate passed and the read then threw.
+
+  Where that throws is host-dependent, and the ground moved under this change while it was open. Measured: **Bun 1.3.14 rejects the header, Bun 1.4.0 accepts it, Node always accepted it** — the 1.4.0 trial lane caught this by failing a hard assertion that the host refuses, on the same CI run where 1.3.14 was green. So the concrete symptom is confined to Bun 1.3.x, which is the version every workflow currently pins; on the other two the mock and the runtime already agreed by accident.
+
+  That narrows the bug, not the argument. The defect was never "Bun is case-sensitive" — it was that the mock decided the media type somewhere Hono does not, so its answer tracked whatever the host happened to do. Deciding it in one place is what makes the two agree on every runtime, including ones whose `formData()` has not been written yet. Nothing gates now, on either side, because Hono decides the media type inside `parseBody()`.
+
+  **`readMultipart()` changes shape, and this is the deliberate part.** It is public only because TS4094 forbids private members on the exported anonymous class type the mock factory returns, but it appears in the published `packages/testing/dist/index.d.ts`, so the change is stated here rather than left to ride. Two things change together:
+
+  - Its return type goes from `Promise<FormData | null>` to `Promise<Record<string, string | File | (string | File)[]>>` — the runtime's `{ all: true }` record. The `multipartBody` memo beside it follows.
+  - `null` is gone. A non-multipart body now reads back as its parsed fields rather than as `null`, because the runtime has no media-type gate to answer `null` from.
+
+  `file()` and `files()` are unaffected when they read through `readMultipart()` themselves: a urlencoded field arrives as a string and fails their `instanceof File` test exactly as an absent field does. Two other cases are affected and are worth naming rather than rounding off. `multipartBody`, the memo beside it, is public for the same TS4094 reason and changes type with it. And a subclass that _overrides_ `readMultipart()` to return a `FormData` — legal against the old declared type — now feeds that object into record indexing, so `file()` and `files()` would read `undefined` off it rather than calling `getAll`. Nothing in this repository does either, but "only direct callers of `readMultipart()`" would have been too narrow.
+
+  One knock-on lands on the published surface: both members are typed as `RequestUploads`, so `packages/testing/dist/index.d.ts` now opens with `import { RequestUploads } from "@guren/server/internal/request"` — a _type_-level dependency on that subpath, where the previous release only reached it at runtime. Naming the runtime's type rather than respelling its shape is the point.
+
+  It does **not** turn the version floor into a compile-time check, which is the tempting thing to claim and is wrong. `skipLibCheck: true` suppresses the `TS2307` that an unresolvable import inside a dependency's `.d.ts` would otherwise raise, and it is on both in this repository's root `tsconfig.json` and in the `create-guren-app` default template — so the consumers most likely to hit this are exactly the ones who would not see it. Measured against `tsc` directly rather than reasoned from the flag's name. A consumer on too old a `@guren/server` therefore still fails the way the previous release did: at runtime, on first import. The release step below is what prevents it, and nothing else does.
+
+  The precedent here is the opposite of the one set when the mock's `parsedBody` box was reverted to keep the published shape. That break was avoidable — the mock clones the request, so re-parsing cost nothing and the memo could stay as it was. This one is not: `FormData | null` _is_ the second implementation. Keeping it would mean converting the runtime's record back into a `FormData`, which reintroduces the copy this removes. `createControllerModuleMock()`'s members are Experimental by the decision tree in `contributing/api-stability.md` — exported from the package index, not from `@guren/core`, with no stability annotation on the package — which is what allows a minor here.
+
+  `packages/testing/tests/controller.test.ts` gains an upload table beside the body one, running `file()` and `files()` through a real `Application.fetch()` controller and a mocked one on the same request: a single upload, an uppercase media type, a repeated file field, a repeated `field[]`, a leading empty upload, a multipart text field, a urlencoded body, and a body with no boundary. Both sides must answer the same names.
+
+  What that table can and cannot do is worth stating, because it was measured rather than assumed. Dropping `{ all: true }` turns two rows red, which is the guard it is really carrying. But run against the exact pre-change mock, **every row passes** — including the uppercase one, because vitest runs that suite on Node, which accepts the header. The uppercase assertion therefore lives in `packages/server/tests/http/request.test.ts`, under `bun run test:bun`.
+
+  That test asserts `parseRequestUploads` answers with the file and says nothing about what the host's `formData()` would do — deliberately, and the second version of it. The first pinned the host's refusal as a premise, which is exactly the assertion Bun 1.4.0 broke. Adding a media-type gate to `parseRequestUploads` still turns it red on every runtime, which is the property worth holding; the host's own answer is recorded in the comment as context that has already changed once.
+
+  Two further cases sit after the table and cover the delegation itself, which comparing `file()` / `files()` cannot: they read `readMultipart()` directly and assert it answers the runtime's record rather than a `FormData`, and that a urlencoded body reads back as its fields rather than as the `null` the gate used to short-circuit to. Both go red against the pre-change mock on any runtime, so reverting the mock to `Request.formData()` is a test failure rather than a silent one.
+
+  `@guren/server` gains one function on the existing internal subpath — no behavior change, and nothing new on the package root. The subpath carries no stability guarantee, by the same rules that put `parseRequestBody` on it.
+
+  **Release step:** the same one the change that added the subpath carried, and it comes due again. v2.14.0 already raised `@guren/testing`'s `@guren/server` peer to `>=2.14.0`, which is the release that first carried `internal/request` — but this change puts a _new_ export on that subpath, so the floor has to move again to whatever version publishes `parseRequestUploads`. Raise it in the release pull request beside the generated version bumps; it cannot be raised earlier, because `audit:plugin-compat` requires every `@guren/*` range to admit the version the workspace currently publishes. Skipping it leaves `>=2.14.0` claiming a compatibility this package does not have: `@guren/testing` upgraded alone against a pinned `@guren/server` 2.14.0 resolves the subpath and then fails on the missing export.
+
+### Patch Changes
+
+- 1eb4303: Stop reporting handled client errors as `Unhandled exception:`.
+
+  `ExceptionHandler.reportException()` falls back to `console.error('Unhandled exception:', error)` when an app registers no reporter, so that a hosted runtime — where stdout is the only channel back to the operator — does not turn a 500 into a rendered page and nothing else. That fallback fired for _every_ exception reaching the handler, including the 4xx an application throws on purpose: a `ValidationException` from `validateBody()`, an `AuthorizationException` from an authorization middleware, an `HttpException.notFound()`. A route rejecting invalid input as designed printed a full stack trace per request, labelled as though nothing had handled it.
+
+  The label was the misleading part. Nothing escapes: the exception is caught by the handler's own middleware, `reportException()` is awaited inside `handle()`, and the correct 4xx is returned. Confirmed on Node 22 under `--unhandled-rejections=strict` against the built `dist` — no `unhandledRejection`, no `uncaughtException`, exit 0 — so this was never a crash risk on `@guren/plugin-lambda` or `@guren/plugin-vercel`, only noise loud enough to read as one.
+
+  The gate is on the console fallback alone, **not** on `shouldNotReport()`: a registered reporter still receives 4xx, because an app tracking auth failures or validation churn through one is asking for exactly those. The status it reads comes from a single `resolveExceptionStatus()`, which `renderDefaultException` now also takes its status from rather than from `toResponse()` — what an exception is delivered as and whether it counts as a server failure must be the same number, or an exception could be sent as a 422 and reported as a crash. An error carrying no status is still a 500, so a bare `throw new Error(...)` logs exactly as before.
+
+- 58f2835: fix(server): force document types served out of `public/` to download
+
+  The `public/` tree is not only build output. The attachments scaffold roots
+  its `public` storage disk inside it (`./public/storage`), so a file there can
+  be an upload that kept the uploader's own extension and content type. Served
+  back as `text/html` or `image/svg+xml` from the app's own origin, that is
+  stored XSS: session-riding requests, CSRF-token reads, account takeover.
+
+  Two routes reach that directory and neither stopped it. The extension
+  allowlist in `registerRootPublicAssets` was declared to be the gate, but
+  `configureInertiaAssets` also mounts an unfiltered `serveStatic` at
+  `/public/*` (and `registerDevAssets` mounts the same one, so `bun run dev` was
+  not exempt); `.svg` is in the allowlist's own default extensions, so it was
+  reachable through the declared gate too.
+
+  Both mounts, and the `/resources/css/*` one beside them, now answer with
+  `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff` for
+  the content types a browser renders as a document in the serving origin:
+  `text/html`, `text/xml`, `application/xml`, `text/xsl`, and any `*+xml`
+  (`application/xhtml+xml`, `image/svg+xml`, `application/xslt+xml`).
+
+  `Content-Disposition` is honoured for navigations and ignored for subresource
+  loads, so `<img src="/logo.svg">`, `<link rel="icon">` and CSS `url()` are
+  unaffected. Scripts, stylesheets, fonts, images, media and PDFs are untouched.
+
+  What does change, beyond opening such a URL directly:
+
+  - an SVG or HTML page embedded through `<iframe>` or `<object>` no longer
+    renders, because that is a navigation;
+  - a directory request resolves to its `index.html` before the guard runs, so
+    `public/site/` now downloads rather than renders. A static microsite under
+    `public/` is the one legitimate flow this stops.
+
+  Opt back in per route family: `rootPublicAssets: { inlineDocuments: true }`
+  for the root-level allowlist, and `inlineDocuments: true` on
+  `configureInertiaAssets` / `registerDevAssets` for `/public/*` and
+  `/resources/css/*`. Turn either on only for a directory holding nothing
+  user-supplied.
+
+  Two scope limits worth stating:
+
+  - This covers the app's own static serving, which is what `bun bin/serve.ts`
+    and the Docker image use. A deployment fronting `public/` with platform
+    static assets, a CDN, or nginx serves those files without reaching this
+    middleware and needs the same header policy configured there.
+  - Root-level assets are served `public, max-age=31536000, immutable`, so a
+    browser or shared cache holding a pre-upgrade inline response keeps it. An
+    app that has already accepted uploads should rotate those URLs or purge the
+    cache rather than rely on the upgrade alone.
+
+- 202cd67: Fix `__proto__` query parameters being dropped before reaching a validation schema.
+
+  `flattenRequestQueries()` — which backs `Controller.validateQuery()` / `validateQuerySafe()` and every route contract's `query` schema — built its result by assigning into an object literal. Query keys are attacker-controlled, and `flat['__proto__'] = …` hits `Object.prototype`'s inherited setter rather than defining a field, so a `__proto__` key was lost in one of two ways depending on how often it was repeated:
+
+  - `?__proto__=one` assigned a **string**, which is a silent no-op. The field never reached the schema, so a schema requiring it failed and one merely reading it saw nothing.
+  - `?__proto__=one&__proto__=two` assigned the **array**, which is not a no-op: it replaced the returned record's own prototype, handing the schema an object whose inheritance came from the request.
+
+  Hono groups query parameters into a null-prototype object, so the key arrives intact and only this last step could lose it. The record is now materialized with `Object.fromEntries`, which defines own properties — the same rule, for the same reason, that the form branch of `parseRequestBody()` already follows.
+
+  Covered directly in `packages/server/tests/http/request.test.ts`, and through `validateQuery()` on both a real `Application.fetch()` and `@guren/testing`'s controller mock.
+
+- 1414267: Apply the document-disposition guard to the two file-serving routes it had missed, and pin the set of mounts that must carry it.
+
+  The guard added for `public/` covers the four routes that reach that directory. Two more routes build file responses of their own and were still serving whatever they found inline: the dev transpile route's static fallback (anything under `resources/js/` that is not TypeScript is handed back as it sits on disk, so a `.html` beside a page component comes back as `text/html`), and the mount serving the built Inertia client out of its package directory. Neither is where an upload lands, which is exactly why they were easy to leave out — but a rule with an exception nobody can name is one nobody can rely on, and `resources/` is a directory a project's own tooling writes into. Both now go through `applyDocumentDisposition`. Neither takes the `inlineDocuments` switch: that escape hatch exists for a `public/` directory holding nothing user-supplied, and these two serve the app's sources and a vendored package.
+
+  **The mounts are now pinned in the source, not just covered by tests.** A seventh mount added later would typecheck and pass every existing test, because `serveStatic` builds its own response and a test cannot reach a route it does not know about. Two source-level assertions close that: the set of modules calling `serveStatic(` must equal the known list, and each of those modules must reference `guardStaticDocument` once per mount. Both were mutation-checked against the three ways such a scan can pass while a mount is unprotected — a mount added in a new file, a mount added to an already-listed file, and the guard replaced by a comment naming it. Comments are stripped with `Bun.Transpiler` rather than a regex, because these files are full of route patterns like `'/public/*'` and `/*` opens a block comment.
+
+- Updated dependencies [4831473]
+  - @guren/orm@2.6.2
+
 ## 2.14.0
 
 ### Minor Changes

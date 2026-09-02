@@ -1,5 +1,82 @@
 # @guren/testing
 
+## 1.9.0
+
+### Minor Changes
+
+- cfef2ad: Diagnose a swapped `PasswordHasher.verify()` call, and stop the built-in defaults from being Bun-only.
+
+  `verify(hashed, plain)` takes two same-typed strings in the inverse order of both the `Bun.password.verify(plain, hashed)` that `ScryptHasher` delegates to and this package's own `verifyPassword(plain, hashed)`, so a swapped call is a type-correct program that no compiler can reject. It surfaced as an opaque `UnsupportedAlgorithm` (or `Invalid password hash format.`) at runtime, naming neither the parameter nor the order — a 500 on every login. `ScryptHasher` and `NodeHasher` now throw a `TypeError` that says so.
+
+  The check is deliberately **two-sided**: it fires only when the second argument looks like a hash _and_ the first does not. A one-sided "the first argument must look like a hash" precondition would misdiagnose a legitimate non-hash credential column — `passwordHash: 'oauth:...'`, the sentinel this repo documents for OAuth-only accounts — as a caller mistake; those keep falling through to the implementation and are rejected as before. Neither argument appears in the message, because one of them is a plaintext password and this throw is reached on a live login attempt.
+
+  **`AuthenticatableModel`, `ModelUserProvider`, and `AuthManager.useModel()` now default to `DefaultHasher` rather than `ScryptHasher`.** On Bun that is the same hasher and the same hash format. Off Bun it is the difference between working and not: `ScryptHasher` calls `Bun.password` unconditionally, so a model with a plain `password` field threw on `create()` under Node — the runtime the Lambda guide tells you to deploy to, and the runtime an app's own Vitest suite runs on. `DefaultHasher` also forwards `needsRehash()` now, so `Hash` is genuinely a drop-in for the runtime-specific hashers rather than silently dropping that member.
+
+  `@guren/testing`'s `configureInertiaVitest({ stubBun: true })` now installs a **working** `Bun.password` built on `node:crypto` scrypt, in the `$scrypt$` format `verifyPassword()` can read back, instead of stubs that throw. A stub that throws forces every app test touching a password into hand-writing its own hasher double, and a hand-written double is a copy of a contract that no type constrains — which is exactly how the swapped call above shipped with a green suite, its double having encoded the same inversion. The fake throws on a hash it cannot parse, as `Bun.password.verify` does, so a swapped call fails in a test the way it fails in production rather than looking like a wrong password.
+
+  **Security: a malformed `$scrypt$` hash authenticated every password.** `verifyPassword()` derived a key of `expectedHash.length` bytes and compared it with `timingSafeEqual` — for a hash whose digest decodes to zero bytes, that is two empty buffers, which compare equal. A truncated column, a partial write, or a digest that is not valid base64 all reach that shape, and `NodeHasher` is the delegate the runtime-detecting default now uses off Bun. The decoded salt and digest must be non-empty and the cost parameters positive integers; anything else is `Invalid password hash format.` as it always should have been.
+
+  `configureInertiaVitest`'s `Bun.password` stand-in delegates to `hashPassword`/`verifyPassword` rather than reimplementing scrypt, so the format, the parameter parsing, and that rejection are the same code the application runs and cannot drift from it.
+
+- 202cd67: Stop `@guren/testing`'s controller mock keeping its own copy of the query-reading rules.
+
+  Follows the split the request-body change made: the rule is shared, the adapter stays local. Two restatements of runtime behavior are gone from `packages/testing/src/controller.ts`.
+
+  `flattenContextQueries()` was a line-for-line copy of the runtime's `flattenRequestQueries()` — same loop, same `values.length === 1 ? values[0] : values`. It now calls that function, reached through `@guren/server/internal/request`. To make it reachable, `flattenRequestQueries()` takes a structural parameter naming the one member it reads (`RequestQueryContext`) instead of a whole Hono `Context`. Narrowing a parameter accepts strictly more callers, so every existing caller passes a real `Context` unchanged. It is spelled as the call shape rather than as `Pick<HonoRequest, 'queries'>`, because `HonoRequest.queries` is overloaded and a `Pick` keeps both signatures, which the plain `() => Record<string, string[]>` on `ControllerContext` cannot satisfy.
+
+  `groupSearchParams()` restated `HonoRequest.queries()`; both of its call sites now use `HonoRequest` itself, and it is deleted.
+
+  **`queries?()` stays optional on `ControllerContext`, and an override supplied there is still honored.** The published type is consumed by application test suites, and the fallback for a context lacking one is load bearing — it re-derives the grouping from the required `req.url` and must never fall back to `query()`, which is single-valued by construction. So the adapter keeps that branch: a context that carries `queries()` hands it to the shared rule, one that does not is re-derived through a `HonoRequest`. Building the `HonoRequest` unconditionally from `req.url` would have read past the override silently.
+
+  The adapter invokes an override as a _method_ on `ctx.req` rather than handing the shared rule a bare function reference. `queries?: () => Record<string, string[]>` is satisfied by a method as readily as by an arrow, so an override may read `this.url`; rebinding it onto a fresh object would silently give it the wrong receiver.
+
+  This also fixes a real divergence, not just duplication. The mock's no-arg `ctx.req.query()` built its record by assignment (`first[name] ??= value`), so a `__proto__` query key hit `Object.prototype`'s inherited setter and vanished: `?__proto__=x` read as absent in a controller test and as a value in production. Hono builds a null-prototype object, which has no setter to hit, and `query()` now delegates to it. This is the same footgun the mock's form-body collection was fixed for earlier.
+
+  Sharing the rule also exposed a `__proto__` bug in the runtime's own flattener, released separately below.
+
+  One deliberate behavior change to note: `createControllerContext()`'s no-arg `query()` and `queries()` now return **null-prototype** objects, because that is what Hono returns and they now delegate to it. `Record<string, string[]>` promises no prototype, and a real controller's `ctx.req` has always behaved this way, so this brings the mock into line with production rather than away from it — but a test calling `ctx.req.queries().hasOwnProperty(...)` on the result would need `Object.hasOwn(...)` instead, exactly as it would against a live request.
+
+  `packages/testing/tests/controller.test.ts` keeps pinning the parity by running one URL through the mock and through a real `Application.fetch()`, covering the repeated key, the single occurrence, and the no-`queries()` fallback, with new cases for the `__proto__` key on the raw surfaces and through `validateQuery()`.
+
+- 0076c39: Stop `@guren/testing`'s controller mock keeping its own copy of the multipart upload read.
+
+  This is the follow-up the body-parser change filed. That one moved `validateBody()` and the field helpers onto the runtime's parser and left exactly one restatement behind: `file()` and `files()` do not go through the body parser, so the mock still gated on Hono's media-type rule and then read the body with `Request.formData()`.
+
+  `Controller.parseUploads()`'s body moves to `parseRequestUploads(ctx)` in `packages/server/src/http/request.ts`, re-exported from the internal `@guren/server/internal/request` subpath beside `parseRequestBody`. `Controller.file()` / `files()` call it, and the mock calls it through the same `HonoRequest` adapter the body parser already uses — so the mock's `isMultipartBody` and `readMultipartBody` are gone, and the adapter is now the whole of what stays local.
+
+  It is a second function rather than a second caller of `parseRequestBody`, deliberately: uploads parse with `{ all: true }`, so a field repeated in the body stays an array and `files()` sees every part. The body parser flattens that same field to its first value, so routing uploads through it would silently reduce `files()` to one file per `<input multiple>` — a loss no malformed-body test can see.
+
+  **The divergence this closes, and where it is visible.** The mock answered `null` from `file()` for a `Content-Type: MULTIPART/FORM-DATA` body the runtime delivers the file for. The gate was not the cause: it lowercases like Hono does. `Request.formData()` was — the gate passed and the read then threw.
+
+  Where that throws is host-dependent, and the ground moved under this change while it was open. Measured: **Bun 1.3.14 rejects the header, Bun 1.4.0 accepts it, Node always accepted it** — the 1.4.0 trial lane caught this by failing a hard assertion that the host refuses, on the same CI run where 1.3.14 was green. So the concrete symptom is confined to Bun 1.3.x, which is the version every workflow currently pins; on the other two the mock and the runtime already agreed by accident.
+
+  That narrows the bug, not the argument. The defect was never "Bun is case-sensitive" — it was that the mock decided the media type somewhere Hono does not, so its answer tracked whatever the host happened to do. Deciding it in one place is what makes the two agree on every runtime, including ones whose `formData()` has not been written yet. Nothing gates now, on either side, because Hono decides the media type inside `parseBody()`.
+
+  **`readMultipart()` changes shape, and this is the deliberate part.** It is public only because TS4094 forbids private members on the exported anonymous class type the mock factory returns, but it appears in the published `packages/testing/dist/index.d.ts`, so the change is stated here rather than left to ride. Two things change together:
+
+  - Its return type goes from `Promise<FormData | null>` to `Promise<Record<string, string | File | (string | File)[]>>` — the runtime's `{ all: true }` record. The `multipartBody` memo beside it follows.
+  - `null` is gone. A non-multipart body now reads back as its parsed fields rather than as `null`, because the runtime has no media-type gate to answer `null` from.
+
+  `file()` and `files()` are unaffected when they read through `readMultipart()` themselves: a urlencoded field arrives as a string and fails their `instanceof File` test exactly as an absent field does. Two other cases are affected and are worth naming rather than rounding off. `multipartBody`, the memo beside it, is public for the same TS4094 reason and changes type with it. And a subclass that _overrides_ `readMultipart()` to return a `FormData` — legal against the old declared type — now feeds that object into record indexing, so `file()` and `files()` would read `undefined` off it rather than calling `getAll`. Nothing in this repository does either, but "only direct callers of `readMultipart()`" would have been too narrow.
+
+  One knock-on lands on the published surface: both members are typed as `RequestUploads`, so `packages/testing/dist/index.d.ts` now opens with `import { RequestUploads } from "@guren/server/internal/request"` — a _type_-level dependency on that subpath, where the previous release only reached it at runtime. Naming the runtime's type rather than respelling its shape is the point.
+
+  It does **not** turn the version floor into a compile-time check, which is the tempting thing to claim and is wrong. `skipLibCheck: true` suppresses the `TS2307` that an unresolvable import inside a dependency's `.d.ts` would otherwise raise, and it is on both in this repository's root `tsconfig.json` and in the `create-guren-app` default template — so the consumers most likely to hit this are exactly the ones who would not see it. Measured against `tsc` directly rather than reasoned from the flag's name. A consumer on too old a `@guren/server` therefore still fails the way the previous release did: at runtime, on first import. The release step below is what prevents it, and nothing else does.
+
+  The precedent here is the opposite of the one set when the mock's `parsedBody` box was reverted to keep the published shape. That break was avoidable — the mock clones the request, so re-parsing cost nothing and the memo could stay as it was. This one is not: `FormData | null` _is_ the second implementation. Keeping it would mean converting the runtime's record back into a `FormData`, which reintroduces the copy this removes. `createControllerModuleMock()`'s members are Experimental by the decision tree in `contributing/api-stability.md` — exported from the package index, not from `@guren/core`, with no stability annotation on the package — which is what allows a minor here.
+
+  `packages/testing/tests/controller.test.ts` gains an upload table beside the body one, running `file()` and `files()` through a real `Application.fetch()` controller and a mocked one on the same request: a single upload, an uppercase media type, a repeated file field, a repeated `field[]`, a leading empty upload, a multipart text field, a urlencoded body, and a body with no boundary. Both sides must answer the same names.
+
+  What that table can and cannot do is worth stating, because it was measured rather than assumed. Dropping `{ all: true }` turns two rows red, which is the guard it is really carrying. But run against the exact pre-change mock, **every row passes** — including the uppercase one, because vitest runs that suite on Node, which accepts the header. The uppercase assertion therefore lives in `packages/server/tests/http/request.test.ts`, under `bun run test:bun`.
+
+  That test asserts `parseRequestUploads` answers with the file and says nothing about what the host's `formData()` would do — deliberately, and the second version of it. The first pinned the host's refusal as a premise, which is exactly the assertion Bun 1.4.0 broke. Adding a media-type gate to `parseRequestUploads` still turns it red on every runtime, which is the property worth holding; the host's own answer is recorded in the comment as context that has already changed once.
+
+  Two further cases sit after the table and cover the delegation itself, which comparing `file()` / `files()` cannot: they read `readMultipart()` directly and assert it answers the runtime's record rather than a `FormData`, and that a urlencoded body reads back as its fields rather than as the `null` the gate used to short-circuit to. Both go red against the pre-change mock on any runtime, so reverting the mock to `Request.formData()` is a test failure rather than a silent one.
+
+  `@guren/server` gains one function on the existing internal subpath — no behavior change, and nothing new on the package root. The subpath carries no stability guarantee, by the same rules that put `parseRequestBody` on it.
+
+  **Release step:** the same one the change that added the subpath carried, and it comes due again. v2.14.0 already raised `@guren/testing`'s `@guren/server` peer to `>=2.14.0`, which is the release that first carried `internal/request` — but this change puts a _new_ export on that subpath, so the floor has to move again to whatever version publishes `parseRequestUploads`. Raise it in the release pull request beside the generated version bumps; it cannot be raised earlier, because `audit:plugin-compat` requires every `@guren/*` range to admit the version the workspace currently publishes. Skipping it leaves `>=2.14.0` claiming a compatibility this package does not have: `@guren/testing` upgraded alone against a pinned `@guren/server` 2.14.0 resolves the subpath and then fails on the missing export.
+
 ## 1.8.0
 
 ### Minor Changes

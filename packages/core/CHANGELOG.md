@@ -1,5 +1,118 @@
 # @guren/core
 
+## 1.13.0
+
+### Minor Changes
+
+- 0346aeb: Mirror the new agent dispatch subpath as `@guren/core/agent`.
+
+  `export * from '@guren/server/agent'`, not an allowlist like `./lambda` and `./redis`: the server entry is already the curated one — it exists to be small and to stay free of the application graph — so restating its names here would give one surface two definitions to keep in sync.
+
+  This needs its own release even though core's `@guren/server` range already admits the version that adds the subpath: a caret range delivers a newer dependency, it does not add an export to `@guren/core`'s own `exports` map. Without a core release, `import { buildToolRequest } from '@guren/core/agent'` resolves to nothing in an installed app.
+
+- 0a5dd3c: Export `DEFAULT_DELIVERY_ROUTE_NAME` from `@guren/core`.
+
+  The delivery route's default name is a cross-package contract: `guren check`'s
+  attachments rules judge, from another package, whether the name the delivery
+  route registers under is claimed by more than one route. That rule kept its own
+  copy of `'attachments.show'`, which would not have failed loudly if the
+  framework's default moved — it would have stopped matching the route that was
+  actually registered and reported a genuine collision as fine. The check now
+  imports the constant instead of restating it.
+
+- 39db410: Export the attachments object-key prefix as `ATTACHMENT_OBJECT_PREFIX` instead of restating the literal at every site that builds a storage key.
+
+  The attachments engine spelled `attachments/` out at six independent sites: the original's key, a variant's key, the HEIC-conversion rewrite, both `deleteDirectory` purges, and the prune sweep's `directories()` listing. That layout is not private to the engine, which is why the duplication matters more than duplication usually does. `guren check`'s attachments rules judge, from `@guren/cli`, whether uploaded bytes land somewhere the app serves statically, and the ones that reach the objects themselves have to name the same `<disk root>/attachments`. Nothing makes the two agree, and the way they come apart is silent: if the layout ever moved (a shard level, a rename), the rule over there would not fail loudly, it would stop matching, answer "not reachable", and report an exposed app as safe. A build-failing security rule failing _open_, with nothing going red anywhere.
+
+  `ATTACHMENT_OBJECT_PREFIX` is exported from `@guren/core` so that rule can import the layout rather than restate it, and the engine now builds every key from it. Two tests keep the single source structural: the constant must stay reachable through core's barrel — an allowlist for these names, not `export *`, so a name missing from it is unreachable however it is exported below — and the engine's source may not re-hardcode the prefix. That second one is a source-level check on purpose: nothing at runtime distinguishes a key built from the constant from one built from a re-typed literal.
+
+  No behaviour changes; the keys are byte-identical.
+
+- 691f12a: Add the App MCP build opt-in to `@guren/core/internal/deploy-build`: `appUsesMcpPlugin()` and `stubbableDevOnlyModules()`, plus the `MCP_PLUGIN_PACKAGE` and `MCP_TRANSPORT_SPECIFIER` constants they are stated in terms of.
+
+  The deploy plugins stub every entry of `DEV_ONLY_MODULES`, and one of those entries is the transport `@guren/plugin-mcp` dynamically imports — so an app that installed the plugin deployed an App MCP endpoint that could never load (RFC 0016 §7). The new functions are the policy layer: declaring `@guren/plugin-mcp` under `dependencies` is the opt-in, and the transport entry is then the one thing dropped from the stub set. The Dev MCP's `McpServer`, `@guren/cli`, `bun:sqlite` and `vite` stay stubbed for every app.
+
+  A minor rather than a patch: `internal/deploy-build` is a published subpath of `@guren/core`, so these are new exports on a shipped surface, and a caret range does not deliver an export the installed package does not have. `DEV_ONLY_MODULES` itself is unchanged.
+
+- a6e3a1f: Reject app-relative signed URLs that begin with an authority, and widen the agent audit sink's default redaction vocabulary.
+
+  `signUrl` / `verifySignedUrl` canonicalize to `pathname + search`, which is what makes a signature host-portable (RFC 0015 §2, T6) — and what made the canonical form non-injective over its own input. `//host/path` and `/\host/path` both begin with `/`, so both took the app-relative branch, and the WHATWG parser folded the first segment into the URL's _authority_, which the canonical form then dropped. The consequences ran in both directions: `verifySignedUrl('//evil.example' + signed)` returned `true` against a signature that never covered `evil.example`, and `signUrl('//evil.example/a.pdf')` returned `/a.pdf?signature=…`, silently discarding the host the caller asked to sign. `parseUrl` now holds app-relative input to the invariant that makes the canonical form usable at all: `pathname + search`, which is both what gets signed and what gets returned, has to mean the same thing when it is parsed again. That fails in two directions, so the guard is one check. Reading in, an authority the parser folds out of a `/`-leading value is covered by no signature. Writing out, a value whose _normalized_ pathname begins with `//` (`/.//host/a`) parses onto the placeholder origin but serializes to a string that does not, so `signUrl` would hand back a URL its own verifier rejects. Both now throw a `TypeError`; `verifySignedUrl` reports that as a failed verification, as it already does for any malformed input. Paths that merely contain a doubled slash (`/a//b/c`) or whose first segment looks host-like (`/evil.example/a.pdf`) are unaffected.
+
+  The check compares the _parsed_ origin rather than matching a prefix. Which spellings fold into an authority is the URL parser's rule to change, not the framework's — a list of prefixes would go stale in silence, which is the failure mode a signature check can least afford.
+
+  Not reachable through the attachment delivery route this primitive was written for: `registerAttachmentRoutes` registers `${prefix}/:id/:filename`, and no `//`-leading path matches it, so a request that reaches the handler always carried a fully signed three-segment path. `signUrl` and `verifySignedUrl` are public exports, though, and an app calling them directly had no such route shape protecting it. RFC 0015's T12 row is amended in place with the injectivity requirement; §3 and T5 are amended separately to record that R2 deliberately does not forward the presign response-overrides, which the RFC text still described it as doing.
+
+  `redactAgentArguments` gains `privatekey`, `pwd` and `jwt` as default sensitive-key fragments — spellings that share no fragment with `secret`, `password` or `token` and so were carried into audit records in the clear. A bare `otp` is deliberately _not_ added: at three characters it is a substring of ordinary argument names (`slotProvider`, `notPublic`), and over-masking is the safe direction for a fragment that mostly hits credentials, not for one that mostly hits everything else.
+
+### Patch Changes
+
+- bf4020f: Carry the static-document download policy onto Cloudflare Workers and Vercel.
+
+  Files a browser renders as a document — `.html`, `.htm`, `.svg`, `.xhtml`,
+  `.xml` — are served from `public/` with `Content-Disposition: attachment` and
+  `X-Content-Type-Options: nosniff`, so navigating straight to one downloads it
+  instead of running its script on the app's origin. On both of these deploy
+  targets the platform answers for `public/` before the app runs, so the
+  framework's guard never saw those requests: the same app downloaded an SVG
+  locally and rendered it inline in production.
+
+  Each plugin now declares the policy to its platform at build time, keyed on
+  file extension because the platform, not the app, computes the content type.
+  The Cloudflare build writes a `_headers` file into the staged asset directory,
+  keeping and going ahead of any `_headers` the app ships under `public/`. The
+  Vercel build adds the rule to the generated `config.json` after
+  `handle: "hit"`, which confines it to files the CDN answered — in the initial
+  phase it would also have forced a download on a path the function serves, such
+  as a dynamic `/sitemap.xml`.
+
+  Cloudflare's `_headers` also names any staged document whose extension is not
+  already lowercase, as an exact rule. The platform compiles a pattern
+  case-sensitively while `getMimeType` lowercases before its lookup, so `/*.svg`
+  alone would leave `logo.SVG` inline there while the framework's own mounts
+  download it. Enumerating the case variants is not possible — one splat per
+  rule — but on this platform the asset set is closed at build time, so naming
+  the offenders exactly is complete, and an app spelling its extensions the
+  ordinary way gets no extra rules. The build now also warns when merging with an
+  app's own `_headers` crosses the 100 rules the platform reads, since it stops
+  there rather than reporting the rest.
+
+  The Cloudflare scaffold additionally sets `"html_handling": "none"` on the
+  `assets` binding. Under the platform default a staged `page.html` is served at
+  `/page` and `/page.html` merely redirects there, which both leaves the `.html`
+  rule landing on the redirect rather than the document and lets a file under
+  `public/` shadow an app route of the same name. An app that names another
+  `html_handling` itself is left alone; an existing `wrangler.jsonc` with no
+  value is named in the build's upgrade warning.
+
+  `inlineDocuments` does not reach either plugin — they read a built directory,
+  not the app's route configuration. The deployment guides say so and describe
+  how to undo the platform-side rules after a build.
+
+- Updated dependencies [09c56ce]
+- Updated dependencies [e4b1ba4]
+- Updated dependencies [1fbbb04]
+- Updated dependencies [0346aeb]
+- Updated dependencies [0346aeb]
+- Updated dependencies [c9947b9]
+- Updated dependencies [0a5dd3c]
+- Updated dependencies [8c15984]
+- Updated dependencies [2baf014]
+- Updated dependencies [1eb4303]
+- Updated dependencies [58f2835]
+- Updated dependencies [cfef2ad]
+- Updated dependencies [7bcd5d6]
+- Updated dependencies [202cd67]
+- Updated dependencies [a6e3a1f]
+- Updated dependencies [4831473]
+- Updated dependencies [1414267]
+- Updated dependencies [202cd67]
+- Updated dependencies [0076c39]
+- Updated dependencies [29c4887]
+- Updated dependencies [7e4aed6]
+  - @guren/cli@2.14.0
+  - @guren/server@2.15.0
+  - @guren/orm@2.6.2
+
 ## 1.12.0
 
 ### Minor Changes
