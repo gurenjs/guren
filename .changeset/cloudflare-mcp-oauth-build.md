@@ -1,0 +1,19 @@
+---
+'@guren/plugin-cloudflare': minor
+---
+
+Add `guren cloudflare:build --mcp-oauth`: front the worker with `@cloudflare/workers-oauth-provider` so the App MCP endpoint is reached by OAuth-authorized clients (RFC 0016 §7).
+
+A **build** option and not plugin configuration, because the generator runs in a separate process and cannot read what `mcpPlugin()` was passed. `--mcp-path` accompanies it for an app that moved the endpoint, since a provider protecting a path the endpoint does not serve leaves that endpoint outside the OAuth boundary — silently, because the request still reaches the app.
+
+**The generated worker exports one `OAuthProvider`.** Its protected `apiRoute` is the MCP path; the `apiHandler` maps `ctx.props` through `mcpOAuthPropsToAuth` and presents the result over `@guren/plugin-mcp/oauth`'s request-identity seam, refusing 401 when the grant does not map rather than forwarding a partial principal. The `defaultHandler` is the *same* `createWorkersHandler` — one handler threaded through both halves, because it dedupes `boot()` per handler while the Workers env holder is module-global, and two would share the holder without sharing the boot slot. `clientRegistrationEndpoint` wires RFC 7591 dynamic client registration, knowingly on a path deprecated in the MCP 2026-07-28 line: it is what shipping MCP SDK 1.x clients use to register themselves today.
+
+**Three guards, all ahead of the app build**, so a misconfigured app is told in a second rather than after several minutes of Vite output:
+
+- The flag is refused on an app that does not depend on `@guren/plugin-mcp` — there would be no endpoint to protect, and the generated worker would import a seam that is not installed.
+- It is refused on an app that does not depend on `@cloudflare/workers-oauth-provider`, with the `bun add` line to fix it. That package is deliberately **not** a dependency of this plugin: the large majority of Workers deployments will never front an OAuth provider, and the opt-in cost of an opt-in feature belongs to the people opting in. A devDependency does not count, for the reason `appUsesMcpPlugin` gives — wrangler resolves the import at deploy time, from a production install.
+- A committed `wrangler.jsonc` binding no `OAUTH_KV` **fails**, with the exact JSON to paste and the `wrangler kv namespace create` line. Unlike the existing build-owned-key warnings this one has a deploy-time consequence nothing in the build output would otherwise reveal. A fresh config gets the binding scaffolded; a build without the flag never requires or writes it.
+
+The flag records itself nowhere — passing it on every build is the contract. The drift that leaves is the other direction, and it is warned about by name: a config binding `OAUTH_KV` while today's build omitted the flag has just produced a worker whose `/oauth/token` and `/oauth/register` 404, breaking every already-authorized client.
+
+**The consent flow ships as real template files** under `templates/mcp-oauth/`, written into the app once and never overwritten — `routes/mcp-oauth.ts` and `app/Http/Controllers/McpOAuthController.ts`. The screen is plain server-rendered HTML rather than an Inertia page, so an API-only app can serve it and it does not break when the asset pipeline does. It renders **tools, not scope strings**: nobody can read `tools:*` and say what it reaches, so the requested scopes are expanded against the application's *live* router derivation — never `.guren/agents.gen.ts`, which can be stale — and rendered one checkbox per tool with its read-only and approval-required facts. Each checkbox carries the `tool:<name>` wire form the scope grammar parses, and the submission is intersected with what the client actually requested, so a grant is a subset of the request by construction. The build prints the two lines that wire the routes file into the app's registrar, once, on the build that created it.

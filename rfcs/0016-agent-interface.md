@@ -625,8 +625,8 @@ workerd-compatible by construction; the build must stop killing it:
   and DCR; Guren scaffolds the session-authenticated authorize/consent routes, which
   render the manifest-derived consent screen. `props` map to `AgentPrincipal`.
 
-**Amended in implementation (first two bullets; `--mcp-oauth` is a later PR).**
-Corrections, each widening what the bullets above described:
+**Amended in implementation.** Corrections, each widening what the bullets above
+described:
 
 - **Open Question 5 resolved: dependency sniffing.** `@guren/plugin-mcp` under the
   app's `dependencies` *is* the opt-in — nothing else is asked, because there is
@@ -649,6 +649,56 @@ Corrections, each widening what the bullets above described:
   the scaffold writes once and never overwrites. An app that adds the plugin later
   would keep the stale alias forever, so the build **fails** and names the one line
   to delete rather than warning.
+
+`--mcp-oauth` shipped as designed, in a second PR. What the design left open:
+
+- **Open Question 2 resolved: `props` → `AgentPrincipal`.** The consent flow is
+  session-authenticated, so the only principal an OAuth grant can carry is the
+  signed-in user: `props` are `{ userId: string | number, scopes: string[] }`,
+  mapped by `mcpOAuthPropsToAuth` to `{ kind: 'user', id: userId, abilities: scopes }`.
+  No service principals — nothing in a browser consent authenticates a machine.
+  `userId` passes through **unchanged** in either type, because `AgentPrincipal.id`
+  admits both and the application's own policies look up by it; coercing in the glue
+  and nowhere else is how a policy lookup silently misses. `scopes` are the same
+  values the grant was issued with, in the §5.1 grammar, so the consent screen's
+  checkboxes carry `tool:<name>` and not bare tool names — the grammar ignores
+  everything outside `tool:` / `tools:`, which would otherwise grant a screenful of
+  tools that reach nothing. Props are validated defensively: they come from the
+  provider's encrypted storage, but they are still parsed data that outlived the
+  version of the flow that wrote them, and an unreadable shape is refused rather
+  than turned into a partial principal.
+- **The handoff into the endpoint is an in-process request-identity seam, not a
+  header** — the pattern §2 of RFC 0017 specifies for its durable principal
+  handoff, adopted here first. `presentExternalMcpAuth(request, auth)` registers the
+  grant in a `WeakMap<Request, ExternalMcpAuth>` keyed on the exact object the
+  generated worker hands to `app.fetch`; the endpoint consults it before any bearer
+  machinery. An `X-Guren-*` envelope would have been one `curl` away from being
+  asserted by any network caller, and the endpoint could not have told the worker's
+  claim from an attacker's. A rebuilt or cloned `Request` does not carry it.
+  `mcpPlugin({ auth: 'external' })` is the fail-closed complement: a request without
+  the seam is refused rather than offered the bearer path.
+- **The provider package is an explicit app dependency**, not a dependency of
+  `@guren/plugin-cloudflare`. The generated worker imports
+  `@cloudflare/workers-oauth-provider` and wrangler resolves that from the app's own
+  install, so the build fails with `bun add …` when it is absent — the opt-in cost
+  of an opt-in feature belongs to the people opting in, and the large majority of
+  Workers deployments will never front an OAuth provider.
+- **No `Authorization` is forwarded into the dispatched request** on this surface.
+  The inbound bearer is the *provider's* access token, which the application's own
+  token guard has never seen and cannot verify. So the endpoint's scope gate and the
+  route's policies run, but a route behind `requireApiToken` answers 401 to an
+  OAuth-authorized caller. Closing that means the auth context itself consulting a
+  principal seam, which is RFC 0017 §2.
+- **DCR is wired, knowingly on a deprecated path.** `clientRegistrationEndpoint` is
+  RFC 7591 dynamic client registration, deprecated in the MCP 2026-07-28 line in
+  favour of Client ID Metadata Documents; this wiring follows what shipping MCP SDK
+  1.x clients use today, and the v2 migration is tracked with the rest of the SDK-v2
+  boundary (RFC 0017 §8).
+- **The flag is recorded nowhere.** Passing it on every build is the contract, as a
+  build option must be. The drift it leaves detectable is the other direction: a
+  committed `wrangler.jsonc` binding `OAUTH_KV` while a build omitted the flag is
+  warned about by name, because that build silently replaces a deployed worker with
+  one whose `/oauth/token` 404s.
 
 **Phase 4b (separate RFC).** Durable agent runtime on the Cloudflare Agents SDK
 (`make:agent`). `McpAgent` is deprecated/frozen and is not used; MCP serving needs no
@@ -752,8 +802,11 @@ Purely additive; no existing API changes shape or behavior. Two soft edges:
 
 1. Whether the adapter re-parses the response for `structuredContent` or reuses the
    already-validated output body (double-validation cost; implementation detail).
-2. The exact glue mapping Cloudflare `OAuthProvider` `props`/scopes onto the
-   `AgentPrincipal` ability vocabulary.
+2. ~~The exact glue mapping Cloudflare `OAuthProvider` `props`/scopes onto the
+   `AgentPrincipal` ability vocabulary.~~ **Resolved in implementation:** `props` are
+   `{ userId, scopes }` written by a session-authenticated consent flow, mapped by
+   `mcpOAuthPropsToAuth` to a `kind: 'user'` principal whose abilities *are* those
+   scopes, in the §5.1 grammar. See the §7 amendment.
 3. ~~WebMCP shipping posture: keep `@guren/plugin-webmcp` unpublished until the origin
    trial concludes, or publish under an experimental tag.~~ **Resolved in
    implementation:** published normally, with the `0.x` line as the experimental
