@@ -1,7 +1,7 @@
 import { readdir, readlink, realpath } from 'node:fs/promises'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import type { CallExpression, ObjectExpression, ObjectProperty } from '@babel/types'
-import { AttachmentDeliveryController, type RouteDefinition } from '@guren/core'
+import { AttachmentDeliveryController, DEFAULT_DELIVERY_ROUTE_NAME, type RouteDefinition } from '@guren/core'
 import { literalString, memberKeyName, objectLiteral, unwrapTypeAssertion, walk } from './ast-walk'
 import { check, type CheckResult } from './check-result'
 import { collectFiles, fileExists, listAppRoots } from './discovery'
@@ -396,8 +396,6 @@ interface AttachmentsDeliveryScan {
   /** `serve: 'redirect'` disk declarations, deduplicated per config file. */
   redirectDisks: Array<{ relPath: string; disk: string }>
 }
-
-const DEFAULT_DELIVERY_ROUTE_NAME = 'attachments.show'
 
 async function scanAttachmentsDelivery(
   cwd: string,

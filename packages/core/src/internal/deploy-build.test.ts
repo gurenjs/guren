@@ -4,9 +4,12 @@ import { isBuiltin } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+  appUsesMcpPlugin,
   assertOutputDirOutsideRoot,
   clientManifestJson,
   DATABASE_FACTORIES,
+  MCP_TRANSPORT_SPECIFIER,
+  stubbableDevOnlyModules,
   detectDatabaseDialects,
   DEV_ONLY_MODULES,
   parseDatabaseDialects,
@@ -312,6 +315,87 @@ describe('DEV_ONLY_MODULES', () => {
     for (const entry of sdkEntries) {
       expect(entry.specifier.startsWith(MCP_SDK_SUBPATH_PREFIX)).toBe(true)
     }
+  })
+
+  test('should carry the transport entry the App MCP endpoint needs', () => {
+    // `stubbableDevOnlyModules` drops this entry by specifier; renaming it
+    // upstream would silently drop nothing and leave the endpoint stubbed.
+    expect(DEV_ONLY_MODULES.map((module) => module.specifier)).toContain(MCP_TRANSPORT_SPECIFIER)
+  })
+})
+
+describe('appUsesMcpPlugin', () => {
+  let root: string
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'guren-mcp-optin-'))
+  })
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  function writeManifest(manifest: unknown): void {
+    writeFileSync(join(root, 'package.json'), JSON.stringify(manifest))
+  }
+
+  test('should report the opt-in when the plugin is a runtime dependency', () => {
+    writeManifest({ name: 'app', dependencies: { '@guren/core': '^1.12.0', '@guren/plugin-mcp': '^0.2.0' } })
+
+    expect(appUsesMcpPlugin(root)).toBe(true)
+  })
+
+  test('should not report the opt-in for a devDependency', () => {
+    // A devDependency never ships, so there is no endpoint in the deployed
+    // app for the transport to serve — keeping the SDK in the bundle of every
+    // app that merely develops against the plugin is the failure this avoids.
+    writeManifest({ name: 'app', devDependencies: { '@guren/plugin-mcp': '^0.2.0' } })
+
+    expect(appUsesMcpPlugin(root)).toBe(false)
+  })
+
+  test('should not report the opt-in when the manifest declares no dependencies', () => {
+    writeManifest({ name: 'app' })
+
+    expect(appUsesMcpPlugin(root)).toBe(false)
+  })
+
+  test('should not report the opt-in when there is no manifest', () => {
+    // Absent evidence is not evidence of opt-in, and false is the safe
+    // direction: the transport stays stubbed, exactly as before RFC 0016.
+    expect(appUsesMcpPlugin(root)).toBe(false)
+  })
+
+  test('should not report the opt-in when the manifest is malformed', () => {
+    writeFileSync(join(root, 'package.json'), '{ not json')
+
+    expect(appUsesMcpPlugin(root)).toBe(false)
+  })
+})
+
+describe('stubbableDevOnlyModules', () => {
+  test('should stub every dev-only module for an app without the MCP plugin', () => {
+    expect(stubbableDevOnlyModules({ mcpPlugin: false }).map((module) => module.specifier)).toEqual(
+      DEV_ONLY_MODULES.map((module) => module.specifier),
+    )
+  })
+
+  test('should drop only the transport for an app with the MCP plugin', () => {
+    const specifiers = stubbableDevOnlyModules({ mcpPlugin: true }).map((module) => module.specifier)
+
+    expect(specifiers).toEqual(
+      DEV_ONLY_MODULES.map((module) => module.specifier).filter(
+        (specifier) => specifier !== MCP_TRANSPORT_SPECIFIER,
+      ),
+    )
+    // Spelled out as well as derived: the Dev MCP's McpServer generates files
+    // on disk and must stay compiled shut whatever the app depends on, and
+    // `@guren/cli` behind it drags Babel into the bundle.
+    expect(specifiers).toContain('@modelcontextprotocol/sdk/server/mcp.js')
+    expect(specifiers).toContain('@guren/cli')
+    expect(specifiers).toContain('bun:sqlite')
+    expect(specifiers).toContain('vite')
+    expect(specifiers).not.toContain(MCP_TRANSPORT_SPECIFIER)
   })
 })
 
