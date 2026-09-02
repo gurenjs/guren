@@ -15,11 +15,28 @@ const cloudflareBuild = defineCommand({
       type: 'boolean',
       description: "Skip running the app's build script before assembling output",
     },
+    'mcp-oauth': {
+      type: 'boolean',
+      description:
+        'Front the App MCP endpoint with @cloudflare/workers-oauth-provider, scaffold the '
+        + 'consent flow, and make the OAUTH_KV binding build-owned (requires @guren/plugin-mcp)',
+    },
+    'mcp-path': {
+      type: 'string',
+      description:
+        'Path the App MCP endpoint is mounted at, protected as the OAuth apiRoute '
+        + '(default /mcp; must match mcpPlugin({ path }))',
+    },
   },
   async run({ args }) {
     await buildCloudflareOutput({
       rootDir: args.root || process.cwd(),
       skipAppBuild: Boolean(args['skip-app-build']),
+      mcpOauth: Boolean(args['mcp-oauth']),
+      // Passed only when given, rather than defaulted here: the default
+      // belongs to the option it documents, so a CLI caller and a programmatic
+      // one cannot end up disagreeing about what "unset" means.
+      ...(args['mcp-path'] ? { mcpPath: args['mcp-path'] } : {}),
     })
   },
 })

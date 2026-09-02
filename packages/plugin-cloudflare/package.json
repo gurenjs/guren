@@ -25,7 +25,8 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "templates"
   ],
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -45,6 +46,7 @@
     "citty": "^0.1.6"
   },
   "devDependencies": {
+    "@cloudflare/workers-oauth-provider": "^0.10.3",
     "@cloudflare/workers-types": "^4.20260702.1",
     "@types/node": "^20.14.10",
     "miniflare": "5.20260801.1-alpha",

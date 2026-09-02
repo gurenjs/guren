@@ -26,6 +26,13 @@ import {
   type PathLike,
 } from '@guren/core/internal/deploy-build'
 
+import {
+  MCP_OAUTH_REGISTRAR,
+  MCP_OAUTH_ROUTES_FILE,
+  MCP_OAUTH_TEMPLATE_FILES,
+  loadMcpOauthTemplate,
+} from './templates'
+
 interface PackageJsonLike {
   name?: string
   scripts?: Record<string, string>
@@ -48,6 +55,30 @@ export interface BuildCloudflareOutputOptions {
   ssrEntryKey?: string
   /** Skip running the app's `build` script before assembling output. */
   skipAppBuild?: boolean
+  /**
+   * Front the worker with `@cloudflare/workers-oauth-provider`, so the App MCP
+   * endpoint is reached by OAuth-authorized clients instead of bearer tokens
+   * (RFC 0016 §7).
+   *
+   * A **build** option and not plugin configuration, because the generator
+   * runs in a separate process from the application and cannot read what
+   * `mcpPlugin()` was passed. Nothing records the choice: pass it on every
+   * build that wants it. A committed config carrying the OAuth binding while
+   * a build omits the flag is warned about, which is the drift this leaves
+   * detectable.
+   */
+  mcpOauth?: boolean
+  /**
+   * Path the App MCP endpoint is mounted at, used as the OAuth provider's
+   * protected `apiRoute`. Only read when `mcpOauth` is on.
+   *
+   * Defaults to `mcpPlugin()`'s own default. An app that passed
+   * `mcpPlugin({ path })` must pass the same value here: the generator cannot
+   * see runtime configuration, and a provider protecting a path the endpoint
+   * does not serve leaves the endpoint outside the OAuth boundary entirely —
+   * silently, because the request still reaches the app.
+   */
+  mcpPath?: string
 }
 
 /**
@@ -81,10 +112,15 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
   // cannot disagree with anything, a second *decision* is neither.
   const mcpPlugin = appUsesMcpPlugin(root)
 
-  // Checked here, before the app build: this is a one-line edit to a file the
-  // developer owns, and reporting it after several minutes of Vite output is
-  // reporting it where nobody reads.
+  const mcpOauth = options.mcpOauth === true
+  const mcpPath = options.mcpPath ?? DEFAULT_MCP_PATH
+
+  // Checked here, before the app build: these are one-line edits to files the
+  // developer owns, and reporting them after several minutes of Vite output is
+  // reporting them where nobody reads.
   assertMcpTransportNotAliased(root, mcpPlugin)
+  assertMcpOauthUsable(root, mcpPlugin, mcpOauth)
+  assertOauthKvBound(root, mcpOauth)
 
   if (!options.skipAppBuild) {
     runAppBuild(root, packageJson.scripts ?? {})
@@ -112,17 +148,178 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
   }
   writeFileSync(
     resolve(out, 'worker.js'),
-    renderWorkerModule({ out, appEntry, ssrImport, hasEnvModule: workerEnv !== undefined }),
+    renderWorkerModule({
+      out,
+      appEntry,
+      ssrImport,
+      hasEnvModule: workerEnv !== undefined,
+      mcpOauth,
+      mcpPath,
+    }),
   )
 
   flattenD1Migrations(resolve(root, 'db/migrations'), resolve(out, 'd1-migrations'))
 
   writeDevOnlyStubs(out)
 
-  scaffoldWranglerConfig(root, out, packageJson.name, mcpPlugin)
+  if (mcpOauth) {
+    scaffoldConsentFlow(root)
+  }
+
+  scaffoldWranglerConfig(root, out, packageJson.name, mcpPlugin, mcpOauth)
 }
 
 const MCP_UNAVAILABLE = 'The MCP endpoint is unavailable on Cloudflare Workers — it generates files on disk.'
+
+/** `mcpPlugin()`'s own default mount path — see `BuildCloudflareOutputOptions.mcpPath`. */
+const DEFAULT_MCP_PATH = '/mcp'
+
+/** The OAuth provider package the generated worker imports, installed by the app. */
+const OAUTH_PROVIDER_PACKAGE = '@cloudflare/workers-oauth-provider'
+
+/** The subpath of `@guren/plugin-mcp` carrying the principal seam. */
+const MCP_OAUTH_SEAM_SPECIFIER = '@guren/plugin-mcp/oauth'
+
+/** The KV binding name `OAuthProvider` requires, fixed by the provider. */
+const OAUTH_KV_BINDING = 'OAUTH_KV'
+
+/** The three endpoints the provider owns or hands back, in one place. */
+const OAUTH_ENDPOINTS = {
+  authorize: '/oauth/authorize',
+  token: '/oauth/token',
+  register: '/oauth/register',
+} as const
+
+/**
+ * Refuse `--mcp-oauth` on an app that cannot serve it, before anything is
+ * built or written.
+ *
+ * Two prerequisites, and both are the app's own declarations rather than
+ * anything this build can supply:
+ *
+ * - **`@guren/plugin-mcp`.** The flag's whole effect is to front the App MCP
+ *   endpoint with an OAuth provider. An app that does not depend on the plugin
+ *   has no such endpoint, so the wrapping would protect a route that answers
+ *   404 — and the generated worker would import a seam module that is not
+ *   installed. Read through the same `appUsesMcpPlugin` rule the alias set
+ *   uses, threaded in rather than re-derived.
+ * - **`@cloudflare/workers-oauth-provider`.** The generated worker imports it,
+ *   and wrangler resolves that import from the *app's* `node_modules`. It is
+ *   deliberately not a dependency of this plugin: it would then be installed
+ *   by every app that deploys to Workers, the large majority of which will
+ *   never front an OAuth provider, and the opt-in cost of an opt-in feature
+ *   belongs to the people opting in.
+ *
+ * `dependencies` and not `devDependencies` for the provider, for the reason
+ * `appUsesMcpPlugin` gives: `wrangler deploy` resolves the import from
+ * whatever the deploy environment installed, and a production install has no
+ * devDependencies to resolve it from.
+ */
+function assertMcpOauthUsable(root: string, mcpPlugin: boolean, mcpOauth: boolean): void {
+  if (!mcpOauth) {
+    return
+  }
+
+  if (!mcpPlugin) {
+    throw new Error(
+      `Cloudflare build: --mcp-oauth fronts the App MCP endpoint with an OAuth provider, but this app does not depend on ${MCP_PLUGIN_PACKAGE}, so it serves no such endpoint. Install and mount the plugin first:\n`
+      + `  bun add ${MCP_PLUGIN_PACKAGE}\n`
+      + '  # then add mcpPlugin() to createApp({ providers })\n'
+      + 'Or drop --mcp-oauth to build the worker without the OAuth wrapping.',
+    )
+  }
+
+  if (!appDependsOn(root, OAUTH_PROVIDER_PACKAGE)) {
+    throw new Error(
+      `Cloudflare build: --mcp-oauth generates a worker that imports ${OAUTH_PROVIDER_PACKAGE}, which this app does not depend on. Install it:\n`
+      + `  bun add ${OAUTH_PROVIDER_PACKAGE}\n`
+      + `It is not a dependency of @guren/plugin-cloudflare on purpose — only apps fronting the MCP endpoint with OAuth need it. A devDependency will not do: wrangler resolves the import at deploy time, from a production install.`,
+    )
+  }
+}
+
+/**
+ * `OAuthProvider` stores clients, grants and tokens in a KV namespace bound as
+ * `OAUTH_KV`, and there is no default: without the binding the worker deploys
+ * and then fails on its first authorize request.
+ *
+ * Build-owned **only while the flag is on**. A fresh scaffold gets the entry
+ * written for it; an app whose `wrangler.jsonc` already exists — the file this
+ * build never overwrites — is failed rather than warned, because unlike the
+ * warnings in {@link warnMissingBuildOwnedKeys} this one has a deploy-time
+ * consequence the developer cannot discover from the build output, and the fix
+ * is a paste of JSON this function can spell exactly.
+ *
+ * A config that does not parse is left alone, exactly as
+ * {@link assertMcpTransportNotAliased} leaves it: failing a build over a file
+ * this cannot read would be worse than the defect, and
+ * {@link warnMissingBuildOwnedKeys} already reports the unreadable file.
+ */
+function assertOauthKvBound(root: string, mcpOauth: boolean): void {
+  const configPath = resolve(root, 'wrangler.jsonc')
+  if (!mcpOauth || !existsSync(configPath)) {
+    return
+  }
+
+  let config: Record<string, unknown>
+  try {
+    config = parseJsonc(readFileSync(configPath, 'utf8')) as Record<string, unknown>
+  } catch {
+    return
+  }
+
+  if (hasOauthKvBinding(config)) {
+    return
+  }
+
+  throw new Error(
+    `Cloudflare build: --mcp-oauth needs a KV namespace bound as ${OAUTH_KV_BINDING} — the OAuth provider stores its clients, grants and tokens there — and ${configPath} has none. Create one and add this entry, alongside whatever the file already has:\n`
+    + `  "kv_namespaces": [\n`
+    + `    ${JSON.stringify(oauthKvNamespace(), null, 2).split('\n').join('\n    ')}\n`
+    + `  ]\n`
+    + `Get the id from: wrangler kv namespace create ${OAUTH_KV_BINDING}`,
+  )
+}
+
+/** Whether a parsed config binds a KV namespace under the provider's name. */
+function hasOauthKvBinding(config: Record<string, unknown>): boolean {
+  const namespaces = config.kv_namespaces
+  if (!Array.isArray(namespaces)) {
+    return false
+  }
+
+  return namespaces.some(
+    (entry) =>
+      typeof entry === 'object'
+      && entry !== null
+      && (entry as Record<string, unknown>).binding === OAUTH_KV_BINDING,
+  )
+}
+
+/** The binding entry, spelled once — the scaffold writes it, the guard quotes it. */
+function oauthKvNamespace(): Record<string, string> {
+  return { binding: OAUTH_KV_BINDING, id: `TODO: wrangler kv namespace create ${OAUTH_KV_BINDING}` }
+}
+
+/**
+ * Whether the app declares `name` under `dependencies`.
+ *
+ * The same question and the same answer-shape as `appUsesMcpPlugin` in
+ * `@guren/core/internal/deploy-build`, for a package that rule does not cover:
+ * absent, unreadable or malformed manifest answers `false`, because no
+ * evidence of a dependency is not evidence of one.
+ */
+function appDependsOn(root: string, name: string): boolean {
+  try {
+    const manifest = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as {
+      dependencies?: Record<string, string>
+    }
+    const dependencies = manifest.dependencies
+    return typeof dependencies === 'object' && dependencies !== null && name in dependencies
+  } catch {
+    return false
+  }
+}
 
 /**
  * Both lists: on Workers the SQL clients are as unreachable as the dev-only
@@ -506,6 +703,8 @@ function renderWorkerModule(input: {
   appEntry: string
   ssrImport: SsrImport | undefined
   hasEnvModule: boolean
+  mcpOauth: boolean
+  mcpPath: string
 }): string {
   const lines: string[] = [
     '// Generated by `guren cloudflare:build`. Do not edit — regenerate instead.',
@@ -517,6 +716,13 @@ function renderWorkerModule(input: {
   }
 
   lines.push("import { createWorkersHandler } from '@guren/plugin-cloudflare'")
+
+  if (input.mcpOauth) {
+    lines.push(
+      `import { OAuthProvider } from ${JSON.stringify(OAUTH_PROVIDER_PACKAGE)}`,
+      `import { mcpOAuthPropsToAuth, presentExternalMcpAuth } from ${JSON.stringify(MCP_OAUTH_SEAM_SPECIFIER)}`,
+    )
+  }
 
   if (input.ssrImport) {
     lines.push(
@@ -531,7 +737,12 @@ function renderWorkerModule(input: {
     lines.push(`setInertiaSsrRenderer(ssrModule.${input.ssrImport.rendererExport})`, '')
   }
 
-  lines.push('export default createWorkersHandler(app)', '')
+  if (!input.mcpOauth) {
+    lines.push('export default createWorkersHandler(app)', '')
+    return lines.join('\n')
+  }
+
+  lines.push(...renderOauthWorker(input.mcpPath), '')
 
   return lines.join('\n')
 }
@@ -601,11 +812,73 @@ function wranglerConfigExists(path: string): boolean {
  */
 const HTML_HANDLING = 'none'
 
+/**
+ * The OAuth-fronted export: one `createWorkersHandler` threaded through both
+ * halves of the provider.
+ *
+ * **One handler, not two.** `createWorkersHandler` dedupes `boot()` per
+ * handler, while the env holder it captures into is module-global — so two
+ * handlers in one module would share the holder without sharing the boot slot,
+ * and neither could guard the other on a failed boot (see `handler.ts`). One
+ * handler keeps the topology that comment describes.
+ *
+ * **The seam, not a header.** `ctx.props` is what the provider decrypted from
+ * the access token it just validated; the glue maps it to a principal and
+ * presents it against the identity of the request it is about to dispatch.
+ * Nothing about that claim travels on the wire, so nothing about it can be
+ * forged by a caller who reaches the app another way. Props that do not map
+ * are refused here rather than passed on as a partial principal.
+ *
+ * `defaultHandler` is the same handler unwrapped: every route that is not the
+ * MCP endpoint — the consent screen included — is served by the application
+ * exactly as it would be without the provider.
+ */
+function renderOauthWorker(mcpPath: string): string[] {
+  return [
+    '// One handler for both halves of the provider: it dedupes boot() per',
+    '// handler while the Workers env holder is module-global, so a second one',
+    '// would share the holder without sharing the boot slot.',
+    'const handler = createWorkersHandler(app)',
+    '',
+    'export default new OAuthProvider({',
+    `  apiRoute: ${JSON.stringify(mcpPath)},`,
+    '  apiHandler: {',
+    '    fetch(request, env, ctx) {',
+    '      // ctx.props is the grant the provider decrypted from the access',
+    '      // token it has already validated. A shape the endpoint cannot read',
+    '      // is refused here, never forwarded as a partial principal.',
+    '      const auth = mcpOAuthPropsToAuth(ctx.props)',
+    '      if (!auth) {',
+    '        return new Response(',
+    '          JSON.stringify({',
+    "            error: 'unauthorized',",
+    "            message: 'This access token carries no readable grant. Re-authorize the client.',",
+    '          }),',
+    "          { status: 401, headers: { 'Content-Type': 'application/json' } },",
+    '        )',
+    '      }',
+    '      // The seam is keyed on this exact Request object — dispatch the one',
+    '      // presentExternalMcpAuth returns, never a copy of it.',
+    '      return handler.fetch(presentExternalMcpAuth(request, auth), env, ctx)',
+    '    },',
+    '  },',
+    '  defaultHandler: handler,',
+    `  authorizeEndpoint: ${JSON.stringify(OAUTH_ENDPOINTS.authorize)},`,
+    `  tokenEndpoint: ${JSON.stringify(OAUTH_ENDPOINTS.token)},`,
+    '  // Dynamic client registration (RFC 7591). Deprecated in the MCP',
+    "  // 2026-07-28 line in favour of Client ID Metadata Documents, but it is",
+    '  // what shipping MCP SDK 1.x clients use to register themselves today.',
+    `  clientRegistrationEndpoint: ${JSON.stringify(OAUTH_ENDPOINTS.register)},`,
+    '})',
+  ]
+}
+
 function scaffoldWranglerConfig(
   root: string,
   out: string,
   packageName: string | undefined,
   mcpPlugin: boolean,
+  mcpOauth: boolean,
 ): void {
   const configPath = resolve(root, 'wrangler.jsonc')
   const appName = (packageName ?? 'guren-app').replace(/^@[^/]+\//, '')
@@ -641,6 +914,11 @@ function scaffoldWranglerConfig(
         migrations_dir: `${outRelative}/d1-migrations`,
       },
     ],
+    // Build-owned only while --mcp-oauth is on: an app that never fronts the
+    // MCP endpoint with OAuth has nothing to store in this namespace, and a
+    // binding scaffolded "just in case" is a namespace someone has to create
+    // before the config validates.
+    ...(mcpOauth ? { kv_namespaces: [oauthKvNamespace()] } : {}),
     vars: { NODE_ENV: 'production' },
   }
 
@@ -650,12 +928,63 @@ function scaffoldWranglerConfig(
     writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, { flag: 'wx' })
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
-      warnMissingBuildOwnedKeys(configPath, outRelative, mcpPlugin)
+      warnMissingBuildOwnedKeys(configPath, outRelative, mcpPlugin, mcpOauth)
       return
     }
     throw error
   }
-  console.log(`Cloudflare build: scaffolded ${configPath} — fill in d1_databases[0].database_id before deploying.`)
+  const notes = ['fill in d1_databases[0].database_id']
+  if (mcpOauth) {
+    notes.push(`create the ${OAUTH_KV_BINDING} namespace (wrangler kv namespace create ${OAUTH_KV_BINDING}) and fill in its id`)
+  }
+  console.log(`Cloudflare build: scaffolded ${configPath} — ${notes.join(', and ')} before deploying.`)
+}
+
+/**
+ * The consent flow, written once into the app and never overwritten — the same
+ * contract `wrangler.jsonc` has, and for the same reason: these are the
+ * developer's files from the moment they exist, and a build that reasserted
+ * its own version of them would silently undo every edit.
+ *
+ * Only reached with `--mcp-oauth` on. An app that never asked for the flag
+ * gets no routes it did not ask for.
+ */
+function scaffoldConsentFlow(root: string): void {
+  const written: string[] = []
+
+  for (const path of MCP_OAUTH_TEMPLATE_FILES) {
+    const target = resolve(root, ...path.split('/'))
+    mkdirSync(resolve(target, '..'), { recursive: true })
+    try {
+      writeFileSync(target, loadMcpOauthTemplate(path), { flag: 'wx' })
+      written.push(path)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+        throw error
+      }
+    }
+  }
+
+  if (written.length === 0) {
+    return
+  }
+
+  console.log(
+    `Cloudflare build: scaffolded the OAuth consent flow — ${written.join(', ')}.`,
+  )
+
+  if (written.includes(MCP_OAUTH_ROUTES_FILE)) {
+    // Said only on the build that created the file, which is the one moment
+    // this knows for certain that nothing has wired it yet. Deciding on later
+    // builds whether a registrar reaches it would mean parsing the app's route
+    // entry — the rule `@guren/cli`'s route-registrar owns, and a second
+    // implementation of it here would eventually disagree with `guren check`.
+    console.log(
+      `  Nothing mounts ${MCP_OAUTH_ROUTES_FILE} yet. Add these two lines to your routes entry (routes/web.ts):\n`
+      + `    import { ${MCP_OAUTH_REGISTRAR} } from './mcp-oauth'\n`
+      + `    ${MCP_OAUTH_REGISTRAR}(router)   // inside your registrar, with its router parameter`,
+    )
+  }
 }
 
 /**
@@ -745,6 +1074,7 @@ function warnMissingBuildOwnedKeys(
   configPath: string,
   outRelative: string,
   mcpPlugin: boolean,
+  mcpOauth: boolean,
 ): void {
   let config: Record<string, unknown>
   try {
@@ -788,6 +1118,7 @@ function warnMissingBuildOwnedKeys(
   }
 
   warnMissingHtmlHandling(configPath, config)
+  warnOauthDrift(configPath, config, mcpOauth)
 }
 
 /**
@@ -811,6 +1142,36 @@ function warnMissingHtmlHandling(configPath: string, config: Record<string, unkn
 
   console.warn(
     `Cloudflare build: ${configPath} does not set "html_handling" under "assets", so a document staged from public/ is still served at its extensionless path — where the /*.html rule in _headers does not reach it, and where it shadows any route of that name in your app. Add "html_handling": "${HTML_HANDLING}" to close both. Note this changes how those files are served: public/about.html stops answering at /about.`,
+  )
+}
+
+/**
+ * The drift `--mcp-oauth` leaves detectable in the other direction.
+ *
+ * The flag records itself nowhere: it is a build option, and passing it every
+ * time is the contract. So the way it goes wrong is a config that was
+ * scaffolded *with* the flag — carrying the `OAUTH_KV` binding a plain worker
+ * has no use for — while today's build omitted it. The worker that just
+ * replaced the deployed one has no `OAuthProvider` in it, `/oauth/token` and
+ * `/oauth/register` answer 404, and every already-authorized client stops
+ * working, with nothing in the build output mentioning OAuth at all.
+ *
+ * A warning and not a failure: a developer may be deliberately building a
+ * non-OAuth worker from a repository that also builds an OAuth one, and the
+ * binding is inert either way. What must not happen is the build passing in
+ * silence.
+ */
+function warnOauthDrift(
+  configPath: string,
+  config: Record<string, unknown>,
+  mcpOauth: boolean,
+): void {
+  if (mcpOauth || !hasOauthKvBinding(config)) {
+    return
+  }
+
+  console.warn(
+    `Cloudflare build: ${configPath} binds ${OAUTH_KV_BINDING}, which only an OAuth-fronted worker uses, but this build ran without --mcp-oauth. The worker it produced has no OAuth provider in it: ${OAUTH_ENDPOINTS.token} and ${OAUTH_ENDPOINTS.register} will 404 and already-authorized clients will stop working. Pass --mcp-oauth, or remove the binding if this app no longer fronts its MCP endpoint with OAuth.`,
   )
 }
 
