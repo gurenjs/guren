@@ -11,6 +11,17 @@ const devPort = Number.parseInt(process.env.GUREN_VITE_PORT ?? '', 10)
 
 export default defineConfig(({ command }) => ({
   publicDir: false,
+  // Read only when vitest is pointed at this file explicitly: the `test`
+  // script passes `--config vite.config.ts`, because vitest's own config
+  // discovery does not pick these options up from a function-form vite
+  // config, and silently running with the defaults means the exclusion below
+  // does not apply.
+  test: {
+    // tests/sqlite needs FTS5, which the SQLite bundled with Node — the
+    // runtime vitest executes in — is compiled without. Those files run
+    // under `bun test` instead.
+    exclude: ['node_modules/**', 'tests/sqlite/**'],
+  },
   build: {
     rollupOptions: {
       // The Guren plugin sets the Inertia entry only when no input is
