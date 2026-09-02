@@ -220,7 +220,12 @@ describe('scaffolded McpOAuthController', () => {
       const html = await (await get(AUTHORIZE_QUERY, asUser(7))).text()
 
       expect(html).toContain('value="tool:posts.index" checked')
-      expect(html).toContain('value="tool:posts.store" />')
+      // The write is rendered and *not* ticked. Asserted as "present, without
+      // `checked`" rather than by matching the tag's closing punctuation: how
+      // a renderer spells a void element is its business (`hono/jsx` writes
+      // `"/>`, the hand-built string wrote `" />`), and pinning that would be
+      // testing the renderer instead of the default.
+      expect(html).toContain('value="tool:posts.store"')
       expect(html).not.toContain('value="tool:posts.store" checked')
     })
 

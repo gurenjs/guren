@@ -33,6 +33,12 @@ export const MCP_OAUTH_ROUTES_FILE = 'routes/mcp-oauth.ts'
 /** The controller template, named for the assertions that read its source. */
 export const MCP_OAUTH_CONTROLLER_FILE = 'app/Http/Controllers/McpOAuthController.ts'
 
+/** The consent screen component, likewise. */
+export const MCP_OAUTH_CONSENT_VIEW_FILE = 'app/View/McpOAuthConsentPage.tsx'
+
+/** The error page component, likewise. */
+export const MCP_OAUTH_ERROR_VIEW_FILE = 'app/View/McpOAuthErrorPage.tsx'
+
 /**
  * Every file the consent-flow scaffold writes, in the order it writes them.
  *
@@ -42,6 +48,8 @@ export const MCP_OAUTH_CONTROLLER_FILE = 'app/Http/Controllers/McpOAuthControlle
  * declaration emit, for instance.
  */
 export const MCP_OAUTH_TEMPLATE_FILES = [
+  MCP_OAUTH_CONSENT_VIEW_FILE,
+  MCP_OAUTH_ERROR_VIEW_FILE,
   MCP_OAUTH_CONTROLLER_FILE,
   MCP_OAUTH_ROUTES_FILE,
 ] as const

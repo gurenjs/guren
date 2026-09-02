@@ -5,6 +5,7 @@ import { join } from 'node:path'
 
 import { buildCloudflareOutput } from './build'
 import {
+  MCP_OAUTH_CONSENT_VIEW_FILE,
   MCP_OAUTH_CONTROLLER_FILE,
   MCP_OAUTH_REGISTRAR,
   MCP_OAUTH_ROUTES_FILE,
@@ -400,6 +401,20 @@ describe('cloudflare:build --mcp-oauth', () => {
  * is left is the shape the scaffold and `guren check` depend on, which no
  * compiler asserts.
  */
+/** The template files that are TSX, derived rather than restated. */
+const TSX_TEMPLATE_FILES = MCP_OAUTH_TEMPLATE_FILES.filter((path) => path.endsWith('.tsx'))
+
+/**
+ * Parse a template, picking the loader from its extension.
+ *
+ * `.tsx` needs `loader: 'tsx'`: under `'ts'` the transpiler reads `<div>` as a
+ * type assertion and throws, so a single loader would either fail every view
+ * or — the worse direction — stop parsing the controller as TypeScript.
+ */
+function transpile(source: string, path: string): string {
+  return new Bun.Transpiler({ loader: path.endsWith('.tsx') ? 'tsx' : 'ts' }).transformSync(source)
+}
+
 describe('mcp-oauth templates', () => {
   /**
    * A template's code with its comments gone, for the assertions that say a
@@ -408,16 +423,41 @@ describe('mcp-oauth templates', () => {
    * explaining the absence and reports it as the thing itself.
    */
   function code(path: string): string {
-    return new Bun.Transpiler({ loader: 'ts' }).transformSync(loadMcpOAuthTemplate(path))
+    return transpile(loadMcpOAuthTemplate(path), path)
   }
 
   const routes = loadMcpOAuthTemplate(MCP_OAUTH_ROUTES_FILE)
   const controller = loadMcpOAuthTemplate(MCP_OAUTH_CONTROLLER_FILE)
   const controllerCode = code(MCP_OAUTH_CONTROLLER_FILE)
+  const consentView = loadMcpOAuthTemplate(MCP_OAUTH_CONSENT_VIEW_FILE)
 
   test.each([...MCP_OAUTH_TEMPLATE_FILES])('should parse as TypeScript: %s', (path: string) => {
     const source = loadMcpOAuthTemplate(path)
-    expect(() => new Bun.Transpiler({ loader: 'ts' }).transformSync(source)).not.toThrow()
+    expect(() => transpile(source, path)).not.toThrow()
+  })
+
+  /**
+   * The pragma is what lets a `.tsx` template compile in an app whose tsconfig
+   * points `jsx: "react-jsx"` at React for `resources/js` — it overrides
+   * `jsxImportSource` for that module alone, so a scaffolded app needs no
+   * tsconfig change. It is only honoured on the **first** line, which is why
+   * this checks the position and not merely the presence.
+   */
+  test.each(TSX_TEMPLATE_FILES)('should open with the guren jsxImportSource pragma: %s', (path: string) => {
+    expect(loadMcpOAuthTemplate(path).split('\n')[0]).toBe('/** @jsxImportSource @guren/core */')
+  })
+
+  /**
+   * A view that reached for anything else — the plugin root, a node builtin, a
+   * client-side React import — would be a scaffolded file an app cannot
+   * compile or a boot it does not need. `@guren/core` carries everything these
+   * components use: `FC`, `DerivedAgentTool`, `CSRF_FORM_FIELD`.
+   */
+  test.each(TSX_TEMPLATE_FILES)('should import from @guren/core alone: %s', (path: string) => {
+    const specifiers = [...loadMcpOAuthTemplate(path).matchAll(/from '([^']+)'/g)].map((m) => m[1])
+
+    expect(specifiers.length).toBeGreaterThan(0)
+    expect([...new Set(specifiers)]).toEqual(['@guren/core'])
   })
 
   test('should export a registrar under the name the scaffold instruction prints', () => {
@@ -461,7 +501,10 @@ describe('mcp-oauth templates', () => {
    * entry outside `tool:` / `tools:`, silently and by design.
    */
   test('should submit granted scopes in the tool: wire form', () => {
-    expect(controller).toContain('value="tool:${name}"')
+    // Both halves, and they live in different files now: the view renders the
+    // checkbox value, the controller rebuilds the same string to intersect
+    // against. They have to agree, and nothing but this says so.
+    expect(consentView).toContain('value={`tool:${tool.toolName}`}')
     expect(controller).toContain('`tool:${tool.toolName}`')
   })
 
@@ -476,7 +519,11 @@ describe('mcp-oauth templates', () => {
   })
 
   test('should carry the CSRF field into the consent form', () => {
-    expect(controller).toContain('csrfField(this.ctx)')
+    // The token is read in the controller and rendered by the view as a plain
+    // JSX input — no string-returning helper, which would be raw HTML in a
+    // world where the renderer owns escaping.
+    expect(controller).toContain('csrfToken: getCsrfToken(this.ctx)')
+    expect(consentView).toContain('<input type="hidden" name={CSRF_FORM_FIELD} value={csrfToken} />')
   })
 
   /**
@@ -493,7 +540,20 @@ describe('mcp-oauth templates', () => {
   })
 
   test('should tick read-only tools only, leaving writes unchecked by default', () => {
-    expect(controller).toContain("tool.annotations.readOnlyHint ? ' checked' : ''")
+    expect(consentView).toContain('checked={tool.annotations.readOnlyHint}')
+  })
+
+  /**
+   * The renderer owns escaping now, so a hand-rolled escaper in these files is
+   * not merely redundant — it is a sign someone reached for raw markup, which
+   * `hono/jsx` would then escape into visible angle brackets or, through
+   * `dangerouslySetInnerHTML`, not escape at all.
+   */
+  test('should hand-escape nothing and inject no raw HTML', () => {
+    for (const path of MCP_OAUTH_TEMPLATE_FILES) {
+      expect(code(path)).not.toContain('escapeHtml')
+      expect(code(path)).not.toContain('dangerouslySetInnerHTML')
+    }
   })
 
   test('should answer a malformed authorize request with a page, not a throw', () => {

@@ -10,20 +10,16 @@
  * the only one the provider cannot make — *who is signed in, and what did they
  * agree to*. That is this controller.
  *
- * **The screen is plain server-rendered HTML, not an Inertia page.** Three
- * reasons, in order: an API-only app has no client build to render one into; a
- * consent screen that depends on the asset pipeline is a consent screen that
- * breaks when the pipeline does; and the OAuth client rendering this is a
- * browser popup that may not carry the session cookies an SPA boot needs.
- * Style it however you like — it is a string.
+ * **The markup lives in `app/View/`, not here.** `McpOAuthConsentPage.tsx` and
+ * `McpOAuthErrorPage.tsx` are `hono/jsx` components rendered by
+ * `Controller.view()` (RFC 0014) — server-rendered, no hydration, no client
+ * bundle, and deliberately not Inertia (see the consent page's own header for
+ * why). This file decides *what* to show; those decide how it looks.
  *
- * **What the screen must show, and why it shows tools rather than scopes.**
- * The endpoint's scope grammar (`tool:<name>`, `tools:read`, `tools:*`,
- * `tools:<prefix>.*`) is compact enough for a client to request and far too
- * compact for a human to consent to: nobody can look at `tools:*` and say what
- * it reaches. So the requested scopes are expanded against this application's
- * *live* tool derivation and rendered one tool per checkbox, with the
- * read-only and approval-required facts each tool carries.
+ * Escaping comes with the renderer: `hono/jsx` escapes text children and
+ * attribute values, so nothing here hand-escapes anything. What it does not do
+ * is validate URL schemes — see `Controller.view()`'s contract before adding a
+ * user-supplied `href`.
  *
  * **Derived live, never read from a manifest.** `.guren/agents.gen.ts` is a
  * build artifact that can be stale; the router is what actually serves. A
@@ -43,9 +39,9 @@
 import {
   CSRF_FORM_FIELD,
   Controller,
-  csrfField,
   deriveAgentTools,
   expandToolScopes,
+  getCsrfToken,
   verifyCsrfToken,
 } from '@guren/core'
 import type { Application, DerivedAgentTool } from '@guren/core'
@@ -54,19 +50,24 @@ import type { Application, DerivedAgentTool } from '@guren/core'
 // generator and its node builtins into this app's route graph on every boot
 // and into the wrangler bundle on every deploy.
 import { getWorkersEnv } from '@guren/plugin-cloudflare/env'
-import type { AuthRequest, ClientInfo, OAuthHelpers } from '@cloudflare/workers-oauth-provider'
+import type { AuthRequest, OAuthHelpers } from '@cloudflare/workers-oauth-provider'
+
+import { McpOAuthErrorPage } from '../../View/McpOAuthErrorPage.js'
+// `SCOPE_FIELD` and `QUERY_FIELD` are imported from the view rather than
+// declared here: the page renders the form, so it owns its field names, and
+// this file reads them back. Two declarations would be two spellings of one
+// contract, and the failure — a submitted field nothing looks for — is silent.
+import {
+  McpOAuthConsentPage,
+  QUERY_FIELD,
+  SCOPE_FIELD,
+} from '../../View/McpOAuthConsentPage.js'
 
 /**
  * Where an unauthenticated visitor is sent. The consent decision is only
  * meaningful for a signed-in user — change this to your own login path.
  */
 const LOGIN_PATH = '/login'
-
-/** The form field each granted scope is submitted under. */
-const SCOPE_FIELD = 'scope'
-
-/** The form field carrying the original authorize query, re-parsed on POST. */
-const QUERY_FIELD = 'authorize_query'
 
 interface WorkerEnvWithProvider {
   OAUTH_PROVIDER: OAuthHelpers
@@ -87,14 +88,14 @@ export default class McpOAuthController extends Controller {
     }
     const client = await provider.lookupClient(parsed.clientId)
 
-    return this.html(
-      this.consentScreen({
-        client,
-        clientId: parsed.clientId,
-        tools: this.offeredTools(parsed.scope),
-        query: new URL(this.ctx.req.url).searchParams.toString(),
-      }),
-    )
+    return this.view(McpOAuthConsentPage, {
+      // The client's registered name when it has one; its id otherwise, which
+      // is at least something the person can recognize in the client's own UI.
+      clientName: client?.clientName ?? parsed.clientId,
+      query: new URL(this.ctx.req.url).searchParams.toString(),
+      tools: this.offeredTools(parsed.scope),
+      csrfToken: getCsrfToken(this.ctx),
+    })
   }
 
   /** POST /oauth/authorize — record the decision and hand back to the provider. */
@@ -266,106 +267,10 @@ export default class McpOAuthController extends Controller {
     return `${LOGIN_PATH}?redirectTo=${encodeURIComponent(`${target.pathname}${target.search}`)}`
   }
 
-  private html(body: string, status = 200): Response {
-    return this.text(body, { status, headers: { 'Content-Type': 'text/html; charset=utf-8' } })
-  }
-
   /** A plain, stack-free page for the arrivals that are nobody's bug. */
-  private errorPage(status: number, title: string, advice: string): Response {
-    return this.html(
-      `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>${escapeHtml(title)}</title>
-<style>
-  :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
-  body { margin: 0 auto; max-width: 32rem; padding: 3rem 1rem; line-height: 1.5; }
-  h1 { font-size: 1.25rem; }
-  p { opacity: .8; }
-</style>
-</head>
-<body>
-<h1>${escapeHtml(title)}</h1>
-<p>${escapeHtml(advice)}</p>
-</body>
-</html>
-`,
-      status,
-    )
+  private errorPage(status: number, title: string, advice: string): Promise<Response> {
+    return this.view(McpOAuthErrorPage, { title, advice }, { status })
   }
-
-  private consentScreen(input: {
-    client: ClientInfo | null
-    clientId: string
-    tools: DerivedAgentTool[]
-    query: string
-  }): string {
-    const clientName = escapeHtml(input.client?.clientName ?? input.clientId)
-
-    const body =
-      input.tools.length === 0
-        ? '<p class="empty">This application requested no tools it can be granted. '
-          + 'Nothing here would give it access, so there is nothing to approve.</p>'
-        : `<ul class="tools">${input.tools.map(toolRow).join('')}</ul>`
-
-    const actions =
-      input.tools.length === 0
-        ? ''
-        : '<button type="submit">Approve selected</button>'
-
-    return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Authorize ${clientName}</title>
-<style>
-  :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
-  body { margin: 0 auto; max-width: 42rem; padding: 2rem 1rem; line-height: 1.5; }
-  h1 { font-size: 1.25rem; }
-  .tools { list-style: none; margin: 1.5rem 0; padding: 0; }
-  .tools li { border-top: 1px solid rgba(128,128,128,.35); padding: .75rem 0; }
-  .name { font-family: ui-monospace, monospace; font-weight: 600; }
-  .desc { display: block; margin: .25rem 0 0 1.75rem; opacity: .8; }
-  .badge { border: 1px solid currentColor; border-radius: .5rem; font-size: .75rem; margin-left: .5rem; padding: 0 .4rem; }
-  .empty { opacity: .8; }
-  button { font: inherit; padding: .5rem 1rem; }
-</style>
-</head>
-<body>
-<h1><strong>${clientName}</strong> is asking to use this application's tools</h1>
-<p>Approving lets it act as you, through the tools you select. Uncheck anything you would rather it could not do.</p>
-<form method="post" action="/oauth/authorize">
-  ${csrfField(this.ctx)}
-  <input type="hidden" name="${QUERY_FIELD}" value="${escapeHtml(input.query)}" />
-  ${body}
-  ${actions}
-</form>
-</body>
-</html>
-`
-  }
-}
-
-function toolRow(tool: DerivedAgentTool): string {
-  const name = escapeHtml(tool.toolName)
-  const badges = [
-    tool.annotations.readOnlyHint ? '<span class="badge">read only</span>' : '',
-    tool.approval === 'required' ? '<span class="badge">approval required</span>' : '',
-  ].join('')
-  const description = tool.description ? `<span class="desc">${escapeHtml(tool.description)}</span>` : ''
-  // Read-only tools arrive ticked; anything that can write does not. The
-  // default is what most people will accept unread, so it is the framework's
-  // fail-closed posture rendered as a checkbox: granting a write has to be a
-  // decision somebody made, not one they failed to undo.
-  const checked = tool.annotations.readOnlyHint ? ' checked' : ''
-
-  return (
-    `<li><label><input type="checkbox" name="${SCOPE_FIELD}" value="tool:${name}"${checked} />`
-    + `<span class="name">${name}</span>${badges}</label>${description}</li>`
-  )
 }
 
 /** One value from a parsed body field that may legally hold several. */
@@ -378,19 +283,4 @@ function many(value: unknown): string[] {
   if (typeof value === 'string') return [value]
   if (Array.isArray(value)) return value.filter((entry): entry is string => typeof entry === 'string')
   return []
-}
-
-/**
- * Everything rendered here comes from somewhere this application does not
- * control — a dynamically registered client's own name, a route's description
- * — so all of it is escaped. `'` and `"` included: values land inside
- * attributes as well as text.
- */
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
 }
