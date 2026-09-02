@@ -241,10 +241,20 @@ export function parseApiToken(plainTextToken: string): { id: string; token: stri
  * parsing rule shared by `createBearerTokenMiddleware`, `TokenGuard`, and
  * `hasBearerHeader` below — three readers of the same header must not
  * disagree about what a bearer request is.
+ *
+ * The `\S` anchoring the capture is load-bearing, not cosmetic: `\s+(.+)`
+ * lets the separator and the token both match a space, so an attacker-supplied
+ * `Bearer` + many spaces + a newline (`.` never matches one, so `$` is
+ * unreachable) makes the engine retry every split of the whitespace run —
+ * quadratic in the header length, on a header read before any authentication.
+ * Requiring the token to start with a non-space removes the overlap. The only
+ * input whose result changes is an all-whitespace token, which was never a
+ * token: it now reads as "not a bearer request" rather than as a bearer
+ * request carrying a space, so CSRF is no longer skipped for it.
  */
 export function readBearerToken(header: string | undefined | null): string | null {
   if (!header) return null
-  const match = header.match(/^Bearer\s+(.+)$/i)
+  const match = header.match(/^Bearer\s+(\S.*)$/i)
   return match ? match[1] : null
 }
 

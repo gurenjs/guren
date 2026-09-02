@@ -3,6 +3,7 @@ import { Hono } from 'hono'
 import {
   createApiToken,
   parseApiToken,
+  readBearerToken,
   verifyApiToken,
   tokenCan,
   tokenCanAll,
@@ -244,6 +245,42 @@ describe('parseApiToken', () => {
     expect(parseApiToken('|')).toBeNull()
     expect(parseApiToken('abc|')).toBeNull()
     expect(parseApiToken('|def')).toBeNull()
+  })
+})
+
+describe('readBearerToken', () => {
+  it('reads the token after the scheme, case-insensitively', () => {
+    expect(readBearerToken('Bearer abc123')).toBe('abc123')
+    expect(readBearerToken('bearer   abc123')).toBe('abc123')
+    expect(readBearerToken('BEARER\tabc|123')).toBe('abc|123')
+  })
+
+  it('returns null for anything that is not a bearer header', () => {
+    expect(readBearerToken(undefined)).toBeNull()
+    expect(readBearerToken(null)).toBeNull()
+    expect(readBearerToken('')).toBeNull()
+    expect(readBearerToken('Basic abc123')).toBeNull()
+    expect(readBearerToken('Bearer')).toBeNull()
+    expect(readBearerToken('Bearer ')).toBeNull()
+    expect(readBearerToken('Bearer    ')).toBeNull()
+  })
+
+  // The header is parsed before any authentication, so its cost must stay
+  // linear in the length an unauthenticated caller controls. `\\s+(.+)` was
+  // quadratic on this shape: the separator and the token could both match a
+  // space, and the trailing newline made `$` unreachable, so every split of
+  // the whitespace run was retried.
+  it('stays linear on a header built to backtrack', () => {
+    const header = `Bearer${' '.repeat(50_000)}\n`
+
+    const start = performance.now()
+    const result = readBearerToken(header)
+    const elapsed = performance.now() - start
+    expect(result).toBeNull()
+
+    // The budget is deliberately loose: the quadratic form took ~1.5s on this
+    // input and the linear one takes ~0.1ms, so anything in between is noise.
+    expect(elapsed).toBeLessThan(250)
   })
 })
 
