@@ -317,15 +317,18 @@ export class GurenLambdaApp extends Construct {
  * target agree with it.
  */
 function renderAssetDocumentGuard(): string {
-  // Every interpolated value goes through JSON.stringify: it is the one
-  // quoting rule that cannot emit a broken function body, and a header value
-  // carrying an apostrophe would. CloudFront rejects a header a function names
-  // in any case but lower.
-  const assignments = Object.entries(DOCUMENT_ASSET_HEADERS)
-    .map(([name, value]) => `    response.headers[${JSON.stringify(name.toLowerCase())}] = { value: ${JSON.stringify(value)} }`)
-    .join('\n')
+  // CloudFront rejects a header a function names in any case but lower.
+  const headers = Object.fromEntries(
+    Object.entries(DOCUMENT_ASSET_HEADERS).map(([name, value]) => [name.toLowerCase(), value]),
+  )
 
+  // Both constants are injected as JSON, the one quoting rule that cannot emit
+  // a broken function body — a header value carrying an apostrophe would. They
+  // go in as *data* rather than as generated assignments, which is what keeps
+  // the body below a literal: what is written here is what CloudFront runs,
+  // with no line of it maintained at one indentation and spliced in at another.
   return `var DOCUMENT_EXTENSIONS = ${JSON.stringify(DOCUMENT_ASSET_EXTENSIONS)}
+var DOCUMENT_HEADERS = ${JSON.stringify(headers)}
 
 function handler(event) {
   var uri = event.request.uri
@@ -335,7 +338,9 @@ function handler(event) {
   // A dot only ends the last segment when it follows the last slash: without
   // the comparison, /v1.2/app reads as an extension of "2/app".
   if (dot > uri.lastIndexOf('/') && DOCUMENT_EXTENSIONS.indexOf(uri.substring(dot + 1).toLowerCase()) !== -1) {
-${assignments}
+    for (var name in DOCUMENT_HEADERS) {
+      response.headers[name] = { value: DOCUMENT_HEADERS[name] }
+    }
   }
 
   return response
