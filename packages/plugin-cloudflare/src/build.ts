@@ -393,7 +393,9 @@ function writeAssetHeaders(assetsOut: string): void {
     }
   }
 
-  writeFileSync(headersFile, existing ? `${renderAssetHeaders()}\n${existing}` : renderAssetHeaders())
+  const generated = renderAssetHeaders()
+
+  writeFileSync(headersFile, existing ? `${generated}\n${existing}` : generated)
 }
 
 function readPackageJson(root: string): PackageJsonLike {

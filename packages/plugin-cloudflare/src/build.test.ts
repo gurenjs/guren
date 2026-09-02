@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { DOCUMENT_ASSET_EXTENSIONS, MCP_TRANSPORT_SPECIFIER } from '@guren/core/internal/deploy-build'
+import { DOCUMENT_ASSET_EXTENSIONS, DOCUMENT_ASSET_HEADERS, MCP_TRANSPORT_SPECIFIER } from '@guren/core/internal/deploy-build'
 import { buildCloudflareOutput } from './build'
 
 function writeJson(path: string, value: unknown): void {
@@ -341,10 +341,12 @@ describe('static document headers', () => {
     // extension added there fails this until it has a rule. One splat per
     // pattern: a second one is a parse error the platform answers by dropping
     // the rule, which would read as a rule that is present and matches nothing.
+    const rule = Object.entries(DOCUMENT_ASSET_HEADERS)
+      .map(([name, value]) => `\n  ${name}: ${value}`)
+      .join('')
+
     for (const extension of DOCUMENT_ASSET_EXTENSIONS) {
-      expect(headers).toContain(
-        `/*.${extension}\n  Content-Disposition: attachment\n  X-Content-Type-Options: nosniff`,
-      )
+      expect(headers).toContain(`/*.${extension}${rule}`)
     }
   })
 

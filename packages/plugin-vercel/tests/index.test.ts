@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import { DOCUMENT_ASSET_EXTENSIONS } from '@guren/core/internal/deploy-build'
+import { DOCUMENT_ASSET_EXTENSIONS, DOCUMENT_ASSET_HEADERS } from '@guren/core/internal/deploy-build'
 import { buildVercelOutput, createVercelHandler, vercelPlugin } from '../src/index'
 
 const DEFAULT_ENTRYPOINT_SOURCE = "export default { fetch() { return new Response('ok') } }\n"
@@ -277,10 +277,10 @@ describe('@guren/plugin-vercel', () => {
       const rule = routes.find((route) => route.headers !== undefined)
 
       expect(rule).toBeDefined()
-      expect(rule!.headers).toEqual({
-        'Content-Disposition': 'attachment',
-        'X-Content-Type-Options': 'nosniff',
-      })
+      // The shared constant rather than a literal pair: a header added to the
+      // framework guard reaches this route through it, and restating it here
+      // would let the route ship one short with this test green.
+      expect(rule!.headers).toEqual({ ...DOCUMENT_ASSET_HEADERS })
       // Only routes after `handle: 'hit'` are confined to what the filesystem
       // answered. In the initial phase the same pattern would also match a
       // path the function serves, and a dynamic /sitemap.xml would download.

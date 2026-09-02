@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it } from 'bun:test'
 import { mimes } from 'hono/utils/mime'
-import { DOCUMENT_ASSET_EXTENSIONS } from '../../../core/src/internal/deploy-build'
+import { DOCUMENT_ASSET_EXTENSIONS, DOCUMENT_ASSET_HEADERS } from '../../../core/src/internal/deploy-build'
 import { Application } from '../../src'
 import { configureInertiaAssets, registerDevAssets } from '../../src/runtime'
 import { registerRootPublicAssets } from '../../src/http/public-assets'
-import { rendersAsDocument } from '../../src/http/static-documents'
+import { applyDocumentDisposition, rendersAsDocument } from '../../src/http/static-documents'
 import { useAssetFixture } from './asset-fixture'
 
 describe('rendersAsDocument', () => {
@@ -86,6 +86,26 @@ describe('the document extensions the deploy plugins declare', () => {
     expect(rendersAsDocument('text/xsl')).toBe(true)
     expect(Object.keys(mimes)).not.toContain('xsl')
     expect([...DOCUMENT_ASSET_EXTENSIONS]).not.toContain('xsl')
+  })
+
+  it('declares the headers the framework guard actually sets', () => {
+    // The other half of the same duplication, and the half nothing was
+    // holding: the plugins restate the *pair* as data because they cannot
+    // call `applyDocumentDisposition`. A header added to the guard — a CSP
+    // sandbox directive is the obvious next one — would otherwise ship on the
+    // app's own mounts and on none of the deploy targets, with every suite
+    // green.
+    const headers = new Headers()
+    applyDocumentDisposition(headers, 'text/html')
+
+    expect(Object.fromEntries(headers)).toEqual(
+      // `Headers` lowercases its names; the constant carries the canonical
+      // spelling, which is what the platforms that take a header name
+      // verbatim write out.
+      Object.fromEntries(
+        Object.entries(DOCUMENT_ASSET_HEADERS).map(([name, value]) => [name.toLowerCase(), value]),
+      ),
+    )
   })
 
   it('covers the extensions a document type actually arrives under', () => {
