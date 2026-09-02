@@ -333,6 +333,20 @@ var DOCUMENT_HEADERS = ${JSON.stringify(headers)}
 function handler(event) {
   var uri = event.request.uri
   var response = event.response
+
+  // Decoded first: CloudFront picks the behavior from a normalized path but
+  // hands the function the raw one, and S3 resolves percent-encoding when it
+  // matches a key. So /evil%2Esvg reaches the object evil.svg while the raw
+  // string holds no dot at all — the extension test would find nothing and
+  // the document would come back inline. A malformed sequence throws rather
+  // than decoding; the raw path is the safe thing to judge in that case,
+  // since it is also what no key will match.
+  try {
+    uri = decodeURIComponent(uri)
+  } catch (error) {
+    uri = event.request.uri
+  }
+
   var dot = uri.lastIndexOf('.')
 
   // A dot only ends the last segment when it follows the last slash: without

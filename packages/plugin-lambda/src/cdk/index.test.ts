@@ -287,6 +287,19 @@ describe('GurenLambdaApp', () => {
       }
     })
 
+    test('should download a document reached through a percent-encoded path', () => {
+      // CloudFront hands the function the raw path while S3 resolves the
+      // encoding when it matches a key, so these reach the same objects the
+      // plain paths do.
+      expect(respondTo(distribution.code, '/uploads/evil%2Esvg')).toEqual(expectedHeaders)
+      expect(respondTo(distribution.code, '/uploads/evil.%73vg')).toEqual(expectedHeaders)
+      // A malformed sequence must not throw out of the handler: CloudFront
+      // answers a function error with a 502, which would take every asset
+      // response down with it.
+      expect(respondTo(distribution.code, '/uploads/%zz.svg')).toEqual(expectedHeaders)
+      expect(respondTo(distribution.code, '/uploads/%zz.js')).toEqual({})
+    })
+
     test('should leave everything else inline', () => {
       const { code } = distribution
 
