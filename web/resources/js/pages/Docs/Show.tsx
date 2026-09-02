@@ -1,6 +1,7 @@
-import { Head, Link } from '@inertiajs/react'
+import { Head, Link, router } from '@inertiajs/react'
 import { useEffect, useMemo, useState } from 'react'
 import { SITE_DESCRIPTION, pageTitle } from '../../../../config/site.js'
+import { DocSearch } from '../../components/DocSearch.js'
 import { Footer } from '../../components/Footer.js'
 import { Header } from '../../components/Header.js'
 import { Seo } from '../../components/Seo.js'
@@ -108,6 +109,19 @@ function loadMermaid(): Promise<MermaidApi> {
     document.head.append(script)
   })
   return mermaidLoader
+}
+
+/**
+ * A hash is whatever is in the address bar, not necessarily something this
+ * page wrote: `#%` makes decodeURIComponent throw, and an exception here
+ * would take the whole effect — and with it the router subscription — down.
+ */
+function decodeFragment(hash: string): string {
+  try {
+    return decodeURIComponent(hash)
+  } catch {
+    return hash
+  }
 }
 
 interface TocItem {
@@ -220,6 +234,45 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
   useEffect(() => {
     setSidebarOpen(false)
   }, [active?.category, active?.slug])
+
+  // A browser scrolls to the fragment on a full page load; Inertia does not
+  // after a client-side visit, so a search result deep-linking to a heading
+  // would land at the top of the page instead. Keyed on the router event
+  // rather than on the doc, because two results in the same document differ
+  // only by their fragment.
+  useEffect(() => {
+    let pending: ReturnType<typeof setTimeout> | undefined
+
+    const scrollToFragment = () => {
+      const id = decodeFragment(window.location.hash.slice(1))
+      if (!id) return
+
+      // Inertia announces the navigation before React has necessarily
+      // committed the new document, so the heading may not exist yet. Retried
+      // on the macrotask queue rather than on an animation frame: a tab that
+      // is not visible never runs one, and a docs link opened in a background
+      // tab should still be at its heading when the reader gets there.
+      let attempts = 0
+      const attempt = () => {
+        const target = document.getElementById(id)
+        if (target) {
+          target.scrollIntoView({ block: 'start' })
+          return
+        }
+        if (attempts++ < 10) {
+          pending = setTimeout(attempt, 16)
+        }
+      }
+      attempt()
+    }
+
+    scrollToFragment()
+    const stop = router.on('navigate', scrollToFragment)
+    return () => {
+      clearTimeout(pending)
+      stop()
+    }
+  }, [])
 
   // Mermaid diagrams: the build-time renderer leaves ```mermaid fences as
   // <pre class="mermaid"> (shiki has no grammar for them), and the library
@@ -375,6 +428,7 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
       <main className={`docs-layout ${toc.items.length > 0 ? 'docs-layout--toc' : ''}`}>
         {/* Sidebar */}
         <aside className="docs-sidebar">
+          <DocSearch locale={locale} className="mb-6" />
           <button
             type="button"
             onClick={() => setSidebarOpen((open) => !open)}
