@@ -359,7 +359,7 @@ export const handler = createLambdaHandler(app)
 
 **Key points:**
 - `app.boot()` runs once at cold start; the handler reuses the booted app
-- Use `NodeHasher` instead of `ScryptHasher` for password hashing on Node.js runtimes
+- `Hash` (`DefaultHasher`) is the default hasher and already falls back to `node:crypto` scrypt off Bun; reach for `NodeHasher` explicitly only to pin the format. Never construct `ScryptHasher` in code a Node runtime will run
 - Static assets should be served via CloudFront/S3, not Lambda
 - Use Redis-backed session/cache/queue stores (not in-memory)
 - List providers explicitly in `createApp()` (auto-discovery requires Bun)

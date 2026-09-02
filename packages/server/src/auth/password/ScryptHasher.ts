@@ -1,4 +1,5 @@
 import type { PasswordHasher } from './PasswordHasher'
+import { assertVerifyArgumentOrder } from './hash-format'
 
 type Argon2Algorithm = 'argon2id' | 'argon2i' | 'argon2d'
 type SupportedAlgorithm = Argon2Algorithm | 'bcrypt'
@@ -45,6 +46,7 @@ export class ScryptHasher implements PasswordHasher {
   }
 
   async verify(hashed: string, plain: string): Promise<boolean> {
+    assertVerifyArgumentOrder(hashed, plain)
     return Bun.password.verify(plain, hashed)
   }
 

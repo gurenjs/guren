@@ -6,7 +6,7 @@ import { ModelUserProvider, type ModelUserProviderOptions } from './providers/Mo
 import { SessionGuard } from './SessionGuard'
 import { TokenGuard } from './TokenGuard'
 import { hasBearerHeader, type ApiTokenStore } from './api-token'
-import { ScryptHasher } from './password/ScryptHasher'
+import { DefaultHasher } from './password/DefaultHasher'
 import type {
   AttachContextOptions,
   AuthContext,
@@ -165,7 +165,7 @@ export class AuthManager implements AuthManagerContract {
     const defaultOptions: ModelUserProviderOptions = {
       usernameColumn: 'email',
       credentialsPasswordField: 'password',
-      hasher: new ScryptHasher(),
+      hasher: new DefaultHasher(),
       ...options,
     }
 

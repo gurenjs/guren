@@ -224,16 +224,38 @@ export const handler = createLambdaHandler(app)
 })
 
 describe('deploy-password-hashing check', () => {
-  it('warns when a Workers app verifies passwords without NodeHasher', async () => {
+  // The default hasher falls back to node:crypto scrypt off Bun, and workerd's
+  // nodejs_compat implements it in full (RFC 0003 §4), so authenticating with
+  // passwords is no longer by itself a break on a Bun-less target. Warning here
+  // would prescribe a destructive rehash for a problem the framework handles.
+  it('passes when a Workers app verifies passwords through the default hasher', async () => {
     const files = { 'app/Http/Controllers/LoginController.ts': PASSWORD_LOGIN_CONTROLLER }
+
+    await withApp('guren-hash-cf-default-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
+      const check = (await deployChecks(dir))['deploy-password-hashing']
+
+      expect(check.status).toBe('pass')
+      expect(check.message).toContain('Cloudflare Workers')
+      expect(check.message).toContain('auth.attempt (app/Http/Controllers/LoginController.ts:4)')
+      expect(check.message).toContain('node:crypto scrypt')
+    })
+  })
+
+  // What does still break: an explicit ScryptHasher writes Argon2id, which
+  // nothing without Bun.password can read back.
+  it('warns when a Workers app constructs ScryptHasher directly', async () => {
+    const files = {
+      'app/Http/Controllers/LoginController.ts': PASSWORD_LOGIN_CONTROLLER,
+      'db/seeders/001_UsersSeeder.ts': `import { ScryptHasher } from '@guren/core'\nconst hasher = new ScryptHasher()\n`,
+    }
 
     await withApp('guren-hash-cf-warn-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
       const check = (await deployChecks(dir))['deploy-password-hashing']
 
       expect(check.status).toBe('warn')
       expect(check.message).toContain('Cloudflare Workers')
-      expect(check.message).toContain('auth.attempt (app/Http/Controllers/LoginController.ts:4)')
-      expect(check.fix).toContain('NodeHasher')
+      expect(check.message).toContain('ScryptHasher (db/seeders/001_UsersSeeder.ts:2)')
+      expect(check.fix).toContain('new Hash()')
     })
   })
 
@@ -252,24 +274,25 @@ describe('deploy-password-hashing check', () => {
     })
   })
 
-  // A bare import is not remediation: the check must see the hasher actually
-  // constructed, or a leftover `import { NodeHasher }` would silence a real gap.
-  it('still warns when NodeHasher is imported but never constructed', async () => {
+  // A bare import is not usage: the check must see the hasher actually
+  // constructed, or a leftover `import { ScryptHasher }` would raise a warning
+  // for a call site that no longer exists.
+  it('does not warn when ScryptHasher is imported but never constructed', async () => {
     const files = {
       'app/Http/Controllers/LoginController.ts': PASSWORD_LOGIN_CONTROLLER,
-      'app/Models/User.ts': `import { AuthenticatableModel, NodeHasher } from '@guren/core'
-export class User extends AuthenticatableModel {}
-`,
+      'db/seeders/001_UsersSeeder.ts': `import { ScryptHasher, Hash } from '@guren/core'\nconst hasher = new Hash()\n`,
     }
 
     await withApp('guren-hash-import-only-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
       const check = (await deployChecks(dir))['deploy-password-hashing']
 
-      expect(check.status).toBe('warn')
+      expect(check.status).toBe('pass')
     })
   })
 
-  it('passes once NodeHasher is configured', async () => {
+  // Configuring NodeHasher explicitly is still a correct thing to do, and must
+  // not be reported as a problem.
+  it('passes when NodeHasher is configured explicitly', async () => {
     const files = {
       'app/Http/Controllers/LoginController.ts': PASSWORD_LOGIN_CONTROLLER,
       'app/Models/User.ts': `import { AuthenticatableModel, NodeHasher } from '@guren/core'
@@ -283,7 +306,6 @@ export class User extends AuthenticatableModel {
       const check = (await deployChecks(dir))['deploy-password-hashing']
 
       expect(check.status).toBe('pass')
-      expect(check.message).toContain('NodeHasher is configured')
     })
   })
 
@@ -919,17 +941,17 @@ export const app = createApp({ auth })
     })
   })
 
-  // Resolving names bare made any same-named export satisfy a remediation.
-  // An unrelated `NodeHasher` silently marked a Workers app as fixed, which is
-  // the worst direction for this check: it hides a real production break.
-  it('does not let a same-named import from another package satisfy the hasher remediation', async () => {
+  // Resolving names bare made any same-named export a signal. An unrelated
+  // `ScryptHasher` would report a Workers app as broken over a class that has
+  // nothing to do with Bun.password, and the fix it prescribes is a rehash.
+  it('does not let a same-named import from another package raise the hasher warning', async () => {
     const files = {
       'app/Http/Controllers/LoginController.ts': PASSWORD_LOGIN_CONTROLLER,
-      'app/lib/hash.ts': `import { NodeHasher } from 'some-other-package'\nexport const h = new NodeHasher()\n`,
+      'app/lib/hash.ts': `import { ScryptHasher } from 'some-other-package'\nexport const h = new ScryptHasher()\n`,
     }
 
     await withApp('guren-ast-foreign-hasher-', files, { '@guren/plugin-cloudflare': '^0.2.0' }, async (dir) => {
-      expect((await deployChecks(dir))['deploy-password-hashing'].status).toBe('warn')
+      expect((await deployChecks(dir))['deploy-password-hashing'].status).toBe('pass')
     })
   })
 

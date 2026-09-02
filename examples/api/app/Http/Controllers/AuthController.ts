@@ -1,5 +1,4 @@
-import { Controller, createApiToken, ValidationException } from '@guren/core'
-import { ScryptHasher } from '@guren/core'
+import { Controller, createApiToken, Hash, ValidationException } from '@guren/core'
 import { User } from '../../Models/User.js'
 import { UserResource } from '../Resources/UserResource.js'
 import { RegisterSchema, LoginSchema } from '../Validators/AuthValidator.js'
@@ -38,7 +37,7 @@ export default class AuthController extends Controller {
     const { email, password } = await this.validateBody(LoginSchema)
     const user = await User.first({ email })
 
-    if (!user || !(await new ScryptHasher().verify(user.passwordHash, password))) {
+    if (!user || !(await new Hash().verify(user.passwordHash, password))) {
       return this.json({ error: 'Invalid credentials' }, { status: 401 })
     }
 

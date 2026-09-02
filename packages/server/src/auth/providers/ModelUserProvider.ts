@@ -1,6 +1,6 @@
 import type { Model, PlainObject } from '@guren/orm'
 import type { PasswordHasher } from '../password/PasswordHasher'
-import { ScryptHasher } from '../password/ScryptHasher'
+import { DefaultHasher } from '../password/DefaultHasher'
 import type { AuthCredentials, Authenticatable } from '../types'
 import { BaseUserProvider } from './UserProvider'
 
@@ -56,7 +56,7 @@ export class ModelUserProvider<User extends Authenticatable = Authenticatable> e
     this.usernameColumn = options.usernameColumn ?? 'email'
     this.passwordColumn = options.passwordColumn ?? authModel?.resolvePasswordHashField() ?? 'passwordHash'
     this.rememberTokenColumn = options.rememberTokenColumn ?? authModel?.resolveRememberTokenField() ?? 'rememberToken'
-    this.hasher = options.hasher ?? new ScryptHasher()
+    this.hasher = options.hasher ?? new DefaultHasher()
     this.credentialsPasswordField = options.credentialsPasswordField ?? 'password'
   }
 

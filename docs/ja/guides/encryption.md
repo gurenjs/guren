@@ -113,98 +113,111 @@ try {
 
 ## ハッシュ化
 
-`Hash`クラスはbcrypt、argon2、またはscryptアルゴリズムを使用した安全なパスワードハッシュを提供します。
+パスワードのハッシュ化は`PasswordHasher`を通して行います。実装は3つ同梱されています。
+
+| クラス | アルゴリズム | ランタイム |
+| --- | --- | --- |
+| `Hash`（`DefaultHasher`のエイリアス） | Bunでは`ScryptHasher`、それ以外では`NodeHasher`に委譲 | 両方 |
+| `ScryptHasher` | `Bun.password`。既定はArgon2id、指定でbcrypt | Bunのみ |
+| `NodeHasher` | `crypto.scrypt` | すべて |
+
+特別な理由がなければ`Hash`を使ってください。`AuthenticatableModel`と`ModelUserProvider`の既定値であり、動作環境に合わせて自分で切り替わる唯一の実装です。`NodeHasher`も両方で動きます（Bunは`node:crypto`を実装しているため）。Bun専用なのは`ScryptHasher`だけです。
+
+> `ScryptHasher`が生成するのはscryptではなくArgon2idです。名前が実装より古いだけで、scryptを使うのは`NodeHasher`だけです。
+
+2つのランタイムはハッシュ形式が異なるため、一方で書いたハッシュをもう一方で検証することはできません。既存のパスワードカラムをランタイム間で移す場合にだけ問題になります。
 
 ### ハッシャーの作成
 
 ```typescript
 import { Hash } from '@guren/core'
 
-// デフォルトのbcryptハッシャー
+// ランタイムを自動判定する。オプションは取らない
 const hash = new Hash()
-
-// Argon2ハッシャー
-const argon2Hash = new Hash({ driver: 'argon2' })
-
-// Scryptハッシャー
-const scryptHash = new Hash({ driver: 'scrypt' })
-
-// カスタムラウンドのBcrypt
-const bcryptHash = new Hash({ driver: 'bcrypt', rounds: 12 })
 ```
+
+アルゴリズムやコストパラメータを固定したい場合は `ScryptHasher` / `NodeHasher` を直接構築してください。[アルゴリズムオプション](#アルゴリズムオプション)を参照。
 
 ### パスワードのハッシュ化
 
 ```typescript
-const hash = new Hash()
-
-// パスワードをハッシュ化
-const hashedPassword = await hash.make('user-password')
-// 戻り値: $2b$10$...
-
-// セキュリティのため非同期（ワーカースレッドを使用）
+const hashedPassword = await hash.hash('user-password')
+// Bun上:  $argon2id$v=19$m=65536,t=2,p=1$...
+// Node上: $scrypt$N=16384,r=8,p=1$...
 ```
+
+`AuthenticatableModel`を継承したモデルはこれを自動で行います。`create()`に平文の`password`を渡すと、モデルが`passwordHash`カラムへハッシュ化して格納します。[認証](/docs/guides/authentication)を参照してください。
 
 ### パスワードの検証
 
+**保存済みのハッシュが第1引数です。**
+
 ```typescript
-// パスワードが一致するかチェック
-const isValid = await hash.check('user-password', hashedPassword)
-// 戻り値: true または false
+const isValid = await hash.verify(hashedPassword, 'user-password')
 ```
+
+この順序は`Bun.password.verify(plain, hashed)`および単体関数の`verifyPassword(plain, hashed)`とは逆なので、呼び出しごとに確認する価値があります。どちらの引数も`string`なので入れ替えてもコンパイルは通り、型エラーは出ません。同梱のハッシャーは明らかな入れ替えを実行時に検出し、順序を明示した`TypeError`をスローします。
+
+多くのアプリではこれを直接呼ぶ必要はありません。`AuthManager`を設定していれば、**セッション**ガードが検索と照合をまとめて行います。アカウントが存在しない場合にダミーハッシュを走らせる処理も含まれるので、応答時間からアカウントの有無を判別されずに済みます。
+
+```typescript
+const user = await this.auth.guard('web').validate({ email, password })
+if (!user) {
+  return this.json({ error: 'Invalid credentials' }, { status: 401 })
+}
+```
+
+ガード名は明示してください。`TokenGuard.validate()` はスローします（ベアラートークンは資格情報ベースではないため）。メールとパスワードからトークンを発行するトークン専用 API は、セッションガードか `ModelUserProvider` を明示的に取得する必要があります。
 
 ### 再ハッシュが必要かチェック
 
 ```typescript
-// ハッシュを再ハッシュする必要があるかチェック（例：ラウンドが変更された場合）
-const needsRehash = hash.needsRehash(hashedPassword)
-
-if (needsRehash) {
-  const newHash = await hash.make(plainPassword)
-  await user.update({ password: newHash })
+if (hash.needsRehash(user.passwordHash)) {
+  await User.update({ id: user.id }, { password: plainPassword })
 }
 ```
 
-### ハッシュ情報の取得
-
-```typescript
-const info = hash.info(hashedPassword)
-// 戻り値: { algorithm: 'bcrypt', options: { rounds: 10 } }
-```
+`needsRehash()`はハッシュに埋め込まれたパラメータとハッシャーの設定値を比較するので、コストファクタを上げた後に`true`を返します。フレームワークが自動で呼ぶことはありません。
 
 ## アルゴリズムオプション
 
-### Bcrypt（デフォルト）
+### Argon2（Bunの既定）
 
 ```typescript
-const hash = new Hash({
-  driver: 'bcrypt',
-  rounds: 10, // コストファクター（デフォルト: 10、推奨: 10-12）
+const hash = new ScryptHasher({
+  algorithm: 'argon2id', // 'argon2i'、'argon2d'、'argon2id'（既定）
+  memoryCost: 65536,     // メモリ使用量（KiB）
+  timeCost: 3,           // 反復回数
 })
 ```
 
-### Argon2
+### Bcrypt
 
 ```typescript
-const hash = new Hash({
-  driver: 'argon2',
-  memoryCost: 65536,  // KB単位のメモリ使用量（デフォルト: 65536）
-  timeCost: 3,        // イテレーション（デフォルト: 3）
-  parallelism: 4,     // 並列スレッド（デフォルト: 4）
-  type: 'argon2id',   // 'argon2i', 'argon2d', または 'argon2id'（デフォルト）
+const hash = new ScryptHasher({
+  algorithm: 'bcrypt',
+  cost: 12, // ログラウンド数
 })
 ```
 
-### Scrypt
+### Scrypt（Node）
 
 ```typescript
-const hash = new Hash({
-  driver: 'scrypt',
-  cost: 16384,      // CPU/メモリコスト（N）
-  blockSize: 8,     // ブロックサイズ（r）
-  parallelization: 1, // 並列化（p）
-  keyLength: 64,    // 出力長
+const hash = new NodeHasher({
+  cost: 16384,     // CPU/メモリコスト（N）
+  memory: 8,       // ブロックサイズ（r）
+  saltLength: 16,  // ソルトのバイト数
+  keyLength: 64,   // 出力のバイト数
 })
+```
+
+同じscrypt実装は単体関数としても使えます。こちらは**平文が第1引数**で、`PasswordHasher.verify()`とは逆です。
+
+```typescript
+import { hashPassword, verifyPassword, needsRehash } from '@guren/core'
+
+const stored = await hashPassword('user-password')
+const ok = await verifyPassword('user-password', stored)
 ```
 
 ## コントローラーでの使用
@@ -216,29 +229,26 @@ export default class AuthController extends Controller {
   private hash = new Hash()
 
   async register() {
-    const { email, password } = await this.request.json()
+    const { email, password } = await this.validateBody(RegisterSchema)
 
-    const user = await User.create({
-      email,
-      password: await this.hash.make(password),
-    })
+    // AuthenticatableModel が password を passwordHash へハッシュ化する
+    const user = await User.create({ email, password })
 
     return this.json({ user })
   }
 
   async login() {
-    const { email, password } = await this.request.json()
-    const user = await User.findBy('email', email)
+    const { email, password } = await this.validateBody(LoginSchema)
+    const user = await User.first({ email })
 
-    if (!user || !await this.hash.check(password, user.password)) {
-      return this.json({ error: '認証情報が無効です' }, 401)
+    // 保存済みのハッシュが第1引数。verify(password, user.passwordHash) は
+    // 型としては通るが誤り
+    if (!user || !(await this.hash.verify(user.passwordHash, password))) {
+      return this.json({ error: '認証情報が無効です' }, { status: 401 })
     }
 
-    // 再ハッシュが必要かチェック
-    if (this.hash.needsRehash(user.password)) {
-      await user.update({
-        password: await this.hash.make(password),
-      })
+    if (this.hash.needsRehash(user.passwordHash)) {
+      await User.update({ id: user.id }, { password })
     }
 
     return this.json({ user })
@@ -252,7 +262,7 @@ export default class AuthController extends Controller {
 2. **強力なAPP_KEYを使用** — `bunx guren key:generate --write` で生成します。バージョン管理にコミットしないでください。
 3. **独自の暗号化を作らない** — 提供されているユーティリティを使用します。
 4. **定期的にキーをローテーション** — ダウンタイムなしでローテーションするには `APP_PREVIOUS_KEYS` を使用します（[キーローテーション](#キーローテーション)を参照）。
-5. **新規プロジェクトにはScryptを使用** — Gurenのデフォルトかつ推奨のパスワードハッシュアルゴリズムです。
+5. **アルゴリズムの選択は`Hash`に任せる**: BunではArgon2id、Nodeではscryptになります。両方で動く唯一のハッシャーです。
 
 ## テスト
 
@@ -275,8 +285,8 @@ describe('ハッシュ化', () => {
   it('パスワードをハッシュ化して検証する', async () => {
     const hash = new Hash()
 
-    const hashed = await hash.make('password123')
-    const valid = await hash.check('password123', hashed)
+    const hashed = await hash.hash('password123')
+    const valid = await hash.verify(hashed, 'password123')
 
     expect(valid).toBe(true)
   })
@@ -284,8 +294,8 @@ describe('ハッシュ化', () => {
   it('無効なパスワードを拒否する', async () => {
     const hash = new Hash()
 
-    const hashed = await hash.make('password123')
-    const valid = await hash.check('wrong-password', hashed)
+    const hashed = await hash.hash('password123')
+    const valid = await hash.verify(hashed, 'wrong-password')
 
     expect(valid).toBe(false)
   })

@@ -636,7 +636,7 @@ export const users = mysqlTable('users', {
         expect(seeder).not.toContain(forbidden)
         // Without the dialect's own context the seeder is typed against
         // PostgreSQL and rejects the schema it inserts into.
-        expect(seeder).toContain(`import { defineSeeder, ScryptHasher, type ${context} } from '@guren/core'`)
+        expect(seeder).toContain(`import { defineSeeder, Hash, type ${context} } from '@guren/core'`)
         expect(seeder).toContain(`async ({ db }: ${context}) => {`)
       } finally {
         await workspace.cleanup()

@@ -957,7 +957,8 @@ export { renderDebugPage, debugErrorMiddleware } from './errors/debug-page'
 export { renderErrorPage } from './errors/error-page'
 // Auth: Node.js-compatible hasher (for Lambda / non-Bun runtimes)
 export { NodeHasher } from './auth/password/NodeHasher'
-// Hash: convenience alias for ScryptHasher (used as default in docs)
+// Hash: convenience alias for DefaultHasher, the runtime-detecting hasher
+// that AuthenticatableModel and ModelUserProvider default to
 export { DefaultHasher, DefaultHasher as Hash } from './auth/password/DefaultHasher'
 export type { ApplicationOptions, AuthPluginOptions, I18nPluginOptions } from './http/Application'
 export type { InertiaI18nProps } from './providers/I18nServiceProvider'

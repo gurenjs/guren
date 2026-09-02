@@ -12,12 +12,11 @@ vi.mock('@guren/core', async () => {
     ...actual,
     ...createControllerModuleMock(),
     ServiceProvider: actual.ServiceProvider,
-    // The real Bun-backed hasher cannot run here (vitest runs on Node), so
-    // stand in the Node implementation of the same `PasswordHasher` interface
-    // rather than a hand-rolled fake: a fake's argument order can drift from
-    // `verify(hashed, plain)` without any type error, which is what let a
-    // swapped call site in the controller ship green.
-    ScryptHasher: actual.NodeHasher,
+    // No hasher override. The controller verifies through `Hash`, which picks
+    // NodeHasher off Bun, so the real implementation runs here. A hand-rolled
+    // fake would be the hazard: its argument order can drift from
+    // `verify(hashed, plain)` with no type error, which is what let a swapped
+    // call site in the controller ship green.
   }
 })
 

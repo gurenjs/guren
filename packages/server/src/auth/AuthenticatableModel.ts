@@ -1,6 +1,6 @@
 import { Model, type PlainObject } from '@guren/orm'
 import type { PasswordHasher } from './password/PasswordHasher'
-import { ScryptHasher } from './password/ScryptHasher'
+import { DefaultHasher } from './password/DefaultHasher'
 
 export abstract class AuthenticatableModel<TRecord extends PlainObject = PlainObject> extends Model<TRecord> {
   static override readonly createType: {
@@ -49,7 +49,7 @@ export abstract class AuthenticatableModel<TRecord extends PlainObject = PlainOb
       return this.passwordHasher
     }
 
-    const hasher = new ScryptHasher()
+    const hasher = new DefaultHasher()
     this.passwordHasher = hasher
     return hasher
   }

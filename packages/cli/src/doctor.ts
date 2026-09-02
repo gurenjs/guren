@@ -1203,13 +1203,18 @@ async function detectPluginCompatibility(context: DoctorRuleContext): Promise<Do
   )
 }
 
-const NODE_HASHER_FIX = 'Set `static passwordHasher = new NodeHasher()` on the AuthenticatableModel subclass and pass `hasher: new NodeHasher()` to `auth.useModel()`. ScryptHasher and NodeHasher produce incompatible hash formats, so existing passwords must be rehashed.'
+const BUN_ONLY_HASHER_FIX = 'Replace `new ScryptHasher()` with `new Hash()`, which hashes with `node:crypto` scrypt off Bun. Rows already written under Bun stay unreadable on this runtime, so existing passwords must still be rehashed.'
 
 /**
- * `ScryptHasher` — the default for both password hashing and verification —
- * runs on `Bun.password`, which does not exist on Workers or Lambda. Only
- * warns for apps that actually authenticate with passwords; OAuth-only apps
- * never reach the hasher.
+ * `DefaultHasher` — the default behind `Hash`, `AuthenticatableModel` and
+ * `ModelUserProvider` — falls back to `node:crypto` scrypt off Bun, and
+ * workerd's `nodejs_compat` implements that in full (RFC 0003 §4), so simply
+ * authenticating with passwords no longer breaks on a Bun-less target.
+ *
+ * What still breaks is an *explicit* `new ScryptHasher()`: it writes Argon2id
+ * or bcrypt, which cannot be read back without `Bun.password`. A seeder is the
+ * usual place — it runs under Bun locally and populates the column the
+ * deployed app then has to verify against.
  */
 function detectDeployPasswordHashing(analysis: DeployRuntimeAnalysis): DoctorCheck {
   const key = 'deploy-password-hashing'
@@ -1227,27 +1232,32 @@ function detectDeployPasswordHashing(analysis: DeployRuntimeAnalysis): DoctorChe
       title,
       'pass',
       analysis.targets.length > 0
-        ? `${formatTargetLabels(analysis.targets)} runs on Bun, so the default ScryptHasher applies.${caveat}`
+        ? `${formatTargetLabels(analysis.targets)} runs on Bun, so every built-in hasher applies.${caveat}`
         : `No deploy plugin or Lambda adapter detected.${caveat}`,
     )
   }
 
   const labels = formatTargetLabels(bunless)
 
-  if (analysis.passwordAuthSignals.length === 0) {
-    return createCheck(key, title, 'pass', `${labels} detected, and no password authentication was found.${caveat}`)
+  if (analysis.bunOnlyHasherSignals.length > 0) {
+    return createCheck(
+      key,
+      title,
+      'warn',
+      `${labels} detected, but ScryptHasher is constructed directly (${formatSignals(analysis.bunOnlyHasherSignals)}). It hashes through Bun.password, so the rows it writes cannot be verified on this runtime.${caveat}`,
+      { fix: BUN_ONLY_HASHER_FIX, manualFix: BUN_ONLY_HASHER_FIX },
+    )
   }
 
-  if (analysis.nodeHasherSignals.length > 0) {
-    return createCheck(key, title, 'pass', `${labels} detected, and NodeHasher is configured.${caveat}`)
+  if (analysis.passwordAuthSignals.length === 0) {
+    return createCheck(key, title, 'pass', `${labels} detected, and no password authentication was found.${caveat}`)
   }
 
   return createCheck(
     key,
     title,
-    'warn',
-    `${labels} detected with password authentication (${formatSignals(analysis.passwordAuthSignals)}), but NodeHasher is never constructed. The default ScryptHasher uses Bun.password, which is unavailable on this runtime.${caveat}`,
-    { fix: NODE_HASHER_FIX, manualFix: NODE_HASHER_FIX },
+    'pass',
+    `${labels} detected with password authentication (${formatSignals(analysis.passwordAuthSignals)}), and no Bun-only hasher is constructed. The default hasher uses node:crypto scrypt here.${caveat}`,
   )
 }
 

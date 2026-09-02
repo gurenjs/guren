@@ -5,6 +5,7 @@ import {
   needsRehash,
 } from '../../encryption/Hash'
 import type { PasswordHashOptions } from '../../encryption/types'
+import { assertVerifyArgumentOrder } from './hash-format'
 
 export interface NodeHasherOptions {
   /** scrypt cost parameter (N). Defaults to 16384. */
@@ -38,6 +39,7 @@ export class NodeHasher implements PasswordHasher {
   }
 
   async verify(hashed: string, plain: string): Promise<boolean> {
+    assertVerifyArgumentOrder(hashed, plain)
     return verifyPassword(plain, hashed)
   }
 
