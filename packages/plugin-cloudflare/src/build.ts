@@ -268,7 +268,20 @@ function assertOauthKvBound(root: string, mcpOauth: boolean): void {
     return
   }
 
-  if (hasOauthKvBinding(config)) {
+  const bound = oauthKvBinding(config)
+  if (bound) {
+    // Present, but still carrying the placeholder id this build scaffolds — so
+    // `wrangler deploy` will reject it, and the guard that just passed would
+    // have said nothing about the one field left to fill in. Warned rather
+    // than failed: the id is not needed to *build*, and a `--dry-run` deploy
+    // or a bundle-size check is a reasonable thing to be doing with a config
+    // nobody has finished yet.
+    if (bound.id === oauthKvNamespace().id) {
+      console.warn(
+        `Cloudflare build: ${configPath} still has the scaffolded placeholder id for the ${OAUTH_KV_BINDING} binding, so a real deploy will be rejected. Create the namespace and paste its id in:\n`
+        + `  wrangler kv namespace create ${OAUTH_KV_BINDING}`,
+      )
+    }
     return
   }
 
@@ -281,19 +294,27 @@ function assertOauthKvBound(root: string, mcpOauth: boolean): void {
   )
 }
 
-/** Whether a parsed config binds a KV namespace under the provider's name. */
-function hasOauthKvBinding(config: Record<string, unknown>): boolean {
+/**
+ * The KV namespace a parsed config binds under the provider's name, or
+ * `undefined`.
+ *
+ * Returns the entry rather than a boolean because two callers ask two
+ * questions of it — "is it bound at all" and "is its id still the
+ * placeholder" — and a predicate would have sent the second one back to
+ * re-walk the array with its own idea of what counts as a match.
+ */
+function oauthKvBinding(config: Record<string, unknown>): Record<string, unknown> | undefined {
   const namespaces = config.kv_namespaces
   if (!Array.isArray(namespaces)) {
-    return false
+    return undefined
   }
 
-  return namespaces.some(
+  return namespaces.find(
     (entry) =>
       typeof entry === 'object'
       && entry !== null
       && (entry as Record<string, unknown>).binding === OAUTH_KV_BINDING,
-  )
+  ) as Record<string, unknown> | undefined
 }
 
 /** The binding entry, spelled once — the scaffold writes it, the guard quotes it. */
@@ -1166,7 +1187,7 @@ function warnOauthDrift(
   config: Record<string, unknown>,
   mcpOauth: boolean,
 ): void {
-  if (mcpOauth || !hasOauthKvBinding(config)) {
+  if (mcpOauth || !oauthKvBinding(config)) {
     return
   }
 

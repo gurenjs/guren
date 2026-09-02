@@ -478,10 +478,36 @@ describe.skipIf(!enabled)('wrangler bundles the --mcp-oauth worker', () => {
       delete config.assets
       writeFileSync(join(root, 'wrangler.jsonc'), JSON.stringify(config))
 
-      const result = wrangler(root, ['deploy', '--dry-run', '--outdir', join(root, 'out')])
+      const out = join(root, 'out')
+      const result = wrangler(root, ['deploy', '--dry-run', '--outdir', out])
 
       expect(result.output).not.toMatch(/Could not resolve/)
       expect(result.exitCode).toBe(0)
+
+      const bundle = readdirSync(out)
+        .filter((file) => file.endsWith('.js'))
+        .map((file) => readFileSync(join(out, file), 'utf8'))
+        .join('\n')
+
+      // No deploy generator in the deployed worker. `Cloudflare build:`
+      // prefixes every message `build.ts` emits and appears nowhere else, so
+      // its absence is the assertion.
+      //
+      // Note what this does *not* prove. The generated worker imports
+      // `createWorkersHandler` from the package root, which re-exports
+      // `buildCloudflareOutput` — and this passes anyway, because wrangler
+      // tree-shakes it out. So the bundle is safe by the bundler's grace, not
+      // by the import graph's shape. That is exactly why the scaffolded
+      // consent controller imports `@guren/plugin-cloudflare/env` instead:
+      // `bun run dev` has no bundler and no tree-shaking, it loads the module
+      // graph file by file, and there the root entry really does drag
+      // `node:fs` and the generator into every boot. This assertion guards the
+      // deploy path; `tests/lean-env-subpath.test.ts` guards the dev one, and
+      // neither substitutes for the other.
+      expect(bundle).not.toContain('Cloudflare build:')
+      // Which means something only if there is a real bundle to look at.
+      expect(bundle).toContain('OAuthProvider')
+      expect(bundle.length).toBeGreaterThan(1000)
     },
     300_000,
   )

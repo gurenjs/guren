@@ -90,6 +90,41 @@ describe('cloudflare:build --mcp-oauth', () => {
     })
 
     /**
+     * The binding is present, so the guard passes and the build proceeds — but
+     * its id is still the placeholder this build scaffolds, which
+     * `wrangler deploy` rejects. Warned rather than failed: the id is not
+     * needed to *build*, and a `--dry-run` deploy or a bundle-size check is a
+     * reasonable thing to be doing with a config nobody has finished.
+     */
+    test('should warn when the OAUTH_KV binding still has the scaffolded placeholder id', async () => {
+      scaffoldApp(root, { mcpPlugin: true, oauthProvider: true })
+      writeJson(join(root, 'wrangler.jsonc'), {
+        name: 'demo-app',
+        kv_namespaces: [{ binding: 'OAUTH_KV', id: 'TODO: wrangler kv namespace create OAUTH_KV' }],
+      })
+
+      const warning = await captureWarnings(() =>
+        buildCloudflareOutput({ rootDir: root, skipAppBuild: true, mcpOauth: true }),
+      )
+
+      expect(warning).toContain('placeholder id')
+      expect(warning).toContain('wrangler kv namespace create OAUTH_KV')
+      // Warned, not failed.
+      expect(existsSync(join(root, '.cloudflare/worker.js'))).toBe(true)
+    })
+
+    test('should not warn when the OAUTH_KV binding carries a real id', async () => {
+      scaffoldApp(root, { mcpPlugin: true, oauthProvider: true })
+      writeJson(join(root, 'wrangler.jsonc'), oauthReadyConfig())
+
+      const warning = await captureWarnings(() =>
+        buildCloudflareOutput({ rootDir: root, skipAppBuild: true, mcpOauth: true }),
+      )
+
+      expect(warning).not.toContain('placeholder id')
+    })
+
+    /**
      * A `kv_namespaces` array holding some *other* binding is not the
      * provider's namespace. Asserted separately because "has kv_namespaces" is
      * the cheap wrong test, and it passes an app one line short of working.
@@ -441,6 +476,39 @@ describe('mcp-oauth templates', () => {
   test('should carry the CSRF field into the consent form', () => {
     const controller = loadMcpOauthTemplate('app/Http/Controllers/McpOAuthController.ts')
     expect(controller).toContain('csrfField(this.ctx)')
+  })
+
+  /**
+   * And verify it in the action, through the framework's own primitive. The
+   * global middleware may not be mounted — `autoSession: false`, a
+   * hand-composed chain — while `csrfField()` renders a convincing token
+   * regardless, so the screen would *look* protected. A comparison written
+   * here instead of `verifyCsrfToken` would be a second implementation of the
+   * rule, and one of the two would eventually accept what the other rejects.
+   */
+  test('should verify the CSRF token itself, via the framework primitive', () => {
+    const controller = loadMcpOauthTemplate('app/Http/Controllers/McpOAuthController.ts')
+    expect(controller).toContain('verifyCsrfToken(this.ctx, single(form[CSRF_FORM_FIELD]))')
+    expect(code('app/Http/Controllers/McpOAuthController.ts')).not.toContain('_csrf_token')
+  })
+
+  test('should tick read-only tools only, leaving writes unchecked by default', () => {
+    const controller = loadMcpOauthTemplate('app/Http/Controllers/McpOAuthController.ts')
+    expect(controller).toContain("tool.annotations.readOnlyHint ? ' checked' : ''")
+  })
+
+  test('should answer a malformed authorize request with a page, not a throw', () => {
+    const controller = loadMcpOauthTemplate('app/Http/Controllers/McpOAuthController.ts')
+    // Both actions route through the wrapper rather than calling the provider
+    // directly — a bare `parseAuthRequest` 500s with a stack trace on a
+    // tampered query, which is a routine arrival at this URL.
+    expect(controller).toContain('this.parseAuthRequest(provider, this.ctx.req.raw)')
+    // Two call sites: show() and approve(). The declaration is
+    // `private async parseAuthRequest(`, so it is not one of these.
+    expect(controller.match(/this\.parseAuthRequest\(/g)).toHaveLength(2)
+    // Exactly one place actually calls the provider: the wrapper's own try.
+    expect(code('app/Http/Controllers/McpOAuthController.ts').match(/provider\.parseAuthRequest\(/g))
+      .toHaveLength(1)
   })
 
   test('should store the app-typed user id and the granted scopes in props', () => {

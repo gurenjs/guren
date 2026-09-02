@@ -40,9 +40,20 @@
  * for a file that also has to be importable by `guren codegen`, `guren check`
  * and your test suite, none of which run on workerd.
  */
-import { Controller, csrfField, deriveAgentTools, expandToolScopes } from '@guren/core'
+import {
+  CSRF_FORM_FIELD,
+  Controller,
+  csrfField,
+  deriveAgentTools,
+  expandToolScopes,
+  verifyCsrfToken,
+} from '@guren/core'
 import type { Application, DerivedAgentTool } from '@guren/core'
-import { getWorkersEnv } from '@guren/plugin-cloudflare'
+// The lean subpath, deliberately not the root entry: the root also exports
+// `buildCloudflareOutput`, so importing from it would pull the deploy
+// generator and its node builtins into this app's route graph on every boot
+// and into the wrangler bundle on every deploy.
+import { getWorkersEnv } from '@guren/plugin-cloudflare/env'
 import type { AuthRequest, ClientInfo, OAuthHelpers } from '@cloudflare/workers-oauth-provider'
 
 /**
@@ -70,7 +81,10 @@ export default class McpOAuthController extends Controller {
     }
 
     const provider = this.provider()
-    const parsed = await provider.parseAuthRequest(this.ctx.req.raw)
+    const parsed = await this.parseAuthRequest(provider, this.ctx.req.raw)
+    if (parsed instanceof Response) {
+      return parsed
+    }
     const client = await provider.lookupClient(parsed.clientId)
 
     return this.html(
@@ -100,8 +114,8 @@ export default class McpOAuthController extends Controller {
     // exactly one tool however many boxes were ticked, silently.
     //
     // The CSRF middleware has already called `parseBody()` on this request,
-    // with no options, to find `_csrf_token`. Hono's body cache is keyed on
-    // those options rather than on the request alone, so this second call
+    // with no options, to read the `_token` field. Hono's body cache is keyed
+    // on those options rather than on the request alone, so this second call
     // still returns the array. Measured rather than assumed: a cache keyed on
     // the request alone would hand back the middleware's `all: false` result,
     // and the failure would be invisible — no error, no log line, one tool
@@ -109,15 +123,36 @@ export default class McpOAuthController extends Controller {
     // keeps that measurement standing across Hono upgrades.
     const form = await this.ctx.req.parseBody({ all: true })
 
+    // Verified here as well as by the global CSRF middleware, because *this*
+    // form must not depend on that middleware being mounted. An app with
+    // `autoSession: false`, or one composing its own middleware chain, can
+    // easily not have it — and `csrfField()` below renders an entirely
+    // convincing token either way, so the screen would look protected while
+    // any site could POST a grant on a signed-in user's behalf. The token is
+    // read through the framework's own `verifyCsrfToken`, never a comparison
+    // written here: a second implementation of that check is how one of them
+    // comes to accept a token the other rejects.
+    if (!verifyCsrfToken(this.ctx, single(form[CSRF_FORM_FIELD]))) {
+      return this.errorPage(
+        419,
+        'This consent form has expired',
+        'Start the authorization again from the application that sent you here.',
+      )
+    }
+
     const provider = this.provider()
     // Re-parsed from the original query rather than trusted from a hidden
     // field holding the request itself: `parseAuthRequest` re-validates the
     // client and its redirect URI, and a form is user input however it got
     // here. The submitted value only decides *which* authorize request this
     // is, and a forged one fails that validation.
-    const parsed = await provider.parseAuthRequest(
+    const parsed = await this.parseAuthRequest(
+      provider,
       new Request(`${new URL(this.ctx.req.url).origin}/oauth/authorize?${single(form[QUERY_FIELD])}`),
     )
+    if (parsed instanceof Response) {
+      return parsed
+    }
 
     const offered = this.offeredTools(parsed.scope)
     const offeredScopes = new Set(offered.map((tool) => `tool:${tool.toolName}`))
@@ -137,6 +172,36 @@ export default class McpOAuthController extends Controller {
     })
 
     return this.redirect(redirectTo)
+  }
+
+  /**
+   * Parse an authorize request, answering with a page instead of throwing.
+   *
+   * `parseAuthRequest` rejects on a query that is malformed, truncated, or
+   * tampered with — a missing `client_id`, an unregistered `redirect_uri` — and
+   * every one of those is a *routine* arrival at this URL, not an application
+   * fault. Left unhandled they surface as a 500 whose body is a stack trace,
+   * which is both alarming and useless to the person reading it: the fix is
+   * never anything they can do on this page, it is to start again from the
+   * client.
+   *
+   * Deliberately does not echo the provider's message. It is derived from
+   * attacker-controllable query parameters, and this page is reached by a
+   * browser.
+   */
+  private async parseAuthRequest(
+    provider: OAuthHelpers,
+    request: Request,
+  ): Promise<AuthRequest | Response> {
+    try {
+      return await provider.parseAuthRequest(request)
+    } catch {
+      return this.errorPage(
+        400,
+        'This authorization link is not valid',
+        'Start the authorization again from the application that sent you here.',
+      )
+    }
   }
 
   /**
@@ -201,8 +266,34 @@ export default class McpOAuthController extends Controller {
     return `${LOGIN_PATH}?redirectTo=${encodeURIComponent(`${target.pathname}${target.search}`)}`
   }
 
-  private html(body: string): Response {
-    return this.text(body, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
+  private html(body: string, status = 200): Response {
+    return this.text(body, { status, headers: { 'Content-Type': 'text/html; charset=utf-8' } })
+  }
+
+  /** A plain, stack-free page for the arrivals that are nobody's bug. */
+  private errorPage(status: number, title: string, advice: string): Response {
+    return this.html(
+      `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>${escapeHtml(title)}</title>
+<style>
+  :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+  body { margin: 0 auto; max-width: 32rem; padding: 3rem 1rem; line-height: 1.5; }
+  h1 { font-size: 1.25rem; }
+  p { opacity: .8; }
+</style>
+</head>
+<body>
+<h1>${escapeHtml(title)}</h1>
+<p>${escapeHtml(advice)}</p>
+</body>
+</html>
+`,
+      status,
+    )
   }
 
   private consentScreen(input: {
@@ -265,9 +356,14 @@ function toolRow(tool: DerivedAgentTool): string {
     tool.approval === 'required' ? '<span class="badge">approval required</span>' : '',
   ].join('')
   const description = tool.description ? `<span class="desc">${escapeHtml(tool.description)}</span>` : ''
+  // Read-only tools arrive ticked; anything that can write does not. The
+  // default is what most people will accept unread, so it is the framework's
+  // fail-closed posture rendered as a checkbox: granting a write has to be a
+  // decision somebody made, not one they failed to undo.
+  const checked = tool.annotations.readOnlyHint ? ' checked' : ''
 
   return (
-    `<li><label><input type="checkbox" name="${SCOPE_FIELD}" value="tool:${name}" checked />`
+    `<li><label><input type="checkbox" name="${SCOPE_FIELD}" value="tool:${name}"${checked} />`
     + `<span class="name">${name}</span>${badges}</label>${description}</li>`
   )
 }
