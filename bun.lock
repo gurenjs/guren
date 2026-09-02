@@ -201,6 +201,7 @@
         "@cloudflare/workers-oauth-provider": "^0.10.3",
         "@cloudflare/workers-types": "^4.20260702.1",
         "@types/node": "^20.14.10",
+        "hono": "^4.11.7",
         "miniflare": "5.20260801.1-alpha",
         "tsdown": "^0.22.14",
         "typescript": "^7.0.2",

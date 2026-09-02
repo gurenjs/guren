@@ -95,10 +95,18 @@ export default class McpOAuthController extends Controller {
       throw new Error('The authenticated user id is neither a string nor a number.')
     }
 
-    // Hono caches the parsed body, so reading it here does not fight the CSRF
-    // middleware that already read it to find `_csrf_token`. `all: true`
-    // is what turns repeated checkbox fields into an array instead of the
-    // last one winning.
+    // `all: true` is what turns the repeated `scope` checkboxes into an array
+    // instead of the last one winning — without it this screen would grant
+    // exactly one tool however many boxes were ticked, silently.
+    //
+    // The CSRF middleware has already called `parseBody()` on this request,
+    // with no options, to find `_csrf_token`. Hono's body cache is keyed on
+    // those options rather than on the request alone, so this second call
+    // still returns the array. Measured rather than assumed: a cache keyed on
+    // the request alone would hand back the middleware's `all: false` result,
+    // and the failure would be invisible — no error, no log line, one tool
+    // granted. `tests/hono-parse-body.test.ts` in @guren/plugin-cloudflare
+    // keeps that measurement standing across Hono upgrades.
     const form = await this.ctx.req.parseBody({ all: true })
 
     const provider = this.provider()
@@ -133,6 +141,16 @@ export default class McpOAuthController extends Controller {
 
   /**
    * The provider helpers, from the Workers env this request captured.
+   *
+   * `getWorkersEnv()` is first-call-wins, so it hands back the env of
+   * whichever request booted the worker — which is safe here because
+   * `OAuthProvider` injects `OAUTH_PROVIDER` into `env` on *both* of its
+   * paths, before either handler runs (read directly out of the published
+   * `oauth-provider.js`: the same `if (!env.OAUTH_PROVIDER) env.OAUTH_PROVIDER
+   * = …` guard sits ahead of the default handler and ahead of the API
+   * handler). So a worker whose first request was a tool call captures an env
+   * carrying the helpers just as one whose first request was this screen does,
+   * and the absence below is genuinely diagnostic rather than a race.
    *
    * Wrapped so the failure names the cause a developer actually has: either
    * this is not running on Workers, or the worker was built without
