@@ -399,11 +399,11 @@ export function stageStaticAssets(publicDir: string, assetsOut: string): void {
  * `rendersAsDocument` matches, but Hono's table names no extension for it, so
  * `getMimeType` returns nothing for a `.xsl` file and the framework serves it
  * unguarded too — adding it here would make a deploy target stricter than the
- * app it deployed. And extension *case*: `getMimeType`
- * lowercases before its lookup, so the framework guard does fire for
- * `logo.SVG`, and a platform matching a literal pattern does not. Each plugin closes
- * that where its own matcher allows — Vercel's `src` is a regular expression
- * and does, Cloudflare's `_headers` takes literal patterns and cannot.
+ * app it deployed. And extension *case*: `getMimeType` lowercases before its
+ * lookup, so the framework guard does fire for `logo.SVG`, and a platform
+ * matching a literal pattern does not. Each plugin closes that where its own
+ * matcher allows, and the three answers differ — see each one's own comment
+ * rather than a list here that goes stale on the next target.
  */
 export const DOCUMENT_ASSET_EXTENSIONS = ['htm', 'html', 'svg', 'xhtml', 'xml'] as const
 

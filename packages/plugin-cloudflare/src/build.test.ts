@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { DOCUMENT_ASSET_EXTENSIONS, MCP_TRANSPORT_SPECIFIER } from '@guren/core/internal/deploy-build'
+import { DOCUMENT_ASSET_EXTENSIONS, DOCUMENT_ASSET_HEADERS, MCP_TRANSPORT_SPECIFIER } from '@guren/core/internal/deploy-build'
 import { buildCloudflareOutput } from './build'
 
 import { CLIENT_MANIFEST, captureWarnings, scaffoldApp, writeJson } from '../tests/app-fixture'
@@ -286,14 +286,76 @@ describe('static document headers', () => {
 
     const headers = readFileSync(join(root, '.cloudflare/assets/_headers'), 'utf8')
     // Derived from the shared list rather than spelled out here, so an
-    // extension added there fails this until it has a rule. One splat per
-    // pattern: a second one is a parse error the platform answers by dropping
-    // the rule, which would read as a rule that is present and matches nothing.
+    // extension added there fails this until it has a rule.
+    const rule = Object.entries(DOCUMENT_ASSET_HEADERS)
+      .map(([name, value]) => `\n  ${name}: ${value}`)
+      .join('')
+
     for (const extension of DOCUMENT_ASSET_EXTENSIONS) {
-      expect(headers).toContain(
-        `/*.${extension}\n  Content-Disposition: attachment\n  X-Content-Type-Options: nosniff`,
-      )
+      // Anchored on the newline before the pattern rather than matched as a
+      // substring. One splat per rule is the platform's limit, and a second
+      // one is a parse error it answers by *dropping* the rule — but
+      // `/*/*.svg` still contains `/*.svg`, so a substring check would call
+      // a rule that reaches nothing present and correct.
+      expect(headers).toContain(`\n/*.${extension}${rule}`)
     }
+  })
+
+  test('should warn when merging pushes an app past the rule budget the platform reads', async () => {
+    scaffoldApp(root)
+    // 96 of the app's own + the 5 generated crosses 100, so the platform stops
+    // reading before the app's last rule — with no error of its own.
+    const appRules = Array.from({ length: 96 }, (_, index) => `/app-${index}/*\n  X-App: ${index}`).join('\n\n')
+    writeFileSync(join(root, 'public/_headers'), `${appRules}\n`)
+
+    const warning = await captureWarnings(async () => {
+      await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
+    })
+
+    expect(warning).toContain('101 rules')
+    expect(warning).toContain('reads only 100')
+  })
+
+  test('should stay silent about the budget for an app whose rules fit', async () => {
+    scaffoldApp(root)
+    writeFileSync(join(root, 'public/_headers'), '/*\n  X-Frame-Options: DENY\n')
+
+    const warning = await captureWarnings(async () => {
+      await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
+    })
+
+    expect(warning).not.toContain('rules')
+  })
+
+  test('should write an exact rule for a staged document whose extension is not lowercase', async () => {
+    scaffoldApp(root)
+    writeFileSync(join(root, 'public/LOGO.SVG'), '<svg/>\n')
+    mkdirSync(join(root, 'public/nested'), { recursive: true })
+    writeFileSync(join(root, 'public/nested/Page.Html'), '<p>hi</p>\n')
+
+    await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
+
+    const headers = readFileSync(join(root, '.cloudflare/assets/_headers'), 'utf8')
+    // The glob cannot reach these: the platform compiles a pattern
+    // case-sensitively, while `getMimeType` lowercases before its lookup, so
+    // the framework's own mounts do guard them. The asset set is closed at
+    // build time, so naming the offenders exactly is a complete answer.
+    expect(headers).toContain('\n/LOGO.SVG\n')
+    expect(headers).toContain('\n/nested/Page.Html\n')
+  })
+
+  test('should name no exact rules for an app that spells its extensions in lowercase', async () => {
+    scaffoldApp(root)
+    writeFileSync(join(root, 'public/logo.svg'), '<svg/>\n')
+
+    await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
+
+    const headers = readFileSync(join(root, '.cloudflare/assets/_headers'), 'utf8')
+    // The ordinary case costs nothing: the globs already cover it, and a
+    // second rule per file would spend the platform's 100-rule budget for it.
+    expect(headers.split('\n').filter((line) => line.startsWith('/'))).toEqual(
+      DOCUMENT_ASSET_EXTENSIONS.map((extension) => `/*.${extension}`),
+    )
   })
 
   test('should leave the types a browser cannot render as a document alone', async () => {
