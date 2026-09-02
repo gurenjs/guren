@@ -6,6 +6,8 @@ import {
   assertOutputDirOutsideRoot,
   clientManifestJson,
   DEV_ONLY_MODULES,
+  DOCUMENT_ASSET_EXTENSIONS,
+  DOCUMENT_ASSET_HEADERS,
   MCP_SDK_SUBPATH_PREFIX,
   renderDevOnlyStub,
   stubbableDevOnlyModules,
@@ -129,6 +131,25 @@ export async function buildVercelOutput(options: BuildVercelOutputOptions = {}):
           { src: '/public/(.*)', dest: '/$1' },
           { handle: 'filesystem' },
           { src: '/(.*)', dest: '/index' },
+          // Everything below runs only once a build match was found, and is
+          // matched against the *resolved* destination rather than the
+          // requested path (vercel's dev router passes getReqUrl(routeResult),
+          // i.e. routeResult.dest). Both halves matter: a request the CDN
+          // answered keeps its own path and matches, while one that fell
+          // through the rule above arrives here as "/index" and cannot. In the
+          // initial phase the same pattern would match either, so a dynamic
+          // /sitemap.xml would come back as a download.
+          { handle: 'hit' },
+          {
+            src: documentAssetPattern(),
+            headers: { ...DOCUMENT_ASSET_HEADERS },
+            // Required of every route after `handle: 'hit'`, which also
+            // forbids `dest` and `status` — the phase exists to decorate a
+            // response, not to route one. A header the function already set is
+            // left alone in this phase, so a route serving its own
+            // Content-Disposition keeps it.
+            continue: true,
+          },
         ],
       },
       null,
@@ -177,6 +198,27 @@ export async function buildVercelOutput(options: BuildVercelOutputOptions = {}):
   if (existsSync(publicDir)) {
     cpSync(publicDir, resolve(out, 'static'), { recursive: true })
   }
+}
+
+/**
+ * Matches a staged path whose extension a browser would render as a document.
+ *
+ * The CDN serves `.vercel/output/static` ahead of the function, so the
+ * framework's own guard never sees these files. This is the same policy
+ * expressed in the one place that still reaches them.
+ *
+ * Spelled with a character class per letter because Vercel compiles `src`
+ * case-sensitively: a plain extension would leave logo.SVG inline, while the
+ * framework guard lowercases before its mime lookup and catches it. An inline
+ * case-insensitive flag is not an option, because `src` is validated by
+ * constructing a JavaScript `RegExp` from it.
+ */
+function documentAssetPattern(): string {
+  const alternatives = DOCUMENT_ASSET_EXTENSIONS.map((extension) =>
+    [...extension].map((character) => `[${character}${character.toUpperCase()}]`).join(''),
+  ).join('|')
+
+  return `^/.*\\.(?:${alternatives})$`
 }
 
 const MCP_UNAVAILABLE =

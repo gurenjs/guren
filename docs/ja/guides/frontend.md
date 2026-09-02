@@ -110,6 +110,8 @@ setInertiaDocument({
 
 ブラウザがドキュメントとして描画する形式のファイル (`.html`、`.svg`、`.xml`) には、`Content-Disposition: attachment` と `X-Content-Type-Options: nosniff` が付きます。URL を直接開いてもダウンロードになり、スクリプトが自サイトのオリジンで実行されることはありません。画像・スクリプト・スタイルシート・フォントは影響を受けません。`<img src="/logo.svg">`、CSS の `url()`、`<link rel="icon">` はいずれも従来どおり読み込まれます。Content-Disposition が決めるのは「遷移するかダウンロードするか」だけだからです。ただし `<iframe>` や `<object>` への埋め込みは遷移にあたるため、その形での描画は止まります。ユーザー由来のファイルを一切置かない public ディレクトリであれば、`rootPublicAssets: { inlineDocuments: true }` と `inlineDocuments: true` でルート系統ごとに無効化できます。それ以外の場合はコントローラーから返してください。
 
+この方針は、アプリより先にプラットフォーム側が `public/` を配信するデプロイ先にも引き継がれます。Cloudflare プラグインと Vercel プラグインがビルド時にプラットフォームへ同じ方針を宣言するため、ローカルでダウンロードになるファイルは本番でもダウンロードになります。ただしこの宣言はフレームワークが算出する content type ではなく拡張子を基準にしており、`inlineDocuments` は届きません。プラグインが読むのはビルド済みディレクトリであって、ルート設定ではないからです。意図的に無効化しているアプリは、プラットフォーム側で取り消してください。生成された `.cloudflare/assets/_headers` からルールを削除するか、`.vercel/output/config.json` から `handle: "hit"` のルートを削除する処理を、ビルドの後段に挟みます。
+
 ## サーバーサイドレンダリング
 各アプリには既定で `resources/js/ssr.tsx` が入り、`@guren/inertia-client` の `renderInertiaServer()` を呼び出します。`autoConfigureInertiaAssets(app, { importMeta })` でブートすると、Guren は次を自動で処理します。
 

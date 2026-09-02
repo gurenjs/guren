@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it } from 'bun:test'
+import { mimes } from 'hono/utils/mime'
+import { DOCUMENT_ASSET_EXTENSIONS } from '../../../core/src/internal/deploy-build'
 import { Application } from '../../src'
 import { configureInertiaAssets, registerDevAssets } from '../../src/runtime'
 import { registerRootPublicAssets } from '../../src/http/public-assets'
@@ -46,6 +48,51 @@ describe('rendersAsDocument', () => {
     expect(rendersAsDocument(undefined)).toBe(false)
     expect(rendersAsDocument(null)).toBe(false)
     expect(rendersAsDocument('')).toBe(false)
+  })
+})
+
+/**
+ * The deploy plugins cannot call `rendersAsDocument`: Cloudflare Workers
+ * Static Assets and Vercel's CDN both answer for `public/` before the app
+ * runs, so each plugin declares the same policy to its platform at build time,
+ * keyed on file extension rather than on a content type it never computes.
+ * That list lives in `@guren/core/internal/deploy-build`, which deliberately
+ * imports nothing from the framework — so this is the seam where the two can
+ * drift, and the only place both halves are in scope.
+ *
+ * Reached by relative path rather than through the package: the module is
+ * node-builtins-only, and importing `@guren/core` here would resolve through
+ * its `exports` map to a built artifact, making this gate read a stale
+ * `dist/` instead of the source it is guarding.
+ */
+describe('the document extensions the deploy plugins declare', () => {
+  it('matches what rendersAsDocument makes of Hono’s mime table', () => {
+    // Hono's table is what `getMimeType` reads, and `getMimeType` is what the
+    // framework's own static mounts judge a file by — so this recomputes the
+    // list from the same inputs rather than restating it.
+    const derived = Object.entries(mimes)
+      .filter(([, contentType]) => rendersAsDocument(contentType))
+      .map(([extension]) => extension)
+      .sort()
+
+    expect(derived).toEqual([...DOCUMENT_ASSET_EXTENSIONS])
+  })
+
+  it('does not claim the document types Hono names no extension for', () => {
+    // `text/xsl` is a document by `rendersAsDocument`, but nothing maps an
+    // extension onto it — so `getMimeType` returns undefined for a .xsl file
+    // and the framework's own mounts leave it unguarded. The deploy targets
+    // are kept level with the app rather than ahead of it.
+    expect(rendersAsDocument('text/xsl')).toBe(true)
+    expect(Object.keys(mimes)).not.toContain('xsl')
+    expect([...DOCUMENT_ASSET_EXTENSIONS]).not.toContain('xsl')
+  })
+
+  it('covers the extensions a document type actually arrives under', () => {
+    // Anchored so the assertion above cannot pass by both sides going empty,
+    // and so a table that stopped naming one of these is a failure here rather
+    // than a rule that silently narrows on two deploy targets.
+    expect([...DOCUMENT_ASSET_EXTENSIONS]).toEqual(['htm', 'html', 'svg', 'xhtml', 'xml'])
   })
 })
 

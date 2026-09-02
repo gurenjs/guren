@@ -149,6 +149,8 @@ vercel deploy --prebuilt
 > [!NOTE]
 > The plugin targets SSR apps only. It reads Vite manifests to inject the correct `GUREN_INERTIA_*` environment variables into the serverless function. API-only apps should use Docker or Lambda instead.
 
+`public/` is copied to `.vercel/output/static`, which the CDN serves ahead of the function. The generated `config.json` therefore carries a route that gives the types a browser renders as a document — `.html`, `.htm`, `.svg`, `.xhtml`, `.xml` — `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff`, matching what the framework does for `public/` when it serves those files itself. It sits after `handle: "hit"`, so it applies only to files the CDN answered and never to a path your function serves, such as a dynamic `/sitemap.xml`.
+
 ## Cloudflare Workers
 
 Apps can run on Cloudflare Workers with D1 as the database, via the official plugin.
