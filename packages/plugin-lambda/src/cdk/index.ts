@@ -14,6 +14,7 @@ import * as s3 from 'aws-cdk-lib/aws-s3'
 import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment'
 import * as sqs from 'aws-cdk-lib/aws-sqs'
 import { Construct } from 'constructs'
+import { DOCUMENT_ASSET_EXTENSIONS, DOCUMENT_ASSET_HEADERS } from '@guren/core/internal/deploy-build'
 import { lambdaHandlerId } from '../handlers'
 
 export interface GurenLambdaQueueProps {
@@ -222,10 +223,18 @@ export class GurenLambdaApp extends Construct {
       // want the bare domain.
       const apiDomain = `${this.httpApi.apiId}.execute-api.${this.httpApi.stack.region}.${this.httpApi.stack.urlSuffix}`
       const assetOrigin = origins.S3BucketOrigin.withOriginAccessControl(this.assetsBucket)
+      // One function, shared by every behavior `assetBehavior` is used for.
+      const documentGuard = new cloudfront.Function(this, 'AssetDocumentGuard', {
+        code: cloudfront.FunctionCode.fromInline(renderAssetDocumentGuard()),
+        runtime: cloudfront.FunctionRuntime.JS_2_0,
+      })
       const assetBehavior: cloudfront.BehaviorOptions = {
         origin: assetOrigin,
         viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
         cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
+        functionAssociations: [
+          { function: documentGuard, eventType: cloudfront.FunctionEventType.VIEWER_RESPONSE },
+        ],
       }
 
       // Both prefixes exist in the staged assets: HTML references /assets/*,
@@ -278,6 +287,94 @@ export class GurenLambdaApp extends Construct {
     new CfnOutput(this, 'ApiUrl', { value: this.httpApi.apiEndpoint })
   }
 }
+
+/**
+ * The CloudFront function body that turns a staged document into a download.
+ *
+ * CloudFront answers every asset behaviour from S3 directly, so
+ * `guardStaticDocument` — which the framework applies on each mount that
+ * reaches `public/` — never sees these files. Without this the same app
+ * downloads an SVG locally and renders it inline, script and all, on its own
+ * origin in production.
+ *
+ * A viewer-response function rather than one cache behaviour per extension:
+ * a behaviour is chosen by path, so `*.svg` would also capture a `/feed.svg`
+ * the *app* renders and send it to S3, and the default limit of 25
+ * behaviours is already spent one per staged root entry. The association
+ * rides on `assetBehavior` alone, which is what keeps it off the default
+ * behaviour — the app, whose responses carry the framework's own headers.
+ *
+ * The extension is read from the request path because that path is the S3
+ * key here: this distribution sets no `defaultRootObject` and rewrites no
+ * index, so nothing stands between `/page.html` and the document. A platform
+ * that served `public/page.html` at `/page` would leave the `.html` half of
+ * this rule matching only the redirect.
+ *
+ * `toLowerCase()` covers the extension case `DOCUMENT_ASSET_EXTENSIONS`
+ * records as unreachable from a literal pattern: `getMimeType` lowercases
+ * before its lookup, so `logo.SVG` downloads under the framework's own guard,
+ * and reading the extension rather than matching a pattern is what lets this
+ * target agree with it.
+ */
+function renderAssetDocumentGuard(): string {
+  // CloudFront rejects a header a function names in any case but lower.
+  const headers = Object.fromEntries(
+    Object.entries(DOCUMENT_ASSET_HEADERS).map(([name, value]) => [name.toLowerCase(), value]),
+  )
+
+  // The two constants are the only thing this build decides. Both go through
+  // JSON.stringify, the one quoting rule that cannot emit a broken function
+  // body — a header value carrying an apostrophe would — and they are declared
+  // ahead of a body that never interpolates rather than woven into it.
+  return [
+    `var DOCUMENT_EXTENSIONS = ${JSON.stringify(DOCUMENT_ASSET_EXTENSIONS)}`,
+    `var DOCUMENT_HEADERS = ${JSON.stringify(headers)}`,
+    '',
+    ASSET_DOCUMENT_GUARD_BODY,
+  ].join('\n')
+}
+
+/**
+ * The function CloudFront runs, verbatim, reading the two constants
+ * {@link renderAssetDocumentGuard} declares above it.
+ *
+ * Free of interpolation on purpose. A template that substitutes into its own
+ * body has to be read twice, once as TypeScript and once as the JavaScript it
+ * becomes, and a `$` or a backtick in the JavaScript changes the result of the
+ * first reading. Here the string is the program: it can be pasted into the
+ * CloudFront console, or run beside the two `var` lines anywhere else, and
+ * behave exactly as it does deployed.
+ */
+const ASSET_DOCUMENT_GUARD_BODY = `function handler(event) {
+  var uri = event.request.uri
+  var response = event.response
+
+  // Decoded first: CloudFront picks the behavior from a normalized path but
+  // hands the function the raw one, and S3 resolves percent-encoding when it
+  // matches a key. So /evil%2Esvg reaches the object evil.svg while the raw
+  // string holds no dot at all — the extension test would find nothing and
+  // the document would come back inline. A malformed sequence throws rather
+  // than decoding; the raw path is the safe thing to judge in that case,
+  // since it is also what no key will match.
+  try {
+    uri = decodeURIComponent(uri)
+  } catch (error) {
+    uri = event.request.uri
+  }
+
+  var dot = uri.lastIndexOf('.')
+
+  // A dot only ends the last segment when it follows the last slash: without
+  // the comparison, /v1.2/app reads as an extension of "2/app".
+  if (dot > uri.lastIndexOf('/') && DOCUMENT_EXTENSIONS.indexOf(uri.substring(dot + 1).toLowerCase()) !== -1) {
+    for (var name in DOCUMENT_HEADERS) {
+      response.headers[name] = { value: DOCUMENT_HEADERS[name] }
+    }
+  }
+
+  return response
+}
+`
 
 function dataApiEnvironment(dataApi: GurenLambdaAppProps['dataApi']): Record<string, string> {
   if (!dataApi) {

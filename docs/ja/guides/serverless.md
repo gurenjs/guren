@@ -216,7 +216,9 @@ const log = new LogManager({
 
 Lambda は静的ファイルの配信に向きません。`lambda:build` が `public/` を `.lambda/assets` にステージングし、CDK コンストラクト（後述）が S3 バケットと、`/assets/*`・`/public/*` をバケットへルーティングする CloudFront ディストリビューション（デフォルトオリジンはアプリ）をプロビジョニングします。
 
-手動でアセットをデプロイする場合は、`.lambda/assets` をバケットに同期し、関数の `GUREN_INERTIA_ENTRY` / `GUREN_INERTIA_STYLES` に CDN の URL を設定してください（値は `.lambda/env.json` に一覧されています）。
+このディストリビューションは関数より先にファイルに応答するため、フレームワーク自身が `public/` を配信するときのガードはここでは動きません。コンストラクトはアセット向けビヘイビアに viewer-response の CloudFront Function を付けてこれを復元します: ブラウザがドキュメントとして描画する形式 (`.html`、`.htm`、`.svg`、`.xhtml`、`.xml`) には、階層の深さや拡張子の大文字小文字によらず `Content-Disposition: attachment` と `X-Content-Type-Options: nosniff` が付きます。画像、スクリプト、スタイルシート、フォントはそのままで、デフォルトビヘイビア (つまりアプリ) も自分のヘッダーのままです。
+
+手動でアセットをデプロイする場合は、`.lambda/assets` をバケットに同期し、関数の `GUREN_INERTIA_ENTRY` / `GUREN_INERTIA_STYLES` に CDN の URL を設定してください（値は `.lambda/env.json` に一覧されています）。ただし上記のドキュメント向けルールはステージング済みディレクトリではなく CDK コンストラクトに付属するため、自前のディストリビューションでは `public/` の `.svg` がアプリのオリジン上でインラインに描画されます。
 
 ## 設定上の注意
 

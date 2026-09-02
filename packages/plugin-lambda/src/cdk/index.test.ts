@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { App, Stack } from 'aws-cdk-lib'
 import { Template } from 'aws-cdk-lib/assertions'
+import { DOCUMENT_ASSET_EXTENSIONS, DOCUMENT_ASSET_HEADERS } from '@guren/core/internal/deploy-build'
 import { GurenLambdaApp } from './index'
 
 let functionDir: string
@@ -201,6 +202,111 @@ describe('GurenLambdaApp', () => {
     } finally {
       rmSync(join(functionDir, '../env.json'))
     }
+  })
+
+  describe('the asset document guard', () => {
+    /**
+     * The code CloudFront actually runs, read back out of the synthesized
+     * template rather than from the renderer: a guard that is generated
+     * perfectly and never associated with a behavior protects nothing, and
+     * only the template shows both halves.
+     */
+    interface AssetDistribution {
+      code: string
+      behaviors: Array<{ FunctionAssociations?: Array<{ EventType: string }> }>
+      defaultBehavior: { FunctionAssociations?: unknown }
+    }
+
+    // Synthesized once: the three tests below read three parts of one stack,
+    // and each synth stages the function and asset directories from disk.
+    let distribution: AssetDistribution
+
+    beforeAll(() => {
+      const template = synth((stack) => {
+        new GurenLambdaApp(stack, 'App', { functionDir, assets: { dir: assetsDir } })
+      })
+
+      const functions = template.findResources('AWS::CloudFront::Function')
+      expect(Object.keys(functions)).toHaveLength(1)
+
+      const config = (Object.values(template.findResources('AWS::CloudFront::Distribution'))[0].Properties as {
+        DistributionConfig: {
+          CacheBehaviors: AssetDistribution['behaviors']
+          DefaultCacheBehavior: AssetDistribution['defaultBehavior']
+        }
+      }).DistributionConfig
+
+      distribution = {
+        code: (Object.values(functions)[0].Properties as { FunctionCode: string }).FunctionCode,
+        behaviors: config.CacheBehaviors,
+        defaultBehavior: config.DefaultCacheBehavior,
+      }
+    })
+
+    /** Run the emitted handler the way CloudFront does, on a viewer response. */
+    function respondTo(code: string, uri: string): Record<string, { value: string }> {
+      const handler = new Function('event', `${code}\nreturn handler(event)`) as (event: unknown) => {
+        headers: Record<string, { value: string }>
+      }
+
+      return handler({ request: { uri }, response: { headers: {} } }).headers
+    }
+
+    const expectedHeaders = Object.fromEntries(
+      Object.entries(DOCUMENT_ASSET_HEADERS).map(([name, value]) => [name.toLowerCase(), { value }]),
+    )
+
+    test('should run on every asset behavior and on none of the app', () => {
+      const { behaviors, defaultBehavior } = distribution
+
+      expect(behaviors.length).toBeGreaterThan(0)
+      for (const behavior of behaviors) {
+        expect(behavior.FunctionAssociations?.map((association) => association.EventType)).toEqual([
+          'viewer-response',
+        ])
+      }
+      // The default behavior is the app: its responses already carry the
+      // framework's own guard, and a rule reaching them would put
+      // `attachment` on a dynamic /sitemap.xml.
+      expect(defaultBehavior.FunctionAssociations).toBeUndefined()
+    })
+
+    test('should download every document extension the framework guards', () => {
+      const { code } = distribution
+
+      // Derived rather than restated: the emitted code has to cover the whole
+      // list, so a renderer that drops one — or an extension its matcher
+      // cannot express — fails here. What keeps the list itself honest is the
+      // gate in the server's own tests, which recomputes it from Hono's mime
+      // table and what rendersAsDocument makes of it.
+      for (const extension of DOCUMENT_ASSET_EXTENSIONS) {
+        expect(respondTo(code, `/uploads/nested/note.${extension}`)).toEqual(expectedHeaders)
+        // getMimeType lowercases before its lookup, so the framework guard
+        // fires for an uppercase extension and this must too.
+        expect(respondTo(code, `/note.${extension.toUpperCase()}`)).toEqual(expectedHeaders)
+      }
+    })
+
+    test('should download a document reached through a percent-encoded path', () => {
+      // CloudFront hands the function the raw path while S3 resolves the
+      // encoding when it matches a key, so these reach the same objects the
+      // plain paths do.
+      expect(respondTo(distribution.code, '/uploads/evil%2Esvg')).toEqual(expectedHeaders)
+      expect(respondTo(distribution.code, '/uploads/evil.%73vg')).toEqual(expectedHeaders)
+      // A malformed sequence must not throw out of the handler: CloudFront
+      // answers a function error with a 502, which would take every asset
+      // response down with it.
+      expect(respondTo(distribution.code, '/uploads/%zz.svg')).toEqual(expectedHeaders)
+      expect(respondTo(distribution.code, '/uploads/%zz.js')).toEqual({})
+    })
+
+    test('should leave everything else inline', () => {
+      const { code } = distribution
+
+      for (const uri of ['/assets/app-Abc123.js', '/logo.png', '/robots.txt', '/health', '/v1.2/app']) {
+        expect(respondTo(code, uri)).toEqual({})
+      }
+    })
   })
 
   test('should honor shared environment and sizing overrides', () => {

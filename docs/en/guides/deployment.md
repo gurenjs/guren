@@ -128,7 +128,7 @@ The CLI scaffolds `src/lambda.ts` (whose exports become your Lambda handlers) an
 bunx guren lambda:build
 ```
 
-The build assembles a `.lambda/` directory: a self-contained function bundle, static assets staged for S3, and the environment the function expects. The framework provides dedicated handlers for HTTP, SQS queues, EventBridge scheduling, and CLI commands. See the **[Serverless Deployment Guide](./serverless.md)** for the full setup including the database, SSR, and CDK deployment.
+The build assembles a `.lambda/` directory: a self-contained function bundle, static assets staged for S3, and the environment the function expects. CloudFront serves those staged files ahead of the function, so the CDK construct puts a viewer-response function on the asset behaviors that gives the types a browser renders as a document — `.html`, `.htm`, `.svg`, `.xhtml`, `.xml` — `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff`, matching what the framework does for `public/` when it serves those files itself. The framework provides dedicated handlers for HTTP, SQS queues, EventBridge scheduling, and CLI commands. See the **[Serverless Deployment Guide](./serverless.md)** for the full setup including the database, SSR, and CDK deployment.
 
 ## Vercel (Serverless)
 
