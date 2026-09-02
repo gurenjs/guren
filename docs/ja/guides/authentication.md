@@ -306,6 +306,8 @@ export class User extends defineModel(users, {
 
 OAuth 専用のサインアップなどパスワードなしでアカウントが作られる場合は `requireOnCreate` を付けず、`password` を任意のままにします。
 
+資格情報カラムにパスワードハッシュ以外の値が入っている場合、そのアカウントはパスワードで認証できないという意味になります。`ModelUserProvider` は null、空文字列、`'oauth:...'` のような番兵を同じ扱いにします: ログインを拒否し、実際の検証と同じだけのハッシュ計算を行うので応答時間からも判別できません。一方、ハッシュ形式を名乗っていて内容がそれを満たさない値はこれまでどおりスローします。カラムの破損や切り詰めであり、黙って拒否すると気付く手がかりが無くなるためです。パスワードを持たないアカウントには nullable なカラムの方が明快で、`make:auth --oauth` はそちらを生成します。
+
 既定の `AuthServiceProvider` は `users` プロバイダーを使う `web` ガードを自動登録します。追加のガード（例: トークンベース API）が必要なら、`context.auth.registerGuard('api', factory)` を呼び、必要に応じて `context.auth.setDefaultGuard('api')` で既定を差し替えます。
 
 ## コントローラーとルート

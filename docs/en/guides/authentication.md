@@ -308,6 +308,8 @@ Optional means optional: a caller may still pass `passwordHash` and it will type
 
 Leave `requireOnCreate` off when accounts can also arrive without a password — an OAuth-only sign-up, for instance — so `password` stays optional.
 
+A credential column holding something that is not a password hash means the account cannot authenticate with one. `ModelUserProvider` treats a null column, an empty string, and a sentinel such as `'oauth:...'` alike: the login is denied, and the same hashing work is spent as on a real verification so the response is not distinguishable by time. A value that *claims* a hash format and fails to satisfy it still throws — that is a corrupt or truncated column, and denying it in silence would leave nothing to notice it by. A nullable column is the clearer choice for a passwordless account; `make:auth --oauth` scaffolds one.
+
 The default `AuthServiceProvider` automatically registers a `web` guard that uses the `users` provider. If you need additional guards (e.g. token-based APIs), call `auth.registerGuard('api', factory)` inside the provider and set it as default via `auth.setDefaultGuard('api')` when appropriate.
 
 ## Controllers & Routes

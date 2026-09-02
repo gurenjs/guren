@@ -1,6 +1,7 @@
 import type { Model, PlainObject } from '@guren/orm'
 import type { PasswordHasher } from '../password/PasswordHasher'
 import { DefaultHasher } from '../password/DefaultHasher'
+import { looksLikePasswordHash } from '../password/hash-format'
 import type { AuthCredentials, Authenticatable } from '../types'
 import { BaseUserProvider } from './UserProvider'
 
@@ -96,7 +97,17 @@ export class ModelUserProvider<User extends Authenticatable = Authenticatable> e
     }
 
     const hashed = (user as PlainObject)[this.passwordColumn]
-    if (typeof hashed !== 'string') {
+    // A column holding something that is not a password hash means the account
+    // cannot authenticate with one: a null or empty column, or a sentinel such
+    // as the `passwordHash: 'oauth:...'` this repo documents for OAuth-only
+    // accounts. That is a failed login, not a server error - handing it to the
+    // hasher throws, which surfaces as a 500 and tells an attacker that the
+    // address belongs to an OAuth account while an unknown address gets a 401.
+    //
+    // A value that *claims* a hash format and fails to satisfy it keeps
+    // throwing. That is a corrupt or truncated column, and denying the login in
+    // silence would leave nothing to notice it by.
+    if (typeof hashed !== 'string' || !looksLikePasswordHash(hashed)) {
       // Run a dummy hash to prevent timing-based user enumeration.
       // This ensures requests take the same time whether or not the user exists.
       await this.hasher.hash('dummy-timing-equalization')
