@@ -23,6 +23,17 @@ Vercel build adds the rule to the generated `config.json` after
 phase it would also have forced a download on a path the function serves, such
 as a dynamic `/sitemap.xml`.
 
+Cloudflare's `_headers` also names any staged document whose extension is not
+already lowercase, as an exact rule. The platform compiles a pattern
+case-sensitively while `getMimeType` lowercases before its lookup, so `/*.svg`
+alone would leave `logo.SVG` inline there while the framework's own mounts
+download it. Enumerating the case variants is not possible — one splat per
+rule — but on this platform the asset set is closed at build time, so naming
+the offenders exactly is complete, and an app spelling its extensions the
+ordinary way gets no extra rules. The build now also warns when merging with an
+app's own `_headers` crosses the 100 rules the platform reads, since it stops
+there rather than reporting the rest.
+
 The Cloudflare scaffold additionally sets `"html_handling": "none"` on the
 `assets` binding. Under the platform default a staged `page.html` is served at
 `/page` and `/page.html` merely redirects there, which both leaves the `.html`
