@@ -322,15 +322,30 @@ function renderAssetDocumentGuard(): string {
     Object.entries(DOCUMENT_ASSET_HEADERS).map(([name, value]) => [name.toLowerCase(), value]),
   )
 
-  // Both constants are injected as JSON, the one quoting rule that cannot emit
-  // a broken function body — a header value carrying an apostrophe would. They
-  // go in as *data* rather than as generated assignments, which is what keeps
-  // the body below a literal: what is written here is what CloudFront runs,
-  // with no line of it maintained at one indentation and spliced in at another.
-  return `var DOCUMENT_EXTENSIONS = ${JSON.stringify(DOCUMENT_ASSET_EXTENSIONS)}
-var DOCUMENT_HEADERS = ${JSON.stringify(headers)}
+  // The two constants are the only thing this build decides. Both go through
+  // JSON.stringify, the one quoting rule that cannot emit a broken function
+  // body — a header value carrying an apostrophe would — and they are declared
+  // ahead of a body that never interpolates rather than woven into it.
+  return [
+    `var DOCUMENT_EXTENSIONS = ${JSON.stringify(DOCUMENT_ASSET_EXTENSIONS)}`,
+    `var DOCUMENT_HEADERS = ${JSON.stringify(headers)}`,
+    '',
+    ASSET_DOCUMENT_GUARD_BODY,
+  ].join('\n')
+}
 
-function handler(event) {
+/**
+ * The function CloudFront runs, verbatim, reading the two constants
+ * {@link renderAssetDocumentGuard} declares above it.
+ *
+ * Free of interpolation on purpose. A template that substitutes into its own
+ * body has to be read twice, once as TypeScript and once as the JavaScript it
+ * becomes, and a `$` or a backtick in the JavaScript changes the result of the
+ * first reading. Here the string is the program: it can be pasted into the
+ * CloudFront console, or run beside the two `var` lines anywhere else, and
+ * behave exactly as it does deployed.
+ */
+const ASSET_DOCUMENT_GUARD_BODY = `function handler(event) {
   var uri = event.request.uri
   var response = event.response
 
@@ -360,7 +375,6 @@ function handler(event) {
   return response
 }
 `
-}
 
 function dataApiEnvironment(dataApi: GurenLambdaAppProps['dataApi']): Record<string, string> {
   if (!dataApi) {
