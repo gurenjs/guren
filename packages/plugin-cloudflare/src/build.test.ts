@@ -219,6 +219,56 @@ describe('buildCloudflareOutput', () => {
     expect(readFileSync(configPath, 'utf8')).toContain('user-edited')
   })
 
+  test('should refuse to scaffold wrangler.jsonc beside a wrangler.toml', async () => {
+    scaffoldApp(root)
+    writeFileSync(join(root, 'wrangler.toml'), 'name = "demo-app"\n')
+    // The refusal must fire before the previous deploy output is destroyed.
+    mkdirSync(join(root, '.cloudflare'))
+    writeFileSync(join(root, '.cloudflare/keep.txt'), 'previous deploy\n')
+
+    await expect(buildCloudflareOutput({ rootDir: root, skipAppBuild: true })).rejects.toThrow(
+      /this plugin manages wrangler\.jsonc/,
+    )
+    expect(existsSync(join(root, 'wrangler.jsonc'))).toBe(false)
+    expect(existsSync(join(root, '.cloudflare/keep.txt'))).toBe(true)
+  })
+
+  test('should refuse a wrangler.json, which wrangler reads before wrangler.jsonc', async () => {
+    scaffoldApp(root)
+    writeJson(join(root, 'wrangler.json'), { name: 'demo-app' })
+
+    await expect(buildCloudflareOutput({ rootDir: root, skipAppBuild: true })).rejects.toThrow(
+      /Rename it to wrangler\.jsonc/,
+    )
+    expect(existsSync(join(root, 'wrangler.jsonc'))).toBe(false)
+  })
+
+  test('should refuse a wrangler.json even when wrangler.jsonc exists', async () => {
+    scaffoldApp(root)
+    await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
+    writeJson(join(root, 'wrangler.json'), { name: 'demo-app' })
+
+    // wrangler would read wrangler.json, so checking wrangler.jsonc would be
+    // a green light on a file that never reaches a deploy.
+    await expect(buildCloudflareOutput({ rootDir: root, skipAppBuild: true })).rejects.toThrow(
+      /found wrangler\.json\./,
+    )
+  })
+
+  test('should warn that a leftover wrangler.toml is ignored once wrangler.jsonc exists', async () => {
+    scaffoldApp(root)
+    await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
+    writeFileSync(join(root, 'wrangler.toml'), 'name = "demo-app"\n')
+
+    const warnings = await captureWarnings(() =>
+      buildCloudflareOutput({ rootDir: root, skipAppBuild: true }),
+    )
+
+    expect(warnings).toContain('wrangler.toml is dead weight')
+    // The build itself still completes against the authoritative wrangler.jsonc.
+    expect(existsSync(join(root, '.cloudflare/worker.js'))).toBe(true)
+  })
+
   test('should generate a CSR-only worker when no SSR manifest exists', async () => {
     scaffoldApp(root, { ssr: false })
 
