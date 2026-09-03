@@ -1,6 +1,6 @@
 export { startInertiaClient } from './app'
 export type { StartInertiaClientOptions } from './app'
-export { createUseChannel } from './channel'
+export { createUseChannel, channelStreamUrl } from './channel'
 export type { UseChannelOptions, ChannelSubscription } from './channel'
 export { renderInertiaServer } from './server'
 export type { RenderInertiaServerOptions, RenderInertiaServerResult } from './server'

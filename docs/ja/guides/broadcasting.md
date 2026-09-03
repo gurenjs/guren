@@ -209,6 +209,8 @@ const off = feed.on('NewPost', (payload) => {
 
 これにより、フロント側で channel/event 名だけでなく payload 形状も型安全に扱えます。
 
+`useChannel(name)` は呼び出しごとに `endpoint?channels=name` へ専用の `EventSource` を開きます（デフォルトの endpoint は `/broadcasting/events`。endpoint に既にクエリ文字列がある場合は `&channels=` で連結します）。チャンネル引数は型のためだけのものではなく、サーバーが実際に購読するチャンネルです。後述の `?channels=` の例と同じくストリーム開始時に認可・購読されるため、SSE ルートが `getUser` でユーザーを解決していればプライベート・プレゼンスチャンネルも同じ呼び出しで動作します。サーバーが拒否したチャンネルは `connected` イベントの `channels` 一覧に含まれず、何も届きません。チャンネルごとに 1 ストリームなのは意図的です。イベントはイベント名で振り分けられるため、チャンネルをストリーム単位で分けることで `feed.on('NewPost', …)` が「`announcements` の `NewPost`」を意味できます。URL を自前で組み立てる場合は `channelStreamUrl(endpoint, channel)` を使えます。
+
 ### E2E 型安全リアルタイム
 
 生成された `ChannelEvents` をサーバー側 emit にも適用すると、送信時 payload もコンパイル時に検証できます。

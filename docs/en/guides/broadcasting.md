@@ -219,6 +219,8 @@ const off = feed.on('NewPost', (payload) => {
 
 This gives you typed channel/event names and inferred payload shapes in the frontend.
 
+Each `useChannel(name)` call opens its own `EventSource` on `endpoint?channels=name` (default endpoint `/broadcasting/events`; an endpoint that already has a query string gets `&channels=`). The channel argument is what the server subscribes, not just a type — the stream is authorized and subscribed up front exactly like the `?channels=` example below, so a private or presence channel works through the same call when the SSE route resolves the user with `getUser`. A channel the server refuses is left out of the `connected` event's `channels` list and delivers nothing. One stream per channel is deliberate: events are dispatched by event name, so keeping each channel on its own stream is what lets `feed.on('NewPost', …)` mean "`NewPost` on `announcements`". `channelStreamUrl(endpoint, channel)` is exported for building that URL by hand.
+
 ### End-to-end typed realtime flow
 
 Use the generated `ChannelEvents` on the server too, so emit-side payloads are checked at compile time.
