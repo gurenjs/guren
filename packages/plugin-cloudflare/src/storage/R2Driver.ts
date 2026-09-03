@@ -9,8 +9,7 @@ import type {
 import { presignGetUrl } from './sigv4'
 
 /**
- * Structural view of the R2 binding, in the same spirit as the S3 driver's
- * local `S3Client { send() }`: only what this driver calls, so
+ * Structural view of the R2 binding: only what this driver calls, so
  * `@cloudflare/workers-types` stays a devDependency. `R2Driver.types.test.ts`
  * pins that the real `R2Bucket` satisfies it.
  */
@@ -32,11 +31,10 @@ export interface R2ObjectLike {
 }
 
 /**
- * Streams and blobs are typed structurally rather than as the global
- * `ReadableStream`/`Blob`: `@cloudflare/workers-types` declares its own
- * interfaces for both, and neither direction is assignable to the runtime
- * globals, so naming the globals here would make the real `R2Bucket` fail
- * the `R2BucketLike` check while being perfectly usable at runtime.
+ * Streams and blobs are typed structurally: `@cloudflare/workers-types` declares
+ * its own `ReadableStream`/`Blob`, assignable in neither direction to the runtime
+ * globals, so naming the globals would fail the `R2BucketLike` check on a real
+ * `R2Bucket` that works fine at runtime.
  */
 export interface R2StreamLike {
   locked: boolean
@@ -110,21 +108,17 @@ export interface R2DriverOptions {
    */
   binding: () => unknown
   /**
-   * Base URL for `url()`: the bucket's custom domain (recommended) or its
-   * r2.dev subdomain. R2 has no derivable default — unlike S3 there is no
-   * `https://<bucket>.s3.<region>.amazonaws.com` — so `url()` throws with
-   * guidance when this is unset.
+   * Base URL for `url()`: the bucket's custom domain (recommended) or its r2.dev
+   * subdomain. R2 has no derivable default, so `url()` throws when this is unset.
    */
   publicUrl?: string
   /** Key prefix, same semantics as `S3DriverOptions.prefix`. */
   prefix?: string
   /**
    * The visibility every object in this bucket effectively has. R2 has no
-   * per-object ACL: a bucket is public (custom domain / r2.dev) or it is not.
+   * per-object ACL, so `put({ visibility })` and `setVisibility()` throw when
+   * asked for the other value rather than pretend to enforce it.
    * Defaults to `'public'` when `publicUrl` is set, `'private'` otherwise.
-   * `put({ visibility })` and `setVisibility()` throw when asked for the
-   * other value — the driver refuses to pretend it can enforce a per-object
-   * flag it cannot.
    */
   visibility?: 'public' | 'private'
   /**
@@ -146,11 +140,7 @@ const DELETE_CONCURRENCY = 6
  *
  * @example
  * ```ts
- * const storage = createStorageManager({ default: 'media' })
- * storage.registerDisk('media', () => new R2Driver({
- *   binding: () => getWorkersEnv<Env>().MEDIA,
- *   publicUrl: 'https://media.example.com',
- * }))
+ * new R2Driver({ binding: () => getWorkersEnv<Env>().MEDIA, publicUrl: 'https://media.example.com' })
  * ```
  */
 export class R2Driver implements StorageDriver {
@@ -246,8 +236,7 @@ export class R2Driver implements StorageDriver {
 
   async getStream(path: string, options?: GetStreamOptions): Promise<ReadableStream<Uint8Array> | null> {
     // HTTP-style inclusive start..end maps onto R2's offset/length form. An
-    // unsatisfiable range is R2's rejection to propagate, not ours to mask —
-    // only a missing key means null.
+    // unsatisfiable range is R2's rejection to propagate; only a missing key is null.
     const range = options?.range
     const object = await this.bucket().get(
       this.key(path),
@@ -261,9 +250,8 @@ export class R2Driver implements StorageDriver {
         : undefined,
     )
     if (!object) return null
-    // workers-types declares its own ReadableStream, deliberately not the
-    // global one (see R2StreamLike); the runtime object is the same —
-    // normalize at this boundary (RFC 0015 §5).
+    // workers-types declares its own ReadableStream (see R2StreamLike) while the
+    // runtime object is the same one; normalize at this boundary (RFC 0015 §5).
     return object.body as unknown as ReadableStream<Uint8Array>
   }
 
@@ -293,9 +281,8 @@ export class R2Driver implements StorageDriver {
     for (let index = 0; index < keys.length; index += DELETE_BATCH_SIZE) {
       batches.push(keys.slice(index, index + DELETE_BATCH_SIZE))
     }
-    // Bounded fan-out: concurrent enough to hide latency, small enough that
-    // a large deleteMany does not open an unbounded number of binding calls
-    // from one request.
+    // Bounded fan-out, so a large deleteMany does not open an unbounded number
+    // of binding calls from one request.
     for (let index = 0; index < batches.length; index += DELETE_CONCURRENCY) {
       await Promise.all(batches.slice(index, index + DELETE_CONCURRENCY).map((batch) => bucket.delete(batch)))
     }
@@ -305,8 +292,7 @@ export class R2Driver implements StorageDriver {
   }
 
   async copy(from: string, to: string): Promise<string> {
-    // The binding has no copy: stream the body from one key into another,
-    // carrying the metadata across.
+    // The binding has no copy: stream the body from one key into another.
     const bucket = this.bucket()
     const source = await bucket.get(this.key(from))
     if (!source) {
@@ -349,16 +335,11 @@ export class R2Driver implements StorageDriver {
         `R2Driver.temporaryUrl(): R2 presigned URLs may be valid for at most 7 days (requested ${expiresIn}s).`,
       )
     }
-    // The response overrides are deliberately NOT forwarded: R2's S3 API
-    // does not implement GetObject's response-* query parameters (its
-    // compatibility matrix lists only conditional/Range/PartNumber/SSE-C,
-    // and community reports confirm the header is not set), so signing them
-    // in would *look* like disposition policy survives the redirect while
-    // R2 serves the object's own metadata. TemporaryUrlOptions' contract
-    // covers this: a driver that cannot honour the overrides ignores them,
-    // and callers needing the guarantee use `serve: 'proxy'`. `put()`
-    // already records Content-Type in httpMetadata, so the redirect's type
-    // is still the recorded one.
+    // The response overrides are deliberately NOT forwarded: R2's S3 API does not
+    // implement GetObject's response-* query parameters, so signing them in would
+    // look like disposition policy survives the redirect while R2 serves the
+    // object's own metadata. TemporaryUrlOptions says an incapable driver ignores
+    // them; callers needing the guarantee use `serve: 'proxy'`.
     void options
     return presignGetUrl({
       url: `https://${this.presign.accountId}.r2.cloudflarestorage.com/${this.presign.bucket}/${encodeKey(this.key(path))}`,
@@ -448,19 +429,18 @@ export class R2Driver implements StorageDriver {
   }
 
   async makeDirectory(path: string): Promise<void> {
-    // R2 has no directories. A zero-byte object whose key ends in `/` is the
-    // convention S3 consoles use for folders: `directories()` sees it as a
-    // delimited prefix, while the trailing-slash filter keeps it out of
-    // `files()`/`allFiles()`.
+    // R2 has no directories. A zero-byte object whose key ends in `/` is the S3
+    // console folder convention: `directories()` sees it as a delimited prefix,
+    // the trailing-slash filter keeps it out of `files()`/`allFiles()`.
     const normalized = trimSlashes(path)
     if (!normalized) return
     await this.bucket().put(`${this.key(normalized)}/`, '')
   }
 
   async deleteDirectory(path: string): Promise<void> {
-    // Delete page by page (a page is at most 1000 keys, the delete cap)
-    // rather than buffering every key first. Raw keys, not paths: the folder
-    // marker written by makeDirectory ends in `/`, which key() would strip.
+    // Delete page by page (at most 1000 keys, the delete cap) rather than buffering
+    // every key. Raw keys, not paths: makeDirectory's marker ends in `/`, which
+    // key() would strip.
     const bucket = this.bucket()
     for await (const page of this.pages({ prefix: this.directoryPrefix(path) })) {
       if (page.objects.length > 0) {

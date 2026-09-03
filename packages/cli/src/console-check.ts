@@ -16,17 +16,11 @@ import { check, type CheckResult } from './check-result'
 const CONSOLE_ENTRY = 'src/console.ts'
 
 /**
- * A parsed entrypoint split into the two halves a registration check needs:
- * the local names it imports from a given path, and its source *outside* the
- * import statements.
- *
- * The split matters because an import alone is not a use: a leftover
- * `import SendDigestCommand from ...` next to an emptied `registerMany([])`
- * is exactly the state these checks exist to catch.
- *
- * Re-exports (`export { X } from './x'`) count as body, not imports: for a
- * module's `index.ts` they put a name on the module's public surface, which
- * is the thing being asked about.
+ * A parsed entrypoint split into the local names it imports and its source
+ * *outside* the imports. An import alone is not a use: a leftover
+ * `import SendDigestCommand from …` next to an emptied `registerMany([])` is the
+ * state these checks exist to catch. Re-exports count as body, since for a
+ * module's `index.ts` they put a name on its public surface.
  */
 interface EntrySource {
   /** Top-level statements minus `import` declarations. */
@@ -55,46 +49,26 @@ async function readEntrySource(cache: ParseCache, absPath: string): Promise<Entr
 }
 
 /**
- * Whether the file could put a console command in front of a kernel. This is
- * what keeps a constants or helper module living next to the commands out of
- * the registration check: it surfaces no command, so there is nothing to hand
- * to `registerMany()` and the warning it would get could never be resolved.
- *
- * Exclusion needs positive evidence of *absence*, so anything that could
- * surface a command counts:
- * - a class — declaration or expression, at any depth — extending another
- *   class or carrying the `make:command` surface (a `signature` or `handle`
- *   member). The superclass name is deliberately not matched against
- *   `Command`: apps subclass their own bases, and an aliased import defeats
- *   a name check. The cost is that a colocated `extends Error` helper still
- *   warns — accepted, because the reverse mistake (a real command with an
- *   unrecognizable base silently leaving the check) reports nothing at all.
- * - a re-export with a source (`export { X } from './impl'`) or a
- *   default-exported identifier or call — shims and factories surface
- *   commands declared elsewhere, and the old path-based check covered them.
- *
- * What remains excluded is a module of imports, constants, functions, types,
- * and local named exports — the shape issue #479 reported.
- *
- * Note the fail direction is the opposite of `app-surface.ts`, deliberately:
- * there, "cannot tell" answers false because the cost of a wrong yes is
- * refusing commands that would have worked; here the cost is only a `warn`,
- * so "cannot tell" stays in the check.
+ * Whether the file could put a console command in front of a kernel — what keeps
+ * a helper module living next to the commands out of the registration check
+ * (#479). Exclusion needs positive evidence of *absence*, so a class extending
+ * anything or carrying a `signature`/`handle` member counts, as does a re-export
+ * with a source or a default-exported identifier or call. The superclass name is
+ * not matched against `Command`: apps subclass their own bases. Unlike
+ * `app-surface.ts`, "cannot tell" stays in the check — the cost is only a warn.
  */
 function declaresCommand(ast: File): boolean {
   for (const node of ast.program.body) {
     if ((node.type === 'ExportNamedDeclaration' || node.type === 'ExportAllDeclaration') && node.source) {
       return true
     }
-    // any default-exported expression counts unless its shape provably cannot
-    // surface a command — the same evidence-of-absence direction as the class
-    // branch below, so `export default new SendDigestCommand()` stays in while
-    // `export default TABLES` in an object-literal helper does not
+    // A default export counts unless its shape provably cannot surface a
+    // command, so `export default new SendDigestCommand()` stays in and
+    // `export default TABLES` does not.
     if (node.type === 'ExportDefaultDeclaration') {
-      // Judged on the unwrapped node: `export default { … } as const` is a
-      // TSAsExpression, absent from the inert set, so the bare test read the
-      // module as possibly holding a command and asked for a registration
-      // that could never exist.
+      // Unwrapped: `export default { … } as const` is a TSAsExpression, absent
+      // from the inert set, so the bare test would ask for a registration that
+      // could never exist.
       const declaration = unwrapTypeAssertion(node.declaration)
       if (declaration.type !== 'ClassDeclaration' && !INERT_DEFAULT_EXPORTS.has(declaration.type)) {
         return true
@@ -140,10 +114,9 @@ const INERT_DEFAULT_EXPORTS = new Set([
 ])
 
 /**
- * Local names `entry` imports from inside `modules/<moduleName>/`. The
- * trailing slash is load-bearing: a bare `modules/billing` substring also
- * matches `modules/billing-reports`, which would credit one module's
- * registration to another.
+ * Local names `entry` imports from inside `modules/<moduleName>/`. The trailing
+ * slash is load-bearing: a bare `modules/billing` also matches
+ * `modules/billing-reports`, crediting one module's registration to another.
  */
 function bindingsFromModule(entry: EntrySource, moduleName: string): string[] {
   return entry.imports
@@ -152,10 +125,10 @@ function bindingsFromModule(entry: EntrySource, moduleName: string): string[] {
 }
 
 /**
- * Whether `entry` imports `name` from inside `modules/<moduleName>/`. Pairing
- * this with {@link referencesIdentifier} is what stops one module's registration
- * from covering another's identically-named command — two modules may each
- * ship an `InvoiceCommand`, and the bare name cannot tell them apart.
+ * Whether `entry` imports `name` from inside `modules/<moduleName>/`. Paired
+ * with {@link referencesIdentifier} so one module's registration cannot cover
+ * another's identically-named command — two modules may each ship an
+ * `InvoiceCommand`.
  */
 function importsNameFromModule(entry: EntrySource, moduleName: string, name: string): boolean {
   return entry.imports.some(
@@ -169,12 +142,10 @@ function registersModuleCommand(entry: EntrySource | null, moduleName: string, n
 }
 
 /**
- * Whether `body` registers `binding`'s commands — `billingModule.commands`,
- * or a member chain ending there for a namespace import.
- *
- * Resolving the binding from the import first is what keeps this honest with
- * more than one module in play: matching `.commands` anywhere would report a
- * module as registered because a *different* module's line is present.
+ * Whether `body` registers `binding`'s commands — `billingModule.commands`, or a
+ * member chain ending there. The binding is resolved from the import first:
+ * matching `.commands` anywhere would report a module as registered because a
+ * *different* module's line is present.
  */
 export function registersCommandsOf(body: string, bindings: string[]): boolean {
   return bindings.some((binding) =>
@@ -187,15 +158,11 @@ export function registersCommandsOf(body: string, bindings: string[]): boolean {
 
 /**
  * The command files the registration check covers and `guren context` lists —
- * the one rule for "this file holds a command", shared so the two commands
- * cannot disagree about what a helper module is. Discovery walks the
- * directories; {@link declaresCommand} judges the contents.
+ * the one rule for "this file holds a command", so the two cannot disagree.
  *
- * A file that fails to parse (or read) cannot be shown to declare no command,
- * so it stays in rather than silently dropping out. That path goes through
- * `cache.read()`, not `get()`: an AST is optional here, so a parse failure
- * must not be recorded as "skipped and not checked" — the file *is* checked,
- * conservatively.
+ * An unparsable file cannot be shown to declare no command, so it stays in. That
+ * path goes through `cache.read()`, not `get()`: the file *is* checked, so a
+ * parse failure must not be recorded as "skipped and not checked".
  */
 export async function discoverDeclaredCommandFiles(cwd: string, cache: ParseCache): Promise<string[]> {
   const discovered = excludeBarrelFiles(await discoverCommandFiles(cwd))
@@ -207,34 +174,12 @@ export async function discoverDeclaredCommandFiles(cwd: string, cache: ParseCach
 }
 
 /**
- * Verifies every class under `app/Console/Commands` is referenced by the
- * console entrypoint that would register it. Nothing scans that directory at
- * runtime — a `ConsoleKernel` only knows the commands it was handed, so a
- * generated-but-unregistered command is dead code that no other signal
- * reports. `make:command` performs this wiring, so a warning here means a
- * command was written or moved by hand.
- *
- * Registration takes two shapes, and each command is only checked against
- * its own:
- * - a project-level command must be named by `src/console.ts`
- *   (`kernel.registerMany([SendDigestCommand])`)
- * - a module's command must be named by `modules/<name>/index.ts`
- *   (`defineModule({ commands: [...] })`), the module's public surface
- *
- * Detection is a name reference outside the entry's imports (see
- * {@link EntrySource}), and nothing more: it says the entrypoint uses the
- * class, not that the kernel ends up with it. `warn`, never `fail`, since a
- * name reference is not proof of registration in the other direction either.
- *
- * Only files that {@link declaresCommand}; that predicate's doc owns the
- * reasoning for what is excluded and which way uncertainty falls.
- *
- * Not filtered by `--changed`, unlike `runCheck`'s file-scanning checks: what
- * decides the outcome is the *entrypoint's* content, so the edit that breaks
- * registration is usually to a file that isn't the command's. Filtering by
- * changed command files would report nothing for exactly that edit. The cost
- * is a directory walk over `app/Console/Commands` plus one parse per command
- * file and per entrypoint.
+ * Verifies every class under `app/Console/Commands` is referenced by the console
+ * entrypoint that would register it — `src/console.ts` for a project command,
+ * `modules/<name>/index.ts` for a module's, each checked only against its own.
+ * Detection is a name reference outside the entry's imports, hence `warn`, never
+ * `fail`. Not filtered by `--changed`: the outcome turns on the *entrypoint's*
+ * content, so filtering by command file would miss the edit that breaks it.
  */
 export async function checkConsoleCommandRegistration(cwd: string, cache: ParseCache): Promise<CheckResult[]> {
   const commandFiles = await discoverDeclaredCommandFiles(cwd, cache)
@@ -301,10 +246,9 @@ export async function checkConsoleCommandRegistration(cwd: string, cache: ParseC
 
     for (const filePath of files) {
       const name = classNameFromPath(filePath)
-      // A module command also counts when the console entry imports it from
-      // that module and registers it directly — the module's index may expose
-      // it through a barrel (`export * from './commands.js'`) that never spells
-      // the class name out.
+      // A module command also counts when the console entry imports and
+      // registers it directly: the module's index may expose it through a barrel
+      // that never spells the class name out.
       const registered
         = referencesIdentifier(entrySource.body, name)
         || (moduleName !== null && registersModuleCommand(consoleEntry ?? null, moduleName, name))
@@ -336,14 +280,10 @@ export async function checkConsoleCommandRegistration(cwd: string, cache: ParseC
 }
 
 /**
- * Whether the project's console entrypoint registers `moduleName`'s commands
- * — the one hop `make:command` cannot patch, since
- * `kernel.registerMany(<module>.commands)` is a statement rather than an entry
- * in an existing array.
- *
- * Two shapes count, because both leave the commands runnable: the module's
- * `commands` array registered wholesale, or the individual classes registered
- * by name (what a project predating the `commands` field does).
+ * Whether the project's console entrypoint registers `moduleName`'s commands —
+ * the one hop `make:command` cannot patch, since
+ * `kernel.registerMany(<module>.commands)` is a statement, not an array entry.
+ * Both the wholesale `commands` array and the individual classes count.
  */
 function checkModuleCommandHop(
   entry: EntrySource | null,
@@ -352,11 +292,9 @@ function checkModuleCommandHop(
 ): CheckResult {
   const binding = `${camelCase(moduleName)}Module`
 
-  // Bindings come from the module's own import, so that `.commands` belonging
-  // to a *different* module cannot satisfy this one. Only when that lookup
-  // finds nothing — an import through a path alias, say — does the
-  // conventional name stand in; adding it unconditionally could only
-  // manufacture a pass.
+  // Bindings come from the module's own import, so a *different* module's
+  // `.commands` cannot satisfy this one. The conventional name stands in only
+  // when that lookup finds nothing (an import through a path alias, say).
   const imported = entry === null ? [] : bindingsFromModule(entry, moduleName)
   const bindings = imported.length > 0 ? imported : [binding]
   const hopped

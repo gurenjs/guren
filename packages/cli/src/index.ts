@@ -48,7 +48,6 @@ export type { GenerateApiClientOptions, ResourceTypeRef } from './api-client-typ
 export type { GenerateOpenApiSpecOptions, GenerateOpenApiSpecResult } from './openapi-generate'
 export type { DoctorCheck, DoctorReport, DoctorStatus, DoctorJsonOutput, RunDoctorOptions, NextStep } from './doctor'
 
-// AI Agent commands
 export { generateContext, renderContextMarkdown, displayContext } from './context'
 export {
   generateEntityContext,
@@ -77,8 +76,6 @@ export {
   type DocActorEvent,
 } from './docs-index'
 export { runDocsCheck } from './docs-check'
-// The docs relation graph, exposed for `guren docs:graph` and the MCP
-// tool of the same shape.
 export {
   buildDocsGraphReport,
   renderDocsGraphMarkdown,
@@ -89,9 +86,8 @@ export {
   type DocsGraphNode,
   type DocsGraphEdge,
 } from './docs-graph'
-// The docs viewer's server-side half calls exactly these two (see
-// DocsViewerCliApi); the graph builder and renderer behind them stay
-// package-internal.
+// The docs viewer's server-side half (DocsViewerCliApi) calls exactly these;
+// the graph builder and renderer behind them stay package-internal.
 export {
   buildDocsViewerData,
   docsViewerAssetPath,

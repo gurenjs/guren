@@ -1,15 +1,12 @@
 /**
- * Stage the docs site's static extras into `web/public/`: the screenshots
- * from `docs/images/`, and the mermaid bundle the docs pages load on demand.
+ * Stage the docs site's static extras into `web/public/`: the `docs/images/`
+ * screenshots, and the mermaid bundle the docs pages load on demand.
  *
- * Docs markdown keeps GitHub-relative image paths (`../../images/foo.png`)
- * so the screenshots render on GitHub; `rewriteDocImage` in
- * app/Services/MarkdownRenderer.ts maps those onto `/docs-images/…`, and the
- * files have to exist under `public/` for both the dev server and the
- * Cloudflare build (which stages all of `public/` into Static Assets).
- *
- * Both copies are generated, so their `public/` destinations are gitignored
- * and rebuilt here rather than committed twice.
+ * Docs markdown keeps GitHub-relative image paths so they render on GitHub;
+ * `rewriteDocImage` (app/Services/MarkdownRenderer.ts) maps those onto
+ * `/docs-images/…`, which both the dev server and the Cloudflare build serve
+ * out of `public/`. Both copies are generated, so the destinations are
+ * gitignored and rebuilt here.
  */
 import { cpSync, existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
 import { resolve } from 'node:path'

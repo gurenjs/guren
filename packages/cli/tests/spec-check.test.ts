@@ -113,9 +113,8 @@ export class Post extends defineModel(posts) {}
   })
 
   it('regenerates the screens view when a module routes-directory file changed', async () => {
-    // Where `make:route --module billing` writes: the file is reached
-    // transitively through the module registrar, so it can change screens.md
-    // without touching modules/billing/routes.ts itself.
+    // Where `make:route --module billing` writes: reached transitively through
+    // the module registrar, so it can change screens.md on its own.
     const results = await runSpecCheck({
       cwd: workspace.dir,
       changedFiles: new Set(['modules/billing/routes/invoice.ts']),
@@ -125,9 +124,8 @@ export class Post extends defineModel(posts) {}
   })
 
   it('regenerates the screens view for a module file outside the scaffold conventions', async () => {
-    // A registrar may import a prefix constant or helper from anywhere in
-    // its module — the source set is the import closure of index.ts, not a
-    // list of conventional file names.
+    // The source set is the import closure of index.ts, not a list of
+    // conventional file names.
     const results = await runSpecCheck({
       cwd: workspace.dir,
       changedFiles: new Set(['modules/billing/route-config.ts']),
@@ -146,15 +144,10 @@ export class Post extends defineModel(posts) {}
   })
 
   it('degrades the screens view when the routes path cannot even be probed', async () => {
-    // Its own workspace: this one is deliberately broken, and the shared
-    // fixture above is restored between tests rather than rebuilt.
-    //
-    // The drift gate reads a routes file it cannot load as `degraded` and
-    // skips the byte comparison — diffing hollow content would report drift
-    // that regenerating could only "fix" by destroying the committed view.
-    // That only holds if the existence probe reaches the loader: a `routes`
-    // that is a regular file makes the probe throw ENOTDIR, which used to
-    // escape `runSpecCheck` as a stack trace instead of this warning.
+    // Its own workspace: deliberately broken, where the shared fixture above is
+    // restored between tests. A routes file the loader cannot read is `degraded`
+    // and skips the byte comparison; a `routes` that is a regular file made the
+    // existence probe throw ENOTDIR and escape as a stack trace.
     const broken = await createTempWorkspace('guren-cli-spec-check-notdir-')
 
     try {

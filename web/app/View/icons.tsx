@@ -9,9 +9,8 @@ import {
 } from '../../config/icon-paths.js'
 
 /**
- * Server-rendered wrappers around the shared icon path data in
- * `config/icon-paths.ts` — the React set in `resources/js/components/`
- * wraps the same strings.
+ * Server-rendered wrappers around `config/icon-paths.ts`; the React set in
+ * `resources/js/components/` wraps the same strings.
  */
 
 type IconProps = { class?: string }

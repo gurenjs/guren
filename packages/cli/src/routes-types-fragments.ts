@@ -1,10 +1,4 @@
-/**
- * Static code fragments emitted by the route type generators.
- *
- * These string constants represent TypeScript code that is identical
- * regardless of which routes are defined.  Keeping them separate from
- * the builder logic makes both easier to read and modify.
- */
+/** Static code fragments emitted by the route type generators, identical for every app. */
 
 /** Module augmentations for @inertiajs/react and @inertiajs/core. */
 export const DECLARATION_MODULE_AUGMENTATION = `\
@@ -28,34 +22,11 @@ declare module '@inertiajs/core' {
 `
 
 /**
- * The path-param rule, from key extraction down to the derived shapes: which
- * keys a route path literal binds, whether it binds any, and the params
- * object they form.
- *
- * Mirrors Hono's own path lexing (verified against hono@4.13.1 by reading
- * `c.req.param()` back): a param starts only at a segment boundary
- * (`/status/foo:bar` is a static literal, not a param named `bar`), its key
- * ends at the first `{` — a regex constraint may itself contain nested
- * braces (`:t{[0-9]{2}}` is a valid Hono route) but is never part of the key
- * — and a trailing `?` is dropped, because Hono strips it too
- * (`/archive/:slug?` arrives as `slug`).
- *
- * A trailing `*` is deliberately **kept**: Hono does not strip it, so
- * `/files/:slug*` arrives as the literal key `slug*`. Dropping it here would
- * make the generated key disagree with `c.req.param()`, `validateParams()`,
- * and route model binding for every inbound use. (`:slug*` is not wildcard
- * syntax at all — `/files/x/y` 404s — which is why the routing guide tells
- * you to write `:path{.+}` instead.)
- *
- * Emitted into every generated module that answers those questions — the
- * route manifest and the API client — so they all derive the answers from
- * the path string the server routes on, not from whatever shape their
- * generator happens to emit alongside it.
- *
- * @guren/inertia-client's components.tsx carries the same rule for library
- * code that cannot embed an emitted fragment; routes-types-fragments.test.ts
- * asserts it contains this fragment verbatim, so a change here fails there
- * until both move.
+ * The path-param rule: which keys a route path literal binds. Mirrors Hono's own lexing
+ * (verified against hono@4.13.1): a param starts at a segment boundary, its key ends at
+ * the first `{`, and a trailing `?` is dropped because Hono strips it. A trailing `*` is
+ * deliberately **kept** — `/files/:slug*` arrives as the key `slug*`. Mirrored verbatim in
+ * @guren/inertia-client's components.tsx, pinned by routes-types-fragments.test.ts.
  */
 export const PATH_PARAM_TYPE_HELPERS = `\
 type SegmentParamKey<TSegment extends string> = TSegment extends \`:\${infer TParam}\`
@@ -112,23 +83,11 @@ export function route<TName extends RouteName>(name: TName, ...args: RouteArgs<T
 `
 
 /**
- * The runtime half of the path-param rule: how a bound key is substituted
- * into the path. Mirrors the same Hono lexing as PATH_PARAM_TYPE_HELPERS — a
- * param starts only at a segment boundary, an attached regex constraint is consumed
- * whole, including one level of nested braces (so `{[0-9]{2}}` stays intact), and the
- * whole token is consumed so no modifier is left behind in the URL:
- * `/items/:id{[0-9]+}` -> `/items/1`. A trailing `*` is part of the key
- * itself (see PATH_PARAM_TYPE_HELPERS), so `/files/:slug*` is filled from
- * `params['slug*']` — the same key the request arrives with.
- *
- * Whole tokens are replaced by key lookup, so a param whose name is a prefix
- * of another (`:id` vs `:identifier`) can never corrupt it, and a key the
- * path lacks really is a no-op. A per-key `path.replace(':key', ...)` loop
- * has neither property; that spelling is what this fragment exists to keep
- * out of the generators.
- *
- * Mirrored verbatim in @guren/inertia-client's components.tsx alongside
- * PATH_PARAM_TYPE_HELPERS, under the same pin test.
+ * The runtime half of the path-param rule, same Hono lexing as PATH_PARAM_TYPE_HELPERS: a
+ * constraint is consumed whole including one level of nested braces, the whole token goes
+ * so no modifier is left in the URL, and a trailing `*` is part of the key. Replacing
+ * whole tokens by key lookup keeps `:id` from corrupting `:identifier` and makes an absent
+ * key a no-op. Mirrored verbatim in @guren/inertia-client's components.tsx, same pin test.
  */
 export const PATH_PARAM_RUNTIME_HELPERS = `\
 function substituteParams(path: string, params?: Record<string, string | number>): string {

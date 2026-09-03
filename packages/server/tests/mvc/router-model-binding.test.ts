@@ -18,10 +18,7 @@ class NotFound extends Error {
   statusCode = 404
 }
 
-/**
- * Mirrors the ORM's static `findOrFail(id, key = 'id')` signature and records
- * every call, so the tests can assert which column the router looked up by.
- */
+/** Mirrors the ORM's static `findOrFail(id, key = 'id')`, recording each call. */
 function makeModel(name = 'Post', rows: PostRecord[] = posts) {
   const calls: Array<[unknown, string | undefined]> = []
   return {
@@ -185,10 +182,9 @@ describe('Router-level bind(param, ...)', () => {
   })
 
   it('lets the route-level bind win for this.model() when both levels bind the same param', async () => {
-    // Rows arranged so the two lookups of the raw value '1' disagree: it is
-    // row 1's id and row 2's slug. The route asked for the slug, so that is
-    // what this.model() must return; the router-level binding still fills the
-    // positional slot, as it did before route bindings reached this.model().
+    // Rows arranged so the two lookups of '1' disagree: it is row 1's id and
+    // row 2's slug. this.model() must return the slug match, while the
+    // router-level binding still fills the positional slot.
     const rows: PostRecord[] = [
       { id: 1, slug: 'x', title: 'X' },
       { id: 2, slug: '1', title: 'Y' },

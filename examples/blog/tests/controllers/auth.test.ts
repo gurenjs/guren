@@ -311,7 +311,6 @@ describe('Auth Flow Integration', () => {
     const auth = createAuthStub()
     auth.attempt.mockResolvedValue(true)
 
-    // Step 1: Show login form
     const showController = createLoginController(auth)
     const showCtx = createControllerContext('http://blog.test/login', {
       headers: { 'X-Inertia': 'true' },
@@ -322,7 +321,6 @@ describe('Auth Flow Integration', () => {
     const { payload } = await readInertiaResponse(showResponse)
     expect(payload.component).toBe('auth/Login')
 
-    // Step 2: Submit login form
     const storeController = createLoginController(auth)
     const storeCtx = createControllerContext('http://blog.test/login', {
       method: 'POST',

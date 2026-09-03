@@ -12,7 +12,6 @@ export interface DatabaseConnection {
   rollback(): Promise<void>
 }
 
-// Global database connection for testing
 let globalDb: DatabaseConnection | null = null
 
 /**
@@ -159,11 +158,8 @@ export async function assertNotSoftDeleted(
 }
 
 /**
- * Use database transactions for test isolation.
- * Each test will run in a transaction that is rolled back after the test.
- *
- * Lifecycle hooks are resolved via `getTestLifecycleHooks()` unless passed
- * explicitly — see that function for runner setup requirements.
+ * Run each test in a transaction that is rolled back afterwards. Lifecycle hooks are
+ * resolved via `getTestLifecycleHooks()` unless passed explicitly.
  */
 export function useDatabaseTransactions(
   db?: DatabaseConnection,
@@ -183,10 +179,8 @@ export function useDatabaseTransactions(
 }
 
 /**
- * Truncate tables before each test.
- *
- * Lifecycle hooks are resolved via `getTestLifecycleHooks()` unless passed
- * explicitly — see that function for runner setup requirements.
+ * Truncate tables before each test. Lifecycle hooks are resolved via
+ * `getTestLifecycleHooks()` unless passed explicitly.
  */
 export function useTruncateTables(
   tables: string[],
@@ -220,8 +214,6 @@ export async function seedDatabase(
 ): Promise<void> {
   await seedFn()
 }
-
-// Helper functions
 
 function buildWhereClause(data: Record<string, unknown>): {
   where: string

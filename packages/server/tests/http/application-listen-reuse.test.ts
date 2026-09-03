@@ -35,15 +35,9 @@ describe('Application.listen Vite dev server reuse on hot reload', () => {
   })
 
   it('keeps the rest of the vite-dev-server module reachable behind the stub', async () => {
-    // Reads what `mock.module` installed, not what the fixture would hand it:
-    // this is the one assertion that fails if the module is replaced wholesale
-    // rather than spread. Every other test here would pass either way, and the
-    // stripped export would surface in whichever file loads it next instead.
-    //
-    // Load-order dependent, so run it the way CI does. Under `bun run test:bun
-    // server` this catches a dropped spread; in a narrower run that loads the
-    // module elsewhere first, Bun patches the named export in place and leaves
-    // the others reachable, which hides the difference.
+    // The one assertion that fails if `mock.module` replaces the module wholesale
+    // rather than spreading it. Load-order dependent: it only catches a dropped
+    // spread under a full `bun run test:bun server`, not a narrower run.
     const mocked = await import('../../src/http/vite-dev-server')
 
     expect(typeof mocked.resolveViteDevServerConfig).toBe('function')
@@ -53,11 +47,9 @@ describe('Application.listen Vite dev server reuse on hot reload', () => {
   })
 
   it('reuses a still-listening managed Vite dev server instead of closing it', async () => {
-    // `bun --hot` re-runs the entrypoint but preserves globalThis, so a
-    // reload arrives here with the previous run's Vite server still alive.
-    // Closing it can hang forever on the browser's open HMR socket — after
-    // the Bun server was already stopped — leaving the process without any
-    // HTTP listener. Reuse is the fix; this pins it.
+    // `bun --hot` preserves globalThis, so a reload arrives with the previous
+    // run's Vite server alive; closing it can hang forever on the browser's open
+    // HMR socket, after the Bun server was stopped. Reuse is the fix.
     const previousClose = mock(async () => {})
     seedPreviousViteDevServer(
       { close: previousClose, httpServer: { listening: true } },

@@ -22,18 +22,14 @@ import {
 import { repoRoot } from './workspace-packages.ts'
 
 /**
- * The audit exists to fail. Every rule below is pinned in both directions: it
- * passes on the real rendered payload, and it fails on a synthetic file that
- * carries exactly the defect the rule claims to catch. A rule that only had
- * the positive half would be indistinguishable from one that checks nothing.
+ * Every rule below is pinned in both directions: it passes on the real rendered
+ * payload, and fails on a synthetic file carrying exactly the defect it claims
+ * to catch. The positive half alone cannot tell a rule from a no-op.
  */
 
 const md = (path: string, content: string) => [{ path, content }]
 
-/**
- * One render, shared. Nothing here mutates the array, and re-rendering per
- * test only re-reads the same ten template files.
- */
+/** One render, shared: nothing here mutates the array. */
 let rendered: Promise<Awaited<ReturnType<typeof renderCatalog>>>
 const catalog = () => (rendered ??= renderCatalog())
 
@@ -95,17 +91,12 @@ describe('renderCatalog', () => {
 
 describe('the command registry is importable', () => {
   it('builds on import without running the CLI or touching the filesystem', () => {
-    // the audit imports `commands.ts` to read what the CLI registers. That is
-    // only safe while importing it stays inert: a stray console line, a
-    // prompt, or a warning in any of the ~50 command modules it pulls in
-    // would run on every audit and every publish. The module says so in
-    // prose; this is what makes the claim fail when it stops being true.
-    //
-    // What it pins is output, not every possible side effect — a top-level
-    // `await` that merely waits would still pass. GUREN_QUIET_DUPLICATE_ORM
-    // silences the one line this workspace prints by design: `src` and
-    // `dist` copies of @guren/orm coexist here, which is not a property of
-    // the registry.
+    // The audit imports `commands.ts`, which is only safe while importing it
+    // stays inert: a stray console line, prompt or warning in any of the ~50
+    // command modules would run on every audit and publish. What is pinned is
+    // output, not every side effect — a top-level `await` would still pass.
+    // GUREN_QUIET_DUPLICATE_ORM silences the one line this workspace prints by
+    // design, `src` and `dist` copies of @guren/orm coexisting here.
     const probe = Bun.spawnSync([
       process.execPath,
       '-e',
@@ -188,9 +179,8 @@ describe('audit: changeset gate parser', () => {
     expect(changesetNames('---\n"@guren/cli-extras": minor\n---\n', '@guren/cli')).toBe(false)
   })
   it('the gate watches every file renderCatalog reads', () => {
-    // LICENSE is copied into the payload and the schema drives validation;
-    // both were once missing from this list, which let a change to either
-    // publish under an unchanged version
+    // LICENSE is copied into the payload and the schema drives validation, so a
+    // change to either publishes
     expect(CATALOG_INPUTS).toContain('LICENSE')
     expect(CATALOG_INPUTS.some((i) => i.startsWith('packages/cli/templates/agent-catalog'))).toBe(true)
   })
@@ -323,16 +313,10 @@ describe('claude plugin validate', () => {
 })
 
 /**
- * The changeset gate, against throwaway repositories.
- *
- * Everything above tests the gate's *parser*; none of it ran the gate, which
- * needs real commits to diff. That left its actual decisions — including the
- * exemption, the one branch a release commit depends on — pinned by nothing.
- * These build a repository per case and point `assertChangesetGate` at it.
- *
- * The fixture only has to carry what the gate reads: the paths in
- * `CATALOG_INPUTS`, the CLI manifest's `version`, and `.changeset/`. Content
- * is irrelevant to it, so the templates here are one line each.
+ * The changeset gate itself, which needs real commits to diff: a repository per
+ * case. The fixture only carries what the gate reads — the paths in
+ * `CATALOG_INPUTS`, the manifest's `version`, and `.changeset/` — so the
+ * templates here are one line each.
  */
 describe('audit: changeset gate', () => {
   let scratch: string
@@ -346,12 +330,10 @@ describe('audit: changeset gate', () => {
   })
 
   /**
-   * Every git call is hardened against the machine it runs on: a global
-   * `core.hooksPath` reaches repositories created here (publish-agent-catalog
-   * disables it the same way, and its comment has the full hazard list), a
-   * global `commit.gpgsign` would make a commit *prompt* — and a hang in
-   * bun:test is charged to the following test, so it would not even look
-   * like this one — and a CI runner has no committer identity to inherit.
+   * Hardened against the machine it runs on: a global `core.hooksPath` reaches
+   * repositories created here, a global `commit.gpgsign` would make a commit
+   * *prompt* (and bun:test charges a hang to the following test), and a CI
+   * runner has no committer identity to inherit.
    */
   const HERMETIC = [
     '-c', 'core.hooksPath=',
@@ -391,9 +373,8 @@ describe('audit: changeset gate', () => {
   }
 
   /**
-   * A repository at the state before the change under test: a CLI manifest, a
-   * catalog template, and an empty `.changeset/`. Returns the repo path and
-   * the sha to use as the gate's base.
+   * The state before the change under test: a CLI manifest, a catalog template,
+   * an empty `.changeset/`. Returns the repo and the sha to use as the base.
    */
   async function baseRepo(version = '2.7.1'): Promise<{ repo: string; base: string }> {
     const repo = newRepoDir()
@@ -447,11 +428,9 @@ describe('audit: changeset gate', () => {
   })
 
   it('passes when the CLI version moved, even with a catalog change in the same range', async () => {
-    // The A-then-B push: a catalog change with its changeset, and then the
-    // `changeset version` commit that consumes it. The old manifest-only
-    // exemption did not match (two inputs touched) and no changeset survives
-    // in the tree to be found, so this range was a false red. Nothing here
-    // can publish under an unchanged version: 2.7.1 → 2.8.0.
+    // A catalog change with its changeset, then the `changeset version` commit
+    // that consumes it: no changeset survives in the tree to be found, yet
+    // nothing here can publish under an unchanged version (2.7.1 → 2.8.0).
     const { repo, base } = await baseRepo('2.7.1')
     await rewordCatalog(repo, true)
     await versionPackages(repo, '2.8.0')
@@ -459,20 +438,18 @@ describe('audit: changeset gate', () => {
   })
 
   it('passes on the release commit whose only touched input is the manifest', async () => {
-    // The ordinary `changeset version` push, where no catalog template rides
-    // along: one input touched, and the version moved. Without this case a
-    // rule reading `touched.length > 1 && baseVersion !== headVersion` would
-    // satisfy every other test here and turn every plain release commit red.
+    // One input touched and the version moved. Without this case a rule reading
+    // `touched.length > 1 && baseVersion !== headVersion` would satisfy every
+    // other test here and turn every plain release commit red.
     const { repo, base } = await baseRepo('2.7.1')
     await versionPackages(repo, '2.8.0')
     expect(await assertChangesetGate(base, repo)).toEqual([])
   })
 
   it('reads the base version from the merge base, not from a base that moved on', async () => {
-    // A branch that forked before a release: its own range moves nothing, but
-    // the base ref it is compared against has since advanced to 2.8.0.
-    // Reading the base *tip* would see 2.7.1 vs 2.8.0 and exempt a catalog
-    // change that publishes under an unchanged version.
+    // A branch that forked before a release: reading the base *tip* would see
+    // 2.7.1 vs 2.8.0 and exempt a catalog change that publishes under an
+    // unchanged version.
     const { repo, base } = await baseRepo('2.7.1')
     git(repo, 'checkout', '--quiet', '-b', 'feature')
     await rewordCatalog(repo, false)
@@ -489,10 +466,8 @@ describe('audit: changeset gate', () => {
   })
 
   it('fails on a manifest edit that does not move the version', async () => {
-    // The branch the version rule replaces. The old exemption was "the CLI
-    // manifest was the only file touched", which waved this through — a
-    // manifest change is not a version change, and this one publishes the
-    // payload under 2.7.1 all over again.
+    // A manifest change is not a version change: this one publishes the payload
+    // under 2.7.1 all over again.
     const { repo, base } = await baseRepo('2.7.1')
     await commit(repo, 'add a keyword', {
       [CLI_MANIFEST]: manifest('2.7.1', { keywords: ['guren'] }),
@@ -503,10 +478,8 @@ describe('audit: changeset gate', () => {
   })
 
   it('does not exempt a version it could not read, and says so', async () => {
-    // No manifest on the base side: the comparison cannot be made, so the
-    // exemption is not granted. An unavailable check is not a green one —
-    // and a silent pass here would be worse than CI's ungated fallback,
-    // which at least annotates itself.
+    // No manifest on the base side, so the comparison cannot be made and the
+    // exemption is not granted: an unavailable check is not a green one.
     const repo = newRepoDir()
     await mkdir(repo, { recursive: true })
     git(repo, 'init', '--quiet', '--initial-branch=main')
@@ -526,11 +499,10 @@ describe('audit: changeset gate', () => {
   })
 
   it('falls back to a two-dot diff when there is no merge base', async () => {
-    // What a shallow CI checkout looks like: the base was fetched by SHA to
-    // depth 1, so it shares no history with HEAD and `git merge-base` has no
-    // answer. The fallback must be the base tip — an empty left side would
-    // make the diff `HEAD..HEAD`, which reports no files and passes this gate
-    // on every such run.
+    // A shallow CI checkout: the base was fetched by SHA to depth 1, so it
+    // shares no history with HEAD and `git merge-base` has no answer. The
+    // fallback must be the base tip; an empty left side diffs HEAD against
+    // itself and passes this gate on every such run.
     const { repo, base } = await baseRepo()
     git(repo, 'checkout', '--quiet', '--orphan', 'unrelated')
     await commit(repo, 'unrelated root', {
@@ -547,12 +519,10 @@ describe('audit: changeset gate', () => {
   })
 
   it('exempts the release commit through a shallow-fetched base ref — the shape CI runs', async () => {
-    // The push event, reproduced: a depth-1 checkout of the tip, and the
-    // previous tip fetched by SHA into refs/audit-base at depth 1. There is
-    // no merge base, so the gate diffs against the ref name — and then has to
-    // read `packages/cli/package.json` out of it. Nothing else here exercises
-    // `git show <shallow-ref>:<path>`, and if that could not resolve, every
-    // release commit would be red for the reason this change removed.
+    // The push event, reproduced: no merge base, so the gate diffs against the
+    // ref name and must read `packages/cli/package.json` out of it. Nothing else
+    // exercises `git show <shallow-ref>:<path>`, and every release commit would
+    // be red if it could not resolve.
     const { repo: origin, base } = await baseRepo('2.7.1')
     await rewordCatalog(origin, true)
     await versionPackages(origin, '2.8.0')

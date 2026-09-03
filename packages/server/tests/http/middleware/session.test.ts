@@ -47,11 +47,9 @@ describe('MemorySessionStore', () => {
 
     await store.write('session-1', { user: 'Alice' }, 60) // 60 seconds TTL
 
-    // Before expiry
     currentTime = 1000 + 59 * 1000
     expect(await store.read('session-1')).toEqual({ user: 'Alice' })
 
-    // After expiry
     currentTime = 1000 + 61 * 1000
     expect(await store.read('session-1')).toBeUndefined()
   })
@@ -141,7 +139,6 @@ describe('createSessionMiddleware', () => {
     const app = createTestApp({ store })
     let isNew: boolean | undefined
 
-    // First request to create session
     app.get('/create', (c) => {
       const session = getSessionFromContext(c)
       session?.set('visited', true)
@@ -348,7 +345,6 @@ describe('createSessionMiddleware', () => {
       headers: { Cookie: cookie ?? '' },
     })
 
-    // Cookie should be deleted
     const setCookie = res2.headers.get('set-cookie')
     expect(setCookie).toContain('Max-Age=0')
   })
@@ -668,13 +664,10 @@ describe('getSessionFromContext', () => {
 })
 
 describe('willPersist agrees with what the next request finds', () => {
-  // willPersist() restates the finalizer's survival decision so that callers
-  // anchoring a value to the session id (CSRF token binding) can ask for it
-  // up front. Nothing in the type system keeps the two in step, so pin every
-  // lifecycle branch here: if the finalizer's write-reduction rules change
-  // and willPersist() is not updated with them, a token gets bound to an id
-  // no later request can match, and the symptom surfaces as a CSRF 403 far
-  // from the edit.
+  // willPersist() restates the finalizer's survival decision for callers anchoring
+  // a value to the session id (CSRF token binding). Nothing in the type system keeps
+  // the two in step, so every lifecycle branch is pinned here: a drift binds a token
+  // to an id no later request matches, surfacing as a CSRF 403 far from the edit.
   const paths: Array<{ name: string; act: (session: Session) => void }> = [
     { name: 'untouched brand-new session', act: () => {} },
     { name: 'new session that stores data', act: (s) => s.set('userId', 1) },

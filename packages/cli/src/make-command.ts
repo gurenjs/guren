@@ -39,31 +39,21 @@ export async function makeCommand(name: string, options: MakeCommandOptions = {}
 }
 
 /**
- * ESM specifier `fromFile` would use to import the scaffolded command. The
- * source is `.ts` but a project's own imports are written `.js`, matching
- * both console templates and the module scaffolds.
+ * The source is `.ts` but a project's own imports are written `.js`, matching
+ * the console templates and the module scaffolds.
  */
 function commandSpecifier(fromFile: string, file: string): string {
   return relativeImportPath(join(process.cwd(), fromFile), file).replace(/\.ts$/u, '.js')
 }
 
 /**
- * Registers a freshly scaffolded command with its console kernel — the root
- * `src/console.ts` for a project-level command, or the owning module's
- * `defineModule({ commands: [...] })` for `--module <name>`.
- *
- * Nothing discovers `app/Console/Commands` at runtime: registration is
- * explicit so a bundled deployment resolves the same commands as a local
- * checkout. That leaves a generated command dead until it is wired up, so
- * this performs the wiring and falls back to printing the exact manual step
- * whenever the target file is missing or shaped in a way the patch can't
- * edit — never failing the scaffold itself over it. `guren check` reports
- * whatever stays unregistered.
- *
- * Takes only `root`, not the full `MakeCommandOptions`: the patching goes
- * through `patch-helpers`, which still resolves against `process.cwd()`, so
- * the signature does not advertise a `cwd` it would ignore. Follow
- * `readSchemaDialect(cwd = process.cwd())` in that file when threading it.
+ * Registers a scaffolded command with its console kernel: `src/console.ts`, or
+ * the owning module's `defineModule({ commands: [...] })` under `--module`.
+ * Nothing discovers `app/Console/Commands` at runtime — registration is
+ * explicit so a bundled deployment matches a local checkout — so an unwired
+ * command is dead; a patch that cannot apply prints the manual step rather
+ * than failing the scaffold. Takes only `root` because the patching goes
+ * through `patch-helpers`, which still resolves against `process.cwd()`.
  */
 export async function registerScaffoldedCommand(
   name: string,
@@ -140,11 +130,9 @@ async function registerModuleCommand(className: string, file: string, moduleName
 }
 
 /**
- * A module's `commands` only become reachable once the project's console
- * entrypoint registers them — the one step `make:command` cannot patch, since
- * `kernel.registerMany(<module>.commands)` is a statement rather than an entry
- * in an existing array. Printed only when that line is actually absent, so a
- * project that already made the hop for this module stays quiet.
+ * The one step `make:command` cannot patch: `kernel.registerMany(<module>
+ * .commands)` is a statement, not an entry in an existing array. Printed only
+ * when that line is absent, so a project that already made the hop stays quiet.
  */
 async function printModuleConsoleHopGuidance(moduleName: string): Promise<void> {
   const moduleBinding = `${camelCase(moduleName)}Module`

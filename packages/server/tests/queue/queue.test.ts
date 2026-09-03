@@ -272,9 +272,8 @@ describe('Job wire name', () => {
     }
     class DerivedJob extends BaseJob {}
 
-    // Statics are inherited, so `DerivedJob.jobName` reads 'StableBase' — but
-    // resolution must ignore it, or registering the subclass would evict the
-    // parent from the registry under a name it never declared.
+    // Statics are inherited, so resolution must ignore `DerivedJob.jobName` or
+    // registering the subclass evicts the parent under a name it never declared.
     expect(DerivedJob.jobName).toBe('StableBase')
     expect(resolveJobName(DerivedJob)).toBe('DerivedJob')
 
@@ -528,7 +527,7 @@ describe('Worker', () => {
     await worker.start()
 
     expect(handledPayloads).toHaveLength(2)
-    expect(handledPayloads[0]).toEqual({ priority: 'urgent' }) // high priority first
+    expect(handledPayloads[0]).toEqual({ priority: 'urgent' })
   })
 
   it('emits jobProcessed event', async () => {
@@ -552,7 +551,7 @@ describe('Worker', () => {
 
     class FailingJob extends Job<void> {
       static maxAttempts = 3
-      static backoff = 0 // No delay for testing
+      static backoff = 0
       async handle() {
         attempts++
         if (attempts < 3) {
@@ -564,7 +563,6 @@ describe('Worker', () => {
     registerJob(FailingJob)
     await FailingJob.dispatch(undefined as any)
 
-    // Process multiple times to allow retries
     for (let i = 0; i < 5; i++) {
       const worker = new Worker(driver, { maxJobs: 1, stopWhenEmpty: true })
       await worker.start()
@@ -577,7 +575,7 @@ describe('Worker', () => {
   it('moves to failed after max attempts', async () => {
     class AlwaysFailsJob extends Job<void> {
       static maxAttempts = 2
-      static backoff = 0 // No delay for testing
+      static backoff = 0
       async handle() {
         throw new Error('Always fails')
       }
@@ -586,7 +584,6 @@ describe('Worker', () => {
     registerJob(AlwaysFailsJob)
     await AlwaysFailsJob.dispatch(undefined as any)
 
-    // Process until failed
     for (let i = 0; i < 3; i++) {
       const worker = new Worker(driver, { maxJobs: 1, stopWhenEmpty: true })
       await worker.start()
@@ -625,7 +622,6 @@ describe('Worker', () => {
 
     const worker = new Worker(driver, { sleep: 100 })
 
-    // Start and stop
     const startPromise = worker.start()
     await new Promise((r) => setTimeout(r, 50))
     await worker.stop()

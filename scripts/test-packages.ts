@@ -1,27 +1,12 @@
-// Runs the Bun test suites of every workspace package under packages/.
+// Runs the Bun test suites of every workspace package under packages/, derived
+// from each package.json. Positional arguments select packages by directory or
+// package name; everything after a bare `--` reaches `bun test` verbatim:
 //
-// The package list is derived from each package.json rather than
-// hand-maintained: any package whose `test` script uses Bun's runner is picked
-// up automatically, so adding a package (a plugin, for example) needs no change
-// here or in the root package.json scripts.
+//   bun run ./scripts/test-packages.ts cli plugin-cloudflare -- -t "rate limit"
 //
-// Packages on a different runner (@guren/testing uses vitest) are skipped —
-// they have their own root script.
-//
-//   bun run ./scripts/test-packages.ts                   # test everything
-//   bun run ./scripts/test-packages.ts --list            # print the packages only
-//   bun run ./scripts/test-packages.ts cli plugin-cloudflare
-//   bun run ./scripts/test-packages.ts -- -t "rate limit"  # forward flags to bun test
-//
-// Positional arguments select packages by directory name or package name.
-// Everything after a bare `--` is forwarded to `bun test` verbatim.
-//
-// One forwarded flag to distrust: `--changed` selects test files by git diff,
-// but packages/cli's tests load @guren/server through the workspace symlink's
-// dist/ (see .claude/rules/common-pitfalls.md, "Stale Build Artifacts"), a
-// dependency git cannot see — so a change under packages/server/src selects
-// the server tests and silently skips the cli tests that would exercise it.
-// For server-touching changes, run the full sweep or name the packages.
+// Distrust forwarded `--changed`: it selects test files by git diff, but
+// packages/cli's tests load @guren/server through the workspace symlink's dist/,
+// which git cannot see — a change under packages/server/src silently skips them.
 
 import { closeSync, mkdtempSync, openSync, readSync, rmSync, writeSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -29,9 +14,8 @@ import { join } from 'node:path'
 
 import { collectPackages, parseArgs, repoRoot, selectPackages } from './workspace-packages.ts'
 
-// Packages on a runner other than Bun's own (@guren/testing uses vitest) keep
-// their own root script instead of joining this one. An explicit list survives
-// a `test` script being reworded — a regex sniffing the script string would not.
+// Packages on another runner keep their own root script. An explicit list
+// survives a `test` script being reworded; a regex over it would not.
 const nonBunTestPackages = new Set(['@guren/testing'])
 
 const { flags, positionals: selectors, forwarded } = parseArgs(
@@ -56,11 +40,8 @@ if (targets.length === 0) {
 }
 
 // A single root-cwd run ignores per-package bunfig.toml, so each package's
-// `[test] root` (create-app uses it to keep the *.test.ts files its
-// templates ship for scaffolded apps out of the monorepo suite) is resolved
-// here and passed as the package's path filter instead. One invocation, so
-// forwarded flags like `-t <pattern>` keep matching across packages rather
-// than failing in every package the pattern misses.
+// `[test] root` is resolved here and passed as its path filter instead. One
+// invocation, so a forwarded `-t <pattern>` matches across packages.
 async function testPathFor(pkg: { dir: string; relativeDir: string }): Promise<string> {
   try {
     const bunfig = await Bun.file(`${pkg.dir}/bunfig.toml`).text()
@@ -72,26 +53,16 @@ async function testPathFor(pkg: { dir: string; relativeDir: string }): Promise<s
   return pkg.relativeDir
 }
 
-// Fails any test that leaves process.cwd() somewhere unexpected, or scaffolds
-// into the checkout. Absolute, because a relative preload path stops resolving
-// the moment cwd moves.
+// Absolute, because a relative preload path stops resolving once cwd moves.
 const cwdGuard = join(import.meta.dir, 'test-cwd-guard.ts')
 
-// Fails any test file that leaves globalThis.fetch replaced. Absolute for the
-// same reason as the guard above.
+// Absolute for the same reason.
 const fetchGuard = join(import.meta.dir, 'test-global-fetch-guard.ts')
 
-// Detectors whose own code lives outside packages/, so a package sweep would
-// never run them — and a detector that silently stops detecting is worth
-// nothing. The smoke package list is here for the same reason: the gates that
-// consume it take ten minutes each, so nothing else would notice it narrowing.
-// Included only on an unfiltered run, so `test:bun cli` stays narrow.
-//
-// Discovered rather than named, so the next scripts-level guard is covered by
-// existing — a hand-kept list is the shape local-packages.ts exists to end.
-// Globbed here rather than passed to `bun test` as a bare `scripts/` directory:
-// what reaches the command line stays a list of explicit file paths, which is
-// what it was before, so this cannot change how bun resolves its arguments.
+// Guards whose own code lives outside packages/, so a package sweep would never
+// run them. Discovered rather than named, so the next one is covered by
+// existing; globbed to explicit file paths rather than handing `bun test` a bare
+// directory. Unfiltered runs only, so `test:bun cli` stays narrow.
 const guardTests = selectors.length === 0 ? await collectScriptTests() : []
 
 async function collectScriptTests(): Promise<string[]> {
@@ -119,21 +90,12 @@ const testArgs = [
 
 console.log(`[test] ${targets.map((pkg) => pkg.name).join(', ')}`)
 
-// On Linux the child's stdout/stderr go to temp files, pumped back to this
-// process's own fds — NOT inherited pipes. Under `--isolate` every test file
-// gets a fresh globals context, and Bun re-creates process.stderr lazily per
-// context as a WriteStream whose fast path registers fd 2 with epoll. When
-// fd 2 is a pipe (any CI runner), that registration intermittently collides
-// with one another sink still holds and the construction dies with "EEXIST:
-// file already exists, epoll_ctl" — uncatchably: it surfaces as an "Unhandled
-// error between tests", kills the whole file mid-load, and the summary says
-// "N tests failed:" while naming none. It cannot be defused from inside the
-// test process either: reading, defineProperty-ing or even delete-ing
-// process.stderr reifies the lazy property first, constructing the exact
-// stream whose construction is the hazard (each variant verified on Bun
-// 1.3.14). A regular file is the one stdio target epoll cannot register, so
-// redirecting removes the race structurally. macOS keeps inherit: kqueue has
-// no such failure mode, and a local TTY keeps its colors.
+// On Linux the child's stdio goes to temp files, not inherited pipes. Under
+// `--isolate` Bun re-creates process.stderr per context as a WriteStream that
+// registers fd 2 with epoll; on a pipe (any CI runner) that intermittently dies
+// with an uncatchable "EEXIST: epoll_ctl", reported as "N tests failed:" naming
+// none, and touching process.stderr reifies the very stream that is the hazard
+// (Bun 1.3.14). A regular file is the one target epoll cannot register.
 const redirectStdio = process.platform === 'linux'
 
 if (!redirectStdio) {
@@ -145,19 +107,17 @@ if (!redirectStdio) {
   process.exit(await proc.exited)
 }
 
-// One fd per channel, opened read-write: the child inherits a duplicate for
-// its writes while this process pread()s the same descriptor at explicit
-// offsets. Reopening the path for reading would work too, but a second open
-// of a just-created path is a textbook time-of-check/time-of-use shape.
+// One fd per channel, opened read-write: the child inherits a duplicate for its
+// writes while this process pread()s the same descriptor at explicit offsets.
+// Reopening the path to read would be a time-of-check/time-of-use shape.
 const stdioDir = mkdtempSync(join(tmpdir(), 'guren-test-stdio-'))
 const channels = [
   { fd: openSync(join(stdioDir, 'stdout.log'), 'w+'), offset: 0, targetFd: 1 },
   { fd: openSync(join(stdioDir, 'stderr.log'), 'w+'), offset: 0, targetFd: 2 },
 ]
 
-// Forwarded with synchronous reads and writes on raw fds: this process's own
-// process.stdout/stderr are the same lazy WriteStreams the redirect exists to
-// avoid, so the pump must not touch them.
+// Synchronous reads and writes on raw fds: this process's own process.stdout
+// and stderr are the very WriteStreams the redirect exists to avoid.
 const chunk = Buffer.alloc(65536)
 function pump(): void {
   for (const channel of channels) {
@@ -171,8 +131,7 @@ function pump(): void {
           written += writeSync(channel.targetFd, chunk, written, bytes - written)
         } catch (error) {
           // EAGAIN: our own stdio can be a full non-blocking pipe — give its
-          // reader a beat instead of spinning hot. Anything else is
-          // unwritable output; drop it rather than wedge the run.
+          // reader a beat. Anything else is unwritable output; drop it.
           if ((error as NodeJS.ErrnoException).code === 'EAGAIN') Bun.sleepSync(1)
           else written = bytes
         }

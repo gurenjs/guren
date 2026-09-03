@@ -1,24 +1,12 @@
 /**
  * A real `.guren/agents.gen.ts`, pasted verbatim below this comment.
  *
- * It exists for one reason, and it is a *compile-time* one: `agentTools` is
- * emitted `as const`, so every property is `readonly`, every array is a
- * `readonly` array and every value is a literal type — and the only line of
- * this package's documented API,
- *
- *     await registerAgentTools(agentTools)
- *
- * is precisely the assignment nothing else in the repo performs. The tests
- * that build their fixtures through `deriveAgentTools()` get mutable
- * `DerivedAgentTool` objects, which satisfy `WebMcpToolSource` trivially and
- * would keep doing so if the interface stopped admitting a real manifest.
- *
- * Produced by `buildAgentToolsContent()` over a router covering the shapes
- * that matter: a params+body split, a query-only GET, a nested non-object
- * body, an `output` schema, an empty `inputSources`, an `expose.webMcp:
- * false` route and an `approval: 'required'` one. Regenerate rather than
- * hand-edit — a fixture edited by hand stops standing in for what codegen
- * writes.
+ * The reason is *compile-time*: `agentTools` is emitted `as const`, so every
+ * property is `readonly` and every value a literal type, and
+ * `registerAgentTools(agentTools)` is the assignment nothing else in the repo
+ * performs — tests building fixtures through `deriveAgentTools()` get mutable
+ * `DerivedAgentTool` objects that satisfy `WebMcpToolSource` trivially.
+ * Produced by `buildAgentToolsContent()`; regenerate rather than hand-edit.
  */
 
 /**

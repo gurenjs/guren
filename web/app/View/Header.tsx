@@ -5,15 +5,10 @@ import { GITHUB_URL } from '../../config/site.js'
 import { GithubIcon, MenuIcon, MoonIcon, SunIcon } from './icons.js'
 
 /**
- * Server-rendered port of the docs-variant `Header` from
- * `resources/js/components/Header.tsx`, for content pages that ship no
- * framework JS. The two client behaviors survive without one:
- *
- * - The color-mode toggle is `COLOR_MODE_TOGGLE_SCRIPT` from
- *   `config/document-theme.ts`, beside the prepaint script it must agree
- *   with (system-follow included; icon visibility is the `.cm-*` rules in
- *   `app.css`).
- * - The mobile menu is a `<details>` disclosure instead of React state.
+ * Server-rendered port of `resources/js/components/Header.tsx` for pages that
+ * ship no framework JS. The color-mode toggle is `COLOR_MODE_TOGGLE_SCRIPT`
+ * from `config/document-theme.ts`, which it must agree with; the mobile menu
+ * is a `<details>` disclosure instead of React state.
  */
 
 export const Header: FC = () => (

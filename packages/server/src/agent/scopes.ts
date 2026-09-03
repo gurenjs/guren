@@ -1,50 +1,29 @@
 /**
  * The scope grammar an API token's `abilities` use to reach agent tools
- * (RFC 0016 §5.1).
- *
- * Four forms, and deliberately no more — a grammar an agent-facing consent
- * screen has to render is only useful if a human can read a scope and say
- * which tools it grants:
+ * (RFC 0016 §5.1). Four forms, and deliberately no more — a consent screen is
+ * only useful if a human can read a scope and say which tools it grants:
  *
  * - `tool:<name>`      one tool, by exact name
  * - `tools:read`       every tool whose resolved `readOnlyHint` is true
  * - `tools:*`          every tool
  * - `tools:<prefix>.*` every tool named `<prefix>.…`
  *
- * **Only `tool:` / `tools:` entries are considered.** Every other ability an
- * `ApiToken` carries — including the store's default `['*']` — is ignored, so
- * it matches nothing. This is the fail-closed half of a deliberate split:
- *
- * - A token issued before agent tools existed, for an app's own API, holds
- *   `['*']`. Reading that as "all agent tools" would silently hand every
- *   already-issued token the whole agent surface the moment an app declares
- *   its first `.agent()` route. Access to the agent surface is granted by an
- *   explicit tool scope or not at all (default deny, RFC §5.1); `tools:*` is
- *   the explicit way to say "everything".
- * - A malformed entry is likewise ignored here rather than throwing: this
- *   module judges an already-issued token, and a token that cannot be parsed
- *   must grant less, never more. Rejecting a bad scope belongs to the
- *   *issuer* (`token:issue`, a later PR), which runs {@link parseToolScope}
- *   over what it was asked for and refuses a `null`.
- *
- * Matching is case-sensitive and entries are not trimmed. A stored ability
- * with stray whitespace is an issuance bug; normalizing it here would make
- * the judge more permissive than the issuer, which is the wrong direction.
+ * **Only `tool:` / `tools:` entries are considered**, so a token issued before
+ * agent tools existed — holding the store's default `['*']` — grants none of
+ * them (default deny). A malformed entry is likewise ignored rather than
+ * throwing: this module judges an already-issued token and must grant less,
+ * never more; rejecting a bad scope belongs to the issuer, which runs
+ * {@link parseToolScope} and refuses a `null`. Matching is case-sensitive and
+ * entries are not trimmed — normalizing here would make the judge more
+ * permissive than the issuer.
  */
 
 /**
  * The MCP tool-name grammar (SEP-986), which a `tool:` scope names and a
- * `tools:<prefix>.*` scope has to stay inside — a scope that could not
- * possibly name a legal tool is not a scope.
- *
- * `packages/cli/src/agent-route-check.ts` holds the same pattern for the
- * check that fails a build over an illegal tool name. Collapsing the two onto
- * this export is a later change, not this one: the CLI reaches `@guren/server`
- * through `dist/`, so the collapse needs a built server and belongs with the
- * PR that does the build-order work.
- *
- * Note what the charset gives for free: `*` is not in it, so `tool:posts.*`
- * fails the test and needs no special case to be rejected.
+ * `tools:<prefix>.*` scope must stay inside. `packages/cli/src/agent-route-check.ts`
+ * holds the same pattern; collapsing the two needs a built server, so it waits
+ * for the PR doing that build-order work. `*` is not in the charset, so
+ * `tool:posts.*` is rejected with no special case.
  */
 export const AGENT_TOOL_NAME_PATTERN = /^[A-Za-z0-9._-]{1,128}$/
 
@@ -61,10 +40,8 @@ export type ParsedToolScope =
 
 /**
  * The shape a tool has to present to be judged: its name, and whether it
- * resolved to read-only. Deliberately not `DerivedAgentTool` — the token
- * guard, the consent screen and a test fixture all supply this, and none of
- * them should have to build a whole derived tool to ask a question about two
- * fields. `DerivedAgentTool` is structurally compatible via
+ * resolved to read-only. Deliberately not `DerivedAgentTool`, which is
+ * structurally compatible via
  * `{ name: tool.toolName, readOnly: tool.annotations.readOnlyHint }`.
  */
 export interface ScopedTool {
@@ -86,17 +63,14 @@ const PREFIX_SUFFIX = '.*'
 /**
  * Parse one `abilities` entry.
  *
- * @returns The scope it denotes, or `null` for an entry that is not a tool
- *   scope at all (`'*'`, an app's own ability name) and for one that is
- *   malformed (`tools:`, `tools:.*`, `tools:*.store`, a prefix outside the
- *   tool-name grammar). Callers cannot tell those apart on purpose: both mean
- *   "grants no tool", and a judge that distinguished them would be inventing
- *   a third answer for a two-valued question.
+ * @returns The scope it denotes, or `null` both for an entry that is not a tool
+ *   scope and for a malformed one (`tools:`, `tools:.*`, `tools:*.store`, a
+ *   prefix outside the tool-name grammar). Callers cannot tell those apart on
+ *   purpose: both mean "grants no tool".
  *
- * Note the two reserved `tools:` words are matched before the wildcard form,
- * so a tool family literally named `read.…` is still reachable as
- * `tools:read.*`, while a tool named exactly `read` is reachable only as
- * `tool:read` — the reserved word wins its own spelling.
+ * The two reserved `tools:` words are matched before the wildcard form, so a
+ * family named `read.…` is still reachable as `tools:read.*` while a tool named
+ * exactly `read` is reachable only as `tool:read`.
  */
 export function parseToolScope(entry: string): ParsedToolScope | null {
   if (entry.startsWith(SINGLE_PREFIX)) {
@@ -117,9 +91,8 @@ export function parseToolScope(entry: string): ParsedToolScope | null {
   const prefix = rest.slice(0, -PREFIX_SUFFIX.length)
   if (!AGENT_TOOL_NAME_PATTERN.test(prefix)) return null
   // A prefix at the length cap can never leave room for `<prefix>.<something>`
-  // inside the same cap, so it is legal and matches nothing. Left legal
-  // rather than rejected: expansion is what shows an issuer that a scope
-  // grants an empty list, and one place saying so beats two.
+  // inside the same cap, so it is legal and matches nothing. Expansion is what
+  // shows an issuer that a scope grants an empty list.
   return { kind: 'prefix', prefix }
 }
 
@@ -157,17 +130,15 @@ export function scopesAllowTool(abilities: readonly string[], tool: ScopedTool):
 }
 
 /**
- * The concrete tool names a token's abilities grant, for the surfaces that
- * have to show a human what a scope means: the OAuth consent screen, the
- * `token:issue` confirmation, and the issuance-time lint.
+ * The concrete tool names a token's abilities grant, for the surfaces that show
+ * a human what a scope means: the OAuth consent screen, the `token:issue`
+ * confirmation, the issuance-time lint.
  *
- * Literally a filter over {@link scopesAllowTool}, and it must stay one. A
- * second matcher that walked entries and accumulated names is how a consent
- * screen comes to list a tool the dispatcher then denies — the two answers
- * have to be the same answer, not two implementations of one rule.
+ * Literally a filter over {@link scopesAllowTool}, and it must stay one: a
+ * second matcher is how a consent screen comes to list a tool the dispatcher
+ * then denies.
  *
- * @returns Names in the order the tools were given, so a caller controls the
- *   display order by ordering its input.
+ * @returns Names in the order the tools were given.
  */
 export function expandToolScopes(
   abilities: readonly string[],

@@ -6,30 +6,19 @@ import { describe, expect, it } from 'bun:test'
 const SRC_DIR = fileURLToPath(new URL('../src', import.meta.url))
 
 /**
- * Files allowed to spell a class-member type test themselves, and why.
- *
  * `controller-methods.ts` owns `classActionMembers`, the one answer to which
- * members of a controller class are actions. Anywhere else, a bare
- * `member.type === 'ClassMethod'` is a second copy of that answer — and a
- * copy that is wrong the same way every time, because `Router` dispatches to
- * `store = async () => {}` exactly as it does to `async store() {}`. Four
- * scanners held such a copy and each silently reported class-field actions as
- * absent rather than as unverified.
+ * members of a controller class are actions. A copy elsewhere is wrong the
+ * same way every time: `Router` dispatches to `store = async () => {}` exactly
+ * as to `async store() {}`, so class-field actions get reported as absent.
  */
 const OWNS_THE_RULE = new Set(['controller-methods.ts'])
 
-/**
- * A quoted `'ClassMethod'` / `"ClassMethod"` — the shape a type test takes.
- * Prose in a comment (which this repo writes a lot of) spells it in backticks
- * and does not match, so the guard does not tax explaining the rule.
- */
+/** Quoted, so prose spelling the name in backticks is not flagged. */
 const TYPE_TEST = /['"]ClassMethod['"]/
 
 /**
- * A sixth copy of the controller-action rule compiles, passes every other
- * test, and quietly under-reports — nothing at runtime distinguishes it from
- * the shared iterator, which is why this is pinned at the source level. Same
- * argument as `controller-surface.test.ts` re-parsing `Controller.ts`.
+ * Pinned at the source level: another copy compiles, passes every other test,
+ * and only under-reports, so nothing at runtime distinguishes it.
  */
 describe('the controller-action rule has one home', () => {
   it('has no class-member type test outside controller-methods.ts', async () => {

@@ -8,13 +8,9 @@ import { runToolDev } from '../src/tool-dev'
 const repoRoot = resolve(import.meta.dir, '../../..')
 
 /**
- * `tool:dev` against real applications: what it refuses, and what it hands a
- * developer when it does not.
- *
  * The app fixture sits in a subdirectory of the workspace so `--app` names a
- * root the process cwd is not — `createTempWorkspace` chdirs into the root it
- * makes, and an app at that root would leave the two equal, so nothing here
- * would notice a command that ignored the flag.
+ * root the process cwd is not: `createTempWorkspace` chdirs into the root it
+ * makes, and an app there would hide a command that ignored the flag.
  */
 async function linkFixtureDependencies(dir: string): Promise<void> {
   await linkWorkspaceCore(dir)
@@ -71,10 +67,7 @@ app.auth.useTokens(new MemoryApiTokenStore())
 export default app
 `
 
-/**
- * The plugin *and* a global authentication middleware in front of it — the
- * probe's false-negative shape, and a realistic app.
- */
+/** Plugin behind a global auth middleware — the probe's false-negative shape. */
 const MAIN_GLOBAL_AUTH_WITH_PLUGIN = `import { createApp, MemoryApiTokenStore, requireAuthenticated } from '@guren/core'
 import { mcpPlugin } from '@guren/plugin-mcp'
 import { registerWebRoutes } from '../routes/web'
@@ -103,12 +96,9 @@ export default app
 `
 
 /**
- * Every listening case binds port 0 and reads back what the app reports.
- *
  * `Application.listen()` walks the port forward when the one it was handed is
- * busy, so a fixed number plus an exact-port assertion describes a server
- * that may have moved — and nothing here stops the servers it starts, which
- * makes a second run of this file the very collision that hides the bug.
+ * busy, so a fixed number plus an exact-port assertion can describe a server
+ * that moved. Bind 0 and read back what the app reports.
  */
 const ANY_PORT = 0
 
@@ -125,8 +115,6 @@ describe('tool:dev', () => {
     await mkdir(join(appDir, 'routes'), { recursive: true })
     await mkdir(join(appDir, 'src'), { recursive: true })
     await writeFile(join(appDir, 'routes/web.ts'), ROUTES)
-    // Silences the banner and the printout; the assertions read the returned
-    // session, not the terminal.
     logSpy = spyOn(console, 'log').mockImplementation(() => {})
   })
 
@@ -157,9 +145,8 @@ describe('tool:dev', () => {
   it('diagnoses a missing plugin even behind a global auth middleware', async () => {
     await writeFile(join(appDir, 'src/main.ts'), MAIN_GLOBAL_AUTH)
 
-    // requireAuthenticated() alone answers 401 on this path, which a
-    // status-only probe once read as "live". Carrying the token gets past it,
-    // so what is left is the truth: nothing is mounted here.
+    // requireAuthenticated() alone answers 401 here, which a status-only probe
+    // reads as "live"; carrying the token gets past it to the truth.
     await expect(runToolDev({ appRoot: appDir, port: ANY_PORT })).rejects.toThrow(
       /No App MCP endpoint answered.*404/su,
     )
@@ -168,9 +155,8 @@ describe('tool:dev', () => {
   it('finds the endpoint behind a global authentication middleware', async () => {
     await writeFile(join(appDir, 'src/main.ts'), MAIN_GLOBAL_AUTH_WITH_PLUGIN)
 
-    // The probe carries the token it just minted, so it passes the same gate
-    // a real client passes. A bearer-less probe never reaches the plugin here
-    // and would report a working setup as missing.
+    // A bearer-less probe never reaches the plugin here and would report a
+    // working setup as missing.
     const session = await runToolDev({ appRoot: appDir, port: ANY_PORT })
     expect(session.endpoint).toMatch(/\/mcp$/u)
   })
@@ -178,8 +164,7 @@ describe('tool:dev', () => {
   it('keeps the provider the app configured its token guard with', async () => {
     await writeFile(join(appDir, 'src/main.ts'), MAIN_WITH_PROVIDER)
 
-    // Replacing the store must change where tokens live and nothing else: a
-    // bare useTokens(store) drops the provider, and the user behind --as
+    // A bare useTokens(store) drops the provider, and the user behind --as
     // becomes a bare { id } no policy reading a field can recognise.
     const session = await runToolDev({ appRoot: appDir, port: ANY_PORT, as: '7' })
 
@@ -211,8 +196,6 @@ describe('tool:dev', () => {
     await writeFile(join(appDir, 'src/main.ts'), MAIN_WITH_PLUGIN)
     const session = await runToolDev({ appRoot: appDir, port: ANY_PORT })
 
-    // The shape, not a number the test chose: the endpoint has to be the one
-    // the app actually bound.
     expect(session.endpoint).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/mcp$/u)
     const { token, endpoint } = session
     const listed = await fetch(endpoint, {
@@ -227,11 +210,9 @@ describe('tool:dev', () => {
     expect(listed.status).toBe(200)
     expect(await listed.text()).toContain('posts.index')
 
-    // The token was issued into this command's own store, so the app's is
-    // untouched — that, not a policy, is what makes it ephemeral. Imported by
-    // the same specifier the command used, with no cache-busting query: a
-    // different specifier would be a different module, and its store would
-    // read empty whether or not the command wrote to the app's.
+    // Imported by the same specifier the command used, with no cache-busting
+    // query: a different specifier is a different module, whose store reads
+    // empty whether or not the command wrote to the app's.
     const module = (await import(pathToFileURL(join(appDir, 'src/main.ts')).href)) as {
       appStore: { size: number }
     }
@@ -244,9 +225,8 @@ describe('tool:dev', () => {
     const explicit = await runToolDev({ appRoot: appDir, port: ANY_PORT, as: '42' })
     expect(explicit.userId).toBe(42)
 
-    // Never a mystery: a call whose policy loads a user behaves differently
-    // depending on this, so the default is a placeholder that matches no
-    // record rather than a plausible id.
+    // The default is a placeholder that matches no record, rather than a
+    // plausible id a policy might silently resolve.
     await writeFile(join(appDir, 'src/main.ts'), MAIN_WITH_PLUGIN)
     const fallback = await runToolDev({ appRoot: appDir, port: ANY_PORT })
     expect(fallback.userId).toBe('tool-dev')

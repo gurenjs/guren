@@ -7,13 +7,10 @@ import { ensureGurenUiTokens } from '../src/guren-css'
 const repoRoot = join(import.meta.dir, '../../..')
 
 /**
- * The Guren UI token sheet exists in two places: create-guren-app ships it in
- * the default template, and `guren add auth` / `guren make:feature` write the
- * scaffold copy into apps that predate it (ensureGurenUiTokens). The two must
- * stay byte-identical — a drifted copy means an app gets different tokens
- * depending on which command created the file. Same policy as
- * scaffold-blog-sync.test.ts; upstream design decisions live in
- * gurenjs/guren-ui and land here by hand.
+ * The token sheet ships in the create-app template and is written into older
+ * apps by ensureGurenUiTokens; the two copies must stay byte-identical, or an
+ * app's tokens depend on which command wrote the file. Upstream is
+ * gurenjs/guren-ui, and lands here by hand.
  */
 it('the scaffold guren.css matches the create-app template copy', async () => {
   const scaffold = await readFile(

@@ -34,12 +34,10 @@ describe('renderPostMarkdown', () => {
 
 describe('sanitization', () => {
   // The rendered HTML is stored and later injected with
-  // dangerouslySetInnerHTML, so every one of these must be neutralized at
-  // save time. Escaping raw HTML alone is not enough — markdown syntax
-  // carries URLs into href/src, and an encoded scheme still executes.
-  //
-  // Each case asserts both that the dangerous form is gone AND that the
-  // sanitized remnant is present, so an empty return value cannot pass.
+  // dangerouslySetInnerHTML, so these must be neutralized at save time;
+  // escaping raw HTML is not enough, since markdown carries URLs into href/src
+  // and an encoded scheme still executes. Each case asserts the sanitized
+  // remnant too, so an empty return value cannot pass.
   const vectors: Array<{ name: string; markdown: string; remnant: RegExp }> = [
     { name: 'raw script tag', markdown: '<script>alert(1)</script>', remnant: /&lt;script&gt;/ },
     { name: 'inline event handler', markdown: 'x <img src=y onerror=alert(2)> z', remnant: /<img[^>]*src="y"/ },
@@ -62,8 +60,8 @@ describe('sanitization', () => {
   }
 
   it('should strip href entirely when the scheme is encoded to evade matching', async () => {
-    // `java&#115;cript:` survives a literal "javascript:" check, so assert
-    // the attribute is dropped rather than that a substring is absent.
+    // `java&#115;cript:` survives a literal "javascript:" check, so assert the
+    // attribute is dropped rather than that a substring is absent.
     const html = await renderPostMarkdown('[e](java&#115;cript:alert(5))')
 
     expect(html).toMatch(/<a[^>]*>e<\/a>/)

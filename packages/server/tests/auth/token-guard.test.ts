@@ -116,8 +116,7 @@ describe('TokenGuard', () => {
 
     const guard = new TokenGuard({ store, ctx, provider })
     expect(await guard.user()).toBeNull()
-    // An unrevoked token whose user no longer exists must NOT count as
-    // authenticated when a provider is configured.
+    // With a provider configured, a token whose user is gone is not authenticated.
     expect(await guard.check()).toBe(false)
   })
 
@@ -155,8 +154,7 @@ describe('TokenGuard', () => {
     expect(await first.check()).toBe(true)
     expect(lookups).toBe(1)
 
-    // A second guard on the same request (middleware + guard both mounted)
-    // reuses the context result: no second store read, no second lastUsedAt write.
+    // A second guard on the same request reuses the context result: no second store read, no second lastUsedAt write.
     const second = new TokenGuard({ store: countingStore, ctx })
     expect(await second.check()).toBe(true)
     expect(lookups).toBe(1)
@@ -174,8 +172,7 @@ describe('TokenGuard', () => {
 
     expect(await guard.check()).toBe(false)
     expect(await store.findByHashedToken(token.hashedToken)).toBeNull()
-    // The request-scoped verification result is cleared too — getApiToken()
-    // must not succeed after logout on the same request.
+    // The request-scoped result is cleared too, so getApiToken() cannot succeed after logout.
     expect(ctx.get(API_TOKEN_KEY)).toBeUndefined()
 
     // A fresh guard (new request) must also reject the revoked token.

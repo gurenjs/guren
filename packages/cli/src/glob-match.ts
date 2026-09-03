@@ -9,11 +9,10 @@ const STAR_TOKEN = '\x00STAR\x00'
 const compiledCache = new Map<string, RegExp>()
 
 /**
- * Compile a minimal glob pattern into a RegExp matched against POSIX-style
- * relative paths. Supports only `*` (within one path segment) and `**`
- * (any number of segments, including zero) — the frozen vocabulary
- * `guren.arch.ts` layers are built from. No brace expansion, character
- * classes, or negation; anything beyond `*`/`**` is treated as a literal.
+ * Compile a minimal glob into a RegExp matched against POSIX-style relative
+ * paths. Only `*` (within one segment) and `**` (any number, including zero) —
+ * the frozen vocabulary `guren.arch.ts` layers are built from. No brace
+ * expansion, character classes or negation; anything else is a literal.
  */
 export function compileGlob(glob: string): RegExp {
   const cached = compiledCache.get(glob)

@@ -25,16 +25,12 @@ export default ${componentName}
 }
 
 /**
- * Refuses a confirmed API-only app, like the multi-file scaffolds and unlike
- * `makeController`: a page has no JSON dialect to adapt to, and the app has no
- * way to render one — codegen leaves it out of `.guren/pages.gen.ts`
- * (`planPageManifest`), so the file would sit there describing a screen nothing
- * can reach. Refusing says that at the command that caused it, rather than
- * leaving the app to report an ignored component on its next `check`.
+ * Refuses a confirmed API-only app: codegen leaves the page out of
+ * `.guren/pages.gen.ts` (`planPageManifest`), so nothing could render it.
  */
 export async function makeView(name: string, options: WriterOptions = {}): Promise<string> {
-  // Before the shape check, so a malformed name is reported as the usage
-  // error it is rather than being masked by the app's shape.
+  // Before the shape check, so a malformed name reports as a usage error
+  // rather than being masked by the app's shape.
   const segments = safePathSegments(name, 'view name')
   const componentName = pascalCase(segments[segments.length - 1]!)
   const filePath = `${VIEW_ROOT}/${segments.join('/')}.tsx`

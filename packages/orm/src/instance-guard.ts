@@ -1,15 +1,8 @@
 /**
- * Detects multiple loaded copies of @guren/orm in one process.
- *
- * Model and DrizzleAdapter keep module-level state (the configured database,
- * relation registries). When two copies of the package are loaded — usually
- * because mixed @guren/* versions made the package manager nest a second
- * copy under another @guren package — `configureOrm()` configures one copy
- * while models imported through the other copy stay unconfigured, and every
- * query fails with "database has not been configured".
- *
- * The runtime cannot merge the copies, but it can make the failure mode
- * obvious instead of silent.
+ * Detects multiple loaded copies of @guren/orm in one process. Model and
+ * DrizzleAdapter keep module-level state, so `configureOrm()` configures one
+ * copy while models imported through the other fail with "database has not
+ * been configured". The runtime cannot merge them, only make it non-silent.
  */
 const INSTANCE_KEY = Symbol.for('guren.orm.loaded')
 

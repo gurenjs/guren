@@ -65,8 +65,7 @@ export class Clip extends Attachable(defineModel(clips), {
     expect(content).toContain("Post: { cover: 'og' | 'thumb'; images: never }")
     expect(content).toContain('Clip: { stills: never }')
     expect(content).toContain('export type AttachmentName<M extends keyof AttachmentsMap> = keyof AttachmentsMap[M]')
-    // The plain model must not appear: an empty entry would type
-    // `AttachmentsMap['User']` as a real (attachment-less) contract.
+    // An empty entry would type `AttachmentsMap['User']` as a real, attachment-less contract.
     expect(content).not.toContain('User')
   })
 
@@ -110,9 +109,7 @@ export class Doc extends Attachable(defineModel(docs), {
   })
 
   test('emits an entry for an empty Attachable declaration', async () => {
-    // Attachable(Base, {}) is still an Attachable model at runtime, so it
-    // must appear in the map (and in AttachableModelName) rather than read
-    // as an app without attachments.
+    // Attachable(Base, {}) is still an Attachable model at runtime, so it belongs in the map.
     const dir = await makeApp({
       'app/Models/Note.ts': `import { Attachable } from '@guren/core'
 import { defineModel } from '@guren/orm'
@@ -131,10 +128,8 @@ export class Note extends Attachable(defineModel(notes), {}) {}
   })
 
   test('keeps an existing file when models were skipped with warnings', async () => {
-    // Removal is on positive evidence only: an unparsable model file may
-    // hide an Attachable declaration, and deleting the module out from
-    // under its importers on uncertainty is worse than an outdated map
-    // plus the warning.
+    // Removal is on positive evidence only: an unparsable model may hide an Attachable
+    // declaration, and deleting the module from under its importers is worse than a stale map.
     const stale = "export interface AttachmentsMap { Post: { cover: 'one' } }\n"
     const dir = await makeApp({
       '.guren/attachments.gen.ts': stale,
@@ -166,8 +161,7 @@ export class Post extends Attachable(defineModel(posts), {
 
     const { outputPath, models, warnings } = await generateAttachmentTypes({ appRoot: dir })
 
-    // Neither entry is truthful when the runtime keys both classes as
-    // 'Post', so nothing is emitted.
+    // The runtime keys both classes as 'Post', so neither entry would be truthful.
     expect(models).toEqual([])
     expect(outputPath).toBeNull()
     expect(warnings).toHaveLength(1)

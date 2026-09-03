@@ -29,19 +29,11 @@ export interface StartInertiaClientOptions {
   page?: Page
 }
 
-/**
- * The default setup function for rendering the Inertia app.
- * @param param0 The setup arguments containing the element, App component, and props.
- */
 const defaultSetup = ({ el, App, props }: SetupArgs) => {
   createRoot(el).render(React.createElement(App, props as any))
 }
 
-/**
- * Start the Inertia client application.
- * @param options The options for starting the Inertia client.
- * @returns A promise that resolves when the Inertia app is created.
- */
+/** Start the Inertia client application. */
 export function startInertiaClient(options: StartInertiaClientOptions): Promise<unknown> {
   const resolve =
     options.resolve ??
@@ -77,10 +69,6 @@ export function startInertiaClient(options: StartInertiaClientOptions): Promise<
 }
 
 
-/**
- * Get the initial Inertia page from the global variable or the DOM.
- * @returns The initial Inertia page or undefined if not found.
- */
 function getInitialPage(): Page | undefined {
   if (typeof window === 'undefined') {
     return undefined

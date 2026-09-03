@@ -6,9 +6,7 @@ const TEST_ROOT = 'tests'
 
 export type TestRunner = 'bun' | 'vitest'
 
-// Scaffolded apps run their test script via `bun test` and don't ship
-// vitest by default, so `bun:test` is the safe default. `detectRunner`
-// switches to vitest when the target project has opted into it.
+// Scaffolded apps run `bun test` and do not ship vitest by default.
 const FALLBACK_RUNNER: TestRunner = 'bun'
 
 const VITEST_CONFIG_CANDIDATES = [
@@ -20,11 +18,7 @@ const VITEST_CONFIG_CANDIDATES = [
   'vitest.config.cjs',
 ]
 
-/**
- * Detect which test runner the target project (cwd) is set up for.
- * Looks for a vitest config file, then for a `vitest` dependency in
- * package.json. Falls back to `bun` when neither is found.
- */
+/** Which test runner the target project (cwd) is set up for. */
 export async function detectRunner(cwd: string = process.cwd()): Promise<TestRunner> {
   for (const candidate of VITEST_CONFIG_CANDIDATES) {
     if (await fileExists(cwd, candidate)) {
@@ -32,8 +26,7 @@ export async function detectRunner(cwd: string = process.cwd()): Promise<TestRun
     }
   }
 
-  // A manifest this cannot read answers `null`, which falls through to the
-  // default runner exactly as a malformed one always did.
+  // An unreadable manifest answers `null`, falling through to the default.
   if (await appDependsOn(cwd, 'vitest')) {
     return 'vitest'
   }

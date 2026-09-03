@@ -1,19 +1,8 @@
 import { createMiddleware } from 'hono/factory'
 
 /**
- * Middleware that logs HTTP requests with method, path, status, and duration.
- * Uses structured JSON format suitable for production monitoring and log collectors.
- *
- * Pairs well with {@link requestIdMiddleware} — if a `requestId` is set on the
- * context, it will be included in the log entry.
- *
- * @example
- * ```ts
- * import { requestIdMiddleware, requestLoggingMiddleware } from '@guren/core'
- *
- * app.use('*', requestIdMiddleware())
- * app.use('*', requestLoggingMiddleware())
- * ```
+ * Logs one structured JSON line per request. Pairs with {@link requestIdMiddleware}:
+ * a `requestId` on the context is included in the entry.
  */
 export function requestLoggingMiddleware() {
   return createMiddleware(async (c, next) => {

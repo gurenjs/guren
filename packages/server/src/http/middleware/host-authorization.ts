@@ -10,18 +10,8 @@ export interface HostAuthorizationOptions {
 }
 
 /**
- * Middleware that validates the Host header against an allowed list.
- * Protects against DNS rebinding and host header attacks.
- *
- * @example
- * ```ts
- * import { createHostAuthorizationMiddleware } from '@guren/core'
- *
- * app.use('*', createHostAuthorizationMiddleware({
- *   allowedHosts: ['example.com', '*.example.com', 'localhost:3000'],
- *   exclude: ['/healthcheck'],
- * }))
- * ```
+ * Validates the Host header against an allowed list, guarding against DNS
+ * rebinding and host header attacks.
  */
 export function createHostAuthorizationMiddleware(options: HostAuthorizationOptions): MiddlewareHandler {
   const { allowedHosts, exclude = [], onError } = options
@@ -53,11 +43,8 @@ export function createHostAuthorizationMiddleware(options: HostAuthorizationOpti
 
 type HostMatcher = (host: string) => boolean
 
-/**
- * Extract the hostname portion from a host header value (strip port).
- */
+/** Strips the port, keeping an IPv6 literal's brackets (`[::1]:3000`). */
 function extractHostname(host: string): string {
-  // Handle IPv6: [::1]:3000
   if (host.startsWith('[')) {
     const bracketEnd = host.indexOf(']')
     return bracketEnd !== -1 ? host.slice(0, bracketEnd + 1) : host
@@ -67,18 +54,16 @@ function extractHostname(host: string): string {
 }
 
 function compileHostMatcher(pattern: string): HostMatcher {
-  // Wildcard subdomain: *.example.com
-  // Matches against hostname only (port stripped) to prevent
-  // port-embedded host tricks like "attacker.com:80.example.com"
+  // `*.example.com`. Matched against the hostname with the port stripped, or
+  // `attacker.com:80.example.com` would pass.
   if (pattern.startsWith('*.')) {
-    const suffix = pattern.slice(1).toLowerCase() // e.g., '.example.com'
+    const suffix = pattern.slice(1).toLowerCase()
     return (host) => {
       const hostname = extractHostname(host).toLowerCase()
       return hostname.endsWith(suffix) && hostname.length > suffix.length
     }
   }
 
-  // Port wildcard: localhost:*
   if (pattern.endsWith(':*')) {
     const hostname = pattern.slice(0, -2).toLowerCase()
     return (host) => {

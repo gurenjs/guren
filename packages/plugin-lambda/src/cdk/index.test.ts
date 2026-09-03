@@ -207,9 +207,8 @@ describe('GurenLambdaApp', () => {
   describe('the asset document guard', () => {
     /**
      * The code CloudFront actually runs, read back out of the synthesized
-     * template rather than from the renderer: a guard that is generated
-     * perfectly and never associated with a behavior protects nothing, and
-     * only the template shows both halves.
+     * template rather than from the renderer: a guard generated perfectly and
+     * never associated with a behavior protects nothing.
      */
     interface AssetDistribution {
       code: string
@@ -275,10 +274,9 @@ describe('GurenLambdaApp', () => {
       const { code } = distribution
 
       // Derived rather than restated: the emitted code has to cover the whole
-      // list, so a renderer that drops one — or an extension its matcher
-      // cannot express — fails here. What keeps the list itself honest is the
-      // gate in the server's own tests, which recomputes it from Hono's mime
-      // table and what rendersAsDocument makes of it.
+      // list, so a renderer that drops one — or an extension its matcher cannot
+      // express — fails here. The server's own tests keep the list honest,
+      // recomputing it from Hono's mime table.
       for (const extension of DOCUMENT_ASSET_EXTENSIONS) {
         expect(respondTo(code, `/uploads/nested/note.${extension}`)).toEqual(expectedHeaders)
         // getMimeType lowercases before its lookup, so the framework guard

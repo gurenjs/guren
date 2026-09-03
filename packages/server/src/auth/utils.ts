@@ -1,35 +1,23 @@
 import { randomBytes, createHash, timingSafeEqual } from 'node:crypto'
 
-/**
- * Hash a token using SHA-256 or SHA-512.
- */
 export function hashToken(token: string, algorithm: 'sha256' | 'sha512' = 'sha256'): string {
   return createHash(algorithm).update(token).digest('hex')
 }
 
-/**
- * Generate a secure random token.
- */
 export function generateToken(length: number = 32): string {
   return randomBytes(length).toString('hex')
 }
 
-/**
- * Generate a random ID (16 bytes = 32 hex chars).
- */
+/** Generate a random ID (16 bytes = 32 hex chars). */
 export function generateId(): string {
   return randomBytes(16).toString('hex')
 }
 
 /**
- * Securely compare two hex strings using timing-safe comparison.
- *
- * Input that is not strict, even-length hex is rejected rather than compared:
- * `Buffer.from(value, 'hex')` stops at the first invalid pair, so 'zzzz' and
- * 'yyyy' both decode to nothing — and 'abcz' and 'abdz' both decode to the
- * one byte they share — and would compare equal. A short decode is how the
- * decoder reports that, which beats restating its grammar in a regex here.
- * Use `secureStringCompare` for values that are not hex.
+ * Timing-safe comparison of two hex strings. Non-hex or odd-length input is
+ * rejected rather than compared: `Buffer.from(x, 'hex')` stops at the first
+ * invalid pair, so 'zzzz' and 'yyyy' would both decode to nothing and compare
+ * equal. Use `secureStringCompare` for values that are not hex.
  */
 export function secureCompare(a: string, b: string): boolean {
   if (a.length !== b.length) return false
@@ -41,10 +29,7 @@ export function secureCompare(a: string, b: string): boolean {
   return timingSafeEqual(bufA, bufB)
 }
 
-/**
- * Securely compare two arbitrary strings using timing-safe comparison.
- * Unlike secureCompare, this works with any string encoding (UUIDs, tokens, etc.).
- */
+/** Timing-safe comparison for arbitrary strings — unlike secureCompare, not hex-only. */
 export function secureStringCompare(a: string, b: string): boolean {
   const bufA = Buffer.from(a, 'utf8')
   const bufB = Buffer.from(b, 'utf8')
@@ -52,9 +37,6 @@ export function secureStringCompare(a: string, b: string): boolean {
   return timingSafeEqual(bufA, bufB)
 }
 
-/**
- * Build a URL with token and optional email parameters.
- */
 export function buildTokenUrl(baseUrl: string, token: string, email?: string): string {
   const url = new URL(baseUrl)
   url.searchParams.set('token', token)
@@ -64,9 +46,6 @@ export function buildTokenUrl(baseUrl: string, token: string, email?: string): s
   return url.toString()
 }
 
-/**
- * Parse a URL to extract token and email parameters.
- */
 export function parseTokenUrl(url: string): { token: string | null; email: string | null } {
   try {
     const parsed = new URL(url)

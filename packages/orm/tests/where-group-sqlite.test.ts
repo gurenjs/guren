@@ -6,10 +6,9 @@ import { Model } from '../src/Model'
 import { SoftDeletes } from '../src/SoftDeletes'
 import { DrizzleAdapter } from '../src/adapters/drizzle-adapter'
 
-// Integration test against the real bun:sqlite driver. Callback groups only
-// exist so that AND filters (published flags, soft deletes, global scopes)
-// survive next to OR keyword chains — the fake-adapter tests cannot prove
-// the Drizzle renderer parenthesizes the generated SQL the same way.
+// Integration test against the real bun:sqlite driver: callback groups exist so
+// AND filters survive next to OR chains, and only the real renderer can prove the
+// generated SQL is parenthesized that way.
 
 const postsTable = sqliteTable('posts', {
   id: integer('id').primaryKey({ autoIncrement: true }),

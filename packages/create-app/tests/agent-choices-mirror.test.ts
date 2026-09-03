@@ -3,11 +3,9 @@ import { readFile } from 'node:fs/promises'
 
 /**
  * AGENT_CHOICES in src/cli.ts mirrors AGENT_TARGETS in @guren/cli — a
- * cross-package literal this package cannot import (the CLI is installed
- * into the scaffolded app, not here, and importing src/cli.ts would run its
- * runMain side effect). Read both sources instead and pin them against each
- * other, so a target added to the framework fails this test until the
- * scaffolder's list — and its interactive prompt — learn about it.
+ * cross-package literal this package cannot import (the CLI is installed into
+ * the scaffolded app, and importing src/cli.ts would run its runMain side
+ * effect). Both sources are read as text and pinned against each other.
  */
 
 function extractList(source: string, constName: string, file: string): string[] {

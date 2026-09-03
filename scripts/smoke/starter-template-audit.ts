@@ -14,17 +14,10 @@ async function read(root: string, relativePath: string): Promise<string> {
 }
 
 /**
- * `create-guren-app` only publishes the directories in its `files` field, so a
- * template the registry names but the tarball omits is invisible to every
- * in-repo test — the directory resolves fine from the monorepo checkout. That is
- * how the `blog` blueprint shipped broken: it overlaid `examples/blog`, which no
- * tarball contains, and `--blueprint blog` from npm died in `cp` with a raw
- * ENOENT.
- *
- * The registry is read from source, because importing the packed bundle would
- * execute its `runMain()`. Source and bundle are then tied together by checking
- * that the shipped `dist/` still names each template — otherwise a stale build
- * could ship a CLI that disagrees with the registry this audit just verified.
+ * `create-guren-app` publishes only the directories in its `files` field, so a
+ * template the registry names but the tarball omits is invisible in-repo (how
+ * the `blog` blueprint shipped broken). The registry is read from source, since
+ * importing the packed bundle would run its `runMain()`.
  *
  * @param root The extracted `package/` directory of a create-guren-app tarball.
  */
@@ -47,10 +40,8 @@ export async function auditBlueprintTemplates(root: string): Promise<void> {
     }
   }
 
-  // npm keeps dot-directories under `files` entries (unlike files literally
-  // named `.gitignore`, which it strips — hence the `_gitignore` convention).
-  // Assert the scaffolded CI workflow survives packing so an npm behavior
-  // change can never silently ship templates without their workflow.
+  // npm keeps dot-directories under `files` entries, unlike files literally
+  // named `.gitignore`, which it strips (hence the `_gitignore` convention).
   for (const template of ['default', 'api-only']) {
     const contents = await read(root, `templates/${template}/.github/workflows/ci.yml`).catch(() => '')
     assert(
@@ -61,9 +52,8 @@ export async function auditBlueprintTemplates(root: string): Promise<void> {
 }
 
 /**
- * Console wiring is identical in every app template, so it is audited on its
- * own — `auditStarterTemplate` only covers the default template's Vite and
- * React files, which the API-only template does not have.
+ * Audited separately because `auditStarterTemplate` covers the default
+ * template's Vite and React files, which the API-only template does not have.
  */
 export async function auditConsoleWiring(root: string): Promise<void> {
   const packageJson = await read(root, 'package.json')

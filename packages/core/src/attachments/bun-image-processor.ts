@@ -1,10 +1,8 @@
 import type { ImageProcessor, VariantSpec } from './types.js'
 
 /**
- * Structural view of the `Bun.Image` surface this processor uses. Declared
- * locally so the module typechecks against any `bun-types` version and never
- * leaks Bun types into the public API; the real object is feature-detected
- * at runtime.
+ * Declared locally so the module typechecks against any `bun-types` version and
+ * never leaks Bun types into the public API; feature-detected at runtime.
  */
 interface BunImageLike {
   metadata(): Promise<{ width: number; height: number; format: string }>
@@ -23,17 +21,13 @@ type BunImageConstructor = new (
 ) => BunImageLike
 
 /**
- * The default {@link ImageProcessor}, backed by `Bun.Image`.
+ * The default {@link ImageProcessor}, backed by `Bun.Image`. Resolved by feature
+ * check, never by version: a Bun lane without the API gets no default processor
+ * and variants are recorded as `unavailable`.
  *
- * Resolved strictly behind the `typeof Bun !== 'undefined' && 'Image' in Bun`
- * feature check — never by version: Bun 1.3.x lanes without the API simply
- * get no default processor (attachments still store; variants are recorded
- * as `unavailable`).
- *
- * Format support is decided by the OS codecs at call time: rejections carry
- * `error.code === 'ERR_IMAGE_FORMAT_UNSUPPORTED'` and the pipeline branches
- * on that code only — there is no hardcoded format×platform matrix, because
- * measured counterexamples exist for every such table.
+ * Format support is decided by the OS codecs at call time, so the pipeline
+ * branches on `error.code === 'ERR_IMAGE_FORMAT_UNSUPPORTED'` alone — measured
+ * counterexamples exist for every hardcoded format×platform table.
  */
 class BunImageProcessor implements ImageProcessor {
   constructor(
@@ -47,9 +41,8 @@ class BunImageProcessor implements ImageProcessor {
   ): Promise<{ width: number; height: number; format: string; placeholder?: string }> {
     const image = new this.Image(input, { maxPixels: limits.maxPixels })
     const metadata = await image.metadata()
-    // metadata() reads only the header — truncated files pass it. The
-    // placeholder terminal decodes every pixel, so it doubles as the
-    // full-decode validation authority and yields the ThumbHash LQIP.
+    // metadata() reads only the header, so truncated files pass it; placeholder()
+    // decodes every pixel, validating as it yields the ThumbHash LQIP.
     const placeholder = await image.placeholder()
     return { width: metadata.width, height: metadata.height, format: metadata.format, placeholder }
   }
@@ -93,17 +86,15 @@ class BunImageProcessor implements ImageProcessor {
     }
 
     const bytes = await image.bytes()
-    // The output header is the cheapest truthful source of the result's
-    // dimensions and format (the instance props describe the source).
+    // The instance props describe the *source*, so re-read the output header.
     const output = await new this.Image(bytes).metadata()
     return { bytes, width: output.width, height: output.height, format: output.format }
   }
 }
 
 /**
- * Resolve the default processor for this runtime: `Bun.Image` when present,
- * `null` otherwise (Node/Lambda/Workers — inject a custom processor or let
- * variants degrade to `unavailable`).
+ * `Bun.Image` when present, `null` otherwise (Node/Lambda/Workers — inject a
+ * custom processor or let variants degrade to `unavailable`).
  */
 export function resolveDefaultImageProcessor(maxPixels: number): ImageProcessor | null {
   if (typeof Bun === 'undefined' || !('Image' in Bun)) return null

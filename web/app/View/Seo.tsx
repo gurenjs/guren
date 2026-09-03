@@ -3,17 +3,11 @@ import type { FC } from '@guren/core'
 import { OG_IMAGE_PATH, SITE_NAME, absoluteUrl } from '../../config/site.js'
 
 /**
- * Server-rendered port of `resources/js/components/Seo.tsx` for content
- * pages: the same `<title>`/`<meta>`/`<link>` set, relying on hono's native
- * head hoisting instead of Inertia's `<Head>` — render it anywhere in the
- * page and the tags land in `<head>`.
- *
- * Deliberately ports only the props content pages use today; `locale`,
- * `alternates`, `markdownPath`, and `jsonLd` stay with the React component
- * until a content page needs them (the RSS discovery link lives in
- * `Layout.tsx`'s head — it is site-wide, and 404 pages skip `Seo`) (JSON-LD additionally needs
- * `dangerouslySetInnerHTML` with `<` escaped as `\u003c`, because hono
- * HTML-escapes text children).
+ * Server-rendered port of `resources/js/components/Seo.tsx`, relying on hono's
+ * native head hoisting instead of Inertia's `<Head>`. Ports only the props
+ * content pages use today; `locale`, `alternates`, `markdownPath` and `jsonLd`
+ * stay with the React component, and JSON-LD would additionally need `<`
+ * escaped as `\u003c`, because hono HTML-escapes text children.
  */
 interface SeoProps {
   /** Full document title, e.g. "Routing — Guren" */

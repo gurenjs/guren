@@ -1,33 +1,18 @@
 import type { CheckResult } from '../types'
 import { HealthCheck } from '../HealthCheck'
 
-/**
- * Database connection interface (minimal).
- */
 export interface DatabaseConnection {
   query(sql: string): Promise<unknown>
 }
 
-/**
- * Options for database health check.
- */
 export interface DatabaseCheckOptions {
-  /**
-   * Custom name for this check.
-   * @default 'database'
-   */
+  /** @default 'database' */
   name?: string
 
-  /**
-   * Custom query to execute.
-   * @default 'SELECT 1'
-   */
+  /** @default 'SELECT 1' */
   query?: string
 }
 
-/**
- * Health check for database connectivity.
- */
 export class DatabaseCheck extends HealthCheck {
   readonly name: string
 

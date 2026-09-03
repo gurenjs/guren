@@ -1,10 +1,10 @@
 import type { AuthCredentials, Authenticatable, UserProvider } from '../types'
 
 /**
- * Run a user record through the provider's optional `sanitize` before it
- * leaves the auth layer. Every guard must call this on anything it returns
- * from `user()` — a guard that forgets the optional-chaining ternary leaks
- * password hashes, so the ternary lives here, once.
+ * Run a user record through the provider's optional `sanitize` before it leaves
+ * the auth layer. Every guard must call this on anything it returns from
+ * `user()` — a guard that forgets the ternary leaks password hashes, so the
+ * ternary lives here, once.
  */
 export function sanitizeUser<User>(provider: UserProvider<User>, user: User): User {
   return provider.sanitize ? provider.sanitize(user) : user

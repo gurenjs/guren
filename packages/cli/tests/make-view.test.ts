@@ -32,10 +32,8 @@ describe('makeView', () => {
     }
   })
 
-  // Refuses before the write, like the multi-file scaffolds — see makeView's
-  // doc comment for why a page has no dialect to adapt to. The "cannot tell"
-  // direction is carried by the tests above, which run in a workspace with no
-  // manifest; the predicate's own branches are pinned in blueprints.test.ts.
+  // Refuses before the write; "cannot tell" is carried by the tests above, and
+  // the predicate's own branches are pinned in blueprints.test.ts.
   it('refuses an API-only app, writing nothing', async () => {
     const workspace = await createTempWorkspace('guren-cli-view-api-only-')
     try {
@@ -49,8 +47,7 @@ describe('makeView', () => {
     }
   })
 
-  // The template is what `create-guren-app` ships; the fixture above is its
-  // reduction, not a substitute for it.
+  // The fixture above is only a reduction of what `create-guren-app` ships.
   it('refuses the api-only template as shipped', async () => {
     const workspace = await createTempWorkspace('guren-cli-view-api-only-shipped-')
     try {

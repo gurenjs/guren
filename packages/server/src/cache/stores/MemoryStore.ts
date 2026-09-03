@@ -1,16 +1,6 @@
 import type { CacheStore, MemoryStoreOptions, CachedItem } from '../types'
 
-/**
- * In-memory cache store.
- *
- * @example
- * ```ts
- * const store = new MemoryStore()
- *
- * await store.set('user:1', { name: 'John' }, 3600)
- * const user = await store.get<User>('user:1')
- * ```
- */
+/** In-memory cache store. */
 export class MemoryStore implements CacheStore {
   private readonly cache: Map<string, CachedItem> = new Map()
   private readonly maxSize: number
@@ -27,16 +17,13 @@ export class MemoryStore implements CacheStore {
         this.removeExpired()
       }, checkPeriod)
 
-      // Prevent the interval from keeping the process alive
+      // So the interval cannot keep the process alive.
       if (this.checkInterval.unref) {
         this.checkInterval.unref()
       }
     }
   }
 
-  /**
-   * Remove expired items from the cache.
-   */
   private removeExpired(): void {
     const now = this.now()
     for (const [key, item] of this.cache) {
@@ -46,19 +33,13 @@ export class MemoryStore implements CacheStore {
     }
   }
 
-  /**
-   * Check if an item is expired.
-   */
   private isExpired(item: CachedItem): boolean {
     return item.expiresAt !== null && item.expiresAt <= this.now()
   }
 
-  /**
-   * Evict items if cache is full.
-   */
   private evictIfNeeded(): void {
     if (this.cache.size >= this.maxSize) {
-      // Remove the oldest item (first item in Map)
+      // The oldest item is the Map's first key.
       const firstKey = this.cache.keys().next().value
       if (firstKey !== undefined) {
         this.cache.delete(firstKey)
@@ -119,7 +100,7 @@ export class MemoryStore implements CacheStore {
     const current = await this.get<number>(key)
     const newValue = (current ?? 0) + value
 
-    // Preserve TTL if item exists
+    // Preserve any existing TTL.
     const item = this.cache.get(key)
     const ttl = item?.expiresAt
       ? Math.max(0, Math.ceil((item.expiresAt - this.now()) / 1000))
@@ -204,16 +185,11 @@ export class MemoryStore implements CacheStore {
     return Math.max(0, Math.ceil((item.expiresAt - this.now()) / 1000))
   }
 
-  /**
-   * Get the number of items in the cache.
-   */
   size(): number {
     return this.cache.size
   }
 
-  /**
-   * Stop the expiration check interval.
-   */
+  /** Stop the expiration check interval. */
   destroy(): void {
     if (this.checkInterval) {
       clearInterval(this.checkInterval)

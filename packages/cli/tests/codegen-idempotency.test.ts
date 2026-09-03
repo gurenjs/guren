@@ -6,19 +6,14 @@ import { generatePageTypes } from '../src/pages-types'
 import { generateRouteTypes } from '../src/routes-types'
 import { writeGeneratedFile } from '../src/utils'
 
-// Codegen re-runs on every save under resources/js/pages/,
-// app/Http/Resources/, and routes/web.ts (the Vite plugin's
-// handleHotUpdate). Controllers import the results, so rewriting
-// byte-identical output bumps the mtime of files a backend watcher is
-// watching — a frontend-only edit would restart the server (and with it the
-// in-process Vite dev server, killing the browser's HMR connection).
+// Codegen re-runs on every save the Vite plugin watches, and controllers
+// import the results, so rewriting byte-identical output bumps the mtime of a
+// file the backend watcher is on: a frontend-only edit restarts the server and
+// kills the browser's HMR connection.
 //
-// Comparing timestamps across two writes is not enough on its own: both can
-// land inside one filesystem timestamp tick and compare equal even when the
-// write really happened. Each test below back-dates the artifact to a known
-// mtime first, so an unchanged timestamp proves no write occurred, and every
-// no-op case is paired with a control asserting the mtime does move when the
-// output would actually change.
+// Two writes can land inside one filesystem timestamp tick and compare equal,
+// so each test back-dates the artifact first and pairs the no-op case with a
+// control asserting the mtime does move when the output changes.
 
 const BACKDATED_SECONDS = 1000
 const BACKDATED_MS = BACKDATED_SECONDS * 1000
@@ -107,12 +102,10 @@ describe('codegen write idempotency', () => {
     }
   })
 
-  // The route fixture can't be edited between two runs the way the pages
-  // fixture can: `loadRouteDefinitions` imports routes/web.ts, and the module
-  // cache hands back the first version for the rest of the process (the
-  // cache-busting query it appends is inert on Bun). Staling the *output*
-  // exercises the same branch — regeneration must still overwrite content
-  // that differs from what it produces.
+  // The route fixture cannot be edited between two runs: the module cache
+  // hands `loadRouteDefinitions` the first version for the rest of the process
+  // (the cache-busting query it appends is inert on Bun). Staling the *output*
+  // exercises the same branch.
   it('rewrites route artifacts whose content differs from the regenerated output', async () => {
     const workspace = await createTempWorkspace('guren-cli-idempotent-routes-changed-')
     try {

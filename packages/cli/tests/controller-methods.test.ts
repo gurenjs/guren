@@ -24,10 +24,9 @@ function scrub(source: string): string {
 }
 
 /**
- * The scan and the vocabulary both commands judge controller bodies with.
- * Covered directly here because `guren audit` and `guren check` each exercise
- * only the slice they use, and a gap in the shared half would surface as an
- * unexplained verdict in whichever command happened to hit it.
+ * Covered directly because `guren audit` and `guren check` each exercise only
+ * the slice they use, so a gap in the shared half surfaces as an unexplained
+ * verdict in whichever command happens to hit it.
  */
 describe('blankCommentsAndStrings', () => {
   it('preserves offsets so body slices still line up with the AST', () => {
@@ -96,8 +95,8 @@ describe('controller member patterns', () => {
     expect(AUTH_CALL_PATTERN.test('const user = await this.auth.user()')).toBe(false)
   })
 
-  // A bare name matched a *declaration* too, so an action defining its own
-  // helper was reported for calling one.
+  // A bare name matches a *declaration* too, reporting an action that defines
+  // its own helper for calling one.
   it('does not read a function declaration as a force write', () => {
     expect(FORCE_WRITE_PATTERN.test('function forceUpdate() { return null }')).toBe(false)
     expect(FORCE_WRITE_PATTERN.test('const forceCreate = () => null')).toBe(false)
@@ -160,9 +159,9 @@ export class PostController extends Controller {
     }
   })
 
-  // Both forms are legal to Router's types and its runtime dispatch, so a
-  // scanner collecting only ClassMethod leaves every class-field action with
-  // no body — which reads as "could not verify", not as what it says.
+  // Both forms are legal to Router's types and its runtime dispatch, so a scan
+  // that walks method declarations only leaves every class-field action with no
+  // body — which reads as "could not verify".
   it('collects a class-field action as well as a method', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'guren-controller-methods-field-'))
     try {
@@ -196,8 +195,8 @@ export class PostController extends Controller {
     }
   })
 
-  // A file that will not open used to reject the whole promise, taking the
-  // entire check/audit run down instead of producing a finding.
+  // A file that will not open must not reject the whole promise and take the
+  // check/audit run down with it.
   it('reports an unreadable controller instead of rejecting', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'guren-controller-methods-unreadable-'))
     try {
@@ -210,9 +209,8 @@ export class PostController extends Controller {
 }
 `,
       })
-      // Discovery collects real files only (a directory or dangling symlink
-      // in its place is filtered before any read), so the only way to reach
-      // the failing read is to make a discovered file unopenable.
+      // Discovery collects real files only, so the only way to reach the
+      // failing read is to make a discovered file unopenable.
       const controller = join(dir, 'app/Http/Controllers/PostController.ts')
       await chmod(controller, 0o000)
       const stillReadable = await readFile(controller, 'utf8').then(() => true, () => false)
@@ -258,10 +256,8 @@ export class PostController extends Controller {
 
 /**
  * The one answer to "which members of a controller class are actions", shared
- * by five scanners. Covered here rather than only through its callers because
- * a gap in it surfaces once per command as an unexplained verdict, and the
- * blind spot it exists to close (class-field actions) was originally fixed in
- * one caller while four others kept their own copy of the wrong test.
+ * by five scanners. Covered here rather than only through its callers, since a
+ * gap in it surfaces once per command as an unexplained verdict.
  */
 describe('classActionMembers', () => {
   function membersOf(source: string): { name: string; bodyType: string }[] {
@@ -297,9 +293,8 @@ describe('classActionMembers', () => {
     ])
   })
 
-  // Structural question only: which of these a scanner cares about is policy
-  // it owns, so hoisting any of these filters in here would apply them to
-  // callers that never asked for them.
+  // Structural question only: hoisting any of these filters in here would
+  // apply them to callers that never asked for them.
   it('yields constructor, static and private members, leaving those filters to callers', () => {
     expect(
       membersOf(`class PostController {
@@ -311,9 +306,8 @@ describe('classActionMembers', () => {
     ).toEqual(['constructor', 'make', 'helper', 'guard'])
   })
 
-  // Names come from the shared `memberKeyName` rule rather than a local
-  // `key.type === 'Identifier'` test, which got both of these wrong: it read
-  // the literal text of a computed key as the action name, and dropped a
+  // Names come from the shared `memberKeyName` rule: a local identifier-only
+  // test reads a computed key's literal text as the action name and drops a
   // quoted one that dispatches perfectly well.
   it('reads a quoted key and refuses to guess at a computed one', () => {
     expect(

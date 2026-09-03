@@ -9,10 +9,8 @@ import {
 } from '../src/token-issue'
 
 /**
- * The tool list every case below is judged against. Injected rather than
- * derived from a routes file on disk: these tests are about the issuance
- * rules, and `tool-list.test.ts` already covers the derivation that feeds
- * them.
+ * The tool list every case is judged against, injected rather than derived from
+ * a routes file: `tool-list.test.ts` already covers the derivation.
  */
 const TOOLS: ScopedTool[] = [
   { name: 'posts.index', readOnly: true },
@@ -36,9 +34,8 @@ describe('normalizeToolScope', () => {
   })
 
   it('does not rewrite a malformed full scope into a legal one', () => {
-    // `tool:posts.*` is not a prefix scope, and guessing that it meant one
-    // would be the issuer inventing intent. It stays as written so the
-    // parse gate can reject it by name.
+    // `tool:posts.*` is not a prefix scope; guessing it meant one would be the
+    // issuer inventing intent, so it stays as written for the parse gate.
     expect(normalizeToolScope('tool:posts.*')).toBe('tool:posts.*')
   })
 })
@@ -162,10 +159,9 @@ describe('planTokenIssue', () => {
     })
 
     it('refuses a write-only entry rather than silently dropping it beside a good one', () => {
-      // `posts.*` would carry the token on its own, so nothing here fails at
-      // the aggregate level — the point is that `comments.*` contributes
-      // nothing and the caller is told, instead of finding out from the
-      // issued token's ability list.
+      // `posts.*` carries the token on its own, so nothing fails at the
+      // aggregate level — the point is that the caller is told `comments.*`
+      // contributes nothing.
       expect(() =>
         planTokenIssue({ tools: 'posts.*, comments.*', readOnly: true, expires: '1d' }, TOOLS),
       ).toThrow('Scope "tools:comments.*" matches no read-only tool')
@@ -209,9 +205,8 @@ describe('planTokenIssue', () => {
   })
 
   it('reports a bad --expires only after the scopes are settled', () => {
-    // Ordering is part of the contract: the first thing wrong with the command
-    // line should be the thing reported, and a typo'd tool name outranks a
-    // typo'd duration.
+    // Ordering is part of the contract: a typo'd tool name outranks a typo'd
+    // duration.
     expect(() => planTokenIssue({ tools: 'nope.tool', expires: 'soon' }, TOOLS)).toThrow(
       'matches none of this app\'s agent tools',
     )

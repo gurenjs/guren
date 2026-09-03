@@ -14,17 +14,9 @@ function normalizePerPage(perPage: number): number {
   return Number.isFinite(perPage) && perPage >= 1 ? Math.floor(perPage) : POSTS_PAGE_SIZE
 }
 
-/**
- * Cache service for posts.
- * Provides cached access to post data with automatic invalidation.
- */
 export class PostCacheService {
   constructor(private readonly cache: CacheManager) {}
 
-  /**
-   * Get paginated posts with caching.
-   * Cache key includes page number for per-page caching.
-   */
   async getPaginatedPosts(
     page: number,
     perPage = POSTS_PAGE_SIZE
@@ -42,9 +34,6 @@ export class PostCacheService {
     })
   }
 
-  /**
-   * Get a single post with caching.
-   */
   async getPost(id: number): Promise<PostWithAuthor | null> {
     const cacheKey = `posts:${id}`
     const ttl = 300 // 5 minutes cache
@@ -55,23 +44,15 @@ export class PostCacheService {
     })
   }
 
-  /**
-   * Invalidate post cache when a post is created or updated.
-   */
   async invalidatePost(id: number): Promise<void> {
-    // Invalidate specific post cache
     await this.cache.store().delete(`posts:${id}`)
 
-    // Invalidate paginated caches using tags if available
-    // For now, we'll just clear the most common pages
+    // Approximate: past POSTS_PAGE_INVALIDATION_DEPTH pages stay stale until TTL.
     for (let page = 1; page <= POSTS_PAGE_INVALIDATION_DEPTH; page++) {
       await this.cache.store().delete(`posts:page:${page}:per:${POSTS_PAGE_SIZE}`)
     }
   }
 
-  /**
-   * Clear all post caches.
-   */
   async clearAll(): Promise<void> {
     await this.cache.store().clear()
   }

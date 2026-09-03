@@ -10,11 +10,9 @@ import {
 
 /**
  * A type-only fixture: these seeders are never executed, and `bun run
- * typecheck` is the assertion. `SeederContext` used to be hard-typed as
- * `PostgresJsDatabase`, so a MySQL or SQLite app's own schema was rejected by
- * the context its seeders receive, and dialect-specific builders
- * (`onDuplicateKeyUpdate`) did not exist on it at all. Nothing caught it
- * because the scaffolded `db/` was outside the app tsconfig.
+ * typecheck` is the assertion. A `SeederContext` hard-typed to one dialect
+ * rejects another app's schema and lacks its builders (`onDuplicateKeyUpdate`);
+ * a scaffolded app cannot catch that, since its `db/` sits outside the tsconfig.
  */
 
 const pgUsers = pgTable('users', {

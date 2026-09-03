@@ -1,7 +1,6 @@
-// The smokes that consume this list take ten minutes each, so a derivation that
-// quietly stopped covering a package would be discovered a release late — which
-// is how `@guren/testing` came to be missing from two of the three lists this
-// module replaced. These run in a second.
+// The smokes consuming this list take ten minutes each, so a derivation that
+// quietly stopped covering a package would surface a release late — how
+// `@guren/testing` went missing from two of the three lists. These run fast.
 import { describe, expect, test } from 'bun:test'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -25,8 +24,8 @@ describe('collectLocalPackages', () => {
   test('covers what the templates declare, including the devDependency', async () => {
     const names = (await collectLocalPackages()).map((pkg) => pkg.name)
 
-    // The one the hand-maintained lists disagreed about. It is a devDependency
-    // of both templates, which is exactly why two of them dropped it.
+    // The one the hand-maintained lists disagreed about: a devDependency of
+    // both templates, which is exactly why two of them dropped it.
     expect(names).toContain('@guren/testing')
     expect(names).toContain('@guren/cli')
     expect(names).toContain('@guren/core')
@@ -36,8 +35,7 @@ describe('collectLocalPackages', () => {
   test('closes over the workspace graph, not just the declared names', async () => {
     const names = (await collectLocalPackages()).map((pkg) => pkg.name)
 
-    // No template names @guren/server; it arrives through @guren/core and is
-    // what an app actually runs on.
+    // No template names @guren/server; it arrives through @guren/core.
     expect(names).toContain('@guren/server')
   })
 

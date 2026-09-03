@@ -5,40 +5,26 @@ import { join } from 'node:path'
 import { DATABASE_DIALECTS, type DatabaseDialect } from '@guren/core/internal/deploy-build'
 import { buildLambdaOutput } from '../src/build'
 
-// Opt-in end-to-end contract test: proves `lambda:build` can bundle an app
-// that imports `@guren/orm` while installing only the client for the database
-// it actually uses.
+// Opt-in end-to-end contract test (GUREN_TEST_BUNDLE=1, needs the network; the
+// nightly canary sets it): proves `lambda:build` bundles an app importing
+// `@guren/orm` with only the client for the database it actually uses. The ORM
+// names every dialect's client in a *literal* dynamic import, which a bundler
+// follows whether or not the branch can be taken — a Postgres app failed on
+// `Could not resolve "mysql2"` — and inside this repository every client is
+// installed, so no unit test sees it.
 //
-// `@guren/orm` names every dialect's client in a *literal* dynamic import, and
-// a bundler follows those whether or not the branch can be taken — so a
-// Postgres app failed on `Could not resolve "mysql2"`, naming a database its
-// author had not chosen. Unit tests cannot see this: it is a property of the
-// bundle, and inside this repository every client is installed anyway.
-//
-// The direction that matters here and did not on Workers: over-stubbing. On
-// Workers D1 is the only database, so stubbing all four clients is always
-// right. Here the client the app *does* use is load-bearing, and stubbing it
-// produces a bundle that builds clean and cannot reach its own database. So
-// the postgres assertions below are as load-bearing as the mysql2 ones.
-//
-// Every assertion is about behaviour rather than about the stub's text,
-// because the text is not in the output: resolution happens first, and the
-// branch the stub replaced is then dropped as unreachable. A test looking for
-// the message it throws would pass whether the client was stubbed or dropped
-// on the floor.
-//
-// Needs the network to install @guren/orm and postgres, so it is gated behind
-// GUREN_TEST_BUNDLE=1 like the Workers bundle test's GUREN_TEST_WRANGLER.
-// The nightly canary sets both.
+// Over-stubbing is the direction that matters here and did not on Workers:
+// stubbing the client the app *does* use builds clean and cannot reach its own
+// database, so the postgres assertions are as load-bearing as the mysql2 ones.
+// Every assertion is about behaviour rather than the stub's text, which
+// resolution drops along with the branch it replaced.
 const enabled = process.env.GUREN_TEST_BUNDLE === '1'
 
 /**
- * Packages this probe must not have installed.
- *
- * The clients belong to dialects a Postgres app never uses. The rest are the
- * dev-only modules the build stubs unconditionally — reached from the probe
- * entry below so a build that stopped stubbing them fails here rather than in
- * a user's deploy.
+ * Packages this probe must not have installed: the clients of dialects a
+ * Postgres app never uses, plus the dev-only modules the build stubs
+ * unconditionally — reached from the probe entry below, so a build that stopped
+ * stubbing them fails here rather than in a user's deploy.
  */
 const ABSENT_PACKAGES = ['mysql2', '@aws-sdk', 'vite', '@modelcontextprotocol']
 
@@ -61,10 +47,9 @@ describe.skipIf(!enabled)('lambda:build bundles an app importing @guren/orm', ()
     )
 
     // Installed from a tarball, not `file:` — a local path install links the
-    // package, and resolution then walks out of the probe into this
-    // repository's own `node_modules`, where every database client *is*
-    // installed. That is how the Workers version of this test first passed
-    // with no stubs at all: it was measuring the monorepo, not the app.
+    // package, and resolution then walks out of the probe into this repository's
+    // own `node_modules`, where every database client *is* installed. That is
+    // how the Workers version first passed with no stubs at all.
     const packed = run(['bun', 'pm', 'pack', '--destination', root], new URL('../../orm', import.meta.url).pathname)
     if (packed.exitCode !== 0) {
       throw new Error(`bundle probe could not pack @guren/orm:\n${packed.output}`)
@@ -83,9 +68,8 @@ describe.skipIf(!enabled)('lambda:build bundles an app importing @guren/orm', ()
       throw new Error(`bundle probe setup failed to install @guren/orm:\n${install.output}`)
     }
 
-    // Asserted rather than assumed: if a future installer pulls the ORM's
-    // optional peers in, the bundler would resolve them for real and the test
-    // would pass no matter what the stubs say.
+    // Asserted rather than assumed: an installer that pulled the ORM's optional
+    // peers in would let the bundler resolve them whatever the stubs say.
     for (const client of ABSENT_PACKAGES) {
       rmSync(join(root, 'node_modules', client), { recursive: true, force: true })
       if (existsSync(join(root, 'node_modules', client))) {
@@ -101,11 +85,10 @@ describe.skipIf(!enabled)('lambda:build bundles an app importing @guren/orm', ()
         + '})\n',
     )
 
-    // The dev-only imports stand in for the ones Guren's own graph makes: the
-    // disabled MCP endpoint reaches `@guren/cli` and the SDK, and `Application`
-    // reaches Vite when serving locally. Naming them directly keeps the probe
-    // to two installed packages while still covering the stubs that path needs
-    // — a bundler follows a literal dynamic import either way.
+    // The dev-only imports stand in for the ones Guren's own graph makes (the
+    // disabled MCP endpoint, Vite when serving locally). Naming them directly
+    // keeps the probe to two installed packages, and a bundler follows a literal
+    // dynamic import either way.
     writeFileSync(
       join(root, 'src/lambda.ts'),
       "import { getDatabase } from '../config/database'\n\n"
@@ -138,9 +121,9 @@ describe.skipIf(!enabled)('lambda:build bundles an app importing @guren/orm', ()
       // database the app did not choose.
       const bundled = await bundle()
 
-      // And the client it *does* use came through as the real package. Without
-      // this half, stubbing all four would pass the test above just as well —
-      // and would ship a function that cannot reach its own database.
+      // And the client it *does* use came through as the real package: without
+      // this half, stubbing all four would pass the assertion above just as well
+      // and ship a function that cannot reach its own database.
       expect(bundled).toContain('class PostgresError')
     },
     120_000,
@@ -149,10 +132,9 @@ describe.skipIf(!enabled)('lambda:build bundles an app importing @guren/orm', ()
   test(
     'bundles with none of the dev-only modules installed either',
     async () => {
-      // Unconditional, unlike the clients: no app can make the Vite dev server
-      // or the MCP endpoint's generators run on this platform. Covered here
-      // because the build succeeding is the only observable difference — the
-      // stub's own text is dropped with the branch it replaced.
+      // Unconditional, unlike the clients: no app can make the Vite dev server or
+      // the MCP endpoint's generators run here. The build succeeding is the only
+      // observable difference — the stub's text is dropped with its branch.
       await bundle()
     },
     120_000,
@@ -161,10 +143,10 @@ describe.skipIf(!enabled)('lambda:build bundles an app importing @guren/orm', ()
   test(
     'still fails to resolve an uninstalled client the app claims to use',
     async () => {
-      // The mutation check, in the test rather than beside it: declaring every
-      // dialect leaves every client unstubbed, which is the state this fix
-      // replaced. If this passed, the fixture would not be reaching mysql2 at
-      // all and the test above would prove nothing.
+      // The mutation check: declaring every dialect leaves every client
+      // unstubbed, the state this fix replaced. If it passed, the fixture would
+      // not be reaching mysql2 at all and the assertion above would prove
+      // nothing.
       const attempt = bundle(DATABASE_DIALECTS)
 
       await expect(attempt).rejects.toThrow(/Could not resolve.*mysql2/s)
@@ -175,9 +157,8 @@ describe.skipIf(!enabled)('lambda:build bundles an app importing @guren/orm', ()
   test(
     'stubs the Postgres client too once the app declares another dialect',
     async () => {
-      // Fixes what the exemption above is keyed on. Without this, "postgres
-      // survives" is equally consistent with stubbing being off entirely, or
-      // with postgres being special-cased.
+      // Without this, "postgres survives" is equally consistent with stubbing
+      // being off entirely, or with postgres being special-cased.
       const bundled = await bundle(['sqlite'])
 
       expect(bundled).not.toContain('class PostgresError')

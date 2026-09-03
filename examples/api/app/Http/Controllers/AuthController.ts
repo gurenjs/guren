@@ -6,7 +6,6 @@ import { UserRegistered } from '../../Events/UserRegistered.js'
 import { getTokenStore } from '../../Providers/ApiTokenProvider.js'
 
 export default class AuthController extends Controller {
-  // POST /api/auth/register
   async register(): Promise<Response> {
     const { name, email, password } = await this.validateBody(RegisterSchema)
 
@@ -32,7 +31,6 @@ export default class AuthController extends Controller {
     })
   }
 
-  // POST /api/auth/login
   async login(): Promise<Response> {
     const { email, password } = await this.validateBody(LoginSchema)
     const user = await User.first({ email })
@@ -54,7 +52,6 @@ export default class AuthController extends Controller {
     })
   }
 
-  // GET /api/auth/user (authenticated)
   async user(): Promise<Response> {
     const { userId, abilities } = this.apiToken()
     const user = await User.findOrFail(userId)

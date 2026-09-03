@@ -127,7 +127,6 @@ describe('Seeder', () => {
       const seeder = new ParentSeeder()
       await seeder.run()
 
-      // Seeder2 should complete first since Seeder1 has delay
       expect(results).toContain('seeder1')
       expect(results).toContain('seeder2')
     })
@@ -153,7 +152,6 @@ describe('Seeder', () => {
       await seeder.run()
       expect(runFn).toHaveBeenCalledTimes(1)
 
-      // Reset and run again
       resetCalledSeeders()
       await seeder.run()
       expect(runFn).toHaveBeenCalledTimes(2)
@@ -209,7 +207,7 @@ describe('Factory', () => {
 
       expect(user.name).toBe('John Doe')
       expect(user.role).toBe('admin')
-      expect(user.email).toBe('user1@example.com') // Default
+      expect(user.email).toBe('user1@example.com')
     })
   })
 
@@ -367,7 +365,7 @@ describe('Factory', () => {
       factory.clearStates()
 
       const user = factory.make()
-      expect(user.role).toBe('user') // Default
+      expect(user.role).toBe('user')
     })
 
     it('fresh creates new instance', () => {
@@ -376,7 +374,7 @@ describe('Factory', () => {
       factory.make()
 
       const fresh = factory.fresh()
-      expect(fresh.make().id).toBe(1) // Reset sequence
+      expect(fresh.make().id).toBe(1)
     })
   })
 
@@ -413,7 +411,6 @@ describe('Factory', () => {
 describe('SeederRunner', () => {
   beforeEach(() => {
     resetCalledSeeders()
-    // Reset NODE_ENV
     delete process.env.NODE_ENV
   })
 
@@ -427,7 +424,6 @@ describe('SeederRunner', () => {
 
       runner.register('TestSeeder', TestSeeder)
 
-      // Verify by running
       expect(runner.run('TestSeeder')).resolves.toBeUndefined()
     })
 

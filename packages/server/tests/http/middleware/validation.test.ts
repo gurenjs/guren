@@ -9,7 +9,6 @@ import {
   type ValidationSchema,
 } from '../../../src/http/middleware/validation'
 
-// Simple mock schema that mimics Zod's interface
 function createSchema<T>(validator: (data: unknown) => T | null, errorMessage = 'Invalid data'): ValidationSchema<T> {
   return {
     parse(data: unknown): T {
@@ -32,7 +31,6 @@ function createSchema<T>(validator: (data: unknown) => T | null, errorMessage = 
   }
 }
 
-// User schema mock
 const userSchema = createSchema<{ name: string; email: string }>((data) => {
   if (
     typeof data === 'object' &&
@@ -187,7 +185,6 @@ describe('validateRequestWith', () => {
       (c) => c.json({ data: getValidatedData(c) }),
     )
 
-    // Strict mode - short name rejected
     const strictRes = await app.request('/users/strict', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -195,7 +192,6 @@ describe('validateRequestWith', () => {
     })
     expect(strictRes.status).toBe(422)
 
-    // Loose mode - short name accepted
     const looseRes = await app.request('/users/loose', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

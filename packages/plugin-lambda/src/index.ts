@@ -14,10 +14,7 @@ const factory = definePlugin<LambdaPluginConfig>({
 /**
  * Register the Lambda plugin.
  *
- * @example
- * ```typescript
- * createApp({ providers: [lambdaPlugin()] })
- * ```
+ * @example createApp({ providers: [lambdaPlugin()] })
  */
 export function lambdaPlugin(config: LambdaPluginConfig = {}): ServiceProviderConstructor {
   return factory(config)

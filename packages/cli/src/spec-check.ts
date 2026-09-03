@@ -13,10 +13,8 @@ export interface SpecCheckOptions {
 }
 
 /**
- * The views whose sources intersect the changed set. Every view also
- * depends on its own committed file (deleting/editing `docs/spec/x.md`
- * must re-verify x), and the screens view additionally depends on a
- * custom `--routes` entry file when one is configured.
+ * The views whose sources intersect the changed set. Every view also depends on its own
+ * committed file, and the screens view on a custom `--routes` entry when configured.
  */
 function selectViews(
   changedFiles: Set<string> | null | undefined,
@@ -38,9 +36,8 @@ function selectViews(
 }
 
 /**
- * The tbls-style drift gate (RFC 0004): regenerate the affected spec views
- * in memory and fail when the committed `docs/spec/` files differ — the
- * committed spec cannot silently lie. Activates only when `docs/spec/`
+ * The tbls-style drift gate (RFC 0004): regenerate the affected spec views in memory and
+ * fail when the committed `docs/spec/` files differ. Activates only when `docs/spec/`
  * exists, so apps that never ran `spec:generate` see zero results.
  */
 export async function runSpecCheck(options: SpecCheckOptions): Promise<CheckResult[]> {
@@ -61,10 +58,8 @@ export async function runSpecCheck(options: SpecCheckOptions): Promise<CheckResu
     const key = `spec-drift:${artifact.fileName}`
 
     if (artifact.degraded) {
-      // A degraded regeneration (e.g. the route graph failed to import)
-      // cannot be byte-compared — diffing against hollow content would
-      // report drift that regenerating can only "fix" by destroying the
-      // committed view.
+      // A degraded regeneration cannot be byte-compared: the drift it reports could only
+      // be "fixed" by destroying the committed view.
       results.push(
         check(key, specPath, 'warn', `Skipped: ${artifact.degraded}`, 'Fix the underlying error, then run: bunx guren check --spec', specPath),
       )

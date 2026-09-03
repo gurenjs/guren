@@ -1,45 +1,12 @@
 /**
  * Keep a plugin's two `@guren/core` version claims from contradicting each other.
  *
- * `changeset version` maintains one of the two and cannot see the other, which
- * is what makes them drift apart:
- *
- * - a `@guren/*` dependency range IS maintained. Verified against changesets
- *   directly: when a dependency crosses a major, a dependent whose range no
- *   longer admits it is added to the release plan and its range is rewritten
- *   (`^1.4.0` -> `^2.0.0`), even with no changeset of its own.
- * - `gurenPlugin.compatibility` is NOT. Changesets has no idea the field
- *   exists, so nothing moves it, ever — while `guren plugin` throws on a
- *   mismatch unless `--ignore-compatibility` is passed, and `guren doctor`
- *   reports it (see packages/cli/src/plugin.ts, doctor.ts).
- *
- * So the dangerous moment is not a range going stale on its own — it is the
- * release where changesets helpfully rewrites the dependency to `^2.0.0` and
- * leaves `compatibility: ">=1.0.0 <2.0.0"` sitting beside it. That manifest
- * installs cleanly from npm and then refuses to load. Nothing in the repo can
- * see it: workspace linking resolves `@guren/core` locally whatever the ranges
- * say, so build, typecheck and test stay green.
- *
- * This asserts:
- *
- *   (a) `compatibility` admits every `@guren/core` version the package's own
- *       core range can resolve to — the self-contradiction above.
- *   (b) every `@guren/*` range admits the version this workspace publishes for
- *       that package. A backstop rather than the main event, since changesets
- *       normally maintains this; it costs nothing and covers the hand-edit.
- *
- * Checked, never written. `compatibility` is a human judgment (a plugin may
- * legitimately support two majors), and at the one moment an auto-fix would
- * run — core crossing a major — writing `>=1.0.0 <3.0.0` would fabricate a
- * support claim for a port that has not happened.
- *
- * Runs in CI and again inside `version-packages`, immediately after
- * `changeset version`, which is the instant the contradiction gets created.
- *
- * Exit codes: 0 clean, 1 drifted claims, 2 the gate could not run — an
- * unresolvable workspace version, or a range shape this script cannot reason
- * about. Like `dependency-audit.ts`, an unavailable check is a failure rather
- * than a silent pass.
+ * `changeset version` rewrites a `@guren/*` dependency range but has no idea
+ * `gurenPlugin.compatibility` exists, so the dangerous release is the one that
+ * writes `^2.0.0` beside a `compatibility: ">=1.0.0 <2.0.0"`: it installs from
+ * npm and then refuses to load, invisible in-repo because workspace linking
+ * ignores the ranges. Checked, never written — compatibility is a human
+ * judgment. Runs in CI and in `version-packages`. Exit 1 drift, 2 cannot run.
  */
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -53,11 +20,7 @@ import { readChangesetDirectory, type Bump, type ParsedChangeset } from './core-
 
 const CORE = '@guren/core'
 
-/**
- * Only the groups a consumer actually installs. A stale range in
- * `devDependencies` cannot pull a second copy into anyone's app, so it is not
- * this gate's business.
- */
+/** Only the groups a consumer installs; a stale devDependency pulls no copy. */
 const DEPENDENCY_GROUPS = ['dependencies', 'peerDependencies'] as const
 
 export interface Manifest {
@@ -68,19 +31,10 @@ export interface Manifest {
 
 /**
  * Probe versions covering the extremes of a dependency range, labelled for the
- * failure message.
- *
- * `Bun.semver` has no range-subset primitive, and it does not need one for the
- * shapes declared here: each denotes one contiguous interval, so its reachable
- * set is bounded by its floor and its ceiling. Testing both ends against a
- * *contiguous* compatibility range is equivalent to testing the whole set. Any
- * other dependency shape returns null, and a non-contiguous compatibility range
- * is rejected separately by `contiguous()` — between them the caller fails
- * loudly instead of quietly checking nothing.
- *
- * The ceilings are the last version each range admits, so a probe is never
- * outside the range it describes. `^0.0.3` is the trap: unlike every other
- * caret it is locked all the way down to the patch, admitting only `0.0.3`.
+ * failure message. `Bun.semver` has no range-subset primitive, and for a
+ * contiguous interval floor and ceiling are equivalent to the whole set; any
+ * other shape returns null so the caller fails loudly. `^0.0.3` is the trap:
+ * unlike every other caret it is locked to the patch, admitting only `0.0.3`.
  */
 function rangeProbes(range: string): Array<{ end: string; version: string }> | null {
   const match = /^([\^~]?)(\d+)\.(\d+)\.(\d+)$/.exec(range.trim())
@@ -95,10 +49,8 @@ function rangeProbes(range: string): Array<{ end: string; version: string }> | n
     ceiling =
       major !== '0' ? `${major}.9999.9999` : minor !== '0' ? `0.${minor}.9999` : floor
   } else if (operator === '~') {
-    // ~1.4.0 -> <1.5.0
     ceiling = `${major}.${minor}.9999`
   } else {
-    // An exact pin admits exactly itself.
     ceiling = floor
   }
 
@@ -112,9 +64,8 @@ function rangeProbes(range: string): Array<{ end: string; version: string }> | n
 
 /**
  * Whether a range denotes a single contiguous interval, which is what makes
- * probing only the ends of a caret sound. A union (`a || b`) can exclude an
- * interior version while admitting both ends, so it is refused rather than
- * approximated.
+ * probing only its ends sound: a union (`a || b`) can exclude an interior
+ * version while admitting both ends, so it is refused rather than approximated.
  */
 function contiguous(range: string): boolean {
   return !range.includes('||')
@@ -134,10 +85,8 @@ async function readManifest(pkg: WorkspacePackage): Promise<Manifest> {
  * is on now and the loudest bump pending against it.
  *
  * Plain semver increment, which is what changesets applies to a >=1.0.0
- * package. Below 1.0.0 it can differ, and that is left alone deliberately:
- * this value is only ever used to *admit* a range the workspace version
- * already fails, and no first-party package below 1.0.0 is depended on by
- * another one, so a wrong answer there cannot excuse a claim.
+ * package. Below 1.0.0 it can differ; left alone deliberately, since no
+ * first-party package below 1.0.0 is depended on by another one.
  */
 export function plannedVersion(current: string, bump: Bump): string | null {
   const match = /^(\d+)\.(\d+)\.(\d+)/.exec(current)
@@ -151,17 +100,11 @@ export function plannedVersion(current: string, bump: Bump): string | null {
 const BUMP_ORDER: Record<Bump, number> = { none: 0, patch: 1, minor: 2, major: 3 }
 
 /**
- * The version each package will be published at once the pending changesets
- * are applied — the loudest bump wins, since `changeset version` applies the
- * maximum across a plan rather than each in turn.
- *
- * This exists for one shape, and it is the shape of this very release: a
- * subpath (`@guren/core/agent`) introduced and *depended on* in the same
- * plan. The honest range is the version that does not exist yet, so checking
- * ranges against the workspace version alone makes the truthful manifest
- * unwritable and the false one mandatory. Only ranges the workspace version
- * fails are re-asked against the plan, so nothing that passes today starts
- * passing for a new reason.
+ * The version each package will be published at once the pending changesets are
+ * applied; the loudest bump wins, since `changeset version` applies the maximum
+ * across a plan. Exists for the shape where a subpath is introduced and depended
+ * on in the same plan, whose honest range names a version that does not exist
+ * yet. Only ranges the workspace version fails are re-asked against the plan.
  */
 export function plannedVersions(
   workspaceVersions: ReadonlyMap<string, string>,
@@ -186,40 +129,11 @@ export function plannedVersions(
 }
 
 /**
- * The dependency range that will actually be *published*, which is not always
- * the one written in the manifest.
- *
- * `changeset version` rewrites an internal `@guren/*` range whenever the
- * dependency is bumped — this workspace sets `updateInternalDependencies:
- * "patch"`, so the rewrite happens on any bump, not only when the new version
- * escapes the old range. Measured by running `changeset version` against a
- * disposable copy of this workspace rather than read off the changesets
- * documentation: `^1.12.0` became `^1.13.0` and `^2.14.0` became `^2.15.0`,
- * while `gurenPlugin.compatibility` was left exactly as written (changesets
- * has no idea the field exists — that asymmetry is this whole script's
- * subject).
- *
- * Which is what makes one otherwise inexpressible release expressible. A
- * plugin needing a subpath introduced in *this* release has to declare a
- * range that admits the version the workspace holds today, because Bun
- * resolves a workspace dependency only through a range that admits it and
- * otherwise falls through to npm — `bun install --frozen-lockfile` then fails
- * outright on a floor that does not exist yet. Meanwhile `compatibility`
- * states the truth about which core versions actually work, and legitimately
- * leads the range for exactly one release. Probing the declared range would
- * report that transient state as drift; probing the range at release reports
- * what npm will see.
- *
- * Only ever raises, never lowers, and only for the shapes
- * {@link rangeProbes} already understands — anything else is returned
- * untouched, so an unrecognised range still reaches the `unreasoned` path
- * rather than being quietly rewritten here.
- *
- * Note it raises the whole *interval*, not just the floor: the operator is
- * preserved and `rangeProbes` recomputes the ceiling from the new version, so
- * a plan that majors the dependency yields `^1.12.0` -> `^2.0.0` and is
- * probed across 2.x — which is what changesets writes, and what must make a
- * compatibility range stuck below that major fail rather than pass.
+ * The dependency range that will actually be *published*: `changeset version`
+ * rewrites an internal `@guren/*` range on any bump (measured — `^1.12.0`
+ * became `^1.13.0`), while the manifest must meanwhile admit the version on
+ * disk or `--frozen-lockfile` fails. Only raises, only for the shapes
+ * {@link rangeProbes} understands, and raises the whole interval.
  */
 export function rangeAtRelease(declared: string, planned: string | undefined): string {
   if (!planned) return declared
@@ -246,10 +160,7 @@ export interface CompatAuditResult {
   manifestsChecked: number
 }
 
-/**
- * The audit proper, over already-read manifests, so it can be exercised
- * against synthetic workspaces instead of only against this checkout.
- */
+/** Over already-read manifests, so synthetic workspaces can exercise it. */
 export function auditPackages(
   packages: readonly AuditablePackage[],
   workspaceVersions: ReadonlyMap<string, string>,
@@ -258,7 +169,6 @@ export function auditPackages(
   const coreVersion = workspaceVersions.get(CORE)!
   const plannedCore = planned.get(CORE)
 
-  /** Claims that are wrong. */
   const drift: string[] = []
   /** Claims this script declined to judge — a gate that cannot run, not a pass. */
   const unreasoned: string[] = []
@@ -273,25 +183,15 @@ export function auditPackages(
     const file = `${pkg.relativeDir}/package.json`
     const coreRanges: string[] = []
 
-    // (b) every @guren/* range must admit what this workspace publishes.
-    //
-    // No release-plan allowance here, deliberately, and this is the one place
-    // it would be tempting: a range whose floor is the version *this* release
-    // introduces reads as the honest claim. It cannot ship. Bun links a
-    // workspace dependency only through a range that admits the version on
-    // disk, and otherwise falls through to npm, where that version does not
-    // exist yet — `bun install --frozen-lockfile`, which is what CI runs,
-    // then fails to resolve the package at all. So a forward floor is never
-    // "not yet true", it is broken now, and tolerating it here would hide a
-    // red CI behind a green audit. The honest floor is reached the other way:
-    // `changeset version` rewrites these ranges at release (see
-    // rangeAtRelease), so the published manifest carries it without anyone
-    // writing it by hand.
+    // (b) every @guren/* range must admit what this workspace publishes. No
+    // release-plan allowance here: a floor naming the version this release
+    // introduces is broken now, because Bun falls through to npm and
+    // `bun install --frozen-lockfile` cannot resolve it. `changeset version`
+    // writes that floor at release instead (see rangeAtRelease).
     for (const group of DEPENDENCY_GROUPS) {
       for (const [dependency, range] of Object.entries(manifest[group] ?? {})) {
         const version = workspaceVersions.get(dependency)
-        // A @guren/* package this workspace does not publish resolves from npm
-        // on its own terms; there is no workspace claim to contradict.
+        // Not published from this workspace: no claim to contradict.
         if (!version) continue
 
         if (dependency === CORE) coreRanges.push(range)
@@ -309,9 +209,8 @@ export function auditPackages(
 
     const plugin = manifest.gurenPlugin
 
-    // The fields under audit are also what makes a package discoverable here, so
-    // deleting one would otherwise buy silence. A packages/plugin-* directory is
-    // asserted to be a plugin regardless of what its manifest currently says.
+    // The audited field is also what makes a package discoverable here, so a
+    // packages/plugin-* directory is held to it however its manifest reads.
     if (!plugin) {
       if (pkg.dirName.startsWith('plugin-')) {
         drift.push(
@@ -350,11 +249,9 @@ export function auditPackages(
       continue
     }
 
-    // (b) the compatibility range must admit what this workspace publishes —
-    // or, failing that, what this plan will publish, the same allowance the
-    // dependency ranges get above. Asked through the same function `guren
-    // plugin` and `guren doctor` call, so CI predicts the runtime decision
-    // instead of re-deriving it.
+    // (b) compatibility must admit what this workspace publishes, or what the
+    // plan will. Asked through the same function `guren plugin` and `guren
+    // doctor` call, so CI predicts the runtime decision rather than re-deriving.
     const current = checkPluginCompatibility(plugin, coreVersion)
     const againstPlan = plannedCore ? checkPluginCompatibility(plugin, plannedCore) : null
     if (current === null) {
@@ -416,16 +313,14 @@ if (import.meta.main) {
     process.exit(2)
   }
 
-  // Read through the core-semver audit's parser rather than a second one: a
-  // changeset this repo accepts has exactly one definition, and that module
-  // already refuses (rather than skips) anything it cannot read.
+  // Through the core-semver audit's parser, not a second one: a changeset this
+  // repo accepts has exactly one definition.
   const changesetDir = join(import.meta.dir, '..', '..', '.changeset')
   let planned: Map<string, string>
   try {
     planned = plannedVersions(workspaceVersions, await readChangesetDirectory(changesetDir))
   } catch (error) {
-    // An unreadable release plan is a gate that could not run, never a clean
-    // one — the same rule the rest of this script follows.
+    // An unreadable release plan is a gate that could not run, never a clean one.
     console.error('plugin compatibility audit could not read the pending release plan.')
     console.error(error instanceof Error ? error.message : String(error))
     process.exit(2)

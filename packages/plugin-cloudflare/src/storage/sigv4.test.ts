@@ -1,12 +1,10 @@
 import { describe, expect, test } from 'bun:test'
 import { presignGetUrl } from './sigv4'
 
-// Known-answer tests. The expected signatures were produced by this
-// implementation and cross-checked byte-for-byte against `aws4fetch`
-// (the reference this replaced) for every case below, so they pin the
-// canonicalization rules that are easy to get subtly wrong: RFC 3986
-// escaping beyond encodeURIComponent, per-segment path encoding, and
-// sorted query canonicalization.
+// Known-answer tests: every expected signature was cross-checked byte-for-byte
+// against `aws4fetch`, pinning the canonicalization rules that are easy to get
+// wrong (RFC 3986 escaping beyond encodeURIComponent, per-segment path encoding,
+// sorted query canonicalization).
 const CREDENTIALS = {
   accessKeyId: 'AKIDEXAMPLE',
   secretAccessKey: 'wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY',

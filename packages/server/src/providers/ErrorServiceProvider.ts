@@ -3,10 +3,7 @@ import { createExceptionHandler } from '../errors'
 import type { ExceptionHandler } from '../errors/ExceptionHandler'
 import type { Hono } from 'hono'
 
-/**
- * Binds the ExceptionHandler as a singleton in the container
- * and attaches it as global error-handling middleware.
- */
+/** Binds the ExceptionHandler singleton and attaches it as global error middleware. */
 export class ErrorServiceProvider extends ServiceProvider {
   register(): void {
     this.container.singleton('exception.handler', () => createExceptionHandler())

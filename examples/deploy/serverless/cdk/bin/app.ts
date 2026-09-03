@@ -22,15 +22,12 @@ new GurenLambdaApp(stack, 'App', {
   // so the CloudFront URL is the one to put in front of users.
   assets: { dir: '../.lambda/assets' },
 
-  // SQS queue + worker with a dead-letter queue and partial batch failures.
-  // Every function receives SQS_QUEUE_URL and permission to send.
-  // Remove if the app dispatches no jobs.
+  // SQS queue + worker with a dead-letter queue and partial batch failures;
+  // every function receives SQS_QUEUE_URL. Remove if the app dispatches no jobs.
   queue: {},
 
-  // Console function: run your app's console commands in the deployed
-  // environment. Requires the `console` export in src/lambda.ts, which
-  // dispatches the kernel src/console.ts exports — register a db:migrate
-  // command there, uncomment the export before `lambda:build`, then invoke:
+  // Runs your console commands in the deployed environment. Requires the
+  // `console` export in src/lambda.ts, uncommented before `lambda:build`:
   //   aws lambda invoke --function-name ... \
   //     --cli-binary-format raw-in-base64-out \
   //     --payload '{"command":"db:migrate"}' out.json
@@ -40,25 +37,21 @@ new GurenLambdaApp(stack, 'App', {
   // Enable once src/lambda.ts exports a schedule handler.
   // schedule: {},
 
-  // Wires DATABASE_* environment variables plus the rds-data and
-  // secret-read IAM grants onto every function, so the console function
-  // can run migrations and the app can query Aurora out of the box.
+  // Wires DATABASE_* plus the rds-data and secret-read IAM grants onto every
+  // function, so migrations and Aurora queries work out of the box.
   dataApi: {
     database: process.env.DATABASE_NAME!,
     resourceArn: process.env.DATABASE_RESOURCE_ARN!,
     secretArn: process.env.DATABASE_SECRET_ARN!,
   },
 
-  // `environment` values are stored as plaintext Lambda configuration and are
-  // written into the synthesized template under cdk.out — so anything here is
-  // readable by whoever can see your cloud assembly or CI logs. Fine for a
-  // throwaway stack; for a real deployment keep APP_KEY in Secrets Manager and
-  // load it at boot instead of baking it into the stack.
+  // `environment` is plaintext Lambda configuration, written into the template
+  // under cdk.out and readable by anyone who can see the assembly or CI logs.
+  // For a real deployment keep APP_KEY in Secrets Manager and load it at boot.
   environment: {
     APP_KEY: process.env.APP_KEY!,
   },
 })
 
-// Every sub-resource is exposed as a property (httpFunction, queue,
-// distribution, ...) for further wiring — custom domains, extra IAM, or
-// per-function memory overrides.
+// Every sub-resource (httpFunction, queue, distribution, ...) is exposed as a
+// property for further wiring: custom domains, extra IAM, memory overrides.
