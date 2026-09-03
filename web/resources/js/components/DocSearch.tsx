@@ -69,6 +69,22 @@ function statusMessage(kind: Display['kind'], copy: (typeof COPY)[DocSearchLocal
   }
 }
 
+/**
+ * Whether this key belongs to the IME rather than to the dialog.
+ *
+ * Converting 「にんしょう」to 「認証」ends with Enter, and that Enter reaches
+ * keydown like any other — so without this the dialog took it as "open the
+ * selected result" and navigated away mid-word. The same applies to the arrow
+ * keys, which move through conversion candidates, and to Escape, which
+ * cancels the conversion.
+ *
+ * `keyCode === 229` is the older signal for the same thing, kept because it
+ * costs one comparison and covers browsers that do not set `isComposing`.
+ */
+function isImeKey(event: React.KeyboardEvent): boolean {
+  return event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229
+}
+
 /** Everything inside the dialog that Tab can reach, in document order. */
 const FOCUSABLE = 'a[href], button, input, select, [tabindex]:not([tabindex="-1"])'
 
@@ -98,6 +114,9 @@ export function DocSearch({ locale, className = '' }: DocSearchProps) {
   const [searchLocale, setSearchLocale] = useState<DocSearchLocale>(locale)
   const [display, setDisplay] = useState<Display>({ kind: 'idle' })
   const [selected, setSelected] = useState(0)
+  // True between compositionstart and compositionend — while an IME is
+  // holding a reading the reader has not converted yet.
+  const [composing, setComposing] = useState(false)
   // Resolved after mount: the server has no idea which keyboard this is, and
   // rendering a guess would mismatch during hydration.
   const [isApple, setIsApple] = useState(false)
@@ -166,7 +185,10 @@ export function DocSearch({ locale, className = '' }: DocSearchProps) {
   }, [open])
 
   useEffect(() => {
-    if (!open) {
+    // Nothing is searched while an IME is mid-word: 「認証」is typed as
+    // 「にんしょう」first, and searching that spends a request to tell the
+    // reader there are no matches for something they are still writing.
+    if (!open || composing) {
       return
     }
 
@@ -190,7 +212,7 @@ export function DocSearch({ locale, className = '' }: DocSearchProps) {
         setDisplay(outcome.hits.length > 0 ? { kind: 'results', hits: outcome.hits } : { kind: 'empty' })
       }
     })
-  }, [open, query, searchLocale, search])
+  }, [open, composing, query, searchLocale, search])
 
   useEffect(() => () => search.cancel(), [search])
 
@@ -206,6 +228,9 @@ export function DocSearch({ locale, className = '' }: DocSearchProps) {
    * close button and the locale select too.
    */
   const onDialogKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (isImeKey(event)) {
+      return
+    }
     if (event.key === 'Escape') {
       event.preventDefault()
       close()
@@ -224,7 +249,7 @@ export function DocSearch({ locale, className = '' }: DocSearchProps) {
   }
 
   const onInputKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
-    if (hits.length === 0) {
+    if (isImeKey(event) || hits.length === 0) {
       return
     }
     if (event.key === 'ArrowDown') {
@@ -287,6 +312,14 @@ export function DocSearch({ locale, className = '' }: DocSearchProps) {
                 value={query}
                 maxLength={MAX_QUERY_LENGTH}
                 onChange={(event) => setQuery(event.target.value)}
+                onCompositionStart={() => setComposing(true)}
+                onCompositionEnd={(event) => {
+                  // The committed text has to be read off the element here:
+                  // in some browsers this fires after the change event that
+                  // carried it, in others before.
+                  setComposing(false)
+                  setQuery(event.currentTarget.value)
+                }}
                 onKeyDown={onInputKeyDown}
                 placeholder={copy.placeholder}
                 aria-label={copy.placeholder}
