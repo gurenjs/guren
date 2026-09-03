@@ -87,7 +87,7 @@ export const analyticsPlugin = definePlugin<AnalyticsConfig>({
 })
 ```
 
-初期化コストの高いプラグインは`deferred: true`と`provides: ['analytics']`を併せて指定すると、提供するサービスが最初に解決されるまでプロバイダーの読み込みを遅延できます。
+初期化コストの高いプラグインは`deferred: true`と`provides: ['analytics']`を併せて指定すると、提供するサービスが最初に解決されるまでプロバイダーの読み込みを遅延できます。`container.make()`は同期なので、deferredプラグインの`register()`はサービスを同期的にバインドする必要があります（そうでない場合`make()`は例外を投げます）。`boot()`は非同期でもよく、最初の解決の直後に実行されます。
 
 `definePlugin()`でカバーできないライフサイクル制御が必要な場合は、従来通り`ServiceProvider`のサブクラスを直接エクスポートすることもできます。ただし設定をstaticプロパティに保存するのは避けてください。staticは共有されるため、プラグインを2回登録すると最初の設定が上書きされます。
 

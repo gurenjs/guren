@@ -486,6 +486,133 @@ describe('ProviderManager', () => {
     expect(manager.isDeferredService('deferred.service')).toBe(false)
   })
 
+  describe('deferred providers through Container.make()', () => {
+    it('should resolve a deferred service on first make() after boot', async () => {
+      let registered = 0
+      class LazyProvider extends ServiceProvider {
+        static deferred = true
+        static provides = ['lazy.service']
+
+        register(): void {
+          registered++
+          this.container.singleton('lazy.service', () => ({ ready: true }))
+        }
+      }
+
+      manager.register(LazyProvider)
+      await manager.registerAll()
+      await manager.bootAll()
+
+      expect(registered).toBe(0)
+      expect(container.make<{ ready: boolean }>('lazy.service')).toEqual({ ready: true })
+      expect(registered).toBe(1)
+      expect(manager.isDeferredService('lazy.service')).toBe(false)
+    })
+
+    it('should register the provider once when make() is called repeatedly', async () => {
+      let registered = 0
+      class LazyProvider extends ServiceProvider {
+        static deferred = true
+        static provides = ['lazy.a', 'lazy.b']
+
+        register(): void {
+          registered++
+          this.container.instance('lazy.a', 'a')
+          this.container.instance('lazy.b', 'b')
+        }
+      }
+
+      manager.register(LazyProvider)
+      await manager.bootAll()
+
+      expect(container.make<string>('lazy.a')).toBe('a')
+      expect(container.make<string>('lazy.b')).toBe('b')
+      expect(container.make<string>('lazy.a')).toBe('a')
+      expect(registered).toBe(1)
+      expect(manager.getProviders()).toHaveLength(1)
+    })
+
+    it('should boot the provider after make() and settle loadDeferredProvider() on that boot', async () => {
+      const order: string[] = []
+      class LazyProvider extends ServiceProvider {
+        static deferred = true
+        static provides = ['lazy.service']
+
+        register(): void {
+          order.push('register')
+          this.container.instance('lazy.service', 'value')
+        }
+
+        async boot(): Promise<void> {
+          await Promise.resolve()
+          order.push('boot')
+        }
+      }
+
+      manager.register(LazyProvider)
+      await manager.bootAll()
+
+      expect(container.make<string>('lazy.service')).toBe('value')
+      expect(order).toEqual(['register'])
+
+      await manager.loadDeferredProvider('lazy.service')
+      expect(order).toEqual(['register', 'boot'])
+    })
+
+    it('should surface a synchronous register() failure from make()', async () => {
+      class BrokenProvider extends ServiceProvider {
+        static deferred = true
+        static provides = ['broken.service']
+
+        register(): void {
+          throw new Error('register exploded')
+        }
+      }
+
+      manager.register(BrokenProvider)
+      await manager.bootAll()
+
+      expect(() => container.make('broken.service')).toThrow('register exploded')
+    })
+
+    it('should explain when a deferred register() binds asynchronously', async () => {
+      class AsyncProvider extends ServiceProvider {
+        static deferred = true
+        static provides = ['async.service']
+
+        async register(): Promise<void> {
+          await Promise.resolve()
+          this.container.instance('async.service', 'late')
+        }
+      }
+
+      manager.register(AsyncProvider)
+      await manager.bootAll()
+
+      expect(() => container.make('async.service')).toThrow(
+        /did not bind "async.service" synchronously/,
+      )
+    })
+
+    it('should still throw not-found for a service no deferred provider claims', async () => {
+      class LazyProvider extends ServiceProvider {
+        static deferred = true
+        static provides = ['lazy.service']
+
+        register(): void {
+          this.container.instance('lazy.service', 'value')
+        }
+      }
+
+      manager.register(LazyProvider)
+      await manager.bootAll()
+
+      expect(() => container.make('other.service')).toThrow(
+        'Service "other.service" not found in container',
+      )
+    })
+  })
+
   it('should only register providers once', async () => {
     let registerCount = 0
 
