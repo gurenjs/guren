@@ -72,11 +72,6 @@ export class RedisDriver implements PresenceBroadcastDriver {
    */
   protected presencePrefix: string = 'broadcasting:presence:'
 
-  /**
-   * Whether the driver is initialized.
-   */
-  protected initialized: boolean = false
-
   constructor(
     redis: RedisClient,
     options: RedisDriverOptions = {}
@@ -114,8 +109,6 @@ export class RedisDriver implements PresenceBroadcastDriver {
         console.error(`Error parsing broadcast message:`, error)
       }
     })
-
-    this.initialized = true
   }
 
   /**

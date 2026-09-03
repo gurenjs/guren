@@ -772,6 +772,7 @@ export type {
   SSEMiddlewareOptions,
   AuthMiddlewareOptions,
   BroadcastableEvent,
+  MemoryDriverOptions as BroadcastMemoryDriverOptions,
   RedisClient as BroadcastRedisClient,
   RedisDriverOptions as BroadcastRedisDriverOptions,
 } from './broadcasting'

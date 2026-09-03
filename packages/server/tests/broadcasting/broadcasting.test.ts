@@ -1,4 +1,5 @@
 import { describe, expect, it, beforeEach, mock } from 'bun:test'
+import { Hono } from 'hono'
 import {
   BroadcastManager,
   createBroadcastManager,
@@ -225,6 +226,39 @@ describe('MemoryDriver', () => {
 
       expect(driver.hasSubscribers('test')).toBe(true)
       expect(driver.getPublishedEvents()).toHaveLength(0)
+    })
+  })
+
+  describe('maxPublishedEvents', () => {
+    it('should keep only the newest events once the cap is reached', async () => {
+      const capped = new MemoryDriver({ maxPublishedEvents: 2 })
+
+      await capped.publish('test', 'First', {})
+      await capped.publish('test', 'Second', {})
+      await capped.publish('test', 'Third', {})
+
+      expect(capped.getPublishedEvents().map((e) => e.event)).toEqual(['Second', 'Third'])
+    })
+
+    it('should not record anything when the cap is zero', async () => {
+      const received: BroadcastEvent[] = []
+      const silent = new MemoryDriver({ maxPublishedEvents: 0 })
+      silent.subscribe('test', (e) => received.push(e))
+
+      await silent.publish('test', 'Event', {})
+
+      expect(silent.getPublishedEvents()).toHaveLength(0)
+      expect(received).toHaveLength(1)
+    })
+
+    it('should cap at 1000 events by default', async () => {
+      for (let i = 0; i < 1001; i++) {
+        await driver.publish('test', `Event${i}`, {})
+      }
+
+      const events = driver.getPublishedEvents()
+      expect(events).toHaveLength(1000)
+      expect(events[0].event).toBe('Event1')
     })
   })
 })
@@ -694,7 +728,84 @@ describe('BroadcastManager', () => {
     })
   })
 
+  describe('sse clients', () => {
+    async function openSseClient(target: BroadcastManager) {
+      const app = new Hono()
+      app.get('/events', target.sseMiddleware({ pingInterval: 60000 }) as never)
+      const response = await app.request('/events')
+      const reader = response.body!.getReader()
+      // `start()` runs synchronously, so the client is registered by now.
+      const client = target.getClients()[0]
+      return { client, reader }
+    }
+
+    it('should unsubscribe from the driver when a client leaves a channel', async () => {
+      const driver = manager.driver() as MemoryDriver
+      const { client, reader } = await openSseClient(manager)
+      const send = mock(client.send)
+      client.send = send
+
+      expect(manager.subscribeClient(client.id, 'orders')).toBe(true)
+      expect(driver.getSubscriberCount('orders')).toBe(1)
+
+      expect(manager.unsubscribeClient(client.id, 'orders')).toBe(true)
+      expect(driver.getSubscriberCount('orders')).toBe(0)
+
+      await manager.broadcast('orders', 'OrderUpdated', { id: 1 })
+      expect(send).not.toHaveBeenCalled()
+
+      await reader.cancel()
+    })
+
+    it('should unsubscribe from the driver when the stream is torn down', async () => {
+      const driver = manager.driver() as MemoryDriver
+      const { client, reader } = await openSseClient(manager)
+
+      manager.subscribeClient(client.id, 'orders')
+      manager.subscribeClient(client.id, 'chat')
+      expect(driver.getChannels().sort()).toEqual(['chat', 'orders'])
+
+      await reader.cancel()
+
+      expect(manager.getClient(client.id)).toBeUndefined()
+      expect(driver.getChannels()).toEqual([])
+    })
+
+    it('should not open a second driver subscription for the same channel', async () => {
+      const driver = manager.driver() as MemoryDriver
+      const { client, reader } = await openSseClient(manager)
+      const received: string[] = []
+      client.send = (event) => {
+        received.push(event)
+      }
+
+      manager.subscribeClient(client.id, 'orders')
+      manager.subscribeClient(client.id, 'orders')
+      expect(driver.getSubscriberCount('orders')).toBe(1)
+
+      await manager.broadcast('orders', 'OrderUpdated', {})
+      expect(received).toEqual(['OrderUpdated'])
+
+      await reader.cancel()
+    })
+  })
+
   describe('websocket clients', () => {
+    it('should release driver subscriptions when a client is removed', () => {
+      const driver = manager.driver() as MemoryDriver
+      const clientId = manager.registerWebSocketClient({
+        send: () => {},
+        close: () => {},
+      })
+
+      manager.subscribeWebSocketClient(clientId, 'ws.a')
+      manager.subscribeWebSocketClient(clientId, 'ws.b')
+      expect(driver.getChannels().sort()).toEqual(['ws.a', 'ws.b'])
+
+      manager.removeWebSocketClient(clientId)
+      expect(driver.getChannels()).toEqual([])
+    })
+
     it('should register and remove websocket clients', () => {
       const clientId = manager.registerWebSocketClient({
         send: () => {},
@@ -743,6 +854,7 @@ describe('BroadcastManager', () => {
       await manager.broadcast('ws.notifications', 'Before', { n: 1 })
       const unsubscribed = manager.unsubscribeWebSocketClient(clientId, 'ws.notifications')
       expect(unsubscribed).toBe(true)
+      expect((manager.driver() as MemoryDriver).getSubscriberCount('ws.notifications')).toBe(0)
       await manager.broadcast('ws.notifications', 'After', { n: 2 })
 
       expect(received).toHaveLength(1)

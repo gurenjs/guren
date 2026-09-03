@@ -5,6 +5,23 @@ import type {
 } from '../types'
 
 /**
+ * Memory broadcast driver options.
+ */
+export interface MemoryDriverOptions {
+  /**
+   * How many published events `getPublishedEvents()` keeps, oldest dropped
+   * first. `0` turns recording off.
+   *
+   * The record exists so tests can assert on what was published, but the
+   * driver also serves single-server deployments, where an unbounded record
+   * is a leak the size of the app's traffic.
+   *
+   * @default 1000
+   */
+  maxPublishedEvents?: number
+}
+
+/**
  * Memory broadcast driver.
  *
  * Stores all subscriptions and presence data in memory.
@@ -44,9 +61,15 @@ export class MemoryDriver implements PresenceBroadcastDriver {
   > = new Map()
 
   /**
-   * Published events (for testing).
+   * Published events (for testing), capped at `maxPublishedEvents`.
    */
   protected publishedEvents: BroadcastEvent[] = []
+
+  protected maxPublishedEvents: number
+
+  constructor(options: MemoryDriverOptions = {}) {
+    this.maxPublishedEvents = Math.max(0, Math.floor(options.maxPublishedEvents ?? 1000))
+  }
 
   /**
    * Publish an event to a channel.
@@ -59,8 +82,7 @@ export class MemoryDriver implements PresenceBroadcastDriver {
       timestamp: new Date(),
     }
 
-    // Store for testing
-    this.publishedEvents.push(broadcastEvent)
+    this.recordPublishedEvent(broadcastEvent)
 
     // Notify subscribers
     const callbacks = this.subscribers.get(channel)
@@ -72,6 +94,15 @@ export class MemoryDriver implements PresenceBroadcastDriver {
           console.error(`Error in broadcast subscriber:`, error)
         }
       }
+    }
+  }
+
+  protected recordPublishedEvent(event: BroadcastEvent): void {
+    if (this.maxPublishedEvents === 0) return
+
+    this.publishedEvents.push(event)
+    if (this.publishedEvents.length > this.maxPublishedEvents) {
+      this.publishedEvents.splice(0, this.publishedEvents.length - this.maxPublishedEvents)
     }
   }
 
@@ -176,7 +207,8 @@ export class MemoryDriver implements PresenceBroadcastDriver {
   }
 
   /**
-   * Get all published events (for testing).
+   * Get recorded published events (for testing) — at most the newest
+   * `maxPublishedEvents`.
    */
   getPublishedEvents(): BroadcastEvent[] {
     return [...this.publishedEvents]
