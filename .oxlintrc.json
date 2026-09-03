@@ -1,0 +1,40 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  // Type-aware rules run through oxlint-tsgolint (typescript-go), the only
+  // type-aware linter that works on the `typescript` 7 this repo pins: the
+  // package ships no JavaScript compiler API, so typescript-eslint cannot load.
+  "options": { "typeAware": true },
+  "jsPlugins": ["./scripts/lint/await-async-assertion.js"],
+  "ignorePatterns": ["**/dist/**", "**/.guren/**", "**/.wrangler/**", ".claude/worktrees/**"],
+  "rules": {
+    "typescript/no-floating-promises": "error",
+    // The type-aware run exists for no-floating-promises. The rest of the
+    // type-aware default set is opted out rule by rule, each for a reason
+    // found on this codebase rather than on principle: `await-thenable` is
+    // defeated by the same bun-types declaration that hides `expect(...).rejects`
+    // from no-floating-promises, and would flag every *correctly* awaited
+    // bun:test assertion; the others fire on phantom `any`s inside the scaffold
+    // templates (their `@guren/*` imports resolve to nothing in this checkout),
+    // on plain-function destructuring the rule cannot tell from methods, on
+    // FormData values, or on deliberate string spreads in the docs tokenizer.
+    // Turning one back on is a follow-up with its own cleanup, not a config flip.
+    "typescript/await-thenable": "off",
+    "typescript/unbound-method": "off",
+    "typescript/no-redundant-type-constituents": "off",
+    "typescript/require-array-sort-compare": "off",
+    "typescript/no-base-to-string": "off",
+    "typescript/restrict-template-expressions": "off",
+    "typescript/no-misused-spread": "off",
+    "typescript/no-implied-eval": "off",
+    // Syntactic companion to no-floating-promises for `expect(...).rejects` /
+    // `.resolves`: bun-types declares those chains as returning `void`, so the
+    // type-aware rule cannot see the promise. The header of the plugin has the details.
+    "guren/await-async-assertion": "error",
+    "no-unused-vars": ["warn", { "ignoreRestSiblings": true, "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }],
+    // QueryBuilder, TestApp, and the agent test client are deliberately
+    // awaitable builders: `then` on them is the API, not a mistake.
+    "unicorn/no-thenable": "off",
+    // The CLI and the docs renderer strip ANSI escapes, which are control characters by definition.
+    "no-control-regex": "off"
+  }
+}

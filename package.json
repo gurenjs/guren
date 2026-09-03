@@ -61,6 +61,8 @@
     "test:testing": "bun run --cwd packages/testing test",
     "test:examples": "bun run --cwd examples/blog test && bun run --cwd examples/api test && bun run --cwd web test",
     "test": "bun run test:bun && bun run test:examples",
+    "lint": "oxlint --deny-warnings",
+    "lint:fix": "oxlint --deny-warnings --fix",
     "typecheck": "tsc --noEmit && bun run typecheck:build-configs && bun run typecheck:scaffold-templates && bun run typecheck:blog && bun run typecheck:api",
     "typecheck:build-configs": "bun run ./scripts/check-build-configs.ts",
     "typecheck:scaffold-templates": "bun run --cwd packages/cli typecheck:templates",

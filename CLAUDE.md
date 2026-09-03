@@ -39,6 +39,10 @@ bun run test          # Full test suite
 # Type checking
 bun run typecheck
 
+# Lint (oxlint, type-aware; the oxlint binary is a Node shim, so Node must be on PATH)
+bun run lint
+bun run lint:fix      # apply the safe auto-fixes, then re-lint
+
 # Development server (blog example)
 bun run dev
 
@@ -411,6 +415,7 @@ export const handler = createLambdaHandler(app)
 | `packages/cli/src/arch/index.ts` | `defineArchRules()` + types, published as the `@guren/cli/arch` subpath |
 | `packages/cli/src/changed-files.ts` | Git-diff-based file filtering shared by `check --changed` |
 | `packages/cli/src/audit.ts` | AI agent: security audit (validation, auth, raw SQL, secrets) |
+| `scripts/lint/await-async-assertion.js` | The lint rule for a bare `expect(...).rejects` / `.resolves` statement, an assertion that can never fail its test. `typescript/no-floating-promises` cannot see it on a `bun:test` file (bun-types declares the chain as returning `void`) and oxlint's jest plugin does not recognise `expect` imported from `bun:test`, so this syntactic, import-agnostic rule closes the gap. `.oxlintrc.json` wires it; the header has the details |
 | `packages/cli/src/guidelines.ts` | AI agent: dynamic guidelines generation |
 | `packages/cli/src/model-list.ts` | AI agent: model introspection |
 | `packages/cli/src/model-parser.ts` | AI agent: Babel AST model parsing |
@@ -427,20 +432,21 @@ export const handler = createLambdaHandler(app)
 
 1. Run `bun run build` - ensure all packages compile
 2. Run `bun run typecheck` - no type errors
-3. Run `bun run test` - all tests pass
-4. Run `bun run audit:core-first` - no `@guren/server` references in docs/templates
-5. Run `bun run audit:docs` - docs reference valid commands and APIs
-6. **If you touched `packages/create-app/templates/**` or `packages/cli/templates/**`:**
+3. Run `bun run lint` - oxlint with the type-aware rules; warnings fail too
+4. Run `bun run test` - all tests pass
+5. Run `bun run audit:core-first` - no `@guren/server` references in docs/templates
+6. Run `bun run audit:docs` - docs reference valid commands and APIs
+7. **If you touched `packages/create-app/templates/**` or `packages/cli/templates/**`:**
    also run `bun run audit:starter-template` and `bun run smoke:starter` /
    `smoke:starter:api`. The audits assert scaffold contents literally, so a
    change that reads as harmless (an added env var in a `dev` script) fails CI
    while `build`/`typecheck`/`test` stay green. The smokes scaffold a real app
    and take several minutes — judge them by exit code, not by wall time.
-7. **If a template started using a framework API added in the same PR:** run
+8. **If a template started using a framework API added in the same PR:** run
    `bun run smoke:starter:npm` — it installs `@guren/*` from the registry, and
    is expected to be red until the release ships that API.
-8. Review `.claude/rules/common-pitfalls.md` - check for known gotchas
-9. Follow commit message convention
+9. Review `.claude/rules/common-pitfalls.md` - check for known gotchas
+10. Follow commit message convention
 
 ## Claude Code Agents
 
