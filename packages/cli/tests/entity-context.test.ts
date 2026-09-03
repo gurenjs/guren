@@ -351,10 +351,10 @@ verified:
   })
 
   it('throws EntityResolutionError listing available models for unknown entities', async () => {
-    expect(generateEntityContext('Ghost', { cwd: workspace.dir })).rejects.toThrow(
+    await expect(generateEntityContext('Ghost', { cwd: workspace.dir })).rejects.toThrow(
       EntityResolutionError,
     )
-    expect(generateEntityContext('Ghost', { cwd: workspace.dir })).rejects.toThrow(
+    await expect(generateEntityContext('Ghost', { cwd: workspace.dir })).rejects.toThrow(
       'Available models: Post, User',
     )
   })
@@ -447,7 +447,7 @@ describe('entity context (duplicated entity across locations)', () => {
   })
 
   it('requires --module when the same model exists in multiple locations', async () => {
-    expect(generateEntityContext('Post', { cwd: workspace.dir })).rejects.toThrow(
+    await expect(generateEntityContext('Post', { cwd: workspace.dir })).rejects.toThrow(
       'multiple locations: app, crm',
     )
   })

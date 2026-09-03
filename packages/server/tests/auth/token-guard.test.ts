@@ -186,9 +186,9 @@ describe('TokenGuard', () => {
   test('should throw for credential-based flows', async () => {
     const guard = new TokenGuard({ store: new MemoryApiTokenStore(), ctx: fakeContext() })
 
-    expect(guard.login()).rejects.toThrow('does not support login')
-    expect(guard.attempt({})).rejects.toThrow('does not support attempt')
-    expect(guard.validate({})).rejects.toThrow('does not support validate')
+    await expect(guard.login()).rejects.toThrow('does not support login')
+    await expect(guard.attempt({})).rejects.toThrow('does not support attempt')
+    await expect(guard.validate({})).rejects.toThrow('does not support validate')
   })
 
   test('session should be undefined', async () => {

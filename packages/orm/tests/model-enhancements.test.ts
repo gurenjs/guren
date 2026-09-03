@@ -561,7 +561,7 @@ describe('global scopes apply on every query entry point', () => {
   it('refuses when a condition would overwrite the scope on the same field', async () => {
     const User = tenantScopedUser()
 
-    expect(User.where('tenantId', 2).get()).rejects.toThrow('return unfiltered rows')
+    await expect(User.where('tenantId', 2).get()).rejects.toThrow('return unfiltered rows')
   })
 
   it('still collapses a condition that repeats the scope value', async () => {
@@ -588,8 +588,8 @@ describe('global scopes apply on every query entry point', () => {
   it('refuses rather than dropping conditions a basic adapter cannot express', async () => {
     const User = tenantScopedUser()
 
-    expect(User.whereNotIn('id', [99]).get()).rejects.toThrow('return unfiltered rows')
-    expect(User.whereNotNull('name').get()).rejects.toThrow('return unfiltered rows')
+    await expect(User.whereNotIn('id', [99]).get()).rejects.toThrow('return unfiltered rows')
+    await expect(User.whereNotNull('name').get()).rejects.toThrow('return unfiltered rows')
   })
 
   it('applies the scope to select()', async () => {

@@ -198,7 +198,7 @@ describe('SessionGuard', () => {
 
     test('should throw when session is undefined', async () => {
       const guard = createGuard({ session: undefined })
-      expect(guard.login(user)).rejects.toThrow('session middleware is required')
+      await expect(guard.login(user)).rejects.toThrow('session middleware is required')
     })
 
     test('should regenerate the session ID to prevent session fixation', async () => {

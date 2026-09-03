@@ -145,7 +145,7 @@ describe('SqsDriver', () => {
   })
 
   test('should throw when retrying non-existent failed job', async () => {
-    expect(driver.retryFailedJob('nonexistent')).rejects.toThrow('Failed job not found')
+    await expect(driver.retryFailedJob('nonexistent')).rejects.toThrow('Failed job not found')
   })
 
   test('should clear all state', async () => {

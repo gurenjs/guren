@@ -53,10 +53,10 @@ describe('makeAdr', () => {
   it('rejects --by actors that could break out of the frontmatter', async () => {
     const workspace = await createTempWorkspace('guren-cli-make-adr-actor-')
     try {
-      expect(makeAdr('Actor injection', { by: 'x }\nstatus: stable' })).rejects.toThrow(
+      await expect(makeAdr('Actor injection', { by: 'x }\nstatus: stable' })).rejects.toThrow(
         'Invalid actor',
       )
-      expect(makeAdr('Quote injection', { by: 'x", at: y' })).rejects.toThrow('Invalid actor')
+      await expect(makeAdr('Quote injection', { by: 'x", at: y' })).rejects.toThrow('Invalid actor')
     } finally {
       await workspace.cleanup()
     }
@@ -266,10 +266,10 @@ describe('makeAdr', () => {
   it('rejects --entity values that are not plain identifiers', async () => {
     const workspace = await createTempWorkspace('guren-cli-make-adr-inject-')
     try {
-      expect(
+      await expect(
         makeAdr('Injection attempt', { entity: 'Ghost]\nstatus: stable\nentities: [Post' }),
       ).rejects.toThrow('Invalid entity name')
-      expect(makeAdr('Injection attempt', { entity: 'Post # comment' })).rejects.toThrow(
+      await expect(makeAdr('Injection attempt', { entity: 'Post # comment' })).rejects.toThrow(
         'Invalid entity name',
       )
     } finally {
@@ -335,7 +335,7 @@ describe('makeAdr', () => {
         'utf8',
       )
 
-      expect(makeAdr('Ambiguous decision', { entity: 'Post' })).rejects.toThrow(
+      await expect(makeAdr('Ambiguous decision', { entity: 'Post' })).rejects.toThrow(
         'multiple locations: billing, sales',
       )
     } finally {
