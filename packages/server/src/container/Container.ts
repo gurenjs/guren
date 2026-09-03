@@ -34,8 +34,16 @@ export class Container {
   protected scopedInstances: Map<string, unknown>[] = []
   protected fakes: Map<string, unknown> = new Map()
 
-  /** @internal Used by ProviderManager to resolve deferred providers on demand */
-  deferredProviderLoader: ((service: string) => Promise<void>) | null = null
+  /**
+   * @internal Installed by ProviderManager once every eager provider has booted.
+   *
+   * Called from `make()` for a key with no binding. The loader must run the
+   * deferred provider's `register()` *synchronously* before it returns, so the
+   * bindings it adds are visible to the same `make()` call; `boot()` may be
+   * asynchronous and is what the returned promise settles on. `undefined`
+   * means no deferred provider claims the service.
+   */
+  deferredProviderLoader: ((service: string) => Promise<void> | undefined) | null = null
 
   /**
    * Bind a service to the container.
@@ -103,17 +111,21 @@ export class Container {
       return this.fakes.get(resolvedKey)
     }
 
-    // Check binding exists — try deferred providers if not found
+    // Check binding exists — try deferred providers if not found.
+    // make() is synchronous, so it can only see what the provider's register()
+    // bound before the loader returned; the loader contract guarantees that
+    // for a synchronous register(). An async register() binds too late for
+    // this call, which is reported rather than left as a bare "not found".
     let binding = this.bindings.get(resolvedKey)
     if (!binding && this.deferredProviderLoader) {
-      // Synchronously trigger deferred provider loading.
-      // The loader registers the provider which adds bindings to this container.
-      // We use a micro-optimization: call the loader and let it resolve synchronously
-      // if the provider's register() is synchronous (which is the common case).
-      let resolved = false
-      this.deferredProviderLoader(resolvedKey).then(() => { resolved = true })
-      if (resolved) {
-        binding = this.bindings.get(resolvedKey)
+      const loading = this.deferredProviderLoader(resolvedKey)
+      binding = this.bindings.get(resolvedKey)
+      if (loading && !binding) {
+        throw new Error(
+          `Deferred provider for "${key}" did not bind "${resolvedKey}" synchronously in register(). ` +
+          'Container.make() cannot await an async register(); bind the service synchronously, ' +
+          'or await ProviderManager.loadDeferredProvider() before resolving it.',
+        )
       }
     }
     if (!binding) {

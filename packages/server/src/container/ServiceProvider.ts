@@ -77,6 +77,8 @@ export class ProviderManager {
   protected registered: Set<ServiceProvider> = new Set()
   protected booted: Set<ServiceProvider> = new Set()
   protected deferredProviders: Map<string, ServiceProvider> = new Map()
+  /** Per service, the boot of an already-activated deferred provider, so a later loadDeferredProvider() awaits that boot */
+  private deferredActivations: Map<string, Promise<void>> = new Map()
   private allBooted = false
 
   constructor(protected container: Container) {}
@@ -157,32 +159,48 @@ export class ProviderManager {
     // Wire deferred provider resolution into Container.make()
     if (this.deferredProviders.size > 0) {
       this.container.deferredProviderLoader = (service: string) =>
-        this.loadDeferredProvider(service)
+        this.activateDeferredProvider(service)
     }
   }
 
   /**
-   * Load a deferred provider for a service.
+   * Load a deferred provider for a service: register it, boot it, and drop
+   * its services from the deferred set. Resolves once boot() has finished,
+   * also when the provider was already activated by Container.make().
    */
   async loadDeferredProvider(service: string): Promise<void> {
+    await (this.activateDeferredProvider(service) ?? this.deferredActivations.get(service))
+  }
+
+  /**
+   * The synchronous half of deferred loading, which is what lets a
+   * synchronous `Container.make()` resolve a deferred service: `register()`
+   * runs before this returns, so its bindings are in the container by the
+   * time the caller reads them, and a synchronous throw reaches the caller.
+   * `boot()` follows on the returned promise, which make() does not await: a
+   * boot failure surfaces as an unhandled rejection rather than silently.
+   * Services are unclaimed from the deferred set up front so a re-entrant
+   * make() for a sibling service does not register the provider twice.
+   */
+  private activateDeferredProvider(service: string): Promise<void> | undefined {
     const provider = this.deferredProviders.get(service)
-    if (!provider) return
+    if (!provider) return undefined
 
-    if (!this.registered.has(provider)) {
-      await provider.register()
-      this.registered.add(provider)
-      this.providers.push(provider)
-    }
-
-    if (!this.booted.has(provider)) {
-      await provider.boot?.()
-      this.booted.add(provider)
-    }
-
-    // Remove from deferred
+    const registering = provider.register()
+    this.registered.add(provider)
+    this.providers.push(provider)
     for (const providedService of provider.provides()) {
       this.deferredProviders.delete(providedService)
     }
+
+    const activation = Promise.resolve(registering).then(async () => {
+      await provider.boot?.()
+      this.booted.add(provider)
+    })
+    for (const providedService of provider.provides()) {
+      this.deferredActivations.set(providedService, activation)
+    }
+    return activation
   }
 
   /**

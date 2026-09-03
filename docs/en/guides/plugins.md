@@ -87,7 +87,7 @@ export const analyticsPlugin = definePlugin<AnalyticsConfig>({
 })
 ```
 
-Plugins that are expensive to initialize can pass `deferred: true` together with `provides: ['analytics']` so the provider only loads when one of its services is first resolved.
+Plugins that are expensive to initialize can pass `deferred: true` together with `provides: ['analytics']` so the provider only loads when one of its services is first resolved. Because `container.make()` is synchronous, a deferred plugin's `register()` must bind its services synchronously (`make()` throws if it does not); `boot()` may still be async and runs right after that first resolution.
 
 If you need lifecycle behavior beyond what `definePlugin()` covers, you can still export a `ServiceProvider` subclass directly — the class-based contract is unchanged. Avoid storing configuration on a static class property, though: statics are shared, so registering the plugin twice would silently overwrite the first configuration.
 
