@@ -731,7 +731,7 @@ async function createScriptsAutofix(_context: DoctorRuleContext, check: DoctorCh
       }
 
       const nextManifest = { ...current.value }
-      const scripts = { ...(nextManifest.scripts ?? {}) }
+      const scripts = { ...nextManifest.scripts }
       for (const [name, command] of Object.entries(CANONICAL_APP_SCRIPTS)) {
         if (!(name in scripts)) {
           scripts[name] = command
@@ -745,7 +745,7 @@ async function createScriptsAutofix(_context: DoctorRuleContext, check: DoctorCh
 
 const MIN_BUN_VERSION = '1.1.0'
 
-async function detectBunVersion(context: DoctorRuleContext): Promise<DoctorCheck> {
+async function detectBunVersion(_context: DoctorRuleContext): Promise<DoctorCheck> {
   const bunVersion = typeof process !== 'undefined' && process.versions?.bun
     ? process.versions.bun
     : null

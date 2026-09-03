@@ -75,7 +75,7 @@ describe('GurenLambdaApp', () => {
     const httpFn = Object.values(functions).find(
       (fn) => (fn.Properties as { Handler?: string }).Handler === 'handler.http',
     )
-    const env = (httpFn?.Properties as { Environment?: { Variables?: Record<string, unknown> } }).Environment
+    const env = (httpFn?.Properties as { Environment?: { Variables?: Record<string, unknown> } } | undefined)?.Environment
     expect(env?.Variables?.SQS_QUEUE_URL).toBeDefined()
   })
 
@@ -138,7 +138,7 @@ describe('GurenLambdaApp', () => {
       const fn = Object.values(functions).find(
         (candidate) => (candidate.Properties as { Handler?: string }).Handler === handler,
       )
-      const env = (fn?.Properties as { Environment?: { Variables?: Record<string, unknown> } }).Environment
+      const env = (fn?.Properties as { Environment?: { Variables?: Record<string, unknown> } } | undefined)?.Environment
       expect(env?.Variables?.SQS_QUEUE_URL).toBeDefined()
     }
   })

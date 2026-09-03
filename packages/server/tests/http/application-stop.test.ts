@@ -95,7 +95,7 @@ describe('Application.stop', () => {
   it('lets the same instance listen again after being stopped', async () => {
     const app = track(new Application())
 
-    const first = await app.listen({ port: 0, hostname: '127.0.0.1', vite: false })
+    await app.listen({ port: 0, hostname: '127.0.0.1', vite: false })
     await app.stop(true)
 
     const second = await app.listen({ port: 0, hostname: '127.0.0.1', vite: false })

@@ -6,7 +6,7 @@ import { defineSeeder, loadSeeders, runSeeders, type SeederContext } from '../sr
 
 describe('defineSeeder', () => {
   it('returns the handler function unchanged', () => {
-    const handler = (ctx: SeederContext) => {
+    const handler = (_ctx: SeederContext) => {
       // seeder logic
     }
 

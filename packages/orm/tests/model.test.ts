@@ -644,8 +644,8 @@ function createPaginationAdapter(records: UserRecord[] = []): ORMAdapter {
     },
 
     async create<TRecord extends PlainObject = PlainObject>(
-      table: unknown,
-      data: PlainObject,
+      _table: unknown,
+      _data: PlainObject,
     ): Promise<TRecord> {
       throw new Error('Not implemented')
     },

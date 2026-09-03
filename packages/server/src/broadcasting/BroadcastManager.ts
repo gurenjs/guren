@@ -294,7 +294,6 @@ export class BroadcastManager {
       // Generate client ID
       const clientId = this.generateClientId()
       const encoder = new TextEncoder()
-      const manager = this
 
       // Channels requested up front (?channels=a,b) are authorized against
       // the connecting user and subscribed before the stream starts, so a
@@ -335,7 +334,7 @@ export class BroadcastManager {
         }
 
         if (client) {
-          manager.sseClients.delete(client.id)
+          this.sseClients.delete(client.id)
           client = null
         }
 
@@ -350,7 +349,7 @@ export class BroadcastManager {
       }
 
       const stream = new ReadableStream<Uint8Array>({
-        start(streamController) {
+        start: (streamController) => {
           controller = streamController
 
           client = {
@@ -366,7 +365,7 @@ export class BroadcastManager {
             close: cleanup,
           }
 
-          manager.sseClients.set(clientId, client)
+          this.sseClients.set(clientId, client)
 
           // Send initial retry configuration
           sendRaw(`retry: ${retry}\n\n`)
@@ -376,7 +375,7 @@ export class BroadcastManager {
           client.send('connected', { clientId, channels: authorizedChannels })
 
           for (const channelName of authorizedChannels) {
-            manager.subscribeClient(clientId, channelName)
+            this.subscribeClient(clientId, channelName)
           }
 
           // Setup ping interval
@@ -388,7 +387,7 @@ export class BroadcastManager {
             }
           }, pingInterval)
         },
-        cancel() {
+        cancel: () => {
           cleanup()
         },
       })

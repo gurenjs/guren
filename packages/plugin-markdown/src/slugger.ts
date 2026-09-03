@@ -54,7 +54,7 @@ export function createSlugger(): (text: string) => string {
       .toLowerCase()
       .trim()
       .replace(/\s+/g, '-')
-      .replace(/[^\p{L}\p{N}\-]/gu, '')
+      .replace(/[^\p{L}\p{N}-]/gu, '')
       .replace(/-+/g, '-')
       .replace(/^-|-$/g, '')
     slug = slug || 'heading'

@@ -8,7 +8,7 @@ import { describe, expect, it, mock } from 'bun:test'
 // restores mock.module, so this replacement outlives this file; the module
 // is otherwise absent here, so the only behavior it can mask in another
 // test is the missing-optional-dependency error.
-mock.module('@aws-sdk/client-s3', () => ({
+await mock.module('@aws-sdk/client-s3', () => ({
   ListObjectsV2Command: class {
     constructor(readonly input: Record<string, unknown>) {}
   },
@@ -22,7 +22,7 @@ mock.module('@aws-sdk/client-s3', () => ({
 
 // The presigner is only ever handed the command; echoing its input back as
 // the "URL" lets tests assert what would have been signed.
-mock.module('@aws-sdk/s3-request-presigner', () => ({
+await mock.module('@aws-sdk/s3-request-presigner', () => ({
   getSignedUrl: async (_client: unknown, command: { input: Record<string, unknown> }) =>
     `https://presigned.example/?input=${encodeURIComponent(JSON.stringify(command.input))}`,
 }))

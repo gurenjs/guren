@@ -29,7 +29,7 @@ export class MemoryDriver implements QueueDriver {
     const now = new Date()
 
     // Find the first available job for this queue
-    for (const [id, job] of this.jobs) {
+    for (const [_id, job] of this.jobs) {
       if (
         job.queue === queue &&
         job.availableAt <= now &&

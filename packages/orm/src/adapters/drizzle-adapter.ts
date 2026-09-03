@@ -1,6 +1,6 @@
 import { and, asc, count, desc, eq, inArray, isNull } from 'drizzle-orm'
 import type { AnyColumn } from 'drizzle-orm'
-import type { AdapterQueryOptions, FindManyOptions, OrderByClause, ORMAdapter, PlainObject, WhereClause } from '../Model'
+import type { AdapterQueryOptions, FindManyOptions, OrderByClause, PlainObject, WhereClause } from '../Model'
 import type { ORMAdapterAdvanced, WhereCondition } from '../QueryBuilder'
 import { buildDrizzleConditions } from './drizzle-conditions'
 
@@ -396,6 +396,7 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
     return rows as TRecord[]
   },
 
+  // oxlint-disable-next-line no-unused-vars -- phantom type parameter, kept because it is part of the public signature
   async countAdvanced<TRecord extends PlainObject = PlainObject>(
     table: unknown,
     conditions: WhereCondition[],
@@ -437,6 +438,7 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
     return result as TRecord
   },
 
+  // oxlint-disable-next-line no-unused-vars -- phantom type parameter, kept because it is part of the public signature
   async deleteAdvanced<TRecord extends PlainObject = PlainObject>(
     table: unknown,
     conditions: WhereCondition[],

@@ -1,5 +1,4 @@
 import type { Context } from '../http/Application'
-import type { HttpException } from './HttpException'
 
 /**
  * Error response structure.

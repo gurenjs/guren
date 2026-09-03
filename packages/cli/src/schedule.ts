@@ -134,13 +134,13 @@ async function loadScheduleKernel(options: ScheduleOptions = {}): Promise<{ task
 /**
  * Parse cron expression and get next run time.
  */
-function getNextRunTime(expression: string, timezone?: string): Date | null {
+function getNextRunTime(expression: string, _timezone?: string): Date | null {
   try {
     const parts = expression.split(' ')
     if (parts.length !== 5) return null
 
     const now = new Date()
-    const [minute, hour, dayOfMonth, month, dayOfWeek] = parts
+    const [minute, hour] = parts
 
     // Simple estimation for common patterns
     const next = new Date(now)

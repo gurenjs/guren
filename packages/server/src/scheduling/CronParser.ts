@@ -60,7 +60,7 @@ function parseField(field: string, min: number, max: number): number[] {
  *
  * Examples:
  * - Every minute: "* * * * *"
- * - Every 5 minutes: "*​/5 * * * *" (step value)
+ * - Every 5 minutes: "*\/5 * * * *" (step value)
  * - At 3:00 AM daily: "0 3 * * *"
  * - Every Monday at 9:00 AM: "0 9 * * 1"
  */

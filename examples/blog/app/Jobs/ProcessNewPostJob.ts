@@ -14,7 +14,7 @@ interface ProcessNewPostPayload {
 export class ProcessNewPostJob extends Job<ProcessNewPostPayload> {
   static override queue = 'default'
   static override maxAttempts = 3
-  static override backoff: 'exponential' = 'exponential'
+  static override backoff = 'exponential' as const
 
   async handle(payload: ProcessNewPostPayload): Promise<void> {
     const post = await Post.find(payload.postId)

@@ -20,7 +20,7 @@ import { listPublishedPosts, type PublishedPost } from '../../../modules/blog/in
 function mdInline(value: string): string {
   return value
     .replace(/\s+/gu, ' ')
-    .replace(/[\\\[\]]/gu, '\\$&')
+    .replace(/[\\[\]]/gu, '\\$&')
     .trim()
 }
 

@@ -5,7 +5,6 @@ import type {
   OptionDefinition,
   OutputInterface,
 } from './types'
-import { Command } from './Command'
 import { Output, BufferedOutput } from './Output'
 import { argumentLabel, formatUsage, optionLabel, parseSignature } from './Input'
 

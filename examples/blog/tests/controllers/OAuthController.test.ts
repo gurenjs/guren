@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   createControllerContext,
   createControllerModuleMock,
-  readInertiaResponse,
 } from '@guren/testing'
 import type { Context } from '@guren/core'
 

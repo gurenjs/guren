@@ -96,6 +96,7 @@ export interface ResourceClass<T, R extends BaseResource<T>> {
 /**
  * Base resource interface.
  */
+// oxlint-disable-next-line no-unused-vars -- phantom type parameter, kept because it is part of the public signature
 export interface BaseResource<T> {
   toArray(): ResourceData
   toJSON(): ResourceData

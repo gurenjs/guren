@@ -38,7 +38,7 @@ export function resolveViteDevServerConfig(
     server: {
       host,
       port,
-      ...(config.server ?? {}),
+      ...config.server,
     },
   }
 }

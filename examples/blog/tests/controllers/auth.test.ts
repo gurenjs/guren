@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   createControllerContext,
   createControllerModuleMock,
@@ -6,9 +6,7 @@ import {
 } from '@guren/testing'
 import type { Context } from '@guren/core'
 
-const { mockEmit } = vi.hoisted(() => ({
-  mockEmit: vi.fn(),
-}))
+
 
 vi.mock('guren', () => createControllerModuleMock())
 vi.mock('@guren/core', async () => {

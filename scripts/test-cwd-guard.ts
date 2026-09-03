@@ -13,7 +13,7 @@
 import { afterAll, afterEach, beforeAll } from 'bun:test'
 import { existsSync, mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve, sep } from 'node:path'
+import { join, sep } from 'node:path'
 
 import { repoRoot as workspaceRoot } from './workspace-packages.ts'
 

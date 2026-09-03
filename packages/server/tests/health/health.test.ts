@@ -517,7 +517,7 @@ describe('CacheCheck', () => {
         usedKey = key
         return Promise.resolve('test')
       }),
-      put: mock((key: string, value: unknown) => {
+      put: mock((key: string, _value: unknown) => {
         usedKey = key
         return Promise.resolve()
       }),

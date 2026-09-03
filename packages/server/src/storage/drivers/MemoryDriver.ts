@@ -90,7 +90,7 @@ export class MemoryDriver implements StorageDriver {
     return normalized
   }
 
-  async putFile(path: string, localPath: string, options?: PutOptions): Promise<string> {
+  async putFile(_path: string, _localPath: string, _options?: PutOptions): Promise<string> {
     // In memory driver, we can't read local files
     throw new Error('putFile is not supported in MemoryDriver')
   }
@@ -157,7 +157,7 @@ export class MemoryDriver implements StorageDriver {
     return `${this.baseUrl}/${normalized}`
   }
 
-  async temporaryUrl(path: string, expiration: Date): Promise<string> {
+  async temporaryUrl(path: string, _expiration: Date): Promise<string> {
     // Memory driver doesn't support temporary URLs
     return this.url(path)
   }
@@ -245,7 +245,7 @@ export class MemoryDriver implements StorageDriver {
     return result.sort()
   }
 
-  async makeDirectory(path: string): Promise<void> {
+  async makeDirectory(_path: string): Promise<void> {
     // Memory driver doesn't need to create directories
     // Files are stored by path directly
   }

@@ -92,7 +92,7 @@ function extractJson(stdout: string): string {
   const lines = stdout.split('\n')
 
   for (let i = lines.length - 1; i >= 0; i -= 1) {
-    if (/^\{/u.test(lines[i])) {
+    if (lines[i].startsWith('{')) {
       return lines.slice(i).join('\n')
     }
   }

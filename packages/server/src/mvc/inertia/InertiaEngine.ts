@@ -268,7 +268,7 @@ async function renderDocument(
   const importMapEntries = {
     ...(isProduction ? {} : DEV_FALLBACK_IMPORT_MAP),
     ...envImportMap,
-    ...(options.importMap ?? {}),
+    ...options.importMap,
   };
   const importMap = JSON.stringify({ imports: importMapEntries }, null, 2);
   const serializedPage = serializePage(page);

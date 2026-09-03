@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import {
   TestResponse,
   TestRequestBuilder,
-  TestClient,
   TestApp,
   createTestClient,
   FakeQueue,
@@ -39,7 +38,7 @@ describe('TestResponse', () => {
         ...init,
         headers: {
           'Content-Type': 'application/json',
-          ...(init.headers as Record<string, string> ?? {}),
+          ...(init.headers as Record<string, string> | undefined),
         },
       })
     )
@@ -1047,11 +1046,8 @@ describe('FakeEvent', () => {
     it('can be used as drop-in replacement for EventManager', async () => {
       const manager = events.getManager()
 
-      // Register listeners
-      let received: UserRegistered | null = null
-      manager.on(UserRegistered, (e) => {
-        received = e as UserRegistered
-      })
+      // Register a listener
+      manager.on(UserRegistered, () => {})
 
       // Emit event (fake manager only records, doesn't call listeners)
       await manager.emit(new UserRegistered('123', 'test@example.com'))

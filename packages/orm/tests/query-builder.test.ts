@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'bun:test'
 import { QueryBuilder, type WhereCondition, type ORMAdapterAdvanced } from '../src/QueryBuilder'
-import { Model, type ORMAdapter, type PlainObject, type WhereClause, type FindManyOptions } from '../src/Model'
+import { Model, type ORMAdapter, type PlainObject, type FindManyOptions } from '../src/Model'
 import { ModelNotFoundException } from '../src/ModelNotFoundException'
 
 type TestRecord = {

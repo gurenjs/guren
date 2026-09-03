@@ -45,6 +45,7 @@ type CollisionFreeDeclaration<TBase extends typeof Model, TDecl> =
  * `keyof` the declaration, so typos, wrong kinds, and undeclared variant
  * names are compile errors.
  */
+// oxlint-disable-next-line no-unused-vars -- phantom type parameter, kept because it is part of the public signature
 export interface AttachableStatic<TBase extends typeof Model, TDecl extends DeclarationShape> {
   /** The declaration, statically readable (this is what `guren check` and codegen read). */
   readonly attachments: TDecl

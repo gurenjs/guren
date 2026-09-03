@@ -132,7 +132,7 @@ describe('mcpPlugin external auth (no token store configured)', () => {
     const event = seen.find((candidate) => candidate.tool === 'posts.store')
     expect(event?.principal).toEqual({ kind: 'user', id: 'u_99', abilities: ['tools:*'] })
     expect(event?.surface).toBe('mcp')
-    expect((event?.arguments as Record<string, unknown>).ssn).not.toBe('123-45')
+    expect((event?.arguments as Record<string, unknown> | undefined)?.ssn).not.toBe('123-45')
   })
 
   test('should record the seam principal on AgentToolDenied', async () => {

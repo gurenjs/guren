@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, describe, expect, it } from 'bun:test'
-import { access, readFile, writeFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createTempWorkspace, type TempWorkspace } from './helpers'
 import { scaffoldDeploy } from '../src/deploy'

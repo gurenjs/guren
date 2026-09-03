@@ -340,7 +340,7 @@ describe('Listener', () => {
       static queue = 'custom'
       static priority = 10
 
-      handle(event: TestEvent) {
+      handle(_event: TestEvent) {
         // handle
       }
     }
@@ -355,7 +355,7 @@ describe('Listener', () => {
     class TestListener extends Listener<TestEvent> {
       static event = TestEvent
 
-      handle(event: TestEvent) {
+      handle(_event: TestEvent) {
         // handle
       }
     }

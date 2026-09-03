@@ -240,6 +240,7 @@ type SelectFrom<TDatabase> = TDatabase extends { select: (...args: any[]) => inf
  * // Relationships
  * const usersWithPosts = await User.with('posts')
  */
+// oxlint-disable-next-line no-unused-vars -- phantom type parameter, kept because it is part of the public signature
 export abstract class Model<TRecord extends PlainObject = PlainObject> {
   /** The ORM adapter used for database operations. */
   protected static ormAdapter: ORMAdapter = DrizzleAdapter

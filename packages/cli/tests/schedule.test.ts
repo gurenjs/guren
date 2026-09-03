@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
+import { describe, test, beforeEach, afterEach } from 'bun:test'
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve, join } from 'node:path'
 import { listScheduledTasks, runScheduledTasks } from '../src/schedule'

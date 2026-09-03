@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'bun:test'
 import { RequestAuthContext } from '../../src/auth/RequestAuthContext'
 import { AuthenticationException } from '../../src/errors/exceptions/AuthenticationException'
-import type { Guard, AuthCredentials } from '../../src/auth/types'
+import type { Guard } from '../../src/auth/types'
 import type { Session } from '../../src/http/middleware'
 
 function createMockGuard(overrides: Partial<Guard> = {}): Guard {

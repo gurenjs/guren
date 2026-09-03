@@ -1,9 +1,9 @@
-import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
+import { describe, test, expect, afterEach } from 'bun:test'
 
 import { isLambda, getLambdaContext } from '../../src/lambda'
 
 describe('isLambda', () => {
-  const originalEnv = { ...process.env }
+  
 
   afterEach(() => {
     // Restore original env

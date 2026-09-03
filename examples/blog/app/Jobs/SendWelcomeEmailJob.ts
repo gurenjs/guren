@@ -13,7 +13,7 @@ interface SendWelcomeEmailPayload {
 export class SendWelcomeEmailJob extends Job<SendWelcomeEmailPayload> {
   static override queue = 'emails'
   static override maxAttempts = 3
-  static override backoff: 'exponential' = 'exponential'
+  static override backoff = 'exponential' as const
 
   async handle(payload: SendWelcomeEmailPayload): Promise<void> {
     const user = await User.find(payload.userId)

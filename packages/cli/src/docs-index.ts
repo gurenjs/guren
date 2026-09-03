@@ -3,7 +3,6 @@ import { readFile } from 'node:fs/promises'
 import {
   parseDocFrontmatter,
   type DocFrontmatterValue,
-  type DocMapping,
 } from './docs-frontmatter'
 import { extractMarkdownLinks } from './docs-links'
 import {

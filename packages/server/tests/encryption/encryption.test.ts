@@ -3,7 +3,6 @@ import {
   // Encrypter
   Encrypter,
   generateKey,
-  createEncrypter,
   setEncrypter,
   getEncrypter,
   encrypt,
@@ -482,7 +481,7 @@ describe('Random', () => {
       expect(combined).toMatch(/[A-Z]/)
       expect(combined).toMatch(/[a-z]/)
       expect(combined).toMatch(/[0-9]/)
-      expect(combined).toMatch(/[!@#$%^&*()\-_=+\[\]{}|;:,.<>?]/)
+      expect(combined).toMatch(/[!@#$%^&*()\-_=+[\]{}|;:,.<>?]/)
     })
   })
 
@@ -509,16 +508,6 @@ describe('Random', () => {
 
       expect(shuffled).toHaveLength(original.length)
       expect(shuffled.sort()).toEqual(original.sort())
-
-      // Should be different order (statistically)
-      let sameOrder = true
-      for (let i = 0; i < original.length; i++) {
-        if (shuffled[i] !== original[i]) {
-          sameOrder = false
-          break
-        }
-      }
-      // It's possible but very unlikely to be in same order
     })
 
     test('does not modify original array', () => {

@@ -20,7 +20,6 @@ import {
   resolveSsrEntryFile,
   stageStaticAssets,
   type ClientAssetEnv,
-  type DevOnlyModule,
   type DevOnlySpecifier,
   type SqlClientSpecifier,
   type PathLike,

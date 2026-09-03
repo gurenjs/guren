@@ -27,6 +27,7 @@ export interface MockAuthContext<User = { id: number; name: string }> {
   login: <T = User>(user: T, remember?: boolean) => Promise<void>
   logout: () => Promise<void>
   attempt: (credentials: Record<string, unknown>, remember?: boolean) => Promise<boolean>
+  // oxlint-disable-next-line no-unused-vars -- phantom type parameter, kept because it is part of the public signature
   guard: <T = User>(name?: string) => any
   session: <T = unknown>() => T | undefined
 }

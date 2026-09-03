@@ -1,7 +1,6 @@
 import { describe, expect, it, beforeEach } from 'bun:test'
 import {
   Container,
-  createContainer,
   ServiceProvider,
   ProviderManager,
 } from '../../src/container'

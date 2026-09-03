@@ -1,6 +1,6 @@
 import type { Context } from '../http/Application'
 import type { Middleware } from '../http/middleware'
-import type { AuthUser, AuthorizeOptions, AuthorizeResourceOptions } from './types'
+import type { AuthorizeOptions, AuthorizeResourceOptions } from './types'
 import { Gate, getGate, denialToException } from './Gate'
 import { AuthorizationException } from '../errors'
 import { stampCapabilities } from '../http/middleware/capabilities'

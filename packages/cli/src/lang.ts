@@ -1,6 +1,6 @@
 import { consola } from 'consola'
 import { resolve, join } from 'node:path'
-import { existsSync, mkdirSync, writeFileSync, readdirSync, readFileSync, copyFileSync, constants as fsConstants } from 'node:fs'
+import { existsSync, mkdirSync, writeFileSync, readdirSync, copyFileSync, constants as fsConstants } from 'node:fs'
 
 /**
  * Write JSON, refusing to overwrite unless forced. The `wx` flag makes the

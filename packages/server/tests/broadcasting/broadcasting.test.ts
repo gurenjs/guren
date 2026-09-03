@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, mock } from 'bun:test'
+import { describe, expect, it, beforeEach } from 'bun:test'
 import {
   BroadcastManager,
   createBroadcastManager,
@@ -10,7 +10,6 @@ import {
   PresenceChannel,
   MemoryDriver,
   type BroadcastEvent,
-  type PresenceMember,
 } from '../../src/broadcasting'
 
 describe('MemoryDriver', () => {
@@ -380,7 +379,7 @@ describe('PresenceChannel', () => {
 
     it('should broadcast presence:joining event', async () => {
       const channel = new PresenceChannel('chat.1', driver)
-      const events = driver.getPublishedEventsFor(channel.name)
+      
 
       await channel.join({ id: 1, info: { name: 'Alice' } })
 

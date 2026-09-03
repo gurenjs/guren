@@ -152,7 +152,7 @@ export class Mail {
       }
       const html = await reactEmail.render(component(props))
       this.message.html = html
-    } catch (error) {
+    } catch  {
       throw new Error(
         'Failed to render email template. Make sure @react-email/render is installed.'
       )
@@ -295,7 +295,7 @@ class SendMailJob extends Job<SendMailJobPayload> {
   static jobName = 'SendMailJob'
   static queue = 'default'
   static maxAttempts = 3
-  static backoff: 'exponential' = 'exponential'
+  static backoff = 'exponential' as const
 
   async handle(payload: SendMailJobPayload): Promise<void> {
     const manager = globalMailManager

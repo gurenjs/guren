@@ -480,7 +480,7 @@ describe('LogManager', () => {
     consoleSpy.mockRestore()
   })
 
-  it('switches channels', () => {
+  it('switches channels', async () => {
     const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'guren-logmanager-test-'))
     const testFile = `${testDir}/test.log`
 
@@ -493,13 +493,13 @@ describe('LogManager', () => {
     })
 
     manager.channel('file').info('Test message')
-    manager.close()
+    await manager.close()
 
     expect(fs.existsSync(testFile)).toBe(true)
     fs.rmSync(testDir, { recursive: true })
   })
 
-  it('creates stack channel', () => {
+  it('creates stack channel', async () => {
     const consoleSpy = vi.spyOn(console, 'info').mockImplementation(() => {})
     const testDir = '/tmp/guren-logmanager-stack-test'
     const testFile = `${testDir}/test.log`
@@ -518,7 +518,7 @@ describe('LogManager', () => {
     })
 
     manager.info('Test message')
-    manager.close()
+    await manager.close()
 
     expect(consoleSpy).toHaveBeenCalled()
     expect(fs.existsSync(testFile)).toBe(true)
@@ -527,7 +527,7 @@ describe('LogManager', () => {
     fs.rmSync(testDir, { recursive: true })
   })
 
-  it('supports stack method', () => {
+  it('supports stack method', async () => {
     const consoleSpy = vi.spyOn(console, 'info').mockImplementation(() => {})
     const testDir = '/tmp/guren-logmanager-stack-method-test'
     const testFile = `${testDir}/test.log`
@@ -545,7 +545,7 @@ describe('LogManager', () => {
     })
 
     manager.stack(['console', 'file']).info('Test message')
-    manager.close()
+    await manager.close()
 
     expect(consoleSpy).toHaveBeenCalled()
     expect(fs.existsSync(testFile)).toBe(true)

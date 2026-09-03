@@ -772,6 +772,7 @@ export interface ORMAdapterAdvanced extends ORMAdapter {
     },
     queryOptions?: AdapterQueryOptions,
   ): Promise<TRecord[]>
+  // oxlint-disable-next-line no-unused-vars -- phantom type parameter, kept because it is part of the public signature
   countAdvanced?<TRecord extends PlainObject = PlainObject>(
     table: unknown,
     conditions: WhereCondition[],
@@ -783,6 +784,7 @@ export interface ORMAdapterAdvanced extends ORMAdapter {
     data: PlainObject,
     writeOptions?: AdapterQueryOptions,
   ): Promise<TRecord>
+  // oxlint-disable-next-line no-unused-vars -- phantom type parameter, kept because it is part of the public signature
   deleteAdvanced?<TRecord extends PlainObject = PlainObject>(
     table: unknown,
     conditions: WhereCondition[],

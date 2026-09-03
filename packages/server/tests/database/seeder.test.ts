@@ -1,12 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import {
   BaseSeeder,
-  Seeder,
   resetCalledSeeders,
   BaseFactory,
-  Factory,
   defineFactory,
-  SeederRunner,
   createSeederRunner,
 } from '../../src/database'
 
@@ -418,7 +415,7 @@ describe('SeederRunner', () => {
   })
 
   describe('register', () => {
-    it('registers seeder classes', () => {
+    it('registers seeder classes', async () => {
       const runner = createSeederRunner({ silent: true })
 
       class TestSeeder extends BaseSeeder {
@@ -428,10 +425,10 @@ describe('SeederRunner', () => {
       runner.register('TestSeeder', TestSeeder)
 
       // Verify by running
-      expect(runner.run('TestSeeder')).resolves.toBeUndefined()
+      await expect(runner.run('TestSeeder')).resolves.toBeUndefined()
     })
 
-    it('registers multiple seeders', () => {
+    it('registers multiple seeders', async () => {
       const runner = createSeederRunner({ silent: true })
 
       class Seeder1 extends BaseSeeder {
@@ -447,8 +444,8 @@ describe('SeederRunner', () => {
         Seeder2,
       })
 
-      expect(runner.run('Seeder1')).resolves.toBeUndefined()
-      expect(runner.run('Seeder2')).resolves.toBeUndefined()
+      await expect(runner.run('Seeder1')).resolves.toBeUndefined()
+      await expect(runner.run('Seeder2')).resolves.toBeUndefined()
     })
   })
 

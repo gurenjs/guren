@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
-import { existsSync, mkdirSync, rmSync, readdirSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, rmSync, readFileSync } from 'node:fs'
 import { resolve, join } from 'node:path'
 import { publishLanguageFiles, makeLanguage, listLocales } from '../src/lang'
 

@@ -14,7 +14,6 @@ import {
   createBearerTokenMiddleware,
   getApiToken,
   MemoryApiTokenStore,
-  API_TOKEN_KEY,
 } from '../../src/auth/api-token'
 
 describe('MemoryApiTokenStore', () => {

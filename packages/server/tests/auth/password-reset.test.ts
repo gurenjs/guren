@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
+import { describe, it, expect, beforeEach } from 'bun:test'
 import {
   createPasswordResetToken,
   verifyPasswordResetToken,
@@ -67,16 +67,16 @@ describe('MemoryPasswordResetStore', () => {
     expect(await store.find('hash3')).not.toBeNull()
   })
 
-  it('clears all tokens', () => {
+  it('clears all tokens', async () => {
     const expiresAt = new Date(Date.now() + 60000)
-    store.store('hash1', 'user1@example.com', expiresAt)
-    store.store('hash2', 'user2@example.com', expiresAt)
+    await store.store('hash1', 'user1@example.com', expiresAt)
+    await store.store('hash2', 'user2@example.com', expiresAt)
 
     store.clear()
 
     // We can only test this indirectly by trying to find them
-    expect(store.find('hash1')).resolves.toBeNull()
-    expect(store.find('hash2')).resolves.toBeNull()
+    await expect(store.find('hash1')).resolves.toBeNull()
+    await expect(store.find('hash2')).resolves.toBeNull()
   })
 })
 

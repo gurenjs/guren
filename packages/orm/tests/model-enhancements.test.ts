@@ -1,7 +1,6 @@
-import { describe, expect, it, beforeEach } from 'bun:test'
+import { describe, expect, it } from 'bun:test'
 import {
   Model,
-  defineModel,
   type FindManyOptions,
   type ORMAdapter,
   type PlainObject,
@@ -383,8 +382,8 @@ describe('Phase 4: Model Observers', () => {
     const log: string[] = []
 
     class UserObserver implements ModelObserver {
-      deleting(data: PlainObject) { log.push('deleting') }
-      deleted(data: PlainObject) { log.push('deleted') }
+      deleting(_data: PlainObject) { log.push('deleting') }
+      deleted(_data: PlainObject) { log.push('deleted') }
     }
 
     class User extends Model<UserRecord> {
