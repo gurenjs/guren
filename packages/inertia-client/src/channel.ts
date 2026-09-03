@@ -10,9 +10,27 @@ type EventPayloadFor<
 > = TChannelEvents[TChannel][TEvent]
 
 export interface UseChannelOptions {
+  /**
+   * The SSE route mounted with `broadcast.sseMiddleware()`. The channel a
+   * subscription asks for is appended as `?channels=<name>`; an endpoint that
+   * already carries a query string gets `&channels=`.
+   */
   endpoint?: string
   withCredentials?: boolean
   eventSourceFactory?: (url: string, init: EventSourceInit) => EventSource
+}
+
+/**
+ * The URL a subscription opens: the SSE endpoint plus the channel it wants.
+ *
+ * The server subscribes nothing on its own — `sseMiddleware()` reads
+ * `?channels=` when the stream opens and delivers only what that names. A
+ * stream opened without it receives `connected` and `ping` and nothing else,
+ * which is exactly what `useChannel('orders')` used to open.
+ */
+export function channelStreamUrl(endpoint: string, channel: string): string {
+  const separator = endpoint.includes('?') ? '&' : '?'
+  return `${endpoint}${separator}channels=${encodeURIComponent(channel)}`
 }
 
 export type ChannelSubscription<
@@ -28,6 +46,15 @@ export type ChannelSubscription<
 
 /**
  * Create a typed channel subscription factory backed by EventSource.
+ *
+ * Each `useChannel(name)` call opens its own EventSource on
+ * `endpoint?channels=name`. One stream per channel is deliberate: the server
+ * dispatches by *event* name, not channel name, so two channels sharing an
+ * event name on one stream would be indistinguishable to `on()`. The server
+ * authorizes the requested channel against the user its SSE route resolves
+ * (`sseMiddleware({ getUser })`), so a private or presence channel works here
+ * too when that route knows who is connecting; a channel it refuses is simply
+ * left out of the `connected` event's `channels` list and delivers nothing.
  */
 export function createUseChannel<TChannelEvents extends UnknownChannelEvents>(
   options: UseChannelOptions = {},
@@ -39,7 +66,7 @@ export function createUseChannel<TChannelEvents extends UnknownChannelEvents>(
   return function useChannel<TChannel extends keyof TChannelEvents & string>(
     channel: TChannel,
   ): ChannelSubscription<TChannelEvents, TChannel> {
-    const eventSource = eventSourceFactory(endpoint, { withCredentials })
+    const eventSource = eventSourceFactory(channelStreamUrl(endpoint, channel), { withCredentials })
     const listeners = new Map<string, Set<EventListener>>()
 
     const attach = (event: string, listener: EventListener): void => {
