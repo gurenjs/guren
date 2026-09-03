@@ -786,38 +786,28 @@ async function main(): Promise<void> {
       await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'codegen', '--routes', 'routes/web.ts', '--out', 'types/generated/routes.d.ts', '--force'], appDir, runtimeEnv)
     }
 
-    // Worker blueprint has a known scaffold export mismatch (named vs default).
-    // TODO: fix blueprint templates to use consistent exports, then remove this skip.
-    if (blueprint !== 'worker') {
-      await typecheckApp(appDir, runtimeEnv)
-    }
+    await typecheckApp(appDir, runtimeEnv)
 
-    // Worker blueprint: skip Vite build (scaffold-only validation is sufficient)
-    if (blueprint !== 'worker') {
-      await run(['bun', 'run', 'build'], appDir, runtimeEnv)
-    }
+    await run(['bun', 'run', 'build'], appDir, runtimeEnv)
 
     // API blueprint has no Vite build output — skip bundle budget
-    if (blueprint !== 'api' && blueprint !== 'worker') {
+    if (blueprint !== 'api') {
       await run(['bun', resolve(repoRoot, 'scripts/smoke/build-budget.ts'), '--max-kb', '600', appDir], repoRoot, runtimeEnv)
     }
 
     // Templates advertise a starter test suite and a CI workflow gating on
     // `check --ci` and `guren audit`; exercise all three here so they cannot
-    // drift from the framework. Worker is excluded like typecheck above
-    // (same export mismatch). The api blueprint needs its codegen manifests
+    // drift from the framework. The api blueprint needs its codegen manifests
     // first — the generated workflow runs codegen before the gates too.
     // --no-deps keeps the audit off the network; releases of the CLI without
     // the flag ignore it harmlessly.
-    if (blueprint !== 'worker') {
-      if (blueprint === 'api') {
-        await run(['bun', 'run', 'codegen'], appDir, runtimeEnv)
-      }
-      const routesArgs = blueprint === 'api' ? ['--routes', 'routes/api.ts'] : []
-      await run(['bun', 'test'], appDir, runtimeEnv)
-      await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'check', '--ci', ...routesArgs], appDir, runtimeEnv)
-      await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'audit', '--no-deps', ...routesArgs], appDir, runtimeEnv)
+    if (blueprint === 'api') {
+      await run(['bun', 'run', 'codegen'], appDir, runtimeEnv)
     }
+    const routesArgs = blueprint === 'api' ? ['--routes', 'routes/api.ts'] : []
+    await run(['bun', 'test'], appDir, runtimeEnv)
+    await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'check', '--ci', ...routesArgs], appDir, runtimeEnv)
+    await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'audit', '--no-deps', ...routesArgs], appDir, runtimeEnv)
 
     console.log(`\nFresh app smoke passed (${blueprint}, ${installMode}): ${appDir}`)
   } finally {
