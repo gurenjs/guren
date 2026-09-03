@@ -647,7 +647,7 @@ export class Application {
     // Register a default auth guard so requireAuthenticated/requireGuest work
     // even when apps manually wire sessions without the auth option.
     if (!this.authManager.guardNames().length) {
-      this.authManager.registerGuard('web', ({ ctx, session, manager }) => {
+      this.authManager.registerGuard('web', ({ session, manager }) => {
         // Use 'users' provider if registered; otherwise create a no-op guard
         // that always returns unauthenticated (apps must register a provider
         // for actual auth to work).
@@ -883,7 +883,7 @@ export class Application {
       return
     }
 
-    provider.register?.()
+    await provider.register?.()
     await provider.boot?.()
   }
 

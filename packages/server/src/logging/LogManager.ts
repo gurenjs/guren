@@ -1,4 +1,4 @@
-import type { LogConfig, LogChannel, LogChannelConfig, LogChannelFactory } from './types'
+import type { LogConfig, LogChannel, LogChannelFactory } from './types'
 import { Logger, type LoggerOptions } from './Logger'
 import { ConsoleChannel } from './channels/ConsoleChannel'
 import { FileChannel } from './channels/FileChannel'
@@ -64,9 +64,10 @@ export class LogManager {
     const channels = config.channels.map((name) => this.resolveChannel(name))
     return {
       log: (entry) => {
-        for (const channel of channels) {
-          channel.log(entry)
-        }
+        const pending = channels
+          .map((channel) => channel.log(entry))
+          .filter((result): result is Promise<void> => result instanceof Promise)
+        return pending.length > 0 ? Promise.all(pending).then(() => undefined) : undefined
       },
       close: async () => {
         for (const channel of channels) {

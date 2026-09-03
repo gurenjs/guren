@@ -416,6 +416,8 @@ export function createSessionMiddleware(options: CreateSessionMiddlewareOptions 
     try {
       await next()
     } finally {
+      // No `return` in here: returning from a `finally` discards whatever
+      // `next()` threw, and the exception handler would never see it.
       if (session.wasDestroyed()) {
         await store.destroy(session.originalSessionId())
         deleteCookie(ctx, cookieName, {
@@ -425,10 +427,7 @@ export function createSessionMiddleware(options: CreateSessionMiddlewareOptions 
           sameSite: cookieSameSite,
           httpOnly: cookieHttpOnly,
         })
-        return
-      }
-
-      if (!session.shouldPersist()) {
+      } else if (!session.shouldPersist()) {
         if (existingId) {
           // Rolling expiry for an unchanged session: a TTL refresh, not a
           // full rewrite, when the store supports it.
@@ -447,28 +446,27 @@ export function createSessionMiddleware(options: CreateSessionMiddlewareOptions 
             maxAge: cookieMaxAgeSeconds ?? ttlSeconds,
           })
         }
-        return
-      }
+      } else {
+        const nextId = session.id
+        await store.write(nextId, session.snapshot(), ttlSeconds)
+        // Known limitation shared by every multi-process store: a concurrent
+        // request still carrying the old cookie can re-persist the old id
+        // after this destroy. The resurrected session holds only pre-rotation
+        // data (no auth state), so fixation does not escalate, but the row can
+        // reappear until it expires.
+        if (session.wasRegenerated() && session.originalSessionId() !== nextId) {
+          await store.destroy(session.originalSessionId())
+        }
 
-      const nextId = session.id
-      await store.write(nextId, session.snapshot(), ttlSeconds)
-      // Known limitation shared by every multi-process store: a concurrent
-      // request still carrying the old cookie can re-persist the old id
-      // after this destroy. The resurrected session holds only pre-rotation
-      // data (no auth state), so fixation does not escalate, but the row can
-      // reappear until it expires.
-      if (session.wasRegenerated() && session.originalSessionId() !== nextId) {
-        await store.destroy(session.originalSessionId())
+        setCookie(ctx, cookieName, signer.sign(nextId), {
+          path: cookiePath,
+          domain: cookieDomain,
+          secure: cookieSecure,
+          sameSite: cookieSameSite,
+          httpOnly: cookieHttpOnly,
+          maxAge: cookieMaxAgeSeconds ?? ttlSeconds,
+        })
       }
-
-      setCookie(ctx, cookieName, signer.sign(nextId), {
-        path: cookiePath,
-        domain: cookieDomain,
-        secure: cookieSecure,
-        sameSite: cookieSameSite,
-        httpOnly: cookieHttpOnly,
-        maxAge: cookieMaxAgeSeconds ?? ttlSeconds,
-      })
     }
   }
 }

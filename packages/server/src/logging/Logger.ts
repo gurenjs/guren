@@ -65,6 +65,13 @@ function filterObject(
 /**
  * Logger instance for writing log entries.
  */
+// Logging errors are reported, never thrown, so a broken channel cannot cascade
+// into the request that logged. Async channels reject instead of throwing, so
+// the same reporter is attached to their promise.
+const reportLoggingError = (error: unknown): void => {
+  console.error('Logging error:', error)
+}
+
 export class Logger {
   private readonly channels: LogChannel[]
   private readonly baseContext: LogContext
@@ -159,10 +166,12 @@ export class Logger {
 
     for (const channel of this.channels) {
       try {
-        channel.log(entry)
+        const pending = channel.log(entry)
+        if (pending instanceof Promise) {
+          pending.catch(reportLoggingError)
+        }
       } catch (error) {
-        // Silently ignore logging errors to prevent cascading failures
-        console.error('Logging error:', error)
+        reportLoggingError(error)
       }
     }
   }
