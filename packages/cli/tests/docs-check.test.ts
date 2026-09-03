@@ -504,9 +504,23 @@ See [invoicing](/invoicing.md).
   })
 
   it('runs the union when --arch and --docs are combined', async () => {
+    // With no guren.arch.ts and no modules/, the arch suite reports nothing,
+    // so a run that skipped it would look the same as one that ran it. A
+    // config with no violations makes it leave a summary behind.
+    await writeFile(
+      join(workspace.dir, 'guren.arch.ts'),
+      `export default {
+  layers: { domain: 'app/Domain/**', http: 'app/Http/**' },
+  rules: [{ from: 'domain', disallow: ['http'] }],
+}
+`,
+      'utf8',
+    )
+
     const report = await runCheck({ cwd: workspace.dir, arch: true, docs: true })
 
     expect(report.checks.some((c) => c.key.startsWith('docs-related:'))).toBe(true)
+    expect(report.checks.some((c) => c.key.startsWith('arch:'))).toBe(true)
     expect(report.checks.some((c) => c.key.startsWith('manifest:'))).toBe(false)
     expect(report.failCount).toBeGreaterThan(0)
   })
