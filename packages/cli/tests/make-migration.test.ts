@@ -246,7 +246,7 @@ describe('makeMigration', () => {
   it('refuses, naming the dialect, when no config and no flag declare one', async () => {
     const workspace = await createTempWorkspace('guren-cli-make-migration-no-dialect-')
     try {
-      expect(makeMigration()).rejects.toThrow(/No drizzle config found.*dialect.*--dialect/s)
+      await expect(makeMigration()).rejects.toThrow(/No drizzle config found.*dialect.*--dialect/s)
       // Refused before spawning: drizzle-kit's own `dialect: undefined` names
       // flags the user never typed.
       expect(spawnCalls.length).toBe(0)
@@ -260,7 +260,7 @@ describe('makeMigration', () => {
     try {
       await writeFile(join(workspace.dir, 'drizzle.config.ts'), "export default { out: './db/migrations' }", 'utf8')
 
-      expect(makeMigration({ out: './other' })).rejects.toThrow(
+      await expect(makeMigration({ out: './other' })).rejects.toThrow(
         /drizzle\.config\.ts declares no `dialect`/,
       )
       expect(spawnCalls.length).toBe(0)
@@ -280,7 +280,7 @@ describe('makeMigration', () => {
         'utf8',
       )
 
-      expect(makeMigration({ out: './other' })).rejects.toThrow(/Could not load drizzle\.config\.ts/)
+      await expect(makeMigration({ out: './other' })).rejects.toThrow(/Could not load drizzle\.config\.ts/)
       expect(spawnCalls.length).toBe(0)
     } finally {
       await workspace.cleanup()
@@ -299,7 +299,7 @@ describe('makeMigration', () => {
         'utf8',
       )
 
-      expect(makeMigration({ out: './other' })).rejects.toThrow(/declares `schema` as a list/)
+      await expect(makeMigration({ out: './other' })).rejects.toThrow(/declares `schema` as a list/)
       expect(spawnCalls.length).toBe(0)
     } finally {
       await workspace.cleanup()

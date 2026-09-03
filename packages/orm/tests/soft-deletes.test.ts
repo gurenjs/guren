@@ -301,8 +301,8 @@ describe('SoftDeletes: models with no other scopes', () => {
     }
     Post.useAdapter({ ...createAdapter([]), update: undefined, delete: undefined } as unknown as ORMAdapter)
 
-    expect(Post.delete({ id: 1 })).rejects.toThrow('needed for soft delete')
-    expect(Post.restore({ id: 1 })).rejects.toThrow('needed for restore')
-    expect(Post.forceDelete({ id: 1 })).rejects.toThrow('does not support delete operations')
+    await expect(Post.delete({ id: 1 })).rejects.toThrow('needed for soft delete')
+    await expect(Post.restore({ id: 1 })).rejects.toThrow('needed for restore')
+    await expect(Post.forceDelete({ id: 1 })).rejects.toThrow('does not support delete operations')
   })
 })
