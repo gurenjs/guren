@@ -86,9 +86,11 @@
     "@babel/types": "^7.29.0",
     "@changesets/cli": "^2.31.1",
     "bun-types": "^1.4.0",
+    "oxlint": "1.81.0",
+    "oxlint-tsgolint": "7.0.2001",
     "typescript": "^7.0.2",
-    "vitest": "^3.2.7",
     "vite": "^8.2.0",
+    "vitest": "^3.2.7",
     "zod": "^4.5.4"
   },
   "overrides": {
