@@ -1610,8 +1610,8 @@ const toolCallCommand = defineCommand({
   async run({ args }) {
     await runToolCall({
       name: args.name,
-      // Repeat-safe readers: `--input a --input b` would otherwise arrive
-      // comma-joined and not be JSON.
+      // Repeat-safe through `define-command.ts`: `--input a --input b` would
+      // otherwise arrive comma-joined and not be JSON.
       input: args.input,
       as: args.as,
       preflight: Boolean(args.preflight),
@@ -1674,8 +1674,9 @@ const toolLogCommand = defineCommand({
     },
   },
   async run({ args }) {
-    // Repeat-safe readers: `--denied=false --denied=false` would otherwise read
-    // as *on* and hide every invocation from a listing that looks complete.
+    // Repeat-safe through `define-command.ts`: `--denied=false --denied=false`
+    // would otherwise read as *on* and hide every invocation from a listing
+    // that looks complete.
     const rawNumber = args.number
     await runToolLog({
       file: args.file,
@@ -1758,9 +1759,10 @@ const tokenIssueCommand = defineCommand({
     },
   },
   async run({ args }) {
-    // Repeat-safe readers, on a command that mints credentials:
-    // `--yes=false --yes=false` would authorize a `tools:*` grant the user twice
-    // declined, and a repeated `--user` be stored as a principal nobody is.
+    // Repeat-safe through `define-command.ts`, on a command that mints
+    // credentials: `--yes=false --yes=false` would authorize a `tools:*` grant
+    // the user twice declined, and a repeated `--user` be stored as a
+    // principal nobody is.
     const name = args.name
     const user = args.user
     const tools = args.tools
@@ -2363,8 +2365,9 @@ const contextCommand = defineCommand({
     },
   },
   async run({ args }) {
-    // Narrowed here so both branches get the same treatment: `--app` and
-    // `--routes` reach a `resolve()` that throws on an array either way.
+    // Read once so both branches see the same values: `--app` and `--routes`
+    // reach a `resolve()` that throws on an array either way, which is what
+    // `define-command.ts` rules out.
     const cwd = args.app
     const routesFile = args.routes
     const json = Boolean(args.json)
