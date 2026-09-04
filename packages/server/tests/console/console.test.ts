@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeEach } from 'bun:test'
+import { PassThrough, Writable } from 'node:stream'
 import {
   Command,
   Input,
@@ -988,5 +989,158 @@ describe('Console Integration', () => {
     const result = output.getOutput()
     expect(result).toContain('users')
     expect(result).toContain('cache')
+  })
+})
+
+// ===================
+// Command.secret() Tests
+// ===================
+
+/**
+ * A duplex stream that passes for an interactive terminal: readline switches it
+ * to raw mode and secret() masks what is typed on it.
+ */
+function createFakeTerminal(): {
+  input: NodeJS.ReadStream
+  writes: string[]
+  rawModeCalls: boolean[]
+  output: NodeJS.WriteStream
+} {
+  const stream = new PassThrough() as PassThrough & {
+    isTTY: boolean
+    setRawMode: (mode: boolean) => PassThrough
+  }
+  const rawModeCalls: boolean[] = []
+  stream.isTTY = true
+  stream.setRawMode = (mode: boolean) => {
+    rawModeCalls.push(mode)
+    return stream
+  }
+
+  const writes: string[] = []
+  const output = new Writable({
+    write(chunk, _encoding, callback) {
+      writes.push(String(chunk))
+      callback()
+    },
+  }) as Writable & { isTTY: boolean }
+  output.isTTY = true
+
+  return {
+    input: stream as unknown as NodeJS.ReadStream,
+    writes,
+    rawModeCalls,
+    output: output as unknown as NodeJS.WriteStream,
+  }
+}
+
+/**
+ * Reject if `promise` has not settled within `ms`, so a prompt that never
+ * settles fails the test instead of hanging the runner.
+ */
+function settleWithin<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`promise did not settle within ${ms}ms`)), ms)
+  })
+  return Promise.race([promise, deadline]).finally(() => clearTimeout(timer)) as Promise<T>
+}
+
+function type(terminal: NodeJS.ReadStream, text: string): void {
+  const stream = terminal as unknown as PassThrough
+  for (const char of text) {
+    stream.write(char)
+  }
+}
+
+/** The masking writes, i.e. the ones that begin by clearing the line. */
+function maskWrites(writes: string[]): string[] {
+  return writes.filter((write) => write.startsWith('\x1B[2K'))
+}
+
+class SecretCommand extends Command {
+  static signature = 'test:secret'
+  static description = 'Secret test'
+
+  constructor(private readonly terminal: ReturnType<typeof createFakeTerminal>) {
+    super()
+  }
+
+  async handle(): Promise<void> {}
+
+  protected inputStream(): NodeJS.ReadStream {
+    return this.terminal.input
+  }
+
+  protected outputStream(): NodeJS.WriteStream {
+    return this.terminal.output
+  }
+}
+
+describe('Command.secret', () => {
+  let output: BufferedOutput
+
+  beforeEach(() => {
+    output = new BufferedOutput()
+  })
+
+  function createCommand(): {
+    command: SecretCommand
+    terminal: ReturnType<typeof createFakeTerminal>
+  } {
+    const terminal = createFakeTerminal()
+    const command = new SecretCommand(terminal)
+    command.setInput([])
+    command.setOutput(output)
+    return { command, terminal }
+  }
+
+  test('a second prompt sees only its own input and leaves no extra listener behind', async () => {
+    const { command, terminal } = createCommand()
+
+    const first = command.secret('Password')
+    type(terminal.input, 'hunter2\n')
+    expect(await settleWithin(first, 1000)).toBe('hunter2')
+
+    const listenersAfterFirst = terminal.input.listenerCount('data')
+    terminal.writes.length = 0
+
+    const second = command.secret('Token')
+    type(terminal.input, 'abc\n')
+    expect(await settleWithin(second, 1000)).toBe('abc')
+
+    expect(terminal.input.listenerCount('data')).toBe(listenersAfterFirst)
+
+    // The second prompt masks its own three characters and nothing carried
+    // over from the first.
+    const masks = maskWrites(terminal.writes)
+    expect(masks.at(-1)).toBe('\x1B[2K\x1B[200DToken: ***')
+    expect(masks.every((write) => write.startsWith('\x1B[2K\x1B[200DToken: '))).toBe(true)
+    expect(terminal.rawModeCalls.at(-1)).toBe(false)
+  })
+
+  test('resolves with input that arrives without a trailing newline', async () => {
+    const { command, terminal } = createCommand()
+
+    const pending = command.secret('Password')
+    type(terminal.input, 'hunter2')
+    ;(terminal.input as unknown as PassThrough).end()
+
+    expect(await settleWithin(pending, 1000)).toBe('hunter2')
+    expect(terminal.rawModeCalls.at(-1)).toBe(false)
+  })
+
+  test('rejects and restores the terminal when input closes with nothing typed', async () => {
+    const { command, terminal } = createCommand()
+
+    const pending = command.secret('Password')
+    const listenersWhilePrompting = terminal.input.listenerCount('data')
+    ;(terminal.input as unknown as PassThrough).end()
+
+    // Bounded: an implementation that never settles this promise must fail the
+    // assertion rather than wedge the run until the suite-level timeout.
+    await expect(settleWithin(pending, 1000)).rejects.toThrow('Password')
+    expect(terminal.input.listenerCount('data')).toBeLessThan(listenersWhilePrompting)
+    expect(terminal.rawModeCalls.at(-1)).toBe(false)
   })
 })

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import {
   MailManager,
   createMailManager,
@@ -426,5 +426,67 @@ describe('mail() helper function', () => {
     const manager = new MailManager()
     const instance = mail(manager)
     expect(instance).toBeInstanceOf(Mail)
+  })
+})
+
+// @react-email/render is not installed in this workspace. Stand it in so
+// template() gets past the import and the failure under test is the rendering.
+let renderStub: (element: unknown) => Promise<string> = async () => '<p>rendered</p>'
+vi.mock('@react-email/render', () => ({
+  render: (element: unknown) => renderStub(element),
+}))
+
+describe('Mail.template', () => {
+  let manager: MailManager
+
+  beforeEach(() => {
+    manager = new MailManager({
+      default: 'memory',
+      from: { email: 'default@example.com', name: 'Default Sender' },
+    })
+    manager.registerTransport('memory', () => new MemoryTransport())
+    renderStub = async () => '<p>rendered</p>'
+  })
+
+  it('keeps the rendering failure as the cause and names the template', async () => {
+    const failure = new Error('render exploded')
+    renderStub = async () => {
+      throw failure
+    }
+    function WelcomeEmail(): null {
+      return null
+    }
+
+    let thrown: unknown
+    try {
+      await mail(manager).template(WelcomeEmail, {})
+    } catch (error) {
+      thrown = error
+    }
+
+    expect(thrown).toBeInstanceOf(Error)
+    const error = thrown as Error
+    expect(error.cause).toBe(failure)
+    expect(error.message).toContain('WelcomeEmail')
+    expect(error.message).toContain('render exploded')
+    // The package loaded, so the install hint would send the reader the wrong way.
+    expect(error.message).not.toContain('is installed')
+  })
+
+  it('keeps a failure thrown by the component itself as the cause', async () => {
+    const failure = new Error('missing prop')
+    function BrokenEmail(): never {
+      throw failure
+    }
+
+    let thrown: unknown
+    try {
+      await mail(manager).template(BrokenEmail, {})
+    } catch (error) {
+      thrown = error
+    }
+
+    expect((thrown as Error).cause).toBe(failure)
+    expect((thrown as Error).message).toContain('BrokenEmail')
   })
 })

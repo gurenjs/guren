@@ -253,31 +253,84 @@ export abstract class Command implements CommandInstance {
 
   /**
    * Ask for secret input (password).
+   *
+   * On a TTY the typed characters are masked. The mask listener and raw mode
+   * are torn down on every exit path, so a later prompt starts clean.
    */
   async secret(question: string): Promise<string> {
+    const stdin = this.inputStream()
+    const stdout = this.outputStream()
     const rl = this.createReadline()
+    const prompt = `${question}: `
+    const hideInput = stdin.isTTY === true
 
-    return new Promise((resolve) => {
-      // Hide input in TTY
-      const stdin = process.stdin
-      if (stdin.isTTY) {
-        rl.question(`${question}: `, (answer) => {
-          rl.close()
-          this.newLine()
-          resolve(answer)
-        })
+    return new Promise((resolve, reject) => {
+      let settled = false
 
-        // Disable echo
-        stdin.on('data', () => {
-          process.stdout.write('\x1B[2K\x1B[200D' + question + ': ' + '*'.repeat(rl.line.length))
-        })
-      } else {
-        rl.question(`${question}: `, (answer) => {
-          rl.close()
-          resolve(answer)
-        })
+      // Overwrites the line readline just echoed, so it has to target the same
+      // stream readline writes to.
+      const mask = (): void => {
+        if (settled) return
+        stdout.write('\x1B[2K\x1B[200D' + prompt + '*'.repeat(rl.line.length))
       }
+
+      const finish = (): void => {
+        settled = true
+        if (hideInput) {
+          stdin.off('data', mask)
+        }
+        rl.close()
+        if (hideInput && typeof stdin.setRawMode === 'function') {
+          stdin.setRawMode(false)
+        }
+      }
+
+      if (hideInput) {
+        stdin.on('data', mask)
+      }
+
+      // Input can end without a trailing newline, and Bun's readline then
+      // closes without ever delivering a line. Flush whatever is still in the
+      // buffer instead of leaving the caller waiting forever.
+      rl.once('close', () => {
+        if (settled) return
+        const buffered = rl.line
+        finish()
+        if (buffered) {
+          if (hideInput) {
+            this.newLine()
+          }
+          resolve(buffered)
+          return
+        }
+        reject(new Error(`Input closed before "${question}" was answered`))
+      })
+
+      rl.question(prompt, (answer) => {
+        if (settled) return
+        finish()
+        if (hideInput) {
+          this.newLine()
+        }
+        resolve(answer)
+      })
     })
+  }
+
+  /**
+   * The stream prompts read from. Overridable so a test can hand the command a
+   * fake terminal; `createReadline()` reads from the same stream.
+   */
+  protected inputStream(): NodeJS.ReadStream {
+    return process.stdin
+  }
+
+  /**
+   * The stream prompts are echoed to. `createReadline()` and `secret()`'s mask
+   * share it, so the mask always overwrites the line readline just echoed.
+   */
+  protected outputStream(): NodeJS.WriteStream {
+    return process.stdout
   }
 
   /**
@@ -285,8 +338,8 @@ export abstract class Command implements CommandInstance {
    */
   protected createReadline(): readline.Interface {
     return readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
+      input: this.inputStream(),
+      output: this.outputStream(),
     })
   }
 
