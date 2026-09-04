@@ -1040,8 +1040,10 @@ describe('FakeEvent', () => {
     it('can be used as drop-in replacement for EventManager', async () => {
       const manager = events.getManager()
 
-      // Register a listener
-      manager.on(UserRegistered, () => {})
+      let received: UserRegistered | null = null
+      manager.on(UserRegistered, (e) => {
+        received = e as UserRegistered
+      })
 
       // The fake manager only records; listeners are never called.
       await manager.emit(new UserRegistered('123', 'test@example.com'))

@@ -2,7 +2,6 @@ import { describe, test, expect, beforeEach } from 'bun:test'
 import {
   Encrypter,
   generateKey,
-  createEncrypter,
   setEncrypter,
   getEncrypter,
   encrypt,
@@ -459,7 +458,7 @@ describe('Random', () => {
       expect(combined).toMatch(/[A-Z]/)
       expect(combined).toMatch(/[a-z]/)
       expect(combined).toMatch(/[0-9]/)
-      expect(combined).toMatch(/[!@#$%^&*()\-_=+\[\]{}|;:,.<>?]/)
+      expect(combined).toMatch(/[!@#$%^&*()\-_=+[\]{}|;:,.<>?]/)
     })
   })
 

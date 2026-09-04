@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, mock } from 'bun:test'
+import { describe, expect, it, beforeEach } from 'bun:test'
 import {
   BroadcastManager,
   createBroadcastManager,
@@ -10,7 +10,6 @@ import {
   PresenceChannel,
   MemoryDriver,
   type BroadcastEvent,
-  type PresenceMember,
 } from '../../src/broadcasting'
 
 describe('MemoryDriver', () => {
