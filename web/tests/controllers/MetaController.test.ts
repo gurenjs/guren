@@ -44,7 +44,6 @@ const post = {
 
 describe('MetaController', () => {
   beforeEach(() => {
-    // Default to an empty blog so docs-focused cases stay about docs.
     vi.mocked(listPublishedPosts).mockReset().mockResolvedValue([])
   })
 

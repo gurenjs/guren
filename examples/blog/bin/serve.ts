@@ -12,8 +12,7 @@ const parsedPort = Number.parseInt(process.env.PORT ?? '', 10)
 const port = Number.isInteger(parsedPort) ? parsedPort : 3333
 const hostname = process.env.HOST ?? '0.0.0.0'
 
-// The walk past a busy port lives in listen() now, which is also the only
-// place that can report which port it ended up on. Set GUREN_STRICT_PORT=1 to
-// fail fast instead — what an automated consumer wants when it has to know
-// the app under test is the one answering.
+// listen() walks past a busy port and is the only place that can report which
+// port it settled on. GUREN_STRICT_PORT=1 fails fast instead, which is what an
+// automated consumer needs to know the app answering is the one under test.
 await app.listen({ port, hostname })

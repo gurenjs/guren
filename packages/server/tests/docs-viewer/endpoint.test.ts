@@ -45,10 +45,8 @@ describe('isDocsViewerEnabled', () => {
   })
 
   test('reads the environment in the form the deploy bundlers substitute', async () => {
-    // See the matching test in tests/mcp/endpoint.test.ts: the deploy plugins'
-    // `--define 'process.env.NODE_ENV="production"'` matches that exact
-    // expression, and `process.env?.NODE_ENV` is not it. Nothing at runtime
-    // can tell the two apart, so the source is the only place to pin it.
+    // The deploy plugins' `--define 'process.env.NODE_ENV="production"'` substitutes that one
+    // exact expression, and an optional chain is a different one. Only the source can pin it.
     const source = await readFile(
       join(import.meta.dir, '../../src/docs-viewer/endpoint.ts'),
       'utf8',
@@ -119,10 +117,8 @@ describe('docs viewer integration', () => {
   const originalCwd = process.cwd()
   let dir: string | null = null
 
-  // `Application.listen()` hands `{ server }` to Bun.serve and threads it into
-  // every request, so a real `bun run dev` always has a peer address. These
-  // in-process `app.fetch()` calls have to supply it themselves — the guard
-  // treats a missing peer as unverified and denies.
+  // `Application.listen()` always threads a peer address through; in-process `app.fetch()`
+  // calls must supply one themselves, since the guard denies an unverified peer.
   const loopbackEnv = { server: { requestIP: () => ({ address: '127.0.0.1' }) } }
 
   afterEach(async () => {
@@ -168,7 +164,6 @@ describe('docs viewer integration', () => {
     expect(payload.docs[0].path).toBe('docs/adr/0001-first.md')
     expect(payload.nodes[0].kind).toBe('doc')
 
-    // Freshness: the ETag answers a conditional request with 304
     const etag = data.headers.get('etag')
     expect(etag).not.toBeNull()
     const conditional = await app.fetch(
@@ -200,8 +195,7 @@ describe('docs viewer integration', () => {
     delete process.env.GUREN_ALLOW_UNVERIFIED_PEER
     const app = await bootWorkspaceApp()
 
-    // No env, so no peer address — the shape a host that calls `app.fetch()`
-    // itself produces, and the shape a remote `curl` produces there.
+    // No env, so no peer address: the shape a host calling `app.fetch()` itself produces.
     const response = await app.fetch(
       new Request(`http://localhost${DOCS_VIEWER_PATH}/data.json`),
     )

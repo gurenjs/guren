@@ -1,13 +1,8 @@
 /**
- * The dispatch contract (RFC 0016 §3): a tool call re-enters the application
- * as a real HTTP request, so validation, policies, and middleware run exactly
- * once, in the app — never re-implemented here.
- *
- * This module is pure request/response plumbing: it rebuilds an HTTP request
- * from a flat tool call and maps the app's response onto an MCP tool result.
- * It never validates arguments (the route does, and the MCP client already
- * saw the JSON Schema) and never decides authorization (the gate and the
- * app's policies do).
+ * The dispatch contract (RFC 0016 §3): a tool call re-enters the application as
+ * a real HTTP request, so validation, policies and middleware run exactly once,
+ * in the app. Pure request/response plumbing — it never validates arguments and
+ * never decides authorization.
  */
 import type { AgentToolInputSource, DerivedAgentTool } from './derive'
 import type { AgentSurface } from './events'
@@ -38,35 +33,23 @@ export interface BuildToolRequestOptions {
    */
   preflight?: boolean
   /**
-   * Which protocol surface the call arrived on, announced to the application
-   * as `X-Guren-Agent-Surface`. Defaults to `'mcp'`, the surface that was the
-   * only one when this header was introduced, so every existing caller keeps
-   * sending exactly what it sent before.
-   *
-   * The header is informational and, in the framework, write-only: nothing
-   * here reads it back. It is there for an *application* that wants to tell
-   * an in-browser session call from a bearer-token one, and it borrows the
-   * audit trail's vocabulary ({@link AgentSurface}) so the two agree — but
-   * the trail's own `surface` comes from the adapter that recorded it, not
-   * from this header. Nothing must ever authorize on it: any client sets any
-   * header it likes, so a surface can never relax a check.
+   * Which protocol surface the call arrived on, announced as
+   * `X-Guren-Agent-Surface`; defaults to `'mcp'`, so existing callers keep
+   * sending what they sent. Informational and write-only here — it borrows the
+   * audit trail's vocabulary ({@link AgentSurface}), but the trail's own
+   * `surface` comes from the adapter. Nothing may authorize on it: any client
+   * sets any header it likes.
    */
   surface?: AgentSurface
 }
 
 /**
  * The argument-level spelling of a preflight request (RFC 0016 §5.4), for a
- * surface whose callers pass flat arguments rather than dispatch options.
- *
- * No adapter strips it today, because none accepts it. Every surface that
- * reaches the seam asks through `BuildToolRequestOptions.preflight` instead:
- * `guren tool:call` and `@guren/testing` from their own flags, and MCP from
- * the `guren.preflight` companion tool, which takes the target tool's name
- * and arguments rather than smuggling a directive through them (RFC 0016
- * §5.4 — a verdict conforms to no route's output schema, so it needs a tool
- * of its own). A surface that adopts this key owns the stripping — it is an
- * instruction to the adapter, not a field of any route's contract, and
- * forwarding it would fail the very validation the caller asked to rehearse.
+ * surface whose callers pass flat arguments rather than dispatch options. No
+ * adapter accepts it today — every surface asks through
+ * `BuildToolRequestOptions.preflight`. A surface that adopts this key owns the
+ * stripping: it is an instruction to the adapter, not a field of any route's
+ * contract, and forwarding it would fail the validation being rehearsed.
  */
 export const PREFLIGHT_ARGUMENT = '_preflight'
 
@@ -80,22 +63,18 @@ export type ToolRequestBuildFailure =
   | { missing: string[] }
   /**
    * Path parameter values that are URL dot-segments (`.` / `..`). Rejected,
-   * never substituted: `encodeURIComponent` leaves a dot untouched, and the
-   * `Request` URL parser then collapses the segment — so `{ name: '..' }` on
-   * `/files/:name/meta` would reach `/meta`, a route the scope check never
-   * saw. The only ASCII segments the WHATWG parser normalizes are `.` and
-   * `..`; every other separator (`/`, `\`) survives `encodeURIComponent`
-   * percent-encoded, so this is the complete set.
+   * never substituted: `encodeURIComponent` leaves a dot untouched and the URL
+   * parser then collapses the segment, so `{ name: '..' }` on `/files/:name/meta`
+   * would reach `/meta`, a route the scope check never saw. `.` and `..` are
+   * the only ASCII segments the WHATWG parser normalizes, so this set is complete.
    */
   | { invalidPath: string[] }
 
 /**
- * The agent-facing diagnosis of a {@link ToolRequestBuildFailure}.
- *
- * One function rather than a string per adapter: the same tool is reachable
- * from several surfaces (App MCP, WebMCP, `guren tool:call`), and an agent
- * that reads a different diagnosis depending on which one it reached would
- * be debugging the client instead of its own call.
+ * The agent-facing diagnosis of a {@link ToolRequestBuildFailure}. One function
+ * rather than a string per adapter: the same tool is reachable from several
+ * surfaces, and a diagnosis that varied by surface would have an agent
+ * debugging the client instead of its own call.
  */
 export function describeBuildFailure(failure: ToolRequestBuildFailure): string {
   if ('missing' in failure) {
@@ -110,17 +89,12 @@ export function describeBuildFailure(failure: ToolRequestBuildFailure): string {
 /**
  * Rebuild the HTTP request a tool call describes.
  *
- * The flat argument object is taken apart along `tool.inputSources` — the
- * derivation's own record of which contract each property came from — so a
- * POST route's `query` keys land in the query string where `validateQuery`
- * reads them, not in the body. Keys the derivation never advertised are
- * forwarded anyway (body for body-carrying methods, query otherwise): the
- * route's validator is the one place that rejects them, and dropping them
- * here would make this a second, quieter validator.
- *
- * GET and HEAD force everything into the query string whatever its source —
- * `Request` refuses a body on those methods, and a `body` schema on a GET
- * route is a contract defect this adapter cannot repair.
+ * The flat argument object is taken apart along `tool.inputSources`, so a POST
+ * route's `query` keys land where `validateQuery` reads them. Keys the
+ * derivation never advertised are forwarded anyway — the route's validator is
+ * the one place that rejects them. GET and HEAD force everything into the query
+ * string: `Request` refuses a body there, and a `body` schema on a GET route is
+ * a contract defect this adapter cannot repair.
  */
 export function buildToolRequest(
   tool: DerivedAgentTool,
@@ -131,14 +105,13 @@ export function buildToolRequest(
   const missing: string[] = []
   const invalidPath: string[] = []
   // Path parameters consumed *exclusively* by the URL. A name the merge
-  // resolved to `query`/`body` (a collision the derivation warns about) fills
-  // the path — the URL needs it — and still flows to its declared sink below,
-  // so it is not added here.
+  // resolved to `query`/`body` fills the path and still flows to its declared
+  // sink below, so it is not added here.
   const pathOnly = new Set<string>()
 
-  // The one path lexer (PATH_PARAM_PATTERN) does the substitution, so the
-  // names replaced here are exactly the names the derivation advertised —
-  // `:name*` is a parameter literally named `name*` on both sides.
+  // The one path lexer (PATH_PARAM_PATTERN) does the substitution, so the names
+  // replaced here are exactly the ones the derivation advertised — `:name*` is
+  // a parameter literally named `name*` on both sides.
   const path = tool.path.replace(
     PATH_PARAM_PATTERN,
     (_match, lead: string, name: string) => {
@@ -154,9 +127,9 @@ export function buildToolRequest(
         invalidPath.push(name)
         return `${lead}:${name}`
       }
-      // A name the merge assigned to query/body still substitutes into the
-      // URL, but keeps flowing to that sink — so a collision does not drop
-      // the argument from the body the route validates.
+      // A name the merge assigned to query/body still substitutes into the URL
+      // but keeps flowing to that sink, so a collision does not drop the
+      // argument from the body the route validates.
       const source = sourceOf(tool, name)
       if (source === undefined || source === 'params' || source === 'path') {
         pathOnly.add(name)
@@ -180,11 +153,11 @@ export function buildToolRequest(
     if (pathOnly.has(key) || value === undefined) continue
     const source = sourceOf(tool, key)
     // Query-bound: everything on a bodyless method; declared `query` keys; a
-    // `params`/`path` key the path never declared (a contract defect
-    // `guren check` fails — forwarded so the route's validation reports it
-    // rather than it vanishing here); and, on a nested-body route, any key
-    // that is not the body itself, since that body is `args.body` verbatim
-    // and has no object to absorb strays.
+    // Query-bound: everything on a bodyless method; declared `query` keys; a
+    // `params`/`path` key the path never declared (forwarded so the route's
+    // validation reports the defect rather than it vanishing here); and, on a
+    // nested-body route, any key that is not the body itself, since that body
+    // is `args.body` verbatim and has no object to absorb strays.
     const toQuery = bodyless
       || source === 'query'
       || source === 'params'
@@ -199,8 +172,8 @@ export function buildToolRequest(
   }
 
   const headers = new Headers({
-    // What turns an Inertia route into page JSON instead of an HTML document
-    // — without engaging the `X-Inertia` visit protocol and its 409 version
+    // What turns an Inertia route into page JSON instead of an HTML document,
+    // without engaging the `X-Inertia` visit protocol and its 409 version
     // negotiation, which a stateless tool call has no version to answer.
     Accept: 'application/json',
     'X-Guren-Agent-Surface': options.surface ?? 'mcp',
@@ -215,10 +188,9 @@ export function buildToolRequest(
   let body: string | undefined
   if (!bodyless) {
     if (tool.inputBodyNested) {
-      // The route validates a non-object body (an array, a primitive), which
-      // the derivation nested under `body` to give the tool an object root.
-      // Unwrapped here: posting `{ body: [...] }` would hand the validator an
-      // object where it expects the array.
+      // The route validates a non-object body, which the derivation nested
+      // under `body` to give the tool an object root. Unwrapped here: posting
+      // `{ body: [...] }` would hand the validator an object.
       if (Object.hasOwn(args, 'body')) {
         body = JSON.stringify(args.body)
       }
@@ -284,25 +256,19 @@ export interface ToolCallOutcome {
   status: number
   /**
    * The response carried the preflight verdict header, so this is the seam's
-   * answer and not the route's own output.
-   *
-   * Carried here because `mapToolResponse` is the only place that sees the
-   * header — an outcome has no headers — and the fact is otherwise lost. A
-   * caller that re-derived it by looking for a `preflight` field in the body
-   * would read an ordinary route whose output happens to carry that field as a
-   * rehearsal that never ran, which is the exact confusion the header was
-   * introduced to prevent.
+   * answer and not the route's own output. Carried here because
+   * `mapToolResponse` is the only place that sees the header; a caller
+   * re-deriving it from a `preflight` field in the body would read an ordinary
+   * route as a rehearsal that never ran.
    */
   preflightVerdict?: boolean
 }
 
 /**
  * Whether the tool advertises an object output schema — the only kind MCP
- * lists, and therefore the only kind that obliges a success result to carry
- * `structuredContent`. A route whose `output` is an array or primitive is not
- * advertised as structured (MCP `outputSchema` must be an object), so its
- * results ride as text. `describeTool` and `mapToolResponse` must agree on
- * this exact predicate, or one advertises a schema the other cannot satisfy.
+ * lists, and so the only kind obliging a success result to carry
+ * `structuredContent`. `describeTool` and `mapToolResponse` must agree on this
+ * exact predicate, or one advertises a schema the other cannot satisfy.
  */
 export function advertisesStructuredOutput(tool: DerivedAgentTool): boolean {
   return tool.outputSchema?.type === 'object'
@@ -311,24 +277,19 @@ export function advertisesStructuredOutput(tool: DerivedAgentTool): boolean {
 /**
  * Map the application's response onto an MCP tool result (RFC 0016 §3.4).
  *
- * - 2xx JSON object → serialized text, plus `structuredContent` when the tool
- *   advertises an object `outputSchema` (the one shape the route validated).
- * - 2xx Inertia page JSON → unwrapped to `page.props`, only for a tool with
- *   no `outputSchema` — unwrap and schema are mutually exclusive by
- *   derivation, so the advertised shape can never disagree with the result.
+ * - 2xx JSON object → text, plus `structuredContent` when the tool advertises
+ *   an object `outputSchema`.
+ * - 2xx Inertia page JSON → unwrapped to `page.props`, only for a tool with no
+ *   `outputSchema` (the two are mutually exclusive by derivation).
  * - 204 / 3xx → a status line naming the Location; not an error.
- * - 4xx / 5xx → `isError: true` carrying the exception handler's JSON body:
- *   a 422's `{ message, errors }` is an application-level failure the agent
- *   should read, not a protocol error.
+ * - 4xx / 5xx → `isError: true` with the exception handler's JSON body.
  * - non-JSON → capped text.
  *
- * One MCP invariant overrides the table: a *non-error* result for a tool that
- * advertises an object `outputSchema` must carry `structuredContent`, or the
- * SDK client rejects it after the route has already run. A success response
- * that yields no object to put there (204, 3xx, non-JSON, a non-object body)
- * contradicts the route's own declared output, so it becomes an `isError`
- * result naming the mismatch — which the SDK exempts from the rule — rather
- * than a protocol fault the agent cannot interpret.
+ * One MCP invariant overrides the table: a non-error result for a tool
+ * advertising an object `outputSchema` must carry `structuredContent`, or the
+ * SDK client rejects it after the route has already run. A success that yields
+ * no object becomes an `isError` result naming the mismatch, which the SDK
+ * exempts, rather than a protocol fault.
  */
 export async function mapToolResponse(
   tool: DerivedAgentTool,
@@ -365,11 +326,9 @@ export async function mapToolResponse(
     return { content: [{ type: 'text', text }], status }
   }
 
-  // A preflight verdict is not the route's output: the handler never ran.
-  // Returned as plain content whatever the tool advertises — put in
-  // `structuredContent`, an SDK client would validate it against the tool's
-  // output schema and throw, turning an allowed rehearsal into a protocol
-  // error.
+  // A preflight verdict is not the route's output: the handler never ran. Put
+  // in `structuredContent`, an SDK client would validate it against the tool's
+  // output schema and throw, turning an allowed rehearsal into a protocol error.
   if (response.headers.get(AGENT_PREFLIGHT_VERDICT_HEADER) !== null) {
     return { content: [{ type: 'text', text: JSON.stringify(parsed) }], status, preflightVerdict: true }
   }
@@ -392,9 +351,8 @@ export async function mapToolResponse(
 
 /**
  * A success response that cannot satisfy the tool's advertised object output
- * schema. Returned as an error result — the honest signal that the route and
- * its declared `output` disagree — which also sidesteps the SDK's
- * structuredContent requirement (errors are exempt).
+ * schema. An error result is the honest signal that the route and its declared
+ * `output` disagree, and it sidesteps the SDK's structuredContent requirement.
  */
 function inconsistentOutput(tool: DerivedAgentTool, detail: string, status: number): ToolCallOutcome {
   return {

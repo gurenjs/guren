@@ -1,12 +1,8 @@
 /**
  * Deterministic stand-in for the runtime processor, shared by the attachment
- * suites so the decode-path tests pass identically on every Bun lane. The
- * real BunImageProcessor is covered by bun-image-processor.test.ts behind the
- * `'Image' in Bun` gate.
- *
- * Pass `overrides` to make one call fail or return other dimensions; keeping
- * one factory here is what stops the suites from drifting into disagreeing
- * about what a decodable image looks like.
+ * suites so the decode-path tests pass identically on every Bun lane. The real
+ * BunImageProcessor is covered by bun-image-processor.test.ts behind the
+ * `'Image' in Bun` gate. Pass `overrides` to make one call fail.
  */
 import type { ImageProcessor } from '../src/index'
 

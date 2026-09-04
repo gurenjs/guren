@@ -33,9 +33,8 @@ const cloudflareBuild = defineCommand({
       rootDir: args.root || process.cwd(),
       skipAppBuild: Boolean(args['skip-app-build']),
       mcpOAuth: Boolean(args['mcp-oauth']),
-      // Passed only when given, rather than defaulted here: the default
-      // belongs to the option it documents, so a CLI caller and a programmatic
-      // one cannot end up disagreeing about what "unset" means.
+      // Passed only when given: the default belongs to the option itself, so a CLI
+      // caller and a programmatic one agree on what "unset" means.
       ...(args['mcp-path'] ? { mcpPath: args['mcp-path'] } : {}),
     })
   },

@@ -1,18 +1,12 @@
 import type { CheckResult, HealthStatus } from '../types'
 import { HealthCheck } from '../HealthCheck'
 
-/**
- * Callback for custom health check.
- */
 export type CustomCheckCallback = () => Promise<{
   status: HealthStatus
   message?: string
   meta?: Record<string, unknown>
 }>
 
-/**
- * Custom health check with callback.
- */
 export class CustomCheck extends HealthCheck {
   readonly name: string
 
@@ -48,9 +42,6 @@ export class CustomCheck extends HealthCheck {
   }
 }
 
-/**
- * Create a custom health check.
- */
 export function customCheck(
   name: string,
   callback: CustomCheckCallback

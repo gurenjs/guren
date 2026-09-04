@@ -17,9 +17,8 @@ export const NON_SOURCE_DIR_NAMES = new Set(['node_modules', 'dist', 'build', 'c
 export const IMPORTABLE_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.js', '.jsx', '.mjs'])
 
 /**
- * Recursively collect files from a directory matching given extensions.
- * Skips dotfiles, declaration files (.d.ts), and any directory named in
- * `excludeDirNames`.
+ * Recursively collect files matching `extensions`, skipping dotfiles,
+ * declaration files, and any directory named in `excludeDirNames`.
  */
 export async function collectFiles(
   directory: string,
@@ -56,18 +55,16 @@ export async function collectFiles(
 
 /**
  * Path of `absPath` relative to `cwd`, with `/` separators regardless of
- * platform. Used wherever a path needs to be compared against a glob or a
- * git-diff entry, both of which are always POSIX-style.
+ * platform — globs and git-diff entries are always POSIX-style.
  */
 export function toPosixRelative(cwd: string, absPath: string): string {
   return relative(cwd, absPath).split(sep).join('/')
 }
 
 /**
- * Module name (e.g. `'billing'`) if `relPath` — a POSIX-relative path, as
- * produced by `toPosixRelative` — is under `modules/<name>/`, else `null`.
- * The single source of truth for "module path → name" shared by the arch
- * boundary checks and the consistency checks.
+ * Module name if `relPath` — POSIX-relative, as `toPosixRelative` produces —
+ * is under `modules/<name>/`, else `null`. The one source of truth for
+ * "module path → name", shared by the arch and consistency checks.
  */
 export function moduleNameFromRelPath(relPath: string): string | null {
   const match = /^modules\/([^/]+)\//.exec(relPath)
@@ -75,29 +72,20 @@ export function moduleNameFromRelPath(relPath: string): string | null {
 }
 
 /**
- * `moduleNameFromRelPath` for an absolute path: module name if `filePath`
- * is under `<cwd>/modules/<name>/`, else `null`. Lets checks that assume a
- * single project-root file (tests, schema, console entry) resolve the right
- * module-scoped equivalent instead of always looking at the top level.
+ * `moduleNameFromRelPath` for an absolute path, so a check that assumes a
+ * single project-root file can resolve the module-scoped equivalent instead.
  */
 export function moduleNameFor(cwd: string, filePath: string): string | null {
   return moduleNameFromRelPath(toPosixRelative(cwd, filePath))
 }
 
 /**
- * Whether the path is *definitely* not there.
- *
- * The question {@link fileExists} answers is "can I read this", and it is the
- * right one for a scaffolder deciding whether to write. It is the wrong one
- * for a loader that degrades a missing file to an empty result: `access()`
- * reports a dangling symlink as `ENOENT`, and `existsSync` reports `EACCES`
- * and `ENOTDIR` as "no" — so a real, broken configuration reads as "you have
- * none", which is the confident wrong answer these loaders exist to avoid.
- * Non-ENOENT outcomes therefore answer `false` here: the caller attempts the
- * load, and the loader's own error is what gets reported.
- *
- * `lstat`, not `access`: a dangling symlink is something the user put there,
- * so it belongs in the loader's hands too.
+ * Whether the path is *definitely* not there — for a loader that degrades a
+ * missing file to an empty result. {@link fileExists} answers "can I read
+ * this", which reads a broken configuration (`EACCES`, `ENOTDIR`, a dangling
+ * symlink) as "you have none". Non-ENOENT outcomes answer `false` here, so the
+ * caller attempts the load and the loader's own error gets reported. `lstat`,
+ * not `access`: a dangling symlink belongs in the loader's hands too.
  */
 export async function isDefinitelyAbsent(cwd: string, relativePath: string): Promise<boolean> {
   try {
@@ -127,11 +115,8 @@ export async function fileExists(cwd: string, relativePath: string): Promise<boo
 
 /**
  * The first of `candidates` (project-relative, in preference order) that
- * exists under `cwd`, or `null`.
- *
- * One probe for every caller that has to *find* a conventional file rather
- * than assume one — `doctor` locating the app's routes entry, `guren check`
- * doing the same. Two copies could disagree about preference order, which
+ * exists under `cwd`, or `null`. One probe for every caller that has to *find*
+ * a conventional file: two copies could disagree about preference order, which
  * decides which file the whole command then reads.
  */
 export async function findFirstExisting(cwd: string, candidates: readonly string[]): Promise<string | null> {
@@ -144,9 +129,6 @@ export async function findFirstExisting(cwd: string, candidates: readonly string
  * {@link findFirstExisting} for a *loader*: the first candidate that is not
  * {@link isDefinitelyAbsent}, so a broken-but-present config reaches the
  * import and is diagnosed rather than skipped.
- *
- * Preference order lives here for the same reason it does there: it decides
- * which file the whole command then reads.
  */
 export async function findFirstLoadable(cwd: string, candidates: readonly string[]): Promise<string | null> {
   const results = await Promise.all(candidates.map((candidate) => isDefinitelyAbsent(cwd, candidate)))
@@ -166,17 +148,11 @@ export async function readIfExists(cwd: string, relativePath: string): Promise<s
  * Whether the app's `package.json` declares `packageName`, as a dependency or
  * a devDependency — `null` when the manifest cannot be read or parsed.
  *
- * Three-valued on purpose. "The app does not depend on this" and "there is no
- * manifest to ask" are different answers, and which one is safe depends
- * entirely on what the caller does with it: skipping optional output on a
- * guess is harmless, refusing a command on the same guess is not. Callers pick
- * their own default for `null`; this must never pick one for them.
- *
- * Every failure mode collapses to `null`, including the ones `readIfExists`
- * rethrows. A caller that wanted "unknown" to be survivable would otherwise get
- * an `EACCES` propagated out of a question it was prepared to answer either way
- * — a raw filesystem error from `guren add admin`, or an aborted `guren
- * codegen` where the old hand-rolled probe simply skipped its optional output.
+ * Three-valued on purpose: "does not depend on this" and "no manifest to ask"
+ * are different answers, and callers pick their own default for `null` because
+ * which one is safe depends on what they do with it. Every failure mode
+ * collapses to `null`, including the ones `readIfExists` rethrows, so an
+ * `EACCES` cannot propagate out of a question the caller was prepared for.
  */
 export async function appDependsOn(cwd: string, packageName: string): Promise<boolean | null> {
   let parsed: { dependencies?: Record<string, string>; devDependencies?: Record<string, string> }
@@ -204,9 +180,8 @@ export async function directoryExists(dirPath: string): Promise<boolean> {
 }
 
 /**
- * Directory names directly under `modules/` (RFC 0002) — e.g. `['billing',
- * 'inventory']`. Missing/absent `modules/` (the common case for apps that
- * haven't adopted modules) resolves to an empty list, not an error.
+ * Directory names directly under `modules/` (RFC 0002). An absent `modules/`
+ * resolves to an empty list, not an error.
  */
 export async function listModuleNames(appRoot: string): Promise<string[]> {
   let entries
@@ -222,10 +197,9 @@ export async function listModuleNames(appRoot: string): Promise<string[]> {
 }
 
 /**
- * The app root plus every `modules/<name>/` directory, each tagged with
- * its module name — the single "root + modules" fan-out point shared by
- * the `discover*Files` functions below, `scanDocs`, and the entity
- * context's db-artifact scans.
+ * The app root plus every `modules/<name>/` directory, tagged with its module
+ * name — the one "root + modules" fan-out point, shared by the `discover*Files`
+ * functions below, `scanDocs`, and the entity context's db-artifact scans.
  */
 export interface AppRoot {
   module: string | null
@@ -242,16 +216,10 @@ export async function listAppRoots(appRoot: string): Promise<AppRoot[]> {
 
 /**
  * Scans `<appRoot>/<subDir>` plus `<subDir>` under every module directory —
- * what makes every `discover*Files` function below (and everything built
- * on them: `check`, `audit`, `context`, `model:list`, `doctor`)
- * module-aware for free.
- *
- * Test files are excluded: components are frequently tested by a co-located
- * `<Name>.test.ts` sibling, and those files are tests, not components of the
- * kind each `discover*Files` function reports.
- *
- * `roots` overrides the fan-out for callers that have already narrowed it to
- * one app root.
+ * what makes every `discover*Files` function below module-aware for free.
+ * Test files are excluded: a co-located `<Name>.test.ts` sibling is a test,
+ * not a component. `roots` overrides the fan-out for a caller that has already
+ * narrowed it to one app root.
  */
 async function discoverDir(appRoot: string, subDir: string, roots?: AppRoot[]): Promise<string[]> {
   const scanned = roots ?? (await listAppRoots(appRoot))
@@ -260,10 +228,9 @@ async function discoverDir(appRoot: string, subDir: string, roots?: AppRoot[]): 
 }
 
 /**
- * Recursively collect every file under `directory`, skipping only
- * dependency/build directories and `.git`. Unlike `collectFiles`, dotfiles
- * and all extensions are included — docs `related:` globs may target
- * markdown, JSON, workflows, or migrations, not just source files.
+ * Every file under `directory`, skipping only dependency/build directories and
+ * `.git`. Unlike `collectFiles`, dotfiles and all extensions are included —
+ * docs `related:` globs may target markdown, workflows, or migrations.
  */
 export async function collectAllFiles(directory: string): Promise<string[]> {
   const results: string[] = []
@@ -290,9 +257,8 @@ export async function collectAllFiles(directory: string): Promise<string[]> {
 
 /**
  * Where an app's models live, relative to an app root. Same contract as
- * {@link RESOURCES_DIR}: `make:model` writes here, `discoverModelFiles`
- * reads here, and the Vite plugin watches it so `attachments.gen.ts`
- * regenerates when an `Attachable(...)` declaration changes.
+ * {@link RESOURCES_DIR}: `make:model` writes here, `discoverModelFiles` reads
+ * here, and the Vite plugin watches it to regenerate `attachments.gen.ts`.
  */
 export const MODELS_DIR = 'app/Models'
 
@@ -301,9 +267,8 @@ export function discoverModelFiles(appRoot: string): Promise<string[]> {
 }
 
 /**
- * Every source file under `app/`, module roots included. For checks whose
- * subject can live anywhere an app puts code (a controller, a job, a
- * service) rather than in one conventional directory.
+ * Every source file under `app/`, module roots included — for checks whose
+ * subject can live anywhere rather than in one conventional directory.
  */
 export function discoverAppSourceFiles(appRoot: string): Promise<string[]> {
   return discoverDir(appRoot, 'app')
@@ -314,24 +279,19 @@ export function discoverControllerFiles(appRoot: string): Promise<string[]> {
 }
 
 /**
- * Where an app's `JsonResource` subclasses live, relative to an app root.
- *
+ * Where an app's `JsonResource` subclasses live, relative to an app root:
  * `make:resource` writes here, `discoverResourceFiles` reads here, the data
- * generator names it in the header it stamps on `data.gen.ts`, and the Vite
- * plugin watches it. Same reason as {@link DB_ARTIFACT_DIRS}: a reader holding
- * its own copy of the path cannot treat a miss as "no such class exists", only
- * as "not where I happened to look".
+ * generator stamps it into `data.gen.ts`, and the Vite plugin watches it. Same
+ * reason as {@link DB_ARTIFACT_DIRS}: a reader holding its own copy of the path
+ * can only ever conclude "not where I happened to look".
  */
 export const RESOURCES_DIR = 'app/Http/Resources'
 
 /**
- * Resource classes at the project root and in every module.
- *
- * `subDir` relocates the scan for the one caller with a non-conventional
- * layout (`generateDataTypes`'s `resourcesDir` option). It stays a parameter
- * here rather than a second scan in the caller so that an override still
- * inherits the module fan-out and the test-file exclusion — a scanner that
- * forked would answer "is this a Resource?" by two rules at once.
+ * Resource classes at the project root and in every module. `subDir` relocates
+ * the scan for `generateDataTypes`'s `resourcesDir` option; a parameter rather
+ * than a second scan in the caller, so an override still inherits the module
+ * fan-out and the test-file exclusion.
  */
 export function discoverResourceFiles(appRoot: string, subDir: string = RESOURCES_DIR): Promise<string[]> {
   return discoverDir(appRoot, subDir)
@@ -366,10 +326,8 @@ export function discoverPolicyFiles(appRoot: string): Promise<string[]> {
  *
  * Scoped to the given root on purpose, unlike the `discover*Files` siblings
  * that fan out over `listAppRoots()`: a module mounts its routes through
- * `defineModule({ routes })` rather than through the project's entry
- * registrar, so the two are not the same question. Modules are covered by
- * {@link discoverModuleRoutesFiles}, which asks that other question — per
- * module, by calling this with the module directory as the root.
+ * `defineModule({ routes })` rather than the project's entry registrar, so the
+ * two are not the same question. See {@link discoverModuleRoutesFiles}.
  */
 export function discoverRoutesFiles(appRoot: string): Promise<string[]> {
   return collectFiles(resolve(appRoot, 'routes'), IMPORTABLE_EXTENSIONS).then((files) =>
@@ -379,7 +337,6 @@ export function discoverRoutesFiles(appRoot: string): Promise<string[]> {
 
 /** One module's `routes/` directory, for the wiring question scoped to it. */
 export interface ModuleRoutes {
-  /** Directory name under `modules/` — e.g. `'billing'`. */
   module: string
   /** Absolute path of `modules/<name>/`. */
   dir: string
@@ -388,13 +345,10 @@ export interface ModuleRoutes {
 }
 
 /**
- * Route files under each module's own `routes/` directory, grouped by module
- * — where `make:route --module <name>` writes, and the module half of the
- * registrar-wiring question.
- *
- * Modules with no such directory are dropped rather than reported empty: the
- * shape `make:module` scaffolds is a single `modules/<name>/routes.ts`, so an
- * app that never ran `make:route --module` has nothing here to ask about.
+ * Route files under each module's own `routes/` directory, grouped by module.
+ * Modules with no such directory are dropped rather than reported empty:
+ * `make:module` scaffolds a single `modules/<name>/routes.ts`, so an app that
+ * never ran `make:route --module` has nothing here to ask about.
  */
 export async function discoverModuleRoutesFiles(appRoot: string): Promise<ModuleRoutes[]> {
   const modules = (await listAppRoots(appRoot)).filter(
@@ -409,39 +363,30 @@ export async function discoverModuleRoutesFiles(appRoot: string): Promise<Module
 }
 
 /**
- * Files a module may keep its routes registrar in, in probe order: the single
- * `modules/<name>/routes.ts` shape `make:module` scaffolds, then the barrel
- * layout a hand-built module may use. Project-relative, given a
- * project-relative module directory.
- *
- * The counterpart to {@link discoverModuleRoutesFiles}, which answers only
- * about a module's `routes/` *directory* and so returns nothing at all for the
- * scaffolded shape. Both questions are asked by more than one check, so the
- * list lives here rather than beside either of them: a second copy is how one
- * check comes to read `modules/x/routes.mts` while the other does not.
+ * Files a module may keep its routes registrar in, in probe order. The
+ * counterpart to {@link discoverModuleRoutesFiles}, which asks only about a
+ * module's `routes/` *directory* and so returns nothing for the scaffolded
+ * shape. One list, because a second copy is how one check comes to read
+ * `modules/x/routes.mts` while the other does not.
  */
 export function moduleRoutesEntryCandidates(moduleDir: string): string[] {
   return [`${moduleDir}/routes.ts`, `${moduleDir}/routes.js`, `${moduleDir}/routes/index.ts`, `${moduleDir}/routes/index.js`]
 }
 
 /**
- * Files under the console-command directories (`make:command` output). Unlike
- * controllers or jobs, nothing loads these by scanning the directory at
- * runtime — registration with a `ConsoleKernel` is explicit — so this
- * discovery exists for tooling only. Path-based and content-blind: both
- * consumers (`guren context`'s listing and `guren check`'s registration
- * warnings) go through `discoverDeclaredCommandFiles` in `console-check.ts`,
- * which filters this walk to files that actually declare a command.
+ * Files under the console-command directories. Nothing loads these by scanning
+ * at runtime — `ConsoleKernel` registration is explicit — so this is for
+ * tooling only, and it is content-blind: both consumers go through
+ * `discoverDeclaredCommandFiles` in `console-check.ts`, which filters this walk
+ * to files that actually declare a command.
  */
 export function discoverCommandFiles(appRoot: string): Promise<string[]> {
   return discoverDir(appRoot, 'app/Console/Commands')
 }
 
 /**
- * Discover `*.test.{ts,tsx,mts,js,jsx,mjs}` files anywhere in the project:
- * under `tests/` (the convention used by scaffolded apps and the blog
- * example) as well as colocated next to source files elsewhere (the
- * convention this framework's own packages use — see CLAUDE.md).
+ * Test files anywhere in the project: under `tests/` (what scaffolded apps
+ * use) as well as colocated beside source files.
  */
 export async function discoverTestFiles(appRoot: string): Promise<string[]> {
   const files = await collectFiles(appRoot, TEST_FILE_EXTENSIONS, NON_SOURCE_DIR_NAMES)
@@ -449,17 +394,14 @@ export async function discoverTestFiles(appRoot: string): Promise<string[]> {
 }
 
 /**
- * Paths — POSIX-relative to `cwd` — that would satisfy "this controller has
- * a test", in probe order: the co-located sibling first, then the `tests/`
- * layouts `make:test` scaffolds. A controller inside `modules/<name>/` is
- * only ever paired with a test inside the same module, since the module
- * boundary check forbids the project-root `tests/` from importing module
- * internals — hence the `modules/<name>/` prefix on the `tests/` candidates.
+ * Paths — POSIX-relative to `cwd` — that would satisfy "this controller has a
+ * test", in probe order. A controller inside `modules/<name>/` is only ever
+ * paired with a test in the same module, since the boundary check forbids the
+ * project-root `tests/` from importing module internals.
  *
  * Detection is by filename and nothing else: a match says a file is named after
- * the controller, not that it exercises it, and a miss says nothing about
- * coverage. Report a miss with {@link describeControllerTestMiss} so that bound
- * is stated wherever it surfaces.
+ * the controller, not that it exercises it. Report a miss with
+ * {@link describeControllerTestMiss} so that bound is stated where it surfaces.
  */
 export function controllerTestCandidates(cwd: string, controllerPath: string): string[] {
   const name = classNameFromPath(controllerPath)
@@ -470,8 +412,7 @@ export function controllerTestCandidates(cwd: string, controllerPath: string): s
   const prefix = moduleName ? `modules/${moduleName}/` : ''
 
   // A `.js`/`.mts` controller may be tested by a same-extension sibling, but
-  // `.test.ts` stays a candidate there too. The `tests/` layouts below are
-  // only ever scaffolded by `make:test`, which always emits `.test.ts`.
+  // `.test.ts` stays a candidate there too; `make:test` only ever emits that.
   const siblingExtensions = Array.from(new Set([extname(controllerPath), '.ts']))
 
   return [
@@ -483,8 +424,7 @@ export function controllerTestCandidates(cwd: string, controllerPath: string): s
 
 /**
  * How a miss must be phrased — one string, because `guren check` and
- * `guren doctor --next` both report it and a doc comment cannot keep two
- * wordings in step.
+ * `guren doctor --next` both report it.
  */
 export function describeControllerTestMiss(cwd: string, controllerPath: string): string {
   const name = classNameFromPath(controllerPath)
@@ -501,11 +441,9 @@ export async function hasControllerTest(cwd: string, controllerPath: string): Pr
 
 /**
  * Where `make:factory` and `make:seeder` write, keyed by the suffix they
- * append. Those two scaffolders import this rather than declaring the path
- * themselves, which is what makes it safe for the readers below — and for
- * `guren doctor --next`, which suggests running `make:factory` when a scan
- * finds nothing — to treat a miss here as "no such artifact exists" rather
- * than "it was written somewhere this constant does not know about".
+ * append. Both scaffolders import this rather than declaring the path
+ * themselves, which is what lets a reader treat a miss as "no such artifact
+ * exists" rather than "not where this constant knows to look".
  */
 export const DB_ARTIFACT_DIRS = {
   Factory: 'db/factories',
@@ -517,17 +455,12 @@ export type DbArtifactKind = keyof typeof DB_ARTIFACT_DIRS
 /**
  * Matches the factory or seeder file names that belong to an entity.
  *
- * Tolerance, not derivation. `make:factory` and `make:seeder` append their
- * suffix to whatever the user typed without inflecting it, so the file name is
- * the user's choice and every plausible spelling of it has to be accepted: the
- * singular, the inflected plural (`Category` → `CategoriesFactory`), and the
- * naive `+s` plural a user may well have typed. `(?:^|_)` lets a numbered
- * seeder such as `002_PostsSeeder` match.
- *
- * The cost of over-tolerance is a stray file listed against an entity; the cost
- * of under-tolerance is an existing one silently missing. Prefer the former.
- * Contrast {@link controllerTestCandidates}, which probes exact paths, and
- * `inflect.ts`, which must produce exactly one name and so declines to guess.
+ * Tolerance, not derivation: `make:factory`/`make:seeder` append their suffix
+ * to whatever the user typed without inflecting it, so the singular, the
+ * inflected plural, and the naive `+s` plural are all accepted, and `(?:^|_)`
+ * lets a numbered seeder (`002_PostsSeeder`) match. Over-tolerance costs a
+ * stray file listed against an entity; under-tolerance silently misses a real
+ * one. Contrast `inflect.ts`, which must produce exactly one name.
  */
 export function dbArtifactPattern(entity: string, kind: DbArtifactKind): RegExp {
   const forms = [...new Set([entity, `${entity}s`, collectionName(entity)])]
@@ -535,13 +468,11 @@ export function dbArtifactPattern(entity: string, kind: DbArtifactKind): RegExp 
 }
 
 /**
- * Every factory (or seeder) file in the project, from the app root and each
- * module — the listing half of "which artifacts belong to this entity?",
- * with {@link dbArtifactPattern} as the matching half. Shared so that
- * `guren context <Entity>` and `guren doctor --next` cannot drift into
- * disagreeing about whether an entity already has one.
- *
- * `roots` narrows the fan-out for a caller that has already picked one.
+ * Every factory (or seeder) file in the project — the listing half of "which
+ * artifacts belong to this entity?", with {@link dbArtifactPattern} as the
+ * matching half. Shared so `guren context <Entity>` and `guren doctor --next`
+ * cannot disagree about whether an entity already has one. `roots` narrows the
+ * fan-out for a caller that has already picked one.
  */
 export function discoverDbArtifactFiles(
   appRoot: string,
@@ -552,28 +483,20 @@ export function discoverDbArtifactFiles(
 }
 
 /**
- * The ` --module <name>` suffix a suggested `make:*` command needs so that it
- * scaffolds beside `filePath` rather than at the project root — empty for a
- * root-level file. One home for the leading space, which is load-bearing at
- * every call site and invisible at all of them.
+ * The ` --module <name>` suffix a suggested `make:*` command needs to scaffold
+ * beside `filePath`, empty for a root-level file. One home for the leading
+ * space, which is load-bearing and invisible at every call site.
  */
 export function moduleFlagFor(cwd: string, filePath: string): string {
   const moduleName = moduleNameFor(cwd, filePath)
   return moduleName ? ` --module ${moduleName}` : ''
 }
 
-/**
- * Extract a class name from a file path.
- * e.g., '/app/Models/Post.ts' → 'Post'
- */
 export function classNameFromPath(filePath: string): string {
   const base = filePath.split(/[\\/]/).pop() ?? ''
   return base.replace(/\.(ts|mts|js|mjs)$/, '')
 }
 
-/**
- * Filter out index/barrel files from discovered file lists.
- */
 export function excludeBarrelFiles(files: string[]): string[] {
   return files.filter((f) => {
     const base = f.split('/').pop() ?? ''
@@ -582,11 +505,8 @@ export function excludeBarrelFiles(files: string[]): string[] {
 }
 
 /**
- * Renders the first `limit` items, then `and N more` — the shape a
- * caveat/warning uses to name a handful of examples without listing an
- * unbounded list. Shared by `guren check`'s scan-coverage warning and the
- * deploy checks' unparsed-file caveat, which both name a possibly-long list of
- * files that failed to read or parse.
+ * Renders the first `limit` items, then `and N more` — how a caveat names a
+ * handful of examples out of a possibly-long list.
  */
 export function formatTruncatedList(items: string[], limit = 3): string {
   const shown = items.slice(0, limit).join(', ')

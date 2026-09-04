@@ -6,13 +6,9 @@ import type { Miniflare } from 'miniflare'
 import { buildCloudflareOutput } from './build'
 
 // Opt-in end-to-end test: serves a real `cloudflare:build` output through the
-// asset worker Miniflare embeds — the same `_headers` parser and rule matcher
-// Workers Static Assets run — so the generated file is checked against the
-// runtime rather than against a reading of the docs. `build.test.ts` asserts
-// what is written; this asserts that writing it does anything.
-//
-// Miniflare spawns workerd (a native binary fetched on install), so like
-// r2-miniflare.test.ts and wrangler-migrations.test.ts it is gated behind
+// asset worker Miniflare embeds, i.e. the same `_headers` parser Workers Static
+// Assets run. `build.test.ts` asserts what is written; this asserts it does
+// anything. Miniflare spawns workerd (a native binary), so it is gated behind
 // GUREN_TEST_WRANGLER=1 and skipped in CI.
 const enabled = process.env.GUREN_TEST_WRANGLER === '1'
 
@@ -48,8 +44,8 @@ async function serveBuiltAssets(): Promise<Miniflare> {
   scaffoldApp(root)
   await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
 
-  // Read back from the config the build just scaffolded rather than restating
-  // it: the point is that what a deploy actually runs produces these headers.
+  // Read back from the config the build just scaffolded, so what a deploy runs
+  // is what produces these headers.
   const wrangler = JSON.parse(readFileSync(join(root, 'wrangler.jsonc'), 'utf8'))
 
   const { Miniflare } = await import('miniflare')

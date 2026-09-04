@@ -1,15 +1,10 @@
 import type { Redis } from 'ioredis'
 
 /**
- * In-memory stand-in covering the string/set/pipeline commands
- * RedisPasswordResetStore and RedisEmailVerificationStore use
- * (`get`/`set`/`del`/`sadd`/`srem`/`smembers`/`pipeline().psetex/sadd/pexpire`).
- *
- * Shared rather than forked a third time: RedisOAuthStateStore.test.ts has its
- * own fake covering `eval` (its atomic get+delete), and
- * RedisApiTokenStore.test.ts has its own covering `hset`/`hgetall`. Neither
- * store this fake backs uses hashes or Lua, so this is the narrower surface
- * the other two fakes already duplicate a slice of.
+ * In-memory stand-in for the string/set/pipeline commands
+ * RedisPasswordResetStore and RedisEmailVerificationStore use. Neither store
+ * needs hashes or Lua: RedisOAuthStateStore.test.ts has its own fake for `eval`
+ * and RedisApiTokenStore.test.ts one for `hset`/`hgetall`.
  */
 export class FakeRedis {
   private readonly strings = new Map<string, string>()

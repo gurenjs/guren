@@ -15,13 +15,9 @@ import {
 } from '../src/tool-log'
 
 /**
- * The audit reader end to end: which files it reads, in what order, what it
- * filters, and what it says when there is nothing.
- *
- * The trail lives in a *subdirectory* of the workspace, because
- * `createTempWorkspace` chdirs into the workspace it makes. An app fixture at
- * its root would leave `--app` and the process cwd pointing at the same place,
- * and every case here would pass whether or not the command honoured the flag.
+ * A *subdirectory* of the workspace, because `createTempWorkspace` chdirs into
+ * the workspace it makes: an app at its root would leave `--app` and the cwd
+ * equal, and every case would pass whether or not the flag was honoured.
  */
 const APP_DIR_NAME = 'app'
 
@@ -31,13 +27,9 @@ const YESTERDAY = '2087-03-13'
 const TOMORROW = '2087-03-15'
 
 /**
- * How often `--tail` polls, mirroring the command's own `FOLLOW_INTERVAL_MS`.
- *
- * Copied rather than imported: it is not part of what this command promises a
- * caller, and exporting it to satisfy a test would make it so. The follow tests
- * wait comfortably past it, so a change to the real interval slows them down
- * rather than making them wrong — until it exceeds this, which the waits would
- * then time out on by name.
+ * Mirrors the command's own `FOLLOW_INTERVAL_MS`, copied rather than imported
+ * so it stays out of the public surface. A larger real interval makes the waits
+ * below time out by name rather than go wrong quietly.
  */
 const FOLLOW_INTERVAL_MS = 500
 
@@ -75,9 +67,8 @@ function line(overrides: RecordOverrides = {}): string {
       ? { reason: overrides.reason ?? 'scope' }
       : { status: overrides.status ?? 200, durationMs: 7 }),
   }
-  // The envelope `DailyFileChannel`'s JSON format adds. Written here rather
-  // than assumed away, so this test fails if the reader ever stops tolerating
-  // it — which is the only thing keeping the sink able to reuse the channel.
+  // The envelope `DailyFileChannel`'s JSON format adds: tolerating it is what
+  // keeps the sink able to reuse the channel.
   return JSON.stringify({ timestamp: record.ts, level: 'info', message: 'agent.audit', ...record })
 }
 
@@ -144,7 +135,6 @@ describe('guren tool:log', () => {
 
       await runToolLog({ appRoot: appDir, json: true })
 
-      // Chronological on the page, whatever order the files were opened in.
       expect(printed().map((row) => JSON.parse(row).tool)).toEqual(['old.one', 'old.two', 'new.one'])
     })
 
@@ -200,10 +190,9 @@ describe('guren tool:log', () => {
     it('filters by tool', async () => {
       await runToolLog({ appRoot: appDir, tool: 'posts.index', json: true })
 
-      // The rows by identity, not by count. Two of the four seeded records are
-      // `posts.index`, so a count of two is also what a filter that dropped
-      // the wrong two would print — and what an implementation ignoring
-      // `--tool` and honouring a stale `-n 2` would print as well.
+      // By identity, not by count: two of the four seeded records are
+      // `posts.index`, so a count of two also matches a filter that dropped the
+      // wrong two, or one ignoring `--tool` under a stale `-n 2`.
       expect(printed().map((row) => JSON.parse(row)).map((record) => [record.tool, record.surface])).toEqual([
         ['posts.index', 'mcp'],
         ['posts.index', 'cli'],
@@ -221,15 +210,14 @@ describe('guren tool:log', () => {
     })
 
     it('refuses an unknown --surface instead of answering with an empty list', async () => {
-      // An empty listing on this command reads as "no agent calls happened",
-      // which is exactly the wrong conclusion to hand someone who mistyped.
+      // An empty listing reads as "no agent calls happened" — the wrong
+      // conclusion to hand someone who mistyped.
       await expect(runToolLog({ appRoot: appDir, surface: 'carrier-pigeon' })).rejects.toThrow('Unknown --surface')
     })
 
     it('applies -n after filtering, not before', async () => {
-      // Ten invocations then two denials: filtering last would leave the
-      // denials outside the window and report none, which over a busy trail is
-      // how a real denial goes unseen.
+      // Filtering last would leave the denials outside the window and report
+      // none, which over a busy trail is how a real denial goes unseen.
       const many = Array.from({ length: 10 }, (_unused, index) => line({ tool: `noise.${index}` }))
       await seed(TODAY, [
         ...many,
@@ -251,8 +239,8 @@ describe('guren tool:log', () => {
       const message = stderr()
       expect(message).toContain('No agent audit trail found')
       expect(message).toContain("mcpPlugin({ audit: { file: 'storage/logs/agent-audit.log' } })")
-      // Honest about both readings: from here, "never wired" and "wired but
-      // nothing called yet" are indistinguishable.
+      // "Never wired" and "wired but nothing called yet" are indistinguishable
+      // from here, so the message says both.
       expect(message).toContain('no tool has been called yet')
     })
 
@@ -278,9 +266,8 @@ describe('guren tool:log', () => {
 
       expect(printed()).toHaveLength(0)
       expect(info()).toContain('holds no records matching those filters')
-      // And emphatically *not* the other message. The two silences look
-      // identical on the page and send a reader to opposite places: one to the
-      // plugin configuration, one to the filters they just typed.
+      // Not the other message: the two silences look identical but send a
+      // reader to opposite places (plugin configuration vs. their filters).
       expect(stderr()).not.toContain('No agent audit trail found')
     })
   })
@@ -292,7 +279,6 @@ describe('guren tool:log', () => {
       await runToolLog({ appRoot: appDir, json: true })
 
       const [row] = printed()
-      // The record, not the envelope the channel wrapped it in.
       expect(JSON.parse(row)).toEqual({
         ts: `${TODAY}T12:00:00.000Z`,
         outcome: 'invoked',
@@ -319,17 +305,15 @@ describe('guren tool:log', () => {
     })
 
     it('paints nothing when stdout is not a terminal', async () => {
-      // This listing is routinely piped without `--json` — into `grep`, into a
-      // file kept with an incident — and an escape code embedded in a stored
-      // audit line is noise a later reader has no way to attribute.
+      // This listing is routinely piped without `--json`, and an escape code in
+      // a stored audit line is noise a later reader cannot attribute.
       await seed(TODAY, [line({ tool: 'posts.store', outcome: 'denied', reason: 'rate-limit' })])
       const had = Object.hasOwn(process.stdout, 'isTTY')
       const original = process.stdout.isTTY
 
       try {
         // Both directions, so the negative assertion below is one that could
-        // fail: with a terminal the same row *does* carry escape codes, which
-        // is what proves the check is reading something real.
+        // fail: with a terminal the same row *does* carry escape codes.
         process.stdout.isTTY = true
         await runToolLog({ appRoot: appDir })
         expect(printed()[0]).toContain('[')
@@ -342,9 +326,8 @@ describe('guren tool:log', () => {
         else delete (process.stdout as { isTTY?: boolean }).isTTY
       }
 
-      // The restore actually took. This is the one piece of global state these
-      // tests write, and Bun shares the process across every test file — an
-      // `isTTY` left behind as `false` would quietly uncolour whatever ran next.
+      // Bun shares the process across test files, so an `isTTY` left behind as
+      // `false` would quietly uncolour whatever ran next.
       expect(process.stdout.isTTY).toBe(original as boolean)
 
       const [row] = printed()
@@ -355,23 +338,16 @@ describe('guren tool:log', () => {
   })
 
   /**
-   * The follow loop.
-   *
-   * Every case here runs against a fake clock seeded on {@link TODAY}, because
-   * the followed path is recomputed each poll from `dailyFilePath(basePath, new
-   * Date())` — a follow reads the file the *wall* clock names, and the fixtures
-   * are dated in 2087 for the reason `agent/audit.test.ts` gives.
-   *
-   * Follows are registered as they are started and aborted in `afterEach`
-   * before the workspace is removed. A `--tail` that outlives its test does not
-   * crash: `readFrom` answers ENOENT with `null`, so an abandoned loop polls a
-   * deleted directory quietly for the rest of the run.
+   * Fake clock seeded on {@link TODAY}: the followed path is recomputed each
+   * poll from the *wall* clock, and the fixtures are dated in 2087 for the
+   * reason `agent/audit.test.ts` gives. An abandoned follow is harmless —
+   * `readFrom` answers ENOENT with `null`.
    */
   describe('--tail', () => {
     interface Follow {
       controller: AbortController
       done: Promise<void>
-      /** Whether `runToolLog` has returned. A follow that returns has stopped. */
+      /** A follow that has returned has stopped. */
       settled: () => boolean
       failure: () => unknown
     }
@@ -387,8 +363,8 @@ describe('guren tool:log', () => {
         running.controller.abort()
         await running.done
       }
-      // Unconditionally, and before the outer hook removes the workspace: a
-      // mid-test throw must not hand the next file a process living in 2087.
+      // Unconditionally: a mid-test throw must not hand the next file a
+      // process living in 2087.
       setSystemTime()
     })
 
@@ -431,13 +407,8 @@ describe('guren tool:log', () => {
     }
 
     it('does not exit when there is no trail yet, and prints the first record to arrive', async () => {
-      // The regression: `--tail` used to return immediately when the trail did
-      // not exist, so an operator who had just wired the sink and was waiting
-      // for the first agent call got the "no trail" notice and their prompt
-      // back — which reads as "and there never will be".
-      // Deliberately not `--json`: the explanation below is suppressed under
-      // that flag so a caller piping stdout into a parser still gets a clean
-      // stream, and it is the explanation that is on trial here.
+      // Deliberately not `--json`: the explanation is suppressed under that flag
+      // to keep stdout parseable, and it is the explanation on trial here.
       const running = follow()
 
       await poll()
@@ -465,9 +436,8 @@ describe('guren tool:log', () => {
       await seed(TODAY, [line({ tool: 'backlog.one' })])
       const running = follow({ json: true })
 
-      // Waiting for the backlog row *is* the proof that the initial read
-      // finished: the follow resumes from the position that read reached, so
-      // everything after this point is strictly the follow's own doing.
+      // Waiting for the backlog row proves the initial read finished, so what
+      // follows is strictly the follow's own doing.
       await waitFor('the backlog row', () => printed().length >= 1)
       expect(tools()).toEqual(['backlog.one'])
 
@@ -476,37 +446,25 @@ describe('guren tool:log', () => {
 
       expect(tools()).toEqual(['backlog.one', 'live.one'])
 
-      // Twice would mean the follow re-read from an offset it had already
-      // passed — which is what a cursor reset on every poll looks like.
+      // Twice would mean a cursor reset on every poll.
       await poll()
       expect(tools()).toEqual(['backlog.one', 'live.one'])
       expect(running.settled()).toBe(false)
     }, 20_000)
 
     it('prints a record appended while the backlog is still being read', async () => {
-      // The initial-offset race. A snapshot read followed by a `stat` is two
+      // The initial-offset race: a snapshot read plus a `stat` are two
       // observations of a growing file, and a record appended between them
-      // belongs to neither — the snapshot was taken before it arrived, the
-      // follow resumes past it. Reading once and keeping *that* read's position
-      // leaves it nowhere to fall.
-      //
-      // The window is a fraction of a millisecond wide on an empty trail, so
-      // it is widened deliberately: a rotation set of 300 dated files whose
-      // records all fail the `--tool` filter. Failing the filter is the point —
-      // nothing accumulates, so `collectRecords` never reaches its limit and
-      // never breaks early, and every one of those files is opened and parsed
-      // while the append below is landing. Measured at ~29ms against a 5ms
-      // append, and the measurement is repeated below rather than trusted.
+      // belongs to neither. The window is widened deliberately to ~29ms with 300
+      // dated files whose records all fail `--tool` (so nothing accumulates and
+      // every file is still opened and parsed), against a 5ms append.
       const APPEND_DELAY_MS = 5
       const noise = Array.from({ length: 60 }, (_unused, index) => line({ tool: `noise.${index}` }))
       for (const stamp of stampsBefore(300)) await seed(stamp, noise)
       await seed(TODAY, [line({ tool: 'noise.today' })])
 
-      // The window's width, measured on this machine rather than assumed: an
-      // ordinary run over the same corpus does the same scan the follow does
-      // before its first poll. Asserted, so a machine fast enough to close the
-      // window before the append lands fails here — naming the construction —
-      // instead of passing vacuously further down.
+      // The window's width, measured on this machine rather than assumed, so a
+      // machine fast enough to close it fails here instead of passing vacuously.
       const startedAt = performance.now()
       await runToolLog({ appRoot: appDir, tool: 'target', json: true })
       const backlogMs = performance.now() - startedAt
@@ -521,24 +479,21 @@ describe('guren tool:log', () => {
       await waitFor('the appended record', () => running.settled() || printed().length >= 1)
       await poll()
 
-      // Exactly once: not zero (the old two-observation read would lose it),
-      // and not twice.
+      // Exactly once: not zero (a two-observation read loses it), not twice.
       expect(tools()).toEqual(['target'])
     }, 30_000)
 
     it('drains a complete record with no trailing newline when the file rolls over', async () => {
-      // A held fragment is right on every ordinary poll — its remainder is
-      // still on the way. After a rollover nothing further is coming to that
-      // file, and the same restraint would discard a record that is already
-      // complete.
+      // Holding a fragment is right on an ordinary poll, but after a rollover
+      // nothing more is coming and the same restraint discards a whole record.
       setSystemTime(new Date(`${TODAY}T23:59:50.000Z`))
       await writeFile(logFile(TODAY), line({ tool: 'held.over' }))
 
       const running = follow({ json: true })
       await rest(200)
 
-      // Held, not printed: from the follow's point of view the last line of a
-      // file being appended to is indistinguishable from a partial write.
+      // Held: the last line of a file being appended to is indistinguishable
+      // from a partial write.
       expect(printed()).toHaveLength(0)
 
       setSystemTime(new Date(`${TOMORROW}T00:00:10.000Z`))
@@ -549,12 +504,9 @@ describe('guren tool:log', () => {
     }, 20_000)
 
     it('does not prepend a stale fragment when the file is truncated before the rollover', async () => {
-      // A follow holds two things between polls: the bytes after the last
-      // newline, and a character whose bytes a read split. Both describe
-      // positions in the file as it was. Truncated, they describe nothing —
-      // and prepending them to the bytes that replaced them corrupts the first
-      // line of what remains, which at a rollover is the last chance anything
-      // in that file has to be read.
+      // The bytes held between polls describe positions in the file as it was;
+      // after a truncation, prepending them corrupts the first line of what
+      // replaced them — at a rollover, that file's last chance to be read.
       setSystemTime(new Date(`${TODAY}T23:59:40.000Z`))
       await seed(TODAY, [line({ tool: 'before.truncate', args: { padding: 'x'.repeat(400) } })])
 
@@ -566,10 +518,9 @@ describe('guren tool:log', () => {
       await poll(2)
       expect(tools()).toEqual(['before.truncate'])
 
-      // Synchronous, and with no `await` between the two, so the follow cannot
-      // wake in the middle: a poll landing between the truncation and the
-      // clock change would drain or restart before the case under test exists,
-      // and the assertion below would then hold for the wrong reason.
+      // Synchronous and with no `await` between the two: a poll landing between
+      // the truncation and the clock change would make the assertion below hold
+      // for the wrong reason.
       writeFileSync(logFile(TODAY), line({ tool: 'after.truncate' }))
       setSystemTime(new Date(`${TOMORROW}T00:00:10.000Z`))
       await poll()
@@ -579,10 +530,8 @@ describe('guren tool:log', () => {
     }, 20_000)
 
     it('reassembles a multibyte character split across a poll boundary', async () => {
-      // What the `StringDecoder` held across polls is for. Decoding each read
-      // on its own turns the straddling character into replacement bytes, and
-      // the record carrying it is lost — which is to say an audit trail would
-      // drop a call because one of its arguments was not written in ASCII.
+      // Decoding each read on its own turns the straddling character into
+      // replacement bytes, dropping the record that carried it.
       await seed(TODAY, [line({ tool: 'ascii.first' })])
       const running = follow({ json: true })
       await waitFor('the backlog row', () => printed().length >= 1)
@@ -593,9 +542,8 @@ describe('guren tool:log', () => {
       expect(cut).toBeGreaterThan(1)
 
       await appendFile(logFile(TODAY), bytes.subarray(0, cut))
-      // Two polls, not one, so this assertion cannot pass because nothing has
-      // been read yet: a window of that length guarantees a poll observed the
-      // fragment and chose to hold it, which is the claim being made.
+      // Two polls, not one, so a poll must have observed the fragment and
+      // chosen to hold it rather than simply not read yet.
       await poll(2)
       // Nothing yet: the line has no newline, so the whole fragment is held.
       expect(tools()).toEqual(['ascii.first'])
@@ -619,14 +567,9 @@ describe('tool:log flag handling (citty layer)', () => {
   let warnSpy: Mock<typeof consola.warn>
 
   /**
-   * Driven through `runCommand`, not through `runToolLog`.
-   *
-   * The bug these cover lives in the argument layer citty owns: a repeated
-   * flag arrives as an *array*, and every array is truthy, so
-   * `--denied=false --denied=false` reads as `true` unless the wiring takes
-   * the last value. A test calling `runToolLog` directly passes a plain
-   * boolean and never touches the layer where that happens — which is how the
-   * gap reached review on the neighbouring command.
+   * Driven through `runCommand`, because the bug lives in citty's argument
+   * layer: a repeated flag arrives as an *array*, and every array is truthy, so
+   * `--denied=false --denied=false` reads as `true` unless the last value wins.
    */
   beforeEach(async () => {
     workspace = await createTempWorkspace('guren-tool-log-flags-')
@@ -672,8 +615,7 @@ describe('tool:log flag handling (citty layer)', () => {
   })
 
   it('reads the last --tool rather than joining repeats', async () => {
-    // Joined, the repeat would read as one name matching neither tool and the
-    // listing would be empty.
+    // Joined, the repeat would match neither tool and list nothing.
     await run(['--tool', 'posts.index', '--tool', 'posts.store'])
 
     expect(tools()).toEqual(['posts.store'])
@@ -690,17 +632,13 @@ describe('tool:log flag handling (citty layer)', () => {
   })
 
   it('reads a repeated --json that ends in false as off', async () => {
-    // `--json` is appended by `run()`, so a `--json=false` after it must win —
-    // the human line is not JSON, and parsing it would throw.
     await runCommand(builtinSubCommands['tool:log'], {
       rawArgs: ['--app', appDir, '--json', '--json=false'],
     })
 
     const rows = logSpy.mock.calls.map((call) => String(call[0]))
-    // Asserted *before* the parse, and this is the whole point of the two
-    // lines: `String(undefined)` is `'undefined'`, which `JSON.parse` also
-    // throws on — so a check that only asserted the throw passed just as well
-    // when the command had printed nothing at all.
+    // Asserted before the parse: `String(undefined)` is `'undefined'`, which
+    // `JSON.parse` also throws on, so a throw alone proves nothing.
     expect(rows).toHaveLength(2)
     expect(rows[0]).toContain('posts.index')
     expect(rows[1]).toContain('posts.store')
@@ -717,18 +655,15 @@ describe('parseSinceDuration', () => {
   })
 
   it('refuses anything that is not a duration', () => {
-    // Defaulting would either widen the window silently or empty it silently;
-    // both look like an answer.
     for (const raw of ['yesterday', '30', 'm', '-5m', '2w']) {
       expect(() => parseSinceDuration(raw)).toThrow('--since must be a duration')
     }
   })
 
   it('refuses a digit string too large to be a duration', () => {
-    // The shape is right — digits then a unit — so the pattern accepts it and
-    // the multiplication overflows to Infinity. Its cutoff is -Infinity, which
-    // keeps every record ever written: no filter at all, wearing the answer to
-    // the question that was asked. Refused like any other unusable duration.
+    // The pattern accepts it and the multiplication overflows to Infinity,
+    // whose cutoff is -Infinity: every record ever written, wearing the answer
+    // to the question that was asked.
     const overflowing = `${'9'.repeat(309)}d`
 
     expect(Number(overflowing.slice(0, -1))).toBe(Number.POSITIVE_INFINITY)

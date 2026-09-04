@@ -73,11 +73,8 @@ export default app
     expect(app).toContain('providers: [AcmeGurenPluginAuditProvider]')
   })
 
-  // The dependency probe used to rethrow anything that was not ENOENT, so an
-  // unreadable manifest aborted the whole command before src/app.ts was
-  // touched. Registering the provider is the useful half and does not depend on
-  // knowing whether the package is already installed — only the install hint
-  // does, and over-offering it is harmless.
+  // Registering the provider does not depend on knowing whether the package is
+  // installed — only the install hint does, and over-offering it is harmless.
   it.skipIf(!CAN_DENY_FILE_READS)('registers the provider when package.json cannot be read', async () => {
     await chmod('package.json', 0o000)
 
@@ -165,9 +162,8 @@ export default app
     // Projects predating src/console.ts would otherwise get an entrypoint
     // importing a file they don't have.
     expect(updated).toContain('src/console.ts')
-    // Pinned to the create-app templates so the two can't silently drift —
-    // this is exactly what happened once, when #223 rewrote both templates'
-    // comment without touching this scaffold's copy.
+    // Pinned to the create-app templates so the two can't drift: #223 rewrote
+    // both templates' comment without touching this scaffold's copy.
     const consoleEntry = await readFile('src/console.ts', 'utf8')
     const canonicalConsoleEntry = await readFile(
       resolve(import.meta.dir, '../../create-app/templates/default/src/console.ts'),
@@ -344,10 +340,8 @@ export default app
     })
   })
 
-  // The refusal is the whole point here: this command throws where the
-  // scaffolders warn, so an import written before the array patch is one the
-  // user is left to clean up by hand — and under noUnusedLocals it stops the
-  // app compiling.
+  // This command throws where the scaffolders warn, so an import written before
+  // the array patch stops the app compiling under noUnusedLocals.
   it('leaves the app entry untouched when the providers array cannot be found', async () => {
     const providerless = `import { createApp } from '@guren/core'
 

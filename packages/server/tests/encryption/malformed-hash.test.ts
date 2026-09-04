@@ -2,10 +2,9 @@ import { describe, test, expect } from 'bun:test'
 import { hashPassword, verifyPassword } from '../../src/encryption/Hash'
 import { NodeHasher } from '../../src/auth/password/NodeHasher'
 
-// A `$scrypt$` string whose digest decodes to zero bytes authenticated *every*
-// password: scrypt asked for a zero-length key returns zero bytes, and
-// timingSafeEqual() of two empty buffers is true. A truncated column, a partial
-// write, or a digest that is not valid base64 all reach that shape.
+// A `$scrypt$` string whose digest decodes to zero bytes authenticates *every* password:
+// scrypt returns zero bytes for a zero-length key and timingSafeEqual() of two empty
+// buffers is true. A truncated column or a non-base64 digest reaches that shape.
 const MALFORMED = {
   'an empty digest': '$scrypt$N=1024,r=8,p=1$c2FsdA==$',
   'an empty salt': '$scrypt$N=1024,r=8,p=1$$c2FsdA==',
@@ -20,8 +19,7 @@ describe('verifyPassword rejects a malformed hash', () => {
     await expect(verifyPassword('any-password-at-all', hash)).rejects.toThrow(
       'Invalid password hash format.',
     )
-    // Whatever it does, it must not authenticate. Two different passwords
-    // agreeing is the signature of the bypass this pins shut.
+    // Two different passwords agreeing is the signature of the bypass this pins shut.
     await expect(NodeHasher.prototype.verify.call(new NodeHasher(), hash, 'other')).rejects.toThrow()
   })
 
@@ -33,8 +31,7 @@ describe('verifyPassword rejects a malformed hash', () => {
   })
 
   test('honours the parallelism encoded in the hash', async () => {
-    // p is read back from the hash, so a tampered value changes the derivation
-    // and cannot be made to agree with the stored digest.
+    // p is read back from the hash, so tampering with it changes the derivation.
     const hashed = await hashPassword('password123', { cost: 1024 })
     const tampered = hashed.replace('p=1', 'p=2')
 

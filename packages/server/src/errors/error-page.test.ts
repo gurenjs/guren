@@ -31,7 +31,6 @@ describe('renderErrorPage', () => {
   test('should use custom message when provided', () => {
     const html = renderErrorPage(404, 'The post was deleted.')
     expect(html).toContain('The post was deleted.')
-    // Should not contain the default description
     expect(html).not.toContain('The page you are looking for could not be found.')
   })
 

@@ -1,35 +1,20 @@
 import type { CheckResult } from '../types'
 import { HealthCheck } from '../HealthCheck'
 
-/**
- * Storage driver interface (minimal).
- */
 export interface StorageDriverInterface {
   put(path: string, contents: string | Buffer): Promise<void>
   get(path: string): Promise<Buffer | null>
   delete(path: string): Promise<boolean>
 }
 
-/**
- * Options for storage health check.
- */
 export interface StorageCheckOptions {
-  /**
-   * Custom name for this check.
-   * @default 'storage'
-   */
+  /** @default 'storage' */
   name?: string
 
-  /**
-   * Test file path.
-   * @default '__health_check__.txt'
-   */
+  /** @default '__health_check__.txt' */
   testPath?: string
 }
 
-/**
- * Health check for storage functionality.
- */
 export class StorageCheck extends HealthCheck {
   readonly name: string
 
@@ -50,13 +35,10 @@ export class StorageCheck extends HealthCheck {
     const testContent = `health_check_${Date.now()}`
 
     try {
-      // Test write
       await this.storage.put(this.testPath, testContent)
 
-      // Test read
       const retrieved = await this.storage.get(this.testPath)
 
-      // Clean up
       await this.storage.delete(this.testPath)
 
       if (retrieved && retrieved.toString() === testContent) {

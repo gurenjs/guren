@@ -1,10 +1,7 @@
-// Query the site's Workers Analytics Engine dataset over the SQL API and
-// print a small weekly report. Reads, not writes — safe to run any time.
-//
-// Usage:
-//   CLOUDFLARE_ACCOUNT_ID=... CLOUDFLARE_API_TOKEN=... bun scripts/analytics-report.ts [--days 7]
-//
+// Weekly read-only report over the site's Workers Analytics Engine dataset.
 // The token needs the "Account Analytics: Read" permission.
+//
+//   CLOUDFLARE_ACCOUNT_ID=... CLOUDFLARE_API_TOKEN=... bun scripts/analytics-report.ts [--days 7]
 
 const DATASET = 'guren_dev_analytics'
 

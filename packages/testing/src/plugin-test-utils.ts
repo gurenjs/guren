@@ -1,18 +1,6 @@
 import type { Application, ServiceProviderConstructor } from '@guren/server'
 
-/**
- * Create a minimal test application for plugin integration testing.
- * Boots the app with the given providers and returns the booted instance.
- *
- * @example
- * ```typescript
- * import { createPluginTestApp, assertPluginRegisters } from '@guren/testing'
- * import { AnalyticsServiceProvider } from 'guren-plugin-analytics'
- *
- * const app = await createPluginTestApp([AnalyticsServiceProvider])
- * assertPluginRegisters(app, ['analytics'])
- * ```
- */
+/** Boot a minimal test application with the given providers. */
 export async function createPluginTestApp(
   providers: unknown[]
 ): Promise<Application> {
@@ -24,16 +12,7 @@ export async function createPluginTestApp(
   return app
 }
 
-/**
- * Assert that a plugin registers expected services in the container.
- * Throws a descriptive error if any expected service is not bound.
- *
- * @example
- * ```typescript
- * const app = await createPluginTestApp([CacheServiceProvider])
- * assertPluginRegisters(app, ['cache'])
- * ```
- */
+/** Assert a plugin bound the expected services in the container. */
 export function assertPluginRegisters(
   app: Application,
   services: string[]
@@ -50,16 +29,7 @@ export function assertPluginRegisters(
   }
 }
 
-/**
- * Assert that a plugin does NOT register certain services.
- * Useful for testing deferred providers before their services are requested.
- *
- * @example
- * ```typescript
- * const app = await createPluginTestApp([DeferredProvider])
- * assertPluginDoesNotRegister(app, ['lazy-service'])
- * ```
- */
+/** Assert a plugin bound none of these services — e.g. a deferred provider. */
 export function assertPluginDoesNotRegister(
   app: Application,
   services: string[]

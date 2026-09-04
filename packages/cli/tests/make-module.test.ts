@@ -49,7 +49,6 @@ describe('makeModule', () => {
     try {
       await expect(makeModule('../../outside')).rejects.toThrow(/Invalid module name/)
 
-      // Nothing should have been written outside the workspace.
       const escaped = await readFile(join(workspace.dir, '../../outside/index.ts'), 'utf8').catch(() => null)
       expect(escaped).toBeNull()
     } finally {
@@ -90,7 +89,6 @@ describe('makeModule', () => {
     try {
       const { filesCreated } = await makeModule('billing')
       expect(filesCreated).toHaveLength(3)
-      // No assertion on db/schema.ts content — it simply doesn't exist to patch.
     } finally {
       await workspace.cleanup()
     }
@@ -153,9 +151,8 @@ export default app
     }
   })
 
-  // Same invariant `addProviderRegistration` enforces for providers: an import
-  // of a binding nothing references is an unused local, and the app it was
-  // written into stops compiling under noUnusedLocals.
+  // An import of a binding nothing references is an unused local, so the app
+  // stops compiling under noUnusedLocals (as `addProviderRegistration` enforces).
   it('withholds the module import when the app entry cannot be patched', async () => {
     const workspace = await createTempWorkspace('guren-cli-make-module-unpatchable-')
     try {

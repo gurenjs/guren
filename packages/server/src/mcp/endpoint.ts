@@ -1,11 +1,7 @@
 /**
- * Identity and activation rules for the dev-only MCP endpoint.
- *
- * Kept free of MCP SDK imports so that middleware (CSRF) and the
- * application bootstrap can reason about the endpoint without pulling in
- * `@modelcontextprotocol/sdk`, which apps are not required to install.
- * The loopback access guard itself is shared with the docs viewer — see
- * `http/middleware/loopback-guard.ts`.
+ * Identity and activation rules for the dev-only MCP endpoint. Free of MCP SDK
+ * imports so middleware (CSRF) and the app bootstrap can reason about the
+ * endpoint without `@modelcontextprotocol/sdk`, which apps need not install.
  */
 import type { MiddlewareHandler } from 'hono'
 import { createLoopbackGuard } from '../http/middleware/loopback-guard'
@@ -49,14 +45,10 @@ export function isMcpEndpointEnabled(): boolean {
 }
 
 /**
- * Restricts the MCP endpoint to the developer's own machine.
- *
- * The endpoint is exempt from CSRF — agent clients carry no token — so
- * the loopback guard takes over that job: web pages are rejected unless
- * their `Origin` is loopback (the check the MCP specification asks local
- * servers for), and every caller is rejected unless its socket peer is
- * loopback. The guard fails closed when the runtime reports no peer at
- * all; see `http/middleware/loopback-guard.ts` for the opt-out.
+ * Restricts the MCP endpoint to the developer's own machine. The endpoint is
+ * CSRF-exempt (agent clients carry no token), so this guard takes over: a web
+ * page is rejected unless its `Origin` is loopback, and every caller unless its
+ * socket peer is. It fails closed when the runtime reports no peer at all.
  */
 export function createMcpAccessGuard(): MiddlewareHandler {
   return createLoopbackGuard('the MCP endpoint')

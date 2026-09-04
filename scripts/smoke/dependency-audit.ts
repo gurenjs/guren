@@ -1,19 +1,16 @@
 /**
  * Dependency vulnerability gate over `bun audit --json`.
  *
- * Fails when any advisory matches an installed package, except advisories
- * listed in IGNORED_ADVISORIES below. Every ignore entry must say why the
- * advisory is acceptable and what unblocks its removal. A stale entry (one
- * that no longer matches anything) also fails, so the list cannot rot.
+ * Fails on any advisory matching an installed package, unless listed in
+ * IGNORED_ADVISORIES with a reason and what unblocks its removal. A stale entry
+ * fails too, so the list cannot rot.
  *
- * Exit codes: 0 clean (ignores may apply), 1 active advisories, stale
- * ignores, or an invalid ignore list, 2 scan unavailable (registry
- * failure or unrecognized `bun audit` output) — CI treats an unavailable
- * scan as a failure rather than a silent pass.
+ * Exit codes: 0 clean, 1 active advisories / stale or invalid ignores, 2 scan
+ * unavailable (registry failure or unrecognized output) — an unavailable scan is
+ * a failure, not a silent pass.
  *
- * `guren audit`'s app-facing scan (packages/cli/src/audit-deps.ts)
- * implements the same `bun audit` contract with its own policy; a change
- * to the output shape needs both updated.
+ * `guren audit`'s app-facing scan (packages/cli/src/audit-deps.ts) implements the
+ * same `bun audit` contract; an output-shape change needs both updated.
  */
 
 interface Advisory {
@@ -71,10 +68,9 @@ function scanUnavailable(why: string): never {
   process.exit(2)
 }
 
-// `bun audit` exits 0 (clean) or 1 (advisories found), valid JSON either
-// way; anything else is an execution/registry failure. A proxy can also
-// answer with JSON that merely *parses* — an error object instead of the
-// package→advisories map — so the shape is validated, not assumed.
+// `bun audit` exits 0 or 1 with valid JSON either way; anything else is an
+// execution/registry failure. A proxy can answer with JSON that merely *parses*
+// (an error object, not the package→advisories map), so the shape is validated.
 if (exitCode > 1) scanUnavailable(`bun audit exited with code ${exitCode}`)
 
 let report: Record<string, Advisory[]>

@@ -103,9 +103,8 @@ export function configureInertiaAssets(app: Application, options: InertiaAssetsO
     serveStatic({
       root: publicDir,
       rewriteRequestPath,
-      // Vite writes content-hashed filenames under `assets/`, so those
-      // responses can be cached forever. Files elsewhere in public/ keep
-      // stable names and must stay revalidatable.
+      // Vite content-hashes filenames under `assets/`, so those can be cached
+      // forever; names elsewhere in public/ are stable and must revalidate.
       onFound: (path, ctx) => {
         if (!options.inlineDocuments) {
           guardStaticDocument(path, ctx)
@@ -145,12 +144,9 @@ function publicRouteBase(route: string): string {
 }
 
 /**
- * Serves the built Inertia client and the chunks it imports out of the
- * resolved package directory.
- *
- * Split out of {@link configureInertiaAssets} so it can be pointed at a
- * directory: the caller derives `inertiaClientDir` from `import.meta.resolve`,
- * which no test can redirect at a fixture.
+ * Serves the built Inertia client and its chunks. Takes a directory rather than
+ * deriving one, because the caller's `import.meta.resolve` cannot be redirected
+ * at a fixture by a test.
  */
 export function registerBuiltInertiaClient(
   app: Application,
@@ -167,9 +163,8 @@ export function registerBuiltInertiaClient(
     const relativeRequest = ctx.req.path.slice(inertiaClientBase.length) || inertiaClientRequestPath
 
     let targetPath: string
-    // Stays undefined for the entry: it is configuration-derived rather than
-    // request-derived, and a package layout may well have it symlinked out of
-    // `inertiaClientDir`.
+    // Undefined for the entry: configuration-derived rather than
+    // request-derived, and it may be symlinked out of `inertiaClientDir`.
     let containmentRoot: string | undefined
 
     if (relativeRequest === inertiaClientRequestPath) {
@@ -200,10 +195,8 @@ export function registerBuiltInertiaClient(
       'Cache-Control': 'public, max-age=31536000',
     })
 
-    // Serving a package directory rather than the app's own tree, so a document
-    // type here is whatever @guren/inertia-client happens to ship. Guarded on
-    // the same rule anyway: what makes the rule dependable is that no mount
-    // gets to decide it is the safe one.
+    // A document type here is whatever @guren/inertia-client ships, but it is
+    // guarded the same way anyway: no mount gets to decide it is the safe one.
     applyDocumentDisposition(headers, contentType)
 
     return new Response(file, { headers })
@@ -300,9 +293,8 @@ export function autoConfigureInertiaAssets(app: Application, options: AutoConfig
     return
   }
 
-  // Within each directory, `.vite/manifest.json` outranks the flat layout for
-  // the same reason `clientManifestCandidates` puts it first: Vite >= 5
-  // writes `.vite/`, so a flat file beside it is most likely stale.
+  // `.vite/manifest.json` outranks the flat layout: Vite >= 5 writes `.vite/`,
+  // so a flat file beside it is most likely stale.
   const ssrManifestPaths = [
     options.ssrManifest,
     resolve(moduleDir, `../${ssrOutDir}/.vite/manifest.json`),

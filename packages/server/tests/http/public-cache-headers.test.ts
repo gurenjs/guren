@@ -7,13 +7,9 @@ import { useAssetFixture } from './asset-fixture'
 const IMMUTABLE_CACHE_CONTROL = 'public, max-age=31536000, immutable'
 
 /**
- * Cache-Control on the `/public/*` static route.
- *
- * Vite writes content-hashed filenames under `public/assets/`, so in
- * production those responses are safe to cache forever. Everything else in
- * public/ keeps stable names, and the dev server must never cache at all —
- * both of those are pinned here so the immutable header cannot creep onto
- * them.
+ * Cache-Control on the `/public/*` static route. Only Vite's content-hashed
+ * `public/assets/` files may be cached immutably in production; everything else
+ * in public/ keeps stable names, and dev must never cache.
  */
 describe('public asset cache headers', () => {
   const fixture = useAssetFixture('guren-public-cache-')

@@ -38,7 +38,7 @@ describe('MemoryPasswordResetStore', () => {
   })
 
   it('returns null for expired tokens', async () => {
-    const expiresAt = new Date(Date.now() - 1000) // Already expired
+    const expiresAt = new Date(Date.now() - 1000)
     await store.store('expired', 'user@example.com', expiresAt)
 
     const result = await store.find('expired')
@@ -75,7 +75,6 @@ describe('MemoryPasswordResetStore', () => {
 
     store.clear()
 
-    // We can only test this indirectly by trying to find them
     expect(store.find('hash1')).resolves.toBeNull()
     expect(store.find('hash2')).resolves.toBeNull()
   })
@@ -103,7 +102,6 @@ describe('createPasswordResetToken', () => {
     const result1 = await createPasswordResetToken('user@example.com', store)
     const result2 = await createPasswordResetToken('user@example.com', store)
 
-    // First token should be invalidated
     const found1 = await store.find(result1.tokenId)
     const found2 = await store.find(result2.tokenId)
 
@@ -112,13 +110,13 @@ describe('createPasswordResetToken', () => {
   })
 
   it('uses custom expiration time', async () => {
-    const expiresIn = 5 * 60 * 1000 // 5 minutes
+    const expiresIn = 5 * 60 * 1000
     const beforeCreate = Date.now()
 
     const result = await createPasswordResetToken('user@example.com', store, { expiresIn })
 
     const expectedMinExpiry = beforeCreate + expiresIn
-    expect(result.expiresAt.getTime()).toBeGreaterThanOrEqual(expectedMinExpiry - 100) // Allow 100ms tolerance
+    expect(result.expiresAt.getTime()).toBeGreaterThanOrEqual(expectedMinExpiry - 100)
   })
 })
 
@@ -151,7 +149,7 @@ describe('verifyPasswordResetToken', () => {
 
   it('returns null for expired token', async () => {
     const { token } = await createPasswordResetToken('user@example.com', store, {
-      expiresIn: -1000, // Already expired
+      expiresIn: -1000,
     })
 
     const email = await verifyPasswordResetToken(token, store)
@@ -195,7 +193,6 @@ describe('completePasswordReset', () => {
 
     await completePasswordReset(token, 'new-password', store, provider, updatePassword)
 
-    // Second attempt with same token should fail
     const email = await verifyPasswordResetToken(token, store)
     expect(email).toBeNull()
   })
@@ -210,7 +207,6 @@ describe('completePasswordReset', () => {
   it('returns null if user no longer exists', async () => {
     const { token } = await createPasswordResetToken('user@example.com', store)
 
-    // Remove the user
     users.length = 0
 
     const user = await completePasswordReset(token, 'new-password', store, provider, updatePassword)

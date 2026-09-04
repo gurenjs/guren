@@ -46,12 +46,10 @@ export type {
   DerivedAgentToolAnnotations,
   DerivedAgentToolExposure,
 } from './agent/derive'
-// The dispatch contract (RFC 0016 §3): a tool call re-enters the application
-// as a real HTTP request. Here rather than in a protocol adapter because
-// every surface that invokes a tool — the App MCP plugin, `guren tool:call`,
-// `@guren/testing` — must build the same request and read the same response,
-// and a second copy is how one of them comes to send a POST route's query
-// keys in the body.
+// The dispatch contract (RFC 0016 §3): a tool call re-enters the application as
+// a real HTTP request. Here rather than in a protocol adapter because every
+// surface invoking a tool — the App MCP plugin, `guren tool:call`,
+// `@guren/testing` — must build the same request and read the same response.
 export {
   advertisesStructuredOutput,
   buildToolRequest,
@@ -98,17 +96,15 @@ export type {
   AgentAuditRecord,
 } from './agent/audit'
 // The one rule for *announcing* an audit event — sink first, then listeners.
-// Exported because it has two readers and the seam between them is a container
-// binding: `@guren/plugin-mcp` builds one and binds it as `'agent.audit'`,
-// `guren tool:call` resolves that binding to record the `'cli'` surface. Two
-// copies of the rule is how one surface's trail comes to differ from another's.
+// Exported because the seam between its two readers is a container binding:
+// `@guren/plugin-mcp` binds one as `'agent.audit'`, `guren tool:call` resolves
+// that binding to record the `'cli'` surface.
 export { AGENT_AUDIT_BINDING, createAuditEmitter } from './agent/audit-emitter'
 export type { AgentAuditEmitter, AgentAuditSink } from './agent/audit-emitter'
 // The approval queue (RFC 0016 §5.4 item 4): the store an application
-// implements, and the pure rules that decide whether a record authorizes a
-// call. Here rather than in the adapter because `guren check` reads the
-// configuration key from the same module the plugin does, and because the
-// binding, expiry and single-use rules must have exactly one definition.
+// implements, plus the pure rules deciding whether a record authorizes a call.
+// Here so `guren check` and the plugin read one configuration key, and the
+// binding, expiry and single-use rules have exactly one definition.
 export {
   AGENT_APPROVAL_CONFIG_KEY,
   agentApprovalExpiredAt,
@@ -627,13 +623,10 @@ export type {
 // Database (Seeder & Factory)
 // The seeder half is deprecated (`seeder-class-convention`, registered in
 // `packages/cli/src/deprecations.ts`): `BaseSeeder`/`Seeder`/
-// `resetCalledSeeders`/`SeederRunner`/`createSeederRunner`, and the
+// `resetCalledSeeders`/`SeederRunner`/`createSeederRunner` and the
 // `SeederClass`/`SeederInterface`/`SeederRunnerOptions` types below. Seeding
-// goes through `runSeeders()`/`defineSeeder`; `runSeeders()` does accept a
-// seeder class, but not one whose `run()` is declared to take no context, and
-// no command reaches `SeederRunner` at all. Removal is 3.0.0, which
-// `audit:core-semver` will hold until a `@guren/core` major is declared
-// alongside it. The factory half is live: `make:factory` scaffolds against it.
+// goes through `runSeeders()`/`defineSeeder`; removal is 3.0.0. The factory
+// half is live: `make:factory` scaffolds against it.
 export {
   BaseSeeder,
   Seeder,
@@ -968,11 +961,8 @@ export { SqsDriver, createSqsAdapter } from './queue/drivers/SqsDriver'
 export { createTypedBroadcaster } from './broadcasting/typed'
 // Redis: client factory
 export { createRedisClient } from './redis/client'
-// MCP: public via the '@guren/server/mcp' subpath, deliberately not
-// re-exported here: @guren/core re-exports this barrel wholesale, so a
-// re-export would pull @modelcontextprotocol/sdk's types into every app's
-// root import (and once blew up the old DTS bundler).
-// Docs viewer (RFC 0005): dev-only, loopback-guarded OKF bundle UI.
-// Not re-exported here for the same reason as MCP above — `Application`
-// mounts it by dynamic relative import, and nothing outside the package
-// consumes it, so it stays internal rather than becoming public API.
+// MCP: public via the '@guren/server/mcp' subpath, deliberately not re-exported
+// here — @guren/core re-exports this barrel wholesale, so it would pull
+// @modelcontextprotocol/sdk's types into every app's root import.
+// Docs viewer (RFC 0005): dev-only, loopback-guarded OKF bundle UI. Internal for
+// the same reason; `Application` mounts it by dynamic relative import.

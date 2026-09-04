@@ -10,11 +10,9 @@ import { setInertiaSharedProps, resolveSharedInertiaProps } from '../../src/mvc/
 import { VALIDATION_ERRORS_COOKIE } from '../../src/http/middleware/validation-errors-cookie'
 
 /**
- * Apps without `createApp({ auth })` have no session middleware, so the
- * Laravel-style "flash to session" path has nowhere to put validation errors.
- * These tests pin the cookie-flash fallback: the errors still make the
- * redirect round trip, and the cookie disappears after the render that
- * consumed it.
+ * Apps without `createApp({ auth })` have no session to flash validation errors
+ * to. These tests pin the cookie fallback: the errors survive the redirect
+ * round trip, and the cookie disappears after the render that consumed it.
  */
 describe('InertiaServiceProvider validation handling without a session', () => {
   let app: Hono
@@ -45,8 +43,7 @@ describe('InertiaServiceProvider validation handling without a session', () => {
       })
     })
 
-    // Simulates the redirect target: renders the shared props the Inertia
-    // response would receive.
+    // Simulates the redirect target, rendering the Inertia shared props.
     app.get('/form', async (ctx) => {
       const shared = await resolveSharedInertiaProps(ctx, container)
       return ctx.json(shared)
@@ -160,9 +157,8 @@ describe('InertiaServiceProvider validation handling without a session', () => {
   })
 
   it('keeps the flash alive across responses that never render it', async () => {
-    // Session flashes survive intermediate hops because they are consumed on
-    // read; the cookie flash must match. A trailing-slash redirect or an auth
-    // bounce between the 303 and the actual render must not burn the errors.
+    // Session flashes are consumed on read, so the cookie flash must match: a
+    // hop between the 303 and the render must not burn the errors.
     const res1 = await app.request('/submit', {
       method: 'POST',
       headers: {

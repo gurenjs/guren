@@ -21,10 +21,9 @@ interface PublishedArtifact {
   sourceDir: string
 }
 
-// `vendored` and `packed` both point the scaffolded app at builds of this
-// checkout; `npm` leaves the template's own ranges alone and installs from the
-// registry, so it is the only mode that sees the templates drift ahead of the
-// published packages.
+// `vendored` and `packed` install builds of this checkout; `npm` keeps the
+// template's own ranges, so it is the only mode that sees templates drift
+// ahead of the published packages.
 const INSTALL_MODES = ['vendored', 'packed', 'npm'] as const
 type InstallMode = (typeof INSTALL_MODES)[number]
 
@@ -33,48 +32,21 @@ const repoRoot = resolve(import.meta.dir, '../..')
 /**
  * The `--fields` the resource blueprint is scaffolded with.
  *
- * Derived from `FIELD_TYPES` rather than written out, because this smoke is
- * the only gate that *compiles* what `generateResource()` and the page
- * builders emit per type — everything else about a field type fails at the
- * type level (`tsFieldType`'s and `ColumnMapping`'s `Record<FieldType, …>`),
- * but the rendered code is builder output that is otherwise only
- * parse-checked. A hand-written list would keep passing, and keep claiming
- * full coverage, the day a seventh type is added.
- *
- * `DEFAULT_FIELDS` already covers a plain read and a nullable one, so a bare
- * `add resource` is not nothing — what it misses is number, boolean, date and
- * json, and json is the only type drizzle leaves as `unknown`.
- *
- * Nullable *and* not, per type, because nullability is a second axis rather
- * than a seventh type: a nullable `date` is a `== null` ternary and a nullable
- * `json` a parenthesised assertion, neither of which their non-nullable form
- * compiles. Twelve fields cost file size, not file count — `makeFeature()`
- * writes the same seven files whatever it is given.
+ * Derived from `FIELD_TYPES`, not written out: this is the only gate that
+ * *compiles* the per-type code the resource builders emit, and a hand-written
+ * list would keep claiming full coverage after a new type is added. Nullable
+ * and non-nullable per type, since those render differently.
  */
 const RESOURCE_FIELDS = FIELD_TYPES.flatMap((type) => [
   `${type}Field:${type}`,
   `nullable${type[0].toUpperCase()}${type.slice(1)}Field:${type}?`,
 ]).join(',')
 
-// The feature blueprints a default-blueprint app gets, in the order the
-// scaffolders expect. Shared by the vendored and the npm paths so the
-// published-drift gate cannot fall behind the set this smoke otherwise claims
-// to cover: every one of these emits template code importing @guren/core, and
-// a bare scaffold contains none of it.
-//
-// It cannot be *derived* from the CLI's registry — `resource` needs a name and
-// `mail` needs a flag, which a list of names cannot carry — so it is checked
-// against it instead, by assertCoversEveryBlueprint(). That every blueprint
-// appears here is not this list happening to be long: `admin` and `oauth` were
-// absent from every smoke in the tree until that check was written.
-//
-// admin and oauth after auth: `add admin` guards /admin and redirects to the
-// sign-in page `add auth` scaffolds.
-//
-// --force on mail: `add auth` also scaffolds app/Providers/MailProvider.ts
-// (password reset needs a mail manager) — the mail blueprint's own, more
-// complete MailProvider (memory transport, setMailManager wiring)
-// intentionally supersedes it, so the assertions can verify its shape.
+// The feature blueprints a default-blueprint app gets, in scaffolder order.
+// It cannot be derived from the CLI's registry (`resource` needs a name, `mail`
+// a flag), so assertCoversEveryBlueprint() checks it against that registry.
+// admin and oauth follow auth for its sign-in page; `--force` on mail
+// supersedes the MailProvider auth wrote.
 const DEFAULT_BLUEPRINT_FEATURES: readonly (readonly string[])[] = [
   ['auth'],
   ['admin'],
@@ -86,15 +58,11 @@ const DEFAULT_BLUEPRINT_FEATURES: readonly (readonly string[])[] = [
   ['cache'],
   ['notifications'],
   ['storage'],
-  // After storage on purpose: with the storage provider already present,
-  // attachments exercises its own scaffolds rather than re-running the
-  // storage prerequisite.
+  // After storage, so attachments exercises its own scaffolds rather than
+  // re-running the storage prerequisite.
   ['attachments'],
-  // After attachments, deliberately: `--attach` refuses an app without
-  // configureAttachments(). This second resource is the one gate that
-  // *typechecks* the attach-aware model (Attachable + has*Attached from
-  // @guren/core) and controller (attach/purgeAttachments) an app installs —
-  // in the repo they are only parse-checked builder output.
+  // After attachments: `--attach` refuses an app without configureAttachments().
+  // The one gate that typechecks the attach-aware model and controller.
   ['resource', 'photos', '--fields', 'title:string,caption:text?', '--attach', 'cover:one,images:many'],
   ['broadcasting'],
   ['schedule'],
@@ -103,15 +71,11 @@ const DEFAULT_BLUEPRINT_FEATURES: readonly (readonly string[])[] = [
 /**
  * Fail when the CLI grows a blueprint this smoke does not scaffold.
  *
- * The registry has a tripwire of its own — packages/cli/tests/blueprints.test.ts
- * pins it to an exact list — which is precisely why this drift was silent:
- * whoever adds a blueprint is routed there, updates that array, and nothing
- * points back here. This is the pointer back.
- *
- * Imported dynamically because packages/cli/src/blueprints reaches
- * @guren/server through untracked dist/. A top-level import would evaluate
- * before main() runs ensureBuiltPackages(), turning a missing build into a
- * module-resolution error instead of the message that names the fix.
+ * The pointer back from packages/cli/tests/blueprints.test.ts, where a new
+ * blueprint gets added. Imported dynamically because packages/cli/src/blueprints
+ * reaches @guren/server through untracked dist/: a top-level import evaluates
+ * before ensureBuiltPackages(), turning a missing build into a resolution error
+ * instead of the message that names the fix.
  */
 async function assertCoversEveryBlueprint(): Promise<void> {
   const { listBlueprints } = await import('../../packages/cli/src/blueprints')
@@ -128,12 +92,10 @@ async function assertCoversEveryBlueprint(): Promise<void> {
 /**
  * Run the feature blueprints through *this checkout's* CLI.
  *
- * Which CLI is not an implementation detail, and npm mode is where it decides
- * whether the gate can fail at all: the app's own installed `guren` ships the
- * published blueprints, so using it would emit published templates against
- * published packages — consistent by construction, and a gate that can only
- * pass. Templates from here, dependencies from the registry, is the mismatch
- * the drift check exists to measure.
+ * In npm mode this is what lets the gate fail: the app's own installed `guren`
+ * ships published blueprints, so it would emit published templates against
+ * published packages. Templates from here, dependencies from the registry, is
+ * the mismatch the drift check measures.
  */
 async function addDefaultBlueprintFeatures(
   appDir: string,
@@ -144,9 +106,8 @@ async function addDefaultBlueprintFeatures(
       ['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'add', ...feature],
       appDir,
       // The CLI runs from source while the app resolves @guren/orm from its own
-      // node_modules, so two copies legitimately coexist in *this* process. The
-      // warning describes the scaffolder, not the app under test; scoped to
-      // these calls so a genuine duplicate in the app stays loud.
+      // node_modules, so two copies legitimately coexist here. Scoped to these
+      // calls so a genuine duplicate in the app stays loud.
       { ...runtimeEnv, GUREN_QUIET_DUPLICATE_ORM: '1' },
     )
   }
@@ -185,9 +146,8 @@ async function runCapture(cmd: string[], cwd: string, envOverrides?: Record<stri
   const output = await new Response(proc.stdout).text()
   const exitCode = await proc.exited
   if (exitCode !== 0) {
-    // Piped stdout is the diagnostic for anything that reports there rather
-    // than on stderr — `tsc` writes every error to stdout — so a failure has
-    // to hand it back before throwing, or the log shows only the exit code.
+    // `tsc` writes every error to stdout, so a failure has to hand the piped
+    // output back or the log shows only the exit code.
     console.error(output)
     throw new Error(`Command failed with exit code ${exitCode}: ${cmd.join(' ')}`)
   }
@@ -213,10 +173,9 @@ async function packPackages(packRoot: string): Promise<Map<string, string>> {
   await mkdir(npmCacheDir, { recursive: true })
   const tarballs = new Map<string, string>()
 
-  // What a scaffolded app installs, as npm would ship it: the vendored set plus
-  // the scaffolder that produced the app. Not every publishable package —
-  // `@guren/openapi` and the deploy plugins are opt-in, so no app resolves them
-  // and packing them here would audit tarballs this smoke never installs.
+  // What a scaffolded app installs: the vendored set plus the scaffolder that
+  // produced it. `@guren/openapi` and the deploy plugins are opt-in, so packing
+  // them here would audit tarballs this smoke never installs.
   const publishedArtifacts: PublishedArtifact[] = [
     ...await collectLocalPackages(),
     { name: 'create-guren-app', sourceDir: resolve(repoRoot, 'packages/create-app') },
@@ -289,9 +248,6 @@ async function assertPackedArtifacts(packageTarballs: Map<string, string>, packR
       }
 
       if (packageName === 'create-guren-app') {
-        // The only check that sees what npm actually publishes: a template
-        // reverted to a literal `.gitignore` is stripped from the tarball, so
-        // this entry disappears rather than merely changing name.
         for (const template of ['default', 'api-only']) {
           assert(
             entries.includes(`package/templates/${template}/_gitignore`),
@@ -333,7 +289,7 @@ async function assertCoreFirstStarter(
     try {
       source = await readFile(join(appDir, relativePath), 'utf8')
     } catch {
-      continue // File doesn't exist for this blueprint (e.g., API has no vite.config.ts)
+      continue
     }
     if (source.includes('@guren/server')) {
       throw new Error(`Fresh app contains a stale @guren/server import in ${relativePath}.`)
@@ -372,10 +328,9 @@ async function assertCanonicalScaffolds(appDir: string): Promise<void> {
 
 /**
  * The blog template ships its app code instead of generating it, so nothing
- * else in CI reads these files. Typecheck and build cover whether they compile;
- * these assertions cover the wiring that compiles either way — an unregistered
- * policy, a mass-assignable `authorId`, or a leftover per-driver schema variant
- * all typecheck fine and all produce a broken or unsafe app.
+ * else in CI reads these files. These assert the wiring that compiles either
+ * way: an unregistered policy, a mass-assignable `authorId`, or a leftover
+ * per-driver schema variant all typecheck fine and all break the app.
  */
 async function assertBlogScaffold(appDir: string): Promise<void> {
   for (const driver of DATABASE_DRIVERS) {
@@ -401,14 +356,13 @@ async function assertBlogScaffold(appDir: string): Promise<void> {
     'Blog blueprint must bind PostPolicy to the Post model from boot(), not at module scope.',
   )
 
-  // Nothing shares the signed-in user with Inertia by default, and Layout.tsx
-  // gates every authenticated control on it — without this the nav renders as a
-  // guest for a signed-in user and the Log out button is unreachable.
+  // Layout.tsx gates every authenticated control on the shared user, so
+  // without this the nav renders as a guest and Log out is unreachable.
   const authProvider = await readFile(join(appDir, 'app/Providers/AuthProvider.ts'), 'utf8')
   assert(authProvider.includes('shareInertiaProps('), 'Blog blueprint must share the signed-in user with Inertia.')
 
   // A native form POST carries neither the X-XSRF-TOKEN header nor a _token
-  // field, so CSRF protection rejects it — the click silently does nothing.
+  // field, so the click silently does nothing.
   const layout = await readFile(join(appDir, 'resources/js/components/Layout.tsx'), 'utf8')
   assert(!/<form[^>]*method="post"/iu.test(layout), 'Blog blueprint must not post from a native form — CSRF rejects it.')
   assert(/<Link[^>]*method="post"/su.test(layout), 'Blog blueprint must log out through an Inertia Link.')
@@ -430,8 +384,7 @@ async function assertBlogScaffold(appDir: string): Promise<void> {
   assert(webRoutes.includes("aliasMiddleware('auth'"), 'Blog blueprint must alias its auth middleware.')
   assert(webRoutes.includes("posts.middleware('auth').group("), 'Blog blueprint must guard mutating post routes with the named auth middleware.')
 
-  // The seeders are the only way a fresh blog app has anything to show, and
-  // nothing else in CI loads them.
+  // Nothing else in CI loads the seeders.
   for (const seeder of ['db/seeders/001_users.ts', 'db/seeders/002_posts.ts']) {
     const source = await readFile(join(appDir, seeder), 'utf8')
     assert(source.includes('defineSeeder'), `${seeder} must export a seeder.`)
@@ -523,36 +476,19 @@ async function assertFeatureScaffolds(appDir: string): Promise<void> {
  * Install the scaffolded app from the registry, scaffold its features with this
  * checkout's CLI, and typecheck the result.
  *
- * Resolving the template's own ranges is the whole point, so this fails
- * whenever a template has started using an API that exists only in this
- * repository — invisible to the other install modes and to the root
- * `typecheck`, which excludes `templates` (that now covers `config/database.ts`
- * and `drizzle.config.ts` too, shipped as per-driver sources under
- * `templates/database/`).
- *
- * "Template" here means every template, not just the base scaffold. The
- * feature blueprints in `packages/cli/src/blueprints.ts` and `make-auth.ts`
- * emit far more `@guren/core` imports than the bare app does, and they are
- * ordinary source in this checkout, so they drift ahead of the registry the
- * same way. They are scaffolded with the checkout's CLI for the reason spelled
- * out on addDefaultBlueprintFeatures().
- *
- * What this deliberately does not run: `bun run build` (Vite), `bun test`,
- * `guren check`, `guren audit`. The claim being gated is "an app scaffolded
- * from the current templates builds against what is on npm right now" — the
- * vendored mode owns the rest, and the closing summary names every skip so a
- * green run says what it proved.
+ * Resolving the template's own ranges is the point: this fails whenever any
+ * template uses an API that exists only in this repository, which the other
+ * install modes and the root `typecheck` (it excludes `templates`) cannot see.
+ * Deliberately runs no build, test, check or audit — the vendored mode owns them.
  */
 async function runPublishedDependencyDrift(
   appDir: string,
   blueprint: string,
   runtimeEnv: Record<string, string>,
 ): Promise<void> {
-  // The mirror of what the vendored modes assert, through the same predicate:
-  // if this mode ever degraded into one of them it would keep passing while
-  // checking nothing, so the local specs are asserted away rather than assumed
-  // absent. Re-run after scaffolding, since a blueprint is free to add a
-  // dependency and a local one would silently take the app off the registry.
+  // If this mode ever degraded into a vendored one it would keep passing while
+  // checking nothing, so local specifiers are asserted away rather than assumed
+  // absent — re-run after scaffolding, since a blueprint may add a dependency.
   const assertPublishedRanges = async (stage: string): Promise<[string, string][]> => {
     const packageJson = JSON.parse(await readFile(join(appDir, 'package.json'), 'utf8')) as DependencyManifest
     const gurenDependencies = Object.entries(declaredDependencies(packageJson))
@@ -592,9 +528,7 @@ async function runPublishedDependencyDrift(
     await addDefaultBlueprintFeatures(appDir, runtimeEnv)
     await assertPublishedRanges('after scaffolding features')
     await run(['bun', 'install'], appDir, runtimeEnv)
-    // Reused from the vendored path rather than reinvented: these fail loudly
-    // if a blueprint stopped emitting what it claims to, which is what keeps
-    // the widened typecheck below from quietly shrinking back to a bare app.
+    // These keep the typecheck below from quietly shrinking back to a bare app.
     await assertCanonicalScaffolds(appDir)
     await assertFeatureScaffolds(appDir)
   }
@@ -631,15 +565,10 @@ async function runPublishedDependencyDrift(
  * Typecheck the app through its own `typecheck` script, and assert tsc actually
  * read the files it was supposed to.
  *
- * `--listFiles` rides along on the one compile rather than costing a second,
- * and it is what makes this an *outcome* check rather than a claim about
- * tsconfig syntax. The bug it exists for: `"include": [".guren"]` matches no
- * files, because TypeScript expands a bare directory name to a wildcard and its
- * wildcard matcher skips dot-prefixed segments. Generated files something
- * imports still arrive through the import graph — which is exactly what hides
- * it — so the ones nothing imports are the tell. Asking tsc which files it read
- * catches every reformulation of that mistake, not just the one spelling a
- * syntax check could reject.
+ * The bug `--listFiles` exists for: `"include": [".guren"]` matches no files,
+ * since TypeScript expands a bare directory to a wildcard whose matcher skips
+ * dot-prefixed segments. Imported files still arrive through the import graph,
+ * so the ones nothing imports are the tell.
  */
 async function typecheckApp(appDir: string, runtimeEnv: Record<string, string>): Promise<string[]> {
   const output = await runCapture(['bun', 'run', 'typecheck', '--listFiles'], appDir, runtimeEnv)
@@ -684,12 +613,9 @@ function resolveInstallMode(): InstallMode {
 async function main(): Promise<void> {
   const installMode = resolveInstallMode()
 
-  // Every mode needs the workspace built. What npm mode keeps off this checkout
-  // is what the *app* resolves — its @guren/* come from the registry, and
-  // runPublishedDependencyDrift() asserts that on both sides of scaffolding.
-  // The scaffolder and the `guren add` blueprints are tools that emit the
-  // templates under test, and the CLI reaches @guren/server through dist/, so
-  // building them is what lets the gate fail rather than what weakens it.
+  // Every mode needs the workspace built: npm mode keeps the *app* off this
+  // checkout, but the scaffolder emitting the templates under test runs from
+  // here and reaches @guren/server through dist/.
   await ensureBuiltPackages()
   await assertCoversEveryBlueprint()
 
@@ -708,7 +634,6 @@ async function main(): Promise<void> {
     await mkdir(runtimeTempDir, { recursive: true })
     await mkdir(bunInstallCacheDir, { recursive: true })
 
-    // Scaffold the app with the selected blueprint
     const createArgs = ['bun', resolve(repoRoot, 'packages/create-app/src/cli.ts'), appDir]
     if (blueprint !== 'default') {
       createArgs.push('--blueprint', blueprint)
@@ -734,9 +659,8 @@ async function main(): Promise<void> {
     }
     await rewriteAppDependencies(appDir, dependencyRoots, `The ${installMode} app`)
     if (installMode === 'packed') {
-      // rewriteAppDependencies() has already asserted every @guren/* resolves
-      // locally; a tarball is the narrower claim only this mode can make, and
-      // the only thing that catches it silently degrading into the vendored one.
+      // A tarball dependency is the one claim only this mode can make, and
+      // the only thing that catches it degrading into the vendored one.
       const declared = declaredDependencies(
         JSON.parse(await readFile(join(appDir, 'package.json'), 'utf8')) as DependencyManifest,
       )
@@ -754,7 +678,6 @@ async function main(): Promise<void> {
     await run(['bun', 'install'], appDir, runtimeEnv)
 
     if (blueprint === 'default') {
-      // Default blueprint: add all features
       await addDefaultBlueprintFeatures(appDir, runtimeEnv)
       await assertCoreFirstStarter(appDir, { checkDependencies: false })
       await assertCanonicalScaffolds(appDir)
@@ -762,21 +685,17 @@ async function main(): Promise<void> {
       await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'codegen', '--force'], appDir, runtimeEnv)
       await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'codegen', '--routes', 'routes/web.ts', '--out', 'types/generated/routes.d.ts', '--force'], appDir, runtimeEnv)
     } else if (blueprint === 'api') {
-      // API blueprint: no features to add, validate API-specific structure
       const routesFile = await readFile(join(appDir, 'routes/api.ts'), 'utf8')
       assert(routesFile.includes('/health'), 'API blueprint must include a /health endpoint.')
       assert(routesFile.includes('/api/v1'), 'API blueprint must include /api/v1 prefix.')
       await assertCoreFirstStarter(appDir, { checkDependencies: false })
     } else if (blueprint === 'blog') {
-      // No codegen before the typecheck below: the template ships .guren/*.gen.ts,
-      // and running codegen first would regenerate them, hiding stubs that have
-      // fallen behind the pages and routes the template actually ships.
+      // No codegen before the typecheck below: regenerating the .guren/*.gen.ts
+      // the template ships would hide stubs that have fallen behind it.
       await assertCoreFirstStarter(appDir, { checkDependencies: false })
       await assertBlogScaffold(appDir)
     } else if (blueprint === 'worker') {
-      // Worker blueprint: postScaffold adds queue/events/cache/schedule
       await assertCoreFirstStarter(appDir, { checkDependencies: false })
-      // Verify the 4 expected worker features were scaffolded
       const appTs = await readFile(join(appDir, 'src/app.ts'), 'utf8')
       assert(appTs.includes('QueueServiceProvider'), 'Worker blueprint must scaffold queue.')
       assert(appTs.includes('EventServiceProvider'), 'Worker blueprint must scaffold events.')
@@ -792,7 +711,6 @@ async function main(): Promise<void> {
       await typecheckApp(appDir, runtimeEnv)
     }
 
-    // Worker blueprint: skip Vite build (scaffold-only validation is sufficient)
     if (blueprint !== 'worker') {
       await run(['bun', 'run', 'build'], appDir, runtimeEnv)
     }
@@ -803,12 +721,9 @@ async function main(): Promise<void> {
     }
 
     // Templates advertise a starter test suite and a CI workflow gating on
-    // `check --ci` and `guren audit`; exercise all three here so they cannot
-    // drift from the framework. Worker is excluded like typecheck above
-    // (same export mismatch). The api blueprint needs its codegen manifests
-    // first — the generated workflow runs codegen before the gates too.
-    // --no-deps keeps the audit off the network; releases of the CLI without
-    // the flag ignore it harmlessly.
+    // `check --ci` and `guren audit`; exercise all three so they cannot drift
+    // from the framework. The api blueprint needs its codegen manifests first.
+    // --no-deps keeps the audit off the network; older CLI releases ignore it.
     if (blueprint !== 'worker') {
       if (blueprint === 'api') {
         await run(['bun', 'run', 'codegen'], appDir, runtimeEnv)

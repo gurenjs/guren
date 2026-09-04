@@ -2,8 +2,8 @@ import type { Context } from 'hono'
 import type { ContainerLike } from '../../container/types'
 
 /**
- * Application-level shared props shape for Inertia responses.
- * Extend this interface in your app (via declaration merging) to type shared props.
+ * Application-level shared props shape for Inertia responses. Extend it in your
+ * app via declaration merging to type shared props.
  */
 export interface InertiaSharedProps { }
 
@@ -153,23 +153,10 @@ export function getInertiaSharedPropsResolver(): SharedInertiaPropsResolver<Reso
 }
 
 /**
- * Register additional shared props without replacing resolvers registered
- * earlier — the new resolver's props are merged over the previous ones.
- * Use this from app providers so multiple providers can each contribute
- * shared props (setInertiaSharedProps replaces the resolver wholesale).
- *
- * Pass the provider's `this.container` to scope the props to one application.
- * Without it the props are module-global, so a second Application booted in
- * the same process shares them.
- *
- * @example
- * ```typescript
- * export class AuthProvider extends ServiceProvider {
- *   boot(): void {
- *     shareInertiaProps(async (ctx) => ({ auth: { user: await currentUser(ctx) } }), this.container)
- *   }
- * }
- * ```
+ * Register additional shared props without replacing earlier resolvers, so
+ * several providers can each contribute (`setInertiaSharedProps` replaces
+ * wholesale). Pass the provider's `this.container` to scope them; without it
+ * they are module-global and a second Application in the process shares them.
  */
 export function shareInertiaProps<Props extends Record<string, unknown>>(
   resolverFn: SharedInertiaPropsResolver<Props>,

@@ -301,7 +301,6 @@ describe('FileStore', () => {
 
       const cleaned = await store.cleanup()
       expect(cleaned).toBe(1)
-      // A second pass finds nothing — the expired file was actually deleted
       expect(await store.cleanup()).toBe(0)
       expect(await store.get('key2')).toBe('value2')
     })

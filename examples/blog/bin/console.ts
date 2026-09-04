@@ -8,6 +8,6 @@ try {
   process.exit(1)
 }
 
-// process.exit() is required, not just tidy: an idle database pool keeps the
-// event loop alive, so returning normally would hang after the command runs.
+// Required, not tidy: an idle database pool keeps the event loop alive, so
+// returning normally hangs after the command runs.
 process.exit(await kernel.handle(process.argv.slice(2)))

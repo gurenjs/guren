@@ -43,13 +43,9 @@ describe('buildPageModuleContent', () => {
 })
 
 describe('generatePageTypes overwrite behavior', () => {
-  // `bunx guren codegen` regenerates .guren/*.gen.ts on every run. These
-  // files are generated artifacts, not user source, so codegen defaults
-  // `force: true` when calling the generators (see codegenCommand in
-  // packages/cli/src/bin.ts). Without this, plain `bunx guren codegen`
-  // fails on the second run with "already exists. Use --force to overwrite."
-  // even though create-app templates and the agent-harness docs assume a
-  // plain re-run just works.
+  // .guren/*.gen.ts are generated artifacts, so `codegenCommand` (src/bin.ts)
+  // defaults `force: true`; without it a plain second `guren codegen` fails with
+  // "already exists. Use --force to overwrite."
   it('fails without force when the output file already exists (safety net preserved)', async () => {
     const workspace = await createTempWorkspace('guren-cli-pages-types-noforce-')
     try {
@@ -96,12 +92,9 @@ describe('generatePageTypes overwrite behavior', () => {
     }
   })
 
-  // Regression test for `codegenCommand` itself (packages/cli/src/bin.ts),
-  // not just the generator it calls — this is what actually reproduces the
-  // original bug report ("already exists. Use --force to overwrite." on a
-  // plain second `bunx guren codegen` run). The tests above exercise
-  // generatePageTypes() directly with force passed explicitly either way,
-  // so they'd pass unchanged even if codegenCommand stopped forcing it.
+  // Covers `codegenCommand` itself, not just the generator it calls: the tests
+  // above pass `force` explicitly either way, so they would stay green even if
+  // the command stopped forcing it.
   it('codegen CLI command overwrites existing artifacts on a second run without --force', async () => {
     const workspace = await createTempWorkspace('guren-cli-codegen-command-')
     try {
@@ -123,10 +116,8 @@ describe('generatePageTypes overwrite behavior', () => {
       const first = runCodegen()
       expect(await first.exited).toBe(0)
 
-      // No routes/web.ts exists in this fixture, so the command generates
-      // pages.gen.ts, warns that routes/data/channel/API-client generation
-      // was skipped, and exits 0 — exercising the exact write path the
-      // original bug hit without needing a full routes/schema fixture.
+      // No routes/web.ts here, so the command writes pages.gen.ts and exits 0 —
+      // the bug's write path without needing a full routes/schema fixture.
       const second = runCodegen()
       const secondExitCode = await second.exited
       const secondStderr = await new Response(second.stderr).text()
@@ -143,11 +134,10 @@ describe('generatePageTypes overwrite behavior', () => {
 })
 
 /**
- * Page components can reach an API-only app by routes no scaffolder controls —
- * a hand-copied file, a checkout, a generator written later — and the api
- * blueprint's `dev` script runs codegen, so nobody has to ask for the manifest
- * for it to appear. It would import `@guren/inertia-client`, which that app does
- * not install, inside `.guren/**` that its tsconfig type-checks.
+ * Page components can reach an API-only app by routes no scaffolder controls,
+ * and the api blueprint's `dev` script runs codegen. The manifest would import
+ * `@guren/inertia-client`, which that app does not install, inside a `.guren/**`
+ * its tsconfig type-checks.
  */
 describe('generatePageTypes on an API-only app', () => {
   it('writes no manifest and says why', async () => {
@@ -214,9 +204,8 @@ describe('generatePageTypes on an API-only app', () => {
     }
   })
 
-  // The counter-case that keeps the skip from degenerating into "any app whose
-  // package.json does not name @guren/inertia-client": one web routes entry is
-  // enough evidence, which is `isConfirmedApiOnlyApp`'s own rule.
+  // Keeps the skip from degenerating into "any app whose package.json does not
+  // name @guren/inertia-client": one web routes entry is enough evidence.
   it('still writes the manifest once the app has a web routes entry', async () => {
     const workspace = await createTempWorkspace('guren-cli-pages-fullstack-')
     try {

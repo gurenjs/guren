@@ -9,7 +9,6 @@ describe('storage-link', () => {
   const publicPath = join(testDir, 'public/storage')
 
   beforeEach(() => {
-    // Clean up and create fresh test directories
     if (existsSync(testDir)) {
       rmSync(testDir, { recursive: true })
     }
@@ -18,7 +17,6 @@ describe('storage-link', () => {
   })
 
   afterEach(() => {
-    // Clean up test directories
     if (existsSync(testDir)) {
       rmSync(testDir, { recursive: true })
     }
@@ -43,21 +41,17 @@ describe('storage-link', () => {
     })
 
     test('returns true if link already exists (no force)', () => {
-      // Create initial link
       createStorageLink({ appRoot: testDir })
       expect(existsSync(publicPath)).toBe(true)
 
-      // Try to create again without force
       const result = createStorageLink({ appRoot: testDir })
 
       expect(result).toBe(true)
     })
 
     test('recreates link with force option', () => {
-      // Create initial link
       createStorageLink({ appRoot: testDir })
 
-      // Recreate with force
       const result = createStorageLink({ appRoot: testDir, force: true })
 
       expect(result).toBe(true)
@@ -72,7 +66,6 @@ describe('storage-link', () => {
       expect(existsSync(publicPath)).toBe(true)
       expect(lstatSync(publicPath).isSymbolicLink()).toBe(true)
 
-      // Check that the link target is relative
       const linkTarget = readlinkSync(publicPath)
       expect(linkTarget.startsWith('..')).toBe(true)
     })
@@ -112,7 +105,6 @@ describe('storage-link', () => {
     })
 
     test('returns false if path exists but is not a symbolic link', () => {
-      // Create a regular directory instead of a symlink
       mkdirSync(publicPath, { recursive: true })
 
       const result = hasStorageLink({ appRoot: testDir })

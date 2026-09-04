@@ -29,8 +29,8 @@ describe('startViteDevServer', () => {
     const result = await startViteDevServer({ root: '/tmp/app', port: 4321 })
 
     if (!receivedConfig) {
-      // When another test has already mocked `vite`, this module-level mock may be bypassed.
-      // In that case we still verify the public contract.
+      // Another test may already have mocked `vite`, bypassing this module-level
+      // mock; verify the public contract either way.
       expect(result.localUrl.startsWith('http://')).toBe(true)
     } else {
       expect(receivedConfig).toMatchObject({
@@ -45,10 +45,8 @@ describe('startViteDevServer', () => {
 
 describe('resolveViteDevServerConfig', () => {
   it('does not bind the dev server to every interface by default', () => {
-    // The dev server serves every file under the project root — application
-    // source and the default SQLite database — with no authentication. Setting
-    // `host` here would override Vite's localhost-only default and hand that to
-    // anyone on the same network, so it must stay unset.
+    // The dev server serves every file under the project root with no auth, so
+    // `host` must stay unset: it would override Vite's localhost-only default.
     const config = resolveViteDevServerConfig({ root: '/tmp/app' })
 
     expect(config.server?.host).toBeUndefined()

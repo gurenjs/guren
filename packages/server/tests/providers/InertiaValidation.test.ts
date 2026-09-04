@@ -18,9 +18,8 @@ describe('InertiaServiceProvider validation handling', () => {
   let container: Container
   let store: MemorySessionStore
 
-  // The provider registers shared props on the container, so a fresh container
-  // per test isolates it; only the one test using the module-global registry
-  // needs this reset.
+  // A fresh container per test isolates the provider's shared props; only the
+  // test using the module-global registry needs this reset.
   afterEach(() => {
     setInertiaSharedProps(null)
   })
@@ -32,20 +31,17 @@ describe('InertiaServiceProvider validation handling', () => {
 
     container.instance('hono', app)
 
-    // Session middleware
     app.use('*', createSessionMiddleware({ store, cookieSecure: false }))
 
-    // Register & boot ErrorServiceProvider (uses hono.onError)
+    // ErrorServiceProvider installs its handler on hono.onError.
     const errorProvider = new ErrorServiceProvider(container)
     errorProvider.register()
     errorProvider.boot()
 
-    // Register & boot InertiaServiceProvider
     const inertiaProvider = new InertiaServiceProvider(container)
     inertiaProvider.register()
     inertiaProvider.boot()
 
-    // A route that throws ValidationException
     app.post('/submit', () => {
       throw new ValidationException({
         email: ['Email is required', 'Email must be valid'],
@@ -53,7 +49,7 @@ describe('InertiaServiceProvider validation handling', () => {
       })
     })
 
-    // A route that reads flash data (simulates redirect target)
+    // Simulates the redirect target.
     app.get('/form', (ctx) => {
       const session = getSessionFromContext(ctx)!
       const errors = session.getFlash<Record<string, string>>('errors')
@@ -77,7 +73,6 @@ describe('InertiaServiceProvider validation handling', () => {
   })
 
   it('flashes flattened errors to session (first message per field)', async () => {
-    // Request 1: POST with Inertia header → 303 redirect
     const res1 = await app.request('/submit', {
       method: 'POST',
       headers: {
@@ -90,7 +85,6 @@ describe('InertiaServiceProvider validation handling', () => {
 
     const cookie = res1.headers.get('set-cookie')!.split(';')[0]
 
-    // Request 2: GET the redirect target — flash data should be available
     const res2 = await app.request('/form', {
       headers: { Cookie: cookie },
     })
@@ -144,10 +138,8 @@ describe('InertiaServiceProvider validation handling', () => {
     })
     const cookie = res1.headers.get('set-cookie')!.split(';')[0]
 
-    // Request 2: read errors
     await app.request('/form', { headers: { Cookie: cookie } })
 
-    // Request 3: errors should be gone
     const res3 = await app.request('/form', { headers: { Cookie: cookie } })
     const body3 = await res3.json() as { errors: Record<string, string> | null }
     expect(body3.errors).toBeNull()
@@ -158,14 +150,12 @@ describe('InertiaServiceProvider validation handling', () => {
     // container-scoped errors resolver.
     setInertiaSharedProps(async () => ({ appName: 'Test' }))
 
-    // Route that returns resolved shared props
     app.get('/shared', async (ctx) => {
       const { resolveSharedInertiaProps } = await import('../../src/mvc/inertia/shared')
       const shared = await resolveSharedInertiaProps(ctx, container)
       return ctx.json(shared)
     })
 
-    // Flash errors via POST
     const res1 = await app.request('/submit', {
       method: 'POST',
       headers: {
@@ -177,7 +167,6 @@ describe('InertiaServiceProvider validation handling', () => {
     })
     const cookie = res1.headers.get('set-cookie')!.split(';')[0]
 
-    // Read shared props on redirect target
     const res2 = await app.request('/shared', {
       headers: { Cookie: cookie },
     })

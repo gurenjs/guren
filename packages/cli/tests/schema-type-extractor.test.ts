@@ -32,9 +32,8 @@ describe('schemaToTypeString', () => {
       expect(output(z.coerce.number())).toBe('number')
     })
 
-    // Coerced strings and booleans are already JSON-native, so widening them
-    // would only cost callers precision — a bare `boolean` is what a
-    // checkbox's `checked` needs.
+    // Coerced strings and booleans are already JSON-native; a bare `boolean` is
+    // what a checkbox's `checked` needs.
     it('renders schemas with no wire/parsed gap identically on both sides', () => {
       for (const [schema, type] of [
         [z.date(), 'Date'], [z.number(), 'number'], [z.boolean(), 'boolean'], [z.string(), 'string'],
@@ -79,9 +78,8 @@ describe('schemaToTypeString', () => {
       expect(output(schema)).toBe('{ title: string }')
     })
 
-    // Distinguishing "the out side is a transform" from "the out side renders
-    // as unknown" needs to be structural — a schema that genuinely parses to
-    // `unknown` must keep saying so rather than borrow the in side's type.
+    // Structural: a schema that genuinely parses to `unknown` must keep saying
+    // so rather than borrow the in side's type.
     it('keeps a genuinely unknown output instead of borrowing the input', () => {
       const schema = pipeTo(z.string(), z.unknown())
 
@@ -123,8 +121,6 @@ describe('schemaToTypeString', () => {
 
     // `zodToType` and `isOptional` walk separately, so a wrapper added to one
     // unwrap list and not the other silently makes an optional field required.
-    // (zod 4's `.brand()` adds no runtime node, so it is transparent by
-    // construction rather than by membership.)
     it('looks through the same wrappers when deciding presence as when reading the type', () => {
       for (const schema of [
         z.object({ a: z.string().optional().readonly() }),
@@ -146,16 +142,13 @@ describe('schemaToTypeString', () => {
     })
   })
 
-  // The zod 3 API is refused, not mis-rendered: on a v3 node `_def.type`
-  // holds a nested schema where v4 keeps the type name, so walking it with
-  // v4 reads produces silently wrong output. `zod/v3` ships inside zod 4
-  // itself, so this arrives from apps that declare only zod 4.
+  // The zod 3 API is refused, not mis-rendered: on a v3 node `_def.type` holds a
+  // nested schema where v4 keeps the type name. `zod/v3` ships inside zod 4, so
+  // this arrives from apps that declare only zod 4.
   describe('zod 3 refusal', () => {
-    // One test, deliberately: the warning fires once per process, so split
-    // tests would be coupled by execution order. The nested case runs first
-    // because it is the one that regresses silently — a v3 node inside a v4
-    // object passes the entry gate, and before the recursion re-checked it
-    // rendered as `unknown` with no warning at all.
+    // One test, deliberately: the warning fires once per process, so split tests
+    // would be coupled by execution order. The nested case runs first because it
+    // is the one that regressed silently.
     it('refuses v3 at entry and nested, warning once per process', () => {
       const warn = spyOn(console, 'warn').mockImplementation(() => {})
       try {

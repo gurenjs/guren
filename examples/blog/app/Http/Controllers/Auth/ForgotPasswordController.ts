@@ -16,16 +16,13 @@ export default class ForgotPasswordController extends Controller {
   async store(): Promise<Response> {
     const { email } = await this.validateBody(ForgotPasswordSchema)
 
-    // Resolved before the lookup on purpose: a misconfigured APP_URL throws,
-    // and throwing only for addresses that turned out to exist would answer
-    // the question the generic status message below refuses to.
+    // Resolved before the lookup: a misconfigured APP_URL throws, and throwing
+    // only for addresses that exist would answer the question hidden below.
     const resetBaseUrl = `${appUrl(this.request)}/reset-password`
 
-    // Always respond with the same status message whether or not the
-    // account exists, to avoid leaking which emails are registered. The
-    // email itself is dispatched to a queue rather than awaited inline, so
-    // the (comparatively slow) mail-transport round-trip can't be used as a
-    // timing side-channel to tell known accounts apart from unknown ones.
+    // One status message whether or not the account exists, so registered
+    // emails do not leak. The mail is queued rather than awaited, so the slow
+    // transport round-trip is not a timing side-channel either.
     const [user] = await User.where({ email })
     if (user) {
       const { token } = await createPasswordResetToken(email, passwordResetStore)

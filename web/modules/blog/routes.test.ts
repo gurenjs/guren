@@ -36,8 +36,7 @@ describe('admin route guard', () => {
   })
 
   it('should guard every admin mutation route', async () => {
-    // CSRF is primed like a real browser so the requests reach the auth
-    // guard — moving any of these out of the blog.auth group fails this.
+    // CSRF primed like a real browser, so the requests reach the auth guard.
     const app = await (await createBlogTestApp()).withCsrf('/blog')
 
     await app.post('/admin/posts').assertRedirect('/auth/github')
@@ -49,9 +48,8 @@ describe('admin route guard', () => {
   it('should leave the public blog index unguarded', async () => {
     const app = await createBlogTestApp()
 
-    // No auth redirect: the request reaches the controller (which may then
-    // fail on the unconfigured test database — anything but a redirect
-    // proves the route is not behind the guard).
+    // Anything but a redirect proves the route is not behind the guard; the
+    // controller may still fail on the unconfigured test database.
     const response = await app.get('/blog')
     expect(response.status).not.toBe(302)
   })

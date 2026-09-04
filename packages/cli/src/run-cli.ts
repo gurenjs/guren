@@ -45,20 +45,11 @@ function isUsageError(error: unknown): error is Error {
 }
 
 /**
- * Stands in for citty's `runMain`, which reports a thrown error twice — once
- * with its stack and once as a bare message — before exiting the process
- * itself, leaving callers no way to intervene. Returns the exit code instead
- * of exiting so the caller decides how the process ends.
- *
- * Upgrading citty does not remove the need for this wrapper: 0.2.x prints the
- * error once but still calls `process.exit()` from inside `runMain`, and it
- * reports through `console.error` rather than `consola`, which would bypass
- * the log level the rest of the CLI honours. A citty major bump is also a
- * breaking change for plugin authors, who write `CommandDef`s against it.
- *
- * `resolveValue` and `resolveSubCommand` mirror internals citty 0.1.6 does not
- * export; `tests/bin-error-output.test.ts` covers them end to end so drift on
- * an upgrade surfaces there.
+ * Stands in for citty's `runMain`, which reports a thrown error twice and exits the
+ * process itself; this returns the exit code instead. Upgrading citty does not remove the
+ * need: 0.2.x still calls `process.exit()` from inside `runMain` and reports through
+ * `console.error`, bypassing consola's log level. `resolveValue`/`resolveSubCommand`
+ * mirror unexported citty 0.1.6 internals; `tests/bin-error-output.test.ts` covers them.
  */
 export async function runCli(cmd: AnyCommandDef, rawArgs: string[]): Promise<number> {
   const usage = async (): Promise<void> => {
@@ -82,12 +73,9 @@ export async function runCli(cmd: AnyCommandDef, rawArgs: string[]): Promise<num
       if (!meta?.version) {
         return failWithUsage('No version specified')
       }
-      // Plain stdout, like every other command that prints a payload rather
-      // than a diagnostic (`model:list`, `context`, `route:list`). citty's own
-      // `runMain` uses `consola.log` here, which makes the version unreadable
-      // exactly where it gets read: consola's non-TTY reporter prefixes the
-      // level, so CI and any piped caller see `[log] 2.6.1`, and a configured
-      // log level can drop the line entirely.
+      // Plain stdout, like every command that prints a payload rather than a diagnostic.
+      // consola's non-TTY reporter would prefix the level (`[log] 2.6.1`), and a
+      // configured log level can drop the line entirely.
       console.log(meta.version)
       return 0
     }

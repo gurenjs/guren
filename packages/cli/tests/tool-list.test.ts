@@ -7,10 +7,9 @@ import { listTools, displayTools, displayToolInspection } from '../src/tool-list
 const repoRoot = resolve(import.meta.dir, '../../..')
 
 /**
- * `createTempWorkspace` disables Bun's auto-install, so a fixture that imports
- * `@guren/core` or `zod` must be linked to this checkout — otherwise the
- * routes file would either fail or, worse, bind whatever the machine has
- * installed and call that a test of this workspace.
+ * `createTempWorkspace` disables Bun's auto-install, so a fixture importing
+ * `@guren/core` or `zod` must be linked to this checkout — otherwise it binds
+ * whatever the machine has installed and calls that a test of this workspace.
  */
 async function linkFixtureDependencies(dir: string): Promise<void> {
   await linkWorkspaceCore(dir)
@@ -20,9 +19,8 @@ async function linkFixtureDependencies(dir: string): Promise<void> {
 }
 
 /**
- * `tool:list` / `tool:inspect` over a real routes file, loaded and derived the
- * way the commands do — the manifest is deliberately never written here,
- * because deriving live without one is the property these commands exist for.
+ * The manifest is deliberately never written here: deriving live without one is
+ * the property these commands exist for.
  */
 const ROUTES = `import { Router, authorizeMiddleware } from '@guren/core'
 import { z } from 'zod'
@@ -168,7 +166,6 @@ export default registerWebRoutes
       expect(text).toContain('publish-post')
       expect(text).toContain('Approval:')
       expect(text).toContain('Redacted:')
-      // Path param supplemented as required, body key merged in flat.
       expect(text).toContain('id: string')
       expect(text).toContain('note: string')
       expect(text).toContain('(no output schema)')
@@ -182,13 +179,10 @@ export default registerWebRoutes
         spy.mockRestore()
       }
 
-      // `Authorization:` is the longest label; a shorter one padded to a
-      // different width is what made the values step out of line.
+      // `Authorization:` is the longest label (14 characters).
       const labelled = output.filter((line) => /^(Description|Exposure|Annotations|Authorization|Approval|Redacted):/u.test(line))
       expect(labelled.length).toBeGreaterThan(3)
-      // The column each value starts in: the padded label's width. One
-      // distinct value means they line up, and `Authorization:` (the longest
-      // label, 14 characters) has to be one of them.
+      // The column each value starts in; one distinct value means they line up.
       const valueColumns = new Set(
         labelled.map((line) => line.length - line.replace(/^[A-Za-z]+:\s+/u, '').length),
       )
@@ -222,8 +216,8 @@ export default registerWebRoutes
         warnings: string[]
       }
       expect(payload.tool.toolName).toBe('posts.index')
-      // Attribution comes off the tool, so the sibling route's identical
-      // warning does not leak into this report.
+      // Attribution comes off the tool, so the sibling route's identical warning
+      // does not leak in.
       expect(payload.warnings).toHaveLength(1)
       expect(payload.warnings).toEqual(payload.tool.warnings)
       expect(payload.warnings[0]).toContain('GET /posts query')

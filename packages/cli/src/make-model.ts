@@ -6,10 +6,9 @@ import type { AttachmentDefinition } from './fields'
 
 export interface MakeModelOptions extends WriterOptions {
   /**
-   * Attachment collections to declare through the `Attachable` mixin
-   * (`make:feature --attach`). The caller is responsible for having verified
-   * that the app wires `configureAttachments()` — the mixin's statics throw
-   * at first use otherwise.
+   * Attachment collections to declare through the `Attachable` mixin. The
+   * caller must have verified the app wires `configureAttachments()` — the
+   * mixin's statics throw at first use otherwise.
    */
   attachments?: AttachmentDefinition[]
 }
@@ -21,12 +20,9 @@ function attachableFactory(kind: AttachmentDefinition['kind']): string {
 function modelTemplate(className: string, attachments: AttachmentDefinition[]): string {
   const schemaIdentifier = schemaIdentifierFor(className)
 
-  // This scaffold's own default, not the framework's: every collection gets
-  // `image: 'require'` (full-decode validation, 422 on non-image) because
-  // safe-by-default matches the rest of the CLI's posture, and the option
-  // sits in the generated file for the author to delete. Drop it per
-  // collection for opaque bytes (PDFs, archives) — `hasOneAttached()` with
-  // no options.
+  // `image: 'require'` (full-decode validation, 422 on non-image) is this
+  // scaffold's own default, not the framework's; the author drops it per
+  // collection for opaque bytes such as PDFs or archives.
   const factories = [...new Set(attachments.map((attachment) => attachableFactory(attachment.kind)))]
   const imports = attachments.length === 0
     ? 'defineModel'

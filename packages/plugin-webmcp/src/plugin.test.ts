@@ -1,11 +1,8 @@
 /**
- * The server half's only observable behaviour: the origin-trial header.
- *
- * Driven through a real booted `createApp`, not by calling the middleware
- * directly, because the thing most likely to break is *when* the middleware
- * is mounted — a global middleware registered after the router mounts applies
- * to no route the app declared, and a unit test of the handler would pass
- * either way.
+ * The server half's only observable behaviour: the origin-trial header. Driven
+ * through a real booted `createApp` because what is most likely to break is
+ * *when* the middleware is mounted — one registered after the router mounts
+ * applies to no route, and a unit test of the handler would pass either way.
  */
 import { describe, test, expect } from 'bun:test'
 import { createApp, type Application, type Router } from '@guren/core'
@@ -31,11 +28,9 @@ describe('webMcpPlugin', () => {
   })
 
   test('should append rather than replace a token already on the response', async () => {
-    // The other token is set by the *handler*, so it is on the response
-    // before this plugin's middleware unwinds. A middleware setting its own
-    // afterwards would pass an ordering test — it runs first and has nothing
-    // to overwrite yet — which is why the collision is staged from the inside
-    // out instead.
+    // The other token is set by the *handler*, so it is on the response before
+    // this plugin's middleware unwinds. A middleware setting its own first
+    // would pass an ordering test with nothing to overwrite yet.
     const app = createApp({
       routes: (router: Router) => {
         router
@@ -53,9 +48,8 @@ describe('webMcpPlugin', () => {
     await app.boot()
 
     const response = await app.fetch(new Request('http://localhost/posts'))
-    // One header per token is how a browser reads several trials; overwriting
-    // would silently disable whichever was already there. Headers.get joins
-    // repeated field lines with ", ", so both tokens have to be in the value.
+    // Headers.get joins repeated field lines with ", ", so both tokens have to
+    // be in the value.
     const served = response.headers.get('Origin-Trial')
     expect(served).toContain('webmcp-token')
     expect(served).toContain('other-token')

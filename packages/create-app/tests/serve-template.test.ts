@@ -6,16 +6,11 @@ import { fileURLToPath } from 'node:url'
 import { createTempWorkspace } from './helpers'
 
 /**
- * Behavioural coverage for the scaffolded `bin/serve.ts`.
- *
- * The file decides which port a generated app asks for, and nothing tested it —
- * which is how `PORT=0` silently became 3333. The busy-port walk itself lives in
- * `Application.listen({ portFallback })` and is tested with it; what matters
- * here is that the template hands `listen()` the right port exactly once and
- * does not force `GUREN_STRICT_PORT` — a template-side retry or strict-port
- * override would nest with the framework's own walk. Asserting the file's
- * *text* would pin none of that, so each case runs the real template against a
- * stub `src/main.js` and reads back what it actually asked for.
+ * The scaffolded `bin/serve.ts` decides which port a generated app asks for
+ * (untested, `PORT=0` silently became 3333). The busy-port walk lives in
+ * `Application.listen({ portFallback })`; what matters here is that the template
+ * calls `listen()` once with the right port and never forces
+ * `GUREN_STRICT_PORT`, which would nest with that walk.
  */
 
 const templatesDir = fileURLToPath(new URL('../templates', import.meta.url))
@@ -124,11 +119,10 @@ describe('scaffolded bin/serve.ts', () => {
   })
 
   it('leaves the busy-port walk to listen()', async () => {
-    // The template used to force GUREN_STRICT_PORT=1 and retry on its own.
-    // Now that listen({ portFallback }) owns the walk, the template must call
-    // it once and leave the strict-port decision to the environment — a
-    // template-side retry would nest with the framework's into a much wider
-    // search, and a forced GUREN_STRICT_PORT=1 would switch the walk off.
+    // `listen({ portFallback })` owns the walk, so the template must call it
+    // once and leave the strict-port decision to the environment: a
+    // template-side retry nests into a much wider search, and a forced
+    // GUREN_STRICT_PORT=1 switches the walk off.
     const result = await runServeTemplate(DEFAULT_SERVE, { PORT: '4000', FAIL_TIMES: '1' })
 
     expect(result.requestedPorts).toEqual([4000])

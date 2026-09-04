@@ -2,44 +2,16 @@ import { consola } from 'consola'
 import { loadAppRouteDefinitions } from './load-routes'
 
 export interface RouteListOptions {
-  /**
-   * Routes entry file path.
-   */
   routesFile?: string
-
-  /**
-   * Application root directory.
-   */
   appRoot?: string
-
-  /**
-   * Filter by HTTP method.
-   */
+  /** Filter by HTTP method. */
   method?: string
-
-  /**
-   * Filter by path pattern.
-   */
+  /** Filter by path substring. */
   path?: string
-
-  /**
-   * Filter by route name.
-   */
+  /** Filter by route name substring. */
   name?: string
-
-  /**
-   * Output format: table, json, or compact.
-   */
   format?: 'table' | 'json' | 'compact'
-
-  /**
-   * Sort by: method, path, name.
-   */
   sort?: 'method' | 'path' | 'name'
-
-  /**
-   * Reverse sort order.
-   */
   reverse?: boolean
 }
 
@@ -49,9 +21,6 @@ export interface RouteInfo {
   name?: string
 }
 
-/**
- * List all registered routes.
- */
 export async function listRoutes(options: RouteListOptions = {}): Promise<RouteInfo[]> {
   const { definitions } = await loadAppRouteDefinitions(options)
 
@@ -61,7 +30,6 @@ export async function listRoutes(options: RouteListOptions = {}): Promise<RouteI
     name: def.name,
   }))
 
-  // Apply filters
   if (options.method) {
     const method = options.method.toUpperCase()
     routes = routes.filter((r) => r.method === method)
@@ -77,7 +45,6 @@ export async function listRoutes(options: RouteListOptions = {}): Promise<RouteI
     routes = routes.filter((r) => r.name?.toLowerCase().includes(namePattern))
   }
 
-  // Apply sorting
   if (options.sort) {
     routes.sort((a, b) => {
       const aValue = a[options.sort!] ?? ''
@@ -93,9 +60,6 @@ export async function listRoutes(options: RouteListOptions = {}): Promise<RouteI
   return routes
 }
 
-/**
- * Display routes in the terminal.
- */
 export async function displayRoutes(options: RouteListOptions = {}): Promise<void> {
   const routes = await listRoutes(options)
 
@@ -119,7 +83,6 @@ export async function displayRoutes(options: RouteListOptions = {}): Promise<voi
     return
   }
 
-  // Table format
   printRouteTable(routes)
 }
 
@@ -140,14 +103,12 @@ function padMethod(method: string): string {
 }
 
 function printRouteTable(routes: RouteInfo[]): void {
-  // Calculate column widths
   const methodWidth = 7
   const pathWidth = Math.max(4, ...routes.map((r) => r.path.length))
   const nameWidth = Math.max(4, ...routes.map((r) => (r.name ?? '').length))
 
   const hasNames = routes.some((r) => r.name)
 
-  // Print header
   let header = `${'Method'.padEnd(methodWidth)} | ${'Path'.padEnd(pathWidth)}`
   if (hasNames) {
     header += ` | ${'Name'.padEnd(nameWidth)}`
@@ -156,7 +117,6 @@ function printRouteTable(routes: RouteInfo[]): void {
   console.log('\x1b[1m' + header + '\x1b[0m')
   console.log('-'.repeat(header.length))
 
-  // Print routes
   for (const route of routes) {
     let line = `${padMethod(route.method)} | ${route.path.padEnd(pathWidth)}`
 
@@ -167,7 +127,6 @@ function printRouteTable(routes: RouteInfo[]): void {
     console.log(line)
   }
 
-  // Print summary
   console.log('')
   console.log(`Total: ${routes.length} route${routes.length === 1 ? '' : 's'}`)
 }

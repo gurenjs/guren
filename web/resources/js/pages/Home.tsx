@@ -142,7 +142,7 @@ function CopyCommand({ command }: { command: string }) {
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
     } catch {
-      // Clipboard unavailable — the command is still visible to select by hand.
+      // Clipboard unavailable; the command is still selectable by hand.
     }
   }
 
@@ -176,7 +176,6 @@ export default function Home({ codeExamples }: Props) {
       <div className="min-h-dvh bg-[radial-gradient(circle_at_10%_20%,rgba(255,190,190,.25),transparent_55%),radial-gradient(circle_at_85%_15%,rgba(183,28,28,.12),transparent_45%),#0f0a0a] text-crimson-50">
         <Header variant="home" />
 
-        {/* Hero */}
         <section className="relative overflow-hidden px-6 py-20 md:py-32">
           <div
             aria-hidden
@@ -224,7 +223,6 @@ export default function Home({ codeExamples }: Props) {
           </div>
         </section>
 
-        {/* Code Showcase */}
         <section className="px-6 py-20">
           <div className="mx-auto grid max-w-5xl grid-cols-1 items-start gap-12 lg:grid-cols-2">
             <div>
@@ -270,7 +268,6 @@ export default function Home({ codeExamples }: Props) {
           </div>
         </section>
 
-        {/* Agent Evaluation */}
         <section className="border-t border-white/10 px-6 py-20">
           <div className="mx-auto grid max-w-5xl grid-cols-1 items-start gap-12 lg:grid-cols-2">
             <div>
@@ -354,7 +351,6 @@ export default function Home({ codeExamples }: Props) {
           </div>
         </section>
 
-        {/* Feature Grid */}
         <section className="border-t border-white/10 px-6 py-20">
           <div className="mx-auto max-w-5xl">
             <div className="mb-12 text-center">
@@ -371,7 +367,6 @@ export default function Home({ codeExamples }: Props) {
           </div>
         </section>
 
-        {/* Benchmarks */}
         <section className="border-t border-white/10 px-6 py-20">
           <div className="mx-auto max-w-5xl">
             <div className="mb-12 text-center">
@@ -440,7 +435,6 @@ export default function Home({ codeExamples }: Props) {
           </div>
         </section>
 
-        {/* Deploy targets */}
         <section className="border-t border-white/10 px-6 py-20">
           <div className="mx-auto max-w-5xl">
             <div className="mb-12 text-center">
@@ -473,7 +467,6 @@ export default function Home({ codeExamples }: Props) {
           </div>
         </section>
 
-        {/* Name origin */}
         <section className="border-y border-white/10 bg-white/[0.02] px-6 py-14">
           <div className="mx-auto flex max-w-4xl flex-col items-center gap-6 text-center md:flex-row md:gap-10 md:text-left">
             <span
@@ -496,7 +489,6 @@ export default function Home({ codeExamples }: Props) {
           </div>
         </section>
 
-        {/* CTA */}
         <section className="relative overflow-hidden px-6 py-24">
           <div
             aria-hidden

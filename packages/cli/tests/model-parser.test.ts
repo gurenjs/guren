@@ -166,8 +166,7 @@ export class User extends defineModel(users, {
 
   it('still treats a wrapped `undefined` option as the absent option it is', () => {
     // `defineModel` skips the assignment either way, so reading this as a
-    // declared allowlist would report mass-assignment protection the runtime
-    // does not have — the widening the unwrap could otherwise cause.
+    // declared allowlist reports mass-assignment protection the runtime lacks.
     const source = `
 import { defineModel } from '@guren/orm'
 import { posts } from '../../db/schema.js'

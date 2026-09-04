@@ -2,9 +2,6 @@ import { Model, type PlainObject } from '@guren/orm'
 import type { ApiToken, ApiTokenStore } from '@guren/server'
 import { decodeJsonColumn, toDate, toOptionalExpiry } from './store-utils.js'
 
-/**
- * Options for DatabaseApiTokenStore.
- */
 export interface DatabaseApiTokenStoreOptions {
   /**
    * How the `abilities` column stores the ability list.
@@ -22,24 +19,11 @@ export interface DatabaseApiTokenStoreOptions {
 /**
  * Database-backed API token store built on the Guren ORM.
  *
- * Pass the Drizzle table for your `api_tokens` schema. Column property
- * names must match the {@link ApiToken} fields (`id`, `name`,
- * `hashedToken`, `userId`, `abilities`, `lastUsedAt`, `expiresAt`,
- * `createdAt`). The ORM must be configured (the standard
- * `DatabaseProvider` setup) before the store is used.
+ * Pass the Drizzle table for your `api_tokens` schema; its column property
+ * names must match the {@link ApiToken} fields. The ORM must be configured
+ * before the store is used.
  *
- * @example
- * ```ts
- * import { DatabaseApiTokenStore, createApiToken } from '@guren/core'
- * import { apiTokens } from '@/db/schema'
- *
- * const store = new DatabaseApiTokenStore(apiTokens)
- *
- * const { plainTextToken } = await createApiToken(store, {
- *   name: 'Mobile App Token',
- *   userId: user.id,
- * })
- * ```
+ * @example `new DatabaseApiTokenStore(apiTokens)`
  */
 export class DatabaseApiTokenStore implements ApiTokenStore {
   private readonly model: typeof Model
@@ -83,9 +67,8 @@ export class DatabaseApiTokenStore implements ApiTokenStore {
   }
 
   /**
-   * Delete tokens whose expiration time has passed. Expired tokens are
-   * already rejected by `verifyApiToken`; call this from a scheduled
-   * job to keep the table small.
+   * Delete tokens whose expiration has passed. `verifyApiToken` already rejects
+   * them; this only keeps the table small.
    */
   async deleteExpired(now: Date = new Date()): Promise<void> {
     await this.model.where('expiresAt', '<', now).delete()
@@ -102,18 +85,15 @@ export class DatabaseApiTokenStore implements ApiTokenStore {
       hashedToken: String(record.hashedToken),
       userId:
         typeof record.userId === 'bigint' ? record.userId.toString() : (record.userId as string | number),
-      // Corrupt text degrades to no abilities (deny-by-default) instead of
-      // throwing on every verification of the affected token. A value that
-      // decodes to something other than a list of strings degrades the same
-      // way: `tokenCan` would otherwise run `String.prototype.includes` on it,
-      // so a stored `'"*"'` would grant every ability.
+      // Deny-by-default on corrupt text, and on anything that is not a list of
+      // strings: `tokenCan` would otherwise run `String.prototype.includes`, so
+      // a stored `'"*"'` would grant every ability.
       abilities: Array.isArray(abilities)
         ? abilities.filter((ability): ability is string => typeof ability === 'string')
         : [],
       lastUsedAt: toDate(record.lastUsedAt),
-      // Null means "never expires"; a present-but-unparseable value means a
-      // malformed row, which must not read as immortal (`verifyApiToken`
-      // skips its expiry check entirely when this is null).
+      // Null means "never expires" (`verifyApiToken` skips its expiry check), so
+      // an unparseable value must not degrade to it.
       expiresAt: toOptionalExpiry(record.expiresAt),
       createdAt: toDate(record.createdAt) ?? new Date(0),
     }

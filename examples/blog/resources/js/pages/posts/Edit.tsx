@@ -6,8 +6,7 @@ import type { AttachmentData } from '@guren/core'
 import { route } from '@/.guren/routes.gen'
 
 interface Props {
-  // The server sends the text fields only — the current cover arrives as its
-  // own AttachmentData prop, never mixed into the form values.
+  // Text fields only: the current cover arrives as its own AttachmentData prop.
   post: Omit<PostFormValues, 'cover'> | null
   postId: number
   cover?: AttachmentData | null

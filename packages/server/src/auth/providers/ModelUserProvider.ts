@@ -98,18 +98,14 @@ export class ModelUserProvider<User extends Authenticatable = Authenticatable> e
 
     const hashed = (user as PlainObject)[this.passwordColumn]
     // A column holding something that is not a password hash means the account
-    // cannot authenticate with one: a null or empty column, or a sentinel such
-    // as the `passwordHash: 'oauth:...'` this repo documents for OAuth-only
-    // accounts. That is a failed login, not a server error - handing it to the
-    // hasher throws, which surfaces as a 500 and tells an attacker that the
-    // address belongs to an OAuth account while an unknown address gets a 401.
-    //
-    // A value that *claims* a hash format and fails to satisfy it keeps
-    // throwing. That is a corrupt or truncated column, and denying the login in
-    // silence would leave nothing to notice it by.
+    // cannot authenticate with one: null, empty, or a sentinel such as the
+    // `passwordHash: 'oauth:...'` this repo documents. That is a failed login,
+    // not a server error — handing it to the hasher throws, surfacing as a 500
+    // that tells an attacker the address belongs to an OAuth account while an
+    // unknown address gets a 401. A value that *claims* a hash format and fails
+    // it keeps throwing: that is a corrupt column, and silence hides it.
     if (typeof hashed !== 'string' || !looksLikePasswordHash(hashed)) {
       // Run a dummy hash to prevent timing-based user enumeration.
-      // This ensures requests take the same time whether or not the user exists.
       await this.hasher.hash('dummy-timing-equalization')
       return false
     }
@@ -122,10 +118,9 @@ export class ModelUserProvider<User extends Authenticatable = Authenticatable> e
   }
 
   /**
-   * Strip the password hash, remember token, and the model's `hidden`
-   * fields before the record leaves the auth layer. Credential
-   * validation happens on the raw record before sanitizing, so this
-   * never affects login — only what `auth.user()` exposes.
+   * Strip the password hash, remember token, and the model's `hidden` fields
+   * before the record leaves the auth layer. Credential validation runs on the
+   * raw record first, so this never affects login — only `auth.user()`.
    */
   sanitize(user: User): User {
     // Block both the option-selected columns and the model's own resolved

@@ -10,10 +10,7 @@ import { AGENT_PREFLIGHT_HEADER, AGENT_PREFLIGHT_VERDICT_HEADER } from '../inter
 import { trimSlashes } from '../support/trim-slashes'
 import { extractPathParamNames, PATH_PARAM_PATTERN } from '../internal/route-path'
 
-/**
- * Constructor type for Controller classes.
- * @template T - The controller type extending Controller
- */
+/** Constructor type for Controller classes. */
 export type ControllerConstructor<T extends Controller = Controller> = (new (...args: any[]) => T) & {
   inject?: readonly string[]
 }
@@ -39,9 +36,8 @@ export type RouteResult =
   | void
 
 /**
- * Handler for a route - either an inline function or a controller action tuple.
- * Inline handlers receive `next`, so any Hono middleware (e.g.
- * `broadcast.sseMiddleware()`) can be mounted directly as a terminal handler.
+ * Inline handlers receive `next`, so Hono middleware (e.g.
+ * `broadcast.sseMiddleware()`) can mount directly as a terminal handler.
  */
 export type RouteHandler<C extends ControllerConstructor = ControllerConstructor> =
   | ((c: Context, next: Next) => RouteResult | Promise<RouteResult>)
@@ -49,14 +45,9 @@ export type RouteHandler<C extends ControllerConstructor = ControllerConstructor
 
 type AnyRouteHandler = ((c: Context, next: Next) => RouteResult | Promise<RouteResult>) | AnyControllerAction
 
-/**
- * Model binding resolver function.
- */
 type ModelBindingResolver = (value: string) => Promise<unknown>
 
-/**
- * Model class with findOrFail static method.
- */
+/** Model class with a findOrFail static method. */
 export interface BindableModel {
   findOrFail(id: unknown, key?: string): Promise<unknown>
   /** Bound values are model classes at runtime; the constructor name is the introspection payload. */
@@ -64,11 +55,9 @@ export interface BindableModel {
 }
 
 /**
- * A model bound to a route parameter: the model class alone looks the value
- * up by primary key (`Model.findOrFail(value)`); a `[Model, column]` tuple
- * looks it up by that column (`Model.findOrFail(value, column)`), e.g.
- * `bind: { slug: [Post, 'slug'] }`. Either way the controller reads the
- * resolved record with `this.model(Model)`.
+ * A model bound to a route parameter: the class alone looks the value up by
+ * primary key, a `[Model, column]` tuple by that column. The controller reads
+ * the resolved record with `this.model(Model)`.
  */
 export type RouteModelBinding = BindableModel | readonly [BindableModel, string]
 
@@ -80,10 +69,8 @@ interface ModelBinding {
 }
 
 /**
- * A router-level `bind(param, ...)` entry. `model` is present when the
- * binding is a model (class or `[Model, column]`) — those records are also
- * handed to `Controller.model()` — and absent for custom resolvers, whose
- * value only reaches the action as a positional argument.
+ * A router-level `bind(param, ...)` entry. `model` is absent for custom
+ * resolvers, whose value only reaches the action as a positional argument.
  */
 interface RegisteredBinding {
   resolve: ModelBindingResolver
@@ -103,31 +90,24 @@ async function resolveModelBinding({ model, key }: ModelBinding, value: string):
 }
 
 /**
- * A Resource class accepted as a response hint. Only the constructor name is
- * introspected — the router never instantiates it, so any class whose
- * instances expose `toJSON()` (every `Resource` subclass) qualifies.
+ * A Resource class accepted as a response hint. Never instantiated — only the
+ * constructor name is introspected.
  */
 interface ResponseResourceClass {
   new (resource: any): { toJSON(): unknown }
 }
 
 /**
- * Type-level response hint for a route: a Resource class, a single-element
- * array of a hint (a collection), or a plain object of hints (an envelope,
- * e.g. `{ data: [PostResource] }`). Purely declarative — nothing is validated
- * at runtime. `guren codegen` maps each Resource class to the `Data` type it
- * extracts from `app/Http/Resources` and types the API client's `json()`
- * with the assembled shape.
+ * Type-level response hint: a Resource class, a single-element array (a
+ * collection), or an object of hints (an envelope). Declarative only; `guren
+ * codegen` turns it into the API client's `json()` type.
  */
 export type ResourceResponseHint =
   | ResponseResourceClass
   | readonly [ResourceResponseHint]
   | { readonly [key: string]: ResourceResponseHint }
 
-/**
- * Serialized form of {@link ResourceResponseHint} carried by
- * {@link RouteDefinition}: Resource classes become their class names.
- */
+/** Serialized {@link ResourceResponseHint}: Resource classes become their class names. */
 export type ResourceResponseShape =
   | string
   | [ResourceResponseShape]
@@ -177,17 +157,14 @@ export interface RouteContractOptions<
   body?: TBodySchema
   output?: TOutputSchema
   /**
-   * Type-level response hint (see {@link ResourceResponseHint}). Unlike
-   * `output`, nothing runs at request time — the route's JSON is assumed to
-   * follow the shape. When both are set, `output` wins in generated types:
-   * it is the one actually enforced.
+   * Type-level response hint (see {@link ResourceResponseHint}); nothing runs
+   * at request time. When both are set, `output` wins in generated types.
    */
   resource?: ResourceResponseHint
   /**
    * Route model bindings: param name → model (see {@link RouteModelBinding}).
-   * `{ id: Post }` resolves by primary key, `{ slug: [Post, 'slug'] }` by
-   * that column; both throw the model's not-found exception (404) on a miss
-   * and expose the record to the controller via `this.model(Post)`.
+   * A miss throws the model's not-found exception (404); the record reaches
+   * the controller via `this.model(Post)`.
    */
   bind?: Record<string, RouteModelBinding>
   /** Agent exposure metadata (RFC 0016). See {@link AgentRouteMetadata}. */
@@ -203,16 +180,9 @@ export interface RouteOpenApiMetadata {
 }
 
 /**
- * Agent exposure metadata for a route (RFC 0016). Declaring it marks the
- * route as an agent tool; everything else about the tool — its input schema,
- * output schema, authorization — is derived from the contracts the route
- * already carries, never restated here.
- *
- * Storage only: no defaults are applied at registration, and the router does
- * not require a route name here — `.agent()` may legally be chained before
- * `.name()`, so name-requirement enforcement is deliberately left to static
- * checks over `definitions()` (a route without a name cannot become a tool;
- * the name is the tool's identity).
+ * Agent exposure metadata (RFC 0016); declaring it marks the route as a tool.
+ * Storage only: no defaults, and no route name required here (`.agent()` may
+ * precede `.name()`) — the name requirement is enforced over `definitions()`.
  */
 export interface AgentRouteMetadata {
   /** Tool description. Absent, the route's OpenAPI `description` ?? `summary` stands in. */
@@ -234,14 +204,9 @@ export interface AgentRouteMetadata {
 }
 
 /**
- * One immutable snapshot of agent metadata, taken when the metadata is
- * attached and again when `definitions()` hands it out — so neither a caller
- * mutating its options object after registration nor a consumer mutating a
- * definition can change the agent metadata the router actually holds. The
- * claim is scoped to this field: other definition fields (`schemas`, the
- * spread OpenAPI metadata) alias the registry. Plain data end to end, so
- * `structuredClone` keeps future nested fields covered without a
- * hand-maintained field list.
+ * Snapshot taken at attach and again at `definitions()`, so neither the caller
+ * nor a consumer can mutate the router's agent metadata. Scoped to this field:
+ * `schemas` and the spread OpenAPI metadata still alias the registry.
  */
 function cloneAgentMetadata(metadata: AgentRouteMetadata): AgentRouteMetadata {
   return structuredClone(metadata)
@@ -269,17 +234,12 @@ interface RegisteredRoute {
   agent?: AgentRouteMetadata
 }
 
-/**
- * Represents a registered route definition for introspection.
- */
+/** A registered route definition, as handed out for introspection. */
 export interface RouteDefinition {
   /** Uppercased HTTP method (GET, POST, PUT, PATCH, DELETE, QUERY, or any custom method registered via on()) */
   method: string
-  /** URL path pattern (e.g., '/users/:id') */
   path: string
-  /** Optional route name for URL generation */
   name?: string
-  /** Schema metadata attached via RouteContractOptions */
   schemas?: {
     params?: SchemaLike<unknown>
     query?: SchemaLike<unknown>
@@ -287,36 +247,26 @@ export interface RouteDefinition {
     output?: SchemaLike<unknown>
   }
   /**
-   * Serialized response hint from `RouteContractOptions.resource` — Resource
-   * class names in place of the classes. Absent when no hint was declared or
-   * when any class in the hint has no usable name (a partially-typed response
-   * would claim a shape the wire does not have).
+   * Serialized `RouteContractOptions.resource`. Absent when no hint was
+   * declared, or when any class in it has no usable name — a partial hint
+   * would claim a shape the wire does not have.
    */
   resource?: ResourceResponseShape
-  /** Named middleware (aliases or groups) applied to this route */
   middlewareNames?: string[]
-  /** Whether inline (unnamed) middleware handlers are attached */
   hasInlineMiddleware?: boolean
   /**
-   * Security capabilities aggregated from the route's middleware chain
-   * (named aliases, groups, and inline handlers). Always present on routers
-   * from this release — an empty object means "no recognized capability" —
-   * so consumers can distinguish that from definitions produced by older
-   * servers, where the field is absent. The value shape is internal and may
-   * change (RFC 0007).
+   * Capabilities aggregated from the route's middleware chain. Always present
+   * from this release (`{}` means none recognized), so consumers can tell that
+   * from an older server's absent field. Shape is internal (RFC 0007).
    */
   capabilities?: MiddlewareCapabilities
-  /** Controller binding when the handler is a [Controller, 'method'] tuple */
   controller?: {
     name: string
     action: string
   }
   /** Route model bindings: param name → bound model class name (from `bind`) */
   bindings?: Record<string, string>
-  /**
-   * Agent exposure metadata as declared (RFC 0016) — raw, no defaults
-   * applied. Absence means the route is not an agent tool.
-   */
+  /** Agent metadata as declared (RFC 0016), no defaults applied. Absent: not a tool. */
   agent?: AgentRouteMetadata
   summary?: string
   description?: string
@@ -325,12 +275,8 @@ export interface RouteDefinition {
   deprecated?: boolean
 }
 
-/**
- * Chainable builder for configuring a registered route.
- * @template M - Union of registered middleware alias names
- */
+/** Chainable builder for configuring a registered route. */
 export interface RouteBuilder<M extends string = never> {
-  /** Set the route name for URL generation. */
   name(routeName: string): RouteBuilder<M>
   /** Attach middleware to this specific route. See {@link RouteMiddlewareInput}. */
   middleware(...items: RouteMiddlewareInput<M>[]): RouteBuilder<M>
@@ -340,16 +286,10 @@ export interface RouteBuilder<M extends string = never> {
 
 /**
  * Accepted by `.middleware()`: a registered alias name or a handler function.
- *
- * Resolution is by kind, not by position: every name in a route's chain runs
- * before every handler, across scopes as well as within one call. So an inline
- * handler on an outer group runs *after* a named one on an inner group, the
- * reverse of how they read. Use aliases throughout when relative order matters.
- *
- * Aliases are also the only form that lands in `RouteDefinition.middlewareNames`,
- * which is how `guren audit` reports middleware it cannot otherwise identify.
- * Guards the framework stamps with a capability (`requireAuthenticated`,
- * `requireGuest`) are recognized either way.
+ * Resolution is by kind, not position — every name runs before every handler,
+ * across scopes, so an inline handler on an outer group runs *after* a named
+ * one on an inner group. Only aliases land in `middlewareNames`, which is how
+ * `guren audit` reports middleware it cannot otherwise identify.
  */
 export type RouteMiddlewareInput<M extends string = never> = M | MiddlewareHandler
 
@@ -357,11 +297,9 @@ export type RouteMiddlewareInput<M extends string = never> = M | MiddlewareHandl
 type MiddlewareScopeEntry = string | MiddlewareHandler
 
 /**
- * Group scopes are unwound synchronously, so an `async` callback registers its
- * routes after the scope has already been popped — silently dropping the
- * prefix or middleware the group was opened with. The callback type says
- * `=> void`, which TypeScript happily accepts an `async` function for, so this
- * has to be caught at runtime.
+ * Group scopes unwind synchronously, so an `async` callback registers routes
+ * after the scope was popped, silently losing the group's prefix and
+ * middleware. `=> void` accepts an async function, so catch it at runtime.
  */
 function assertSyncGroupCallback(result: unknown, method: string): void {
   if (typeof (result as PromiseLike<unknown> | undefined)?.then !== 'function') return
@@ -401,33 +339,24 @@ const RESOURCE_ACTIONS = [
   { method: 'destroy', suffix: '/:param', httpMethod: 'delete' },
 ] as const
 
-/**
- * Available actions for resource routes.
- */
+/** Available actions for resource routes. */
 export type ResourceAction = 'index' | 'create' | 'store' | 'show' | 'edit' | 'update' | 'destroy'
 
-/**
- * Options for configuring resource routes.
- */
+/** Options for configuring resource routes. */
 export interface ResourceRouteOptions {
   name?: string
   param?: string
   only?: ResourceAction[]
   except?: ResourceAction[]
   /**
-   * Per-action agent exposure (RFC 0016). An action not listed here is not
-   * exposed as a tool — deny by default, no `destroy: false` spelling needed.
-   * Listing an action this call does not register (excluded via `only`/
-   * `except`, or missing from the controller) throws: metadata for a tool
+   * Per-action agent exposure (RFC 0016); an action not listed is not exposed.
+   * Listing an action this call does not register throws — metadata for a tool
    * that cannot exist is a wiring mistake, not a no-op.
    */
   agent?: Partial<Record<ResourceAction, AgentRouteMetadata>>
 }
 
-/**
- * Instance-based router for app-local route registration and mounting.
- * @template M - Union of registered middleware alias names (e.g. `'auth' | 'guest'`)
- */
+/** Instance-based router for app-local route registration and mounting. */
 export class Router<M extends string = never> {
   private readonly registry: RegisteredRoute[] = []
   private readonly prefixStack: string[] = []
@@ -447,27 +376,16 @@ export class Router<M extends string = never> {
     return this as Router<M | N>
   }
 
-  /**
-   * Open a middleware scope for the routes registered through the returned
-   * builder. See {@link RouteMiddlewareInput}.
-   */
+  /** Open a middleware scope for the returned builder. See {@link RouteMiddlewareInput}. */
   middleware(...items: RouteMiddlewareInput<M>[]): RouterMiddlewareGroupBuilder<M> {
     return new RouterMiddlewareGroupBuilder(this, items)
   }
 
   /**
-   * Bind a route parameter for every route on this router whose path names
-   * it. A model (class or `[Model, column]`) resolves through `findOrFail`
-   * and reaches the controller both via `this.model(Model)` and as a
-   * positional argument after the context; a custom resolver's value only
-   * arrives positionally, in path-parameter order:
-   *
-   * ```ts
-   * router.bind('post', async (slug) => Post.where('slug', slug).firstOrFail())
-   * router.get('/posts/:post', [PostController, 'show'])
-   *
-   * async show(_ctx: Context, post: PostRecord) { ... }
-   * ```
+   * Bind a route parameter for every route on this router whose path names it.
+   * A model resolves through `findOrFail` and reaches the controller both via
+   * `this.model(Model)` and positionally; a custom resolver's value arrives
+   * only positionally, in path-parameter order.
    */
   bind(param: string, modelOrResolver: RouteModelBinding | ModelBindingResolver): this {
     if (typeof modelOrResolver === 'function' && !('findOrFail' in modelOrResolver)) {
@@ -475,7 +393,6 @@ export class Router<M extends string = never> {
       return this
     }
 
-    // A model class, a `[Model, column]` tuple, or any object exposing findOrFail.
     const binding = normalizeModelBinding(modelOrResolver as RouteModelBinding)
     this.modelBindings.set(param, {
       model: binding.model,
@@ -643,10 +560,9 @@ export class Router<M extends string = never> {
   }
 
   /**
-   * Registers a route for the HTTP QUERY method (RFC 10008): safe and
-   * idempotent like GET, but the request carries a body like POST. Handlers
-   * must not mutate state — CSRF protection deliberately skips QUERY on that
-   * assumption (see `createCsrfMiddleware`'s `methods` option to opt in).
+   * HTTP QUERY (RFC 10008): safe and idempotent like GET, but carries a body.
+   * Handlers must not mutate state — CSRF protection deliberately skips QUERY
+   * on that assumption (`createCsrfMiddleware`'s `methods` option opts in).
    */
   query<C extends ControllerConstructor>(path: string, handler: RouteHandler<C>, ...middlewares: MiddlewareHandler[]): RouteBuilder<M>
   query<
@@ -706,9 +622,8 @@ export class Router<M extends string = never> {
     const paramName = options.param ?? 'id'
     const { only, except, agent } = options
 
-    // The registration predicate is pure, so it runs once up front. That
-    // keeps the orphan check *before* any mutation: a rejected resource()
-    // leaves the router exactly as it was, never holding half its routes.
+    // Pure predicate, run up front so the orphan check below lands before any
+    // mutation: a rejected resource() leaves the router exactly as it was.
     const registrable = new Set<ResourceAction>()
     for (const { method } of RESOURCE_ACTIONS) {
       if (only && !only.includes(method)) continue
@@ -719,9 +634,8 @@ export class Router<M extends string = never> {
     }
 
     if (agent) {
-      // An explicitly-undefined value (`destroy: enabled ? meta : undefined`)
-      // is not a declaration — only real metadata for an unregistrable action
-      // is a wiring mistake.
+      // An explicitly-undefined value (`destroy: enabled ? meta : undefined`) is
+      // not a declaration; only real metadata for an unregistrable action throws.
       const orphaned = (Object.keys(agent) as ResourceAction[])
         .filter((action) => agent[action] !== undefined && !registrable.has(action))
       if (orphaned.length > 0) {
@@ -753,12 +667,9 @@ export class Router<M extends string = never> {
       const handler = resolveHandler(route.handler, this.modelBindings, options.container, route.bindings, route.path)
       const contractMiddleware = createContractValidationMiddleware(route)
       const inlineMiddlewares = [...route.scopedMiddlewares, ...route.middlewares]
-      // Last before the handler, so a preflight verdict answers only for a
-      // request that already cleared every other gate — see
-      // createAgentPreflightMiddleware. The capability walk is passed lazily
-      // because only an `.agent()` route has a seam to build: aggregating
-      // expands every alias and group on the chain, and doing that eagerly
-      // would discard the result for most routes in an app.
+      // Last before the handler, so a verdict answers only for a request that
+      // cleared every other gate. The capability walk is lazy: aggregating
+      // expands every alias and group, wasted work on non-agent routes.
       const preflightMiddleware = createAgentPreflightMiddleware(route, () =>
         this.aggregateCapabilities(route.routeMiddlewareNames, inlineMiddlewares))
       const chain = [...resolvedMiddlewares, ...inlineMiddlewares]
@@ -791,9 +702,8 @@ export class Router<M extends string = never> {
       resource: serializeResourceHint(resource),
       agent: agent ? cloneAgentMetadata(agent) : undefined,
       middlewareNames: [...routeMiddlewareNames],
-      // Route-local only, so a group-scoped handler does not make every route
-      // in the group report middleware it never attached (`guren audit` warns
-      // per route on this flag). Capabilities still see the whole chain.
+      // Route-local only, so a group-scoped handler does not make every route in
+      // the group report middleware it never attached. Capabilities see it all.
       hasInlineMiddleware: middlewares.length > 0,
       capabilities: this.aggregateCapabilities(routeMiddlewareNames, [...scopedMiddlewares, ...middlewares]),
       controller: isControllerAction(handler)
@@ -823,7 +733,6 @@ export class Router<M extends string = never> {
       const options = handlerOrOptions as RouteContractOptions
       const [handlerOrAction] = rest
 
-      // Contract options + controller action: validate at route level, delegate to controller
       if (isControllerAction(handlerOrAction as AnyRouteHandler)) {
         const builder = this.add(method, path, handlerOrAction as AnyControllerAction, options.middlewares ?? [])
         if (options.name) builder.name(options.name)
@@ -832,7 +741,6 @@ export class Router<M extends string = never> {
         return builder
       }
 
-      // Contract options + typed handler function
       const contractHandler = handlerOrAction as TypedRouteHandler<SchemaLike<unknown>, SchemaLike<unknown>, SchemaLike<unknown>, SchemaLike<unknown>>
       if (typeof contractHandler !== 'function') {
         throw new Error(`Router.${method.toLowerCase()} requires a handler function when route contract options are provided.`)
@@ -872,15 +780,10 @@ export class Router<M extends string = never> {
   }
 
   /**
-   * Security capabilities present on a route's middleware chain, aggregated
-   * across named aliases (group-expanded) and inline handlers. Unlike
-   * `resolveMiddlewareNames`, unregistered names are skipped rather than
-   * thrown: `definitions()` must stay side-effect-free for introspection of
-   * routers that never mount (audit, codegen), and an unresolvable alias
-   * simply contributes no capabilities.
-   *
-   * This walks the chain; the rules for combining what it finds live with the
-   * capability type, in `mergeCapabilities`.
+   * Security capabilities on a route's middleware chain, across named aliases
+   * (group-expanded) and inline handlers. Unlike `resolveMiddlewareNames`,
+   * unregistered names are skipped rather than thrown: `definitions()` must
+   * stay side-effect-free for routers that never mount (audit, codegen).
    */
   private aggregateCapabilities(
     names: string[],
@@ -890,12 +793,10 @@ export class Router<M extends string = never> {
   ): MiddlewareCapabilities {
     const aggregated: MiddlewareCapabilities = {}
     const visited = seen ?? new Set<string>()
-    // The same handler can legitimately appear twice in one chain — passed
-    // inline as well as reached through an alias or a group. `mergeCapabilities`
-    // counts every call as an independent check, which would degrade an 'any'
-    // to 'mixed', so each stamp is merged once. Threaded through the group
-    // recursion alongside `visited`, or a stamp reached inside a group would
-    // not be recognized as the one seen inline.
+    // One handler can appear twice in a chain (inline and via an alias or
+    // group). `mergeCapabilities` counts each call as an independent check,
+    // degrading 'any' to 'mixed', so each stamp is merged once — threaded
+    // through the group recursion alongside `visited`.
     const merged = seenStamps ?? new Set<MiddlewareCapabilities>()
 
     const absorbStamp = (stamp: MiddlewareCapabilities | undefined): void => {
@@ -910,8 +811,7 @@ export class Router<M extends string = never> {
 
       const groupNames = this.middlewareGroups.get(name)
       if (groupNames) {
-        // The group's own aggregate is freshly built from stamps already
-        // recorded in `merged`, so it needs no de-duplication of its own.
+        // Built from stamps already recorded in `merged`; no de-dup of its own.
         mergeCapabilities(aggregated, this.aggregateCapabilities(groupNames, [], visited, merged))
         continue
       }
@@ -1186,10 +1086,8 @@ function createRouteBuilder<M extends string = never>(route: RegisteredRoute, na
       return this
     },
     agent(metadata: AgentRouteMetadata): RouteBuilder<M> {
-      // Refuse a second declaration rather than replacing or merging: a
-      // wholesale replace silently drops security-relevant fields the first
-      // declaration carried (approval, redact), and merge semantics would be
-      // just as easy to weaken by accident. One route, one declaration.
+      // Refuse a second declaration rather than replace or merge: replacing
+      // silently drops security fields the first carried (approval, redact).
       if (route.agent) {
         throw new Error(
           `Route ${route.method} ${route.path} already carries agent metadata `
@@ -1260,7 +1158,6 @@ function createContractHandler<
         sourceBody = await result.clone().text()
         outputValue = JSON.parse(sourceBody)
       } catch {
-        // Non-JSON response — skip output validation
         return result as RouteResult
       }
     }
@@ -1282,12 +1179,10 @@ function createContractHandler<
 }
 
 /**
- * Re-serialize a JSON response from schema-parsed data, or `null` when parsing was a
- * no-op and the original response can be sent untouched.
- *
- * Headers describing the *previous* body are dropped: the parsed payload may differ
- * in byte length (schema defaults) and in content (transforms), so a copied
- * `Content-Length` or `ETag` would misdescribe what is actually sent.
+ * Re-serialize a JSON response from schema-parsed data, or `null` when parsing
+ * was a no-op. Headers describing the *previous* body are dropped: the parsed
+ * payload may differ in length (defaults) and content (transforms), so a copied
+ * `Content-Length` or `ETag` would misdescribe what is sent.
  */
 function rebuildJsonResponse(source: Response, sourceBody: string, data: unknown): Response | null {
   const body = JSON.stringify(data)
@@ -1330,12 +1225,9 @@ function validationErrorResponse(error: ValidationErrorLike, status: number): Re
 }
 
 /**
- * Validate one request segment, throwing `ValidationException` (422) on failure.
- *
- * The controller-action path reports failures as exceptions rather than
- * responses so `ExceptionHandler` renders them: JSON for API requests, and a
- * redirect carrying the error bag for Inertia ones. `validateBody`,
- * `validateQuery` and `validateParams` on `Controller` report the same way.
+ * Validate one request segment, throwing `ValidationException` (422). The
+ * controller-action path throws rather than responding so `ExceptionHandler`
+ * renders it: JSON for API requests, a redirect with the error bag for Inertia.
  */
 function throwOnInvalid(schema: ValidationSchema<unknown>, data: unknown): void {
   const result = schema.safeParse(data)
@@ -1345,35 +1237,11 @@ function throwOnInvalid(schema: ValidationSchema<unknown>, data: unknown): void 
 }
 
 /**
- * The preflight seam: everything a request must pass before the handler runs,
- * reported instead of executed.
- *
- * Mounted last, so the whole chain in front of it has already run — an
- * unauthenticated call is a 401 and an unauthorized one a 403 from the real
- * middleware, not from a second copy of the rule here. Reaching this point is
- * itself the positive half of the verdict; what it adds is validating the
- * contract the *tool advertised* and then stopping, so an agent can ask "would
- * this be allowed" without the write happening.
- *
- * **Only routes declaring `.agent()` honour the header.** A non-agent route
- * ignores it completely, so no ordinary endpoint changes behaviour on a header
- * an arbitrary client can set; the surface is exactly what RFC 0016 defines.
- *
- * Body validation happens *here* rather than being left to the controller's
- * `validateBody()`: the chain stops before the controller by construction, so
- * the alternative is a verdict that silently never checked the body — the
- * shape of the request an agent is most likely to get wrong. Reading the body
- * is safe precisely because this branch does not call `next()`, so nothing
- * downstream reads the stream after it.
- *
- * What it cannot check, it says. A route may authorize inside its action
- * (`await this.authorize(...)`), which `guren check` accepts as satisfying the
- * agent-route authorization rule — and which this seam structurally cannot
- * reach, because the action never runs. So `allowed: true` means "passed
- * everything that runs before the handler", and `unverified` names what a real
- * call would still evaluate. Reporting a bare `allowed: true` for a route
- * whose only authorization lives in its body would be the verdict claiming a
- * check it never made.
+ * The preflight seam: what a request must pass before the handler, reported
+ * instead of executed. Mounted last, so the chain in front really ran; only
+ * `.agent()` routes honour the header. Body validation happens here (safe:
+ * this branch never calls `next()`), and `unverified` names the checks only
+ * the action itself would make, such as `await this.authorize(...)`.
  */
 function createAgentPreflightMiddleware(
   route: RegisteredRoute,
@@ -1407,9 +1275,8 @@ function createAgentPreflightMiddleware(
       validated.push('body')
     }
 
-    // Marked as a verdict so nothing downstream mistakes it for the route's
-    // own output: this body does not satisfy an `output` schema, and it is
-    // not the tool's `structuredContent`.
+    // Marked as a verdict so nothing downstream mistakes it for the route's own
+    // output: it satisfies no `output` schema and is not `structuredContent`.
     c.header(AGENT_PREFLIGHT_VERDICT_HEADER, '1')
     return c.json({
       preflight: true,
@@ -1420,14 +1287,8 @@ function createAgentPreflightMiddleware(
       message:
         'Preflight only: the request passed this route\'s middleware'
         + (validated.length > 0 ? ` and its ${validated.join(', ')} schema${validated.length > 1 ? 's' : ''}` : '')
-        // Precisely "the handler did not run", and no more. The seam is mounted
-        // last, so every middleware on the route *did* run — that is the point,
-        // since a rehearsal past fake gates would answer a different question
-        // than the one asked. But a middleware can have effects of its own (a
-        // quota counter, a rate-limit bucket, a touched session), and this
-        // sentence is read by an agent deciding whether asking is safe.
-        // "Nothing was created, changed, or deleted" is a promise the seam
-        // structurally cannot keep, and it used to make it.
+        // The seam is mounted last, so the route's middleware did run and may
+        // have had effects of its own; the message must not promise otherwise.
         + '. The handler did not run. The route\'s own middleware did run, so any effect a'
         + ' middleware on this route has of its own has already happened.'
         + (unverified.length > 0
@@ -1439,7 +1300,6 @@ function createAgentPreflightMiddleware(
 }
 
 function createContractValidationMiddleware(route: RegisteredRoute): MiddlewareHandler | null {
-  // Only apply contract validation for controller actions with schemas
   if (!isControllerAction(route.handler)) {
     return null
   }
@@ -1462,20 +1322,11 @@ function createContractValidationMiddleware(route: RegisteredRoute): MiddlewareH
 
     await next()
 
-    // Validate output schema against the response body — but only a body the
-    // schema actually describes.
-    //
-    // `output` states what the action *returns*, so a failure response is
-    // outside it by construction: the exception handler wrote that body, not
-    // the action. Validating it anyway rewrote every `validateBody()` 422 on
-    // such a route into `500 Response validation failed`, hiding the real
-    // error behind a report that the app had violated its own contract. RFC
-    // 0016 makes the combination usual rather than exotic, since `guren
-    // check` warns about an agent route with no `output` schema.
-    //
-    // A preflight verdict is excluded for the same reason and one more: the
-    // handler never ran at all, so answering 500 would fail a question that
-    // was allowed.
+    // Only a body the schema describes: `output` states what the action
+    // *returns*, so an error response (written by the exception handler) is
+    // outside it — validating it rewrote every 422 into `500 Response
+    // validation failed`. A preflight verdict is excluded too: the handler
+    // never ran.
     const isSuccess = c.res !== undefined && c.res.status >= 200 && c.res.status < 300
     if (schemas.output && isSuccess && c.res.headers.get(AGENT_PREFLIGHT_VERDICT_HEADER) === null) {
       let sourceBody: string
@@ -1484,7 +1335,6 @@ function createContractValidationMiddleware(route: RegisteredRoute): MiddlewareH
         sourceBody = await c.res.clone().text()
         parsedBody = JSON.parse(sourceBody)
       } catch {
-        // Non-JSON response or parse error — skip output validation
         return
       }
 
@@ -1497,8 +1347,7 @@ function createContractValidationMiddleware(route: RegisteredRoute): MiddlewareH
         return
       }
 
-      // Rebuild the response from the parsed data so defaults/transforms/coercions
-      // applied by the schema reach the client.
+      // Rebuild from parsed data so schema defaults/transforms reach the client.
       const rebuilt = rebuildJsonResponse(c.res, sourceBody, parsed.data)
       if (rebuilt) {
         c.res = rebuilt
@@ -1535,10 +1384,8 @@ function resolveHandler(
         controller.setContainer(container)
       }
 
-      // Resolve per-route model bindings (from RouteContractOptions.bind).
-      // The model classes they claim are remembered: `this.model()` is keyed
-      // by class, so a router-level bind() must not overwrite a record the
-      // route asked for by name.
+      // `this.model()` is keyed by class, so remember the classes a route-level
+      // bind claimed: a router-level bind() must not overwrite them.
       const routeBoundModels = new Set<unknown>()
       if (routeBindings && routeBindings.size > 0) {
         const params = c.req.param() as Record<string, string>
@@ -1556,9 +1403,8 @@ function resolveHandler(
         throw new Error(`Controller method ${String(methodName)} is not defined on ${ControllerClass.name}.`)
       }
 
-      // Router-level bindings (bind(param, ...)) travel as positional
-      // arguments after the context, in path-parameter order; the ones bound
-      // to a model are also exposed through `this.model(Model)`.
+      // Router-level bindings travel as positional arguments after the context,
+      // in path-parameter order; model ones also reach `this.model(Model)`.
       const resolvedBindings = modelBindings.size > 0
         ? await resolveModelBindings(c, modelBindings, path)
         : []
@@ -1575,9 +1421,8 @@ function resolveHandler(
 
   return async (c, next) => {
     const result = await action(c, next)
-    // Middleware mounted as a handler may set the response via c.res
-    // (directly or through next()) and return nothing — honor it instead
-    // of synthesizing a 204.
+    // Middleware mounted as a handler may set the response via c.res and return
+    // nothing — honor it instead of synthesizing a 204.
     if (result === undefined && c.finalized) {
       return c.res
     }
@@ -1597,7 +1442,6 @@ async function resolveModelBindings(
   const resolved: Array<{ model?: BindableModel; value: unknown }> = []
   const params = c.req.param()
 
-  // Get path params in order from the route pattern
   const pathParams = path ? extractPathParamNames(path) : []
 
   for (const param of pathParams) {
@@ -1615,11 +1459,9 @@ async function resolveModelBindings(
 function ensureResponse(result: unknown, c?: Context): Response {
   const response = buildResponse(result)
 
-  // Handlers and controllers return raw Response objects, which bypass
-  // Hono's response construction — headers staged via c.header() in
-  // upstream middleware would be silently dropped. Rebuild through
-  // c.newResponse() so prepared headers are merged (Set-Cookie appended,
-  // the handler's own headers winning otherwise).
+  // A raw Response bypasses Hono's response construction, silently dropping
+  // headers staged via c.header() upstream. c.newResponse() merges them
+  // (Set-Cookie appended, the handler's own headers winning otherwise).
   if (c) {
     return c.newResponse(response.body, response) as Response
   }
@@ -1652,11 +1494,9 @@ function buildResponse(result: unknown): Response {
 }
 
 /**
- * Introspectable model bindings for a route: per-route `bind` entries plus
- * router-level `bind(param, Model)` calls whose param appears in the path
- * (route-level entries win). Bindings without a usable constructor name
- * (anonymous classes, custom resolvers) are omitted rather than emitted
- * as an empty string.
+ * Introspectable model bindings: per-route `bind` entries plus router-level
+ * ones whose param appears in the path (route-level wins). Bindings without a
+ * usable constructor name are omitted rather than emitted as an empty string.
  */
 function serializeBindings(
   path: string,
@@ -1678,11 +1518,9 @@ function serializeBindings(
 }
 
 /**
- * Serializes a {@link ResourceResponseHint} for introspection, replacing each
- * Resource class with its constructor name. All-or-nothing on purpose: a
- * class without a usable name (an anonymous class expression) voids the whole
- * hint rather than narrowing it, because a response type missing one of its
- * keys describes a payload the server never sends.
+ * Serializes a {@link ResourceResponseHint}, replacing Resource classes with
+ * their names. All-or-nothing: one unnamed class voids the whole hint, because
+ * a response type missing a key describes a payload the server never sends.
  */
 function serializeResourceHint(hint: ResourceResponseHint | undefined): ResourceResponseShape | undefined {
   if (hint === undefined) {
@@ -1693,27 +1531,22 @@ function serializeResourceHint(hint: ResourceResponseHint | undefined): Resource
     return hint.name || undefined
   }
 
-  // Nothing validates the hint at runtime, so a value outside the type is
-  // reachable and voids the hint like an unnamed class does. A primitive has to
-  // be rejected before `Object.entries`, which turns a string into an infinite
-  // recursion (every character is itself a one-character string) and throws on
-  // `null`.
+  // A value outside the type is reachable (nothing validates at runtime) and
+  // must be rejected before `Object.entries`, which recurses forever on a
+  // string (every character is itself a one-character string) and throws on null.
   if (typeof hint !== 'object' || hint === null) {
     return undefined
   }
 
-  // Array.isArray does not narrow the readonly tuple member of the union
-  // (it is not assignable to `any[]`), so without the assertion the tuple
-  // would fall through to the Object.entries path and serialize as
-  // `{ '0': ... }`.
+  // Array.isArray does not narrow the readonly tuple member of the union, so
+  // without the assertion the tuple would serialize as `{ '0': ... }`.
   if (Array.isArray(hint)) {
     const inner = serializeResourceHint((hint as readonly ResourceResponseHint[])[0])
     return inner === undefined ? undefined : [inner]
   }
 
-  // Only an envelope literal is left. A class instance enumerates to nothing
-  // through `Object.entries`, so without this it would serialize to `{}` — a
-  // response shape the server never sends.
+  // Only an envelope literal is left: a class instance enumerates to nothing
+  // through `Object.entries` and would serialize to `{}`.
   const proto = Object.getPrototypeOf(hint)
   if (proto !== Object.prototype && proto !== null) {
     return undefined

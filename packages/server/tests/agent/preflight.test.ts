@@ -13,11 +13,9 @@ import { buildToolRequest } from '../../src/agent/dispatch'
 
 /**
  * The preflight seam (RFC 0016 §5.4): a verdict instead of an execution.
- *
- * Driven through a mounted router rather than by calling the middleware
- * directly — what the seam promises is about its *position* in the chain (the
- * handler must not run, and everything in front of it must have), which a
- * unit call cannot show.
+ * Driven through a mounted router because the promise is about the seam's
+ * *position* in the chain — the handler must not run, everything in front of
+ * it must have — which a direct unit call cannot show.
  */
 let created = 0
 

@@ -7,9 +7,7 @@ import { getJob } from '../queue/Job'
 
 export type { APIGatewayProxyResult, LambdaEvent } from 'hono/aws-lambda'
 
-/**
- * SQS event record from AWS Lambda.
- */
+/** SQS event record from AWS Lambda. */
 export interface SqsRecord {
   messageId: string
   receiptHandle: string
@@ -22,57 +20,29 @@ export interface SqsRecord {
   awsRegion: string
 }
 
-/**
- * SQS event payload from AWS Lambda.
- */
+/** SQS event payload from AWS Lambda. */
 export interface SqsEvent {
   Records: SqsRecord[]
 }
 
-/**
- * SQS batch item failure for partial batch response.
- */
+/** SQS batch item failure for partial batch response. */
 export interface SqsBatchItemFailure {
   itemIdentifier: string
 }
 
-/**
- * SQS batch response with partial failures.
- */
+/** SQS batch response with partial failures. */
 export interface SqsBatchResponse {
   batchItemFailures: SqsBatchItemFailure[]
 }
 
-/**
- * Create an AWS Lambda handler from a booted Guren application.
- *
- * @example
- * ```typescript
- * import app from './src/app'
- * import { createLambdaHandler } from '@guren/server/lambda'
- *
- * await app.boot()
- * export const handler = createLambdaHandler(app)
- * ```
- */
+/** Create an AWS Lambda handler from an already booted Guren application. */
 export function createLambdaHandler(app: Application) {
   return handle(app.hono)
 }
 
 /**
- * Create an AWS Lambda handler for processing SQS queue jobs.
- *
- * Supports partial batch failure reporting — only failed messages
- * are returned to SQS for retry, while successful ones are deleted.
- *
- * @example
- * ```typescript
- * import app from './src/app'
- * import { createSqsHandler } from '@guren/server/lambda'
- *
- * await app.boot()
- * export const queue = createSqsHandler()
- * ```
+ * Create an AWS Lambda handler for SQS queue jobs. Reports partial batch
+ * failures, so only failed messages go back to SQS for retry.
  */
 export function createSqsHandler(): (event: SqsEvent) => Promise<SqsBatchResponse> {
   return async (event: SqsEvent): Promise<SqsBatchResponse> => {
@@ -93,12 +63,11 @@ export function createSqsHandler(): (event: SqsEvent) => Promise<SqsBatchRespons
         try {
           await instance.handle(job.payload)
         } catch (error) {
-          // If max attempts reached, call the failed handler
           if (job.attempts >= job.maxAttempts && instance.failed) {
             try {
               await instance.failed(job.payload, error as Error)
             } catch {
-              // Swallow errors in failed handler
+              // The original error is what the batch reports.
             }
           }
           throw error
@@ -116,17 +85,7 @@ export function createSqsHandler(): (event: SqsEvent) => Promise<SqsBatchRespons
   }
 }
 
-/**
- * Create an AWS Lambda handler for running scheduled tasks via EventBridge.
- *
- * @example
- * ```typescript
- * import { createScheduleHandler } from '@guren/server/lambda'
- * import { scheduler } from './src/scheduler'
- *
- * export const schedule = createScheduleHandler(scheduler)
- * ```
- */
+/** Create an AWS Lambda handler for running scheduled tasks via EventBridge. */
 export function createScheduleHandler(
   scheduler: Scheduler,
 ): () => Promise<void> {
@@ -135,36 +94,20 @@ export function createScheduleHandler(
   }
 }
 
-/**
- * Console command event payload for Lambda.
- */
+/** Console command event payload for Lambda. */
 export interface ConsoleEvent {
-  /**
-   * Command string to execute (e.g. "db:migrate", "users:create john@example.com --admin").
-   */
+  /** Command string to execute, e.g. `"users:create jo@example.com --admin"`. */
   command: string
 }
 
-/**
- * Console command result from Lambda.
- */
+/** Console command result from Lambda. */
 export interface ConsoleResult {
   exitCode: number
 }
 
 /**
- * Create an AWS Lambda handler for running console commands.
- *
- * Invoke via AWS CLI, SDK, or EventBridge with a JSON payload:
- * `{ "command": "db:migrate" }`
- *
- * @example
- * ```typescript
- * import { createConsoleHandler } from '@guren/server/lambda'
- * import { kernel } from './src/console'
- *
- * export const console = createConsoleHandler(kernel)
- * ```
+ * Create an AWS Lambda handler for running console commands. Invoke via AWS
+ * CLI, SDK, or EventBridge with a payload like `{ "command": "db:migrate" }`.
  */
 export function createConsoleHandler(
   kernel: ConsoleKernel,
@@ -177,18 +120,14 @@ export function createConsoleHandler(
 }
 
 /**
- * Detect if the current process is running inside AWS Lambda.
- *
- * Checks for the `AWS_LAMBDA_FUNCTION_NAME` environment variable,
- * which AWS sets automatically in all Lambda runtimes.
+ * Whether the process is running inside AWS Lambda, by the
+ * `AWS_LAMBDA_FUNCTION_NAME` variable AWS sets in every Lambda runtime.
  */
 export function isLambda(): boolean {
   return typeof process !== 'undefined' && !!process.env?.AWS_LAMBDA_FUNCTION_NAME
 }
 
-/**
- * Get Lambda environment metadata, or null if not running on Lambda.
- */
+/** Get Lambda environment metadata, or null if not running on Lambda. */
 export function getLambdaContext(): LambdaRuntimeContext | null {
   if (!isLambda()) return null
 
@@ -203,9 +142,7 @@ export function getLambdaContext(): LambdaRuntimeContext | null {
   }
 }
 
-/**
- * Lambda runtime context metadata.
- */
+/** Lambda runtime context metadata. */
 export interface LambdaRuntimeContext {
   functionName: string
   functionVersion: string
@@ -216,9 +153,7 @@ export interface LambdaRuntimeContext {
   tmpDir: string
 }
 
-/**
- * Deserialize a JSON SQS message body into a QueuedJob-like object.
- */
+/** Deserialize a JSON SQS message body into a QueuedJob-like object. */
 function deserializeSqsJob(body: string) {
   const raw = JSON.parse(body)
   return {

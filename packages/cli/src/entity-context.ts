@@ -42,10 +42,9 @@ export interface EntityPage {
 }
 
 /**
- * The most recent of a set of ISO 8601 timestamps. Compared as instants,
- * not strings: OKF permits offsets, so `2026-01-01T00:00:00+09:00` is
- * earlier than `2025-12-31T16:00:00Z` despite sorting after it.
- * Unparseable values lose to any real timestamp.
+ * The most recent of a set of ISO 8601 timestamps, compared as instants: OKF
+ * permits offsets, so `2026-01-01T00:00:00+09:00` is earlier than
+ * `2025-12-31T16:00:00Z` despite sorting after it.
  */
 function latestTimestamp(values: string[]): string | undefined {
   let latest: string | undefined
@@ -115,9 +114,8 @@ export interface EntityContextOptions {
 }
 
 /**
- * Thrown when the entity argument can't be resolved to exactly one model —
- * unknown name, or the same class name in more than one location. The CLI
- * and the MCP tool both surface `message` verbatim.
+ * Thrown when the entity argument resolves to no model or to more than one.
+ * The CLI and the MCP tool both surface `message` verbatim.
  */
 export class EntityResolutionError extends Error {
   constructor(message: string) {
@@ -157,10 +155,9 @@ function resolveEntity(
 }
 
 /**
- * Action names a route may dispatch to: public, instance-level, and written
- * either as a method or as a function-valued class field — `Router` accepts
- * both, so listing only methods left a field action out of the bundle
- * entirely, with nothing to say it had been skipped.
+ * Action names a route may dispatch to: public, instance-level, written as
+ * either a method or a function-valued class field. `Router` accepts both, so
+ * listing only methods drops a field action silently.
  */
 function publicActionNames(classDecl: ClassDeclaration): string[] {
   const actions: string[] = []
@@ -175,8 +172,7 @@ function publicActionNames(classDecl: ClassDeclaration): string[] {
 
 /**
  * Public method names of the controller class in a source file. Exported
- * classes win over unexported helpers declared alongside them; a bare
- * class is only used when nothing is exported.
+ * classes win over unexported helpers declared alongside them.
  */
 function extractControllerActions(source: string, filePath: string): string[] {
   const ast = parseSourceFile(source, filePath)
@@ -212,9 +208,8 @@ export async function generateEntityContext(
   const entity = match.info.className
   const controllerName = `${entity}Controller`
 
-  // When the same class name exists in more than one location, every join
-  // below is restricted to the selected location — otherwise artifacts of
-  // the sibling entity would leak into the bundle.
+  // When the same class name exists in more than one location, every join below
+  // is restricted to the selected one, or the sibling entity's artifacts leak in.
   const duplicated = sameName.length > 1
   const locationOf = (file: string) => moduleNameFromRelPath(toPosixRelative(cwd, file))
   const inLocation = (file: string) => locationOf(file) === match.module
@@ -264,10 +259,8 @@ export async function generateEntityContext(
         .map(routeDefinitionToContextRoute)
     } catch (error) {
       // A routes file that cannot be loaded is not a routes file with nothing
-      // in it. Reported rather than swallowed: the two used to render the same
-      // "No routes reference this entity.", so an app whose routes failed to
-      // import read as an app whose entity has no routes — and every reader of
-      // this bundle, agent or human, would have believed it.
+      // in it: rendering both as "No routes reference this entity." makes an
+      // import failure read as an absence.
       routesError = error instanceof Error ? error.message : String(error)
       return []
     }
@@ -334,9 +327,8 @@ export async function generateEntityContext(
     .map((file) => toPosixRelative(cwd, file))
     .sort()
 
-  // Linked docs: frontmatter `entities:` (location-scoped when duplicated)
-  // merged with explicit @docs tags from the model and controller sources
-  // (tags cross scope on purpose — they are declared, not inferred).
+  // Frontmatter `entities:` is location-scoped when the name is duplicated;
+  // `@docs` tags cross scope on purpose — they are declared, not inferred.
   const scopedDocRefs = duplicated ? allDocRefs.filter((ref) => ref.module === match.module) : allDocRefs
   const docRefByPath = new Map(allDocRefs.map((ref) => [ref.path, ref] as const))
   const linkedPaths = new Set([
@@ -393,16 +385,13 @@ export async function generateEntityContext(
 /**
  * The `## Agent Interfaces` section (RFC 0016 §14): the entity's routes that
  * declare `.agent()` metadata, rendered as the tools they become.
+ * Content-activated, so an entity exposing none contributes no section.
  *
- * Content-activated — an entity exposing no agent tools contributes no
- * section at all, which is every entity until a route opts in.
- *
- * Input is the route's *already rendered* schema strings; the tool's real
- * inputSchema is the merge of params, query, and body that the derivation
- * layer builds, so this lists the parts rather than claiming to be that
- * schema. Authorization is reported only where the middleware chain makes it
- * derivable, and says so plainly where it does not — a route whose ability is
- * resolved at request time must not be rendered as if it named one.
+ * Input lists the route's already-rendered schema strings *as parts*, since the
+ * tool's real inputSchema is the merge the derivation layer builds.
+ * Authorization is reported only where the chain makes it derivable, and says
+ * so where it does not: a route resolving its ability at request time must not
+ * be rendered as if it named one.
  */
 function renderAgentInterfaces(routes: ContextRoute[]): string[] {
   const exposed = routes.filter((route) => route.agent)
@@ -462,7 +451,6 @@ export function renderEntityContextMarkdown(ctx: EntityContext): string {
   lines.push(`# ${ctx.entity}${ctx.module ? ` (module: ${ctx.module})` : ''}`)
   lines.push('')
 
-  // Model
   const table = ctx.model.tableName ? ` (table: \`${ctx.model.tableName}\`)` : ''
   lines.push(`## Model — ${ctx.model.filePath}${table}`)
   const traits: string[] = []
@@ -494,7 +482,6 @@ export function renderEntityContextMarkdown(ctx: EntityContext): string {
     lines.push('')
   }
 
-  // Routes
   lines.push(`## Routes (${ctx.routes.length})`)
   if (ctx.routes.length > 0) {
     lines.push('| Method | Path | Name | Action | Params | Body |')

@@ -5,12 +5,8 @@ import { MessageSigner } from '../encryption/MessageSigner'
 import { deriveAppKeyring, getAppKeyringFromEnv } from '../encryption/app-key'
 
 /**
- * Configuration for password reset tokens.
- *
- * Applies at issuance only: `createPasswordResetToken` signs the expiry into
- * the token, so `verifyPasswordResetToken` and `completePasswordReset` take no
- * configuration. Changing `expiresIn` affects tokens issued from then on, not
- * tokens already sent.
+ * Configuration for password reset tokens. Applies at issuance only: the expiry
+ * is signed into the token, so the verify functions take no config.
  */
 export interface PasswordResetConfig {
   /** Token expiration time in milliseconds (default: 1 hour) */
@@ -20,17 +16,14 @@ export interface PasswordResetConfig {
 }
 
 /**
- * Storage interface for password reset tokens.
- *
- * The store answers "does this token id still exist" — single use and
- * revocation. Expiry is decided from the claim signed into the token, so a
- * store may drop expired records for housekeeping (the built-in stores do),
- * but verification never relies on it doing so.
+ * Storage interface for password reset tokens. The store answers whether a
+ * token ID still exists, which is what gives single use and revocation; expiry
+ * is decided from the claim signed into the token.
  */
 export interface PasswordResetTokenStore {
   /** Store a token ID with associated email and expiration */
   store(tokenId: string, email: string, expiresAt: Date): Promise<void>
-  /** Find email by token ID, returns null if not found (or already dropped as expired) */
+  /** Find email by token ID, returns null if not found or already dropped */
   find(tokenId: string): Promise<{ email: string; expiresAt: Date } | null>
   /** Delete a token ID from storage */
   delete(tokenId: string): Promise<void>
@@ -38,9 +31,7 @@ export interface PasswordResetTokenStore {
   deleteForEmail(email: string): Promise<void>
 }
 
-/**
- * In-memory token store for testing and development.
- */
+/** In-memory token store for testing and development. */
 export class MemoryPasswordResetStore implements PasswordResetTokenStore {
   private tokens = new Map<string, { email: string; expiresAt: Date }>()
 
@@ -63,9 +54,9 @@ export class MemoryPasswordResetStore implements PasswordResetTokenStore {
   }
 
   async deleteForEmail(email: string): Promise<void> {
-    for (const [tokenId, record] of this.tokens) {
+    for (const [hash, record] of this.tokens) {
       if (record.email === email) {
-        this.tokens.delete(tokenId)
+        this.tokens.delete(hash)
       }
     }
   }
@@ -76,9 +67,7 @@ export class MemoryPasswordResetStore implements PasswordResetTokenStore {
   }
 }
 
-/**
- * Result of creating a password reset token.
- */
+/** Result of creating a password reset token. */
 export interface PasswordResetTokenResult {
   /** The plain-text token to send to the user (via email) */
   token: string
@@ -96,14 +85,7 @@ function createPasswordResetSigner(): MessageSigner {
   return new MessageSigner(deriveAppKeyring(getAppKeyringFromEnv(), 'password-reset-signing'))
 }
 
-/**
- * Create a password reset token for a user.
- *
- * @param email - The user's email address
- * @param store - The token storage implementation
- * @param config - Optional configuration
- * @returns The token result containing the plain token and its store id
- */
+/** Create a password reset token for a user. */
 export async function createPasswordResetToken(
   email: string,
   store: PasswordResetTokenStore,
@@ -112,7 +94,6 @@ export async function createPasswordResetToken(
   const expiresIn = config.expiresIn ?? DEFAULT_EXPIRES_IN
   const tokenLength = config.tokenLength ?? DEFAULT_TOKEN_LENGTH
 
-  // Delete any existing tokens for this email
   await store.deleteForEmail(email)
 
   const tokenId = generateId()
@@ -135,16 +116,7 @@ export async function createPasswordResetToken(
   return { token, tokenId, expiresAt }
 }
 
-/**
- * Verify a password reset token.
- *
- * Expiry comes from the claim signed into the token; the store is consulted
- * only for whether the token id still exists.
- *
- * @param token - The plain-text token from the reset URL
- * @param store - The token storage implementation
- * @returns The email if token is valid, null otherwise
- */
+/** Verify a password reset token, returning the email it was issued for. */
 export async function verifyPasswordResetToken(
   token: string,
   store: PasswordResetTokenStore,
@@ -159,18 +131,15 @@ export async function verifyPasswordResetToken(
 
   const record = await store.find(claims.id)
   if (!record) return null
+
+  // Cross-check the two independently-authenticated sources: the signer
+  // vouched for claims.email, the store holds record.email of its own.
   return record.email.toLowerCase() === claims.email.toLowerCase() ? record.email : null
 }
 
 /**
- * Complete a password reset by updating the user's password and invalidating the token.
- *
- * @param token - The plain-text token from the reset URL
- * @param newPassword - The new password (should be validated by caller)
- * @param store - The token storage implementation
- * @param provider - The user provider to look up and update the user
- * @param updatePassword - Function to update the user's password
- * @returns The user if reset was successful, null if token is invalid
+ * Complete a password reset: update the user's password and invalidate the
+ * token. Returns the user, or `null` when the token is invalid.
  */
 export async function completePasswordReset<T extends Authenticatable>(
   token: string,
@@ -190,7 +159,8 @@ export async function completePasswordReset<T extends Authenticatable>(
   const record = await store.find(claims.id)
   if (!record) return null
 
-  // Verify email matches between token and store
+  // Cross-check the two independently-authenticated sources: the signer
+  // vouched for claims.email, the store holds record.email of its own.
   if (record.email.toLowerCase() !== claims.email.toLowerCase()) {
     return null
   }
@@ -201,21 +171,15 @@ export async function completePasswordReset<T extends Authenticatable>(
     return null
   }
 
-  // Update password
   await updatePassword(user, newPassword)
 
-  // Invalidate token
   await store.delete(claims.id)
 
   return user
 }
 
-/**
- * Build a password reset URL from a base URL and token.
- */
+/** Build a password reset URL from a base URL and token. */
 export const buildPasswordResetUrl = buildTokenUrl
 
-/**
- * Parse a password reset URL to extract the token and optional email.
- */
+/** Parse a password reset URL to extract the token and optional email. */
 export const parsePasswordResetUrl = parseTokenUrl

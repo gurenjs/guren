@@ -5,9 +5,8 @@ import { buildRssFeed } from '../../Services/rss.js'
 
 export default class FeedController extends Controller {
   async rss(): Promise<Response> {
-    // Built per request rather than memoized: posts are rows the admin UI
-    // mutates at runtime, and a module-scope cache would strand a published
-    // post outside whichever isolates had already answered a request.
+    // Per request rather than memoized: the admin UI mutates these rows, and a
+    // module-scope cache would strand a published post outside warm isolates.
     const xml = buildRssFeed(await listPublishedPosts())
 
     return this.text(xml, {

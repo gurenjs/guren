@@ -9,15 +9,13 @@ export function registerWebRoutes(baseRouter: Router): void {
     .aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
     .aliasMiddleware('guest', requireGuest({ redirectTo: '/dashboard' }))
 
-  // Attachments live on the private `local` disk, so their URLs point at this
-  // signed delivery route. Unmounted, every cover image 404s — and the 404 is
-  // the route's own uniform failure, so nothing at runtime names the cause.
+  // Attachment URLs point at this signed route, so unmounted every cover image
+  // 404s — with the route's own uniform failure, naming no cause.
   registerAttachmentRoutes(router)
 
   router.get('/', [PostController, 'index']).name('home')
 
-  // Health check endpoint for load balancers and uptime monitors, matching the
-  // path the generated deploy configs probe and the host-authorization exclude.
+  // Matches the path the generated deploy configs probe and host authorization excludes.
   router.get('/health', (c) => c.json({ status: 'ok' })).name('health')
 
   registerAuthRoutes(router)

@@ -27,10 +27,8 @@ interface Screen extends InertiaPageDescription {
 }
 
 /**
- * Where a controller file's `this.inertia(...)` references live: attributed
- * to the action whose body contains them, plus the leftovers that sit
- * outside any action (a helper function, a field initializer that is not
- * itself an action).
+ * Where a controller file's `this.inertia(...)` references live: attributed to the action
+ * whose body contains them, plus the leftovers that sit outside any action.
  */
 interface ControllerPageRefs {
   /** Action name → page IDs referenced in that action's body. */
@@ -40,9 +38,8 @@ interface ControllerPageRefs {
 }
 
 /**
- * The controller class in a source file. An exported class wins over an
- * unexported helper declared alongside it; a bare class is only used when
- * nothing is exported.
+ * The controller class in a source file. An exported class wins over an unexported helper
+ * declared alongside it.
  */
 function findControllerClass(source: string, filePath: string): ClassDeclaration | null {
   const ast = parseSourceFile(source, filePath)
@@ -59,19 +56,17 @@ function findControllerClass(source: string, filePath: string): ClassDeclaration
 }
 
 /**
- * Page references split per action, by slicing the source to each method's
- * span and re-running the shared extractor over the slice. That per-action
- * attribution is what lets a page join to the routes of the single action
- * that renders it rather than to every route on the controller.
+ * Page references split per action, by slicing the source to each member's span. That
+ * attribution is what joins a page to the routes of the one action that renders it,
+ * rather than to every route on the controller.
  */
 function collectControllerPageRefs(source: string, filePath: string): ControllerPageRefs {
   const byAction = new Map<string, Set<string>>()
   const attributed = new Set<string>()
 
   const classDecl = findControllerClass(source, filePath)
-  // Field actions (`show = () => this.inertia(...)`) are attributed like
-  // methods: `Router` dispatches to both, so a page one renders belongs to
-  // its routes, not to the file-level leftovers below.
+  // Field actions (`show = () => this.inertia(...)`) are attributed like methods —
+  // `Router` dispatches to both.
   for (const { member, name } of classDecl ? classActionMembers(classDecl) : []) {
     if (member.start === null || member.end === null) continue
 
@@ -86,8 +81,8 @@ function collectControllerPageRefs(source: string, filePath: string): Controller
     byAction.set(name, bucket)
   }
 
-  // Everything the file references, minus what an action claimed — an
-  // unparsable controller lands entirely here, so its pages still appear.
+  // Everything the file references minus what an action claimed; an unparsable
+  // controller lands entirely here, so its pages still appear.
   const outsideActions = new Set(
     extractInertiaPageRefs(source)
       .map((ref) => ref.id)
@@ -97,11 +92,7 @@ function collectControllerPageRefs(source: string, filePath: string): Controller
   return { byAction, outsideActions }
 }
 
-/**
- * Page references keyed by controller class name — which is what a route's
- * `controller.name` carries, so it is the join key between a page and the
- * routes that render it.
- */
+/** Page references keyed by controller class name — what a route's `controller.name` carries. */
 async function collectPagesByController(cwd: string): Promise<Map<string, ControllerPageRefs>> {
   const files = await discoverControllerFiles(cwd)
   const entries = await Promise.all(
@@ -111,8 +102,7 @@ async function collectPagesByController(cwd: string): Promise<Map<string, Contro
     }),
   )
 
-  // A class name can appear in more than one location (app root plus a
-  // module); merge rather than letting one shadow the other.
+  // A class name can appear in more than one location (app root plus a module).
   const byController = new Map<string, ControllerPageRefs>()
   for (const [className, refs] of entries) {
     const existing = byController.get(className)
@@ -137,17 +127,11 @@ interface RouteGraph {
 }
 
 /**
- * The route graph, distinguishing the two ways it can come back empty. An
- * app with no routes file at all is a legitimate shape (mid-scaffold, or a
- * pages-only project) and gets a real page-only document. An import that
- * throws is not: the resulting document would look identical to one for an
- * app that genuinely has no routes, so it is flagged degraded and must
- * never be written or byte-compared.
- *
- * A named `--routes` that is not there is degraded too, not silent: it would
- * otherwise regenerate a routeless document and the drift gate would compare
- * it, reporting drift that regenerating could only "fix" by deleting real
- * content. `resolveRoutesFile()` owns that distinction.
+ * The route graph, distinguishing the two ways it can come back empty. No routes file at
+ * all is a legitimate shape and gets a real page-only document; an import that throws, or
+ * a named `--routes` that is not there, is flagged degraded — the resulting document
+ * would look identical to a genuinely routeless app and the drift gate would compare it.
+ * `resolveRoutesFile()` owns that distinction.
  */
 async function loadRouteGraph(cwd: string, target: RoutesFileTarget): Promise<RouteGraph> {
   if (target.silentlyAbsent) return { routes: [] }
@@ -167,21 +151,16 @@ function renderRoute(route: ContextRoute): string {
 }
 
 /**
- * The screen inventory: every Inertia page a controller renders, the Props
- * type its component declares, and the routes that reach it.
- *
- * Pages referenced by a controller are the routed inventory; pages that exist
- * on disk but no controller references are listed separately, so the view
- * covers the whole `resources/js/pages` tree rather than only what happens to
- * be wired up. That split is deliberately page-side ("does any controller
- * reference it") rather than route-side ("did a route match") — when the
- * routes file is absent, a routed page keeps its row with an empty Routes
- * cell instead of being misfiled as unrouted.
+ * The screen inventory: every Inertia page a controller renders, the Props type its
+ * component declares, and the routes that reach it. Pages on disk no controller references
+ * are listed separately, so the whole `resources/js/pages` tree is covered. That split is
+ * page-side ("does any controller reference it") rather than route-side, so an absent
+ * routes file leaves a routed page with an empty Routes cell instead of misfiling it.
  */
 export async function generateScreensSpec(cwd: string, routesFile?: string): Promise<SpecArtifact> {
   const target = await resolveRoutesFile(cwd, routesFile)
-  // Rendered into the document, so it has to be app-root-relative and POSIX —
-  // an absolute path would differ per machine and break the drift gate.
+  // Rendered into the document, so app-root-relative and POSIX: an absolute path would
+  // differ per machine and break the drift gate.
   const relRoutesFile = toPosixRelative(cwd, resolve(cwd, target.path))
 
   const [graph, pagesByController, pageIdsOnDisk] = await Promise.all([
@@ -190,9 +169,8 @@ export async function generateScreensSpec(cwd: string, routesFile?: string): Pro
     listInertiaPageIds(cwd),
   ])
 
-  // Row set first: every page any controller references, whether or not a
-  // route reaches it. Routes are then layered on per action, so a page whose
-  // action has no route keeps its row with an empty Routes cell.
+  // Row set first: every page any controller references. Routes are layered on per
+  // action, so a page whose action has no route keeps its row with an empty Routes cell.
   const routesByPage = new Map<string, Set<string>>()
   const bucketFor = (id: string): Set<string> => {
     const bucket = routesByPage.get(id) ?? new Set<string>()

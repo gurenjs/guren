@@ -9,10 +9,6 @@ import {
   parseSignature,
 } from '../../src/console'
 
-// ===================
-// Input Tests
-// ===================
-
 describe('parseSignature', () => {
   test('parses command name', () => {
     const result = parseSignature('users:create')
@@ -330,10 +326,6 @@ describe('Input', () => {
   })
 })
 
-// ===================
-// Output Tests
-// ===================
-
 describe('Output', () => {
   test('creates output instance', () => {
     const output = new Output({ colors: false })
@@ -417,10 +409,6 @@ describe('BufferedOutput', () => {
     expect(output.getLines()).toHaveLength(4)
   })
 })
-
-// ===================
-// Command Tests
-// ===================
 
 class TestCommand extends Command {
   static signature = 'test:run {name} {--force}'
@@ -650,15 +638,9 @@ describe('Command', () => {
   })
 })
 
-// ===================
-// ConsoleKernel Tests
-// ===================
-
 /**
- * The non-blank lines of a help screen with runs of whitespace collapsed, so an
- * assertion can pin which description belongs to which label without depending
- * on the column width — 'aligns help descriptions past the longest label'
- * covers the padding itself.
+ * The non-blank lines of a help screen, whitespace runs collapsed, so an assertion can pin
+ * label-to-description pairing without depending on the column width.
  */
 function helpLines(output: BufferedOutput): string[] {
   return output
@@ -817,8 +799,7 @@ describe('ConsoleKernel', () => {
     kernel.register(WideCommand)
     await kernel.handle(['help', 'queue:work'])
 
-    // The longest label is '  -t, --attachment=<value>...', so every description
-    // starts two columns past it rather than overflowing a fixed column.
+    // Descriptions start two columns past the longest label, not at a fixed column.
     const rows = output.getLines().filter((line) => line.includes('--'))
     expect(rows).toEqual([
       '      --connection=<value>     Connection name',
@@ -872,10 +853,6 @@ describe('ConsoleKernel', () => {
     expect(kernel.getOutput()).toBe(newOutput)
   })
 })
-
-// ===================
-// Integration Tests
-// ===================
 
 describe('Console Integration', () => {
   test('command can call another command', async () => {

@@ -30,9 +30,8 @@ describe('Gate.resolveUser', () => {
   })
 
   test('an attached auth context is authoritative even when it has no user', async () => {
-    // No fallback to ctx.get('user') here: authentication rejected the
-    // request (e.g. invalid Bearer), so authorization must not resurrect a
-    // manually-set principal.
+    // Authentication rejected the request, so authorization must not fall back to a
+    // manually-set ctx.get('user').
     const gate = new Gate()
     const ctx = fakeContext({
       values: {
