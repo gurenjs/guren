@@ -68,8 +68,10 @@ export abstract class BaseFactory<T> {
 
     const model = attributes as T
 
+    // Run afterMaking callbacks. make() is synchronous, so an async
+    // callback finishes after the model has already been returned.
     for (const callback of this._afterMakingCallbacks) {
-      callback(model)
+      void callback(model)
     }
 
     return model

@@ -524,7 +524,7 @@ describe('Command', () => {
     expect(opts.force).toBe(true)
   })
 
-  test('option with default value', () => {
+  test('option with default value', async () => {
     class CommandWithDefault extends Command {
       static signature = 'test:default {--level=info}'
       static description = 'Test with default'
@@ -537,7 +537,7 @@ describe('Command', () => {
     const command = new CommandWithDefault()
     command.setInput([])
     command.setOutput(output)
-    command.run()
+    await command.run()
 
     expect(output.contains('Level: info')).toBe(true)
   })

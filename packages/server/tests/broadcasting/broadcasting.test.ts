@@ -11,7 +11,6 @@ import {
   PresenceChannel,
   MemoryDriver,
   type BroadcastEvent,
-  type PresenceMember,
 } from '../../src/broadcasting'
 
 describe('MemoryDriver', () => {

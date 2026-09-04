@@ -24,18 +24,10 @@ function createMockDatabase(options: {
 
   const createSelectChain = (filtered: UserRecord[]) => {
     let result = [...filtered]
-    let whereApplied = false
-    let orderApplied = false
 
     const chain: Record<string, unknown> = {
-      where: (clause: unknown) => {
-        whereApplied = true
-        return chain
-      },
-      orderBy: (...clauses: unknown[]) => {
-        orderApplied = true
-        return chain
-      },
+      where: () => chain,
+      orderBy: () => chain,
       limit: (value: number) => {
         result = result.slice(0, value)
         return chain
@@ -56,10 +48,10 @@ function createMockDatabase(options: {
   }
 
   const db = {
-    select: (selection?: Record<string, unknown>) => ({
-      from: (table: unknown) => createSelectChain(store),
+    select: (_selection?: Record<string, unknown>) => ({
+      from: (_table: unknown) => createSelectChain(store),
     }),
-    insert: (table: unknown) => ({
+    insert: (_table: unknown) => ({
       values: (record: Record<string, unknown>) => ({
         returning: async () => {
           const newRecord = { ...record, id: nextId++ } as UserRecord
@@ -69,19 +61,14 @@ function createMockDatabase(options: {
       }),
     }),
     update: supportsUpdate
-      ? (table: unknown) => {
+      ? (_table: unknown) => {
           let updateData: Record<string, unknown> = {}
-          let whereClause: unknown
-
           const chain = {
             set: (data: Record<string, unknown>) => {
               updateData = data
               return chain
             },
-            where: (clause: unknown) => {
-              whereClause = clause
-              return chain
-            },
+            where: () => chain,
             returning: async () => {
               const record = store[0]
               if (record) {
@@ -96,14 +83,9 @@ function createMockDatabase(options: {
         }
       : undefined,
     delete: supportsDelete
-      ? (table: unknown) => {
-          let whereClause: unknown
-
+      ? (_table: unknown) => {
           const chain = {
-            where: (clause: unknown) => {
-              whereClause = clause
-              return chain
-            },
+            where: () => chain,
             returning: async () => {
               if (store.length > 0) {
                 const deleted = store.shift()
@@ -316,14 +298,11 @@ describe('DrizzleAdapter', () => {
 
   describe('count', () => {
     it('returns count of all records', async () => {
-      const records = [
-        { id: 1, name: 'Alice', email: 'alice@example.com' },
-        { id: 2, name: 'Bob', email: 'bob@example.com' },
-      ]
+      
 
       const db = {
-        select: (selection?: Record<string, unknown>) => ({
-          from: (table: unknown) => ({
+        select: (_selection?: Record<string, unknown>) => ({
+          from: (_table: unknown) => ({
             where: () => ({
               all: async () => [{ value: 2 }],
             }),
@@ -342,8 +321,8 @@ describe('DrizzleAdapter', () => {
 
     it('handles bigint count values', async () => {
       const db = {
-        select: (selection?: Record<string, unknown>) => ({
-          from: (table: unknown) => ({
+        select: (_selection?: Record<string, unknown>) => ({
+          from: (_table: unknown) => ({
             all: async () => [{ value: BigInt(100) }],
           }),
         }),
@@ -359,8 +338,8 @@ describe('DrizzleAdapter', () => {
 
     it('returns 0 for empty results', async () => {
       const db = {
-        select: (selection?: Record<string, unknown>) => ({
-          from: (table: unknown) => ({
+        select: (_selection?: Record<string, unknown>) => ({
+          from: (_table: unknown) => ({
             all: async () => [],
           }),
         }),
@@ -376,8 +355,8 @@ describe('DrizzleAdapter', () => {
 
     it('returns 0 for NaN values', async () => {
       const db = {
-        select: (selection?: Record<string, unknown>) => ({
-          from: (table: unknown) => ({
+        select: (_selection?: Record<string, unknown>) => ({
+          from: (_table: unknown) => ({
             all: async () => [{ value: 'not a number' }],
           }),
         }),

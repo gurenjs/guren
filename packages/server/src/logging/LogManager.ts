@@ -1,5 +1,5 @@
-import type { LogConfig, LogChannel, LogChannelConfig, LogChannelFactory } from './types'
-import { Logger, type LoggerOptions } from './Logger'
+import type { LogConfig, LogChannel, LogChannelFactory } from './types'
+import { Logger, isPromiseLike, type LoggerOptions } from './Logger'
 import { ConsoleChannel } from './channels/ConsoleChannel'
 import { FileChannel } from './channels/FileChannel'
 import { DailyFileChannel } from './channels/DailyFileChannel'
@@ -43,9 +43,32 @@ export class LogManager {
     const channels = config.channels.map((name) => this.resolveChannel(name))
     return {
       log: (entry) => {
+        // Every member is called, and every rejection is handled the moment it
+        // is seen, whatever a later member does: a sync throw from member B
+        // must not leave member A's rejection unhandled. Failures are gathered
+        // and rethrown once, synchronously when no member went async so a
+        // sync-only stack stays sync, otherwise after all members settled.
+        const failures: unknown[] = []
+        const pending: Promise<void>[] = []
         for (const channel of channels) {
-          channel.log(entry)
+          try {
+            const result = channel.log(entry)
+            if (isPromiseLike(result)) {
+              pending.push(Promise.resolve(result).then(() => undefined, (error: unknown) => { failures.push(error) }))
+            }
+          } catch (error) {
+            failures.push(error)
+          }
         }
+        const rethrow = (): void => {
+          if (failures.length === 1) throw failures[0]
+          if (failures.length > 1) throw new AggregateError(failures, `${failures.length} of ${channels.length} stack channels failed`)
+        }
+        if (pending.length === 0) {
+          rethrow()
+          return
+        }
+        return Promise.all(pending).then(rethrow)
       },
       close: async () => {
         for (const channel of channels) {

@@ -1,4 +1,3 @@
-import { inertia } from './inertia/InertiaEngine'
 
 export type ViewRenderer = (template: string, props: Record<string, unknown>) => Response | Promise<Response>
 

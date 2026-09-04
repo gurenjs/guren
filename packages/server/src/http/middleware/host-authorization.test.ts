@@ -63,11 +63,6 @@ describe('createHostAuthorizationMiddleware', () => {
   })
 
   test('should support wildcard path exclusions', async () => {
-    const app = createApp({
-      allowedHosts: ['example.com'],
-      exclude: ['/api/*'],
-    })
-
     const app2 = new Hono()
     app2.use('*', createHostAuthorizationMiddleware({
       allowedHosts: ['example.com'],

@@ -2,7 +2,6 @@ import { describe, test, expect, beforeEach } from 'bun:test'
 import {
   Gate,
   Response,
-  createGate,
   setGate,
   getGate,
   can,
@@ -266,14 +265,14 @@ describe('Policy', () => {
   let gate: Gate
 
   class PostPolicy extends Policy {
-    before(user: TestUser | null, ability: string) {
+    before(user: TestUser | null, _ability: string) {
       if ((user as TestUser | null)?.role === 'admin') {
         return true
       }
       return undefined
     }
 
-    viewAny(user: TestUser | null) {
+    viewAny(_user: TestUser | null) {
       return true
     }
 

@@ -13,7 +13,7 @@ interface SendPasswordResetEmailPayload {
 export class SendPasswordResetEmailJob extends Job<SendPasswordResetEmailPayload> {
   static override queue = 'emails'
   static override maxAttempts = 3
-  static override backoff: 'exponential' = 'exponential'
+  static override backoff = 'exponential' as const
 
   async handle(payload: SendPasswordResetEmailPayload): Promise<void> {
     await sendPasswordResetMail(this.make('mail'), payload.email, payload.resetUrl)

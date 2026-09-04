@@ -526,7 +526,7 @@ describe('Guren MCP Server', () => {
     expect(calls.at(-1)?.definitions).toEqual(ROUTE_MANIFEST)
     // Without these, every `resource` response hint resolves to "unknown
     // Resource" and the regenerated client silently loses its typed json().
-    expect((calls.at(-1)?.options as { resources?: unknown[] }).resources).toEqual(RESOURCE_DEFINITIONS)
+    expect((calls.at(-1)?.options as { resources?: unknown[] } | undefined)?.resources).toEqual(RESOURCE_DEFINITIONS)
   })
 
   test('guren_codegen surfaces generator warnings in the tool payload', async () => {

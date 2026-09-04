@@ -34,7 +34,7 @@ class FactoryUser extends defineModel(users) {}
 
 declare const db: ReturnType<typeof drizzle>
 
-User.query(db).execute()
+void User.query(db).execute()
 
 // Model.query(db) must preserve the builder's result shape.
 type FakeSelect = { from(table: typeof users): { execute: () => Promise<UserRecord[]> } }
@@ -61,8 +61,8 @@ FactoryUser.whereNull('name')
 declare const trx: TransactionHandle
 const txUser = User.inTransaction(trx)
 const _txScope: TransactionModelScope<typeof User> = txUser
-txUser.create({ name: 'Kaworu' })
-txUser.update({ id: 1 }, { name: 'Nagisa' })
+void txUser.create({ name: 'Kaworu' })
+void txUser.update({ id: 1 }, { name: 'Nagisa' })
 
 // findWith / with() with multiple relations must intersect the relation
 // picks, not distribute them into a union.

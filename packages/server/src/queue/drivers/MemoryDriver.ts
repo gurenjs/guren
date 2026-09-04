@@ -12,7 +12,7 @@ export class MemoryDriver implements QueueDriver {
   async pop(queue: string): Promise<QueuedJob | null> {
     const now = new Date()
 
-    for (const [id, job] of this.jobs) {
+    for (const [_id, job] of this.jobs) {
       if (
         job.queue === queue &&
         job.availableAt <= now &&

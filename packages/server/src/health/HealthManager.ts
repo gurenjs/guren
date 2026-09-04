@@ -55,7 +55,7 @@ export class HealthManager {
   }
 
   middleware(options: HealthMiddlewareOptions = {}): Middleware {
-    return async (ctx: Context, next: () => Promise<void>): Promise<void> => {
+    return async (ctx: Context, _next: () => Promise<void>): Promise<void> => {
       const report = options.checks
         ? await this.checkOnly(options.checks)
         : await this.check()

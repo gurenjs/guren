@@ -12,7 +12,7 @@ import {
 } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { Readable } from 'node:stream'
-import { join, dirname, relative, resolve, sep } from 'node:path'
+import { join, dirname, resolve, sep } from 'node:path'
 import type { StorageDriver, LocalDriverOptions, PutOptions, FileMetadata, GetStreamOptions } from '../types'
 import { warnOnce } from '../../support/warn-once'
 
@@ -154,7 +154,7 @@ export class LocalDriver implements StorageDriver {
     return `${this.baseUrl}/${path}`
   }
 
-  async temporaryUrl(path: string, expiration: Date): Promise<string> {
+  async temporaryUrl(path: string, _expiration: Date): Promise<string> {
     // Local driver doesn't support temporary URLs
     return this.url(path)
   }

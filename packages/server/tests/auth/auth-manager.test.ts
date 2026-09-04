@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test'
 import { AuthManager } from '../../src/auth/AuthManager'
-import type { Guard, GuardContext, UserProvider, AuthCredentials, Authenticatable } from '../../src/auth/types'
+import type { Guard, GuardContext, UserProvider } from '../../src/auth/types'
 import { createApiToken, MemoryApiTokenStore } from '../../src/auth/api-token'
 import { TokenGuard } from '../../src/auth/TokenGuard'
 import { fakeContext } from '../support/fake-context'

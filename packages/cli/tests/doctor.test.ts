@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
 import { consola } from 'consola'
 import { getDoctorRuleEvaluations, runDoctor, buildJsonOutput, suggestNextSteps, renderDoctorReport } from '../src/doctor'
-import type { DoctorCheck, DoctorJsonOutput } from '../src/doctor'
+import type { DoctorCheck } from '../src/doctor'
 import {
   API_ONLY_APP_FILES,
   API_ONLY_REFUSAL,

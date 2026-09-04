@@ -105,7 +105,7 @@ export async function displayToolInspection(
   name: string,
   options: ToolListOptions & { json?: boolean } = {},
 ): Promise<void> {
-  const { tools, warnings } = await listTools(options)
+  const { tools } = await listTools(options)
   const tool = tools.find((candidate) => candidate.toolName === name)
 
   if (!tool) {

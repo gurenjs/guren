@@ -90,12 +90,22 @@ Runs root monorepo + blog example type checks.
 
 **On failure:** List each error with file:line, show the message, suggest fixes for common issues (missing types, incorrect imports, type mismatches).
 
+### Lint
+
+```bash
+bun run lint
+```
+
+oxlint with the type-aware rules (`typescript/no-floating-promises`) plus the repo's own `guren/await-async-assertion`. Warnings fail the run too. `bun run lint:fix` applies the safe auto-fixes.
+
+**On failure:** Show each finding with file:line and the rule name. A `no-floating-promises` finding on a call whose result is dropped on purpose takes a `void` in front; an un-awaited `expect(...).rejects` / `.resolves` takes `await`.
+
 ### PR Check (pre-PR validation)
 
 Run all checks in order. **Stop and report on first failure:**
 
 ```bash
-bun run build && bun run typecheck && bun run test
+bun run build && bun run typecheck && bun run lint && bun run test
 ```
 
 On success, confirm:

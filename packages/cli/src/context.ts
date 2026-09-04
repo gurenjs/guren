@@ -1,6 +1,4 @@
 import { resolve, relative } from 'node:path'
-import { readFile } from 'node:fs/promises'
-import { consola } from 'consola'
 import {
   discoverModelFiles,
   discoverControllerFiles,

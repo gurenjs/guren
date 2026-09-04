@@ -1,4 +1,3 @@
-import { Link } from '@inertiajs/react'
 import { SITE_DESCRIPTION, pageTitle, formatPostDate } from '../../../../config/site.js'
 import { Footer } from '../../components/Footer.js'
 import { Header } from '../../components/Header.js'

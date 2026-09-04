@@ -223,7 +223,7 @@ class SendMailJob extends Job<SendMailJobPayload> {
   static jobName = 'SendMailJob'
   static queue = 'default'
   static maxAttempts = 3
-  static backoff: 'exponential' = 'exponential'
+  static backoff = 'exponential' as const
 
   async handle(payload: SendMailJobPayload): Promise<void> {
     const manager = globalMailManager

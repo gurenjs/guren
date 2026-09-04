@@ -167,7 +167,7 @@ export class FakeEvent {
    * Record an event dispatch.
    */
   record<T extends Event>(event: T): void {
-    this.manager.emit(event)
+    void this.manager.emit(event)
   }
 
   /**

@@ -152,6 +152,7 @@ type SelectFrom<TDatabase> = TDatabase extends { select: (...args: any[]) => inf
  * which infers the type markers; extending `Model` directly means setting
  * `static table` and redeclaring `recordType`/`createType` by hand.
  */
+// oxlint-disable-next-line no-unused-vars -- phantom type parameter, kept because it is part of the public signature
 export abstract class Model<TRecord extends PlainObject = PlainObject> {
   protected static ormAdapter: ORMAdapter = DrizzleAdapter
   protected static table: unknown

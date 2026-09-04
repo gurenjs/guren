@@ -196,7 +196,6 @@ export class BroadcastManager {
     return async (ctx: Context) => {
       const clientId = this.generateClientId()
       const encoder = new TextEncoder()
-      const manager = this
 
       // Channels requested up front (?channels=a,b) are authorized and
       // subscribed before the stream starts, so a plain EventSource works.
@@ -234,8 +233,8 @@ export class BroadcastManager {
         }
 
         if (client) {
-          manager.releaseDriverSubscriptions(client.id)
-          manager.sseClients.delete(client.id)
+          this.releaseDriverSubscriptions(client.id)
+          this.sseClients.delete(client.id)
           client = null
         }
 
@@ -250,7 +249,7 @@ export class BroadcastManager {
       }
 
       const stream = new ReadableStream<Uint8Array>({
-        start(streamController) {
+        start: (streamController) => {
           controller = streamController
 
           client = {
@@ -266,7 +265,7 @@ export class BroadcastManager {
             close: cleanup,
           }
 
-          manager.sseClients.set(clientId, client)
+          this.sseClients.set(clientId, client)
 
           sendRaw(`retry: ${retry}\n\n`)
 
@@ -275,7 +274,7 @@ export class BroadcastManager {
           client.send('connected', { clientId, channels: authorizedChannels })
 
           for (const channelName of authorizedChannels) {
-            manager.subscribeClient(clientId, channelName)
+            this.subscribeClient(clientId, channelName)
           }
 
           pingTimer = setInterval(() => {
@@ -286,7 +285,7 @@ export class BroadcastManager {
             }
           }, pingInterval)
         },
-        cancel() {
+        cancel: () => {
           cleanup()
         },
       })

@@ -395,7 +395,7 @@ describe('createCsrfMiddleware', () => {
 
   it('uses custom error handler when provided', async () => {
     const app = createTestApp({
-      onError: (ctx) =>
+      onError: (_ctx) =>
         new Response('Custom CSRF error', {
           status: 419,
           headers: { 'X-CSRF-Error': 'true' },

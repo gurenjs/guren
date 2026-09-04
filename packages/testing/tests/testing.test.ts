@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import {
   TestResponse,
   TestRequestBuilder,
-  TestClient,
   TestApp,
   createTestClient,
   FakeQueue,
@@ -39,7 +38,7 @@ describe('TestResponse', () => {
         ...init,
         headers: {
           'Content-Type': 'application/json',
-          ...(init.headers as Record<string, string> ?? {}),
+          ...(init.headers as Record<string, string> | undefined),
         },
       })
     )
