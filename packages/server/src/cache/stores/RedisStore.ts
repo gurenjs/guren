@@ -87,25 +87,15 @@ export class RedisStore implements CacheStore {
   }
 
   async increment(key: string, value = 1): Promise<number> {
-    const prefixedKey = this.prefixKey(key)
-
-    const exists = await this.client.exists(prefixedKey)
-    if (!exists) {
-      await this.client.set(prefixedKey, '0')
-    }
-
-    return this.client.incrby(prefixedKey, value)
+    // INCRBY treats a missing key as 0 and leaves an existing key's TTL alone,
+    // so the one command is the whole operation. An exists-then-SET preamble
+    // is not: two callers can both see "missing", both write 0, and one
+    // increment is lost.
+    return this.client.incrby(this.prefixKey(key), value)
   }
 
   async decrement(key: string, value = 1): Promise<number> {
-    const prefixedKey = this.prefixKey(key)
-
-    const exists = await this.client.exists(prefixedKey)
-    if (!exists) {
-      await this.client.set(prefixedKey, '0')
-    }
-
-    return this.client.decrby(prefixedKey, value)
+    return this.client.decrby(this.prefixKey(key), value)
   }
 
   async remember<T>(key: string, ttl: number, callback: () => Promise<T>): Promise<T> {

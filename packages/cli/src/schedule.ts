@@ -2,6 +2,7 @@ import { consola } from 'consola'
 import { resolve } from 'node:path'
 import { existsSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
+import { matchesCron, parseCron, toTimezone, type ParsedCron } from '@guren/core'
 
 export interface ScheduleOptions {
   appRoot?: string
@@ -111,45 +112,66 @@ async function loadScheduleKernel(options: ScheduleOptions = {}): Promise<{ task
   return null
 }
 
-function getNextRunTime(expression: string, _timezone?: string): Date | null {
+/**
+ * How far ahead a "next run" is searched. Four years covers a Feb 29 task;
+ * a day-of-week + Feb 29 combination past that shows as "-" in the listing.
+ */
+const NEXT_RUN_HORIZON_MS = 4 * 366 * 24 * 60 * 60 * 1000
+
+/**
+ * The next instant at which the scheduler would fire `expression`.
+ *
+ * Mirrors `ScheduledTask.isDue()`: a timezone-bearing task is matched against
+ * its wall clock in that zone, the rest against local time. Walking the same
+ * predicate forward is what keeps the listed "next run" honest — a second
+ * estimator is how the CLI came to announce a local-time run for a task the
+ * scheduler fires on Tokyo time.
+ *
+ * Steps a wall-clock hour at a time while the hour or day cannot match, then
+ * a minute at a time. An hour step can only skip wall-clock minutes a DST gap
+ * removed, so it never overshoots a real occurrence.
+ */
+export function getNextRunTime(
+  expression: string,
+  timezone?: string,
+  from: Date = new Date(),
+): Date | null {
+  let cron: ParsedCron
   try {
-    const parts = expression.split(' ')
-    if (parts.length !== 5) return null
-
-    const now = new Date()
-    const [minute, hour] = parts
-
-    // Estimation only: covers the common patterns, not the full cron grammar.
-    const next = new Date(now)
-
-    if (minute === '*' && hour === '*') {
-      next.setMinutes(next.getMinutes() + 1)
-      next.setSeconds(0)
-    } else if (minute !== '*' && hour === '*') {
-      const targetMinute = parseInt(minute, 10)
-      if (next.getMinutes() >= targetMinute) {
-        next.setHours(next.getHours() + 1)
-      }
-      next.setMinutes(targetMinute)
-      next.setSeconds(0)
-    } else if (minute !== '*' && hour !== '*') {
-      const targetHour = parseInt(hour, 10)
-      const targetMinute = parseInt(minute, 10)
-      if (
-        next.getHours() > targetHour ||
-        (next.getHours() === targetHour && next.getMinutes() >= targetMinute)
-      ) {
-        next.setDate(next.getDate() + 1)
-      }
-      next.setHours(targetHour)
-      next.setMinutes(targetMinute)
-      next.setSeconds(0)
-    }
-
-    return next
+    cron = parseCron(expression)
   } catch {
     return null
   }
+  // A field outside its range ("0 25 * * *") parses to no values at all.
+  if (Object.values(cron).some((values) => values.length === 0)) return null
+
+  const wallClock = (instant: Date): Date => (timezone ? toTimezone(instant, timezone) : instant)
+  const dayMatches = (wall: Date): boolean =>
+    cron.dayOfMonth.includes(wall.getDate()) &&
+    cron.month.includes(wall.getMonth() + 1) &&
+    cron.dayOfWeek.includes(wall.getDay())
+
+  const next = new Date(from)
+  next.setSeconds(0, 0)
+  next.setMinutes(next.getMinutes() + 1)
+
+  const horizon = from.getTime() + NEXT_RUN_HORIZON_MS
+
+  try {
+    while (next.getTime() <= horizon) {
+      const wall = wallClock(next)
+      if (matchesCron(wall, cron)) return next
+
+      const stepMinutes =
+        cron.hour.includes(wall.getHours()) && dayMatches(wall) ? 1 : 60 - wall.getMinutes()
+      next.setTime(next.getTime() + stepMinutes * 60_000)
+    }
+  } catch {
+    // An unknown timezone throws from Intl; the listing shows "-" for it.
+    return null
+  }
+
+  return null
 }
 
 function formatTimeUntil(date: Date): string {

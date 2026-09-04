@@ -177,13 +177,46 @@ describe('createMySqlDatabase', () => {
       connectionString: () => 'mysql://guren:hunter2@db.internal:33306/guren',
     })
 
+    // drizzle's execute() wraps the mysql2 error in a DrizzleQueryError whose
+    // message is the SQL; the ER_NO_SUCH_TABLE code lives on `cause`.
     executeImpl = async () => {
-      throw Object.assign(new Error("Table 'guren.__drizzle_migrations' doesn't exist"), { code: 'ER_NO_SUCH_TABLE' })
+      throw new Error('Failed query: SELECT name, applied_at FROM __drizzle_migrations', {
+        cause: Object.assign(new Error("Table 'guren.__drizzle_migrations' doesn't exist"), {
+          code: 'ER_NO_SUCH_TABLE',
+          errno: 1146,
+        }),
+      })
     }
 
     expect(await database.migrationStatus()).toEqual([
       { name: '20240101000000_init', applied: false, appliedAt: null },
     ])
+  })
+
+  it('surfaces a denied tracker read from db:status instead of calling every migration pending', async () => {
+    const database = createMySqlDatabase({
+      migrationsFolder: createMigrationsFolder(true),
+      connectionString: () => 'mysql://guren:hunter2@db.internal:33306/guren',
+    })
+
+    // ER_TABLEACCESS_DENIED_ERROR (1142): the tracker exists, this user just
+    // cannot read it. Absorbing it reports applied migrations as pending.
+    executeImpl = async () => {
+      throw new Error('Failed query: SELECT name, applied_at FROM __drizzle_migrations', {
+        cause: Object.assign(
+          new Error("SELECT command denied to user 'guren'@'%' for table '__drizzle_migrations'"),
+          { code: 'ER_TABLEACCESS_DENIED_ERROR', errno: 1142 },
+        ),
+      })
+    }
+
+    const error = await database.migrationStatus().then(
+      () => null,
+      (reason: unknown) => reason as Error,
+    )
+
+    expect(error?.message).toContain("SELECT command denied to user 'guren'@'%' for table '__drizzle_migrations'")
+    expect(error?.message).not.toContain('hunter2')
   })
 
   it('throws when seeders folder is missing', async () => {
