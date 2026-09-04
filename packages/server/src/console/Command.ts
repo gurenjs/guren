@@ -157,7 +157,10 @@ export abstract class Command implements CommandInstance {
       let settled = false
 
       // Overwrites the line readline just echoed, so it has to target the same
-      // stream readline writes to.
+      // stream readline writes to. The settled check is load-bearing:
+      // EventEmitter snapshots its listener array before dispatch, so the `off`
+      // in finish() cannot stop a mask call already scheduled in the same
+      // 'data' emit — the newline ending the prompt would repaint an empty mask.
       const mask = (): void => {
         if (settled) return
         stdout.write('\x1B[2K\x1B[200D' + prompt + '*'.repeat(rl.line.length))
@@ -165,9 +168,7 @@ export abstract class Command implements CommandInstance {
 
       const finish = (): void => {
         settled = true
-        if (hideInput) {
-          stdin.off('data', mask)
-        }
+        stdin.off('data', mask)
         rl.close()
         if (hideInput && typeof stdin.setRawMode === 'function') {
           stdin.setRawMode(false)
@@ -179,8 +180,7 @@ export abstract class Command implements CommandInstance {
       }
 
       // Input can end without a trailing newline, and Bun's readline then
-      // closes without ever delivering a line. Flush whatever is still in the
-      // buffer instead of leaving the caller waiting forever.
+      // closes without ever delivering a line.
       rl.once('close', () => {
         if (settled) return
         const buffered = rl.line
@@ -206,20 +206,17 @@ export abstract class Command implements CommandInstance {
     })
   }
 
-  /**
-   * The stream prompts read from. Overridable so a test can hand the command a
-   * fake terminal; `createReadline()` reads from the same stream.
-   */
+  /** The stream prompts read from. Overridable so a test can hand the command a fake terminal. */
   protected inputStream(): NodeJS.ReadStream {
     return process.stdin
   }
 
   /**
-   * The stream prompts are echoed to. `createReadline()` and `secret()`'s mask
-   * share it, so the mask always overwrites the line readline just echoed.
+   * The stream prompts are echoed to. Derived from the output `setOutput()`
+   * installed, so redirecting a command's output redirects its prompts too.
    */
   protected outputStream(): NodeJS.WriteStream {
-    return process.stdout
+    return this.output?.stream?.() ?? process.stdout
   }
 
   protected createReadline(): readline.Interface {

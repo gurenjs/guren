@@ -973,41 +973,44 @@ describe('Console Integration', () => {
 // Command.secret() Tests
 // ===================
 
+/** The escape sequence every masking write starts with: clear the line, return the cursor. */
+const MASK_PREFIX = '\x1B[2K\x1B[200D'
+
 /**
- * A duplex stream that passes for an interactive terminal: readline switches it
- * to raw mode and secret() masks what is typed on it.
+ * A duplex stream that passes for an interactive terminal, paired with the
+ * `Output` a command installs through `setOutput()`, so prompts and masking are
+ * captured through the same seam production uses.
  */
-function createFakeTerminal(): {
-  input: NodeJS.ReadStream
-  writes: string[]
-  rawModeCalls: boolean[]
-  output: NodeJS.WriteStream
-} {
-  const stream = new PassThrough() as PassThrough & {
+function createFakeTerminal() {
+  const input = new PassThrough() as PassThrough & {
     isTTY: boolean
     setRawMode: (mode: boolean) => PassThrough
   }
   const rawModeCalls: boolean[] = []
-  stream.isTTY = true
-  stream.setRawMode = (mode: boolean) => {
+  input.isTTY = true
+  input.setRawMode = (mode: boolean) => {
     rawModeCalls.push(mode)
-    return stream
+    return input
   }
 
   const writes: string[] = []
-  const output = new Writable({
+  const stream = new Writable({
     write(chunk, _encoding, callback) {
       writes.push(String(chunk))
       callback()
     },
   }) as Writable & { isTTY: boolean }
-  output.isTTY = true
+  stream.isTTY = true
 
   return {
-    input: stream as unknown as NodeJS.ReadStream,
+    input: input as unknown as NodeJS.ReadStream,
     writes,
     rawModeCalls,
-    output: output as unknown as NodeJS.WriteStream,
+    output: new Output({
+      colors: false,
+      stdout: stream as unknown as NodeJS.WriteStream,
+      stderr: stream as unknown as NodeJS.WriteStream,
+    }),
   }
 }
 
@@ -1020,7 +1023,7 @@ function settleWithin<T>(promise: Promise<T>, ms: number): Promise<T> {
   const deadline = new Promise<never>((_resolve, reject) => {
     timer = setTimeout(() => reject(new Error(`promise did not settle within ${ms}ms`)), ms)
   })
-  return Promise.race([promise, deadline]).finally(() => clearTimeout(timer)) as Promise<T>
+  return Promise.race([promise, deadline]).finally(() => clearTimeout(timer))
 }
 
 function type(terminal: NodeJS.ReadStream, text: string): void {
@@ -1030,94 +1033,78 @@ function type(terminal: NodeJS.ReadStream, text: string): void {
   }
 }
 
-/** The masking writes, i.e. the ones that begin by clearing the line. */
 function maskWrites(writes: string[]): string[] {
-  return writes.filter((write) => write.startsWith('\x1B[2K'))
+  return writes.filter((write) => write.startsWith(MASK_PREFIX))
 }
 
 class SecretCommand extends Command {
   static signature = 'test:secret'
   static description = 'Secret test'
 
-  constructor(private readonly terminal: ReturnType<typeof createFakeTerminal>) {
-    super()
-  }
+  readonly terminal = createFakeTerminal()
 
   async handle(): Promise<void> {}
 
   protected inputStream(): NodeJS.ReadStream {
     return this.terminal.input
   }
-
-  protected outputStream(): NodeJS.WriteStream {
-    return this.terminal.output
-  }
 }
 
 describe('Command.secret', () => {
-  let output: BufferedOutput
-
-  beforeEach(() => {
-    output = new BufferedOutput()
-  })
-
-  function createCommand(): {
-    command: SecretCommand
-    terminal: ReturnType<typeof createFakeTerminal>
-  } {
-    const terminal = createFakeTerminal()
-    const command = new SecretCommand(terminal)
+  function createCommand(): SecretCommand {
+    const command = new SecretCommand()
     command.setInput([])
-    command.setOutput(output)
-    return { command, terminal }
+    command.setOutput(command.terminal.output)
+    return command
   }
 
   test('a second prompt sees only its own input and leaves no extra listener behind', async () => {
-    const { command, terminal } = createCommand()
+    const command = createCommand()
+    const { input, writes, rawModeCalls } = command.terminal
 
     const first = command.secret('Password')
-    type(terminal.input, 'hunter2\n')
+    type(input, 'hunter2\n')
     expect(await settleWithin(first, 1000)).toBe('hunter2')
 
-    const listenersAfterFirst = terminal.input.listenerCount('data')
-    terminal.writes.length = 0
+    const listenersAfterFirst = input.listenerCount('data')
+    writes.length = 0
 
     const second = command.secret('Token')
-    type(terminal.input, 'abc\n')
+    type(input, 'abc\n')
     expect(await settleWithin(second, 1000)).toBe('abc')
 
-    expect(terminal.input.listenerCount('data')).toBe(listenersAfterFirst)
+    expect(input.listenerCount('data')).toBe(listenersAfterFirst)
 
-    // The second prompt masks its own three characters and nothing carried
-    // over from the first.
-    const masks = maskWrites(terminal.writes)
-    expect(masks.at(-1)).toBe('\x1B[2K\x1B[200DToken: ***')
-    expect(masks.every((write) => write.startsWith('\x1B[2K\x1B[200DToken: '))).toBe(true)
-    expect(terminal.rawModeCalls.at(-1)).toBe(false)
+    // The second prompt masks its own three characters and nothing carried over
+    // from the first.
+    const masks = maskWrites(writes)
+    expect(masks.at(-1)).toBe(`${MASK_PREFIX}Token: ***`)
+    expect(masks.every((write) => write.startsWith(`${MASK_PREFIX}Token: `))).toBe(true)
+    expect(rawModeCalls.at(-1)).toBe(false)
   })
 
   test('resolves with input that arrives without a trailing newline', async () => {
-    const { command, terminal } = createCommand()
+    const command = createCommand()
+    const { input, rawModeCalls } = command.terminal
 
     const pending = command.secret('Password')
-    type(terminal.input, 'hunter2')
-    ;(terminal.input as unknown as PassThrough).end()
+    type(input, 'hunter2')
+    ;(input as unknown as PassThrough).end()
 
     expect(await settleWithin(pending, 1000)).toBe('hunter2')
-    expect(terminal.rawModeCalls.at(-1)).toBe(false)
+    expect(rawModeCalls.at(-1)).toBe(false)
   })
 
   test('rejects and restores the terminal when input closes with nothing typed', async () => {
-    const { command, terminal } = createCommand()
+    const command = createCommand()
+    const { input, rawModeCalls } = command.terminal
 
     const pending = command.secret('Password')
-    const listenersWhilePrompting = terminal.input.listenerCount('data')
-    ;(terminal.input as unknown as PassThrough).end()
+    const listenersWhilePrompting = input.listenerCount('data')
+    ;(input as unknown as PassThrough).end()
 
-    // Bounded: an implementation that never settles this promise must fail the
-    // assertion rather than wedge the run until the suite-level timeout.
     await expect(settleWithin(pending, 1000)).rejects.toThrow('Password')
-    expect(terminal.input.listenerCount('data')).toBeLessThan(listenersWhilePrompting)
-    expect(terminal.rawModeCalls.at(-1)).toBe(false)
+    expect(input.listenerCount('data')).toBeLessThan(listenersWhilePrompting)
+    expect(rawModeCalls.at(-1)).toBe(false)
   })
 })

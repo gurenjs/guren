@@ -22,4 +22,8 @@ with an unterminated line now resolves with what was typed, and input ending
 with nothing typed rejects instead of hanging.
 
 The mask writes to the same stream `createReadline()` echoes to, reached through
-the new overridable `inputStream()` / `outputStream()` accessors.
+the new overridable `inputStream()` / `outputStream()` accessors. `outputStream()`
+derives from whatever output `setOutput()` installed, via a new optional
+`stream()` on `OutputInterface` that `Output` implements, so redirecting a
+command's output now redirects its prompts with it rather than leaving them
+pinned to the real `process.stdout`.
