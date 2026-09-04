@@ -29,10 +29,8 @@ describe('assertScaffoldPath', () => {
     }
   })
 
-  // The containment root has to be the directory the write resolves against.
-  // These cover the failure mode where `cwd` reaches the writer but not the
-  // guard: the guard would then vet paths against process.cwd() while the file
-  // lands under `cwd`, so nothing it approves has actually been checked.
+  // The failure mode: `cwd` reaches the writer but not the guard, which then
+  // vets paths against process.cwd() while the file lands under `cwd`.
   describe('with an explicit cwd', () => {
     let root: string
 
@@ -54,9 +52,7 @@ describe('assertScaffoldPath', () => {
     })
 
     it('judges containment against the given root, not process.cwd()', () => {
-      // Inside the process's own directory, so a guard still reading
-      // process.cwd() would wave this through — but it escapes `root`, which
-      // is where the write would land.
+      // Inside process.cwd() but outside `root`, where the write would land.
       const escapesRootButNotCwd = `${process.cwd()}/escaped.ts`
 
       expect(() => assertScaffoldPath(escapesRootButNotCwd, root)).toThrow(

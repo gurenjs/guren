@@ -4,21 +4,15 @@ import * as realViteDevServer from '../../src/http/vite-dev-server'
 import type { ActiveViteDevServer, GurenGlobalSlots } from '../../src/http/Application'
 
 /**
- * Shared setup for the `Application` tests that stub the managed Vite dev
- * server. What they each need is a stand-in `startViteDevServer`, a view of the
- * ambient `__guren*` slots loose enough to hold fake servers, and a way to
- * clear those slots between tests.
- *
- * The `mock.module()` call itself deliberately stays at each call site. When it
- * runs, relative to the imports around it, is the part of this setup most
- * likely to matter; moving it here would hide that ordering behind an import.
+ * Shared setup for the `Application` tests that stub the managed Vite dev server.
+ * The `mock.module()` call stays at each call site: when it runs relative to the
+ * imports around it matters, and moving it here would hide that ordering.
  */
 
 /**
- * The test-side view of {@link GurenGlobalSlots}: the slot names come from the
- * one declaration in `Application.ts`, so a misspelled slot in a test does not
- * compile, while the values widen to `unknown` because these tests plant plain
- * objects where the runtime keeps real Bun and Vite servers.
+ * The test-side view of {@link GurenGlobalSlots}: names come from the declaration in
+ * `Application.ts` so a misspelling does not compile, while the values widen to
+ * `unknown` because these tests plant plain objects in place of real servers.
  */
 type GurenTestGlobal = typeof globalThis & {
   [Slot in keyof GurenGlobalSlots]?: unknown
@@ -27,18 +21,11 @@ type GurenTestGlobal = typeof globalThis & {
 export const gurenGlobals = globalThis as GurenTestGlobal
 
 /**
- * Clear every slot Guren plants on `globalThis`, so one test's leftover server
- * cannot be picked up as another's "previous run".
- *
- * Swept by prefix rather than by a list of names: the list would be one more
- * copy of the contract this fixture exists to keep in a single place, and it
- * would go stale silently. `__guren*` on `globalThis` is Guren's alone —
- * `__gurenInertia`, the one other name in this family, lives on response
- * objects rather than the global.
- *
- * A plain function, not a `beforeEach` of its own: the callers register their
- * hooks at different levels, and hook order across files is not something this
- * fixture should be quietly deciding.
+ * Clear every slot Guren plants on `globalThis`, so one test's leftover server is
+ * not picked up as another's "previous run". Swept by prefix, since a name list
+ * would go stale silently; `__guren*` on `globalThis` is Guren's alone. A plain
+ * function rather than a `beforeEach`, so this fixture does not decide hook order
+ * for callers that register at different levels.
  */
 export function resetGurenGlobals(): void {
   const slots = globalThis as Record<string, unknown>
@@ -51,10 +38,9 @@ export function resetGurenGlobals(): void {
 }
 
 /**
- * Plant the active-server slot the way a previous `bun --hot` incarnation
- * leaves it. The record's owner is an application from the module instance the
- * reload replaced, so nothing in this run can equal it — which is the point:
- * the adopting app has to take ownership rather than share it.
+ * Plant the active-server slot the way a previous `bun --hot` incarnation leaves
+ * it: the record's owner is from the replaced module instance, so nothing in this
+ * run can equal it and the adopting app has to take ownership.
  */
 export function seedPreviousViteDevServer(server: unknown, localUrl: string): void {
   gurenGlobals.__gurenActiveViteDevServer = {
@@ -65,18 +51,12 @@ export function seedPreviousViteDevServer(server: unknown, localUrl: string): vo
   }
 }
 
-/**
- * Read the slot back with the record's real shape, for assertions on what a
- * `listen()` or `stop()` left behind.
- */
+/** Read the slot back with the record's real shape. */
 export function activeViteDevServer(): ActiveViteDevServer | undefined {
   return gurenGlobals.__gurenActiveViteDevServer as ActiveViteDevServer | undefined
 }
 
-/**
- * The process listener counts the teardown assertions compare: one snapshot
- * before `listen()`, one after each transition.
- */
+/** The process listener counts the teardown assertions compare. */
 export function signalListenerCounts(): { exit: number; sigint: number; sigterm: number } {
   return {
     exit: process.listenerCount('exit'),
@@ -86,12 +66,9 @@ export function signalListenerCounts(): { exit: number; sigint: number; sigterm:
 }
 
 /**
- * Build the Vite dev server mocks and the module body that installs them.
- *
  * `moduleFactory()` spreads the module and overrides only `startViteDevServer`:
  * Bun shares one module registry across test files, so replacing it wholesale
- * would strip its other exports for every test that loads it afterwards. The
- * reuse test pins this by reading back what `mock.module()` installed.
+ * strips its other exports for every test that loads it afterwards.
  */
 export function createViteDevServerMocks() {
   const viteClose = mock(async () => {})
@@ -99,14 +76,12 @@ export function createViteDevServerMocks() {
   const startViteDevServer = mock(async () => ({
     server: {
       close: viteClose,
-      // A server that just started is listening. Tests that need the other
-      // answer plant their own `__gurenActiveViteDevServer` instead of
-      // reshaping this one.
+      // Tests that need a non-listening server plant their own
+      // `__gurenActiveViteDevServer` rather than reshaping this one.
       httpServer: { listening: true },
     },
-    // Spelled out again in the callers' assertions on purpose: a test that
-    // imported this value would compare the fixture against itself and stay
-    // green whatever it published.
+    // Spelled out again in the callers' assertions: a test importing this value
+    // would compare the fixture against itself.
     localUrl: 'http://localhost:5174',
     networkUrls: [] as string[],
   }))

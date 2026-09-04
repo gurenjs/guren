@@ -4,37 +4,14 @@ import { scanKeys } from './scan-keys'
 import { decodeAbilities } from './redis-values'
 import { toDate, toOptionalExpiry } from '../support/expiry'
 
-/**
- * Options for RedisApiTokenStore.
- */
 export interface RedisApiTokenStoreOptions {
-  /**
-   * Key prefix for token keys.
-   * @default 'apitoken:'
-   */
+  /** @default 'apitoken:' */
   prefix?: string
 }
 
 /**
- * Redis-backed API token store.
- *
- * Uses the following key structure:
- * - `apitoken:{id}` - Token data (hash)
- * - `apitoken:hash:{hashedToken}` - Maps hash to token ID
- * - `apitoken:user:{userId}` - Set of token IDs for a user
- *
- * @example
- * ```ts
- * import { createRedisClient } from '@guren/server/redis'
- *
- * const redis = createRedisClient({ url: process.env.REDIS_URL })
- * const store = new RedisApiTokenStore(redis)
- *
- * const { plainTextToken } = await createApiToken(store, {
- *   name: 'API Token',
- *   userId: user.id,
- * })
- * ```
+ * Key layout: `apitoken:{id}` Hash of token data, `apitoken:hash:{hashedToken}`
+ * hash → token ID, `apitoken:user:{userId}` Set of a user's token IDs.
  */
 export class RedisApiTokenStore implements ApiTokenStore {
   private readonly prefix: string
@@ -46,9 +23,6 @@ export class RedisApiTokenStore implements ApiTokenStore {
     this.prefix = options.prefix ?? 'apitoken:'
   }
 
-  /**
-   * Store a new API token.
-   */
   async store(token: ApiToken): Promise<void> {
     const tokenKey = `${this.prefix}${token.id}`
     const hashKey = `${this.prefix}hash:${token.hashedToken}`
@@ -61,7 +35,6 @@ export class RedisApiTokenStore implements ApiTokenStore {
     pipeline.set(hashKey, token.id)
     pipeline.sadd(userKey, token.id)
 
-    // Set expiration if token has expiresAt
     if (token.expiresAt) {
       const ttl = Math.max(0, token.expiresAt.getTime() - Date.now())
       if (ttl > 0) {
@@ -73,9 +46,6 @@ export class RedisApiTokenStore implements ApiTokenStore {
     await pipeline.exec()
   }
 
-  /**
-   * Find a token by its hashed value.
-   */
   async findByHashedToken(hashedToken: string): Promise<ApiToken | null> {
     const hashKey = `${this.prefix}hash:${hashedToken}`
     const tokenId = await this.redis.get(hashKey)
@@ -87,9 +57,6 @@ export class RedisApiTokenStore implements ApiTokenStore {
     return this.findById(tokenId)
   }
 
-  /**
-   * Find all tokens for a user.
-   */
   async findByUserId(userId: string | number): Promise<ApiToken[]> {
     const userKey = `${this.prefix}user:${userId}`
     const tokenIds = await this.redis.smembers(userKey)
@@ -105,9 +72,6 @@ export class RedisApiTokenStore implements ApiTokenStore {
     return tokens
   }
 
-  /**
-   * Delete a token by its ID.
-   */
   async delete(id: string): Promise<void> {
     const token = await this.findById(id)
     if (!token) return
@@ -123,9 +87,6 @@ export class RedisApiTokenStore implements ApiTokenStore {
     await pipeline.exec()
   }
 
-  /**
-   * Delete all tokens for a user.
-   */
   async deleteForUser(userId: string | number): Promise<void> {
     const tokens = await this.findByUserId(userId)
 
@@ -133,22 +94,15 @@ export class RedisApiTokenStore implements ApiTokenStore {
       await this.delete(token.id)
     }
 
-    // Also delete the user's token set
     const userKey = `${this.prefix}user:${userId}`
     await this.redis.del(userKey)
   }
 
-  /**
-   * Update the last used timestamp.
-   */
   async updateLastUsed(id: string, timestamp: Date): Promise<void> {
     const tokenKey = `${this.prefix}${id}`
     await this.redis.hset(tokenKey, 'lastUsedAt', timestamp.toISOString())
   }
 
-  /**
-   * Find a token by its ID.
-   */
   private async findById(id: string): Promise<ApiToken | null> {
     const tokenKey = `${this.prefix}${id}`
     const data = await this.redis.hgetall(tokenKey)
@@ -160,9 +114,6 @@ export class RedisApiTokenStore implements ApiTokenStore {
     return this.deserializeToken(data)
   }
 
-  /**
-   * Serialize a token for Redis storage.
-   */
   private serializeToken(token: ApiToken): Record<string, string> {
     return {
       id: token.id,
@@ -176,9 +127,6 @@ export class RedisApiTokenStore implements ApiTokenStore {
     }
   }
 
-  /**
-   * Deserialize a token from Redis storage.
-   */
   private deserializeToken(data: Record<string, string>): ApiToken {
     return {
       id: data.id,
@@ -187,19 +135,15 @@ export class RedisApiTokenStore implements ApiTokenStore {
       userId: data.userId,
       abilities: decodeAbilities(data.abilities),
       lastUsedAt: toDate(data.lastUsedAt),
-      // A never-expiring token serializes `expiresAt` as '' (a Redis hash has no
-      // null), so an empty string is "absent" here, not a corrupt value. Map it
-      // to undefined before `toOptionalExpiry`, which would otherwise degrade ''
-      // to epoch and reject every non-expiring token. A genuinely unparseable
-      // value still degrades to epoch and reads as expired.
+      // A Redis hash has no null, so a never-expiring token stores '' — absent,
+      // not corrupt. `toOptionalExpiry` would degrade '' to epoch and reject
+      // every non-expiring token; a truly unparseable value still does.
       expiresAt: toOptionalExpiry(data.expiresAt === '' ? undefined : data.expiresAt),
       createdAt: toDate(data.createdAt) ?? new Date(0),
     }
   }
 
-  /**
-   * Clear all tokens (for testing).
-   */
+  /** Testing only. */
   async clear(): Promise<void> {
     const keys = await scanKeys(this.redis, this.prefix + '*')
     if (keys.length > 0) {

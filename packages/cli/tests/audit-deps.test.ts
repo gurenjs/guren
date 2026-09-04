@@ -2,10 +2,8 @@ import { describe, expect, it } from 'bun:test'
 import type { AuditFinding } from '../src/audit'
 import { dependencyFindingsFromScan } from '../src/audit-deps'
 
-// Captured from a real `bun audit --json` run (bun 1.3.14) and trimmed:
-// values are a map of package name → advisory list, advisories repeat per
-// affected version range, and carry fields (id, cwe, cvss) beyond what the
-// scan consumes — the parser must tolerate them.
+// Captured from a real `bun audit --json` run (bun 1.3.14): advisories repeat per affected
+// version range and carry fields beyond what the scan consumes, which the parser must tolerate.
 const REAL_SHAPE = JSON.stringify({
   'js-yaml': [
     {
@@ -113,9 +111,8 @@ describe('dependencyFindingsFromScan partial failures', () => {
 
 describe('dependencyFindingsFromScan exit-code contract', () => {
   it('treats exit 1 with an empty report as scan-unavailable, not a clean pass', () => {
-    // Exit 1 is bun audit's "vulnerabilities found" contract — an exit-1
-    // run reporting none is contradicting itself (truncated output, a
-    // broken wrapper) and must not produce deps:none.
+    // Exit 1 is bun audit's "vulnerabilities found" contract, so an exit-1 run reporting
+    // none is contradicting itself and must not produce deps:none.
     const findings: AuditFinding[] = []
     const scan = dependencyFindingsFromScan('{}', 1, findings)
 

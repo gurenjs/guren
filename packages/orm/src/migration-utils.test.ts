@@ -88,8 +88,7 @@ describe('migrateDatabase run summary', () => {
     expect(summary).toEqual({ migrationsFolder: migrationsDir, migrationsFound: 0, looseSqlFiles: 2 })
   })
 
-  // The count used to be hardcoded to 0 on the applied path, which claimed a
-  // clean folder for one that is still skipping files.
+  // The applied path must not report a clean folder for one still skipping files.
   test('should count loose .sql files sitting beside real migrations, without warning', async () => {
     const migrationsDir = join(workDir, 'migrations')
     writeDrizzleMigration(
@@ -183,7 +182,6 @@ describe('createSqliteDatabase resetDatabase/migrationStatus', () => {
       filename: dbFile,
     })
 
-    // Before migrating: folder visible, nothing applied
     const before = await database.migrationStatus()
     expect(before).toHaveLength(1)
     expect(before[0].name).toBe('20260101000000_create_widgets')
@@ -195,7 +193,6 @@ describe('createSqliteDatabase resetDatabase/migrationStatus', () => {
     expect(after[0].applied).toBe(true)
     expect(after[0].appliedAt).not.toBeNull()
 
-    // Table exists and accepts writes
     const { Database } = await import('bun:sqlite')
     const raw = new Database(dbFile)
     raw.exec("INSERT INTO widgets (name) VALUES ('a')")
@@ -223,9 +220,8 @@ describe('createSqliteDatabase resetDatabase/migrationStatus', () => {
   })
 
   test('should leave tables queryable without an explicit migrateDatabase() call', async () => {
-    // The issue this test pins: `resetDatabase()` reads as self-sufficient, and
-    // a caller that trusts the name used to meet "no such table" inside the
-    // first query of the first test — far from the reset that caused it.
+    // `resetDatabase()` reads as self-sufficient: a caller that trusts the name
+    // otherwise meets "no such table" far from the reset that caused it.
     const migrationsDir = join(workDir, 'migrations')
     writeDrizzleMigration(
       migrationsDir,

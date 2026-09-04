@@ -3,41 +3,16 @@ import type { OAuthStatePayload, OAuthStateStore } from '@guren/server'
 import { isExpired, toDate } from './store-utils.js'
 
 /**
- * Database-backed OAuth state store built on the Guren ORM.
+ * Database-backed OAuth state store built on the Guren ORM. The default
+ * `MemoryOAuthStateStore` breaks on serverless, where the authorize redirect
+ * and the callback can land on different instances.
  *
- * The default `MemoryOAuthStateStore` keeps state in per-isolate memory,
- * which breaks on serverless: the OAuth authorize redirect and the callback
- * that follows it can land on different instances, so an in-memory map
- * never sees the state that was just written. Backing the store with the
- * database makes state visible to whichever instance handles the callback.
+ * Pass the Drizzle table for your `oauth_states` schema; column property names
+ * must be `stateHash` (text primary key), `provider`, `redirectTo`,
+ * `expiresAt`, and `binding`. Without `binding`, every `authorize({ bindTo })`
+ * state comes back unbound.
  *
- * Pass the Drizzle table for your `oauth_states` schema. Column property
- * names must match `stateHash` (text primary key), `provider`,
- * `redirectTo`, `expiresAt`, and `binding`:
- *
- * ```ts
- * export const oauthStates = sqliteTable('oauth_states', {
- *   stateHash: text('state_hash').primaryKey(),
- *   provider: text('provider').notNull(),
- *   redirectTo: text('redirect_to'),
- *   expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
- *   binding: text('binding'),
- * })
- * ```
- *
- * `binding` is required for `authorize({ bindTo })` to survive the round trip
- * to the provider. Without the column the store cannot persist it, and every
- * bound state comes back unbound.
- *
- * @example
- * ```ts
- * import { createOAuthManager, DatabaseOAuthStateStore } from '@guren/core'
- * import { oauthStates } from '@/db/schema'
- *
- * export const oauth = createOAuthManager({
- *   stateStore: new DatabaseOAuthStateStore(oauthStates),
- * })
- * ```
+ * @example `new DatabaseOAuthStateStore(oauthStates)`
  */
 export class DatabaseOAuthStateStore implements OAuthStateStore {
   private readonly model: typeof Model
@@ -64,11 +39,7 @@ export class DatabaseOAuthStateStore implements OAuthStateStore {
     return record ? mapRecordToPayload(record) : null
   }
 
-  /**
-   * Fetch the row for `stateHash`, clearing it out and returning null if
-   * expired. Shared by `find` and `consume`, which otherwise diverge only
-   * in what they do with a live row.
-   */
+  /** Fetch the row for `stateHash`, clearing it and returning null if expired. */
   private async fetchLive(stateHash: string): Promise<Record<string, unknown> | null> {
     const record = await this.model.where({ stateHash }).first()
     if (!record) {
@@ -76,9 +47,8 @@ export class DatabaseOAuthStateStore implements OAuthStateStore {
     }
 
     if (isExpired(record.expiresAt)) {
-      // Delete only the observed row version (raw value equality binds
-      // portably across column modes), so a concurrent re-issue of the same
-      // hash cannot be deleted out from under its request.
+      // Only the observed row version, so a concurrent re-issue of the same hash
+      // is not deleted out from under its request.
       await this.model.where({ stateHash, expiresAt: record.expiresAt }).delete()
       return null
     }
@@ -91,29 +61,16 @@ export class DatabaseOAuthStateStore implements OAuthStateStore {
   }
 
   /**
-   * Atomically fetch and delete a state, guaranteeing exactly one concurrent
-   * caller for the same hash receives the payload.
+   * Atomically fetch and delete a state, so exactly one concurrent caller for a
+   * hash receives the payload. Depends on the adapter's `delete()` reporting a
+   * match, which `DrizzleAdapter` always does (RETURNING row, or MySQL's
+   * `affectedRows`).
    *
-   * This guarantee depends on the configured ORM adapter's `delete()`
-   * reporting whether a row actually matched — either the deleted row
-   * (RETURNING) or an affected-row count. `DrizzleAdapter`, the framework's
-   * default and only shipped adapter, always does this: RETURNING drivers
-   * (Postgres, SQLite, D1) resolve to the deleted row or `undefined` only
-   * when zero rows matched; MySQL resolves to a result carrying
-   * `affectedRows` (verified by inspection, not a dedicated test).
-   *
-   * The `ORMAdapter.delete` contract also permits a bare `void` return.
-   * A custom adapter (via `Model.useAdapter()`) that returns `void`
-   * unconditionally — on both a successful delete and a no-op — gives
-   * `consume()` no way to tell which caller won: the value is identical for
-   * both, so no post-hoc check can attribute the deletion. Rather than
-   * silently rejecting every real login for such adapters,
-   * `deleteRemovedRow` treats an unrecognized non-null result as removed —
-   * this reopens the pre-consume find-then-delete race window (multiple
-   * concurrent callers can pass) for adapters that can't report a match,
-   * but does not break login. It is fail-closed (returns null / rejects)
-   * only for `null`/`undefined`, DrizzleAdapter's definitive "no rows
-   * matched" signal.
+   * `ORMAdapter.delete` also permits a bare `void`, which cannot attribute the
+   * deletion at all. `deleteRemovedRow` treats an unrecognized non-null result
+   * as removed — reopening the find-then-delete race for such adapters rather
+   * than rejecting every real login — and is fail-closed only for
+   * `null`/`undefined`, Drizzle's definitive "no rows matched".
    */
   async consume(stateHash: string): Promise<OAuthStatePayload | null> {
     const record = await this.fetchLive(stateHash)
@@ -121,31 +78,23 @@ export class DatabaseOAuthStateStore implements OAuthStateStore {
       return null
     }
 
-    // Guarded delete on the observed row version: only the caller whose
-    // DELETE actually removes the row may return the payload. RETURNING
-    // drivers (postgres, sqlite, d1) yield the deleted row or undefined;
-    // MySQL yields a result carrying affectedRows — both distinguish the
-    // winner from concurrent losers. The pre-delete read above is what
-    // supplies the payload on MySQL, which has no RETURNING to read it
-    // back from the delete itself.
+    // Only the caller whose DELETE actually removes the row may return the
+    // payload. The pre-delete read above is what supplies that payload on MySQL,
+    // which has no RETURNING to read it back from the delete itself.
     const result = await this.model.where({ stateHash, expiresAt: record.expiresAt }).delete()
     return deleteRemovedRow(result) ? mapRecordToPayload(record) : null
   }
 
   /**
-   * Delete OAuth states whose expiration time has passed. Expired states
-   * are already rejected by `find`; call this from a scheduled job to keep
-   * the table small.
+   * Delete states whose expiration has passed. `find` already rejects them; this
+   * only keeps the table small.
    */
   async deleteExpired(now: Date = new Date()): Promise<void> {
     await this.model.where('expiresAt', '<=', now).delete()
   }
 }
 
-/**
- * Build the public payload from a live (non-expired) row. Shared by `find`
- * and `consume` so the column-to-payload mapping only lives in one place.
- */
+/** Build the public payload from a live (non-expired) row. */
 function mapRecordToPayload(record: Record<string, unknown>): OAuthStatePayload {
   return {
     provider: String(record.provider),
@@ -157,11 +106,8 @@ function mapRecordToPayload(record: Record<string, unknown>): OAuthStatePayload 
 }
 
 /**
- * Interpret an adapter delete result as "this call removed the row". See
- * the `consume()` JSDoc above for the full adapter-support tradeoff: this
- * is exact for DrizzleAdapter, and best-effort (assume removed) for any
- * other result shape, since a bare `void` return carries no information to
- * confirm or refute a match.
+ * Interpret an adapter delete result as "this call removed the row": exact for
+ * DrizzleAdapter, assume-removed for any other shape (see `consume()`).
  */
 function deleteRemovedRow(result: unknown): boolean {
   if (result == null) return false

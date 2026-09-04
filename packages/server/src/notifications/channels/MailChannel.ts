@@ -27,25 +27,7 @@ function parseAddressList(
   return parsed.length > 0 ? parsed : undefined
 }
 
-/**
- * Mail notification channel.
- *
- * Sends notifications via email using the MailManager.
- *
- * @example
- * ```typescript
- * const mailChannel = new MailChannel(mailManager)
- * notifications.registerChannel('mail', mailChannel)
- *
- * // In notification class:
- * toMail(notifiable: Notifiable): NotificationMailMessage {
- *   return {
- *     subject: 'Order Shipped',
- *     html: '<p>Your order has shipped!</p>',
- *   }
- * }
- * ```
- */
+/** Mail notification channel: sends notifications through the MailManager. */
 export class MailChannel implements NotificationChannel {
   readonly name = 'mail'
 
@@ -54,26 +36,19 @@ export class MailChannel implements NotificationChannel {
     private options: MailChannelOptions = {}
   ) {}
 
-  /**
-   * Send the notification via mail.
-   */
   async send(notifiable: Notifiable, notification: Notification): Promise<void> {
-    // Get mail message from notification
     const message = notification.toMail?.(notifiable)
     if (!message) {
       return
     }
 
-    // Get recipient email
     const to = notifiable.routeNotificationFor('mail')
     if (!to) {
       return
     }
 
-    // Get transport
     const transport = this.mailManager.transport(this.options.transport)
 
-    // Build and send email
     const toAddresses = parseAddressList(to)
     if (!toAddresses || toAddresses.length === 0) {
       return
@@ -98,17 +73,9 @@ export class MailChannel implements NotificationChannel {
   }
 }
 
-/**
- * Mail channel options.
- */
+/** Mail channel options. */
 export interface MailChannelOptions {
-  /**
-   * Default from address.
-   */
   from?: string
 
-  /**
-   * Transport name to use.
-   */
   transport?: string
 }

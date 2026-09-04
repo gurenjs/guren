@@ -81,12 +81,10 @@ function ensureAliases(config: Record<string, any>, options: Required<GurenViteP
 function ensureServer(config: Record<string, any>, options: Required<GurenVitePluginOptions>) {
   config.server ??= {}
 
-  // `server.host` is deliberately left alone so Vite's localhost-only default
-  // applies. The dev server serves any file under the project root — source,
-  // and the default SQLite database at `data/guren.db`, which `server.fs.deny`
-  // does not cover — with no authentication or origin check. Binding it to
-  // every interface hands that to anyone on the same network, so LAN exposure
-  // stays an explicit opt-in (`--host`, or `server.host` in vite.config.ts).
+  // `server.host` is left alone so Vite's localhost-only default applies: the
+  // dev server serves any file under the project root — including the default
+  // SQLite database at `data/guren.db`, which `server.fs.deny` does not cover —
+  // with no auth or origin check. LAN exposure stays an explicit `--host`.
   if (config.server.port === undefined) {
     config.server.port = options.devPort
   }
@@ -95,10 +93,9 @@ function ensureServer(config: Record<string, any>, options: Required<GurenVitePl
 function ensurePreview(config: Record<string, any>, options: Required<GurenVitePluginOptions>) {
   config.preview ??= {}
 
-  // Unlike the dev server above, preview serves only the build output
-  // (`build.outDir`), never the project root, so binding it to every interface
-  // exposes assets that are about to ship publicly anyway. Kept on for
-  // checking a production build from a phone on the same network.
+  // Preview serves only `build.outDir`, never the project root, so binding
+  // every interface exposes assets that are about to ship publicly anyway —
+  // kept on for checking a production build from a phone on the same network.
   if (config.preview.host === undefined) {
     config.preview.host = true
   }

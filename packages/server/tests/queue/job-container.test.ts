@@ -45,9 +45,8 @@ describe('the container an Application publishes', () => {
   })
 
   it('lets a job resolve bindings before the application is booted', async () => {
-    // `guren queue:work` bootstraps the app only far enough to read the queue
-    // driver, so a job can run against an app that was never booted. Moving the
-    // setContainer() call into boot() fails this test and not the one above.
+    // `guren queue:work` bootstraps only far enough to read the queue driver.
+    // Moving the setContainer() call into boot() fails this test, not the one above.
     createQueueManager({ default: 'sync', drivers: { sync: () => new SyncDriver() } }).driver()
     const { sent } = appWithMailer()
 

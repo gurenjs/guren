@@ -3,12 +3,10 @@ import { createShikiHighlight } from '@guren/plugin-markdown/shiki'
 
 import { MARKDOWN_CODE_THEMES, SITE_ALERT_LABELS } from '../../../../config/markdown.js'
 
-// Theme pair shared with the docs pipeline via config/markdown.ts. Grammars
-// and themes are passed as explicit module thunks: the Workers bundler must
-// see every import statically (never the full 'shiki' entry, which would
-// pull every grammar plus the oniguruma WASM blob), and thunks keep the load
-// lazy — importing this module (e.g. from routes) costs nothing until the
-// first render. The theme thunk paths below must name the same themes as
+// Grammars and themes are explicit module thunks: the Workers bundler must see
+// every import statically (never the full 'shiki' entry, which pulls every
+// grammar plus the oniguruma WASM blob), and thunks keep the load lazy until
+// the first render. The thunk paths must name the same themes as
 // MARKDOWN_CODE_THEMES; the shared constant cannot make the imports follow.
 const highlight = createShikiHighlight({
   themes: MARKDOWN_CODE_THEMES,
@@ -28,13 +26,10 @@ const highlight = createShikiHighlight({
   ],
 })
 
-// The plugin sanitizes by default — the rendered HTML is later injected with
-// dangerouslySetInnerHTML, so sanitization at save time stays mandatory. The
-// plugin's default allowlist is a deliberate superset of the one this module
-// used to carry: it additionally admits div, heading ids, and the alert
-// classes, because posts now render alerts and heading anchors like docs do.
-// Alert labels use the site vocabulary so blog and docs pages sharing one
-// stylesheet cannot label the same directive differently.
+// The rendered HTML is later injected with dangerouslySetInnerHTML, so the
+// plugin's default sanitization stays mandatory; its allowlist admits div,
+// heading ids and the alert classes posts need. Alert labels use the site
+// vocabulary, so blog and docs sharing a stylesheet cannot disagree.
 const renderer = createMarkdownRenderer({
   highlight,
   alertLabels: SITE_ALERT_LABELS,

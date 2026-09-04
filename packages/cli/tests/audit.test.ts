@@ -56,8 +56,7 @@ export default function registerRoutes(router: any) {
     ['input with a nested type argument', `const meta = await this.input<Record<string, unknown>>('meta')`],
     ['only', `const data = await this.only('title', 'body')`],
     ['except', `const data = await this.except('id')`],
-    // file()/files() are req.parseBody() underneath, which this rule has
-    // always flagged when called directly.
+    // file()/files() are req.parseBody() underneath, always flagged when called directly.
     ['file', `const avatar = await this.file('avatar')`],
     ['files', `const attachments = await this.files('attachments')`],
   ])('fails when the body is read through this.%s() without validation', async (_accessor, read) => {
@@ -125,8 +124,7 @@ export default function registerRoutes(router: any) {
 
       const validation = report.findings.find(f => f.key === 'validation:POST /posts')
       expect(validation).toBeDefined()
-      // has() consumes the body but yields only a boolean, so no unvalidated
-      // value reaches the app and validateBody() would be the wrong advice.
+      // has() yields only a boolean, so no unvalidated value reaches the app.
       expect(validation!.status).toBe('pass')
       // ...but the action does read the body, so the report must not claim otherwise.
       expect(validation!.message).not.toContain('does not consume')
@@ -353,9 +351,7 @@ export default function registerRoutes(router: any) {
   })
 
   it('warns when middleware is only named like an auth guard (unverifiable)', async () => {
-    // Pre-capability audits passed any middleware whose *name* matched
-    // /auth/i. The name alone proves nothing — this alias is never even
-    // registered — so with capability-aware servers this is now a warn.
+    // A name matching /auth/i proves nothing: this alias is never even registered.
     const workspace = await createTempWorkspace('guren-cli-audit-authz-mw-')
 
     try {
@@ -698,8 +694,7 @@ export default function registerRoutes(router: any) {
 
     const CONTROLLER = 'app/Http/Controllers/Auth/ForgotPasswordController.ts'
 
-    // The pre-fix ForgotPasswordController body, verbatim: an unauthenticated
-    // attacker POSTing with a forged Host had the app mail the victim a real
+    // The pre-fix controller verbatim: a forged Host made the app mail the victim a real
     // single-use token pointing at the attacker's server.
     const vulnerableController = [
       `import { Controller, createPasswordResetToken, buildPasswordResetUrl } from '@guren/core'`,
@@ -728,9 +723,8 @@ export default function registerRoutes(router: any) {
       expect(report.findings.find(f => f.key === 'request-host-url:none')).toBeUndefined()
     })
 
-    // buildOAuthRedirectUrl is a literal alias of buildTokenUrl and is exported
-    // from @guren/core; missing it made the audit report an affirmative pass on
-    // the exact exploit. See the drift test at the end of this block.
+    // buildOAuthRedirectUrl is an alias of buildTokenUrl exported from @guren/core; missing
+    // it made the audit report an affirmative pass on the exact exploit.
     it('warns when an OAuth redirect link is built from the request host', async () => {
       const report = await withWorkspace({
         [CONTROLLER]: [
@@ -786,8 +780,7 @@ export default function registerRoutes(router: any) {
       expect(found[0]!.line).toBe(2)
     })
 
-    // The two spellings an accessor requirement used to miss: the origin is
-    // read a line or more after the URL is parsed.
+    // The origin is read a line or more after the URL is parsed.
     it.each([
       ['a hoisted URL object', `    const url = new URL(this.request.url)`],
       ['a destructured origin', `    const { origin } = new URL(this.request.url)`],
@@ -809,10 +802,8 @@ export default function registerRoutes(router: any) {
       expect(found[0]!.line).toBe(4)
     })
 
-    // The exact one-liner the scaffold generates today. `[^)]*` in the
-    // direct-pass anchor cannot cross the inner `)` of `appUrl(this.request)`,
-    // which is the only thing keeping the sanctioned fix from matching — so
-    // this asserts that property rather than leaving it incidental.
+    // The scaffold's one-liner. `[^)]*` in the direct-pass anchor cannot cross the inner `)`
+    // of `appUrl(this.request)`, which is the only thing keeping the sanctioned fix clean.
     it('does not flag the scaffolded appUrl() one-liner', async () => {
       const report = await withWorkspace({
         [CONTROLLER]: [
@@ -825,9 +816,8 @@ export default function registerRoutes(router: any) {
       expect(hostFindings(report)).toHaveLength(0)
     })
 
-    // The sanctioned helper `guren add auth` generates. Its non-production
-    // fallback returns a request-derived origin on purpose — it is the fix,
-    // not the bug, and must stay clean without being exempted by path.
+    // The helper `guren add auth` generates: its non-production fallback returns a
+    // request-derived origin on purpose, and must stay clean without a path exemption.
     it('does not flag the AppUrl helper that builds no links', async () => {
       const report = await withWorkspace({
         'app/Auth/AppUrl.ts': [
@@ -849,9 +839,8 @@ export default function registerRoutes(router: any) {
       expect(report.findings.find(f => f.key === 'request-host-url:none')?.status).toBe('pass')
     })
 
-    // Reading the path off the request URL is not taking its host. The fixture
-    // calls a builder on purpose, so the gate passes and only the anchor can
-    // decide — without it this would prove nothing about the anchor at all.
+    // Reading the path off the request URL is not taking its host. The fixture calls a
+    // builder on purpose, so the gate passes and only the anchor can decide.
     it('does not flag a request URL parsed for its path inside a builder file', async () => {
       const report = await withWorkspace({
         'app/Http/Middleware/canonical-host.ts': [
@@ -878,13 +867,10 @@ export default function registerRoutes(router: any) {
       expect(hostFindings(report)).toHaveLength(0)
     })
 
-    // The audit reads whatever source the app contains, and CI runs it over
-    // examples/blog on fork pull requests — so one crafted line must not hang
-    // it. Many `new URL(req.url` runs with no `)` between them is the shape
-    // that blows up; it also carries a builder call, so the gate lets it
-    // through. Measured on this exact input: 6918ms with `[^)]*`, 5ms with
-    // `[^)]{0,200}`. The threshold sits between the two, so dropping the
-    // bounds fails this test rather than merely slowing it down.
+    // The audit reads app source, and CI runs it over examples/blog on fork PRs, so one
+    // crafted line must not hang it. Many `new URL(req.url` runs with no `)` between them
+    // is the shape that blows up. Measured on this input: 6918ms with `[^)]*`, 5ms with
+    // `[^)]{0,200}`; the threshold sits between the two.
     it('rejects a pathological line without catastrophic backtracking', async () => {
       const pathological = 'const x = new URL(' + 'new URL(req.url '.repeat(1200) + '\n'
 
@@ -898,16 +884,14 @@ export default function registerRoutes(router: any) {
       expect(hostFindings(report)).toHaveLength(0)
     })
 
-    // The gate is a hand-maintained name list, so a builder added to
-    // @guren/core reaches users as an affirmative `pass` — which is how
-    // buildOAuthRedirectUrl was missed. This fails when a fifth one lands.
+    // The gate is a hand-maintained name list, so a builder added to @guren/core reaches
+    // users as an affirmative `pass`. This fails when a fifth one lands.
     it('covers every build*Url that @guren/core exports', async () => {
       const core = await import('@guren/core')
       const exported = Object.keys(core).filter(name => /^build[A-Za-z]*Url$/.test(name))
 
-      // Builds the *provider's* authorize URL, not a link the app mails to a
-      // user. A request-derived redirect_uri there is a real risk but a
-      // different one, and this rule's wording would misdescribe it.
+      // Builds the provider's authorize URL, not a link the app mails: a different risk,
+      // which this rule's wording would misdescribe.
       const excluded = new Set(['buildOAuthAuthorizeUrl'])
 
       expect(exported.length).toBeGreaterThan(0)
@@ -1057,8 +1041,7 @@ export class User extends defineModel(users, {
 }) {}`,
         'utf8',
       )
-      // Same option, but a static declaration shadows it — the runtime
-      // serializes with the static list, so the audit must too.
+      // A static declaration shadows the option, and the runtime serializes with the static list.
       await writeFile(
         join(workspace.dir, 'app/Models/Shadowed.ts'),
         `import { defineModel } from '@guren/core'
@@ -1102,8 +1085,7 @@ export const users = pgTable('users', {
         'utf8',
       )
       await mkdir(join(workspace.dir, 'app/Models'), { recursive: true })
-      // The static shadows the option at runtime but its value cannot be
-      // read — the option's list must NOT be reported as what serializes.
+      // The static shadows the option but is unreadable, so the option's list must not be reported.
       await writeFile(
         join(workspace.dir, 'app/Models/User.ts'),
         `import { defineModel } from '@guren/core'
@@ -1117,8 +1099,7 @@ export class User extends defineModel(users, {
 }`,
         'utf8',
       )
-      // A spread makes the literal unreadable too — a partial read of
-      // ['passwordHash', ...] would also be wrong in the other direction.
+      // A spread makes the literal unreadable; a partial read would be wrong the other way.
       await writeFile(
         join(workspace.dir, 'app/Models/Spread.ts'),
         `import { defineModel } from '@guren/core'
@@ -1172,9 +1153,7 @@ export class Post extends defineModel(posts, {
   })
 
   it('resolves the table from defineModel, not just from `static table`', async () => {
-    // A model that binds its table through defineModel() used to fall out of
-    // this check entirely — the table never resolved, so no column was ever
-    // compared against `hidden`.
+    // A table bound through defineModel() once never resolved, so no column was compared against `hidden`.
     const workspace = await createTempWorkspace('guren-cli-audit-hidden-define-model-')
 
     try {
@@ -1259,9 +1238,8 @@ export const users = pgTable('users', {
     const workspace = await createTempWorkspace('guren-cli-audit-hidden-module-')
 
     try {
-      // make:module wires modules/<name>/db/schema.ts into the root
-      // db/schema.ts via `export * from ...` — the table itself is declared
-      // in the module's schema file, not the root one.
+      // make:module wires the module's schema into the root one via `export * from ...`;
+      // the table itself is declared in the module's file.
       await mkdir(join(workspace.dir, 'db'), { recursive: true })
       await writeFile(join(workspace.dir, 'db/schema.ts'), `export * from '../modules/billing/db/schema'\n`, 'utf8')
 
@@ -1536,9 +1514,7 @@ export const invoices = pgTable('invoices', {
     try {
       await writeRoutes(workspace.dir, `export default function registerRoutes(_router: any) {}`)
 
-      // A module directory whose index.ts fails to import (references a
-      // file that doesn't exist) must not make the audit report look clean —
-      // its routes went entirely unchecked.
+      // A module whose index.ts fails to import must not read as clean: its routes went unchecked.
       await mkdir(join(workspace.dir, 'modules/billing'), { recursive: true })
       await writeFile(
         join(workspace.dir, 'modules/billing/index.ts'),
@@ -1605,8 +1581,7 @@ export const billingModule = { name: 'billing', providers: [], routes: registerB
     const workspace = await createTempWorkspace('guren-cli-audit-module-')
 
     try {
-      // Top-level routes file has no routes of its own — the mutating route
-      // under test lives entirely inside modules/billing/.
+      // The mutating route under test lives entirely inside modules/billing/.
       await writeRoutes(
         workspace.dir,
         `export default function registerRoutes(_router: any) {}`,
@@ -1757,10 +1732,8 @@ export default function registerRoutes(router: any) {
     const workspace = await createTempWorkspace('guren-cli-audit-jsx-text-')
 
     try {
-      // .tsx isn't a discovered controller extension, but the parser falls
-      // back to the jsx-enabled dialect for a plain .ts file whenever the
-      // non-jsx dialects fail to parse it (see parserPluginCandidates), so
-      // JSX syntax reaches a real controller file this way too.
+      // .tsx is not a discovered controller extension, but the parser falls back to the
+      // jsx-enabled dialect for a .ts file the others cannot parse (see parserPluginCandidates).
       await writeController(
         workspace.dir,
         'PostController',
@@ -2166,13 +2139,11 @@ export default function registerRoutes(router: any) {
       expect(secret).toBeDefined()
       expect(secret!.classifications?.map(c => c.id)).toEqual(['A07', 'CWE-798'])
 
-      // Passing findings carry the rule's classification too — the taxonomy
-      // describes the check, not the failure.
+      // Passing findings carry the classification too: the taxonomy describes the check.
       const massAssignmentPass = report.findings.find(f => f.key === 'raw-sql:none')
       expect(massAssignmentPass!.classifications?.[0]?.id).toBe('A03')
 
-      // Infrastructure findings (config load, module load) are not security
-      // rules and stay untagged.
+      // Infrastructure findings (config load, module load) stay untagged.
       const infra = report.findings.filter(f => f.key.startsWith('routes:') || f.key.startsWith('audit-config:'))
       for (const entry of infra) {
         expect(entry.classifications).toBeUndefined()
@@ -2192,8 +2163,8 @@ describe('authMiddlewareVerdict', () => {
   })
 
   it('falls back to the name heuristic only for pre-capability servers', () => {
-    // Old server: no capabilities field at all — the name keeps counting so
-    // a newer CLI does not flood a not-yet-upgraded app with false warns.
+    // Old server, no capabilities field: the name keeps counting so a newer CLI does not
+    // flood a not-yet-upgraded app with false warns.
     expect(authMiddlewareVerdict({ middlewareNames: ['auth'] })).toBe('legacy-name-match')
     expect(authMiddlewareVerdict({ middlewareNames: ['member'] })).toBe('none')
     // New server: empty capabilities means "checked, nothing recognized".
@@ -2295,10 +2266,8 @@ export default function registerRoutes(router: any) {
 
 describe('audit ignore config discovery', () => {
   it('reports a config/audit.ts that exists only as a dangling symlink', async () => {
-    // Discovery used `fileExists`, which reads a dangling symlink as absent,
-    // so an ignore config the user really put there was skipped without a
-    // word — and the audit ran with none of the entries it was told about,
-    // reporting a result shaped by rules it never read.
+    // `fileExists` reads a dangling symlink as absent, so the ignore config was skipped
+    // silently and the audit reported a result shaped by rules it never read.
     const workspace = await createTempWorkspace('guren-cli-audit-config-dangling-')
 
     try {
@@ -2339,8 +2308,7 @@ export default function registerRoutes(router: Router) {
 }
 `
 
-  // The escalation the RFC asks for: the same unknown costs more once an
-  // agent composes the payload from an advertised schema.
+  // The RFC's escalation: the same unknown costs more once an agent composes the payload.
   it('escalates the unanalyzable-handler validation warn to a fail on an agent route', async () => {
     const report = await withWorkspace({
       'routes/web.ts': routesWith(`{ name: 'posts.store', agent: { description: 'Create a post.' } }`),
@@ -2361,9 +2329,8 @@ export default function registerRoutes(router: Router) {
     expect(validation?.message).not.toContain('agent tool')
   })
 
-  // The key is unchanged so an existing config/audit.ts entry keeps applying
-  // to the escalated finding — route-level findings carry no line, so they
-  // stay eligible for suppression.
+  // The key is unchanged so an existing config/audit.ts entry keeps applying to the
+  // escalated finding; route-level findings carry no line, so they stay suppressible.
   it('keeps the escalated finding suppressible through config/audit.ts', async () => {
     const report = await withWorkspace({
       'routes/web.ts': routesWith(`{ name: 'posts.store', agent: {} }`),
@@ -2422,8 +2389,7 @@ ${body}
       expect(report.findings.some((f) => f.key === 'agent-annotation:DELETE /posts/:id')).toBe(true)
     })
 
-    // Without the receiver constraint every Map/Set/cache eviction in an
-    // action would read as a record deletion.
+    // Without the receiver constraint every Map/Set/cache eviction would read as a record deletion.
     it('does not warn about a cache eviction', async () => {
       const report = await withWorkspace({
         'routes/web.ts': routes,
@@ -2435,8 +2401,7 @@ ${body}
       expect(report.findings.some((f) => f.key.startsWith('agent-annotation:'))).toBe(false)
     })
 
-    // The escalation above states the rule this must not contradict: for an
-    // agent-exposed route an unknown is a finding, not silence.
+    // For an agent-exposed route an unknown is a finding, not silence.
     it('warns rather than passing when the action body cannot be read', async () => {
       const report = await withWorkspace({ 'routes/web.ts': routes })
 
@@ -2445,8 +2410,7 @@ ${body}
       expect(annotation?.message).toContain('could not be analyzed')
     })
 
-    // Absent is not `false`: the spec default for a non-read-only tool is
-    // already destructive, so an unset hint claims nothing to contradict.
+    // Absent is not `false`: a non-read-only tool defaults to destructive, so an unset hint claims nothing.
     it('does not warn when destructiveHint is simply unset', async () => {
       const report = await withWorkspace({
         'routes/web.ts': routes.replace('agent: { destructiveHint: false }', 'agent: {}'),

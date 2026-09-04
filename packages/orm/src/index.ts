@@ -76,17 +76,13 @@ export type {
   AwsDataApiSeederContext,
 } from './seeder'
 
-// Accessors & Mutators
 export { applyAccessors, applyMutators } from './attributes'
 export type { AccessorFn, MutatorFn, AccessorDefinitions, MutatorDefinitions } from './attributes'
 
-// Serialization
 export { serializeRecord, serializeRecords } from './serialization'
 
-// Observers
 export { executeObservers } from './ModelObserver'
 export type { ModelObserver, ModelObserverConstructor } from './ModelObserver'
 
-// Global Scopes
 export { GlobalScopeRegistry } from './GlobalScopeRegistry'
 export type { ScopeFunction } from './GlobalScopeRegistry'

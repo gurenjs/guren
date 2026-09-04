@@ -1,10 +1,7 @@
 import type { MailMessage, MailTransport, SendResult } from '../types'
 
 export interface LogTransportOptions {
-  /**
-   * Log function to write to.
-   * @default console.log
-   */
+  /** @default console.log */
   logger?: (message: string) => void
 }
 

@@ -34,24 +34,20 @@ export interface AttachOptions {
   /** Disk to store on, overriding the configured default. */
   disk?: string
   /**
-   * Defer the full decode and variant generation to the queue: the request
-   * path runs only the synchronous gates (byte cap, header dimensions, HEIC
-   * signature), stores the original, seeds declared variants as `pending`,
-   * and dispatches `GenerateVariantsJob`. Until the worker runs, variant
-   * URLs fall back to the original. Requires a queue — either
-   * `configureAttachments({ queue })` or an already-booted QueueManager.
+   * Defer the full decode and variant generation to the queue: the request path
+   * runs only the synchronous gates, stores the original, seeds declared
+   * variants as `pending`, and dispatches `GenerateVariantsJob`. Variant URLs
+   * fall back to the original until the worker runs. Requires a queue.
    */
   queued?: boolean
 }
 
 export interface ConfigureAttachmentsOptions {
   /**
-   * The app's Drizzle `attachments` table (the app owns the table; the
-   * framework ships the schema snippet — see the attachments guide).
-   * Column property names must match the documented contract: `id`,
-   * `attachableType`, `attachableId`, `collection`, `disk`, `path`, `name`,
-   * `contentType`, `size`, `width`, `height`, `variants` (JSON-capable),
-   * `placeholder`, `createdAt`, `updatedAt`.
+   * The app's Drizzle `attachments` table. Column property names must match the
+   * documented contract: `id`, `attachableType`, `attachableId`, `collection`,
+   * `disk`, `path`, `name`, `contentType`, `size`, `width`, `height`,
+   * `variants` (JSON-capable), `placeholder`, `createdAt`, `updatedAt`.
    */
   table: unknown
   /** The app's StorageManager, resolved lazily (e.g. `() => container.make('storage')`). */
@@ -59,27 +55,21 @@ export interface ConfigureAttachmentsOptions {
   /** Default disk name for new attachments. */
   disk: string
   /**
-   * Per-disk visibility (and, with the object form, how a private disk's
-   * bytes are served — RFC 0015 §3). `'public'` disks serve via
-   * `disk.url()`; `'private'` ones serve through the signed delivery route
-   * when `delivery` is configured, else via `disk.temporaryUrl()`. Per
-   * disk, not per attachment, because at least one driver (R2) has no
-   * per-object visibility. Undeclared disks default to `'public'`.
+   * Per-disk visibility, and with the object form how a private disk's bytes are
+   * served (RFC 0015 §3). Per disk, not per attachment, because at least one
+   * driver (R2) has no per-object visibility. Undeclared disks are `'public'`.
    */
   disks?: Record<string, DiskDeliveryConfig>
   /**
    * Signed delivery route configuration (RFC 0015). Presence switches
-   * private-disk URLs from `disk.temporaryUrl()` to signed route URLs; the
-   * route itself is mounted by `registerAttachmentRoutes(router)` in the
-   * app's route registrar. Without this option nothing changes — v1
-   * behaviour and its documented limitations stand.
+   * private-disk URLs from `disk.temporaryUrl()` to signed route URLs; the route
+   * itself is mounted by `registerAttachmentRoutes(router)`.
    */
   delivery?: DeliveryOptions
   /**
-   * Decode cap in pixels (decompression-bomb defense). Header-declared and
-   * decoded dimensions above this are rejected before a pixel buffer is
-   * allocated. No "unlimited" setting exists; photography/archival apps
-   * raise it deliberately and should isolate their image workers.
+   * Decode cap in pixels (decompression-bomb defense); header-declared and
+   * decoded dimensions above it are rejected before a pixel buffer exists.
+   * There is deliberately no "unlimited" setting.
    * @default 52_000_000
    */
   maxPixels?: number
@@ -90,23 +80,17 @@ export interface ConfigureAttachmentsOptions {
    */
   maxImageBytes?: number
   /**
-   * Image processor override. Defaults to the Bun-native processor when the
-   * runtime has `Bun.Image`; pass `null` to force the processor-less path
-   * (variants recorded as `unavailable`, validation stops at the header
-   * gates) or your own implementation (e.g. sharp-backed) on other runtimes.
+   * Defaults to the Bun-native processor when the runtime has `Bun.Image`. Pass
+   * `null` to force the processor-less path (variants `unavailable`, validation
+   * stops at the header gates), or your own implementation.
    */
   processor?: ImageProcessor | null
   /**
-   * The app's QueueManager, resolved lazily (e.g.
-   * `() => container.make('queue')`). Enables `attach(..., { queued: true })`:
-   * the engine materializes the manager's default driver and dispatches
-   * `GenerateVariantsJob` on it. Materializing the default driver installs
-   * it as the process-wide dispatch target (`QueueManager` semantics), so
-   * pass the same manager the rest of the app dispatches through — a
-   * second manager here would redirect every later `Job.dispatch()` in the
-   * process. Without this option, `queued: true` falls back to the
-   * globally configured queue driver and throws a clear error when there
-   * is none.
+   * The app's QueueManager, resolved lazily; enables `attach(..., { queued })`.
+   * Materializing its default driver installs that driver process-wide, so pass
+   * the same manager the rest of the app dispatches through — a second one would
+   * redirect every later `Job.dispatch()`. Without this option, `queued: true`
+   * falls back to the globally configured driver.
    */
   queue?: () => unknown
   /**
@@ -118,10 +102,9 @@ export interface ConfigureAttachmentsOptions {
 }
 
 /**
- * What `GenerateVariantsJob` needs to finish a deferred attach. The specs
- * are snapshotted at dispatch time (they come from the model declaration,
- * never the call site), so an in-flight job is unaffected by later
- * declaration edits and the worker needs no model registry to resolve them.
+ * What `GenerateVariantsJob` needs to finish a deferred attach. Specs are
+ * snapshotted at dispatch time, so an in-flight job survives later declaration
+ * edits and the worker needs no model registry.
  */
 export interface GenerateVariantsPayload {
   attachmentId: string
@@ -131,15 +114,11 @@ export interface GenerateVariantsPayload {
 }
 
 /**
- * How a private disk's bytes are served behind the signed route
- * (RFC 0015 §3):
- * - `'auto'` (default): redirect when the driver positively declares
- *   `capabilities.presignedGet`, else proxy. Declared, never probed —
- *   `LocalDriver.temporaryUrl()` succeeds with a plain public URL, so a
- *   probe would misclassify exactly the disk that must not redirect.
- * - `'redirect'` / `'proxy'`: force one behaviour.
- * - `'direct'`: bypass the route entirely — v1's raw `temporaryUrl()`
- *   URLs, for disks that measured the extra hop and want it gone.
+ * How a private disk's bytes are served behind the signed route (RFC 0015 §3).
+ * `'auto'` redirects only on a driver's *declared* `capabilities.presignedGet`,
+ * never a probe: `LocalDriver.temporaryUrl()` succeeds with a plain public URL,
+ * so probing would misclassify exactly the disk that must not redirect.
+ * `'direct'` bypasses the route entirely for v1's raw `temporaryUrl()` URLs.
  */
 export type DeliveryServeMode = 'auto' | 'redirect' | 'proxy' | 'direct'
 
@@ -150,8 +129,7 @@ export type DiskDeliveryConfig =
 
 /**
  * Per-URL options for `attachmentUrl()`. `disposition` accepts only
- * `'attachment'`: `inline` is already the default outcome for allowlisted
- * types, and the route's allowlist can never be forced to inline — a
+ * `'attachment'`: the route's allowlist can never be forced to inline, so a
  * signed `inline` value would change the URL while doing nothing.
  */
 export interface AttachmentUrlOptions {
@@ -160,11 +138,10 @@ export interface AttachmentUrlOptions {
 }
 
 /**
- * The public union normalized once at the constructor boundary. `'direct'`
- * splits into its two real axes here — `route: false` (URL minting
- * bypasses the delivery route) with `serve: 'auto'` (a signed URL that
- * still arrives, minted before the config change, serves normally) — so
- * no later branch has to remember that `direct` secretly means `auto`.
+ * The public union normalized once at the constructor boundary: `'direct'`
+ * splits into `route: false` (minting bypasses the route) plus `serve: 'auto'`
+ * (a URL signed before the config change still serves), so no later branch has
+ * to remember that `direct` secretly means `auto`.
  */
 interface ResolvedDiskDelivery {
   visibility: 'public' | 'private'
@@ -179,9 +156,8 @@ export interface DeliveryOptions {
    */
   prefix?: string
   /**
-   * Named-route name `registerAttachmentRoutes` registers under.
-   * `Router.name()` silently overwrites duplicates, so the default is
-   * reserved for the framework.
+   * `Router.name()` silently overwrites duplicates, so the default is reserved
+   * for the framework.
    * @default 'attachments.show'
    */
   routeName?: string
@@ -189,19 +165,12 @@ export interface DeliveryOptions {
 
 /**
  * The single storage key prefix every attachment object lives under:
- * `attachments/<id>/<name>` for an original, `attachments/<id>/variants/…`
- * for a derivative, and `attachments/` itself for the prune sweep's
- * directory listing.
+ * `attachments/<id>/<name>` for an original, `attachments/<id>/variants/…` for
+ * a derivative, `attachments/` for the prune sweep's listing.
  *
- * Exported, and re-exported from `@guren/core`, because the layout is not
- * private to this file. `guren check`'s attachments rules judge, from
- * another package, whether uploaded bytes land somewhere the app serves
- * statically — and the ones that reach the objects themselves have to name
- * `<disk root>/attachments` to do it. A restated copy of the prefix over
- * there does not fail loudly when this layout moves (a shard level, a
- * rename): it stops matching, answers "not reachable", and reports an
- * exposed app as safe. A build-failing security rule failing *open*, with
- * nothing going red anywhere. Import this instead of restating it.
+ * Exported because `guren check`'s attachments rules name `<disk root>/
+ * attachments` from another package. A restated copy there would not fail when
+ * this layout moves — it would stop matching and report an exposed app as safe.
  */
 export const ATTACHMENT_OBJECT_PREFIX = 'attachments'
 
@@ -209,11 +178,9 @@ export const DEFAULT_DELIVERY_PREFIX = '/attachments'
 export const DEFAULT_DELIVERY_ROUTE_NAME = 'attachments.show'
 
 /**
- * The inner (presigned) TTL behind a redirect. Fixed rather than derived
- * from `urlExpiresIn`: the inner credential is minted per request, so it
- * never needs to outlive one fetch — and deriving it would let a raised
- * outer lifetime silently exceed a driver's presign ceiling (R2 rejects
- * anything over 7 days).
+ * The inner (presigned) TTL behind a redirect. Fixed, not derived from
+ * `urlExpiresIn`: it is minted per request and need not outlive one fetch, and
+ * deriving it could exceed a driver's presign ceiling (R2 rejects over 7 days).
  */
 const INNER_PRESIGN_TTL_MS = 5 * 60 * 1000
 
@@ -230,10 +197,9 @@ export interface PruneReport {
   /** Rows whose owning record no longer exists (deleted unless dry-run). */
   orphanRows: Array<{ id: string; attachableType: string; attachableId: string }>
   /**
-   * Morph types that could not be verified and were left untouched: types
-   * missing from `Model.morphMap`, or whose existence query failed. A type
-   * that cannot be checked is never treated as absent — that would turn an
-   * outage into a mass deletion.
+   * Morph types that could not be verified and were left untouched. A type that
+   * cannot be checked is never treated as absent: that turns an outage into a
+   * mass deletion.
    */
   skippedTypes: Array<{ type: string; reason: string }>
   /** Per disk, storage prefixes under `attachments/` with no row (with `objects`). */
@@ -244,31 +210,27 @@ export interface PruneReport {
 
 const DEFAULT_MAX_PIXELS = 52_000_000
 /**
- * Header sniffing only ever needs the first bytes; capping the window keeps
- * the JPEG marker walk O(cap) instead of O(input) on attacker-sized bytes
- * that reach the sniffer before the byte-cap gate applies (image: 'allow'
- * collections must not size-reject non-image files).
+ * Caps the JPEG marker walk at O(cap) rather than O(input) on attacker-sized
+ * bytes that reach the sniffer before the byte-cap gate applies (`image:
+ * 'allow'` collections must not size-reject non-image files).
  */
 const SNIFF_WINDOW_BYTES = 262_144
 const DEFAULT_MAX_IMAGE_BYTES = 50_000_000
 const DEFAULT_URL_EXPIRES_IN = 5 * 60 * 1000
 /**
  * How recently minted a storage prefix may be before `--objects` refuses to
- * touch it. attach() writes the object *before* the row, so a prefix without
- * a row is either debris — or an attach in flight. The prefix id is a ULID,
- * so its age is readable; anything younger than this window is skipped and
- * picked up by the next sweep if it really was abandoned.
+ * touch it. attach() writes the object *before* the row, so a rowless prefix is
+ * either debris or an attach in flight; the ULID id makes its age readable.
  */
 const PRUNE_OBJECTS_GRACE_MS = 60 * 60 * 1000
 /** Existence lookups are chunked to stay inside every dialect's bind-parameter limits. */
 const PRUNE_LOOKUP_CHUNK = 500
 
 /**
- * The spellings under which an id may appear on either side of the prune
- * comparison: as stored (lowercased — UUID hex case is not identity) and,
- * for numeric values, the canonical numeric form ('01' and 1 are the same
- * key). Used symmetrically so a representation mismatch always errs toward
- * "the record exists".
+ * The spellings an id may appear under on either side of the prune comparison:
+ * lowercased (UUID hex case is not identity) and, for numeric values, the
+ * canonical numeric form ('01' and 1 are one key). Used symmetrically so a
+ * representation mismatch errs toward "the record exists".
  */
 function idSpellings(value: unknown): string[] {
   const raw = String(value).toLowerCase()
@@ -355,7 +317,7 @@ export class AttachmentEngine {
     this.queue = options.queue
   }
 
-  /** Wired by `configureAttachments()`; kept out of the constructor so this module never imports the job (which imports this module). */
+  /** Wired by `configureAttachments()`, so this module never imports the job. */
   setJobDispatcher(dispatch: (payload: GenerateVariantsPayload) => Promise<unknown>): void {
     this.dispatchJob = dispatch
   }
@@ -373,8 +335,8 @@ export class AttachmentEngine {
 
     const queued = options.queued === true
     if (queued) {
-      // Fail before any byte is written: a missing queue must not leave a
-      // stored original whose variants nobody will ever generate.
+      // Before any byte is written: a missing queue must not leave a stored
+      // original whose variants nobody will ever generate.
       this.ensureQueueDispatchable()
     }
 
@@ -387,10 +349,8 @@ export class AttachmentEngine {
     const disk = this.storage().disk(diskName)
     const contentType = inspection.contentType ?? normalized.declaredContentType ?? 'application/octet-stream'
 
-    // On a hasOne collection the new attachment replaces the old one. Read
-    // the rows to purge *before* writing, purge them only *after* the new
-    // row exists: a failed put must never leave the record without its
-    // attachment.
+    // Read the rows to purge *before* writing, purge them only *after* the new
+    // row exists: a failed put must not leave the record without an attachment.
     const replaced =
       spec.kind === 'one' ? await this.rowsFor(model, recordId, { collection }) : []
 
@@ -424,24 +384,20 @@ export class AttachmentEngine {
           image: spec.image,
           heic: spec.accepts?.heic,
           // Snapshot, not a reference: an in-memory queue keeps the payload
-          // object alive, and a later mutation of the model declaration must
-          // not rewrite a job that is already in flight.
+          // alive, and a later declaration edit must not rewrite a job in flight.
           variants: spec.variants ? structuredClone(spec.variants) : undefined,
         })
       } catch (error) {
-        // No job will ever finish this provisionally accepted upload — and
-        // on an image: 'require' collection the full decode never ran, so
-        // leaving the row would keep serving unvalidated bytes forever.
-        // Undo the accept (the replaced attachment below is still intact)
-        // and surface the queue failure to the caller.
+        // No job will finish this provisionally accepted upload, and on an
+        // `image: 'require'` collection the full decode never ran — leaving the
+        // row would serve unvalidated bytes forever.
         await this.purgeRows([row as PlainObject])
         throw error
       }
     }
 
-    // Purged only after a deferred attach is durably enqueued: replacing
-    // first would destroy the previous attachment even when the dispatch
-    // fails and the new one is rolled back.
+    // Only after a deferred attach is durably enqueued: purging first would
+    // destroy the previous attachment when the dispatch fails and rolls back.
     if (replaced.length > 0) {
       await this.purgeRows(replaced)
     }
@@ -517,9 +473,8 @@ export class AttachmentEngine {
     const spec = this.specFor(model, declaration, collection)
     const variant = options.variant
     if (variant !== undefined && !(variant in (spec.variants ?? {}))) {
-      // A declared-but-not-generated variant falls back to the original; a
-      // name that was never declared is a programming error and must not
-      // degrade into silently serving the original.
+      // A declared-but-not-generated variant falls back to the original; an
+      // undeclared name is a programming error, not a silent fallback.
       throw new Error(
         `${model.name}.attachmentUrl(): variant '${variant}' is not declared on collection '${collection}'.`,
       )
@@ -530,8 +485,8 @@ export class AttachmentEngine {
     if (recordId == null) return null
 
     const rows = sortById(await this.rowsFor(model, recordId, { collection }))
-    // hasOne reads the *newest* row: a crash between attach()'s write-new
-    // and purge-old steps leaves two rows, and the stale one must not win.
+    // The *newest* row: a crash between attach()'s write-new and purge-old steps
+    // leaves two, and the stale one must not win.
     const raw = spec.kind === 'one' ? rows[rows.length - 1] : rows[0]
     if (!raw) return null
     const row = this.toRecord(raw)
@@ -548,8 +503,6 @@ export class AttachmentEngine {
     await this.purgeRows(rows)
   }
 
-  // --- internals -----------------------------------------------------------
-
   private specFor(
     model: typeof Model,
     declaration: AttachmentsDeclaration,
@@ -565,10 +518,9 @@ export class AttachmentEngine {
   }
 
   /**
-   * The three-gate image pipeline (RFC 0013 §6): (1) encoded-byte cap,
-   * (2) header-dimension cap, (3) full decode. Gates 1-2 plus the HEIC
-   * signature rejection are pure JS and run on every runtime; only the full
-   * decode needs a processor.
+   * The three-gate image pipeline (RFC 0013 §6): encoded-byte cap, header
+   * dimensions, full decode. The first two plus the HEIC signature rejection are
+   * pure JS; only the full decode needs a processor.
    */
   private async inspectImage(
     spec: AttachmentCollectionSpec,
@@ -604,7 +556,6 @@ export class AttachmentEngine {
       return opaque
     }
 
-    // Gate 1: encoded-input cap — cheapest, before any header math.
     if (source.bytes.byteLength > this.maxImageBytes) {
       throw new HttpException(
         413,
@@ -612,9 +563,8 @@ export class AttachmentEngine {
       )
     }
 
-    // HEIC is rejected by signature alone: decoding it is an OS-codec
-    // property (works on a macOS dev machine, fails on Linux production),
-    // and the default must not let that skew pass silently.
+    // By signature alone: HEIC decoding is an OS-codec property (macOS dev
+    // machine yes, Linux production no), and that skew must not pass silently.
     if (sniffed.format === 'heic') {
       if ((spec.accepts?.heic ?? 'reject') === 'reject') {
         throw new HttpException(
@@ -627,9 +577,8 @@ export class AttachmentEngine {
       }
     }
 
-    // Gate 2: header-declared dimensions, before any pixel buffer exists.
-    // The decoder allocates from these numbers, so this is the gate that
-    // actually prevents the allocation.
+    // Gate 2. The decoder allocates from these header numbers, so this is the
+    // gate that actually prevents the allocation.
     if (sniffed.width != null && sniffed.height != null && sniffed.width * sniffed.height > this.maxPixels) {
       throw new ValidationException({
         [collection]: [
@@ -638,11 +587,9 @@ export class AttachmentEngine {
       })
     }
 
-    // Deferred attach: gate 3 and variant generation run in the queue
-    // worker, even when this process has a processor — that is the point of
-    // queued: true. Dimensions come from the header until the job updates
-    // them; the one class that survives the synchronous checks (bytes whose
-    // header lies) is detected after acceptance, by the job.
+    // Gate 3 and variant generation run in the worker even when this process has
+    // a processor. Dimensions come from the header until the job updates them,
+    // so bytes whose header lies are only detected after acceptance.
     if (defer) {
       return {
         width: sniffed.width ?? null,
@@ -656,9 +603,8 @@ export class AttachmentEngine {
       }
     }
 
-    // Gate 3: the full decode is the validation authority. Without a
-    // processor it defers — the upload is accepted on header evidence and
-    // dimensions come from the header (graceful degrade; RFC 0013 §5).
+    // Gate 3: the full decode is the validation authority. Without a processor
+    // the upload is accepted on header evidence alone (RFC 0013 §5).
     if (!this.processor) {
       return {
         width: sniffed.width ?? null,
@@ -685,8 +631,7 @@ export class AttachmentEngine {
     }
 
     if (sniffed.format === 'heic') {
-      // accepts.heic 'convert': store a JPEG original so the stored object
-      // is decodable everywhere the app might later run.
+      // Store a JPEG original, decodable everywhere the app might later run.
       const converted = await this.processor.process(source.bytes, { format: 'jpeg' })
       return {
         width: converted.width,
@@ -711,10 +656,9 @@ export class AttachmentEngine {
   }
 
   /**
-   * Seed one entry per *declared* variant and generate inline where a
-   * processor exists. Recording declared names (not just generated ones) is
-   * what lets `attachmentUrl()` tell "not yet generated" from "never
-   * declared" after a reload.
+   * Seed one entry per *declared* variant, generating inline where a processor
+   * exists. Recording declared names is what lets `attachmentUrl()` tell "not
+   * yet generated" from "never declared" after a reload.
    */
   private async buildVariants(
     spec: Pick<AttachmentCollectionSpec, 'variants'>,
@@ -761,14 +705,10 @@ export class AttachmentEngine {
     return variants
   }
 
-  // --- deferred (queued) generation -----------------------------------------
-
   /**
-   * Worker-side completion of a deferred attach (`GenerateVariantsJob`):
-   * run the full decode that the request path skipped, convert a HEIC
-   * original where the collection opted in, generate the declared variants,
-   * and settle every `pending` status record. Safe against races — a row or
-   * object purged while the job sat in the queue is simply nothing to do.
+   * Worker-side completion of a deferred attach: the skipped full decode, any
+   * opted-in HEIC conversion, the declared variants, and settling every
+   * `pending` record. A row or object purged meanwhile is nothing to do.
    */
   async generateVariants(payload: GenerateVariantsPayload): Promise<void> {
     const raw = (await this.model.where({ id: payload.attachmentId }).first()) as PlainObject | null
@@ -777,12 +717,10 @@ export class AttachmentEngine {
     const disk = this.storage().disk(row.disk)
 
     if (!this.processor) {
-      // A worker without an image processor cannot finish the job — settle
-      // rather than retry forever; URLs keep falling back to the original.
-      // The one exception is a HEIC original accepted only because the
-      // collection promised conversion: the synchronous path answers 415
-      // for it on processor-less runtimes, so an image-required collection
-      // must not keep serving it once the promise turns out unkeepable.
+      // Settle rather than retry forever; URLs keep falling back to the
+      // original. The exception is a HEIC original accepted only because the
+      // collection promised conversion — an image-required collection must not
+      // keep serving it once that promise turns out unkeepable.
       if (payload.heic === 'convert' && payload.image === 'require' && row.contentType === 'image/heic') {
         await this.purgeRows([raw])
         return
@@ -802,10 +740,9 @@ export class AttachmentEngine {
     try {
       probed = await this.processor.probe(bytes, { maxPixels: this.maxPixels })
     } catch {
-      // The synchronous gates accepted this upload on header evidence; the
-      // full decode is the authority and it said no. Acceptance on an
-      // image-required collection was provisional — purge it (RFC 0013 §6);
-      // an image-optional collection keeps the bytes as an opaque file.
+      // The synchronous gates accepted on header evidence; the full decode is
+      // the authority. Acceptance was provisional on an image-required
+      // collection, so purge; an image-optional one keeps opaque bytes.
       if (payload.image === 'require') {
         await this.purgeRows([raw])
         return
@@ -827,12 +764,10 @@ export class AttachmentEngine {
       const name = replaceExtension(row.name, 'jpg')
       const path = `${ATTACHMENT_OBJECT_PREFIX}/${row.id}/${name}`
       await disk.put(path, Buffer.from(converted.bytes), { contentType: 'image/jpeg' })
-      // The old object is deleted only after the row commit below repoints
-      // to the new one: deleting first would leave the row referencing
-      // nothing if anything past this line failed — and the retry would
-      // then find no bytes and settle 'failed', a silent broken link. A
-      // leaked superseded object is the recoverable failure; a row
-      // pointing at nothing is not.
+      // Only after the row commit below repoints to the new object: deleting
+      // first leaves the row referencing nothing if anything later fails, and
+      // the retry settles 'failed' on a silent broken link. A leaked superseded
+      // object is the recoverable failure; a row pointing at nothing is not.
       if (path !== row.path) {
         supersededPath = row.path
       }
@@ -854,11 +789,8 @@ export class AttachmentEngine {
     }
     updates.updatedAt = new Date()
 
-    // The attachment can be replaced or detached while this job was
-    // generating: its purge deletes the prefix, and the puts above would
-    // silently recreate orphan objects under it. Re-check the row and clean
-    // up after ourselves instead of leaving objects only a bucket audit
-    // would find.
+    // A replace or detach while this job ran deletes the prefix, and the puts
+    // above would silently recreate orphan objects under it.
     const still = await this.model.where({ id: row.id }).first()
     if (!still) {
       await disk.deleteDirectory(`${ATTACHMENT_OBJECT_PREFIX}/${row.id}`)
@@ -870,9 +802,8 @@ export class AttachmentEngine {
       try {
         await disk.delete(supersededPath)
       } catch {
-        // The row already points at the converted object; a superseded
-        // original that failed to delete is a leak for the sweeper, not a
-        // job failure.
+        // The row already points at the converted object, so a superseded
+        // original that failed to delete is a leak for the sweeper.
       }
     }
   }
@@ -883,11 +814,9 @@ export class AttachmentEngine {
   }
 
   /**
-   * Flip every `pending` variant to a terminal status so nothing looks
-   * in-flight forever. Works on a *fresh* read of the row, never a caller's
-   * snapshot: under at-least-once delivery a duplicate execution can hold a
-   * stale copy whose `pending` entries would otherwise clobber the variants
-   * a completed run already marked `ready`.
+   * Flip every `pending` variant to a terminal status. Works on a *fresh* read
+   * of the row: under at-least-once delivery a duplicate execution holding a
+   * stale copy would clobber variants a completed run already marked `ready`.
    */
   private async settleDeferred(
     row: Pick<AttachmentRecord, 'id'>,
@@ -923,9 +852,8 @@ export class AttachmentEngine {
   }
 
   /**
-   * A queued attach needs somewhere to dispatch to: the configured
-   * QueueManager's default driver, or — when no `queue` option was given —
-   * whatever queue driver the app has already booted globally.
+   * The configured QueueManager's default driver, or with no `queue` option
+   * whatever driver the app has already booted globally.
    */
   private ensureQueueDispatchable(): void {
     if (!this.dispatchJob) {
@@ -938,10 +866,9 @@ export class AttachmentEngine {
           'configureAttachments({ queue }) must resolve to a QueueManager (an object with a driver() method).',
         )
       }
-      // Job.dispatch() sends through the module-global driver, and
-      // QueueManager.driver() installs its default there only on *first*
-      // resolution — the cached branch does not. Reassert it on every
-      // dispatch, or a job could land on whichever driver another manager
+      // Job.dispatch() sends through the module-global driver, which
+      // QueueManager.driver() installs only on *first* resolution. Reassert on
+      // every dispatch, or a job lands on whichever driver another manager
       // installed since, where no worker of ours ever pops.
       setQueueDriver(manager.driver() as Parameters<typeof setQueueDriver>[0])
       return
@@ -959,9 +886,8 @@ export class AttachmentEngine {
   }
 
   /**
-   * The single indexed query behind `withAttachments()`. An empty `records`
-   * or `names` short-circuits: either would send an empty `IN ()` list to the
-   * adapter rather than matching nothing.
+   * The single indexed query behind `withAttachments()`. Empty `records` or
+   * `names` short-circuits: either would send an empty `IN ()` to the adapter.
    */
   private async rowsForPage(
     model: typeof Model,
@@ -993,9 +919,9 @@ export class AttachmentEngine {
   }
 
   /**
-   * Objects first, rows after (RFC 0013 §8): a crash between the two leaves
-   * a row pointing at nothing, which the next `url()` surfaces loudly — the
-   * reverse would leave invisible orphaned objects only a bucket audit finds.
+   * Objects first, rows after (RFC 0013 §8): a crash between the two leaves a
+   * row pointing at nothing, which the next `url()` surfaces loudly. The reverse
+   * leaves orphaned objects only a bucket audit finds.
    */
   private async purgeRows(rows: PlainObject[]): Promise<void> {
     for (const row of rows) {
@@ -1003,27 +929,22 @@ export class AttachmentEngine {
       await disk.deleteDirectory(`${ATTACHMENT_OBJECT_PREFIX}/${String(row.id)}`)
     }
     const ids = rows.map((row) => String(row.id))
-    // Chunked like the prune lookups: a sweep can hand this thousands of
-    // ids, and one unbounded IN would blow dialect bind-parameter limits —
-    // after the objects above are already gone.
+    // A sweep can hand this thousands of ids, and one unbounded IN would blow
+    // dialect bind-parameter limits — after the objects above are already gone.
     for (let start = 0; start < ids.length; start += PRUNE_LOOKUP_CHUNK) {
       await this.model.where({ id: ids.slice(start, start + PRUNE_LOOKUP_CHUNK) }).delete()
     }
   }
 
   /**
-   * The sweeper behind `attachments:prune` (RFC 0013 §8): no DB cascade can
-   * exist for a polymorphic pair, so deletion is explicit-plus-sweep. Rows
-   * are removed only on *positive* evidence the record is gone — the owning
-   * type resolved through `Model.morphMap` and the record queried and found
-   * missing. Anything unverifiable (type not in the morph map, a failing
-   * query, an unlistable disk) is reported and left alone.
+   * The sweeper behind `attachments:prune` (RFC 0013 §8): no DB cascade exists
+   * for a polymorphic pair. Rows are removed only on *positive* evidence the
+   * record is gone; anything unverifiable is reported and left alone.
    */
   async pruneOrphans(options: PruneOptions = {}): Promise<PruneReport> {
-    // Unscoped on purpose: configureAttachments() hands this model to the
-    // app, which may add global scopes (a tenant filter, say). A scoped
-    // snapshot would hide other tenants' rows from `liveIds` and --objects
-    // would then sweep prefixes that are very much referenced.
+    // Unscoped: the app may add global scopes to this model, and a scoped
+    // snapshot would hide rows from `liveIds` so --objects sweeps referenced
+    // prefixes.
     const rows = (await this.model.withoutGlobalScopes()) as PlainObject[]
     const report: PruneReport = {
       scannedRows: rows.length,
@@ -1055,21 +976,18 @@ export class AttachmentEngine {
       const ids = Array.from(new Set(group.map((row) => String(row.attachableId))))
       const existing = new Set<string>()
       const unverifiable = new Set<string>()
-      // Bounded chunks: one IN over every id (twice, with both spellings)
-      // blows dialect parameter limits on large tables, and the catch would
-      // then skip the whole type — leaving its real orphans unswept forever.
+      // One IN over every id (twice, both spellings) blows dialect parameter
+      // limits on large tables, and the catch then skips the whole type.
       for (let start = 0; start < ids.length; start += PRUNE_LOOKUP_CHUNK) {
         const chunk = ids.slice(start, start + PRUNE_LOOKUP_CHUNK)
-        // The morph column stores ids as text while the owning table's key
-        // may be numeric; query both spellings so a representation mismatch
-        // can never make a live record look deleted. Number() is lossy above
-        // 2^53; harmless because the string spelling rides alongside.
+        // The morph column stores ids as text while the owning key may be
+        // numeric, so query both spellings. Number() is lossy above 2^53, which
+        // is harmless because the string spelling rides alongside.
         const lookupValues = chunk.flatMap((id) => (/^\d+$/.test(id) ? [id, Number(id)] : [id]))
         try {
-          // Existence is a primary-key fact, so every global scope is
-          // dropped: a SoftDeletes filter would make a soft-deleted
-          // (restorable!) record's attachments look orphaned, and a tenant
-          // filter would let one tenant's sweep delete another's.
+          // Every global scope is dropped: SoftDeletes would make a restorable
+          // record's attachments look orphaned, and a tenant filter would let
+          // one tenant's sweep delete another's.
           const records = (await relatedModel
             .withoutGlobalScopes()
             .where({ id: lookupValues })) as PlainObject[]
@@ -1087,9 +1005,8 @@ export class AttachmentEngine {
       for (const row of group) {
         const stored = String(row.attachableId)
         if (unverifiable.has(stored)) continue
-        // Membership through the same normalization on both sides: '01' in
-        // the morph column must match an integer key of 1, and a UUID must
-        // match regardless of hex case.
+        // Same normalization on both sides: '01' must match an integer key of 1,
+        // and a UUID must match regardless of hex case.
         if (idSpellings(stored).some((spelling) => existing.has(spelling))) continue
         orphans.push(row)
         report.orphanRows.push({
@@ -1123,9 +1040,9 @@ export class AttachmentEngine {
       rows.map((row) => String(row.id)).filter((id) => !removed.has(id)),
     )
 
-    // Every disk the sweep can know about: the registered set (a disk used
-    // once via attach({ disk }) whose only write crashed pre-row would
-    // otherwise never be examined), plus config and row-referenced names.
+    // The registered set plus config and row-referenced names: a disk used once
+    // via attach({ disk }) whose only write crashed pre-row is in none of the
+    // others.
     let registered: string[] = []
     try {
       registered = this.storage().getDiskNames()
@@ -1155,10 +1072,8 @@ export class AttachmentEngine {
       for (const prefix of prefixes) {
         const id = prefix.split('/').pop() ?? prefix
         if (liveIds.has(id)) continue
-        // A rowless prefix minted moments ago is an attach() in flight (the
-        // object is written before the row), not debris — leave it for a
-        // later sweep. Non-ULID names carry no timestamp and cannot be a
-        // mid-flight attach, so they are swept.
+        // A rowless prefix minted moments ago is an attach() in flight, not
+        // debris. Non-ULID names carry no timestamp and cannot be mid-flight.
         const mintedAt = ulidTime(id)
         if (mintedAt !== null && Date.now() - mintedAt < PRUNE_OBJECTS_GRACE_MS) continue
         report.orphanObjectPrefixes.push({ disk: diskName, prefix })
@@ -1166,8 +1081,8 @@ export class AttachmentEngine {
           try {
             await disk.deleteDirectory(prefix)
           } catch (error) {
-            // One failing prefix must not abort the sweep of everything
-            // after it — the rows are already gone by this point.
+            // The rows are already gone, so one failing prefix must not abort
+            // the rest of the sweep.
             report.skippedDisks.push({
               disk: diskName,
               reason: `deleting ${prefix} failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -1197,9 +1112,8 @@ export class AttachmentEngine {
   }
 
   private deliveryKeyring(): AppKeyring {
-    // Lazy, like the framework's five other purposes: the env is read at
-    // first use, and the derived keyring is scoped so a leaked delivery key
-    // forges delivery URLs and nothing else.
+    // Lazy so the env is read at first use; the derived keyring is scoped, so a
+    // leaked delivery key forges delivery URLs and nothing else.
     if (!this.deliveryKeys) {
       this.deliveryKeys = deriveAppKeyring(getAppKeyringFromEnv(), 'attachment-delivery')
     }
@@ -1207,12 +1121,10 @@ export class AttachmentEngine {
   }
 
   /**
-   * The one URL policy (RFC 0015 §7): public disks stay on `disk.url()`
-   * untouched; private disks hand out signed route URLs when `delivery` is
-   * configured (and the disk did not opt out with `serve: 'direct'`), else
-   * the v1 `temporaryUrl()` behaviour with its documented limitations.
+   * The one URL policy (RFC 0015 §7): public disks stay on `disk.url()`; private
+   * disks get signed route URLs when `delivery` is configured and the disk did
+   * not opt out with `serve: 'direct'`, else v1's `temporaryUrl()`.
    */
-  /** Whether URLs for this row are minted through the delivery route. */
   private usesDeliveryRoute(row: AttachmentRecord): boolean {
     return (
       this.visibilityOf(row.disk) === 'private' && this.delivery !== null && this.routeEnabledFor(row.disk)
@@ -1220,13 +1132,11 @@ export class AttachmentEngine {
   }
 
   /**
-   * The one variant-resolution rule (RFC 0013 §7 / RFC 0015 §1), shared by
-   * URL minting, resource payloads, and the delivery route: a `ready`
-   * entry resolves to the variant's key and format-derived MIME type
-   * (variants are transcoded — serving them under the original's type with
-   * `nosniff` would be self-sabotage); anything else — `pending`,
-   * `failed`, `unavailable`, or an entry missing entirely on a row
-   * attached before the variant was declared — falls back to the original.
+   * The one variant-resolution rule (RFC 0013 §7 / RFC 0015 §1), shared by URL
+   * minting, resource payloads, and the delivery route. A `ready` entry resolves
+   * to the variant's key and *format-derived* MIME type — variants are
+   * transcoded, and serving them under the original's type with `nosniff` would
+   * be self-sabotage. Anything else falls back to the original.
    */
   private resolveVariantTarget(
     row: AttachmentRecord,
@@ -1252,8 +1162,7 @@ export class AttachmentEngine {
       return this.signDeliveryUrl(row, options)
     }
 
-    // Generation-time variant fallback, as v1 shipped it: a declared-but-
-    // not-ready variant resolves to the original's key.
+    // A declared-but-not-ready variant resolves to the original's key.
     const { path } = this.resolveVariantTarget(row, options.variant)
     const disk = this.storage().disk(row.disk)
     if (this.visibilityOf(row.disk) === 'private') {
@@ -1263,11 +1172,9 @@ export class AttachmentEngine {
   }
 
   /**
-   * Path-relative on purpose: the `Host` header never participates in URL
-   * construction (RFC 0015 T6); emails prefix the app's canonical URL
-   * themselves. The variant rides as a signed query parameter and is
-   * resolved at *serve* time, so the same URL starts serving the variant
-   * once generation completes.
+   * Path-relative: the `Host` header never participates in URL construction (RFC
+   * 0015 T6). The variant rides as a signed query parameter resolved at *serve*
+   * time, so the same URL starts serving it once generation completes.
    */
   private signDeliveryUrl(
     row: AttachmentRecord,
@@ -1275,12 +1182,11 @@ export class AttachmentEngine {
   ): string {
     const params = new URLSearchParams()
     if (options.variant) params.set('variant', options.variant)
-    // Signed like everything else; §4's allowlist still wins — the
-    // parameter can force `attachment`, never `inline`.
+    // §4's allowlist still wins: the parameter can force `attachment`, never
+    // `inline`.
     if (options.disposition) params.set('disposition', options.disposition)
     const query = params.size > 0 ? `?${params}` : ''
-    // wellFormed: a stored name with a lone surrogate (a legacy row whose
-    // truncation split a pair) must not make encodeURIComponent throw.
+    // A stored name with a lone surrogate must not make encodeURIComponent throw.
     const path = `${this.delivery!.prefix}/${encodeURIComponent(row.id)}/${encodeURIComponent(wellFormed(row.name))}`
     return signUrl(`${path}${query}`, this.deliveryKeyring(), {
       expiresIn: options.expiresIn ?? this.urlExpiresIn,
@@ -1288,17 +1194,12 @@ export class AttachmentEngine {
   }
 
   /**
-   * Serve one delivery-route request (RFC 0015 §1): verify → load →
-   * resolve → redirect or proxy. Everything before the row load is one
-   * HMAC per keyring key, and every failure is the same 404 — invalid
-   * signature, expired URL, and unknown id must be indistinguishable.
-   *
-   * Takes the raw web `Request`: every semantic parameter (id, variant,
-   * disposition, expires) is re-read from the *same* `URL`/`URLSearchParams`
-   * parse the signature verification canonicalizes with. A route
-   * framework's own query decoder disagrees with `URLSearchParams` on
-   * malformed percent-encoding, and a parser mismatch there is a signed-URL
-   * rewrite primitive.
+   * Serve one delivery-route request (RFC 0015 §1). Every failure is the same
+   * 404: invalid signature, expired URL, and unknown id must be
+   * indistinguishable. Takes the raw `Request` so every semantic parameter is
+   * re-read from the *same* `URLSearchParams` parse the signature canonicalizes
+   * with — a route framework's decoder disagrees on malformed percent-encoding,
+   * and that mismatch is a signed-URL rewrite primitive.
    */
   async handleDeliveryRequest(request: Request): Promise<Response> {
     const notFound = () =>
@@ -1313,9 +1214,8 @@ export class AttachmentEngine {
       return notFound()
     }
 
-    // The id is the first path segment after the prefix. Only URLs this
-    // engine signed reach this point, so the decode cannot throw for real
-    // traffic; the catch is defense in depth, not a code path.
+    // Only URLs this engine signed reach here, so the decode cannot throw for
+    // real traffic; the catch is defense in depth.
     let id: string
     try {
       id = decodeURIComponent(url.pathname.slice(this.delivery.prefix.length + 1).split('/')[0] ?? '')
@@ -1329,10 +1229,8 @@ export class AttachmentEngine {
     if (!raw) return notFound()
     const row = this.toRecord(raw)
 
-    // The valid signature proves the variant was declared when the URL was
-    // minted (attachmentUrl throws on undeclared names before signing), so
-    // variant state never 404s — resolveVariantTarget falls back to the
-    // original (RFC 0015 §1).
+    // A valid signature proves the variant was declared when the URL was minted,
+    // so variant state never 404s: resolveVariantTarget falls back (§1).
     const target = this.resolveVariantTarget(row, variant)
 
     // `expires` passed verification, so it is a plain integer in seconds.
@@ -1342,11 +1240,10 @@ export class AttachmentEngine {
     const disk = this.storage().disk(row.disk)
     const mode = this.serveModeFor(row.disk)
     // Fail closed at the comparison site: redirecting requires the driver's
-    // *positive* presignedGet declaration, whatever the configured mode —
-    // `serve: 'redirect'` on a disk that cannot presign would 302 to
-    // whatever temporaryUrl() returns (LocalDriver's is the plain public
-    // URL: the exact fail-open this route exists to close). The
-    // misconfiguration downgrades to proxy and says so once.
+    // *positive* presignedGet declaration whatever the configured mode.
+    // `serve: 'redirect'` on a non-presigning disk would 302 to whatever
+    // temporaryUrl() returns — LocalDriver's is the plain public URL, the exact
+    // fail-open this route exists to close. It downgrades to proxy instead.
     const canPresign = disk.capabilities?.presignedGet === true
     if (mode === 'redirect' && !canPresign) {
       warnRedirectDowngradeOnce(row.disk)
@@ -1354,10 +1251,7 @@ export class AttachmentEngine {
     const redirect = canPresign && mode !== 'proxy'
 
     if (redirect) {
-      // Minted per request with a fixed short TTL: the inner credential
-      // only needs to survive one fetch, and a TTL derived from the outer
-      // lifetime would let a raised urlExpiresIn exceed a driver's presign
-      // ceiling (R2 rejects > 7 days).
+      // Fixed short TTL: the inner credential only needs to survive one fetch.
       const inner = new Date(Date.now() + Math.min(remainingMs, INNER_PRESIGN_TTL_MS))
       const location = await disk.temporaryUrl(target.path, inner, {
         responseContentDisposition: disposition,
@@ -1379,35 +1273,31 @@ export class AttachmentEngine {
       'Content-Type': target.contentType,
       'Content-Disposition': disposition,
       'X-Content-Type-Options': 'nosniff',
-      // Belt over the allowlist's braces: even if an inline type turns out
-      // to carry active content in some engine, it executes with no origin.
+      // Even if an inline type carries active content in some engine, it
+      // executes with no origin.
       'Content-Security-Policy': 'sandbox',
       'Referrer-Policy': 'no-referrer',
-      // Browser-cacheable, never in shared caches, never beyond the
-      // signature's own validity.
       'Cache-Control': `private, max-age=${Math.floor(remainingMs / 1000)}`,
       ETag: etag,
     }
 
-    // A 304 asserts the client's cached copy is still valid — reachable
-    // only when the client already holds the bytes, so no storage check.
+    // A 304 is reachable only when the client already holds the bytes, so no
+    // storage check.
     if (ifNoneMatchSatisfied(request.headers.get('if-none-match'), etag)) {
       return new Response(null, { status: 304, headers })
     }
 
     if (target.size != null) headers['Content-Length'] = String(target.size)
 
-    // Hono dispatches HEAD through the GET handler and drops the body;
-    // without this branch every HEAD would pay for the storage read. A
-    // HEAD 200 still asserts existence, so the object is checked — an
-    // exists() head, not a body read.
+    // Hono dispatches HEAD through the GET handler and drops the body, so
+    // without this branch every HEAD pays for the storage read. A HEAD 200 still
+    // asserts existence, hence exists() rather than nothing.
     if (request.method === 'HEAD') {
       return (await disk.exists(target.path)) ? new Response(null, { headers }) : notFound()
     }
 
     const body = disk.getStream ? await disk.getStream(target.path) : await disk.get(target.path)
-    // A row pointing at nothing (crash between object delete and row
-    // delete) surfaces as 404, same as v1's loud url() failure.
+    // A row pointing at nothing surfaces as 404, like v1's loud url() failure.
     if (!body) return notFound()
     return new Response(body as BodyInit, { headers })
   }
@@ -1419,12 +1309,10 @@ export class AttachmentEngine {
     for (const name of Object.keys(spec.variants ?? {})) {
       const target = this.resolveVariantTarget(row, name)
       const entry = row.variants?.[name]
-      // Not-ready variants fall back to the original so pages keep
-      // rendering (the placeholder LQIP covers the gap). On a delivery-
-      // route disk the URL carries the variant and the route resolves at
-      // serve time; everywhere else the fallback resolves *here*, reusing
-      // `originalUrl` byte for byte — v1 semantics, and one temporaryUrl()
-      // call per row instead of one per pending variant.
+      // Not-ready variants fall back to the original so pages keep rendering. On
+      // a delivery-route disk the route resolves at serve time; everywhere else
+      // the fallback resolves here, reusing `originalUrl` byte for byte — one
+      // temporaryUrl() call per row instead of one per pending variant.
       variants[name] = {
         url:
           viaRoute || target.ready ? await this.urlForRow(row, { variant: name }) : originalUrl,
@@ -1470,8 +1358,6 @@ export class AttachmentEngine {
   }
 }
 
-// --- module-level wiring ----------------------------------------------------
-
 let activeEngine: AttachmentEngine | null = null
 
 /** Install the engine `configureAttachments()` built. Last call wins; `null` unconfigures (tests). */
@@ -1480,20 +1366,18 @@ export function setActiveAttachmentEngine(engine: AttachmentEngine | null): void
 }
 
 /**
- * The active engine, or `null` when `configureAttachments()` has not run —
- * the delivery route resolves it per request precisely so its registration
- * stays configuration-independent (bootless route tooling invokes
- * registrars with no providers booted).
+ * The active engine, or `null` when `configureAttachments()` has not run. The
+ * delivery route resolves it per request so its registration stays
+ * configuration-independent for bootless route tooling.
  */
 export function getActiveAttachmentEngine(): AttachmentEngine | null {
   return activeEngine
 }
 
 /**
- * The delivery route's prefix and name: the configured values when an
- * engine is active, the defaults otherwise (bootless route tooling invokes
- * registrars with no providers booted). The one place the defaults are
- * applied outside the engine constructor.
+ * The delivery route's prefix and name: configured values when an engine is
+ * active, defaults otherwise (bootless route tooling boots no providers). The
+ * one place the defaults are applied outside the engine constructor.
  */
 export function resolveDeliveryRoute(): { prefix: string; routeName: string } {
   return (
@@ -1513,8 +1397,6 @@ export function resolveAttachmentEngine(caller: string): AttachmentEngine {
   return activeEngine
 }
 
-// --- helpers ----------------------------------------------------------------
-
 async function normalizeSource(source: AttachmentSource, nameOverride?: string): Promise<NormalizedSource> {
   if (source instanceof Uint8Array) {
     return {
@@ -1532,22 +1414,20 @@ async function normalizeSource(source: AttachmentSource, nameOverride?: string):
       declaredContentType: source.type || null,
     }
   }
-  // Deliberately no path-string form: a filesystem path here would be an
-  // arbitrary-file-read primitive (RFC 0013 §6).
+  // No path-string form: it would be an arbitrary-file-read primitive (§6).
   throw new TypeError(
     'attach() accepts bytes only (File, Blob, or Uint8Array). Filesystem path strings are not supported.',
   )
 }
 
 /**
- * Filenames become part of the object key, so they must not steer it: no
- * path separators, no control characters, never empty or dot-only.
+ * Filenames become part of the object key, so they must not steer it: no path
+ * separators, no control characters, never empty or dot-only.
  */
 export function sanitizeFilename(name: string): string {
   const base = name.split(/[/\\]/).pop() ?? ''
-  // Truncate by code point, not code unit: a slice() that lands inside a
-  // surrogate pair leaves a lone surrogate that later throws in
-  // encodeURIComponent (delivery URLs, RFC 5987 disposition names).
+  // By code point, not code unit: a slice() landing inside a surrogate pair
+  // leaves a lone surrogate that later throws in encodeURIComponent.
   const cleaned = Array.from(base.replace(/[\u0000-\u001f\u007f]/g, '').trim())
     .slice(0, 200)
     .join('')
@@ -1599,16 +1479,14 @@ function normalizeDiskDelivery(
 }
 
 function normalizeDeliveryPrefix(prefix: string): string {
-  // Loop, not /\/+$/: the regex form backtracks polynomially on
-  // slash-heavy input — the reason trimTrailingSlashes exists in
-  // @guren/server's support module (same loop as S3Driver.listingPrefix).
+  // Loop, not /\/+$/: the regex form backtracks polynomially on slash-heavy
+  // input (same loop as @guren/server's trimTrailingSlashes).
   let end = prefix.length
   while (end > 0 && prefix.charCodeAt(end - 1) === 0x2f /* '/' */) {
     end--
   }
   const trimmed = prefix.slice(0, end)
-  // Anything URL parsing would reinterpret cannot be a route prefix: a
-  // '//' start becomes an authority, '?'/'#' swallow the id and filename
+  // A '//' start becomes an authority, '?'/'#' swallow the id and filename
   // segments, and whitespace never survives a real URL.
   if (!trimmed.startsWith('/') || trimmed.startsWith('//') || /[?#\s]/.test(trimmed)) {
     throw new Error(
@@ -1619,10 +1497,9 @@ function normalizeDeliveryPrefix(prefix: string): string {
 }
 
 /**
- * Content types allowed to render inline (RFC 0015 §4). Everything else —
- * notably image/svg+xml and text/html — is forced to `attachment`: the
- * `disposition` parameter can force `attachment` for a listed type, but
- * nothing can force `inline` for an unlisted one.
+ * Content types allowed to render inline (RFC 0015 §4). Everything else, notably
+ * image/svg+xml and text/html, is forced to `attachment`; nothing can force
+ * `inline` for an unlisted type.
  */
 const INLINE_CONTENT_TYPES = new Set([
   'image/png',
@@ -1642,8 +1519,7 @@ function contentDispositionFor(
   filename: string,
 ): string {
   const kind = forceAttachment || !INLINE_CONTENT_TYPES.has(contentType) ? 'attachment' : 'inline'
-  // Plain-ASCII fallback plus the RFC 5987 form for everything else; the
-  // stored name is already sanitized (no separators, no control chars).
+  // Plain-ASCII fallback plus the RFC 5987 form for everything else.
   const fallback = filename.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_')
   return `${kind}; filename="${fallback}"; filename*=UTF-8''${encodeRfc5987(filename)}`
 }
@@ -1663,10 +1539,9 @@ function ifNoneMatchSatisfied(header: string | null, etag: string): boolean {
 }
 
 /**
- * Replace lone surrogates so `encodeURIComponent` cannot throw on a stored
- * name whose truncation once split a pair. `String#toWellFormed` is
- * ES2024 (Bun, Node ≥ 20); older runtimes fall through — their names were
- * produced by the same truncation and are overwhelmingly well-formed.
+ * Replace lone surrogates so `encodeURIComponent` cannot throw on a stored name
+ * whose truncation split a pair. `String#toWellFormed` is ES2024 (Bun, Node ≥
+ * 20); older runtimes fall through.
  */
 function wellFormed(value: string): string {
   const candidate = value as string & { toWellFormed?: () => string }
@@ -1695,13 +1570,10 @@ function encodeRfc5987(value: string): string {
 }
 
 /**
- * A validator over the *resolved object*, not the request: `id + variant`
- * is not a byte identity (a pending variant resolves to original bytes
- * today and variant bytes tomorrow; queued HEIC conversion rewrites the
- * path under the same row id). Resolved key + size move in both of those
- * cases; `updatedAt` covers the one they miss — a same-key rewrite with
- * different bytes of the same length (queued variant regeneration), which
- * always lands with a row update.
+ * A validator over the *resolved object*, not the request: `id + variant` is no
+ * byte identity, since a pending variant resolves to original bytes today and
+ * variant bytes tomorrow. Resolved key + size cover that; `updatedAt` covers a
+ * same-key rewrite with different bytes of the same length.
  */
 function deliveryEtag(path: string, size: number | null, updatedAt: Date): string {
   const digest = createHash('sha256')

@@ -22,7 +22,6 @@ import React from 'react'
 import { Link as InertiaLink, router } from '@inertiajs/react'
 import type { InertiaLinkProps } from '@inertiajs/react'
 
-// ─── Route type infrastructure ───────────────────────────────
 // These types are designed to be augmented by the generated routes.gen.ts
 // via module augmentation or by passing the route manifest as a generic.
 
@@ -51,8 +50,6 @@ type PathParamsOf<TPath extends string> =
   HasPathParams<TPath> extends false
     ? Record<string, never>
     : { [TKey in PathParamKeys<TPath>]: string | number }
-
-// ─── Link component ──────────────────────────────────────────
 
 // Verbatim mirror of PATH_PARAM_RUNTIME_HELPERS, from the same fragment
 // module and under the same pin test as the type helpers above: token-based
@@ -113,8 +110,6 @@ export function createTypedLink<TManifest extends RouteManifestLike>(manifest: T
     props: TypedLinkProps<TManifest, TName>,
   ) => React.ReactElement
 }
-
-// ─── Form component ──────────────────────────────────────────
 
 export type TypedFormProps<
   TManifest extends RouteManifestLike,

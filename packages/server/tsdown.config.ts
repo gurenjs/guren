@@ -2,10 +2,9 @@ import { defineConfig } from 'tsdown'
 
 import { tsdownPreset } from '../../scripts/tsdown-preset'
 
-// rolldown always shares chunks between entries, and this package depends on
-// that: the job registry, mail manager and queue driver are module-level
-// state, so a copy per entry would make registerJob via the root entry
-// invisible to a Worker imported via ./queue.
+// rolldown shares chunks between entries, and this package depends on that: the
+// job registry, mail manager and queue driver are module-level state, so a copy
+// per entry would make registerJob via the root entry invisible to ./queue.
 export default defineConfig({
   ...tsdownPreset,
   entry: [
@@ -32,30 +31,23 @@ export default defineConfig({
     'src/vite/index.ts',
     'src/lambda/index.ts',
     'src/mcp/index.ts',
-    // The browser-safe dispatch surface, its own entry so a client bundle
-    // gets buildToolRequest/mapToolResponse without the application graph the
-    // package index pulls in. src/agent/public.ts states what that entry may
-    // and may not re-export.
+    // Browser-safe dispatch surface: its own entry so a client bundle gets
+    // buildToolRequest/mapToolResponse without the package index's app graph.
     'src/agent/public.ts',
     // Not public API: @guren/core's database stores re-export the expiry
     // rules from here so the two packages cannot drift apart.
     'src/support/expiry.ts',
-    // Not public API either, and here for the same reason one step further
-    // out: `@guren/core/internal/*` re-exports these, so @guren/openapi and
-    // @guren/cli keep one Zod → JSON Schema rule with `deriveAgentTools`.
-    // Declarations come from tsc, JS from here — a path listed in
-    // package.json `exports` but missing below emits a .d.ts with no .js.
-    // Not public API either: @guren/testing's controller mock reads the one
-    // request-body rule from here, so a mocked controller and a real one
-    // cannot disagree about a body.
+    // Not public API: `@guren/core/internal/*` re-exports these, so @guren/openapi,
+    // @guren/cli and @guren/testing share one Zod → JSON Schema rule and one
+    // request-body rule. A path in package.json `exports` but missing here emits
+    // a .d.ts with no .js.
     'src/internal/request.ts',
     'src/internal/route-path.ts',
     'src/internal/zod-compat.ts',
     'src/internal/zod-json-schema.ts',
   ],
-  // Declarations come from `tsc -p tsconfig.build.json` (see the build
-  // script): unbundled, one .d.ts per module, which keeps the MCP SDK types
-  // behind the ./mcp subpath instead of in one root bundle.
+  // Declarations come from `tsc -p tsconfig.build.json`: unbundled, one .d.ts per
+  // module, keeping the MCP SDK types behind ./mcp instead of in one root bundle.
   dts: false,
   // Both undeclared: @guren/cli is reached by dynamic import and would
   // otherwise be bundled through the root tsconfig paths; zod is the app's.

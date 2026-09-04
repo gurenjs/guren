@@ -4,9 +4,7 @@ import type { LogChannel, LogEntry, DailyFileChannelConfig } from '../types'
 import { LOG_LEVEL_PRIORITY } from '../types'
 import { dailyFileDateStamp, dailyFilePath, matchDailyFileDate } from '../daily-file-path'
 
-/**
- * Daily rotating file log channel.
- */
+/** Daily rotating file log channel. */
 export class DailyFileChannel implements LogChannel {
   private readonly config: DailyFileChannelConfig
   private readonly minLevel: number
@@ -30,7 +28,6 @@ export class DailyFileChannel implements LogChannel {
 
     const dateStr = dailyFileDateStamp(entry.timestamp)
 
-    // Rotate if date changed
     if (this.currentDate !== dateStr) {
       this.rotate(entry.timestamp, dateStr)
     }
@@ -50,7 +47,6 @@ export class DailyFileChannel implements LogChannel {
     this.currentFilePath = dailyFilePath(this.config.path, date)
     this.ensureDirectory(this.currentFilePath)
 
-    // Clean up old files
     this.cleanup()
   }
 

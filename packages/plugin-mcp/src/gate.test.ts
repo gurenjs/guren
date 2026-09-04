@@ -42,9 +42,8 @@ describe('gateToolCall', () => {
   })
 
   // The same tool with a queue behind it. Admitting it here is what puts it in
-  // `tools/list`: the call becomes a pending request, which is the interaction
-  // the queue exists to offer, and hiding a tool whose whole point is to ask
-  // would make the queue unreachable.
+  // `tools/list`: the call becomes a pending request, and hiding a tool whose
+  // whole point is to ask would make the queue unreachable.
   test('should admit an approval-required tool once a queue is configured', () => {
     expect(gateToolCall(tools().approval, ['tools:*'], { approvalsConfigured: true })).toEqual({
       allowed: true,

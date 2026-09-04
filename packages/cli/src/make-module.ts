@@ -10,15 +10,10 @@ export interface MakeModuleResult {
 }
 
 /**
- * Scaffolds a `modules/<name>/` directory (RFC 0002): `index.ts` (the
- * module's public API — a `defineModule()` descriptor), `routes.ts` (an
- * empty registrar), and `db/schema.ts` (an empty table-definitions file).
- * Then patches the project's root `db/schema.ts` (re-export) and
- * `src/app.ts` (import + `modules: [...]` registration) so the module is
- * wired in immediately — both patches degrade to a warning + manual
- * instructions when the target file can't be found or parsed, never a
- * thrown error, since a scaffold shouldn't fail because of an unrelated
- * hand-edited app.ts.
+ * Scaffolds a `modules/<name>/` directory (RFC 0002) and wires it into the
+ * project's root `db/schema.ts` and `src/app.ts`. Both patches degrade to a
+ * warning plus manual instructions rather than throwing — a scaffold should
+ * not fail over an unrelated hand-edited app.ts.
  */
 export async function makeModule(name: string, options: WriterOptions = {}): Promise<MakeModuleResult> {
   assertCwdUnsupported(options, 'make:module')
@@ -70,9 +65,8 @@ async function patchRootSchema(moduleDir: string): Promise<void> {
     return
   }
 
-  // addImport() just inserts a line after the file's existing imports —
-  // it doesn't require the inserted line to itself start with `import `,
-  // so it's reused here for a `export * from ...` re-export statement.
+  // addImport() inserts a line after the existing imports without requiring it
+  // to start with `import `, so it also serves for a re-export.
   const reExport = `export * from '../${moduleDir}/db/schema'`
   const result = await addImport(rootSchemaPath, reExport)
 
@@ -99,10 +93,9 @@ async function patchAppEntry(moduleDir: string, camelName: string): Promise<void
   const importPath = relativeImportPath(appPath, moduleDir)
   const moduleImport = `import { ${moduleBinding} } from '${importPath}'`
 
-  // Registration first, import only once it lands — the same ordering
-  // `addProviderRegistration` enforces, and for the same reason: an import of
-  // a binding nothing references is an unused local, which stops the app
-  // compiling under `noUnusedLocals`.
+  // Registration first, import only once it lands (as in
+  // `addProviderRegistration`): an import nothing references is an unused
+  // local, which stops the app compiling under `noUnusedLocals`.
   const modulesResult = await addToArrayOption(appPath, 'modules', moduleBinding)
   if (modulesResult.modified) {
     consola.success(`Registered ${moduleBinding} in ${appPath}`)

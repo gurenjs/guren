@@ -15,17 +15,9 @@ export interface SpecGenerateOptions {
 }
 
 /**
- * One entry per spec view: the generator plus the POSIX-relative file
- * patterns whose changes can alter its output. `check --spec --changed`
- * regenerates only the views whose sources changed — the single list that
- * keeps the gate and the generators from drifting apart.
- */
-/**
- * One input to a spec view: the pattern `check --spec --changed` matches
- * changed files against, and the name the docs viewer draws as the
- * derivation edge. Pairing them in one entry is what keeps the gate and
- * the graph on the same list — two parallel arrays drift the moment a
- * pattern is added without its label.
+ * One input to a spec view: the pattern `check --spec --changed` matches changed files
+ * against, and the label the docs viewer draws as the derivation edge. Paired in one
+ * entry so the gate and the graph cannot drift apart.
  */
 export interface SpecViewSource {
   pattern: RegExp
@@ -61,16 +53,9 @@ export const SPEC_VIEWS: SpecViewDescriptor[] = [
     fileName: 'screens.md',
     sources: [
       { pattern: /^routes\//, label: 'routes/' },
-      // A module feeds the route graph through a runtime import:
-      // `loadRouteDefinitions` evaluates `modules/<name>/index.ts` and
-      // whatever the registrar it names reaches from there — `routes.ts`,
-      // files under `routes/` (where `make:route --module` writes), or any
-      // other module file holding a prefix constant or helper. Like the
-      // modules view's any-source rule, the pattern matches that honest
-      // input set rather than an allow-list of conventional names — an
-      // allow-list of `routes.ts`/`index.ts` is how a stale screens.md
-      // once slipped through `--changed`, and over-selection only costs a
-      // regeneration.
+      // A module feeds the route graph through a runtime import, so any module file can
+      // alter it. An allow-list of `routes.ts`/`index.ts` is how a stale screens.md once
+      // slipped through `--changed`; over-selection only costs a regeneration.
       { pattern: /^modules\/[^/]+\//, label: 'modules/' },
       { pattern: /(^|\/)app\/Http\/Controllers\//, label: 'app/Http/Controllers/' },
       { pattern: /^resources\/js\/pages\//, label: 'resources/js/pages/' },
@@ -78,8 +63,7 @@ export const SPEC_VIEWS: SpecViewDescriptor[] = [
     generate: (cwd, routesFile) => generateScreensSpec(cwd, routesFile),
   },
   {
-    // The module map scans static imports across the whole project, so
-    // any importable source file is honestly one of its inputs.
+    // The module map scans static imports project-wide, so any source file is an input.
     fileName: 'modules.md',
     sources: [{ pattern: /\.(ts|tsx|mts|js|jsx|mjs)$/, label: '(all source files)' }],
     generate: (cwd) => generateModulesSpec(cwd),
@@ -106,8 +90,8 @@ export async function writeSpecArtifacts(options: SpecGenerateOptions = {}): Pro
   for (const artifact of artifacts) {
     const specPath = `${SPEC_DIR}/${artifact.fileName}`
     if (artifact.degraded) {
-      // Writing a degraded view would replace real content with a hollow
-      // document that then reads as "in sync" — keep whatever is committed.
+      // A degraded view would replace real content with a hollow document that then
+      // reads as "in sync"; keep whatever is committed.
       consola.warn(`Skipped ${specPath} — ${artifact.degraded}`)
       continue
     }

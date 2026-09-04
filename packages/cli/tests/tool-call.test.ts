@@ -19,13 +19,9 @@ import { consola } from 'consola'
 const repoRoot = resolve(import.meta.dir, '../../..')
 
 /**
- * `guren tool:call` end to end: a real application on disk, booted, dispatched
- * into, and its answer read back through the shared dispatch contract.
- *
- * The app lives in a *subdirectory* of the workspace so `--app` names a root
- * the process cwd is not — the same arrangement `token-issue-command.test.ts`
- * uses, and for the same reason: an app at the workspace root would let every
- * case pass whether or not the command honoured the flag.
+ * The fixture app lives in a *subdirectory* of the workspace so `--app` names a
+ * root the process cwd is not; at the workspace root every case would pass
+ * whether or not the command honoured the flag.
  */
 async function linkFixtureDependencies(dir: string): Promise<void> {
   await linkWorkspaceCore(dir)
@@ -78,14 +74,9 @@ export class MeController extends Controller {
 `
 
 /**
- * A route whose `.agent({ redact })` names a field the framework's own
- * sensitive-fragment list does *not* cover.
- *
- * That choice is what gives the redaction assertion below any power. A test
- * using `password` passes whether or not the route's list was threaded
- * through — the built-in fragments mask it either way — and a review of the
- * MCP surface found exactly that hole. `note` matches no default fragment, so
- * a mask on it can only have come from this declaration.
+ * `note` matches no built-in sensitive fragment, so a mask on it can only have
+ * come from the route's own `redact` list — a test using `password` would pass
+ * whether or not that list was threaded through.
  */
 const AUDITED_ROUTES = `import { Router } from '@guren/core'
 import { z } from 'zod'
@@ -103,13 +94,8 @@ export function registerWebRoutes(router: Router): void {
 `
 
 /**
- * An application that configured an audit trail, without an MCP endpoint.
- *
- * The binding is what `guren tool:call` reaches, so a fixture that binds it
- * directly tests exactly the seam — and can do so in a workspace where only
- * `@guren/core` is linked. `@guren/plugin-mcp`'s own suite covers that its
- * `audit` option produces this binding; nothing is being faked here that the
- * plugin does differently.
+ * An audit trail without an MCP endpoint: the binding is what `guren tool:call`
+ * reaches, and binding it directly keeps the fixture to `@guren/core` alone.
  */
 const MAIN_WITH_AUDIT = `import { appendFileSync } from 'node:fs'
 import { ServiceProvider, createApp, createAuditEmitter } from '@guren/core'
@@ -248,8 +234,6 @@ describe('tool:call', () => {
     expect(verdict.unverified).toEqual(['authorization'])
     expect(result.preflightUnanswered).toBe(false)
 
-    // The rehearsal must not have created anything: the list tool still sees
-    // an empty collection.
     output.length = 0
     await runToolCall({ name: 'posts.index', appRoot: appDir, json: true })
     expect(payload().structuredContent).toEqual({ posts: [] })
@@ -285,10 +269,8 @@ describe('tool:call', () => {
   })
 
   it('withholds a cookie scoped to a path the tool does not sit under', async () => {
-    // Presenting more than a browser would is the one direction that could
-    // turn a real CSRF misconfiguration into a green run here, so Path is
-    // honoured: this app scopes its XSRF cookie to /admin, and the tool is
-    // not under it.
+    // Presenting more than a browser would is the one direction that could turn
+    // a real CSRF misconfiguration into a green run, so Path is honoured.
     await writeFile(join(appDir, 'src/main.ts'), MAIN_WITH_SCOPED_CSRF)
 
     await runToolCall({ name: 'posts.store', input: '{"title":"Scoped"}', appRoot: appDir, json: true })
@@ -298,10 +280,9 @@ describe('tool:call', () => {
   })
 
   it('sends a cookie whose Path is not absolute, which scopes it to the root', async () => {
-    // RFC 6265: a Path that is not absolute is no scope at all and falls back
-    // to the default path of the request that set it. Reading `admin` as a
-    // scope would withhold a cookie a browser sends, and turn a working app
-    // into a 403 nobody can explain.
+    // RFC 6265: a Path that is not absolute is no scope at all and falls back to
+    // the default path of the request that set it — reading `admin` as a scope
+    // would withhold a cookie a browser sends.
     await writeFile(join(appDir, 'src/main.ts'), MAIN_WITH_RELATIVE_CSRF_PATH)
 
     await runToolCall({ name: 'posts.store', input: '{"title":"Relative"}', appRoot: appDir, json: true })
@@ -321,12 +302,7 @@ describe('tool:call', () => {
     ).rejects.toThrow(/received: \{title: 1\}/)
   })
 
-  /**
-   * RFC 0016 §5.2 on this surface: `'cli'` is one of the four, and this
-   * command is the whole of it. A developer calling a write tool as any user
-   * they like is precisely the event a trail exists to hold, and until now it
-   * held nothing.
-   */
+  /** RFC 0016 §5.2: `'cli'` is one of the four surfaces, and this command is it. */
   describe('the audit trail', () => {
     let auditFile: string
     let previousAuditFile: string | undefined
@@ -344,14 +320,12 @@ describe('tool:call', () => {
       else process.env.GUREN_TEST_AUDIT_FILE = previousAuditFile
     })
 
-    /** Every record the fixture's sink wrote, in order. */
     async function records(): Promise<Record<string, unknown>[]> {
       let text: string
       try {
         text = await readFile(auditFile, 'utf8')
       } catch (error) {
-        // A trail that was never opened is an empty one here, not a failure:
-        // the "records nothing" case below asserts exactly this.
+        // A trail that was never opened is an empty one, not a failure.
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
         throw error
       }
@@ -374,13 +348,11 @@ describe('tool:call', () => {
         surface: 'cli',
         tool: 'notes.store',
         status: 201,
-        // Nothing authenticated the call, and a record claiming a user where
-        // none was named would be worse than one saying so.
+        // Nothing authenticated the call; claiming a user would be worse.
         principal: null,
       })
-      // Exact, not a `toMatchObject` on `note` alone: this catches the mask
-      // going missing *and* the whole payload being masked, which a
-      // sensitive-fragment list that grew a stray empty entry would do.
+      // Exact, not `toMatchObject` on `note` alone: also catches the *whole*
+      // payload being masked, which a stray empty sensitive fragment would do.
       expect(record!.arguments).toEqual({ title: 'Visible', note: '[REDACTED]' })
       expect(typeof record!.durationMs).toBe('number')
       expect(record!.ts).toMatch(/^\d{4}-\d{2}-\d{2}T/)
@@ -402,18 +374,15 @@ describe('tool:call', () => {
       }
 
       const [record] = await records()
-      // Who the app acted as is the fact this trail most needs; `surface: 'cli'`
-      // is what carries the standing caveat that no credential was verified.
       expect(record!.principal).toEqual({ kind: 'user', id: 42 })
-      // `abilities` are a token's, and there was no token. An empty array
-      // would be a claim about a credential that does not exist.
+      // `abilities` are a token's, and there was no token; an empty array would
+      // claim a credential that does not exist.
       expect(record!.principal).not.toHaveProperty('abilities')
     })
 
     it('records the status of a call the application refused', async () => {
-      // A 422 is an invocation, not a denial: the request was sent and the
-      // application answered it. The four denial reasons name adapter checks
-      // this surface does not run.
+      // A 422 is an invocation, not a denial: the four denial reasons name
+      // adapter checks this surface does not run.
       await runToolCall({ name: 'notes.store', input: '{"title":"Only a title"}', appRoot: appDir, json: true })
 
       const [record] = await records()
@@ -421,10 +390,9 @@ describe('tool:call', () => {
     })
 
     it('records a rehearsal as guren.preflight, not as the tool it rehearsed', async () => {
-      // The distinction the App MCP endpoint already draws, and the one this
-      // surface most needs: `--preflight` stops before the handler, so a record
-      // naming `notes.store` with a success status would be indistinguishable
-      // from a write that happened. The probed tool rides in the arguments.
+      // `--preflight` stops before the handler, so a record naming `notes.store`
+      // with a success status would be indistinguishable from a write that
+      // happened. The probed tool rides in the arguments instead.
       await runToolCall({
         name: 'notes.store',
         input: '{"title":"Rehearsed","note":"private"}',
@@ -435,8 +403,7 @@ describe('tool:call', () => {
 
       const [record] = await records()
       expect(record).toMatchObject({ outcome: 'invoked', surface: 'cli', tool: 'guren.preflight' })
-      // The checked tool's own `redact` list still masks the payload it was
-      // checked with, one level down inside `input`.
+      // The checked tool's own `redact` list still masks, one level down.
       expect(record!.arguments).toEqual({
         tool: 'notes.store',
         input: { title: 'Rehearsed', note: '[REDACTED]' },
@@ -444,8 +411,7 @@ describe('tool:call', () => {
     })
 
     it('records nothing, and still answers, when the app configured no sink', async () => {
-      // The absence is the same one the MCP endpoint has with no `audit`
-      // option: no binding, no trail, and no second sink invented here.
+      // No binding, no trail — and no second sink invented here.
       await writeFile(join(appDir, 'src/main.ts'), MAIN)
 
       await runToolCall({ name: 'notes.store', input: '{"title":"Quiet","note":"private"}', appRoot: appDir, json: true })
@@ -494,15 +460,10 @@ describe('tool:call --as', () => {
 })
 
 /**
- * What decides that a response is a rehearsal rather than an execution.
- *
- * Driven as a unit because the interesting case cannot be built from a real
- * application: it needs a response whose *body* claims to be a verdict while
- * the seam never marked it, and any app this suite can boot has a `@guren/core`
- * new enough that its seam intercepts a `--preflight` call before the handler.
- * The case is real for an installed app older than the seam, which runs the
- * call for real — and that is precisely the one where reading the body instead
- * of the marker files a write that happened as a rehearsal that did not.
+ * Driven as a unit: the interesting case needs a body claiming to be a verdict
+ * while the seam never marked it, which no app this suite can boot produces.
+ * It is real for an installed core predating the seam, where reading the body
+ * instead of the marker files a write that happened as a rehearsal.
  */
 describe('readVerdict', () => {
   function outcome(body: unknown, extra: Partial<ToolCallOutcome> = {}): ToolCallOutcome {
@@ -522,19 +483,15 @@ describe('readVerdict', () => {
   })
 
   it('does not read a route\'s own output as a verdict, whatever it says', () => {
-    // The mutation this pins: a `preflight: true` in the body, with no marker,
-    // is an ordinary response. An app predating the seam answers exactly this
-    // for a `--preflight` call it ran for real, and calling it a rehearsal
-    // would drop the write from the trail.
+    // A `preflight: true` body with no marker is an ordinary response; calling
+    // it a rehearsal would drop a real write from the trail.
     expect(readVerdict(outcome({ preflight: true, allowed: true }))).toBeUndefined()
     expect(readVerdict(outcome({ ok: true }))).toBeUndefined()
   })
 
   it('still reports a verdict when the marked body cannot be read', () => {
-    // The marker is what establishes that the handler did not run. Returning
-    // `undefined` for an unreadable body would file the call under the tool it
-    // rehearsed — the claim this branch exists to avoid — so an empty verdict
-    // is the right answer.
+    // The marker, not the body, establishes that the handler did not run:
+    // `undefined` here would file the call under the tool it only rehearsed.
     const unreadable: ToolCallOutcome = {
       content: [{ type: 'text', text: 'not json' }],
       status: 200,
@@ -550,17 +507,9 @@ describe('readVerdict', () => {
 })
 
 /**
- * The recording rules against a hand-built route graph and an injected
- * `fetch`, which is what `dispatchToolCall` takes them for.
- *
- * One case here cannot be built any other way. A `--preflight` whose header the
- * application *ignored* — an installed `@guren/core` predating the seam, which
- * runs the call for real — needs a response that carries a `preflight` body
- * with no verdict header, and no app this suite can boot will produce one: the
- * seam is mounted on every `.agent()` route of the linked core and answers
- * before the handler. Injecting the response is the only honest way to reach
- * the case, and it is the case where reading the body instead of the marker
- * files a write that happened as a rehearsal that did not.
+ * Injected `fetch`, because one case cannot be built otherwise: a `--preflight`
+ * the application *ignored* (an installed core predating the seam) answers with
+ * a `preflight` body and no verdict header, and no app this suite can boot will.
  */
 describe('dispatchToolCall recording', () => {
   function definitions(): RouteDefinition[] {
@@ -574,9 +523,8 @@ describe('dispatchToolCall recording', () => {
 
   function collect(): { records: AgentToolInvoked[]; audit: AgentAuditEmitter } {
     const records: AgentToolInvoked[] = []
-    // Only invocations reach this surface — it runs none of the four adapter
-    // checks a denial names — so the narrowing is an assertion about the
-    // command, not a convenience.
+    // Only invocations reach this surface, so the narrowing is an assertion
+    // about the command rather than a convenience.
     return { records, audit: (event) => records.push(event as AgentToolInvoked) }
   }
 
@@ -584,8 +532,7 @@ describe('dispatchToolCall recording', () => {
     const { records, audit } = collect()
     const result = await dispatchToolCall(
       definitions(),
-      // The shape an app with no seam answers with: a real 201, a body that
-      // happens to say `preflight`, and no verdict header.
+      // The shape an app with no seam answers with.
       async () => Response.json({ preflight: true, id: 1 }, { status: 201 }),
       { name: 'notes.store', args: { title: 'Real', note: 'private' }, preflight: true, audit },
     )
@@ -595,8 +542,7 @@ describe('dispatchToolCall recording', () => {
     expect(records).toHaveLength(1)
     expect(records[0]!.tool).toBe('notes.store')
     expect(records[0]!.status).toBe(201)
-    // Masked by the checked route's own list, flat rather than wrapped: this
-    // was an execution, not a rehearsal.
+    // Flat rather than wrapped: this was an execution, not a rehearsal.
     expect(records[0]!.arguments).toEqual({ title: 'Real', note: '[REDACTED]' })
   })
 
@@ -611,9 +557,8 @@ describe('dispatchToolCall recording', () => {
       ),
     ).rejects.toThrow('socket closed')
 
-    // Recorded before the rethrow, and under the real tool even though
-    // `--preflight` was asked for: with no answer to read, nothing here can
-    // say the handler did not run.
+    // Under the real tool even though `--preflight` was asked for: with no
+    // answer to read, nothing here can say the handler did not run.
     expect(records).toHaveLength(1)
     expect(records[0]!.tool).toBe('notes.store')
     expect(records[0]!.status).toBe(500)
@@ -629,16 +574,14 @@ describe('dispatchToolCall recording', () => {
       audit,
     })
 
-    // `0042` and `42` are different ids to any store that distinguishes them,
-    // and the record is where that distinction has to survive.
+    // `0042` and `42` are different ids to any store that distinguishes them.
     expect(records[0]!.principal).toEqual({ kind: 'user', id: '0042' })
   })
 
   it('answers the call even when the bound emitter throws', async () => {
-    // `agent.audit` is a public binding an application writes itself, so
-    // nothing guarantees the bound value is what `createAuditEmitter` returns.
-    // A command that failed a tool call in order to record it would invert the
-    // whole point — and by this line the write has already happened.
+    // `agent.audit` is a public binding, so the bound value need not be what
+    // `createAuditEmitter` returns — and failing a call to record it would
+    // invert the point, the write having already happened.
     const warn = spyOn(consola, 'warn').mockImplementation((() => {}) as never)
     try {
       const result = await dispatchToolCall(

@@ -10,16 +10,12 @@ import { runTokenIssue } from '../src/token-issue'
 const repoRoot = resolve(import.meta.dir, '../../..')
 
 /**
- * The command's I/O boundary — deriving the tool list, reaching the app's own
- * token store, and what it prints — as opposed to the issuance rules, which
- * `token-issue.test.ts` covers against an injected tool list.
- *
- * The app lives in a *subdirectory* of the workspace, so `--app` names a root
- * the process cwd is not. `createTempWorkspace` chdirs into the workspace it
- * makes, so an app at its root would leave `--app` and cwd pointing at the
- * same place — and every case here would pass whether or not the command
- * honoured the flag, which is the arrangement that hid the store landing in a
- * different application than the tools were derived from.
+ * The command's I/O boundary — deriving the tool list, reaching the token store,
+ * and what it prints; `token-issue.test.ts` covers the issuance rules. The app
+ * lives in a *subdirectory* of the workspace so `--app` names a root the process
+ * cwd is not: at the workspace root every case would pass whether or not the
+ * command honoured the flag, which is what hid the store landing in a different
+ * application than the tools were derived from.
  */
 async function linkFixtureDependencies(dir: string): Promise<void> {
   await linkWorkspaceCore(dir)
@@ -202,13 +198,10 @@ export default registerWebRoutes
 })
 
 /**
- * The citty layer, driven through the parser rather than around it.
- *
- * `runTokenIssue` above receives values already narrowed to scalars, so it
- * cannot see the defect these cover: citty arrays a repeated flag and every
- * array is truthy, which turned `--yes=false --yes=false` into consent for a
- * `tools:*` grant. A test that calls the function directly passes whether or
- * not the command reads its flags safely — the bug lives in the parse.
+ * The citty layer, driven through the parser. `runTokenIssue` receives values
+ * already narrowed to scalars, so it cannot see the defect these cover: citty
+ * arrays a repeated flag and every array is truthy, which turned
+ * `--yes=false --yes=false` into consent for a `tools:*` grant.
  */
 describe('token:issue flag parsing', () => {
   let workspace: TempWorkspace
@@ -225,10 +218,8 @@ describe('token:issue flag parsing', () => {
     await writeFile(join(appDir, 'routes/web.ts'), ROUTES)
     await writeFile(join(appDir, 'src/main.ts'), MAIN)
     logSpy = spyOn(console, 'log').mockImplementation(() => {})
-    // The command ends a successful run with `process.exit(0)` — it boots the
-    // app and closes none of what that opens. Left real, the first passing
-    // case would take the test runner with it, so success is observed as this
-    // sentinel instead.
+    // A successful run ends in `process.exit(0)` and closes nothing it opened,
+    // so success is observed as this sentinel rather than left real.
     exitSpy = spyOn(process, 'exit').mockImplementation(((code?: number) => {
       throw new Error(`process.exit(${code ?? 0})`)
     }) as never)
@@ -252,18 +243,16 @@ describe('token:issue flag parsing', () => {
   })
 
   it('honours the last value of a repeated boolean rather than any false', async () => {
-    // The inverse direction, on a scope that only issues when the last value
-    // wins: `posts.store` is a write tool, so a lingering `--read-only=true`
-    // would refuse it. Reaching the success exit is the assertion.
+    // The inverse direction on a write tool: a lingering `--read-only=true`
+    // would refuse `posts.store`, so reaching the success exit is the assertion.
     await expect(
       runFlags(['--name', 'ci', '--user', '42', '--tools', 'posts.store', '--read-only=true', '--read-only=false']),
     ).rejects.toThrow('process.exit(0)')
   })
 
   it('reads the last --tools rather than joining repeats', async () => {
-    // Joined, the repeat would read as one scope naming neither tool and be
-    // refused; last-wins issues against the second one, so this reaches the
-    // success exit.
+    // Joined, the repeat would name neither tool and be refused; last-wins
+    // issues against the second one and reaches the success exit.
     await expect(
       runFlags(['--name', 'ci', '--user', '42', '--tools', 'internal.index', '--tools', 'posts.index']),
     ).rejects.toThrow('process.exit(0)')

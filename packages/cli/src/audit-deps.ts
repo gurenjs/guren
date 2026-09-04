@@ -4,18 +4,10 @@ import type { AuditFinding } from './audit'
  * Dependency vulnerability scan for `guren audit` (RFC 0007): runs
  * `bun audit --json` in the app and converts advisories into findings.
  *
- * Parsing rules: `bun audit` exits 0 (clean) or 1 (advisories found) with
- * valid JSON either way; any other exit code is an execution/registry
- * failure. A proxy can also answer with JSON that merely *parses* — an
- * error object instead of the package→advisories map — so the shape is
- * validated, not assumed. "Could not scan" is reported as its own finding
- * and status, never as a pass: an offline machine must not look identical
- * to a clean one.
- *
- * The monorepo's own supply-chain gate (scripts/smoke/dependency-audit.ts)
- * implements the same contract with its own policy (reasoned ignore list,
- * stale detection); a change to `bun audit`'s output shape needs both
- * updated.
+ * Exit 0 (clean) or 1 (advisories) carry valid JSON; any other code is an
+ * execution/registry failure. The shape is validated, not assumed, and "could
+ * not scan" is its own status, never a pass. Keep in step with
+ * scripts/smoke/dependency-audit.ts, which reads the same output shape.
  */
 
 export interface DependencyScan {
@@ -71,9 +63,8 @@ export function dependencyFindingsFromScan(
     return scanFailure(findings, BAD_SHAPE, detail)
   }
 
-  // Collected locally and committed only on success: a shape failure halfway
-  // through must not leave a half-parsed advisory list next to an
-  // "unavailable" status.
+  // Committed only on success: a shape failure halfway through must not leave a
+  // half-parsed advisory list next to an "unavailable" status.
   const parsed: AuditFinding[] = []
   const seen = new Set<string>()
 
@@ -86,8 +77,7 @@ export function dependencyFindingsFromScan(
         return scanFailure(findings, BAD_SHAPE, detail)
       }
 
-      // The same advisory appears once per affected version range; one
-      // finding per package+advisory is what a human (or CI) acts on.
+      // The same advisory appears once per affected version range.
       const ghsa = advisory.url.match(GHSA_PATTERN)?.[0].toUpperCase() ?? advisory.url
       const key = `deps:${pkg}:${ghsa}`
       if (seen.has(key)) continue
@@ -105,8 +95,7 @@ export function dependencyFindingsFromScan(
   }
 
   // Exit 1 is bun audit's "vulnerabilities found" contract: an exit-1 run
-  // whose report contains none is contradicting itself (truncated output,
-  // a broken wrapper), and must not read as a clean pass.
+  // reporting none is contradicting itself and must not read as a clean pass.
   if (exitCode === 1 && parsed.length === 0) {
     return scanFailure(findings, 'bun audit exited 1 but reported no advisories', detail)
   }

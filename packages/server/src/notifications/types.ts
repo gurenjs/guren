@@ -1,40 +1,26 @@
 import type { Notification } from './Notification'
 
-/**
- * Notification channel interface.
- */
+/** Notification channel interface. */
 export interface NotificationChannel {
   readonly name: string
   send(notifiable: Notifiable, notification: Notification): Promise<void>
 }
 
-/**
- * Notifiable entity interface.
- */
+/** Notifiable entity interface. */
 export interface Notifiable {
-  /**
-   * Get the notification routing information for a given channel.
-   */
   routeNotificationFor(channel: string): string | null
 
   /**
-   * Stable type name for this notifiable (optional).
-   *
-   * Defaults to the constructor name. Set this when the notifiable is rebuilt
-   * from a queue payload, or when the class name is not durable (bundlers that
-   * mangle identifiers).
+   * Stable type name; defaults to the constructor name. Set it when the
+   * notifiable is rebuilt from a queue payload, or when the class name is not
+   * durable (bundlers that mangle identifiers).
    */
   notifiableType?: string
 
-  /**
-   * Database notifications (optional).
-   */
   notifications?: DatabaseNotification[]
 }
 
-/**
- * Database notification record.
- */
+/** Database notification record. */
 export interface DatabaseNotification {
   id: string
   type: string
@@ -45,9 +31,7 @@ export interface DatabaseNotification {
   createdAt: Date
 }
 
-/**
- * Mail message for notifications.
- */
+/** Mail message for notifications. */
 export interface NotificationMailMessage {
   subject: string
   html?: string
@@ -59,9 +43,7 @@ export interface NotificationMailMessage {
   attachments?: NotificationAttachment[]
 }
 
-/**
- * Notification attachment.
- */
+/** Notification attachment. */
 export interface NotificationAttachment {
   filename: string
   content?: string | Buffer
@@ -69,9 +51,7 @@ export interface NotificationAttachment {
   contentType?: string
 }
 
-/**
- * Slack message for notifications.
- */
+/** Slack message for notifications. */
 export interface SlackMessage {
   text?: string
   blocks?: SlackBlock[]
@@ -82,9 +62,7 @@ export interface SlackMessage {
   icon_url?: string
 }
 
-/**
- * Slack block.
- */
+/** Slack block. */
 export interface SlackBlock {
   type: string
   text?: {
@@ -101,9 +79,7 @@ export interface SlackBlock {
   [key: string]: unknown
 }
 
-/**
- * Slack attachment.
- */
+/** Slack attachment. */
 export interface SlackAttachment {
   color?: string
   fallback?: string
@@ -126,37 +102,26 @@ export interface SlackAttachment {
   ts?: number
 }
 
-/**
- * Notification channel factory.
- */
+/** Notification channel factory. */
 export interface NotificationChannelFactory {
   (config: Record<string, unknown>): NotificationChannel
 }
 
-/**
- * Notification manager options.
- */
+/** Notification manager options. */
 export interface NotificationManagerOptions {
   channels?: Record<string, NotificationChannel>
   channelFactories?: Record<string, NotificationChannelFactory>
 }
 
-/**
- * Database channel options.
- */
+/** Database channel options. */
 export interface DatabaseChannelOptions {
-  /**
-   * Callback to store the notification.
-   */
   store?: (
     notifiable: Notifiable,
     notification: DatabaseNotification
   ) => Promise<void>
 }
 
-/**
- * Sent notification record (for testing).
- */
+/** Sent notification record (for testing). */
 export interface SentNotification {
   notifiable: Notifiable
   notification: Notification
@@ -164,9 +129,7 @@ export interface SentNotification {
   timestamp: Date
 }
 
-/**
- * Notification class type.
- */
+/** Notification class type. */
 export interface NotificationClass<T extends Notification = Notification> {
   new (...args: unknown[]): T
   shouldQueue?: boolean

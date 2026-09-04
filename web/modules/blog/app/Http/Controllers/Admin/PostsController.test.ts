@@ -86,8 +86,8 @@ describe('PostsController', () => {
     })
 
     it('should retry with a fresh slug when a concurrent create wins the unique race', async () => {
-      // First probe sees the slug as free; the insert then loses the race.
-      // The retry re-probes (now seeing the winner) and must use "-2".
+      // First probe sees the slug free, the insert loses the race, and the
+      // retry must re-probe and use "-2".
       let probeSeesWinner = false
       vi.spyOn(Post, 'where').mockImplementation(
         (conditions: unknown) =>

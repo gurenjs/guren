@@ -5,44 +5,19 @@ import { join } from 'node:path'
 import { DATABASE_DIALECTS, type DatabaseDialect } from '@guren/core/internal/deploy-build'
 import { buildVercelOutput } from '../src/index'
 
-// Opt-in end-to-end contract test: proves `vercel:build` can bundle an app
-// that imports `@guren/orm` while installing only the client for the database
-// it actually uses.
-//
-// `@guren/orm` names every dialect's client in a *literal* dynamic import, and
-// a bundler follows those whether or not the branch can be taken — so a
-// Postgres app failed on `Could not resolve "mysql2"`, naming a database its
-// author had not chosen. Unit tests cannot see this: it is a property of the
-// bundle, and inside this repository every client is installed anyway.
-//
-// The direction that matters here and did not on Workers: over-stubbing. On
-// Workers D1 is the only database, so stubbing all four clients is always
-// right. Here the client the app *does* use is load-bearing, and stubbing it
-// produces a bundle that builds clean and cannot reach its own database. So
-// the postgres assertions below are as load-bearing as the mysql2 ones.
-//
-// Every assertion is about behaviour rather than about the stub's text,
-// because the text is not in the output: resolution happens first, and the
-// branch the stub replaced is then dropped as unreachable. A test looking for
-// the message it throws would pass whether the client was stubbed or dropped
-// on the floor.
-//
-// Needs the network to install @guren/orm and postgres, so it is gated behind
-// GUREN_TEST_BUNDLE=1 like the Workers bundle test's GUREN_TEST_WRANGLER.
-// The nightly canary sets both.
-//
-// This platform is also where the stub mechanism is newest: `bun build` was
-// spawned as a subprocess until this build moved to Bun's JS API, which is
-// the only one of the two that takes plugins.
+// Opt-in end-to-end contract test (GUREN_TEST_BUNDLE=1, like the Workers bundle
+// test's GUREN_TEST_WRANGLER; the nightly canary sets both): can `vercel:build`
+// bundle an app importing `@guren/orm` with only its own database client
+// installed? `@guren/orm` names every dialect's client in a *literal* dynamic
+// import, which a bundler follows whether or not the branch can be taken, so a
+// Postgres app failed on `Could not resolve "mysql2"`. Over-stubbing matters
+// here and did not on Workers: the client the app *does* use is load-bearing.
+// Assertions are about behaviour — the stub's text is dropped with its branch.
 const enabled = process.env.GUREN_TEST_BUNDLE === '1'
 
 /**
- * Packages this probe must not have installed.
- *
- * The clients belong to dialects a Postgres app never uses. The rest are the
- * dev-only modules this build started stubbing when it moved to Bun's JS API
- * — the reason a scaffolded app could not be bundled for Vercel at all, and
- * the half of the change most likely to be simplified back out.
+ * Packages this probe must not have installed: the clients of dialects a
+ * Postgres app never uses, plus the dev-only modules this build stubs.
  */
 const ABSENT_PACKAGES = ['mysql2', '@aws-sdk', 'vite', '@modelcontextprotocol']
 
@@ -66,9 +41,7 @@ describe.skipIf(!enabled)('vercel:build bundles an app importing @guren/orm', ()
 
     // Installed from a tarball, not `file:` — a local path install links the
     // package, and resolution then walks out of the probe into this
-    // repository's own `node_modules`, where every database client *is*
-    // installed. That is how the Workers version of this test first passed
-    // with no stubs at all: it was measuring the monorepo, not the app.
+    // repository's own `node_modules`, where every client *is* installed.
     const packed = run(['bun', 'pm', 'pack', '--destination', root], new URL('../../orm', import.meta.url).pathname)
     if (packed.exitCode !== 0) {
       throw new Error(`bundle probe could not pack @guren/orm:\n${packed.output}`)
@@ -105,11 +78,9 @@ describe.skipIf(!enabled)('vercel:build bundles an app importing @guren/orm', ()
         + '})\n',
     )
 
-    // The dev-only imports stand in for the ones Guren's own graph makes: the
-    // disabled MCP endpoint reaches `@guren/cli` and the SDK, and `Application`
-    // reaches Vite when serving locally. Naming them directly keeps the probe
-    // to two installed packages while still covering the stubs that path needs
-    // — a bundler follows a literal dynamic import either way.
+    // The dev-only imports stand in for the ones Guren's own graph makes (the
+    // disabled MCP endpoint reaches `@guren/cli` and the SDK, `Application`
+    // reaches Vite), keeping the probe to two installed packages.
     writeFileSync(
       join(root, 'src/vercel.ts'),
       "import { getDatabase } from '../config/database'\n\n"
@@ -154,11 +125,10 @@ describe.skipIf(!enabled)('vercel:build bundles an app importing @guren/orm', ()
   test(
     'bundles with none of the dev-only modules installed either',
     async () => {
-      // The regression this guards: with these unstubbed, a scaffolded app
-      // fails on `Could not resolve "@guren/openapi"` — reached from the MCP
-      // endpoint's `import("@guren/cli")`, which resolves. Covered here
-      // because the build succeeding is the only observable difference — the
-      // stub's own text is dropped with the branch it replaced.
+      // The regression this guards: unstubbed, a scaffolded app fails on
+      // `Could not resolve "@guren/openapi"`, reached from the MCP endpoint's
+      // `import("@guren/cli")`. The build succeeding is the only observable
+      // difference — the stub's own text goes with the branch it replaced.
       await bundle()
     },
     120_000,
@@ -167,9 +137,8 @@ describe.skipIf(!enabled)('vercel:build bundles an app importing @guren/orm', ()
   test(
     'still fails to resolve an uninstalled client the app claims to use',
     async () => {
-      // The mutation check, in the test rather than beside it: declaring every
-      // dialect leaves every client unstubbed, which is the state this fix
-      // replaced. If this passed, the fixture would not be reaching mysql2 at
+      // The mutation check: declaring every dialect leaves every client
+      // unstubbed. If this passed, the fixture would not be reaching mysql2 at
       // all and the test above would prove nothing.
       const attempt = bundle(DATABASE_DIALECTS)
 

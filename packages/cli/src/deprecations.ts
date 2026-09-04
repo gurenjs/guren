@@ -1,9 +1,4 @@
-/**
- * Framework-level deprecation warnings.
- *
- * Each deprecation targets a specific API, config, or pattern that will
- * be removed in a future version.
- */
+/** Framework-level deprecation warnings. */
 import { readFile } from 'node:fs/promises'
 import { relative } from 'node:path'
 import { discoverAppSourceFiles, discoverDbArtifactFiles, discoverModelFiles } from './discovery'
@@ -11,15 +6,10 @@ import { extractClassDeclaration, findStaticClassProperty } from './model-parser
 import { parseSourceFile } from './parse-cache'
 
 export interface Deprecation {
-  /** Unique identifier */
   id: string
-  /** What is deprecated */
   what: string
-  /** Version when it was deprecated */
   since: string
-  /** Version when it will be removed */
   removedIn: string
-  /** What to use instead */
   replacement: string
   /** Detect usage in the project. Returns affected file paths. */
   detect(cwd: string): Promise<string[]>
@@ -31,8 +21,7 @@ async function detectModelStatic(cwd: string, property: string): Promise<string[
     files.map(async (filePath) => {
       const source = await readFile(filePath, 'utf-8')
       // Same AST predicate `guren check`'s legacy rule uses, so the two
-      // commands cannot drift on what counts as a declaration (and comments
-      // or access modifiers neither fake nor hide one).
+      // commands cannot drift on what counts as a declaration.
       const ast = parseSourceFile(source, filePath)
       for (const node of ast?.program.body ?? []) {
         const classDecl = extractClassDeclaration(node)
@@ -47,14 +36,9 @@ async function detectModelStatic(cwd: string, property: string): Promise<string[
 }
 
 /**
- * Registry of all known deprecations.
- */
-/**
  * Call sites that ask a storage disk for per-object visibility. Text search
- * rather than AST: the call can sit anywhere (a controller, a job, a
- * service), and the disk it targets is only known at runtime, so this
- * reports candidates for a human to read rather than pretending to resolve
- * which driver each one hits.
+ * rather than AST: the disk a call targets is only known at runtime, so these
+ * are candidates for a human to read, not resolved verdicts.
  */
 async function detectLocalVisibilityCalls(cwd: string): Promise<string[]> {
   const files = await discoverAppSourceFiles(cwd)
@@ -71,16 +55,10 @@ async function detectLocalVisibilityCalls(cwd: string): Promise<string[]> {
 
 /**
  * Files that import the class-based seeder API rather than `defineSeeder`.
- *
- * Text search over the import statement, not the AST: what identifies the
- * deprecation is the specifier list on an import from `@guren/core`, and a
- * subclass of it can sit in any file the app puts code in. `@guren/server` is
- * matched too — the core-first rule says not to import from it, but an app
- * that already does is exactly the one this needs to reach.
- *
- * `defineSeeder` ends in the same six letters as `Seeder`, so the specifier is
- * matched on its own word boundaries; a file that imports only `defineSeeder`
- * is the supported case and must not be reported.
+ * `@guren/server` is matched alongside `@guren/core`: an app importing from it
+ * despite the core-first rule is exactly the one this needs to reach.
+ * `defineSeeder` ends in the same six letters as `Seeder`, so specifiers are
+ * matched on their own word boundaries.
  */
 const SEEDER_CLASS_SPECIFIERS = /\b(?:BaseSeeder|SeederRunner|createSeederRunner|resetCalledSeeders|Seeder|SeederClass|SeederInterface|SeederRunnerOptions)\b/
 const GUREN_IMPORT = /import\s+(?:type\s+)?\{([^}]*)\}\s*from\s*['"]@guren\/(?:core|server)['"]/g
@@ -153,9 +131,6 @@ export const deprecations: Deprecation[] = [
   },
 ]
 
-/**
- * Check the project for deprecated API usage.
- */
 export async function checkDeprecations(
   cwd: string,
 ): Promise<DeprecationWarning[]> {

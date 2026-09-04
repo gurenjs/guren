@@ -1,15 +1,9 @@
 import type { Context } from '../http/Application'
 
-/**
- * User type for authorization.
- */
 export interface AuthUser {
   id: string | number
 }
 
-/**
- * Gate callback function.
- */
 export type GateCallback<Args extends unknown[] = unknown[]> = {
   bivarianceHack(
     user: AuthUser | null,
@@ -17,10 +11,7 @@ export type GateCallback<Args extends unknown[] = unknown[]> = {
   ): PolicyResult | Promise<PolicyResult>
 }['bivarianceHack']
 
-/**
- * Gate before callbacks can short-circuit authorization.
- * Return true to allow, false to deny, or undefined to continue.
- */
+/** Return true to allow, false to deny, or undefined to continue. */
 export type GateBeforeCallback<Args extends unknown[] = unknown[]> = {
   bivarianceHack(
     user: AuthUser | null,
@@ -29,107 +20,63 @@ export type GateBeforeCallback<Args extends unknown[] = unknown[]> = {
   ): PolicyResult | undefined | Promise<PolicyResult | undefined>
 }['bivarianceHack']
 
-/**
- * Gate definition with optional callback.
- */
 export interface GateDefinition {
   callback: GateCallback
 }
 
 /**
- * What a policy ability or gate callback may answer.
- *
  * `Response.deny()` and friends return an object, so it must be part of the
- * type — a signature of just `boolean` is what let a denial object be read
- * as an approval.
+ * type — a `boolean`-only signature let a denial be read as an approval.
  */
 export type PolicyResult = boolean | AuthorizationResponse
 
-/**
- * Policy method type.
- */
 export type PolicyMethod<T = unknown> = (
   user: AuthUser | null,
   model?: T,
   ...args: unknown[]
 ) => PolicyResult | Promise<PolicyResult>
 
-/**
- * Policy class interface.
- */
 export interface Policy {
-  /**
-   * Run before all other authorization checks.
-   * Return true to allow, false to deny, undefined to continue to specific check.
-   */
+  /** Return true to allow, false to deny, undefined to continue to the ability method. */
   before?(user: AuthUser | null, ability: string): PolicyResult | undefined | Promise<PolicyResult | undefined>
 }
 
-/**
- * Policy class constructor.
- */
 export interface PolicyClass {
   new (): Policy
 }
 
-/**
- * Authorization response.
- */
 export interface AuthorizationResponse {
   allowed: boolean
   message?: string
   code?: string
 }
 
-/**
- * Gate options.
- */
 export interface GateOptions {
-  /**
-   * Default user resolver from context.
-   */
   userResolver?: (ctx: Context) => AuthUser | null | Promise<AuthUser | null>
 }
 
-/**
- * Authorization check options.
- */
 export interface AuthorizeOptions {
-  /**
-   * Custom message for denial.
-   */
+  /** Custom message for denial. */
   message?: string
 
-  /**
-   * HTTP status code for denial.
-   */
+  /** HTTP status code for denial. */
   status?: number
 }
 
-/**
- * Options for `authorizeResourceMiddleware`.
- */
 export interface AuthorizeResourceOptions extends AuthorizeOptions {
   /**
-   * Map an HTTP method (always uppercased) to a policy ability, overriding
-   * or extending the built-in mapping. Return `undefined` to fall back to
-   * the default mapping; a method with no ability from either source is
-   * denied with a 403.
+   * Map an HTTP method (always uppercased) to a policy ability. Return
+   * `undefined` to fall back to the built-in mapping; a method with no ability
+   * from either source is denied with a 403.
    */
   abilityFor?: (method: string) => string | undefined
 }
 
-/**
- * Policy registration.
- */
 export interface PolicyRegistration {
   modelClass: unknown
   policyClass: PolicyClass
 }
 
-/**
- * Resource actions for policies.
- */
 export type ResourceAction =
   | 'viewAny'
   | 'view'
@@ -139,9 +86,6 @@ export type ResourceAction =
   | 'restore'
   | 'forceDelete'
 
-/**
- * Response builder for authorization.
- */
 export interface ResponseBuilder {
   allow(message?: string): AuthorizationResponse
   deny(message?: string, code?: string): AuthorizationResponse

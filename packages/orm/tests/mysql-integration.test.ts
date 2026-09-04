@@ -6,16 +6,14 @@ import { sql } from 'drizzle-orm'
 import { createMySqlDatabase, type MySqlDatabase } from '../src/mysql'
 
 // The unit tests mock `drizzle-orm/mysql2` away, so they cannot see driver-level
-// breakage (a wiring shape the adapter rejects, a migrator that never runs).
-// CI supplies MYSQL_URL from a mysql service container; locally, start one with
-// `bun run db:up:mysql`. MYSQL_URL needs a user allowed to create a database,
-// since the compose service only grants the app user rights on its own.
+// breakage. CI supplies MYSQL_URL from a mysql service container; locally, start
+// one with `bun run db:up:mysql`. MYSQL_URL needs a user allowed to create a
+// database, since the compose service only grants the app user rights on its own.
 const MYSQL_URL = process.env.MYSQL_URL
 const describeMySql = MYSQL_URL ? describe : describe.skip
 
-// Derived rather than taken from MYSQL_URL: the reset below drops every table
-// in the database it runs against, and MYSQL_URL is the same string a
-// scaffolded app puts in DATABASE_URL.
+// Derived rather than taken from MYSQL_URL: the reset below drops every table in
+// the database it runs against, and MYSQL_URL is what an app puts in DATABASE_URL.
 const TEST_DATABASE = 'guren_orm_test'
 
 function databaseUrl(url: string, database: string): string {
@@ -59,8 +57,7 @@ describeMySql('createMySqlDatabase against a real MySQL server (requires MYSQL_U
   })
 
   afterAll(async () => {
-    // beforeAll may have thrown before `database` was assigned — don't mask
-    // that failure with a "Cannot read properties of undefined" here.
+    // beforeAll may have thrown before `database` was assigned; don't mask that failure here.
     await database?.closeDatabase()
   })
 
@@ -86,9 +83,8 @@ describeMySql('createMySqlDatabase against a real MySQL server (requires MYSQL_U
   })
 
   it('clears table contents on reset and leaves migrations applied', async () => {
-    // Explicit setup rather than relying on what the preceding test (or the
-    // reset in beforeAll) left behind: the contract under test must be what
-    // fails here, not the fixture.
+    // Explicit setup rather than what the preceding test left behind: the
+    // contract under test must be what fails here, not the fixture.
     await database.migrateDatabase()
     const db = await database.getDatabase()
     await db.execute(sql`INSERT INTO \`widgets\` (\`name\`) VALUES ('sprocket')`)
@@ -128,8 +124,7 @@ describeMySql('createMySqlDatabase against a real MySQL server (requires MYSQL_U
   })
 
   it('drops views on reset, not just base tables', async () => {
-    // `widgets` has to exist for the view to select from it, whatever the
-    // preceding test left behind.
+    // `widgets` has to exist for the view to select from it.
     await database.migrateDatabase()
     const db = await database.getDatabase()
     await db.execute(sql`CREATE OR REPLACE VIEW \`widget_names\` AS SELECT \`name\` FROM \`widgets\``)

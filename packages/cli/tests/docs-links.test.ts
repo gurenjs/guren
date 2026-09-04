@@ -62,7 +62,6 @@ Inline \`[code](/not-a-link.md)\` too, but [real](./real.md).
     expect(extractMarkdownLinks(String.raw`[a](..\app\Architecture.md)`)).toEqual([
       String.raw`..\app\Architecture.md`,
     ])
-    // Escapable punctuation still unescapes.
     expect(extractMarkdownLinks(String.raw`[a](./esc\)paren.md)`)).toEqual(['./esc)paren.md'])
   })
 

@@ -49,12 +49,9 @@ async function auditEnglishDocs(root: string): Promise<void> {
     assert(cli.includes(mcpPath), `CLI guide must name ${mcpPath} in the agent harness MCP config map.`)
   }
   assert(cli.includes('agent:init --target'), 'CLI guide must document agent:init --target.')
-  // `db:seed` has never accepted a per-seeder flag. The `--class` spelling
-  // documented here came from an unwired second implementation, and citty
-  // ignores an argument the command does not declare — so it did not fail
-  // loudly, it seeded the whole folder while reading as one seeder.
-  // A tombstone for that one invocation, not a check of the convention:
-  // it catches `--class` and `--class=X` on a db:seed line, nothing subtler.
+  // `db:seed` accepts no per-seeder flag, and citty ignores an argument the
+  // command does not declare, so a documented `--class` silently seeds the whole
+  // folder while reading as one seeder. A tombstone for that spelling only.
   assert(!/db:seed[^\n]*--class/.test(cli), 'CLI guide must not spell a per-seeder flag on a db:seed line — the command takes no such argument and would silently seed everything.')
 
   const consoleGuide = await read(root, 'docs/en/guides/console.md')
@@ -170,7 +167,6 @@ async function auditEnglishDocs(root: string): Promise<void> {
   assert(csrf.includes('pages.forms.Create'), 'CSRF guide must use typed page definitions in controller examples.')
   assert(!csrf.includes('Route.post('), 'CSRF guide must not use legacy Route.post() examples.')
 
-  // Task-completion guides
   const buildAuthApp = await read(root, 'docs/en/guides/build-auth-app.md')
   assert(buildAuthApp.includes('bunx create-guren-app'), 'Build auth app guide must include project scaffolding.')
   assert(buildAuthApp.includes('bunx guren add auth'), 'Build auth app guide must include auth scaffold command.')
@@ -323,7 +319,6 @@ async function auditJapaneseDocs(root: string): Promise<void> {
   assert(csrf.includes('pages.forms.Create'), 'Japanese CSRF guide must use typed page definitions in controller examples.')
   assert(!csrf.includes('Route.post('), 'Japanese CSRF guide must not use legacy Route.post() examples.')
 
-  // Task-completion guides
   const jaBuildAuthApp = await read(root, 'docs/ja/guides/build-auth-app.md')
   assert(jaBuildAuthApp.includes('bunx create-guren-app'), 'Japanese build auth app guide must include project scaffolding.')
   assert(jaBuildAuthApp.includes('bunx guren add auth'), 'Japanese build auth app guide must include auth scaffold command.')
@@ -345,19 +340,15 @@ async function auditJapaneseDocs(root: string): Promise<void> {
 const STALE_APP_ALIAS_PATTERN = /['"]@\/(?:Http|Models|Policies|Events|Jobs|Listeners|Mail|Notifications|Providers|Services|Validators|Console|Exceptions|utils)\//u
 
 // `aliasMiddleware()` returns a *new* Router type carrying the alias name, so a
-// call whose value is thrown away registers the handler at runtime while leaving
-// the name invisible to the type system — every later `.middleware('auth')` then
-// fails to compile. Match a statement that opens with a plain or member
-// expression and drops the result; `const router = base.aliasMiddleware(...)`,
-// chain continuations opening with `.`, and same-line chains ending in another
-// call are all correct and must not match.
+// discarded call registers the handler at runtime while leaving the name
+// invisible to the type system, and every later `.middleware('auth')` fails to
+// compile. An assigned call, a chain continuation opening with `.`, and a
+// same-line chain ending in another call are all correct and must not match.
 const DISCARDED_ALIAS_MIDDLEWARE_PATTERN = /^[\w$]+(?:\.[\w$]+)*\.aliasMiddleware\((?!.*\)\s*\.\w)/u
 
-// `Controller.validate()` no longer exists. Samples calling it read as the
-// mainline validation path while naming a method the framework never had, so
-// nothing an author copies from them can run. Match the bare call only —
-// `validateBody` / `validateQuery` / `validateParams` are the real helpers, and
-// `FormRequest`'s own `validate` never lived on the controller.
+// `Controller.validate()` does not exist: `validateBody` / `validateQuery` /
+// `validateParams` are the real helpers, and `FormRequest`'s own `validate`
+// never lived on the controller. Match the bare call only.
 const PHANTOM_CONTROLLER_VALIDATE_PATTERN = /\bthis\.validate\(/u
 
 const DOC_LINE_RULES: { pattern: RegExp; describe: (location: string) => string }[] = [
@@ -399,10 +390,8 @@ async function auditDocLineRules(root: string): Promise<void> {
 
 /**
  * Every named import in a TypeScript fence must name a symbol its specifier
- * exports. Reports the whole batch before failing — the assertions above die on
- * the first miss, which is right for a claim about one file and wrong for a
- * sweep over every fence in `docs/`. See docs-import-sources.ts for what the
- * check can and cannot prove.
+ * exports. Reports the whole batch before failing, unlike the single-file
+ * assertions above. See docs-import-sources.ts for what it can and cannot prove.
  */
 async function auditImportSources(root: string): Promise<void> {
   const report = await auditDocsImportSources(root)
@@ -413,16 +402,11 @@ async function auditImportSources(root: string): Promise<void> {
     )
   }
 
-  // A *root* entry point going open is not a note, it is the check switching
-  // itself off. The exempt ones are all subpaths — `@guren/orm/drizzle/pg`,
-  // the jsx runtimes — each reached by a handful of snippets. `@guren/core` is
-  // reached by most of them, so one `export *` from a third-party package
-  // added to its barrel drops what this audit verifies from about a thousand
-  // symbols to roughly a hundred, and the only trace is the line above,
-  // printed directly beneath the word "passed". Derived rather than listed:
-  // whichever roots exist, a root is the shape that collapses coverage, while
-  // a new subpath that legitimately re-exports a dependency still costs only
-  // its own snippets.
+  // A *root* entry point going open switches the check off rather than noting
+  // something: one `export *` from a third-party package added to `@guren/core`'s
+  // barrel drops what this verifies from about a thousand symbols to roughly a
+  // hundred, traced only by the line above, printed under the word "passed". The
+  // exempt entries are all subpaths, each reached by a handful of snippets.
   const openRoots = report.openEntryPoints.filter((entry) => entry.split(' ')[0]!.split('/').length === 2)
   assert(
     openRoots.length === 0,

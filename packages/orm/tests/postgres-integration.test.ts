@@ -8,16 +8,15 @@ import { createPostgresDatabase, type PostgresDatabase } from '../src/postgres'
 import { Model, type PaginatedResult, type TransactionHandle } from '../src/Model'
 import { DrizzleAdapter } from '../src/adapters/drizzle-adapter'
 
-// The unit tests in postgres.test.ts mock `postgres` and the migrator away, so
-// they can assert that a migration run *happens* but never that the database
-// ends up usable. CI supplies POSTGRES_URL from its postgres service; locally,
-// start one with `bun run db:up`. POSTGRES_URL needs a user allowed to create a
-// database, since the reset below drops every schema in the one it runs against.
+// postgres.test.ts mocks `postgres` and the migrator away, so it can assert a
+// migration run *happens* but never that the database ends up usable. CI supplies
+// POSTGRES_URL from its postgres service; locally, start one with `bun run db:up`.
+// POSTGRES_URL needs a user allowed to create a database, since the reset below
+// drops every schema in the one it runs against.
 const POSTGRES_URL = process.env.POSTGRES_URL
 const describePostgres = POSTGRES_URL ? describe : describe.skip
 
-// Derived rather than taken from POSTGRES_URL, which is the same string a
-// scaffolded app puts in DATABASE_URL.
+// Derived rather than taken from POSTGRES_URL, which is what an app puts in DATABASE_URL.
 const TEST_DATABASE = 'guren_orm_test'
 
 function databaseUrl(url: string, database: string): string {
@@ -65,8 +64,7 @@ describePostgres('createPostgresDatabase against a real PostgreSQL server (requi
   })
 
   afterAll(async () => {
-    // beforeAll may have thrown before `database` was assigned — don't mask
-    // that failure with a "Cannot read properties of undefined" here.
+    // beforeAll may have thrown before `database` was assigned; don't mask that failure here.
     await database?.closeDatabase()
   })
 
@@ -79,9 +77,8 @@ describePostgres('createPostgresDatabase against a real PostgreSQL server (requi
   })
 
   it('clears table contents on reset and leaves migrations applied', async () => {
-    // Explicit setup rather than relying on what the preceding test (or the
-    // reset in beforeAll) left behind: the contract under test must be what
-    // fails here, not the fixture.
+    // Explicit setup rather than what the preceding test left behind: the
+    // contract under test must be what fails here, not the fixture.
     await database.migrateDatabase()
     const db = await database.getDatabase()
     await db.execute(sql`INSERT INTO "widgets" ("name") VALUES ('sprocket')`)
@@ -91,9 +88,8 @@ describePostgres('createPostgresDatabase against a real PostgreSQL server (requi
     const status = await database.migrationStatus()
     expect(status[0]).toMatchObject({ applied: true })
 
-    // Queryable without an explicit migrateDatabase(): the reset re-applied it.
-    // This is the issue-400 repro — the handle predates the reset, so nothing
-    // re-migrates on the way to the query.
+    // issue-400 repro: the handle predates the reset, so nothing re-migrates on
+    // the way to the query.
     const widgets = (await db.execute(sql`SELECT "name" FROM "widgets"`)) as unknown as Array<{ name: string }>
     expect(widgets).toEqual([])
   })
@@ -120,8 +116,7 @@ describePostgres('createPostgresDatabase against a real PostgreSQL server (requi
   })
 
   it('drops views on reset, not just base tables', async () => {
-    // `widgets` has to exist for the view to select from it, whatever the
-    // preceding test left behind.
+    // `widgets` has to exist for the view to select from it.
     await database.migrateDatabase()
     const db = await database.getDatabase()
     await db.execute(sql`CREATE OR REPLACE VIEW "widget_names" AS SELECT "name" FROM "widgets"`)
@@ -174,10 +169,9 @@ const articlesTable = pgTable('articles', {
 type AuthorRecord = typeof authorsTable.$inferSelect
 type ArticleRecord = typeof articlesTable.$inferSelect
 
-// Eager loading against a real transaction. A pooled driver is what makes this
-// observable at all: the fake adapters hand every query the same store, so a
-// relation query that ignores `trx` still returns the uncommitted parent's
-// children and the bug reads as correct behavior.
+// Eager loading against a real transaction. Only a pooled driver makes this
+// observable: the fake adapters hand every query the same store, so a relation
+// query that ignores `trx` still reads as correct.
 describePostgres('eager loading inside a transaction (requires POSTGRES_URL)', () => {
   let database: PostgresDatabase
 
@@ -198,12 +192,9 @@ describePostgres('eager loading inside a transaction (requires POSTGRES_URL)', (
     database = createPostgresDatabase({
       migrationsFolder: createRelationsMigrationsFolder(),
       connectionString: () => databaseUrl(url, RELATIONS_DATABASE),
-      // The default pool holds a single connection, which would turn the
-      // symptom under test into a different one: a relation query that skips
-      // the transaction would sit waiting for the connection the transaction
-      // is holding rather than returning rows it cannot see. Bun charges a
-      // timeout to whichever test runs next, so the failure would not even
-      // point here.
+      // With the default single-connection pool, a relation query that skips the
+      // transaction would block on the connection the transaction holds instead of
+      // returning rows it cannot see — and Bun charges that timeout to the next test.
       clientOptions: { max: 5 },
     })
     await database.resetDatabase()
@@ -215,11 +206,9 @@ describePostgres('eager loading inside a transaction (requires POSTGRES_URL)', (
   })
 
   /**
-   * Run a body inside a transaction, then unwind it so its fixtures stay out
-   * of later tests. Two things here are load-bearing: the signal is thrown
-   * only after the body's assertions have run, and every other error
-   * propagates untouched — so a failed assertion still surfaces as itself
-   * rather than as a rollback.
+   * Run a body inside a transaction, then unwind it so its fixtures stay out of
+   * later tests. The rollback signal is thrown only after the body's assertions
+   * have run, and every other error propagates untouched.
    */
   async function inRolledBackTransaction(
     body: (trx: TransactionHandle) => Promise<void>,
@@ -240,9 +229,9 @@ describePostgres('eager loading inside a transaction (requires POSTGRES_URL)', (
         { trx },
       )) as ArticleRecord
 
-      // The premise: nothing outside the transaction can see either row yet,
-      // so a relation query that runs on the pool has no author to find. If
-      // this ever stops holding, the assertion below passes for free.
+      // The premise: nothing outside the transaction can see either row yet, so a
+      // relation query on the pool finds no author. If that stops holding, the
+      // assertion below passes for free.
       const fromPool = await Author.find(author.id)
       expect(fromPool).toBeNull()
 
@@ -253,8 +242,6 @@ describePostgres('eager loading inside a transaction (requires POSTGRES_URL)', (
 
       expect(loaded.author).toMatchObject({ id: author.id, name: 'Ada' })
 
-      // Rolling back keeps the fixture out of later runs; the assertions above
-      // have already been made, so a failure still surfaces as itself.
     })
   })
 

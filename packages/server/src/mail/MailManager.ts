@@ -12,35 +12,7 @@ import { ResendTransport } from './transports/ResendTransport'
 import { MemoryTransport } from './transports/MemoryTransport'
 import { LogTransport, type LogTransportOptions } from './transports/LogTransport'
 
-/**
- * Mail manager for handling multiple transports.
- *
- * @example
- * ```ts
- * const mailManager = new MailManager({
- *   default: 'smtp',
- *   from: { email: 'noreply@example.com', name: 'MyApp' },
- *   transports: {
- *     smtp: {
- *       driver: 'smtp',
- *       host: 'smtp.example.com',
- *       port: 587,
- *       auth: { user: 'user', pass: 'pass' },
- *     },
- *     resend: {
- *       driver: 'resend',
- *       apiKey: 'your-api-key',
- *     },
- *   },
- * })
- *
- * // Get the default transport
- * const transport = mailManager.transport()
- *
- * // Get a specific transport
- * const resendTransport = mailManager.transport('resend')
- * ```
- */
+/** Mail manager for handling multiple transports. */
 export class MailManager {
   private readonly defaultTransportName: string
   private readonly defaultFrom?: MailAddress
@@ -51,10 +23,8 @@ export class MailManager {
     this.defaultTransportName = config.default ?? 'smtp'
     this.defaultFrom = config.from
 
-    // Register built-in drivers
     this.registerBuiltinDrivers()
 
-    // Register transports from config
     if (config.transports) {
       for (const [name, transportConfig] of Object.entries(config.transports)) {
         this.registerTransportFromConfig(name, transportConfig)
@@ -62,26 +32,20 @@ export class MailManager {
     }
   }
 
-  /**
-   * Register built-in transport drivers.
-   */
   private registerBuiltinDrivers(): void {
-    // SMTP driver factory
     this.registerDriverFactory('smtp', (options: SmtpTransportOptions) => {
       return new SmtpTransport(options)
     })
 
-    // Resend driver factory
     this.registerDriverFactory('resend', (options: ResendTransportOptions) => {
       return new ResendTransport(options)
     })
 
-    // Memory driver factory
     this.registerDriverFactory('memory', (options?: MemoryTransportOptions) => {
       return new MemoryTransport(options)
     })
 
-    // Log driver factory (development default)
+    // Development default.
     this.registerDriverFactory('log', (options?: LogTransportOptions) => {
       return new LogTransport(options)
     })
@@ -89,9 +53,6 @@ export class MailManager {
 
   private driverFactories: Map<string, (options: any) => MailTransport> = new Map()
 
-  /**
-   * Register a driver factory.
-   */
   private registerDriverFactory<T>(
     driver: string,
     factory: (options: T) => MailTransport
@@ -99,9 +60,6 @@ export class MailManager {
     this.driverFactories.set(driver, factory)
   }
 
-  /**
-   * Register a transport from configuration.
-   */
   private registerTransportFromConfig(
     name: string,
     config: { driver: string; [key: string]: unknown }
@@ -116,20 +74,15 @@ export class MailManager {
     this.transportFactories.set(name, () => factory(options))
   }
 
-  /**
-   * Get a mail transport by name.
-   * Returns the default transport if no name is specified.
-   */
+  /** Get a mail transport by name, or the default transport when unnamed. */
   transport(name?: string): MailTransport {
     const transportName = name ?? this.defaultTransportName
 
-    // Return cached transport if already resolved
     const cached = this.resolvedTransports.get(transportName)
     if (cached) {
       return cached
     }
 
-    // Get factory and create transport
     const factory = this.transportFactories.get(transportName)
     if (!factory) {
       throw new Error(`Mail transport not found: ${transportName}`)
@@ -140,47 +93,28 @@ export class MailManager {
     return transport
   }
 
-  /**
-   * Register a custom transport.
-   */
   registerTransport(name: string, factory: MailTransportFactory): void {
     this.transportFactories.set(name, factory)
-    // Clear cached instance if exists
     this.resolvedTransports.delete(name)
   }
 
-  /**
-   * Check if a transport is registered.
-   */
   hasTransport(name: string): boolean {
     return this.transportFactories.has(name)
   }
 
-  /**
-   * Get the default transport name.
-   */
   getDefaultTransportName(): string {
     return this.defaultTransportName
   }
 
-  /**
-   * Get the default from address.
-   */
   getDefaultFrom(): MailAddress | undefined {
     return this.defaultFrom
   }
 
-  /**
-   * Get all registered transport names.
-   */
   getTransportNames(): string[] {
     return Array.from(this.transportFactories.keys())
   }
 }
 
-/**
- * Create a mail manager with configuration.
- */
 export function createMailManager(config?: MailConfig): MailManager {
   return new MailManager(config)
 }

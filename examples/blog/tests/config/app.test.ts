@@ -1,7 +1,6 @@
 // @vitest-environment node
 // The suite default is jsdom, where `import.meta.url` is an http URL and
-// config/app.ts's `fileURLToPath(new URL('../db/migrations', import.meta.url))`
-// throws.
+// config/app.ts's `fileURLToPath(new URL(...))` throws.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { configureOrmMock, seedDatabaseMock } = vi.hoisted(() => ({
@@ -14,8 +13,7 @@ vi.mock('../../config/database.js', () => ({
 }))
 
 async function bootModelsFresh(): Promise<void> {
-  // config/app.ts memoizes with a module-level flag, so each case needs its
-  // own module instance.
+  // config/app.ts memoizes on a module-level flag, so each case needs its own instance.
   vi.resetModules()
   const { bootModels } = await import('../../config/app.js')
   await bootModels()

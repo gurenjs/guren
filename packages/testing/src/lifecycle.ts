@@ -12,11 +12,8 @@ export interface TestLifecycleHooks {
 let registeredHooks: TestLifecycleHooks | null = null
 
 /**
- * Register the lifecycle hooks of the active test runner.
- *
- * Importing `@guren/testing/vitest` does this automatically for vitest.
- * Under bun:test the global `beforeEach`/`afterEach` are picked up without
- * registration.
+ * Register the lifecycle hooks of the active test runner. `@guren/testing/vitest`
+ * does this automatically; bun:test globals are picked up without registration.
  */
 export function setTestLifecycleHooks(hooks: TestLifecycleHooks): void {
   registeredHooks = hooks

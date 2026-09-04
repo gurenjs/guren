@@ -8,9 +8,6 @@ export interface ModelListOptions {
   format?: 'table' | 'json' | 'compact'
 }
 
-/**
- * Discover and parse all models in the project.
- */
 export async function listModels(options: ModelListOptions = {}): Promise<ModelInfo[]> {
   const appRoot = resolve(options.appRoot ?? process.cwd())
   const files = await discoverModelFiles(appRoot)
@@ -27,9 +24,6 @@ export async function listModels(options: ModelListOptions = {}): Promise<ModelI
   return models
 }
 
-/**
- * Display models in the terminal.
- */
 export async function displayModels(options: ModelListOptions = {}): Promise<void> {
   const models = await listModels(options)
 

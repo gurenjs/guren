@@ -11,16 +11,11 @@ import { TestAgent, type AgentTestBridge } from './agent'
 type BootCallback = (app: Hono) => void | Promise<void>
 type ProviderLike = { register?(): unknown; boot?(): unknown }
 /**
- * Constructor shape for a provider class passed to `TestApp.create()`.
- *
- * The parameters are `any[]`, not `unknown[]`: constructor parameters are
- * contravariant, so `unknown[]` rejects every real `ServiceProvider`
- * subclass — their inherited constructor takes a concrete `Container`.
- *
- * It stays structural rather than reusing `@guren/server`'s
- * `ServiceProviderConstructor` so the published `.d.ts` needs nothing to
- * resolve: an app that only depends on `@guren/core` would otherwise widen
- * this to `any` under `skipLibCheck` and check nothing at all.
+ * Constructor shape for a provider class passed to `TestApp.create()`. `any[]`, not
+ * `unknown[]`: constructor parameters are contravariant, and every real
+ * `ServiceProvider` subclass inherits a constructor taking a concrete `Container`.
+ * Structural, so the published `.d.ts` resolves for an app depending only on
+ * `@guren/core` instead of widening to `any` under `skipLibCheck`.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type ProviderConstructor = new (...args: any[]) => ProviderLike
@@ -29,21 +24,17 @@ type ApplicationLike = {
   boot(): Promise<void>
   fetch(request: Request): Response | Promise<Response>
   /**
-   * The app-local route registry, read after `boot()` so `agent()` derives
-   * tools from the graph this app actually serves. Optional because the shape
-   * is structural: an app resolving a `@guren/core` without the agent
-   * interface has none, and `agent()` must say so rather than throw a
-   * `TypeError` naming an internal.
+   * The app-local route registry, read after `boot()` so `agent()` derives tools from
+   * the graph this app serves. Optional: a `@guren/core` without the agent interface
+   * has none, and `agent()` must say so rather than throw on an internal.
    */
   readonly router?: { definitions(): RouteDefinition[] }
 }
 /**
- * The `Application` constructor as this file calls it — kept structural for the
- * same reason as {@link ProviderConstructor}, but faithful to the real
- * signature so the dynamic imports below are type-checked rather than widened
- * to `any`. `providers` therefore names `ServiceProviderConstructor`, not the
- * looser shape `TestAppOptions` accepts; the one place those two meet is the
- * `new Application(...)` call, which says so.
+ * The `Application` constructor as this file calls it — structural for the same
+ * reason as {@link ProviderConstructor}, but faithful to the real signature so the
+ * dynamic imports stay type-checked. `providers` names `ServiceProviderConstructor`,
+ * not the looser shape `TestAppOptions` accepts; they meet at the `new Application()`.
  */
 type ApplicationConstructor = new (options: {
   boot?: BootCallback
@@ -101,13 +92,7 @@ export interface WorkersTestAppOptions {
   readonly baseUrl?: string
 }
 
-/**
- * A promise-like TestResponse that allows chaining assertions
- * directly on the result of HTTP method calls.
- *
- * This enables the fluent syntax:
- *   await app.get('/posts').assertStatus(200).assertJsonCount(3, 'data')
- */
+/** A promise-like TestResponse, so assertions chain on an HTTP method call. */
 export class PendingTestResponse implements PromiseLike<TestResponse> {
   private promise: Promise<TestResponse>
 
@@ -379,22 +364,12 @@ export class PendingTestResponse implements PromiseLike<TestResponse> {
 }
 
 /**
- * Integrated HTTP test client that wraps the Application class.
- *
- * Uses `app.fetch()` internally so no running HTTP server is needed.
+ * Integrated HTTP test client wrapping the Application class. Uses `app.fetch()`
+ * internally, so no running HTTP server is needed.
  *
  * @example
- * ```typescript
- * const app = await TestApp.create({
- *   boot: (hono) => {
- *     hono.get('/posts', (c) => c.json([{ id: 1 }]))
- *   },
- * })
- *
  * await app.get('/posts').assertOk().assertJsonCount(1)
  * await app.actingAs(user).get('/dashboard').assertOk()
- * await app.json().post('/api/posts', { title: 'Test' }).assertCreated()
- * ```
  */
 export class TestApp {
   private baseUrl: string
@@ -402,10 +377,9 @@ export class TestApp {
   private defaultHeaders: Record<string, string> = {}
   private authenticatedUser: unknown = null
   /**
-   * The app's route definitions, when this TestApp was built from an
-   * Application rather than a bare fetch function. Undefined — never an empty
-   * list — for `fromFetch`/`fromWorkers`, so `agent()` can distinguish "this
-   * app exposes no tools" from "this construction cannot see any routes".
+   * The app's route definitions when built from an Application. Undefined — never an
+   * empty list — for `fromFetch`/`fromWorkers`, so `agent()` can tell "no tools" from
+   * "this construction cannot see any routes".
    */
   private routeDefinitions?: readonly RouteDefinition[]
   /** Present when created via fromWorkers(); propagated across builder copies. */
@@ -420,12 +394,9 @@ export class TestApp {
   }
 
   /**
-   * Create a new TestApp by booting an Application instance.
-   *
-   * The Application is imported dynamically to avoid hard coupling at the
-   * module level. If the import fails (e.g., in a test environment without
-   * @guren/server installed), a lightweight Hono-based fallback is used.
-  */
+   * Create a new TestApp by booting an Application instance. The Application is
+   * imported dynamically; without `@guren/server` a Hono-based fallback is used.
+   */
   static async create(options: TestAppOptions = {}): Promise<TestApp> {
     // Enable test mode so that attachAuthContext() accepts the X-Testing-User header.
     if (typeof process !== 'undefined') {
@@ -456,10 +427,9 @@ export class TestApp {
 
     const application = new Application({
       boot: options.boot,
-      // `TestAppOptions` accepts the structural `ProviderConstructor` (see
-      // above) where `ApplicationOptions` demands a `ServiceProvider`
-      // subclass. Every real provider satisfies both, and the widening is
-      // confined to this one property instead of blanketing the import.
+      // `TestAppOptions` accepts the structural `ProviderConstructor` where
+      // `ApplicationOptions` demands a `ServiceProvider` subclass. Every real provider
+      // satisfies both, and the widening stays confined to this one property.
       providers: options.providers as ServiceProviderConstructor[] | undefined,
       routes: options.routes,
       auth: options.auth,
@@ -520,12 +490,9 @@ export class TestApp {
   }
 
   /**
-   * Create a TestApp from a Cloudflare Workers-style fetch handler
-   * (`{ fetch(request, env, ctx) }`).
-   *
-   * A single fake ExecutionContext is shared across all requests made
-   * through the returned TestApp; promises passed to `ctx.waitUntil()` are
-   * collected in `workers.waitUntilPromises` for tests to await.
+   * Create a TestApp from a Cloudflare Workers-style fetch handler. One fake
+   * ExecutionContext is shared across every request; promises passed to
+   * `ctx.waitUntil()` are collected in `workers.waitUntilPromises` to await.
    */
   static fromWorkers(
     handler: WorkersHandler,
@@ -552,10 +519,8 @@ export class TestApp {
   }
 
   /**
-   * Return a new TestApp that injects the given user as the authenticated user.
-   *
-   * The user is injected by setting a custom header that auth middleware
-   * can recognize in test mode.
+   * Return a new TestApp authenticated as this user, injected through a header the
+   * auth middleware recognizes in test mode.
    */
   actingAs(user: unknown): TestApp {
     const copy = this.clone()
@@ -564,12 +529,9 @@ export class TestApp {
   }
 
   /**
-   * A copy carrying everything this TestApp was configured with.
-   *
-   * One place, because every builder (`actingAs`, `withHeaders`, `withCsrf`)
-   * has to carry *all* of it: the three used to hand-copy field by field, and
-   * a field added to one but not the others vanishes on the next `.actingAs()`
-   * with nothing failing.
+   * A copy carrying everything this TestApp was configured with. One place, because
+   * every builder (`actingAs`, `withHeaders`, `withCsrf`) has to carry *all* of it —
+   * a field one copies and another does not vanishes silently on the next builder.
    */
   private clone(): TestApp {
     const copy = new TestApp(this.fetchFn, this.baseUrl)
@@ -581,17 +543,12 @@ export class TestApp {
   }
 
   /**
-   * The agent surface of this app: the tools an MCP client would see, and a
-   * way to call them (RFC 0016).
-   *
-   * A call goes through the framework's own dispatch contract and out through
-   * the same `fetch` as every other request here, so a test asserts against
-   * exactly what an agent gets.
+   * The agent surface of this app (RFC 0016): the tools an MCP client would see, and
+   * a way to call them. A call goes through the framework's own dispatch contract and
+   * the same `fetch` as every other request here.
    *
    * @example
    * const result = await app.agent().call('posts.store', { title: 'x' }, { as: user })
-   * result.assertOk()
-   * const post = result.assertStructured<{ id: number }>()
    */
   agent(): TestAgent {
     return new TestAgent(this.agentBridge())
@@ -602,24 +559,17 @@ export class TestApp {
       baseUrl: this.baseUrl,
       routeDefinitions: () => this.routeDefinitions,
       headers: () => this.requestHeaders(),
-      // Through `fetchFn`, not an Application: `fromWorkers` closes over the
-      // env and ExecutionContext there, so a tool call inherits the bindings
-      // and `waitUntil` that RFC 0016 §3.1 warns about losing.
+      // Through `fetchFn`, not an Application: `fromWorkers` closes over the env and
+      // ExecutionContext there, so a tool call inherits the bindings and `waitUntil`.
       dispatch: (request) => this.fetchFn(request),
       actingAs: (user) => this.actingAs(user).agentBridge(),
     }
   }
 
   /**
-   * Prime the CSRF protection: performs a GET request to `path`, captures the
-   * session and XSRF-TOKEN cookies, and returns a TestApp that sends them
-   * (plus the `X-XSRF-TOKEN` header) on every subsequent request — so POST,
-   * PUT, PATCH, and DELETE pass the CSRF middleware like a real browser.
-   *
-   * @example
-   * const http = TestApp.fromFetch((request) => app.fetch(request)).actingAs(user)
-   * const csrf = await http.withCsrf()
-   * await csrf.post('/tasks', { title: 'hello' }) // no more 403
+   * Prime the CSRF protection: GETs `path`, captures the session and XSRF-TOKEN
+   * cookies, and returns a TestApp that sends them (plus the `X-XSRF-TOKEN` header)
+   * on every later request, so mutating requests pass CSRF like a real browser.
    */
   async withCsrf(path = '/'): Promise<TestApp> {
     const response = await this.request('GET', path)
@@ -657,13 +607,7 @@ export class TestApp {
     return this.withHeaders({ Accept: 'application/json' })
   }
 
-  /**
-   * Return a new TestApp that sends the given headers on every request.
-   *
-   * @example
-   * const en = http.withHeaders({ 'Accept-Language': 'en' })
-   * await en.get('/') // rendered with the English locale
-   */
+  /** Return a new TestApp that sends the given headers on every request. */
   withHeaders(headers: Record<string, string>): TestApp {
     const copy = this.clone()
     copy.defaultHeaders = { ...copy.defaultHeaders, ...headers }
@@ -721,23 +665,15 @@ export class TestApp {
   }
 
   /**
-   * Make a request with any HTTP method.
-   */
-  /**
-   * The headers every request from this TestApp carries: whatever
-   * `withHeaders`/`withCsrf` parked, plus the authenticated-user envelope.
-   *
-   * One spelling, shared with the agent dispatch: a second copy of the
-   * `X-Testing-User` envelope is how the two come to disagree about who a
-   * call authenticates as.
+   * The headers every request carries: whatever `withHeaders`/`withCsrf` parked, plus
+   * the authenticated-user envelope. One spelling, shared with the agent dispatch.
    */
   private requestHeaders(): Record<string, string> {
     const headers: Record<string, string> = { ...this.defaultHeaders }
 
     if (this.authenticatedUser) {
-      // Inject authenticated user as a JSON-encoded header that test-aware
-      // auth middleware can read. Preserve the auth identifier so the
-      // deserialized object can reconstruct getAuthIdentifier().
+      // JSON-encoded header the test-aware auth middleware reads. The auth identifier
+      // is preserved so the deserialized object can reconstruct getAuthIdentifier().
       const user = this.authenticatedUser as Record<string, unknown>
       const authId =
         typeof (user as { getAuthIdentifier?: unknown }).getAuthIdentifier === 'function'
@@ -778,15 +714,7 @@ export class TestApp {
   }
 }
 
-/**
- * Factory helper for creating test model instances.
- *
- * @example
- * ```typescript
- * const user = await factory(UserFactory)
- * const users = await factory(UserFactory, 3)
- * ```
- */
+/** Factory helper for creating test model instances. */
 export async function factory<T>(
   factoryClass: new () => { create(overrides?: Partial<T>): Promise<T> },
   count?: number,
@@ -802,8 +730,6 @@ export async function factory<T>(
 
   return instance.create()
 }
-
-// --- Internal helpers ---
 
 function getNestedValue(obj: unknown, path: string): unknown {
   const parts = path.split('.')

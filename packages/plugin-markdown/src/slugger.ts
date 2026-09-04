@@ -1,17 +1,12 @@
 /**
- * Heading-id slugger, hardened against HTML smuggled through inline markdown.
- *
- * Ported from guren.dev's docs pipeline (RFC 0012). Two properties matter:
- * tags are stripped to a fixed point because a single pass can splice a new
- * tag together (`<scr<x>ipt>` becomes `<script>` after one removal), and the
- * strip itself is a linear scan because the obvious `/<[^>]*>/g` regex is
- * quadratic on `<`-heavy input with no closing bracket.
+ * Heading-id slugger, hardened against HTML smuggled through inline markdown
+ * (RFC 0012). Tags are stripped to a fixed point because a single pass can
+ * splice a new tag together (`<scr<x>ipt>` becomes `<script>`), and the strip
+ * is a linear scan because the obvious `/<[^>]*>/g` is quadratic on `<`-heavy
+ * input with no closing bracket.
  */
 
-/**
- * One pass of tag removal. Unclosed `<` tails are kept verbatim, matching
- * the regex form (which requires a closing `>`).
- */
+/** One pass of tag removal; an unclosed `<` tail is kept verbatim. */
 function stripHtmlTagsOnce(html: string): string {
   let out = ''
   let i = 0
@@ -32,12 +27,10 @@ function stripHtmlTagsOnce(html: string): string {
 
 /**
  * Returns a slugify function whose uniqueness state is scoped to one render:
- * repeated headings get `-1`, `-2`, … suffixes, skipping over suffixes a
- * literal heading already claimed (`Setup`, `Setup-1`, `Setup` yields
- * `setup`, `setup-1`, `setup-2`). A heading that slugs to nothing (all
- * punctuation, all markup) falls back to `heading`, which the same
- * uniqueness mechanism then disambiguates — deterministic, unlike the
- * random suffix the ported implementation used.
+ * repeated headings get `-1`, `-2`, … suffixes, skipping any a literal heading
+ * already claimed. A heading that slugs to nothing falls back to `heading` and
+ * is disambiguated the same way — deterministic, unlike the random suffix the
+ * ported implementation used.
  */
 export function createSlugger(): (text: string) => string {
   const usedSlugs = new Set<string>()

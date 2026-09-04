@@ -2,9 +2,7 @@ import { ServiceProvider } from '../container/ServiceProvider'
 import { createEncrypter } from '../encryption'
 import { deriveAppKeyring, encodeDerivedKey, getAppKeyringFromEnv } from '../encryption/app-key'
 
-/**
- * Binds the Encrypter as a singleton in the container.
- */
+/** Binds the Encrypter as a singleton in the container. */
 export class EncryptionServiceProvider extends ServiceProvider {
   register(): void {
     if (!this.container.has('app.keyring')) {

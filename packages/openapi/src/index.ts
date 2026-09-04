@@ -30,11 +30,9 @@ export interface OpenApiDocumentOptions {
   version: string
   description?: string
   /**
-   * A function is resolved every time a document is generated — for
-   * `mountOpenApiDocs()`, on every request to the JSON endpoint. That is how an
-   * app advertises an address it does not know at mount time: the port it binds
-   * under `PORT=0` is assigned by the OS, so a fixed list written beside the
-   * mount would send clients to a port nothing is listening on.
+   * A function is resolved on every generation — for `mountOpenApiDocs()`, on
+   * every request — so an app can advertise an address it does not know at mount
+   * time, such as the OS-assigned port under `PORT=0`.
    */
   servers?: Array<string | OpenApiServer> | (() => Array<string | OpenApiServer>)
 }
@@ -64,9 +62,8 @@ export interface OpenApiInfoObject {
 
 /**
  * OpenAPI 3.1's Schema Object *is* JSON Schema 2020-12, so this is the shared
- * walker's own type under the name this package has always exported. Keeping
- * one definition is the point of the promotion: a second copy here is how the
- * document and an agent tool derived from the same route come to advertise
+ * walker's own type under the name this package exports. A second definition is
+ * how a document and an agent tool derived from one route come to advertise
  * different constraints.
  */
 export type OpenApiSchemaObject = JsonSchemaObject
@@ -127,11 +124,9 @@ const DEFAULT_OUTPUT_FILE = '.guren/openapi.gen.json'
 const DEFAULT_JSON_PATH = '/openapi.json'
 const DEFAULT_DOCS_PATH = '/docs'
 
-// The only method keys an OpenAPI 3.1 Path Item may carry. Routes registered
-// with any other method (QUERY, or a custom verb via router.on()) would make
-// the emitted document invalid, so they are skipped with a warning instead.
-// OpenAPI 3.2 adds `query`/`additionalOperations`; revisit when the generator
-// targets it.
+// The only method keys an OpenAPI 3.1 Path Item may carry; a route on any other
+// verb (QUERY, or router.on()) is skipped with a warning rather than emitted
+// into an invalid document. 3.2 adds `query`/`additionalOperations`.
 const OPENAPI_31_METHOD_KEYS = new Set(['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace'])
 
 export function generateOpenApiDocument(
@@ -205,10 +200,9 @@ export function mountOpenApiDocs(
   const docsPath = options.docsPath ?? DEFAULT_DOCS_PATH
   const getDefinitions = resolveDefinitions(target, options.definitions)
 
-  // Serving silently would hide routes the generator had to skip (e.g. QUERY
-  // under OpenAPI 3.1). Definitions resolve lazily per request and can grow
-  // after mount, so dedupe per distinct warning — not once ever — or a route
-  // registered after the first fetch would be skipped without a trace.
+  // Definitions resolve lazily per request and can grow after mount, so dedupe
+  // per distinct warning — not once ever — or a route registered after the first
+  // fetch would be skipped without a trace.
   const onWarning = options.onWarning ?? ((warning: string) => console.warn(`[guren/openapi] ${warning}`))
   const emitted = new Set<string>()
   hono.get(jsonPath, (context: HonoLikeContext) => {
@@ -287,12 +281,9 @@ function buildParameters(definition: RouteDefinition, warnings: string[]): OpenA
   const parameters: OpenApiParameterObject[] = []
   const paramsDetails = readObjectSchema(definition.schemas?.params, warnings, `${definition.method} ${definition.path} params`, 'input')
 
-  // Raw label and rendered name are different strings for a `:slug*` param,
-  // and each is authoritative for a different half: the schema is keyed by
-  // what Hono registers (`slug*`, which is the key the app's `params` schema
-  // declares), while the document must show the RFC 6570-safe name. Looking
-  // the schema up by the rendered name silently missed it and fell back to
-  // `{ type: 'string' }`, discarding a declared contract.
+  // Raw label and rendered name differ for a `:slug*` param, and each is
+  // authoritative for one half: the schema is keyed by what Hono registers
+  // (`slug*`), while the document must show the RFC 6570-safe name.
   for (const rawName of extractPathParamNames(definition.path)) {
     parameters.push({
       name: stripExplodeModifier(rawName),
@@ -374,17 +365,10 @@ function normalizeServers(servers?: OpenApiDocumentOptions['servers']): OpenApiS
 }
 
 /**
- * The one deliberate divergence between this document and every other surface
- * derived from the same route: Hono keeps a trailing `*` in a parameter's name
- * (`/files/:slug*` arrives as the key `slug*`), and the shared lexer reports it
- * that way, but OpenAPI path templates are RFC 6570 URI templates where
- * `{name*}` already means "explode". Emitting the literal asterisk would claim
- * something else entirely, so it is stripped here — at the one place that
- * renders, rather than by lexing the path differently.
- *
- * Applied to the path template *and* the parameter list, which is what keeps
- * them consistent: OpenAPI requires every `{name}` in a template to match a
- * `parameters[].name`.
+ * Hono keeps a trailing `*` in a parameter name (`/files/:slug*` is the key
+ * `slug*`), but an OpenAPI template is an RFC 6570 URI template where `{name*}`
+ * already means "explode", so it is stripped here. Applied to the template *and*
+ * the parameter list, which OpenAPI requires to name the same `{name}`s.
  */
 function stripExplodeModifier(label: string): string {
   return label.endsWith('*') ? label.slice(0, -1) : label
@@ -481,13 +465,9 @@ function isRequestBodyRequired(schema: unknown): boolean {
     return true
   }
 
-  // `safeParse` is supposed to return failures, but a malformed schema can
-  // still throw — zod 4 throws outright when an object's property is not a
-  // schema it recognizes (a nested v3 node, for one). A body whose schema
-  // cannot even run against `{}` is best documented as required. Running the
-  // schema is this package's own business, which is why `ZodLike` (the reading
-  // surface plus `safeParse`) stays here rather than in the shared walker: the
-  // walker only ever *reads* a schema.
+  // A malformed schema can throw out of `safeParse` — zod 4 does when an
+  // object's property is not a schema it recognizes — and a body whose schema
+  // cannot even run against `{}` is best documented as required.
   const parseable = schema as ZodLike
   try {
     return !parseable.safeParse?.({}).success

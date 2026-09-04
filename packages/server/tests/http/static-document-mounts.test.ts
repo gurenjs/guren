@@ -9,12 +9,10 @@ import { useAssetFixture } from './asset-fixture'
 const SVG = '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(document.cookie)</script></svg>\n'
 
 /**
- * static-documents.test.ts covers the four routes that reach `public/`. Two
- * more file-serving routes build their own responses and were left inline:
- * the dev transpile route's static fallback, and the mount that serves the
- * built Inertia client out of its package directory. Neither is where an
- * upload lands, which is exactly why they are easy to leave out — and a rule
- * with an exception nobody can name is one nobody can rely on.
+ * static-documents.test.ts covers the four routes reaching `public/`. Two more
+ * file-serving routes build their own responses: the dev transpile route's static
+ * fallback, and the mount serving the built Inertia client from its package
+ * directory. Neither is where an upload lands, which is why they are easy to omit.
  */
 function expectAttachment(response: Response): void {
   expect(response.status).toBe(200)
@@ -79,12 +77,9 @@ describe('the built Inertia client mount', () => {
 })
 
 /**
- * The mounts above are the ones that exist today; a seventh added later would
- * typecheck and pass every test in both files. `serveStatic` builds its own
- * response, so a mount that never composes the guard into `onFound` cannot be
- * reached from a test that does not know it exists — these read the source
- * instead, the way tests/mcp/endpoint.test.ts pins a form nothing at runtime
- * can tell apart.
+ * A seventh mount added later would typecheck and pass every test in both files:
+ * `serveStatic` builds its own response, so a mount that never composes the guard
+ * into `onFound` is unreachable from a test unaware of it. These read the source.
  */
 describe('the serveStatic mounts in @guren/server', () => {
   // Paths relative to src/. A new entry here is the point: adding one is the
@@ -118,10 +113,10 @@ describe('the serveStatic mounts in @guren/server', () => {
 })
 
 /**
- * Every `.ts` source under `dir`, as [path relative to `dir`, code], with the
- * comments stripped — a mount must not be talkable into passing. Bun's own
- * transpiler does the stripping because a regex cannot: `'/public/*'` is a
- * route pattern these very files are full of, and it opens a block comment.
+ * Every `.ts` source under `dir`, as [path relative to `dir`, code], comments
+ * stripped so a mount cannot be talked into passing. Bun's transpiler does the
+ * stripping because a regex cannot: the route pattern `'/public/*'` opens a
+ * block comment.
  */
 async function sourceFiles(dir: string, prefix = ''): Promise<Array<[string, string]>> {
   const transpiler = new Bun.Transpiler({ loader: 'ts' })

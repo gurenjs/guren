@@ -11,7 +11,6 @@ export default class AuthProvider extends ServiceProvider {
       rememberTokenColumn: 'rememberToken',
       credentialsPasswordField: 'password',
     })
-    // CSRF middleware is now auto-registered by AuthServiceProvider
-    // when autoSession is enabled (secure by default).
+    // AuthServiceProvider auto-registers CSRF middleware when autoSession is on.
   }
 }

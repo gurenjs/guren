@@ -8,10 +8,9 @@ const createInertiaAppMock = mock(async (options: Record<string, unknown>) => {
   return { head: [], body: '' }
 })
 
-// Spread the real module and override only what this file stubs:
-// mock.module() is process-wide and not undone between files, so a
-// hand-listed replacement breaks later files that import other exports
-// (usePage, for the i18n tests).
+// Spread the real module and override only what this file stubs: mock.module()
+// is process-wide and not undone between files, so a hand-listed replacement
+// breaks later files importing other exports.
 await mock.module('@inertiajs/react', () => ({
   ...realInertiaReact,
   createInertiaApp: createInertiaAppMock,

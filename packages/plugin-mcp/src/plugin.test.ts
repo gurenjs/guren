@@ -16,11 +16,10 @@ import {
 import { mcpPlugin } from './plugin'
 
 /**
- * The endpoint end to end: a real Application with token auth and agent
- * routes, driven by the SDK's own client over streamable HTTP — the fetch is
- * bridged straight into `app.fetch`, so this covers the transport, the
- * bearer boundary, the scope gate, the dispatch re-entry, and the audit
- * emission in one pass.
+ * The endpoint end to end: a real Application with token auth and agent routes,
+ * driven by the SDK's own client over streamable HTTP bridged into `app.fetch` —
+ * transport, bearer boundary, scope gate, dispatch re-entry and audit emission
+ * in one pass.
  */
 describe('mcpPlugin (integration)', () => {
   const store = new MemoryApiTokenStore()
@@ -38,9 +37,9 @@ describe('mcpPlugin (integration)', () => {
         '/posts',
         {
           body: z.object({ title: z.string(), password: z.string() }),
-          // Declared on purpose: an object `output` is what makes the SDK
-          // client validate a call's structuredContent after listTools(), and
-          // it is the shape `guren check` steers agent routes toward.
+          // An object `output` is what makes the SDK client validate a call's
+          // structuredContent after listTools(), and the shape `guren check`
+          // steers agent routes toward.
           output: z.object({ created: z.string() }),
         },
         // An output contract validates the returned data, so the handler
@@ -49,10 +48,9 @@ describe('mcpPlugin (integration)', () => {
       )
       .name('posts.store')
       .agent({})
-    // `ssn` on purpose, and not `password`: the default fragment list masks
-    // anything password-shaped whichever redact list is in play, so a case
-    // written with it passes even when the *checked* tool's own list is
-    // dropped. Only a field the defaults do not know can tell the two apart.
+    // `ssn` on purpose, not `password`: the default fragment list masks anything
+    // password-shaped whichever redact list is in play, so only a field the
+    // defaults do not know can tell a dropped per-tool list apart.
     router
       .post(
         '/profiles',
@@ -152,10 +150,9 @@ describe('mcpPlugin (integration)', () => {
   })
 
   test('should redact a preflight through the checked tool\'s own redact list', async () => {
-    // The record is a `guren.preflight` invocation, but the redaction rules
-    // that apply to it are the *checked* tool's: the meta-tool declares none,
-    // and using its empty list would write a route's declared-secret field
-    // into the audit trail in the clear.
+    // The record is a `guren.preflight` invocation, but the redaction rules that
+    // apply are the *checked* tool's: the meta-tool declares none, and its empty
+    // list would write a route's declared-secret field into the trail in clear.
     const seen: AgentToolInvoked[] = []
     events.on(AgentToolInvoked, (event) => {
       seen.push(event)

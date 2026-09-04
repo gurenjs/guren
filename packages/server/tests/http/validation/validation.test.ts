@@ -5,7 +5,6 @@ import {
   createValidator,
   quickValidate,
   quickValidateOrThrow,
-  // Rules
   required,
   nullable,
   requiredIf,
@@ -328,7 +327,7 @@ describe('Validation Rules', () => {
   describe('between', () => {
     test('passes for value in range', async () => {
       const rule = between(5, 10)
-      expect(await rule('hello', 'field', {})).toBe(true) // 5 chars
+      expect(await rule('hello', 'field', {})).toBe(true)
       expect(await rule(7, 'field', {})).toBe(true)
     })
 
@@ -719,15 +718,12 @@ describe('Validator', () => {
         .rules(min(3), max(20))
         .sometimes()
 
-      // Field not present - should pass
       const result1 = await validator.validate({})
       expect(result1.success).toBe(true)
 
-      // Field present but invalid - should fail
       const result2 = await validator.validate({ nickname: 'ab' })
       expect(result2.success).toBe(false)
 
-      // Field present and valid - should pass
       const result3 = await validator.validate({ nickname: 'johnny' })
       expect(result3.success).toBe(true)
     })
@@ -818,7 +814,6 @@ describe('FieldValidator', () => {
       .rules(required(), min(8), regex(/[A-Z]/))
       .continueOnError()
 
-    // Note: 'ab' passes required but fails min and regex
     const errors = await field.validate('ab', {})
     expect(errors.length).toBe(2)
   })
@@ -831,11 +826,9 @@ describe('FieldValidator', () => {
       .when((data) => data.type === 'promo')
       .bail()
 
-    // Condition not met - no validation
     const errors1 = await field.validate('', { type: 'regular' })
     expect(errors1.length).toBe(0)
 
-    // Condition met - validation runs
     const errors2 = await field.validate('', { type: 'promo' })
     expect(errors2.length).toBe(1)
   })

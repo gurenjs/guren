@@ -2,58 +2,38 @@ import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mc
 import { z } from 'zod'
 
 /**
- * Options the `.guren/*.gen.ts` generators are called with. `cwd` is the
- * project they resolve every output path against; nothing here changes
- * `process.cwd()`, which is process-wide and shared by concurrent requests.
+ * Options the `.guren/*.gen.ts` generators are called with. `cwd` is the project
+ * they resolve output paths against; nothing changes `process.cwd()`, which is
+ * process-wide and shared by concurrent requests.
  */
 export interface CodegenOptions {
   cwd: string
   force?: boolean
 }
 
-/**
- * What every scaffolder takes. `cwd` names the project the scaffold belongs
- * to, for the same reason: this server handles requests for a workspace
- * without a per-request `process.cwd()` to fall back on.
- */
+/** What every scaffolder takes; `cwd` names the project, for the same reason. */
 export interface ScaffoldOptions {
   force?: boolean
   cwd?: string
 }
 
 /**
- * What a generator reports back. An empty `outputPath` means the generator
- * found nothing to describe and wrote no file (a project with no page
- * components, for instance).
- *
- * `skipped` is an optional sentence explaining that empty `outputPath` when
- * "nothing to describe" would be wrong — the pages generator declines to write
- * a manifest into an app that cannot compile one, and an agent reading this
- * result is exactly who needs to hear that a page it just wrote was ignored.
- *
- * `definitions` is what a generator extracted: the route manifest from
- * `generateRouteTypes`, the Resource definitions from `generateDataTypes`.
- * It stays opaque here — this package only carries it from one CLI call to
- * the next (`generateApiClientTypes` consumes both) and never reads inside
- * it, so mirroring the CLI's shapes would only create something to keep in
- * sync.
+ * What a generator reports back. An empty `outputPath` means it found nothing to
+ * describe and wrote no file; `skipped` explains that when "nothing to describe"
+ * would be wrong. `definitions` stays opaque — this package only carries it from
+ * one CLI call to the next, so mirroring the CLI's shapes would need syncing.
  */
 export interface CodegenResult {
   outputPath?: string
   definitions?: unknown[]
   skipped?: { message: string } | null
-  /**
-   * Diagnostics the generator wants surfaced to whoever asked for the run —
-   * a `resource` response hint naming an unknown Resource class, for
-   * instance. Non-fatal: the artifact was still written.
-   */
+  /** Non-fatal diagnostics for whoever asked for the run; the artifact was still written. */
   warnings?: string[]
 }
 
 /**
- * CLI functions that the MCP server wraps.
- * These are injected at runtime to avoid circular dependencies
- * (@guren/server cannot depend on @guren/cli directly).
+ * CLI functions the MCP server wraps, injected at runtime because
+ * `@guren/server` cannot depend on `@guren/cli`.
  */
 export interface GurenCliApi {
   generateContext(opts: { cwd: string }): Promise<{
@@ -108,10 +88,9 @@ export interface GurenCliApi {
   generateDataTypes(opts: CodegenOptions): Promise<CodegenResult | void>
   generateChannelTypes(opts: CodegenOptions): Promise<CodegenResult | void>
   /**
-   * Takes the route manifest `generateRouteTypes` returns, so it can only run
-   * after that succeeded. `resources` is the Resource set `generateDataTypes`
-   * extracted — without it every `resource` response hint is "unknown
-   * Resource" and the client's `json()` stays untyped.
+   * Takes the route manifest `generateRouteTypes` returns. `resources` is what
+   * `generateDataTypes` extracted — without it every `resource` response hint
+   * is "unknown Resource" and the client's `json()` stays untyped.
    */
   generateApiClientTypes(
     definitions: unknown[],
@@ -119,42 +98,31 @@ export interface GurenCliApi {
   ): Promise<CodegenResult | void>
   /**
    * Agent tools derived from the route manifest (RFC 0016), so it runs after
-   * `generateRouteTypes` and — because a `resource` hint's payload type is
-   * embedded in a tool description — after `generateDataTypes` too. Optional
-   * because `@guren/cli` is resolved from the app at runtime and may predate
-   * it; an older CLI simply generates no agent manifest.
+   * `generateRouteTypes` and `generateDataTypes`. Optional: `@guren/cli` is
+   * resolved from the app and an older one simply generates no agent manifest.
    */
   generateAgentTypes?(
     definitions: unknown[],
     opts: CodegenOptions & { resources?: unknown[] },
   ): Promise<CodegenResult | void>
   /**
-   * Route-dependent context generation that re-runs the CLI in a fresh
-   * process. Optional because `@guren/cli` is resolved from the app at
-   * runtime and may predate it — see `McpServiceProvider`.
+   * Route-dependent context generation in a fresh process. Optional because
+   * `@guren/cli` is resolved from the app at runtime and may predate it.
    */
   createFreshContextApi?: () => Pick<GurenCliApi, 'generateContext' | 'generateEntityContext'>
   /**
-   * Optional fields the CLI's context routes populate. Spelled exactly as
-   * `@guren/cli` exports it — this interface describes that module namespace,
-   * so a prettier camelCase name here would read `undefined` off every real
-   * CLI and silently answer "unsupported" forever.
-   *
-   * Optional for the same runtime-resolution reason as the members above, and
-   * read for exactly that reason: an older CLI emits routes with no `agent`
-   * field at all, which reads identically to an app exposing no agent tools.
+   * Spelled exactly as `@guren/cli` exports it — this interface describes that
+   * module namespace, so a camelCase name here would read `undefined` off every
+   * real CLI. Optional for the runtime-resolution reason above, and read for it:
+   * an older CLI emits routes with no `agent` field, which looks like no tools.
    */
   CONTEXT_ROUTE_FEATURES?: readonly string[]
   /**
-   * Every route as a context route, without building the rest of the project
-   * context. Optional like the above; `guren_agent_surface` falls back to
-   * `generateContext` when an older CLI does not provide it.
+   * Every route as a context route, without the rest of the project context.
+   * Optional; `guren_agent_surface` falls back to `generateContext`.
    */
   loadContextRoutes?(cwd: string, routesFile?: string, loadErrors?: string[]): Promise<unknown[]>
-  /**
-   * The OKF docs relation graph (RFC 0005). Optional for the same
-   * runtime-resolution reason as above.
-   */
+  /** The OKF docs relation graph (RFC 0005). Optional, like the above. */
   buildDocsGraphReport?(options: { cwd?: string; entity?: string; path?: string }): Promise<unknown>
   renderDocsGraphMarkdown?(report: unknown): string
 }
@@ -167,10 +135,8 @@ export interface CreateMcpServerOptions {
 
 /**
  * A route in `generateContext()`'s output that declares agent metadata
- * (RFC 0016). `GurenCliApi` types `routes` as `unknown[]` on purpose — this
- * package carries the CLI's shapes rather than mirroring them — so the one
- * tool that reads inside a route narrows it here, structurally and at
- * runtime, instead of casting.
+ * (RFC 0016). `GurenCliApi` types `routes` as `unknown[]` on purpose, so the one
+ * tool that reads inside a route narrows it here instead of casting.
  */
 interface AgentContextRoute {
   method: string
@@ -202,10 +168,9 @@ function isAgentRoute(route: unknown): route is AgentContextRoute {
 }
 
 /**
- * One tool as an agent editing the app should see it. Annotations are
- * reported **as declared**, with no defaults filled in: the derivation layer
- * owns the GET/QUERY → readOnlyHint rule, and restating it here would be a
- * second copy of it that can disagree.
+ * One tool as an agent editing the app should see it. Annotations are reported
+ * **as declared**, no defaults filled in: the derivation layer owns the
+ * GET/QUERY → readOnlyHint rule, and a second copy here could disagree.
  */
 function describeAgentRoute(route: AgentContextRoute) {
   const { agent } = route
@@ -233,8 +198,6 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServer {
     name: 'guren',
     version,
   })
-
-  // ─── Read-Only Tools ────────────────────────────────────────────
 
   server.tool(
     'guren_get_context',
@@ -313,9 +276,8 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServer {
     {},
     async () => {
       // An empty list has two causes that must not be conflated: an app that
-      // exposes nothing, and a @guren/cli — resolved from the app, so
-      // possibly older than this server — whose context output has no agent
-      // field to read. Say which one happened.
+      // exposes nothing, and a @guren/cli older than this server whose context
+      // output has no agent field to read. Say which one happened.
       if (!cli.CONTEXT_ROUTE_FEATURES?.includes('agent')) {
         return {
           content: [
@@ -337,17 +299,10 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServer {
         }
       }
 
-      // The routes are all this tool reads, and building the rest of the
-      // project context — models, pages, controllers, resources — costs a
-      // full filesystem scan on an interactive path with no caching. Older
-      // CLIs without the routes-only entry still answer through the whole
-      // context, which is what they always did.
-      //
-      // Either way the reason the route list is empty travels with it: a
-      // routes file that throws degrades to zero routes, and reporting that
-      // as an empty tool surface would be the confident-looking "no routes"
-      // the CLI's own loader warns about — indistinguishable from an app
-      // that genuinely exposes nothing.
+      // Routes are all this tool reads, and building the rest of the context
+      // costs a full filesystem scan with no caching. Either way the reason a
+      // route list is empty travels with it: a routes file that throws degrades
+      // to zero routes, indistinguishable from an app that exposes nothing.
       const loadErrors: string[] = []
       let routes: unknown[]
       if (cli.loadContextRoutes) {
@@ -426,8 +381,6 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServer {
       return { content: [{ type: 'text', text }] }
     },
   )
-
-  // ─── Write Tools ────────────────────────────────────────────────
 
   server.tool(
     'guren_make_feature',
@@ -517,10 +470,8 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServer {
     'Generate the type-safe route, page, data, and channel manifests plus the API client (.guren/ and types/generated/).',
     {},
     async () => {
-      // `force` matches what `guren codegen` passes: every artifact below is
-      // generated output, so overwriting it is the whole point — without it
-      // the writer rejects each one as "already exists" from the second run
-      // onwards.
+      // `force` matches what `guren codegen` passes: every artifact is generated
+      // output, so without it the writer rejects each one from the second run on.
       const options: CodegenOptions = { cwd, force: true }
 
       const generated: string[] = []
@@ -530,10 +481,8 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServer {
 
       /**
        * Runs one generator and files its artifacts under `generated` or
-       * `skipped`. A generator that returns an empty `outputPath` had
-       * nothing to describe, which is a normal shape for a project rather
-       * than a failure; a throw is the opposite, and is what `isError`
-       * reports on.
+       * `skipped`. An empty `outputPath` is a normal project shape, not a
+       * failure; a throw is, and is what `isError` reports on.
        */
       const run = async (
         artifacts: string[],
@@ -559,9 +508,8 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServer {
         }
       }
 
-      // Ordered as `guren codegen` orders it, and for the same reason at the
-      // end: the API client is built from the route manifest, so it can only
-      // run once routes has produced one.
+      // Ordered as `guren codegen` orders it: the API client is built from the
+      // route manifest, so it can only run once routes has produced one.
       const routes = await run(
         ['.guren/routes.gen.ts', 'types/generated/routes.d.ts'],
         () => cli.generateRouteTypes(options),
@@ -569,9 +517,8 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServer {
       await run(['.guren/pages.gen.ts'], () => cli.generatePageTypes(options))
       const data = await run(['.guren/data.gen.ts'], () => cli.generateDataTypes(options))
       await run(['.guren/channels.gen.ts'], () => cli.generateChannelTypes(options))
-      // Between data and the API client, exactly as `guren codegen` orders it:
-      // a `resource` hint's payload type comes from the Resource definitions,
-      // and the emitted `Data` import resolves against data.gen.ts.
+      // Between data and the API client, as `guren codegen` orders it: a
+      // `resource` hint's payload type comes from the Resource definitions.
       if (cli.generateAgentTypes) {
         const generateAgentTypes = cli.generateAgentTypes.bind(cli)
         await run(['.guren/agents.gen.ts'], () => {
@@ -585,23 +532,19 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServer {
         if (!routes?.definitions) {
           throw new Error('route generation produced no manifest to build a client from')
         }
-        // Resource definitions ride along so `resource` response hints
-        // resolve — dropped, they would all warn and the regenerated client
-        // would silently lose its typed json().
+        // Resource definitions ride along so `resource` hints resolve; dropped,
+        // the regenerated client would silently lose its typed json().
         return cli.generateApiClientTypes(routes.definitions, { ...options, resources: data?.definitions })
       })
 
       return {
         content: [{ type: 'text', text: JSON.stringify({ generated, skipped, warnings }, null, 2) }],
-        // A generator that found nothing to describe is not a failure — an
-        // app with no page components is a normal shape — so only a thrown
-        // one makes the run an error, even when other artifacts landed.
+        // A generator that found nothing to describe is not a failure, so only
+        // a thrown one makes the run an error, even when other artifacts landed.
         isError: failed,
       }
     },
   )
-
-  // ─── Resources ──────────────────────────────────────────────────
 
   server.resource(
     'context',
@@ -666,8 +609,6 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServer {
       }
     },
   )
-
-  // ─── Prompts ────────────────────────────────────────────────────
 
   server.prompt(
     'guren_review',

@@ -22,9 +22,8 @@ describe('createControllerModuleMock with an application module', () => {
   })
 
   it('leaves a route registrar importable without mocking its call-time deps', () => {
-    // The registrar reaches `requireAuthenticated`, which the mock does not
-    // carry — harmless, because only what a module index touches at import
-    // time has to be mocked. Registering routes needs a real router.
+    // The registrar reaches `requireAuthenticated`, which the mock does not carry:
+    // only what a module index touches at import time has to be mocked.
     expect(() => widgetModule.routes?.({} as never)).toThrow(/requireAuthenticated/)
   })
 })

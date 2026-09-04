@@ -18,8 +18,7 @@ describe('makeResource', () => {
         'export class CommentResource extends Resource<CommentRecord, CommentResourceData>',
       )
       expect(content).toContain('export interface CommentResourceData extends Record<string, unknown>')
-      // id type is derived from the record, not hardcoded — a UUID/text primary
-      // key must not be forced through an incorrect `number` cast.
+      // A UUID/text primary key must not be forced through a `number` cast.
       expect(content).toContain("id: CommentRecord['id']")
       expect(content).toContain('id: this.resource.id,')
       expect(content).not.toContain('as number')

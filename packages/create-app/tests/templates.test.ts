@@ -22,10 +22,9 @@ async function collectTemplateFiles(): Promise<string[]> {
       continue
     }
 
-    // Recursive readdir yields platform separators; normalize so the
-    // assertions below can be written one way.
-    // A template directory can hold a package.json, so someone running
-    // `bun install` in one would otherwise drag dependency ignore files in.
+    // Recursive readdir yields platform separators; normalize them. A template
+    // directory can hold a package.json, so a stray `bun install` in one would
+    // otherwise drag dependency ignore files in.
     files.push(...entries
       .map((entry) => `${pkg.name}/templates/${entry.replaceAll('\\', '/')}`)
       .filter((entry) => !entry.split('/').includes('node_modules')))
@@ -36,10 +35,8 @@ async function collectTemplateFiles(): Promise<string[]> {
 
 describe('scaffolding templates', () => {
   // npm silently drops every file literally named `.gitignore` from a published
-  // tarball, so a template that ships one scaffolds fine from the monorepo and
-  // ships nothing to real users. The convention is `_gitignore`. The packed
-  // tarball is checked directly by scripts/smoke/fresh-app.ts; this is the fast
-  // gate that runs on every `bun run test:bun`.
+  // tarball, so the convention is `_gitignore`. scripts/smoke/fresh-app.ts
+  // checks the packed tarball; this is the fast gate on every `test:bun`.
   it('carry no file literally named .gitignore', async () => {
     const files = await collectTemplateFiles()
 

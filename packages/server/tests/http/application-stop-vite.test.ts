@@ -91,12 +91,9 @@ describe('Application.stop and the managed Vite dev server', () => {
   })
 
   /**
-   * The listener-count case in `application-stop.test.ts` runs `vite: false`, so
-   * it only ever watched the Bun half. This is the same guarantee on the half
-   * that starts a *second* set of handlers — and where a close that only reset
-   * a boolean used to leave the first set attached. The stale set is worse than
-   * its count: its signal handler runs its own `process.exit()`, so it can end
-   * the process before the live set has finished shutting down.
+   * The listener-count guarantee on the Vite half, which starts a *second* set of
+   * handlers. A stale set is worse than its count: its signal handler runs its own
+   * `process.exit()`, ending the process before the live set finishes.
    */
   it('detaches the Vite teardown handlers too, across repeated cycles', async () => {
     const app = new Application()
@@ -121,10 +118,8 @@ describe('Application.stop and the managed Vite dev server', () => {
   })
 
   it('closes nothing extra when listen() started no Vite dev server', async () => {
-    // An externally supplied asset URL means listen() starts nothing of its
-    // own. It still clears the stale active server it found — that is
-    // listen()'s existing behaviour, not stop()'s — so the assertion that
-    // matters is that stop() adds no second close on top of it.
+    // An externally supplied asset URL means listen() starts nothing of its own,
+    // though it still clears the stale active server: stop() must add no second close.
     const strayClose = mock(async () => {})
     process.env.VITE_DEV_SERVER_URL = 'http://localhost:6000'
     seedPreviousViteDevServer(

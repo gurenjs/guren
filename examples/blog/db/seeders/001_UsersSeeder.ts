@@ -13,8 +13,7 @@ export default defineSeeder(async ({ db }) => {
         name: 'Demo User',
         email: 'demo@guren.dev',
         passwordHash,
-        // Pre-verified so the seeded demo account can reach /dashboard
-        // immediately — matches the account's role as a login E2E fixture.
+        // Pre-verified so this login E2E fixture reaches /dashboard immediately.
         emailVerifiedAt: new Date(),
       },
     ])

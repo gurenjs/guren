@@ -63,7 +63,6 @@ async function resolveRenderingMode(flagValue: unknown): Promise<RenderingMode> 
     return normalized as RenderingMode
   }
 
-  // In non-interactive environments (CI, piped stdin), default to SSR
   if (!process.stdin.isTTY) {
     return 'ssr'
   }
@@ -112,10 +111,8 @@ async function resolveDatabase(flagValue: unknown): Promise<DatabaseDriver> {
 }
 
 // Mirrors AGENT_TARGETS in @guren/cli's agent-targets.ts — create-app cannot
-// import it (the CLI is installed into the scaffolded app, not here). The
-// app's own `guren agent:init --target` re-validates, so drift fails loud at
-// install time, and tests/agent-choices-mirror.test.ts pins the two lists
-// against each other.
+// import it (the CLI is installed into the scaffolded app, not here), so
+// tests/agent-choices-mirror.test.ts pins the two lists against each other.
 const AGENT_CHOICES = ['claude', 'codex', 'cursor', 'copilot', 'opencode'] as const
 type AgentChoice = (typeof AGENT_CHOICES)[number]
 const AGENT_CHOICE_SET = new Set<string>(AGENT_CHOICES)
@@ -124,9 +121,8 @@ const DEFAULT_AGENTS: AgentChoice[] = ['claude']
 
 /**
  * The selection handed to `guren agent:init --target`: agent names, `['all']`
- * forwarded verbatim (the app's CLI owns the expansion, so a framework
- * release that learns a new target is not narrowed by this list), or null
- * when the user opted out of the harness entirely.
+ * forwarded verbatim so the app's CLI owns the expansion, or null when the user
+ * opted out of the harness entirely.
  */
 async function resolveAgents(flagValue: unknown): Promise<string[] | null> {
   // citty accumulates a repeated --agents flag into an array; accept both

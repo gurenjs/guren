@@ -11,10 +11,8 @@ const NOW = new Date('2087-03-14T01:59:26.535Z')
 
 describe('dailyFilePath', () => {
   test('should name the file the way DailyFileChannel always has', () => {
-    // The format itself, pinned. The channel wrote `dir/name-YYYY-MM-DD.ext`
-    // before this rule was extracted out of it, and every file already on an
-    // operator's disk carries that spelling — a reader derived from a changed
-    // rule would stop seeing them.
+    // Pinned: every file already on an operator's disk carries this spelling,
+    // and a reader derived from a changed rule would stop seeing them.
     expect(dailyFilePath('/var/log/app.log', NOW)).toBe('/var/log/app-2087-03-14.log')
     expect(dailyFilePath('./storage/logs/agent-audit.log', NOW)).toBe('storage/logs/agent-audit-2087-03-14.log')
     expect(dailyFilePath('agent-audit.log', NOW)).toBe('agent-audit-2087-03-14.log')
@@ -43,8 +41,8 @@ describe('matchDailyFileDate', () => {
 
   test('should treat a base path with regex metacharacters literally', () => {
     // Unescaped, `app.v1`'s dot matches any character, so `appXv1-…` would be
-    // read as one of this base path's files — and the retention sweep that
-    // consumes this match deletes what it matches.
+    // read as one of this base path's files — and the retention sweep deletes
+    // what it matches.
     expect(matchDailyFileDate('/var/log/app.v1.log', 'app.v1-2087-03-14.log')).toBe('2087-03-14')
     expect(matchDailyFileDate('/var/log/app.v1.log', 'appXv1-2087-03-14.log')).toBeNull()
   })
@@ -98,18 +96,11 @@ describe('DailyFileChannel through the extracted rule', () => {
   })
 
   test('should sweep a base path that names no directory, against the working directory', () => {
-    // `path.parse('audit.log').dir` is the empty string, and `existsSync('')`
-    // is false — so a channel configured with a bare filename used to return
-    // from `cleanup()` before looking at anything, and its retention window
-    // never expired a single file however old. `path.dirname` answers `'.'`
-    // for the same input, which is the directory the channel is already
-    // writing into, so the sweep now runs where the files are.
-    //
-    // Pinned because that is a behaviour change to shared logging
-    // infrastructure, not only to the audit trail: every `DailyFileChannel`
-    // configured with a relative bare name starts deleting files it previously
-    // left alone, and the only thing that keeps it to its own is
-    // `matchDailyFileDate`.
+    // `path.parse('audit.log').dir` is `''` and `existsSync('')` is false, so a
+    // bare filename used to skip `cleanup()` entirely; `path.dirname` answers
+    // `'.'`, the directory the channel writes into. Pinned because every
+    // `DailyFileChannel` on a relative bare name now deletes files it used to
+    // leave alone, and only `matchDailyFileDate` keeps it to its own.
     const dir = tempDir()
     const originalCwd = process.cwd()
     try {

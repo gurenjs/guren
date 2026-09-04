@@ -1,12 +1,8 @@
 /**
  * The WebMCP client's contract: which tools it registers, and what one
- * `execute` actually puts on the wire.
- *
- * Every fixture goes through the real `deriveAgentTools` on a real `Router`
- * rather than a hand-written tool object. A hand-written `inputSources` would
- * let a request-splitting bug pass here and fail against the manifest a real
- * app generates — the two have to be the same shape or these tests prove
- * nothing about the client.
+ * `execute` puts on the wire. Every fixture goes through the real
+ * `deriveAgentTools` on a real `Router`: a hand-written `inputSources` would
+ * let a request-splitting bug pass here and fail against a real app's manifest.
  */
 import { describe, test, expect, afterEach } from 'bun:test'
 import { z } from 'zod'
@@ -77,8 +73,7 @@ interface RegisteredCall {
 
 /**
  * A host implementing the *current* draft: `registerTool(descriptor,
- * { signal })`, no `unregisterTool` at all, and aborting the signal is what
- * removes the tool. `live` is what the page would still expose.
+ * { signal })`, no `unregisterTool`, aborting the signal removes the tool.
  */
 class FakeModelContext implements ModelContextLike {
   readonly calls: RegisteredCall[] = []
@@ -107,8 +102,7 @@ class FakeModelContext implements ModelContextLike {
 
 /**
  * A host of the earlier generation: it has `unregisterTool` and ignores the
- * options argument entirely, the way WebIDL conversion drops a dictionary
- * member the host does not declare.
+ * options argument, the way WebIDL conversion drops an undeclared member.
  */
 class LegacyModelContext implements ModelContextLike {
   readonly registeredNames: string[] = []
@@ -126,13 +120,10 @@ class LegacyModelContext implements ModelContextLike {
 }
 
 /**
- * A `fetch` that records what it was handed and answers canned.
- *
- * `requests` holds `new Request(input, init)` — what a real `fetch` derives
- * — not the Request the client passed in. The client depends on an init
- * carrying nothing but a signal leaving method, headers and body untouched;
- * recording the input directly would assert that claim against itself and
- * pass however the platform actually behaves.
+ * A `fetch` that records what it was handed and answers canned. `requests`
+ * holds `new Request(input, init)` — what a real `fetch` derives — not the
+ * Request the client passed in: recording the input directly would assert the
+ * "init carries only a signal" claim against itself.
  */
 function recordingFetch(response: () => Response): {
   fetch: typeof fetch
@@ -157,11 +148,9 @@ function json(body: unknown, status = 200): Response {
 }
 
 /**
- * Install a `document` stub carrying a cookie string, and restore whatever
- * was there. bun:test has no DOM, and the CSRF read is a `document.cookie`
- * read by design — it is the same rule the generated API client applies, and
- * routing it through an injection seam would be testing a seam this module
- * would not otherwise have.
+ * Install a `document` stub carrying a cookie string, and restore whatever was
+ * there. bun:test has no DOM, and the CSRF read is a `document.cookie` read by
+ * design — an injection seam would be testing a seam this module lacks.
  */
 const documentRestores: Array<() => void> = []
 
@@ -196,12 +185,9 @@ describe('registerAgentTools', () => {
     const anchor = new FakeModelContext()
 
     // The load-bearing half of this test is that it *compiles*: no cast, no
-    // helper, the one line the README documents. `generatedManifest` is
-    // `as const`, so it is readonly to the leaves and its properties are
-    // literal types — the shape `WebMcpToolSource` exists to admit, and the
-    // shape every other fixture here (built from `deriveAgentTools`, hence
-    // mutable) would keep satisfying even if the interface stopped admitting
-    // it.
+    // helper. `generatedManifest` is `as const`, readonly to the leaves — the
+    // shape `WebMcpToolSource` exists to admit, and the one every other
+    // fixture here (mutable, from `deriveAgentTools`) would satisfy anyway.
     const registration = await registerAgentTools(generatedManifest, { modelContext: anchor })
 
     expect(registration.supported).toBe(true)
@@ -425,9 +411,8 @@ describe('tool execution', () => {
     await anchor.descriptor('comments.store').execute({ id: 7, text: 'hello' })
 
     // Read off `new Request(built, { signal })`, the way a real fetch derives
-    // it (see recordingFetch): method, headers and body all have to survive
-    // an init that overrides none of them, or the client would be posting an
-    // empty GET without anything here noticing.
+    // it: method, headers and body all have to survive an init that overrides
+    // none of them, or the client would be posting an empty GET.
     const request = wire.requests[0]!
     expect(request.method).toBe('POST')
     expect(new URL(request.url).pathname).toBe('/posts/7/comments')
@@ -570,9 +555,8 @@ describe('tool execution', () => {
     await anchor.descriptor('comments.store').execute({ id: 1, text: 'hi' })
 
     // Without these the Request defaults to cors + follow, and `fetch` strips
-    // only Authorization across a cross-origin redirect — so one open
-    // redirect in the app would replay this body and X-XSRF-TOKEN to another
-    // host. Asserted as exact init members because that is the whole fix.
+    // only Authorization across a cross-origin redirect — so one open redirect
+    // would replay this body and X-XSRF-TOKEN to another host.
     const init = wire.inits[0]!
     expect(init.mode).toBe('same-origin')
     expect(init.redirect).toBe('manual')

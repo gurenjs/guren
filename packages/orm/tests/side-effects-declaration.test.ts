@@ -6,24 +6,13 @@ import { join } from 'node:path'
  * Pins the `"sideEffects"` array in packages/orm/package.json to the files that
  * actually carry the side effect.
  *
- * `src/instance-guard.ts` detects a second copy of @guren/orm in one process —
- * the failure that otherwise shows up as "database has not been configured" on
- * models imported through the extra copy. It is imported for that effect alone,
- * so a bundler told the package is side-effect-free would drop it.
- *
- * The array form is what prevents that, but only while its entries name real
- * files, and that is the part nothing else checks. `./dist/instance-guard.js`
- * looks like the obvious entry and is wrong: tsdown bundles the guard into the
- * barrel, so that path matches nothing and the guard survives only by luck.
- * The right entry is whatever the build actually emits, and the entry list in
- * tsdown.config.ts is what decides that: giving the guard its own entry does
- * emit a stably named `./dist/instance-guard.js`, but in the same move stops
- * `./dist/index.js` carrying the guard, so one correct entry is simply traded
- * for the other. The declaration follows the build; it never leads it.
- *
- * A wrong path fails open in the worst way: everything builds, every test
- * passes, and the loss appears only in someone else's bundled app as a warning
- * that stopped being emitted.
+ * `src/instance-guard.ts` detects a second copy of @guren/orm in one process
+ * ("database has not been configured" on models from the extra copy). It is
+ * imported for that effect alone, so a bundler told the package is side-effect-free
+ * drops it. The entries must name what the build emits: `./dist/instance-guard.js`
+ * matches nothing while tsdown bundles the guard into the barrel, and giving it its
+ * own entry only moves the guard off `./dist/index.js`. A wrong path fails open —
+ * everything builds and passes, and the loss appears only in a bundled app.
  */
 
 const ORM_ROOT = join(import.meta.dir, '..')
@@ -43,11 +32,9 @@ const manifest = JSON.parse(readFileSync(join(ORM_ROOT, 'package.json'), 'utf8')
 
 describe('@guren/orm sideEffects declaration', () => {
   test('uses the array form, not a blanket false', () => {
-    // `false` would license dropping instance-guard outright. Bun happens to
-    // keep it anyway (it will not treat the guard's top-level global write as
-    // pure), which is exactly why this needs asserting rather than measuring:
-    // rollup and webpack drop a bare-imported module from a side-effect-free
-    // package by design, and no Guren gate bundles with either.
+    // `false` would license dropping instance-guard outright. Bun keeps it anyway,
+    // which is why this is asserted rather than measured: rollup and webpack drop a
+    // bare-imported module from a side-effect-free package, and no gate bundles with either.
     expect(Array.isArray(manifest.sideEffects)).toBe(true)
   })
 
@@ -65,21 +52,18 @@ describe('@guren/orm sideEffects declaration', () => {
   test('every declared entry names a file that carries the guard', () => {
     const wrong: string[] = []
 
-    // Whether dist was built at all, decided once from the barrel rather than
-    // per entry. Skipping each missing dist file individually is fail-open: it
-    // is precisely how `./dist/instance-guard.js` — a path this build never emits —
+    // Whether dist was built at all, decided once from the barrel. Skipping each
+    // missing dist file individually is fail-open: a path the build never emits
     // would read as "not built yet" and pass forever.
     const distBuilt = readIfPresent(join(ORM_ROOT, 'dist/index.js')) !== null
 
     for (const entry of manifest.sideEffects as string[]) {
-      // Globs would need matching rather than reading; none are used today and
-      // one would silently skip this check, so it is called out instead.
+      // A glob would need matching rather than reading, and would silently skip this check.
       expect(entry).not.toContain('*')
 
       const isDist = entry.startsWith('./dist/')
-      // A fresh checkout has no dist/ until `bun run build`; that is the only
-      // reason to skip. Once dist exists, a declared dist file that does not is
-      // the bug this test is for.
+      // A fresh checkout has no dist/ until `bun run build`; that is the only reason
+      // to skip. Once dist exists, a declared file that does not is the bug under test.
       if (isDist && !distBuilt) continue
 
       const contents = readIfPresent(join(ORM_ROOT, entry))

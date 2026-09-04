@@ -24,10 +24,8 @@ import {
   resolveModelStringArrayConfig,
 } from './model-parser'
 import { parseSourceFile } from './parse-cache'
-// The controller-body vocabulary lives beside the scan that produces the
-// bodies, so every command judging an action reads one copy of it — and every
-// pattern naming a `Controller` member stays inside the reach of
-// controller-surface.test.ts.
+// Every pattern naming a `Controller` member lives beside the scan that
+// produces the bodies, inside the reach of controller-surface.test.ts.
 import {
   accessorCallPattern,
   controllerMembers,
@@ -77,16 +75,13 @@ export interface RunAuditOptions {
   auditConfigFile?: string
   /**
    * Scan installed dependencies via `bun audit` (requires registry access).
-   * Defaults to false here so embedded callers stay hermetic; the `guren
-   * audit` command enables it unless invoked with --no-deps.
+   * False by default so embedded callers stay hermetic; the `guren audit`
+   * command enables it unless invoked with --no-deps.
    */
   deps?: boolean
 }
 
-/**
- * Paths that are expected to be reachable without authentication
- * (guest flows like login/registration).
- */
+/** Guest flows (login/registration), reachable without authentication. */
 const GUEST_PATH_PATTERN = /(login|logout|register|signup|sign-up|password|forgot|reset|verification|verify-email)/i
 
 const WEBHOOK_PATH_PATTERN = /(webhook|callback)/i
@@ -107,11 +102,10 @@ export type AuthMiddlewareVerdict =
   | 'none'
 
 /**
- * Exported for tests. `route` is the shape `Router.definitions()` returns:
- * `capabilities` is always present (possibly empty) on servers with
- * capability support, and absent entirely on older servers. Typed against
- * the server's own RouteDefinition so a capability-shape change over there
- * breaks this compile instead of silently mis-detecting.
+ * `capabilities` is present (possibly empty) on servers with capability support
+ * and absent entirely on older ones. Typed against the server's own
+ * RouteDefinition so a capability-shape change there breaks this compile rather
+ * than silently mis-detecting.
  */
 export function authMiddlewareVerdict(
   route: Pick<RouteDefinition, 'middlewareNames' | 'capabilities'>,
@@ -141,10 +135,7 @@ const BODY_ACCESS_PATTERN = new RegExp(
 /**
  * The `body-payload` members that read upload bytes rather than fields. Named
  * once because the two patterns below partition `body-payload` by it: a member
- * spelled into only one of them would be a body read that counts as neither.
- * It stays a hand list rather than a `ControllerMemberKind` of its own —
- * uploads *are* body payload, and moving them to another kind would change
- * what BODY_ACCESS_PATTERN sees.
+ * spelled into only one would be a body read that counts as neither.
  */
 const FILE_UPLOAD_MEMBERS: readonly string[] = ['file', 'files']
 
@@ -163,23 +154,18 @@ const NON_FILE_BODY_ACCESS_PATTERN = new RegExp(
 )
 
 /**
- * A typed attachment write: `Post.attach(...)` (RFC 0013). The receiver must
- * be PascalCase — model classes are, and requiring it keeps a stray
- * `emitter.attach(handler)` from counting as upload validation. The attach
- * pipeline validates per the model's declaration (byte cap, header
- * dimensions, full decode, HEIC policy), which is why an action whose only
- * body reads are file()/files() feeding it needs no validateBody() to be a
- * clean pass.
+ * A typed attachment write: `Post.attach(...)` (RFC 0013). PascalCase receiver
+ * required, so a stray `emitter.attach(handler)` does not count as upload
+ * validation. The attach pipeline validates per the model's declaration, which
+ * is why an action reading only file()/files() into it needs no validateBody().
  */
 const MODEL_ATTACH_PATTERN = /\b[A-Z][A-Za-z0-9_]*\s*\.\s*attach\s*(?:<[^()]*>)?\s*\(/
 
 /**
  * A raw storage write in the same method disqualifies the attach-aware pass:
  * this rule proves co-occurrence, not data flow, so an action that reads an
- * upload, attach()es something, and *also* put()s bytes may be storing the
- * unvalidated upload through the raw path. Erring toward the existing fail
- * costs a validateBody() nudge; erring toward pass costs an unvalidated
- * upload — the audit takes the first.
+ * upload, attach()es something and *also* put()s bytes may be storing the
+ * unvalidated upload through the raw path.
  */
 const STORAGE_WRITE_PATTERN = /\.\s*put(?:File)?\s*\(/
 
@@ -203,9 +189,7 @@ export async function runAudit(options: RunAuditOptions = {}): Promise<AuditRepo
   const cwd = resolve(options.cwd ?? process.cwd())
   const findings: AuditFinding[] = []
 
-  // Kicked off first so the registry round-trip overlaps the local
-  // parsing below; the result is folded in (in stable finding order)
-  // once the local scans are done.
+  // Kicked off first so the registry round-trip overlaps the local parsing.
   const dependencyScanOutput = options.deps ? startDependencyScan(cwd) : null
 
   const { methods: controllerMethods, collisions, unreadableFiles } = await parseControllerMethods(cwd)
@@ -255,28 +239,18 @@ export async function runAudit(options: RunAuditOptions = {}): Promise<AuditRepo
   }
 }
 
-// --- Ignore config ---
-
 function configWarning(key: string, message: string, suggestion: string): AuditFinding {
   return finding(key, 'Audit ignore config', 'warn', message, suggestion)
 }
 
 /**
- * Applies config/audit.ts ignore entries to warn/fail findings (matched by
- * exact `key`, applied to every finding sharing that key). Ignored findings
- * are kept but flipped to status 'ignored' with `ignoreReason` set, rather
- * than removed — callers see the full picture.
+ * Applies config/audit.ts ignore entries to warn/fail findings, matched by exact
+ * `key` and flipped to status 'ignored' rather than removed.
  *
- * Only findings with no source `line` are eligible — those are exactly the
- * route- and model-level findings that have nowhere to attach an inline
- * `// guren-audit-ignore` comment. Findings tied to a specific line (secrets,
- * raw SQL, disabled security toggles) already have that inline mechanism, so
- * config entries targeting them are rejected rather than silently widening
- * what this file can suppress.
- *
- * Entries with a missing/empty reason, entries targeting a line-level
- * finding, and entries that never matched any finding are all reported back
- * as their own findings so ignore rules can't silently rot or overreach.
+ * Only findings with no source `line` are eligible: a line-level finding already
+ * has the inline `// guren-audit-ignore` mechanism, so config entries targeting
+ * one are rejected. Invalid, unsupported and unmatched entries are each reported
+ * as their own finding, so ignore rules cannot silently rot or overreach.
  */
 async function applyIgnoreConfig(
   cwd: string,
@@ -337,10 +311,9 @@ interface IgnoreApplicationResult {
 }
 
 /**
- * Flips every warn/fail finding whose `key` matches an ignore entry to
- * status 'ignored' — all findings sharing a key are affected, not just the
- * first. Findings with a `line` are skipped (see `applyIgnoreConfig`) and
- * their entries are reported as unsupported instead of unused.
+ * Flips every warn/fail finding whose `key` matches an ignore entry to status
+ * 'ignored'. Findings with a `line` are skipped (see `applyIgnoreConfig`) and
+ * their entries reported as unsupported instead of unused.
  */
 function applyIgnoreEntries(
   entries: AuditIgnoreEntry[],
@@ -378,13 +351,9 @@ function applyIgnoreEntries(
   return { unused, unsupported }
 }
 
-// --- Route-level checks ---
-
 /**
- * A same-named controller class in two files. The scan reports it (see
- * `controller-methods.ts`); the audit fails on it, because every route-level
- * verdict below is drawn from whichever file was scanned last and may
- * therefore describe the other class entirely.
+ * A same-named controller class in two files: every route-level verdict below is
+ * drawn from whichever file was scanned last and may describe the other class.
  */
 function controllerCollisionFinding(collision: ControllerNameCollision): AuditFinding {
   const { className, previousFile, currentFile } = collision
@@ -400,19 +369,16 @@ function controllerCollisionFinding(collision: ControllerNameCollision): AuditFi
 }
 
 /**
- * Heuristic: a controller method that both validates a request body and
- * calls forceCreate/forceUpdate is likely feeding request-derived data past
- * mass-assignment protection — the predictable "fix" for a
- * MassAssignmentException that silently reopens the hole. force* is for
- * trusted server-side values only. Static analysis cannot prove data flow,
- * so this is a review prompt (warn), never a fail.
+ * A controller method that both validates a request body and calls
+ * forceCreate/forceUpdate is likely feeding request-derived data past
+ * mass-assignment protection. Static analysis cannot prove data flow, so this is
+ * a review prompt (warn), never a fail.
  */
 function auditForceWrites(controllerMethods: Map<string, ControllerMethodInfo>, findings: AuditFinding[]): void {
   for (const [methodKey, info] of controllerMethods) {
     if (!FORCE_WRITE_PATTERN.test(info.body)) continue
     // Same predicate the route-validation check uses, so the two findings
-    // cannot disagree about whether a method validates its body — it also
-    // covers validateBodySafe and generic validateBody<T>() calls.
+    // cannot disagree about whether a method validates its body.
     if (!VALIDATE_BODY_PATTERN.test(info.body)) continue
 
     findings.push(
@@ -455,10 +421,8 @@ async function auditRoutes(
     return false
   }
 
-  // A module that failed to load isn't a load-routes.ts *failure* — the rest
-  // of the app is still analyzed — but its own routes went unchecked, which
-  // must be visible in the structured report (not just a console warning)
-  // so `guren audit --json`/CI can't mistake it for a clean pass.
+  // A module that failed to load leaves its own routes unchecked, which must
+  // reach the structured report so `guren audit --json`/CI cannot read a pass.
   for (const [index, message] of moduleWarnings.entries()) {
     findings.push(
       finding(
@@ -474,9 +438,8 @@ async function auditRoutes(
   for (const route of definitions) {
     const method = route.method.toUpperCase()
     const { safe, bodyCarrying } = describeMethod(method)
-    // No shared skip here on purpose: each phase gates on its own predicate,
-    // so a later-added phase chooses its own scope instead of silently
-    // inheriting "mutating-only" from a mid-loop `continue`.
+    // No shared skip here on purpose: each phase gates on its own predicate, so
+    // a later one cannot silently inherit a scope from a mid-loop `continue`.
 
     const routeLabel = `${method} ${route.path}`
     const controllerKey = route.controller
@@ -489,9 +452,8 @@ async function auditRoutes(
     // 1. Input validation on body-carrying routes
     if (bodyCarrying) {
       const hasRouteSchema = Boolean(route.schemas?.body)
-      // Route-level body schemas are runtime-enforced only for inline handlers.
-      // For controller actions the router intentionally leaves body validation
-      // to this.validateBody() (the schema is type-information only).
+      // Route-level body schemas are runtime-enforced only for inline handlers;
+      // for controller actions the schema is type-information only.
       const routeSchemaEnforced = hasRouteSchema && !route.controller
       const hasControllerValidation = methodInfo ? VALIDATE_BODY_PATTERN.test(methodInfo.body) : false
       const readsBody = methodInfo ? BODY_ACCESS_PATTERN.test(methodInfo.body) : false
@@ -515,9 +477,7 @@ async function auditRoutes(
         MODEL_ATTACH_PATTERN.test(methodInfo.body) &&
         !STORAGE_WRITE_PATTERN.test(methodInfo.body)
       ) {
-        // Uploads handed to Model.attach() are validated by the attachment
-        // declaration's pipeline; with no other body reads there is nothing
-        // left for validateBody() to check.
+        // With no other body reads, the attach pipeline is the whole validation.
         findings.push(
           finding(
             `validation:${routeLabel}`,
@@ -554,13 +514,9 @@ async function auditRoutes(
           ),
         )
       } else {
-        // An unanalyzable handler is a warn for an ordinary route and a fail
-        // for an agent-exposed one (RFC 0016 §13): the same unknown carries a
-        // different cost once a tool advertises the endpoint, because the
-        // caller is an autonomous agent composing payloads from a schema
-        // rather than a form the app itself rendered. Escalated in place
-        // rather than under a new key, so an existing config/audit.ts entry
-        // for this route keeps applying and the route is reported once.
+        // An unanalyzable handler is a warn for an ordinary route and a fail for
+        // an agent-exposed one (RFC 0016 §13). Escalated in place rather than
+        // under a new key, so an existing config/audit.ts entry keeps applying.
         findings.push(
           finding(
             `validation:${routeLabel}`,
@@ -580,17 +536,13 @@ async function auditRoutes(
       }
     }
 
-    // 2. Authentication on unsafe (state-changing) routes. Safe
-    // body-carrying methods (QUERY) are read routes, so they get the same
-    // treatment as GET here. Guest flows (login/register/password reset)
-    // are exempt — they must be reachable unauthenticated.
+    // 2. Authentication on unsafe (state-changing) routes. Safe body-carrying
+    // methods (QUERY) are read routes; guest flows must stay unauthenticated.
     if (!safe && !GUEST_PATH_PATTERN.test(route.path)) {
       const middlewareNames = route.middlewareNames ?? []
-      // Capability verdict (RFC 0007): the server stamps its auth guards
-      // (requireAuthenticated/requireGuest) and definitions() aggregates the
-      // stamps across aliases, groups, and inline handlers. An older server
-      // emits no `capabilities` field at all — only then fall back to the
-      // pre-capability name heuristic so mixed-version apps don't regress.
+      // Capability verdict (RFC 0007). An older server emits no `capabilities`
+      // field at all — only then does the name heuristic apply, so mixed-version
+      // apps don't regress.
       const verdict = authMiddlewareVerdict(route)
       const hasAuthMiddleware = verdict === 'verified' || verdict === 'legacy-name-match'
       const hasControllerAuth = methodInfo ? AUTH_CALL_PATTERN.test(methodInfo.body) : false
@@ -653,16 +605,12 @@ async function auditRoutes(
       }
     }
 
-    // 3. Annotation honesty (RFC 0016 §5.5). `destructiveHint: false` is the
-    // strong claim "additive updates only" — clients present such a tool as
-    // safe to call unattended, so an action that deletes behind it is a
-    // false statement about what the agent is authorizing. Only an explicit
-    // `false` is judged: the MCP spec's default for a non-read-only tool is
-    // already `true`, so an absent hint claims nothing.
+    // 3. Annotation honesty (RFC 0016 §5.5). `destructiveHint: false` claims
+    // "additive updates only", which clients read as safe to call unattended.
+    // Only an explicit `false` is judged: the MCP spec's default for a
+    // non-read-only tool is already `true`, so an absent hint claims nothing.
     if (route.agent?.destructiveHint === false) {
-      // An unread body is reported, not passed over. The escalation above
-      // states the rule this must not contradict twenty lines later: for an
-      // agent-exposed route, an unknown is a finding rather than silence.
+      // For an agent-exposed route an unknown is a finding, not silence.
       if (!methodInfo) {
         findings.push(
           finding(
@@ -696,8 +644,6 @@ async function auditRoutes(
   return true
 }
 
-// --- File-level checks ---
-
 const SCAN_DIRECTORIES = ['app', 'src', 'routes', 'config']
 
 const SECRET_PATTERN = /\b(secret|password|passwd|api[_-]?key|token|private[_-]?key)\b\s*[:=]\s*['"`]([^'"`]{8,})['"`]/i
@@ -707,28 +653,12 @@ const RAW_SQL_PATTERN = /\bsql\.raw\s*\(\s*`[^`]*\$\{/
 const UNSAFE_SQL_PATTERN = /\.unsafe\s*\(\s*`[^`]*\$\{/
 
 /**
- * Absolute links that leave the app — password reset, email verification —
- * must not be derived from the request. A request URL is reconstructed from
- * the `Host` header, which any client can forge, so an unauthenticated
- * attacker can make the app mail a victim a genuine single-use token whose
- * link points at the attacker's own server.
- *
- * The origin anchor deliberately does *not* require a `.origin`/`.host` read.
- * Requiring one missed the two most idiomatic spellings of the same bug —
- * `const url = new URL(req.url)` and `const { origin } = new URL(req.url)`,
- * both used a line or more later. Middleware that parses the request URL only
- * to reach its path is already excluded by the builder gate below, so the
- * accessor requirement bought no protection those files did not already have;
- * only the path-ish accessors stay excluded, for a same-line read inside a
- * file that does build links.
- *
- * The `[^)]` runs are bounded rather than `*`. Unbounded, a line of the shape
- * `new URL(` + whitespace + `request.url` + filler took 15s to reject here —
- * the audit reads whatever source the app happens to contain, so a generated
- * or vendored long line is enough to hang it. Measured on that input: 15,111ms
- * unbounded, 0.02ms bounded, with no change on any real match. Dropping the
- * redundant `\s*` after `\(` (it overlapped `[^)]*`) is the other half; alone
- * it still left 4-5s cases, so both are load-bearing.
+ * Absolute links that leave the app (password reset, email verification) must
+ * not be derived from the request: the URL is reconstructed from the forgeable
+ * `Host` header, so an attacker can have the app mail a victim a genuine
+ * single-use token pointing at their own server. No `.origin`/`.host` read is
+ * required (that missed `const url = new URL(req.url)` used a line later), and
+ * the `[^)]` runs are bounded: 15,111ms unbounded against 0.02ms on one line.
  */
 const REQUEST_ORIGIN_PATTERN =
   /new\s+URL\s*\([^)]{0,200}\b(?:req|request)\s*\.\s*url\b[^)]{0,200}\)(?!\s*\.\s*(?:pathname|searchParams|search|hash)\b)/
@@ -737,48 +667,26 @@ const REQUEST_ORIGIN_PATTERN =
 const HOST_HEADER_READ_PATTERN =
   /\.\s*(?:header|get)\s*\(\s*['"`](?:host|x-forwarded-host|:authority)['"`]\s*\)|\.\s*headers\s*\??\s*\.\s*host\b/i
 
-/**
- * Pairs with the above so `response.headers.get('host')` — reading a host back
- * off something the app itself produced — stays clean.
- */
+/** Pairs with the above so `response.headers.get('host')` stays clean. */
 const REQUEST_RECEIVER_PATTERN = /\b(?:req|request)\b/i
 
 /**
- * The framework's own outbound-link builders. Their presence anywhere in the
- * file is what promotes a request-derived origin from "reads its own host" to
- * "mails its own host to someone else" — and it is the whole reason the
- * generated `app/Auth/AppUrl.ts` stays clean, since its non-production
- * fallback returns a request origin but builds no link. Exempting that helper
- * by path instead would break the moment a user renames it.
- *
- * `buildTokenUrl` is the implementation; `buildPasswordResetUrl`,
- * `buildVerificationUrl`, and `buildOAuthRedirectUrl` are literal aliases of
- * it, and the latter three are what `@guren/core` actually exports. Matching
- * the bare name rather than a call also covers an aliased import
- * (`buildVerificationUrl as makeUrl`), which would otherwise skip the file
- * silently. `buildOAuthAuthorizeUrl` is deliberately absent: it builds the
- * *provider's* authorize URL, so a request-derived `redirect_uri` there is a
- * real risk but a different one, and this finding's wording would misdescribe
- * it. An audit test enumerates `@guren/core`'s `build*Url` exports against
- * this list so a fifth builder cannot land here as a silent pass.
- *
- * The boundary this draws: a controller that mails a link assembled by hand,
- * without going through these builders, is invisible here. Widening the gate
- * to guessed-at mail helper names would trade a real false-positive cost for
- * speculative coverage — the gate is a *requirement*, so loosening it makes
- * every unrelated request-origin read in a mailing file a finding.
+ * The framework's own outbound-link builders: their presence in a file is what
+ * promotes a request-derived origin from "reads its own host" to "mails it to
+ * someone else". Matched by bare name so an aliased import still counts.
+ * `buildOAuthAuthorizeUrl` is deliberately absent — a request-derived
+ * `redirect_uri` there is a different risk this finding would misdescribe. An
+ * audit test enumerates `@guren/core`'s `build*Url` exports against this list.
  */
 const LINK_BUILDER_NAMES = 'TokenUrl|PasswordResetUrl|VerificationUrl|OAuthRedirectUrl'
 
 export const LINK_BUILDER_PATTERN = new RegExp(`\\bbuild(?:${LINK_BUILDER_NAMES})\\b`)
 
 /**
- * A builder handed the request URL directly. Kept as its own anchor rather
- * than folded into `LINK_BUILDER_PATTERN.test(line) && /req\.url/.test(line)`:
- * `[^)]*` cannot cross the inner `)`, which is exactly what keeps the
- * *sanctioned* one-liner `buildVerificationUrl(`${appUrl(this.request)}/x`, …)`
- * — what the scaffold generates today — from matching. Both patterns are built
- * from one name list so a new builder cannot reach only one of them.
+ * A builder handed the request URL directly. Its own anchor rather than a
+ * two-test conjunction because `[^)]*` cannot cross the inner `)`, which is what
+ * keeps the sanctioned `buildVerificationUrl(appUrl(this.request) + '/x', …)`
+ * from matching. Built from the same name list as the pattern above.
  */
 const LINK_BUILDER_FROM_REQUEST_PATTERN = new RegExp(
   `\\bbuild(?:${LINK_BUILDER_NAMES})\\s*\\([^)]{0,200}\\b(?:req|request)\\s*\\.\\s*url\\b`,
@@ -789,9 +697,8 @@ async function auditSourceFiles(cwd: string, findings: AuditFinding[]): Promise<
   for (const dir of SCAN_DIRECTORIES) {
     files.push(...(await collectFiles(resolve(cwd, dir))))
   }
-  // Each modules/<name>/ directory already contains its own app/, routes.ts,
-  // and db/schema.ts, so scanning it as one unit covers all of the above
-  // without re-deriving SCAN_DIRECTORIES per module.
+  // Each modules/<name>/ holds its own app/, routes.ts and db/schema.ts, so
+  // scanning it as one unit covers SCAN_DIRECTORIES without re-deriving them.
   for (const moduleName of await listModuleNames(cwd)) {
     files.push(...(await collectFiles(resolve(cwd, 'modules', moduleName))))
   }
@@ -821,7 +728,6 @@ async function auditSourceFiles(cwd: string, findings: AuditFinding[]): Promise<
         continue
       }
 
-      // Hardcoded secrets
       const secretMatch = SECRET_PATTERN.exec(line)
       if (secretMatch && !SECRET_ALLOWLIST.test(line)) {
         secretCount++
@@ -838,7 +744,6 @@ async function auditSourceFiles(cwd: string, findings: AuditFinding[]): Promise<
         )
       }
 
-      // Raw SQL with interpolation
       if (RAW_SQL_PATTERN.test(line) || UNSAFE_SQL_PATTERN.test(line)) {
         rawSqlCount++
         findings.push(
@@ -854,10 +759,8 @@ async function auditSourceFiles(cwd: string, findings: AuditFinding[]): Promise<
         )
       }
 
-      // Disabled security defaults
-      // `hostAuthorization` belongs here for the same reason as the rest: the
-      // templates themselves shipped `hostAuthorization: ... ? false : {...}`,
-      // which turned the check off in production and audited clean.
+      // `hostAuthorization` is here because the templates themselves shipped
+      // `hostAuthorization: ... ? false : {...}`, off in production and clean.
       const toggleMatch = /\b(autoCsrf|securityHeaders|csrf|hostAuthorization)\s*:\s*false\b/.exec(line)
       if (toggleMatch) {
         toggleCount++
@@ -874,10 +777,8 @@ async function auditSourceFiles(cwd: string, findings: AuditFinding[]): Promise<
         )
       }
 
-      // Outbound links built from the client-controlled request host.
       // Phrased conditionally, like the force-write rule: co-occurrence in one
-      // file is not proof the host reaches the link, and static analysis here
-      // cannot establish that it does.
+      // file is not proof the host reaches the link.
       if (
         buildsOutboundLink &&
         (REQUEST_ORIGIN_PATTERN.test(line) ||
@@ -916,12 +817,9 @@ async function auditSourceFiles(cwd: string, findings: AuditFinding[]): Promise<
   }
 }
 
-// --- Model checks ---
-
 /**
- * Column names that look like credentials or secrets. Matching columns
- * must be listed in the model's `static hidden` (or excluded via
- * `static visible`) so serialize()/toJSON() never exposes them.
+ * Column names that look like credentials. A match must be listed in the model's
+ * `hidden` (or excluded via `visible`) so serialize()/toJSON() never emits it.
  */
 const SENSITIVE_COLUMN_PATTERN = /(password|passwd|secret|token|salt|hash)/i
 
@@ -932,10 +830,9 @@ interface ModelSerializationInfo {
 }
 
 /**
- * Extract the model's table plus `static hidden`/`static visible` from a model
- * source via AST (regexes would count string literals inside comments). The
- * table is resolved through `extractTableIdentifier`, so models that bind it
- * via `defineModel(users, …)` are covered as well as `static table = users`.
+ * The model's table plus `hidden`/`visible`, read via AST because a regex would
+ * count string literals inside comments. Covers `defineModel(users, …)` as well
+ * as `static table = users`.
  */
 function parseModelSerializationInfo(source: string, filePath: string): ModelSerializationInfo {
   const info: ModelSerializationInfo = {}
@@ -969,18 +866,15 @@ async function auditModels(cwd: string, findings: AuditFinding[]): Promise<void>
     const name = classNameFromPath(filePath)
     const source = await readFile(filePath, 'utf-8')
 
-    // AST classification, not source-text matching — a comment mentioning
-    // AuthenticatableModel must not flip this model to structurally
-    // protected, and a modifier-prefixed fillable must still count.
+    // AST classification, not source text: a comment mentioning
+    // AuthenticatableModel must not flip this model to structurally protected.
     const ast = parseSourceFile(source, filePath)
     const classDecl = ast ? firstClassDeclaration(ast.program.body) : null
     const hasFillable = classDecl ? hasModelConfig(classDecl, 'fillable') : false
     const isAuthenticatable = classDecl ? classUsesAuthenticatableBase(classDecl) : false
 
-    // Authenticatable models are structurally protected: their credential
-    // columns are denied from mass assignment by the framework, so a missing
-    // fillable is not the exposure it is on a plain model. Warning here
-    // would be a false positive; note the structural cover instead.
+    // Authenticatable models deny their credential columns from mass assignment
+    // structurally, so a missing fillable is not the exposure it is elsewhere.
     findings.push(
       finding(
         `mass-assignment:${name}`,
@@ -1032,8 +926,6 @@ async function auditModels(cwd: string, findings: AuditFinding[]): Promise<void>
     )
   }
 }
-
-// --- Rendering ---
 
 export function renderAuditReport(report: AuditReport): void {
   consola.box(`Guren security audit for ${report.cwd}`)

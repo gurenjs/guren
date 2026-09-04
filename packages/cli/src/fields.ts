@@ -2,11 +2,8 @@
  * The `--fields "name:type,..."` vocabulary shared by the scaffolders that
  * accept one (`make:feature`, `make:validator`, the `resource` blueprint),
  * and its sibling `--attach "name:kind,..."` (`make:feature`, the `resource`
- * blueprint).
- *
- * It lives here rather than in any one generator so that none of them has to
- * reach into another to parse the same string — `make:feature` composes
- * `make:validator`, so a definition owned by either would be a cycle.
+ * blueprint). Here rather than in any one generator because `make:feature`
+ * composes `make:validator`, so a definition owned by either would be a cycle.
  */
 
 import { isIdentifier } from './utils'
@@ -22,12 +19,10 @@ export interface FieldDefinition {
 }
 
 /**
- * What `make:feature` scaffolds when no `--fields` is given: enough of a shape
- * for the generated model, controller, and pages to agree with each other.
- *
- * `make:validator` deliberately does not share this — a standalone validator
- * has no siblings to agree with, so inventing `title`/`body` for an entity
- * that has neither is two fields the caller has to notice and delete.
+ * What `make:feature` scaffolds when no `--fields` is given: enough shape for
+ * the generated model, controller and pages to agree. `make:validator`
+ * deliberately does not share it — a standalone validator has no siblings to
+ * agree with, so these would be two fields the caller has to delete.
  */
 export const DEFAULT_FIELDS: FieldDefinition[] = [
   { name: 'title', type: 'string' },
@@ -46,9 +41,8 @@ export function parseFieldsString(fieldsStr: string): FieldDefinition[] {
 
     if (!name) throw new Error(`Invalid field definition: "${field}"`)
 
-    // The name becomes an object key, a property access and a state key in the
-    // generated code, so anything that is not an identifier produces a file
-    // that cannot be parsed — better to say so than to emit it.
+    // The name becomes an object key, a property access and a state key, so a
+    // non-identifier produces a generated file that cannot be parsed.
     if (!isIdentifier(name)) {
       throw new Error(`Invalid field name "${name}". Use a valid identifier, e.g. "publishedAt".`)
     }
@@ -71,12 +65,10 @@ export interface AttachmentDefinition {
 }
 
 /**
- * Names `isIdentifier` accepts that still cannot be bound with `const` — a
- * hasOne collection becomes exactly that in the generated store action
- * (`const cover = await this.file('cover')`), so a reserved word there is a
- * file that does not parse. Field names deliberately skip this list: they
- * only ever appear as object keys and property accesses, where reserved
- * words are legal.
+ * Names `isIdentifier` accepts that still cannot be bound with `const`, which
+ * is what a hasOne collection becomes in the generated store action. Field
+ * names deliberately skip this list: they only ever appear as object keys and
+ * property accesses, where reserved words are legal.
  */
 const RESERVED_WORDS = new Set([
   'await', 'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default', 'delete',
@@ -87,18 +79,11 @@ const RESERVED_WORDS = new Set([
 ])
 
 /**
- * `--attach "cover:one,images:many"`, mirroring `--fields`' shape: comma
- * separates collections, colon separates the name from its kind, and an
- * omitted kind defaults the way an omitted field type does (`cover` reads as
- * `cover:one` — the common case, like Rails' `has_one_attached`).
- *
+ * `--attach "cover:one,images:many"`, mirroring `--fields`' shape; an omitted
+ * kind defaults to `one`, and the empty string means "no attachments".
  * Duplicates are rejected here, unlike in `parseFieldsString`: a repeated
- * field is a harmless duplicated form input, but a repeated collection is a
- * duplicate object key in the generated `Attachable` declaration — the second
- * silently wins and the first kind is discarded.
- *
- * The empty string means "no attachments", matching how an omitted `--attach`
- * reaches the scaffolders.
+ * collection is a duplicate object key in the generated `Attachable`
+ * declaration, where the second silently wins.
  */
 export function parseAttachString(attachStr: string): AttachmentDefinition[] {
   if (!attachStr.trim()) return []
@@ -107,16 +92,14 @@ export function parseAttachString(attachStr: string): AttachmentDefinition[] {
   return attachStr.split(',').map((entry) => {
     const parts = entry.trim().split(':')
     const name = parts[0]?.trim()
-    // The default applies only to a genuinely omitted kind — an empty or
-    // extra segment (`cover:`, `cover::many`, `cover:many:typo`) is a typo
-    // that silently defaulting would mask.
+    // The default applies only to a genuinely omitted kind: an empty or extra
+    // segment (`cover:`, `cover::many`) is a typo defaulting would mask.
     const kind = parts.length > 1 ? parts[1]?.trim() : 'one'
 
     if (!name || parts.length > 2) throw new Error(`Invalid attachment definition: "${entry}"`)
 
-    // Same rule as field names, for the same reason: the name becomes an
-    // object key in the model declaration, a variable in the generated store
-    // action, and a multipart field name.
+    // Same rule as field names: the name becomes an object key, a variable in
+    // the generated store action, and a multipart field name.
     if (!isIdentifier(name)) {
       throw new Error(`Invalid attachment name "${name}". Use a valid identifier, e.g. "coverImage".`)
     }

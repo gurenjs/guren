@@ -3,8 +3,6 @@ import { Hono } from 'hono'
 import { z } from 'zod'
 import { Controller } from '../../src/mvc/Controller'
 
-// ─── Test Schemas ────────────────────────────────────────────
-
 const BodySchema = z.object({
   email: z.email(),
   name: z.string().min(1),
@@ -18,8 +16,6 @@ const QuerySchema = z.object({
 const ParamsSchema = z.object({
   id: z.coerce.number().int().positive(),
 })
-
-// ─── Test Controller ─────────────────────────────────────────
 
 class TestController extends Controller {
   async bodySafe() {
@@ -37,8 +33,6 @@ class TestController extends Controller {
     return this.json(result)
   }
 }
-
-// ─── Helpers ─────────────────────────────────────────────────
 
 function createApp() {
   const app = new Hono()
@@ -63,8 +57,6 @@ function createApp() {
 
   return app
 }
-
-// ─── Tests ───────────────────────────────────────────────────
 
 describe('Controller Safe Validation', () => {
   let app: Hono
@@ -96,7 +88,7 @@ describe('Controller Safe Validation', () => {
         body: JSON.stringify({ email: 'not-an-email', name: '' }),
       })
 
-      expect(res.status).toBe(200) // no throw, controller returns 200
+      expect(res.status).toBe(200) // the safe variant does not throw
       const json = await res.json()
       expect(json.success).toBe(false)
       expect(json.errors).toBeDefined()

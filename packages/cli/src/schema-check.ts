@@ -10,30 +10,10 @@ const TIMESTAMP_BUILDER = 'timestamp'
 
 /**
  * Flags Postgres `timestamp` columns declared without `{ withTimezone: true }`.
- *
- * `timestamp without time zone` stores a bare wall clock, and who reads it
- * decides what that clock meant: `defaultNow()` records the wall clock of the
- * *database session's* zone while the app reads the column back as UTC, so on
- * a non-UTC session the stored instant is simply wrong — and any non-Drizzle
- * reader (psql, a report, another service) sees a different instant than the
- * app does for values the app wrote itself.
- *
- * Postgres only. MySQL has no `timestamptz` and its TIMESTAMP is already
- * UTC-normalized; sqlite stores epoch integers via `integer(..., { mode })`.
- * Both are matched by the declaring table's factory, not by the file, so a
- * schema mixing dialects is judged a table at a time.
- *
- * Judges tables the caller already parsed, so a run reads `db/schema.ts` once
- * however many checks consume it.
- *
- * Silence is not proof: a column the parser cannot read statically is skipped
- * rather than guessed at, and `schema-parser.ts` documents the spellings it
- * does not resolve. Reporting a column that is actually fine costs more here
- * than missing one — the fix this suggests is a migration.
- *
- * Emits one result per offending column and nothing when a schema is clean —
- * the shape the per-file checks in `check.ts` use, since a pass per column
- * would bury everything else in the report.
+ * `timestamp without time zone` stores a bare wall clock: `defaultNow()` records the
+ * *database session's* zone while the app reads it back as UTC. Postgres only, matched per
+ * table by the declaring factory. Silence is not proof — a column the parser cannot read
+ * statically is skipped rather than guessed at, since the fix suggested is a migration.
  */
 export function checkSchemaTimestamps(tables: SchemaTable[]): CheckResult[] {
   const results: CheckResult[] = []
@@ -51,12 +31,9 @@ export function checkSchemaTimestamps(tables: SchemaTable[]): CheckResult[] {
       // here" would be a guess, not a reading.
       if (column.opaqueOptions) continue
 
-      // The suggestion has to name the database column, not the object key it
-      // is declared under — they differ in every scaffolded schema
-      // (`createdAt: timestamp('created_at')`). Under drizzle's name-less form
-      // the database name is derived from a casing config this parser does not
-      // read, so the SQL hint is dropped rather than quoting a name that would
-      // not resolve.
+      // The suggestion names the database column, not the object key it is declared
+      // under (`createdAt: timestamp('created_at')`). Under drizzle's name-less form that
+      // name comes from a casing config this parser does not read, so the hint is dropped.
       const declaration = column.columnName
         ? `timestamp('${column.columnName}', { withTimezone: true })`
         : `timestamp({ withTimezone: true })`

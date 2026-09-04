@@ -27,10 +27,8 @@ import {
   TokenListResponseSchema,
 } from '../app/Http/Validators/OpenApiSchema.js'
 
-// Rate limit stores (shared for consistent limiting)
 const rateLimitStore = new MemoryRateLimitStore()
 
-// Rate limiters with different configurations
 const strictRateLimit = createRateLimitMiddleware({
   limit: 5,
   windowMs: 15 * 60 * 1000, // 15 minutes
@@ -49,7 +47,6 @@ const userRateLimit = createRateLimitMiddleware({
   },
 })
 
-// Bearer token auth middleware
 const requireAuth = createBearerTokenMiddleware({
   store: getTokenStore(),
 })

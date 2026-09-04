@@ -2,15 +2,9 @@ import { FormRequest } from '../../src/http/FormRequest'
 import { required, string } from '../../src/http/validation/rules'
 
 /**
- * A type-only fixture: nothing here is ever executed, and `bun run typecheck`
- * is the assertion.
- *
- * `FormRequest.user()` used to be declared `(): unknown` while the
- * `AuthContext.user()` it delegates to was already async, so it handed back a
- * pending promise that the return type hid. No runtime test can hold that
- * line — every caller that awaits behaves identically under both signatures —
- * so the assignment below is the guard: it fails to compile if `user()` ever
- * goes back to returning a non-promise.
+ * A type-only fixture: `bun run typecheck` is the assertion. No runtime test can
+ * hold this line, since every caller that awaits behaves the same either way —
+ * the assignment below fails to compile if `user()` returns a non-promise.
  */
 export class TypedUserRequest extends FormRequest<{ title: string }> {
   rules() {

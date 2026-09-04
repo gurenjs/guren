@@ -8,13 +8,10 @@ export default defineConfig({
   resolve: {
     alias: [
       { find: '@', replacement: rootDir },
-      // Exact-match root entries first, then one capture-group rule per
-      // package for subpaths. The replacement must re-append the captured
-      // path itself: path.resolve() strips trailing slashes, so a bare
-      // prefix-replacement silently yields src<subpath> (no separator) —
-      // the trap the old exact-match patches existed to dodge. Extensionless
-      // on purpose: vite's resolver then handles both `src/foo.ts` and
-      // `src/foo/index.ts`.
+      // Each subpath rule re-appends the captured path itself: path.resolve()
+      // strips trailing slashes, so a bare prefix-replacement silently yields
+      // src<subpath> with no separator. Extensionless on purpose, so vite
+      // resolves both `src/foo.ts` and `src/foo/index.ts`.
       { find: /^@guren\/testing$/, replacement: resolveFromRoot('../packages/testing/src/index.ts') },
       { find: /^@guren\/testing\/(.+)$/, replacement: resolveFromRoot('../packages/testing/src') + '/$1' },
       { find: /^@guren\/server$/, replacement: resolveFromRoot('../packages/server/src/index.ts') },
@@ -30,13 +27,10 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
-    // Every test here runs in single-digit milliseconds except the two that
-    // reach live shiki — FsDocsStore.getRendered and HomeController.index,
-    // which take the live-highlighting path because shouldUsePrerendered() is
-    // false outside production. Loading the WASM regex engine, the themes and
-    // one grammar per fenced language costs ~1.2s on its own, ~2s under normal
-    // full-suite contention and ~4s on an otherwise loaded machine, so the 5s
-    // default sits just above a cold shiki start and flakes under load.
+    // Two tests reach live shiki (FsDocsStore.getRendered, HomeController.index;
+    // shouldUsePrerendered() is false outside production). A cold shiki start
+    // costs ~1.2s alone, ~2s under full-suite contention and ~4s on a loaded
+    // machine, so the 5s default sits just above it and flakes.
     testTimeout: 30_000,
   },
 })

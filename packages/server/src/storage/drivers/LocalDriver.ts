@@ -16,20 +16,6 @@ import { join, dirname, relative, resolve, sep } from 'node:path'
 import type { StorageDriver, LocalDriverOptions, PutOptions, FileMetadata, GetStreamOptions } from '../types'
 import { warnOnce } from '../../support/warn-once'
 
-/**
- * Local filesystem storage driver.
- *
- * @example
- * ```ts
- * const driver = new LocalDriver({
- *   root: './storage/app',
- *   url: '/storage',
- * })
- *
- * await driver.put('avatars/user-1.jpg', imageBuffer)
- * const url = driver.url('avatars/user-1.jpg')
- * ```
- */
 export class LocalDriver implements StorageDriver {
   private readonly root: string
   private readonly baseUrl: string
@@ -41,10 +27,6 @@ export class LocalDriver implements StorageDriver {
     this.defaultVisibility = options.visibility ?? 'private'
   }
 
-  /**
-   * Get the full path for a file.
-   * Rejects paths that resolve outside the storage root (e.g. via `../`).
-   */
   private fullPath(path: string): string {
     const root = resolve(this.root)
     const candidate = resolve(root, path)
@@ -54,9 +36,6 @@ export class LocalDriver implements StorageDriver {
     return candidate
   }
 
-  /**
-   * Ensure the directory exists.
-   */
   private async ensureDirectory(filePath: string): Promise<void> {
     const dir = dirname(filePath)
     if (!existsSync(dir)) {
@@ -100,9 +79,8 @@ export class LocalDriver implements StorageDriver {
   async getStream(path: string, options?: GetStreamOptions): Promise<ReadableStream<Uint8Array> | null> {
     const fullPath = this.fullPath(path)
 
-    // Open before returning: a bare createReadStream() hands back a stream
-    // whose open fails asynchronously, which cannot honour the contract's
-    // `null` for a missing file.
+    // A bare createReadStream() fails its open asynchronously, which cannot
+    // honour the contract's `null` for a missing file.
     let handle: Awaited<ReturnType<typeof open>>
     try {
       handle = await open(fullPath, 'r')
@@ -120,8 +98,8 @@ export class LocalDriver implements StorageDriver {
     const nodeStream = handle.createReadStream(
       options?.range ? { start: options.range.start, end: options.range.end } : undefined,
     )
-    // node:stream/web's ReadableStream is a distinct type from the global
-    // one; the runtime object is the same — normalize at this boundary.
+    // node:stream/web's ReadableStream is a distinct type from the global one
+    // for the same runtime object; normalize at this boundary.
     return Readable.toWeb(nodeStream) as unknown as ReadableStream<Uint8Array>
   }
 
@@ -178,7 +156,6 @@ export class LocalDriver implements StorageDriver {
 
   async temporaryUrl(path: string, expiration: Date): Promise<string> {
     // Local driver doesn't support temporary URLs
-    // Return the regular URL
     return this.url(path)
   }
 
@@ -276,11 +253,9 @@ export class LocalDriver implements StorageDriver {
   }
 
   async setVisibility(path: string, visibility: 'public' | 'private'): Promise<void> {
-    // A local disk has no per-object visibility: whether a file is reachable
-    // is decided by where the disk is rooted and what serves it, not by a
-    // flag on one file. The contract's rule for such backends is to refuse
-    // what cannot be carried out, but this driver has been silently
-    // accepting it, so it warns for now and throws in the next major.
+    // A local disk has no per-object visibility: reachability is decided by
+    // the disk root and what serves it. The contract says to refuse what
+    // cannot be carried out; this driver warns for now, throws in the next major.
     await this.warnIfMissing(path, 'setVisibility')
     this.warnUnsupportedVisibility(visibility, 'setVisibility')
   }
@@ -316,9 +291,6 @@ export class LocalDriver implements StorageDriver {
     )
   }
 
-  /**
-   * Get the root directory.
-   */
   getRoot(): string {
     return this.root
   }

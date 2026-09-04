@@ -2,32 +2,14 @@ import type { NotificationChannel, Notifiable, SentNotification } from '../types
 import type { Notification } from '../Notification'
 
 /**
- * Memory notification channel for testing.
- *
- * Stores all sent notifications in memory for assertions.
- *
- * @example
- * ```typescript
- * const memoryChannel = new MemoryChannel()
- * notifications.registerChannel('memory', memoryChannel)
- *
- * await notifications.send(user, new OrderShipped(order))
- *
- * memoryChannel.assertSentTo(user, 'OrderShipped')
- * memoryChannel.assertCount(1)
- * ```
+ * Memory notification channel for testing: stores every sent notification in
+ * memory for assertions.
  */
 export class MemoryChannel implements NotificationChannel {
   readonly name = 'memory'
 
-  /**
-   * All sent notifications.
-   */
   sent: SentNotification[] = []
 
-  /**
-   * Send (store) the notification.
-   */
   async send(notifiable: Notifiable, notification: Notification): Promise<void> {
     this.sent.push({
       notifiable,
@@ -37,9 +19,6 @@ export class MemoryChannel implements NotificationChannel {
     })
   }
 
-  /**
-   * Assert that a notification was sent to a notifiable.
-   */
   assertSentTo(notifiable: Notifiable, notificationType?: string): void {
     const found = this.sent.some((record) => {
       const matchesNotifiable = record.notifiable === notifiable
@@ -55,9 +34,6 @@ export class MemoryChannel implements NotificationChannel {
     }
   }
 
-  /**
-   * Assert that a notification was not sent to a notifiable.
-   */
   assertNotSentTo(notifiable: Notifiable, notificationType?: string): void {
     const found = this.sent.some((record) => {
       const matchesNotifiable = record.notifiable === notifiable
@@ -75,9 +51,6 @@ export class MemoryChannel implements NotificationChannel {
     }
   }
 
-  /**
-   * Assert the total count of sent notifications.
-   */
   assertCount(count: number): void {
     if (this.sent.length !== count) {
       throw new Error(
@@ -86,9 +59,6 @@ export class MemoryChannel implements NotificationChannel {
     }
   }
 
-  /**
-   * Assert that a notification type was sent.
-   */
   assertSent(notificationType: string): void {
     const found = this.sent.some(
       (record) => record.notification.type === notificationType
@@ -101,9 +71,6 @@ export class MemoryChannel implements NotificationChannel {
     }
   }
 
-  /**
-   * Assert that a notification type was not sent.
-   */
   assertNotSent(notificationType: string): void {
     const found = this.sent.some(
       (record) => record.notification.type === notificationType
@@ -116,9 +83,6 @@ export class MemoryChannel implements NotificationChannel {
     }
   }
 
-  /**
-   * Assert that no notifications were sent.
-   */
   assertNothingSent(): void {
     if (this.sent.length > 0) {
       throw new Error(
@@ -127,25 +91,16 @@ export class MemoryChannel implements NotificationChannel {
     }
   }
 
-  /**
-   * Get notifications sent to a specific notifiable.
-   */
   getSentTo(notifiable: Notifiable): SentNotification[] {
     return this.sent.filter((record) => record.notifiable === notifiable)
   }
 
-  /**
-   * Get notifications of a specific type.
-   */
   getSentOfType(notificationType: string): SentNotification[] {
     return this.sent.filter(
       (record) => record.notification.type === notificationType
     )
   }
 
-  /**
-   * Check if a notification was sent to a notifiable.
-   */
   hasSentTo(notifiable: Notifiable, notificationType?: string): boolean {
     return this.sent.some((record) => {
       const matchesNotifiable = record.notifiable === notifiable
@@ -156,39 +111,24 @@ export class MemoryChannel implements NotificationChannel {
     })
   }
 
-  /**
-   * Check if a notification type was sent.
-   */
   hasSent(notificationType: string): boolean {
     return this.sent.some(
       (record) => record.notification.type === notificationType
     )
   }
 
-  /**
-   * Get the count of sent notifications.
-   */
   count(): number {
     return this.sent.length
   }
 
-  /**
-   * Get the last sent notification.
-   */
   last(): SentNotification | undefined {
     return this.sent[this.sent.length - 1]
   }
 
-  /**
-   * Get the first sent notification.
-   */
   first(): SentNotification | undefined {
     return this.sent[0]
   }
 
-  /**
-   * Clear all sent notifications.
-   */
   clear(): void {
     this.sent = []
   }

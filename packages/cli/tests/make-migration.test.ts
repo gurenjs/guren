@@ -10,33 +10,27 @@ import * as realUtils from '../src/utils'
 const repoRoot = resolve(import.meta.dir, '../../..')
 
 /**
- * The real `drizzle-kit` bin, and a directory it can resolve `drizzle-orm`
- * from, or undefined when neither is installed.
- *
- * Resolved from `examples/blog`, which depends on both — bun's isolated
- * layout keeps them out of the root `node_modules`, so a plain lookup from
- * this package finds nothing. Returning undefined rather than throwing keeps
- * the suite runnable in a checkout that has not installed the examples.
+ * The real `drizzle-kit` bin plus a directory it can resolve `drizzle-orm`
+ * from, or undefined when neither is installed. Resolved from `examples/blog`
+ * (bun's isolated layout keeps both out of the root `node_modules`); undefined
+ * rather than a throw keeps the suite runnable without the examples installed.
  */
 function resolveDrizzleKit(): { bin: string; nodeModules: string } | undefined {
   const from = join(repoRoot, 'examples/blog')
   try {
     // `Bun.resolveSync` can answer from the root `.bun/` store even when blog
-    // itself was never installed, which would leave the symlink below dangling
-    // and hard-fail the run we meant to skip.
+    // was never installed, leaving the symlink below dangling.
     if (!existsSync(join(from, 'node_modules'))) {
       return undefined
     }
 
     const bin = join(dirname(Bun.resolveSync('drizzle-kit/package.json', from)), 'bin.cjs')
     // The generated schema imports `drizzle-orm/pg-core`, which drizzle-kit
-    // resolves from the *workspace* with node's resolver, not from its own
-    // install. Throws here when it is absent, which is the skip signal.
+    // resolves from the *workspace*. A throw here is the skip signal.
     Bun.resolveSync('drizzle-orm/pg-core', from)
 
-    // blog's own link farm, not the resolved path: bun's isolated layout keeps
-    // the real package under the root `.bun/` store, where node's resolver
-    // finds nothing by bare specifier.
+    // blog's own link farm, not the resolved path: node's resolver finds
+    // nothing by bare specifier under bun's isolated layout.
     return { bin, nodeModules: join(from, 'node_modules') }
   } catch {
     return undefined
@@ -47,20 +41,15 @@ const spawnCalls: Array<{ command: string; args: string[] }> = []
 
 /**
  * What the faked `drizzle-kit generate` writes for the next call, or undefined
- * for the run that finds no schema changes. Without this the mock would create
- * nothing on every path, so a test asserting "nothing was generated" would pass
- * against a `makeMigration` that never looks at the folder at all.
+ * for the run that finds no schema changes. Without it, "nothing was generated"
+ * would also pass against a `makeMigration` that never reads the folder.
  */
 let nextGeneratedMigration: { folder: string; name: string } | undefined
 
-// Mock `./utils`'s `runCommand` rather than `node:child_process` directly:
-// `mock.module()` replaces a module in the process-wide registry for the
-// rest of the test run (no per-file scoping), so mocking the shared
-// built-in `node:child_process` would also poison unrelated tests that
-// shell out for real (e.g. changed-files.test.ts calling real git). Mocking
-// this package's own `./utils` module instead keeps the fake scoped to a
-// file no other test touches. Spread the real module so anything besides
-// `runCommand` (e.g. `writeFileSafe`) keeps its real behavior.
+// Mock `./utils`'s `runCommand` rather than `node:child_process`: `mock.module()`
+// is process-wide with no per-file scoping, so faking the built-in would poison
+// tests that really shell out (changed-files.test.ts runs git). Spread the real
+// module so `writeFileSafe` and friends keep their behavior.
 await mock.module('../src/utils', () => ({
   ...realUtils,
   runCommand: async (command: string, args: string[]) => {
@@ -77,7 +66,6 @@ await mock.module('../src/utils', () => ({
 
 const { makeMigration } = await import('../src/make-migration')
 
-/** Queues one generated migration for the next `makeMigration()` call. */
 function generateOnNextRun(folder: string, name: string): void {
   nextGeneratedMigration = { folder, name }
 }
@@ -172,8 +160,7 @@ describe('makeMigration', () => {
     const workspace = await createTempWorkspace('guren-cli-make-migration-documented-')
     try {
       // The exact invocation docs/ja/guides/database.md prints under
-      // "マイグレーションの生成". Before the dialect was carried across, this
-      // failed with `dialect: undefined` against a config that declared one.
+      // "マイグレーションの生成"; it failed with `dialect: undefined` before.
       await writeFile(
         join(workspace.dir, 'drizzle.config.ts'),
         "export default { dialect: 'postgresql', schema: './db/schema.ts', out: './db/migrations' }",
@@ -222,8 +209,7 @@ describe('makeMigration', () => {
     const workspace = await createTempWorkspace('guren-cli-make-migration-dialect-flag-')
     try {
       // The no-config fallback: its DEFAULT_SCHEMA/DEFAULT_OUTPUT could never
-      // succeed while `dialect` went unstated, so nothing reached drizzle-kit
-      // that it would accept.
+      // succeed while `dialect` went unstated.
       await makeMigration({ dialect: 'sqlite' })
 
       const call = spawnCalls.pop()
@@ -291,8 +277,7 @@ describe('makeMigration', () => {
     const workspace = await createTempWorkspace('guren-cli-make-migration-list-schema-')
     try {
       // `--schema` takes one value and a repeated flag keeps only the last, so
-      // carrying a list would drop tables silently. The default template's own
-      // comment documents this shape.
+      // carrying a list would drop tables silently.
       await writeFile(
         join(workspace.dir, 'drizzle.config.ts'),
         "export default { dialect: 'sqlite', schema: ['./db/schema.ts', './modules/*/db/schema.ts'] }",
@@ -379,11 +364,9 @@ describe('makeMigration', () => {
   it('keeps the config out when only --schema is overridden', async () => {
     const workspace = await createTempWorkspace('guren-cli-make-migration-schema-only-')
     try {
-      // A --schema override alone stops the config being passed to drizzle-kit,
-      // so every field it declares has to be restated on the command line —
-      // `out` included. Overriding the schema is not a request to relocate the
-      // migrations, and writing them to the default folder instead would split
-      // the app's history across two directories.
+      // A --schema override alone stops `--config` being passed, so every field
+      // it declares has to be restated — `out` included, or the app's history
+      // splits across two directories.
       await writeFile(
         join(workspace.dir, 'drizzle.config.ts'),
         "export default { dialect: 'sqlite', out: './custom/migrations' }",
@@ -407,9 +390,8 @@ describe('makeMigration', () => {
   it('reports nothing when the config declares no out directory', async () => {
     const workspace = await createTempWorkspace('guren-cli-make-migration-no-out-')
     try {
-      // drizzle-kit falls back to its own default here, which this reader has no
-      // way to know. Naming a folder we did not watch would be worse than the
-      // plain success message, so the folder stays unset.
+      // drizzle-kit falls back to its own default here, which this reader cannot
+      // know, so the folder stays unset rather than naming one we did not watch.
       await writeFile(join(workspace.dir, 'drizzle.config.ts'), "export default { dialect: 'sqlite' }", 'utf8')
 
       const result = await makeMigration()
@@ -425,11 +407,9 @@ describe('makeMigration', () => {
   it('does not fail db:make when the config cannot be read', async () => {
     const workspace = await createTempWorkspace('guren-cli-make-migration-bad-config-')
     try {
-      // Reading the config is a reporting nicety over a command that already
-      // ran, so a config this reader chokes on must not turn into a thrown
-      // `db:make`. drizzle-kit loads configs with its own bundler, so the two
-      // do not always agree on what is loadable — this pins that the
-      // disagreement costs a message, never the command.
+      // drizzle-kit loads configs with its own bundler, so the two do not always
+      // agree on what is loadable; the disagreement costs a message, never the
+      // command.
       await writeFile(
         join(workspace.dir, 'drizzle.config.ts'),
         "import 'a-package-that-is-not-installed'\nexport default { out: './db/migrations' }",
@@ -467,21 +447,15 @@ describe('makeMigration', () => {
   })
 
   /**
-   * The one test that can observe drizzle-kit *rejecting* what it was handed.
-   * Everything above asserts against a mocked `runCommand`, which accepts any
-   * argument list — including the one that shipped, where the override path
-   * stated no `dialect` and drizzle-kit exited 1 on every app.
-   *
-   * So it takes the args `makeMigration` actually built and feeds them to the
-   * real binary. Verified to fail without the fix: the same run minus
+   * The one test that can observe drizzle-kit *rejecting* what it was handed:
+   * everything above asserts against a mocked `runCommand`, which accepts any
+   * argument list. Verified to fail without the fix — the same run minus
    * `--dialect` exits 1 with "Please provide required params: [x] dialect".
    */
   it('builds an argument list real drizzle-kit accepts', async () => {
     const drizzleKit = resolveDrizzleKit()
     if (!drizzleKit) {
-      // A silent pass here would read as "the args were verified" when nothing
-      // ran, so say so. Everything above still holds; only the real-binary
-      // check is missing.
+      // A silent pass would read as "the args were verified" when nothing ran.
       console.warn('[make-migration] skipped: no drizzle-kit installed (run `bun install` at the repo root)')
       return
     }
@@ -489,8 +463,7 @@ describe('makeMigration', () => {
     const workspace = await createTempWorkspace('guren-cli-make-migration-e2e-')
     try {
       // drizzle-kit reads the schema with node's resolver from the cwd, so the
-      // workspace needs a `drizzle-orm` to resolve. Symlinking beats installing
-      // one per run.
+      // workspace needs a `drizzle-orm` to resolve; symlinking beats installing.
       await symlink(drizzleKit.nodeModules, join(workspace.dir, 'node_modules'), 'dir')
       await mkdir(join(workspace.dir, 'custom'), { recursive: true })
       await writeFile(
@@ -587,9 +560,8 @@ describe('makeMigration', () => {
   it('does not name the config schema when the override is a glob', async () => {
     const workspace = await createTempWorkspace('guren-cli-make-migration-glob-override-')
     try {
-      // The override is what drizzle-kit reads, and a glob names no one file.
-      // Falling back to the config's `schema` here would tell the user to edit
-      // a file that had nothing to do with this run.
+      // The override is what drizzle-kit reads, and a glob names no one file;
+      // the config's `schema` would name a file unrelated to this run.
       await writeFile(
         join(workspace.dir, 'drizzle.config.ts'),
         "export default { dialect: 'sqlite', schema: './db/schema.ts', out: './db/migrations' }",
@@ -626,9 +598,8 @@ describe('makeMigration', () => {
   it('reports a config it could not load while --dialect carried the run', async () => {
     const workspace = await createTempWorkspace('guren-cli-make-migration-unreadable-proceed-')
     try {
-      // drizzle-kit bundles configs with its own loader, so it may read one
-      // this process cannot — and then the defaults below describe a different
-      // schema than the app declared.
+      // drizzle-kit bundles configs with its own loader, so it may read one this
+      // process cannot — and the defaults below then describe another schema.
       await writeFile(
         join(workspace.dir, 'drizzle.config.ts'),
         "import 'a-package-that-is-not-installed'\nexport default { schema: './custom/schema.ts' }",
@@ -734,11 +705,9 @@ describe('makeMigration', () => {
 })
 
 /**
- * A stand-in for the `drizzle-kit` `bun x` would otherwise fetch, written where
- * `bun x` looks first: `node_modules/.bin` under the invocation cwd. It records
- * the argv it was handed and exits 0, which is what keeps this test off the
- * network — a temp workspace has no ancestor `node_modules`, so without the
- * stub `bun x drizzle-kit` would install the real one.
+ * A stand-in for the `drizzle-kit` `bun x` would fetch, written where `bun x`
+ * looks first (`node_modules/.bin` under the invocation cwd). Records its argv
+ * and exits 0, which is what keeps this test off the network.
  */
 async function seedDrizzleKitStub(dir: string): Promise<void> {
   const binDir = join(dir, 'node_modules', '.bin')
@@ -747,26 +716,15 @@ async function seedDrizzleKitStub(dir: string): Promise<void> {
   await writeFile(stub, '#!/bin/sh\nprintf \'%s\\n\' "$@" > "$GUREN_TEST_ARGV_OUT"\n', 'utf8')
   await chmod(stub, 0o755)
   // Declares a dialect because `--schema`/`--out` drop `--config`, and the flag
-  // path has to restate the dialect from somewhere. Config-path cases are
-  // unaffected: they pass `--config` and never name a dialect on the line.
+  // path has to restate it. Config-path cases never name one on the line.
   await writeFile(join(dir, 'drizzle.config.ts'), "export default { dialect: 'sqlite' }", 'utf8')
 }
 
 /**
- * The argv `make:migration` actually hands drizzle-kit, from a real spawn of
- * the CLI.
- *
- * Spawned rather than imported because what is under test is the citty arg
- * *declaration* in bin.ts — and bin.ts has no exports, it runs the CLI at
- * module scope. A test that reached `makeMigration()` directly would keep
- * passing through exactly the regression this pins: citty resolves positionals
- * and string flags from different places, so declaring `name` a positional
- * drops `--name <value>` with neither a `name` key nor an unknown-flag error,
- * and `makeMigration()` — correct on its own, as the cases above show — is
- * simply never told the name.
- *
- * No `createTempWorkspace`: its `process.chdir()` is there for commands that
- * read `process.cwd()` in-process, and a subprocess is handed its cwd.
+ * The argv `make:migration` actually hands drizzle-kit, from a real spawn of the
+ * CLI. Spawned rather than imported because what is under test is bin.ts's citty
+ * arg *declaration*: citty resolves positionals and string flags from different
+ * places, so declaring `name` a positional dropped `--name <value>` silently.
  */
 async function drizzleKitArgvFor(cliArgs: string[]): Promise<string[]> {
   const dir = await mkdtemp(join(tmpdir(), 'guren-cli-make-migration-argv-'))
@@ -787,9 +745,8 @@ async function drizzleKitArgvFor(cliArgs: string[]): Promise<string[]> {
 }
 
 describe('make:migration name argument', () => {
-  // The whole argv, not a `toContain` — a containment check passes just as
-  // happily on `--name=add_smoke_probe --name=wrong`, which is the shape a
-  // repeated flag produced before `lastFlagValue()`.
+  // The whole argv, not a `toContain`: containment passes just as happily on
+  // `--name=add_smoke_probe --name=wrong`, the shape a repeated flag produced.
   const NAMED_ARGV = ['generate', '--name=add_smoke_probe', '--config', 'drizzle.config.ts']
 
   const forms: Array<[string, string[]]> = [
@@ -809,9 +766,8 @@ describe('make:migration name argument', () => {
     })
   }
 
-  // `--schema` and `--out` take the same citty array, and failed on it more
-  // quietly than `--name` did: comma-joined into `a/schema.ts,b/schema.ts` and
-  // handed to drizzle-kit as a path, with a 0 exit code.
+  // `--schema` and `--out` take the same citty array, and failed more quietly:
+  // comma-joined into a single path and handed over with a 0 exit code.
   it('takes the last value of a repeated --schema or --out', async () => {
     const argv = await drizzleKitArgvFor([
       '--schema',
@@ -837,10 +793,8 @@ describe('make:migration name argument', () => {
     ])
   })
 
-  // A bare `--name` was inert while the argument was a positional — citty
-  // dropped it with everything else. It reaches `makeMigration()` now, so pin
-  // that an empty value falls back to drizzle-kit's own naming rather than
-  // being forwarded as an empty `--name=`.
+  // A bare `--name` was inert while the argument was a positional. It reaches
+  // `makeMigration()` now, so pin the fallback to drizzle-kit's own naming.
   for (const [label, cliArgs] of [
     ['no name is given', [] as string[]],
     ['`--name` is given no value', ['--name']],

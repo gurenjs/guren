@@ -1,10 +1,9 @@
 /**
- * Markdown link scanning for the OKF docs convention: inline links
- * (balanced parens, optional titles, angle-bracket destinations,
- * CommonMark backslash escapes) and link reference definitions.
- * Pure markdown — which targets count as bundle-local is the one
- * OKF-flavored decision here (`localLinkTarget`), shared by the
- * graph, the checker, and the viewer so they cannot disagree.
+ * Markdown link scanning for the OKF docs convention: inline links (balanced
+ * parens, optional titles, angle-bracket destinations, CommonMark escapes) and
+ * link reference definitions. Which targets count as bundle-local is the one
+ * OKF-flavored decision here (`localLinkTarget`), shared by the graph, the
+ * checker and the viewer so they cannot disagree.
  */
 
 const URL_SCHEME_REGEX = /^[a-z][a-z0-9+.-]*:/i
@@ -19,11 +18,10 @@ const LINK_DEFINITION_RE = /^ {0,3}\[[^\]]+\]:\s*(?:<([^>\n]*)>|(\S+))(?:\s+(?:"
 const ESCAPABLE = /^[!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~]$/
 
 /**
- * The destination of a markdown link starting at `open` (the index of
- * `(`), honoring balanced parentheses so `./use-(legacy)-api.md` survives.
- * Returns null when the link is unterminated or contains whitespace.
- * Exported for the renderer, so a rendered link and the graph edge
- * derived from it always name the same target.
+ * The destination of a markdown link starting at `open` (the index of `(`),
+ * honoring balanced parentheses so `./use-(legacy)-api.md` survives; null when
+ * the link is unterminated. Exported for the renderer, so a rendered link and
+ * the graph edge derived from it always name the same target.
  */
 export function readLinkDestination(
   text: string,
@@ -46,10 +44,10 @@ export function readLinkDestination(
     const char = text[index]
 
     if (char === '\\' && ESCAPABLE.test(text[index + 1] ?? '')) {
-      // A markdown escape yields the literal character, so `\)` cannot
-      // close the destination. A backslash before anything else stays
-      // part of the path — dropping it would erase the separators in a
-      // Windows-style target before containment checks ever see them.
+      // A markdown escape yields the literal character, so `\)` cannot close
+      // the destination. A backslash before anything else stays part of the
+      // path, or a Windows-style target loses its separators before the
+      // containment checks see them.
       if (depth > 0) target.push(text[index + 1])
       index += 1
       continue
@@ -68,9 +66,8 @@ export function readLinkDestination(
       continue
     }
 
-    // Whitespace ends the destination; what follows may be an optional
-    // title (`[x](./a.md "Title")`), which is skipped to the closing
-    // paren rather than making the whole link unparseable.
+    // Whitespace ends the destination; an optional title after it is skipped
+    // to the closing paren rather than making the whole link unparseable.
     if (/\s/.test(char)) return readAfterDestination(text, index, target.join(''))
 
     target.push(char)
@@ -80,10 +77,9 @@ export function readLinkDestination(
 }
 
 /**
- * What may legally follow a destination: nothing, or a single quoted
- * title, before the closing paren. Anything else means this was never a
- * link (`[x](./a.md some words)`), so reporting it as one would produce
- * a phantom broken-link warning.
+ * What may legally follow a destination: nothing, or a single quoted title,
+ * before the closing paren. Anything else was never a link, and reporting it as
+ * one produces a phantom broken-link warning.
  */
 const TRAILING_TITLE_RE = /^\s*(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\((?:[^)\\]|\\.)*\))?\s*\)/
 
@@ -100,21 +96,11 @@ function readAfterDestination(
 }
 
 /**
- * Local markdown link targets in a doc body — OKF expresses relations as
- * plain markdown links, so these are graph edges worth validating. Code
- * fences and inline code are stripped first (docs about the docs
- * convention quote example links), external URLs and bare `#anchor` links
- * are skipped, and fragments are dropped from what remains.
- */
-/**
- * The bundle-local path a markdown link target names, or null when it
- * points outside the bundle — an external URL, a protocol-relative
- * `//host/path`, or a bare `#anchor`. Fragments are dropped.
- *
- * Exported because anything that renders these links has to reach the
- * same answer this extraction did: the graph keys its nodes on the
- * result, so a renderer computing it differently would emit targets
- * that match no node.
+ * The bundle-local path a markdown link target names, or null when it points
+ * outside the bundle — an external URL, a protocol-relative `//host/path`, or a
+ * bare `#anchor`. Fragments are dropped. Exported because the graph keys its
+ * nodes on this result, so a renderer computing it differently would emit
+ * targets matching no node.
  */
 export function localLinkTarget(target: string): string | null {
   if (URL_SCHEME_REGEX.test(target) || target.startsWith('#') || target.startsWith('//')) return null

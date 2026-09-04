@@ -4,9 +4,8 @@ import { describe, expect, it } from 'bun:test'
 import { createTempWorkspace, runCliBin as runBin } from './helpers'
 
 /**
- * In a real app `guren codegen` runs before `check --ci` (that is the
- * scaffolded workflow order); stub its manifests so fixtures match that
- * state instead of warning about missing generated files.
+ * The scaffolded workflow runs `guren codegen` before `check --ci`; stubbing
+ * its manifests keeps fixtures from warning about missing generated files.
  */
 async function writeCodegenManifests(dir: string): Promise<void> {
   await mkdir(join(dir, '.guren'), { recursive: true })
@@ -46,9 +45,8 @@ describe('check --ci exit gating', () => {
 
       // The stable v1.0 contract: findings alone never fail a plain check.
       expect(await runBin(['check'], workspace.dir)).toBe(0)
-      // The opt-in gate fails on integrity warns — most integrity problems
-      // report as 'warn', so a fail-only gate would wave nearly everything
-      // through.
+      // The opt-in gate fails on integrity warns: most integrity problems
+      // report as 'warn', so a fail-only gate would wave them through.
       expect(await runBin(['check', '--ci'], workspace.dir)).toBe(1)
     } finally {
       await workspace.cleanup()

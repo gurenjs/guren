@@ -1,27 +1,18 @@
 import { defineConfig } from 'drizzle-kit'
 
 /**
- * The same variable `config/database.ts` reads, and deliberately not
- * `DATABASE_URL`: that name carries a Postgres URI in existing environments,
- * so naming it here would point `drizzle-kit studio`/`push`/`migrate` at a
- * different database than the app itself opens.
+ * The same variable `config/database.ts` reads, and not `DATABASE_URL`: that
+ * name carries a Postgres URI in existing environments, which would point
+ * drizzle-kit at a different database than the app opens.
  */
 const filename = process.env.SQLITE_DATABASE_PATH ?? './data/guren.db'
 
 /**
- * This variable is read by two different SQLite implementations that disagree
- * about URI filenames: the app opens it with `bun:sqlite`, which honours them,
- * while drizzle-kit opens it with `node:sqlite`, which does not. So `file:` is
- * not a shared spelling of anything — `file:local.db` migrates the app into
- * `local.db` and drizzle-kit into a file *named* `file:local.db`, which is the
- * silent split this variable exists to avoid. The safe set is what both agree
- * on: plain paths, and `:memory:`.
- *
- * Hence any scheme is refused, not just one carrying an authority. The scheme
- * must be two characters or more, since no registered scheme is one letter
- * while `C:/data/app.db` is a Windows drive path. `@guren/orm` applies a
- * narrower rule to the app's own filename, where `bun:sqlite` is the only
- * consumer and URI forms do work.
+ * Two SQLite implementations read this and disagree about URI filenames:
+ * `bun:sqlite` (the app) honours them, `node:sqlite` (drizzle-kit) does not, so
+ * `file:local.db` migrates the app into `local.db` and drizzle-kit into a file
+ * *named* `file:local.db`. Both agree only on plain paths and `:memory:`, so any
+ * scheme of two characters or more is refused (`C:/…` is a Windows drive path).
  */
 const uriScheme = /^([a-z][a-z0-9+.-]+):/i.exec(filename)
 
