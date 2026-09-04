@@ -161,7 +161,7 @@ export async function verifyEmailToken(
     createEmailVerificationSigner(),
     token,
     EMAIL_VERIFICATION_PURPOSE,
-    (id) => store.delete(id),
+    store,
   )
   if (!claims) return null
 
@@ -188,7 +188,7 @@ export async function completeEmailVerification<T>(
     createEmailVerificationSigner(),
     token,
     EMAIL_VERIFICATION_PURPOSE,
-    (id) => store.delete(id),
+    store,
   )
   if (!claims) return null
 

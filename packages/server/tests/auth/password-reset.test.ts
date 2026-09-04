@@ -6,8 +6,8 @@ import {
   buildPasswordResetUrl,
   parsePasswordResetUrl,
   MemoryPasswordResetStore,
+  type PasswordResetTokenStore,
 } from '../../src/auth/password-reset'
-import type { PasswordResetTokenStore } from '../../src/auth/password-reset'
 import type { UserProvider } from '../../src/auth/types'
 import { createMockUser, createMockProvider, type MockUser } from '@guren/testing'
 
@@ -145,6 +145,19 @@ describe('verifyPasswordResetToken', () => {
     const tampered = `${token}x`
 
     expect(await verifyPasswordResetToken(tampered, store)).toBeNull()
+  })
+
+  // Rejecting a bad signature must not touch the store. An implementation that
+  // read the id out of the payload and deleted it before checking the HMAC
+  // would still return null here, so asserting only the null lets an
+  // unauthenticated request revoke someone else's live token.
+  it('leaves the record intact when the signature does not verify', async () => {
+    const { token, tokenId } = await createPasswordResetToken('user@example.com', store)
+
+    expect(await verifyPasswordResetToken(`${token}x`, store)).toBeNull()
+
+    expect(await store.find(tokenId)).not.toBeNull()
+    expect(await verifyPasswordResetToken(token, store)).toBe('user@example.com')
   })
 
   it('returns null for expired token', async () => {
@@ -286,7 +299,7 @@ class LenientPasswordResetStore implements PasswordResetTokenStore {
 describe('expiry is decided by the signed token, not the store record', () => {
   let store: LenientPasswordResetStore
   let provider: UserProvider<MockUser>
-  let passwordUpdates: string[]
+  let passwordUpdates: Array<{ userId: number; password: string }>
 
   beforeEach(() => {
     store = new LenientPasswordResetStore()
@@ -296,8 +309,8 @@ describe('expiry is decided by the signed token, not the store record', () => {
     passwordUpdates = []
   })
 
-  const updatePassword = async (_user: MockUser, password: string) => {
-    passwordUpdates.push(password)
+  const updatePassword = async (user: MockUser, password: string) => {
+    passwordUpdates.push({ userId: user.id, password })
   }
 
   it('accepts an unexpired token whose store record claims to be expired', async () => {
@@ -305,6 +318,13 @@ describe('expiry is decided by the signed token, not the store record', () => {
     store.records.get(tokenId)!.expiresAt = new Date(Date.now() - 60_000)
 
     expect(await verifyPasswordResetToken(token, store)).toBe('user@example.com')
+  })
+
+  it('rejects a token whose stored email no longer matches the signed one', async () => {
+    const { token, tokenId } = await createPasswordResetToken('user@example.com', store)
+    store.records.get(tokenId)!.email = 'attacker@example.com'
+
+    expect(await verifyPasswordResetToken(token, store)).toBeNull()
   })
 
   it('rejects an expired token whose store record claims to be live', async () => {
@@ -323,7 +343,7 @@ describe('expiry is decided by the signed token, not the store record', () => {
 
     const user = await completePasswordReset(live.token, 'new-password', store, provider, updatePassword)
     expect(user?.id).toBe(1)
-    expect(passwordUpdates).toEqual(['new-password'])
+    expect(passwordUpdates).toEqual([{ userId: 1, password: 'new-password' }])
 
     const expired = await createPasswordResetToken('user@example.com', store, { expiresIn: -2000 })
     store.records.get(expired.tokenId)!.expiresAt = new Date(Date.now() + 60_000)
@@ -331,7 +351,7 @@ describe('expiry is decided by the signed token, not the store record', () => {
     expect(
       await completePasswordReset(expired.token, 'another', store, provider, updatePassword),
     ).toBeNull()
-    expect(passwordUpdates).toEqual(['new-password'])
+    expect(passwordUpdates).toEqual([{ userId: 1, password: 'new-password' }])
     expect(store.records.has(expired.tokenId)).toBe(false)
   })
 })

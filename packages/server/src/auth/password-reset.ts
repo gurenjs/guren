@@ -125,7 +125,7 @@ export async function verifyPasswordResetToken(
     createPasswordResetSigner(),
     token,
     PASSWORD_RESET_PURPOSE,
-    (id) => store.delete(id),
+    store,
   )
   if (!claims) return null
 
@@ -152,7 +152,7 @@ export async function completePasswordReset<T extends Authenticatable>(
     createPasswordResetSigner(),
     token,
     PASSWORD_RESET_PURPOSE,
-    (id) => store.delete(id),
+    store,
   )
   if (!claims) return null
 
