@@ -1,11 +1,12 @@
 import { getAuthContext } from './context'
 import { generateId, buildTokenUrl, parseTokenUrl } from './utils'
+import { readSignedTokenClaims } from './signed-token'
 import { MessageSigner } from '../encryption/MessageSigner'
 import { deriveAppKeyring, getAppKeyringFromEnv } from '../encryption/app-key'
 
 /**
  * Email verification token data stored in the backing store.
- * Only the hashed token is stored for security.
+ * Only an opaque token id is stored; the token itself is never persisted.
  */
 export interface EmailVerificationToken {
   email: string
@@ -17,6 +18,11 @@ export interface EmailVerificationToken {
 /**
  * Store interface for email verification tokens.
  * Implement this to use database-backed storage.
+ *
+ * The store answers "does this token id still exist" — single use and
+ * revocation. Expiry is decided from the claim signed into the token, so a
+ * store may drop expired records for housekeeping, but verification never
+ * relies on it doing so.
  */
 export interface EmailVerificationTokenStore {
   /**
@@ -85,6 +91,11 @@ export class MemoryEmailVerificationStore implements EmailVerificationTokenStore
 
 /**
  * Configuration options for email verification.
+ *
+ * Applies at issuance only: `createEmailVerificationToken` signs the expiry
+ * into the token, so `verifyEmailToken` and `completeEmailVerification` take
+ * no configuration. Changing `expiresIn` affects tokens issued from then on,
+ * not tokens already sent.
  */
 export interface EmailVerificationConfig {
   /**
@@ -116,7 +127,7 @@ function createEmailVerificationSigner(): MessageSigner {
 export interface EmailVerificationTokenResult {
   /**
    * The raw token to send to the user via email.
-   * This is NOT stored - only the hash is stored.
+   * This is NOT stored - only its opaque id is.
    */
   token: string
 
@@ -189,9 +200,11 @@ export async function createEmailVerificationToken(
 /**
  * Verify an email verification token.
  *
+ * Expiry comes from the claim signed into the token; the store is consulted
+ * only for whether the token id still exists.
+ *
  * @param token - The raw token from the verification link
  * @param store - Token store implementation
- * @param config - Optional configuration (not currently used, reserved for future)
  * @returns The email address if valid, null if invalid or expired
  *
  * @example
@@ -209,35 +222,19 @@ export async function createEmailVerificationToken(
 export async function verifyEmailToken(
   token: string,
   store: EmailVerificationTokenStore,
-  _config: EmailVerificationConfig = {}
 ): Promise<string | null> {
-  const signer = createEmailVerificationSigner()
-  const payload = signer.verify<{ id?: string; email?: string }>(token, {
-    purpose: EMAIL_VERIFICATION_PURPOSE,
-    allowExpired: true,
-  })
-  if (!payload?.id || !payload.email) {
-    return null
-  }
+  const claims = await readSignedTokenClaims(
+    createEmailVerificationSigner(),
+    token,
+    EMAIL_VERIFICATION_PURPOSE,
+    (id) => store.delete(id),
+  )
+  if (!claims) return null
 
-  if (typeof payload.exp === 'number' && payload.exp < Math.floor(Date.now() / 1000)) {
-    await store.delete(payload.id)
-    return null
-  }
+  const storedToken = await store.findByTokenId(claims.id)
+  if (!storedToken) return null
 
-  const storedToken = await store.findByTokenId(payload.id)
-
-  if (!storedToken) {
-    return null
-  }
-
-  // Check if expired
-  if (new Date() > storedToken.expiresAt) {
-    await store.delete(payload.id)
-    return null
-  }
-
-  return storedToken.email.toLowerCase() === payload.email.toLowerCase()
+  return storedToken.email.toLowerCase() === claims.email.toLowerCase()
     ? storedToken.email
     : null
 }
@@ -273,34 +270,19 @@ export async function completeEmailVerification<T>(
   store: EmailVerificationTokenStore,
   markVerified: (email: string) => Promise<T>
 ): Promise<T | null> {
-  const signer = createEmailVerificationSigner()
-  const payload = signer.verify<{ id?: string; email?: string }>(token, {
-    purpose: EMAIL_VERIFICATION_PURPOSE,
-    allowExpired: true,
-  })
-  if (!payload?.id || !payload.email) {
-    return null
-  }
+  const claims = await readSignedTokenClaims(
+    createEmailVerificationSigner(),
+    token,
+    EMAIL_VERIFICATION_PURPOSE,
+    (id) => store.delete(id),
+  )
+  if (!claims) return null
 
-  if (typeof payload.exp === 'number' && payload.exp < Math.floor(Date.now() / 1000)) {
-    await store.delete(payload.id)
-    return null
-  }
+  const storedToken = await store.findByTokenId(claims.id)
+  if (!storedToken) return null
 
-  const storedToken = await store.findByTokenId(payload.id)
-
-  if (!storedToken) {
-    return null
-  }
-
-  // Check if expired
-  if (new Date() > storedToken.expiresAt) {
-    await store.delete(payload.id)
-    return null
-  }
-
-  // Verify email matches between JWT and store
-  if (storedToken.email.toLowerCase() !== payload.email.toLowerCase()) {
+  // Verify email matches between token and store
+  if (storedToken.email.toLowerCase() !== claims.email.toLowerCase()) {
     return null
   }
 
@@ -308,7 +290,7 @@ export async function completeEmailVerification<T>(
   const result = await markVerified(storedToken.email)
 
   // Delete the used token
-  await store.delete(payload.id)
+  await store.delete(claims.id)
 
   return result
 }

@@ -7,6 +7,7 @@ import {
   parsePasswordResetUrl,
   MemoryPasswordResetStore,
 } from '../../src/auth/password-reset'
+import type { PasswordResetTokenStore } from '../../src/auth/password-reset'
 import type { UserProvider } from '../../src/auth/types'
 import { createMockUser, createMockProvider, type MockUser } from '@guren/testing'
 
@@ -87,7 +88,7 @@ describe('createPasswordResetToken', () => {
     store = new MemoryPasswordResetStore()
   })
 
-  it('generates a token and stores its hash', async () => {
+  it('generates a token and stores its id', async () => {
     const result = await createPasswordResetToken('user@example.com', store)
 
     expect(result.token).toBeTruthy()
@@ -257,5 +258,84 @@ describe('parsePasswordResetUrl', () => {
   it('returns null for missing token', () => {
     const { token } = parsePasswordResetUrl('https://example.com/reset')
     expect(token).toBeNull()
+  })
+})
+
+// A store that hands back whatever it holds, expired or not, and lets a test
+// move a record's `expiresAt` after issuance. Verification must not care: the
+// `exp` claim signed into the token is the one authority on expiry, and the
+// store's copy is there for the store's own housekeeping.
+class LenientPasswordResetStore implements PasswordResetTokenStore {
+  readonly records = new Map<string, { email: string; expiresAt: Date }>()
+
+  async store(tokenId: string, email: string, expiresAt: Date): Promise<void> {
+    this.records.set(tokenId, { email, expiresAt })
+  }
+
+  async find(tokenId: string): Promise<{ email: string; expiresAt: Date } | null> {
+    return this.records.get(tokenId) ?? null
+  }
+
+  async delete(tokenId: string): Promise<void> {
+    this.records.delete(tokenId)
+  }
+
+  async deleteForEmail(email: string): Promise<void> {
+    for (const [tokenId, record] of this.records) {
+      if (record.email === email) this.records.delete(tokenId)
+    }
+  }
+}
+
+describe('expiry is decided by the signed token, not the store record', () => {
+  let store: LenientPasswordResetStore
+  let provider: UserProvider<MockUser>
+  let passwordUpdates: string[]
+
+  beforeEach(() => {
+    store = new LenientPasswordResetStore()
+    provider = createMockProvider([
+      createMockUser({ id: 1, email: 'user@example.com', password: 'old-password' }),
+    ])
+    passwordUpdates = []
+  })
+
+  const updatePassword = async (_user: MockUser, password: string) => {
+    passwordUpdates.push(password)
+  }
+
+  it('accepts an unexpired token whose store record claims to be expired', async () => {
+    const { token, tokenId } = await createPasswordResetToken('user@example.com', store)
+    store.records.get(tokenId)!.expiresAt = new Date(Date.now() - 60_000)
+
+    expect(await verifyPasswordResetToken(token, store)).toBe('user@example.com')
+  })
+
+  it('rejects an expired token whose store record claims to be live', async () => {
+    const { token, tokenId } = await createPasswordResetToken('user@example.com', store, {
+      expiresIn: -2000,
+    })
+    store.records.get(tokenId)!.expiresAt = new Date(Date.now() + 60_000)
+
+    expect(await verifyPasswordResetToken(token, store)).toBeNull()
+    expect(store.records.has(tokenId)).toBe(false)
+  })
+
+  it('completePasswordReset applies the same rule', async () => {
+    const live = await createPasswordResetToken('user@example.com', store)
+    store.records.get(live.tokenId)!.expiresAt = new Date(Date.now() - 60_000)
+
+    const user = await completePasswordReset(live.token, 'new-password', store, provider, updatePassword)
+    expect(user?.id).toBe(1)
+    expect(passwordUpdates).toEqual(['new-password'])
+
+    const expired = await createPasswordResetToken('user@example.com', store, { expiresIn: -2000 })
+    store.records.get(expired.tokenId)!.expiresAt = new Date(Date.now() + 60_000)
+
+    expect(
+      await completePasswordReset(expired.token, 'another', store, provider, updatePassword),
+    ).toBeNull()
+    expect(passwordUpdates).toEqual(['new-password'])
+    expect(store.records.has(expired.tokenId)).toBe(false)
   })
 })

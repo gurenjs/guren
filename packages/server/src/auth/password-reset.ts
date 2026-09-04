@@ -1,10 +1,16 @@
 import type { Authenticatable, UserProvider } from './types'
 import { generateId, buildTokenUrl, parseTokenUrl } from './utils'
+import { readSignedTokenClaims } from './signed-token'
 import { MessageSigner } from '../encryption/MessageSigner'
 import { deriveAppKeyring, getAppKeyringFromEnv } from '../encryption/app-key'
 
 /**
  * Configuration for password reset tokens.
+ *
+ * Applies at issuance only: `createPasswordResetToken` signs the expiry into
+ * the token, so `verifyPasswordResetToken` and `completePasswordReset` take no
+ * configuration. Changing `expiresIn` affects tokens issued from then on, not
+ * tokens already sent.
  */
 export interface PasswordResetConfig {
   /** Token expiration time in milliseconds (default: 1 hour) */
@@ -15,11 +21,16 @@ export interface PasswordResetConfig {
 
 /**
  * Storage interface for password reset tokens.
+ *
+ * The store answers "does this token id still exist" — single use and
+ * revocation. Expiry is decided from the claim signed into the token, so a
+ * store may drop expired records for housekeeping (the built-in stores do),
+ * but verification never relies on it doing so.
  */
 export interface PasswordResetTokenStore {
   /** Store a token ID with associated email and expiration */
   store(tokenId: string, email: string, expiresAt: Date): Promise<void>
-  /** Find email by token ID, returns null if not found or expired */
+  /** Find email by token ID, returns null if not found (or already dropped as expired) */
   find(tokenId: string): Promise<{ email: string; expiresAt: Date } | null>
   /** Delete a token ID from storage */
   delete(tokenId: string): Promise<void>
@@ -52,9 +63,9 @@ export class MemoryPasswordResetStore implements PasswordResetTokenStore {
   }
 
   async deleteForEmail(email: string): Promise<void> {
-    for (const [hash, record] of this.tokens) {
+    for (const [tokenId, record] of this.tokens) {
       if (record.email === email) {
-        this.tokens.delete(hash)
+        this.tokens.delete(tokenId)
       }
     }
   }
@@ -91,7 +102,7 @@ function createPasswordResetSigner(): MessageSigner {
  * @param email - The user's email address
  * @param store - The token storage implementation
  * @param config - Optional configuration
- * @returns The token result containing plain token and hash
+ * @returns The token result containing the plain token and its store id
  */
 export async function createPasswordResetToken(
   email: string,
@@ -127,33 +138,28 @@ export async function createPasswordResetToken(
 /**
  * Verify a password reset token.
  *
+ * Expiry comes from the claim signed into the token; the store is consulted
+ * only for whether the token id still exists.
+ *
  * @param token - The plain-text token from the reset URL
  * @param store - The token storage implementation
- * @param config - Optional configuration (must match createPasswordResetToken config)
  * @returns The email if token is valid, null otherwise
  */
 export async function verifyPasswordResetToken(
   token: string,
   store: PasswordResetTokenStore,
-  _config: PasswordResetConfig = {},
 ): Promise<string | null> {
-  const signer = createPasswordResetSigner()
-  const payload = signer.verify<{ id?: string; email?: string }>(token, {
-    purpose: PASSWORD_RESET_PURPOSE,
-    allowExpired: true,
-  })
-  if (!payload?.id || !payload.email) {
-    return null
-  }
+  const claims = await readSignedTokenClaims(
+    createPasswordResetSigner(),
+    token,
+    PASSWORD_RESET_PURPOSE,
+    (id) => store.delete(id),
+  )
+  if (!claims) return null
 
-  if (typeof payload.exp === 'number' && payload.exp < Math.floor(Date.now() / 1000)) {
-    await store.delete(payload.id)
-    return null
-  }
-
-  const record = await store.find(payload.id)
+  const record = await store.find(claims.id)
   if (!record) return null
-  return record.email.toLowerCase() === payload.email.toLowerCase() ? record.email : null
+  return record.email.toLowerCase() === claims.email.toLowerCase() ? record.email : null
 }
 
 /**
@@ -164,7 +170,6 @@ export async function verifyPasswordResetToken(
  * @param store - The token storage implementation
  * @param provider - The user provider to look up and update the user
  * @param updatePassword - Function to update the user's password
- * @param config - Optional configuration
  * @returns The user if reset was successful, null if token is invalid
  */
 export async function completePasswordReset<T extends Authenticatable>(
@@ -173,33 +178,26 @@ export async function completePasswordReset<T extends Authenticatable>(
   store: PasswordResetTokenStore,
   provider: UserProvider<T>,
   updatePassword: (user: T, password: string) => Promise<void>,
-  _config: PasswordResetConfig = {},
 ): Promise<T | null> {
-  const signer = createPasswordResetSigner()
-  const payload = signer.verify<{ id?: string; email?: string }>(token, {
-    purpose: PASSWORD_RESET_PURPOSE,
-    allowExpired: true,
-  })
-  if (!payload?.id || !payload.email) {
-    return null
-  }
+  const claims = await readSignedTokenClaims(
+    createPasswordResetSigner(),
+    token,
+    PASSWORD_RESET_PURPOSE,
+    (id) => store.delete(id),
+  )
+  if (!claims) return null
 
-  if (typeof payload.exp === 'number' && payload.exp < Math.floor(Date.now() / 1000)) {
-    await store.delete(payload.id)
-    return null
-  }
-
-  const record = await store.find(payload.id)
+  const record = await store.find(claims.id)
   if (!record) return null
 
-  // Verify email matches between JWT and store
-  if (record.email.toLowerCase() !== payload.email.toLowerCase()) {
+  // Verify email matches between token and store
+  if (record.email.toLowerCase() !== claims.email.toLowerCase()) {
     return null
   }
 
   const user = await provider.retrieveByCredentials({ email: record.email })
   if (!user) {
-    await store.delete(payload.id)
+    await store.delete(claims.id)
     return null
   }
 
@@ -207,7 +205,7 @@ export async function completePasswordReset<T extends Authenticatable>(
   await updatePassword(user, newPassword)
 
   // Invalidate token
-  await store.delete(payload.id)
+  await store.delete(claims.id)
 
   return user
 }
