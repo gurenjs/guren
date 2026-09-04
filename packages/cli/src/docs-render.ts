@@ -1,16 +1,12 @@
 /**
  * Markdown-subset renderer for the docs viewer (RFC 0005).
  *
- * Covers what the OKF docs convention produces: headings, paragraphs,
- * bullet lists (one nesting level), pipe tables, fenced code, and the
- * inline spans below. Deliberately not a CommonMark engine — the docs
- * convention is a controlled vocabulary (same philosophy as the
- * frontmatter parser in `docs-index.ts`), so holes found in practice are
- * cheaper to patch than a markdown dependency is to carry.
- *
- * Mermaid fences pass through as `<pre class="mermaid">` for the viewer
- * to render client-side; local link targets are surfaced via
- * `data-target` so the viewer can wire graph navigation onto them.
+ * Covers what the OKF docs convention produces: headings, paragraphs, bullet
+ * lists (one nesting level), pipe tables, fenced code, inline spans.
+ * Deliberately not a CommonMark engine — the convention is a controlled
+ * vocabulary, so holes found in practice are cheaper to patch than a markdown
+ * dependency is to carry. Mermaid fences pass through as `<pre class="mermaid">`
+ * for the viewer to render; local link targets are surfaced via `data-target`.
  */
 import { readLinkDestination } from './docs-links'
 
@@ -18,10 +14,9 @@ import { readLinkDestination } from './docs-links'
 const LINK_DEFINITION_LINE = /^ {0,3}\[[^\]]+\]:\s*\S+/
 
 /**
- * Escapes for both element and attribute contexts — quotes included,
- * since link targets are interpolated into a `data-target="…"` value and
- * doc content is attacker-controllable in the general case (a bundle can
- * be vendored, shared, or agent-written).
+ * Escapes for both element and attribute contexts — quotes included, since link
+ * targets are interpolated into a `data-target="…"` value and doc content is
+ * attacker-controllable in the general case.
  */
 export function escapeHtml(value: string): string {
   return value
@@ -33,14 +28,11 @@ export function escapeHtml(value: string): string {
 }
 
 /**
- * Inline spans over raw text, in markdown's precedence order: code
- * first (so link syntax inside a code span stays literal), then links,
- * then emphasis across what remains (so `**[label](target)**` bolds the
- * link rather than leaving the asterisks behind).
- *
- * Finished HTML is parked behind placeholders while the later passes
- * run, which is why the input's own NUL characters are dropped first —
- * otherwise doc content could forge a placeholder and inject markup.
+ * Inline spans in markdown's precedence order: code first (so link syntax
+ * inside a code span stays literal), then links, then emphasis over what
+ * remains. Finished HTML is parked behind NUL-delimited placeholders while the
+ * later passes run, so the input's own NULs are dropped first — otherwise doc
+ * content could forge a placeholder and inject markup.
  */
 function inline(text: string, resolveLink?: (target: string) => string): string {
   const parked: string[] = []
@@ -113,14 +105,11 @@ function emphasis(escaped: string): string {
 }
 
 /**
- * Splits a table row on its unescaped pipes, undoing the escaping
- * `escapeMarkdownTableCell` applies: a backslash doubled, then every pipe
- * escaped. Reading `\\` as one unit is what keeps the parity right — `\\|`
- * is a literal backslash followed by a cell delimiter, not an escaped pipe.
- *
- * Splitting on every pipe instead pushes each later cell one column right and
- * leaves a stray backslash behind, so a `screens.md` Props column holding a
- * TypeScript union rendered with more cells than the table had headers.
+ * Splits a table row on its unescaped pipes, undoing what
+ * `escapeMarkdownTableCell` applies. Reading `\\` as one unit keeps the parity
+ * right — `\\|` is a literal backslash followed by a cell delimiter, not an
+ * escaped pipe — where splitting on every pipe pushes each later cell one
+ * column right and leaves a stray backslash behind.
  */
 function splitCells(row: string): string[] {
   const cells: string[] = []
@@ -144,9 +133,9 @@ function splitCells(row: string): string[] {
 }
 
 function renderTable(rows: string[], resolveLink?: (target: string) => string): string {
-  // The outer pipes are optional and produce an empty cell on each side. Which
-  // trailing pipe is a delimiter is a question only the scan can answer, so the
-  // empties are dropped from its result rather than sliced off the row first.
+  // Outer pipes are optional and produce an empty cell on each side. Only the
+  // scan can tell which trailing pipe is a delimiter, so the empties are
+  // dropped from its result rather than sliced off the row first.
   const cells = (row: string): string[] => {
     const text = row.trim()
     const parts = splitCells(text)
@@ -164,16 +153,15 @@ function renderTable(rows: string[], resolveLink?: (target: string) => string): 
 }
 
 /**
- * Render a doc body (frontmatter already stripped) to HTML. Headings
- * shift down one level (`#` → `<h2>`) so the viewer's panel title keeps
- * the single `<h1>` slot.
+ * Options for {@link renderDocHtml}, which renders a doc body (frontmatter
+ * already stripped) and shifts headings down one level (`#` → `<h2>`) so the
+ * viewer's panel title keeps the single `<h1>` slot.
  */
 export interface RenderDocOptions {
   /**
-   * Maps a markdown link destination to the value emitted in
-   * `data-target`. The viewer passes the app-root path the link resolves
-   * to, so navigation is a map lookup rather than a second, divergent
-   * implementation of the resolution rules.
+   * Maps a markdown link destination to the value emitted in `data-target`. The
+   * viewer passes the app-root path the link resolves to, so navigation is a
+   * map lookup rather than a second implementation of the resolution rules.
    */
   resolveLink?: (target: string) => string
 }

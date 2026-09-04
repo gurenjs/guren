@@ -3,10 +3,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { Application } from '../../src/http/Application'
 
 /**
- * Like the port-binding tests next door, these bind real sockets on 127.0.0.1
- * rather than stubbing `Bun.serve`. What `stop()` has to deliver is that the
- * socket is genuinely released — a stub can only report that `stop()` was
- * called, which is the one thing never in doubt.
+ * Real sockets on 127.0.0.1 rather than a stubbed `Bun.serve`: what `stop()` has
+ * to deliver is that the socket is genuinely released, which no stub can report.
  */
 
 type BunServerSlot = { __gurenActiveServer?: unknown }
@@ -62,10 +60,8 @@ describe('Application.stop', () => {
   })
 
   /**
-   * `address` reports where `listen()` put this app, and its own docs treat a
-   * stop that the framework can see as clearing it. `stop()` is now such a stop,
-   * so leaving the stored address behind would have the accessor naming a socket
-   * that is closed.
+   * Leaving the stored address behind after `stop()` would have `address` naming
+   * a socket that is closed.
    */
   it('stops reporting an address once stopped, and reports the new one after a restart', async () => {
     const app = track(new Application())
@@ -107,10 +103,8 @@ describe('Application.stop', () => {
   })
 
   /**
-   * Every other real-server case here forces connections closed. The default is
-   * the graceful path, and it is the one a caller gets by writing `app.stop()` —
-   * so it needs its own case rather than being covered only by the never-listened
-   * app, which returns before reaching Bun's `stop()` at all.
+   * Every other real-server case here forces connections closed, but `app.stop()`
+   * defaults to the graceful path, so it needs a case that reaches Bun's `stop()`.
    */
   it('releases the socket on a graceful stop with no argument', async () => {
     const app = track(new Application())
@@ -130,11 +124,9 @@ describe('Application.stop', () => {
   })
 
   /**
-   * `listen()` guards its process-handler registration with a flag that only
-   * ever went `true`. `stop()` has to detach the handlers, not just reset the
-   * flag: resetting alone would let every stop/listen cycle attach another set,
-   * and leaving the flag set would be the same leak deferred to whoever resets
-   * it next.
+   * `stop()` has to detach the process handlers, not just reset `listen()`'s
+   * registration flag: resetting alone lets every stop/listen cycle attach another
+   * set, and leaving the flag set defers the same leak.
    */
   it('detaches its process teardown handlers, and re-attaches exactly one set', async () => {
     const counts = () => ({
@@ -166,12 +158,9 @@ describe('Application.stop', () => {
   })
 
   /**
-   * The counterpart to the listener-count test above, and the half it cannot
-   * reach: that the re-attached handlers actually *fire*. `listenerCount` only
-   * reports Bun's bookkeeping, and a process exiting has its sockets reclaimed
-   * by the OS either way — so the discriminating signal is the exit *code*. A
-   * restarted app whose SIGTERM handler went missing dies by signal instead of
-   * exiting 0 through the teardown.
+   * The half `listenerCount` cannot reach: that the re-attached handlers actually
+   * *fire*. The discriminating signal is the exit *code* — a restarted app whose
+   * SIGTERM handler went missing dies by signal instead of exiting 0.
    */
   it('still tears down on a signal after a stop/restart cycle', async () => {
     const child = Bun.spawn(
@@ -207,10 +196,8 @@ describe('Application.stop', () => {
     const first = track(new Application())
     await first.listen({ port: 0, hostname: '127.0.0.1', vite: false })
 
-    // A second listen() force-stops whatever the slot holds and takes it over
-    // — the hot-reload path. The first app still remembers its own (now dead)
-    // server, so its stop() must not clear a slot that has moved on, or the
-    // live server loses its exit teardown.
+    // On the hot-reload path a second listen() takes over the slot, so the first
+    // app's stop() must not clear it, or the live server loses its exit teardown.
     const second = track(new Application())
     await second.listen({ port: 0, hostname: '127.0.0.1', vite: false })
 

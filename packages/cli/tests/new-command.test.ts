@@ -5,9 +5,8 @@ import { CLI_BIN_PATH, SERVER_DIST_ENTRY, assertWorkspaceBuilt } from './helpers
 import { createNewCommand } from '../src/new-command'
 
 /**
- * Drives the command through citty rather than asserting on a pure argv
- * builder: the bug this covers lived in citty's *parsing*, so a test that
- * skips the parse cannot see it.
+ * Driven through citty rather than a pure argv builder: the bug this covers
+ * lived in citty's *parsing*, so a test that skips the parse cannot see it.
  */
 async function forwardedArgs(rawArgs: string[]): Promise<string[]> {
   const calls: string[][] = []
@@ -23,9 +22,8 @@ async function forwardedArgs(rawArgs: string[]): Promise<string[]> {
 
 describe('guren new', () => {
   it('forwards a string flag with its value instead of parsing it as a boolean', async () => {
-    // The regression: `--db` was undeclared, so citty produced `db: true` and
-    // leaked "postgres" into `args._`. Rebuilding argv from parsed args then
-    // dropped it entirely and the user silently got a SQLite app.
+    // Regression: `--db` was undeclared, so citty produced `db: true` and leaked
+    // "postgres" into `args._`; rebuilt argv dropped it and users got SQLite.
     expect(await forwardedArgs(['my-app', '--db', 'postgres'])).toEqual([
       'x',
       'create-guren-app',
@@ -74,10 +72,9 @@ describe('guren new', () => {
   })
 
   it('forwards a flag this command does not declare at all', async () => {
-    // The contract is "forward everything", not "forward what we mirror". Every
-    // other case here uses a declared flag, so a translation table rebuilt to
-    // cover the current declarations would satisfy them while silently dropping
-    // the next flag `create-guren-app` grows. That is exactly how `--db` broke.
+    // The contract is "forward everything", not "forward what we mirror": a
+    // translation table covering only today's declarations would satisfy every
+    // other case here while dropping the next flag `create-guren-app` grows.
     expect(await forwardedArgs(['my-app', '--not-a-declared-flag', 'value'])).toEqual([
       'x',
       'create-guren-app',
@@ -107,10 +104,9 @@ describe('guren new', () => {
     ])
   })
 
-  // The cases above construct the command directly, so none of them would
-  // notice if it stopped being registered in `bin.ts`. `--help` is the one
-  // path that exercises the real wiring without spawning `create-guren-app`:
-  // `runCli` renders usage and returns before `run()` is reached.
+  // The cases above construct the command directly, so none would notice it
+  // being unregistered in `bin.ts`. `--help` exercises the real wiring without
+  // spawning `create-guren-app`: usage renders and returns before `run()`.
   it('is registered in the CLI, and its help lists the flags it forwards', async () => {
     assertWorkspaceBuilt([SERVER_DIST_ENTRY])
 

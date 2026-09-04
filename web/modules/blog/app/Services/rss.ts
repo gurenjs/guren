@@ -3,9 +3,8 @@ import { xmlEscape } from '../../../../config/xml.js'
 import type { PublishedPost } from './published-posts.js'
 
 /**
- * RSS 2.0 requires RFC-822 dates, not ISO-8601 — readers that parse strictly
- * drop items with an ISO timestamp. ES2018 fixed toUTCString() at exactly that
- * form ("Www, DD Mmm YYYY HH:MM:SS GMT"), locale-independent.
+ * RSS 2.0 requires RFC-822 dates, not ISO-8601; strict readers drop the item.
+ * ES2018 fixed toUTCString() at exactly that form, locale-independent.
  */
 export function toRfc822(date: Date): string {
   return date.toUTCString()
@@ -29,8 +28,8 @@ function item(post: PublishedPost): string {
 
 /**
  * RSS 2.0 for the blog. Posts arrive newest-first, so the head of the list is
- * also the feed's last build date — deriving it from the content rather than
- * from `now` keeps the body byte-identical between requests.
+ * the last build date; deriving it from content rather than `now` keeps the
+ * body byte-identical between requests.
  */
 export function buildRssFeed(posts: PublishedPost[]): string {
   const feedUrl = absoluteUrl('/blog/rss.xml')

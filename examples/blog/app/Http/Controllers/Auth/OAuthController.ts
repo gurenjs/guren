@@ -27,15 +27,13 @@ export default class OAuthController extends Controller {
     return this.make<OAuthManager>('oauth')
   }
 
-  // Note: not named `redirect` — that would shadow the base
-  // Controller.redirect() helper used below.
+  // Not named `redirect`: that would shadow Controller.redirect() used below.
   async redirectToProvider(): Promise<Response> {
     const { provider } = this.validateParams(ProviderParamSchema)
 
-    // Passing the session ties `state` to this browser: the manager keeps a
-    // binding in it that the callback must present back. Without it an
-    // attacker could authorize their own account, hold the `code`, and walk a
-    // visitor through the callback to log them into the attacker's account.
+    // Passing the session ties `state` to this browser. Without it an attacker
+    // could authorize their own account, hold the `code`, and walk a visitor
+    // through the callback to log them into the attacker's account.
     const { url } = await this.oauth().authorize(provider, {
       redirectTo: this.request.query('redirectTo') ?? undefined,
       session: this.auth.session(),
@@ -54,9 +52,8 @@ export default class OAuthController extends Controller {
       session: this.auth.session(),
     })
 
-    // GitHub accounts with a private email are handled upstream:
-    // createGitHubOAuthProviderConfig falls back to /user/emails, so
-    // profile.email is already populated whenever one is obtainable.
+    // A private GitHub email is handled upstream: createGitHubOAuthProviderConfig
+    // falls back to /user/emails, so this is populated whenever one is obtainable.
     const resolvedEmail = profile.email?.toLowerCase()
 
     if (!resolvedEmail) {
@@ -66,15 +63,10 @@ export default class OAuthController extends Controller {
     let [user] = await User.where(identityWhere(provider, profile.id))
 
     if (!user) {
-      // Returning an email is not a claim that the provider checked it — the
-      // provider reports that separately, and profile.emailVerified carries
-      // the answer. Creating an account from an address the provider says it
-      // never verified would let it claim an email it does not own, and the
-      // collision check below would then turn the real owner away for good.
-      // Only an explicit false is refused: providers that send no signal at
-      // all (GitHub's /user) leave this undefined. Checked only on the create
-      // path, so an already-linked account is not locked out if its provider
-      // status changes later.
+      // Returning an email is not a claim the provider checked it: an account
+      // created from an unverified address claims an email it may not own, and
+      // the collision check below then locks the real owner out. Only an explicit
+      // false is refused, and only on the create path.
       if (profile.emailVerified === false) {
         throw ValidationException.withMessages({
           message: 'Your provider has not verified this email address. Verify it with the provider and try again.',
@@ -88,17 +80,14 @@ export default class OAuthController extends Controller {
         })
       }
 
-      // No password was supplied by the user — generate a random one so the
-      // account still satisfies AuthenticatableModel's hashing pipeline.
-      // It's never surfaced to the user and can't realistically be guessed.
+      // A random password so the account still satisfies AuthenticatableModel's
+      // hashing pipeline; it is never surfaced and cannot realistically be guessed.
       user = await User.create({
         name: profile.name ?? resolvedEmail,
         email: resolvedEmail,
         password: randomUUID(),
-        // The address got past the check above — either the provider vouches
-        // for it, or it came from GitHub's fallback, which only accepts
-        // primary+verified emails. Making the user click a verification link
-        // we never send would just strand them at /verify-email.
+        // The address passed the check above, so demanding a verification link
+        // this app never sends would strand the user at /verify-email.
         emailVerifiedAt: new Date(),
         ...identityWhere(provider, profile.id),
       })

@@ -390,7 +390,6 @@ export class TestRequestBuilder {
    * Send the request.
    */
   async send(): Promise<TestResponse> {
-    // Build cookie header
     if (Object.keys(this._cookies).length > 0) {
       const cookieStr = Object.entries(this._cookies)
         .map(([k, v]) => `${k}=${v}`)
@@ -506,8 +505,6 @@ export function createTestClient(
 ): TestClient {
   return new TestClient(baseUrl, fetchFn)
 }
-
-// Helper functions
 
 function getNestedValue(obj: unknown, path: string): unknown {
   const parts = path.split('.')

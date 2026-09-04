@@ -255,10 +255,8 @@ describe('LocalDriver', () => {
     })
   })
 
-  // Visibility on a local disk is a property of the disk: what makes a file
-  // reachable is the disk root and whatever serves it. The driver has always
-  // accepted per-object requests and done nothing, so it now says so and
-  // keeps the old behaviour until the next major.
+  // Visibility on a local disk is a property of the disk, not the object. The
+  // driver warns on a per-object request but keeps the old no-op until the next major.
   describe('visibility', () => {
     beforeEach(() => {
       resetWarnOnce()

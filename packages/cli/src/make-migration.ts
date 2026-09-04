@@ -7,30 +7,12 @@ import { runCommand, slugifyProse } from './utils'
 const DEFAULT_SCHEMA = 'db/schema.ts'
 const DEFAULT_OUTPUT = 'db/migrations'
 /**
- * The config filenames we probe for, ordered consistently with drizzle-kit.
- *
- * Not a copy of drizzle-kit's own default discovery, which probes only `.ts`,
- * `.js` and `.json`: when we hand the file over as an explicit `--config`, its
- * loader accepts `.mts`/`.mjs` even though it never looks for them itself.
- * Finding nothing is not a no-op — it leaves `dialect` with no source at all,
- * and `makeMigration()` refuses rather than run a command that cannot succeed.
- *
- * `drizzle.config.json` is probed even though drizzle-kit cannot currently load
- * one: `bun x drizzle-kit` runs it through its `#!/usr/bin/env node` shebang, and
- * under Node its `import()` of the config needs a `type: json` import attribute
- * it does not pass. Pointing it at the app's real config still beats overriding
- * with defaults — the user gets an error naming the file they wrote, instead of
- * drizzle-kit reporting a missing `dialect` they had in fact declared. Ordering
- * matters for the same reason drizzle-kit's does: a loadable config alongside a
- * `.json` must win.
- *
- * Bun *can* import a `.json` config, so on the flag path — where this process
- * reads the config itself instead of delegating — a JSON app works where the
- * `--config` path fails it. That asymmetry is a strict improvement, not a
- * contradiction: the flag path never needs drizzle-kit to load the file.
- *
- * Verified against drizzle-kit 1.0.0-rc.4 (the version the scaffold templates
- * pin) via `bun x drizzle-kit generate --config <file>`.
+ * Wider than drizzle-kit's own discovery (`.ts`/`.js`/`.json`): its loader
+ * accepts an explicit `--config` pointing at `.mts`/`.mjs` too. `.json` is
+ * probed although drizzle-kit cannot load one under its Node shebang, because
+ * an error naming the user's own config beats a missing-`dialect` report for a
+ * dialect they did declare. Order matters — a loadable config must beat a
+ * `.json`. Verified against drizzle-kit 1.0.0-rc.4.
  */
 const DRIZZLE_CONFIG_CANDIDATES = [
   'drizzle.config.ts',
@@ -44,52 +26,38 @@ export interface MakeMigrationOptions {
   name?: string
   schema?: string
   out?: string
-  /**
-   * The drizzle dialect, passed through verbatim. Only reachable on the flag
-   * path — see `makeMigration()` — and only needed when no config declares one.
-   */
+  /** Passed through verbatim; only reachable on the flag path. */
   dialect?: string
 }
 
 /**
- * What `drizzle-kit generate` actually produced. The command exits 0 whether it
- * wrote a migration or printed "No schema changes, nothing to migrate.", so a ✔
- * off the exit code alone reports a migration that does not exist — and sends
- * the user back to `db:migrate`, which then repeats its own empty-folder
- * warning with nothing in between explaining why.
+ * What `drizzle-kit generate` actually produced. It exits 0 whether it wrote a
+ * migration or printed "No schema changes, nothing to migrate.", so a success
+ * report off the exit code alone announces a migration that does not exist.
  */
 export interface MakeMigrationResult {
   /**
-   * The folder drizzle-kit wrote to, absolute. **Present only when it was
-   * resolved from positive evidence** — an explicit `--out`, or the `out` the
-   * drizzle config declares. Absent means `created` observed nothing and says
-   * nothing: naming a folder drizzle-kit may not have written to is worse than
-   * staying quiet, so the caller falls back to reporting the exit code.
+   * The absolute folder drizzle-kit wrote to, **only when resolved from
+   * positive evidence** (an explicit `--out`, or the config's `out`). Absent
+   * means `created` observed nothing and says nothing.
    */
   migrationsFolder?: string
   /**
-   * Migration folders that appeared during this run, by name. Empty alongside a
-   * `migrationsFolder` is the "nothing to migrate" case, positively observed.
+   * Migration folders that appeared during this run. Empty alongside a
+   * `migrationsFolder` is "nothing to migrate", positively observed.
    */
   created: string[]
   /** The schema file drizzle-kit read, when known, for the caller's message. */
   schemaPath?: string
   /**
-   * Config fields the flag path could not carry, named for the caller to warn
-   * about. Empty on the `--config` path, which carries everything by
-   * definition.
-   *
-   * `generate` exposes most of the config as flags, but not all of it, and an
-   * unstated field silently reverts to drizzle-kit's default rather than
-   * erroring — the same "quietly generates something else" failure the list
-   * `schema` refusal exists to prevent, only milder, so it warns instead of
-   * stopping.
+   * Config fields the flag path could not carry, for the caller to warn about;
+   * empty on the `--config` path. An unstated field silently reverts to
+   * drizzle-kit's default rather than erroring.
    */
   droppedConfigFields: string[]
   /**
-   * A drizzle config exists but this process could not import it, so the flag
-   * path proceeded on defaults. Distinct from `droppedConfigFields`, which
-   * names fields read and then left behind.
+   * A config exists but could not be imported, so the flag path proceeded on
+   * defaults — distinct from `droppedConfigFields`, which was read then left.
    */
   configUnreadable: boolean
 }
@@ -100,16 +68,13 @@ interface DrizzleConfig {
   schema?: string
   /**
    * What `--schema` can be handed as one flag. Wider than `schema` above: a
-   * glob is one argument drizzle-kit expands itself, it just names no one file
-   * to point a user at.
+   * glob is one argument drizzle-kit expands itself.
    */
   schemaFlag?: string
   /**
-   * `schema` was declared as a list. drizzle-kit takes one `--schema`, and a
-   * repeated flag keeps only the last — verified against 1.0.0-rc.4, where
-   * `--schema db/schema.ts --schema modules/a/db/schema.ts` generated the
-   * second file's tables and silently dropped the first's. So the flag path
-   * cannot carry a list, and must say so rather than emit half a migration.
+   * `schema` was declared as a list, which the flag path cannot carry:
+   * drizzle-kit takes one `--schema` and a repeated flag keeps only the last
+   * (verified against 1.0.0-rc.4, silently dropping the earlier file's tables).
    */
   schemaIsList?: boolean
   /** Passed through verbatim; drizzle-kit owns the valid set. See `readDialect`. */
@@ -117,11 +82,9 @@ interface DrizzleConfig {
   /** Passed through verbatim alongside `dialect` — `aws-data-api`, `pglite`, … */
   driver?: string
   /**
-   * Only `false` is interesting. `--breakpoints` is a boolean flag with no
-   * negation, so a config disabling them cannot be restated on the command
-   * line; leaving it unstated re-enables them. Measured against 1.0.0-rc.4:
-   * the same schema yields one `--> statement-breakpoint` via `--config` with
-   * `breakpoints: false`, and none via flags.
+   * Only `false` is interesting: `--breakpoints` has no negation, so a config
+   * disabling them cannot be restated on the command line and leaving it
+   * unstated re-enables them (measured against 1.0.0-rc.4).
    */
   breakpointsDisabled?: boolean
   /** Importing the config threw, so its fields are unknown rather than unset. */
@@ -137,14 +100,9 @@ async function resolveDrizzleConfig(): Promise<string | undefined> {
 }
 
 /**
- * One path from the config, or nothing when it names no single file. drizzle-kit
- * also accepts globs and arrays for `schema`, and a message telling the user to
- * edit a glob names a file that does not exist.
- *
- * Every glob metacharacter counts, not just `*`: drizzle-kit expands `schema`
- * with `glob.sync`, so `./db/{posts,users}.ts` and `./db/schema.?ts` are
- * patterns too, and naming one as the file to edit is the same mistake `*`
- * was already guarded against.
+ * drizzle-kit expands `schema` with `glob.sync`, so every metacharacter counts,
+ * not just `*` — telling the user to edit `./db/{posts,users}.ts` names a file
+ * that does not exist.
  */
 const GLOB_METACHARACTERS = /[*?[\]{}]/
 
@@ -153,8 +111,7 @@ function readPath(value: unknown): string | undefined {
 }
 
 /**
- * What `--schema` can be handed, or nothing when the config states no schema at
- * all. A glob is fine here where `readPath` rejects it: drizzle-kit expands it
+ * A glob is fine here where `readPath` rejects it: drizzle-kit expands it
  * itself, verified against 1.0.0-rc.4.
  */
 function readSchemaFlag(value: unknown): string | undefined {
@@ -162,35 +119,26 @@ function readSchemaFlag(value: unknown): string | undefined {
 }
 
 /**
- * A dialect/driver string, passed to drizzle-kit verbatim.
- *
- * Deliberately not narrowed to `SchemaDialect` ('sqlite' | 'pg' | 'mysql'):
- * drizzle-kit 1.0.0-rc.4 also accepts `turso`, `singlestore`, `mssql`,
- * `cockroach` and `duckdb`, so mapping through that type would answer a turso
- * app with `sqlite` and generate quietly different SQL. drizzle-kit owns the
- * valid set and rejects a typo with a message naming every option, which beats
- * a second copy of the list here going stale.
+ * Deliberately not narrowed to `SchemaDialect`: drizzle-kit 1.0.0-rc.4 also
+ * accepts `turso`, `singlestore`, `mssql`, `cockroach` and `duckdb`, so
+ * mapping through that type would answer a turso app with `sqlite` and
+ * generate quietly different SQL. drizzle-kit owns the valid set.
  */
 function readVerbatim(value: unknown): string | undefined {
   return typeof value === 'string' && value !== '' ? value : undefined
 }
 
 /**
- * Reads the drizzle config, which is the authority on what drizzle-kit needs
- * whenever we cannot simply hand it `--config`.
- *
- * Importing it runs the file, so a failure — a config that throws on a missing
- * env var, a `drizzle-kit` that will not resolve — is reported as `unreadable`
- * rather than propagating. That distinction matters now that the flag path
- * depends on this reader: "your config declares no dialect" and "we could not
- * read your config" send the user to different fixes, and only the first is
- * their config's fault.
+ * Importing the config runs it, so a failure (a throw on a missing env var, an
+ * unresolvable `drizzle-kit`) becomes `unreadable` rather than propagating:
+ * "declares no dialect" and "could not be read" send the user to different
+ * fixes, and only the first is their config's fault.
  */
 async function readDrizzleConfig(configPath: string): Promise<DrizzleConfig> {
   try {
     const module = await import(pathToFileURL(resolve(process.cwd(), configPath)).href)
     // drizzle-kit's loader adopts a promise-exporting config, so awaiting is
-    // what keeps this reader looking at the same object the child process does.
+    // what keeps this reader on the same object the child process sees.
     const config = ((await module.default) ?? module) as Record<string, unknown>
 
     return {
@@ -208,9 +156,8 @@ async function readDrizzleConfig(configPath: string): Promise<DrizzleConfig> {
 }
 
 /**
- * Why no dialect could be resolved, phrased as the fix rather than as
- * drizzle-kit's `dialect: undefined`. Reached only on the flag path, where
- * drizzle-kit never sees the config and so cannot name it for us.
+ * Reached only on the flag path, where drizzle-kit never sees the config and
+ * so could only report `dialect: undefined` against flags nobody typed.
  */
 function describeMissingDialect(configPath: string | undefined, configured: DrizzleConfig): string {
   if (!configPath) {
@@ -234,10 +181,8 @@ function describeMissingDialect(configPath: string | undefined, configured: Driz
 }
 
 /**
- * drizzle-kit migration folder names in `folder` — one directory each, holding
- * a migration.sql. `@guren/orm` reads the same shape for the migrator, but
- * publishes only the summary types, so the CLI reads it here rather than
- * growing the ORM's public surface for one caller.
+ * `@guren/orm` reads this same shape for the migrator but publishes only the
+ * summary types, so the CLI reads it here rather than widening that surface.
  */
 function listMigrationNames(folder: string): string[] {
   if (!existsSync(folder)) {
@@ -255,31 +200,18 @@ export async function makeMigration(options: MakeMigrationOptions = {}): Promise
   const hasOverrides = options.schema != null || options.out != null || options.dialect != null
   const useConfig = Boolean(configPath) && !hasOverrides
 
-  // Read the config on both branches now. The flag path needs it most: any
-  // override drops `--config`, and drizzle-kit 1.0.0-rc.4 refuses that
-  // combination — "You can't use both --config and other cli options for
-  // generate command", exit 1 — so the flags have to restate what the config
-  // would have supplied, `dialect` above all.
-  //
-  // The refusal is per-flag, not blanket: `generate` whitelists `name`,
-  // `custom`, `ignoreConflicts`, `explain`, `output`, `hints` and `hintsFile`
-  // as safe beside `--config`, and collides only on `driver`, `breakpoints`,
-  // `schema`, `out` and `dialect` (drizzle-kit's `assertCollisions`). That is
-  // why `--name` below rides along on either branch.
-  //
-  // "What it can": `generate` takes dialect, driver, schema, out and name as
-  // flags, which covers the fields that decide *what* is generated and *where*.
-  // `breakpoints: false` is the measured exception, reported rather than
-  // carried. `tablesFilter`/`schemaFilter` were checked and do not apply to
-  // `generate` at all (push/pull only), and rc.4's Config has no top-level
-  // `casing` nor a `migrations.prefix` — so neither is a gap here.
+  // Read on both branches: any override drops `--config`, and drizzle-kit
+  // 1.0.0-rc.4 refuses that combination outright ("You can't use both --config
+  // and other cli options for generate command"), so the flags must restate
+  // what the config would have supplied. Its `assertCollisions` only rejects
+  // `driver`, `breakpoints`, `schema`, `out` and `dialect` beside `--config`,
+  // which is why `--name` below rides along on either branch. `breakpoints:
+  // false` is the one field flags cannot carry.
   const configured = configPath ? await readDrizzleConfig(configPath) : {}
 
   const args = ['x', 'drizzle-kit', 'generate']
 
-  // Ahead of the branch because `--name` belongs to neither: drizzle-kit
-  // whitelists it beside `--config`, so it rides along whichever way the rest
-  // of the arguments are assembled.
+  // Ahead of the branch: drizzle-kit whitelists `--name` beside `--config`.
   if (name) {
     args.push(`--name=${name}`)
   }
@@ -292,19 +224,17 @@ export async function makeMigration(options: MakeMigrationOptions = {}): Promise
   if (useConfig && configPath) {
     args.push('--config', configPath)
   } else {
-    // drizzle-kit requires `dialect` and will not infer it. Refusing here names
-    // the field and the fix; letting the child run reports `dialect: undefined`
-    // against flags the user never typed.
+    // drizzle-kit requires `dialect` and will not infer it; refusing here names
+    // the field and the fix.
     const dialect = options.dialect ?? configured.dialect
     if (!dialect) {
       throw new Error(describeMissingDialect(configPath, configured))
     }
 
-    // A list `schema` cannot survive the trip: `--schema` takes one value and a
-    // repeated flag keeps only the last, so carrying it would generate part of
-    // the app's tables and drop the rest without a word. The default template
-    // documents `schema: ['./db/schema.ts', './modules/*/db/schema.ts']`, so
-    // this is reachable by following its own comment.
+    // `--schema` takes one value and a repeated flag keeps only the last, so
+    // carrying a list would generate part of the app's tables and drop the
+    // rest silently. Reachable from the default template's own comment, which
+    // documents `schema: ['./db/schema.ts', './modules/*/db/schema.ts']`.
     if (options.schema == null && configured.schemaIsList) {
       throw new Error(
         `${configPath} declares \`schema\` as a list, which cannot be passed as a single --schema ` +
@@ -317,9 +247,8 @@ export async function makeMigration(options: MakeMigrationOptions = {}): Promise
     out = options.out ?? configured.out ?? DEFAULT_OUTPUT
 
     args.push('--dialect', dialect)
-    // `driver` selects a transport within a dialect (`aws-data-api`, `pglite`,
-    // …). Dropping it would silently switch the app off the one its config
-    // names, so it rides along whenever the config states one.
+    // `driver` selects a transport within a dialect (`aws-data-api`, `pglite`),
+    // so dropping it would silently switch the app off the one it named.
     if (configured.driver) {
       args.push('--driver', configured.driver)
     }
@@ -330,24 +259,17 @@ export async function makeMigration(options: MakeMigrationOptions = {}): Promise
       droppedConfigFields.push('breakpoints')
     }
 
-    // An unreadable config states nothing, so an un-overridden `schema`/`out`
-    // fell back to the defaults above while a config file sits right there.
-    // drizzle-kit loads configs with its own bundler, so it may well have read
-    // the one this process could not — generating from a schema the app never
-    // named.
-    //
-    // Only when something actually fell back: overriding both paths leaves the
-    // config nothing to have supplied, and warning there would describe a
-    // substitution that did not happen.
+    // An un-overridden `schema`/`out` just fell back to the defaults while a
+    // config sits right there — and drizzle-kit's own bundler may well read
+    // the file this process could not. Guarded on something having actually
+    // fallen back, so overriding both paths warns about nothing.
     if (configured.unreadable && (options.schema == null || options.out == null)) {
       configUnreadable = true
     }
   }
 
-  // The config branch is the only one that leaves the paths unstated on the
-  // command line, so it is the only one that has to ask the config where the
-  // output went. The flag branch resolved `out` above, from the override, the
-  // config, or the default, in that order.
+  // Only the config branch leaves the paths unstated on the command line, so
+  // only it has to ask the config where the output went.
   const outDir = out ?? (useConfig ? configured.out : undefined)
   const migrationsFolder = outDir ? resolve(process.cwd(), outDir) : undefined
   const before = migrationsFolder ? new Set(listMigrationNames(migrationsFolder)) : new Set<string>()

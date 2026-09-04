@@ -1,9 +1,7 @@
 // Builds every workspace package under packages/ in dependency order, running
-// independent packages in parallel (bounded by the machine's core count).
-//
-// The order is derived from each package.json rather than hand-maintained, so
-// adding a package (a plugin, for example) needs no change here or in the root
-// package.json scripts.
+// independent packages in parallel (bounded by the machine's core count). The
+// order is derived from each package.json, so adding a package (a plugin, for
+// example) needs no change here or in the root package.json scripts.
 //
 //   bun run ./scripts/build-packages.ts                  # build everything
 //   bun run ./scripts/build-packages.ts --clean          # wipe dist/ first
@@ -11,8 +9,7 @@
 //   bun run ./scripts/build-packages.ts --sequential     # one package at a time
 //   bun run ./scripts/build-packages.ts cli plugin-cloudflare
 //
-// Positional arguments select packages by directory name or package name; the
-// dependency order of the selection is preserved.
+// Positionals select by directory or package name, preserving dependency order.
 
 import { rm } from 'node:fs/promises'
 import { availableParallelism } from 'node:os'
@@ -29,9 +26,8 @@ import {
 } from './workspace-packages.ts'
 
 /**
- * Returns the child's exit code; a non-zero code means the caller should stop
- * and propagate it. Never rejects — the scheduler's bookkeeping depends on
- * every build settling with a code.
+ * Never rejects: the scheduler's bookkeeping depends on every build settling
+ * with an exit code.
  */
 async function build(pkg: WorkspacePackage, stream: boolean): Promise<number> {
   const started = Date.now()
@@ -45,8 +41,7 @@ async function build(pkg: WorkspacePackage, stream: boolean): Promise<number> {
       })
       exitCode = await proc.exited
     } else {
-      // Output is buffered and replayed on completion so concurrent builds
-      // don't interleave their lines.
+      // Buffered and replayed on completion so concurrent builds don't interleave.
       const proc = Bun.spawn([process.execPath, 'run', 'build'], {
         cwd: pkg.dir,
         stdout: 'pipe',
@@ -76,12 +71,11 @@ async function build(pkg: WorkspacePackage, stream: boolean): Promise<number> {
 }
 
 /**
- * Untracked `.d.ts` files under any package's src/. The native declaration
- * emitter writes the declarations of files outside its `--rootDir` next to
- * their sources instead of into its output directory, silently; tracked
- * `.d.ts` (hand-written ambient types) are not strays. Checked once after
- * every build has finished: with builds running in parallel, the package
- * that finished last is not necessarily the one whose program strayed.
+ * Untracked `.d.ts` under any package's src/: the native declaration emitter
+ * silently writes declarations for files outside its `--rootDir` next to their
+ * sources. Tracked `.d.ts` (hand-written ambient types) are not strays. Checked
+ * once after every build, since a parallel run's last finisher need not be the
+ * package whose program strayed.
  */
 function strayDeclarations(): string[] {
   const result = Bun.spawnSync(
@@ -95,22 +89,19 @@ function strayDeclarations(): string[] {
 }
 
 /**
- * Builds the packages as their dependencies complete, at most `limit` at a
- * time. On a failure no new builds start; in-flight ones finish and their
- * output is still printed. Returns the first failure's exit code, or 0.
+ * Builds packages as their dependencies complete, at most `limit` at a time. On
+ * a failure no new builds start; in-flight ones finish and still print.
  */
 async function buildAll(
   targets: WorkspacePackage[],
   limit: number,
   allPackages: WorkspacePackage[],
 ): Promise<number> {
-  // The closure over the full workspace keeps transitive order for subset
-  // selections: `build server openapi` still runs server before openapi even
-  // though the core package between them is not selected.
+  // The full workspace keeps transitive order for subset selections: `build
+  // server openapi` still runs server first via the unselected package between.
   const { remainingDeps, dependents } = dependencySchedule(targets, allPackages)
 
-  // `targets` is already dependency-sorted, so the ready queue starts (and
-  // stays) in a deterministic order.
+  // `targets` is already dependency-sorted, so the ready queue is deterministic.
   const ready = targets.filter((pkg) => remainingDeps.get(pkg.name) === 0)
   let running = 0
   let exitCode = 0
@@ -150,10 +141,8 @@ const { flags, positionals: selectors } = parseArgs(process.argv.slice(2), [
 const clean = flags.clean
 const listOnly = flags.list
 
-// Sort the full workspace graph — including packages without a `build` script
-// — before filtering, so a buildable package that transitively depends on a
-// non-buildable one keeps its correct relative order. This also rejects any
-// undeclared dependency cycle before the scheduler runs.
+// Sorted before filtering, so a buildable package that transitively depends on a
+// non-buildable one keeps its order. Also rejects undeclared cycles up front.
 const allPackages = sortByDependencies(await collectPackages())
 const buildable = allPackages.filter((pkg) => pkg.scripts.build)
 const targets = selectPackages(buildable, selectors)

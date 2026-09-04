@@ -14,45 +14,38 @@ const MAIN_ENTRY_CANDIDATES = [
 
 export type MaybeApplication = {
   /**
-   * Resolves to the bound address on a current `@guren/server`. The `unknown`
-   * arm is not defensive padding — `guren dev` imports the *user's* app, which
-   * may resolve a version whose `listen()` predates the return value.
+   * Resolves to the bound address on a current `@guren/server`. The `unknown` arm covers
+   * the *user's* app resolving a version whose `listen()` predates the return value.
    */
   listen?: (options?: {
     port?: number
     hostname?: string
   }) => unknown | Promise<{ port: number; hostname: string; url: string } | undefined>
   boot?: () => Promise<void> | void
-  /**
-   * The app's auth manager, as much of it as a command may touch. Structural
-   * and optional all the way down for the same reason `listen` carries an
-   * `unknown` arm: the app being loaded is the *user's*, and may resolve a
-   * `@guren/core` older than `getApiTokenStore()`. A missing method has to
-   * reach the caller's own diagnostic ("call `useTokens(store)`") rather than
-   * a `TypeError` naming an internal.
-   */
   /** Bun's listener handle, when the app is one that reports having a server. */
   stop?: (closeConnections?: boolean) => void | Promise<void>
+  /**
+   * The app's auth manager, as much of it as a command may touch. Structural and optional
+   * all the way down: the user's app may resolve a `@guren/core` older than
+   * `getApiTokenStore()`, and a missing method must reach the caller's own diagnostic
+   * rather than a `TypeError` naming an internal.
+   */
   auth?: {
     getApiTokenStore?: () => ApiTokenStore | undefined
     /**
-     * The options the app's own `useTokens()` used, so machinery replacing
-     * the store changes where tokens live and nothing else.
+     * The options the app's own `useTokens()` used, so machinery replacing the store
+     * changes where tokens live and nothing else.
      */
     getApiTokenOptions?: () => { provider?: string; guardName?: string; updateLastUsed?: boolean }
     /**
-     * Installs a token store over whatever the app configured, which is how
-     * `tool:dev` issues a credential that cannot outlive its process. Same
-     * structural-and-optional reasoning as the accessor above.
+     * Installs a token store over whatever the app configured — how `tool:dev` issues a
+     * credential that cannot outlive its process.
      */
     useTokens?: (store: ApiTokenStore, options?: { provider?: string; guardName?: string }) => void
   }
   /**
-   * The app-local route registry, for the commands that must read the graph
-   * the *booted* app serves rather than the one on disk (`guren tool:call`).
-   * Optional for the same reason `auth` is: an app resolving a `@guren/core`
-   * without the agent interface has no such registry, and that must reach the
-   * caller's own diagnostic instead of a `TypeError`.
+   * The app-local route registry, for commands that must read the graph the *booted* app
+   * serves rather than the one on disk (`guren tool:call`). Optional like `auth`.
    */
   router?: {
     definitions?: () => RouteDefinition[]
@@ -60,17 +53,11 @@ export type MaybeApplication = {
   /** The app's HTTP entry, when it has one — `tool:call` re-enters through it. */
   fetch?: (request: Request) => Response | Promise<Response>
   /**
-   * The app's service container, for the commands that must reach a service
-   * the *application* configured rather than one they can construct
-   * (`guren tool:call` resolves `'agent.audit'` through it).
-   *
-   * Structural and optional like everything else here, and deliberately down
-   * to the method level: an app on a `@guren/core` predating a binding, or one
-   * whose container is some other object entirely, must reach the caller's own
-   * fallback rather than a `TypeError`. `make` is declared as *possibly*
-   * throwing in the caller's handling, not in this type — a container resolving
-   * a factory that fails does throw, and a command recording what it did may
-   * not fail the thing it is recording.
+   * The app's service container, for commands that must reach a service the *application*
+   * configured rather than one they can construct (`tool:call` resolves `'agent.audit'`).
+   * Optional down to the method level, so an app whose container is some other object
+   * reaches the caller's own fallback. `make` can throw — callers handle that, since a
+   * command recording what it did may not fail the thing it is recording.
    */
   container?: {
     has?: (key: string) => boolean
@@ -79,12 +66,8 @@ export type MaybeApplication = {
 }
 
 export async function resolveMainEntry(appRoot?: string): Promise<string> {
-  // A caller that resolved anything *else* about the app from an explicit
-  // root has to resolve the entry from that same root. `token:issue` derives
-  // its tool list from `--app` and writes the token into the store this
-  // returns: reading `process.cwd()` here made those two different
-  // applications, so the command printed one app's tools and granted them in
-  // another.
+  // The entry must come from the same root everything else about the app did. Reading
+  // `process.cwd()` here made `token:issue` print one app's tools and grant them in another.
   const cwd = appRoot ? resolve(process.cwd(), appRoot) : process.cwd()
 
   for (const candidate of MAIN_ENTRY_CANDIDATES) {
@@ -136,20 +119,12 @@ export async function bootstrapApplication(mod: Record<string, unknown>): Promis
 }
 
 /**
- * Resolve the app's entry, import it, bootstrap it, and boot it — the block
- * every command that must reach a *live* application performs.
- *
- * `boot()` failures are rethrown rather than warned about, and that is the
- * whole reason this is a helper rather than four lines at each call site: a
- * command reaching into a half-booted app reads state whose configuration
- * never completed. A provider that failed after auth registered leaves a store
- * that *looks* configured, so a token minted against it is written into an
- * application that never finished booting — and reported as a success. What
- * that costs differs per command, so each call site says so in its own words.
+ * Resolve the app's entry, import it, bootstrap it, and boot it — the block every command
+ * that must reach a *live* application performs. `boot()` failures are rethrown, not
+ * warned about: a provider that failed after auth registered leaves a store that *looks*
+ * configured, so a token minted against it lands in an app that never finished booting.
  */
 export async function loadBootedApplication(appRoot?: string): Promise<MaybeApplication> {
-  // The same root everything else about the app was resolved from — see
-  // `resolveMainEntry`.
   const entry = await resolveMainEntry(appRoot)
 
   let moduleExports: Record<string, unknown>
@@ -201,11 +176,8 @@ export async function ensureApplicationBooted(
   try {
     await maybeBoot.call(app)
   } catch (error) {
-    // Warn-and-continue suits a command that only inspects a half-built app
-    // (`console` still gives a usable REPL). A command that *writes* through
-    // one must not: a provider that failed after auth registered leaves a
-    // store that looks configured, so `token:issue` would mint into an
-    // application that never finished booting and report success.
+    // Warn-and-continue suits a command that only inspects a half-built app (`console`
+    // still gives a usable REPL); one that *writes* through it must rethrow.
     if (options.rethrow) throw error
     consola.warn('Application boot() rejected:', error)
   }

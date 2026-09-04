@@ -45,10 +45,8 @@ export async function runArchCheck(options: RunArchCheckOptions): Promise<CheckR
     ]
   }
 
-  // Both evaluators scan the same set — every importable file in the project —
-  // so the walk is shared. Lazy because a project with neither `modules/` nor
-  // a guren.arch.ts reaches neither scan, and must not pay for a walk nothing
-  // reads. `readonly` because the two now share one array instance.
+  // One shared walk. Lazy so a project with neither `modules/` nor a
+  // guren.arch.ts pays for nothing; `readonly` because both evaluators share it.
   let importableFilesPromise: Promise<readonly string[]> | null = null
   const importableFiles = (): Promise<readonly string[]> =>
     (importableFilesPromise ??= collectFiles(cwd, IMPORTABLE_EXTENSIONS, NON_SOURCE_DIR_NAMES))
@@ -62,27 +60,11 @@ export async function runArchCheck(options: RunArchCheckOptions): Promise<CheckR
 }
 
 /**
- * Zero-config module boundary rules (RFC 0002 "Derived boundary rules"),
- * active whenever a `modules/` directory exists — no `guren.arch.ts`
- * required. Two rules, neither user-authorable (the frozen public rule
- * vocabulary deliberately has no allow-list primitive; these exist only to
- * make the zero-config default usable):
- *
- * 1. A file inside `modules/<a>/` may not import from `modules/<b>/`,
- *    except that module's public surface.
- * 2. Top-level application code may import a module's public surface but
- *    not its internals.
- *
- * **Amended from the RFC's original text:** a module's public surface is
- * not just `index.ts` — `db/schema.ts` is exempt too, since `make:module`
- * itself wires the project's root `db/schema.ts` to
- * `export * from '../modules/<name>/db/schema'`, which the RFC's literal
- * "except index.ts" wording would otherwise flag as a violation of its own
- * generator's output.
- *
- * Always runtime imports only: these rules take no options, so a set-wide
- * `includeTypeImports` in `guren.arch.ts` deliberately does not reach them
- * — documented on `ArchRuleSet.includeTypeImports`.
+ * Zero-config module boundary rules (RFC 0002), active whenever a `modules/`
+ * directory exists: nothing outside a module may reach past its public surface.
+ * Amended from the RFC's literal "except index.ts" — `db/schema.ts` is exempt
+ * too, since `make:module` wires the root schema to it. Runtime imports only: a
+ * set-wide `includeTypeImports` deliberately does not reach these.
  */
 async function evaluateDerivedModuleRules(
   cwd: string,
@@ -162,9 +144,7 @@ async function evaluateArchRules(
   const rules = config.rules
   const results: CheckResult[] = []
 
-  // The effective flag is a property of the rule set, constant for the run —
-  // resolved once here so no later call site re-derives the
-  // `rule ?? set ?? false` cascade and drifts.
+  // Resolved once so no later call site re-derives the `rule ?? set ?? false` cascade.
   const ruleIncludesTypes = (rule: ArchRule): boolean =>
     rule.includeTypeImports ?? config.includeTypeImports ?? false
 
@@ -181,8 +161,7 @@ async function evaluateArchRules(
     const parsed = await cache.get(absPath)
     if (!parsed) continue
 
-    // Type-only specifiers are only extracted (and the type-position walk
-    // only paid for) when some applicable rule will actually judge them.
+    // The type-position walk is paid for only when a rule will judge its results.
     const wantsTypes = applicableRules.some(ruleIncludesTypes)
 
     const specifiers = extractImportSpecifiers(parsed.ast.program.body, wantsTypes)
@@ -271,9 +250,8 @@ async function evaluateArchRules(
 }
 
 /**
- * `entry` is either a declared layer name (matched via that layer's globs)
- * or an inline glob matched directly — the `from`/`disallow` fields of an
- * `ArchRule` accept both per the RFC's "layer name (or inline glob)" contract.
+ * `entry` is a declared layer name or an inline glob: `from`/`disallow` accept
+ * both, per the RFC's "layer name (or inline glob)" contract.
  */
 function matchesLayerOrGlob(relPath: string, entry: string, layers: ArchLayers): boolean {
   if (Object.prototype.hasOwnProperty.call(layers, entry)) {
@@ -302,23 +280,18 @@ type ResolvedImport = { specifier: string; typeOnly: boolean } & (
 )
 
 /**
- * One entry per resolved target, runtime beating type-only: a file that
- * imports a module for real and also names it in a type position has one
- * boundary crossing, and it is a runtime one. Keyed on the *resolved*
- * identity, not the specifier — `'./Post.js'` and `'./Post'` are two
- * spellings of one file, and keying on the string would let a type-only
- * duplicate survive next to its runtime twin.
- */
-/**
- * The verb for a finding's message. Naming the kind keeps an
- * includeTypeImports finding explainable — the file shows no runtime import
- * to point at — and one rule keeps the label identical across the unresolved
- * warning and the violation messages.
+ * Naming the kind keeps an includeTypeImports finding explainable: the file
+ * shows no runtime import to point at.
  */
 function importVerb(imp: { typeOnly: boolean }): string {
   return imp.typeOnly ? 'imports (type-only)' : 'imports'
 }
 
+/**
+ * One entry per resolved target, runtime beating type-only. Keyed on the
+ * resolved identity, not the specifier: `'./Post.js'` and `'./Post'` are two
+ * spellings of one file, so a string key would keep a type-only duplicate.
+ */
 function dedupeResolvedImports(imports: ResolvedImport[]): ResolvedImport[] {
   if (imports.length < 2) return imports
   const byTarget = new Map<string, ResolvedImport>()
@@ -359,10 +332,8 @@ async function resolveImportSpecifier(
     ? resolve(cwd, specifier.slice(2))
     : resolve(dirname(importerAbsPath), specifier)
 
-  // TS source under NodeNext/bundler resolution commonly writes
-  // `import './Post.js'` for a file that's actually `Post.ts` on disk — strip
-  // a known extension before re-appending candidates, so `Post.js` resolves
-  // to `Post.ts` instead of a literal (nonexistent) `Post.js`.
+  // TS source under NodeNext writes `import './Post.js'` for a file that is
+  // `Post.ts` on disk, so the extension is stripped before candidates are tried.
   const base = stripKnownExtension(rawTarget)
 
   const candidates = [
@@ -412,34 +383,16 @@ async function pathExists(absPath: string): Promise<boolean> {
 
 interface ExtractedSpecifier {
   specifier: string
-  /**
-   * The import compiles away entirely: a whole-declaration `import type` /
-   * `export type ... from`, or an `import('...')` in a type position. Rules
-   * skip these unless `includeTypeImports` says otherwise.
-   */
+  /** The import compiles away entirely; rules skip these unless `includeTypeImports` is set. */
   typeOnly: boolean
 }
 
 /**
- * Top-level `import ... from '...'` and `export ... from '...'` specifiers.
- * Dynamic `import()` *expressions* are intentionally not followed (scope
- * frozen by RFC 0002 — "static import / export ... from specifiers").
- *
- * Whole-declaration type-only imports/exports (`import type { X } from
- * '...'`, `export type { X } from '...'`) are marked `typeOnly` — they
- * compile away entirely, so they create no runtime coupling across a
- * boundary. Sharing a type (a DTO, a props interface) across layers is a
- * common, benign pattern; flagging it by default would be exactly the kind
- * of plausible-but-wrong violation the severity policy above exists to
- * avoid. A *mixed* declaration (`import { type X, Y } from '...'`) counts
- * as runtime — some binding in it (`Y`) is a real runtime import, so the
- * boundary crossing is real regardless of `X`.
- *
- * With `includeTypeOnly`, type-only specifiers are returned too, and the
- * whole AST is additionally walked for `import('...')` in type positions
- * (`TSImportType`) — the one specifier form that lives outside the
- * top-level statements. Only files where some applicable rule opted into
- * type imports pay for that walk.
+ * Top-level `import ... from` and `export ... from` specifiers; dynamic
+ * `import()` expressions are not followed (scope frozen by RFC 0002). A
+ * whole-declaration `import type` creates no runtime coupling and is marked
+ * `typeOnly`, while a mixed declaration counts as runtime. Under
+ * `includeTypeOnly` those return too, plus type-position `import('...')`.
  */
 function extractImportSpecifiers(body: Statement[], includeTypeOnly = false): ExtractedSpecifier[] {
   const specifiers: ExtractedSpecifier[] = []
@@ -460,8 +413,6 @@ function extractImportSpecifiers(body: Statement[], includeTypeOnly = false): Ex
   }
 
   if (includeTypeOnly) {
-    // `import('...').X` in a type position is the one specifier form living
-    // outside the top-level statements, so it needs the shared AST walker.
     walk(body, (node) => {
       if (node.type !== 'TSImportType') return
       const spec = literalString(node.argument)

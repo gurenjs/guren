@@ -122,9 +122,8 @@ ${RUNTIME_UTILITY_FUNCTIONS}`
 }
 
 export function toTypeLiteral(path: string): string {
-  // Replacing each param token with a placeholder first keeps constraint
-  // contents (which may include `/`) out of the segment split, and leaves
-  // literal segments — including `foo:bar` and `{static}` — untouched.
+  // Masking param tokens first keeps constraint contents (which may include `/`) out of
+  // the segment split, and leaves literal segments like `foo:bar` untouched.
   const masked = path.replace(PATH_PARAM_PATTERN, '$1\u0000')
 
   if (!masked.includes('\u0000')) {

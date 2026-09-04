@@ -18,11 +18,7 @@ function route(
   return { method: 'GET', capabilities: {}, ...overrides }
 }
 
-/**
- * `cwd` points at nothing on purpose for the definition-driven cases: with no
- * controller sources to discover, every verdict is drawn from the route
- * definition alone, which is what those cases are about.
- */
+/** `cwd` points at nothing on purpose: with no controller sources, every verdict comes from the definition alone. */
 async function run(definitions: RouteDefinition[], cwd = '/nonexistent') {
   return checkAgentRoutes({ cwd, definitions })
 }
@@ -64,8 +60,7 @@ describe('checkAgentRoutes', () => {
       expect(results[0]?.message).toContain('identity')
     })
 
-    // One defect, one finding: a nameless route has nothing for the grammar
-    // rule to test, so reporting both would name it twice.
+    // One defect, one finding: a nameless route has nothing for the grammar rule to test.
     it('does not also report the grammar rule for a nameless route', async () => {
       const results = await run([route({ path: '/posts', agent: {}, schemas: OUTPUT })])
 
@@ -99,10 +94,8 @@ describe('checkAgentRoutes', () => {
       expect(results[0]?.status).toBe('pass')
     })
 
-    // The endpoint adds `guren.preflight` to the catalogue itself, and drops
-    // any route claiming it — two tools with one name makes an MCP client
-    // reject the whole list. A route that took it would otherwise be silently
-    // absent from the surface it declared itself for.
+    // The endpoint adds `guren.preflight` itself and drops any route claiming it: two tools
+    // with one name makes an MCP client reject the whole list.
     it('fails a route claiming a reserved meta-tool name', async () => {
       const results = await run([
         route({ path: '/preflight', name: 'guren.preflight', agent: {}, schemas: OUTPUT }),
@@ -129,9 +122,7 @@ describe('checkAgentRoutes', () => {
       expect(results[0]?.message).toContain('agent toolName override')
     })
 
-    // The reservation is one name, not the `guren.` namespace: reserving a
-    // namespace nothing occupies fails routes over a collision that does not
-    // exist.
+    // The reservation is one name, not the `guren.` namespace.
     it('accepts a name that merely resembles a reserved one', async () => {
       const results = await run([
         route({ path: '/preflight', name: 'guren.preflights', agent: {}, schemas: OUTPUT }),
@@ -159,8 +150,7 @@ describe('checkAgentRoutes', () => {
       expect(results[0]?.message).toContain('GET /articles')
     })
 
-    // Renaming the illegal one fixes both rules, so spending three findings
-    // on it would triple-report a single defect.
+    // Renaming the illegal one fixes both rules, so a third finding would triple-report one defect.
     it('does not also report a collision between illegally-named tools', async () => {
       const results = await run([
         route({ path: '/posts', name: 'posts index', agent: {}, schemas: OUTPUT }),
@@ -193,8 +183,7 @@ describe('checkAgentRoutes', () => {
       expect(results[0]?.status).toBe('pass')
     })
 
-    // Authorization is present even when the *ability* is not derivable —
-    // this rule asks whether anything authorizes, not which ability it names.
+    // The rule asks whether anything authorizes, not which ability it names.
     it('accepts an authorization capability whose ability is not derivable', async () => {
       const results = await run([
         destroyRoute({
@@ -246,9 +235,7 @@ describe('checkAgentRoutes', () => {
       expect(keys(results)).toContain('agent-route-annotation:POST:/posts/search')
     })
 
-    // An inline handler's body is a closure this check never reads, so the
-    // fail's claim about "the controller action" would describe source it
-    // never opened.
+    // An inline handler's body is a closure this check never reads, so a fail would describe unopened source.
     it('warns rather than fails for an inline handler with no authorization', async () => {
       const results = await run([
         route({ method: 'DELETE', path: '/posts/:id', name: 'posts.destroy', agent: {}, schemas: OUTPUT }),
@@ -277,8 +264,7 @@ describe('checkAgentRoutes', () => {
       expect(results[0]?.key).toBe('agent-route-output:GET:/posts')
     })
 
-    // RFC 0016 §13 states the tier-3 warn unqualified: a write tool whose
-    // result an agent cannot read is no better off than a read tool.
+    // RFC 0016 §13 states the tier-3 warn unqualified, write tools included.
     it('warns for a write tool with no output too', async () => {
       const results = await run([
         route({
@@ -326,8 +312,7 @@ describe('checkAgentRoutes', () => {
       expect(results[0]?.message).toContain('inputSchema')
     })
 
-    // For an inline handler the route schema is what validates at runtime, so
-    // its absence is strictly worse than on a controller action.
+    // For an inline handler the route schema is the only runtime validation.
     it('warns about a missing body schema on an inline handler, saying nothing validates it', async () => {
       const results = await run([
         route({
@@ -345,8 +330,7 @@ describe('checkAgentRoutes', () => {
       expect(input?.message).toContain('nothing checks what it sends')
     })
 
-    // DELETE is body-less by the shared classification, so the rule that asks
-    // for a body schema must not fire on it.
+    // DELETE is body-less by the shared classification.
     it('does not ask a DELETE route for a body schema', async () => {
       const results = await run([
         route({
@@ -363,8 +347,7 @@ describe('checkAgentRoutes', () => {
       expect(results[0]?.status).toBe('pass')
     })
 
-    // QUERY carries a body (RFC 10008) even though it is safe, which is
-    // exactly why this rule shares audit's method classification.
+    // QUERY carries a body (RFC 10008) even though it is safe: hence the shared classification.
     it('asks a QUERY route for a body schema', async () => {
       const results = await run([
         route({
@@ -392,16 +375,7 @@ describe('checkAgentRoutes', () => {
       await rm(tempDir, { recursive: true, force: true })
     })
 
-    /**
-     * One DELETE agent route bound to `PostController.destroy`, checked
-     * against a controller file holding `body` as that action's body. The
-     * route carries an output schema so only the body-derived rules speak.
-     */
-    /**
-     * Writes `PostController` with one action holding `body`, in either
-     * spelling — both are legal to `Router` and its dispatch, so every rule
-     * that reads a body has to see them alike.
-     */
+    /** Both spellings are legal to `Router`'s dispatch, so every body-reading rule must see them alike. */
     async function writeController(
       action: string,
       body: string,
@@ -433,8 +407,7 @@ ${member}
     /** A mutating agent route (DELETE) against `PostController.destroy`. */
     async function runDestroy(body: string, options: ActionCase = {}) {
       const { agent = {}, declaration = 'method' } = options
-      // `in`, not a destructuring default: a case that means "no output
-      // schema" passes `schemas: undefined`, which a default would overwrite.
+      // `in`, not a destructuring default: "no output schema" passes `schemas: undefined`.
       const schemas = 'schemas' in options ? options.schemas : OUTPUT
       await writeController('destroy', body, declaration)
 
@@ -456,8 +429,7 @@ ${member}
     /** The read-only sibling: a GET route against `PostController.index`. */
     async function runIndex(body: string, options: ActionCase = {}) {
       const { agent = {}, declaration = 'method' } = options
-      // `in`, not a destructuring default: a case that means "no output
-      // schema" passes `schemas: undefined`, which a default would overwrite.
+      // `in`, not a destructuring default: "no output schema" passes `schemas: undefined`.
       const schemas = 'schemas' in options ? options.schemas : OUTPUT
       await writeController('index', body, declaration)
 
@@ -483,8 +455,7 @@ ${member}
       expect(results[0]?.status).toBe('pass')
     })
 
-    // `can()` returns a boolean and enforces nothing — the same distinction
-    // the audit draws between userOrFail() and check().
+    // `can()` returns a boolean and enforces nothing.
     it('does not accept this.can() as authorization evidence', async () => {
       const results = await runDestroy(
         "    if (await this.can('delete', Post)) return this.noContent()\n    return this.redirect('/')",
@@ -502,9 +473,8 @@ ${member}
       expect(results[0]?.message).toContain('Authenticated but not authorized')
     })
 
-    // A bearer token is the auth path an agent actually uses, so a pattern
-    // that knew only userOrFail() would report a token-authenticated action
-    // as having no authentication at all.
+    // A bearer token is the auth path an agent actually uses; a userOrFail()-only pattern
+    // would report a token-authenticated action as unauthenticated.
     it('reports apiToken() authentication with the same sharper message', async () => {
       const results = await runDestroy(
         '    const userId = await this.apiTokenUserId()\n    return this.noContent()',
@@ -514,8 +484,7 @@ ${member}
       expect(results[0]?.message).toContain('Authenticated but not authorized')
     })
 
-    // A commented-out authorize() must not clear the route — the scan blanks
-    // comments before any pattern runs.
+    // The scan blanks comments before any pattern runs.
     it('does not accept a commented-out authorize() as evidence', async () => {
       const results = await runDestroy(
         "    // await this.authorize('delete', Post)\n    return this.noContent()",
@@ -525,8 +494,7 @@ ${member}
     })
 
     it('warns about an Inertia response instead of the generic output warning', async () => {
-      // No output schema: the point of the case is what the tool would return
-      // when nothing describes it.
+      // No output schema: the case is about what the tool returns when nothing describes it.
       const results = await runIndex('    return this.inertia(pages.posts.Index, { posts: [] })', {
         schemas: undefined,
       })
@@ -538,8 +506,7 @@ ${member}
     })
 
     describe('readOnlyHint honesty', () => {
-      // The escape hatch has to be checked, or writing the hint is enough to
-      // silence the authorization failure it was meant to answer.
+      // Unchecked, writing the hint would silence the authorization failure it answers.
       it('warns when readOnlyHint: true sits on an action that deletes', async () => {
         const results = await runDestroy(
           '    await Post.delete({ id: 1 })\n    return this.noContent()',
@@ -571,8 +538,7 @@ ${member}
         expect(keys(results)).not.toContain('agent-route-annotation:DELETE:/posts/:id')
       })
 
-      // Nobody wrote the GET default, but it carries the same exemption and
-      // the same "safe to call unattended" promise to a client.
+      // Nobody wrote the GET default, but it carries the same exemption and the same promise.
       it('judges the method default too, when a GET action mutates', async () => {
         const results = await runIndex(
           '    await Post.delete({ id: 1 })\n    return this.json({})',
@@ -583,8 +549,7 @@ ${member}
         expect(honesty?.message).toContain('read-only tools by default')
       })
 
-      // An unverifiable *default* would fire on every ordinary read route
-      // whose controller this check cannot see — noise about nothing declared.
+      // An unverifiable default would fire on every read route whose controller is unreadable.
       it('does not chase the method default into an unreadable body', async () => {
         const results = await run([
           route({
@@ -609,21 +574,18 @@ ${member}
         expect(keys(results)).toContain('agent-route-annotation:DELETE:/posts/:id')
       })
 
-      // Receiver discipline is pinned where it lives: controller-methods.test.ts
-      // asserts it at the regex level and again through mutatesRecords(). A
-      // third copy here would re-test the same rule through a temp workspace.
+      // Receiver discipline is pinned in controller-methods.test.ts, not re-tested here.
     })
 
-    // Both forms are legal to Router's types and its runtime dispatch, so a
-    // scanner that saw only ClassMethod downgraded every class-field action.
+    // Both forms are legal to Router's dispatch; a scanner reading only methods
+    // downgraded every class-field action.
     it('reads a class-field action, not just a method', async () => {
       const results = await runDestroy(
         "    await this.authorize('delete', Post)\n    return this.noContent()",
         { declaration: 'field' },
       )
 
-      // The authorize() in the class field is found, so this is a clean pass
-      // rather than the could-not-verify warn an unread body produces.
+      // A clean pass, not the could-not-verify warn an unread body produces.
       expect(results[0]?.status).toBe('pass')
     })
 
@@ -674,13 +636,10 @@ export class InvoiceController extends Controller {
     })
   })
 
-  // The linchpin: the metadata this check reads only reaches a definition
-  // through the real Router — via route options, a chained .agent(), or
-  // resource()'s per-action map — and the path it judges is the joined one.
+  // The metadata only reaches a definition through the real Router (route options, a chained
+  // .agent(), or resource()'s per-action map), and the path judged is the joined one.
   describe('against a real Router', () => {
-    // A route carrying an `output` schema types its handler against that
-    // schema, so these cases hand it a value of the declared shape rather
-    // than the bare Response the untyped overload accepts.
+    // An `output` schema types the handler, so these cases return a value rather than a Response.
     const typedHandler = () => ({})
 
     class PostController extends Controller {
@@ -729,16 +688,13 @@ export class InvoiceController extends Controller {
 
       const results = await run(router.definitions())
 
-      // Only `destroy` was declared, so `index` — registered by the same
-      // call — contributes nothing. Two findings for the one route: the
-      // unreadable-controller authorization warn (this cwd holds no
-      // controller sources) and the missing output schema.
+      // Only `destroy` was declared, so `index` contributes nothing. Its two findings: the
+      // unreadable-controller authorization warn (no controller sources here) and no output schema.
       expect(keys(results).every((key) => key.endsWith(':DELETE:/posts/:id'))).toBe(true)
       expect(statuses(results).every((status) => status === 'warn')).toBe(true)
     })
 
-    // The capability this rule accepts is stamped by real middleware, not
-    // hand-written onto a definition — so the acceptance is proven end to end.
+    // Stamped by real middleware rather than hand-written onto a definition.
     it('accepts authorization stamped by authorizeMiddleware on the chain', async () => {
       const router = new Router()
       router
@@ -823,18 +779,15 @@ export const providers = [mcpPlugin({ path: '/mcp' } satisfies McpPluginOptions)
 `)
 
       const results = await checkAgentRoutes({ cwd: tempDir, definitions: [gated()] })
-      // Wrapped options used to read as unreadable, and the scan's
-      // positive-evidence-only rule then turned that into silence — a gated
-      // route with nowhere to queue its approvals went unreported.
+      // Read as unreadable, the positive-evidence-only rule turns a gated route with
+      // nowhere to queue approvals into silence.
       expect(keys(results)).toContain('agent-route-approval-store')
     })
 
     it('reads an approvals queue written behind a transparent wrapper', async () => {
-      // The unwrapped call is what makes this test able to fail: on its own, a
-      // wrapped configured call is indistinguishable from an unreadable one —
-      // both produce no finding. Pairing it with a readable call that has no
-      // queue means the wrapped one has to be understood as *configured* to
-      // keep the finding away.
+      // The unwrapped call is what makes this able to fail: alone, a wrapped configured call
+      // is indistinguishable from an unreadable one. Pairing it with a readable queue-less
+      // call means the wrapped one must be understood as configured to keep the finding away.
       await writeAppFile(`
 import { mcpPlugin } from '@guren/plugin-mcp'
 import { store } from './approvals'
@@ -860,9 +813,8 @@ export const providers = [mcp({ path: '/mcp' })]
       expect(keys(results)).toContain('agent-route-approval-store')
     })
 
-    // Positive evidence only. Each of these is a shape the scan cannot read,
-    // and `guren check` has no per-finding ignore configuration — an
-    // unsuppressible false positive is the thing to avoid here.
+    // Positive evidence only: `guren check` has no per-finding ignore, so a false positive
+    // here would be unsuppressible.
     it('stays silent when the plugin options are not an object literal', async () => {
       await writeAppFile(`
 import { mcpPlugin } from '@guren/plugin-mcp'

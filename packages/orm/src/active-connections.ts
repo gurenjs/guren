@@ -1,33 +1,13 @@
 /**
  * Closes the database client a previous module evaluation left open.
  *
- * `bun --hot` re-runs the module graph inside the same process. The cached
- * client each `create*Database()` factory keeps in closure state is reset along
- * with the module, but the connection that client opened stays alive with
- * nothing left holding a reference that could close it — one leaked connection
- * per reload until the server refuses new ones.
- *
- * `globalThis` survives re-evaluation, so it is where the previous client's
- * teardown is parked — the same storage `Application.listen()` uses for the Bun
- * and Vite dev servers. Bun does not expose `import.meta.hot` to `bun --hot`
- * (checked on 1.3.14), so there is no reload hook to register with instead.
- *
- * Only the storage carries over from `Application.listen()`, though, not its
- * simplicity: a process has exactly one Bun server, so `listen()` can replace
- * whatever it finds unconditionally. Connections have no such guarantee, so a
- * handle is identified by the file that built it and the database it points at.
- *
- * That pair is what survives an edit. Keying on the exact line would be more
- * precise, but a line number changes the moment anything above it does — adding
- * an import to `config/database.ts` would orphan the previous entry and leak the
- * connection it was holding, during the very workflow this exists to fix. The
- * file is stable across every edit that isn't a rename.
- *
- * The cost of that choice: two handles built in one file against one database —
- * separate pools for web requests and background jobs, say — share a key, so the
- * second replaces the first. Give them their own module to keep them apart. This
- * only runs under `--hot`, so the mistake surfaces immediately in dev rather
- * than anywhere it could reach production.
+ * `bun --hot` re-runs the module graph in-process: a `create*Database()`
+ * factory's cached client resets but the connection it opened leaks, one per
+ * reload. Bun exposes no `import.meta.hot` under `--hot` (checked on 1.3.14),
+ * so the previous teardown is parked on `globalThis`, which survives
+ * re-evaluation. Handles are keyed by caller file + target, not line (any edit
+ * above moves a line), so two handles built in one file against one database
+ * share a key; give them separate modules.
  */
 
 type Teardown = () => Promise<void> | void
@@ -41,12 +21,9 @@ interface ActiveConnection {
 const REGISTRY_KEY = Symbol.for('guren.orm.activeConnections')
 
 /**
- * How long to wait for the previous client to close before giving up on it.
- *
- * The teardown is awaited so the replacement never runs alongside the client it
- * replaces — that back-pressure is what keeps a burst of reloads from stacking
- * up connections. But it runs on the path to the first query after a reload, so
- * a client whose socket never finishes closing must not wedge the dev server.
+ * Awaiting the teardown is the back-pressure that keeps a burst of reloads from
+ * stacking up connections, but it runs on the path to the first query after a
+ * reload, so a socket that never finishes closing must not wedge the dev server.
  */
 const TEARDOWN_TIMEOUT_MS = 5_000
 
@@ -67,13 +44,7 @@ function getRegistry(): Map<string, ActiveConnection> {
   return registry
 }
 
-/**
- * Whether modules can be re-evaluated in this process.
- *
- * `bun --watch` restarts the process instead, which closes every connection on
- * its own, so `--hot` is the only mode that leaks. Everywhere else — production,
- * tests, CLI commands, serverless — nothing is ever torn down automatically.
- */
+/** `bun --watch` restarts the process instead, so `--hot` is the only mode that leaks. */
 function isHotReloadRuntime(): boolean {
   return typeof process !== 'undefined' && Array.isArray(process.execArgv) && process.execArgv.includes('--hot')
 }
@@ -96,15 +67,10 @@ function isDigitAt(text: string, index: number): boolean {
 }
 
 /**
- * Where a frame's trailing `:line[:column]` may begin, in the order the lazy
- * `(.+?):\d+(?::\d+)?` these replace settled on them: the `:line:column` split
- * first, because a lazy path stops at the earliest suffix that satisfies the
- * rest, then the `:column`-only split it backtracked to when the shorter path
- * came out empty.
- *
- * Walking the digits back from `end` finds both in one pass. The pattern
- * instead re-tested the suffix at every prefix length, which is what made it
- * quadratic in the length of a frame.
+ * Where a frame's trailing `:line[:column]` may begin, `:line:column` split
+ * first, in the order the lazy `(.+?):\d+(?::\d+)?` this replaces settled on
+ * them. Walking the digits back from `end` finds both in one pass; the pattern
+ * re-tested the suffix at every prefix length, which made it quadratic.
  */
 function locationSplits(frame: string, end: number): number[] {
   let cursor = end
@@ -127,29 +93,11 @@ function pathBefore(frame: string, from: number, splits: number[]): string | und
 }
 
 /**
- * The index of the `(` that matches the `)` at `closeIndex`, or `undefined`
- * when the frame carries no usable `(` at all. `closeIndex` must point at the
- * frame's final `)`; anything else is rejected.
- *
- * Neither the leftmost nor the rightmost `(` is right in general. A path may
- * contain one — `at fn (/app (old)/x.ts:1:2)` needs the outer, *leftmost*
- * pair — and so may the function name in front of it — `at weird (name)
- * (/app/x.ts:1:2)` needs the outer, *rightmost* pair. Depth is what actually
- * tells the two apart; a fixed "first" or "last" gets one of them wrong.
- *
- * Depth alone would reject a frame whose location holds an *unmatched* `)`, as
- * `/app/name).ts` or a URL ending `?label=)` does — the scan runs off the front
- * still owing a paren. So the leftmost `(` it passed is kept as a fallback for
- * exactly that case. Only frames the depth rule rejects outright can reach it.
- *
- * The scan stops at a line terminator: a path could never span one, so neither
- * a balanced `(` nor the fallback may come from the far side of a break.
- * Characters are compared by code rather than tested against `LINE_TERMINATOR`
- * because this loop runs over every character of every frame.
- *
- * Its twin is `packages/server/src/support/stack-frames.ts`. The body there is
- * identical character for character on purpose; only this prose differs. Keep
- * the two in step.
+ * The index of the `(` matching the final `)` at `closeIndex`. Both a path and
+ * the function name in front of it may contain `(`, so only depth tells the
+ * outer pair apart; the leftmost `(` passed is the fallback for a location
+ * holding an unmatched `)`. Compared by code: this runs over every character of
+ * every frame. Twin of `packages/server/src/support/stack-frames.ts` — keep in step.
  */
 function matchingOpenParen(frame: string, closeIndex: number): number | undefined {
   if (frame.charCodeAt(closeIndex) !== CLOSE_PAREN) {
@@ -181,33 +129,12 @@ function matchingOpenParen(frame: string, closeIndex: number): number | undefine
 
 /**
  * The path a single stack frame points at, without its line and column.
- *
- * The two shapes a frame comes in are read separately rather than by one rule
- * loose enough to cover both. `at fn (/path/file.ts:1:2)` is tried first,
- * because its parentheses bound the path; a rule that also had to accept the
- * bare `at /path/file.ts:1:2` could only bound it by whitespace, and would
- * truncate `/Users/me/My Projects/app/config` to `Projects/app/config`.
- * Nothing constrains what the path itself may contain — spaces and parentheses
- * are both ordinary in a macOS directory name, and excluding either is how the
- * truncation happened in the first place.
- *
- * Neither the leftmost nor the rightmost `(` bounds the opening paren in
- * general — see `matchingOpenParen` — so the two shapes below no longer search
- * for one at a fixed end.
- *
- * Both shapes require a trailing `:line`, so frames that name no location at
- * all — `at native`, `at <anonymous>` — are rejected instead of being read as a
- * path. That is a check on the frame's shape, not on what it points at: the
- * engine also emits those same names *with* a location, and rejecting those is
- * `SYNTHETIC_FRAME_PATHS`'s job below, not this function's. An `eval` group is
- * rejected outright here, though: V8 nests the real location inside
- * `eval at fn (/app/x.ts:1:2), <anonymous>:1:1`, and keying a connection on
- * text that is not a path is worse than not keying it — a handle with no key
- * is left alone, which is the safe failure.
+ * `at fn (/path/file.ts:1:2)` is tried first because its parens bound the path;
+ * a whitespace-bounded rule would truncate `/Users/me/My Projects/app`. Both
+ * shapes require a trailing `:line`, and a V8 `eval at ...` group is rejected:
+ * keying on text that is not a path is worse than leaving the handle unkeyed.
  */
 function parseFrameLocation(frame: string): string | undefined {
-  // `trimEnd` drops exactly the characters `\s` matches, so this is where the
-  // patterns' trailing `\s*$` would have started.
   const end = frame.trimEnd().length
 
   if (end > 0 && frame[end - 1] === ')') {
@@ -236,46 +163,28 @@ function parseFrameLocation(frame: string): string | undefined {
   pathStart = Math.min(pathStart, splits[splits.length - 1] - 1)
   if (pathStart <= afterAt) return undefined
 
-  // Nothing here can start the path any later, so a line break inside it means
-  // there was never a match — unlike the parenthesized shape, whose opening
-  // paren can move.
+  // Nothing can start this shape's path later, so a line break inside it means
+  // there was never a match.
   const path = pathBefore(frame, pathStart, splits)
 
   return path !== undefined && !LINE_TERMINATOR.test(path) ? path : undefined
 }
 
 /**
- * Paths the engine reports for code that has no source location.
- *
- * A class field initializer, or a subclass that declares no constructor of its
- * own, runs inside a function nobody wrote, and JSC reports it as
- * `at new Owner (unknown:1:17)`; a built-in doing the calling reports
+ * Paths the engine reports for code with no source location — a class field
+ * initializer as `at new Owner (unknown:1:17)`, a built-in caller as
  * `at map (native:1:11)`. Both carry a `:line`, so they parse as ordinary paths
- * and only this set rejects them.
- *
- * Why taking one is worse than taking nothing is spelled out beside the twin's
- * copy in `packages/server/src/hot-reload/hot-disposables.ts` — keep the two in
- * step.
+ * and only this set rejects them. Twin in
+ * `packages/server/src/hot-reload/hot-disposables.ts` — keep the two in step.
  */
 const SYNTHETIC_FRAME_PATHS = new Set(['unknown', 'native', '<anonymous>'])
 
 /**
- * The file that called a `create*Database()` factory.
- *
- * `stack` must come from an `Error` constructed inside the factory itself, so
- * frame 0 is `Error`, frame 1 is the factory, and frame 2 is the caller — or the
- * first frame after it that names a real file, since the engine may have
- * synthesized the frames in between. Only the path is kept: a reload re-runs the
- * same file, but not necessarily at the same line.
- *
- * The frame taken may sit further out than the call — a shared bootstrap, say —
- * widening the file-level collision the header describes; the target in the key
- * is what keeps those apart.
- *
- * One case the header's escape hatch does not reach: a field initializer leaves
- * no frame of its own, so the file the class is declared in never appears in the
- * stack, and giving that class its own module changes nothing. Such a handle is
- * keyed to wherever `new` was written instead.
+ * The file that called a `create*Database()` factory. `stack` must come from an
+ * `Error` constructed inside the factory: frame 0 is `Error`, 1 the factory, 2
+ * the caller — or the first later frame naming a real file. A class field
+ * initializer leaves no frame of its own, so a handle built there keys to
+ * wherever `new` was written instead.
  */
 export function describeCallerFile(stack: string | undefined): string | undefined {
   for (const frame of stack?.split('\n').slice(2) ?? []) {
@@ -334,16 +243,10 @@ async function closeWithTimeout(teardown: Teardown, timeoutMs: number): Promise<
 
 /**
  * Records `teardown` as the active client for `key` and closes whichever client
- * held the slot before it.
- *
- * Claims on one key are serialized: a claim waits for the claim it supersedes to
- * finish its own replacement before tearing it down. Without that, three reloads
- * arriving inside the teardown window let the third close the second's client
- * while the second was still initializing, and the second would go on to hand
- * its caller a client that is already closed.
- *
- * `timeoutMs` exists so tests can exercise the give-up path without waiting out
- * the real budget; callers should leave it at the default.
+ * held the slot before it. Claims on one key are serialized: without that, three
+ * reloads inside the teardown window let the third close the second's client
+ * mid-initialization, handing its caller an already-closed one. `timeoutMs` is
+ * for tests; callers should leave it at the default.
  */
 export async function replaceActiveConnection(
   key: string,
@@ -362,8 +265,6 @@ export async function replaceActiveConnection(
       return
     }
 
-    // Let the superseded claim finish before pulling its client out from under
-    // it, then close it.
     await previous.settled.catch(() => {})
     await closeWithTimeout(previous.teardown, timeoutMs)
   })()

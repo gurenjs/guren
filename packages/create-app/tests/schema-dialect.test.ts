@@ -5,15 +5,11 @@ import { DATABASE_DRIVERS, scaffoldAppBlueprint, type DatabaseDriver } from '../
 import { createTempWorkspace } from './helpers'
 
 /**
- * Every column builder in a generated db/schema.ts must come from the module
- * that owns the app's dialect. Drizzle's builders share names across dialects
- * (`timestamp`, `text`, `boolean`), and mixing them is silent: drizzle-kit
- * still emits DDL and tsc still passes, so nothing downstream reports that a
- * MySQL table was built out of PostgreSQL columns.
- *
- * The `@guren/orm/drizzle/<dialect>` barrels re-export exactly one dialect's
- * builders each, so importing from the matching barrel is what keeps every
- * name dialect-pure.
+ * Every column builder in a generated db/schema.ts must come from the app's own
+ * dialect. Drizzle's builders share names across dialects and mixing them is
+ * silent: drizzle-kit still emits DDL and tsc still passes. The
+ * `@guren/orm/drizzle/<dialect>` barrels re-export exactly one dialect each, so
+ * importing from the matching barrel is what keeps every name pure.
  */
 const EXPECTED_SCHEMA_MODULE = {
   postgres: '@guren/orm/drizzle/pg',

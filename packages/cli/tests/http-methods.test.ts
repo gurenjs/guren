@@ -3,8 +3,7 @@ import { describeMethod } from '../src/http-methods'
 
 /**
  * The classification `guren audit`'s two per-route phases and the agent-route
- * input rule all read. Pinned here rather than inside either command's tests,
- * because the whole point of the shared module is that neither owns it.
+ * input rule all read; pinned here because neither command owns it.
  */
 describe('describeMethod', () => {
   it('classifies the standard verbs', () => {

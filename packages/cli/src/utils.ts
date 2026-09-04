@@ -5,23 +5,16 @@ import { dirname, relative, resolve, sep as pathSep } from 'node:path'
 export interface WriterOptions {
   force?: boolean
   /**
-   * Project root a generator's relative output path resolves against.
-   * Defaults to `process.cwd()`, which is what the one-shot CLI wants.
-   *
-   * Callers that are not a one-shot process name the directory instead of
-   * steering into it: `process.cwd()` is per-process state, so `chdir` is
-   * never a local choice. `guren mcp` serves a workspace from a long-lived
-   * server where it would race concurrent requests, and Bun runs every test
-   * file in one process where it relocates all the others.
+   * Project root a generator's relative output path resolves against; defaults to
+   * `process.cwd()`. Callers that are not a one-shot process name the directory instead
+   * of steering into it — `chdir` is per-process state, so it would race concurrent
+   * `guren mcp` requests and relocate every other Bun test file in the same process.
    */
   cwd?: string
   /**
-   * When set (via `--module <name>`), prefixes a generator's output
-   * directory with `modules/<kebab-case root>/` instead of writing to the
-   * project root — e.g. `app/Http/Controllers` becomes
-   * `modules/billing/app/Http/Controllers`. Normalized to kebab-case the
-   * same way `make:module` derives its directory name, so `--module Billing`
-   * and `make:module Billing` target the same `modules/billing/` directory.
+   * When set (via `--module <name>`), prefixes a generator's output directory with
+   * `modules/<kebab-case root>/`. Normalized to kebab-case the same way `make:module`
+   * derives its directory name, so both spellings target the same directory.
    */
   root?: string
 }
@@ -41,9 +34,7 @@ export interface ScaffoldConfig {
   template: (names: ScaffoldNames) => string
 }
 
-/**
- * Spawn a command with inherited stdio and resolve when it exits cleanly.
- */
+/** Spawn a command with inherited stdio and resolve when it exits cleanly. */
 export async function runCommand(
   command: string,
   args: string[],
@@ -71,25 +62,11 @@ export async function runCommand(
 }
 
 /**
- * Throws unless `relativePath` stays under the project root.
- *
- * Scaffolders build their output path out of a name they were handed, and
- * those names are not all developer-typed: `guren mcp` exposes them as a
- * request field. `..` survives both `trimSlashes()` and `kebabCase()`, so
- * without this a name like `../../../../tmp/evil` writes outside the project.
- *
- * Reach for it through `writeScaffoldFile`/`writeScaffoldFiles` rather than
- * calling it directly — a generator that picks the right writer gets
- * containment for free, and one that picks `writeFileSafe` is visibly opting
- * out. Codegen is the reason the check cannot simply live in `writeFileSafe`:
- * `guren codegen --out` takes a caller-supplied directory that may
- * legitimately sit outside `process.cwd()`.
- *
- * `cwd` has to be the same root the write itself resolves against — both are
- * taken from one `WriterOptions` in `writeScaffoldFile`. Checking containment
- * against one directory while writing relative to another is not a weaker
- * guard, it is no guard at all: every path sits inside a root that nothing is
- * ever written to.
+ * Throws unless `relativePath` stays under the project root. Scaffold names are not all
+ * developer-typed (`guren mcp` exposes them as a request field) and `..` survives both
+ * `trimSlashes()` and `kebabCase()`. Reach for it through `writeScaffoldFile`; it cannot
+ * live in `writeFileSafe`, whose `guren codegen --out` caller may legitimately write
+ * outside `process.cwd()`. `cwd` must be the same root the write resolves against.
  */
 export function assertScaffoldPath(relativePath: string, cwd: string = process.cwd()): void {
   const root = resolve(cwd)
@@ -103,18 +80,10 @@ export function assertScaffoldPath(relativePath: string, cwd: string = process.c
 }
 
 /**
- * Resolves the root a writer works against, once.
- *
- * Callers must pin this before checking a path and reuse the result for the
- * write, rather than reading `options.cwd` twice: with `cwd` omitted or
- * relative, the second read can land on a different directory than the one
- * that was checked, and the containment check then guarantees nothing.
- *
- * Exported because a generator that probes the app before writing
- * (`make:feature`, `make:controller`, `make:view`) has to judge the same root
- * the write will resolve to, and can only do that by asking this one. It
- * delegates to `resolveAppRoot` rather than re-deriving the expression, so the
- * probe and the write it decides are not two resolvers that merely agree today.
+ * Resolves the root a writer works against, **once**. Callers pin it before checking a
+ * path and reuse the result for the write: reading `options.cwd` twice can land on a
+ * different directory than the one checked, and the containment check then guarantees
+ * nothing. Exported so a generator probing the app before writing judges that same root.
  */
 export function writeRoot(options: WriterOptions): string {
   return resolveAppRoot(options)
@@ -136,9 +105,8 @@ export async function writeFileSafe(relativePath: string, contents: string, opti
 
   await mkdir(dirname(fullPath), { recursive: true })
   try {
-    // `wx` makes the exists-check and the write one atomic operation; a
-    // separate access() probe leaves a window where a concurrent writer's
-    // file gets clobbered.
+    // `wx` makes the exists-check and the write one atomic operation; a separate
+    // access() probe leaves a window where a concurrent writer's file gets clobbered.
     await writeFile(fullPath, contents, { encoding: 'utf8', flag: options.force ? 'w' : 'wx' })
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
@@ -150,18 +118,11 @@ export async function writeFileSafe(relativePath: string, contents: string, opti
 }
 
 /**
- * Writes a generated artifact, skipping the write entirely when the file
- * already holds byte-identical content.
- *
- * Codegen re-runs on every save under `resources/js/pages/`,
- * `app/Http/Resources/`, and `routes/web.ts` (see `vite/route-types.ts`), and
- * controllers import the results (`@/.guren/pages.gen`). Rewriting unchanged
- * output bumps those files' mtimes, which wakes up anything watching backend
- * sources for no reason. Comparing first keeps a no-op run a real no-op.
- *
- * Differing content still goes through `writeFileSafe`, so the
- * "already exists. Use --force to overwrite." guard is untouched — identical
- * content is simply not a clobber worth guarding against.
+ * Writes a generated artifact, skipping the write when the file already holds
+ * byte-identical content. Codegen re-runs on every save under the watched directories,
+ * and rewriting unchanged output bumps mtimes that wake anything watching backend
+ * sources. Differing content still goes through `writeFileSafe`, so the
+ * "already exists" guard is untouched.
  */
 export async function writeGeneratedFile(
   relativePath: string,
@@ -184,9 +145,8 @@ export async function writeGeneratedFile(
 }
 
 /**
- * `writeGeneratedFile` for an artifact whose absolute path was already built
- * from `appRoot`. Keeps the "already exists" message project-relative while
- * pinning the write to the same root the path came from.
+ * `writeGeneratedFile` for an artifact whose absolute path was already built from
+ * `appRoot`, keeping the "already exists" message project-relative.
  */
 export async function writeGeneratedFileIn(
   appRoot: string,
@@ -210,26 +170,19 @@ export function resolveAppRoot(options: { appRoot?: string } & WriterOptions): s
 }
 
 /**
- * Copies the whole of `WriterOptions` across when a command builds a fresh
- * options bag for a generator it composes.
- *
- * Rebuilding the bag field by field is how `cwd` gets silently dropped and the
- * generator writes to the process directory instead of the requested one; this
- * keeps the field list in one place so a new option reaches every caller.
+ * Copies the whole of `WriterOptions` across when a command builds a fresh options bag.
+ * Rebuilding it field by field is how `cwd` gets silently dropped and the generator
+ * writes to the process directory instead of the requested one.
  */
 export function writerOptionsFrom(options: WriterOptions): WriterOptions {
   return { force: Boolean(options.force), root: options.root, cwd: options.cwd }
 }
 
 /**
- * Refuses an explicit `cwd` on a command that cannot honour it yet.
- *
- * `cwd` rides on the shared `WriterOptions`, so commands inherit the field
- * long before they thread it through every path they touch. Those commands
- * write some files relative to `cwd` and others relative to the process
- * directory, which splits one scaffold across two projects. Until each is
- * migrated, passing `cwd` fails loudly rather than half-working. Omitting it
- * is unaffected, so no existing caller changes behaviour.
+ * Refuses an explicit `cwd` on a command that cannot honour it yet. `cwd` rides on the
+ * shared `WriterOptions`, so a command inherits the field long before it threads it
+ * through every path — writing some files relative to `cwd` and others to the process
+ * directory splits one scaffold across two projects. Omitting it is unaffected.
  */
 export function assertCwdUnsupported(options: WriterOptions, command: string): void {
   if (options.cwd === undefined) return
@@ -286,10 +239,9 @@ export function pascalCase(value: string): string {
 }
 
 /**
- * Strip leading and trailing slashes without regex backtracking
- * (`/\/+$/` is quadratic on adversarial input). A twin lives in
- * `@guren/server` (`src/support/trim-slashes.ts`); the packages share no
- * dependency edge, so the six lines are duplicated by convention.
+ * Strip leading and trailing slashes without regex backtracking (`/\/+$/` is quadratic on
+ * adversarial input). A twin lives in `@guren/server` (`src/support/trim-slashes.ts`);
+ * the packages share no dependency edge, so the six lines are duplicated by convention.
  */
 export function trimSlashes(value: string): string {
   let start = 0
@@ -300,9 +252,8 @@ export function trimSlashes(value: string): string {
 }
 
 /**
- * Escape a value for interpolation inside generated single-quoted strings.
- * Shared by the codegen emitters (routes, channels, API client) so escaping
- * fixes land once.
+ * Escape a value for interpolation inside generated single-quoted strings. Shared by
+ * every codegen emitter so escaping fixes land once.
  */
 export function escapeSingleQuoted(value: string): string {
   return value
@@ -317,39 +268,34 @@ export function escapeSingleQuoted(value: string): string {
 const IDENTIFIER_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/u
 
 /**
- * Whether `value` can be written as a bare identifier in generated code.
- *
- * Character shape only, and deliberately: `default` is a fine object key and a
- * syntax error as a type alias name, so a caller emitting a *binding* has to
- * rule out reserved words itself.
+ * Whether `value` can be written as a bare identifier in generated code. Character shape
+ * only: `default` is a fine object key and a syntax error as a type alias name, so a
+ * caller emitting a *binding* must rule out reserved words itself.
  */
 export function isIdentifier(value: string): boolean {
   return IDENTIFIER_RE.test(value)
 }
 
 /**
- * Renders a property key for a generated object or type literal: bare when it
- * is a valid identifier, single-quoted otherwise. Shared by the codegen
- * emitters for the same reason as {@link escapeSingleQuoted} \u2014 what counts as
- * an emittable key should have one spelling.
+ * A property key for a generated object or type literal: bare when it is a valid
+ * identifier, single-quoted otherwise. Shared by the codegen emitters, like
+ * {@link escapeSingleQuoted}, so an emittable key has one spelling.
  */
 export function quoteObjectKey(key: string): string {
   return isIdentifier(key) ? key : `'${escapeSingleQuoted(key)}'`
 }
 
 /**
- * One Hono route-path param token, as Hono's own parser lexes it: a param
- * starts only at a segment boundary (`/:name` — `/status/foo:bar` is a
- * literal), an attached regex constraint is consumed whole, including one level of
- * nested braces (so `{[0-9]{2}}` and `{[^/]{2}}` stay intact), and a trailing `?`/`*` modifier belongs
- * to the token. Group 1 is the boundary, group 2 the param label. Shared by
- * every route generator so the lexing rule lands once.
+ * One Hono route-path param token, as Hono's own parser lexes it: a param starts only at
+ * a segment boundary (`/status/foo:bar` is a literal), an attached constraint is consumed
+ * whole including one level of nested braces (`{[0-9]{2}}` stays intact), and a trailing
+ * `?`/`*` modifier belongs to the token. Group 1 is the boundary, group 2 the label.
+ * Shared by every route generator so the lexing rule lands once.
  */
-// A constraint is spelled out to one level of nesting rather than with a
-// nested quantifier: every class here excludes both braces, so a scan always
-// stops at the next brace instead of running to the end of the string. The
-// `\{[^}]*\}(?:[^/]*\})*` shape it replaces was quadratic (CodeQL
-// js/polynomial-redos, measured at 2.9s for a 16k-char path vs 1.9ms here).
+// The constraint is spelled out to one level of nesting rather than with a nested
+// quantifier: every class excludes both braces, so a scan stops at the next brace. The
+// `\{[^}]*\}(?:[^/]*\})*` shape it replaces was quadratic (CodeQL js/polynomial-redos,
+// measured at 2.9s for a 16k-char path vs 1.9ms here).
 export const PATH_PARAM_PATTERN = /(^|\/):([A-Za-z0-9_-]+\*?)(?:\{[^{}]*\{[^{}]*\}[^{}]*\}|\{[^{}]*\})?\??/gu
 
 /** Param labels in path order, with constraints and modifiers dropped. */
@@ -358,9 +304,8 @@ export function extractPathParamNames(path: string): string[] {
 }
 
 /**
- * Escape a value for interpolation inside generated template literals.
- * Backslashes must go first — escaping them after the backtick pass would
- * double-escape the `\` it just inserted.
+ * Escape a value for interpolation inside generated template literals. Backslashes must
+ * go first, or the backtick pass's own `\` gets double-escaped.
  */
 export function escapeTemplateLiteral(value: string): string {
   return value.replace(/\\/gu, '\\\\').replace(/`/gu, '\\`').replace(/\$/gu, '\\$')
@@ -372,11 +317,10 @@ export function camelCase(value: string): string {
 }
 
 /**
- * Slug for prose input (ADR titles, migration names): lowercase,
- * non-alphanumeric runs collapse to `separator`, edges trimmed. Unlike
- * `kebabCase()`, punctuation is dropped rather than preserved. Input with
- * no ASCII alphanumerics at all (e.g. a fully Japanese title) falls back
- * to `fallback` so the sequence number stays the distinguishing part.
+ * Slug for prose input (ADR titles, migration names): lowercase, non-alphanumeric runs
+ * collapse to `separator`, edges trimmed — unlike `kebabCase()`, punctuation is dropped.
+ * Input with no ASCII alphanumerics falls back to `fallback`, so the sequence number
+ * stays the distinguishing part.
  */
 export function slugifyProse(value: string, separator: string, fallback: string): string {
   const slug = value
@@ -395,9 +339,8 @@ export function kebabCase(value: string): string {
 }
 
 /**
- * Builds the ESM specifier that `fromFile` would use to import `toPath`.
- * Separators are normalized to `/` so generated and printed import lines stay
- * valid on Windows, where `path.relative()` yields `\`.
+ * The ESM specifier `fromFile` would use to import `toPath`. Separators are normalized to
+ * `/` so generated import lines stay valid on Windows, where `path.relative()` yields `\`.
  */
 export function relativeImportPath(fromFile: string, toPath: string): string {
   const rel = relative(dirname(fromFile), toPath) || toPath
@@ -405,29 +348,17 @@ export function relativeImportPath(fromFile: string, toPath: string): string {
   return normalized.startsWith('.') ? normalized : `./${normalized}`
 }
 
-/**
- * Escapes `value` for literal use inside a `RegExp` source string.
- */
+/** Escapes `value` for literal use inside a `RegExp` source string. */
 export function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 /**
- * Whether `body` — source text with its `import` declarations already removed
- * — uses `name` as an identifier.
- *
- * Shared by the registration checks (console commands, route registrars),
- * which all ask the same question of an entrypoint: does it *use* this name,
- * having imported it? A word-boundary match over source rather than an AST
- * identifier walk, because "use" is deliberately broader than "call" — a
- * registrar handed to `defineModule({ routes: registerBlogRoutes })`, a
- * command pushed through `[SendDigestCommand].forEach(...)`, and a plain
- * `registerAuthRoutes(router)` all count, and only the last is a call
- * expression.
- *
- * The looseness cuts one way on purpose: it can call a name used in a comment
- * or a string registered, never the reverse. These checks warn rather than
- * fail, so a missed alarm is the cheaper error.
+ * Whether `body` — source text with its `import` declarations already removed — uses
+ * `name` as an identifier. A word-boundary match over source rather than an AST walk,
+ * because "use" is broader than "call": a registrar handed to `defineModule({ routes })`
+ * and a command pushed through `forEach(...)` both count. The looseness cuts one way — a
+ * name in a comment reads as used, never the reverse — and these checks warn, not fail.
  */
 export function referencesIdentifier(body: string, name: string): boolean {
   return new RegExp(`\\b${escapeRegExp(name)}\\b`, 'u').test(body)
@@ -436,25 +367,11 @@ export function referencesIdentifier(body: string, name: string): boolean {
 const SAFE_MODULE_NAME_RE = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/u
 
 /**
- * kebab-cases a `--module <name>`/`make:module <name>` value and rejects
- * anything that would escape the `modules/<name>/` directory it becomes a
- * path segment of. `kebabCase()` alone doesn't strip `/`, `\`, or `..` — a
- * name like `../../outside` or `/etc/passwd` would resolve outside the
- * project root wherever it's interpolated into a scaffold path. Requiring
- * the result to be one or more alphanumeric segments joined by single
- * hyphens rejects those, plus anything else that isn't a plain directory
- * name (empty, all-symbol, leading/trailing hyphen, etc.) in one check.
- *
- * The first segment must additionally start with a letter, because the name
- * is not only a directory: codegen PascalCases it to qualify the identifiers
- * it emits for that module (`modules/billing/InvoiceResource` becomes
- * `Data.BillingInvoice`), and no TypeScript identifier may start with a
- * digit. `modules/2fa/` would yield `2faInvoice`, which the generator has to
- * drop. Refusing the name here is the whole of the fix: every generator that
- * qualifies a generated identifier by module name inherits the constraint,
- * so this validator — not any one generator — is where it belongs. Later
- * segments are unconstrained; only the leading character reaches the front
- * of an identifier.
+ * kebab-cases a `--module <name>` value and rejects anything that would escape the
+ * `modules/<name>/` directory it becomes a path segment of: `kebabCase()` alone does not
+ * strip `/`, `\`, or `..`. Requiring alphanumeric segments joined by single hyphens
+ * rejects those in one check. The first segment must also start with a letter, because
+ * codegen PascalCases the name into identifiers and `modules/2fa/` yields `2faInvoice`.
  */
 export function safeModuleName(value: string): string {
   const name = kebabCase(value)
@@ -472,21 +389,11 @@ export function safeModuleName(value: string): string {
 const PATH_SEGMENT_SEPARATOR_RE = /[\\\u0000]/u
 
 /**
- * Splits a nested generator name (`make:view posts/Index`,
- * `make:test auth/Login`) into path segments, rejecting any segment that is a
- * directory traversal rather than a name.
- *
- * `trimSlashes()` only touches the edges, so `..` survives
- * `split('/').filter(Boolean)` — it is non-empty — and walks out of the
- * generator's output directory once interpolated into the path. Segments are
- * rejected rather than stripped because nesting is the documented feature
- * here: silently rewriting the path would put the file somewhere the caller
- * did not ask for.
- *
- * Only traversal is rejected, not unusual characters. `pascalCase()` already
- * accepts space-separated words, so narrowing to an identifier charset here
- * would break `make:test "admin/my page"` — which the filesystem, and every
- * release before this check, accepted.
+ * Splits a nested generator name (`make:view posts/Index`) into path segments, rejecting
+ * any that is a directory traversal: `trimSlashes()` only touches the edges, so `..`
+ * survives `split('/').filter(Boolean)` and walks out of the output directory. Rejected
+ * rather than stripped, since rewriting the path would put the file somewhere the caller
+ * did not ask for. Only traversal — a narrower charset would break `"admin/my page"`.
  */
 export function safePathSegments(value: string, label: string): string[] {
   const segments = trimSlashes(value).split('/').filter(Boolean)
@@ -518,11 +425,9 @@ export function ensureSuffix(name: string, suffix: string): string {
 }
 
 /**
- * Builds a `pages.foo.bar` accessor for a scaffolded controller, matching the
- * nesting/quoting rules pages-types.ts's codegen uses to build the `pages`
- * object (one key per resources/js/pages/ directory segment, bracket-quoted
- * when a segment isn't a valid identifier) so generated code references the
- * same path codegen will actually produce.
+ * A `pages.foo.bar` accessor for a scaffolded controller, matching the nesting and
+ * quoting rules pages-types.ts's codegen uses, so generated code references the path
+ * codegen will actually produce.
  */
 export function pagesAccessor(...keys: Array<string | undefined>): string {
   return keys

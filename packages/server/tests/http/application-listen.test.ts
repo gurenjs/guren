@@ -16,11 +16,9 @@ beforeEach(() => {
   process.env.NODE_ENV = 'development'
   process.env.GUREN_DEV_BANNER = '0'
   vite.clear()
-  // Each test here starts a server that `listen()` records on `globalThis`,
-  // and a still-listening record sends the next `listen()` down the hot-reload
-  // reuse path instead of the one under test. Bun shares a process across test
-  // files, so the leftover can arrive from a sibling file as easily as from
-  // the test above — hence a reset on both sides.
+  // A still-listening record on `globalThis` sends the next `listen()` down the
+  // hot-reload reuse path instead of the one under test, and Bun shares a process
+  // across test files — hence a reset on both sides.
   resetGurenGlobals()
 })
 
@@ -31,11 +29,8 @@ afterEach(() => {
 })
 
 /**
- * Stubs a bind that succeeds while reporting no `port` and no `hostname`.
- *
- * Both omissions are load-bearing: `listen()` has to fall back to the port it
- * bound and the hostname it was asked for, and a stub written before it read
- * either field must keep working.
+ * Stubs a bind that succeeds while reporting no `port` and no `hostname`, so
+ * `listen()` must fall back to the port it bound and the hostname it was asked for.
  */
 function stubBunServe() {
   const serveMock = mock(() => ({ stop: mock(async () => {}) }))
@@ -62,11 +57,8 @@ describe('Application.listen', () => {
   })
 
   it('shuts the managed Vite dev server down when the bind fails', async () => {
-    // Vite is started before anything tries to bind, so a bind that throws
-    // past it would strand an asset server and its published env vars in a
-    // process with no application server. `GUREN_STRICT_PORT=1` makes that the
-    // expected path for automated callers, which handle the rejection rather
-    // than exiting.
+    // Vite starts before the bind, so a throwing bind would strand an asset server
+    // and its published env vars in a process with no application server.
     const addressInUse = Object.assign(new Error('Failed to start server.'), {
       code: 'EADDRINUSE',
     })
@@ -83,10 +75,8 @@ describe('Application.listen', () => {
 
     expect(vite.startViteDevServer).toHaveBeenCalledTimes(1)
     expect(vite.viteClose).toHaveBeenCalled()
-    // The discriminating assertions: `listen()` also closes a *previous*
-    // server on the way in, so the call count alone proves nothing. These env
-    // vars were published by this call's Vite start, and only this call's
-    // teardown clears them.
+    // `listen()` also closes a *previous* server on the way in, so the call count
+    // proves nothing; only this call's teardown clears these env vars.
     expect(process.env.VITE_DEV_SERVER_URL).toBeUndefined()
     expect(process.env.GUREN_MANAGED_VITE_DEV_SERVER).toBeUndefined()
   })
@@ -99,8 +89,7 @@ describe('Application.address', () => {
 
   it('reports the address listen() resolved, not what the live server reports', async () => {
     // Re-deriving the address from the server would lose the port fallback the
-    // stub forces here — and `port: 0` has no fallback at all, which is the
-    // case the accessor exists for.
+    // stub forces here, and `port: 0` has no fallback at all.
     stubBunServe()
 
     const app = new Application()
@@ -114,9 +103,8 @@ describe('Application.address', () => {
   })
 
   it('reverts to undefined when a rebind fails after the old server stopped', async () => {
-    // `listen()` stops the running server before it tries to bind again, so a
-    // failed rebind leaves the app serving nothing. Reporting the old address
-    // here would point callers at a socket that is already closed.
+    // `listen()` stops the running server before rebinding, so reporting the old
+    // address after a failed rebind would point callers at a closed socket.
     stubBunServe()
 
     const app = new Application()

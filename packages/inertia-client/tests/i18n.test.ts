@@ -177,10 +177,8 @@ describe('parity with the server Translator', () => {
     expect(translator(locale).tc(key, count)).toBe(serverTranslator(locale).tc(key, count))
   })
 
-  // Sweep every locale the server's pluralization table knows (plus variants
-  // exercising the primary-subtag and default paths) across a count range
-  // covering the mod-10/mod-100 branches. Deriving the list from the server
-  // export means a locale added on either side alone fails here.
+  // Deriving the locale list from the server export means a locale added on
+  // either side alone fails here.
   const PLURAL_SWEEP_MESSAGES = {
     en: { forms: '0|1|2|3|4|5' },
   }

@@ -1,6 +1,5 @@
 import { MemoryPasswordResetStore } from '@guren/core'
 
-// Swap for a Redis-backed store (see @guren/core/redis) in production
-// or any multi-instance deployment — this in-memory store does not
-// survive restarts and is not shared across processes.
+// Swap for a Redis-backed store (@guren/core/redis) in production or any
+// multi-instance deployment: this one dies with the process and is not shared.
 export const passwordResetStore = new MemoryPasswordResetStore()

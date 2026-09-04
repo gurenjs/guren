@@ -2,16 +2,10 @@
  * The slice of AWS Signature Version 4 needed to presign a GET against an
  * S3-compatible endpoint, on WebCrypto alone.
  *
- * Written here rather than taken from a package because the only thing to
- * import is a signature: R2 presigning is one request shape (GET, no body,
- * `host` the sole signed header), the algorithm is frozen by AWS, and a
- * dependency the bundler has to resolve is exactly what broke the first
- * attempt at this — a variable-specifier dynamic import that no Workers
- * bundler could follow, so `temporaryUrl()` threw `No such module` on the
- * one runtime this driver runs on.
- *
- * `crypto.subtle` is a global on workerd, Bun, and Node 18+, so this needs
- * no runtime shims.
+ * Hand-written rather than imported: R2 presigning is one frozen request shape
+ * (GET, no body, `host` the sole signed header), and a dependency the Workers
+ * bundler has to resolve is what made `temporaryUrl()` throw `No such module`.
+ * `crypto.subtle` is a global on workerd, Bun and Node 18+, so no shims.
  */
 
 export interface PresignGetOptions {
@@ -96,12 +90,10 @@ async function hmac(key: ArrayBuffer | Uint8Array, value: string): Promise<Array
 }
 
 /**
- * `AWS4<secret>` → date → region → service → terminator, cached per
- * credential and day: the delivery route presigns once per request on
- * redirect-mode disks, and the four-step HMAC chain (eight `crypto.subtle`
- * host calls) only changes when the date stamp rolls over. Keyed by access
- * key id — never the secret — plus scope; self-bounding, but capped anyway
- * so a pathological key rotation cannot grow it.
+ * `AWS4<secret>` → date → region → service → terminator, cached per credential
+ * and day: the four-step HMAC chain (eight `crypto.subtle` calls) only changes
+ * when the date stamp rolls over. Keyed by access key id — never the secret —
+ * plus scope, and capped so a pathological key rotation cannot grow it.
  */
 const signingKeyCache = new Map<string, Promise<ArrayBuffer>>()
 const SIGNING_KEY_CACHE_MAX = 8
@@ -132,11 +124,7 @@ function signingKey(
   return derived
 }
 
-/**
- * Presign a GET so the URL alone authorizes the read until it expires.
- *
- * @returns the signed absolute URL
- */
+/** Presign a GET so the URL alone authorizes the read until it expires. */
 export async function presignGetUrl(options: PresignGetOptions): Promise<string> {
   const { accessKeyId, secretAccessKey, region, service, expiresIn } = options
   const date = options.date ?? new Date()

@@ -2,28 +2,14 @@ import { describe, test, expect } from 'bun:test'
 import { Hono } from 'hono'
 
 /**
- * The one upstream behaviour the scaffolded OAuth consent flow rests on, and
- * the one nothing else in this repository would notice changing.
- *
- * The consent form submits one `scope` field per ticked checkbox, so the
- * controller reads the body with `parseBody({ all: true })` — without which
- * repeated fields collapse to the last one and the screen grants exactly one
- * tool however many boxes were ticked. But Guren's CSRF middleware has
- * *already* called `parseBody()` on that request, with no options, to find
- * `_csrf_token`. If Hono's body cache were keyed on the request alone, the
- * controller's call would hand back the middleware's `all: false` result and
- * the flow would silently under-grant — a bug with no error, no log line, and
- * no failing test anywhere, because the collapse happens inside a framework
- * both halves trust.
- *
- * Measured here rather than assumed, and kept standing rather than measured
- * once: this file is the assertion that Hono keys the cache on the options
- * too. A Hono upgrade that changed it fails here instead of in someone's
- * deployed consent screen.
- *
- * `firstScope` is asserted as well, and it is the half that proves the probe
- * is testing anything: it must be the *collapsed* value, or the two calls were
- * never in conflict and the test would pass under any caching rule at all.
+ * The one upstream behaviour the scaffolded OAuth consent flow rests on: Hono
+ * keys its body cache on the parse *options*, not on the request alone. The
+ * consent controller reads repeated `scope` checkboxes with
+ * `parseBody({ all: true })` after the CSRF middleware already called
+ * `parseBody()` with none; were the cache keyed on the request, it would get the
+ * collapsed result and grant one tool however many boxes were ticked, with no
+ * error and no log line. The collapsed `first` is asserted too — without it the
+ * two calls were never in conflict and this would pass under any rule.
  */
 describe('hono parseBody caching (consent form prerequisite)', () => {
   test('should honour all: true on a request whose body was already parsed without it', async () => {

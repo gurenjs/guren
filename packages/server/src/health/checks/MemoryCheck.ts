@@ -1,32 +1,23 @@
 import type { CheckResult } from '../types'
 import { HealthCheck } from '../HealthCheck'
 
-/**
- * Options for memory health check.
- */
 export interface MemoryCheckOptions {
-  /**
-   * Custom name for this check.
-   * @default 'memory'
-   */
+  /** @default 'memory' */
   name?: string
 
   /**
-   * Memory threshold in MB. Above this is degraded.
+   * Heap use above this reports degraded.
    * @default 512
    */
   thresholdMb?: number
 
   /**
-   * Critical memory threshold in MB. Above this is unhealthy.
+   * Heap use above this reports unhealthy.
    * @default 1024
    */
   criticalThresholdMb?: number
 }
 
-/**
- * Health check for memory usage.
- */
 export class MemoryCheck extends HealthCheck {
   readonly name: string
 

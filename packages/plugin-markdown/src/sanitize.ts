@@ -3,19 +3,12 @@ import type sanitizeHtml from 'sanitize-html'
 import { alertAllowedClasses } from './alerts'
 
 /**
- * Default allowlist applied to rendered HTML (RFC 0012). Ported from
- * guren.dev's blog pipeline: the output is commonly injected with
- * dangerouslySetInnerHTML, and escaping raw HTML in the markdown source is
- * not enough on its own — markdown syntax itself can carry
- * `javascript:`/`data:` URLs into href and src. sanitize-html enforces an
- * element/attribute allowlist and a URL scheme allowlist.
- *
- * Extended beyond the ported allowlist only for this package's own output:
- * heading `id`s (the anchors feature) and the alert wrapper markup, whose
- * admissible class values are derived from `alerts.ts`.
- *
- * Returned as a fresh object per call so one renderer's `sanitize` callback
- * can mutate its copy without bleeding into other renderers.
+ * Default allowlist applied to rendered HTML (RFC 0012). The output is commonly
+ * injected with dangerouslySetInnerHTML, and escaping raw HTML in the markdown
+ * source is not enough on its own: markdown syntax itself can carry
+ * `javascript:`/`data:` URLs into href and src. Returned as a fresh object per
+ * call so one renderer's `sanitize` callback can mutate its copy without
+ * bleeding into other renderers.
  */
 export function defaultSanitizeOptions(): sanitizeHtml.IOptions {
   return {
@@ -38,10 +31,9 @@ export function defaultSanitizeOptions(): sanitizeHtml.IOptions {
       th: ['align'],
       td: ['align'],
     },
-    // The alert wrapper markup — class attributes on div/p are admitted only
-    // for the exact values alerts.ts emits, derived there so the two cannot
-    // drift (allowedClasses filters them; `class` itself must stay out of
-    // allowedAttributes for div/p or every class passes).
+    // Class attributes on div/p are admitted only for the exact values
+    // alerts.ts emits, derived there so the two cannot drift. `class` itself
+    // must stay out of allowedAttributes for div/p, or every class passes.
     allowedClasses: alertAllowedClasses(),
     allowedSchemes: ['http', 'https', 'mailto'],
     allowedSchemesAppliedToAttributes: ['href', 'src'],

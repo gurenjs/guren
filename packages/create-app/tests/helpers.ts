@@ -9,13 +9,10 @@ export interface TempWorkspace {
 }
 
 /**
- * A throwaway directory for one test.
- *
- * Deliberately does *not* `process.chdir()` into it: Bun runs every test file
- * in one shared process, so the working directory is global state. A test that
- * times out keeps running, and its `finally` then chdir'd and `rm -rf`'d out
- * from under whichever test had started in the meantime — one slow test failed
- * three. Callers pass absolute paths instead.
+ * A throwaway directory for one test. Deliberately does *not* `process.chdir()`
+ * into it: the working directory is global state across Bun's one test process,
+ * and a timed-out test's `finally` then chdir'd and `rm -rf`'d out from under
+ * whichever test had started meanwhile. Callers pass absolute paths instead.
  */
 export async function createTempWorkspace(prefix: string): Promise<TempWorkspace> {
   const dir = await mkdtemp(join(tmpdir(), prefix))
@@ -36,14 +33,11 @@ const GIT_IDENTITY = {
 } as const
 
 /**
- * Give `git commit` an identity for the duration of the calling file.
- *
- * The scaffolder deliberately leaves identity to the user's own `git config`,
- * and CI runners don't configure one globally the way most developer machines
- * do — so a test that commits has to supply one, or it passes only on the
- * machines that happen to have it. File-wide rather than per test: a per-test
- * restore in a `finally` runs late when that test overruns, leaving the
- * variables set for whatever ran in the meantime.
+ * Give `git commit` an identity for the duration of the calling file. The
+ * scaffolder leaves identity to the user's own `git config`, which CI runners
+ * do not set, so a committing test would otherwise pass only on developer
+ * machines. File-wide rather than per test: a per-test restore in a `finally`
+ * runs late when that test overruns.
  */
 export function useGitIdentity(): void {
   const previous = Object.fromEntries(

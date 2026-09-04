@@ -21,11 +21,9 @@ import { writeScaffoldFiles, type ScaffoldFileEntry, type WriterOptions } from '
 const CONSOLE_ENTRY = 'src/console.ts'
 
 /**
- * The `attachments` table per dialect, matching the attachments guide's
- * snippets: morph columns under the ORM's `attachable` convention, a
- * JSON-capable `variants` column, and (on Postgres) `withTimezone`
- * timestamps per the `guren check` schema rule. The engine writes its own
- * timestamps, so the dialects without a portable default carry none.
+ * The `attachments` table per dialect, matching the attachments guide. Postgres
+ * uses `withTimezone` timestamps per the `guren check` schema rule; the engine
+ * writes its own timestamps, so dialects without a portable default carry none.
  */
 const ATTACHMENTS_TABLE_BLOCKS: Record<SchemaDialect, string> = {
   pg: `export const attachments = pgTable('attachments', {
@@ -98,31 +96,25 @@ function attachmentsFile(path: string): ScaffoldFileEntry {
 }
 
 /**
- * Any exported `attachments` binding counts as "the app already has one":
- * builder spellings vary (`pgTable`, a pgSchema's `.table()`, re-exports),
- * and appending a second `export const attachments` next to any of them is
- * a compile error at best and a second physical table at worst.
+ * Any exported `attachments` binding counts as one the app already has: builder
+ * spellings vary, and appending a second is a compile error at best and a second
+ * physical table at worst.
  */
 const ATTACHMENTS_TABLE_PATTERN = /\bexport\s+(?:const|let)\s+attachments\b|\bexport\s*\{[^}]*\battachments\b/
 
 /**
- * `guren add attachments`: append the attachments table to `db/schema.ts`
- * (per dialect), write `config/attachments.ts` + `AttachmentsProvider`, wire
- * the provider, mount the signed delivery route, and register the
- * `attachments:prune` console command.
- *
- * Works on API-only apps — nothing here renders a page. Requires a storage
- * manager; when the app has no `StorageProvider`, the storage blueprint is
- * installed first by the registry entry that calls this.
+ * `guren add attachments`: the schema table, `config/attachments.ts` +
+ * `AttachmentsProvider`, the signed delivery route, and the `attachments:prune`
+ * command. Works on API-only apps. Requires a storage manager — the registry
+ * entry calling this installs the storage blueprint first when there is none.
  */
 export async function addAttachments(options: WriterOptions): Promise<string[]> {
   const created: string[] = []
 
   await patchSchema()
 
-  // Skipped per file rather than thrown: a re-run (or a run after a partial
-  // one) should repair whatever is missing — wire the provider, register the
-  // command — not abort on the first file that already exists.
+  // Skipped per file rather than thrown, so a re-run repairs whatever is
+  // missing instead of aborting on the first file that already exists.
   const scaffolds = ['config/attachments.ts', 'app/Providers/AttachmentsProvider.ts'].map(attachmentsFile)
   const pending: ScaffoldFileEntry[] = []
   for (const entry of scaffolds) {
@@ -162,9 +154,8 @@ async function patchSchema(): Promise<void> {
 
   const dialect = detectSchemaDialect(existing)
   let content = SCHEMA_IMPORTS[dialect](existing)
-  // Identifier-guarded: insertImport() only recognizes the exact statement,
-  // so a schema that already imports the type among others would end up
-  // with a duplicate binding.
+  // Identifier-guarded: insertImport() recognizes only the exact statement, so a
+  // schema already importing the type among others would get a duplicate binding.
   if (!content.includes('AttachmentVariantRecord')) {
     content = insertImport(content, VARIANT_RECORD_IMPORT) ?? content
   }
@@ -175,10 +166,9 @@ async function patchSchema(): Promise<void> {
 }
 
 /**
- * Whether the app already binds a 'storage' service somewhere — the real
- * prerequisite question. The conventional file name alone answers it in
- * neither direction: a custom CloudStorageProvider binds storage without
- * that file, and installing a second manager over it would shadow it.
+ * Whether the app already binds a 'storage' service. The conventional file name
+ * answers this in neither direction: a custom provider binds storage without
+ * that file, and installing a second manager would shadow it.
  */
 export async function appBindsStorage(): Promise<boolean> {
   const roots = await listAppRoots(process.cwd())
@@ -194,15 +184,10 @@ export async function appBindsStorage(): Promise<boolean> {
 }
 
 /**
- * Mount the signed delivery route the scaffolded `config/attachments.ts`
- * configures (`delivery: {}`).
- *
- * Not optional decoration: the config stores uploads on a private disk, whose
- * URLs point at this route. See the `attachments-delivery` rule in
- * attachments-check.ts for why an unmounted route is invisible at runtime.
- *
- * The entry file is probed rather than assumed: attachments work on an
- * API-only app, which ships `routes/api.ts` and no `routes/web.ts`.
+ * Mount the signed delivery route `config/attachments.ts` configures. Uploads go
+ * to a private disk whose URLs point at this route, so an unmounted one 404s
+ * (see the `attachments-delivery` rule in attachments-check.ts). The entry file
+ * is probed, not assumed: an API-only app ships `routes/api.ts` and no web entry.
  */
 async function registerDeliveryRoute(): Promise<void> {
   const routesFile = await resolveRoutesEntry(process.cwd())
@@ -236,11 +221,9 @@ async function registerPruneCommand(): Promise<void> {
     return
   }
 
-  // Read before patching: once the registration lands in the array, the
-  // identifier is in the file, and "already imported?" can no longer be told
-  // apart from "just registered". addImport() only recognizes the exact
-  // statement, so an import merged into another '@guren/core' line would
-  // otherwise get a duplicate binding appended.
+  // Read before patching: once the registration lands, "already imported?"
+  // cannot be told from "just registered", and addImport() recognizes only the
+  // exact statement, so a merged '@guren/core' line would get a duplicate.
   const beforePatch = (await readIfExists(process.cwd(), CONSOLE_ENTRY)) ?? ''
   const alreadyImported = beforePatch.includes(className)
 

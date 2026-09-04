@@ -3,7 +3,6 @@ import { CreateTokenSchema, TokenIdParamSchema } from '../Validators/AuthValidat
 import { getTokenStore } from '../../Providers/ApiTokenProvider.js'
 
 export default class TokenController extends Controller {
-  // GET /api/auth/tokens
   async index(): Promise<Response> {
     const { userId } = this.apiToken()
     const tokens = await getUserApiTokens(userId, getTokenStore())
@@ -20,7 +19,6 @@ export default class TokenController extends Controller {
     })
   }
 
-  // POST /api/auth/tokens
   async store(): Promise<Response> {
     const { userId } = this.apiToken()
     const { name, abilities, expiresInDays } = await this.validateBody(CreateTokenSchema)
@@ -42,12 +40,10 @@ export default class TokenController extends Controller {
     })
   }
 
-  // DELETE /api/auth/tokens/:id
   async destroy(): Promise<Response> {
     const { userId } = this.apiToken()
     const { id: tokenId } = this.validateParams(TokenIdParamSchema)
 
-    // Verify token belongs to user
     const userTokens = await getUserApiTokens(userId, getTokenStore())
     const targetToken = userTokens.find((t) => t.id === tokenId)
 

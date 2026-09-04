@@ -72,9 +72,8 @@ export default class PostsController extends Controller {
     try {
       await createWithFreshSlug()
     } catch (error) {
-      // The slug probe and the insert are not atomic; a concurrent create
-      // can win the same slug in between. The unique index catches it —
-      // re-probe (which now sees the winner) and try once more.
+      // Probe and insert are not atomic, so a concurrent create can win the
+      // slug in between; the unique index catches it, so re-probe and retry.
       if (!/unique/i.test(error instanceof Error ? error.message : '')) throw error
       await createWithFreshSlug()
     }
@@ -107,8 +106,7 @@ export default class PostsController extends Controller {
     const data = await this.validateBody(PostPayloadSchema)
     const bodyHtml = await renderPostMarkdown(data.bodyMarkdown)
 
-    // The slug is intentionally kept stable on update so published URLs
-    // never break when a title is edited.
+    // Slug stays stable on update so published URLs survive a retitle.
     await Post.update(
       { id },
       {
@@ -136,9 +134,8 @@ export default class PostsController extends Controller {
     const post = await Post.findOrFail(id)
     const { published } = await this.validateBody(SetPublishedSchema)
 
-    // The client states the outcome it wants instead of toggling, so a
-    // double-submitted form is idempotent rather than a second flip. A
-    // re-publish keeps the original publishedAt (stable dates in feeds).
+    // The client states the outcome rather than toggling, so a double-submitted
+    // form is idempotent. A re-publish keeps the original publishedAt.
     await Post.update(
       { id },
       {

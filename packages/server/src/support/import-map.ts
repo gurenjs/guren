@@ -1,15 +1,11 @@
 export interface ParseImportMapOptions {
-  /**
-   * Optional label describing the source of the import map.
-   * Used in warning logs when parsing fails.
-   */
+  /** Label used in the parse-failure warning. */
   context?: string
 }
 
 /**
- * Parses an import map JSON string into a record of module specifiers.
- * Empty, null, and undefined entries are ignored so callers can safely
- * merge optional overrides without additional filtering.
+ * Empty, null and undefined entries are dropped, so callers can merge optional
+ * overrides without filtering first.
  */
 export function parseImportMap(
   value: string | undefined,

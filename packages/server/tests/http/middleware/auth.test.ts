@@ -31,11 +31,8 @@ describe('attachAuthContext', () => {
 
 describe('requireAuthenticated', () => {
   it('accepts a context that implements only the method it calls', async () => {
-    // The guards read check()/guest() and nothing else, so a hand-rolled
-    // minimal context has to keep working. This pins getAuthContext's
-    // contract: it does not probe for members its callers never touch —
-    // Gate does that at its own call site, where a stray value decides
-    // whether the legacy fallback runs.
+    // Pins getAuthContext's contract: it does not probe for members its callers
+    // never touch, so a context implementing only check()/guest() keeps working.
     const app = new Hono()
     const partialAuth = { check: async () => true } as unknown as AuthContext
 

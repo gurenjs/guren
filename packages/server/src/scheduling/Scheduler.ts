@@ -3,28 +3,6 @@ import { Schedule } from './Schedule'
 import { ScheduledTask } from './ScheduledTask'
 import { claimHotDisposable, isHotReloadRuntime, type HotDisposableClaim } from '../hot-reload/hot-disposables'
 
-/**
- * Task scheduler for running periodic tasks.
- *
- * @example
- * ```ts
- * const scheduler = new Scheduler()
- *
- * scheduler.schedule((schedule) => {
- *   schedule.call(async () => {
- *     await cleanupOldSessions()
- *   }).daily().at('03:00').name('cleanup-sessions')
- *
- *   schedule.job(SendWeeklyDigestJob, {})
- *     .weekly()
- *     .sundays()
- *     .at('09:00')
- *     .tz('Asia/Tokyo')
- * })
- *
- * scheduler.start()
- * ```
- */
 export class Scheduler {
   private tasks: ScheduledTask[] = []
   private readonly options: Required<SchedulerOptions>
@@ -42,39 +20,24 @@ export class Scheduler {
     }
   }
 
-  /**
-   * Define schedules using a callback.
-   */
   schedule(definer: (schedule: Schedule) => void): void {
     const schedule = new Schedule()
     definer(schedule)
     this.tasks.push(...schedule.buildTasks())
   }
 
-  /**
-   * Add a pre-built task.
-   */
   addTask(task: ScheduledTask): void {
     this.tasks.push(task)
   }
 
-  /**
-   * Get all scheduled tasks.
-   */
   getTasks(): ScheduledTask[] {
     return [...this.tasks]
   }
 
-  /**
-   * Get tasks that are due now.
-   */
   getDueTasks(date: Date = new Date()): ScheduledTask[] {
     return this.tasks.filter((task) => task.isDue(date))
   }
 
-  /**
-   * Run all due tasks.
-   */
   async runDueTasks(date: Date = new Date()): Promise<void> {
     const dueTasks = this.getDueTasks(date)
 
@@ -91,9 +54,6 @@ export class Scheduler {
     }
   }
 
-  /**
-   * Start the scheduler.
-   */
   start(): void {
     if (this.isRunning) {
       return
@@ -112,10 +72,8 @@ export class Scheduler {
       () => this.stop(),
     )
 
-    // Run immediately
     this.tick()
 
-    // Set up interval
     this.interval = setInterval(() => {
       this.tick()
     }, this.options.checkInterval)
@@ -126,9 +84,6 @@ export class Scheduler {
     }
   }
 
-  /**
-   * Stop the scheduler.
-   */
   stop(): void {
     if (!this.isRunning) {
       return
@@ -139,11 +94,9 @@ export class Scheduler {
       this.interval = null
     }
 
-    // Give the slot up: a stopped scheduler left holding one keeps itself, and
-    // every task it has been given, reachable from `globalThis` for the rest of
-    // the process — the same leak this registry exists to close. Also reached as
-    // the registry's own teardown, where the slot already belongs to the
-    // replacement and this is a no-op.
+    // A stopped scheduler still holding its slot keeps itself and every task it
+    // was given reachable from `globalThis`. Also reached as the registry's own
+    // teardown, where the slot already belongs to the replacement: a no-op.
     this.hotReloadClaim?.release()
     this.hotReloadClaim = undefined
 
@@ -151,9 +104,6 @@ export class Scheduler {
     this.options.logger('Scheduler stopped')
   }
 
-  /**
-   * Check and run due tasks.
-   */
   private tick(): void {
     const now = new Date()
 
@@ -173,51 +123,30 @@ export class Scheduler {
     })
   }
 
-  /**
-   * Check if the scheduler is running.
-   */
   getIsRunning(): boolean {
     return this.isRunning
   }
 
-  /**
-   * Get the check interval.
-   */
   getCheckInterval(): number {
     return this.options.checkInterval
   }
 
-  /**
-   * Get the default timezone.
-   */
   getTimezone(): string {
     return this.options.timezone
   }
 
-  /**
-   * Clear all tasks.
-   */
   clear(): void {
     this.tasks = []
   }
 
-  /**
-   * Get the number of tasks.
-   */
   count(): number {
     return this.tasks.length
   }
 
-  /**
-   * Get task by name.
-   */
   getTask(name: string): ScheduledTask | undefined {
     return this.tasks.find((task) => task.getName() === name)
   }
 
-  /**
-   * Remove a task by name.
-   */
   removeTask(name: string): boolean {
     const index = this.tasks.findIndex((task) => task.getName() === name)
     if (index !== -1) {
@@ -228,9 +157,6 @@ export class Scheduler {
   }
 }
 
-/**
- * Create a scheduler instance.
- */
 export function createScheduler(options?: SchedulerOptions): Scheduler {
   return new Scheduler(options)
 }

@@ -1,17 +1,11 @@
 /**
- * `guren tool:list` / `guren tool:inspect` — what this app exposes to agents
- * (RFC 0016 §6).
+ * `guren tool:list` / `guren tool:inspect` — what this app exposes to agents (RFC 0016 §6).
  *
- * Both derive live, from the route graph on disk, rather than reading
- * `.guren/agents.gen.ts`: a manifest can be stale or absent, and the question
- * these answer ("what would an agent see right now?") is only useful when the
- * answer comes from the same `deriveAgentTools()` call an adapter makes. The
- * gap between the two — a `resource` hint's payload type — is codegen-only and
- * named as such where it shows.
- *
- * The `tool:` namespace is new; `agent:init` / `agent:sync` already own
- * `agent:` for the coding-agent harness, which is a different surface
- * entirely.
+ * Both derive live from the route graph on disk rather than reading
+ * `.guren/agents.gen.ts`, which can be stale or absent: the answer is only useful when it
+ * comes from the same `deriveAgentTools()` call an adapter makes. The one gap — a
+ * `resource` hint's payload type — is codegen-only and named as such where it shows.
+ * The `tool:` namespace is separate from `agent:`, which the coding-agent harness owns.
  */
 import { consola } from 'consola'
 import {
@@ -23,9 +17,7 @@ import {
 import { loadAppRouteDefinitions } from './load-routes'
 
 export interface ToolListOptions {
-  /** Routes entry file path. */
   routesFile?: string
-  /** Application root directory. */
   appRoot?: string
 }
 
@@ -126,11 +118,9 @@ export async function displayToolInspection(
     )
   }
 
-  // Only this tool's warnings: the rest belong to routes the caller did not
-  // ask about, and burying the one line that concerns this tool among them is
-  // how an inspect command stops being read. Read off the tool rather than
-  // filtered out of the aggregate by prefix — the prefix is a printing
-  // convention, not a contract to parse back.
+  // Only this tool's warnings: the rest belong to routes the caller did not ask about.
+  // Read off the tool rather than filtered out of the aggregate by prefix — the prefix is
+  // a printing convention, not a contract to parse back.
   const relevant = tool.warnings
 
   if (options.json) {
@@ -167,11 +157,9 @@ export async function displayToolInspection(
   if (tool.outputSchema) {
     console.log(JSON.stringify(tool.outputSchema, null, 2))
   } else if (tool.resource) {
-    // The hint's payload *type* lives in the CLI's AST extraction over
-    // app/Http/Resources, not in the route graph this command reads — so name
-    // the Resource class the reader can open, rather than pointing at a
-    // generated file that may not exist (this command derives live precisely
-    // because it must answer without one).
+    // The hint's payload *type* lives in the CLI's AST extraction over app/Http/Resources,
+    // not in the route graph this command reads, so name the Resource class the reader can
+    // open rather than a generated file that may not exist.
     const classes = resourceClassNames(tool.resource)
     console.log(`  (no output schema; response declared by ${classes.join(', ')})`)
   } else {

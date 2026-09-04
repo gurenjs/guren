@@ -15,33 +15,23 @@ import { getApiTokenOrFail } from '../auth/api-token'
 import { getGate } from '../authorization/Gate'
 import type { AuthUser } from '../authorization/types'
 
-/**
- * Duck-type interface for Zod-like schemas.
- * Allows validation without a direct Zod dependency.
- */
+/** Duck-typed Zod-like schema, so validation needs no direct Zod dependency. */
 interface ZodLikeSchema<T> {
   safeParse(data: unknown):
     | { success: true; data: T }
     | { success: false; error: { issues: Array<{ path: PropertyKey[]; message: string }> } }
 }
 
-/**
- * Result type for safe validation methods (discriminated union).
- */
+/** Result type for safe validation methods (discriminated union). */
 export type SafeValidationResult<T> =
   | { success: true; data: T }
   | { success: false; errors: Record<string, string> }
 
 /**
- * The record `Controller.model()` returns for a bound model class. ORM models
- * carry their row type as a `recordType` marker (set by `defineModel()`);
- * `findOrFail`'s own return type cannot be read off the class because the
- * method is generic in `this`, and `ReturnType` widens it to the base row.
- * Anything without a usable marker — a class extending `Model` directly
- * without redeclaring it, or a plain `{ findOrFail }` adapter — falls back to
- * whatever its `findOrFail` resolves to. The marker is only trusted when it
- * names an object type: `Model`'s own is `unknown`, and an unrelated
- * `recordType` on some adapter (a string tag, say) describes no record.
+ * The record `Controller.model()` returns. ORM models carry their row type as a
+ * `recordType` marker (set by `defineModel()`); `findOrFail`'s return type cannot
+ * stand in because it is generic in `this` and `ReturnType` widens it to the base
+ * row. The marker is trusted only when it names an object type.
  */
 export type BoundModelRecord<T extends { findOrFail(...args: any[]): Promise<any> }> =
   T extends { readonly recordType: infer R }
@@ -99,32 +89,19 @@ type InertiaResponseOptions = Omit<InertiaOptions, 'url' | 'request'> & { url?: 
 type InertiaPageComponent<TPage extends InertiaPageContractLike> = TPage['id']
 type InertiaPageProps<TPage extends InertiaPageContractLike> = NonNullable<TPage['__props']>
 
-/**
- * Constructor type for controllers with optional DI.
- */
+/** Constructor type for controllers with optional DI. */
 export type ControllerConstructorWithInject = {
   new (...args: any[]): Controller
   inject?: readonly string[]
 }
 
 /**
- * Base controller inspired by Laravel's expressive API. Subclasses can access
- * the current Hono context through the protected `ctx` getter and rely on the
- * helper response builders for common patterns.
- *
- * Supports dependency injection via the `static inject` convention:
- * ```typescript
- * class PostController extends Controller {
- *   static inject = ['cache', 'events'] as const
- *   constructor(private cache: CacheManager, private events: EventManager) { super() }
- * }
- * ```
+ * Base controller inspired by Laravel's expressive API. Subclasses reach the
+ * Hono context through the protected `ctx` getter. Dependencies are declared
+ * with `static inject = ['cache'] as const` and passed to the constructor.
  */
 export class Controller {
-  /**
-   * Dependencies to inject from the container.
-   * Override in subclasses to declare required services.
-   */
+  /** Services to resolve from the container and pass to the constructor. */
   static inject?: readonly string[]
 
   private context?: Context
@@ -141,10 +118,7 @@ export class Controller {
     this._container = container
   }
 
-  /**
-   * Store a resolved model instance from route model binding.
-   * @internal Called by the router, not intended for direct use.
-   */
+  /** @internal Called by the router to store a route-bound model instance. */
   setResolvedModel(modelClass: unknown, instance: unknown): void {
     if (!this.resolvedModels) this.resolvedModels = new Map()
     this.resolvedModels.set(modelClass, instance)
@@ -152,22 +126,8 @@ export class Controller {
 
   /**
    * Retrieve a model instance resolved via route model binding — a per-route
-   * `bind` option or a router-level `router.bind(param, Model)`. Look up by
-   * primary key with the class alone, or by another column with a
-   * `[Model, column]` tuple.
-   *
-   * @example
-   * ```typescript
-   * // routes/web.ts
-   * posts.get('/:id', { bind: { id: Post }, name: 'posts.show' }, [PostController, 'show'])
-   * posts.get('/by-slug/:slug', { bind: { slug: [Post, 'slug'] } }, [PostController, 'show'])
-   *
-   * // PostController.ts
-   * async show() {
-   *   const post = this.model(Post)  // typed as PostRecord
-   *   return this.inertia(pages.posts.Show, { post })
-   * }
-   * ```
+   * `bind` option or a router-level `router.bind(param, Model)`. The class
+   * alone looks up by primary key, a `[Model, column]` tuple by that column.
    */
   protected model<T extends { findOrFail(...args: any[]): Promise<any> }>(
     modelClass: T,
@@ -195,20 +155,9 @@ export class Controller {
   }
 
   /**
-   * Get an uploaded file from a multipart request.
-   *
-   * Returns null when the field is missing, is not a file, or the upload is
-   * empty. Hono caches the parsed body, so this composes with other body
-   * reads in the same request.
-   *
-   * @example
-   * ```typescript
-   * const avatar = await this.file('avatar')
-   * if (!avatar) {
-   *   throw ValidationException.withMessages({ avatar: 'Choose a file.' })
-   * }
-   * await storage.disk().put(`avatars/${avatar.name}`, Buffer.from(await avatar.arrayBuffer()))
-   * ```
+   * Get an uploaded file from a multipart request. Returns null when the field
+   * is missing, is not a file, or the upload is empty. Hono caches the parsed
+   * body, so this composes with other body reads in the same request.
    */
   protected async file(name: string): Promise<File | null> {
     const body = await parseRequestUploads(this.ctx)
@@ -246,60 +195,27 @@ export class Controller {
     return this._container.make(key)
   }
 
-  // ─── API Token Helpers ─────────────────────────────────────────
-
-  /**
-   * Get the authenticated API token or throw AuthenticationException.
-   *
-   * @example
-   * ```typescript
-   * const { userId, abilities } = this.apiToken()
-   * ```
-   */
+  /** Get the authenticated API token, or throw AuthenticationException. */
   protected apiToken() {
     return getApiTokenOrFail(this.ctx)
   }
 
-  /**
-   * Get the authenticated user ID from the API token.
-   *
-   * @example
-   * ```typescript
-   * const userId = this.apiTokenUserId()
-   * ```
-   */
+  /** Get the authenticated user ID from the API token. */
   protected apiTokenUserId(): string | number {
     return this.apiToken().userId
   }
 
-  // ─── Authorization Helpers ──────────────────────────────────────
-
   /**
-   * Authorize the current user (or guest) for an ability.
-   * Throws AuthorizationException (403) when denied.
-   *
-   * ORM records are plain objects with no constructor information, so pass
-   * the model class alongside the record to resolve the policy:
-   *
-   * @example
-   * ```typescript
-   * const post = await Post.findOrFail(id)
-   * await this.authorize('update', [Post, post])
-   * await this.authorize('create', Post)
-   * ```
+   * Authorize the current user (or guest) for an ability; throws
+   * AuthorizationException (403) when denied. ORM records are plain objects
+   * with no constructor information, so pass the model class alongside the
+   * record: `await this.authorize('update', [Post, post])`.
    */
   protected async authorize(ability: string, ...args: unknown[]): Promise<void> {
     await getGate().forUser(await this.gateUser()).authorize(ability, ...args)
   }
 
-  /**
-   * Check whether the current user (or guest) can perform an ability.
-   *
-   * @example
-   * ```typescript
-   * if (await this.can('update', [Post, post])) { ... }
-   * ```
-   */
+  /** Check an ability without throwing: `await this.can('update', [Post, post])`. */
   protected async can(ability: string, ...args: unknown[]): Promise<boolean> {
     return getGate().forUser(await this.gateUser()).allows(ability, ...args)
   }
@@ -312,27 +228,11 @@ export class Controller {
     return (await auth.user()) as AuthUser | null
   }
 
-  // ─── Response Helpers ───────────────────────────────────────────
-
   /**
    * Render a `hono/jsx` component to a plain server-rendered HTML response —
-   * the non-hydrating counterpart to {@link inertia} for public content pages
-   * (RFC 0014). Takes the component and its props separately so controllers
-   * stay plain `.ts` and the props are type-checked at the call site.
-   *
-   * Escaping covers markup: text children and attribute values are escaped,
-   * so tag and attribute breakout cannot occur. It does **not** validate URL
-   * schemes — a `javascript:` href built from user data is emitted verbatim.
-   * Sanitize user-supplied URLs upstream (e.g. `@guren/plugin-markdown`'s
-   * allowlist) before they reach a View.
-   *
-   * @example
-   * ```typescript
-   * async show() {
-   *   const post = await Post.findOrFail(id)
-   *   return this.view(PostPage, { post })
-   * }
-   * ```
+   * the non-hydrating counterpart to {@link inertia} (RFC 0014). Escaping
+   * covers markup only, not URL schemes: a `javascript:` href built from user
+   * data is emitted verbatim, so sanitize user-supplied URLs upstream.
    */
   protected view<P>(component: FC<P>, props: P, options?: ViewOptions): Promise<Response> {
     return renderDocument(component, props, options)
@@ -381,28 +281,16 @@ export class Controller {
   }
 
   /**
-   * Locale resolved for the current request: the request-scoped `locale`
-   * context variable (set by locale middleware) wins over the app-wide i18n
-   * locale (the router-injected container binding, then the `setI18n()`
-   * global). Falls back to `'en'` when no i18n is configured.
+   * Locale for the current request: the request-scoped `locale` context
+   * variable wins over the app-wide i18n locale. Falls back to `'en'`.
    */
   protected get locale(): string {
     return this.#resolveLocale() ?? 'en'
   }
 
   /**
-   * Translate a key for the current request locale.
-   *
-   * Uses the request-scoped translator bound by the locale detection
-   * middleware when present, falling back to a translator scoped to
-   * `this.locale` from the container's `i18n` binding (then the `setI18n()`
-   * global).
-   *
-   * @example
-   * ```typescript
-   * this.t('posts.created')
-   * this.t('posts.greeting', { name: user.name })
-   * ```
+   * Translate a key for the current request locale, using the request-scoped
+   * translator the locale middleware bound, else one scoped to `this.locale`.
    */
   protected t(key: RegisteredTranslationKey, replacements?: ReplacementValues): string {
     return this.#requestTranslator().t(key, replacements)
@@ -484,23 +372,14 @@ export class Controller {
     })
   }
 
-  /**
-   * Return a 204 No Content response.
-   */
   protected noContent(): Response {
     return new Response(null, { status: 204 })
   }
 
-  /**
-   * Return a 201 Created response with JSON data.
-   */
   protected created<T>(data?: T, init: ResponseInit = {}): Response {
     return this.jsonStatus(201, data, init)
   }
 
-  /**
-   * Return a 202 Accepted response with optional JSON data.
-   */
   protected accepted<T>(data?: T, init: ResponseInit = {}): Response {
     return this.jsonStatus(202, data, init)
   }
@@ -519,12 +398,7 @@ export class Controller {
     })
   }
 
-  // ─── Input Helpers ──────────────────────────────────────────────
-
-  /**
-   * Get a specific input value from the request body or query parameters.
-   * Body values take precedence over query parameters.
-   */
+  /** Get an input value; body values take precedence over query parameters. */
   protected async input<T = unknown>(key: string, defaultValue?: T): Promise<T | undefined> {
     const body = await this.getBody()
     if (key in body) {
@@ -537,16 +411,11 @@ export class Controller {
     return defaultValue
   }
 
-  /**
-   * Get a query parameter value.
-   */
   protected query(key: string, defaultValue?: string): string | undefined {
     return this.ctx.req.query(key) ?? defaultValue
   }
 
-  /**
-   * Get only the specified keys from the request body.
-   */
+  /** Get only the specified keys from the request body. */
   protected async only(...keys: string[]): Promise<Record<string, unknown>> {
     const body = await this.getBody()
     const result: Record<string, unknown> = {}
@@ -558,9 +427,7 @@ export class Controller {
     return result
   }
 
-  /**
-   * Get all request body values except the specified keys.
-   */
+  /** Get all request body values except the specified keys. */
   protected async except(...keys: string[]): Promise<Record<string, unknown>> {
     const body = await this.getBody()
     const excluded = new Set(keys)
@@ -573,9 +440,7 @@ export class Controller {
     return result
   }
 
-  /**
-   * Check if a key exists in the request body.
-   */
+  /** Check if a key exists in the request body. */
   protected async has(key: string): Promise<boolean> {
     const body = await this.getBody()
     return key in body
@@ -586,79 +451,33 @@ export class Controller {
     return flattenRequestQueries(this.ctx)
   }
 
-  // ─── Validation ─────────────────────────────────────────────────
-
-  /**
-   * Validate the request body against a Zod-like schema.
-   * Throws ValidationException on failure.
-   *
-   * @example
-   * ```typescript
-   * const data = await this.validateBody(CreatePostSchema)
-   * ```
-   */
+  /** Validate the request body; throws ValidationException on failure. */
   protected async validateBody<T>(schema: ZodLikeSchema<T>): Promise<T> {
     return this.runValidation(schema, await this.getRawBody())
   }
 
-  /**
-   * Validate query parameters against a Zod-like schema.
-   * Throws ValidationException on failure.
-   *
-   * @example
-   * ```typescript
-   * const { page } = this.validateQuery(PageQuerySchema)
-   * ```
-   */
+  /** Validate query parameters; throws ValidationException on failure. */
   protected validateQuery<T>(schema: ZodLikeSchema<T>): T {
     return this.runValidation(schema, this.flattenQueries())
   }
 
-  /**
-   * Validate route parameters against a Zod-like schema.
-   * Throws ValidationException on failure.
-   *
-   * @example
-   * ```typescript
-   * const { id } = this.validateParams(PostIdParamSchema)
-   * ```
-   */
+  /** Validate route parameters; throws ValidationException on failure. */
   protected validateParams<T>(schema: ZodLikeSchema<T>): T {
     const params = this.ctx.req.param() as Record<string, string>
     return this.runValidation(schema, params)
   }
 
-  // ─── Safe Validation (no-throw) ──────────────────────────────
-
-  /**
-   * Validate the request body against a Zod-like schema without throwing.
-   * Returns a discriminated union: `{ success: true, data }` or `{ success: false, errors }`.
-   *
-   * @example
-   * ```typescript
-   * const result = await this.validateBodySafe(CreatePostSchema)
-   * if (!result.success) {
-   *   return this.inertia(pages.posts.New, { errors: result.errors }, { status: 422 })
-   * }
-   * const { title, body } = result.data
-   * ```
-   */
+  /** Validate the request body without throwing; returns data or field errors. */
   protected async validateBodySafe<T>(schema: ZodLikeSchema<T>): Promise<SafeValidationResult<T>> {
     return this.runValidationSafe(schema, await this.getRawBody())
   }
 
-  /**
-   * Validate query parameters against a Zod-like schema without throwing.
-   * Returns a discriminated union: `{ success: true, data }` or `{ success: false, errors }`.
-   */
+  /** Validate query parameters without throwing; returns data or field errors. */
   protected validateQuerySafe<T>(schema: ZodLikeSchema<T>): SafeValidationResult<T> {
     return this.runValidationSafe(schema, this.flattenQueries())
   }
 
-  /**
-   * Validate route parameters against a Zod-like schema without throwing.
-   * Returns a discriminated union: `{ success: true, data }` or `{ success: false, errors }`.
-   */
+  /** Validate route parameters without throwing; returns data or field errors. */
   protected validateParamsSafe<T>(schema: ZodLikeSchema<T>): SafeValidationResult<T> {
     const params = this.ctx.req.param() as Record<string, string>
     return this.runValidationSafe(schema, params)
@@ -687,21 +506,11 @@ export class Controller {
     return { success: false, errors }
   }
 
-  // ─── Private Helpers ────────────────────────────────────────────
-
   /**
-   * The parsed body as sent: an array stays an array, a string stays a string.
-   * Only validation reads it — a schema is what decides whether the shape is
-   * acceptable, so narrowing first would make a non-object contract
-   * unreachable.
-   *
-   * Memoized in a box rather than by truthiness: a body of `null`, `''`, `0`
-   * or `false` is a parsed body, and re-reading the request would find the
-   * stream consumed.
-   *
-   * No fallback of its own: an unparseable body already arrives here as `{}`
-   * from {@link parseRequestBody}, which is what gives every dispatch path the
-   * same answer. A second fallback here could only diverge from that one.
+   * The parsed body as sent: an array stays an array, so a non-object contract
+   * stays reachable. Boxed rather than memoized by truthiness — `null`, `''`,
+   * `0` and `false` are parsed bodies, and re-reading would find the stream
+   * consumed. No fallback here: {@link parseRequestBody} already yields `{}`.
    */
   private async getRawBody(): Promise<unknown> {
     if (this.parsedBody) {
@@ -712,11 +521,7 @@ export class Controller {
     return this.parsedBody.value
   }
 
-  /**
-   * The record view of {@link getRawBody}, for the field-by-field helpers
-   * (`input`, `only`, `except`, `has`). A non-object body has no field to
-   * read, so it reads as `{}`.
-   */
+  /** The record view of {@link getRawBody}; a non-object body reads as `{}`. */
   private async getBody(): Promise<Record<string, unknown>> {
     return asRecord(await this.getRawBody())
   }

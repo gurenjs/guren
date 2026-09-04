@@ -4,10 +4,7 @@ import type {
   PresenceMember,
 } from '../types'
 
-/**
- * Redis client interface.
- * Compatible with ioredis and similar clients.
- */
+/** Compatible with ioredis and similar clients. */
 export interface RedisClient {
   publish(channel: string, message: string): Promise<number>
   subscribe(channel: string): Promise<void>
@@ -19,57 +16,22 @@ export interface RedisClient {
   duplicate(): RedisClient
 }
 
-/**
- * Redis broadcast driver.
- *
- * Uses Redis pub/sub for multi-server deployments.
- *
- * @example
- * ```typescript
- * import Redis from 'ioredis'
- *
- * const redis = new Redis()
- * const driver = new RedisDriver(redis)
- *
- * // Subscribe to a channel
- * driver.subscribe('notifications', (event) => {
- *   console.log('Received:', event)
- * })
- *
- * // Publish an event
- * await driver.publish('notifications', 'NewMessage', { content: 'Hello!' })
- * ```
- */
+/** Uses Redis pub/sub, for multi-server deployments. */
 export class RedisDriver implements PresenceBroadcastDriver {
-  /**
-   * Publisher Redis client.
-   */
   protected publisher: RedisClient
 
-  /**
-   * Subscriber Redis client.
-   */
   protected subscriber: RedisClient
 
-  /**
-   * Local subscribers.
-   */
   protected subscribers: Map<
     string,
     Set<(event: BroadcastEvent) => void>
   > = new Map()
 
-  /**
-   * Local presence members cache.
-   */
   protected localPresence: Map<
     string,
     Map<string | number, PresenceMember>
   > = new Map()
 
-  /**
-   * Presence key prefix.
-   */
   protected presencePrefix: string = 'broadcasting:presence:'
 
   constructor(
@@ -86,9 +48,6 @@ export class RedisDriver implements PresenceBroadcastDriver {
     this.setupSubscriber()
   }
 
-  /**
-   * Setup the subscriber client.
-   */
   protected setupSubscriber(): void {
     this.subscriber.on('message', (channel, message) => {
       try {
@@ -111,9 +70,6 @@ export class RedisDriver implements PresenceBroadcastDriver {
     })
   }
 
-  /**
-   * Publish an event to a channel.
-   */
   async publish(channel: string, event: string, data: unknown): Promise<void> {
     const broadcastEvent: BroadcastEvent = {
       channel,
@@ -125,9 +81,6 @@ export class RedisDriver implements PresenceBroadcastDriver {
     await this.publisher.publish(channel, JSON.stringify(broadcastEvent))
   }
 
-  /**
-   * Subscribe to a channel.
-   */
   subscribe(
     channel: string,
     callback: (event: BroadcastEvent) => void
@@ -142,22 +95,17 @@ export class RedisDriver implements PresenceBroadcastDriver {
 
     callbacks.add(callback)
 
-    // Subscribe to Redis channel if first subscriber
     if (isNew) {
       this.subscriber.subscribe(channel).catch((error) => {
         console.error(`Error subscribing to Redis channel:`, error)
       })
     }
 
-    // Return unsubscribe function
     return () => {
       this.unsubscribe(channel, callback)
     }
   }
 
-  /**
-   * Unsubscribe from a channel.
-   */
   unsubscribe(
     channel: string,
     callback: (event: BroadcastEvent) => void
@@ -167,7 +115,6 @@ export class RedisDriver implements PresenceBroadcastDriver {
       callbacks.delete(callback)
       if (callbacks.size === 0) {
         this.subscribers.delete(channel)
-        // Unsubscribe from Redis channel
         this.subscriber.unsubscribe(channel).catch((error) => {
           console.error(`Error unsubscribing from Redis channel:`, error)
         })
@@ -175,19 +122,12 @@ export class RedisDriver implements PresenceBroadcastDriver {
     }
   }
 
-  /**
-   * Get members of a presence channel.
-   */
   getMembers(channel: string): PresenceMember[] {
-    // Return from local cache (sync operation)
-    // For async retrieval, use getMembersAsync
+    // Local cache only, so possibly stale; getMembersAsync reads Redis.
     const members = this.localPresence.get(channel)
     return members ? Array.from(members.values()) : []
   }
 
-  /**
-   * Get members asynchronously from Redis.
-   */
   async getMembersAsync(channel: string): Promise<PresenceMember[]> {
     const key = `${this.presencePrefix}${channel}`
     const data = await this.publisher.hgetall(key)
@@ -201,7 +141,6 @@ export class RedisDriver implements PresenceBroadcastDriver {
       }
     }
 
-    // Update local cache
     const localMembers = new Map<string | number, PresenceMember>()
     for (const member of members) {
       localMembers.set(member.id, member)
@@ -211,11 +150,7 @@ export class RedisDriver implements PresenceBroadcastDriver {
     return members
   }
 
-  /**
-   * Add a member to a presence channel.
-   */
   addMember(channel: string, member: PresenceMember): void {
-    // Update local cache
     let members = this.localPresence.get(channel)
     if (!members) {
       members = new Map()
@@ -223,7 +158,7 @@ export class RedisDriver implements PresenceBroadcastDriver {
     }
     members.set(member.id, member)
 
-    // Update Redis (async, fire and forget)
+    // Fire and forget.
     const key = `${this.presencePrefix}${channel}`
     this.publisher
       .hset(key, String(member.id), JSON.stringify(member))
@@ -232,11 +167,7 @@ export class RedisDriver implements PresenceBroadcastDriver {
       })
   }
 
-  /**
-   * Remove a member from a presence channel.
-   */
   removeMember(channel: string, memberId: string | number): void {
-    // Update local cache
     const members = this.localPresence.get(channel)
     if (members) {
       members.delete(memberId)
@@ -245,36 +176,25 @@ export class RedisDriver implements PresenceBroadcastDriver {
       }
     }
 
-    // Update Redis (async, fire and forget)
+    // Fire and forget.
     const key = `${this.presencePrefix}${channel}`
     this.publisher.hdel(key, String(memberId)).catch((error) => {
       console.error(`Error removing presence member from Redis:`, error)
     })
   }
 
-  /**
-   * Check if a channel has subscribers.
-   */
   hasSubscribers(channel: string): boolean {
     const callbacks = this.subscribers.get(channel)
     return callbacks !== undefined && callbacks.size > 0
   }
 
-  /**
-   * Get subscriber count for a channel.
-   */
   getSubscriberCount(channel: string): number {
     const callbacks = this.subscribers.get(channel)
     return callbacks ? callbacks.size : 0
   }
 }
 
-/**
- * Redis driver options.
- */
 export interface RedisDriverOptions {
-  /**
-   * Prefix for presence keys.
-   */
+  /** Prefix for presence keys. */
   presencePrefix?: string
 }

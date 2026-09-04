@@ -5,16 +5,27 @@ import { runCheck } from '../src/check'
 import { createTempWorkspace } from './helpers'
 
 describe('runCheck — console command registration', () => {
-  const COMMAND_SOURCE = `import { Command } from '@guren/core'
-export default class SendDigestCommand extends Command {
-  static signature = 'send-digest'
-  static description = 'Send the digest'
+  // The class is named after the file it is written to: resolution goes by
+  // file name today, and a fixture whose class disagreed with its file would
+  // silently stop describing an app the moment that switched.
+  function commandSource(className: string): string {
+    const signature = className
+      .replace(/Command$/, '')
+      .replace(/([a-z])([A-Z])/g, '$1-$2')
+      .toLowerCase()
+    return `import { Command } from '@guren/core'
+export default class ${className} extends Command {
+  static signature = '${signature}'
+  static description = 'Run ${signature}'
   async handle(): Promise<void> {}
 }`
+  }
+
+  const COMMAND_SOURCE = commandSource('SendDigestCommand')
 
   async function writeRootCommand(dir: string, name = 'SendDigestCommand'): Promise<void> {
     await mkdir(join(dir, 'app/Console/Commands'), { recursive: true })
-    await writeFile(join(dir, `app/Console/Commands/${name}.ts`), COMMAND_SOURCE, 'utf8')
+    await writeFile(join(dir, `app/Console/Commands/${name}.ts`), commandSource(name), 'utf8')
   }
 
   it('passes when src/console.ts registers the command', async () => {
@@ -196,9 +207,8 @@ kernel.registerMany([SendDigestCommand])`,
 
     try {
       await mkdir(join(workspace.dir, 'app/Console/Commands'), { recursive: true })
-      // `export default { … } as const` is a TSAsExpression, so the inert-shape
-      // test used to miss it and the module was treated as possibly holding a
-      // command — a registration warning nothing could ever resolve.
+      // `export default { … } as const` is a TSAsExpression: an inert-shape
+      // test that misses it warns for a registration nothing can resolve.
       await writeFile(
         join(workspace.dir, 'app/Console/Commands/table-config.ts'),
         `export default { users: 'users', posts: 'posts' } as const`,
@@ -335,9 +345,8 @@ export class TableFormatter {
     const workspace = await createTempWorkspace('guren-cli-check-console-error-helper-')
 
     try {
-      // any superclass counts as command evidence (aliased imports defeat a
-      // name match), so an extends-Error helper stays in the check; this test
-      // pins that as a known, deliberate tradeoff rather than an accident
+      // Any superclass counts as command evidence (aliased imports defeat a
+      // name match), so an extends-Error helper stays in the check.
       await mkdir(join(workspace.dir, 'app/Console/Commands'), { recursive: true })
       await writeFile(
         join(workspace.dir, 'app/Console/Commands/CommandTimeoutError.ts'),
@@ -366,8 +375,8 @@ kernel.registerMany([])`,
     const workspace = await createTempWorkspace('guren-cli-check-console-unparseable-command-')
 
     try {
-      // Cannot be shown to declare no command, so the conservative reading is
-      // the old one: ask for a registration.
+      // Cannot be shown to declare no command, so the conservative reading
+      // wins: ask for a registration.
       await mkdir(join(workspace.dir, 'app/Console/Commands'), { recursive: true })
       await writeFile(
         join(workspace.dir, 'app/Console/Commands/BrokenCommand.ts'),

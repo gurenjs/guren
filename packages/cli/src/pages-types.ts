@@ -46,33 +46,20 @@ export interface PageManifestPlan {
 }
 
 /**
- * The one rule for "does this app get a `.guren/pages.gen.ts`?" — codegen's own
- * decision, which `check` and `doctor` read rather than restate.
- *
- * Page components on disk are not sufficient on their own. The manifest imports
- * `@guren/inertia-client`, and the api blueprint's `tsconfig.json` includes
- * `.guren/**` (but not `resources/`) while the app never installs that package,
- * so a manifest generated there fails `tsc` on its first line. Any route into
- * `resources/js/pages` reaches that state — a hand-copied page, a checkout, a
- * generator — and the app's `dev` script runs codegen, so it needs no deliberate
- * act to happen.
- *
- * Suppressing the manifest inverts the risk profile `isConfirmedApiOnlyApp` was
- * written for: there a wrong answer blocks a command loudly, here it would
- * quietly withhold a file every controller imports. The compensation is that a
- * suppressed manifest is a *reported* state rather than an absence — see
- * {@link describePageManifestSuppression}. Codegen does not delete a manifest it
- * would no longer write: if this rule is ever wrong about an app, removing the
- * file turns a type error into a mystery.
+ * The one rule for "does this app get a `.guren/pages.gen.ts`?", which `check`
+ * and `doctor` read rather than restate. Page components on disk are not
+ * enough: the manifest imports `@guren/inertia-client`, which an api-blueprint
+ * app never installs while its tsconfig still includes `.guren/**`. A
+ * suppressed manifest is a *reported* state (see {@link
+ * describePageManifestSuppression}), and codegen never deletes one.
  */
 export async function planPageManifest(appRoot: string, options: PagePathOptions = {}): Promise<PageManifestPlan> {
   return (await surveyPages(appRoot, options)).plan
 }
 
 /**
- * The plan together with the page components it was decided from, so codegen
- * does not walk the pages directory a second time to build what it already
- * counted.
+ * The plan with the page components it was decided from, so codegen does not
+ * walk the pages directory a second time.
  */
 async function surveyPages(
   appRoot: string,
@@ -81,10 +68,8 @@ async function surveyPages(
   const pagesDir = options.pagesDir ?? DEFAULT_PAGES_DIR
   const manifestPath = options.outputFile ?? PAGES_MANIFEST_FILE
   const definitions = await collectPageDefinitions(resolve(appRoot, pagesDir))
-  // A manifest left behind by an earlier run is the state that actually breaks
-  // the typecheck, and it outlives the page components that caused it — an app
-  // whose pages were deleted after one codegen run has none left to find, so
-  // asking about them first would let the file that fails `tsc` go unreported.
+  // Asked before the page count, because a leftover manifest is what actually
+  // breaks the typecheck and it outlives the components that caused it.
   const staleManifest = await fileExists(appRoot, manifestPath)
   const common = { pagesDir, manifestPath, pageCount: definitions.length }
 
@@ -121,13 +106,9 @@ export interface SuppressedPageManifest {
 
 /**
  * What to tell the user about a manifest codegen declined to write, or `null`
- * when there is nothing to say — an API-only app with no page components and no
- * leftover is the normal, healthy shape.
- *
- * Owned here, whole sentences included, for the reason `assertNotApiOnly` owns
- * its middle sentence: `guren codegen`, `check`, and `doctor` all report this
- * state, and each reassembling it from fragments is how the three of them come
- * to describe one rule three stale ways. Callers choose only where it goes.
+ * when there is nothing to say. Owned here as whole sentences because
+ * `codegen`, `check` and `doctor` all report this state; callers choose only
+ * where it goes.
  */
 export function describePageManifestSuppression(plan: PageManifestPlan): SuppressedPageManifest | null {
   if (plan.reason !== 'api-only') return null
@@ -161,9 +142,8 @@ export async function generatePageTypes(
   /** Why nothing was written, for callers that only see the result (MCP). */
   skipped: SuppressedPageManifest | null
 }> {
-  // The app the manifest would be written into, which is the app the rule has
-  // to judge: `appRoot` is what MCP and `--app` steer, and it is free to differ
-  // from `process.cwd()`.
+  // The app judged must be the app written into: `appRoot` is what MCP and
+  // `--app` steer, and it may differ from `process.cwd()`.
   const appRoot = resolveAppRoot(options)
   const pagesDir = resolve(appRoot, options.pagesDir ?? DEFAULT_PAGES_DIR)
   const outputFile = resolve(appRoot, options.outputFile ?? PAGES_MANIFEST_FILE)
@@ -262,11 +242,9 @@ export const pages = ${pageObject} as const
 }
 
 function buildPagePropsBlock(propsMap: Map<string, ExtractedPageProps>): string {
-  // Collect and deduplicate local type definitions across all pages
   const allLocalTypes = new Map<string, string>()
   for (const extracted of propsMap.values()) {
     for (const typeDef of extracted.localTypes) {
-      // Use the type name as key for deduplication
       const nameMatch = typeDef.match(/^(?:export\s+)?(?:type|interface)\s+([A-Za-z0-9_]+)/)
       const key = nameMatch ? nameMatch[1] : typeDef
       if (!allLocalTypes.has(key)) {
@@ -307,7 +285,6 @@ function buildTypeImportsBlock(propsMap: Map<string, ExtractedPageProps>): strin
     .filter((statement) => statement.length > 0)
     .filter((statement) => !statement.includes("from 'react'") && !statement.includes('from "react"'))
 
-  // Merge imports from the same module into a single statement
   const moduleImports = new Map<string, Set<string>>()
   for (const statement of imports) {
     const moduleMatch = statement.match(/from\s+['"]([^'"]+)['"]/u)
@@ -386,8 +363,6 @@ async function collectPageDefinitions(
 
   return definitions
 }
-
-// ─── Tree rendering ──────────────────────────────────────────
 
 type PageTreeNode = {
   children: Map<string, PageTreeNode>

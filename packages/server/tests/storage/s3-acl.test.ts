@@ -1,11 +1,8 @@
 import { describe, expect, it } from 'bun:test'
 import { assertVisibilitySupported, cannedAcl, putAclFields } from '../../src/storage/drivers/s3-acl'
 
-// These cover the decision the S3 driver makes about `x-amz-acl` rather than
-// the AWS calls around it: the SDK is an optional peer that is not installed
-// here, and stubbing it would only assert that a stub was called. What can be
-// checked without it — and what was wrong for every ACL-less endpoint — is
-// which fields end up in the command.
+// Covers which fields end up in the command rather than the AWS calls: the SDK is
+// an optional peer not installed here, so stubbing it would only assert the stub.
 describe('cannedAcl', () => {
   it('maps visibility to the S3 canned ACL names', () => {
     expect(cannedAcl('public')).toBe('public-read')

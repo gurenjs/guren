@@ -82,7 +82,6 @@ describe('createHostAuthorizationMiddleware', () => {
   test('should reject port-embedded host tricks', async () => {
     const app = createApp({ allowedHosts: ['*.example.com'] })
 
-    // Simulate a crafted Host header via request headers
     const res = await app.request('http://localhost/', {
       headers: { Host: 'attacker.com:80.example.com' },
     })

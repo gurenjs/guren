@@ -12,7 +12,6 @@ describe('createCorsMiddleware', () => {
       headers: { Origin: 'http://example.com' },
     })
 
-    // Default: no origin configured means no ACAO header, browser enforces same-origin
     const acao = res.headers.get('Access-Control-Allow-Origin')
     expect(!acao || acao === '').toBe(true)
   })
@@ -49,9 +48,9 @@ describe('createCorsMiddleware', () => {
     }).toThrow('credentials requires an explicit origin')
   })
 
-  // Passing `allowMethods: undefined` through to Hono spreads over its default
-  // and produces preflights with NO Access-Control-Allow-Methods, so Guren
-  // owns the default list. QUERY (RFC 10008) is part of it.
+  // `allowMethods: undefined` spread over Hono's default produces preflights
+  // with NO Access-Control-Allow-Methods, so Guren owns the list — QUERY
+  // (RFC 10008) included.
   test('preflight without explicit allowMethods advertises the default methods', async () => {
     const app = new Hono()
     app.use('*', createCorsMiddleware({ origin: 'https://example.com' }))

@@ -3,9 +3,8 @@ import type { FC } from '@guren/core'
 import { GithubIcon, RssIcon } from './icons.js'
 
 /**
- * Server-rendered port of the docs-variant `Footer` from
- * `resources/js/components/Footer.tsx` — same markup with plain `<a>` in
- * place of Inertia `<Link>`.
+ * Server-rendered port of `resources/js/components/Footer.tsx`: same markup
+ * with plain `<a>` in place of Inertia `<Link>`.
  */
 export const Footer: FC = () => (
   <footer class="border-t border-docs-border bg-docs-page">

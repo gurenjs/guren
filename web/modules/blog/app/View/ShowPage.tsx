@@ -5,11 +5,9 @@ import { Seo } from '../../../../app/View/Seo.js'
 import { SITE_DESCRIPTION, formatPostDate, pageTitle } from '../../../../config/site.js'
 
 /**
- * The public blog post page, server-rendered via `Controller.view()`
- * (RFC 0014) — the markup mirrors the retired Inertia page
- * `resources/js/pages/blog/Show.tsx`, minus the framework: no Inertia
- * page-payload script, no hydration, plain `<a>` for links. Metadata goes
- * through the `ContentShell` head slot (see `Layout` for why).
+ * The public blog post page, server-rendered via `Controller.view()`: the
+ * retired Inertia page's markup minus the framework — no page-payload script,
+ * no hydration, plain `<a>`. Metadata goes through the `ContentShell` head slot.
  */
 
 type BlogPostView = {
@@ -55,7 +53,7 @@ export const ShowPage: FC<{ post: BlogPostView }> = ({ post }) => (
   </ContentShell>
 )
 
-/** The 404 counterpart — its own component now that `view()` binds per call. */
+/** The 404 counterpart, its own component because `view()` binds per call. */
 export const PostNotFoundPage: FC = () => (
   <ContentShell
     head={

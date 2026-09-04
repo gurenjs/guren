@@ -3,14 +3,10 @@ import { resolve } from 'node:path'
 
 /**
  * What one `migrateDatabase()` call had to work with. `db:migrate` reports
- * success off this rather than off the call returning: a folder with nothing
- * in it applies nothing, and saying "completed" there reads as a database that
- * is now up to date.
- *
- * It describes the run the driver memoized, not the folder as it stands now.
- * Migrations are single-flighted per handle, so a second call returns this same
- * summary without re-reading the folder — which is the pre-existing no-rerun
- * behaviour, faithfully reported.
+ * success off this, not off the call returning: an empty folder applies
+ * nothing, and "completed" there reads as an up-to-date database. Describes
+ * the run the driver memoized — migrations are single-flighted per handle, so
+ * a second call returns this same summary without re-reading the folder.
  */
 export interface MigrationRunSummary {
   /** The folder the migrator read, absolute as the driver resolved it. */
@@ -18,19 +14,14 @@ export interface MigrationRunSummary {
   /** drizzle-kit migrations found there (one folder each, holding migration.sql). */
   migrationsFound: number
   /**
-   * Loose .sql files in that folder, which the drizzle migrator never runs.
-   * Non-zero alongside `migrationsFound: 0` means the folder is not empty but
-   * holds nothing to apply, which is a different problem from having generated
-   * no migrations yet.
+   * Loose .sql files there, which the drizzle migrator never runs. Non-zero
+   * alongside `migrationsFound: 0` means the folder holds nothing to apply,
+   * a different problem from having generated no migrations yet.
    */
   looseSqlFiles: number
 }
 
-/**
- * One read of the migrations folder, answering both questions a run summary
- * asks of it. Kept together because they come from the same directory listing:
- * counting the loose files separately would read it twice to report on one run.
- */
+/** One directory listing answering both questions a run summary asks of it. */
 export function inspectMigrationsFolder(migrationsFolder: string): MigrationRunSummary {
   if (!existsSync(migrationsFolder)) {
     return { migrationsFolder, migrationsFound: 0, looseSqlFiles: 0 }
@@ -49,12 +40,9 @@ export function inspectMigrationsFolder(migrationsFolder: string): MigrationRunS
 
 /**
  * Reports a run that found nothing to apply, naming the loose .sql files if
- * that is why the folder looked empty — without this, `db:migrate` reports the
- * folder as having no migrations while files that look like migrations sit in
- * it. The names cost a second read, so this only happens when there are some.
- *
- * A folder the migrator did run from is never warned about: it has already
- * produced a database, and the warning would fire on every app boot.
+ * that is why the folder looked empty. The names cost a second read, so it
+ * only happens when there are some; a folder the migrator did run from is
+ * never warned about, or the warning would fire on every app boot.
  */
 export function noMigrationsToRun(summary: MigrationRunSummary): MigrationRunSummary {
   if (summary.looseSqlFiles === 0) {
@@ -74,15 +62,11 @@ export function noMigrationsToRun(summary: MigrationRunSummary): MigrationRunSum
 }
 
 /**
- * Driver error codes that mean the server was never reached, so the statement
- * drizzle happened to be sending is noise. Deliberately excludes mid-flight
- * failures like ECONNRESET and EPIPE — those can hit halfway through a
- * migration run, where the query text is the useful part.
- *
- * ETIMEDOUT is absent for the same reason, and is instead recognised through
- * `syscall: 'connect'` below: mysql2 reports a connect timeout as
- * `ETIMEDOUT`/`syscall: 'connect'`, while a read that times out mid-query does
- * not carry that syscall.
+ * Codes meaning the server was never reached, so the statement drizzle was
+ * sending is noise. Excludes mid-flight failures (ECONNRESET, EPIPE), where
+ * the query text is the useful part. ETIMEDOUT is out for the same reason and
+ * is caught instead by `syscall: 'connect'` below — mysql2 sets that on a
+ * connect timeout but not on a read that times out mid-query.
  */
 const PRE_CONNECTION_ERROR_CODES = new Set([
   'CONNECT_TIMEOUT',
@@ -95,6 +79,7 @@ const PRE_CONNECTION_ERROR_CODES = new Set([
 
 interface CauseLike {
   code?: unknown
+  errno?: unknown
   message?: unknown
   syscall?: unknown
 }
@@ -108,10 +93,7 @@ function failedWhileConnecting(error: CauseLike): error is CauseLike & { code: s
   return PRE_CONNECTION_ERROR_CODES.has(code) || syscall === 'connect'
 }
 
-/**
- * Walks the cause chain (and AggregateError members) collecting every nested
- * error, outwards-in. `seen` bounds the walk on self-referencing chains.
- */
+/** Collects the cause chain and AggregateError members, outwards-in. `seen` bounds self-referencing chains. */
 function collectCauses(error: unknown, seen = new Set<unknown>()): CauseLike[] {
   if (error == null || typeof error !== 'object' || seen.has(error)) {
     return []
@@ -126,23 +108,43 @@ function collectCauses(error: unknown, seen = new Set<unknown>()): CauseLike[] {
   return [error as CauseLike, ...nested.flatMap((child) => collectCauses(child, seen))]
 }
 
-/** True when the failure means the database server was never reached. */
-export function isConnectionFailure(error: unknown): boolean {
-  return collectCauses(error).some(failedWhileConnecting)
+export type TrackerDialect = 'postgres' | 'mysql' | 'sqlite'
+
+/**
+ * Each driver's own signal for "that table does not exist", read off the
+ * driver error rather than the wrapper drizzle puts around it.
+ */
+const MISSING_TABLE: Record<TrackerDialect, (cause: CauseLike) => boolean> = {
+  // 42P01 undefined_table. A fresh database has no `drizzle` schema either,
+  // and measured against Postgres 17 the qualified read reports 42P01 for
+  // that too rather than 3F000 — pinned by the integration test. A denied
+  // read (42501) and a drifted tracker column (42703) are not this code.
+  postgres: (cause) => cause.code === '42P01',
+  // ER_NO_SUCH_TABLE: mysql2 puts the symbol on `code` and the number on `errno`.
+  mysql: (cause) => cause.code === 'ER_NO_SUCH_TABLE' || cause.errno === 1146,
+  // bun:sqlite reports every statement error as SQLITE_ERROR, so the message
+  // is the only thing separating a missing table from a broken one.
+  sqlite: (cause) => typeof cause.message === 'string' && /no such table/i.test(cause.message),
 }
 
 /**
- * Turns a database failure into a message that names the actual problem.
- *
- * Drizzle wraps driver failures in a DrizzleQueryError whose message is the SQL
- * it was running — for a fresh database that is `CREATE SCHEMA IF NOT EXISTS
- * "drizzle"`, the migrator's own bookkeeping statement. Reporting only that
- * message blames a statement the user never wrote for what is usually an
- * unreachable server (postgres-js reports `ECONNREFUSED` on `cause` and leaves
- * that error's message empty) or a SQL error whose text also lives on `cause`.
- *
- * `endpoint` is included only as host:port — never the connection string, which
- * carries credentials.
+ * True when a query against the drizzle migration tracker failed because the
+ * tracker table does not exist yet — the one failure `migrationStatus()` may
+ * read as "nothing applied". Anything else (a denied SELECT, a tracker whose
+ * columns drifted, a broken `drizzle` schema) has to surface: reported as
+ * all-pending it invites a re-run of migrations that were applied.
+ */
+export function isMissingTrackerTable(error: unknown, dialect: TrackerDialect): boolean {
+  return collectCauses(error).some(MISSING_TABLE[dialect])
+}
+
+/**
+ * Names the actual problem behind a database failure. Drizzle's
+ * DrizzleQueryError message is the SQL it was running — on a fresh database
+ * the migrator's own `CREATE SCHEMA`, which blames a statement the user never
+ * wrote; the real cause is on `cause` (postgres-js puts `ECONNREFUSED` there
+ * with an empty message). `endpoint` is host:port only, never the connection
+ * string, which carries credentials.
  */
 export function describeDatabaseFailure(error: unknown, endpoint?: string): string {
   const causes = collectCauses(error)
@@ -165,9 +167,7 @@ export function describeDatabaseFailure(error: unknown, endpoint?: string): stri
     return error instanceof Error ? error.message : String(error)
   }
 
-  // A driver that reports only a code (postgres-js leaves the message empty)
-  // would otherwise leave the outer query text unexplained. The deepest code is
-  // the driver's, not a SQLSTATE an outer frame happened to copy.
+  // The deepest code is the driver's, not a SQLSTATE an outer frame copied.
   if (messages.length === 1) {
     const deepestCode = causes.reduce<string | undefined>(
       (found, cause) => (typeof cause.code === 'string' && cause.code !== '' ? cause.code : found),
@@ -210,11 +210,7 @@ export interface LocalMigrationEntry {
   name: string
 }
 
-/**
- * Lists drizzle-kit generated migrations (one folder per migration, each
- * containing migration.sql), sorted the same way the drizzle migrator
- * applies them.
- */
+/** drizzle-kit migrations, sorted the way the drizzle migrator applies them. */
 export function listLocalMigrations(migrationsFolder: string): LocalMigrationEntry[] {
   if (!existsSync(migrationsFolder)) {
     return []
@@ -238,9 +234,8 @@ export interface MigrationStatusEntry {
 }
 
 /**
- * Joins local migration folders with the rows the drizzle migrator recorded
- * in its tracker table. Drizzle itself decides pending migrations by name
- * membership, so status uses the same rule.
+ * Joins local migration folders with the migrator's tracker rows. Drizzle
+ * decides pending migrations by name membership, so status uses that rule.
  */
 export function buildMigrationStatus(
   localMigrations: LocalMigrationEntry[],

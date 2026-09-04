@@ -28,13 +28,9 @@ class Post extends Attachable(defineModel(prunePosts), {
 }) {}
 
 /**
- * A ULID whose timestamp half is two hours old — past the one-hour grace
- * window `--objects` gives a rowless prefix, so the sweep treats it as debris
- * rather than an attach in flight.
- *
- * Hand-encoded rather than `ulid(twoHoursAgo)` because the generator is
- * monotonic: it clamps a backdated timestamp to the last one it issued, so
- * any earlier attach() in this suite would hand back a *fresh* id instead.
+ * A ULID two hours old — past the one-hour grace window `--objects` gives a
+ * rowless prefix. Hand-encoded rather than `ulid(twoHoursAgo)`: the generator
+ * is monotonic and clamps a backdated timestamp to the last id it issued.
  */
 function staleUlid(): string {
   const ENCODING = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'

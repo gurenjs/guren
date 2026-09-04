@@ -42,26 +42,20 @@ export const PUBLISH_TARGET_ROOTS = ['config/', 'db/migrations/', 'resources/'] 
 const ENV_KEY_PATTERN = /^[A-Z][A-Z0-9_]*$/u
 
 /**
- * Environment namespace the framework reserves for itself.
- *
- * `GUREN_TESTING`, `GUREN_MCP` and `GUREN_ALLOW_UNVERIFIED_PEER` are the whole
- * of several security gates: `GUREN_TESTING` alone makes the server trust an
- * `X-Testing-User` header. A plugin has no legitimate reason to set one, and a
- * line appended to `.env.example` is committed and propagates to every clone —
- * so this is refused loudly rather than filtered out in silence.
+ * Reserved by the framework: `GUREN_TESTING`, `GUREN_MCP` and
+ * `GUREN_ALLOW_UNVERIFIED_PEER` are whole security gates on their own, and a
+ * line appended to `.env.example` is committed and reaches every clone. So a
+ * plugin setting one is refused loudly rather than filtered out in silence.
  */
 const RESERVED_ENV_PREFIX = 'GUREN_'
 
-// Bun is only available at runtime. The declaration keeps TypeScript happy
-// while allowing the compatibility check to no-op on other runtimes.
+// Declared rather than imported so the compatibility check can no-op on a
+// runtime without Bun.
 declare const Bun:
   | { semver: { satisfies(version: string, range: string): boolean } }
   | undefined
 
-/**
- * Read the `gurenPlugin` manifest from an installed package.
- * Returns null when the package or the field is absent.
- */
+/** Null when the package or the `gurenPlugin` field is absent. */
 export async function readPluginManifest(
   packageName: string,
   cwd: string = process.cwd(),
@@ -78,10 +72,8 @@ export async function readPluginManifest(
 }
 
 /**
- * Package names declared in the app's own package.json `dependencies` and
- * `devDependencies` — no node_modules lookup, so this resolves even for a
- * package that has never been installed. Returns `[]` when package.json is
- * missing or fails to parse.
+ * From the app's own package.json, with no node_modules lookup, so a package
+ * that has never been installed still resolves.
  */
 export async function readDeclaredDependencyNames(cwd: string = process.cwd()): Promise<string[]> {
   const packageJsonRaw = await readIfExists(cwd, 'package.json')
@@ -101,10 +93,7 @@ export async function readDeclaredDependencyNames(cwd: string = process.cwd()): 
   }
 }
 
-/**
- * Enumerate installed packages (dependencies and devDependencies of the
- * app's package.json) that declare a `gurenPlugin` manifest.
- */
+/** Installed dependencies that declare a `gurenPlugin` manifest. */
 export async function readInstalledPluginManifests(
   cwd: string = process.cwd(),
 ): Promise<Array<{ packageName: string; manifest: GurenPluginManifest }>> {
@@ -123,14 +112,10 @@ export async function readInstalledPluginManifests(
 }
 
 /**
- * Walk up from `candidate` to the nearest existing ancestor and return its
- * canonical (symlink-resolved) path, plus the non-existent tail rejoined
- * onto it. Lets callers realpath-validate a path that doesn't exist yet
- * (e.g. a publish target about to be created).
- *
- * A sibling of `realpathOfNearestExisting` in `@guren/core`'s internal
- * deploy-build module, kept as a copy because that module cannot import cli.
- * Keep the two in step, especially the ENOENT-only walk-up.
+ * The nearest existing ancestor's canonical path with the missing tail
+ * rejoined, so a path that does not exist yet can still be realpath-validated.
+ * A copy of `realpathOfNearestExisting` in `@guren/core`'s deploy-build module
+ * (which cannot import cli); keep the ENOENT-only walk-up in step.
  */
 async function realpathNearestExisting(candidate: string): Promise<string> {
   const tail: string[] = []
@@ -151,20 +136,12 @@ async function realpathNearestExisting(candidate: string): Promise<string> {
 }
 
 /**
- * Resolve `relPath` against `baseDir`, returning null when the input is
- * absolute, escapes the base directory, or — once symlinks are resolved —
- * points outside it. `baseDir` and any existing ancestor of the resolved
- * path are canonicalized via `realpath` so a symlink inside the package
- * (or a symlinked `node_modules` entry) can't be used to read or write
- * outside the intended directory. The candidate path (not its realpath) is
- * returned so callers keep operating on the logical location.
- *
- * `extraRealRoots` are additional canonical directories the resolved path
- * may live in. Local installs (`bun add file:`, `link:`, `workspace:*`)
- * materialize a package as per-file symlinks into the source directory, so
- * every file's realpath escapes the node_modules entry while the entry
- * itself does not — package-side callers pass the package's content root
- * (see packageContentRoot) to accept that layout.
+ * Null when `relPath` is absolute or escapes `baseDir`, symlinks resolved, so
+ * a link inside the package cannot read or write outside it. The candidate
+ * path is returned rather than its realpath, keeping callers on the logical
+ * location. `extraRealRoots` admits local installs (`bun add file:`, `link:`,
+ * `workspace:*`), whose per-file symlinks all point outside node_modules —
+ * package-side callers pass `packageContentRoot()`.
  */
 export async function resolveInside(
   baseDir: string,
@@ -194,11 +171,8 @@ export async function resolveInside(
 }
 
 /**
- * Canonical directory holding a package's actual content: the realpath
- * parent of its package.json. For a regular npm install this equals the
- * package directory itself; for per-file-symlink local installs it is the
- * source directory every file link points into. Returns null when
- * package.json cannot be resolved.
+ * The realpath parent of a package's package.json: the package directory for a
+ * regular install, the source directory for a per-file-symlink local install.
  */
 export async function packageContentRoot(packageDir: string): Promise<string | null> {
   try {
@@ -208,9 +182,7 @@ export async function packageContentRoot(packageDir: string): Promise<string | n
   }
 }
 
-/**
- * Read the installed `@guren/core` version, or null when not installed.
- */
+/** The installed `@guren/core` version, or null when not installed. */
 export async function readCoreVersion(cwd: string = process.cwd()): Promise<string | null> {
   const raw = await readIfExists(cwd, join('node_modules', '@guren/core', 'package.json'))
   if (raw === null) return null
@@ -225,9 +197,8 @@ export interface CompatibilityResult {
 }
 
 /**
- * Check a manifest's `compatibility` range against a core version.
- * Returns null when either side is unknown (no range declared, core version
- * unresolved, or a runtime without Bun.semver).
+ * Null when either side is unknown: no range declared, core version
+ * unresolved, or a runtime without `Bun.semver`.
  */
 export function checkPluginCompatibility(
   manifest: GurenPluginManifest,
@@ -244,16 +215,10 @@ export function checkPluginCompatibility(
 }
 
 /**
- * Reject env entries a plugin is not allowed to write.
- *
- * Call this *before* an install starts mutating the project. `applyEnvEntries`
- * calls it too, but by then the provider has been wired into `src/app.ts` and
- * publishes may already be on disk, so a throw there refuses the env write
- * while leaving the rest of the install applied.
- *
- * Entries whose key is merely malformed are filtered out elsewhere and are not
- * this function's concern — these two refusals are loud because a line that
- * lands in the committed `.env.example` reaches every clone.
+ * Rejects env entries a plugin may not write. Call it *before* an install
+ * starts mutating the project: `applyEnvEntries` calls it too, but by then the
+ * provider is wired into `src/app.ts` and publishes may be on disk, so a throw
+ * there leaves the rest of the install applied.
  */
 export function assertEnvEntriesAllowed(entries: GurenPluginEnvEntry[]): void {
   for (const entry of entries) {
@@ -263,9 +228,8 @@ export function assertEnvEntriesAllowed(entries: GurenPluginEnvEntry[]): void {
       )
     }
 
-    // A newline in either field ends the line the key opened and starts one the
-    // key never names, so `{ key: 'ACME_KEY', value: '\nGUREN_TESTING=1' }`
-    // reads as an innocuous entry while writing a second, reserved one.
+    // A newline starts a line the key never names, so `{ key: 'ACME_KEY',
+    // value: '\nGUREN_TESTING=1' }` would write a second, reserved entry.
     for (const field of ['value', 'comment'] as const) {
       const text = entry[field]
       if (text !== undefined && /[\r\n]/.test(text)) {
@@ -292,7 +256,6 @@ export async function applyEnvEntries(
   for (const file of ['.env.example', '.env']) {
     const existing = await readIfExists(cwd, file)
 
-    // .env is only updated when it already exists
     if (existing === null && file === '.env') continue
     const content = existing ?? ''
 
@@ -320,11 +283,9 @@ export interface PublishResult {
 }
 
 /**
- * Copy declared files from the installed package into the application.
- *
- * Targets are restricted to PUBLISH_TARGET_ROOTS, sources must stay inside
- * the package directory, and existing files are never overwritten unless
- * `force` is set.
+ * Copies declared files from the installed package into the application.
+ * Targets are restricted to PUBLISH_TARGET_ROOTS and sources must stay inside
+ * the package directory.
  */
 export async function applyPublishes(
   packageName: string,
@@ -337,9 +298,8 @@ export async function applyPublishes(
   const packageRoots = contentRoot ? [contentRoot] : []
   const invalid = (detail: string): Error => new Error(`Invalid publish entry in "${packageName}": ${detail}`)
 
-  // Validate sequentially so the first invalid entry is always the one
-  // reported, then copy files concurrently — each entry targets an
-  // independent path with no cross-entry dependency.
+  // Validated sequentially so the first invalid entry is always the one
+  // reported; the copies afterwards are independent and run concurrently.
   const resolved: Array<{ entry: GurenPluginPublishEntry; fromPath: string; toPath: string; toRelative: string }> = []
 
   for (const entry of entries) {

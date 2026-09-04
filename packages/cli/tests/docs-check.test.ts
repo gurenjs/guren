@@ -34,8 +34,6 @@ export class Legacy {}
       'utf8',
     )
 
-    // Valid doc: resolvable related paths, real entity, and body links in
-    // both forms (bundle-relative and doc-relative into the app)
     await writeFile(
       join(dir, 'docs/adr/0001-valid.md'),
       `---
@@ -55,8 +53,6 @@ Superseded by [the broken one](/adr/0002-broken.md); implemented in
       'utf8',
     )
 
-    // Broken doc: dangling related path, unknown entity, dangling body
-    // link, and a body link that escapes the app root
     await writeFile(
       join(dir, 'docs/adr/0002-broken.md'),
       `---
@@ -73,7 +69,6 @@ See [missing](./nope.md) and [outside](../../../outside.md).
       'utf8',
     )
 
-    // Deprecated-only entity link, already past its stale_after date
     await writeFile(
       join(dir, 'docs/adr/0003-deprecated.md'),
       `---
@@ -88,7 +83,6 @@ stale_after: 2020-01-01
       'utf8',
     )
 
-    // Frontmatter without the one field OKF requires
     await writeFile(
       join(dir, 'docs/adr/0004-untyped.md'),
       `---
@@ -100,7 +94,6 @@ entities: [Post]
       'utf8',
     )
 
-    // No frontmatter: not an OKF concept document
     await writeFile(join(dir, 'docs/notes.md'), '# Free-form notes\n', 'utf8')
   })
 
@@ -203,7 +196,6 @@ verified:
       expect(results.find((r) => r.key === key('generated.at'))?.status).toBe('warn')
       expect(results.find((r) => r.key === key('verified[0].by'))?.status).toBe('warn')
       expect(results.find((r) => r.key === key('verified[2].by'))?.status).toBe('warn')
-      // Non-ASCII human actors are valid.
       expect(results.find((r) => r.key === key('verified[1].by'))).toBeUndefined()
     } finally {
       await scoped.cleanup()
@@ -250,7 +242,6 @@ verified:
 
     const conformance = results.find((r) => r.key === 'docs-frontmatter:docs/notes.md')
     expect(conformance?.status).toBe('warn')
-    // No link validation beyond that — the doc declares nothing.
     expect(
       results.some((r) => r.key.includes('docs/notes.md') && r.key !== 'docs-frontmatter:docs/notes.md'),
     ).toBe(false)
@@ -267,7 +258,6 @@ verified:
     // pulls it into scope too; 0003-deprecated.md references nothing changed.
     expect(results.some((r) => r.key === 'docs-links:docs/adr/0001-valid.md')).toBe(true)
     expect(results.some((r) => r.key.includes('docs/adr/0003-deprecated.md'))).toBe(false)
-    // The unchanged frontmatterless doc stays out of scope too
     expect(results.some((r) => r.key === 'docs-frontmatter:docs/notes.md')).toBe(false)
     // Tag validation follows changed source files, none of which changed here
     expect(results.some((r) => r.key.startsWith('docs-tag:'))).toBe(false)
@@ -292,7 +282,6 @@ verified:
       await mkdir(join(scoped.dir, 'config'), { recursive: true })
       await writeFile(join(scoped.dir, 'package.json'), '{}', 'utf8')
       await writeFile(join(scoped.dir, 'config/billing.ts'), 'export const cycle = 30\n', 'utf8')
-      // The doc references config/billing.ts only through a body link
       await writeFile(
         join(scoped.dir, 'docs/billing.md'),
         `---
@@ -515,18 +504,29 @@ See [invoicing](/invoicing.md).
   })
 
   it('runs the union when --arch and --docs are combined', async () => {
+    // With no guren.arch.ts and no modules/, the arch suite reports nothing,
+    // so a run that skipped it would look the same as one that ran it. A
+    // config with no violations makes it leave a summary behind.
+    await writeFile(
+      join(workspace.dir, 'guren.arch.ts'),
+      `export default {
+  layers: { domain: 'app/Domain/**', http: 'app/Http/**' },
+  rules: [{ from: 'domain', disallow: ['http'] }],
+}
+`,
+      'utf8',
+    )
+
     const report = await runCheck({ cwd: workspace.dir, arch: true, docs: true })
 
-    // Docs suite ran (broken doc fails), arch suite ran, core suite did not
     expect(report.checks.some((c) => c.key.startsWith('docs-related:'))).toBe(true)
+    expect(report.checks.some((c) => c.key.startsWith('arch:'))).toBe(true)
     expect(report.checks.some((c) => c.key.startsWith('manifest:'))).toBe(false)
     expect(report.failCount).toBeGreaterThan(0)
   })
 
-  // Entity identity comes from the parsed class name, with the filename as a
-  // fallback for unparsable models. A decorated model used to take that
-  // fallback, so a doc linking the real class name was reported as pointing at
-  // a model that doesn't exist — a false failure on a correct doc.
+  // Entity identity comes from the parsed class name; the filename fallback
+  // would misreport a decorated model whose class name differs from it.
   it('resolves entities of a decorated model whose class name differs from its filename', async () => {
     const scoped = await createTempWorkspace('guren-cli-docs-decorators-')
     try {

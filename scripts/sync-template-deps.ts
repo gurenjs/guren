@@ -1,21 +1,14 @@
 /**
  * Keep the scaffold templates' dependency versions pointed at what this
- * repository publishes and depends on.
+ * repository publishes and depends on. A template's `package.json` is the one
+ * manifest here that resolves against **npm** rather than the workspace.
  *
- * A template's `package.json` is the one manifest in the monorepo that resolves
- * against **npm** rather than the workspace, and nothing kept its versions
- * moving. Two rules apply to it:
+ * - every `@guren/*` range follows the workspace version, so the write mode
+ *   runs right after `changeset version` (see the `version-packages` script).
+ * - `drizzle-orm` and `drizzle-kit` follow the exact pin `packages/orm`
+ *   depends on, by the rule in `packages/cli/src/drizzle-pins.ts`.
  *
- * - every `@guren/*` range follows the workspace version. `changeset version`
- *   is what decides the new numbers, so the write mode runs right after it (see
- *   the `version-packages` script).
- * - `drizzle-orm` and `drizzle-kit` follow the exact pin `packages/orm` depends
- *   on, by the same rule `guren upgrade` applies to an installed app — see
- *   `packages/cli/src/drizzle-pins.ts` for why a second copy is the hazard.
- *
- * `--check` asserts both without writing and backs `audit:template-deps`, so a
- * version that falls behind fails CI on the PR that introduces it rather than on
- * a user's first `bunx create-guren-app`.
+ * `--check` asserts both without writing and backs `audit:template-deps`.
  */
 import { readFile, writeFile } from 'node:fs/promises'
 import { join, relative } from 'node:path'
@@ -32,14 +25,9 @@ import { collectPackages, manifestAtRev, repoRoot, versionOf } from './workspace
 
 /**
  * The groups this script rewrites a template's ranges in. Exported because
- * `plan-create-app-bump.ts` has to predict, before `changeset version` runs,
- * whether this script will rewrite anything — a group it read and this one did
- * not would be a release that rewrites a range and plans no scaffolder bump.
- *
- * Deliberately not the four-group list in `scripts/smoke/local-packages.ts`:
- * that one answers which packages a smoke must vendor, and a group there costs
- * nothing extra, while a group here would rewrite a range this script does not
- * own.
+ * `plan-create-app-bump.ts` must predict, before `changeset version` runs,
+ * whether this script will rewrite anything. Deliberately not the four-group
+ * list in `scripts/smoke/local-packages.ts`, which answers a different question.
  */
 export const DEPENDENCY_GROUPS = ['dependencies', 'devDependencies', 'peerDependencies'] as const
 
@@ -74,8 +62,7 @@ async function workspaceRanges(): Promise<Map<string, string>> {
 /** `packages/orm`'s own manifest — the pin the templates' drizzle versions follow. */
 async function ormManifest(): Promise<OrmManifest> {
   const path = join(repoRoot, ORM_MANIFEST)
-  // Unlike an unreachable registry, a missing ORM manifest is not a condition to
-  // work around: it means this is not the repository this script belongs to.
+  // A missing ORM manifest means this is not the repository this script belongs to.
   const raw = await readFile(path, 'utf8').catch((cause: unknown) => {
     throw new Error(`Could not read ${ORM_MANIFEST}, which is where the templates' drizzle pins come from.`, { cause })
   })
@@ -83,17 +70,11 @@ async function ormManifest(): Promise<OrmManifest> {
 }
 
 /**
- * Does `<name>@<version>` exist on npm? Asked only about `drizzle-kit`, and only
- * when its pin has to move — the two drizzle packages have never shared numbers
- * on their stable lines, so the companion release cannot be assumed to exist.
- *
- * A 404 is an answer (leave the pin alone, say so); anything else is not, and
- * throwing says so — the planner turns that into a `companion-unverifiable`
- * decline rather than a crash, so an npm outage neither fails an unrelated PR
- * nor reads as "no drift".
- *
- * Memoized across *templates*: the pin comes from one ORM manifest, so both of
- * them ask about the same release. The planner dedupes within one manifest.
+ * Does `<name>@<version>` exist on npm? Asked only about `drizzle-kit`, whose
+ * numbers have never tracked `drizzle-orm`'s, so the companion release cannot
+ * be assumed to exist. A 404 is an answer; any other failure throws, and the
+ * planner turns that into a `companion-unverifiable` decline, so an npm outage
+ * neither fails an unrelated PR nor reads as "no drift".
  */
 const published = new Map<string, Promise<boolean>>()
 function companionPublished(name: string, version: string): Promise<boolean> {
@@ -121,14 +102,10 @@ interface TemplateManifest {
 }
 
 /**
- * Drizzle refusals a maintainer can resolve in this repository, and which
- * therefore have to fail rather than pass with a warning — a template cannot
- * ship a specifier that names a location, and the whole rule stops enforcing
- * anything once `packages/orm` no longer names one exact version to follow.
- *
- * The other two refusals are about npm, not about this checkout: `drizzle-kit`
- * releases the ORM's pin ahead of, and a registry that will not answer. Failing
- * on those would leave the gate red with nothing to fix.
+ * Drizzle refusals a maintainer can resolve in this repository, so these fail
+ * rather than warn. The other refusals are about npm (an unreleased
+ * `drizzle-kit` companion, an unreachable registry) and would leave the gate
+ * red with nothing to fix.
  */
 const BLOCKING_DECLINES = new Set<DrizzlePinDeclineReason>(['location-specifier', 'no-exact-pin'])
 
@@ -195,9 +172,8 @@ async function collectMismatches(): Promise<TemplateManifest[]> {
     templates.push({ path, manifest, mismatches })
   }
 
-  // Thrown from here so neither mode can proceed: a refusal this script cannot
-  // rewrite is drift it must not report as a match, and half-syncing a template
-  // whose pins it could not read is worse than syncing none.
+  // Thrown so neither mode proceeds: a refusal this script cannot rewrite is
+  // drift it must not report as a match.
   if (blocked.length > 0) {
     throw new Error(
       'Template drizzle pins this script will not rewrite:\n' +
@@ -233,35 +209,11 @@ async function check(): Promise<void> {
 }
 
 /**
- * A rewritten template only reaches users inside a new `create-guren-app`
- * tarball, and `changeset publish` skips a package whose version did not move.
- * `create-guren-app` declares no `@guren/*` dependency, so changesets has no
- * edge to follow and will not bump it just because the ORM did — an ORM-only
- * changeset would rewrite the templates here and then publish nothing carrying
- * them, silently restoring the drift this script exists to prevent.
- *
- * Only an *error* under `--release`: outside `changeset version` there is no
- * bump to compare against, so a maintainer repairing a hand-edited version — or
- * following an ORM drizzle pin that moved in an ordinary PR — would be failed
- * for a release that is not theirs to cut. The same fact is printed as a
- * reminder on that path instead.
- *
- * The two ways a version can be unreadable are not the same refusal, because
- * they are not the same fact:
- *
- * - no manifest at `HEAD` at all — a scaffolder not yet committed — leaves
- *   nothing to compare, so this warns and skips, as it always has.
- * - a manifest that is there and whose version cannot be read is a broken
- *   comparison, not an absent one, and it fails. Letting it through would be
- *   worse than a noisy release: `undefined !== '2.8.0'` reads as *the version
- *   moved*, so the gate would quietly exempt itself and publish `@guren/*`
- *   ranges inside no new tarball — the exact silent staleness it exists to
- *   stop. Both sides are checked; a working tree that lost its version
- *   exempts the release just as effectively as a committed one.
- *
- * `repo` is the checkout to run in; it is the function's subject, not a test
- * hook. The refusal is only observable against real commits, so its tests build
- * throwaway repositories and point it at those.
+ * A rewritten template reaches users only inside a new `create-guren-app`
+ * tarball, which `changeset publish` skips unless its version moved — and
+ * changesets will not bump it, since the scaffolder declares no `@guren/*` edge.
+ * An error only under `--release`. An unreadable version fails on either side:
+ * `undefined !== '2.8.0'` would read as "moved" and exempt the release.
  */
 export async function assertCreateAppRepublishes(repo: string = repoRoot): Promise<void> {
   const manifestPath = 'packages/create-app/package.json'
@@ -302,8 +254,7 @@ async function write(options: { release: boolean }): Promise<void> {
   const templates = await collectMismatches()
   const unpublishable = templates.flatMap((t) => t.mismatches).filter((m) => m.expected === null)
 
-  // Validated before anything is written, so a bad manifest cannot leave half
-  // the templates rewritten and half untouched.
+  // Before any write, so a bad manifest cannot leave the templates half rewritten.
   if (unpublishable.length > 0) {
     throw new Error(
       'Templates name @guren/* packages this workspace does not publish:\n' +
@@ -323,8 +274,8 @@ async function write(options: { release: boolean }): Promise<void> {
       group[mismatch.dependency] = mismatch.expected as string
       console.log(`${mismatch.file}: ${mismatch.dependency} ${mismatch.declared} -> ${mismatch.expected}`)
     }
-    // Templates are hand-edited files; keep the two-space, newline-terminated
-    // shape the rest of them have so the diff is only the ranges.
+    // Keep the hand-edited two-space, newline-terminated shape so the diff is
+    // only the ranges.
     await writeFile(template.path, `${JSON.stringify(template.manifest, null, 2)}\n`, 'utf8')
   }
 
@@ -333,9 +284,8 @@ async function write(options: { release: boolean }): Promise<void> {
     return
   }
 
-  // Outside `changeset version` there is no bump to assert against, but the same
-  // fact still holds: a drizzle pin that moves in an ordinary PR reaches users
-  // only inside a new create-guren-app tarball.
+  // No bump to assert against here, but the fact still holds: a drizzle pin that
+  // moves in an ordinary PR reaches users only inside a new tarball.
   console.log(
     '\nThese templates ship inside create-guren-app. Add a create-guren-app bump to\n' +
     'your changeset, or the rewritten versions will not reach the registry.',

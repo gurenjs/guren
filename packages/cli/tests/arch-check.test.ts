@@ -5,10 +5,8 @@ import { runArchCheck } from '../src/arch-check'
 import { ParseCache } from '../src/parse-cache'
 import { createTempWorkspace } from './helpers'
 
-// Config fixtures export a plain object rather than importing defineArchRules
-// (an identity function the loader doesn't require) — the workspace lives in
-// a temp directory, so a relative import back into the package source isn't
-// resolvable from there.
+// Config fixtures export a plain object rather than importing defineArchRules (an identity
+// function the loader doesn't require): a temp workspace cannot resolve back into the package.
 const ARCH_CONFIG = `
 export default {
   layers: {
@@ -74,9 +72,8 @@ describe('runArchCheck', () => {
     }
   })
 
-  // A decorated class used to make the whole file unparseable, and arch-check
-  // skips files it cannot parse — so a real boundary violation in a file using
-  // `@Injectable`-style decorators was silently invisible to `check --arch`.
+  // arch-check skips files it cannot parse, so an unparseable decorated class made every
+  // boundary violation in it invisible.
   it('sees a boundary violation in a file that uses decorators', async () => {
     const workspace = await createTempWorkspace('guren-cli-arch-decorators-')
     try {
@@ -443,9 +440,7 @@ export default {
   rules: [{ from: 'domain', disallow: ['http'], includeTypeImports: true }],
 }`,
       )
-      // the target exists only as a declaration file — legal for a type
-      // import, and previously classified 'unresolved' (a spurious warn, and
-      // a silently missed violation)
+      // a declaration-file-only target: legal for a type import, and once misclassified 'unresolved'
       await writeFile(
         join(workspace.dir, 'app/Http/Controllers/env.d.ts'),
         `export interface Env { url: string }`,
@@ -504,8 +499,8 @@ export default {
       await mkdir(join(workspace.dir, 'modules/billing'), { recursive: true })
       await mkdir(join(workspace.dir, 'modules/orders/db'), { recursive: true })
       await writeFile(join(workspace.dir, 'modules/orders/db/rows.ts'), `export interface Row { id: number }`, 'utf8')
-      // a type-only reach into another module's internals — runtime-only by
-      // design for the zero-config rules, whatever the set-wide flag says
+      // a type-only reach into another module's internals: the zero-config rules are
+      // runtime-only whatever the set-wide flag says
       await writeFile(
         join(workspace.dir, 'modules/billing/service.ts'),
         `import type { Row } from '../orders/db/rows'\nexport const rows: Row[] = []`,
@@ -529,8 +524,7 @@ export default {
   rules: [{ from: 'domain', disallow: ['http'], includeTypeImports: true }],
 }`,
       )
-      // different spellings of one file: NodeNext-style .js for the runtime
-      // import, extensionless for the type import — still one crossing
+      // one file, two spellings (.js for runtime, extensionless for the type): still one crossing
       await writeFile(
         join(workspace.dir, 'app/Domain/OrderService.ts'),
         `import { PostController } from '../Http/Controllers/PostController.js'\n`
@@ -580,10 +574,8 @@ export default {
 
 describe('runArchCheck config discovery', () => {
   it('reports a guren.arch.ts that exists only as a dangling symlink', async () => {
-    // Discovery used `fileExists`, which reads a dangling symlink as absent —
-    // so a rules file the user really put there was skipped and the gate
-    // returned no results, which reads exactly like "no violations". An
-    // architecture check that could not load its rules is not a passing one.
+    // `fileExists` reads a dangling symlink as absent, so the rules file was skipped and
+    // the gate returned no results, which reads exactly like "no violations".
     const workspace = await createTempWorkspace('guren-cli-arch-dangling-')
 
     try {
@@ -764,17 +756,10 @@ describe('runArchCheck derived module rules (RFC 0002, zero-config)', () => {
     }
   })
 
-  // Pins that both evaluators agree on which files they scan. It deliberately
-  // does NOT claim to prove the project is walked only once: two identical
-  // walks yield identical lists, so reverting to a walk per evaluator still
-  // passes here. What it catches is one evaluator being narrowed to a subtree
-  // — scanning only `modules/` for the derived rules, say — which is the
-  // plausible way the shared walk gets undone.
-  //
-  // The counts are files *checked*, not files walked: `filesChecked` only
-  // counts files with at least one import specifier, past each evaluator's own
-  // filtering. So the fixture's guren.arch.ts has to stay import-free, or the
-  // derived count moves for a reason unrelated to what is under test.
+  // Pins that both evaluators scan the same files. It does NOT prove a single walk: two
+  // identical walks yield identical lists. What it catches is one evaluator narrowed to a
+  // subtree. Counts are files *checked* — only files with an import specifier, past each
+  // evaluator's filtering — so the fixture's guren.arch.ts must stay import-free.
   it('scans the same file set in both evaluators', async () => {
     const workspace = await createTempWorkspace('guren-cli-arch-shared-walk-')
     try {
@@ -788,8 +773,7 @@ describe('runArchCheck derived module rules (RFC 0002, zero-config)', () => {
         'utf8',
       )
 
-      // Two importing files at the project root, one inside a module. No
-      // violations anywhere, so both evaluators fall through to their summary.
+      // No violations anywhere, so both evaluators fall through to their summary.
       await mkdir(join(workspace.dir, 'app/Domain'), { recursive: true })
       await writeFile(join(workspace.dir, 'app/Domain/Helper.ts'), 'export const helper = 1', 'utf8')
       await writeFile(
@@ -808,14 +792,12 @@ describe('runArchCheck derived module rules (RFC 0002, zero-config)', () => {
 
       const results = await runArchCheck({ cwd: workspace.dir, cache: new ParseCache() })
 
-      // Derived rules reach both importers — the project-root one and the one
-      // inside a module — which is what a modules-only walk would miss.
+      // Derived rules reach the project-root importer too, which a modules-only walk would miss.
       const moduleSummary = results.find((r) => r.key === 'arch:module-summary')
       expect(moduleSummary?.status).toBe('pass')
       expect(moduleSummary?.message).toContain('Checked 2 file(s)')
 
-      // Explicit rules start from that same list and narrow to the `domain`
-      // layer: Helper.ts is in the layer but imports nothing, so it drops out.
+      // Explicit rules narrow the same list to the `domain` layer; Helper.ts imports nothing, so it drops out.
       const archSummary = results.find((r) => r.key === 'arch:summary')
       expect(archSummary?.status).toBe('pass')
       expect(archSummary?.message).toContain('Checked 1 file(s)')

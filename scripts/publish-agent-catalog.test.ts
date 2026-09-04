@@ -8,25 +8,19 @@ import { isPublishRepo } from './publish-agent-catalog.ts'
 import { repoRoot } from './workspace-packages.ts'
 
 /**
- * The publish script end to end, against a local bare repository standing in
- * for gurenjs/agent-skills. Three runs, three distinct outcomes the script
- * must tell apart: a first publish that writes the whole tree, a re-run on
- * the same version that is a no-op success (not a failure — most releases do
- * not move @guren/cli), and a re-run whose tree differs only in content
- * (same version) that still refuses to push a byte-identical tree.
- *
- * Kept as a scripts-level guard rather than a unit test because the script's
- * value is the git choreography — clone, replace tracked files, fast-forward
- * push — and that is not meaningfully testable without a real repository.
+ * The publish script end to end, against a local bare repository standing in for
+ * gurenjs/agent-skills. Three outcomes it must tell apart: a first publish, a
+ * same-version re-run that is a no-op *success*, and a same-version re-run whose
+ * bytes differ. Kept at scripts level because the value under test is the git
+ * choreography, which needs a real repository.
  */
 
 const script = join(repoRoot, 'scripts', 'publish-agent-catalog.ts')
 
 /**
- * A commit identity supplied by the test rather than by the machine. A CI
- * runner has no `user.email` and a hostname of `(none)`, so git cannot
- * auto-detect one and every commit the script makes would fail there while
- * passing on a maintainer's laptop.
+ * A CI runner has no `user.email` and a hostname of `(none)`, so git can
+ * auto-detect no identity and every commit would fail there while passing on a
+ * maintainer's laptop.
  */
 const gitIdentity = {
   GIT_AUTHOR_NAME: 'Guren publish test',
@@ -36,10 +30,9 @@ const gitIdentity = {
 }
 
 /**
- * The git choreography these tests are about, with the validator gate stood
- * down: `claude` is not on a CI runner's PATH and the script refuses to
- * publish when the validator cannot run. That refusal has its own test below,
- * so it is not a condition on all the others.
+ * The validator gate stood down: `claude` is not on a CI runner's PATH, and the
+ * refusal that causes has its own test below rather than conditioning all the
+ * others.
  */
 function run(remote: string, extraEnv: Record<string, string> = {}, ...args: string[]) {
   return spawnPublish(remote, extraEnv, ['--yes', '--skip-validate', ...args])
@@ -59,15 +52,12 @@ function spawnPublish(remote: string, extraEnv: Record<string, string>, args: st
 }
 
 /**
- * Every git call this file makes, hardened against the machine it runs on.
- * A global `core.hooksPath` reaches repositories created here — including
- * fresh clones, whose `post-checkout` runs before any assertion does — and
- * publish-agent-catalog disables it the same way, its `NO_HOOKS` comment
- * carrying the full hazard list. A global `commit.gpgsign` would make a
- * commit *prompt*, and a hang under bun:test is charged to the following
- * test, so it would not even look like the call that caused it. A CI runner
- * has no committer identity to inherit. The same four flags guard
- * build-agent-catalog.test.ts, which has no module to share them through.
+ * Every git call this file makes, hardened against the machine it runs on: a
+ * global `core.hooksPath` reaches repositories created here (fresh clones
+ * included, whose `post-checkout` runs before any assertion), a global
+ * `commit.gpgsign` would make a commit *prompt* and bun:test charges a hang to
+ * the following test, and a CI runner has no committer identity to inherit.
+ * The same four flags guard build-agent-catalog.test.ts.
  */
 const HERMETIC = [
   '-c', 'core.hooksPath=',
@@ -84,17 +74,11 @@ function git(cwd: string, ...args: string[]): string {
 let bare: string
 let scratch: string
 /**
- * The global git configuration the *child* runs see, in place of the
- * maintainer's. `HERMETIC` cannot reach them: the script makes its own
- * commits, and a global `commit.gpgsign` makes those prompt — a hang, charged
- * by bun:test to the following test. The script itself is right not to force
- * signing off (a maintainer may want the publish commit signed), so the
- * neutral configuration is the test's to supply.
- *
- * A file rather than `/dev/null` on purpose: it is where a test that wants to
- * hand the script a hostile *global* configuration would write one. The three
- * that do so today (`core.hooksPath`, `core.excludesFile`, `core.attributesFile`)
- * inject through `GIT_CONFIG_*` in the env, a layer this does not touch.
+ * The global git configuration the *child* runs see: `HERMETIC` cannot reach
+ * them, and the script is right not to force signing off, so a neutral
+ * configuration is the test's to supply. A file rather than `/dev/null` because
+ * it is where a hostile global configuration would be written; the three tests
+ * that do so inject through `GIT_CONFIG_*` instead.
  */
 let childGitConfig: string
 
@@ -124,10 +108,8 @@ afterAll(async () => {
 })
 
 describe('isPublishRepo', () => {
-  // what decides whether a run is pointed at the public repository. Unit
-  // tested because the guard that uses it cannot be mutation tested: making
-  // it answer wrongly, with the override set, is a run that clones and
-  // pushes to the real gurenjs/agent-skills.
+  // Unit tested because the guard using it cannot be mutation tested: making it
+  // answer wrongly, with the override set, publishes to the real repository.
   it('recognizes the real repository however it is addressed', () => {
     for (const remote of [
       'git@github.com:gurenjs/agent-skills.git',
@@ -154,11 +136,9 @@ describe('isPublishRepo', () => {
 
 describe('publish-agent-catalog', () => {
   it('refuses to publish when claude plugin validate could not run', () => {
-    // a PATH with no `claude` on it: a CI runner, or a maintainer who has not
-    // installed the CLI. Publish is the last gate before users, so an
-    // unavailable validator refuses rather than warns — only --skip-validate
-    // (which every other test here passes) overrides that. Runs before any
-    // publish because it must not reach the remote at all.
+    // A PATH with no `claude` on it. Publish is the last gate before users, so an
+    // unavailable validator refuses rather than warns; only --skip-validate (which
+    // every other test here passes) overrides that.
     const result = spawnPublish(bare, { PATH: '/usr/bin:/bin' }, ['--yes'])
     expect(result.code).toBe(1)
     expect(result.out).toContain('claude plugin validate could not run')
@@ -206,9 +186,8 @@ describe('publish-agent-catalog', () => {
   })
 
   it('a second, higher version publishes over the populated tree without nesting directories', async () => {
-    // the bug this pins: `cp -R plugins clone/plugins` nests into
-    // clone/plugins/plugins/ when the destination already exists — which it
-    // does on every publish after the first
+    // `cp -R plugins clone/plugins` nests into clone/plugins/plugins/ once the
+    // destination exists, which it does on every publish after the first
     const result = run(bare, { GUREN_CATALOG_VERSION_OVERRIDE: '99.0.0' })
     expect(result.code).toBe(0)
     expect(result.out).toContain('Publishing @guren/cli 99.0.0')
@@ -292,9 +271,8 @@ describe('publish-agent-catalog', () => {
   })
 
   it('a global gitignore cannot thin the published tree', async () => {
-    // core.excludesFile applies inside the clone too, so a plain `git add -A`
-    // stages whatever the maintainer's global ignores leave behind — a tree
-    // that passed the audit as ten files and reaches users as six
+    // core.excludesFile applies inside the clone, so a plain `git add -A` stages
+    // whatever the global ignores leave: ten audited files, six published
     const remote = await seedRemote('excludes.git')
     const excludes = join(scratch, 'global-excludes')
     await Bun.write(excludes, '*.md\n')
@@ -336,11 +314,10 @@ describe('publish-agent-catalog', () => {
   })
 
   it('refuses to push onto a remote that moved after this run cloned it', async () => {
-    // the confirmation prompt is the one moment a test can move the remote
-    // out from under a run that has already cloned it. A rollback is the
-    // dangerous shape: the new commit is still a fast-forward from the
-    // remote's rewound tip, so a plain push would restore exactly the history
-    // somebody had just removed.
+    // The prompt is the one moment a test can move the remote out from under a
+    // run that has cloned it. A rollback is the dangerous shape: the new commit
+    // is still a fast-forward from the rewound tip, so a plain push would restore
+    // the history somebody just removed.
     const remote = await seedRemote('moved.git')
     expect(run(remote).code).toBe(0)
     const proc = Bun.spawn([process.execPath, script, '--skip-validate'], {

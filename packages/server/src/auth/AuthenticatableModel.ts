@@ -31,8 +31,8 @@ export abstract class AuthenticatableModel<TRecord extends PlainObject = PlainOb
    * Credential columns can never be mass-assigned: the resolved password-hash
    * column (unless the model hashes in place into the password field itself)
    * and the remember-token column. Resolved at call time so a renamed column
-   * stays covered. Use `forceCreate()`/`forceUpdate()` for trusted
-   * server-side values such as `passwordHash: 'oauth:...'`.
+   * stays covered. Use `forceCreate()`/`forceUpdate()` for trusted server-side
+   * values such as `passwordHash: 'oauth:...'`.
    */
   protected static override deniedFields(): string[] {
     const denied = [...super.deniedFields()]

@@ -50,7 +50,7 @@ describe('MemoryRateLimitStore', () => {
     currentTime += 150
 
     const entry = await store.increment('key', 100)
-    expect(entry.count).toBe(1) // Reset to 1
+    expect(entry.count).toBe(1)
   })
 
   it('returns null from get after window expires', async () => {
@@ -125,7 +125,7 @@ describe('SlidingWindowRateLimitStore', () => {
     currentTime += 150
 
     const entry = await store.increment('key', 100)
-    expect(entry.count).toBe(1) // Old request removed
+    expect(entry.count).toBe(1)
   })
 
   it('returns null when window has expired', async () => {
@@ -278,12 +278,10 @@ describe('createRateLimitMiddleware', () => {
     )
     app.get('/', (c) => c.text('OK'))
 
-    // First user hits limit
     await app.request('/', { headers: { 'X-API-Key': 'user1' } })
     const res1 = await app.request('/', { headers: { 'X-API-Key': 'user1' } })
     expect(res1.status).toBe(429)
 
-    // Second user can still request
     const res2 = await app.request('/', { headers: { 'X-API-Key': 'user2' } })
     expect(res2.status).toBe(200)
   })

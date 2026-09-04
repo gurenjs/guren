@@ -28,24 +28,11 @@ function parseUrl(value: string): { url: URL; relative: boolean } {
   const relative = value.startsWith('/')
   const url = relative ? new URL(value, RELATIVE_BASE) : new URL(value)
 
-  // The invariant an app-relative value has to satisfy: `pathname + search`,
-  // which is both the canonical form and the returned string, must mean the
-  // same thing when it is parsed again. Two ways it does not, and the guard
-  // is one check because they are one failure.
-  //
-  // Reading in: `//host/path` and `/\host/path` both start with `/`, yet the
-  // parser folds the first segment into the *authority*, which the canonical
-  // form then drops. Signer and verifier would agree on `/path` for whatever
-  // host an attacker prefixes, so `verifySignedUrl('//evil' + signed)`
-  // verifies against a signature that never covered `evil`.
-  //
-  // Writing out: a value whose *normalized* pathname begins with `//`
-  // (`/.//host/a`) parses onto this origin but serializes to a string that
-  // does not — `signUrl` would hand back a URL its own verifier rejects.
-  //
-  // The origin half is compared against the *parsed* origin rather than
-  // matched as a prefix: which spellings the parser folds into an authority
-  // is the parser's rule, not ours, and a prefix list goes stale in silence.
+  // `pathname + search` — the canonical form and the returned string — must
+  // re-parse to the same thing. `//host/path` starts with `/` yet parses as an
+  // *authority* the canonical form drops, so `'//evil' + signed` would verify;
+  // and a pathname normalizing to `//…` serializes off this origin, so
+  // `signUrl` would emit a URL its own verifier rejects.
   if (relative && (url.origin !== RELATIVE_ORIGIN || url.pathname.startsWith('//'))) {
     throw new TypeError(`signed-url: an app-relative URL must not begin with an authority, got ${value}`)
   }
@@ -60,9 +47,8 @@ function serializeUrl(url: URL, relative: boolean): string {
 function canonicalizeUrl(url: URL): string {
   const canonical = new URL(url.toString())
   canonical.searchParams.delete(SIGNATURE_PARAM)
-  // Code-unit comparison, not localeCompare: canonicalization must be
-  // deterministic across runtimes and locales or signer and verifier can
-  // disagree on the same URL.
+  // Code-unit comparison, not localeCompare: a locale-dependent order would
+  // let signer and verifier disagree on the same URL.
   const params = Array.from(canonical.searchParams.entries()).sort(([left], [right]) =>
     left < right ? -1 : left > right ? 1 : 0,
   )

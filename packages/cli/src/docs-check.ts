@@ -29,11 +29,10 @@ function hasGlobChars(entry: string): boolean {
 }
 
 /**
- * Backslashes count as separators, and a drive letter is absolute: on
- * Windows `path.resolve` treats them that way, so a `..\..\outside.md`
- * examined with `/` rules alone would slip past containment and resolve
- * outside the app root. Both containment checks below start here so
- * they cannot disagree about what a separator is.
+ * Backslashes count as separators and a drive letter is absolute, as Windows
+ * `path.resolve` treats them — a `..\..\outside.md` judged by `/` rules alone
+ * slips past containment. Both containment checks below start here so they
+ * cannot disagree about what a separator is.
  */
 function normalizeTarget(target: string): { path: string; absolute: boolean } {
   const path = target.replace(/\\/g, '/')
@@ -50,10 +49,9 @@ function isAppRootRelative(entry: string): boolean {
 }
 
 /**
- * The `docs/` bundle a document belongs to, with a trailing slash — the
- * root for its bundle-relative (`/…`) links. Matched structurally rather
- * than by searching for `docs/`, which would find the wrong segment in a
- * module named e.g. `apidocs`.
+ * The `docs/` bundle a document belongs to, with a trailing slash — the root
+ * for its bundle-relative (`/…`) links. Matched structurally, since searching
+ * for `docs/` finds the wrong segment in a module named `apidocs`.
  */
 function bundleRoot(docPath: string): string {
   return /^(?:modules\/[^/]+\/)?docs\//.exec(docPath)?.[0] ?? ''
@@ -71,9 +69,8 @@ function isOkfActor(actor: string): boolean {
 }
 
 /**
- * A real `YYYY-MM-DD` calendar date. `Date.parse` alone would accept
- * `2026-02-30` (rolled forward to March 2) and reject nothing loudly,
- * so the round-trip check rejects out-of-range days.
+ * A real `YYYY-MM-DD` calendar date. `Date.parse` alone rolls `2026-02-30`
+ * forward to March 2, so the round-trip rejects out-of-range days.
  */
 function parseCalendarDate(value: string): number | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null
@@ -94,21 +91,17 @@ function isStale(staleAt: number): boolean {
 const MODEL_FILE_PATTERN = /(?:^|\/)app\/Models\/[^/]+\.(?:ts|mts|js|mjs)$/
 
 /**
- * Resolve a body markdown link to an app-root-relative path. A leading
- * `/` is bundle-relative (OKF §6.1): it resolves from the doc's own
- * `docs/` root, so `/adr/0002-x.md` in `docs/adr/0001-y.md` means
- * `docs/adr/0002-x.md` and module docs stay within their module's
- * bundle. Anything else is relative to the doc's directory and may
- * reach into the app (`../../app/...`). Null when the target escapes
- * the app root.
+ * Resolve a body markdown link to an app-root-relative path, or null when it
+ * escapes the app root. A leading `/` is bundle-relative (OKF §6.1), resolving
+ * from the doc's own `docs/` root so module docs stay inside their bundle;
+ * anything else is relative to the doc's directory and may reach into the app.
  */
 export function resolveDocLink(docPath: string, target: string): string | null {
   const { path } = normalizeTarget(target)
   if (/^[A-Za-z]:/.test(path)) return null
 
-  // A leading `/` is bundle-relative, so it is resolved rather than
-  // rejected — the one place the two containment checks legitimately
-  // differ.
+  // A leading `/` is resolved rather than rejected — the one place the two
+  // containment checks legitimately differ.
   const fromBundleRoot = path.startsWith('/')
   const base = fromBundleRoot ? bundleRoot(docPath) : posix.dirname(docPath)
   const joined = posix.join(base, fromBundleRoot ? path.slice(1) : path)
@@ -116,14 +109,11 @@ export function resolveDocLink(docPath: string, target: string): string | null {
 }
 
 /**
- * Doc-link validation (RFC 0004): docs are OKF concept documents, so frontmatter must carry `type` (the one field OKF requires), body
- * markdown links (OKF's relation mechanism) must resolve, frontmatter
- * `related` paths/globs must resolve, `entities` must name real models,
- * `@docs` tags in model and controller sources must point at existing
- * files, and entities whose only linked docs are superseded get flagged.
- * Activates on content — an app with no docs and no tags produces zero
- * results, so nothing goes red on projects that haven't adopted the
- * convention.
+ * Doc-link validation (RFC 0004): frontmatter carries `type`, body markdown
+ * links and `related` paths/globs resolve, `entities` name real models, `@docs`
+ * tags point at existing files, and entities whose only linked docs are
+ * superseded get flagged. Activates on content — an app with no docs and no
+ * tags produces zero results.
  */
 export async function runDocsCheck(options: DocsCheckOptions): Promise<CheckResult[]> {
   const { cwd, changedFiles, cache } = options
@@ -165,9 +155,8 @@ export async function runDocsCheck(options: DocsCheckOptions): Promise<CheckResu
 }
 
 /**
- * Filesystem probes shared across a run. Docs cross-link the same hub
- * pages, so each path resolves to one access(); the project walk behind
- * glob matching happens at most once, and only when a glob appears.
+ * Filesystem probes shared across a run: each path costs one access(), and the
+ * project walk behind glob matching happens once, only if a glob appears.
  */
 interface PathProbes {
   exists: (path: string) => Promise<boolean>
@@ -203,11 +192,9 @@ function createPathProbes(cwd: string): PathProbes {
 }
 
 /**
- * The paths of the docs a `--changed` run should validate; every doc
- * when no scope is given. Entity names are derived from changed *paths*
- * (not the discovered file list) so a deleted model still pulls the
- * docs that referenced it into scope and fails their dangling
- * `entities:` links.
+ * The docs a `--changed` run should validate; every doc when no scope is given.
+ * Entity names come from changed *paths*, not the discovered file list, so a
+ * deleted model still pulls the docs that referenced it into scope.
  */
 function changedScope(refs: DocRef[], changedFiles: Set<string> | null): Set<string> {
   if (!changedFiles) return new Set(refs.map((ref) => ref.path))
@@ -262,11 +249,10 @@ function checkRequiredType(ref: DocRef): CheckResult[] {
 }
 
 /**
- * The declared relations: `related` paths/globs, `entities`, and body
- * markdown links, with one aggregate pass entry when everything
- * resolves. A missing body-link target is a warn, not a fail — OKF §6.1
- * treats a broken link as possibly not-yet-written knowledge — while a
- * link that escapes the app root is malformed and fails.
+ * The declared relations: `related` paths/globs, `entities`, and body markdown
+ * links, with one aggregate pass entry when everything resolves. A missing
+ * body-link target is a warn — OKF §6.1 treats a broken link as possibly
+ * not-yet-written knowledge — while one escaping the app root fails.
  */
 async function checkDocRelations(
   ref: DocRef,
@@ -361,16 +347,15 @@ async function checkDocRelations(
 }
 
 /**
- * The trust and lifecycle families (OKF §5, §7): actors, timestamps,
- * `status`, and `stale_after`. All warns — a malformed declaration means
- * a policy that cannot take effect, not a broken document.
+ * The trust and lifecycle families (OKF §5, §7): actors, timestamps, `status`,
+ * `stale_after`. All warns — a malformed declaration means a policy that cannot
+ * take effect, not a broken document.
  */
 function checkProvenanceFields(ref: DocRef): CheckResult[] {
   const results: CheckResult[] = []
 
-  // Provenance is only as trustable as its actors: consumers derive
-  // the trust tier from the `human:` prefix (§5.3), so an actor
-  // written outside the §7 convention silently reads as a machine.
+  // Consumers derive the trust tier from the `human:` prefix (§5.3), so an
+  // actor written outside the §7 convention silently reads as a machine.
   const actorEvents = [
     ...(ref.generated ? [{ field: 'generated', event: ref.generated }] : []),
     ...ref.verified.map((event, index) => ({
@@ -420,9 +405,8 @@ function checkProvenanceFields(ref: DocRef): CheckResult[] {
     )
   }
 
-  // Presence, not truthiness: an empty `stale_after:` is a malformed
-  // date, and skipping it would let the doc claim a freshness policy
-  // the checker never enforces.
+  // Presence, not truthiness: an empty `stale_after:` is a malformed date, and
+  // skipping it lets the doc claim a policy the checker never enforces.
   if (ref.staleAfter !== undefined) {
     const staleAt = parseCalendarDate(ref.staleAfter)
     if (staleAt === null) {
@@ -454,10 +438,9 @@ function checkProvenanceFields(ref: DocRef): CheckResult[] {
 }
 
 /**
- * OKF conformance (§11) asks every non-reserved doc to carry
- * frontmatter with a `type`. Only warn, and only once the app has
- * adopted the convention — a project with zero frontmatter docs stays
- * silent, preserving the activates-on-content principle.
+ * OKF conformance (§11) asks every non-reserved doc to carry frontmatter with a
+ * `type`. Warn only, and only once the app has adopted the convention: a
+ * project with zero frontmatter docs stays silent.
  */
 function checkConformance(
   refs: DocRef[],

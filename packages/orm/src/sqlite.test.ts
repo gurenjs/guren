@@ -381,15 +381,11 @@ describe('createSqliteDatabase connection-URI filenames', () => {
     expect(existsSync(strayUriRoot)).toBe(false)
   })
 
-  // Accepting the URI is only half of it: the driver `mkdir -p`s the database's
-  // directory, and a URI handed to `resolve()` is taken as a *relative* name —
-  // so the tree it prepares is `<cwd>/file:/…`. Both halves are asserted here
-  // because each alone admits a wrong fix: the target directory does not exist
-  // yet, so an implementation that just skips the mkdir for `file:` URIs fails
-  // to open at all, and one that keeps concatenating leaves the stray tree
-  // behind. Untracked, which is why no build, typecheck or test gate reported
-  // it — and empty only where the host's sqlite parses the URI, which is the
-  // half of this that is not portable and why the driver resolves it itself.
+  // The driver `mkdir -p`s the database's directory, and a URI handed to
+  // `resolve()` is taken as a *relative* name, so the tree it prepares is
+  // `<cwd>/file:/…`. Both halves are asserted because each alone admits a wrong
+  // fix: skipping the mkdir for `file:` URIs fails to open at all, and
+  // concatenating leaves the stray (untracked, ungated) tree behind.
   test('should create the directory the URI names, not one named after the URI', async () => {
     const target = join(workDir, 'nested', 'deep.db')
     const database = createSqliteDatabase({
@@ -486,13 +482,11 @@ describe('createSqliteDatabase connection-URI filenames', () => {
   })
 
   test('should accept file:local.db, which sqlite resolves to a real file', async () => {
-    // The URI resolves against the cwd rather than workDir, so the file it
-    // creates is cleaned up here rather than by the suite's workDir teardown.
-    // That cwd-relative rule is sqlite's, not the URL parser's: `new URL()` reads
-    // the same string as `/local.db`, so resolving these URIs through it would
-    // point the mkdir at the filesystem root. Asserting *where* the file lands
-    // is what makes this portable: a host whose sqlite does not parse URI
-    // filenames opens one named literally `file:local.db` and reports success.
+    // The URI resolves against the cwd, not workDir, so cleanup happens here.
+    // That rule is sqlite's, not the URL parser's: `new URL()` reads the same
+    // string as `/local.db` and would point the mkdir at the filesystem root.
+    // Asserting *where* the file lands is what makes this portable — a host
+    // that does not parse URI filenames opens `file:local.db` and succeeds.
     const database = createSqliteDatabase({
       migrationsFolder: join(workDir, 'migrations'),
       filename: 'file:local.db',
@@ -508,6 +502,32 @@ describe('createSqliteDatabase connection-URI filenames', () => {
       // The name an implementation that resolved the URI as a relative path
       // would have opened. Cleaned so a red run leaves nothing in the tree.
       rmSync(resolve('file:local.db'), { force: true })
+    }
+  })
+})
+
+describe('createSqliteDatabase migrationStatus', () => {
+  test('should surface a broken tracker table instead of calling every migration pending', async () => {
+    // bun:sqlite reports every statement error as SQLITE_ERROR, so a tracker
+    // whose columns drifted looks exactly like a missing one to a catch that
+    // absorbs everything — and "nothing applied" is the answer that gets the
+    // applied migrations re-run.
+    const migrationsDir = join(workDir, 'migrations')
+    const { mkdirSync, writeFileSync } = await import('node:fs')
+    mkdirSync(join(migrationsDir, '20260101000000_init'), { recursive: true })
+    writeFileSync(join(migrationsDir, '20260101000000_init', 'migration.sql'), 'SELECT 1;')
+
+    const dbFile = join(workDir, 'app.db')
+    const { Database } = await import('bun:sqlite')
+    const raw = new Database(dbFile)
+    raw.exec('CREATE TABLE __drizzle_migrations (id integer primary key, hash text not null)')
+    raw.close()
+
+    const database = createSqliteDatabase({ migrationsFolder: migrationsDir, filename: dbFile })
+    try {
+      await expect(database.migrationStatus()).rejects.toThrow(/no such column/)
+    } finally {
+      await database.closeDatabase()
     }
   })
 })

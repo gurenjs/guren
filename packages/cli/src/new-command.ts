@@ -25,20 +25,13 @@ async function runBunCommand(args: string[]): Promise<void> {
 }
 
 /**
- * `guren new` is a thin forwarder to `create-guren-app`, so the transport is
- * `ctx.rawArgs` — citty hands over exactly the argv that followed the
- * subcommand name, which the child then parses with its own declarations.
- *
- * The `args` block below exists **only** so `guren new --help` stays useful
- * (`runCli` intercepts `--help` before `run()` is ever reached). citty still
- * parses it on the way in; `run()` just ignores the result. Do not reintroduce
- * a parsed-arg translation table: an undeclared string flag does not merely get
- * dropped by citty, it parses as boolean `true` and leaks its value into
- * `args._` — which is how `guren new app --db postgres` silently scaffolded a
- * SQLite app.
- *
- * Keep these declarations in sync with `packages/create-app/src/cli.ts` by
- * hand; they are documentation, and only the child enforces them.
+ * A thin forwarder to `create-guren-app`, so the transport is `ctx.rawArgs`
+ * and the child parses with its own declarations. The `args` block below is
+ * documentation for `guren new --help` only, kept in sync with
+ * `packages/create-app/src/cli.ts` by hand. Do not reintroduce a parsed-arg
+ * translation table: citty parses an undeclared string flag as boolean `true`
+ * and leaks its value into `args._`, which is how `guren new app --db
+ * postgres` silently scaffolded a SQLite app.
  */
 export function createNewCommand(runCreateApp: CommandRunner = runBunCommand) {
   return defineCommand({
@@ -67,9 +60,8 @@ export function createNewCommand(runCreateApp: CommandRunner = runBunCommand) {
       },
       blueprint: {
         type: 'string',
-        // Not enumerated here: this is forwarded to create-guren-app, which
-        // owns the list. A hardcoded copy here is how `blog` stayed advertised
-        // after it was dropped from create-guren-app's own blueprint registry.
+        // Not enumerated here: create-guren-app owns the list. A copy here is
+        // how `blog` stayed advertised after it was dropped from that registry.
         description: 'Application blueprint to scaffold (see `create-guren-app --help`).',
       },
       db: {

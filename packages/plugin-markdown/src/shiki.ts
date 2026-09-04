@@ -1,12 +1,9 @@
 /**
- * Shiki integration for `@guren/plugin-markdown` (RFC 0012), kept on its own
- * subpath so the root export has no dependency on shiki. `shiki` is an
- * optional peer dependency: importing `@guren/plugin-markdown/shiki` without
- * it installed fails with the runtime's module-not-found error naming shiki.
- *
- * The default shape is the Workers-safe fine-grained bundle: `shiki/core`
- * with an explicit grammar list and the JavaScript regex engine — never the
- * full `shiki` entry, which pulls every grammar plus the oniguruma WASM blob.
+ * Shiki integration for `@guren/plugin-markdown` (RFC 0012), on its own subpath
+ * so the root export has no dependency on shiki (an optional peer). The default
+ * shape is the Workers-safe fine-grained bundle — `shiki/core` with an explicit
+ * grammar list and the JavaScript regex engine — never the full `shiki` entry,
+ * which pulls every grammar plus the oniguruma WASM blob.
  */
 import {
   createHighlighterCore,
@@ -22,21 +19,19 @@ const PLAIN_LANGUAGE = 'text'
 
 export interface CreateShikiHighlightOptions {
   /**
-   * Theme names for dual-theme output: the light palette renders inline, the
-   * dark palette rides along in `--shiki-dark` custom properties that the
-   * reference stylesheet switches on.
+   * Dual-theme output: the light palette renders inline, the dark palette rides
+   * in `--shiki-dark` custom properties the reference stylesheet switches on.
    */
   themes: { light: string; dark: string }
   /**
-   * Grammar names to load, resolved via `import('shiki/dist/langs/<name>.mjs')`
-   * at runtime. Convenient on server runtimes; bundlers that must see every
-   * import statically (Workers builds) should use `langModules` instead.
+   * Grammar names, resolved via `import('shiki/dist/langs/<name>.mjs')` at
+   * runtime. Bundlers that must see every import statically (Workers builds)
+   * need `langModules` instead.
    */
   langs?: string[]
   /**
-   * Explicit grammar modules for bundle-size-critical targets, e.g.
-   * `[import('shiki/dist/langs/typescript.mjs')]`. Loaded grammars register
-   * their own names, so fences resolve without a separate name list.
+   * Explicit grammar modules for bundle-size-critical targets. Loaded grammars
+   * register their own names, so fences resolve without a separate name list.
    */
   langModules?: LanguageInput[]
   /**
@@ -48,10 +43,9 @@ export interface CreateShikiHighlightOptions {
 }
 
 /**
- * Builds a `highlight` function for `createMarkdownRenderer`. The
- * highlighter is created lazily on first use and shared across renders;
- * fences whose language is not loaded fall back to plain text rather than
- * throwing.
+ * Builds a `highlight` function for `createMarkdownRenderer`. The highlighter is
+ * created lazily on first use and shared across renders; a fence whose language
+ * is not loaded falls back to plain text rather than throwing.
  */
 export function createShikiHighlight(options: CreateShikiHighlightOptions): HighlightFn {
   const { themes, langs = [], langModules, themeModules } = options
@@ -81,9 +75,8 @@ export function createShikiHighlight(options: CreateShikiHighlightOptions): High
         loadedLangs: new Set(highlighter.getLoadedLanguages()),
       }))
       // A rejected attempt must not stay cached — a transient load failure
-      // would otherwise disable highlighting for the renderer's lifetime.
-      // Guarded by attempt identity so a later retry cannot be cleared by
-      // this attempt's failure callback.
+      // would disable highlighting for the renderer's lifetime. Guarded by
+      // attempt identity so a later retry cannot be cleared by this failure.
       attempt.catch(() => {
         if (highlighterPromise === attempt) {
           highlighterPromise = undefined

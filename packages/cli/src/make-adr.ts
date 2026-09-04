@@ -19,11 +19,8 @@ import { runGit } from './changed-files'
 const ADR_DIR = 'docs/adr'
 
 /**
- * Matches the `NNNN-slug.md` files `make:adr` produces; anything else in the
- * directory is ignored when numbering. The extension match is case-insensitive
- * on purpose: on a case-insensitive filesystem (APFS, NTFS) a `0001-x.MD` that
- * numbering skipped would still collide with the `0001-x.md` we then try to
- * write, so such a file has to participate in the sequence.
+ * Case-insensitive on purpose: on APFS or NTFS a skipped `0001-x.MD` would
+ * still collide with the `0001-x.md` numbering then tries to write.
  */
 const ADR_FILE_RE = /^(\d{4})-.*\.md$/iu
 
@@ -35,9 +32,8 @@ export interface MakeAdrOptions extends WriterOptions {
   entity?: string
   /**
    * OKF actor for `generated.by` (§7): `human:<id>`, `process:<id>`, or
-   * `<producer>/<version>` for agents. Defaults to the git author as
-   * `human:<user.name>`; when neither is available the scaffold omits
-   * `generated` entirely (a concept with just `type` is conformant).
+   * `<producer>/<version>`. Defaults to the git author; with neither, the
+   * scaffold omits `generated` entirely, which is still conformant.
    */
   by?: string
 }
@@ -50,20 +46,15 @@ interface AdrPrefill {
 const EMPTY_PREFILL: AdrPrefill = { entities: [], related: [] }
 
 /**
- * Entity names are class identifiers, and they are interpolated into the
- * frontmatter unquoted — anything beyond identifier characters could
- * inject frontmatter keys (`]`, newlines, `#`, quotes), so it is rejected
- * outright rather than escaped.
+ * Interpolated into the frontmatter unquoted, so anything beyond identifier
+ * characters could inject keys; rejected outright rather than escaped.
  */
 const ENTITY_NAME_RE = /^[A-Za-z][A-Za-z0-9_]*$/
 
 /**
- * Prefill for `--entity`: the canonical class name plus the entity's
- * companion files (from the same location as the resolved model) as
- * `related:` entries. A model that doesn't exist yet is prefilled as
- * given — ADR-first flows write the decision before the code, and
- * `guren check --docs` failing until the model lands is the intended
- * "implementation missing" signal.
+ * A model that does not exist yet is prefilled as given: ADR-first flows write
+ * the decision before the code, and `guren check --docs` failing until the
+ * model lands is the intended "implementation missing" signal.
  */
 async function resolveAdrPrefill(entity: string, moduleName?: string): Promise<AdrPrefill> {
   if (!ENTITY_NAME_RE.test(entity)) {
@@ -122,10 +113,9 @@ async function resolveAdrPrefill(entity: string, moduleName?: string): Promise<A
 }
 
 /**
- * The actor is written into a double-quoted YAML scalar, so only what
- * could break that scalar is rejected — quotes, backslashes, newlines.
- * Shape questions (OKF §7) are `guren check --docs`'s to warn about,
- * and git author names are not ASCII, so no character allowlist here.
+ * Written into a double-quoted YAML scalar, so only what breaks that scalar is
+ * rejected. No allowlist: git author names are not ASCII, and OKF §7 shape is
+ * `guren check --docs`'s to warn about.
  */
 const ACTOR_RE = /^[^"\\\r\n]+$/
 

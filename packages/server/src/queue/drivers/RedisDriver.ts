@@ -1,42 +1,19 @@
 import type { Redis } from 'ioredis'
 import type { QueueDriver, QueuedJob, FailedJob } from '../types'
 
-/**
- * Options for RedisDriver.
- */
 export interface RedisDriverOptions {
-  /**
-   * Key prefix for queue keys.
-   * @default 'queue:'
-   */
+  /** @default 'queue:' */
   prefix?: string
 
-  /**
-   * Visibility timeout in milliseconds.
-   * Jobs reserved longer than this will be released.
-   * @default 60000
-   */
+  /** Jobs reserved longer than this are released. Milliseconds. @default 60000 */
   visibilityTimeout?: number
 }
 
 /**
- * Redis-backed queue driver for production.
- *
- * Uses the following Redis structures:
- * - `{prefix}{queue}:pending` - Sorted Set (score = availableAt timestamp)
- * - `{prefix}{queue}:reserved` - Sorted Set (score = timeout timestamp)
- * - `{prefix}{queue}:failed` - List of failed job IDs
- * - `{prefix}job:{id}` - Hash containing job data
- *
- * @example
- * ```ts
- * import { createRedisClient } from '@guren/server/redis'
- * import { RedisDriver, setQueueDriver } from '@guren/server/queue'
- *
- * const redis = createRedisClient({ url: process.env.REDIS_URL })
- * const driver = new RedisDriver(redis)
- * setQueueDriver(driver)
- * ```
+ * Redis-backed queue driver for production. Key layout:
+ * `{prefix}{queue}:pending` Sorted Set (score = availableAt),
+ * `{prefix}{queue}:reserved` Sorted Set (score = timeout),
+ * `{prefix}{queue}:failed` List of job IDs, `{prefix}job:{id}` Hash of job data.
  */
 export class RedisDriver implements QueueDriver {
   private readonly prefix: string
@@ -66,9 +43,6 @@ export class RedisDriver implements QueueDriver {
     return `${this.prefix}job:${id}`
   }
 
-  /**
-   * Push a job onto the queue.
-   */
   async push(job: QueuedJob): Promise<void> {
     const jobData = {
       id: job.id,
@@ -87,16 +61,11 @@ export class RedisDriver implements QueueDriver {
     await pipeline.exec()
   }
 
-  /**
-   * Pop the next available job from the queue.
-   */
   async pop(queue: string): Promise<QueuedJob | null> {
     const now = Date.now()
 
-    // First, release any jobs that have exceeded visibility timeout
     await this.releaseTimedOutJobs(queue)
 
-    // Get the next available job
     const jobIds = await this.redis.zrangebyscore(
       this.pendingKey(queue),
       '-inf',
@@ -112,24 +81,19 @@ export class RedisDriver implements QueueDriver {
 
     const jobId = jobIds[0]
 
-    // Move from pending to reserved atomically
     const removed = await this.redis.zrem(this.pendingKey(queue), jobId)
     if (removed === 0) {
       // Another worker got it
       return null
     }
 
-    // Add to reserved set with timeout
     const timeout = now + this.visibilityTimeout
     await this.redis.zadd(this.reservedKey(queue), timeout, jobId)
 
-    // Update job data
     await this.redis.hset(this.jobKey(jobId), 'reservedAt', new Date().toISOString())
 
-    // Fetch job data
     const jobData = await this.redis.hgetall(this.jobKey(jobId))
     if (!jobData || !jobData.id) {
-      // Job data missing, remove from reserved
       await this.redis.zrem(this.reservedKey(queue), jobId)
       return null
     }
@@ -137,13 +101,9 @@ export class RedisDriver implements QueueDriver {
     return this.parseJobData(jobData)
   }
 
-  /**
-   * Release jobs that have exceeded visibility timeout.
-   */
   private async releaseTimedOutJobs(queue: string): Promise<void> {
     const now = Date.now()
 
-    // Get timed out jobs
     const timedOutIds = await this.redis.zrangebyscore(
       this.reservedKey(queue),
       '-inf',
@@ -151,7 +111,6 @@ export class RedisDriver implements QueueDriver {
     )
 
     for (const jobId of timedOutIds) {
-      // Move back to pending
       const removed = await this.redis.zrem(this.reservedKey(queue), jobId)
       if (removed > 0) {
         await this.redis.zadd(this.pendingKey(queue), now, jobId)
@@ -160,16 +119,11 @@ export class RedisDriver implements QueueDriver {
     }
   }
 
-  /**
-   * Release a job back onto the queue.
-   */
   async release(job: QueuedJob, delayMs: number = 0): Promise<void> {
     const availableAt = Date.now() + delayMs
 
-    // Remove from reserved
     await this.redis.zrem(this.reservedKey(job.queue), job.id)
 
-    // Update job data
     const updates: Record<string, string> = {
       attempts: String(job.attempts),
       availableAt: new Date(availableAt).toISOString(),
@@ -180,13 +134,9 @@ export class RedisDriver implements QueueDriver {
     await this.redis.hset(this.jobKey(job.id), updates)
     await this.redis.hdel(this.jobKey(job.id), 'reservedAt')
 
-    // Add back to pending
     await this.redis.zadd(this.pendingKey(job.queue), availableAt, job.id)
   }
 
-  /**
-   * Delete a job from the queue.
-   */
   async delete(jobId: string): Promise<void> {
     const jobData = await this.redis.hgetall(this.jobKey(jobId))
     if (jobData && jobData.queue) {
@@ -200,11 +150,7 @@ export class RedisDriver implements QueueDriver {
     }
   }
 
-  /**
-   * Mark a job as failed.
-   */
   async fail(job: QueuedJob, error: Error): Promise<void> {
-    // Update job with failure info
     const failedData = {
       failedAt: new Date().toISOString(),
       error: error.message,
@@ -212,30 +158,22 @@ export class RedisDriver implements QueueDriver {
     }
     await this.redis.hset(this.jobKey(job.id), failedData)
 
-    // Remove from reserved, add to failed list
     const pipeline = this.redis.pipeline()
     pipeline.zrem(this.reservedKey(job.queue), job.id)
     pipeline.lpush(this.failedKey(job.queue), job.id)
     await pipeline.exec()
   }
 
-  /**
-   * Get the number of jobs in a queue.
-   */
   async size(queue: string): Promise<number> {
     return this.redis.zcard(this.pendingKey(queue))
   }
 
-  /**
-   * Get failed jobs.
-   */
   async getFailedJobs(queue?: string): Promise<FailedJob[]> {
     const jobs: FailedJob[] = []
 
     if (queue) {
       jobs.push(...(await this.getFailedJobsForQueue(queue)))
     } else {
-      // Get all queues with failed jobs
       const pattern = `${this.prefix}*:failed`
       let cursor = '0'
       const queueKeys: string[] = []
@@ -275,9 +213,6 @@ export class RedisDriver implements QueueDriver {
     return jobs
   }
 
-  /**
-   * Retry a failed job.
-   */
   async retryFailedJob(jobId: string): Promise<void> {
     const jobData = await this.redis.hgetall(this.jobKey(jobId))
     if (!jobData || !jobData.queue) {
@@ -286,10 +221,8 @@ export class RedisDriver implements QueueDriver {
 
     const queue = jobData.queue
 
-    // Remove from failed list
     await this.redis.lrem(this.failedKey(queue), 1, jobId)
 
-    // Reset job data
     const now = new Date()
     await this.redis.hset(this.jobKey(jobId), {
       attempts: '0',
@@ -298,13 +231,9 @@ export class RedisDriver implements QueueDriver {
     })
     await this.redis.hdel(this.jobKey(jobId), 'reservedAt', 'failedAt', 'error', 'stack', 'lastError')
 
-    // Add to pending
     await this.redis.zadd(this.pendingKey(queue), now.getTime(), jobId)
   }
 
-  /**
-   * Delete a failed job.
-   */
   async deleteFailedJob(jobId: string): Promise<void> {
     const jobData = await this.redis.hgetall(this.jobKey(jobId))
     if (jobData && jobData.queue) {
@@ -313,9 +242,7 @@ export class RedisDriver implements QueueDriver {
     await this.redis.del(this.jobKey(jobId))
   }
 
-  /**
-   * Clear all jobs (for testing).
-   */
+  /** Testing only. */
   async clear(): Promise<void> {
     const pattern = this.prefix + '*'
     let cursor = '0'
@@ -332,9 +259,6 @@ export class RedisDriver implements QueueDriver {
     }
   }
 
-  /**
-   * Parse job data from Redis hash.
-   */
   private parseJobData(data: Record<string, string>): QueuedJob {
     return {
       id: data.id,
