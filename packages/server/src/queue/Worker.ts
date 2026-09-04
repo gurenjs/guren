@@ -1,52 +1,20 @@
 import type { QueueDriver, QueuedJob, WorkerOptions } from './types'
 import { getJob, type JobClass } from './Job'
 
-/**
- * Worker events.
- */
 export interface WorkerEvents {
-  /**
-   * Emitted when a job is processed successfully.
-   */
   jobProcessed?: (job: QueuedJob) => void
 
-  /**
-   * Emitted when a job fails (but may retry).
-   */
+  /** Emitted on a failure that may still retry. */
   jobFailed?: (job: QueuedJob, error: Error, willRetry: boolean) => void
 
-  /**
-   * Emitted when the worker starts.
-   */
   workerStarted?: () => void
 
-  /**
-   * Emitted when the worker stops.
-   */
   workerStopped?: () => void
 }
 
 /**
- * Queue worker that processes jobs.
- *
- * @example
- * ```ts
- * import { Worker, MemoryDriver, setQueueDriver } from '@guren/server/queue'
- *
- * const driver = new MemoryDriver()
- * setQueueDriver(driver)
- *
- * const worker = new Worker(driver, {
- *   queues: ['default', 'emails'],
- *   sleep: 1000,
- * })
- *
- * // Start processing
- * await worker.start()
- *
- * // Stop gracefully
- * await worker.stop()
- * ```
+ * Pulls jobs off a driver's queues in priority order and runs each under a
+ * timeout, retrying through `driver.release()`.
  */
 export class Worker {
   private running = false
@@ -71,9 +39,6 @@ export class Worker {
     this.stopWhenEmpty = options.stopWhenEmpty ?? false
   }
 
-  /**
-   * Start the worker.
-   */
   async start(): Promise<void> {
     if (this.running) {
       return
@@ -86,7 +51,6 @@ export class Worker {
     this.events.workerStarted?.()
 
     while (!this.shouldStop) {
-      // Check max jobs limit
       if (this.maxJobs > 0 && this.processedJobs >= this.maxJobs) {
         break
       }
@@ -97,7 +61,6 @@ export class Worker {
         await this.processJob(job)
         this.processedJobs++
       } else {
-        // No jobs available
         if (this.stopWhenEmpty) {
           break
         }
@@ -109,36 +72,23 @@ export class Worker {
     this.events.workerStopped?.()
   }
 
-  /**
-   * Stop the worker gracefully.
-   */
   async stop(): Promise<void> {
     this.shouldStop = true
 
-    // Wait for current job to finish (with timeout)
     const startWait = Date.now()
     while (this.running && this.currentJob && Date.now() - startWait < this.timeout) {
       await this.sleepMs(100)
     }
   }
 
-  /**
-   * Check if the worker is running.
-   */
   isRunning(): boolean {
     return this.running
   }
 
-  /**
-   * Get the number of processed jobs.
-   */
   getProcessedJobsCount(): number {
     return this.processedJobs
   }
 
-  /**
-   * Get the next available job from the queues.
-   */
   private async getNextJob(): Promise<QueuedJob | null> {
     for (const queue of this.queues) {
       const job = await this.driver.pop(queue)
@@ -149,9 +99,6 @@ export class Worker {
     return null
   }
 
-  /**
-   * Process a single job.
-   */
   private async processJob(job: QueuedJob): Promise<void> {
     this.currentJob = job
     job.attempts++
@@ -165,16 +112,13 @@ export class Worker {
     }
 
     try {
-      // Create job instance
       const instance = new JobClass()
 
-      // Execute with timeout
       await this.executeWithTimeout(
         async () => instance.handle(job.payload),
         this.timeout
       )
 
-      // Job completed successfully
       await this.driver.delete(job.id)
       this.events.jobProcessed?.(job)
     } catch (error) {
@@ -184,9 +128,6 @@ export class Worker {
     }
   }
 
-  /**
-   * Handle a failed job.
-   */
   private async handleFailedJob(
     job: QueuedJob,
     error: Error,
@@ -201,10 +142,8 @@ export class Worker {
       job.lastError = error.message
       await this.driver.release(job, delay)
     } else {
-      // Max attempts reached, move to failed
       await this.driver.fail(job, error)
 
-      // Call the failed handler if defined
       try {
         const instance = new JobClass()
         if (instance.failed) {
@@ -230,9 +169,6 @@ export class Worker {
     this.events.jobFailed?.(job, error, willRetry)
   }
 
-  /**
-   * Execute a function with a timeout.
-   */
   private async executeWithTimeout<T>(
     fn: () => Promise<T>,
     timeoutMs: number
@@ -254,17 +190,12 @@ export class Worker {
     })
   }
 
-  /**
-   * Sleep for a given number of milliseconds.
-   */
   private sleepMs(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms))
   }
 }
 
-/**
- * Process a single job (for testing or one-off execution).
- */
+/** Process one job without a running worker, for tests and one-off execution. */
 export async function processJob(
   driver: QueueDriver,
   queue: string = 'default'
