@@ -8,6 +8,7 @@ import {
   isEmailVerified,
   requireVerifiedEmail,
   MemoryEmailVerificationStore,
+  type EmailVerificationToken,
 } from '../../src/auth/email-verification'
 
 process.env.APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
@@ -23,13 +24,13 @@ describe('MemoryEmailVerificationStore', () => {
   it('stores and retrieves tokens', async () => {
     const token = {
       email: 'test@example.com',
-      tokenId: 'hashed-token',
+      tokenId: 'token-id',
       expiresAt: new Date(Date.now() + 3600000),
       createdAt: new Date(),
     }
 
     await store.store(token)
-    const found = await store.findByTokenId('hashed-token')
+    const found = await store.findByTokenId('token-id')
 
     expect(found).toEqual(token)
   })
@@ -39,17 +40,17 @@ describe('MemoryEmailVerificationStore', () => {
     expect(found).toBeNull()
   })
 
-  it('deletes tokens by hashed token', async () => {
+  it('deletes tokens by token id', async () => {
     const token = {
       email: 'test@example.com',
-      tokenId: 'hashed-token',
+      tokenId: 'token-id',
       expiresAt: new Date(Date.now() + 3600000),
       createdAt: new Date(),
     }
 
     await store.store(token)
-    await store.delete('hashed-token')
-    const found = await store.findByTokenId('hashed-token')
+    await store.delete('token-id')
+    const found = await store.findByTokenId('token-id')
 
     expect(found).toBeNull()
   })
@@ -180,6 +181,19 @@ describe('verifyEmailToken', () => {
   it('returns null for tampered token', async () => {
     const { token } = await createEmailVerificationToken('user@example.com', store)
     expect(await verifyEmailToken(`${token}x`, store)).toBeNull()
+  })
+
+  // Rejecting a bad signature must not touch the store. An implementation that
+  // read the id out of the payload and deleted it before checking the HMAC
+  // would still return null here, so asserting only the null lets an
+  // unauthenticated request revoke someone else's live token.
+  it('leaves the record intact when the signature does not verify', async () => {
+    const { token } = await createEmailVerificationToken('user@example.com', store)
+
+    expect(await verifyEmailToken(`${token}x`, store)).toBeNull()
+
+    expect(store.size).toBe(1)
+    expect(await verifyEmailToken(token, store)).toBe('user@example.com')
   })
 
   it('returns null for expired token', async () => {
@@ -414,5 +428,80 @@ describe('requireVerifiedEmail', () => {
     await middleware(ctx, vi.fn())
 
     expect(ctx.redirect).toHaveBeenCalled()
+  })
+})
+
+// `MemoryEmailVerificationStore` already hands back whatever it holds, expired
+// or not. Subclassed only to reach the stored record, so a test can move its
+// `expiresAt` after issuance: the `exp` claim signed into the token is the one
+// authority on expiry, and the store's copy is there for the store's own
+// housekeeping.
+class LenientEmailVerificationStore extends MemoryEmailVerificationStore {
+  last: EmailVerificationToken | null = null
+
+  async store(token: EmailVerificationToken): Promise<void> {
+    await super.store(token)
+    this.last = token
+  }
+
+  only(): EmailVerificationToken {
+    if (!this.last) throw new Error('store is empty')
+    return this.last
+  }
+}
+
+describe('expiry is decided by the signed token, not the store record', () => {
+  let store: LenientEmailVerificationStore
+
+  beforeEach(() => {
+    store = new LenientEmailVerificationStore()
+  })
+
+  it('accepts an unexpired token whose store record claims to be expired', async () => {
+    const { token } = await createEmailVerificationToken('user@example.com', store)
+    store.only().expiresAt = new Date(Date.now() - 60_000)
+
+    expect(await verifyEmailToken(token, store)).toBe('user@example.com')
+  })
+
+  // The store is what makes a token revocable. A verify that trusted the signed
+  // claim alone would report a deleted token as valid.
+  it('rejects a live token whose record was revoked', async () => {
+    const { token } = await createEmailVerificationToken('user@example.com', store)
+    await store.delete(store.only().tokenId)
+
+    expect(await verifyEmailToken(token, store)).toBeNull()
+  })
+
+  it('rejects a token whose stored email no longer matches the signed one', async () => {
+    const { token } = await createEmailVerificationToken('user@example.com', store)
+    store.only().email = 'attacker@example.com'
+
+    expect(await verifyEmailToken(token, store)).toBeNull()
+  })
+
+  it('rejects an expired token whose store record claims to be live', async () => {
+    const { token } = await createEmailVerificationToken('user@example.com', store, {
+      expiresIn: -2000,
+    })
+    store.only().expiresAt = new Date(Date.now() + 60_000)
+
+    expect(await verifyEmailToken(token, store)).toBeNull()
+    expect(store.size).toBe(0)
+  })
+
+  it('completeEmailVerification applies the same rule', async () => {
+    const markVerified = vi.fn().mockResolvedValue({ verified: true })
+
+    const live = await createEmailVerificationToken('user@example.com', store)
+    store.only().expiresAt = new Date(Date.now() - 60_000)
+    expect(await completeEmailVerification(live.token, store, markVerified)).toEqual({ verified: true })
+
+    const expired = await createEmailVerificationToken('user@example.com', store, { expiresIn: -2000 })
+    store.only().expiresAt = new Date(Date.now() + 60_000)
+    expect(await completeEmailVerification(expired.token, store, markVerified)).toBeNull()
+
+    expect(markVerified).toHaveBeenCalledTimes(1)
+    expect(store.size).toBe(0)
   })
 })

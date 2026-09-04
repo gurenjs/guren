@@ -17,6 +17,9 @@ export type { ViewOptions } from './mvc/view'
 // Content rendering (RFC 0014): the component types app View files annotate
 // with, and the asset resolver their Layouts link stylesheets through.
 export type { FC, PropsWithChildren } from 'hono/jsx'
+// The status type `RateLimitOptions.statusCode` carries, re-exported so an
+// app naming it does not have to import from hono directly.
+export type { ContentfulStatusCode } from 'hono/utils/http-status'
 export { viteAsset } from './http/vite-assets'
 export type { ViteAssetOptions } from './http/vite-assets'
 export { Router } from './mvc/Router'
@@ -765,6 +768,7 @@ export type {
   SSEMiddlewareOptions,
   AuthMiddlewareOptions,
   BroadcastableEvent,
+  MemoryDriverOptions as BroadcastMemoryDriverOptions,
   RedisClient as BroadcastRedisClient,
   RedisDriverOptions as BroadcastRedisDriverOptions,
 } from './broadcasting'

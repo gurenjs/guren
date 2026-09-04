@@ -78,8 +78,8 @@ interface RateLimitOptions {
   /** 制限時のエラーメッセージ（デフォルト: 'Too many requests...'） */
   message?: string
 
-  /** 制限時のHTTPステータスコード（デフォルト: 429） */
-  statusCode?: number
+  /** 制限時のHTTPステータスコード（デフォルト: 429）。`@guren/core` から再エクスポートされている `ContentfulStatusCode` 型です */
+  statusCode?: ContentfulStatusCode
 
   /** レート制限キーのプレフィックス（デフォルト: 'rl:'） */
   keyPrefix?: string

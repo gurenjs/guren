@@ -7,7 +7,13 @@ import { applyDocumentDisposition } from './static-documents'
 declare const Bun: any
 
 const DEFAULT_CACHE_CONTROL = 'public, max-age=31536000, immutable'
-const DEFAULT_EXTENSIONS = ['.svg', '.png', '.jpg', '.jpeg', '.gif', '.ico', '.webp', '.avif', '.webmanifest', '.txt'] as const
+/**
+ * The root-asset extensions served when `rootPublicAssets.extensions` is
+ * omitted. Exported because the option *replaces* this list rather than
+ * extending it — an app that wants one more extension spreads this rather
+ * than restating it, so additions here reach it.
+ */
+export const DEFAULT_ROOT_PUBLIC_ASSET_EXTENSIONS = ['.svg', '.png', '.jpg', '.jpeg', '.gif', '.ico', '.webp', '.avif', '.webmanifest', '.txt'] as const
 const DEFAULT_CONTENT_TYPES: Record<string, string> = {
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
@@ -132,7 +138,7 @@ function normalizeConfig(config?: RootPublicAssetsConfig): NormalizedConfig | un
 
   if (config === undefined || config === true) {
     return {
-      extensions: new Set(DEFAULT_EXTENSIONS),
+      extensions: new Set(DEFAULT_ROOT_PUBLIC_ASSET_EXTENSIONS),
       cacheControlHeader: DEFAULT_CACHE_CONTROL,
       inlineDocuments: false,
     }
@@ -145,7 +151,7 @@ function normalizeConfig(config?: RootPublicAssetsConfig): NormalizedConfig | un
   }
 
   const extensions = new Set(
-    (config.extensions && config.extensions.length > 0 ? config.extensions : DEFAULT_EXTENSIONS).map((ext) =>
+    (config.extensions && config.extensions.length > 0 ? config.extensions : DEFAULT_ROOT_PUBLIC_ASSET_EXTENSIONS).map((ext) =>
       normalizeExtension(ext),
     ),
   )

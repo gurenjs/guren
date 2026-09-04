@@ -1,11 +1,12 @@
 # パスワードリセットガイド
 
-Guren はトークン生成、検証、有効期限を備えたセキュアなパスワードリセットシステムを提供します。トークンはセキュリティのため、保存前にハッシュ化されます。
+Guren はトークン生成、検証、有効期限を備えたセキュアなパスワードリセットシステムを提供します。トークンは保存されず署名されます。ストアに渡るのは不透明なトークン ID だけです。
 
 ## コアコンセプト
 
 - **PasswordResetTokenStore** – パスワードリセットトークンを保存するためのインターフェース。
-- **トークンハッシュ化** – トークンは保存前にSHA-256/SHA-512でハッシュ化される。
+- **署名済みトークン** – トークンは `APP_KEY` から導出した鍵で署名され、自身の有効期限を持つ。保存されるのは不透明なトークン ID のみ。
+- **有効期限の判断はひとつ** – 検証はトークンに署名された有効期限を読む。ストアには、そのトークン ID がまだ存在するかだけを問い合わせる。
 - **自動クリーンアップ** – 新しいトークン作成時に同じメールの既存トークンが無効化される。
 - **有効期限** – トークンは設定可能な時間後に期限切れになる（デフォルト: 1時間）。
 
@@ -228,26 +229,27 @@ import { passwordResets } from '@/db/schema'
 import { eq, lt } from 'drizzle-orm'
 
 export class DatabasePasswordResetStore implements PasswordResetTokenStore {
-  async store(tokenHash: string, email: string, expiresAt: Date): Promise<void> {
+  async store(tokenId: string, email: string, expiresAt: Date): Promise<void> {
     await db.insert(passwordResets).values({
-      tokenHash,
+      tokenId,
       email,
       expiresAt,
       createdAt: new Date(),
     })
   }
 
-  async find(tokenHash: string): Promise<{ email: string; expiresAt: Date } | null> {
+  async find(tokenId: string): Promise<{ email: string; expiresAt: Date } | null> {
     const result = await db.select()
       .from(passwordResets)
-      .where(eq(passwordResets.tokenHash, tokenHash))
+      .where(eq(passwordResets.tokenId, tokenId))
       .limit(1)
 
     if (!result[0]) return null
 
-    // 期限切れかチェック
+    // ここは掃除のためだけ。有効期限はトークンに署名されたクレームで判定されるため、
+    // 期限切れの行を返してもリセットリンクが延命されることはない。
     if (result[0].expiresAt < new Date()) {
-      await this.delete(tokenHash)
+      await this.delete(tokenId)
       return null
     }
 
@@ -257,9 +259,9 @@ export class DatabasePasswordResetStore implements PasswordResetTokenStore {
     }
   }
 
-  async delete(tokenHash: string): Promise<void> {
+  async delete(tokenId: string): Promise<void> {
     await db.delete(passwordResets)
-      .where(eq(passwordResets.tokenHash, tokenHash))
+      .where(eq(passwordResets.tokenId, tokenId))
   }
 
   async deleteForEmail(email: string): Promise<void> {
@@ -282,12 +284,14 @@ export class DatabasePasswordResetStore implements PasswordResetTokenStore {
 import { pgTable, text, timestamp } from '@guren/orm/drizzle/pg'
 
 export const passwordResets = pgTable('password_resets', {
-  tokenHash: text('token_hash').primaryKey(),
+  tokenId: text('token_id').primaryKey(),
   email: text('email').notNull(),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 ```
+
+物理カラム名は自由に決められます。決まっているのはストアのメソッドシグネチャだけです。以前のこのガイドでは、ストアがトークンのハッシュを保持していた頃の名前 `token_hash` を使っていました。すでにそのカラムがある場合は、移行せずそのまま `tokenId` に対応づけてください。
 
 ## 設定
 
@@ -297,8 +301,6 @@ export const passwordResets = pgTable('password_resets', {
 interface PasswordResetConfig {
   /** トークン有効期限（ミリ秒、デフォルト: 1時間） */
   expiresIn?: number
-  /** ハッシュアルゴリズム（デフォルト: 'sha256'） */
-  hashAlgorithm?: 'sha256' | 'sha512'
   /** エンコード前のトークンバイト長（デフォルト: 32） */
   tokenLength?: number
 }
@@ -306,10 +308,11 @@ interface PasswordResetConfig {
 // カスタム設定の例
 const { token } = await createPasswordResetToken(email, store, {
   expiresIn: 30 * 60 * 1000, // 30分
-  hashAlgorithm: 'sha512',
   tokenLength: 64,
 })
 ```
+
+設定はトークン発行時に適用されます。`createPasswordResetToken` は有効期限をトークン自体に署名して埋め込むため、`verifyPasswordResetToken` と `completePasswordReset` は設定を受け取りません。有効期限はトークンの署名済みクレームから読み取られ、ストアには「そのトークン ID がまだ存在するか」だけを問い合わせます。`expiresIn` を変更しても影響するのはそれ以降に発行するトークンだけで、送信済みのリンクには及びません。署名鍵は `APP_KEY` から導出されます。
 
 ## テスト
 

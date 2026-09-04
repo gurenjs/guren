@@ -1,9 +1,13 @@
 import type { Authenticatable, UserProvider } from './types'
 import { generateId, buildTokenUrl, parseTokenUrl } from './utils'
+import { readSignedTokenClaims } from './signed-token'
 import { MessageSigner } from '../encryption/MessageSigner'
 import { deriveAppKeyring, getAppKeyringFromEnv } from '../encryption/app-key'
 
-/** Configuration for password reset tokens. */
+/**
+ * Configuration for password reset tokens. Applies at issuance only: the expiry
+ * is signed into the token, so the verify functions take no config.
+ */
 export interface PasswordResetConfig {
   /** Token expiration time in milliseconds (default: 1 hour) */
   expiresIn?: number
@@ -11,11 +15,15 @@ export interface PasswordResetConfig {
   tokenLength?: number
 }
 
-/** Storage interface for password reset tokens. */
+/**
+ * Storage interface for password reset tokens. The store answers whether a
+ * token ID still exists, which is what gives single use and revocation; expiry
+ * is decided from the claim signed into the token.
+ */
 export interface PasswordResetTokenStore {
   /** Store a token ID with associated email and expiration */
   store(tokenId: string, email: string, expiresAt: Date): Promise<void>
-  /** Find email by token ID, returns null if not found or expired */
+  /** Find email by token ID, returns null if not found or already dropped */
   find(tokenId: string): Promise<{ email: string; expiresAt: Date } | null>
   /** Delete a token ID from storage */
   delete(tokenId: string): Promise<void>
@@ -108,33 +116,25 @@ export async function createPasswordResetToken(
   return { token, tokenId, expiresAt }
 }
 
-/**
- * Verify a password reset token, returning the email it was issued for.
- *
- * @param config - Must match the `createPasswordResetToken` config.
- */
+/** Verify a password reset token, returning the email it was issued for. */
 export async function verifyPasswordResetToken(
   token: string,
   store: PasswordResetTokenStore,
-  _config: PasswordResetConfig = {},
 ): Promise<string | null> {
-  const signer = createPasswordResetSigner()
-  const payload = signer.verify<{ id?: string; email?: string }>(token, {
-    purpose: PASSWORD_RESET_PURPOSE,
-    allowExpired: true,
-  })
-  if (!payload?.id || !payload.email) {
-    return null
-  }
+  const claims = await readSignedTokenClaims(
+    createPasswordResetSigner(),
+    token,
+    PASSWORD_RESET_PURPOSE,
+    store,
+  )
+  if (!claims) return null
 
-  if (typeof payload.exp === 'number' && payload.exp < Math.floor(Date.now() / 1000)) {
-    await store.delete(payload.id)
-    return null
-  }
-
-  const record = await store.find(payload.id)
+  const record = await store.find(claims.id)
   if (!record) return null
-  return record.email.toLowerCase() === payload.email.toLowerCase() ? record.email : null
+
+  // Cross-check the two independently-authenticated sources: the signer
+  // vouched for claims.email, the store holds record.email of its own.
+  return record.email.toLowerCase() === claims.email.toLowerCase() ? record.email : null
 }
 
 /**
@@ -147,40 +147,33 @@ export async function completePasswordReset<T extends Authenticatable>(
   store: PasswordResetTokenStore,
   provider: UserProvider<T>,
   updatePassword: (user: T, password: string) => Promise<void>,
-  _config: PasswordResetConfig = {},
 ): Promise<T | null> {
-  const signer = createPasswordResetSigner()
-  const payload = signer.verify<{ id?: string; email?: string }>(token, {
-    purpose: PASSWORD_RESET_PURPOSE,
-    allowExpired: true,
-  })
-  if (!payload?.id || !payload.email) {
-    return null
-  }
+  const claims = await readSignedTokenClaims(
+    createPasswordResetSigner(),
+    token,
+    PASSWORD_RESET_PURPOSE,
+    store,
+  )
+  if (!claims) return null
 
-  if (typeof payload.exp === 'number' && payload.exp < Math.floor(Date.now() / 1000)) {
-    await store.delete(payload.id)
-    return null
-  }
-
-  const record = await store.find(payload.id)
+  const record = await store.find(claims.id)
   if (!record) return null
 
   // Cross-check the two independently-authenticated sources: the signer
-  // vouched for payload.email, the store holds record.email of its own.
-  if (record.email.toLowerCase() !== payload.email.toLowerCase()) {
+  // vouched for claims.email, the store holds record.email of its own.
+  if (record.email.toLowerCase() !== claims.email.toLowerCase()) {
     return null
   }
 
   const user = await provider.retrieveByCredentials({ email: record.email })
   if (!user) {
-    await store.delete(payload.id)
+    await store.delete(claims.id)
     return null
   }
 
   await updatePassword(user, newPassword)
 
-  await store.delete(payload.id)
+  await store.delete(claims.id)
 
   return user
 }

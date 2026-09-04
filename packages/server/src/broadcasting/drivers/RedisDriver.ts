@@ -34,8 +34,6 @@ export class RedisDriver implements PresenceBroadcastDriver {
 
   protected presencePrefix: string = 'broadcasting:presence:'
 
-  protected initialized: boolean = false
-
   constructor(
     redis: RedisClient,
     options: RedisDriverOptions = {}
@@ -70,8 +68,6 @@ export class RedisDriver implements PresenceBroadcastDriver {
         console.error(`Error parsing broadcast message:`, error)
       }
     })
-
-    this.initialized = true
   }
 
   async publish(channel: string, event: string, data: unknown): Promise<void> {
