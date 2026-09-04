@@ -91,6 +91,11 @@ export interface QueueDriver {
 
   /**
    * Release a job back onto the queue (for retry).
+   *
+   * The driver owns the delay. A driver with nothing to wait in (`SyncDriver`)
+   * may run the job again immediately, so callers must not assume time has
+   * passed once this resolves.
+   *
    * @param job - The job to release
    * @param delayMs - Delay before the job becomes available again
    */

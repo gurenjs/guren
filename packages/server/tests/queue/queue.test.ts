@@ -9,6 +9,7 @@ import {
   getRegisteredJobs,
   resolveJobName,
   MemoryDriver,
+  SyncDriver,
   Worker,
   processJob,
   QueueManager,
@@ -772,5 +773,127 @@ describe('QueueManager', () => {
     const globalDriver = getQueueDriver()
 
     expect(globalDriver).toBe(manager.driver('other'))
+  })
+
+  it('resolves the new default from driver() after setDefaultDriver', () => {
+    const memoryDriver = new MemoryDriver()
+    const otherDriver = new MemoryDriver()
+    const manager = new QueueManager({
+      default: 'memory',
+      drivers: {
+        memory: () => memoryDriver,
+        other: () => otherDriver,
+      },
+    })
+
+    // Resolve the old default first so the instance default, not a fresh
+    // cache, is what the assertions below observe.
+    expect(manager.driver()).toBe(memoryDriver)
+
+    manager.setDefaultDriver('other')
+
+    expect(manager.getDefaultDriverName()).toBe('other')
+    expect(manager.driver()).toBe(otherDriver)
+    expect(getQueueDriver()).toBe(otherDriver)
+  })
+
+  it('publishes an already-resolved driver as the global when it becomes the default', () => {
+    const memoryDriver = new MemoryDriver()
+    const otherDriver = new MemoryDriver()
+    const manager = new QueueManager({
+      default: 'memory',
+      drivers: {
+        memory: () => memoryDriver,
+        other: () => otherDriver,
+      },
+    })
+
+    manager.driver()
+    manager.driver('other') // cached under its name, not yet the global
+    expect(getQueueDriver()).toBe(memoryDriver)
+
+    manager.setDefaultDriver('other')
+
+    expect(getQueueDriver()).toBe(otherDriver)
+  })
+
+  it('rejects an unknown driver without changing the default', () => {
+    const manager = new QueueManager({
+      drivers: { memory: () => new MemoryDriver() },
+    })
+
+    expect(() => manager.setDefaultDriver('unknown')).toThrow('Queue driver not found: unknown')
+    expect(manager.getDefaultDriverName()).toBe('memory')
+  })
+})
+
+describe('SyncDriver', () => {
+  let driver: SyncDriver
+
+  beforeEach(() => {
+    driver = new SyncDriver()
+    setQueueDriver(driver)
+    clearJobRegistry()
+  })
+
+  function queuedJob(name: string) {
+    return {
+      id: 'job-1',
+      name,
+      payload: {},
+      queue: 'default',
+      attempts: 1,
+      maxAttempts: 3,
+      availableAt: new Date(),
+      createdAt: new Date(),
+      reservedAt: null,
+    }
+  }
+
+  it('runs the job inline on dispatch and surfaces the failure from dispatch()', async () => {
+    class FailingJob extends Job<void> {
+      async handle() {
+        throw new Error('inline failure')
+      }
+    }
+    registerJob(FailingJob)
+
+    await expect(FailingJob.dispatch(undefined as any)).rejects.toThrow('inline failure')
+
+    const failed = await driver.getFailedJobs()
+    expect(failed).toHaveLength(1)
+    expect(failed[0].attempts).toBe(1)
+  })
+
+  it('release() re-runs the job immediately, ignoring the retry delay', async () => {
+    const ran: number[] = []
+    class RetriedJob extends Job<void> {
+      async handle() {
+        ran.push(Date.now())
+      }
+    }
+    registerJob(RetriedJob)
+
+    const job = queuedJob('RetriedJob')
+    const started = Date.now()
+    await driver.release(job, 5_000)
+
+    expect(ran).toHaveLength(1)
+    expect(ran[0] - started).toBeLessThan(1_000)
+    expect(job.attempts).toBe(2)
+  })
+
+  it('release() rethrows a retry that fails, like push()', async () => {
+    class StillFailingJob extends Job<void> {
+      async handle() {
+        throw new Error('still failing')
+      }
+    }
+    registerJob(StillFailingJob)
+
+    await expect(driver.release(queuedJob('StillFailingJob'), 5_000)).rejects.toThrow(
+      'still failing'
+    )
+    expect(await driver.getFailedJobs()).toHaveLength(1)
   })
 })

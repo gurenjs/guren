@@ -7,6 +7,9 @@ import { getJob } from '../Job'
  * semantics stay identical to a real queue, but failures surface right away
  * and nothing needs a second process.
  *
+ * Because nothing waits in a sync queue, retry backoff is not honored:
+ * `release()` re-runs the job immediately whatever `delayMs` it is handed.
+ *
  * @example
  * ```ts
  * const queue = createQueueManager({
@@ -41,8 +44,17 @@ export class SyncDriver implements QueueDriver {
     return null
   }
 
-  async release(job: QueuedJob): Promise<void> {
-    // Re-run immediately: releasing back to a sync queue means retrying now.
+  /**
+   * Re-run the job now, ignoring `delayMs`.
+   *
+   * There is no queue to wait in: the job runs inline in the process that
+   * released it, so honoring a backoff (2s, 4s, 8s under the default
+   * exponential strategy) would block that caller for the full delay, and a
+   * detached timer would move the failure off the call that surfaces it. Sync
+   * mode therefore retries immediately; a failure fails the job and rethrows,
+   * exactly as `push()` does.
+   */
+  async release(job: QueuedJob, _delayMs?: number): Promise<void> {
     await this.push(job)
   }
 

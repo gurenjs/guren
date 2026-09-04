@@ -48,7 +48,7 @@ export interface QueueConfig {
  * ```
  */
 export class QueueManager {
-  private readonly defaultDriver: string
+  private defaultDriver: string
   private readonly driverFactories: Map<string, QueueDriverFactory> = new Map()
   private readonly resolvedDrivers: Map<string, QueueDriver> = new Map()
 
@@ -124,14 +124,19 @@ export class QueueManager {
 
   /**
    * Set the default driver and update global driver.
+   *
+   * After this call `driver()` with no argument and `getDefaultDriverName()`
+   * both answer with the new driver, and `Job.dispatch()` goes to it.
    */
   setDefaultDriver(name: string): void {
     if (!this.driverFactories.has(name)) {
       throw new Error(`Queue driver not found: ${name}`)
     }
 
-    const driver = this.driver(name)
-    setQueueDriver(driver)
+    this.defaultDriver = name
+    // driver() only publishes the global on first resolution; a driver that was
+    // already resolved by name would otherwise stay off the global slot.
+    setQueueDriver(this.driver(name))
   }
 }
 

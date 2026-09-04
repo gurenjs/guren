@@ -195,7 +195,8 @@ export class Worker {
     const willRetry = job.attempts < job.maxAttempts
 
     if (willRetry) {
-      // Calculate retry delay
+      // The driver owns the wait: a queue-backed driver makes the job available
+      // after `delay`, while SyncDriver re-runs it before release() resolves.
       const delay = JobClass.calculateRetryDelay(job.attempts)
       job.lastError = error.message
       await this.driver.release(job, delay)
