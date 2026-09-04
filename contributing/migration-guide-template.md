@@ -38,17 +38,17 @@ Brief list of new features (link to docs for details).
 
 ## Upgrade Steps
 
-1. Update dependencies:
+1. Preview the upgrade -- dependency changes and any applicable codemods, without writing:
+   ```bash
+   bunx guren upgrade --canary --dry-run
+   ```
+2. Apply it -- this updates the `@guren/*` dependency ranges and runs the codemods:
    ```bash
    bunx guren upgrade --canary
    ```
-2. Run doctor to check for issues:
+3. Run doctor to check for remaining issues:
    ```bash
    bunx guren doctor
-   ```
-3. Run codemods (if any):
-   ```bash
-   bunx guren upgrade --canary --check-only
    ```
 4. Verify:
    ```bash
