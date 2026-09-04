@@ -1,5 +1,6 @@
 import { getAuthContext } from './context'
 import { generateId, buildTokenUrl, parseTokenUrl } from './utils'
+import { readSignedTokenClaims } from './signed-token'
 import { MessageSigner } from '../encryption/MessageSigner'
 import { deriveAppKeyring, getAppKeyringFromEnv } from '../encryption/app-key'
 
@@ -14,7 +15,11 @@ export interface EmailVerificationToken {
   createdAt: Date
 }
 
-/** Store interface for email verification tokens. */
+/**
+ * Store interface for email verification tokens. The store answers whether a
+ * token ID still exists, which is what gives single use and revocation; expiry
+ * is decided from the claim signed into the token.
+ */
 export interface EmailVerificationTokenStore {
   /** Store a new verification token. */
   store(token: EmailVerificationToken): Promise<void>
@@ -65,7 +70,10 @@ export class MemoryEmailVerificationStore implements EmailVerificationTokenStore
   }
 }
 
-/** Configuration options for email verification. */
+/**
+ * Configuration options for email verification. Applies at issuance only: the
+ * expiry is signed into the token, so the verify functions take no config.
+ */
 export interface EmailVerificationConfig {
   /**
    * Token expiration time in milliseconds.
@@ -148,34 +156,21 @@ export async function createEmailVerificationToken(
 export async function verifyEmailToken(
   token: string,
   store: EmailVerificationTokenStore,
-  _config: EmailVerificationConfig = {}
 ): Promise<string | null> {
-  const signer = createEmailVerificationSigner()
-  const payload = signer.verify<{ id?: string; email?: string }>(token, {
-    purpose: EMAIL_VERIFICATION_PURPOSE,
-    allowExpired: true,
-  })
-  if (!payload?.id || !payload.email) {
-    return null
-  }
+  const claims = await readSignedTokenClaims(
+    createEmailVerificationSigner(),
+    token,
+    EMAIL_VERIFICATION_PURPOSE,
+    store,
+  )
+  if (!claims) return null
 
-  if (typeof payload.exp === 'number' && payload.exp < Math.floor(Date.now() / 1000)) {
-    await store.delete(payload.id)
-    return null
-  }
+  const storedToken = await store.findByTokenId(claims.id)
+  if (!storedToken) return null
 
-  const storedToken = await store.findByTokenId(payload.id)
-
-  if (!storedToken) {
-    return null
-  }
-
-  if (new Date() > storedToken.expiresAt) {
-    await store.delete(payload.id)
-    return null
-  }
-
-  return storedToken.email.toLowerCase() === payload.email.toLowerCase()
+  // Cross-check the two independently-authenticated sources: the signer
+  // vouched for claims.email, the store holds storedToken.email of its own.
+  return storedToken.email.toLowerCase() === claims.email.toLowerCase()
     ? storedToken.email
     : null
 }
@@ -189,40 +184,26 @@ export async function completeEmailVerification<T>(
   store: EmailVerificationTokenStore,
   markVerified: (email: string) => Promise<T>
 ): Promise<T | null> {
-  const signer = createEmailVerificationSigner()
-  const payload = signer.verify<{ id?: string; email?: string }>(token, {
-    purpose: EMAIL_VERIFICATION_PURPOSE,
-    allowExpired: true,
-  })
-  if (!payload?.id || !payload.email) {
-    return null
-  }
+  const claims = await readSignedTokenClaims(
+    createEmailVerificationSigner(),
+    token,
+    EMAIL_VERIFICATION_PURPOSE,
+    store,
+  )
+  if (!claims) return null
 
-  if (typeof payload.exp === 'number' && payload.exp < Math.floor(Date.now() / 1000)) {
-    await store.delete(payload.id)
-    return null
-  }
-
-  const storedToken = await store.findByTokenId(payload.id)
-
-  if (!storedToken) {
-    return null
-  }
-
-  if (new Date() > storedToken.expiresAt) {
-    await store.delete(payload.id)
-    return null
-  }
+  const storedToken = await store.findByTokenId(claims.id)
+  if (!storedToken) return null
 
   // Cross-check the two independently-authenticated sources: the signer
-  // vouched for payload.email, the store holds storedToken.email of its own.
-  if (storedToken.email.toLowerCase() !== payload.email.toLowerCase()) {
+  // vouched for claims.email, the store holds storedToken.email of its own.
+  if (storedToken.email.toLowerCase() !== claims.email.toLowerCase()) {
     return null
   }
 
   const result = await markVerified(storedToken.email)
 
-  await store.delete(payload.id)
+  await store.delete(claims.id)
 
   return result
 }

@@ -44,7 +44,7 @@ describe('Job', () => {
       class EmailJob extends Job<{ email: string }> {
         static queue = 'emails'
         static maxAttempts = 5
-        static backoff: 'linear' = 'linear'
+        static backoff = 'linear' as const
 
         handle() {}
       }
@@ -121,7 +121,7 @@ describe('Job', () => {
   describe('calculateRetryDelay', () => {
     it('calculates exponential backoff', () => {
       class TestJob extends Job<void> {
-        static backoff: 'exponential' = 'exponential'
+        static backoff = 'exponential' as const
         handle() {}
       }
 
@@ -132,7 +132,7 @@ describe('Job', () => {
 
     it('calculates linear backoff', () => {
       class TestJob extends Job<void> {
-        static backoff: 'linear' = 'linear'
+        static backoff = 'linear' as const
         handle() {}
       }
 

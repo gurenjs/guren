@@ -23,7 +23,7 @@ class FakeRedis {
 
   // Real hgetall answers a missing key with an empty hash, not null.
   async hgetall(key: string): Promise<Record<string, string>> {
-    return { ...(this.hashes.get(key) ?? {}) }
+    return { ...this.hashes.get(key) }
   }
 
   async set(key: string, value: string) {

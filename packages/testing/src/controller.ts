@@ -7,13 +7,6 @@ import {
   type RequestUploads,
 } from '@guren/server/internal/request'
 
-const HTML_ENTITIES: Record<string, string> = {
-  '<': '\\u003c',
-  '>': '\\u003e',
-  '&': '&amp;',
-  '"': '&quot;',
-}
-
 const HTML_DECODE_ENTITIES: Record<string, string> = {
   '&quot;': '"',
   '&amp;': '&',
@@ -532,7 +525,7 @@ export function createControllerModuleMock() {
         ...init,
         headers: {
           'Content-Type': 'application/json; charset=utf-8',
-          ...(init.headers ?? {}),
+          ...init.headers,
         },
       })
     }
@@ -546,7 +539,7 @@ export function createControllerModuleMock() {
         ...init,
         headers: {
           'Content-Type': 'application/json; charset=utf-8',
-          ...(init.headers ?? {}),
+          ...init.headers,
         },
       })
     }

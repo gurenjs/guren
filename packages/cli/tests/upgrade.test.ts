@@ -3,8 +3,8 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { createTempWorkspace, type TempWorkspace } from './helpers'
 import { upgradeCanary, checkVersionCompatibility } from '../src/upgrade'
-import { findApplicableCodemods, compareVersions, codemods, type Codemod } from '../src/codemods'
-import { checkDeprecations, deprecations } from '../src/deprecations'
+import { findApplicableCodemods, runCodemods, compareVersions, codemods, type Codemod } from '../src/codemods'
+import { checkDeprecations } from '../src/deprecations'
 
 describe('upgradeCanary', () => {
   let workspace: TempWorkspace
@@ -543,6 +543,97 @@ describe('findApplicableCodemods', () => {
     } finally {
       codemods.splice(codemods.indexOf(testCodemods[0]), 1)
       codemods.splice(codemods.indexOf(testCodemods[1]), 1)
+    }
+  })
+})
+
+// The registry is empty on purpose — contributing/deprecation-policy.md names
+// it as where a breaking change's codemod goes. Nothing exercised the runner
+// while it stayed empty, so a registered codemod is pushed here to prove the
+// path `guren upgrade` wires still detects, previews, and applies.
+describe('runCodemods', () => {
+  function register(codemod: Codemod): () => void {
+    codemods.push(codemod)
+    return () => {
+      codemods.splice(codemods.indexOf(codemod), 1)
+    }
+  }
+
+  it('applies a registered codemod whose detect() finds files', async () => {
+    const applied: string[] = []
+    const unregister = register({
+      id: 'test-apply',
+      description: 'Applies',
+      fromVersion: '1.0.0',
+      toVersion: '2.0.0',
+      async detect(cwd) { return [join(cwd, 'a.ts'), join(cwd, 'b.ts')] },
+      async apply(cwd) { applied.push(cwd); return 2 },
+    })
+
+    try {
+      const results = await runCodemods('/app', '1.0.0', '2.0.0')
+
+      expect(applied).toEqual(['/app'])
+      expect(results).toEqual([
+        { id: 'test-apply', description: 'Applies', status: 'applied', filesAffected: 2 },
+      ])
+    } finally {
+      unregister()
+    }
+  })
+
+  it('reports a codemod as pending under dryRun without applying it', async () => {
+    let applyCalls = 0
+    const unregister = register({
+      id: 'test-dry',
+      description: 'Dry',
+      fromVersion: '1.0.0',
+      toVersion: '2.0.0',
+      async detect(cwd) { return [join(cwd, 'a.ts')] },
+      async apply() { applyCalls += 1; return 1 },
+    })
+
+    try {
+      const results = await runCodemods('/app', '1.0.0', '2.0.0', { dryRun: true })
+
+      expect(applyCalls).toBe(0)
+      expect(results).toEqual([
+        { id: 'test-dry', description: 'Dry', status: 'pending', filesAffected: 1, files: ['/app/a.ts'] },
+      ])
+    } finally {
+      unregister()
+    }
+  })
+
+  it('skips a codemod whose detect() finds nothing, and one outside the version range', async () => {
+    let applyCalls = 0
+    const unregisterEmpty = register({
+      id: 'test-empty',
+      description: 'Empty',
+      fromVersion: '1.0.0',
+      toVersion: '2.0.0',
+      async detect() { return [] },
+      async apply() { applyCalls += 1; return 0 },
+    })
+    const unregisterOutside = register({
+      id: 'test-outside',
+      description: 'Outside',
+      fromVersion: '0.1.0',
+      toVersion: '0.2.0',
+      async detect(cwd) { return [join(cwd, 'a.ts')] },
+      async apply() { applyCalls += 1; return 1 },
+    })
+
+    try {
+      const results = await runCodemods('/app', '1.0.0', '2.0.0')
+
+      expect(applyCalls).toBe(0)
+      expect(results).toEqual([
+        { id: 'test-empty', description: 'Empty', status: 'skipped', filesAffected: 0 },
+      ])
+    } finally {
+      unregisterEmpty()
+      unregisterOutside()
     }
   })
 })

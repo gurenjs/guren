@@ -227,7 +227,6 @@ describe('tool:dev', () => {
 
     // The default is a placeholder that matches no record, rather than a
     // plausible id a policy might silently resolve.
-    await writeFile(join(appDir, 'src/main.ts'), MAIN_WITH_PLUGIN)
     const fallback = await runToolDev({ appRoot: appDir, port: ANY_PORT })
     expect(fallback.userId).toBe('tool-dev')
   })

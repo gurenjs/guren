@@ -9,7 +9,6 @@ import {
   discoverValidatorFiles,
   discoverPolicyFiles,
   classNameFromPath,
-  fileExists,
   directoryExists,
   excludeBarrelFiles,
 } from './discovery'

@@ -61,6 +61,8 @@
     "test:testing": "bun run --cwd packages/testing test",
     "test:examples": "bun run --cwd examples/blog test && bun run --cwd examples/api test && bun run --cwd web test",
     "test": "bun run test:bun && bun run test:examples",
+    "lint": "oxlint --deny-warnings",
+    "lint:fix": "oxlint --deny-warnings --fix",
     "typecheck": "tsc --noEmit && bun run typecheck:build-configs && bun run typecheck:scaffold-templates && bun run typecheck:blog && bun run typecheck:api",
     "typecheck:build-configs": "bun run ./scripts/check-build-configs.ts",
     "typecheck:scaffold-templates": "bun run --cwd packages/cli typecheck:templates",
@@ -86,9 +88,11 @@
     "@babel/types": "^7.29.0",
     "@changesets/cli": "^2.31.1",
     "bun-types": "^1.4.0",
+    "oxlint": "1.81.0",
+    "oxlint-tsgolint": "7.0.2001",
     "typescript": "^7.0.2",
-    "vitest": "^3.2.7",
     "vite": "^8.2.0",
+    "vitest": "^3.2.7",
     "zod": "^4.5.4"
   },
   "overrides": {

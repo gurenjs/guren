@@ -36,6 +36,7 @@ export { Channel, PrivateChannel, PresenceChannel } from './channels'
 export {
   MemoryDriver,
   RedisDriver,
+  type MemoryDriverOptions,
   type RedisClient,
   type RedisDriverOptions,
 } from './drivers'

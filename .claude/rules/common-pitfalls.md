@@ -17,7 +17,7 @@ Lessons learned from code review cycles. Check these before submitting changes.
 
 ## CI Environment
 
-- **Never use `bunx guren` in CI.** The `guren` package is not on npm. Use `bun packages/cli/src/bin.ts` directly.
+- **Never use `bunx guren` in CI.** The `guren` package is not on npm. Use `bun packages/cli/src/bin.ts` directly. A smoke's `['bunx', 'guren', …]` passes locally only because the temp app's `file:` link to packages/cli happens to provide a `.bin/guren` — the link CI cannot be trusted to have. `audit:workspace-scripts` covers three scopes: workspace `package.json` scripts, spawn shapes under `scripts/**/*.ts` (argv arrays, `$` shell templates, `exec`/`spawn` calls), and command lines in `scripts/**/*.sh`. It does **not** read `.github/workflows/*.yml` shell steps or `packages/*/src`, so the rule is wider than the gate there.
 - **Vite route-types plugin resolves `@guren/cli/bin` and spawns it with `bun` directly** (no `bunx guren`, which 404s in this monorepo). It still skips generation when `process.env.CI` is set — CI runs codegen as its own step, and watcher-triggered regeneration during E2E would be nondeterministic.
 - **E2E webServer in CI uses `bun run e2e:server`** — not `bun run dev` (triggers codegen) and not `bun run dev:server` (runs under `bun --hot`, so the server would reload mid-test if anything touched a watched file).
 - **`bun run --cwd` with `bunx` can resolve from npm instead of local.** Use `cd dir && bun ...` or direct paths.
@@ -94,3 +94,9 @@ Lessons learned from code review cycles. Check these before submitting changes.
 - **Use `storageState` for authenticated tests** — login once in setup, share session across all tests.
 - **Avoid asserting specific post titles in lists** — pagination may push them off page 1.
 - **Use `page.waitForLoadState('networkidle')` after Inertia navigations** in CI.
+
+## Lint
+
+- **`bun run lint` is oxlint with type-aware rules, and it needs Node on PATH.** The `oxlint` bin is a Node shim (`#!/usr/bin/env node`), and JS plugins go through Node's module loader — which is also why `scripts/lint/await-async-assertion.js` is JavaScript: a `.ts` plugin fails to load. Type information comes from `oxlint-tsgolint` (typescript-go), the only type-aware linter that runs on the `typescript` 7 this repo pins; typescript-eslint needs the JavaScript compiler API that package no longer ships.
+- **`typescript/no-floating-promises` cannot see a bare `expect(...).rejects` on a `bun:test` file.** bun-types declares `rejects: Matchers<unknown>` and `toThrow(): void`, so the promise the matcher returns is typed away and the rule stays quiet; 22 such assertions shipped before one was noticed (#656). oxlint's `jest/valid-expect` is syntactic but only recognises `expect` imported from jest or vitest, not from `bun:test`. `guren/await-async-assertion`, a JS plugin under `scripts/lint/`, is the syntactic and import-agnostic rule that closes the gap. The same lie cuts the other way: `typescript/await-thenable` would flag every *correctly* awaited `bun:test` assertion (281 at the time), so it stays off.
+- **The dangerous auto-fixer rewrites rest-sibling destructuring.** `oxlint --fix-dangerously` turned `const { dependencies, devDependencies, peerDependencies, ...rest } = manifest` into `const { devDependencies, ...rest } = manifest`, which changes what `rest` holds. `no-unused-vars` runs with `ignoreRestSiblings: true` so those names are never reported, and `bun run lint:fix` applies only the safe fixes.

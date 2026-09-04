@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import {
   TestResponse,
   TestRequestBuilder,
-  TestClient,
   TestApp,
   createTestClient,
   FakeQueue,
@@ -39,7 +38,7 @@ describe('TestResponse', () => {
         ...init,
         headers: {
           'Content-Type': 'application/json',
-          ...(init.headers as Record<string, string> ?? {}),
+          ...(init.headers as Record<string, string> | undefined),
         },
       })
     )
@@ -1051,6 +1050,10 @@ describe('FakeEvent', () => {
 
       const recorded = manager.getEventsOf(UserRegistered)
       expect(recorded).toHaveLength(1)
+
+      // ...and the listener never ran: a fake that invoked listeners would
+      // run real side effects from inside a test.
+      expect(received).toBeNull()
     })
 
     it('tracks listeners', () => {

@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises'
-import type { Statement, Expression, ClassDeclaration, ClassBody, ClassProperty, CallExpression, Node, ObjectProperty } from '@babel/types'
+import type { Statement, Expression, ClassDeclaration, ClassBody, ClassProperty, CallExpression, Node, ObjectProperty, TSPropertySignature } from '@babel/types'
 import { literalString, memberKeyName, objectLiteral, unwrapTypeAssertion } from './ast-walk'
 import { extractDocsTags } from './docs-index'
 import { discoverModelFiles, toPosixRelative, moduleNameFromRelPath } from './discovery'
@@ -78,7 +78,7 @@ export function parseModelSource(source: string, filePath: string): ModelInfo | 
   const className = classDecl.id.name
   const { tableName, usesAuth, hasSoftDeletes } = analyzeClassHeader(classDecl, source)
   const bodyRelationships = extractRelationshipsFromBody(classDecl.body, source)
-  const callRelationships = extractRelationshipsFromCalls(ast.program.body, className, source)
+  const callRelationships = extractRelationshipsFromCalls(ast.program.body, className)
 
   const relationships = mergeRelationships(bodyRelationships, callRelationships)
 
@@ -408,7 +408,7 @@ function extractRelationshipsFromBody(body: ClassBody, source: string): ModelRel
 }
 
 function extractRelationType(
-  prop: any,
+  prop: TSPropertySignature,
   source: string,
 ): { type: ModelRelationship['type']; model?: string } | null {
   const typeAnn = prop.typeAnnotation?.typeAnnotation
@@ -444,7 +444,6 @@ function extractRelationType(
 function extractRelationshipsFromCalls(
   body: Statement[],
   className: string,
-  _source: string,
 ): ModelRelationship[] {
   const relationships: ModelRelationship[] = []
   const relMethods = new Set(['belongsTo', 'hasMany', 'hasOne', 'belongsToMany', 'hasManyThrough', 'morphMany', 'morphTo'])

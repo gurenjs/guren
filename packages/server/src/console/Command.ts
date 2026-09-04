@@ -97,15 +97,12 @@ export abstract class Command implements CommandInstance {
   }
 
   async ask(question: string, defaultValue?: string): Promise<string> {
-    const rl = this.createReadline()
-    const prompt = defaultValue ? `${question} [${defaultValue}]: ` : `${question}: `
+    const answer = await this.prompt(
+      defaultValue ? `${question} [${defaultValue}]: ` : `${question}: `,
+      { mask: false }
+    )
 
-    return new Promise((resolve) => {
-      rl.question(prompt, (answer) => {
-        rl.close()
-        resolve(answer || defaultValue || '')
-      })
-    })
+    return answer || defaultValue || ''
   }
 
   async confirm(question: string, defaultValue = false): Promise<boolean> {
@@ -140,35 +137,102 @@ export abstract class Command implements CommandInstance {
     return choices[0]
   }
 
-  /** Ask for secret input (password). */
+  /**
+   * Ask for secret input (password).
+   *
+   * Rejects when input ends with nothing typed: unlike the other prompts there
+   * is no safe default for a password.
+   */
   async secret(question: string): Promise<string> {
+    const answer = await this.prompt(`${question}: `, { mask: true })
+
+    if (answer === null) {
+      throw new Error(`Input closed before "${question}" was answered`)
+    }
+
+    return answer
+  }
+
+  /**
+   * Run one readline prompt to completion. Settles exactly once, and tears the
+   * interface, the mask listener and raw mode down on every exit path, so a
+   * later prompt starts clean.
+   *
+   * Returns null when input ended with nothing typed. Callers decide what that
+   * means; leaving it unanswered would hang them forever.
+   */
+  private prompt(prompt: string, options: { mask: boolean }): Promise<string | null> {
+    const stdin = this.inputStream()
+    const stdout = this.outputStream()
     const rl = this.createReadline()
+    const hideInput = options.mask && stdin.isTTY === true
 
     return new Promise((resolve) => {
-      const stdin = process.stdin
-      if (stdin.isTTY) {
-        rl.question(`${question}: `, (answer) => {
-          rl.close()
-          this.newLine()
-          resolve(answer)
-        })
+      let settled = false
 
-        stdin.on('data', () => {
-          process.stdout.write('\x1B[2K\x1B[200D' + question + ': ' + '*'.repeat(rl.line.length))
-        })
-      } else {
-        rl.question(`${question}: `, (answer) => {
-          rl.close()
-          resolve(answer)
-        })
+      // Overwrites the line readline just echoed, so it has to target the same
+      // stream readline writes to. The settled check is load-bearing:
+      // EventEmitter snapshots its listener array before dispatch, so the `off`
+      // in finish() cannot stop a mask call already scheduled in the same
+      // 'data' emit — the newline ending the prompt would repaint an empty mask.
+      const mask = (): void => {
+        if (settled) return
+        stdout.write('\x1B[2K\x1B[200D' + prompt + '*'.repeat(rl.line.length))
       }
+
+      const finish = (): void => {
+        settled = true
+        stdin.off('data', mask)
+        rl.close()
+        if (hideInput && typeof stdin.setRawMode === 'function') {
+          stdin.setRawMode(false)
+        }
+      }
+
+      if (hideInput) {
+        stdin.on('data', mask)
+      }
+
+      // Input can end without a trailing newline, and Bun's readline then
+      // closes without ever delivering a line.
+      rl.once('close', () => {
+        if (settled) return
+        const buffered = rl.line
+        finish()
+        if (hideInput && buffered) {
+          this.newLine()
+        }
+        resolve(buffered || null)
+      })
+
+      rl.question(prompt, (answer) => {
+        if (settled) return
+        finish()
+        if (hideInput) {
+          this.newLine()
+        }
+        resolve(answer)
+      })
     })
+  }
+
+  /** The stream prompts read from. Overridable so a test can hand the command a fake terminal. */
+  protected inputStream(): NodeJS.ReadStream {
+    return process.stdin
+  }
+
+  /**
+   * The stream prompts are echoed to. Derived from the output `setOutput()`
+   * installed, so redirecting a command's output redirects its prompts too.
+   */
+  protected outputStream(): NodeJS.WriteStream {
+    return this.output?.stream?.() ?? process.stdout
   }
 
   protected createReadline(): readline.Interface {
     return readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
+      input: this.inputStream(),
+      output: this.outputStream(),
     })
   }
 

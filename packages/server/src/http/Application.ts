@@ -518,7 +518,7 @@ export class Application {
     // So requireAuthenticated/requireGuest work for apps that wire sessions
     // manually, without the auth option.
     if (!this.authManager.guardNames().length) {
-      this.authManager.registerGuard('web', ({ ctx, session, manager }) => {
+      this.authManager.registerGuard('web', ({ session, manager }) => {
         // Without a 'users' provider this guard always answers unauthenticated.
         let provider: any
         try { provider = manager.getProvider('users') } catch {
@@ -701,7 +701,7 @@ export class Application {
       return
     }
 
-    provider.register?.()
+    await provider.register?.()
     await provider.boot?.()
   }
 

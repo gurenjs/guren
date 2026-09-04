@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test'
-import { mkdtemp, rm, mkdir, writeFile, readFile, access } from 'node:fs/promises'
+import { mkdtemp, rm, mkdir, writeFile, access } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createConsolaStub } from './helpers'

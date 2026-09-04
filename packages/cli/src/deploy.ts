@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import { basename, resolve } from 'node:path'
 import { assertCwdUnsupported, kebabCase, writeScaffoldFiles, type WriterOptions } from './utils'
 

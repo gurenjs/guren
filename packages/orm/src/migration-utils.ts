@@ -79,6 +79,7 @@ const PRE_CONNECTION_ERROR_CODES = new Set([
 
 interface CauseLike {
   code?: unknown
+  errno?: unknown
   message?: unknown
   syscall?: unknown
 }
@@ -107,9 +108,34 @@ function collectCauses(error: unknown, seen = new Set<unknown>()): CauseLike[] {
   return [error as CauseLike, ...nested.flatMap((child) => collectCauses(child, seen))]
 }
 
-/** True when the failure means the database server was never reached. */
-export function isConnectionFailure(error: unknown): boolean {
-  return collectCauses(error).some(failedWhileConnecting)
+export type TrackerDialect = 'postgres' | 'mysql' | 'sqlite'
+
+/**
+ * Each driver's own signal for "that table does not exist", read off the
+ * driver error rather than the wrapper drizzle puts around it.
+ */
+const MISSING_TABLE: Record<TrackerDialect, (cause: CauseLike) => boolean> = {
+  // 42P01 undefined_table. A fresh database has no `drizzle` schema either,
+  // and measured against Postgres 17 the qualified read reports 42P01 for
+  // that too rather than 3F000 — pinned by the integration test. A denied
+  // read (42501) and a drifted tracker column (42703) are not this code.
+  postgres: (cause) => cause.code === '42P01',
+  // ER_NO_SUCH_TABLE: mysql2 puts the symbol on `code` and the number on `errno`.
+  mysql: (cause) => cause.code === 'ER_NO_SUCH_TABLE' || cause.errno === 1146,
+  // bun:sqlite reports every statement error as SQLITE_ERROR, so the message
+  // is the only thing separating a missing table from a broken one.
+  sqlite: (cause) => typeof cause.message === 'string' && /no such table/i.test(cause.message),
+}
+
+/**
+ * True when a query against the drizzle migration tracker failed because the
+ * tracker table does not exist yet — the one failure `migrationStatus()` may
+ * read as "nothing applied". Anything else (a denied SELECT, a tracker whose
+ * columns drifted, a broken `drizzle` schema) has to surface: reported as
+ * all-pending it invites a re-run of migrations that were applied.
+ */
+export function isMissingTrackerTable(error: unknown, dialect: TrackerDialect): boolean {
+  return collectCauses(error).some(MISSING_TABLE[dialect])
 }
 
 /**

@@ -3,7 +3,7 @@ import { ServiceProvider } from '../container/ServiceProvider'
 import { createI18n, type I18nManager, type TranslationMessages } from '../i18n'
 import { detectLocaleMiddleware, getRequestLocale } from '../http/middleware/detect-locale'
 import { shareInertiaProps } from '../mvc/inertia/shared'
-import type { Application, I18nPluginOptions } from '../http/Application'
+import type { Application } from '../http/Application'
 
 /**
  * Shape of the `_i18n` Inertia shared prop (unless `i18n.share` is `false`),

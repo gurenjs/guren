@@ -1,12 +1,13 @@
 # メール確認ガイド
 
-Guren はトークン生成、検証、有効期限を備えたセキュアなメール確認システムを提供します。トークンはセキュリティのため、保存前にハッシュ化されます。
+Guren はトークン生成、検証、有効期限を備えたセキュアなメール確認システムを提供します。トークンは保存されず署名されます。ストアに渡るのは不透明なトークン ID だけです。
 
 ## コアコンセプト
 
 - **EmailVerificationTokenStore** – メール確認トークンを保存するためのインターフェース。
-- **トークンハッシュ化** – トークンは保存前にSHA-256でハッシュ化される。
-- **平文は保存しない** – トークンはハッシュのみ保存。
+- **署名済みトークン** – トークンは `APP_KEY` から導出した鍵で署名され、自身の有効期限を持つ。
+- **平文は保存しない** – 保存されるのは不透明なトークン ID だけで、トークン自体は保存しない。
+- **有効期限の判断はひとつ** – 検証はトークンに署名された有効期限を読む。ストアには、そのトークン ID がまだ存在するかだけを問い合わせる。
 - **一度きりの使用** – トークンは確認成功後に削除される。
 - **有効期限** – トークンは設定可能な時間後に期限切れになる（デフォルト: 24時間）。
 
@@ -264,32 +265,32 @@ import { eq } from 'drizzle-orm'
 export class DatabaseEmailVerificationStore implements EmailVerificationTokenStore {
   async store(token: EmailVerificationToken): Promise<void> {
     await db.insert(emailVerifications).values({
-      hashedToken: token.hashedToken,
+      tokenId: token.tokenId,
       email: token.email,
       expiresAt: token.expiresAt,
       createdAt: token.createdAt,
     })
   }
 
-  async findByHashedToken(hashedToken: string): Promise<EmailVerificationToken | null> {
+  async findByTokenId(tokenId: string): Promise<EmailVerificationToken | null> {
     const result = await db.select()
       .from(emailVerifications)
-      .where(eq(emailVerifications.hashedToken, hashedToken))
+      .where(eq(emailVerifications.tokenId, tokenId))
       .limit(1)
 
     if (!result[0]) return null
 
     return {
       email: result[0].email,
-      hashedToken: result[0].hashedToken,
+      tokenId: result[0].tokenId,
       expiresAt: result[0].expiresAt,
       createdAt: result[0].createdAt,
     }
   }
 
-  async delete(hashedToken: string): Promise<void> {
+  async delete(tokenId: string): Promise<void> {
     await db.delete(emailVerifications)
-      .where(eq(emailVerifications.hashedToken, hashedToken))
+      .where(eq(emailVerifications.tokenId, tokenId))
   }
 
   async deleteForEmail(email: string): Promise<void> {
@@ -306,7 +307,7 @@ export class DatabaseEmailVerificationStore implements EmailVerificationTokenSto
 import { pgTable, text, timestamp } from '@guren/orm/drizzle/pg'
 
 export const emailVerifications = pgTable('email_verifications', {
-  hashedToken: text('hashed_token').primaryKey(),
+  tokenId: text('token_id').primaryKey(),
   email: text('email').notNull(),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -320,6 +321,8 @@ export const users = pgTable('users', {
   // ... その他のフィールド
 })
 ```
+
+物理カラム名は自由に決められます。決まっているのはストアのメソッドシグネチャだけです。以前のこのガイドでは、ストアがトークンのハッシュを保持していた頃の名前 `hashed_token` を使っていました。すでにそのカラムがある場合は、移行せずそのまま `tokenId` に対応づけてください。
 
 ## 設定
 
@@ -339,6 +342,8 @@ const { token } = await createEmailVerificationToken(email, store, {
   tokenLength: 64,
 })
 ```
+
+設定はトークン発行時に適用されます。`createEmailVerificationToken` は有効期限をトークン自体に署名して埋め込むため、`verifyEmailToken` と `completeEmailVerification` は設定を受け取りません。有効期限はトークンの署名済みクレームから読み取られ、ストアには「そのトークン ID がまだ存在するか」だけを問い合わせます。`expiresIn` を変更しても影響するのはそれ以降に発行するトークンだけで、送信済みのリンクには及びません。署名鍵は `APP_KEY` から導出されます。
 
 ## テスト
 

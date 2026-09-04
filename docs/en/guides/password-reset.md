@@ -1,11 +1,12 @@
 # Password Reset Guide
 
-Guren provides a secure password reset system with token generation, verification, and expiration. Tokens are hashed before storage for security.
+Guren provides a secure password reset system with token generation, verification, and expiration. The token is signed rather than stored: only an opaque token id reaches the store.
 
 ## Core Concepts
 
 - **PasswordResetTokenStore** – Interface for storing password reset tokens.
-- **Token Hashing** – Tokens are hashed using SHA-256/SHA-512 before storage.
+- **Signed Tokens** – The token is signed with a key derived from `APP_KEY`, and carries its own expiry. Only an opaque token id is stored.
+- **One Authority on Expiry** – Verification reads the expiry signed into the token; the store is asked only whether the token id still exists.
 - **Automatic Cleanup** – Creating a new token invalidates any existing tokens for the same email.
 - **Expiration** – Tokens expire after a configurable time (default: 1 hour).
 
@@ -228,26 +229,27 @@ import { passwordResets } from '@/db/schema'
 import { eq, lt } from 'drizzle-orm'
 
 export class DatabasePasswordResetStore implements PasswordResetTokenStore {
-  async store(tokenHash: string, email: string, expiresAt: Date): Promise<void> {
+  async store(tokenId: string, email: string, expiresAt: Date): Promise<void> {
     await db.insert(passwordResets).values({
-      tokenHash,
+      tokenId,
       email,
       expiresAt,
       createdAt: new Date(),
     })
   }
 
-  async find(tokenHash: string): Promise<{ email: string; expiresAt: Date } | null> {
+  async find(tokenId: string): Promise<{ email: string; expiresAt: Date } | null> {
     const result = await db.select()
       .from(passwordResets)
-      .where(eq(passwordResets.tokenHash, tokenHash))
+      .where(eq(passwordResets.tokenId, tokenId))
       .limit(1)
 
     if (!result[0]) return null
 
-    // Check if expired
+    // Housekeeping only. Expiry is enforced from the claim signed into the
+    // token, so returning a stale row here would not extend a reset link.
     if (result[0].expiresAt < new Date()) {
-      await this.delete(tokenHash)
+      await this.delete(tokenId)
       return null
     }
 
@@ -257,9 +259,9 @@ export class DatabasePasswordResetStore implements PasswordResetTokenStore {
     }
   }
 
-  async delete(tokenHash: string): Promise<void> {
+  async delete(tokenId: string): Promise<void> {
     await db.delete(passwordResets)
-      .where(eq(passwordResets.tokenHash, tokenHash))
+      .where(eq(passwordResets.tokenId, tokenId))
   }
 
   async deleteForEmail(email: string): Promise<void> {
@@ -282,12 +284,14 @@ export class DatabasePasswordResetStore implements PasswordResetTokenStore {
 import { pgTable, text, timestamp } from '@guren/orm/drizzle/pg'
 
 export const passwordResets = pgTable('password_resets', {
-  tokenHash: text('token_hash').primaryKey(),
+  tokenId: text('token_id').primaryKey(),
   email: text('email').notNull(),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 ```
+
+The physical column name is yours to choose; only the store's method signatures are fixed. An earlier version of this guide called it `token_hash`, from when the store held a hash of the token. If you already have that column, keep it and map it to `tokenId` rather than migrating.
 
 ## Configuration
 
@@ -297,8 +301,6 @@ export const passwordResets = pgTable('password_resets', {
 interface PasswordResetConfig {
   /** Token expiration time in milliseconds (default: 1 hour) */
   expiresIn?: number
-  /** Hash algorithm (default: 'sha256') */
-  hashAlgorithm?: 'sha256' | 'sha512'
   /** Token byte length before encoding (default: 32) */
   tokenLength?: number
 }
@@ -306,10 +308,11 @@ interface PasswordResetConfig {
 // Example with custom configuration
 const { token } = await createPasswordResetToken(email, store, {
   expiresIn: 30 * 60 * 1000, // 30 minutes
-  hashAlgorithm: 'sha512',
   tokenLength: 64,
 })
 ```
+
+The configuration applies when a token is issued. `createPasswordResetToken` signs the expiry into the token itself, so `verifyPasswordResetToken` and `completePasswordReset` take no configuration: expiry is read from the token's signed claim, and the store is only asked whether the token id still exists. Changing `expiresIn` affects tokens issued from then on, not links already sent, and the signing key comes from `APP_KEY`.
 
 ## Testing
 

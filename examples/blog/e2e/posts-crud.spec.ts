@@ -38,7 +38,7 @@ async function createPost(page: Page, title: string, options: { cover?: boolean 
 
   // store() redirects to the show page; click through from the index so callers
   // always get the post's own URL.
-  if (/\/posts$/.test(page.url())) {
+  if (page.url().endsWith('/posts')) {
     await Promise.all([
       page.waitForURL(/\/posts\/\d+$/),
       page.getByRole('link', { name: new RegExp(title) }).click(),

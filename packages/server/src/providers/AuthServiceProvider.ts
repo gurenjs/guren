@@ -53,7 +53,7 @@ export class AuthServiceProvider extends ServiceProvider {
 }
 
 function createDefaultGuardFactory(providerName: string): GuardFactory {
-  return ({ ctx, session, manager }) => {
+  return ({ session, manager }) => {
     const provider = manager.getProvider(providerName)
     return new SessionGuard({
       provider,

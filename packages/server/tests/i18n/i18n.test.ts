@@ -292,19 +292,19 @@ describe('MemoryLoader', () => {
     expect(locales).toEqual(['en', 'ja'])
   })
 
-  it('adds messages', () => {
+  it('adds messages', async () => {
     loader.addMessages('fr', { messages: { hello: 'Bonjour' } })
-    expect(loader.getAvailableLocales()).resolves.toContain('fr')
+    await expect(loader.getAvailableLocales()).resolves.toContain('fr')
   })
 
-  it('removes locale', () => {
+  it('removes locale', async () => {
     loader.removeLocale('ja')
-    expect(loader.getAvailableLocales()).resolves.toEqual(['en'])
+    await expect(loader.getAvailableLocales()).resolves.toEqual(['en'])
   })
 
-  it('clears all messages', () => {
+  it('clears all messages', async () => {
     loader.clear()
-    expect(loader.getAvailableLocales()).resolves.toEqual([])
+    await expect(loader.getAvailableLocales()).resolves.toEqual([])
   })
 })
 

@@ -1,4 +1,4 @@
-import type { TaskDefinition, TaskCallback } from './types'
+import type { TaskDefinition } from './types'
 import { isDue, isDueInTimezone } from './CronParser'
 
 export class ScheduledTask {

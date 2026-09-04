@@ -1,4 +1,4 @@
-export { MemoryDriver } from './MemoryDriver'
+export { MemoryDriver, type MemoryDriverOptions } from './MemoryDriver'
 export {
   RedisDriver,
   type RedisClient,

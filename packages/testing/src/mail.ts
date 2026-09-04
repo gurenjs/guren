@@ -63,7 +63,7 @@ export class FakeMail {
    * Record a mail send.
    */
   record(message: MailMessage): void {
-    this.transport.send(message)
+    void this.transport.send(message)
   }
 
   /**

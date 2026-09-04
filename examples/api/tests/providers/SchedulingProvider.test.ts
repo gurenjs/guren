@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { scheduler, createScheduler } = vi.hoisted(() => ({
+const { createScheduler } = vi.hoisted(() => ({
   scheduler: { schedule: vi.fn() },
   createScheduler: vi.fn(() => ({ schedule: vi.fn() })),
 }))

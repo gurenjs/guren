@@ -34,10 +34,6 @@ export interface ModelUserProviderOptions {
   credentialsPasswordField?: string
 }
 
-type ModelConstructor = typeof Model<PlainObject>
-
-type InferRecord<T extends typeof Model> = Awaited<ReturnType<T['find']>> extends infer R ? (R extends object ? R : PlainObject) : PlainObject
-
 export class ModelUserProvider<User extends Authenticatable = Authenticatable> extends BaseUserProvider<User> {
   private readonly idColumn: string
   private readonly usernameColumn: string

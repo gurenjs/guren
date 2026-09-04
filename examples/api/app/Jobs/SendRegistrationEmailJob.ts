@@ -9,7 +9,7 @@ interface SendRegistrationEmailPayload {
 export class SendRegistrationEmailJob extends Job<SendRegistrationEmailPayload> {
   static override queue = 'emails'
   static override maxAttempts = 3
-  static override backoff: 'exponential' = 'exponential'
+  static override backoff = 'exponential' as const
 
   async handle(payload: SendRegistrationEmailPayload): Promise<void> {
     const user = await User.find(payload.userId)

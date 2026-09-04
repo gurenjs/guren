@@ -173,7 +173,7 @@ describeRedis('Redis Stores (requires REDIS_URL)', () => {
     })
 
     it('stores and retrieves token by hash', async () => {
-      const { token, plainTextToken } = await createApiToken(store, {
+      const { token } = await createApiToken(store, {
         name: 'Test Token',
         userId: 'user-1',
         abilities: ['read', 'write'],

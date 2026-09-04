@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test'
 import { Hono } from 'hono'
-import { createCspMiddleware, getCspNonce, CSP_NONCE_KEY } from './csp'
+import { createCspMiddleware, getCspNonce } from './csp'
 
 function createApp(options?: Parameters<typeof createCspMiddleware>[0]) {
   const app = new Hono()
@@ -100,7 +100,7 @@ describe('createCspMiddleware', () => {
       return c.text('ok')
     })
 
-    app.request('/')
+    void app.request('/')
     // The error is thrown synchronously inside the handler
     expect(threwError).toBe(true)
   })

@@ -1,5 +1,4 @@
 import type { AccessorDefinitions } from './attributes'
-import { applyAccessors } from './attributes'
 import type { PlainObject } from './Model'
 
 /** Serializes a record for JSON output: appends, then visible/hidden filtering. */

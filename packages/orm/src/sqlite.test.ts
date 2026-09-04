@@ -505,3 +505,29 @@ describe('createSqliteDatabase connection-URI filenames', () => {
     }
   })
 })
+
+describe('createSqliteDatabase migrationStatus', () => {
+  test('should surface a broken tracker table instead of calling every migration pending', async () => {
+    // bun:sqlite reports every statement error as SQLITE_ERROR, so a tracker
+    // whose columns drifted looks exactly like a missing one to a catch that
+    // absorbs everything — and "nothing applied" is the answer that gets the
+    // applied migrations re-run.
+    const migrationsDir = join(workDir, 'migrations')
+    const { mkdirSync, writeFileSync } = await import('node:fs')
+    mkdirSync(join(migrationsDir, '20260101000000_init'), { recursive: true })
+    writeFileSync(join(migrationsDir, '20260101000000_init', 'migration.sql'), 'SELECT 1;')
+
+    const dbFile = join(workDir, 'app.db')
+    const { Database } = await import('bun:sqlite')
+    const raw = new Database(dbFile)
+    raw.exec('CREATE TABLE __drizzle_migrations (id integer primary key, hash text not null)')
+    raw.close()
+
+    const database = createSqliteDatabase({ migrationsFolder: migrationsDir, filename: dbFile })
+    try {
+      await expect(database.migrationStatus()).rejects.toThrow(/no such column/)
+    } finally {
+      await database.closeDatabase()
+    }
+  })
+})
