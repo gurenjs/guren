@@ -10,10 +10,9 @@ import { routeDefinitionToContextRoute } from '../src/context-route'
 const handler = () => new Response('ok')
 
 /**
- * The load-bearing half of the agent surface's context integration: the
- * metadata and the authorization capability only reach a `ContextRoute`
- * through a real `Router`, so a hand-built definition would prove nothing
- * about the conversion the MCP tool and the entity bundle both read.
+ * Driven through a real `Router`: the metadata and the authorization
+ * capability only reach a `ContextRoute` that way, so a hand-built definition
+ * would prove nothing about the conversion.
  */
 describe('routeDefinitionToContextRoute — agent metadata', () => {
   it('carries declared agent metadata through verbatim', () => {

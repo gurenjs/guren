@@ -281,7 +281,6 @@ describe('DailyFileChannel', () => {
   it('rotates when date changes', () => {
     const channel = new DailyFileChannel({ driver: 'daily', path: testFile })
 
-    // Log for yesterday
     const yesterday = new Date()
     yesterday.setDate(yesterday.getDate() - 1)
     const yesterdayStr = yesterday.toISOString().split('T')[0]
@@ -293,7 +292,6 @@ describe('DailyFileChannel', () => {
       timestamp: yesterday,
     })
 
-    // Log for today
     const today = new Date()
     const todayStr = today.toISOString().split('T')[0]
 
@@ -316,7 +314,6 @@ describe('DailyFileChannel', () => {
       days: 7,
     })
 
-    // Create old file manually
     fs.mkdirSync(testDir, { recursive: true })
     const oldDate = new Date()
     oldDate.setDate(oldDate.getDate() - 10)
@@ -324,7 +321,7 @@ describe('DailyFileChannel', () => {
     const oldFile = `${testDir}/app-${oldDateStr}.log`
     fs.writeFileSync(oldFile, 'old content')
 
-    // Log today (triggers cleanup)
+    // Logging is what triggers the cleanup.
     channel.log({
       level: 'info',
       message: 'Test message',
@@ -333,7 +330,6 @@ describe('DailyFileChannel', () => {
     })
     channel.close()
 
-    // Old file should be deleted
     expect(fs.existsSync(oldFile)).toBe(false)
   })
 })
@@ -369,7 +365,7 @@ describe('Logger', () => {
     logger.critical('test')
     logger.error('test')
     logger.warning('test')
-    logger.warn('test') // alias
+    logger.warn('test')
     logger.notice('test')
     logger.info('test')
     logger.debug('test')
@@ -445,7 +441,6 @@ describe('Logger', () => {
     const logger = new Logger([failingChannel, successChannel])
     logger.info('Test')
 
-    // Should not throw
     expect(successChannel.log).toHaveBeenCalled()
     errorSpy.mockRestore()
   })

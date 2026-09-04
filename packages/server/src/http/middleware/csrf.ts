@@ -15,35 +15,21 @@ export const XSRF_COOKIE_NAME = 'XSRF-TOKEN'
 export const CSRF_FORM_FIELD = '_token'
 
 export interface CsrfOptions {
-  /**
-   * Routes to exclude from CSRF protection.
-   * Supports exact paths ('/api/webhook') or patterns ('/api/*').
-   */
+  /** Exact paths ('/api/webhook') or patterns ('/api/*'). */
   exclude?: string[]
 
-  /**
-   * Custom error handler when CSRF validation fails.
-   * Defaults to returning a 403 JSON response.
-   */
+  /** Defaults to a 403 JSON response. */
   onError?: (ctx: Context) => Response | Promise<Response>
 
-  /**
-   * HTTP methods that require CSRF token validation.
-   * Defaults to ['POST', 'PUT', 'PATCH', 'DELETE'].
-   */
+  /** Defaults to ['POST', 'PUT', 'PATCH', 'DELETE']. */
   methods?: string[]
 
   /**
-   * Set the CSRF token as an `XSRF-TOKEN` cookie on every response.
-   * This enables Axios/Inertia.js to automatically read the cookie
-   * and send it back as the `X-XSRF-TOKEN` header.
-   * Defaults to true.
+   * Set the token as an `XSRF-TOKEN` cookie, which Axios/Inertia read back into
+   * the `X-XSRF-TOKEN` header. Defaults to true.
    */
   cookie?: boolean
 
-  /**
-   * Cookie options when `cookie` is enabled.
-   */
   cookieOptions?: {
     path?: string
     secure?: boolean
@@ -67,10 +53,8 @@ interface CsrfClaims extends Record<string, unknown> {
   n?: string
 }
 
-// Follows the createXSigner() convention used by email-verification /
-// password-reset / signed-url: derive a purpose-scoped keyring per call
-// (a single HKDF derivation is cheap) and let MessageSigner own the
-// sign/verify/rotation/timing-safe machinery.
+// Same shape as the other createXSigner()s: a purpose-scoped keyring derived
+// per call (one HKDF derivation is cheap), MessageSigner owns the rest.
 function createCsrfSigner(): MessageSigner {
   return new MessageSigner(deriveAppKeyring(getAppKeyringFromEnv(), 'csrf-token'))
 }
@@ -82,13 +66,9 @@ function randomNonce(): string {
 }
 
 /**
- * The session id a token may anchor to, or undefined for a guest request.
- *
- * `Session.willPersist()` is the question being asked — see its definition
- * for why `!isNew` is the wrong predicate. A custom `Session` that predates
- * the method falls back to `!isNew`, which reproduces the pre-fix behaviour
- * for that implementation: its login response mints a guest token that the
- * next request then rejects. Implement `willPersist()` to avoid that.
+ * The session id a token may anchor to, or undefined for a guest request. A
+ * custom `Session` without `willPersist()` falls back to `!isNew`, whose login
+ * response mints a guest token the next request rejects — implement it.
  */
 function bindableSessionId(session: Session | undefined): string | undefined {
   if (!session) {
@@ -117,10 +97,9 @@ function verifiedClaims(token: string): CsrfClaims | null {
 
 /**
  * The one statement of the mode rule, shared by issuing and verification: a
- * bound token is usable only for its own session, a stateless token only
- * while there is no session to bind to. Both callers must agree — a mint
- * that outruns verification locks users out, and a verification looser than
- * minting is a CSRF bypass.
+ * bound token is usable only for its own session, a stateless one only while
+ * there is no session to bind to. A mint that outruns verification locks users
+ * out; a verification looser than minting is a CSRF bypass.
  */
 function claimsUsableFor(claims: CsrfClaims, boundId: string | undefined): boolean {
   if (claims.sid === undefined) {
@@ -143,43 +122,22 @@ function isExcluded(path: string, excludePatterns: string[]): boolean {
 }
 
 /**
- * The MCP endpoint is exempt wherever CSRF is mounted.
- *
- * MCP clients (Claude Code, Cursor) POST JSON-RPC directly and never make a
- * preceding GET to pick up an `XSRF-TOKEN`, so CSRF would make the endpoint
- * unreachable for every client Guren ships config for. Nothing is exempted
- * in production or without `GUREN_MCP=1`, because the route does not exist
- * there; the endpoint enforces its own local-only access guard instead.
+ * MCP clients POST JSON-RPC without a preceding GET, so they never pick up an
+ * `XSRF-TOKEN`. Nothing is exempted in production or without `GUREN_MCP=1` —
+ * the route does not exist there, and the endpoint guards local-only access.
  */
 function isMcpEndpointRequest(path: string): boolean {
   return path === MCP_ENDPOINT_PATH && isMcpEndpointEnabled()
 }
 
 /**
- * A bearer-authenticated request that carries no cookies at all (RFC 0016
- * §3). CSRF defends cookie ambient authority — a browser attaching the
- * victim's cookies to a request the victim never made. A request that
- * authenticates by `Authorization: Bearer` and sends no `Cookie` header has
- * none to attach: the token is the client's own credential, deliberately
- * presented, and a browser cannot strip its cookies from a cross-site
- * request. Agent tool dispatch is the intended caller — it synthesizes
- * cookie-less bearer requests by construction.
- *
- * The predicate is the raw `Cookie` header, deliberately not the loaded
- * session. Ambient authority *requires a cookie*, so the header's absence is
- * proof by itself — independent of where this middleware sits relative to
- * the session mount. A session-based predicate reads as more precise and is
- * weaker on both edges: mounted before the session middleware it sees no
- * session and fails open for a cookie-carrying victim browser, and an
- * intermediate middleware that writes one value into a fresh session turns a
- * genuinely cookie-less client into a 403. Any cookie — even one this app
- * never reads — therefore keeps verification on; a bearer client that wants
- * the skip sends none, which is what every non-browser client does.
- *
+ * A bearer request carrying no cookies at all (RFC 0016 §3). CSRF defends
+ * cookie ambient authority, which *requires a cookie* — so the raw `Cookie`
+ * header's absence is proof by itself, independent of where this middleware
+ * sits relative to the session mount. A session-based predicate would fail open
+ * before that mount and 403 a cookie-less client after an intermediate write.
  * Bearer detection is `hasBearerHeader`, the same predicate
- * `AuthManager.resolveGuardName` routes a request to the token guard by, so
- * this rule and token authentication cannot disagree about what a bearer
- * request is.
+ * `AuthManager.resolveGuardName` routes by, so the two cannot disagree.
  */
 function isBearerRequestWithoutCookies(ctx: Context): boolean {
   if (!hasBearerHeader(ctx)) {
@@ -198,22 +156,11 @@ interface IssuedCsrfToken {
 }
 
 /**
- * Get the request's CSRF token.
- *
- * Signed token bound to the session when a stable one exists, otherwise a
- * stateless signed double-submit token for guests. Nothing is stored
- * server-side, so anonymous page views cost no session writes. A cookie
- * token that is still valid for this request's mode is reused; otherwise a
- * fresh token is minted and set on the response by the middleware.
- *
- * The answer tracks the session as it stands *at the moment of the call*,
- * because a handler can change it: log a user in and the correct token stops
- * being the guest one it would have got a line earlier. A token cached from
- * before that point would be rendered into the response body while the
- * response cookie carried a session-bound one, and `verifyCsrfToken` would
- * then reject the form on submit. So the per-request cache is keyed by the
- * mode it was issued for, and re-issues when the mode moves — which also
- * makes re-reads free, since the common case is that nothing changed.
+ * The request's CSRF token: bound to the session when a stable one exists,
+ * otherwise a stateless signed double-submit token. Nothing is stored
+ * server-side. The per-request cache is keyed by the *mode* it was issued for,
+ * because a handler can log a user in mid-request — a token cached from before
+ * that would be rendered into the body while the cookie carried a bound one.
  */
 export function getCsrfToken(ctx: Context): string {
   const boundId = bindableSessionId(getSessionFromContext(ctx))
@@ -242,30 +189,18 @@ function remember(ctx: Context, token: string, boundId: string | undefined): str
   return token
 }
 
-/**
- * Generate an HTML hidden input field containing the CSRF token.
- */
 export function csrfField(ctx: Context): string {
   const token = getCsrfToken(ctx)
   return `<input type="hidden" name="${CSRF_FORM_FIELD}" value="${token}" />`
 }
 
 /**
- * Verify a request token.
- *
- * The token must first carry a valid app-key signature (proving this server
- * minted it). The mode is then fixed by the request — whether it carries a
- * bindable session — and the token has to be in that mode:
- * - **Session-bound** (request has a session; token must carry a matching
- *   `sid`): immune to cookie injection — a sibling-subdomain attacker can
- *   plant a cookie but cannot know the victim's session id. A stateless
- *   token is rejected here, which is the point: anyone can mint one.
- * - **Stateless** (request has no session, so no `sid`): the token must match the `XSRF-TOKEN`
- *   cookie (double-submit). Guests hold no authenticated state to protect.
- *
- * Legacy fallback: tokens stored in sessions by earlier releases keep
- * verifying against the session until those sessions expire. Remove this
- * branch once all pre-upgrade sessions have aged out (a major release).
+ * The token must carry a valid app-key signature, and be in the mode the
+ * *request* fixes: session-bound needs a matching `sid` (a sibling-subdomain
+ * attacker can plant a cookie but cannot know the session id, and a stateless
+ * token — which anyone can mint — is rejected); stateless must match the
+ * `XSRF-TOKEN` cookie. TODO: drop the legacy session-stored fallback once all
+ * pre-upgrade sessions have aged out (a major release).
  */
 export function verifyCsrfToken(ctx: Context, token: string | undefined): boolean {
   if (!token) {
@@ -274,10 +209,8 @@ export function verifyCsrfToken(ctx: Context, token: string | undefined): boolea
 
   const claims = verifiedClaims(token)
   if (claims && claimsUsableFor(claims, bindableSessionId(getSessionFromContext(ctx)))) {
-    // A bound token is already proven by the session match `claimsUsableFor`
-    // just made. A stateless one proves only that this server minted it —
-    // anyone can get one by visiting the site — so it still has to match the
-    // cookie.
+    // A bound token is proven by the session match above. A stateless one only
+    // proves this server minted it, so it must still match the cookie.
     if (claims.sid !== undefined) {
       return true
     }
@@ -293,19 +226,17 @@ export function verifyCsrfToken(ctx: Context, token: string | undefined): boolea
 }
 
 async function getTokenFromRequest(ctx: Context): Promise<string | undefined> {
-  // Check X-CSRF-TOKEN header
   const headerToken = ctx.req.header(CSRF_HEADER_NAME)
   if (headerToken) {
     return headerToken
   }
 
-  // Check X-XSRF-TOKEN header (sent automatically by Axios from XSRF-TOKEN cookie)
+  // Sent automatically by Axios from the XSRF-TOKEN cookie.
   const xsrfToken = ctx.req.header(XSRF_HEADER_NAME)
   if (xsrfToken) {
     return xsrfToken
   }
 
-  // Then, check form body
   const contentType = ctx.req.header('content-type') ?? ''
 
   if (
@@ -323,7 +254,6 @@ async function getTokenFromRequest(ctx: Context): Promise<string | undefined> {
     }
   }
 
-  // Check JSON body
   if (contentType.includes('application/json')) {
     try {
       const json = await ctx.req.json()
@@ -342,48 +272,13 @@ async function getTokenFromRequest(ctx: Context): Promise<string | undefined> {
 }
 
 /**
- * Creates a CSRF protection middleware.
- *
- * This middleware:
- * - Issues a signed token in the `XSRF-TOKEN` cookie on safe requests.
- *   With a logged-in session the token is bound to the session id; for
- *   guests it is a stateless double-submit token. Nothing is stored
- *   server-side, so anonymous traffic costs no session writes and session
- *   middleware is optional.
- * - Validates the token for state-changing HTTP methods (POST, PUT, PATCH,
- *   DELETE): always requires a valid app-key signature, then the bound
- *   session id or (guest) the cookie match.
- * - Supports token submission via form field (_token) or header (X-CSRF-TOKEN)
- * - Keeps verifying tokens stored in sessions by earlier releases until
- *   those sessions expire
- * - Exempts the dev-only MCP endpoint while it is mounted, since agent
- *   clients cannot fetch a token first (it guards local-only access instead)
- * - Skips verification for `Authorization: Bearer` requests that carry no
- *   cookies (RFC 0016) — token clients authenticate per request and hold no
- *   cookie ambient authority for CSRF to defend
- *
- * `cookie: false` disables the `XSRF-TOKEN` cookie for apps that deliver the
- * token themselves (meta tag / form field). Session-bound tokens still
- * verify without the cookie; guest (stateless) tokens require the cookie, so
- * disable it only for session-authenticated flows.
- *
- * **Mount it directly inside the session middleware.** The response cookie is
- * settled once the handler returns, reading the session id as it stands then.
- * Middleware layered *between* the two that mutates the session after its own
- * `await next()` — regenerating or invalidating it — moves the id after this
- * has already committed to a token, and the next mutation is rejected. The
- * automatic registration in `AuthServiceProvider` mounts them adjacently;
- * hand-composed chains have to keep that property.
- *
- * @example
- * ```ts
- * import { createCsrfMiddleware } from '@guren/server'
- *
- * app.use(createSessionMiddleware())
- * app.use(createCsrfMiddleware({
- *   exclude: ['/api/webhooks/*']
- * }))
- * ```
+ * Issues a signed `XSRF-TOKEN` on safe requests and verifies it on
+ * state-changing ones, from a `_token` field or an `X-CSRF-TOKEN` /
+ * `X-XSRF-TOKEN` header. `cookie: false` suits session-authenticated flows
+ * only — guest (stateless) tokens need the cookie to verify. **Mount it
+ * directly inside the session middleware:** the response cookie is settled
+ * after the handler, so anything between the two that mutates the session
+ * after its own `await next()` moves the id once this has committed.
  */
 export function createCsrfMiddleware(options: CsrfOptions = {}): MiddlewareHandler {
   const {
@@ -396,10 +291,8 @@ export function createCsrfMiddleware(options: CsrfOptions = {}): MiddlewareHandl
 
   const protectedMethods = new Set(methods.map((m) => m.toUpperCase()))
 
-  // Always settled after the handler: a request that establishes a session
-  // has to leave with a token bound to it, or the next mutation is rejected.
-  // Handlers reach the same value through getCsrfToken(), which re-issues on
-  // the same rule, so the body and the cookie cannot disagree.
+  // Settled after the handler: a request that establishes a session must leave
+  // with a token bound to it, or the next mutation is rejected.
   const settleCookie = (ctx: Context): void => {
     if (enableCookie) {
       setXsrfCookie(ctx, getCsrfToken(ctx), cookieOptions)
@@ -416,11 +309,8 @@ export function createCsrfMiddleware(options: CsrfOptions = {}): MiddlewareHandl
       return
     }
 
-    // Excluded and MCP paths skip *verification*, not issuance: an exempt
-    // endpoint that logs a user in (an OAuth callback is the usual one) still
-    // has to hand back a bound token, or every later mutation is rejected.
-    // Cookie-less bearer requests skip on the same terms — see
-    // isBearerRequestWithoutCookies for why that is sound.
+    // Skips *verification*, not issuance: an exempt endpoint that logs a user
+    // in still has to hand back a bound token.
     if (isExcluded(path, exclude) || isMcpEndpointRequest(path) || isBearerRequestWithoutCookies(ctx)) {
       await next()
       settleCookie(ctx)

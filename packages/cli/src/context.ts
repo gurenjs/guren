@@ -47,7 +47,6 @@ export interface ContextOptions {
 export async function generateContext(options: ContextOptions = {}): Promise<ProjectContext> {
   const cwd = resolve(options.cwd ?? process.cwd())
 
-  // Framework version
   let version = 'unknown'
   const pkgRaw = await readIfExists(cwd, 'package.json')
   if (pkgRaw) {
@@ -71,8 +70,6 @@ export async function generateContext(options: ContextOptions = {}): Promise<Pro
     return files.map(classNameFromPath).sort()
   }
 
-  // Every source below is independent — one barrier instead of a dozen
-  // serialized directory walks (plus the route-graph import).
   const routeLoadErrors: string[] = []
 
   const [
@@ -137,7 +134,6 @@ export function renderContextMarkdown(ctx: ProjectContext): string {
   lines.push(`- Frontend: React + Inertia.js`)
   lines.push('')
 
-  // Models
   lines.push(`## Models (${ctx.models.length})`)
   if (ctx.models.length === 0) {
     lines.push('No models found.')
@@ -158,7 +154,6 @@ export function renderContextMarkdown(ctx: ProjectContext): string {
     lines.push('')
   }
 
-  // Routes
   lines.push(`## Routes (${ctx.routes.length})`)
   if (ctx.routes.length > 0) {
     lines.push('| Method | Path | Name | Controller |')
@@ -171,10 +166,6 @@ export function renderContextMarkdown(ctx: ProjectContext): string {
       lines.push(`| ${cells.map(escapeMarkdownTableCell).join(' | ')} |`)
     }
   } else if (ctx.routesError) {
-    // An unreadable routes file is not an app with no routes. Both used to
-    // render `## Routes (0)` / `No routes loaded.` and exit 0, so the reader
-    // of a context map — an agent, most often — had no way to tell a real
-    // answer from a failed one.
     lines.push(`Routes could not be read: ${ctx.routesError}`)
     lines.push('This is not the same as the app having no routes — the list above is incomplete.')
   } else {
@@ -182,14 +173,12 @@ export function renderContextMarkdown(ctx: ProjectContext): string {
   }
   lines.push('')
 
-  // Pages
   lines.push(`## Pages (${ctx.pages.length})`)
   for (const page of ctx.pages) {
     lines.push(`- ${page}`)
   }
   lines.push('')
 
-  // Component lists
   const sections: [string, string[]][] = [
     ['Controllers', ctx.controllers],
     ['Resources', ctx.resources],

@@ -1,10 +1,7 @@
 import type { LogChannel, LogLevel, LogContext, LogEntry } from './types'
 
 export interface LoggerOptions {
-  /**
-   * Keys whose values should be replaced with the replacement string.
-   * Matching is case-insensitive and recursive.
-   */
+  /** Keys to redact. Matching is case-insensitive and recursive. */
   filterKeys?: string[]
   /** Replacement string for filtered values. Default: '[FILTERED]' */
   replacement?: string
@@ -24,9 +21,7 @@ const DEFAULT_FILTER_KEYS = [
   'authorization',
 ]
 
-/**
- * Recursively replace values of sensitive keys in a log context object.
- */
+/** Recursively replace values of sensitive keys in a log context object. */
 export function filterSensitiveData(
   data: Record<string, unknown>,
   filterKeys: string[],
@@ -62,9 +57,6 @@ function filterObject(
   return result
 }
 
-/**
- * Logger instance for writing log entries.
- */
 // Logging errors are reported, never thrown, so a broken channel cannot cascade
 // into the request that logged. Async channels reject instead of throwing, so
 // the same reporter is attached to their promise.
@@ -72,6 +64,7 @@ const reportLoggingError = (error: unknown): void => {
   console.error('Logging error:', error)
 }
 
+/** Logger instance for writing log entries. */
 export class Logger {
   private readonly channels: LogChannel[]
   private readonly baseContext: LogContext
@@ -85,72 +78,42 @@ export class Logger {
     this.replacement = options.replacement ?? '[FILTERED]'
   }
 
-  /**
-   * Log at emergency level (system is unusable).
-   */
   emergency(message: string, context: LogContext = {}): void {
     this.log('emergency', message, context)
   }
 
-  /**
-   * Log at alert level (action must be taken immediately).
-   */
   alert(message: string, context: LogContext = {}): void {
     this.log('alert', message, context)
   }
 
-  /**
-   * Log at critical level (critical conditions).
-   */
   critical(message: string, context: LogContext = {}): void {
     this.log('critical', message, context)
   }
 
-  /**
-   * Log at error level (error conditions).
-   */
   error(message: string, context: LogContext = {}): void {
     this.log('error', message, context)
   }
 
-  /**
-   * Log at warning level (warning conditions).
-   */
   warning(message: string, context: LogContext = {}): void {
     this.log('warning', message, context)
   }
 
-  /**
-   * Alias for warning().
-   */
   warn(message: string, context: LogContext = {}): void {
     this.warning(message, context)
   }
 
-  /**
-   * Log at notice level (normal but significant conditions).
-   */
   notice(message: string, context: LogContext = {}): void {
     this.log('notice', message, context)
   }
 
-  /**
-   * Log at info level (informational messages).
-   */
   info(message: string, context: LogContext = {}): void {
     this.log('info', message, context)
   }
 
-  /**
-   * Log at debug level (debug-level messages).
-   */
   debug(message: string, context: LogContext = {}): void {
     this.log('debug', message, context)
   }
 
-  /**
-   * Log a message at the specified level.
-   */
   log(level: LogLevel, message: string, context: LogContext = {}): void {
     const merged = { ...this.baseContext, ...context }
     const filtered = this.filterKeys.length > 0
@@ -176,9 +139,6 @@ export class Logger {
     }
   }
 
-  /**
-   * Create a new logger with additional context.
-   */
   withContext(context: LogContext): Logger {
     return new Logger(this.channels, { ...this.baseContext, ...context }, {
       filterKeys: this.filterKeys,
@@ -186,16 +146,10 @@ export class Logger {
     })
   }
 
-  /**
-   * Create a child logger with additional context (alias for withContext).
-   */
   child(context: LogContext): Logger {
     return this.withContext(context)
   }
 
-  /**
-   * Close all channels.
-   */
   async close(): Promise<void> {
     for (const channel of this.channels) {
       if (channel.close) {

@@ -141,7 +141,7 @@ describe('Translator', () => {
 
     it('uses fallback locale', () => {
       translator.setLocale('ja')
-      expect(translator.t('nested.key')).toBe('Nested value') // fallback to en
+      expect(translator.t('nested.key')).toBe('Nested value')
     })
 
     it('supports {key} replacement format', () => {
@@ -315,7 +315,6 @@ describe('JsonLoader', () => {
   beforeEach(async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'i18n-test-'))
 
-    // Create translation files
     await mkdir(join(tempDir, 'en'))
     await mkdir(join(tempDir, 'ja'))
 
@@ -362,12 +361,10 @@ describe('JsonLoader', () => {
 
   it('caches loaded translations', async () => {
     await loader.load('en')
-    // Modify file
     await writeFile(
       join(tempDir, 'en', 'messages.json'),
       JSON.stringify({ hello: 'Hi' })
     )
-    // Should return cached value
     const messages = await loader.load('en')
     expect((messages.messages as Record<string, string> | undefined)?.hello).toBe('Hello')
   })

@@ -8,18 +8,12 @@ import type {
 import { Output, BufferedOutput } from './Output'
 import { argumentLabel, formatUsage, optionLabel, parseSignature } from './Input'
 
-/**
- * The column help text starts at: past the longest label, and never narrower
- * than `min` so that a list of short labels still reads as a column.
- */
+/** Past the longest label, but never narrower than `min`. */
 function helpColumn(labels: string[], min: number): number {
   return Math.max(min, ...labels.map((label) => label.length + 2))
 }
 
-/**
- * Emit one help row: a label padded out to `column`, followed by whichever of
- * its annotations are present.
- */
+/** A label padded out to `column`, followed by whichever annotations are present. */
 function helpRow(
   output: OutputInterface,
   indent: string,
@@ -31,34 +25,12 @@ function helpRow(
   output.line(`${indent}${label}${padding}${annotations.filter(Boolean).join(' ')}`)
 }
 
-/**
- * Console kernel for managing and executing commands.
- *
- * @example
- * ```typescript
- * const kernel = new ConsoleKernel()
- *
- * kernel.register(CreateUserCommand)
- * kernel.register(SendNotificationsCommand)
- *
- * // Execute command
- * const exitCode = await kernel.handle(['users:create', 'john@example.com', '--admin'])
- * ```
- */
+/** Console kernel for managing and executing commands. */
 export class ConsoleKernel {
-  /**
-   * Registered commands.
-   */
   protected commands: Map<string, CommandClass> = new Map()
 
-  /**
-   * Service container.
-   */
   protected container?: Container
 
-  /**
-   * Output instance.
-   */
   protected output: OutputInterface
 
   constructor(options: ConsoleKernelOptions = {}) {
@@ -66,18 +38,12 @@ export class ConsoleKernel {
     this.output = new Output()
   }
 
-  /**
-   * Register a command.
-   */
   register(command: CommandClass): this {
     const parsed = parseSignature(command.signature)
     this.commands.set(parsed.name, command)
     return this
   }
 
-  /**
-   * Register multiple commands.
-   */
   registerMany(commands: CommandClass[]): this {
     for (const command of commands) {
       this.register(command)
@@ -85,56 +51,35 @@ export class ConsoleKernel {
     return this
   }
 
-  /**
-   * Get all registered commands.
-   */
   getCommands(): Map<string, CommandClass> {
     return new Map(this.commands)
   }
 
-  /**
-   * Get a command by name.
-   */
   getCommand(name: string): CommandClass | undefined {
     return this.commands.get(name)
   }
 
-  /**
-   * Check if a command is registered.
-   */
   hasCommand(name: string): boolean {
     return this.commands.has(name)
   }
 
-  /**
-   * Set the output instance.
-   */
   setOutput(output: OutputInterface): this {
     this.output = output
     return this
   }
 
-  /**
-   * Get the output instance.
-   */
   getOutput(): OutputInterface {
     return this.output
   }
 
-  /**
-   * Handle command execution.
-   */
   async handle(argv: string[] = process.argv.slice(2)): Promise<number> {
-    // Parse command name from argv
     const [commandName, ...args] = argv
 
-    // No command specified
     if (!commandName) {
       this.showHelp()
       return 0
     }
 
-    // Built-in help command
     if (commandName === 'help' || commandName === '--help' || commandName === '-h') {
       if (args[0] && this.hasCommand(args[0])) {
         this.showCommandHelp(args[0])
@@ -144,13 +89,11 @@ export class ConsoleKernel {
       return 0
     }
 
-    // Built-in list command
     if (commandName === 'list') {
       this.listCommands()
       return 0
     }
 
-    // Find command
     const CommandClass = this.commands.get(commandName)
     if (!CommandClass) {
       this.output.error(`Command not found: ${commandName}`)
@@ -159,13 +102,9 @@ export class ConsoleKernel {
       return 1
     }
 
-    // Create and execute command
     return this.runCommand(CommandClass, args)
   }
 
-  /**
-   * Run a command.
-   */
   protected async runCommand(CommandClass: CommandClass, args: string[]): Promise<number> {
     const command = new CommandClass(this.container)
     command.setInput(args)
@@ -175,15 +114,11 @@ export class ConsoleKernel {
     return command.run()
   }
 
-  /**
-   * Show help.
-   */
   protected showHelp(): void {
     this.output.line('')
     this.output.info('Available Commands:')
     this.output.line('')
 
-    // Group commands by namespace, dropping the namespace from the label
     const groups = Array.from(this.groupCommands(), ([namespace, commands]) => ({
       namespace,
       entries: Array.from(commands, ([name, cmd]) => ({
@@ -210,9 +145,6 @@ export class ConsoleKernel {
     }
   }
 
-  /**
-   * Show help for a specific command.
-   */
   protected showCommandHelp(commandName: string): void {
     const CommandClass = this.commands.get(commandName)
     if (!CommandClass) {
@@ -229,7 +161,7 @@ export class ConsoleKernel {
     this.output.line('')
     this.output.line(`Usage: ${formatUsage(parsed)}`)
 
-    // One column for both blocks, so arguments and options line up with each other
+    // One column for both blocks, so arguments and options line up.
     const optionShortcut = (opt: OptionDefinition) => (opt.shortcut ? `-${opt.shortcut}, ` : '    ')
     const column = helpColumn(
       [
@@ -267,9 +199,6 @@ export class ConsoleKernel {
     this.output.line('')
   }
 
-  /**
-   * List all commands.
-   */
   protected listCommands(): void {
     this.output.line('')
     this.output.info('Registered Commands:')
@@ -289,13 +218,9 @@ export class ConsoleKernel {
     this.output.line('')
   }
 
-  /**
-   * Group commands by namespace.
-   */
   protected groupCommands(): Map<string, Map<string, CommandClass>> {
     const grouped = new Map<string, Map<string, CommandClass>>()
 
-    // Sort commands
     const sorted = Array.from(this.commands.entries()).sort((a, b) =>
       a[0].localeCompare(b[0])
     )
@@ -314,9 +239,6 @@ export class ConsoleKernel {
     return grouped
   }
 
-  /**
-   * Suggest similar commands.
-   */
   protected suggestCommands(input: string): void {
     const similar: string[] = []
 
@@ -334,9 +256,7 @@ export class ConsoleKernel {
     }
   }
 
-  /**
-   * Calculate string similarity (simple Dice coefficient).
-   */
+  /** Dice coefficient over bigrams. */
   protected similarity(a: string, b: string): number {
     const aBigrams = new Set<string>()
     for (let i = 0; i < a.length - 1; i++) {
@@ -353,9 +273,6 @@ export class ConsoleKernel {
     return (2 * matches) / (a.length + b.length - 2)
   }
 
-  /**
-   * Call a command programmatically.
-   */
   async call(commandName: string, args: string[] = [], silent = false): Promise<number> {
     const originalOutput = this.output
 
@@ -373,9 +290,6 @@ export class ConsoleKernel {
   }
 }
 
-/**
- * Create a console kernel.
- */
 export function createConsoleKernel(options?: ConsoleKernelOptions): ConsoleKernel {
   return new ConsoleKernel(options)
 }

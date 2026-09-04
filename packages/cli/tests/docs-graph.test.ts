@@ -74,7 +74,6 @@ describe('buildDocsGraph', () => {
       relation: 'links',
       verdict: 'pass',
     })
-    // No duplicate code node for the linked doc
     expect(nodes.filter((n) => n.id === 'docs/adr/0002-second.md')).toHaveLength(1)
   })
 
@@ -178,7 +177,6 @@ related: [app/Http/Controllers/PostController.ts]
 
       expect(report.focus).toEqual(['app/Http/Controllers/PostController.ts'])
       expect(report.query).toEqual({ path: 'app/Http/Controllers/PostController.ts' })
-      // The governing doc is pulled in; the unrelated doc is not.
       expect(report.nodes.some((n) => n.id === 'docs/adr/0001-posts.md')).toBe(true)
       expect(report.nodes.some((n) => n.id === 'docs/adr/0002-other.md')).toBe(false)
       expect(report.edges).toHaveLength(1)

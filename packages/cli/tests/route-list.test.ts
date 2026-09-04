@@ -13,7 +13,6 @@ describe('route-list', () => {
     originalCwd = process.cwd()
     process.chdir(tempDir)
 
-    // Create routes directory
     await mkdir(join(tempDir, 'routes'), { recursive: true })
   })
 
@@ -24,7 +23,6 @@ describe('route-list', () => {
 
   describe('listRoutes', () => {
     it('returns empty array when no routes are registered', async () => {
-      // Create minimal routes file with no routes
       await writeFile(
         join(tempDir, 'routes/web.ts'),
         `
@@ -57,7 +55,6 @@ export function registerRoutes(_router: Router): void {}
 `
       )
 
-      // Should not throw
       const routes = await listRoutes({
         appRoot: tempDir,
         routesFile: 'custom/routes.ts',
@@ -92,7 +89,6 @@ export function registerRoutes(_router: Router): void {}
   })
 
   describe('filtering', () => {
-    // Mock data for filtering tests
     const mockRoutes: RouteInfo[] = [
       { method: 'GET', path: '/users', name: 'users.index' },
       { method: 'POST', path: '/users', name: 'users.store' },
@@ -146,7 +142,6 @@ export function registerRoutes(_router: Router): void {}
         return aName.localeCompare(bName)
       })
 
-      // Routes without name come first (empty string)
       expect(sorted[0].name).toBeUndefined()
     })
 
@@ -170,7 +165,6 @@ export function registerWebRoutes(_router: Router): void {}
 `
       )
 
-      // Should not throw
       await displayRoutes({ appRoot: tempDir })
     })
 

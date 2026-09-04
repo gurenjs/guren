@@ -5,11 +5,9 @@ import { DATABASE_DRIVERS, databaseConfigTemplatePath, scaffoldAppBlueprint, typ
 import { createTempWorkspace } from './helpers'
 
 /**
- * A seeder receives the drizzle database the app configured, and the bare
- * `SeederContext` is PostgreSQL-shaped — a MySQL or SQLite seeder typed with it
- * cannot insert into its own schema, and dialect-specific builders are missing
- * outright. Every scaffold therefore re-exports its own dialect's context as
- * `AppSeederContext`, which is what keeps the shipped seeders portable.
+ * The bare `SeederContext` is PostgreSQL-shaped, so a MySQL or SQLite seeder
+ * typed with it cannot insert into its own schema. Every scaffold re-exports its
+ * own dialect's context as `AppSeederContext`, keeping shipped seeders portable.
  */
 const EXPECTED_CONTEXT = {
   postgres: 'PostgresSeederContext',
@@ -17,10 +15,8 @@ const EXPECTED_CONTEXT = {
   sqlite: 'SqliteSeederContext',
 } as const satisfies Record<DatabaseDriver, string>
 
-// Asserted on the shipped template sources rather than a scaffolded app: the
-// verbatim-copy test in database-config-template.test.ts already pins that a
-// scaffold delivers these files byte-for-byte, so scaffolding again here
-// would only re-derive that.
+// Asserted on the shipped template sources: database-config-template.test.ts
+// already pins that a scaffold delivers these files byte-for-byte.
 describe('shipped config/database.ts seeder context', () => {
   for (const driver of DATABASE_DRIVERS) {
     it(`re-exports ${EXPECTED_CONTEXT[driver]} as AppSeederContext for --db ${driver}`, async () => {
@@ -32,9 +28,8 @@ describe('shipped config/database.ts seeder context', () => {
   }
 })
 
-// One driver is enough here: the blog seeders are static template files, and
-// `AppSeederContext` is the indirection that lets them stay that way. Which
-// alias the app ends up with is the describe above.
+// One driver is enough: the blog seeders are static template files, and
+// `AppSeederContext` is the indirection that lets them stay that way.
 describe('blog blueprint seeders', () => {
   it('annotates its seeders with AppSeederContext', async () => {
     const workspace = await createTempWorkspace('guren-blog-seeder-context-')

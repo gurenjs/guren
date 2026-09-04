@@ -6,9 +6,8 @@ import { shareInertiaProps } from '../mvc/inertia/shared'
 import type { Application } from '../http/Application'
 
 /**
- * Shape of the `_i18n` Inertia shared prop injected when `createApp({ i18n })`
- * is configured (unless `i18n.share` is `false`). The client-side
- * `useTranslation()` hook consumes this.
+ * Shape of the `_i18n` Inertia shared prop (unless `i18n.share` is `false`),
+ * consumed by the client-side `useTranslation()` hook.
  */
 export interface InertiaI18nProps {
   locale: string
@@ -17,13 +16,10 @@ export interface InertiaI18nProps {
 }
 
 /**
- * Binds the I18nManager as a singleton in the container.
- *
- * When the app is created with `createApp({ i18n })`, this provider also
- * mounts locale detection middleware (unless `i18n.detect` is `false`),
- * preloads every supported locale during boot, and shares the request locale
- * and its messages with Inertia pages as the `_i18n` prop (unless
- * `i18n.share` is `false`).
+ * Binds the I18nManager as a singleton. With `createApp({ i18n })` it also
+ * mounts locale detection (unless `i18n.detect` is `false`), preloads every
+ * supported locale at boot, and shares the request locale and its messages with
+ * Inertia pages as `_i18n` (unless `i18n.share` is `false`).
  */
 export class I18nServiceProvider extends ServiceProvider {
   register(): void {
@@ -89,11 +85,9 @@ export class I18nServiceProvider extends ServiceProvider {
       const fallback = manager.getFallbackLocale() ?? manager.getLocale()
       const supported = new Set(options.supported)
 
-      // Props are built once per supported locale; messages added to the
-      // manager after a locale is cached are not picked up — same load-once
-      // lifecycle as the locale middleware's translators. Locales outside
-      // `supported` (a custom middleware setting an unvalidated `locale`
-      // context variable) are served uncached so the map stays bounded.
+      // Built once per supported locale; messages added to the manager after a
+      // locale is cached are not picked up. Locales outside `supported` are
+      // served uncached so the map stays bounded.
       const propsByLocale = new Map<string, InertiaI18nProps>()
 
       shareInertiaProps((ctx: Context) => {

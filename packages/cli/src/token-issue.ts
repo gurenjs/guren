@@ -1,28 +1,13 @@
 /**
- * `guren token:issue` — mint an API token scoped to this app's agent tools
- * (RFC 0016 §5.1).
+ * `guren token:issue` — mint an API token scoped to this app's agent tools (RFC 0016 §5.1).
  *
- * The command is the *issuer* half of the split `agent/scopes.ts` describes:
- * that module judges an already-issued token and must grant less on anything
- * it cannot parse, so it silently ignores a malformed entry. Here the same
- * entry is a typo in a command line a human is still looking at, and the only
- * useful answer is to refuse and name it. Everything below exists to fail at
- * issuance rather than to fail quietly at dispatch:
- *
- * - a scope that parses but matches no current tool is rejected, because it is
- *   either a typo or a *latent grant* — a stored pattern that would activate
- *   without anyone's consent the moment a matching tool is added. Overriding
- *   that (`--allow-unmatched`) is deliberate and warns about exactly that.
- * - `--read-only` stores the concrete `tool:<name>` entries it resolved to,
- *   never the pattern. That asymmetry is forced by the grammar, not taste:
- *   `ParsedToolScope` has no "read-only subset of `posts.*`" form, so a
- *   concrete list is the only faithful encoding — and it is fail-closed, since
- *   a write tool added later to the `posts.` family joins no stored entry.
- *
- * Scope expansion goes through `expandToolScopes` and nothing else, once per
- * entry for the unmatched rule and once over the whole list for the grant.
- * A second accumulator here is precisely what that module's header warns
- * against: an issuance screen listing tools the dispatcher then denies.
+ * The *issuer* half of the split `agent/scopes.ts` describes: that module judges an issued
+ * token and grants less on anything it cannot parse, while here the same entry is a typo a
+ * human is still looking at, so everything below fails at issuance rather than at dispatch.
+ * A scope matching no current tool is rejected as a typo or a latent grant that would
+ * activate without consent (`--allow-unmatched` overrides). `--read-only` stores concrete
+ * `tool:<name>` entries, never the pattern, which is fail-closed. Scope expansion goes
+ * through `expandToolScopes` alone, or an issuance screen lists tools the dispatcher denies.
  */
 import { consola } from 'consola'
 import {
@@ -51,21 +36,16 @@ const DURATION_UNITS: Record<string, number> = {
 const DURATION_PATTERN = /^(\d+)([dhm])$/
 
 /**
- * The longest expiry that still lands inside the ECMAScript Date range
- * (±100,000,000 days from the epoch) from any plausible `now`. Half the range
- * with room to spare: the exact edge is not worth defending, and nothing
- * legitimate asks for a token good for a quarter of a million years.
+ * The longest expiry still inside the ECMAScript Date range (±100,000,000 days from the
+ * epoch) from any plausible `now` — half the range, with room to spare.
  */
 const MAX_EXPIRES_DAYS = 36_500_000
 const MAX_EXPIRES_MS = MAX_EXPIRES_DAYS * DURATION_UNITS.d!
 
 /**
- * Expand a shorthand `--tools` entry to full scope syntax.
- *
- * An entry that already names a prefix is passed through verbatim — including
- * a malformed one like `tool:posts.*`, which {@link parseToolScope} then
- * rejects by name. Rewriting it into something legal would be the issuer
- * guessing at intent, and a guess is what a scope grammar cannot afford.
+ * Expand a shorthand `--tools` entry to full scope syntax. An entry already naming a
+ * prefix passes through verbatim, malformed ones included ({@link parseToolScope} rejects
+ * them by name) — rewriting one would be the issuer guessing at intent.
  */
 export function normalizeToolScope(entry: string): string {
   if (entry.startsWith(SINGLE_PREFIX) || entry.startsWith(SET_PREFIX)) return entry
@@ -76,15 +56,11 @@ export function normalizeToolScope(entry: string): string {
 }
 
 /**
- * Parse a `--expires` duration (`30d` / `12h` / `45m`) into milliseconds.
- *
- * Zero is refused rather than accepted as "expires now": `createApiToken`
- * stores `now + expiresIn` unguarded, so `0m` would mint a token that is
- * already dead — a silent no-op wearing the shape of a successful issuance.
- * The upper bound refuses the same failure from the other end: past the
- * Date range, `now + expiresIn` is an Invalid Date, which every expiry check
- * reads as expired. Both ends fail closed at the store; the point of
- * refusing here is that the success message would otherwise be false.
+ * Parse a `--expires` duration (`30d` / `12h` / `45m`) into milliseconds. Zero is refused
+ * rather than read as "expires now", and the upper bound refuses the same failure from
+ * the other end (past the Date range, `now + expiresIn` is an Invalid Date, which every
+ * expiry check reads as expired). Both fail closed at the store; refusing here keeps the
+ * success message from being false.
  */
 export function parseExpiresDuration(value: string): number {
   const match = DURATION_PATTERN.exec(value)
@@ -103,20 +79,13 @@ export function parseExpiresDuration(value: string): number {
 }
 
 /**
- * Read `--user` as the identifier the app's user provider will look up.
- *
- * A digits-only value becomes a number, because that is what a serial primary
- * key is and `retrieveById` hands the value straight to `Model.find` — a
- * string there is a type mismatch the database, not this command, would
- * report. Anything else (a UUID, a ULID) stays a string.
+ * Read `--user` as the identifier the app's user provider will look up. A digits-only
+ * value becomes a number, since `retrieveById` hands it straight to `Model.find` against
+ * a serial key; anything else (a UUID, a ULID) stays a string.
  */
 export function parseUserId(value: string): string | number {
-  // Round-trip, not just digits-only: `0042` and `42` are different ids in an
-  // app keyed by string, and coercing the first to the second mints a token
-  // for a principal nobody typed. A value that survives `String(Number(v))`
-  // unchanged is the same id either way, which is the only case where
-  // choosing number over string is free — and it has to be a number there,
-  // because `retrieveById` hands it to `Model.find` against a serial key.
+  // Round-trip rather than digits-only: `0042` and `42` are different ids in an app keyed
+  // by string, and coercing one to the other mints a token for a principal nobody typed.
   const numeric = Number(value)
   return /^\d+$/.test(value) && Number.isSafeInteger(numeric) && String(numeric) === value
     ? numeric
@@ -156,15 +125,10 @@ function splitToolEntries(raw: string): string[] {
 }
 
 /**
- * Decide what a token would carry, without minting anything.
- *
- * Throws on every refusal, in a fixed order so the first thing wrong with a
- * command line is the thing reported: parse, then `tools:*` consent, then
- * unmatched scopes, then the `--read-only` intersection, then `--expires`.
- *
- * @param tools Every tool the app currently exposes, as the scope matcher
- *   sees them. Injected rather than derived here so the rules stay testable
- *   without a route graph on disk.
+ * Decide what a token would carry, without minting anything. Throws on every refusal in a
+ * fixed order, so the first thing wrong with a command line is the thing reported: parse,
+ * `tools:*` consent, unmatched scopes, the `--read-only` intersection, `--expires`.
+ * `tools` is injected rather than derived so the rules stay testable with no route graph.
  */
 export function planTokenIssue(input: TokenIssueInput, tools: readonly ScopedTool[]): TokenIssuePlan {
   const entries = splitToolEntries(input.tools)
@@ -172,9 +136,8 @@ export function planTokenIssue(input: TokenIssueInput, tools: readonly ScopedToo
     throw new Error('--tools requires at least one scope (for example: tools:read, posts.*, posts.store).')
   }
 
-  // Keep the caller's order and drop exact repeats: a duplicated entry grants
-  // nothing extra, and listing it twice in the stored abilities only makes the
-  // token harder to read.
+  // Caller's order, exact repeats dropped: a duplicate grants nothing and only makes the
+  // stored abilities harder to read.
   const normalized: string[] = []
   for (const entry of entries) {
     const scope = normalizeToolScope(entry)
@@ -196,15 +159,10 @@ export function planTokenIssue(input: TokenIssueInput, tools: readonly ScopedToo
 
   const warnings: string[] = []
 
-  // `read` is a reserved word before it is a tool name, and the grammar says
-  // so deliberately (`tools:read` wins its own spelling). An app that happens
-  // to name a tool `read` therefore cannot reach it through the shorthand —
-  // the entry silently means "every read-only tool" instead. Nothing is
-  // broadened and the printed grant stays exact; the warning exists because
-  // the two readings look identical on the command line.
-  // Read from `entries`, the shorthand as it was typed: `normalized` cannot
-  // answer this, because an explicit `tools:read` normalizes to the same entry
-  // and its author has no ambiguity to be warned about.
+  // `read` is a reserved word before it is a tool name, so an app naming a tool `read`
+  // cannot reach it through the shorthand — nothing is broadened, but the two readings
+  // look identical on a command line. Read from `entries` as typed: an explicit
+  // `tools:read` normalizes to the same entry and its author has no ambiguity.
   if (entries.includes('read') && tools.some((tool) => tool.name === 'read')) {
     warnings.push(
       'The shorthand "read" means tools:read — every read-only tool — not the tool named "read". '
@@ -212,11 +170,9 @@ export function planTokenIssue(input: TokenIssueInput, tools: readonly ScopedToo
     )
   }
 
-  // The tools an entry is allowed to count as a match against. Under
-  // `--read-only` that is the read-only ones alone, which makes the per-entry
-  // rule below say exactly what the token will end up granting: a scope
-  // resolving only to write tools contributes nothing to a read-only token,
-  // and is as much a mistake as a misspelled name.
+  // What an entry may count as a match against. Under `--read-only` that is the
+  // read-only tools alone, so a scope resolving only to write tools is reported as the
+  // mistake it is rather than contributing nothing silently.
   const readOnlyTools = tools.filter((tool) => tool.readOnly)
   const readOnlyNames = new Set(readOnlyTools.map((tool) => tool.name))
   const matchable = input.readOnly ? readOnlyTools : tools
@@ -225,9 +181,8 @@ export function planTokenIssue(input: TokenIssueInput, tools: readonly ScopedToo
     if (expandToolScopes([scope], matchable).length > 0) continue
 
     if (input.readOnly) {
-      // Refused even under --allow-unmatched: that flag's whole promise is
-      // future activation, and a read-only token stores concrete `tool:`
-      // entries, so this scope could never grant anything at any later point.
+      // Refused even under --allow-unmatched: that flag promises future activation, and a
+      // read-only token stores concrete `tool:` entries, which can never gain members.
       throw new Error(
         `Scope "${scope}" matches no read-only tool this app exposes, and --read-only stores concrete `
           + 'tool: entries, so it could never grant anything later either. Drop it, or issue without --read-only.',
@@ -247,10 +202,8 @@ export function planTokenIssue(input: TokenIssueInput, tools: readonly ScopedToo
     )
   }
 
-  // Every surviving entry matched at least one tool in `matchable`, so this is
-  // never empty — the "a --read-only token that can call nothing" case is
-  // already refused above, by the entry that caused it rather than in the
-  // aggregate.
+  // Every surviving entry matched at least one tool in `matchable`, so this is never
+  // empty — a read-only token that can call nothing was refused above, per entry.
   const grantedNames = expandToolScopes(normalized, matchable)
 
   const granted = {
@@ -272,9 +225,8 @@ export function planTokenIssue(input: TokenIssueInput, tools: readonly ScopedToo
   }
 
   if (granted.readOnly.length > 0 && granted.write.length > 0) {
-    // The lethal trifecta, in the shape the Supabase incident took: one
-    // principal that can read attacker-influenced content and also write.
-    // A warning, not a refusal — plenty of legitimate agents need both.
+    // One principal that can read attacker-influenced content and also write. A warning,
+    // not a refusal — plenty of legitimate agents need both.
     warnings.push(
       'This token grants both read and write tools. An agent that reads untrusted content and can also write '
         + 'it back can be steered by that content (the Supabase-incident shape) — split the two across separate tokens if you can.',
@@ -285,25 +237,18 @@ export function planTokenIssue(input: TokenIssueInput, tools: readonly ScopedToo
 }
 
 /**
- * Plan, then mint.
- *
- * The store arrives as a *thunk*, and is resolved only once the plan holds:
- * reaching an app's store means booting the app, database and all, and a
- * misspelled `--tools` entry should cost nothing more than the message that
- * names it. The tool list is a parameter for the same reason the store is a
- * thunk — the rules above are exercised against a `MemoryApiTokenStore` with
- * no app on disk at all.
+ * Plan, then mint. The store arrives as a thunk resolved only once the plan holds:
+ * reaching it means booting the app, database and all, and a misspelled `--tools` entry
+ * should cost nothing more than the message naming it.
  */
 export async function issueAgentToken(
   resolveStore: () => ApiTokenStore | Promise<ApiTokenStore>,
   tools: readonly ScopedTool[],
   input: TokenIssueInput & { name: string; userId: string | number },
 ): Promise<{ plan: TokenIssuePlan; result: CreateApiTokenResult }> {
-  // citty's `required: true` is satisfied by `--user ''`, and an empty
-  // identifier resolves to no user at all — a token that authenticates as
-  // nobody and only says so at dispatch, which is the inversion this whole
-  // command exists to prevent. Same for a nameless token, which is
-  // unrevocable in practice because nothing in a token list identifies it.
+  // citty's `required: true` is satisfied by `--user ''`, which resolves to no user at
+  // all — a token authenticating as nobody that only says so at dispatch. A nameless
+  // token is likewise unrevocable in practice: nothing in a token list identifies it.
   if (String(input.userId).trim() === '') {
     throw new Error('--user requires a user ID; an empty one would issue a token that authenticates as nobody.')
   }
@@ -333,17 +278,13 @@ export interface TokenIssueOptions extends TokenIssueInput {
 }
 
 /**
- * Load the application the way `guren console` does and hand back the store it
- * configured, or explain how to configure one.
- *
- * `MaybeApplication` is extended structurally rather than by importing
- * `AuthManager`: an app resolving an older `@guren/core` has no accessor at
- * all, and that must land on the message below instead of a `TypeError`.
+ * Load the application and hand back the store it configured, or explain how to configure
+ * one. `MaybeApplication` is structural rather than an `AuthManager` import: an app on an
+ * older `@guren/core` has no accessor, and must land on the message below, not a TypeError.
  */
 async function resolveApiTokenStore(appRoot?: string): Promise<ApiTokenStore> {
-  // The same root the tool list was derived from (see `resolveMainEntry`), and
-  // booted or nothing: a token written into a half-booted app is issued
-  // against a store whose configuration never completed.
+  // The same root the tool list was derived from, and booted or nothing: a token written
+  // into a half-booted app is issued against a store that never finished configuring.
   const app = await loadBootedApplication(appRoot)
 
   const store = app.auth?.getApiTokenStore?.()
@@ -361,13 +302,10 @@ async function resolveApiTokenStore(appRoot?: string): Promise<ApiTokenStore> {
 async function loadScopedTools(options: TokenIssueOptions): Promise<{ tools: ScopedTool[]; warnings: string[] }> {
   const { tools, warnings } = await listTools({ routesFile: options.routesFile, appRoot: options.appRoot })
   return {
-    // Only tools exposed on MCP. What this command mints is a bearer token,
-    // and bearer is how the App MCP endpoint authenticates — the other
-    // surfaces do not read these tokens (WebMCP carries the session,
-    // `tool:call` takes `--as`). A tool with `expose: { mcp: false }` is
-    // therefore not something this token can ever reach, so counting it
-    // would print a grant no dispatcher honours and let a `--read-only`
-    // intersection pass on a tool that is not callable.
+    // Only tools exposed on MCP: bearer is how the App MCP endpoint authenticates, and
+    // the other surfaces do not read these tokens (WebMCP carries the session, `tool:call`
+    // takes `--as`). Counting an `expose: { mcp: false }` tool would print a grant no
+    // dispatcher honours and let a `--read-only` intersection pass on an uncallable tool.
     tools: tools
       .filter((tool) => tool.expose.mcp)
       .map((tool) => ({ name: tool.toolName, readOnly: tool.annotations.readOnlyHint })),
@@ -376,8 +314,8 @@ async function loadScopedTools(options: TokenIssueOptions): Promise<{ tools: Sco
 }
 
 export async function runTokenIssue(options: TokenIssueOptions): Promise<void> {
-  // Derivation first: a bad `--tools` or an app with no agent routes should be
-  // reported without booting the application (and its database) at all.
+  // Derivation first: a bad `--tools` or an app with no agent routes is reported without
+  // booting the application (and its database) at all.
   const { tools, warnings: derivationWarnings } = await loadScopedTools(options)
 
   if (tools.length === 0) {
@@ -393,9 +331,8 @@ export async function runTokenIssue(options: TokenIssueOptions): Promise<void> {
   })
 
   if (options.json) {
-    // One JSON object on stdout and nothing beside it: the warnings ride
-    // inside the payload, because a consola line next to it would make the
-    // output unparseable for exactly the callers that pass this flag.
+    // One JSON object on stdout and nothing beside it — warnings ride inside the payload,
+    // since a consola line would make the output unparseable for callers passing --json.
     console.log(
       JSON.stringify(
         {

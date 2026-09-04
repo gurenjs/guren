@@ -4,10 +4,9 @@ import { join } from 'node:path'
 import { PATH_PARAM_RUNTIME_HELPERS, PATH_PARAM_TYPE_HELPERS } from '../src/routes-types-fragments'
 
 describe('path-param fragments', () => {
-  // The mirrors exist because a shipped library cannot embed an emitted
-  // fragment (the PATH_PARAM_TYPE_HELPERS JSDoc has the full story). Each
-  // side type-checks on its own, so only this exact-text pin sees drift: a
-  // change to either rule fails here until both spellings move together.
+  // A shipped library cannot embed an emitted fragment (see the
+  // PATH_PARAM_TYPE_HELPERS JSDoc). Each side type-checks on its own, so only
+  // this exact-text pin sees drift.
   for (const [name, fragment] of [
     ['PATH_PARAM_TYPE_HELPERS', PATH_PARAM_TYPE_HELPERS],
     ['PATH_PARAM_RUNTIME_HELPERS', PATH_PARAM_RUNTIME_HELPERS],

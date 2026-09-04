@@ -256,8 +256,7 @@ describe('Guren MCP Server', () => {
     expect(text).toStartWith('# Context')
   })
 
-  // The route-shaped half of this tool is proven CLI-side (a real Router
-  // through routeDefinitionToContextRoute); what belongs here is the
+  // The route-shaped half is proven CLI-side; what belongs here is the
   // filtering and the reported shape.
   test('guren_agent_surface reports only routes that declare agent metadata', async () => {
     const client = await createTestClient({
@@ -329,15 +328,11 @@ describe('Guren MCP Server', () => {
     expect(tools[0].approval).toBe('not-required')
   })
 
-  // @guren/cli is resolved from the app, so it can predate the field this
-  // tool reads — and an older CLI's routes carry no `agent` at all, which is
-  // indistinguishable from an app exposing nothing. Reporting an empty list
-  // there would answer a question this server cannot answer.
-  // The probe reads a field off the @guren/cli module namespace, so a mock
-  // spelling it any other way proves only that the mock agrees with itself.
-  // This one takes the real module's exports: a rename or a casing slip on
-  // either side fails here, which is exactly how the first version of this
-  // probe shipped reading a name the CLI never exported.
+  // @guren/cli is resolved from the app and can predate the field this tool
+  // reads: an older CLI's routes carry no `agent`, indistinguishable from an
+  // app exposing nothing. The probe takes the real module's exports — a mock
+  // would only prove it agrees with itself, which is how the first version
+  // shipped reading a name the CLI never exported.
   test('guren_agent_surface probes the capability the real @guren/cli exports', async () => {
     const cliModule = (await import('@guren/cli')) as Record<string, unknown>
 
@@ -377,9 +372,8 @@ describe('Guren MCP Server', () => {
     expect(called).toEqual(['loadContextRoutes'])
   })
 
-  // A routes file that throws degrades to zero routes. Reporting that as an
-  // empty tool surface is the confident-looking "no routes" the CLI's own
-  // loader warns about — indistinguishable from an app exposing nothing.
+  // A routes file that throws degrades to zero routes, which reported as an
+  // empty tool surface is indistinguishable from an app exposing nothing.
   test('guren_agent_surface reports a route graph that failed to load', async () => {
     const client = await createTestClient({
       loadContextRoutes: async (_cwd, _routesFile, loadErrors) => {
@@ -530,9 +524,8 @@ describe('Guren MCP Server', () => {
       expect(call.options.force).toBe(true)
     }
     expect(calls.at(-1)?.definitions).toEqual(ROUTE_MANIFEST)
-    // Resource definitions must ride along, or every `resource` response
-    // hint resolves to "unknown Resource" and the regenerated client
-    // silently loses its typed json().
+    // Without these, every `resource` response hint resolves to "unknown
+    // Resource" and the regenerated client silently loses its typed json().
     expect((calls.at(-1)?.options as { resources?: unknown[] } | undefined)?.resources).toEqual(RESOURCE_DEFINITIONS)
   })
 
@@ -608,9 +601,8 @@ describe('Guren MCP Server', () => {
     const result = await client.callTool({ name: 'guren_codegen', arguments: {} })
     const data = JSON.parse((result.content as Array<{ type: string; text: string }>)[0].text)
 
-    // "nothing to generate" would be false here — page components were found
-    // and deliberately ignored, and the agent that just wrote one is exactly
-    // who has to hear that.
+    // "nothing to generate" would be false: page components were found and
+    // deliberately ignored, and the agent that wrote one has to hear why.
     expect(data.skipped).toEqual([
       {
         artifacts: ['.guren/pages.gen.ts'],

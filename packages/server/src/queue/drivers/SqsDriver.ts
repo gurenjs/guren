@@ -1,14 +1,10 @@
 import type { QueueDriver, QueuedJob, FailedJob } from '../types'
 
 /**
- * Abstracted SQS operations.
- * Users implement this interface by wrapping their SQS client (e.g. @aws-sdk/client-sqs).
- * This avoids a hard dependency on @aws-sdk/client-sqs in the framework.
+ * Implemented by wrapping your own SQS client, which keeps @aws-sdk/client-sqs
+ * out of the framework's dependencies.
  */
 export interface SqsAdapter {
-  /**
-   * Send a message to an SQS queue.
-   */
   sendMessage(params: {
     queueUrl: string
     messageBody: string
@@ -17,63 +13,31 @@ export interface SqsAdapter {
     messageDeduplicationId?: string
   }): Promise<void>
 
-  /**
-   * Receive a single message from an SQS queue.
-   */
   receiveMessage(params: {
     queueUrl: string
     waitTimeSeconds?: number
   }): Promise<{ body: string; receiptHandle: string } | null>
 
-  /**
-   * Change the visibility timeout of a message.
-   */
   changeMessageVisibility(params: {
     queueUrl: string
     receiptHandle: string
     visibilityTimeout: number
   }): Promise<void>
 
-  /**
-   * Get the approximate number of messages in a queue.
-   */
   getApproximateMessageCount(queueUrl: string): Promise<number>
 }
 
-/**
- * Options for SqsDriver.
- */
 export interface SqsDriverOptions {
-  /**
-   * SQS queue URL for the primary queue.
-   */
   queueUrl: string
 
-  /**
-   * Optional mapping of logical queue names to SQS queue URLs.
-   * If not specified, all queues use the primary `queueUrl`.
-   */
+  /** Logical queue name to SQS URL; unlisted queues use `queueUrl`. */
   queueUrls?: Record<string, string>
 
-  /**
-   * Message group ID for FIFO queues. If set, enables FIFO mode.
-   */
+  /** Setting this enables FIFO mode. */
   messageGroupId?: string
 }
 
-/**
- * Create an SqsAdapter from an @aws-sdk/client-sqs SQSClient.
- *
- * @example
- * ```ts
- * import { SQSClient } from '@aws-sdk/client-sqs'
- * import { createSqsAdapter, SqsDriver } from '@guren/server/queue'
- *
- * const client = new SQSClient({ region: 'ap-northeast-1' })
- * const adapter = createSqsAdapter(client)
- * const driver = new SqsDriver(adapter, { queueUrl: '...' })
- * ```
- */
+/** Builds an SqsAdapter over an @aws-sdk/client-sqs SQSClient. */
 export function createSqsAdapter(client: { send(command: unknown): Promise<unknown> }): SqsAdapter {
   return {
     async sendMessage(params) {
@@ -146,22 +110,7 @@ async function importSqs(): Promise<{
   }
 }
 
-/**
- * AWS SQS queue driver for serverless deployments.
- *
- * @example
- * ```ts
- * import { SQSClient } from '@aws-sdk/client-sqs'
- * import { createSqsAdapter, SqsDriver, setQueueDriver } from '@guren/server/queue'
- *
- * const adapter = createSqsAdapter(new SQSClient({ region: 'ap-northeast-1' }))
- * const driver = new SqsDriver(adapter, { queueUrl: process.env.SQS_QUEUE_URL! })
- * setQueueDriver(driver)
- *
- * // Dispatch jobs as usual
- * await SendEmailJob.dispatch({ to: 'user@example.com' })
- * ```
- */
+/** AWS SQS queue driver for serverless deployments. */
 export class SqsDriver implements QueueDriver {
   private readonly adapter: SqsAdapter
   private readonly options: SqsDriverOptions
@@ -282,9 +231,6 @@ export class SqsDriver implements QueueDriver {
   }
 }
 
-/**
- * Deserialize a JSON string into a QueuedJob, restoring Date objects.
- */
 function deserializeJob(body: string): QueuedJob {
   const raw = JSON.parse(body)
   return {

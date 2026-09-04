@@ -6,7 +6,6 @@ describe('isLambda', () => {
   
 
   afterEach(() => {
-    // Restore original env
     delete process.env.AWS_LAMBDA_FUNCTION_NAME
     delete process.env.AWS_LAMBDA_FUNCTION_VERSION
     delete process.env.AWS_LAMBDA_FUNCTION_MEMORY_SIZE

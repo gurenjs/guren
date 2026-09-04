@@ -24,9 +24,8 @@ export default class ProfileController extends Controller {
       return this.redirect('/login')
     }
 
-    // validateBody throws ValidationException on failure →
-    // InertiaServiceProvider catches it, flashes errors to session, and redirects back (303).
-    // Inertia's useForm() preserves client-side input state across the redirect.
+    // A ValidationException here is caught by InertiaServiceProvider, flashed to
+    // the session and redirected back (303); useForm() keeps the typed input.
     const { name, email, password: rawPassword } = await this.validateBody(ProfileUpdateSchema)
     const password = rawPassword ?? ''
 
@@ -50,9 +49,7 @@ export default class ProfileController extends Controller {
     }
 
     if (emailChanged) {
-      // The new address hasn't been proven to belong to this user yet — an
-      // arbitrary replacement email must not inherit the old address's
-      // verified status.
+      // The new address is unproven: it must not inherit the old one's verified status.
       updates.emailVerifiedAt = null
     }
 

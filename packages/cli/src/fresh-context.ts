@@ -18,10 +18,8 @@ const MAX_BUFFER = 32 * 1024 * 1024
 const MAX_ERROR_CHARS = 2000
 
 /**
- * Absolute path to this package's own CLI entry. Built output puts `bin.js`
- * next to the chunk this module lands in; running from source resolves
- * `bin.ts` next to this file. Resolved once per process -- the answer can't
- * change between calls.
+ * Absolute path to this package's own CLI entry: `bin.js` beside the built
+ * chunk, `bin.ts` beside this file when running from source.
  */
 let cachedBinPath: string | undefined
 
@@ -42,14 +40,10 @@ function resolveBinPath(): string {
 }
 
 /**
- * Every failure this module can hit -- an unknown entity, an unreadable
- * routes file -- is a single-line `consola.error(message)` (see
- * `displayEntityContext` in entity-context.ts), which consola's fancy
- * reporter renders as an ANSI-colored ` ERROR  <message>` badge line (its
- * badge is always the word, never an icon -- icons are reporter-internal and
- * only used for non-error levels). Everything else on stderr is unrelated
- * noise (duplicate-package warnings and the like), so pick out just that
- * line and fall back to the raw text when the process died some other way.
+ * Every failure this module can hit is a single-line `consola.error(message)`,
+ * which consola's fancy reporter renders as an ANSI-colored ` ERROR  <message>`
+ * badge line (always the word, never an icon). Everything else on stderr is
+ * unrelated noise, so pick out that line and fall back to the raw text.
  */
 function cleanStderr(stderr: string): string {
   const lines = stderr.replace(/\x1b\[[0-9;]*m/gu, '').split('\n')
@@ -79,14 +73,11 @@ async function runCli(args: string[], cwd: string): Promise<string> {
 }
 
 /**
- * The CLI keeps its own diagnostics on stderr, but a dependency loaded while
- * the routes graph is imported can still log to stdout (`@guren/orm`'s
- * duplicate-copy warning is one, but nothing stops a project's own routes
- * file or a controller from doing the same). `displayContext()` /
- * `displayEntityContext()` print the payload with a single trailing
- * `console.log(JSON.stringify(...))` and nothing runs after it, so it is
- * always the *last* line starting at column 0 — taking the first such line
- * instead would pick up any earlier noise that happens to look like JSON too.
+ * A dependency loaded while the routes graph is imported can log to stdout
+ * (`@guren/orm`'s duplicate-copy warning, or the app's own code). The payload
+ * is printed by a single trailing `console.log(JSON.stringify(...))`, so it is
+ * always the *last* line starting at column 0 — taking the first would pick up
+ * earlier noise that happens to look like JSON.
  */
 function extractJson(stdout: string): string {
   const lines = stdout.split('\n')
@@ -113,21 +104,14 @@ async function runCliJson<T>(args: string[], cwd: string): Promise<T> {
 }
 
 /**
- * The subset of context generation that a long-lived process must not call
- * in-process. Both entries reach `loadRouteDefinitions()`, whose module graph
- * is frozen for the lifetime of the process (see the note in
- * `load-routes.ts`), so a dev server answering repeated MCP requests would
- * keep reporting the route graph as it looked at the first request — long
- * after `routes/web.ts`, a controller, or a `modules/*` route file changed.
- * Running the CLI as a child process re-evaluates the whole graph, transitive
- * imports included, which no in-process trick can do on Bun.
- *
- * The returned values are the same shapes the in-process functions return —
- * `guren context [entity] --json` prints exactly the object they build — so
- * `renderContextMarkdown()` / `renderEntityContextMarkdown()` still apply.
- *
- * Structurally compatible with the matching members of `GurenCliApi` in
- * `@guren/server`; keep the signatures in sync with that interface.
+ * The subset of context generation a long-lived process must not call
+ * in-process: everything here reaches `loadRouteDefinitions()`, whose module
+ * graph is frozen for the process lifetime (see `load-routes.ts`), so a dev
+ * server would answer every MCP request from the graph captured at the first
+ * one. A child process re-evaluates the whole graph, which no in-process trick
+ * can do on Bun. Returns the same shapes as the in-process functions, and is
+ * structurally compatible with `GurenCliApi` in `@guren/server` — keep the
+ * signatures in sync with that interface.
  */
 export function createFreshContextApi(): {
   generateContext(options: { cwd: string }): Promise<ProjectContext>
@@ -150,18 +134,11 @@ export function createFreshContextApi(): {
         cwd,
       ),
 
-    // Overrides the in-process `loadContextRoutes`, which reaches
-    // `loadRouteDefinitions()` like the two above and would answer every
-    // request from the module graph captured at the first one. The child
-    // process still builds the whole context to hand back one field: the
-    // routes-only saving is real for an in-process caller, and a routes-only
-    // CLI output would be needed to extend it here.
-    //
-    // Honours both remaining parameters rather than declaring and dropping
-    // them: `--routes` is a real flag on `guren context`, and `routesError`
-    // is exactly the reason the in-process function reports through
-    // `loadErrors` — without forwarding it, a routes file that throws comes
-    // back as an empty list no caller can tell from an app with no routes.
+    // The child still builds the whole context to hand back one field; a
+    // routes-only CLI output would be needed to avoid that. Both parameters are
+    // honoured rather than dropped: without forwarding `routesError` through
+    // `loadErrors`, a routes file that throws comes back as an empty list no
+    // caller can tell from an app with no routes.
     loadContextRoutes: async (cwd, routesFile, loadErrors) => {
       const context = await runCliJson<ProjectContext>(
         routesFile ? ['context', '--routes', routesFile] : ['context'],

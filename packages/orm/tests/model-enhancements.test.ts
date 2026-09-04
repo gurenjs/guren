@@ -66,10 +66,6 @@ function createAdapter(records: UserRecord[] = []): ORMAdapter {
   }
 }
 
-// =============================================================================
-// Phase 1: Accessors & Mutators
-// =============================================================================
-
 describe('Phase 1: Accessors & Mutators', () => {
   it('applies accessors when reading records', async () => {
     class User extends Model<UserRecord> {
@@ -133,10 +129,6 @@ describe('Phase 1: Accessors & Mutators', () => {
   })
 })
 
-// =============================================================================
-// Phase 2: Serialization
-// =============================================================================
-
 describe('Phase 2: Serialization', () => {
   it('hides fields listed in hidden', () => {
     class User extends Model<UserRecord> {
@@ -192,15 +184,11 @@ describe('Phase 2: Serialization', () => {
   })
 })
 
-// =============================================================================
-// Phase 3: Eager Loading on QueryBuilder
-// =============================================================================
-
 describe('Phase 3: QueryBuilder.with()', () => {
   type PostRecord = { id: number; title: string; authorId: number }
 
-  // One in-memory adapter over several tables: the eager loader queries the
-  // related table through the same adapter the parent model uses.
+  // One adapter over several tables: the eager loader queries the related
+  // table through the same adapter the parent model uses.
   function createMultiAdapter(stores: Record<string, PlainObject[]>): ORMAdapter {
     const matches = (where: PlainObject) => (r: PlainObject) =>
       Object.entries(where).every(([k, v]) => (Array.isArray(v) ? v.includes(r[k]) : r[k] === v))
@@ -300,8 +288,7 @@ describe('Phase 3: QueryBuilder.with()', () => {
   it('restores limit/offset when eager loading fails in first() and paginate()', async () => {
     const { Post } = defineBlog({
       users: [{ id: 1, name: 'Alice' }],
-      // Enough rows that both queries fetch something: an empty page never
-      // reaches the eager loader, so it could not fail there.
+      // an empty page never reaches the eager loader, so it could not fail there
       posts: Array.from({ length: 5 }, (_, i) => ({ id: 10 + i, title: `Post ${i}`, authorId: 1 })),
     })
 
@@ -311,10 +298,6 @@ describe('Phase 3: QueryBuilder.with()', () => {
     expect(query.getOptions()).toMatchObject({ limitValue: 5, offsetValue: 3 })
   })
 })
-
-// =============================================================================
-// Phase 4: Model Observers
-// =============================================================================
 
 describe('Phase 4: Model Observers', () => {
   it('fires observer creating/created hooks', async () => {
@@ -420,17 +403,12 @@ describe('Phase 4: Model Observers', () => {
 
     await User.create({ name: 'Test' } as any)
 
-    // Hooks fire before observers
     expect(log.indexOf('hook:creating')).toBeLessThan(log.indexOf('observer:creating'))
     expect(log.indexOf('hook:created')).toBeLessThan(log.indexOf('observer:created'))
 
     User.clearObservers()
   })
 })
-
-// =============================================================================
-// Phase 5: Global Scopes
-// =============================================================================
 
 describe('Phase 5: Global Scopes', () => {
   it('applies named global scopes to queries', async () => {
@@ -466,12 +444,10 @@ describe('Phase 5: Global Scopes', () => {
     User.addGlobalScope('active', (q) => q.where('active', true))
     User.addGlobalScope('tenant', (q) => q.where('tenantId', 1))
 
-    // Both scopes applied
     const scoped = await User.newQuery().get()
     expect(scoped).toHaveLength(1)
     expect(scoped[0].name).toBe('Active')
 
-    // Without 'active' scope
     const withInactive = await User.withoutGlobalScope('active').get()
     expect(withInactive).toHaveLength(2) // tenantId=1 only
 
@@ -507,25 +483,18 @@ describe('Phase 5: Global Scopes', () => {
       { id: 2, name: 'Deleted', active: false },
     ]))
 
-    // Using defaultScope (which find() checks)
     User.defaultScope = (q) => q.where('active', true)
 
     const found = await User.find(2)
-    // find() with defaultScope goes through newQuery, which should filter
     expect(found).toBeNull()
 
     User.defaultScope = undefined
   })
 })
 
-// =============================================================================
-// Global scopes on every query entry point
-// =============================================================================
-
 describe('global scopes apply on every query entry point', () => {
-  // The docs recommend global scopes for multi-tenancy ("any filter that should
-  // always be active"), so an entry point that drops the scope is a tenant
-  // isolation hole, not just a missing filter.
+  // Global scopes are the documented multi-tenancy filter, so an entry point
+  // that drops one is a tenant isolation hole.
   function tenantScopedUser() {
     class User extends Model<UserRecord> {
       static table = 'users'
@@ -555,8 +524,8 @@ describe('global scopes apply on every query entry point', () => {
   })
 
   // A flat where-object holds one value per field, so a caller's condition on
-  // the scoped column used to overwrite the scope's — handing them another
-  // tenant's rows through the very filter meant to stop that.
+  // the scoped column would otherwise overwrite the scope's and hand them
+  // another tenant's rows.
   it('refuses when a condition would overwrite the scope on the same field', async () => {
     const User = tenantScopedUser()
 
@@ -579,11 +548,10 @@ describe('global scopes apply on every query entry point', () => {
     expect(names(await User.whereNull('deletedAt').get())).toEqual(['Ours'])
   })
 
-  // `not in` / `is not null` have no simple-where representation. On a basic
-  // adapter the builder used to fall back to `where: undefined`, dropping the
-  // tenant scope along with the condition and returning every row. Refusing is
-  // the only safe answer; the shipped Drizzle adapter implements
-  // findManyAdvanced and never reaches this path.
+  // `not in` / `is not null` have no simple-where representation, so a basic
+  // adapter would drop the tenant scope with the condition and return every
+  // row. The shipped Drizzle adapter implements findManyAdvanced and never
+  // reaches this path.
   it('refuses rather than dropping conditions a basic adapter cannot express', async () => {
     const User = tenantScopedUser()
 
@@ -621,8 +589,7 @@ describe('global scopes apply on every query entry point', () => {
     expect(await User.withoutGlobalScope('tenant').get()).toHaveLength(3)
   })
 
-  // Writes are the sharp edge: reads that leak are a disclosure, but an
-  // update/delete that skips the tenant scope mutates another tenant's data.
+  // A write that skips the tenant scope mutates another tenant's data.
   it('applies the scope to update() — a write cannot cross the tenant boundary', async () => {
     const User = tenantScopedUser()
     // id 2 belongs to tenant 2; the tenant-1 scope must keep this write off it.
@@ -651,9 +618,8 @@ describe('global scopes apply on every query entry point', () => {
     expect(await User.withoutGlobalScopes().where('id', 1).first()).toBeNull()
   })
 
-  // The scoped write path borrows the builder's conditions but must reuse the
-  // payload runUpdate already prepared — re-preparing would run mutators twice
-  // (e.g. double-hash a hashed column).
+  // The scoped write path must reuse the payload runUpdate prepared;
+  // re-preparing would run mutators twice (double-hash a hashed column).
   it('runs mutators exactly once on a scoped update', async () => {
     let calls = 0
     class User extends Model<UserRecord> {

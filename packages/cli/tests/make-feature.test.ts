@@ -179,9 +179,8 @@ describe('makeFeature --attach', () => {
       await expect(
         makeFeature('Post', { fields: 'title:string', attach: 'post:one' }),
       ).rejects.toThrow(/collides/)
-      // Shadowing the model class puts the store action's own `Post.create`
-      // in a temporal dead zone; createdAt is a column every resource
-      // blueprint table (and most hand-written ones) carries.
+      // Shadowing the model class puts the store action's own `Post.create` in
+      // a temporal dead zone; createdAt is a column every resource table carries.
       await expect(
         makeFeature('Post', { fields: 'title:string', attach: 'Post:one' }),
       ).rejects.toThrow(/collides/)
@@ -310,9 +309,8 @@ describe('makeFeature', () => {
     }
   })
 
-  // A date column is a `Date` in the database, an ISO string on the wire, and a
-  // bare `YYYY-MM-DD` in a date input. Each layer has to name its own shape or
-  // the scaffold does not type-check — see the RouteBody note below.
+  // A date column is a `Date` in the DB, an ISO string on the wire, and a bare
+  // `YYYY-MM-DD` in a date input; each layer must name its own shape to compile.
   it('keeps a date field a string all the way through the form', async () => {
     const workspace = await createTempWorkspace('guren-cli-feature-date-')
 
@@ -473,12 +471,11 @@ describe('makeFeature', () => {
     try {
       const created = await makeFeature('Invoice', { fields: 'title:string', root: 'billing' })
 
-      // app/ output moves under modules/<name>/ ...
       expect(created.some((f) => f.endsWith('modules/billing/app/Http/Controllers/InvoiceController.ts'))).toBe(true)
       expect(created.some((f) => f.endsWith('modules/billing/app/Models/Invoice.ts'))).toBe(true)
 
-      // ... but pages stay top-level, namespaced by module name per RFC 0002's
-      // "pages are not colocated" decision — NOT modules/billing/resources/js/pages/.
+      // Pages stay top-level, namespaced by module name (RFC 0002: pages are
+      // not colocated).
       expect(created.some((f) => f.endsWith('resources/js/pages/billing/invoices/Index.tsx'))).toBe(true)
       expect(created.some((f) => f.includes('modules/billing/resources'))).toBe(false)
 
@@ -488,22 +485,16 @@ describe('makeFeature', () => {
       )
       expect(controllerContent).toContain('class InvoiceController')
 
-      // The generated pages.gen.ts nests every resources/js/pages/ directory
-      // segment (see pages-types.ts), so a page at
-      // resources/js/pages/billing/invoices/Index.tsx is reached via
-      // pages.billing.invoices.Index — not pages.invoices.Index. The
-      // controller must reference the module-namespaced path or codegen
-      // output and generated code disagree.
+      // pages.gen.ts nests every resources/js/pages/ directory segment
+      // (pages-types.ts), so the controller must use the module-namespaced path.
       expect(controllerContent).toContain('pages.billing.invoices.Index')
       expect(controllerContent).toContain('pages.billing.invoices.Show')
       expect(controllerContent).toContain('pages.billing.invoices.New')
       expect(controllerContent).toContain('pages.billing.invoices.Edit')
       expect(controllerContent).not.toMatch(/this\.inertia\(pages\.invoices\./)
 
-      // store()/update() redirect to the resource's own show page. Once
-      // --module moves this route under the module's prefix (make:module's
-      // own default is `/<name>`), a bare '/invoices/' + id redirect 404s —
-      // it must match make:module's default prefix.
+      // The redirect must match make:module's default prefix (`/<name>`); a bare
+      // '/invoices/' + id 404s once --module moves the route under it.
       expect(controllerContent).toContain("this.redirect('/billing/invoices/' + invoice?.id)")
       expect(controllerContent).toContain("this.redirect('/billing/invoices/' + id)")
       expect(controllerContent).toContain("this.redirect('/billing/invoices')")
@@ -529,8 +520,7 @@ describe('makeFeature', () => {
 })
 
 describe('buildRouteRegistrationHint', () => {
-  // Scaffolded registrars — the default app template and every `make:module`
-  // module — name their parameter `router`. The printed block is meant to be
+  // Every scaffolded registrar names its parameter `router`, and the block is
   // pasted in as-is, so it may only reference `router` and names it binds itself.
   const REGISTRAR_PARAM = 'router'
 
@@ -572,10 +562,8 @@ describe('buildRouteRegistrationHint', () => {
 })
 
 // `guren make:feature` reaches this scaffold without passing through the
-// blueprint registry, so the refusal has to live here too — the resource
-// blueprint's own guard cannot cover the direct command. The predicate's
-// branches are pinned in the admin block of blueprints.test.ts; this only has
-// to prove makeFeature() refuses before its first write.
+// blueprint registry, so the refusal has to live here too. The predicate's own
+// branches are pinned in blueprints.test.ts; this pins refusal-before-write.
 describe('makeFeature on an API-only app', () => {
   it('refuses, naming the two signals, and writes nothing', async () => {
     const workspace = await createTempWorkspace('guren-cli-feature-api-only-')
@@ -599,10 +587,8 @@ describe('makeFeature on an API-only app', () => {
     }
   })
 
-  // The guard judges `writeRoot(options)`, and this is the test that keeps it
-  // that way: `guren mcp` names the workspace it scaffolds into rather than
-  // steering the server process there, so reading the process directory would
-  // judge a project the files are never written to.
+  // The guard must judge `writeRoot(options)`: `guren mcp` names the workspace
+  // it scaffolds into without steering the server process there.
   it('judges the project named by cwd, not the process directory', async () => {
     const workspace = await createTempWorkspace('guren-cli-feature-api-only-cwd-')
     try {
@@ -621,9 +607,8 @@ describe('makeFeature on an API-only app', () => {
     }
   })
 
-  // Positive evidence only: no manifest is an unknown app, not an API-only one.
-  // The shared predicate is tested elsewhere; this pins that the guard at this
-  // call site cannot misfire into refusing an app it cannot judge.
+  // Positive evidence only: no manifest is an unknown app, not an API-only one,
+  // so the guard at this call site must not refuse what it cannot judge.
   it('still scaffolds when there is no package.json to judge by', async () => {
     const workspace = await createTempWorkspace('guren-cli-feature-unknown-app-')
     try {

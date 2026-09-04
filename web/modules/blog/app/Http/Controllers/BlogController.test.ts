@@ -61,9 +61,9 @@ describe('BlogController', () => {
       const older = makePost({ id: 1, slug: 'older', publishedAt: new Date('2026-06-01T00:00:00Z') })
       const newer = makePost({ id: 2, slug: 'newer', publishedAt: new Date('2026-07-01T00:00:00Z') })
       const scheduled = makePost({ id: 4, slug: 'scheduled', publishedAt: new Date(Date.now() + 86_400_000) })
-      // Ordering and the unpublished filter happen in SQL now, so the mock
-      // returns rows already in query order and the assertions cover the
-      // query shape plus the future-dated guard the database cannot express.
+      // Ordering and the unpublished filter happen in SQL, so the mock returns
+      // rows already ordered and the assertions cover the query shape plus the
+      // future-dated guard the database cannot express.
       const chain = {
         whereNotNull: vi.fn().mockReturnThis(),
         orderBy: vi.fn().mockReturnThis(),
@@ -87,8 +87,7 @@ describe('BlogController', () => {
     })
   })
 
-  // show() renders plain server HTML via Controller.view() (RFC 0014), so
-  // these assert on the document rather than an Inertia payload.
+  // show() renders plain server HTML, so these assert on the document.
   describe('show', () => {
     it('should return a 404 document for an unknown slug', async () => {
       stubFindBySlug(null)
@@ -100,8 +99,7 @@ describe('BlogController', () => {
       const html = await response.text()
 
       expect(response.status).toBe(404)
-      // Body copy and the back link — the <title> alone also says
-      // "Post not found", so assert the parts only the body carries.
+      // The <title> also says "Post not found", so assert what only the body has.
       expect(html).toContain('exist or has been unpublished')
       expect(html).toContain('href="/blog"')
       expect(html).toMatch(/<head>[\s\S]*noindex[\s\S]*<\/head>/)
@@ -146,12 +144,11 @@ describe('BlogController', () => {
       expect(response.status).toBe(200)
       expect(response.headers.get('content-type')).toBe('text/html; charset=utf-8')
       expect(html.startsWith('<!doctype html><html lang="en">')).toBe(true)
-      // The stored article HTML lands exactly once — the doubled payload
-      // (escaped JSON + SSR HTML) was the reason this page left Inertia.
+      // Exactly once: the doubled payload (escaped JSON + SSR HTML) was the
+      // reason this page left Inertia.
       expect(html.split('<h1>Hello</h1>').length - 1).toBe(1)
       expect(html).not.toContain('__INERTIA_PAGE__')
       expect(html).not.toContain('data-page')
-      // Metadata in <head> via the ContentShell head slot.
       expect(html).toMatch(/<head>[\s\S]*Hello World[\s\S]*<\/head>/)
       expect(html).toMatch(/<head>[\s\S]*rel="canonical"[\s\S]*<\/head>/)
       expect(html).toMatch(/<link rel="stylesheet" href="[^"]*resources\/css\/app\.css"/)

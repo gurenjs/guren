@@ -6,10 +6,6 @@ interface SendWelcomeEmailPayload {
   userId: number
 }
 
-/**
- * Job that sends a welcome email to a newly registered user.
- * This runs in the background to avoid blocking the registration flow.
- */
 export class SendWelcomeEmailJob extends Job<SendWelcomeEmailPayload> {
   static override queue = 'emails'
   static override maxAttempts = 3

@@ -7,9 +7,8 @@ import { DEFAULT_DEV_STYLES_ENTRY } from "../../support/inertia-defaults";
 ensureErrorStackTracePolyfill();
 
 /**
- * Per-response form of {@link InertiaDocumentOptions}: the same fields, already
- * resolved to strings. Each one overrides the app-wide default registered
- * through {@link setInertiaDocument}.
+ * Per-response form of {@link InertiaDocumentOptions}, already resolved to
+ * strings. Each field overrides the app-wide {@link setInertiaDocument} default.
  */
 type InertiaDocumentOverrides = {
   readonly [K in keyof InertiaDocumentOptions]?: string;
@@ -69,29 +68,21 @@ type InertiaDocumentValue =
   | ((context: InertiaDocumentContext) => string | undefined);
 
 export interface InertiaDocumentOptions {
-  /**
-   * Class attribute for the root `<body>` element. Pass a function to vary it
-   * per page component — a docs section that needs a light surface while the
-   * marketing pages keep a dark one, for instance.
-   */
+  /** Class for the root `<body>`; a function varies it per page component. */
   readonly bodyClass?: InertiaDocumentValue;
   /**
-   * CSS inlined into `<head>` ahead of the stylesheet links. Keep it to the
-   * few declarations that decide the first paint (surface and text colors);
-   * the main stylesheet still wins for everything it defines later.
+   * CSS inlined into `<head>` ahead of the stylesheet links. Keep it to the few
+   * declarations that decide the first paint; the main stylesheet wins later.
    */
   readonly criticalCss?: InertiaDocumentValue;
   /**
-   * Body of a blocking inline `<script>` executed before the first paint.
-   * Use it for theme prepaint logic that has to read `localStorage` or
-   * `matchMedia` before React hydrates.
+   * Body of a blocking inline `<script>` run before the first paint — theme
+   * prepaint logic reading `localStorage` or `matchMedia` before hydration.
    */
   readonly prepaintScript?: InertiaDocumentValue;
   /**
-   * Raw markup inlined into `<head>`, ahead of the critical CSS and stylesheet
-   * links. Unescaped — the app author owns this string. Use it for static,
-   * site-wide tags the framework has no way to infer on its own, such as
-   * `<link rel="icon">` favicons.
+   * Raw markup inlined into `<head>`, ahead of the critical CSS. Unescaped —
+   * the app author owns this string. For static site-wide tags like favicons.
    */
   readonly head?: InertiaDocumentValue;
 }
@@ -99,29 +90,12 @@ export interface InertiaDocumentOptions {
 let documentOptions: InertiaDocumentOptions | undefined;
 
 /**
- * Register app-wide document defaults for server-rendered Inertia responses.
- *
- * Without this, the `<body>` ships without a class and nothing is inlined into
- * `<head>`, so a page whose theme is applied by a client effect flashes the
- * stylesheet's default surface color until React hydrates. Call it at module
- * scope in the app entry so every runtime (Bun, serverless handlers, generated
- * worker bundles) picks it up.
- *
- * Registration is process-wide and not request-scoped: calling this while
- * requests are in flight leaks the new policy into them. Use the matching
- * {@link InertiaOptions} fields for a single response instead.
- *
- * The values are emitted verbatim — inside `<style>` / `<script>` elements,
- * or as raw markup for `head` — they are developer-authored assets, never
- * user input.
- *
- * ```typescript
- * setInertiaDocument({
- *   bodyClass: ({ component }) => (component.startsWith('Docs/') ? 'docs-theme' : undefined),
- * })
- * ```
- *
- * Pass `undefined` to clear (test isolation).
+ * Register app-wide document defaults for server-rendered Inertia responses;
+ * call it at module scope in the app entry so every runtime picks it up.
+ * Process-wide, not request-scoped: calling it mid-flight leaks the policy into
+ * in-flight requests — use the {@link InertiaOptions} fields per response.
+ * Values are emitted verbatim, so never pass user input. `undefined` clears
+ * (test isolation).
  */
 export function setInertiaDocument(
   options: InertiaDocumentOptions | undefined
@@ -132,13 +106,10 @@ export function setInertiaDocument(
 let defaultSsrRenderer: InertiaSsrRenderer | undefined;
 
 /**
- * Register a process-wide default SSR renderer.
- *
- * Serverless adapters whose bundlers cannot resolve a runtime file path
- * (Cloudflare Workers has no filesystem for `GUREN_INERTIA_SSR_ENTRY`'s
- * dynamic import) register the statically imported renderer once at module
- * scope. Per-call `ssr.render` still takes precedence; pass `undefined` to
- * clear (test isolation).
+ * Register a process-wide default SSR renderer, for adapters whose bundler
+ * cannot resolve a runtime path (Workers has no filesystem for
+ * `GUREN_INERTIA_SSR_ENTRY`'s dynamic import). Per-call `ssr.render` still
+ * wins; `undefined` clears (test isolation).
  */
 export function setInertiaSsrRenderer(
   renderer: InertiaSsrRenderer | undefined
@@ -227,9 +198,8 @@ export async function inertia(
 }
 
 /**
- * The Inertia protocol's page `url` is the request path including the query
- * string (e.g. "/posts?page=1"), kept relative. Derive it from the request
- * when the caller does not override it.
+ * The Inertia protocol's page `url` is the request path plus query string, kept
+ * relative. Derived from the request when the caller does not override it.
  */
 function inertiaPageUrl(request: Request | undefined): string | undefined {
   if (!request) {
@@ -251,13 +221,11 @@ async function renderDocument(
   const isProduction = process.env.NODE_ENV === "production";
   const configuredStyles =
     options.styles ?? parseStylesEnv(process.env.GUREN_INERTIA_STYLES);
-  // The dev-default stylesheet path points at the *source* file, which only
-  // works when nothing has to compile it. With a Vite dev server on the
-  // entry, the compiled CSS already arrives through the module graph, and the
-  // raw file is broken besides: Tailwind's `@import 'tailwindcss'` is a bare
-  // specifier only a bundler resolves, so the browser 404s it on every page.
-  // A per-call `options.styles` is an explicit choice and is never filtered;
-  // only the ambient (env-derived) styles can carry the dev fallback.
+  // The dev-default stylesheet points at the *source* file, which only works
+  // when nothing has to compile it: with a Vite dev server on the entry the CSS
+  // already arrives through the module graph, and Tailwind's `@import
+  // 'tailwindcss'` is a bare specifier the browser 404s. An explicit
+  // `options.styles` is never filtered; only env-derived styles are.
   const styles =
     !isProduction && options.styles === undefined && isDevServerEntry(entry)
       ? configuredStyles.filter((href) => href !== DEFAULT_DEV_STYLES_ENTRY)
@@ -305,9 +273,9 @@ async function renderDocument(
       : "",
     `<script>window.__INERTIA_PAGE__ = ${serializedPage};</script>`,
   ].filter((segment) => segment && segment.length > 0);
-  // Inertia v3 contract: the initial page ships in a JSON script element
-  // (script[data-page="app"][type="application/json"]); the container div
-  // stays empty. serializePage escapes `<`, so </script> breakout is safe.
+  // Inertia v3 contract: the initial page ships in a JSON script element and
+  // the container div stays empty. serializePage escapes `<`, so </script>
+  // breakout is safe.
   const appMarkup =
     ssrResult?.body ??
     `<script data-page="app" type="application/json">${serializedPage}</script><div id="app"></div>`;
@@ -447,8 +415,8 @@ function isUrlLike(specifier: string): boolean {
 
 /**
  * An absolute http(s) entry means an asset dev server (Vite) is serving the
- * module graph. A same-origin path means the fallback pipeline is serving
- * source files directly — there the raw stylesheet link is the only styling.
+ * module graph; a same-origin path means source files are served directly,
+ * where the raw stylesheet link is the only styling.
  */
 function isDevServerEntry(entry: string): boolean {
   return /^https?:\/\//iu.test(entry);
@@ -473,10 +441,7 @@ function normalizeHeadElement(element: unknown): string {
   );
 }
 
-/**
- * Resolves one document field: the per-response override wins, then the
- * app-wide default, then the empty string (meaning "emit nothing").
- */
+/** One document field: per-response override, then app-wide default, then "". */
 function resolveDocumentValue(
   key: keyof InertiaDocumentOptions,
   options: InertiaOptions,

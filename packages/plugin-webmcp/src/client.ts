@@ -1,24 +1,14 @@
 /**
  * The WebMCP client (RFC 0016 §7, Phase 3) — **experimental**.
  *
- * Registers the tools an application's `.guren/agents.gen.ts` marks
- * `expose.webMcp` onto the browser's `modelContext` API, so an in-page agent
- * calls them as the signed-in user: same session cookie, same CSRF token,
- * same policies, same validation. Nothing here re-implements any of that —
- * a tool call is turned back into the HTTP request the route already
- * validates, by the framework's one dispatch contract.
- *
- * **Import discipline.** This module imports from `@guren/core/agent` and
- * nothing else. Never from `@guren/core` or `@guren/server`: their indexes
- * pull the container, Hono, the ORM and the whole application graph into what
- * is a browser bundle. The `/agent` subpath exists precisely so this file can
- * have `buildToolRequest` without any of that.
- *
- * **Experimental.** WebMCP is a W3C Community Group draft. The anchor moved
- * from `navigator.modelContext` to `document.modelContext`, `unregisterTool`
- * has come and gone across revisions, and the result shape is still settling.
- * Every place this file feature-detects rather than assumes is a place the
- * draft has already changed once.
+ * Registers the tools an app's `.guren/agents.gen.ts` marks `expose.webMcp`
+ * onto the browser's `modelContext` API: a tool call becomes the HTTP request
+ * the route already validates, as the signed-in user. Imports from
+ * `@guren/core/agent` and nothing else — `@guren/core` or `@guren/server`
+ * would pull the container, Hono and the ORM into a browser bundle. WebMCP is
+ * a W3C CG draft (the anchor moved from `navigator` to `document`,
+ * `unregisterTool` has come and gone), so every feature detection here marks
+ * something the draft already changed once.
  */
 import {
   buildToolRequest,
@@ -38,27 +28,18 @@ const XSRF_HEADER_NAME = 'X-XSRF-TOKEN'
 /**
  * Methods that carry no CSRF token. QUERY is deliberately absent even though
  * the server's CSRF default skips it: a redundant token header is harmless,
- * and sending it is what keeps this client working against a server that opts
- * QUERY into protection.
+ * and sending it keeps this client working against a server that protects it.
  */
 const CSRF_SAFE_METHODS: ReadonlySet<string> = new Set(['GET', 'HEAD', 'OPTIONS'])
 
 /**
  * One entry of a generated `agentTools` manifest, structurally.
  *
- * Declared here rather than imported as `DerivedAgentTool` because the
- * manifest is emitted `as const`: every property is `readonly` and every
- * array is a `readonly` array, and a `readonly string[]` is not assignable to
- * the `string[]` the derivation's own type declares. So the shape a caller
- * can actually satisfy is this one, and the single cast back to
- * `DerivedAgentTool` at the dispatch call is what bridges them — sound
- * because dispatch only ever reads the tool.
- *
- * `inputSchema` and `outputSchema` are `unknown` on purpose: this module
- * never inspects them, it forwards `inputSchema` to the host and hands the
- * tool to `mapToolResponse`, which reads the schema through its own type.
- * Naming a schema type here would be a second description of a shape the
- * framework already owns.
+ * Declared here rather than imported as `DerivedAgentTool` because the manifest
+ * is emitted `as const`, and a `readonly string[]` is not assignable to the
+ * `string[]` the derivation declares. The single cast back at the dispatch call
+ * bridges them, sound because dispatch only ever reads the tool. The schemas
+ * are `unknown` because this module never inspects them.
  */
 export interface WebMcpToolSource {
   readonly toolName: string
@@ -89,12 +70,10 @@ export interface WebMcpToolResult {
 }
 
 /**
- * The descriptor handed to `modelContext.registerTool`.
- *
- * `description` is **required** by the draft's `ModelContextTool`, and an
- * empty string is rejected with `InvalidStateError` — which is why
- * {@link registerAgentTools} substitutes a fallback rather than forwarding
- * the optional description a Guren route carries.
+ * The descriptor handed to `modelContext.registerTool`. `description` is
+ * **required** by the draft's `ModelContextTool` and an empty string is
+ * rejected with `InvalidStateError`, which is why {@link registerAgentTools}
+ * substitutes a fallback.
  */
 export interface WebMcpToolDescriptor {
   name: string
@@ -110,48 +89,40 @@ export interface WebMcpToolDescriptor {
 /**
  * `ModelContextRegisterToolOptions`, the draft's second `registerTool`
  * argument. Aborting `signal` is how the current draft unregisters a tool;
- * there is no `unregisterTool` in it at all.
+ * it has no `unregisterTool` at all.
  */
 export interface WebMcpRegisterToolOptions {
   signal?: AbortSignal
 }
 
 /**
- * The slice of the browser's `modelContext` this client uses.
- *
- * Structural rather than a reference to a published type: there is no stable
- * one to reference while the CG draft moves, and a structural declaration is
- * also what makes the anchor injectable in a test.
+ * The slice of the browser's `modelContext` this client uses. Structural
+ * because there is no stable published type while the CG draft moves, and it
+ * is also what makes the anchor injectable in a test.
  */
 export interface ModelContextLike {
   registerTool(descriptor: WebMcpToolDescriptor, options?: WebMcpRegisterToolOptions): unknown
   /**
-   * Present in earlier shipped hosts, absent from the current draft — which
+   * Present in earlier shipped hosts, absent from the current draft, which
    * replaced it with the abort signal above. Feature-detected at
-   * unregistration time rather than at registration, so a host of either
-   * generation can still register.
+   * unregistration time so a host of either generation can still register.
    */
   unregisterTool?(name: string): unknown
 }
 
 export interface RegisterAgentToolsOptions {
   /**
-   * The anchor to register on, overriding detection. A testing and embedding
-   * seam — a page with its own `modelContext` shim passes it here rather than
-   * assigning onto `document`.
+   * The anchor to register on, overriding detection — a testing and embedding
+   * seam for a page with its own `modelContext` shim.
    */
   modelContext?: ModelContextLike
   /** `fetch` to dispatch through. Defaults to the page's own. */
   fetch?: typeof fetch
   /**
-   * Register tools whose route declares `approval: 'required'`.
-   *
-   * Off by default, and that default is fail-closed rather than tidy: the
-   * server-side approval queue is reached through the App MCP endpoint, and
-   * WebMCP has no equivalent — so registering such a tool here offers an
-   * agent a call the application asked a human to confirm first, with no
-   * human in the loop. Turning it on is the explicit statement that the page
-   * itself confirms those calls.
+   * Register tools whose route declares `approval: 'required'`. Off by default
+   * and fail-closed: the approval queue is reached through the App MCP endpoint
+   * and WebMCP has no equivalent, so registering one here would offer an agent
+   * a call the application asked a human to confirm, with no human in the loop.
    */
   includeApprovalRequired?: boolean
 }
@@ -164,11 +135,9 @@ export interface WebMcpRegistration {
   /** Tools deliberately not registered, and why. */
   skipped: Array<{ tool: string; reason: 'expose' | 'approval' }>
   /**
-   * Remove the tools this call registered, by both mechanisms the two
-   * generations of host offer: aborting the signal handed to `registerTool`
-   * (the current draft's only way) and calling `unregisterTool` per name
-   * (earlier shipped hosts). Best-effort — a host that has neither, or one
-   * name that refuses, does not stop the rest. Safe on an unsupported
+   * Remove the tools this call registered, by both mechanisms the two host
+   * generations offer: aborting the signal handed to `registerTool` and calling
+   * `unregisterTool` per name. Best-effort, and safe on an unsupported
    * environment.
    */
   unregister(): Promise<void>
@@ -177,19 +146,14 @@ export interface WebMcpRegistration {
 /**
  * Register an application's WebMCP-exposed agent tools on the page.
  *
+ * A browser with no `modelContext` gets `{ supported: false }` and no
+ * exception: this runs on every page load, and a missing experimental API is
+ * the normal case. Registration failures are the opposite — see the loop below.
+ *
  * @example
  * ```typescript
- * import { agentTools } from '@/.guren/agents.gen'
- * import { registerAgentTools } from '@guren/plugin-webmcp/client'
- *
  * await registerAgentTools(agentTools)
  * ```
- *
- * Progressive enhancement by construction: a browser with no `modelContext`
- * gets `{ supported: false }` and no exception, because this runs on every
- * page load of an app that adopts it and a missing experimental API is the
- * normal case, not an error. Registration failures are the opposite — see
- * the loop below.
  */
 export async function registerAgentTools(
   tools: Readonly<Record<string, WebMcpToolSource>>,
@@ -203,15 +167,11 @@ export async function registerAgentTools(
     return { supported: false, registered, skipped, unregister: async () => {} }
   }
 
-  // One controller for the whole call, so `unregister()` is a single abort
-  // whatever the host does with it. Handed to every `registerTool` alongside
-  // the descriptor: a host implementing the current draft unregisters on
-  // abort, and a host predating the option ignores an unknown dictionary
-  // member (WebIDL conversion drops what the dictionary does not declare),
-  // so passing it costs nothing there and `unregisterTool` covers that
-  // generation instead. Both paths run on teardown rather than one being
-  // feature-detected as the winner — the two are not distinguishable from
-  // outside, and doing both is idempotent.
+  // One controller for the whole call, so `unregister()` is a single abort.
+  // Handed to every `registerTool`: a host on the current draft unregisters on
+  // abort, and one predating the option drops an undeclared dictionary member,
+  // so `unregisterTool` covers that generation instead. Both run on teardown —
+  // the two are not distinguishable from outside, and doing both is idempotent.
   const lifetime = new AbortController()
 
   const candidates: WebMcpToolSource[] = []
@@ -236,25 +196,21 @@ export async function registerAgentTools(
           name: tool.toolName,
           description: describeTool(tool),
           inputSchema: tool.inputSchema,
-          // Passed through unchanged. The draft's annotations dictionary is a
+          // Passed through unchanged: the draft's annotations dictionary is a
           // superset of what the derivation resolves, and WebIDL conversion
-          // ignores members a dictionary does not declare — so a host that
-          // knows fewer of them drops the rest rather than rejecting the
-          // tool. (`untrustedContentHint` is the one going the other way:
-          // nothing in a route contract says whether a response embeds
-          // third-party content, so it is not derivable and not sent.)
+          // drops undeclared members. (`untrustedContentHint` is not derivable
+          // from a route contract, so it is not sent.)
           annotations: tool.annotations,
           execute: (args, context) => executeTool(tool, args, context, options),
         },
         { signal: lifetime.signal },
       )
     } catch (error) {
-      // Propagated, not collected. A registration failure means the manifest
-      // and the host disagree — a duplicate name, a schema the host rejects
-      // — which is a wiring mistake the developer has to see; a page that
-      // silently exposed nine of ten tools would look like it worked. The
-      // ones already registered come back off first, so a caller that
-      // catches and retries is not fighting a half-registered page.
+      // Propagated, not collected: a registration failure means the manifest
+      // and the host disagree — a duplicate name, a schema the host rejects —
+      // which is a wiring mistake the developer has to see. Already-registered
+      // tools come off first, so a caller that retries is not fighting a
+      // half-registered page.
       await teardown(anchor, lifetime, registered)
       throw error
     }
@@ -270,14 +226,10 @@ export async function registerAgentTools(
 }
 
 /**
- * The description the host is given.
- *
- * `ModelContextTool.description` is required, and an empty one is rejected
- * with `InvalidStateError` — while a Guren route's `.agent()` description is
- * optional and `guren check` only warns about its absence. Forwarding the
- * absence would turn a warning into a page that throws on load, so the method
- * and path stand in: not a good description, but a true one, and the tool it
- * names is still callable.
+ * The description the host is given. `ModelContextTool.description` is required
+ * and an empty one is rejected with `InvalidStateError`, while a Guren route's
+ * `.agent()` description is optional — so the method and path stand in rather
+ * than turning a `guren check` warning into a page that throws on load.
  */
 function describeTool(tool: WebMcpToolSource): string {
   const declared = tool.description?.trim()
@@ -285,13 +237,10 @@ function describeTool(tool: WebMcpToolSource): string {
 }
 
 /**
- * Where the page publishes its model context.
- *
- * `document` first: the draft moved the anchor there, and
- * `navigator.modelContext` is the deprecated spelling (removed in Chrome
- * 150). Both are read through `globalThis` so this module stays importable —
- * and type-checkable — under SSR, where neither global exists. Nothing is
- * touched at module scope for the same reason.
+ * Where the page publishes its model context. `document` first: the draft moved
+ * the anchor there and `navigator.modelContext` is the deprecated spelling
+ * (removed in Chrome 150). Both are read through `globalThis`, and nothing is
+ * touched at module scope, so this stays importable under SSR.
  */
 function resolveModelContext(override?: ModelContextLike): ModelContextLike | undefined {
   if (override) return override
@@ -304,12 +253,9 @@ function resolveModelContext(override?: ModelContextLike): ModelContextLike | un
 
 /**
  * Remove the registered tools by both mechanisms; see
- * {@link WebMcpRegistration.unregister}.
- *
- * The abort goes first because it is the current draft's only way and cannot
- * fail, then the legacy per-name call for hosts that predate it. Neither is
- * conditional on the other: from outside, a host that ignored the signal is
- * indistinguishable from one that honoured it.
+ * {@link WebMcpRegistration.unregister}. The abort goes first because it is the
+ * current draft's only way and cannot fail, then the legacy per-name call.
+ * Neither is conditional: from outside the two hosts are indistinguishable.
  */
 async function teardown(
   anchor: ModelContextLike,
@@ -329,11 +275,8 @@ async function teardown(
 
 /**
  * Turn one tool call into the HTTP request its route validates, and the
- * response back into an MCP tool result.
- *
- * The two casts to `DerivedAgentTool` are the ones {@link WebMcpToolSource}
- * documents: the manifest is deeply readonly and the derivation's type is
- * not, while both functions here only read.
+ * response back into an MCP tool result. The casts to `DerivedAgentTool` are
+ * the ones {@link WebMcpToolSource} documents; both callees only read.
  */
 async function executeTool(
   tool: WebMcpToolSource,
@@ -344,8 +287,7 @@ async function executeTool(
   const derived = tool as DerivedAgentTool
   const built = buildToolRequest(derived, args ?? {}, {
     // The page's own origin, so the request is same-origin and carries the
-    // session cookie. Absent under SSR, where dispatch's own default applies
-    // and this code does not run anyway.
+    // session cookie. Absent under SSR, where dispatch's own default applies.
     origin: (globalThis as { location?: { origin?: string } }).location?.origin,
     surface: 'webmcp',
   })
@@ -365,38 +307,27 @@ async function executeTool(
   try {
     response = await dispatch(built.request, {
       signal: context?.signal,
-      // Both pin the request to the app that served the page, and both are
-      // load-bearing rather than defensive tidying. The synthesized Request
-      // would otherwise default to `cors` + `follow`, and this call carries
-      // two things that must never leave the origin: the session cookie's
-      // authority and the `X-XSRF-TOKEN` header. `fetch` strips
-      // `Authorization` across a cross-origin redirect but *not* custom
-      // headers, so a single open redirect anywhere in the application would
-      // replay the body and the CSRF token to whatever host it names.
-      // `same-origin` refuses the cross-origin request outright; `manual`
-      // makes sure no redirect is followed to find out.
+      // Both pin the request to the app that served the page. The synthesized
+      // Request would otherwise default to `cors` + `follow`, and this call
+      // carries the session cookie's authority and the `X-XSRF-TOKEN` header:
+      // `fetch` strips `Authorization` across a cross-origin redirect but *not*
+      // custom headers, so one open redirect would replay both elsewhere.
       mode: 'same-origin',
       redirect: 'manual',
     })
   } catch (error) {
-    // Returned rather than thrown. A rejected `execute` reaches the agent as
-    // a host-level failure whose message is flattened or dropped, so an
-    // offline tab would report "tool failed" with nothing to act on; as a
-    // result it reads like any other error the tool can answer with.
+    // Returned rather than thrown: a rejected `execute` reaches the agent as a
+    // host-level failure whose message is flattened or dropped, so an offline
+    // tab would report "tool failed" with nothing to act on.
     return errorResult(`Request failed: ${describeError(error)}`)
   }
 
-  // `redirect: 'manual'` turns *any* redirect into an opaque response: type
-  // `opaqueredirect`, status 0, no readable headers. Caught before
-  // `mapToolResponse`, which would read that as a status-0 non-JSON body and
-  // describe it as something the route returned.
-  //
-  // A parity gap with the App MCP surface, accepted knowingly: that adapter
-  // dispatches in-process, so it can report `HTTP 302 (Location: …)`. A
-  // browser cannot see the Location of an opaque redirect at all, and the
-  // alternative — following it — is the hazard above. Not an error result:
-  // the route answered, the client declined to chase it, and an agent that
-  // sees `isError` would retry a call that did exactly what it should.
+  // `redirect: 'manual'` turns *any* redirect into an opaque response (type
+  // `opaqueredirect`, status 0, no readable headers), which `mapToolResponse`
+  // would otherwise describe as something the route returned. A browser cannot
+  // read the Location, and following it is the hazard above — a parity gap with
+  // the App MCP surface. Not an error result: the route answered, and `isError`
+  // would make an agent retry a call that did exactly what it should.
   if (response.type === 'opaqueredirect') {
     return {
       content: [
@@ -416,9 +347,8 @@ async function executeTool(
 
 /**
  * Copy the CSRF cookie into the header Guren's middleware reads, for the
- * methods it protects. Absent cookie, no header: the app may be running with
- * `csrf({ cookie: false })`, and inventing an empty token would turn a
- * working call into a 403.
+ * methods it protects. Absent cookie, no header: the app may run with
+ * `csrf({ cookie: false })`, and an empty token would turn a call into a 403.
  */
 function applyCsrfToken(request: Request): void {
   if (CSRF_SAFE_METHODS.has(request.method.toUpperCase())) return
@@ -427,10 +357,8 @@ function applyCsrfToken(request: Request): void {
 }
 
 /**
- * Read the `XSRF-TOKEN` cookie issued by Guren's CSRF middleware.
- *
- * Reached through `globalThis` for the same reason the generated API client
- * does it: the module has to stay importable outside a browser.
+ * Read the `XSRF-TOKEN` cookie issued by Guren's CSRF middleware, through
+ * `globalThis` so the module stays importable outside a browser.
  */
 function readXsrfToken(): string | undefined {
   const cookies = (globalThis as { document?: { cookie?: string } }).document?.cookie
@@ -449,14 +377,10 @@ function readXsrfToken(): string | undefined {
 }
 
 /**
- * The MCP-shaped subset of a dispatch outcome.
- *
- * `status` and `preflightVerdict` are dropped deliberately. They exist for
- * the App MCP endpoint's audit trail, which has a server to record into; a
- * WebMCP host has none, and hands whatever `execute` returns straight to the
- * agent. Returning the content array alone is also the intersection every
- * shipped WebMCP implementation accepts, while the CG draft's serialization
- * of arbitrary return values is the part still moving.
+ * The MCP-shaped subset of a dispatch outcome. `status` and `preflightVerdict`
+ * are dropped: they exist for the App MCP endpoint's audit trail, and a WebMCP
+ * host has none. The content array alone is also the intersection every shipped
+ * WebMCP implementation accepts.
  */
 function toWireResult(outcome: ToolCallOutcome): WebMcpToolResult {
   const result: WebMcpToolResult = { content: outcome.content }

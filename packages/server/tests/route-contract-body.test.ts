@@ -12,13 +12,9 @@ import {
 import { required, string } from '../src/http/validation/rules'
 
 /**
- * A route may bind any schema to `body`, not only an object one. The parsed
- * JSON reaches the schema as-is — an array stays an array, a string stays a
- * string — so `z.array()` / `z.string()` contracts are reachable over HTTP
- * rather than always 422-ing on a payload that was narrowed to `{}` first.
- *
- * The object case is what every scaffolded route uses, so it is pinned beside
- * each non-object one.
+ * A route may bind any schema to `body`, not only an object one: the parsed JSON
+ * reaches the schema as-is, so `z.array()` / `z.string()` contracts stay reachable
+ * instead of 422-ing on a payload narrowed to `{}` first.
  */
 
 class BulkController extends Controller {
@@ -193,16 +189,10 @@ describe('non-object request bodies', () => {
 })
 
 /**
- * A body the form parser cannot decode used to get three different answers
- * depending on which validation path read it: the route contract and the
- * `validateRequest()` middleware let the parser's TypeError escape as a 500
- * carrying a stack, while `Controller.validateBody()` caught it and validated
- * `{}`. A malformed body is a client error, so all three now answer 422 —
- * the same status every other body-validation failure gets.
- *
- * The fallback lives in `parseRequestBody()`, which is the one place all three
- * reach it through. Each path keeps its own 422 body shape; only the status is
- * common ground.
+ * An undecodable body is a client error, so all three validation paths (route
+ * contract, `validateRequest()`, `Controller.validateBody()`) answer 422 through
+ * the shared fallback in `parseRequestBody()`. Only the status is common ground;
+ * each path keeps its own 422 body shape.
  */
 describe('a request body the form parser cannot decode', () => {
   test('a route contract answers 422, not a 500 reporting a TypeError', async () => {
@@ -265,10 +255,8 @@ describe('a request body the form parser cannot decode', () => {
     expect(body).not.toContain('TypeError')
   })
 
-  // The fallback is `{}`, not `undefined` — which is what these pin. A
-  // fallback of `undefined` would 422 the three tests above just as well
-  // while breaking every all-optional schema, so without these the suite
-  // would go green on the wrong fix.
+  // The fallback is `{}`, not `undefined`: `undefined` would 422 the tests above
+  // just as well while breaking every all-optional schema.
   test('an all-optional contract still passes, receiving the empty-object fallback', async () => {
     const { status, body } = await post(
       (router) =>
@@ -345,10 +333,8 @@ describe('a request body the form parser cannot decode', () => {
     expect(JSON.parse(body)).toEqual({ received: { title: 'Guren' } })
   })
 
-  // The upload helpers read the multipart body themselves rather than through
-  // the shared fallback, so they were the one path still answering 500 after
-  // it landed. An undecodable body carries no file, which is a state both
-  // helpers already have an answer for.
+  // The upload helpers read the multipart body themselves rather than through the
+  // shared fallback. An undecodable body carries no file, which both already handle.
   test('Controller.file() / files() report no upload rather than crashing the request', async () => {
     const { status, body } = await post(
       (router) => router.post('/uploads', [BulkController, 'upload']),

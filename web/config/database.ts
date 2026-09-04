@@ -18,9 +18,8 @@ const database = isWorkersRuntime()
   : createSqliteDatabase({
       migrationsFolder: new URL('../db/migrations', import.meta.url),
       seedersFolder: new URL('../db/seeders', import.meta.url),
-      // Deliberately not DATABASE_URL: that name carries a Postgres URI in
-      // existing environments, and the sqlite factory would treat it as a
-      // file path.
+      // Not DATABASE_URL: that name carries a Postgres URI in existing
+      // environments, which the sqlite factory would read as a file path.
       filename: () => process.env.SQLITE_DATABASE_PATH ?? './data/guren.db',
     })
 

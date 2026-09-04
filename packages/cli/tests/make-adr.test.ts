@@ -189,9 +189,8 @@ describe('makeAdr', () => {
     }
   })
 
-  // `writeFileSafe` refuses to overwrite without `--force`. Because the sequence
-  // is always `max(existing) + 1` (counting `.MD` too), a repeated title is
-  // additive rather than an error, so `--force` has nothing to overwrite here.
+  // The sequence is always `max(existing) + 1` (counting `.MD` too), so a
+  // repeated title is additive and `--force` has nothing to overwrite.
   it('never overwrites an existing ADR: a repeated title takes the next number', async () => {
     const workspace = await createTempWorkspace('guren-cli-make-adr-repeat-')
     try {
@@ -239,7 +238,6 @@ describe('makeAdr', () => {
         'utf8',
       )
 
-      // Case-insensitive input canonicalizes to the parsed class name
       const result = await makeAdr('Posts are public', { entity: 'post' })
       const content = readFileSync(result, 'utf8')
 
@@ -302,13 +300,11 @@ describe('makeAdr', () => {
         'utf8',
       )
 
-      // Root ADR prefers the root model and links only root companions
       const rootAdr = await makeAdr('Root decision', { entity: 'Post' })
       const rootContent = readFileSync(rootAdr, 'utf8')
       expect(rootContent).toContain('- app/Http/Controllers/PostController.ts')
       expect(rootContent).not.toContain('modules/billing')
 
-      // Module ADR prefers the module model and links only its companions
       const moduleAdr = await makeAdr('Billing decision', { entity: 'Post', root: 'billing' })
       const moduleContent = readFileSync(moduleAdr, 'utf8')
       expect(moduleContent).toContain('- modules/billing/app/Http/Controllers/PostController.ts')

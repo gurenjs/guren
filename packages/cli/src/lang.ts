@@ -3,9 +3,8 @@ import { resolve, join } from 'node:path'
 import { existsSync, mkdirSync, writeFileSync, readdirSync, copyFileSync, constants as fsConstants } from 'node:fs'
 
 /**
- * Write JSON, refusing to overwrite unless forced. The `wx` flag makes the
- * exists-check and the write one atomic operation — a separate `existsSync`
- * guard leaves a race window. Returns false when the file already existed.
+ * The `wx` flag makes the exists-check and the write one atomic operation; a
+ * separate `existsSync` guard would leave a race window.
  */
 function writeJsonUnlessPresent(filePath: string, content: unknown, force = false): boolean {
   try {
@@ -20,45 +19,19 @@ function writeJsonUnlessPresent(filePath: string, content: unknown, force = fals
 }
 
 export interface LangPublishOptions {
-  /**
-   * Application root directory.
-   */
   appRoot?: string
-
-  /**
-   * Path to the language files directory.
-   */
   path?: string
-
-  /**
-   * Overwrite existing files.
-   */
   force?: boolean
 }
 
 export interface MakeLangOptions {
-  /**
-   * Application root directory.
-   */
   appRoot?: string
-
-  /**
-   * Path to the language files directory.
-   */
   path?: string
-
-  /**
-   * Copy structure from existing locale.
-   */
+  /** Locale to copy the file structure from. */
   from?: string
-
-  /**
-   * Overwrite existing files.
-   */
   force?: boolean
 }
 
-// Default language templates
 const defaultMessages = {
   welcome: 'Welcome to our application!',
   greeting: 'Hello, :name!',
@@ -122,22 +95,17 @@ const defaultPagination = {
   showing: 'Showing :from to :to of :total results',
 }
 
-/**
- * Publish default language files.
- */
 export function publishLanguageFiles(options: LangPublishOptions = {}): string[] {
   const appRoot = options.appRoot ? resolve(options.appRoot) : process.cwd()
   const langPath = options.path ? resolve(appRoot, options.path) : resolve(appRoot, 'lang')
 
   const createdFiles: string[] = []
 
-  // Create lang directory
   if (!existsSync(langPath)) {
     mkdirSync(langPath, { recursive: true })
     consola.info(`Created directory: ${langPath}`)
   }
 
-  // Create English locale
   const enPath = join(langPath, 'en')
   if (!existsSync(enPath)) {
     mkdirSync(enPath, { recursive: true })
@@ -165,14 +133,10 @@ export function publishLanguageFiles(options: LangPublishOptions = {}): string[]
   return createdFiles
 }
 
-/**
- * Create a new language locale.
- */
 export function makeLanguage(locale: string, options: MakeLangOptions = {}): string[] {
   const appRoot = options.appRoot ? resolve(options.appRoot) : process.cwd()
   const langPath = options.path ? resolve(appRoot, options.path) : resolve(appRoot, 'lang')
 
-  // Validate locale format
   if (!/^[a-z]{2}(-[A-Z]{2})?$/.test(locale)) {
     consola.error(`Invalid locale format: ${locale}`)
     consola.info('Expected format: xx or xx-XX (e.g., en, ja, en-US, pt-BR)')
@@ -182,19 +146,16 @@ export function makeLanguage(locale: string, options: MakeLangOptions = {}): str
   const localePath = join(langPath, locale)
   const createdFiles: string[] = []
 
-  // Check if locale already exists
   if (existsSync(localePath) && !options.force) {
     consola.error(`Locale already exists: ${localePath}`)
     consola.info('Use --force to overwrite existing files.')
     return []
   }
 
-  // Create locale directory
   if (!existsSync(localePath)) {
     mkdirSync(localePath, { recursive: true })
   }
 
-  // Copy from existing locale or create empty files
   if (options.from) {
     const fromPath = join(langPath, options.from)
 
@@ -203,7 +164,6 @@ export function makeLanguage(locale: string, options: MakeLangOptions = {}): str
       return []
     }
 
-    // Copy files from source locale
     const files = readdirSync(fromPath).filter((f) => f.endsWith('.json'))
 
     for (const file of files) {
@@ -223,7 +183,6 @@ export function makeLanguage(locale: string, options: MakeLangOptions = {}): str
       consola.success(`Created: ${targetPath}`)
     }
   } else {
-    // Create empty template files
     const emptyFiles: Record<string, Record<string, string>> = {
       'messages.json': {
         welcome: '',
@@ -270,9 +229,6 @@ export function makeLanguage(locale: string, options: MakeLangOptions = {}): str
   return createdFiles
 }
 
-/**
- * List available locales.
- */
 export function listLocales(options: LangPublishOptions = {}): string[] {
   const appRoot = options.appRoot ? resolve(options.appRoot) : process.cwd()
   const langPath = options.path ? resolve(appRoot, options.path) : resolve(appRoot, 'lang')

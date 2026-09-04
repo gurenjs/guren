@@ -71,10 +71,8 @@ describe('OAuthController', () => {
 
       const response = await controller.redirectToProvider()
 
-      // Passing the session lets the manager bind `state` to this browser:
-      // without it an attacker can authorize their own account, hold the
-      // `code`, and walk a visitor through the callback to log them into the
-      // attacker's account.
+      // The session binds `state` to this browser; without it an attacker can
+      // walk a visitor through the callback into the attacker's account.
       expect(oauth.authorize).toHaveBeenCalledWith('github', {
         redirectTo: undefined,
         session,
@@ -83,8 +81,8 @@ describe('OAuthController', () => {
       expect(response.headers.get('Location')).toBe('https://github.com/login/oauth/authorize?client_id=abc')
     })
 
-    // The manager treats a missing session as an unbound flow; forwarding it
-    // untouched is what keeps a session-less setup working.
+    // A missing session is an unbound flow; forwarding it untouched keeps a
+    // session-less setup working.
     it('passes the missing session through so the flow stays unbound', async () => {
       const oauth = createOAuthStub()
       // `null`, not `undefined` — the default parameter would substitute a stub.
@@ -117,8 +115,7 @@ describe('OAuthController', () => {
 
       const response = await controller.callback()
 
-      // The manager reads the binding back from the same session that
-      // authorize() stored it in.
+      // The binding is read back from the session authorize() stored it in.
       expect(oauth.handleCallback).toHaveBeenCalledWith('github', { code: 'abc', state: 'xyz', session })
       expect(mockUserCreate).not.toHaveBeenCalled()
       expect(response.status).toBe(302)

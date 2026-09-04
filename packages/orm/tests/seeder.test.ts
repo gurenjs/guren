@@ -7,7 +7,6 @@ import { defineSeeder, loadSeeders, runSeeders, type SeederContext } from '../sr
 describe('defineSeeder', () => {
   it('returns the handler function unchanged', () => {
     const handler = (_ctx: SeederContext) => {
-      // seeder logic
     }
 
     const result = defineSeeder(handler)
@@ -28,7 +27,6 @@ describe('loadSeeders', () => {
   })
 
   it('loads seeders from directory sorted by filename', async () => {
-    // Seeders receive { db } context, so they access ctx.db
     await writeFile(
       join(tempDir, '02-second.ts'),
       `export default function(ctx) { ctx.db.order = ctx.db.order || []; ctx.db.order.push('second'); }`,
@@ -173,8 +171,6 @@ describe('runSeeders', () => {
   })
 
   it('runs all seeders in sequence', async () => {
-    // runSeeders passes db directly, so seeder receives { db: mockDb }
-    // and accesses ctx.db to get mockDb
     await writeFile(
       join(tempDir, '01-first.ts'),
       `export default (ctx) => { ctx.db.results = ctx.db.results || []; ctx.db.results.push(1); }`,
@@ -217,8 +213,7 @@ describe('runSeeders run summary', () => {
     await rm(tempDir, { recursive: true, force: true })
   })
 
-  // The scaffolded `db/seeders/` ships holding only .gitkeep, so this is the
-  // shape a fresh app reports — the one db:seed used to call executed.
+  // The scaffolded `db/seeders/` ships holding only .gitkeep, so this is the shape a fresh app reports.
   it('should report nothing ran for a folder holding no seeders', async () => {
     await writeFile(join(tempDir, '.gitkeep'), '')
 
@@ -240,8 +235,8 @@ describe('runSeeders run summary', () => {
     })
   })
 
-  // Files that exported no seeder are the case a "run make:seeder" hint would
-  // misdiagnose: the files are there, they just export nothing runnable.
+  // A "run make:seeder" hint would misdiagnose this: the files are there, they
+  // just export nothing runnable.
   it('should count files that exported no seeder', async () => {
     await writeFile(join(tempDir, 'helpers.ts'), `export const fixtures = [1, 2, 3];`)
     await writeFile(join(tempDir, 'types.ts'), `export const kind = 'seed';`)
@@ -277,11 +272,9 @@ describe('runSeeders run summary', () => {
     })
   })
 
-  // An app that never created db/seeders/ used to have the readdir ENOENT
-  // surface through seedFailure() as "Failed to seed the database: ENOENT ...
-  // scandir" — a filesystem error dressed as a database failure. It holds no
-  // seeders, which is the nothing-to-run db:seed already reports, and is what
-  // `inspectMigrationsFolder()` has always answered for a missing db/migrations.
+  // A missing db/seeders/ holds no seeders, which is the nothing-to-run case
+  // db:seed already reports — not a database failure. `inspectMigrationsFolder()`
+  // answers the same way for a missing db/migrations.
   it('should report nothing ran for a folder that does not exist', async () => {
     const missing = join(tempDir, 'never-created')
 
@@ -292,9 +285,8 @@ describe('runSeeders run summary', () => {
     })
   })
 
-  // A symlink pointing at nothing resolves to nothing, and the OS reports that
-  // as the same ENOENT a folder that was never created gives — so it reads as
-  // absent rather than as an error of its own.
+  // A dangling symlink gives the same ENOENT as a folder that was never created,
+  // so it reads as absent rather than as an error of its own.
   it('should report nothing ran for a dangling symlink', async () => {
     const link = join(tempDir, 'seeders')
     await symlink(join(tempDir, 'never-created'), link)
@@ -306,9 +298,9 @@ describe('runSeeders run summary', () => {
     })
   })
 
-  // Absence is ENOENT and nothing else: a file sitting where the folder belongs
-  // is a misconfiguration, and reporting it as an empty folder would send the
-  // user to `make:seeder` to write a seeder into a path that cannot hold one.
+  // Absence is ENOENT and nothing else: a file where the folder belongs is a
+  // misconfiguration, and "empty folder" would send the user to `make:seeder`
+  // to write into a path that cannot hold one.
   it('should not report nothing ran for a file where the folder belongs', async () => {
     const notAFolder = join(tempDir, 'seeders')
     await writeFile(notAFolder, '')

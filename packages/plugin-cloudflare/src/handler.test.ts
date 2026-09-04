@@ -97,9 +97,8 @@ describe('createWorkersHandler', () => {
           return new Response('ok')
         },
       }
-      // Pins the axis rather than trusting it to a keyword: making the second
-      // boot `async` would turn its throw into a rejection, and the case would
-      // silently become a copy of the first.
+      // Making this boot `async` would turn its throw into a rejection, and the
+      // case would silently become a copy of the first.
       expect(app.boot.constructor.name).toBe(mode === 'rejects' ? 'AsyncFunction' : 'Function')
 
       const handler = createWorkersHandler(app)
@@ -172,13 +171,10 @@ describe('createWorkersHandler', () => {
     const retryEnv = { DB: 'retry-db' }
     let retryResponse: Response | undefined
 
-    // Registration order is the test. Rejection reactions run in the order
-    // they were attached, so the retry is queued between the two waiters and
-    // runs between their catches — and an app may legitimately attach one,
-    // since this is the very promise its `boot()` returned. `fetch` installs
-    // the new boot promise and captures the new env before its first `await`,
-    // so the retry is already live when the second waiter gives up. Reorder
-    // these three statements and the race stops being reproduced.
+    // Registration order is the test: rejection reactions run in attachment order,
+    // so the retry is queued between the two waiters and runs between their catches,
+    // installing its boot promise and env before the second waiter gives up.
+    // Reorder these three statements and the race stops being reproduced.
     const first = handler.fetch(new Request('https://example.com/one'), failedEnv, ctx)
     const retried = bootDeferred.promise.catch(async () => {
       retryResponse = await handler.fetch(new Request('https://example.com/retry'), retryEnv, ctx)

@@ -28,17 +28,13 @@ export interface ModelInfo {
   usesAuth: boolean
   hasSoftDeletes: boolean
   /**
-   * The `Attachable(Base, { ... })` declaration in the heritage clause:
-   * `null` when the model is not Attachable, the collections otherwise
-   * (empty for `Attachable(Base, {})`, which is still an Attachable model),
-   * and `'unreadable'` when the mixin is present but its declaration cannot
-   * be read (a spread, a computed key, an options object built elsewhere).
-   * One field rather than an array+flag pair so "attachable at all" —
-   * what `guren check` asks — is not conflated with "zero collections",
-   * and a partial read is never representable: a map claiming `cover` is
-   * the only collection makes every consumer reject the `gallery` the
-   * runtime accepts (the same reason the allowlist checks resolve to
-   * undefined).
+   * The `Attachable(Base, { ... })` declaration: `null` when not Attachable,
+   * the collections otherwise, `'unreadable'` when the mixin is there but its
+   * declaration cannot be read (a spread, a computed key, an options object
+   * built elsewhere). One field, not an array plus a flag, so "attachable at
+   * all" is never conflated with "zero collections" and a partial read is
+   * unrepresentable — it would make consumers reject collections the runtime
+   * accepts.
    */
   attachments: ModelAttachmentCollection[] | 'unreadable' | null
   /** `@docs <path>` tags in the model source (code-side doc links). */
@@ -59,9 +55,8 @@ export interface DiscoveredModel {
 }
 
 /**
- * Every parsable model with its location — the shared discovery+parse
- * projection behind the entity context, the domain spec view, and
- * `make:adr --entity`. Unparsable files are dropped.
+ * The discovery+parse projection shared by the entity context, the domain spec
+ * view and `make:adr --entity`. Unparsable files are dropped.
  */
 export async function discoverParsedModels(cwd: string): Promise<DiscoveredModel[]> {
   const files = await discoverModelFiles(cwd)
@@ -99,10 +94,7 @@ export function parseModelSource(source: string, filePath: string): ModelInfo | 
   }
 }
 
-/**
- * The `ClassDeclaration` in a top-level statement — export named, export
- * default, or bare. Shared AST-shape knowledge for "the class in this file".
- */
+/** The class in a top-level statement: export named, export default, or bare. */
 export function extractClassDeclaration(node: Statement): ClassDeclaration | null {
   if (node.type === 'ExportNamedDeclaration' && node.declaration?.type === 'ClassDeclaration') {
     return node.declaration
@@ -117,14 +109,9 @@ export function extractClassDeclaration(node: Statement): ClassDeclaration | nul
 }
 
 /**
- * The first class declared in a file — the convention every model, controller,
- * and command file follows, so callers that want "this file's class" ask for
- * it here rather than each walking `program.body` themselves.
- *
- * First, not exported-first: a bare class still counts, since a file that
- * declares one is describing that class whatever it does with it. Callers
- * needing the exported one specifically (the entity context, the screens spec)
- * resolve it by name instead.
+ * The one rule for "this file's class", following the model/controller/command
+ * convention. First, not exported-first: a bare class still describes the
+ * file. Callers needing the exported one resolve it by name instead.
  */
 export function firstClassDeclaration(body: Statement[]): ClassDeclaration | null {
   for (const node of body) {
@@ -135,10 +122,8 @@ export function firstClassDeclaration(body: Statement[]): ClassDeclaration | nul
 }
 
 /**
- * Whether an expression names `AuthenticatableModel`, as a bare identifier or
- * with type arguments (`AuthenticatableModel<UserRecord>`). Both the superclass
- * and `defineModel`'s `base` option accept either spelling, so both go through
- * here. Matching is by name only — an aliased import is not resolved.
+ * Whether an expression names `AuthenticatableModel`, bare or with type
+ * arguments. Matching is by name only — an aliased import is not resolved.
  */
 function isAuthenticatableBase(node: Node): boolean {
   const unwrapped = unwrapTypeAssertion(node)
@@ -152,9 +137,8 @@ function propertyKeyName(property: ObjectProperty): string | undefined {
 }
 
 /**
- * The table `defineModel(users, …)` binds, reached through any mixin wrapping
- * it — `SoftDeletes(defineModel(posts))` is the documented spelling, and a
- * model written that way must not read as bindless.
+ * Reached through any mixin wrapping it: `SoftDeletes(defineModel(posts))` is
+ * a documented spelling and must not read as bindless.
  */
 function defineModelTableArgument(node: Node): string | undefined {
   const firstArg = findMixinCall(node, 'defineModel')?.arguments[0]
@@ -162,14 +146,10 @@ function defineModelTableArgument(node: Node): string | undefined {
 }
 
 /**
- * The identifier a model binds its table to, from either supported spelling:
- * `defineModel(users, …)` or `static table = users`. Callers that only look
- * for the latter silently stop covering every model written the modern way,
- * so anything resolving a model's table goes through here.
- *
- * The identifier is the model file's local name for the table. A caller
- * comparing it against a schema's exported names has to account for an
- * aliased import (`import { posts as postTable }`) itself.
+ * The one rule for a model's table, covering both spellings:
+ * `defineModel(users, …)` and `static table = users`. The result is the model
+ * file's *local* name, so a caller comparing it against a schema's exports
+ * must account for an aliased import itself.
  */
 export function extractTableIdentifier(classDecl: ClassDeclaration): string | undefined {
   let tableName = classDecl.superClass ? defineModelTableArgument(classDecl.superClass) : undefined
@@ -192,22 +172,19 @@ export function extractTableIdentifier(classDecl: ClassDeclaration): string | un
 }
 
 /**
- * Whether the class is authenticatable: it extends `AuthenticatableModel`
- * directly or receives it via `defineModel`'s `base` option. AST-based, so a
- * comment or import merely mentioning the name does not count.
+ * Extends `AuthenticatableModel` directly or receives it via `defineModel`'s
+ * `base`. AST-based, so a comment mentioning the name does not count.
  */
 export function classUsesAuthenticatableBase(classDecl: ClassDeclaration): boolean {
   const superClass = classDecl.superClass
   if (!superClass) return false
 
-  // defineModel(users, { base: AuthenticatableModel }) — the auth base
-  // arrives as an option rather than as the superclass itself. Resolved
-  // through findDefineModelOption so mixin wrapping is covered the same way
-  // it is for the table and the allowlist options.
+  // In `defineModel(users, { base: AuthenticatableModel })` the base is an
+  // option rather than the superclass; resolved through findDefineModelOption
+  // so mixin wrapping is covered as it is for the table.
   const baseOption = findDefineModelOption(classDecl, 'base')
   if (baseOption && isAuthenticatableBase(baseOption.value)) return true
 
-  // AuthenticatableModel pattern
   return isAuthenticatableBase(superClass)
 }
 
@@ -228,18 +205,14 @@ export function staticStringProperty(classDecl: ClassDeclaration, name: string):
 }
 
 /**
- * String-literal entries of an array-literal node, or undefined for any
- * other node — including an array with a spread or computed element. A
- * partial read is worse than none for the allowlist checks: `visible:
- * ['id', ...EXPOSED]` read as `['id']` reports columns hidden that the
- * runtime exposes.
+ * Undefined for anything but a fully-readable array literal, spreads and
+ * computed elements included: a partial read is worse than none, since
+ * `visible: ['id', ...EXPOSED]` read as `['id']` reports columns hidden that
+ * the runtime exposes.
  */
 function stringArrayEntries(node: Node | null | undefined): string[] | undefined {
-  // `static fillable = ['title'] as const` is the idiomatic spelling of a
-  // read-only allowlist, and reads as a non-array without this: the config
-  // then resolves to undefined and every check that consults it — the
-  // mass-assignment audit, the denied-credential-column check — reports the
-  // model as having no allowlist at all rather than one it could not read.
+  // Unwrapped because `static fillable = ['title'] as const` is the idiomatic
+  // spelling and otherwise reads as a non-array.
   const array = node ? unwrapTypeAssertion(node) : null
   if (array?.type !== 'ArrayExpression') return undefined
   const entries: string[] = []
@@ -274,11 +247,9 @@ function findMixinCall(node: Node, mixinName: string): CallExpression | null {
 }
 
 /**
- * The class's attachment declaration — the second argument of the
- * `Attachable(...)` call in its heritage clause (RFC 0013). `'unreadable'`
- * reports a declaration this could not fully parse rather than a partial
- * collection list, because a partial map misreports the model's contract
- * (see {@link ModelInfo.attachments}).
+ * The second argument of the heritage clause's `Attachable(...)` call (RFC
+ * 0013). `'unreadable'` rather than a partial list, which would misreport the
+ * model's contract — see {@link ModelInfo.attachments}.
  */
 export function extractModelAttachments(
   classDecl: ClassDeclaration,
@@ -302,10 +273,9 @@ export function extractModelAttachments(
 }
 
 /**
- * One collection's `hasOneAttached(...)` / `hasManyAttached(...)` call, or
- * null for any other shape. An options argument that is not an object
- * literal — or one carrying a spread or computed key — is unreadable rather
- * than "no variants": the variants may be hiding inside it.
+ * Null for any shape but a `hasOneAttached(...)` / `hasManyAttached(...)`
+ * call, an unreadable options argument included: the variants may be hiding
+ * inside it, so it must not read as "no variants".
  */
 function parseAttachmentSpec(node: Node): { kind: 'one' | 'many'; variants: string[] } | null {
   if (node.type !== 'CallExpression' || node.callee.type !== 'Identifier') return null
@@ -347,10 +317,8 @@ function attachmentVariantNames(node: Node): string[] | null {
 }
 
 /**
- * The named property of the class's `defineModel(table, { ... })` options
- * object, if present. A literal `name: undefined` counts as absent — the
- * runtime skips the assignment, so the model is configured by neither
- * spelling.
+ * A literal `name: undefined` counts as absent: the runtime skips the
+ * assignment, so the model is configured by neither spelling.
  */
 export function findDefineModelOption(classDecl: ClassDeclaration, name: string): ObjectProperty | null {
   if (!classDecl.superClass) return null
@@ -359,9 +327,8 @@ export function findDefineModelOption(classDecl: ClassDeclaration, name: string)
   if (!options) return null
   for (const property of options.properties) {
     if (property.type !== 'ObjectProperty' || propertyKeyName(property) !== name) continue
-    // Through a wrapper too: `fillable: undefined as string[] | undefined` is
-    // the same skipped assignment, and reading it as a declared option
-    // reports mass-assignment protection the runtime does not have.
+    // Unwrapped, because `fillable: undefined as string[] | undefined` is the
+    // same skipped assignment and would otherwise read as a declared option.
     const value = unwrapTypeAssertion(property.value)
     if (value.type === 'Identifier' && value.name === 'undefined') return null
     return property
@@ -375,26 +342,20 @@ function defineModelStringArrayOption(classDecl: ClassDeclaration, name: string)
 }
 
 /**
- * Resolve a string-array model config (`fillable`, `hidden`, `visible`, …)
- * the way the runtime does: a `static` declaration on the subclass shadows
- * the same-named defineModel option. Callers that read only the static
- * spelling silently stop covering models written the option way, so
- * anything resolving these allowlists goes through here.
+ * The one rule for a string-array model config (`fillable`, `hidden`, …),
+ * resolved as the runtime does: a `static` on the subclass shadows the
+ * same-named defineModel option.
  */
 export function resolveModelStringArrayConfig(classDecl: ClassDeclaration, name: string): string[] | undefined {
-  // Precedence follows declaration presence, not parseability: a static
-  // whose value we cannot read (`static hidden = HIDDEN`) still shadows the
-  // option at runtime, so falling back to the option would report a list the
-  // runtime does not use. Unreadable resolves to undefined and the checks
-  // stay conservative.
+  // Precedence follows declaration presence, not parseability: a static whose
+  // value cannot be read (`static hidden = HIDDEN`) still shadows the option
+  // at runtime, so falling back would report a list nothing uses.
   if (findStaticClassProperty(classDecl, name)) return staticStringArrayProperty(classDecl, name)
   return defineModelStringArrayOption(classDecl, name)
 }
 
 /**
- * Whether the model declares the named config in either spelling — a static
- * class property or a defineModel option — regardless of whether its value
- * is a parseable array literal. The presence twin of
+ * Declared in either spelling, parseable or not. The presence twin of
  * `resolveModelStringArrayConfig`; keep the two composition rules together.
  */
 export function hasModelConfig(classDecl: ClassDeclaration, name: string): boolean {
@@ -412,10 +373,7 @@ function analyzeClassHeader(
   }
 }
 
-/**
- * Extract relationships from static relationTypes property.
- * Pattern: static override relationTypes: { author: BelongsToRecord<...> }
- */
+/** From `static override relationTypes: { author: BelongsToRecord<...> }`. */
 function extractRelationshipsFromBody(body: ClassBody, source: string): ModelRelationship[] {
   const relationships: ModelRelationship[] = []
 
@@ -470,7 +428,7 @@ function extractRelationType(
 
   for (const [prefix, relType] of Object.entries(typeMap)) {
     if (typeStr.includes(prefix)) {
-      // Try to extract model name from generic: BelongsToRecord<UserRecord> → User
+      // BelongsToRecord<UserRecord> → User
       const match = typeStr.match(new RegExp(`${prefix}<([A-Z]\\w*?)(?:Record)?(?:[,>])`))
       const model = match?.[1]
       return { type: relType, model }
@@ -481,9 +439,7 @@ function extractRelationType(
 }
 
 /**
- * Extract relationships from module-level calls like:
- *   Post.belongsTo('author', ...)
- *   User.hasMany('posts', ...)
+ * From module-level calls such as `Post.belongsTo('author', ...)`.
  */
 function extractRelationshipsFromCalls(
   body: Statement[],
@@ -547,9 +503,7 @@ function extractRelationshipsFromCalls(
   return relationships
 }
 
-/**
- * Merge relationships from body (relationTypes) and calls, preferring body info.
- */
+/** `relationTypes` wins over calls: it carries the related model's name. */
 function mergeRelationships(
   bodyRels: ModelRelationship[],
   callRels: ModelRelationship[],
@@ -563,7 +517,6 @@ function mergeRelationships(
   for (const rel of bodyRels) {
     const existing = merged.get(rel.name)
     if (existing) {
-      // Body has richer info (model name from type annotation)
       merged.set(rel.name, { ...existing, ...rel })
     } else {
       merged.set(rel.name, rel)

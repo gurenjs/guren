@@ -1,17 +1,11 @@
 /**
- * The Guren CLI's builtin command registry, importable without running the CLI.
+ * The Guren CLI's builtin command registry, importable without running the CLI —
+ * the agent-catalog audit reads it to assert a skill only names commands and
+ * flags the CLI actually registers (RFC 0011 §2). `bin.ts` imports this and adds
+ * the per-invocation, cwd-dependent parts.
  *
- * `bin.ts` used to define every command and the registry in the same module
- * that discovers plugin commands from `process.cwd()` and then calls
- * `runCli()` at top level. That made the registry unreachable to anything
- * that wanted to *read* it — the agent-catalog audit needs to assert that a
- * skill only names commands and flags the CLI actually registers (RFC 0011
- * §2). This module holds the definitions and the registry; `bin.ts` imports
- * it and adds the per-invocation, cwd-dependent parts.
- *
- * Nothing here runs at import beyond building the command objects. Keep it
- * that way: a top-level `await` or `process.*` read added here would run for
- * every importer, including the audit and any future tooling.
+ * Nothing here runs at import beyond building the command objects. Keep it that
+ * way: a top-level `await` or `process.*` read would run for every importer.
  */
 import { relative } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -103,10 +97,8 @@ const MODULE_ARG = {
   alias: 'M',
 }
 
-// One definition for every command that takes `--fields`. The syntax is parsed
-// in exactly one place (`parseFieldsString`), so it should be described in one
-// place too — three hand-written copies had already drifted into three
-// wordings and an alias that existed on only one of them.
+// One definition for every command that takes `--fields`, matching the single
+// parser (`parseFieldsString`); three hand-written copies had already drifted.
 const FIELDS_ARG = {
   type: 'string' as const,
   alias: 'F',
@@ -142,14 +134,9 @@ type MakeCommandSpec = {
   makeFn: (name: string, options: WriterOptions) => Promise<string>
   resourceName: string
   /**
-   * Printed after the success line, for a generator whose output does not
-   * work until the user does something else.
-   *
-   * Only `make:route` needs one: every other generator here writes something
-   * the framework discovers, while a routes file does nothing until its
-   * registrar is called. `guren check` now reports that gap and the
-   * scaffolded CI workflow gates on it, so a generator that stayed silent
-   * would hand the user a red build to diagnose later.
+   * Printed after the success line, for a generator whose output does not work
+   * until the user does something else. Only `make:route` needs one: everything
+   * else here writes something the framework discovers.
    */
   nextStep?: string
 }
@@ -164,10 +151,8 @@ const makeCommandSpecs: MakeCommandSpec[] = [
     argDescription: 'Route group name',
     makeFn: makeRoute,
     resourceName: 'Route',
-    // "your route registrar" rather than `routes/web.ts`, because `--module`
-    // sends this file to `modules/<name>/routes/`, where the registrar that
-    // mounts it is the module's own `routes.ts`. `guren check` reports the gap
-    // in both places, so the reminder can name it.
+    // "your route registrar" rather than `routes/web.ts`: `--module` sends this
+    // file to `modules/<name>/routes/`, mounted by the module's own `routes.ts`.
     nextStep:
       'Nothing mounts it yet (guren check reports this) — import its registerRoutes from your route '
       + "registrar and call it, passing that registrar's router.",
@@ -236,8 +221,7 @@ const docsGraphCommand = defineCommand({
   },
 })
 
-// make:adr takes an extra --entity flag beyond the shared writer options,
-// so it gets its own command instead of a makeCommandSpecs entry.
+// Its own command rather than a makeCommandSpecs entry, for the extra flags.
 const makeAdrCommand = defineCommand({
   meta: {
     name: 'make:adr',
@@ -267,8 +251,7 @@ const makeAdrCommand = defineCommand({
   },
 })
 
-// make:validator takes an extra --fields flag beyond the shared writer options,
-// so it gets its own command instead of a makeCommandSpecs entry.
+// Its own command rather than a makeCommandSpecs entry, for the extra --fields.
 const makeValidatorCommand = defineCommand({
   meta: {
     name: 'make:validator',
@@ -281,9 +264,8 @@ const makeValidatorCommand = defineCommand({
     module: MODULE_ARG,
   },
   async run({ args }) {
-    // Parsed here rather than inside makeValidator so an omitted --fields means
-    // "empty payload schema" for this command without changing what an omitted
-    // --fields means for make:feature (see DEFAULT_FIELDS in fields.ts).
+    // Parsed here so an omitted --fields means "empty payload schema" for this
+    // command only (make:feature falls back to DEFAULT_FIELDS in fields.ts).
     const fields = args.fields ? parseFieldsString(args.fields) : undefined
     const file = await makeValidator(args.name, { ...toWriterOptions(args), fields })
     consola.success(`Validator created at ${file}`)
@@ -316,9 +298,9 @@ function reportDryRun(action: string, message: string, json: boolean, extra?: Re
 }
 
 /**
- * A path as the user would type it: cwd-relative when it is under cwd, and
- * verbatim otherwise. `relative()` resolves a relative input against cwd on its
- * own, so a config's './db/schema.ts' and an absolute folder both land here.
+ * A path as the user would type it: cwd-relative when it is under cwd, verbatim
+ * otherwise. `relative()` resolves a relative input against cwd itself, so a
+ * config's './db/schema.ts' and an absolute folder both land here.
  */
 function describePath(path: string): string {
   const relativePath = relative(process.cwd(), path)
@@ -349,9 +331,9 @@ function migrationRunFields(summary: MigrationRunSummary | undefined): Record<st
 }
 
 /**
- * Reports a migration run that applied nothing. `db:migrate`, `db:reset` and
- * `db:fresh` can all end on one, and a ✔ there reads as a database that is now
- * up to date — after a reset, as one that still has its tables.
+ * Reports a migration run that applied nothing — `db:migrate`, `db:reset` and
+ * `db:fresh` can all end on one, where a ✔ would read as an up-to-date database
+ * (after a reset, as one that still has its tables).
  */
 function reportNoMigrationsApplied(
   action: string,
@@ -369,7 +351,7 @@ function reportNoMigrationsApplied(
 
   consola.warn(message)
   // A folder holding loose .sql files is not one waiting for db:make — the ORM
-  // has already explained why those files were skipped.
+  // has already explained why they were skipped.
   if (summary.looseSqlFiles === 0) {
     consola.info(`Generate one with \`bun run db:make\`, then re-run \`bun run ${action}\`.`)
   }
@@ -381,10 +363,8 @@ function seederRunFields(summary: SeederRunSummary | undefined): Record<string, 
 }
 
 /**
- * Reports a seed run that ran nothing. On a fresh app `db/seeders/` is
- * scaffolded empty, so the ✔ described a database that holds none of the rows
- * the seeders would have written — the next green line after an empty
- * `db/migrations`, and just as far from the cause.
+ * Reports a seed run that ran nothing. `db/seeders/` is scaffolded empty, so a ✔
+ * would describe a database holding none of the rows the seeders would write.
  */
 function reportNoSeedersRan(
   action: string,
@@ -402,11 +382,10 @@ function reportNoSeedersRan(
 
   consola.warn(message)
   // Files that exported no seeder are not a folder waiting for make:seeder —
-  // the seeders are written, they are just in a shape the loader skips.
+  // the seeders are written, just in a shape the loader skips.
   if (summary.filesWithoutSeeder === 0) {
     // Always db:seed, never the command that reported this: the migrations are
-    // already applied by now, so sending the user back through db:reset would
-    // drop every table again to reach the one step that was missing.
+    // applied by now, so db:reset would drop every table again.
     consola.info('Generate one with `bunx guren make:seeder`, then run `bun run db:seed`.')
   } else {
     consola.info(
@@ -764,23 +743,10 @@ const makeExceptionCommand = defineCommand({
  * The last value of a repeated citty flag.
  *
  * citty types every `string` arg as `string | undefined` and then hands back a
- * `string[]` when the flag is passed twice — a lie no compiler catches, and one
- * that surfaces differently at every place the value is then used. Measured on
- * this bin, three shapes crash: `make:migration --name a --name b` inside
- * `makeMigration()` on `options.name?.trim is not a function`,
- * `context --entity User --entity User` on `entityName.toLowerCase is not a
- * function`, and `context --app . --app .` inside `resolve()` on `The
- * "paths[0]" property must be of type string, got array`.
- *
- * The quiet ones are the reason to narrow a value before reading it rather than
- * after a crash report: `make:migration --schema a.ts --schema b.ts` comma-joins
- * them into a path nothing can open and still exits 0;
- * `context --module app --module app` exits 1 blaming a module named `app,app`;
- * `context --routes web.ts --routes web.ts` exits 0 reporting the entity's
- * routes as none, because the same `resolve()` TypeError lands in a `catch` that
- * exists for a routes file this CLI genuinely cannot load (`entity-context.ts`,
- * `loadEntityRoutes`) and cannot tell the two apart. Last-wins is what repeating
- * a flag means to whoever typed it.
+ * `string[]` when the flag is passed twice — a lie no compiler catches. Three
+ * shapes on this bin crash; the quiet ones are worse
+ * (`--schema a.ts --schema b.ts` comma-joins into a path nothing can open and
+ * still exits 0). Last-wins is what repeating a flag means to whoever typed it.
  */
 function lastFlagValue(value: unknown): string | undefined {
   const candidate = Array.isArray(value) ? value.at(-1) : value
@@ -788,16 +754,11 @@ function lastFlagValue(value: unknown): string | undefined {
 }
 
 /**
- * The last value of a repeated citty `boolean` flag.
- *
- * `Boolean(args.flag)` reads as safe here and is not: citty arrays a repeated
- * boolean the same way it arrays a string, and every array is truthy. So
- * `--json=false --json=false` turns *off* into *on*, and `--json --json=false`
- * ignores the half the user typed last. Only the `=value` spellings can express
- * a false, so a bare `--json --json` is unaffected — which is exactly what makes
- * this the kind of bug that survives casual testing. citty coerces the value
- * itself (`--json=yes` and `--json=0` both arrive as `true`), so the only work
- * left is picking the last one.
+ * The last value of a repeated citty `boolean` flag. `Boolean(args.flag)` is not
+ * safe: citty arrays a repeated boolean and every array is truthy, so
+ * `--json=false --json=false` turns *off* into *on*. Only the `=value` spellings
+ * can express a false, so a bare `--json --json` is unaffected — which is what
+ * makes this survive casual testing. citty coerces the value itself.
  */
 function lastBooleanFlag(value: unknown): boolean {
   return Boolean(Array.isArray(value) ? value.at(-1) : value)
@@ -809,22 +770,11 @@ const makeMigrationCommand = defineCommand({
     description: 'Generate a new SQL migration file using drizzle-kit.',
   },
   args: {
-    // A `string`, not a `positional`, because citty resolves the two from
-    // different places and silently drops what the other one reads: declared
-    // positional, `--name add_posts_table` leaves `args` with neither a `name`
-    // key nor the value in `_` — no unknown-flag error either, so the command
-    // ran on to drizzle-kit with no name and drizzle-kit invented its own
-    // (`20260819113244_unusual_triton`). The flag is what docs/*/guides/
-    // database.md documents; the bare positional is what every skill and
-    // templates/agent/** uses, and a `string` arg still leaves unconsumed
-    // positionals in `_` for `run()` below to pick up.
-    //
-    // A second, differently-keyed positional would carry both spellings too,
-    // and would put the bare form back in citty's usage line — but citty
-    // renders a positional by its key, so help would read `[MIGRATIONNAME]`
-    // beside `--name`, and two args for one value raises a which-one-wins
-    // question there is no good answer to. One key, both spellings named in
-    // the description.
+    // A `string`, not a `positional`: declared positional, `--name x` leaves
+    // `args` with neither a `name` key nor the value in `_`, and no
+    // unknown-flag error, so drizzle-kit invents its own name. Both spellings
+    // are documented, and a `string` arg still leaves the bare positional in
+    // `_` for `run()` below.
     name: {
       type: 'string',
       description: 'Migration name, as `--name <name>` or a bare positional',
@@ -847,23 +797,20 @@ const makeMigrationCommand = defineCommand({
     },
   },
   async run({ args }) {
-    // Any of these three drops drizzle-kit's `--config`, which it refuses to
-    // accept alongside other flags — so `makeMigration` reassembles the config's
+    // Any of these three drops drizzle-kit's `--config`, which it refuses
+    // alongside other flags, so `makeMigration` reassembles the config's
     // dialect, schema and out onto the command line instead.
     const result = await makeMigration({
       name: lastFlagValue(args.name) ?? args._[0],
       schema: lastFlagValue(args.schema),
       out: lastFlagValue(args.out),
-      // Through the same helper as the three above: citty hands back a
-      // `string[]` for a repeated flag whatever its declared type, and
-      // `--dialect` reaches drizzle-kit verbatim, so an array would arrive
-      // comma-joined as a dialect nothing accepts.
+      // `--dialect` reaches drizzle-kit verbatim, so a repeated flag would
+      // arrive comma-joined as a dialect nothing accepts.
       dialect: lastFlagValue(args.dialect),
     })
 
     // Overrides drop `--config`, and `generate` has no flag for every field it
-    // would have read. Naming what was left behind beats a migration that
-    // quietly differs from the one the config asked for.
+    // would have read, so name what was left behind.
     if (result.configUnreadable) {
       consola.warn(
         'Your drizzle config could not be loaded, so the schema and output paths fell back to ' +
@@ -882,11 +829,8 @@ const makeMigrationCommand = defineCommand({
 
     // drizzle-kit exits 0 for "No schema changes, nothing to migrate." too, so
     // the ✔ below is reported off what it wrote, not off the exit code. An
-    // unresolvable out dir leaves `migrationsFolder` unset and keeps the old
-    // message rather than describing a folder we did not watch.
+    // unresolvable out dir leaves `migrationsFolder` unset.
     if (result.migrationsFolder && result.created.length === 0) {
-      // The config states its paths as './db/schema.ts'; render it the same way
-      // as the folder above so one message does not mix two spellings.
       const schema = result.schemaPath ? describePath(result.schemaPath) : 'your schema'
       consola.warn(
         `No migration generated in ${describeMigrationsFolder(result.migrationsFolder)} — ` +
@@ -978,10 +922,9 @@ const seedCommand = defineCommand({
 })
 
 /**
- * `db:reset` and `db:fresh` are the same command under two names, so they share
- * one body: the guard against reporting success for a reset that dropped every
- * table and re-applied nothing has to hold for both, and a second copy is how
- * it would come to hold for only one.
+ * `db:reset` and `db:fresh` are the same command under two names, sharing one
+ * body so the guard against reporting success for a reset that dropped every
+ * table and re-applied nothing cannot come to hold for only one.
  */
 async function runResetCommand(
   action: 'db:reset' | 'db:fresh',
@@ -1005,13 +948,11 @@ async function runResetCommand(
 
   consola.info('Dropping all tables...')
   const { migrations, seeders } = await resetDatabase({ seed })
-  // Assembled once so every exit below reports the same run the same way,
-  // whichever of them the command takes.
+  // Assembled once so every exit below reports the same run the same way.
   const runFields = { ...migrationRunFields(migrations), ...seederRunFields(seeders), seed }
 
-  // The migration half wins when both came back empty: a reset that re-applied
-  // nothing is the bigger news, and seeding an empty schema could not have
-  // worked anyway. Stacking both warnings would bury it.
+  // The migration half wins when both came back empty: seeding an empty schema
+  // could not have worked anyway, and stacking both warnings would bury it.
   if (migrations?.migrationsFound === 0) {
     reportNoMigrationsApplied(action, migrations, 'the tables were dropped and nothing was re-applied', json, runFields)
     return
@@ -1092,10 +1033,9 @@ const freshCommand = defineCommand({
 
 /**
  * Says out loud that page components were found and deliberately not compiled
- * into a manifest. Silence here would be the whole hazard of the rule: a
- * fullstack app misread as API-only loses `.guren/pages.gen.ts` with nothing on
- * screen to explain it. `guren check` and `guren doctor` report the same state
- * for the run where nobody was watching this line go by.
+ * into a manifest: silently, a fullstack app misread as API-only would lose
+ * `.guren/pages.gen.ts` with nothing on screen to explain it. `guren check` and
+ * `guren doctor` report the same state for an unwatched run.
  */
 function reportSuppressedPageManifest(plan: PageManifestPlan): void {
   const suppressed = describePageManifestSuppression(plan)
@@ -1170,18 +1110,12 @@ const codegenCommand = defineCommand({
   },
   args: routeTypesCommand.args,
   async run({ args }) {
-    // Unlike make:* and routes:types, codegen's outputs are entirely
-    // generated artifacts under .guren/ and types/generated/ — safe to
-    // overwrite by default, including custom --out/--pages-out destinations
-    // (those flags exist to redirect where a generated artifact lands, not
-    // to protect hand-maintained files). --force is still accepted for
-    // backward compatibility but is a no-op.
+    // codegen's outputs are entirely generated artifacts, safe to overwrite by
+    // default — including custom --out/--pages-out destinations. --force is
+    // accepted for backward compatibility but is a no-op.
     const writerOptions: WriterOptions = { ...toWriterOptions(args), force: true }
     // These three read disjoint inputs (pages, lang/, app/Models) and write
-    // disjoint artifacts, and the Vite plugin awaits this whole command
-    // before the dev server is usable — so they run concurrently.
-    // Translation keys and attachment maps only exist for apps with a lang/
-    // directory / Attachable models; those generators emit nothing otherwise.
+    // disjoint artifacts, so they run concurrently.
     const [
       { outputPath: pagesOutputPath, plan: pagesPlan },
       { outputPath: translationsOutputPath, keyCount },
@@ -1242,10 +1176,9 @@ const codegenCommand = defineCommand({
       appRoot: args.app,
       ...writerOptions,
     })
-    // Agent tools sit between data and the API client: they consume the
-    // Resource definitions the data generator produced (a `resource` hint's
-    // payload type is embedded in a tool description), and the `Data` import
-    // they emit resolves against the sibling data.gen.ts.
+    // Agent tools sit between data and the API client: they consume the Resource
+    // definitions the data generator produced, and the `Data` import they emit
+    // resolves against the sibling data.gen.ts.
     const {
       outputPath: agentsOutputPath,
       tools: agentTools,
@@ -1459,11 +1392,9 @@ const queueRetryCommand = defineCommand({
     description: 'Retry a failed job or all failed jobs.',
   },
   args: {
-    // Left `positional` on purpose, unlike `context`'s entity arg. citty drops
-    // a value passed to a positional as a flag, so `--id 42` reads as no id at
-    // all — but here that lands in the `else` below, which reports the missing
-    // id and exits 1. The wrong spelling is already loud, so converting it to
-    // `string` would trade the `[ID]` in `--help` for nothing.
+    // Left `positional`, unlike `context`'s entity arg: citty drops `--id 42`
+    // entirely, but here that lands in the `else` below, which reports the
+    // missing id and exits 1 — loud enough already.
     id: {
       type: 'positional',
       required: false,
@@ -1595,11 +1526,10 @@ const routeListCommand = defineCommand({
   },
 })
 
-// The `tool:` namespace is RFC 0016's; `agent:init` / `agent:sync` already own
-// `agent:` for the coding-agent harness, which is a different surface. Both
-// commands derive live from the route graph rather than reading
-// `.guren/agents.gen.ts`, so a stale or absent manifest cannot answer for what
-// an agent would actually see.
+// The `tool:` namespace is RFC 0016's; `agent:` is the coding-agent harness's.
+// Both commands derive live from the route graph rather than reading
+// `.guren/agents.gen.ts`, so a stale manifest cannot answer for what an agent
+// would actually see.
 const toolListCommand = defineCommand({
   meta: {
     name: 'tool:list',
@@ -1686,10 +1616,8 @@ const toolCallCommand = defineCommand({
       type: 'boolean',
       description: 'Ask for a verdict instead of an execution — the handler does not run',
     },
-    // No `--routes`: unlike `tool:list`, this command dispatches into the
-    // booted application, so its tools come from the graph that app actually
-    // serves. A routes file could not change that, and a flag that silently
-    // does not apply is worse than an absent one — see `tool-call.ts`.
+    // No `--routes`: this command dispatches into the booted application, so its
+    // tools come from the graph that app actually serves — see `tool-call.ts`.
     app: {
       type: 'string',
       description: 'Application root directory',
@@ -1702,11 +1630,8 @@ const toolCallCommand = defineCommand({
   async run({ args }) {
     await runToolCall({
       name: args.name,
-      // Through `lastFlagValue`/`lastBooleanFlag`: citty arrays a repeated
-      // flag whatever its declared type, and every array is truthy — so
-      // `--input a --input b` would otherwise arrive as a comma-joined string
-      // that is not JSON, and `--json=false --json=false` would turn off into
-      // on.
+      // Repeat-safe readers: `--input a --input b` would otherwise arrive
+      // comma-joined and not be JSON.
       input: lastFlagValue(args.input),
       as: lastFlagValue(args.as),
       preflight: lastBooleanFlag(args.preflight),
@@ -1716,9 +1641,8 @@ const toolCallCommand = defineCommand({
   },
 })
 
-// Reads the trail the MCP plugin's `audit` sink writes; unlike its `tool:`
-// neighbours it boots nothing, because an audit trail has to be readable when
-// the application it records is not startable.
+// Reads the trail the MCP plugin's `audit` sink writes. Boots nothing: an audit
+// trail has to be readable when the application it records is not startable.
 const toolLogCommand = defineCommand({
   meta: {
     name: 'tool:log',
@@ -1770,10 +1694,8 @@ const toolLogCommand = defineCommand({
     },
   },
   async run({ args }) {
-    // Every flag through `lastFlagValue`/`lastBooleanFlag`: citty arrays a
-    // repeated flag whatever its declared type and every array is truthy, so
-    // `--denied=false --denied=false` would otherwise read as *on* and quietly
-    // hide every invocation from a listing that looks complete.
+    // Repeat-safe readers: `--denied=false --denied=false` would otherwise read
+    // as *on* and hide every invocation from a listing that looks complete.
     const rawNumber = lastFlagValue(args.number)
     await runToolLog({
       file: lastFlagValue(args.file),
@@ -1790,12 +1712,9 @@ const toolLogCommand = defineCommand({
 })
 
 /**
- * Read `-n` as a count.
- *
- * A `string` arg rather than citty's `number`, because citty hands a
- * non-numeric `--number abc` across as `NaN` and every comparison against it
- * is false — the listing would come back empty, which on this command reads as
- * "no agent calls happened". Refused by name instead.
+ * Read `-n` as a count. A `string` arg rather than citty's `number`: citty hands
+ * `--number abc` across as `NaN`, every comparison against it is false, and the
+ * empty listing reads as "no agent calls happened".
  */
 function parseRecordCount(raw: string): number {
   const count = Number(raw)
@@ -1805,10 +1724,8 @@ function parseRecordCount(raw: string): number {
   return count
 }
 
-// `token:` is its own namespace, distinct from the `tool:` commands above
-// (which only *describe* the surface) and from `agent:` (the coding-agent
-// harness). This one writes into the application's store, so unlike its
-// neighbours it boots the app.
+// `token:` is its own namespace: this one writes into the application's store,
+// so unlike its `tool:` neighbours it boots the app.
 const tokenIssueCommand = defineCommand({
   meta: {
     name: 'token:issue',
@@ -1861,12 +1778,9 @@ const tokenIssueCommand = defineCommand({
     },
   },
   async run({ args }) {
-    // Every flag is narrowed through the repeat-safe readers: citty arrays a
-    // repeated flag, and an array is truthy — so `--yes=false --yes=false`
-    // would authorize a `tools:*` grant the user twice declined, and a
-    // repeated `--user` would be stored comma-joined as a principal nobody
-    // is. This command mints credentials; last-wins is what repeating a flag
-    // means to whoever typed it.
+    // Repeat-safe readers, on a command that mints credentials:
+    // `--yes=false --yes=false` would authorize a `tools:*` grant the user twice
+    // declined, and a repeated `--user` be stored as a principal nobody is.
     const name = lastFlagValue(args.name)
     const user = lastFlagValue(args.user)
     const tools = lastFlagValue(args.tools)
@@ -1887,10 +1801,9 @@ const tokenIssueCommand = defineCommand({
       json: lastBooleanFlag(args.json),
     })
 
-    // Booting the app to reach its token store opens whatever the app opens —
-    // a database pool, a Redis client — and nothing here closes them. Exit
-    // explicitly rather than leaving a one-shot command hanging on handles it
-    // did not create; `routes:types` ends the same way, for the same reason.
+    // Booting the app opens whatever the app opens — a database pool, a Redis
+    // client — and nothing here closes them, so a one-shot command must exit
+    // explicitly. `routes:types` ends the same way.
     process.exit(0)
   },
 })
@@ -1924,13 +1837,9 @@ const toolDevCommand = defineCommand({
     },
   },
   async run({ args }) {
-    // Repeat-safe like every other flag reader here: citty arrays a repeated
-    // flag, and this one picks the port a listener binds.
-    //
-    // Decimal digits and nothing else. `parseInt` stops at the first
-    // non-digit, so `3333abc` would bind 3333; `Number` accepts what a port
-    // is not — `--port=` and whitespace become 0, `0x10` becomes 16, `1e3`
-    // becomes 1000. Each of those binds a real port nobody asked for.
+    // Decimal digits and nothing else: `parseInt` stops at the first non-digit
+    // so `3333abc` would bind 3333, and `Number` turns `--port=`, `0x10` and
+    // `1e3` into real ports nobody asked for.
     const rawPort = lastFlagValue(args.port)
     const port = rawPort === undefined ? undefined : Number(rawPort)
     if (
@@ -1948,9 +1857,8 @@ const toolDevCommand = defineCommand({
       appRoot: lastFlagValue(args.app),
     })
 
-    // Deliberately no process.exit: unlike the one-shot commands beside it,
-    // this one is the server. It ends when the developer stops it, which is
-    // also when the token stops existing.
+    // Deliberately no process.exit: this command *is* the server, and it ends
+    // when the developer stops it — which is when the token stops existing.
   },
 })
 
@@ -2348,10 +2256,9 @@ const devCommand = defineCommand({
       return
     }
 
-    // Report where it actually bound. The requested port is not it once the
-    // walk moves past a busy one, or when PORT=0 lets the OS choose. Apps on a
-    // `@guren/server` older than the bound-address return still report nothing,
-    // hence the fallback.
+    // Report where it actually bound: the requested port is not it once the walk
+    // moves past a busy one, or when PORT=0 lets the OS choose. The fallback is
+    // for a `@guren/server` older than the bound-address return.
     consola.success(
       `Development server listening on ${address?.url ?? `http://${hostname}:${port}`}`,
     )
@@ -2417,8 +2324,6 @@ const keyGenerateCommand = defineCommand({
   },
 })
 
-// --- AI Agent Commands ---
-
 const modelListCommand = defineCommand({
   meta: {
     name: 'model:list',
@@ -2450,13 +2355,10 @@ const contextCommand = defineCommand({
   },
   args: {
     // Declared `string`, not `positional`, so both spellings reach the entity
-    // path. citty drops a value passed as a flag to a positional arg — it lands
-    // in neither `args.entity` nor `args._` and raises no unknown-flag error —
-    // and this command's no-entity branch is the whole-project map, so
-    // `guren context --entity User` would have printed that and exited 0. The
-    // flag spelling is one the docs actively teach: `--entity <Model>` is real
-    // on `make:adr` and `docs:graph`. A `string` arg still leaves an unconsumed
-    // positional in `_`, so `guren context User` is unchanged.
+    // path: citty drops a value passed as a flag to a positional and raises no
+    // unknown-flag error, so `guren context --entity User` used to print the
+    // whole-project map and exit 0. A `string` arg still leaves the bare
+    // positional in `_`.
     entity: {
       type: 'string',
       valueHint: 'User',
@@ -2481,9 +2383,8 @@ const contextCommand = defineCommand({
     },
   },
   async run({ args }) {
-    // Narrowed here rather than at each use so both branches below get the same
-    // treatment: `--app` and `--routes` reach a `resolve()` that throws on an
-    // array whether or not an entity was named.
+    // Narrowed here so both branches get the same treatment: `--app` and
+    // `--routes` reach a `resolve()` that throws on an array either way.
     const cwd = lastFlagValue(args.app)
     const routesFile = lastFlagValue(args.routes)
     const json = lastBooleanFlag(args.json)
@@ -2576,20 +2477,15 @@ const checkCommand = defineCommand({
       renderCheckReport(report)
     }
 
-    // Only the suite flags (`--arch`/`--docs`/`--spec`) and the opt-in
-    // `--ci` gate on exit code. Plain `guren check` has never set one (it's
-    // a v1.0-stable command; changing that default is a breaking change
-    // reserved for a major release). These flags are newer, with no prior
-    // contract to preserve, so they can gate CI from day one — that's the
-    // intended way to enforce checks in CI without breaking the default.
+    // Only the suite flags and the opt-in `--ci` gate on exit code. Plain
+    // `guren check` has never set one, and changing that on a v1.0-stable
+    // command is a breaking change reserved for a major release.
     if ((args.arch || args.docs || args.spec || args.i18n) && report.failCount > 0) {
       process.exitCode = 1
     }
-    // --ci also gates on warns: most integrity problems (a missing codegen
-    // manifest, an unregistered console command) report as 'warn', so a
-    // fail-only gate would wave nearly everything through. Advisory checks
-    // (test-coverage nudges) are exempt — the flag lives on the result, so
-    // JSON consumers see the same rule this gate applies.
+    // --ci also gates on warns: most integrity problems report as 'warn', so a
+    // fail-only gate would wave nearly everything through. Advisory checks are
+    // exempt, and the flag lives on the result so JSON consumers see the rule.
     if (args.ci && report.checks.some((c) => !c.advisory && c.status !== 'pass')) {
       process.exitCode = 1
     }
@@ -2680,11 +2576,9 @@ function reportAgentHarnessResult(result: AgentHarnessResult): void {
     consola.success(`${wroteVerb} ${file}`)
   }
   if (result.replaced.length > 0) {
-    // The one destructive step, so it gets the one warning: these files held
-    // something else. Which advice applies depends on who overwrote them —
-    // sync refreshing managed files, or init --force replacing files the user
-    // owns — and the sync-specific advice is exactly wrong for the latter
-    // (CLAUDE.md *is* the user's own file).
+    // The one destructive step, so it gets the one warning. The sync-specific
+    // advice is exactly wrong for init --force, which replaces files the user
+    // owns — CLAUDE.md *is* the user's own file.
     const advice =
       result.mode === 'sync'
         ? 'Local edits to framework-managed files do not survive agent:sync. Keep project-specific rules in files of your own — sync never touches files it does not ship.'
@@ -2783,11 +2677,9 @@ const agentInitCommand = defineCommand({
 })
 
 /**
- * The dry run's closing line, with the "run this to apply" hint carrying the
- * run's own flags — the applied command must be the previewed one. The flags
- * are derived from the command's declared arg spec (skipping the dry-run
- * itself), so a future flag cannot silently fall out of the hint the way a
- * hand-kept list would let it.
+ * The dry run's closing line, whose "run this to apply" hint carries the run's
+ * own flags — the applied command must be the previewed one. Derived from the
+ * declared arg spec so a future flag cannot fall out of the hint.
  */
 function agentDryRunClosingLine(
   commandName: 'agent:init' | 'agent:sync',
@@ -3188,7 +3080,6 @@ const upgradeCommand = defineCommand({
       return
     }
 
-    // Version compatibility
     if (result.versionCompatibility) {
       const vc = result.versionCompatibility
       if (vc.warnings.length > 0) {
@@ -3201,7 +3092,6 @@ const upgradeCommand = defineCommand({
       }
     }
 
-    // Deprecation warnings
     if (result.deprecationWarnings.length > 0) {
       consola.box('Deprecation warnings')
       for (const dep of result.deprecationWarnings) {
@@ -3211,7 +3101,6 @@ const upgradeCommand = defineCommand({
       }
     }
 
-    // Codemod results
     if (result.codemodResults.length > 0) {
       consola.box(args.dryRun ? 'Codemod preview' : 'Codemods')
       for (const codemod of result.codemodResults) {
@@ -3376,7 +3265,6 @@ export const builtinSubCommands = {
   deploy: deployCommand,
   console: consoleCommand,
   dev: devCommand,
-  // AI Agent commands
   'model:list': modelListCommand,
   context: contextCommand,
   check: checkCommand,

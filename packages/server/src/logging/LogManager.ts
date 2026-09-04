@@ -4,27 +4,7 @@ import { ConsoleChannel } from './channels/ConsoleChannel'
 import { FileChannel } from './channels/FileChannel'
 import { DailyFileChannel } from './channels/DailyFileChannel'
 
-/**
- * Log manager for managing multiple logging channels.
- *
- * @example
- * ```ts
- * const log = new LogManager({
- *   default: 'stack',
- *   channels: {
- *     console: { driver: 'console', level: 'debug' },
- *     file: { driver: 'daily', path: './storage/logs/app.log', days: 14 },
- *     stack: { driver: 'stack', channels: ['console', 'file'] },
- *   }
- * })
- *
- * log.info('User logged in', { userId: user.id })
- * log.error('Payment failed', { orderId, error: error.message })
- *
- * const requestLog = log.withContext({ requestId: ctx.requestId })
- * requestLog.info('Processing request')
- * ```
- */
+/** Log manager for managing multiple logging channels. */
 export class LogManager {
   private readonly config: LogConfig
   private readonly channelFactories: Map<string, LogChannelFactory> = new Map()
@@ -55,7 +35,6 @@ export class LogManager {
     })
 
     this.registerDriver('stack', (config) => {
-      // Stack is a special driver that combines multiple channels
       return this.createStackChannel(config as any)
     })
   }
@@ -79,16 +58,10 @@ export class LogManager {
     }
   }
 
-  /**
-   * Register a custom channel driver.
-   */
   registerDriver(name: string, factory: LogChannelFactory): void {
     this.channelFactories.set(name, factory)
   }
 
-  /**
-   * Get a logger for a specific channel.
-   */
   channel(name?: string): Logger {
     const channelName = name ?? this.config.default
 
@@ -100,9 +73,6 @@ export class LogManager {
     return this.loggers.get(channelName)!
   }
 
-  /**
-   * Get a logger that writes to multiple channels.
-   */
   stack(channelNames: string[]): Logger {
     const key = `stack:${channelNames.join(',')}`
 
@@ -134,14 +104,9 @@ export class LogManager {
     return channel
   }
 
-  /**
-   * Create a logger with additional context using the default channel.
-   */
   withContext(context: Record<string, unknown>): Logger {
     return this.channel().withContext(context)
   }
-
-  // Convenience methods that delegate to default channel
 
   emergency(message: string, context?: Record<string, unknown>): void {
     this.channel().emergency(message, context)
@@ -179,9 +144,6 @@ export class LogManager {
     this.channel().debug(message, context)
   }
 
-  /**
-   * Close all channel instances.
-   */
   async close(): Promise<void> {
     for (const channel of this.channelInstances.values()) {
       if (channel.close) {
@@ -192,41 +154,25 @@ export class LogManager {
     this.loggers.clear()
   }
 
-  /**
-   * Get the default channel name.
-   */
   getDefaultChannel(): string {
     return this.config.default
   }
 
-  /**
-   * Get available channel names.
-   */
   getChannelNames(): string[] {
     return Object.keys(this.config.channels)
   }
 }
 
-/**
- * Create a log manager instance.
- */
 export function createLogManager(config: LogConfig): LogManager {
   return new LogManager(config)
 }
 
-// Global log manager instance
 let globalLogManager: LogManager | null = null
 
-/**
- * Set the global log manager instance.
- */
 export function setLogManager(manager: LogManager): void {
   globalLogManager = manager
 }
 
-/**
- * Get the global log manager instance.
- */
 export function getLogManager(): LogManager {
   if (!globalLogManager) {
     throw new Error('Log manager has not been initialized. Call setLogManager() first.')

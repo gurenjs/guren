@@ -187,10 +187,8 @@ describe('Container', () => {
 
   describe('when (contextual binding)', () => {
     it('should provide contextual binding', () => {
-      // Default logger
       container.bind('logger', () => ({ type: 'default' }))
 
-      // UserService with custom logger
       container.bind('userService', (c) => ({
         logger: c.make<{ type: string }>('logger'),
       }))

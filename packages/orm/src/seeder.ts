@@ -9,10 +9,9 @@ import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 const SUPPORTED_EXTENSIONS = new Set(['.js', '.mjs', '.cjs', '.ts'])
 
-// A declaration file carries a supported extension but no runtime exports, so
-// importing one yields nothing and it would be counted as a seeder that failed
-// to export a handler — suppressing the `make:seeder` hint for a folder that
-// genuinely has no seeder in it.
+// A .d.ts has a supported extension but no runtime exports, so it would count
+// as a file that failed to export a handler and suppress the `make:seeder`
+// hint for a folder that genuinely has no seeder.
 const DECLARATION_SUFFIXES = ['.d.ts', '.d.mts', '.d.cts']
 
 function isSeederCandidate(name: string): boolean {
@@ -20,13 +19,9 @@ function isSeederCandidate(name: string): boolean {
 }
 
 /**
- * The context a seeder receives. `db` is the drizzle database the app
- * configured, so its type depends on the dialect: annotate the seeder with the
- * matching alias below (or pass the driver's own database type) whenever the
- * app is not on PostgreSQL.
- *
- * The type parameter defaults to `PostgresJsDatabase` for backwards
- * compatibility — seeders written before this was generic keep compiling.
+ * The context a seeder receives. `db`'s type depends on the dialect: annotate
+ * the seeder with the matching alias below whenever the app is not on
+ * PostgreSQL, which is the default only for backwards compatibility.
  */
 export interface SeederContext<TDatabase = PostgresJsDatabase> {
   db: TDatabase
@@ -35,8 +30,7 @@ export interface SeederContext<TDatabase = PostgresJsDatabase> {
 export type SeederHandler<TDatabase = PostgresJsDatabase> = (context: SeederContext<TDatabase>) => unknown
 
 // Every driver whose `seedDatabase()` runs seeders gets an alias here. D1 has
-// none on purpose: its seeding happens through wrangler, and `seedDatabase()`
-// throws rather than handing a database to a seeder.
+// none on purpose: it seeds through wrangler and `seedDatabase()` throws.
 
 /** Seeder context for apps created with `createPostgresDatabase()`. */
 export type PostgresSeederContext = SeederContext<PostgresJsDatabase>
@@ -101,9 +95,8 @@ async function loadSeederModule(path: string): Promise<SeederHandler | undefined
 
 /**
  * What one `runSeeders()` call had to work with. `db:seed` reports success off
- * this rather than off the call returning: a folder with no seeders in it seeds
- * nothing, and saying "executed" there reads as a database that now holds the
- * rows the seeders would have written.
+ * this, not off the call returning: an empty folder seeds nothing, and
+ * "executed" there reads as a database that now holds the seeded rows.
  */
 export interface SeederRunSummary {
   /** The folder that was read, absolute as the driver resolved it. */
@@ -111,39 +104,25 @@ export interface SeederRunSummary {
   /** How many seeders ran. They run in the order their files sorted. */
   seedersRan: number
   /**
-   * Files with a seeder extension that exported nothing runnable, so they were
-   * skipped. Non-zero alongside `seedersRan: 0` means the folder is not empty
-   * but holds nothing to run — a different problem from having written no
-   * seeder yet, and one `make:seeder` would not solve.
+   * Files with a seeder extension that exported nothing runnable. Non-zero
+   * alongside `seedersRan: 0` means the folder holds nothing to run — a
+   * different problem from having written no seeder, which `make:seeder` fixes.
    */
   filesWithoutSeeder: number
 }
 
-/**
- * One read of the seeders folder: the handlers it yielded, and the files that
- * yielded none. Kept together because they come from the same listing — the
- * skipped count cannot be recovered from the handler array alone.
- */
+/** One read of the folder: the handlers it yielded, and the files that yielded none. */
 async function collectSeeders<TDatabase>(
   directory: string | URL,
 ): Promise<{ root: string; seeders: Array<SeederHandler<TDatabase>>; filesWithoutSeeder: number }> {
   const root = directory instanceof URL ? fileURLToPath(directory) : resolve(directory)
 
-  // A folder that was never created holds no seeders — the same nothing-to-run
-  // an empty one reports, and what `db:seed` already has the right message for.
-  // Letting the ENOENT out instead reached the user through `seedFailure()` as
-  // "Failed to seed the database: ENOENT ... scandir", a filesystem error
-  // dressed as a database failure; `inspectMigrationsFolder()` has always
-  // answered `migrationsFound: 0` for a missing migrations folder.
-  //
-  // Only ENOENT is absence, and it is read off the listing itself rather than
-  // from a preceding existsSync: that check answers false for a folder whose
-  // *parent* is unreadable, which would turn a permission problem into a silent
-  // "no seeders found". ENOTDIR (a file sitting where the folder should be) and
-  // EACCES both still throw — both are misconfigurations a user has to see, and
-  // neither is a folder holding no seeders. A folder that was never
-  // *configured* is different again, and each driver's `seedDatabase()` still
-  // throws for it before reaching here.
+  // A folder that was never created is the same nothing-to-run an empty one
+  // reports; letting the ENOENT out surfaced it as "Failed to seed the
+  // database: ENOENT ... scandir". Only ENOENT is absence, and it is read off
+  // the listing rather than a preceding existsSync, which answers false for a
+  // folder whose *parent* is unreadable and would turn a permission problem
+  // into a silent "no seeders found". ENOTDIR and EACCES still throw.
   let entries: Dirent[]
   try {
     entries = await readdir(root, { withFileTypes: true })
@@ -172,9 +151,8 @@ async function collectSeeders<TDatabase>(
 }
 
 /**
- * Seeders are loaded as modules, so the dialect they were written against is
- * unknowable here. `TDatabase` is the caller stating which database it will
- * hand them — the same contract `runSeeders()` fulfils from the driver side.
+ * Seeders load as modules, so their dialect is unknowable here: `TDatabase` is
+ * the caller stating which database it will hand them.
  */
 export async function loadSeeders<TDatabase = PostgresJsDatabase>(
   directory: string | URL,

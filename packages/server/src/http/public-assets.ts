@@ -19,9 +19,8 @@ const DEFAULT_CONTENT_TYPES: Record<string, string> = {
   '.avif': 'image/avif',
   '.webmanifest': 'application/manifest+json',
   '.txt': 'text/plain; charset=utf-8',
-  // Not in DEFAULT_EXTENSIONS, so these are only reachable for an app that
-  // opts in — but an app that does should not also have to restate the type.
-  // Served as application/octet-stream, a browser refuses to run or apply them.
+  // Reachable only for an app that opts in via `extensions`, which should not
+  // also have to restate the type: as octet-stream a browser refuses them.
   '.js': 'text/javascript; charset=utf-8',
   '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
@@ -41,13 +40,10 @@ export interface RootPublicAssetsOptions {
   /** Override content types per extension. */
   contentTypeMap?: Record<string, string>
   /**
-   * Serve document types (`.svg`, `.html`, XML) inline instead of forcing them
-   * to download. Defaults to false.
-   *
-   * The default exists because this directory is also where an app's uploads
-   * land — `.svg` is in the default extension list, and an SVG navigated to
-   * directly is script in the app's own origin. Turn it on only for a
-   * directory holding nothing user-supplied.
+   * Serve document types (`.svg`, `.html`, XML) inline rather than as downloads.
+   * Defaults to false because uploads land in this directory too, and an SVG
+   * navigated to directly is script in the app's own origin. Turn it on only
+   * for a directory holding nothing user-supplied.
    */
   inlineDocuments?: boolean
 }

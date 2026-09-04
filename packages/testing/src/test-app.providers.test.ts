@@ -3,15 +3,10 @@ import type { Container, ServiceProviderConstructor } from '@guren/server'
 import type { TestAppOptions } from './test-app'
 
 /**
- * Mirrors a scaffolded `app/Providers/DatabaseProvider.ts`: an ordinary
- * `ServiceProvider` subclass, whose inherited constructor takes a concrete
- * `Container`. That parameter is the whole point of this file — constructor
- * parameters are contravariant, so an option typed
- * `new (...args: unknown[]) => ...` rejects it, and the api-only starter's
- * own test file stopped typechecking.
- *
- * Written structurally, against a type-only `Container` import, so the check
- * is pure `tsc` and needs no built `@guren/server` at runtime.
+ * Mirrors a scaffolded `app/Providers/DatabaseProvider.ts`, whose inherited
+ * constructor takes a concrete `Container`: constructor parameters are
+ * contravariant, so an option typed `new (...args: unknown[]) => ...` rejects it.
+ * Written structurally so the check is pure `tsc`, with no built `@guren/server`.
  */
 class DatabaseProvider {
   constructor(protected container: Container) {}

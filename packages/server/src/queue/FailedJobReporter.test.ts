@@ -49,7 +49,6 @@ describe('FailedJobReporter', () => {
   })
 
   test('should call custom handlers', async () => {
-    // Suppress default log output
     console.error = () => {}
 
     const reporter = new FailedJobReporter()
@@ -77,7 +76,6 @@ describe('FailedJobReporter', () => {
 
     await reporter.report(createFailedJobInfo())
 
-    // Default handler runs first, then custom handlers 1 and 2
     expect(callOrder).toEqual([1, 2])
   })
 
@@ -94,10 +92,8 @@ describe('FailedJobReporter', () => {
       called.push(true)
     })
 
-    // Should not throw
     await reporter.report(createFailedJobInfo())
 
-    // Second handler should still be called despite first handler throwing
     expect(called).toHaveLength(1)
   })
 
@@ -126,7 +122,6 @@ describe('FailedJobReporter', () => {
     let asyncResult: string | undefined
 
     reporter.onFailure(async (info) => {
-      // Simulate async operation
       await new Promise((resolve) => setTimeout(resolve, 1))
       asyncResult = info.jobName
     })

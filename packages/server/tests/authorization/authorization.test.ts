@@ -18,7 +18,6 @@ import { AuthorizationException } from '../../src/errors'
 import type { Context } from '../../src/http/Application'
 import type { Middleware } from '../../src/http/middleware'
 
-// Test models
 class Post {
   constructor(
     public id: number,
@@ -35,16 +34,11 @@ class Comment {
   ) {}
 }
 
-// Test user type
 interface TestUser {
   id: number
   role: string
   name?: string
 }
-
-// ===================
-// Gate Tests
-// ===================
 
 describe('Gate', () => {
   let gate: Gate
@@ -267,14 +261,9 @@ describe('Gate', () => {
   })
 })
 
-// ===================
-// Policy Tests
-// ===================
-
 describe('Policy', () => {
   let gate: Gate
 
-  // Test policy
   class PostPolicy extends Policy {
     before(user: TestUser | null, _ability: string) {
       if ((user as TestUser | null)?.role === 'admin') {
@@ -339,7 +328,6 @@ describe('Policy', () => {
     const userGate = gate.forUser({ id: 1, role: 'user' } as TestUser)
     const guestGate = gate.forUser(null)
 
-    // Need to pass a model for policy lookup
     const dummyPost = new Post(0, 0)
     expect(await userGate.allows('create', dummyPost)).toBe(true)
     expect(await guestGate.allows('create', dummyPost)).toBe(false)
@@ -389,10 +377,6 @@ describe('Policy', () => {
     expect(await otherGate.allows('view', unpublishedPost)).toBe(false)
   })
 })
-
-// ===================
-// AuthorizationResponse Tests
-// ===================
 
 describe('Policy returning an AuthorizationResponse', () => {
   class ResponsePolicy extends Policy {
@@ -464,8 +448,8 @@ describe('Policy returning an AuthorizationResponse', () => {
     expect((paymentRequired as Error).message).toBe('Upgrade required.')
   })
 
-  // `before` used to keep checking on anything that was not a boolean, so a
-  // denial object fell through and a permissive ability method then allowed it.
+  // A non-boolean `before` result must short-circuit: a denial object that falls through
+  // is then allowed by a permissive ability method.
   test('honours a denial response from a gate before callback', async () => {
     gate.before(() => Response.deny('banned'))
     gate.define('view', () => true)
@@ -511,10 +495,6 @@ describe('Policy returning an AuthorizationResponse', () => {
     expect(seen).toEqual([false])
   })
 })
-
-// ===================
-// definePolicy Tests
-// ===================
 
 describe('definePolicy', () => {
   test('creates policy from definition object', async () => {
@@ -562,10 +542,6 @@ describe('definePolicy', () => {
   })
 })
 
-// ===================
-// Response Tests
-// ===================
-
 describe('Response', () => {
   test('allow creates allowed response', () => {
     const response = Response.allow('Allowed!')
@@ -592,10 +568,6 @@ describe('Response', () => {
     expect(response.status).toBe(404)
   })
 })
-
-// ===================
-// Global Gate Tests
-// ===================
 
 describe('Global Gate', () => {
   beforeEach(() => {
@@ -631,16 +603,10 @@ describe('Global Gate', () => {
   })
 })
 
-// ===================
-// Integration Tests
-// ===================
-
 describe('Authorization Integration', () => {
   test('complex authorization scenario', async () => {
-    // Define a complex authorization setup
     const gate = new Gate()
 
-    // Global before callback for super admins
     gate.before((user) => {
       if ((user as TestUser)?.role === 'superadmin') {
         return true
@@ -648,7 +614,6 @@ describe('Authorization Integration', () => {
       return undefined
     })
 
-    // Simple ability gates
     gate.define('access-dashboard', (user) => {
       const u = user as TestUser
       return ['admin', 'moderator'].includes(u?.role ?? '')
@@ -658,7 +623,6 @@ describe('Authorization Integration', () => {
       return (user as TestUser)?.role === 'admin'
     })
 
-    // Policy for posts
     class TestPostPolicy extends Policy {
       view(user: TestUser | null, post: Post) {
         return post.published || user?.id === post.authorId
@@ -672,7 +636,6 @@ describe('Authorization Integration', () => {
 
     gate.policy(Post, TestPostPolicy)
 
-    // Test scenarios
     const superadmin = gate.forUser({ id: 1, role: 'superadmin' } as TestUser)
     const admin = gate.forUser({ id: 2, role: 'admin' } as TestUser)
     const moderator = gate.forUser({ id: 3, role: 'moderator' } as TestUser)
@@ -680,34 +643,25 @@ describe('Authorization Integration', () => {
 
     const post = new Post(1, 4, false) // Unpublished, owned by user id 4
 
-    // Superadmin can do anything
     expect(await superadmin.allows('access-dashboard')).toBe(true)
     expect(await superadmin.allows('manage-users')).toBe(true)
     expect(await superadmin.allows('update', post)).toBe(true)
 
-    // Admin can access dashboard and manage users
     expect(await admin.allows('access-dashboard')).toBe(true)
     expect(await admin.allows('manage-users')).toBe(true)
-    expect(await admin.allows('update', post)).toBe(true) // Admin via policy
+    expect(await admin.allows('update', post)).toBe(true)
 
-    // Moderator can access dashboard but not manage users
     expect(await moderator.allows('access-dashboard')).toBe(true)
     expect(await moderator.allows('manage-users')).toBe(false)
     expect(await moderator.allows('update', post)).toBe(false)
 
-    // User can only update their own post
     expect(await user.allows('access-dashboard')).toBe(false)
     expect(await user.allows('manage-users')).toBe(false)
-    expect(await user.allows('update', post)).toBe(true) // Owner
-    expect(await user.allows('view', post)).toBe(true) // Owner can view unpublished
+    expect(await user.allows('update', post)).toBe(true)
+    expect(await user.allows('view', post)).toBe(true)
   })
 })
 
-// ===================
-// authorizeResourceMiddleware Tests
-// ===================
-
-/** Drive one authorization middleware against a fake request context. */
 const drive = async (middleware: Middleware, method = 'GET') => {
   const ctx = { req: { method }, get: () => ({ id: 1 }) } as unknown as Context
   let nextCalled = false
@@ -783,9 +737,8 @@ describe('authorizeResourceMiddleware', () => {
   })
 
   test('captures abilityFor at creation, so a later assignment cannot apply', async () => {
-    // The capability stamp fixes `fromMethodMap` at creation. If the handler
-    // re-read options per request, an assignment made afterwards would change
-    // the ability checked while the stamp still named the verb map.
+    // The capability stamp fixes `fromMethodMap` at creation; re-reading options per
+    // request would let a later assignment change the ability checked.
     const options: AuthorizeResourceOptions = {}
     const middleware = authorizeResourceMiddleware(() => ({ id: 1 }), options)
     options.abilityFor = () => 'purge'
@@ -835,13 +788,11 @@ describe('authorize middleware ability snapshots', () => {
     gate.define('publish', () => Response.denyWithStatus(404, 'No such post.'))
     setGate(gate)
 
-    // Any-of over one ability is that ability, so it must not fall back to
-    // the generic any-of denial — the stamp reports it as all-of-one.
+    // Any-of over one ability is that ability, so its own denial response must survive.
     await expect(drive(authorizeMiddleware(['publish']))).rejects.toThrow('No such post.')
     await expect(drive(authorizeMiddleware('publish'))).rejects.toThrow('No such post.')
 
-    // Two alternatives have no single response to carry, so that denial is
-    // generic — the boundary the normalization stops at.
+    // Two alternatives have no single response to carry, so that denial stays generic.
     await expect(drive(authorizeMiddleware(['publish', 'admin']))).rejects.toThrow(
       'This action is unauthorized.'
     )

@@ -34,10 +34,9 @@ class FactoryUser extends defineModel(users) {}
 
 declare const db: ReturnType<typeof drizzle>
 
-// Should accept a Drizzle database without type errors.
 void User.query(db).execute()
 
-// Type assertions with a typed builder: Model.query(db) should preserve the builder's result shape.
+// Model.query(db) must preserve the builder's result shape.
 type FakeSelect = { from(table: typeof users): { execute: () => Promise<UserRecord[]> } }
 type FakeDb = { select: () => FakeSelect }
 
@@ -102,9 +101,8 @@ async function _relationIntersection() {
 }
 void _relationIntersection
 
-// Nested eager-load paths ('posts.comments') must be accepted by with()/
-// findWith()/findWithOrFail()/withPaginate(). The head segment is typed from
-// relationTypes; declare the nested shape there to type the loaded children.
+// The head segment of a nested path is typed from relationTypes; declare the
+// nested shape there to type the loaded children.
 class NestedRelUser extends Model<UserRecord> {
   static table = users
   declare static relationTypes: {
@@ -143,13 +141,10 @@ async function _nestedRelationPaths() {
   const _mixedPosts: PostRecordT[] = mixed[0].posts
   void _mixedPosts
 
-  // Only the head segment is validated — everything after the first dot is
-  // an unvalidated string, so these malformed/deeper paths type-check even
-  // though the runtime would throw "unknown relation" for a bad tail (and
-  // even that only once it recurses into an actually-loaded child; see the
-  // RelationPath comment above its definition). This is documented, not a
-  // gap to close here — flagging it so a future edit doesn't "fix" it into
-  // silently narrowing what compiles.
+  // Only the head segment is validated: everything after the first dot is an
+  // unvalidated string, so these malformed paths compile even though the
+  // runtime throws "unknown relation". Documented behavior — a future edit
+  // must not narrow it.
   await NestedRelUser.with('posts.')
   await NestedRelUser.with('posts..comments')
   await NestedRelUser.with('posts.comments.typo')
@@ -161,9 +156,8 @@ async function _nestedRelationPaths() {
 }
 void _nestedRelationPaths
 
-// belongsTo relations backed by a NOT NULL foreign key can opt into a
-// non-nullable declaration via BelongsToRequiredRecord. Using `declare`
-// avoids the runtime placeholder value entirely.
+// A belongsTo backed by a NOT NULL foreign key opts into a non-nullable
+// declaration via BelongsToRequiredRecord.
 class RequiredAuthorUser extends Model<UserRecord> {
   static table = users
   declare static relationTypes: {
@@ -181,10 +175,9 @@ async function _requiredBelongsTo() {
 }
 void _requiredBelongsTo
 
-// defineModel's create payload can be reshaped at the type level. The base
-// below mirrors @guren/server's AuthenticatableModel, which the ORM cannot
-// import (that would invert the package dependency) — examples/blog and
-// examples/api typecheck the same options against the real class.
+// Mirrors @guren/server's AuthenticatableModel, which the ORM cannot import
+// (that would invert the package dependency); examples/blog and examples/api
+// typecheck the same options against the real class.
 abstract class PasswordHashingModel<TRecord extends PlainObject = PlainObject> extends Model<TRecord> {
   declare static readonly createType: {
     password?: string
@@ -216,10 +209,9 @@ async function _reshapedCreatePayload() {
 }
 void _reshapedCreatePayload
 
-// requireOnCreate in isolation: no column is made optional here, so the only
-// thing missing from the call below is the base's virtual `password`.
-// (Type-level only: on the real AuthenticatableModel, deniedFields() rejects a
-// mass-assigned passwordHash at runtime — forceCreate is the sanctioned path.)
+// requireOnCreate in isolation: no column is made optional, so the only thing
+// added is the base's virtual `password`. Type-level only: on the real
+// AuthenticatableModel a mass-assigned passwordHash is rejected at runtime.
 class RequirePasswordAccount extends defineModel(accounts, {
   base: PasswordHashingModel,
   requireOnCreate: ['password'],
@@ -237,10 +229,8 @@ async function _requireOnCreateAddsTheNamedField() {
 }
 void _requireOnCreateAddsTheNamedField
 
-// optionalOnCreate in isolation: the named column stops being required and
-// keeps its own type, and nothing else moves. The last two calls are what fail
-// if the option's keys ever widen from literals to `string`, which would make
-// every column optional.
+// optionalOnCreate in isolation. The last two calls fail if the option's keys
+// ever widen from literals to `string`, which would make every column optional.
 class DerivedHashAccount extends defineModel(accounts, { optionalOnCreate: ['passwordHash'] }) {}
 async function _optionalOnCreateDropsOnlyTheNamedRequirement() {
   await DerivedHashAccount.create({ name: 'Ada', email: 'ada@example.com' })
@@ -254,8 +244,7 @@ async function _optionalOnCreateDropsOnlyTheNamedRequirement() {
 }
 void _optionalOnCreateDropsOnlyTheNamedRequirement
 
-// Both options are checked against the table columns and the base's own
-// named create fields, so typos fail to compile.
+// Both options are checked against the table columns and the base's own create fields.
 // @ts-expect-error 'passwordHassh' is not a column of the table
 class _BadOptional extends defineModel(accounts, { optionalOnCreate: ['passwordHassh'] }) {}
 void _BadOptional
@@ -285,13 +274,11 @@ async function _softDeletesPreservesInference() {
 }
 void _softDeletesPreservesInference
 
-// The mixin registers its filter as a *named* global scope only: a second
-// registration as `defaultScope` would make it unremovable, because
-// `withoutGlobalScope()` re-applies `defaultScope` whatever it was asked to
-// drop. This pins the type half — the property survives only as `Model`'s
-// optional declaration, so calling it unguarded is an error, and putting it back
-// on `SoftDeletesStatic` makes this directive unused. The runtime half is pinned
-// behaviorally in tests/soft-deletes.test.ts.
+// The mixin registers its filter as a *named* global scope only: registering it
+// as `defaultScope` too would make it unremovable, because `withoutGlobalScope()`
+// re-applies `defaultScope` whatever it was asked to drop. Runtime half pinned in
+// tests/soft-deletes.test.ts; putting the property back on `SoftDeletesStatic`
+// makes the directive below unused.
 function _softDeleteScopeIsNotADefaultScope() {
   // @ts-expect-error defaultScope is not registered by the SoftDeletes mixin
   SoftAccount.defaultScope({} as never)

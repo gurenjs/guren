@@ -20,7 +20,6 @@ export default class TaskController extends Controller {
     return Number(this.apiTokenUserId())
   }
 
-  // GET /api/tasks
   async index(): Promise<Response> {
     const userId = this.getUserId()
     const { page, per_page: perPage, completed } = this.validateQuery(ListTasksQuerySchema)
@@ -45,7 +44,6 @@ export default class TaskController extends Controller {
     return this.json(paginatorInstance.toResource(TaskResource))
   }
 
-  // POST /api/tasks
   async store(): Promise<Response> {
     const userId = this.getUserId()
     const data = await this.validateBody(CreateTaskSchema)
@@ -56,11 +54,9 @@ export default class TaskController extends Controller {
       completed: false,
     })
 
-    // Invalidate cache
     const cacheService = this.#cacheService()
     await cacheService.invalidateUserTasks(userId)
 
-    // Emit TaskCreated event
     await this.make('events').emit(new TaskCreated(task!, userId))
 
     return this.created({
@@ -68,7 +64,6 @@ export default class TaskController extends Controller {
     })
   }
 
-  // GET /api/tasks/:id
   async show(): Promise<Response> {
     const userId = this.getUserId()
     const { id } = this.validateParams(TaskIdParamSchema)
@@ -83,7 +78,6 @@ export default class TaskController extends Controller {
     })
   }
 
-  // PUT /api/tasks/:id
   async update(): Promise<Response> {
     const userId = this.getUserId()
     const { id } = this.validateParams(TaskIdParamSchema)
@@ -103,11 +97,9 @@ export default class TaskController extends Controller {
 
     const refreshed = await Task.find(task.id)
 
-    // Invalidate cache
     const cacheService = this.#cacheService()
     await cacheService.invalidateTask(task.id, userId)
 
-    // Emit TaskCompleted event if task was just completed
     if (!wasCompleted && refreshed?.completed === true) {
       await this.make('events').emit(new TaskCompleted(refreshed, userId))
     }
@@ -117,7 +109,6 @@ export default class TaskController extends Controller {
     })
   }
 
-  // DELETE /api/tasks/:id
   async destroy(): Promise<Response> {
     const userId = this.getUserId()
     const { id } = this.validateParams(TaskIdParamSchema)
@@ -129,7 +120,6 @@ export default class TaskController extends Controller {
 
     await Task.delete({ id: task.id })
 
-    // Invalidate cache
     const cacheService = this.#cacheService()
     await cacheService.invalidateTask(task.id, userId)
 

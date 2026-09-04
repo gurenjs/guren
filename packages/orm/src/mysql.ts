@@ -14,14 +14,13 @@ type CreatePool = typeof import('mysql2')['createPool']
 type MySqlPool = ReturnType<CreatePool>
 type DrizzleConfig = Exclude<Parameters<MySql2Drizzle['drizzle']>[0], string>
 
-// The mysql driver packages are loaded lazily so importing @guren/orm
-// does not require `mysql2` to be installed (e.g. SQLite-only apps).
+// Lazy so importing @guren/orm does not require `mysql2`.
 //
-// `createPool` comes from mysql2's callback API on purpose: drizzle builds its
-// own pool through `mysql2/promise` when handed a `connection:`, and that
+// `createPool` comes from mysql2's callback API on purpose: handed a
+// `connection:`, drizzle builds its own pool through `mysql2/promise`, whose
 // wrapper exposes no `.config` for the driver to write `supportBigNumbers`
-// onto, so every query throws before reaching a socket. Pools built here are
-// passed to `drizzle({ client })` instead.
+// onto, so every query throws before reaching a socket. Pools built here go to
+// `drizzle({ client })` instead.
 async function loadMySqlModules(): Promise<{
   drizzle: MySql2Drizzle['drizzle']
   migrate: typeof import('drizzle-orm/mysql2/migrator')['migrate']
@@ -48,9 +47,9 @@ export interface MySqlDatabaseOptions {
   clientOptions?: MySqlConnectionOptions
   seedersFolder?: string | URL
   /**
-   * Drizzle relations for RQB v2 (`db.query.*`).
-   * Build with `defineRelations(schema, ...)` from `drizzle-orm`,
-   * or with `relations()` from `drizzle-orm/_relations` for the RQB v1 partial-upgrade path.
+   * Drizzle relations for RQB v2 (`db.query.*`): `defineRelations(schema, ...)`
+   * from `drizzle-orm`, or `relations()` from `drizzle-orm/_relations` for the
+   * RQB v1 partial-upgrade path.
    */
   relations?: Record<string, unknown>
 }
@@ -95,10 +94,8 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
   }
 
   const migrations = singleFlight(async (): Promise<MigrationRunSummary> => {
-    // Scoped to this attempt, and resolved below rather than up front:
-    // resolveConnectionString() throws when no connection string is configured,
-    // so it must not run before the no-migrations early return. The catch needs
-    // it afterwards.
+    // Resolved below, not up front: resolveConnectionString() throws when
+    // nothing is configured, so it must not run before the early return.
     let endpoint: string | undefined
 
     try {
@@ -206,10 +203,10 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
     const { sql } = await import('drizzle-orm')
 
     await withAdminDb(async (adminDb) => {
-      // table_type is selected because information_schema.tables lists views
-      // alongside base tables, and MySQL answers DROP TABLE on a view with a
-      // warning rather than an error — so dropping every row as a table
-      // silently leaves views standing behind a successful-looking reset.
+      // information_schema.tables lists views alongside base tables, and MySQL
+      // answers DROP TABLE on a view with a warning rather than an error — so
+      // dropping every row as a table leaves views standing behind a
+      // successful-looking reset. Hence table_type.
       const [rows] = (await adminDb.execute(
         sql.raw(
           'SELECT table_name AS name, table_type AS type FROM information_schema.tables WHERE table_schema = DATABASE()',
@@ -229,10 +226,9 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
       }
     })
 
-    // Drop the memo so the run below re-applies everything from scratch, then
-    // migrate: a reset ends on a migrated database, the same state `guren
-    // db:reset` leaves behind. A caller that migrates again — the documented
-    // reset-then-migrate pattern — hits the memo and no-ops.
+    // A reset ends on a migrated database, like `guren db:reset`. Dropping the
+    // memo re-applies from scratch; a caller that then migrates again hits the
+    // fresh memo and no-ops.
     migrations.reset()
     return migrations.get()
   }
@@ -249,11 +245,9 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
         )) as unknown as [Array<{ name: string | null; applied_at: string | Date | null }>]
         return rows.map((row) => ({ name: row.name, appliedAt: row.applied_at }))
       } catch (error) {
-        // An unreachable server reaches this catch too, and reporting it as
-        // "nothing applied" makes db:status indistinguishable from a database
-        // that is up with no migrations run.
+        // An unreachable server reaches this catch too; reporting it as
+        // "nothing applied" would look like an up database with no migrations.
         if (isConnectionFailure(error)) throw error
-        // Tracker table does not exist yet — nothing applied.
         return []
       }
     })

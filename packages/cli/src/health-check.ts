@@ -5,24 +5,11 @@ import { pathToFileURL } from 'node:url'
 import { isDefinitelyAbsent } from './discovery'
 
 export interface HealthCheckOptions {
-  /**
-   * Application root directory.
-   */
   appRoot?: string
-
-  /**
-   * Path to the health setup file.
-   */
+  /** Path to the health setup file. */
   health?: string
-
-  /**
-   * Run specific checks only.
-   */
+  /** Comma-separated names; runs only those checks. */
   checks?: string
-
-  /**
-   * Output as JSON.
-   */
   json?: boolean
 }
 
@@ -49,11 +36,8 @@ interface HealthManager {
 }
 
 /**
- * The load failures, as report entries.
- *
- * Carried as checks rather than only logged, so they reach `--json` — the
- * shape CI and agents read. Without them the payload is indistinguishable
- * from an app whose health checks all passed.
+ * The load failures, as report entries: only logged, they would not reach
+ * `--json`, leaving the payload indistinguishable from an all-passing app.
  */
 function configChecks(loadErrors: string[]): CheckResult[] {
   return loadErrors.map((message) => ({
@@ -64,24 +48,11 @@ function configChecks(loadErrors: string[]): CheckResult[] {
 }
 
 /**
- * A key that is equal for two paths naming the same file, and different
- * otherwise.
- *
- * `stat` first, so a symlink and its target dedupe to one candidate. It
- * throws for a *dangling* symlink, and falling back to the literal path there
- * defeated the dedupe in exactly the case the loader was taught to notice:
- * `app/health.ts` and `app/Health.ts` pointing nowhere are one file on a
- * case-insensitive filesystem, and were reported twice. The link itself is a
- * real inode, so `lstat` answers for it — and keeps two genuinely different
- * broken links apart, which a path-shaped fallback could not.
- *
- * `bigint` because a Windows file ID is 64 bits and would not survive a
- * `number` — two distinct files could compare equal and one of their failures
- * go unreported. Same reason `isSameFile()` in `agent-harness.ts` uses it.
- *
- * `undefined` means neither probe could answer; the caller keeps the
- * candidate rather than guessing, since a duplicate report is a smaller
- * failure than a dropped one.
+ * A key equal for two paths naming the same file. `stat` first, so a symlink
+ * and its target dedupe; `lstat` covers a dangling one, whose own inode still
+ * separates two broken links. `bigint` because a Windows file ID is 64 bits
+ * (same reason as `isSameFile()` in `agent-harness.ts`). `undefined` means
+ * neither probe answered, and the caller then keeps the candidate.
  */
 async function fileIdentity(path: string): Promise<string | undefined> {
   for (const probe of [stat, lstat]) {
@@ -89,15 +60,12 @@ async function fileIdentity(path: string): Promise<string | undefined> {
       const stats = await probe(path, { bigint: true })
       return `${stats.dev}:${stats.ino}`
     } catch {
-      // the next probe answers, or nothing does
+      // intentionally empty
     }
   }
   return undefined
 }
 
-/**
- * Try to load the health manager from common locations.
- */
 async function loadHealthManager(
   options: HealthCheckOptions = {},
   loadErrors: string[] = [],
@@ -109,25 +77,11 @@ async function loadHealthManager(
     consola.warn(`Failed to load health checks from ${path}: ${reason}`)
   }
 
-  // A `--health <path>` is the user naming the file; anything that stops it
-  // from yielding a manager is a failure to report, including the file not
-  // being there and the file exporting nothing recognizable. Without one, the
-  // list below is a *search*, so a candidate that loads without exporting a
-  // manager is just a miss — some other `health.ts` — and stays silent.
-  //
-  // One value carries that distinction rather than a mode flag beside the
-  // list, because a flag and a list derived from the same option disagreed:
-  // `--health=` (citty's result for a valued flag given no value) turned on
-  // named-file strictness while the paths fell back to the default search,
-  // and exited 1 on an app that exits 0 without the flag. An empty value
-  // names no file.
-  //
-  // `resolveRoutesFile()` derives namedness the same way and for the same
-  // reason, but is not shared with this: there, absence when unnamed is a
-  // silent shape and the whole answer; here it is one candidate of five, and
-  // the named case additionally has to report a file that imports but exports
-  // nothing. The atom the two have in common is `Boolean(option)` — the
-  // consequences are what differ, and those do not factor.
+  // A named `--health <path>` makes every failure reportable; without one the
+  // list below is a search, so a candidate exporting no manager stays silent.
+  // One value carries that distinction rather than a separate mode flag: a
+  // bare `--health=` (citty's empty string) turned strictness on while the
+  // paths fell back to the search, exiting 1 on an app that otherwise exits 0.
   const namedPath = options.health ? resolve(appRoot, options.health) : undefined
   const healthPaths = namedPath
     ? [namedPath]
@@ -139,30 +93,21 @@ async function loadHealthManager(
         resolve(appRoot, 'config/health.ts'),
       ]
 
-  // Probing and importing in one pass, so the usual app — a manager at the
-  // first candidate — stops there instead of stat'ing all five first. Dedupe
-  // is incremental for the same reason: a candidate is only ever compared
-  // against ones already reached, which is what a two-phase pass computed
-  // anyway.
   const seen = new Set<string>()
 
   for (const healthPath of healthPaths) {
     // `isDefinitelyAbsent`, not `existsSync`: the latter answers "no" for a
     // dangling symlink, an untraversable parent, and an `app` that is a
-    // regular file — so a health file the user really put there would be
-    // skipped, and the command would report a clean bill of health for a
-    // configuration it never managed to look at.
+    // regular file, so a health file the user really put there would be
+    // skipped and the command would report a clean bill of health.
     if (await isDefinitelyAbsent(appRoot, healthPath)) {
       if (namedPath !== undefined) fail(namedPath, 'no such file')
       continue
     }
 
-    // Deduped by identity, not by name: on a case-insensitive filesystem
-    // `app/health.ts` and `app/Health.ts` are one file, and the loop would
-    // otherwise import it twice and report the same failure twice. Deduping
-    // on the *error text* instead would collapse two genuinely different
-    // files whose failures happen to read alike (a `throw new Error('boom')`
-    // in each carries no path), under-reporting a real second problem.
+    // By identity, not name: on a case-insensitive filesystem `app/health.ts`
+    // and `app/Health.ts` are one file, imported and reported twice. Not by
+    // error text either — two different files can fail with the same message.
     const identity = await fileIdentity(healthPath)
     if (identity !== undefined) {
       if (seen.has(identity)) continue
@@ -172,10 +117,8 @@ async function loadHealthManager(
     try {
       const mod = await import(pathToFileURL(healthPath).href)
 
-      // Each candidate export is tested for the shape, not just for being
-      // truthy: a file that exports both a placeholder `health` and a real
-      // `healthManager` would otherwise be judged on the placeholder alone and
-      // reported as exporting no manager.
+      // Shape-tested rather than truthy-tested: a placeholder `health` beside
+      // a real `healthManager` would otherwise decide the answer alone.
       const health = [mod.health, mod.healthManager, mod.default].find(
         (candidate) => candidate && typeof candidate.check === 'function',
       )
@@ -190,12 +133,8 @@ async function loadHealthManager(
         )
       }
     } catch (error) {
-      // `consola.debug` is invisible at the default log level, so a health
-      // file that exists and throws on import used to arrive at the caller as
-      // `null` — rendered as "No health manager found", followed by
-      // instructions to create the file the user already has. Reported as a
-      // warning, and remembered so the caller can say which file failed
-      // instead of claiming there is none.
+      // Warned rather than `consola.debug`'d (invisible at the default level)
+      // so a file that exists and throws is not reported as no file at all.
       fail(healthPath, error instanceof Error ? error.message : String(error))
     }
   }
@@ -203,9 +142,6 @@ async function loadHealthManager(
   return null
 }
 
-/**
- * Get status icon.
- */
 function getStatusIcon(status: HealthStatus): string {
   switch (status) {
     case 'healthy':
@@ -217,9 +153,6 @@ function getStatusIcon(status: HealthStatus): string {
   }
 }
 
-/**
- * Get status color.
- */
 function getStatusColor(status: HealthStatus): string {
   switch (status) {
     case 'healthy':
@@ -233,19 +166,15 @@ function getStatusColor(status: HealthStatus): string {
 
 const RESET = '\x1b[0m'
 
-/**
- * Run health checks from CLI.
- */
+/** Run health checks from CLI. */
 export async function runHealthCheck(options: HealthCheckOptions = {}): Promise<void> {
   const loadErrors: string[] = []
   const health = await loadHealthManager(options, loadErrors)
 
   // A health file that exists and cannot be imported is not an app with no
-  // health checks. Both used to reach the built-in checks, which report
-  // `status: "healthy"` off memory/uptime/runtime alone — so `guren
-  // health:check --json` answered a question it had not been able to ask.
-  // Printed once, because `loadErrors` is complete the moment the loader
-  // returns; `consola.error` goes to stderr, so it never reaches the JSON.
+  // health checks: the built-in checks would report `healthy` off
+  // memory/uptime/runtime alone. `consola.error` goes to stderr, so this
+  // never reaches the JSON document.
   if (loadErrors.length > 0) {
     consola.error('Health checks could not be read:')
     for (const message of loadErrors) {
@@ -280,14 +209,8 @@ export async function runHealthCheck(options: HealthCheckOptions = {}): Promise<
 }
 
 /**
- * Info-level prose, dropped under `--json`.
- *
- * consola's info reporter writes to stdout, so under `--json` prose lands in
- * front of the document and nothing downstream can parse it. One gate for
- * every prose block in this command, so a later message cannot forget it —
- * which is the bug this exists to fix. (It looked fine from the test suite
- * only because `NODE_ENV=test` puts consola at warn level: the assertion was
- * reading the environment.)
+ * Info-level prose, dropped under `--json`: consola's info reporter writes to
+ * stdout, so prose would land in front of the document and break parsing.
  */
 function sayer(options: HealthCheckOptions): (lines: string[]) => void {
   return (lines) => {
@@ -306,13 +229,9 @@ async function runManagerChecks(
     : await health.check()
 
   // The manager is app-authored and arrives through `import()`, so nothing
-  // type-checks the report it returns. A missing `checks` reached
-  // `printReport` as "undefined is not an object" and the splice below as a
-  // spread of undefined; a missing `timestamp` is the same crash one field
-  // over, at every `toISOString()`. Normalized where the value crosses the
-  // boundary, so no consumer downstream has to defend. `status` is left as
-  // given: coercing an unrecognized one would decide the exit code on the
-  // command's behalf.
+  // type-checks its report; normalized here so no consumer has to defend.
+  // `status` is left as given: coercing an unrecognized one would decide the
+  // exit code on the command's behalf.
   return {
     ...report,
     checks: Array.isArray(report.checks) ? report.checks : [],
@@ -321,14 +240,8 @@ async function runManagerChecks(
 }
 
 /**
- * The report with any load failures folded in.
- *
- * One place, because the two paths into it used to disagree: the built-in
- * checks derived `unhealthy` from a spliced entry while the manager path
- * forced it, and only one of them reported at all — so a broken
- * `app/health.ts` beside a working leftover answered `"status": "healthy"`,
- * exit 0, with the failure's only trace a stderr warning a CI step reading
- * stdout never sees.
+ * The report with any load failures folded in. One place, so the manager path
+ * and the built-in path cannot disagree about how a load failure is marked.
  */
 function withLoadErrors(report: HealthReport, loadErrors: string[]): HealthReport {
   if (loadErrors.length === 0) return report
@@ -355,18 +268,14 @@ function emit(report: HealthReport, options: HealthCheckOptions): void {
 }
 
 /**
- * The built-in checks, for an app that configured none of its own.
- *
- * Returns rather than emits: the caller folds load failures in and does the
- * one emit, so the two ways into a report cannot disagree about how a failure
- * is marked or which exit code follows.
+ * The built-in checks, for an app that configured none of its own. Returns
+ * rather than emits: the caller folds load failures in and does the one emit.
  */
 async function runBasicChecks(options: HealthCheckOptions): Promise<HealthReport> {
   sayer(options)(['', 'Running basic health checks...', ''])
 
   const checks: CheckResult[] = []
 
-  // Memory check
   const memoryUsage = process.memoryUsage()
   const usedMb = Math.round(memoryUsage.heapUsed / 1024 / 1024)
   const totalMb = Math.round(memoryUsage.heapTotal / 1024 / 1024)
@@ -378,7 +287,6 @@ async function runBasicChecks(options: HealthCheckOptions): Promise<HealthReport
     meta: { usedMb, totalMb },
   })
 
-  // Process uptime check
   const uptime = process.uptime()
   checks.push({
     name: 'process',
@@ -387,7 +295,6 @@ async function runBasicChecks(options: HealthCheckOptions): Promise<HealthReport
     meta: { uptimeSeconds: uptime },
   })
 
-  // Node version check
   checks.push({
     name: 'runtime',
     status: 'healthy',
@@ -404,9 +311,6 @@ async function runBasicChecks(options: HealthCheckOptions): Promise<HealthReport
   return { status: overallStatus, timestamp: new Date(), checks }
 }
 
-/**
- * Print health report to console.
- */
 function printReport(report: HealthReport): void {
   console.log('')
   console.log('Health Check Report')

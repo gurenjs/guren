@@ -1,8 +1,6 @@
 /**
- * Codemod infrastructure for automated code transformations during upgrades.
- *
- * Each codemod targets a specific version range and transforms user code
- * to adapt to breaking changes.
+ * Codemod infrastructure for upgrades: each codemod targets a version range and
+ * transforms user code to adapt to breaking changes.
  */
 
 export interface Codemod {
@@ -19,40 +17,17 @@ export interface Codemod {
   apply(cwd: string): Promise<number>
 }
 
-/**
- * Registry of all available codemods, ordered by version.
- * Add new codemods here as breaking changes are introduced.
- */
-export const codemods: Codemod[] = [
-  // Example codemod (commented out as reference for future use):
-  // {
-  //   id: 'rename-static-route',
-  //   description: 'Replace static Route.get() calls with router instance methods',
-  //   fromVersion: '0.2.0',
-  //   toVersion: '0.3.0',
-  //   async detect(cwd) {
-  //     // scan for Route.get/post/put/delete patterns
-  //     return []
-  //   },
-  //   async apply(cwd) {
-  //     // replace patterns
-  //     return 0
-  //   },
-  // },
-]
+/** Registry of all available codemods, ordered by version. */
+export const codemods: Codemod[] = []
 
-/**
- * Find codemods applicable for upgrading between two versions.
- */
+/** Codemods applicable for upgrading between two versions. */
 export function findApplicableCodemods(from: string, to: string): Codemod[] {
   return codemods.filter((c) => {
     return compareVersions(c.fromVersion, from) >= 0 && compareVersions(c.toVersion, to) <= 0
   })
 }
 
-/**
- * Run all applicable codemods in sequence.
- */
+/** Run all applicable codemods in sequence. */
 export async function runCodemods(
   cwd: string,
   from: string,
@@ -95,10 +70,9 @@ export interface CodemodResult {
 }
 
 /**
- * A single concrete semver version — three numeric segments, with optional
- * prerelease and build metadata. Ranges (`^1.0.0`), partial pins (`1.3`), tag
- * names, and `workspace:`-style specifiers are all excluded, so callers can use
- * this to ask "is this orderable" without a second classification.
+ * A single concrete semver version. Ranges (`^1.0.0`), partial pins (`1.3`), tag
+ * names and `workspace:` specifiers are all excluded, so this also answers
+ * "is this orderable".
  */
 const EXACT_VERSION = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.+-]+)?$/u
 

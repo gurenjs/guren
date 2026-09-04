@@ -97,8 +97,7 @@ export const { Attachment } = configureAttachments({
   it('stays silent when the table cannot be traced to a schema import', async () => {
     const workspace = await createTempWorkspace('guren-cli-check-attachments-opaque-')
     try {
-      // Imported from somewhere other than db/schema: existence cannot be
-      // judged, and a symbol the check cannot trace is not a missing one.
+      // Imported from outside db/schema: a symbol the check cannot trace is not a missing one.
       const config = `import { configureAttachments } from '@guren/core'
 import { attachments } from './tables.js'
 
@@ -133,8 +132,7 @@ export const { Attachment } = configureAttachments({
   it('fails a module config whose own schema lacks the table, even when the root declares it', async () => {
     const workspace = await createTempWorkspace('guren-cli-check-attachments-module-miss-')
     try {
-      // Root declares `attachments`, but the module config imports the
-      // module's schema — which does not. Existence is per schema module.
+      // The root schema declares `attachments`, the module's does not: existence is per schema module.
       await writeApp(workspace.dir, { schema: SCHEMA_WITH_ATTACHMENTS })
       await mkdir(join(workspace.dir, 'modules/media/db'), { recursive: true })
       await writeFile(join(workspace.dir, 'modules/media/db/schema.ts'), SCHEMA_WITHOUT_ATTACHMENTS, 'utf8')
@@ -390,8 +388,7 @@ export const { Attachment } = configureAttachments({
     const workspace = await createTempWorkspace('guren-cli-delivery-noroutes-')
     try {
       const file = await writeConfig(workspace.dir, deliveryConfig())
-      // No definitions seam and no routes/web.ts: positive evidence that
-      // nothing can have mounted the route.
+      // No definitions seam and no routes/web.ts: positive evidence nothing mounted the route.
       const results = await runDelivery(workspace.dir, [file])
 
       const result = results.find((c) => c.key.startsWith('attachments-delivery:'))
@@ -457,14 +454,9 @@ export const { Attachment } = configureAttachments({ table: {} as never, storage
     }
   })
 
-  // The scaffolder mounts the delivery route in routes/api.ts on an API-only
-  // app. A rule that judges against routes/web.ts finds no entry file, treats
-  // that as positive evidence nothing could have mounted the route, and fails
-  // the app that just mounted it.
-  //
-  // Deliberately runs with no injected definitions: passing them short-circuits
-  // the routes-file lookup entirely, so a test that injects them cannot see
-  // this bug at all (it passed against the unfixed code).
+  // An API-only app mounts the delivery route in routes/api.ts; a rule judging against
+  // routes/web.ts finds no entry file and fails the app that just mounted it. Runs with
+  // no injected definitions on purpose: injecting them short-circuits the routes lookup.
   it('does not report an API-only app as having no routes entry', async () => {
     const workspace = await createTempWorkspace('guren-cli-delivery-api-only-')
     try {
@@ -473,9 +465,8 @@ export const { Attachment } = configureAttachments({ table: {} as never, storage
 
       const results = await runDelivery(workspace.dir, [file])
 
-      // This fixture mounts nothing, so a failure is correct — what matters is
-      // which file it was judged against. Blaming routes/web.ts names a file
-      // an API-only app was never going to have.
+      // The fixture mounts nothing, so failing is correct; what matters is which file it
+      // was judged against, and an API-only app never has routes/web.ts.
       const failed = results.find((c) => c.key.startsWith('attachments-delivery:'))
       expect(failed?.message).toContain('no route registered by registerAttachmentRoutes()')
       expect(failed?.message).not.toContain('routes/web.ts')
@@ -552,8 +543,7 @@ export const other = { disks: { torn: { driver: 's3' } } }`,
       const results = await runDelivery(workspace.dir, [config, storage], MOUNTED)
 
       expect(results.find((c) => c.key.endsWith(':media'))?.status).toBe('pass')
-      // No statically readable driver ('mystery') and conflicting evidence
-      // ('torn') are both skipped, never guessed.
+      // An unreadable driver ('mystery') and conflicting evidence ('torn') are skipped, never guessed.
       expect(results.find((c) => c.key.endsWith(':mystery'))).toBeUndefined()
       expect(results.find((c) => c.key.endsWith(':torn'))).toBeUndefined()
     } finally {
@@ -664,9 +654,7 @@ export function register(): unknown {
     }
   })
 
-  // `./public` itself, not only a subdirectory of it — the containment test
-  // has to accept the boundary, and must not accept a sibling whose name
-  // merely extends it.
+  // The containment test must accept `./public` itself, and reject a sibling whose name merely extends it.
   it('fails a root that is the public directory itself, and passes public-facing siblings', async () => {
     const workspace = await createTempWorkspace('guren-cli-public-disk-edge-')
     try {
@@ -690,8 +678,7 @@ export function register(): unknown {
     }
   })
 
-  // The rule fails a build, so a false positive costs more than a miss:
-  // anything it cannot read positively is skipped rather than guessed at.
+  // The rule fails a build, so anything it cannot read positively is skipped, not guessed.
   it('stays silent on a non-local driver, an unreadable root, and conflicting evidence', async () => {
     const workspace = await createTempWorkspace('guren-cli-public-disk-skip-')
     try {
@@ -713,8 +700,7 @@ export function register(): unknown {
       )
       expect(await run(workspace.dir, [config, computed])).toEqual([])
 
-      // Two declarations disagreeing about the root: unreadable, not
-      // first-match-wins.
+      // Two declarations disagreeing about the root: unreadable, not first-match-wins.
       const conflicting = await write(
         workspace.dir,
         'config/storage.ts',
@@ -731,10 +717,9 @@ export function register(): unknown {
     }
   })
 
-  // The scaffolded StorageProvider ends its map with `as const`, so the disk
-  // scan reads a TSAsExpression rather than an object literal. Getting this
-  // wrong is silent: "cannot read the config" and "nothing to flag" are the
-  // same empty result, and the app it blinds is the scaffold's own shape.
+  // The scaffolded StorageProvider ends its map with `as const`, so the scan reads a
+  // TSAsExpression. Getting this wrong is silent: "cannot read" and "nothing to flag"
+  // are the same empty result, on the scaffold's own shape.
   it('reads a disks map written `as const`', async () => {
     const workspace = await createTempWorkspace('guren-cli-public-disk-asconst-')
     try {
@@ -756,11 +741,9 @@ export function register(): unknown {
     }
   })
 
-  // `satisfies` on the options object used to make every attachments rule —
-  // this one included — return nothing at all, because the shared entry scan
-  // tested the argument for ObjectExpression without unwrapping first. A
-  // security rule that a type annotation silently switches off is worse than
-  // no rule, and the failure is invisible: it looks exactly like a clean app.
+  // The shared entry scan once tested the argument for ObjectExpression without unwrapping,
+  // so `satisfies` on the options object silently switched every attachments rule off, and
+  // the result looked exactly like a clean app.
   it('reads options written with `satisfies` or `as const`', async () => {
     const workspace = await createTempWorkspace('guren-cli-public-disk-wrapped-')
     try {
@@ -784,10 +767,8 @@ export function register(): unknown {
     }
   })
 
-  // `as const` on the *string* is a level below the object-level unwrapping:
-  // literalString() reads the assertion node, finds no StringLiteral, and
-  // answers null — which the rule cannot tell from "no disk declared", so a
-  // build-failing security rule is switched off by a type annotation.
+  // `as const` on the *string* sits below the object-level unwrapping: literalString()
+  // answers null, which the rule cannot tell from "no disk declared".
   it('reads disk and root names written with `as const`', async () => {
     const workspace = await createTempWorkspace('guren-cli-public-disk-strconst-')
     try {
@@ -808,10 +789,8 @@ export function register(): unknown {
     }
   })
 
-  // `guren storage:link` symlinks public/storage -> storage/app/public, and
-  // the storage guide documents `local` rooted at exactly that path. A
-  // lexical containment test calls this safe, because storage/app/public is
-  // nowhere near public/ as a string.
+  // `guren storage:link` symlinks public/storage -> storage/app/public, which the storage
+  // guide documents as `local`'s root. A lexical containment test calls that safe.
   describe('symlinked into the served tree', () => {
     async function app(dir: string, root: string): Promise<string[]> {
       const config = await write(dir, 'config/attachments.ts', attachmentsConfig('local'))
@@ -840,10 +819,8 @@ export function register(): unknown {
       }
     })
 
-    // The link exposes storage/app/public, which sits *inside* the scaffold's
-    // root but does not contain storage/app/attachments. Asking merely whether
-    // the two overlap would fail the default scaffold the moment anyone ran
-    // storage:link — a false positive on the shape this rule recommends.
+    // The link exposes storage/app/public, inside the scaffold's root but not containing
+    // storage/app/attachments: asking only whether the two overlap fails the default scaffold.
     it("passes the scaffold's own root, which the link does not expose", async () => {
       const workspace = await createTempWorkspace('guren-cli-public-disk-link-ok-')
       try {
@@ -856,12 +833,9 @@ export function register(): unknown {
       }
     })
 
-    // The link is created before its target — routine, since the directory
-    // appears on first upload. `realpath` cannot resolve it, and resolving
-    // only the side that exists puts the two paths in different vocabularies
-    // (/var vs /private/var on macOS), so they never compare equal and the
-    // scan reports safe. The first upload then creates the target and serves
-    // every attachment.
+    // The link routinely precedes its target (the directory appears on first upload).
+    // `realpath` cannot resolve it, and resolving only the existing side puts the paths in
+    // different vocabularies (/var vs /private/var on macOS), so they never compare equal.
     it('fails a link whose target does not exist yet', async () => {
       const workspace = await createTempWorkspace('guren-cli-public-disk-dangling-')
       try {
@@ -874,9 +848,7 @@ export function register(): unknown {
       }
     })
 
-    // A link into the uploads rather than around them still exposes the files
-    // it points at, so containment is tested in both directions against the
-    // attachments/ prefix.
+    // A link into the uploads still exposes them, so containment is tested in both directions.
     it('fails a link exposing one attachment directory', async () => {
       const workspace = await createTempWorkspace('guren-cli-public-disk-descendant-')
       try {

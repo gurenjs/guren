@@ -363,12 +363,9 @@ describe('TestApp', () => {
         },
       })
 
-      // Without a CSRF token the mutating request is rejected (403, per
-      // createCsrfMiddleware's default).
       const blocked = await app.post('/submit', { title: 'x' })
       expect(blocked.status).toBe(403)
 
-      // withCsrf() primes session + XSRF-TOKEN, after which the mutation passes.
       const csrf = await app.withCsrf('/form')
       await csrf.post('/submit', { title: 'x' }).assertOk()
     } finally {
@@ -477,7 +474,6 @@ describe('TestApp', () => {
 describe('FakeQueue', () => {
   let queue: FakeQueue
 
-  // Mock job class
   class SendEmailJob extends Job<{ to: string }> {
     async handle(_payload: { to: string }): Promise<void> {}
   }
@@ -710,7 +706,6 @@ describe('FakeMail', () => {
 })
 
 describe('DatabaseAssertions', () => {
-  // Mock database connection
   const mockDb = {
     data: [] as Record<string, unknown>[],
     query: async <T>(sql: string, params?: unknown[]): Promise<T[]> => {
@@ -805,7 +800,6 @@ describe('DatabaseAssertions', () => {
   })
 })
 
-// Test event classes
 class UserRegistered extends Event {
   static override eventName = 'UserRegistered'
 
@@ -1049,10 +1043,9 @@ describe('FakeEvent', () => {
       // Register a listener
       manager.on(UserRegistered, () => {})
 
-      // Emit event (fake manager only records, doesn't call listeners)
+      // The fake manager only records; listeners are never called.
       await manager.emit(new UserRegistered('123', 'test@example.com'))
 
-      // Event should be recorded
       const recorded = manager.getEventsOf(UserRegistered)
       expect(recorded).toHaveLength(1)
     })

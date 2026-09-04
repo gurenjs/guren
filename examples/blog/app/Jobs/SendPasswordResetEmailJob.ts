@@ -7,9 +7,8 @@ interface SendPasswordResetEmailPayload {
 }
 
 /**
- * Job that sends the password-reset email. Dispatched (never awaited)
- * regardless of whether the account exists, so ForgotPasswordController's
- * response time doesn't leak which emails are registered.
+ * Dispatched, never awaited, whether or not the account exists, so
+ * ForgotPasswordController's response time cannot leak registered emails.
  */
 export class SendPasswordResetEmailJob extends Job<SendPasswordResetEmailPayload> {
   static override queue = 'emails'

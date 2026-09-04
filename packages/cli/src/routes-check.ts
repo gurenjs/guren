@@ -20,26 +20,17 @@ import { check, type CheckResult } from './check-result'
 const ROUTES_DIR = 'routes'
 
 /**
- * A path that can move a module scope's answer: the module's descriptor
- * (`modules/billing/index.ts`, where `defineModule({ routes })` names the
- * registrar), its routes entry (`modules/billing/routes.ts`), or anything
- * under its routes directory (`modules/billing/routes/foo.ts`).
+ * A path that can move a module scope's answer: its descriptor (where
+ * `defineModule({ routes })` names the registrar), its routes entry, or its routes/.
  */
 const MODULE_WIRING_PATTERN = /^modules\/[^/]+\/(?:index\.|routes[/.])/u
 
 /**
- * Whether a changed path — POSIX-relative, as `getChangedFiles` reports —
- * could move this check's answer, and so must wake it under `--changed`.
- *
- * The whole check is gated as a unit on this rather than filtered by changed
- * candidate, for the reason {@link checkRouteRegistrarWiring} documents: the
- * edit that unmounts `routes/admin.ts` is usually to `routes/web.ts`. Both
- * halves of each scope count, and the module half is not covered by the
- * project one — `modules/billing/routes/foo.ts` does not start with `routes/`,
- * so a gate that only knew the project directory would leave every module
- * unchecked in exactly the edit-hook path that runs on every save. The
- * descriptor counts too: deleting `routes:` from `defineModule()` is an edit
- * to `modules/billing/index.ts` alone, and it 404s every module route.
+ * Whether a changed path — POSIX-relative, as `getChangedFiles` reports — could move this
+ * check's answer, and so must wake it under `--changed`. Gated as a unit rather than
+ * filtered by changed candidate: the edit that unmounts `routes/admin.ts` is usually to
+ * `routes/web.ts`. Both halves of each scope count — `modules/billing/routes/foo.ts` does
+ * not start with `routes/`, and deleting `routes:` from a descriptor 404s every route.
  */
 export function affectsRouteWiring(file: string, routesFile?: string): boolean {
   return (
@@ -50,28 +41,18 @@ export function affectsRouteWiring(file: string, routesFile?: string): boolean {
   )
 }
 
-/**
- * Stands in for "every export", for `import * as routes` and
- * `export * from './x'`. Safe as a sentinel because `*` is not a legal
- * export name.
- */
+/** Stands in for "every export"; safe as a sentinel because `*` is not a legal export name. */
 const EVERY_EXPORT = '*'
 
 /** Extensions a specifier without one may resolve to, in preference order. */
 const RESOLVED_EXTENSIONS = ['.ts', '.tsx', '.mts', '.js', '.jsx', '.mjs']
 
 /**
- * Source extension → the runtime extension it is emitted as.
- *
- * Load-bearing in both directions, not a nicety. Read backwards, it is how a
- * specifier reaches its file: apps following Node's ESM rules import the
- * *emitted* path, so `routes/web.ts` names its sibling `'./auth.js'` while
- * the file on disk is `auth.ts` — the shape `examples/blog` and every `guren
- * add` scaffold use. A resolver that only tried the specifier as written
- * would find no edges at all in a real app and report every routes file as
- * unmounted. Read forwards, it is how a suggested import line is printed, and
- * how an emitted `auth.js` sitting beside its own `auth.ts` is recognized as
- * a build artifact rather than a second routes file.
+ * Source extension → the runtime extension it is emitted as. Used in both directions:
+ * backwards, because apps following Node's ESM rules import the *emitted* path
+ * (`routes/web.ts` names `'./auth.js'` for a file on disk called `auth.ts`), so a
+ * resolver trying only the specifier as written finds no edges at all; forwards, to
+ * print a suggested import line and to recognize an emitted `auth.js` as a build artifact.
  */
 const SOURCE_TO_RUNTIME_EXTENSION: Record<string, string> = {
   '.ts': '.js',
@@ -96,10 +77,9 @@ interface ImportBinding {
   /** The imported export's name, `'default'`, or {@link EVERY_EXPORT}. */
   imported: string
   /**
-   * Absolute path of the file the specifier resolved to, or `null` for a
-   * specifier that leaves `routes/`. Those bindings are kept rather than
-   * dropped because the local name still matters for the collision note in
-   * {@link wiringSuggestion} — only the filesystem probe is skipped.
+   * Absolute path of the file the specifier resolved to, or `null` for a specifier that
+   * leaves `routes/` — kept, because the local name still matters to the collision note
+   * in {@link wiringSuggestion}.
    */
   from: string | null
 }
@@ -112,13 +92,9 @@ interface ReexportEdge {
 }
 
 /**
- * One routes file, reduced to what deciding "is this registrar called?" needs.
- *
- * The body/import split is the same one `console-check.ts` makes, for the same
- * reason: an import alone is not a use. A `routes/web.ts` left holding
- * `import registerAdminRoutes from './admin.js'` after someone deleted the
- * call is exactly the state this check exists to report, and it is
- * indistinguishable from wired-up unless the two halves are kept apart.
+ * One routes file, reduced to what deciding "is this registrar called?" needs. The
+ * body/import split (as in `console-check.ts`) exists because an import alone is not a
+ * use: a leftover import whose call was deleted is exactly what this check reports.
  */
 interface RoutesFileFacts {
   /** Exports the file itself declares that the route loader would accept. */
@@ -140,16 +116,10 @@ async function isFile(path: string): Promise<boolean> {
 }
 
 /**
- * Absolute path a specifier points at, before extension guessing: relative to
- * the importing file, or to the app root for the `@/` alias the templates
- * configure. Package specifiers yield `null` — nothing outside the app can
- * mount a routes file.
- *
- * Pure string work, which is what makes it worth having separately from
- * {@link resolveSpecifier}: only an edge landing inside `routes/` can change
- * an answer here, so callers rule the rest out before touching the disk. In
- * `examples/blog` that is 16 of 17 filesystem probes not made — the entry
- * file's controller, model, and validator imports.
+ * Absolute path a specifier points at, before extension guessing: relative to the
+ * importing file, or to the app root for the `@/` alias. Package specifiers yield `null`.
+ * Pure string work, kept apart from {@link resolveSpecifier} so callers can rule an edge
+ * out before touching the disk — 16 of 17 probes in `examples/blog`.
  */
 function specifierBase(cwd: string, fromFile: string, specifier: string): string | null {
   if (specifier.startsWith('.')) return resolve(dirname(fromFile), specifier)
@@ -158,12 +128,9 @@ function specifierBase(cwd: string, fromFile: string, specifier: string): string
 }
 
 /**
- * The file `base` names, or `null` when it names nothing on disk.
- *
- * Existence is probed rather than assumed (unlike `spec-modules.ts`, which
- * only needs a path prefix for attribution): a specifier that resolves
- * nowhere must not create a graph edge, or a typo'd import would read as
- * wiring.
+ * The file `base` names, or `null` when it names nothing on disk. Existence is probed
+ * rather than assumed: a specifier resolving nowhere must not create a graph edge, or a
+ * typo'd import would read as wiring.
  */
 async function resolveSpecifier(base: string): Promise<string | null> {
   const source = swapExtension(base, RUNTIME_TO_SOURCE_EXTENSION)
@@ -184,13 +151,10 @@ async function resolveSpecifier(base: string): Promise<string | null> {
 }
 
 /**
- * Whether an `export default` declaration is something the loader would call.
- *
- * The loader takes the default export only when `typeof` it is a function
- * (`load-routes.ts`), so counting every default export would report a
- * `routes/prefixes.ts` whose default is a plain object as an unmounted
- * registrar. An `Identifier` counts because `export default registerAdminRoutes`
- * — what every `guren add` scaffold writes — is the common indirection.
+ * Whether an `export default` declaration is something the loader would call. It takes
+ * the default only when `typeof` it is a function (`load-routes.ts`), so a default that
+ * is a plain object is not a registrar. An `Identifier` counts:
+ * `export default registerAdminRoutes` is what every `guren add` scaffold writes.
  */
 function isDefaultRegistrar(declaration: { type: string }): boolean {
   return (
@@ -202,10 +166,8 @@ function isDefaultRegistrar(declaration: { type: string }): boolean {
 }
 
 /**
- * Registrar-shaped exports a statement declares *itself*. A re-export
- * (`export { registerAdminRoutes } from './admin.js'`) is deliberately not
- * one: a barrel that forwards a registrar does not own it, and reporting the
- * barrel would name a file whose only fix is in another one.
+ * Registrar-shaped exports a statement declares *itself*. A re-export is deliberately
+ * not one: reporting the barrel would name a file whose only fix is in another one.
  */
 function declaredRegistrarExports(node: Statement): string[] {
   if (node.type === 'ExportDefaultDeclaration') {
@@ -333,23 +295,17 @@ export interface RoutesCheckOptions {
   cwd: string
   cache: ParseCache
   /**
-   * `--routes <file>`, project-relative. Omitted, the entry is probed from
-   * {@link ROUTES_ENTRY_CANDIDATES} rather than assumed.
-   *
-   * The project scope only. A module's entry is its own file, so a `--routes`
-   * pointing at the project's API entry must not move it.
+   * `--routes <file>`, project-relative; omitted, the entry is probed from
+   * {@link ROUTES_ENTRY_CANDIDATES}. Project scope only — a module's entry is its own file.
    */
   routesFile?: string
 }
 
 /**
- * One "which registrar mounts these?" question, and everything answering it
- * needs. The project asks one; each module with a `routes/` directory asks
- * another, about its own files and against its own entry.
- *
- * Kept whole rather than threaded as parameters because nothing here may leak
- * across scopes: one shared candidate list, or one shared `facts` map, would
- * let a file credit another module's registrar and report it as mounted.
+ * One "which registrar mounts these?" question and everything answering it needs — the
+ * project asks one, each module with a `routes/` directory asks another. Kept whole
+ * because nothing may leak across scopes: a shared candidate list or `facts` map would
+ * let a file credit another module's registrar and report as mounted.
  */
 interface WiringScope {
   /** Module name, or `null` for the project itself — wording only. */
@@ -357,13 +313,9 @@ interface WiringScope {
   /** Project-relative entry file whose registrar mounts this scope. */
   entryFile: string
   /**
-   * Absolute `routes/` directory bounding graph traversal — the project's, or
-   * the module's own.
-   *
-   * What it bounds is the *target* of an import, not the importing file: a
-   * module's entry sits beside this directory rather than inside it, and its
-   * `./routes/invoice.js` edge is followed all the same. Every candidate is
-   * inside, which is what makes the bound safe to apply before touching disk.
+   * Absolute `routes/` directory bounding graph traversal. It bounds the *target* of an
+   * import, not the importing file: a module's entry sits beside the directory, and its
+   * `./routes/invoice.js` edge is followed all the same.
    */
   boundary: string
   /** Absolute paths of every routes file this scope asks about. */
@@ -382,19 +334,11 @@ type ModuleEntryResolution =
   | { kind: 'fallback' }
 
 /**
- * Resolves the file a module's `defineModule({ routes })` takes its registrar
- * from — the same link the runtime follows, which is what makes it the scope
- * entry rather than any conventionally named file. Judging against a guessed
- * `routes.ts` gets both directions wrong: a descriptor with no `routes` at
- * all mounts nothing however well-wired `routes.ts` is internally, and a
- * descriptor naming `routes/index.ts` mounts that file even when a stale
- * `routes.ts` sits beside it.
- *
- * The looseness runs the check's usual way — miss, never invent. A `routes`
- * value this cannot trace (a member expression, a call, an import from a
- * package) yields `opaque`, which skips the module rather than judging it
- * against the wrong entry; a spread in the descriptor object means an absent
- * `routes` property proves nothing, so that is `opaque` too, not `unwired`.
+ * Resolves the file a module's `defineModule({ routes })` takes its registrar from — the
+ * same link the runtime follows, which is what makes it the scope entry rather than any
+ * conventionally named file. Misses rather than invents: a `routes` value this cannot
+ * trace yields `opaque`, which skips the module, and a spread in the descriptor makes an
+ * absent `routes` property `opaque` too rather than `unwired`.
  */
 async function resolveModuleEntry(
   cwd: string,
@@ -427,11 +371,8 @@ async function resolveModuleEntry(
     if (sawDefineModule || node.type !== 'CallExpression') return
     const call = node as unknown as CallExpression
     if (call.callee.type !== 'Identifier' || call.callee.name !== 'defineModule') return
-    // `defineModule({ … } satisfies ModuleDefinition)` describes the same
-    // module, so unwrap before judging the argument's shape. Reading it bare
-    // made the descriptor invisible and dropped the scope back to the
-    // conventional `routes.ts` — a wired module reported as unmounted, with
-    // nothing to distinguish that from a descriptor naming no routes.
+    // `defineModule({ … } satisfies ModuleDefinition)` describes the same module, so
+    // unwrap before judging the argument's shape or the descriptor reads as absent.
     const argument = objectLiteral(call.arguments[0])
     if (!argument) return
     sawDefineModule = true
@@ -443,8 +384,7 @@ async function resolveModuleEntry(
       }
       // Computed keys answer `undefined` here, which is the skip this wants.
       if (memberKeyName(property) !== 'routes') continue
-      // A method shorthand (`routes(router) {...}`) is an inline registrar,
-      // same as an arrow value.
+      // A method shorthand (`routes(router) {...}`) is an inline registrar, like an arrow.
       routesValue = property.type === 'ObjectMethod' ? { type: 'FunctionExpression' } : (property.value ?? null)
     }
   })
@@ -453,8 +393,7 @@ async function resolveModuleEntry(
   if (routesValue === null) return hasSpread ? { kind: 'opaque' } : { kind: 'unwired', descriptor }
 
   const value = routesValue as { type?: string; name?: string }
-  // An inline registrar makes the descriptor itself the entry: its own
-  // imports are the wiring.
+  // An inline registrar makes the descriptor itself the entry: its imports are the wiring.
   if (value.type === 'ArrowFunctionExpression' || value.type === 'FunctionExpression') {
     return { kind: 'entry', entryPath: descriptorPath }
   }
@@ -471,10 +410,8 @@ async function resolveModuleEntry(
 }
 
 /**
- * The one warning an unwired module gets: its `routes/` files exist, but the
- * descriptor names no registrar, so nothing in the module — however
- * well-wired internally — is ever mounted. One result rather than one per
- * file, because the only fix is in the descriptor.
+ * The one warning an unwired module gets: its `routes/` files exist but the descriptor
+ * names no registrar, so nothing is mounted. One result, since the fix is in the descriptor.
  */
 function unwiredModuleResult(cwd: string, module: string, descriptor: string, files: string[]): CheckResult {
   const shown = withoutEmittedTwins(files).map((file) => toPosixRelative(cwd, file))
@@ -493,60 +430,17 @@ function unwiredModuleResult(cwd: string, module: string, descriptor: string, fi
 }
 
 /**
- * Verifies every registrar under a `routes/` directory is reached from the
- * entry registrar that would mount it — the wiring `guren add
- * admin|oauth|resource|auth` performs automatically, so a warning here means a
- * routes file was written, moved, or unhooked by hand (`make:route`, notably,
- * writes its file and leaves the wiring to you).
- *
- * Asked once per {@link WiringScope}, because "the entry registrar" is not one
- * file: the project's `routes/*.ts` are mounted from `routes/web.ts`, while a
- * module's `routes/*.ts` are mounted from whatever file its
- * `defineModule({ routes })` names (see {@link resolveModuleEntry}) — and
- * `make:route --module billing` writes into the second. The scopes share no
- * state; crossing them would report a file as mounted because a *different*
- * module's registrar calls something of that name.
- *
- * Nothing else reports this. A routes file nobody imports still compiles,
- * still type-checks, and still looks wired from the inside — the only symptom
- * is a 404 in production, which is why the scaffolders' own regex matching
- * only a registrar parameter literally named `router` went unnoticed against
- * the blog template's `baseRouter`. Fixing the scaffolders does nothing for
- * the apps already in that state; this does.
- *
- * Mounting spreads outward from the entry file rather than over everything
- * parsed, and it is *named*: a file is mounted only once some already-mounted
- * file uses a binding that traces back to one of its registrar exports. Both
- * halves are load-bearing. Crediting a whole file for any binding would pass
- * an `admin.ts` whose `ADMIN_PREFIX` constant is imported while its registrar
- * is not; crediting from any parsed file would pass an `admin.ts` called only
- * by a `group.ts` that nothing calls in turn.
- *
- * "Uses" is a name reference outside the file's imports (see
- * {@link referencesIdentifier}), not a call expression — a registrar can be
- * handed onward as a value. That looseness runs one way: a name in a comment
- * or a string reads as used, so this can miss an orphan but not invent one.
- * `warn` rather than `fail` for the same reason.
- *
- * Two wirings it cannot see, both reported as unmounted: a chain that leaves
- * the scope's boundary (`web.ts` → `app/routing.ts` → `routes/admin.ts`),
- * since following it means parsing the project to answer a question about a
- * handful of files; and a registrar reached by anything less direct than an
- * import or `await import()` of its file.
- *
- * Not filtered by changed *candidates*, unlike `runCheck`'s file-scanning
- * checks: the edit that breaks the wiring is to `routes/web.ts`, not to
- * `routes/admin.ts`. `runCheck` instead gates the whole check on
- * {@link affectsRouteWiring}, which covers both. Content-activated — an app
- * whose `routes/` holds nothing but the entry file, or whose modules have no
- * `routes/` directory at all, contributes zero results.
+ * Verifies every registrar under a `routes/` directory is reached from the entry registrar
+ * that would mount it — nothing else does, and the only symptom is a 404. Asked once per
+ * {@link WiringScope}, which share no state, or a file would count another module's
+ * registrar. Mounting spreads outward from the entry and is *named*: a file counts only
+ * once an already-mounted file uses one of its registrar exports. `warn`: it misses, never invents.
  */
 export async function checkRouteRegistrarWiring(options: RoutesCheckOptions): Promise<CheckResult[]> {
   const { cwd, cache } = options
 
-  // An explicit `--routes` is honoured as given, including when it names a
-  // file that doesn't exist — reporting that is the point. Otherwise probe,
-  // for the reason ROUTES_ENTRY_CANDIDATES documents.
+  // An explicit `--routes` is honoured even when it names a file that doesn't exist —
+  // reporting that is the point. Otherwise probe, per ROUTES_ENTRY_CANDIDATES.
   const entryFile = options.routesFile ?? (await resolveRoutesEntry(cwd)) ?? DEFAULT_ROUTES_FILE
 
   const results = await checkScope(cwd, cache, {
@@ -588,10 +482,8 @@ async function checkScope(cwd: string, cache: ParseCache, scope: WiringScope): P
   const entryPath = resolve(cwd, entryFile)
 
   const candidates = withoutEmittedTwins(scope.files)
-    // By resolved path, not by name: `--routes` may point anywhere, under a
-    // custom entry `routes/web.ts` is an ordinary candidate, and a module
-    // keeping its registrar at `routes/index.ts` has its entry sitting among
-    // the very files it mounts.
+    // By resolved path, not by name: `--routes` may point anywhere, and a module keeping
+    // its registrar at `routes/index.ts` has its entry sitting among the files it mounts.
     .filter((filePath) => filePath !== entryPath)
     .sort()
 
@@ -628,8 +520,7 @@ async function checkScope(cwd: string, cache: ParseCache, scope: WiringScope): P
   const entryFacts = facts.get(entryPath)
 
   if (!entryFacts) {
-    // One warning, not one per candidate: an unparseable entry is a single
-    // fact about a single file, and fanning it out would read as every routes
+    // One warning, not one per candidate: fanning it out would read as every routes
     // file being broken.
     return [
       check(
@@ -648,9 +539,8 @@ async function checkScope(cwd: string, cache: ParseCache, scope: WiringScope): P
 
   return candidates.flatMap((filePath) => {
     const candidateFacts = facts.get(filePath)
-    // A routes file exporting no registrar is a helper, not something the
-    // loader could mount; an unparseable one is already reported by the
-    // shared `scan-coverage` warning.
+    // A routes file exporting no registrar is a helper; an unparseable one is already
+    // reported by the shared `scan-coverage` warning.
     if (!candidateFacts || candidateFacts.registrarExports.length === 0) return []
 
     const relPath = toPosixRelative(cwd, filePath)
@@ -672,12 +562,9 @@ async function checkScope(cwd: string, cache: ParseCache, scope: WiringScope): P
 }
 
 /**
- * Drops an emitted `auth.js` sitting beside the `auth.ts` it was built from.
- *
- * The pair is one routes file, and the specifier resolver already prefers the
- * source. Left in, the artifact is a second candidate that nothing imports by
- * that path — so an in-place TypeScript build would turn a working `routes/`
- * into a failing check.
+ * Drops an emitted `auth.js` sitting beside the `auth.ts` it was built from. Left in, the
+ * artifact is a second candidate nothing imports, so an in-place TypeScript build would
+ * turn a working `routes/` into a failing check.
  */
 function withoutEmittedTwins(files: string[]): string[] {
   const present = new Set(files)
@@ -687,10 +574,7 @@ function withoutEmittedTwins(files: string[]): string[] {
   })
 }
 
-/**
- * Files whose registrar the app will actually call, spreading outward from
- * the entry.
- */
+/** Files whose registrar the app will actually call, spreading outward from the entry. */
 function mountedFrom(
   facts: Map<string, RoutesFileFacts>,
   entryPath: string,
@@ -706,11 +590,7 @@ function mountedFrom(
     pending.push(file)
   }
 
-  /**
-   * Credits `file` with `name` being used, following `export ... from` edges
-   * so a barrel forwards the credit to whichever file actually declares the
-   * registrar.
-   */
+  /** Credits `file` with `name`, following `export ... from` edges through barrels. */
   const credit = (file: string, name: string): void => {
     const visit = `${file} ${name}`
     if (credited.has(visit)) return
@@ -728,9 +608,8 @@ function mountedFrom(
       return
     }
 
-    // An explicit named re-export shadows every `export *` in the same file,
-    // per ES semantics — following both would credit a `legacy-admin.ts` the
-    // barrel deliberately overrides.
+    // An explicit named re-export shadows every `export *` in the same file, per ES
+    // semantics — following both would credit a file the barrel deliberately overrides.
     const explicit = forwarded.reexports.filter((edge) => edge.exported === name)
     if (explicit.length > 0) {
       for (const edge of explicit) credit(edge.from, edge.imported)
@@ -742,9 +621,8 @@ function mountedFrom(
     }
   }
 
-  // The loader resolves a registrar from the entry file's *exports*, so one
-  // the entry merely forwards (`export * from './admin.js'`) is called just
-  // as surely as one it declares.
+  // The loader resolves a registrar from the entry file's *exports*, so a forwarded one
+  // is called just as surely as one the entry declares.
   for (const edge of entryFacts.reexports) {
     if (edge.exported === EVERY_EXPORT || isRegistrarExportName(edge.exported)) {
       credit(edge.from, edge.imported)
@@ -761,8 +639,7 @@ function mountedFrom(
         credit(binding.from, binding.imported)
       }
     }
-    // A dynamic import binds its names by destructuring the awaited module,
-    // so there is no static local to look for — the import itself is the use.
+    // A dynamic import has no static local to look for — the import itself is the use.
     for (const target of source.dynamicImports) credit(target, EVERY_EXPORT)
   }
 
@@ -770,9 +647,8 @@ function mountedFrom(
 }
 
 /**
- * The import-and-call line to add, spelled out rather than described: this is
- * the user's only guidance, since nothing regenerates the wiring for a routes
- * file that already exists.
+ * The import-and-call line to add, spelled out: nothing regenerates the wiring for a
+ * routes file that already exists.
  */
 function wiringSuggestion(
   cwd: string,
@@ -789,8 +665,7 @@ function wiringSuggestion(
     return `Import the default export of ${relPath} in ${entryFile} ${tail}`
   }
 
-  // Printed with the runtime extension the app's own imports use, so the line
-  // can be pasted rather than adapted.
+  // Printed with the runtime extension the app's own imports use, so it can be pasted.
   const printed = relativeImportPath(resolve(cwd, entryFile), filePath)
   const specifier = swapExtension(printed, SOURCE_TO_RUNTIME_EXTENSION) ?? printed
 

@@ -18,7 +18,6 @@ import type {
 import { serializeRecord, serializeRecords } from './serialization'
 import { MassAssignmentException } from './MassAssignmentException'
 
-/** Generic plain object type used throughout the ORM. */
 export type PlainObject = Record<string, unknown>
 
 type RelationShape = Record<string, unknown>
@@ -42,151 +41,91 @@ export type InferModelInsert<TTable> = TTable extends { $inferInsert: infer TIns
     : PlainObject
   : PlainObject
 
-/** Supported cast types for attribute casting. */
 export type CastType = 'json' | 'date' | 'boolean' | 'number' | 'string'
 
-/**
- * Value type for where clause conditions.
- * Supports single values, arrays (for IN queries), or null.
- */
 export type WhereValue<Value> = Value | readonly Value[] | null
 
-/**
- * Where clause for filtering records.
- * Supports equality and IN (array) queries.
- *
- * @example
- * // Single value (equality)
- * { status: 'active' }
- *
- * // Array value (IN query)
- * { id: [1, 2, 3] }
- *
- * // Multiple conditions (AND)
- * { status: 'active', role: 'admin' }
- */
+/** A single value is an equality test, an array an IN; keys are AND-ed. */
 export type WhereClause<TRecord extends PlainObject = PlainObject> = Partial<{
   [K in keyof TRecord & string]?: WhereValue<TRecord[K]>
 }>
 
-/** Sort direction for ordering queries. */
 export type OrderDirection = 'asc' | 'desc'
 
-/** Normalized order definition with column and direction. */
 export type OrderDefinition<TRecord extends PlainObject = PlainObject> = {
   column: keyof TRecord & string
   direction: OrderDirection
 }
 
-/**
- * Flexible order expression input.
- * @example
- * 'createdAt'                        // Column name (ascending)
- * ['createdAt', 'desc']              // Tuple [column, direction]
- * { column: 'createdAt', direction: 'desc' }  // Object form
- */
 export type OrderExpression<TRecord extends PlainObject = PlainObject> =
   | (keyof TRecord & string)
   | readonly [keyof TRecord & string, OrderDirection]
   | { column: keyof TRecord & string; direction?: OrderDirection }
 
-/** Input for orderBy - single expression or array of expressions. */
 export type OrderByInput<TRecord extends PlainObject = PlainObject> =
   | OrderExpression<TRecord>
   | readonly OrderExpression<TRecord>[]
 
-/** Normalized array of order definitions. */
 export type OrderByClause<TRecord extends PlainObject = PlainObject> = readonly OrderDefinition<TRecord>[]
 
-/** Options for findMany queries. */
 export interface FindManyOptions<TRecord extends PlainObject = PlainObject> {
-  /** Filter conditions */
   where?: WhereClause<TRecord>
-  /** Sort order */
   orderBy?: OrderByClause<TRecord>
-  /** Maximum number of records to return */
   limit?: number
-  /** Number of records to skip */
   offset?: number
 }
 
-/** Options for paginated queries. */
 export interface PaginateOptions<TRecord extends PlainObject = PlainObject> {
-  /** Page number (1-based, default: 1) */
   page?: number
-  /** Records per page (default: 15) */
   perPage?: number
-  /** Filter conditions */
   where?: WhereClause<TRecord>
-  /** Sort order */
   orderBy?: OrderByInput<TRecord>
 }
 
-/** Pagination metadata returned with paginated results. */
 export interface ModelPaginationMeta {
-  /** Total number of records matching the query */
   total: number
-  /** Number of records per page */
   perPage: number
-  /** Current page number (1-based) */
   currentPage: number
-  /** Total number of pages */
   totalPages: number
-  /** Whether there are more pages after this one */
   hasMore: boolean
-  /** Index of first record on this page (1-based) */
   from: number
-  /** Index of last record on this page */
   to: number
 }
 
-/** Result of a paginated query. */
 export interface PaginatedResult<TRecord extends PlainObject = PlainObject> {
-  /** Records for the current page */
   data: TRecord[]
-  /** Pagination metadata */
   meta: ModelPaginationMeta
 }
 
-/**
- * Interface for ORM adapters that power the Model class.
- * The default adapter is DrizzleAdapter.
- */
+/** Interface for ORM adapters that power the Model class; DrizzleAdapter by default. */
 export interface ORMAdapter {
-  /** Run operations in a database transaction. */
   transaction?<TResult>(callback: (trx: unknown) => Promise<TResult>): Promise<TResult>
-  /** Find multiple records with optional filtering, ordering, and pagination. */
   findMany<TRecord extends PlainObject = PlainObject>(
     table: unknown,
     options?: FindManyOptions<TRecord>,
     queryOptions?: AdapterQueryOptions,
   ): Promise<TRecord[]>
-  /** Find a single record by unique criteria. */
   findUnique<TRecord extends PlainObject = PlainObject>(
     table: unknown,
     where: WhereClause<TRecord>,
     queryOptions?: AdapterQueryOptions,
   ): Promise<TRecord | null>
-  /** Create a new record. */
   create<TRecord extends PlainObject = PlainObject>(
     table: unknown,
     data: PlainObject,
     writeOptions?: AdapterQueryOptions,
   ): Promise<TRecord>
-  /** Update records matching criteria. */
   update?<TRecord extends PlainObject = PlainObject>(
     table: unknown,
     where: WhereClause<TRecord>,
     data: PlainObject,
     writeOptions?: AdapterQueryOptions,
   ): Promise<TRecord>
-  /** Delete records matching criteria. */
   delete?<TRecord extends PlainObject = PlainObject>(
     table: unknown,
     where: WhereClause<TRecord>,
     writeOptions?: AdapterQueryOptions,
   ): Promise<number | PlainObject | void>
-  /** Count records matching criteria. */
   count?<TRecord extends PlainObject = PlainObject>(
     table: unknown,
     where?: WhereClause<TRecord>,
@@ -209,218 +148,87 @@ type SelectFrom<TDatabase> = TDatabase extends { select: (...args: any[]) => inf
   : never
 
 /**
- * ActiveRecord-style base class for database models.
- *
- * Provides a Laravel Eloquent-like API for database operations including
- * CRUD, querying, pagination, and eager-loading of relationships.
- *
- * @example
- * // Define a model — recordType/createType are inferred from the Drizzle table
- * class User extends defineModel(users) {}
- *
- * // Or, when extending Model directly, redeclare the type markers
- * class LegacyUser extends Model<UserRecord> {
- *   static override table = users  // Drizzle table
- *   declare static readonly recordType: UserRecord
- *   declare static readonly createType: NewUserRecord
- * }
- *
- * // Query records
- * const allUsers = await User.all()
- * const user = await User.find(1)
- * const activeUsers = await User.where({ status: 'active' })
- *
- * // Create and update
- * const newUser = await User.create({ name: 'John', email: 'john@example.com' })
- * await User.update({ id: 1 }, { name: 'Jane' })
- *
- * // Pagination
- * const page = await User.paginate({ page: 1, perPage: 10 })
- *
- * // Relationships
- * const usersWithPosts = await User.with('posts')
+ * ActiveRecord-style base class for database models. Prefer `defineModel(table)`,
+ * which infers the type markers; extending `Model` directly means setting
+ * `static table` and redeclaring `recordType`/`createType` by hand.
  */
 // oxlint-disable-next-line no-unused-vars -- phantom type parameter, kept because it is part of the public signature
 export abstract class Model<TRecord extends PlainObject = PlainObject> {
-  /** The ORM adapter used for database operations. */
   protected static ormAdapter: ORMAdapter = DrizzleAdapter
-  /** The database table (e.g., Drizzle table schema). */
   protected static table: unknown
   /** Type marker for TypeScript inference. Set by `defineModel()`; when extending `Model` directly, redeclare as `declare static readonly recordType: YourRecordType`. */
   static readonly recordType: unknown = undefined as unknown
   /** Type marker for insert/update payload inference. Set by `defineModel()`; when extending `Model` directly, redeclare as `declare static readonly createType: YourCreateType`. */
   static readonly createType: unknown = undefined as unknown
   protected static relationDefinitions?: Map<string, RelationDefinition>
-  /** Type marker for relation types. Define relation types here for type inference. */
   static relationTypes: RelationShape = {}
 
   /**
-   * Named query scopes for reusable query constraints.
-   *
-   * @example
-   * class Post extends Model<PostRecord> {
-   *   static scopes = {
-   *     published: (q: QueryBuilder<PostRecord>) => q.where('status', 'published'),
-   *     popular: (q: QueryBuilder<PostRecord>) => q.where('views', '>', 1000),
-   *   }
-   * }
-   * // Usage: Post.scope('published').scope('popular').get()
+   * Reusable query constraints, applied by name with
+   * `Post.scope('published').scope('popular')`.
    */
   static scopes?: Record<string, (q: QueryBuilder<any>) => QueryBuilder<any>> // eslint-disable-line @typescript-eslint/no-explicit-any
 
   /**
-   * Default scope applied to all queries on this model.
-   * Override this to automatically filter queries (e.g., soft deletes).
-   *
-   * @example
-   * static defaultScope = (q: QueryBuilder<any>) => q.whereNull('deletedAt')
+   * Applied to every query on this model, and — unlike a named global scope —
+   * never removable with `withoutGlobalScope()`.
    */
   static defaultScope?: (q: QueryBuilder<any>) => QueryBuilder<any> // eslint-disable-line @typescript-eslint/no-explicit-any
 
-  /**
-   * Model lifecycle hooks that fire during create, update, and delete operations.
-   *
-   * @example
-   * class User extends Model<UserRecord> {
-   *   static hooks: ModelHooks = {
-   *     creating: async (data) => { data.password = await hash(data.password as string) },
-   *     created: async (data) => { console.log('User created:', data) },
-   *   }
-   * }
-   */
+  /** Lifecycle hooks firing around create, update and delete. */
   static hooks?: ModelHooks
 
-  /**
-   * Attribute casting definitions for automatic type conversion.
-   *
-   * Casts are applied when reading records from the database and when
-   * writing records to the database.
-   *
-   * @example
-   * class Post extends Model<PostRecord> {
-   *   static casts = {
-   *     metadata: 'json',
-   *     publishedAt: 'date',
-   *     isActive: 'boolean',
-   *     viewCount: 'number',
-   *   }
-   * }
-   */
+  /** Attribute casts, applied both on read and on write. */
   static casts?: Record<string, CastType>
 
   /**
-   * Whitelist of fields allowed for mass assignment.
-   * If set, `create()` and `update()` accept only these fields — input
-   * containing any other key throws a MassAssignmentException so bugs
-   * (and injection attempts) surface immediately instead of being
-   * silently discarded. Use `forceCreate()` / `forceUpdate()` for
-   * trusted server-side data.
-   *
-   * The primary key (`id`) is always silently stripped from mass-assignment
-   * input, and fields returned by `deniedFields()` always throw — neither
-   * depends on `fillable`.
-   *
-   * @example
-   * class User extends Model<UserRecord> {
-   *   static fillable = ['name', 'email', 'password']
-   * }
+   * Mass-assignment allowlist. When set, any other key in `create()`/`update()`
+   * input throws a MassAssignmentException rather than being discarded, so
+   * bugs and injection attempts surface; `forceCreate()`/`forceUpdate()` are
+   * the trusted-data escape. Independent of it, `id` is always stripped and
+   * `deniedFields()` always throws.
    */
   static fillable?: string[]
 
   /**
-   * Fields that can never be mass-assigned, resolved at call time so
-   * subclasses can derive them from their own configuration (e.g.
-   * `AuthenticatableModel` contributes its resolved password-hash and
-   * remember-token columns). Input containing any of these throws a
-   * MassAssignmentException regardless of `fillable` — use
-   * `forceCreate()` / `forceUpdate()` for trusted server-side values.
+   * Fields that can never be mass-assigned, whatever `fillable` says. Resolved
+   * at call time so a subclass can derive them from its own configuration
+   * (`AuthenticatableModel` contributes its password-hash column).
    */
   protected static deniedFields(): string[] {
     return []
   }
 
-  /**
-   * Accessor functions for computed/virtual attributes.
-   * Applied after reading records from the database.
-   *
-   * @example
-   * class User extends Model<UserRecord> {
-   *   static accessors = {
-   *     fullName: (record) => `${record.firstName} ${record.lastName}`,
-   *   }
-   * }
-   */
+  /** Computed attributes, applied after a record is read. */
   static accessors?: AccessorDefinitions
 
-  /**
-   * Mutator functions for transforming attributes before persistence.
-   *
-   * @example
-   * class User extends Model<UserRecord> {
-   *   static mutators = {
-   *     email: (value) => String(value).toLowerCase(),
-   *   }
-   * }
-   */
+  /** Attribute transforms applied before persistence. */
   static mutators?: MutatorDefinitions
 
-  /**
-   * Fields to exclude from serialization output.
-   *
-   * @example
-   * class User extends Model<UserRecord> {
-   *   static hidden = ['passwordHash', 'rememberToken']
-   * }
-   */
+  /** Fields to exclude from serialization output. */
   static hidden?: string[]
 
-  /**
-   * Whitelist of fields to include in serialization output.
-   * When set, only these fields appear. Takes precedence over `hidden`.
-   */
+  /** Serialization allowlist; takes precedence over `hidden`. */
   static visible?: string[]
 
-  /**
-   * Virtual accessor attributes to include in serialization output.
-   *
-   * @example
-   * class User extends Model<UserRecord> {
-   *   static appends = ['fullName']
-   *   static accessors = { fullName: (r) => `${r.firstName} ${r.lastName}` }
-   * }
-   */
+  /** Accessor names to add to serialization output. */
   static appends?: string[]
 
-  /** Registered model observers. */
   protected static observers?: ModelObserver[]
 
-  /** Named global scopes registry. */
   protected static globalScopeRegistry?: GlobalScopeRegistry
 
-  /**
-   * Set a custom ORM adapter for this model.
-   * @param adapter - The adapter to use
-   */
   static useAdapter(adapter: ORMAdapter): void {
     this.ormAdapter = adapter
   }
 
-  /**
-   * Get the current ORM adapter.
-   * @returns The configured adapter
-   */
   static getAdapter(): ORMAdapter {
     return this.ormAdapter
   }
 
   /**
-   * Run operations inside a database transaction.
-   *
    * @example
-   * await User.transaction(async (trx) => {
-   *   const user = await User.create({ name: 'John' }, { trx })
-   *   await Profile.create({ userId: user.id }, { trx })
-   * })
+   * await User.transaction(async (trx) => User.create({ name: 'John' }, { trx }))
    */
   static async transaction<T extends typeof Model, TResult>(
     this: T,
@@ -433,16 +241,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     return adapter.transaction((trx) => callback(trx as TransactionHandle, this.inTransaction(trx as TransactionHandle)))
   }
 
-  /**
-   * Create a transaction-bound model scope that automatically forwards `trx`
-   * to query and write operations.
-   *
-   * @example
-   * await User.transaction(async (trx, txUser) => {
-   *   await txUser.create({ name: 'Shinji' })
-   *   await txUser.update({ id: 1 }, { name: 'Ikari' })
-   * })
-   */
+  /** A model scope that forwards `trx` to every query and write on it. */
   static inTransaction<T extends typeof Model>(this: T, trx: TransactionHandle): TransactionModelScope<T> {
     const where: TransactionModelScope<T>['where'] = (
       fieldOrConditions: FieldFor<T> | WhereClauseFor<T> | WhereGroupCallback<TRecordFor<T>>,
@@ -482,18 +281,6 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // ---------------------------------------------------------------------------
-  // Observers
-  // ---------------------------------------------------------------------------
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Register a model observer class.
-   *
-   * @example
-   * User.observe(UserObserver)
-   */
   static observe(ObserverClass: ModelObserverConstructor): void {
     if (!Object.prototype.hasOwnProperty.call(this, 'observers') || !this.observers) {
       this.observers = []
@@ -501,32 +288,16 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     this.observers.push(new ObserverClass())
   }
 
-  /** Clear all registered observers. */
   static clearObservers(): void {
     this.observers = []
   }
 
-  // ---------------------------------------------------------------------------
-  // ---------------------------------------------------------------------------
-  // Global Scopes
-  // ---------------------------------------------------------------------------
-  // ---------------------------------------------------------------------------
-
   /**
-   * The registry this class may mutate, creating it on first write.
-   *
-   * The new registry is seeded from the inherited one: the read paths
-   * (`newQuery()`, `hasScopes()`) resolve `globalScopeRegistry` through the
-   * prototype chain, so a subclass that started from an empty registry would
-   * shadow — and silently drop — every scope it inherited. That is exactly the
-   * `class Post extends SoftDeletes(Base)` then `Post.addGlobalScope('tenant')`
-   * case, which would otherwise lose the `softDelete` filter.
-   *
-   * The copy is a snapshot: scopes added to the parent *after* a subclass first
-   * registers or removes one do not reach that subclass. Nothing in the
-   * framework relies on later propagation — the `SoftDeletes` mixin registers
-   * `softDelete` synchronously while building the class, before any user code
-   * can touch it.
+   * The registry this class may mutate, created on first write and seeded from
+   * the inherited one: the read paths resolve it through the prototype chain,
+   * so starting empty would shadow and drop every inherited scope (SoftDeletes
+   * then `addGlobalScope('tenant')`). The copy is a snapshot — scopes added to
+   * the parent afterwards never reach the subclass.
    */
   protected static getGlobalScopes(): GlobalScopeRegistry {
     if (!Object.prototype.hasOwnProperty.call(this, 'globalScopeRegistry') || !this.globalScopeRegistry) {
@@ -536,67 +307,34 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     return this.globalScopeRegistry
   }
 
-  /**
-   * Register a named global scope.
-   *
-   * @example
-   * User.addGlobalScope('active', (q) => q.where('active', true))
-   */
   static addGlobalScope(name: string, fn: ScopeFunction): void {
     this.getGlobalScopes().add(name, fn)
   }
 
-  /** Remove a named global scope. */
   static removeGlobalScope(name: string): void {
     this.getGlobalScopes().remove(name)
   }
 
   /**
-   * Start a query excluding specific global scope(s).
-   *
-   * Only *named* scopes can be excluded: `defaultScope` is re-applied here
-   * whatever this is asked to drop. A mixin whose filter users must be able to
-   * opt out of therefore has to register a named scope and nothing else —
-   * registering as both makes the filter unremovable, which is how `SoftDeletes`
-   * once made `withoutGlobalScope('softDelete')` a no-op.
-   *
-   * @example
-   * const all = await User.withoutGlobalScope('active').get()
+   * Only *named* scopes can be excluded: `defaultScope` is re-applied whatever
+   * this is asked to drop, so a mixin whose filter must be opt-out-able has to
+   * register a named scope and nothing else.
    */
   static withoutGlobalScope<T extends typeof Model>(this: T, ...names: string[]): QueryBuilder<TRecordFor<T>> {
     const builder = new QueryBuilder<TRecordFor<T>>(this)
-    // Apply defaultScope if present
     if (this.defaultScope) {
       this.defaultScope(builder)
     }
-    // Apply global scopes except the excluded ones
     this.getGlobalScopes().apply(builder, names)
     return builder
   }
 
-  /**
-   * Start a query with no global scopes applied (also skips defaultScope).
-   *
-   * @example
-   * const all = await User.withoutGlobalScopes().get()
-   */
+  /** A query with no global scopes applied, `defaultScope` included. */
   static withoutGlobalScopes<T extends typeof Model>(this: T): QueryBuilder<TRecordFor<T>> {
     return new QueryBuilder<TRecordFor<T>>(this)
   }
 
-  // ---------------------------------------------------------------------------
-  // ---------------------------------------------------------------------------
-  // Serialization
-  // ---------------------------------------------------------------------------
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Serialize a record for API/JSON output.
-   * Applies hidden/visible filtering, accessors, and appends.
-   *
-   * @example
-   * const json = User.serialize(user)
-   */
+  /** Applies hidden/visible filtering, accessors and appends. */
   static serialize<T extends typeof Model>(this: T, record: TRecordFor<T>): PlainObject {
     return serializeRecord(record, {
       hidden: this.hidden,
@@ -606,12 +344,6 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     })
   }
 
-  /**
-   * Serialize an array of records.
-   *
-   * @example
-   * const json = User.serializeMany(users)
-   */
   static serializeMany<T extends typeof Model>(this: T, records: TRecordFor<T>[]): PlainObject[] {
     return serializeRecords(records, {
       hidden: this.hidden,
@@ -621,17 +353,10 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     })
   }
 
-  /**
-   * Apply attribute casts to a record read from the database.
-   *
-   * @param record - The raw record from the database
-   * @returns The record with cast attributes applied
-   */
   static applyCasts<T extends PlainObject>(record: T): T {
     const castDefs = this.casts
     if (!castDefs) return record
 
-    // Only copy if at least one castable field exists in the record
     const castKeys = Object.keys(castDefs)
     if (!castKeys.some((key) => key in record && record[key] != null)) {
       return record
@@ -649,7 +374,6 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
             try {
               result[field as keyof T] = JSON.parse(value) as T[keyof T]
             } catch {
-              // Keep original value if parsing fails
             }
           }
           break
@@ -678,10 +402,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     return result
   }
 
-  /**
-   * Apply all read-time transforms: casts then accessors.
-   * Used internally after fetching records from the database.
-   */
+  /** Read-time transforms, in order: casts then accessors. */
   protected static applyReadTransforms<T extends PlainObject>(record: T): T {
     let result = record
     if (this.casts) result = this.applyCasts(result)
@@ -690,16 +411,9 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   }
 
   /**
-   * Filter input data based on mass assignment protection rules.
-   *
-   * Applied in order: fields returned by `deniedFields()` throw a
-   * MassAssignmentException (checked on the raw input, so no other rule
-   * can silently swallow them); the primary key (`id`) is silently
-   * stripped; when `fillable` is defined, any remaining field outside it
-   * throws and only listed fields are kept.
-   *
-   * @param data - The input data to filter
-   * @returns Filtered data safe for mass assignment
+   * In order: `deniedFields()` throws, checked on the raw input so no later
+   * rule can swallow them; `id` is stripped silently; then, with `fillable`
+   * set, anything outside it throws.
    */
   static filterFillable(data: PlainObject): PlainObject {
     const denied = this.deniedFields().filter((field) => field in data)
@@ -735,7 +449,6 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   protected static async preparePersistencePayload(data: PlainObject): Promise<PlainObject> {
     let result = { ...data }
 
-    // Apply mutators before persistence
     if (this.mutators) {
       result = applyMutators(result, this.mutators)
     }
@@ -804,14 +517,6 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     return this.table
   }
 
-  /**
-   * Retrieve all records from the table.
-   *
-   * @returns Array of all records
-   *
-   * @example
-   * const users = await User.all()
-   */
   static async all<T extends typeof Model>(this: T, queryOptions?: ModelQueryOptions): Promise<Array<TRecordFor<T>>> {
     if (this.hasScopes()) {
       return this.newQuery(queryOptions).get()
@@ -824,17 +529,6 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     return records
   }
 
-  /**
-   * Find a record by its primary key.
-   *
-   * @param id - The primary key value
-   * @param key - The primary key column name (default: 'id')
-   * @returns The record or null if not found
-   *
-   * @example
-   * const user = await User.find(1)
-   * const userByEmail = await User.find('john@example.com', 'email')
-   */
   static async find<T extends typeof Model>(
     this: T,
     id: TRecordFor<T>[keyof TRecordFor<T> & string],
@@ -853,17 +547,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     return record
   }
 
-  /**
-   * Find a record by primary key or throw an error.
-   *
-   * @param id - The primary key value
-   * @param key - The primary key column name (default: 'id')
-   * @returns The record
-   * @throws Error if record not found
-   *
-   * @example
-   * const user = await User.findOrFail(1) // Throws if not found
-   */
+  /** @throws ModelNotFoundException (404) when no record matches. */
   static async findOrFail<T extends typeof Model>(
     this: T,
     id: TRecordFor<T>[keyof TRecordFor<T> & string],
@@ -877,18 +561,6 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     return record
   }
 
-  /**
-   * Find a record by primary key with eager-loaded relations.
-   *
-   * @param id - The primary key value
-   * @param relations - Relation name(s) to eager load
-   * @param key - The primary key column name (default: 'id')
-   * @returns The record with loaded relations, or null if not found
-   *
-   * @example
-   * const post = await Post.findWith(1, 'author')
-   * const post = await Post.findWith(1, ['author', 'tags'])
-   */
   static async findWith<T extends typeof Model, K extends RelationPath<T>>(
     this: T,
     id: TRecordFor<T>[keyof TRecordFor<T> & string],
@@ -918,18 +590,8 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   }
 
   /**
-   * Find a record by primary key with eager-loaded relations, or throw.
-   *
-   * @param id - The primary key value
-   * @param relations - Relation name(s) to eager load
-   * @param key - The primary key column name (default: 'id')
-   * @returns The record with loaded relations
-   * @throws ModelNotFoundException if record not found
-   *
-   * @example
-   * const post = await Post.findWithOrFail(1, 'author')
-   * const post = await Post.findWithOrFail(1, ['author', 'tags'])
-   * const post = await Post.findWithOrFail(1, 'comments.author') // nested
+   * Relations accept dot-notation paths (`comments.author`).
+   * @throws ModelNotFoundException when no record matches.
    */
   static async findWithOrFail<T extends typeof Model, K extends RelationPath<T>>(
     this: T,
@@ -958,15 +620,6 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     return copy as TRecordFor<T> & RelationTypePick<T, Names>
   }
 
-  /**
-   * Get the first record matching the conditions.
-   *
-   * @param where - Optional filter conditions
-   * @returns The first matching record or null
-   *
-   * @example
-   * const admin = await User.first({ role: 'admin' })
-   */
   static async first<T extends typeof Model>(
     this: T,
     where?: WhereClauseFor<T>,
@@ -990,26 +643,11 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   }
 
   /**
-   * Start a fluent query with where conditions.
-   *
-   * Returns a QueryBuilder that is thenable, so it can be directly awaited.
+   * Returns a thenable QueryBuilder, so it can be chained or awaited directly.
    *
    * @example
-   * // Object form - multiple equality conditions
-   * const activeUsers = await User.where({ status: 'active' })
-   *
-   * // Field + value - equality
-   * const admins = await User.where('role', 'admin')
-   *
-   * // Field + operator + value - comparison
-   * const recent = await Post.where('views', '>', 100)
-   *
-   * // Fluent chaining
-   * const posts = await Post.where('status', 'published')
-   *   .where('views', '>', 100)
-   *   .orderBy('createdAt', 'desc')
-   *   .limit(10)
-   *   .get()
+   * await User.where({ status: 'active' })
+   * await Post.where('views', '>', 100).orderBy('createdAt', 'desc').get()
    */
   static where<T extends typeof Model>(this: T, callback: WhereGroupCallback<TRecordFor<T>>): QueryBuilder<TRecordFor<T>>
   static where<T extends typeof Model>(this: T, conditions: WhereClauseFor<T>): QueryBuilder<TRecordFor<T>>
@@ -1041,10 +679,6 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     )
   }
 
-  /**
-   * Start a fluent query with a WHERE NULL condition.
-   * @param field - Column to check for NULL
-   */
   static whereNull<T extends typeof Model>(
     this: T,
     field: keyof TRecordFor<T> & string,
@@ -1052,10 +686,6 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     return this.newQuery().whereNull(field)
   }
 
-  /**
-   * Start a fluent query with a WHERE NOT NULL condition.
-   * @param field - Column to check for NOT NULL
-   */
   static whereNotNull<T extends typeof Model>(
     this: T,
     field: keyof TRecordFor<T> & string,
@@ -1063,11 +693,6 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     return this.newQuery().whereNotNull(field)
   }
 
-  /**
-   * Start a fluent query with a WHERE IN condition.
-   * @param field - Column to check
-   * @param values - Array of values to match against
-   */
   static whereIn<T extends typeof Model>(
     this: T,
     field: keyof TRecordFor<T> & string,
@@ -1076,11 +701,6 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     return this.newQuery().whereIn(field, values)
   }
 
-  /**
-   * Start a fluent query with a WHERE NOT IN condition.
-   * @param field - Column to check
-   * @param values - Array of values to exclude
-   */
   static whereNotIn<T extends typeof Model>(
     this: T,
     field: keyof TRecordFor<T> & string,
@@ -1089,13 +709,6 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     return this.newQuery().whereNotIn(field, values)
   }
 
-  /**
-   * Start a fluent query with a typed field selection.
-   *
-   * @example
-   * const rows = await User.select('id', 'name')
-   * const first = await User.select('id').first()
-   */
   static select<T extends typeof Model, Keys extends keyof TRecordFor<T> & string>(
     this: T,
     ...fields: readonly Keys[]
@@ -1103,24 +716,11 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     return this.newQuery().select(...fields)
   }
 
-  /**
-   * Start a new QueryBuilder for fluent query construction.
-   *
-   * @returns A fresh QueryBuilder instance
-   *
-   * @example
-   * const results = await User.newQuery()
-   *   .where('status', 'active')
-   *   .orderBy('name')
-   *   .limit(10)
-   *   .get()
-   */
   static newQuery<T extends typeof Model>(this: T, queryOptions?: ModelQueryOptions): QueryBuilder<TRecordFor<T>> {
     const builder = new QueryBuilder<TRecordFor<T>>(this, queryOptions)
     if (this.defaultScope) {
       this.defaultScope(builder)
     }
-    // Apply named global scopes
     const registry = this.globalScopeRegistry
     if (registry && registry.size > 0) {
       registry.apply(builder)
@@ -1128,37 +728,21 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     return builder
   }
 
-  /**
-   * Create a new QueryBuilder without applying any default scopes.
-   * Useful for querying soft-deleted records or bypassing global filters.
-   *
-   * @returns A fresh QueryBuilder instance with no scopes applied
-   */
+  /** No scopes applied — for soft-deleted records or bypassing global filters. */
   static newQueryWithoutScopes<T extends typeof Model>(this: T, queryOptions?: ModelQueryOptions): QueryBuilder<TRecordFor<T>> {
     return new QueryBuilder<TRecordFor<T>>(this, queryOptions)
   }
 
   /**
-   * Whether this model carries a filter that every query must apply.
-   *
-   * The entry points that talk to the adapter directly check this to decide
-   * whether they can take the fast path; anything that returns a QueryBuilder
-   * goes through `newQuery()` unconditionally.
+   * Whether this model carries a filter every query must apply. Checked by the
+   * entry points that talk to the adapter directly, to decide whether they can
+   * take the fast path.
    */
   protected static hasScopes(): boolean {
     return Boolean(this.defaultScope) || Boolean(this.globalScopeRegistry && this.globalScopeRegistry.size > 0)
   }
 
-  /**
-   * Apply a named query scope.
-   *
-   * @param name - The scope name defined in `static scopes`
-   * @returns A QueryBuilder with the scope applied
-   *
-   * @example
-   * const published = await Post.scope('published').get()
-   * const popularPublished = await Post.scope('published').scope('popular').get()
-   */
+  /** Apply a scope defined in `static scopes`; chainable. */
   static scope<T extends typeof Model>(this: T, name: string): QueryBuilder<TRecordFor<T>> {
     const scopes = this.scopes
     if (!scopes || typeof scopes[name] !== 'function') {
@@ -1169,20 +753,8 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   }
 
   /**
-   * Define a one-to-many relationship.
-   *
-   * @param name - Relation name (used in `with()` calls)
-   * @param related - The related model class
-   * @param foreignKey - Foreign key column on the related model
-   * @param localKey - Local key column on this model
-   *
-   * @example
-   * class User extends Model<UserRecord> {
-   *   static {
-   *     this.hasMany('posts', Post, 'userId', 'id')
-   *   }
-   * }
-   * // Later: User.with('posts')
+   * One-to-many: `foreignKey` is on the related model, `localKey` on this one.
+   * Declare in a `static {}` block; `name` is what `with()` takes.
    */
   static hasMany<
     This extends typeof Model,
@@ -1208,20 +780,8 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   }
 
   /**
-   * Define a many-to-one (inverse) relationship.
-   *
-   * @param name - Relation name (used in `with()` calls)
-   * @param related - The related model class
-   * @param foreignKey - Foreign key column on this model
-   * @param ownerKey - Primary key column on the related model
-   *
-   * @example
-   * class Post extends Model<PostRecord> {
-   *   static {
-   *     this.belongsTo('author', User, 'userId', 'id')
-   *   }
-   * }
-   * // Later: Post.with('author')
+   * Many-to-one inverse: `foreignKey` is on *this* model, `ownerKey` on the
+   * related one.
    */
   static belongsTo<
     This extends typeof Model,
@@ -1247,20 +807,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   }
 
   /**
-   * Define a one-to-one relationship.
-   *
-   * @param name - Relation name (used in `with()` calls)
-   * @param related - The related model class
-   * @param foreignKey - Foreign key column on the related model
-   * @param localKey - Local key column on this model
-   *
-   * @example
-   * class User extends Model<UserRecord> {
-   *   static {
-   *     this.hasOne('profile', Profile, 'userId', 'id')
-   *   }
-   * }
-   * // Later: User.with('profile')
+   * One-to-one: `foreignKey` is on the related model, `localKey` on this one.
    */
   static hasOne<
     This extends typeof Model,
@@ -1286,23 +833,12 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   }
 
   /**
-   * Define a many-to-many relationship via a pivot table.
-   *
-   * @param name - Relation name (used in `with()` calls)
-   * @param related - The related model class
-   * @param pivotTable - The pivot/junction table (e.g., Drizzle table schema)
-   * @param foreignPivotKey - Column on pivot table referencing this model
-   * @param relatedPivotKey - Column on pivot table referencing the related model
-   * @param parentKey - Local key on this model (default: 'id')
-   * @param relatedKey - Local key on the related model (default: 'id')
+   * Many-to-many through a pivot table. `foreignPivotKey`/`relatedPivotKey` are
+   * both columns *on the pivot*, referencing this model and the related one;
+   * `parentKey`/`relatedKey` are the local keys they point at.
    *
    * @example
-   * class User extends Model<UserRecord> {
-   *   static {
-   *     this.belongsToMany('roles', Role, userRoles, 'userId', 'roleId', 'id', 'id')
-   *   }
-   * }
-   * // Later: User.with('roles')
+   * this.belongsToMany('roles', Role, userRoles, 'userId', 'roleId', 'id', 'id')
    */
   static belongsToMany<
     This extends typeof Model,
@@ -1332,23 +868,12 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   }
 
   /**
-   * Define a has-many-through relationship.
-   *
-   * @param name - Relation name (used in `with()` calls)
-   * @param related - The final related model class
-   * @param through - The intermediate model class
-   * @param firstKey - Foreign key on the intermediate model referencing this model
-   * @param secondKey - Foreign key on the related model referencing the intermediate model
-   * @param localKey - Local key on this model (default: 'id')
-   * @param secondLocalKey - Local key on the intermediate model (default: 'id')
+   * Has-many-through: `firstKey` is on the intermediate model referencing this
+   * one, `secondKey` on the related model referencing the intermediate;
+   * `localKey` and `secondLocalKey` are the keys they point at.
    *
    * @example
-   * class Country extends Model<CountryRecord> {
-   *   static {
-   *     this.hasManyThrough('posts', Post, User, 'countryId', 'userId', 'id', 'id')
-   *   }
-   * }
-   * // Later: Country.with('posts')
+   * this.hasManyThrough('posts', Post, User, 'countryId', 'userId', 'id', 'id')
    */
   static hasManyThrough<
     This extends typeof Model,
@@ -1378,24 +903,12 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     })
   }
 
-  /**
-   * Map of type strings to model classes for polymorphic relationships.
-   *
-   * @example
-   * Model.morphMap = { Post, Video }
-   */
+  /** Type strings to model classes, e.g. `Model.morphMap = { Post, Video }`. */
   static morphMap?: Record<string, typeof Model>
 
   /**
-   * Define a one-to-many polymorphic relationship.
-   *
-   * @param name - Relation name
-   * @param related - The related model class
-   * @param morphName - Base name for the type/id columns (e.g. 'commentable' → commentableType + commentableId)
-   * @param localKey - Local key on this model (default: 'id')
-   *
-   * @example
-   * Post.morphMany('comments', Comment, 'commentable', 'id')
+   * Polymorphic one-to-many. `morphName` is the base of the column pair:
+   * 'commentable' means commentableType + commentableId.
    */
   static morphMany<
     This extends typeof Model,
@@ -1417,15 +930,7 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     })
   }
 
-  /**
-   * Define the inverse of a polymorphic relationship.
-   *
-   * @param name - Relation name
-   * @param morphName - Base name for the type/id columns
-   *
-   * @example
-   * Comment.morphTo('commentable', 'commentable')
-   */
+  /** Inverse of a polymorphic relation; `morphName` bases the type/id columns. */
   static morphTo<
     This extends typeof Model,
     Name extends RelationKeyOrString<This>,
@@ -1443,24 +948,9 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   }
 
   /**
-   * Get records sorted by the specified order.
-   *
-   * @param order - Order expression(s)
-   * @param where - Optional filter conditions
-   * @returns Sorted array of records
-   *
    * @example
-   * // Single column ascending
    * await User.orderBy('createdAt')
-   *
-   * // Single column descending
-   * await User.orderBy(['createdAt', 'desc'])
-   *
-   * // Multiple columns
-   * await User.orderBy([['lastName', 'asc'], ['firstName', 'asc']])
-   *
-   * // With where clause
-   * await User.orderBy('name', { status: 'active' })
+   * await User.orderBy([['lastName', 'asc'], ['firstName', 'asc']], { status: 'active' })
    */
   static async orderBy<T extends typeof Model>(
     this: T,
@@ -1492,24 +982,8 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   }
 
   /**
-   * Get paginated records.
-   *
-   * @param options - Pagination options
-   * @returns Paginated result with data and metadata
-   *
    * @example
-   * const result = await User.paginate({ page: 1, perPage: 10 })
-   * // result.data - Array of users
-   * // result.meta.total - Total count
-   * // result.meta.hasMore - Whether there are more pages
-   *
-   * // With filtering and ordering
-   * await User.paginate({
-   *   page: 2,
-   *   perPage: 20,
-   *   where: { status: 'active' },
-   *   orderBy: ['createdAt', 'desc']
-   * })
+   * await User.paginate({ page: 2, perPage: 20, where: { status: 'active' } })
    */
   static async paginate<T extends typeof Model>(
     this: T,
@@ -1580,18 +1054,6 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     return { data, meta }
   }
 
-  /**
-   * Paginate records with eager-loaded relationships.
-   *
-   * @param relations - Relation name(s) to load
-   * @param options - Pagination options
-   * @returns Paginated result with loaded relationships
-   *
-   * @example
-   * const result = await User.withPaginate('posts', { page: 1, perPage: 10 })
-   * // result.data - Users with their posts loaded
-   * // result.meta - Pagination metadata
-   */
   static async withPaginate<T extends typeof Model, K extends RelationPath<T>>(
     this: T,
     relations: K | readonly K[],
@@ -1622,18 +1084,6 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     }
   }
 
-  /**
-   * Create a new record.
-   *
-   * @param data - Record data to insert
-   * @returns The created record
-   *
-   * @example
-   * const user = await User.create({
-   *   name: 'John Doe',
-   *   email: 'john@example.com'
-   * })
-   */
   static async create<T extends typeof Model>(
     this: T,
     data: TCreateFor<T>,
@@ -1643,16 +1093,8 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   }
 
   /**
-   * Create a record bypassing mass-assignment protection. Use for trusted,
-   * server-side-assembled data (OAuth account linking, seeders, system
-   * records) — never for raw request input.
-   *
-   * @example
-   * const user = await User.forceCreate({
-   *   name: profile.name,
-   *   email: profile.email,
-   *   passwordHash: `oauth:${provider}:${profile.id}`,
-   * })
+   * Create bypassing mass-assignment protection. Trusted server-side data only
+   * (OAuth linking, seeders, system records), never raw request input.
    */
   static async forceCreate<T extends typeof Model>(
     this: T,
@@ -1711,16 +1153,6 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     return result
   }
 
-  /**
-   * Update records matching the conditions.
-   *
-   * @param where - Filter conditions to identify records
-   * @param data - Data to update
-   * @returns The updated record
-   *
-   * @example
-   * await User.update({ id: 1 }, { name: 'Jane Doe' })
-   */
   static async update<T extends typeof Model>(
     this: T,
     where: WhereClauseFor<T>,
@@ -1731,8 +1163,8 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   }
 
   /**
-   * Update records bypassing mass-assignment protection. Use for trusted,
-   * server-side-assembled data — never for raw request input.
+   * Update bypassing mass-assignment protection. Trusted server-side data only,
+   * never raw request input.
    */
   static async forceUpdate<T extends typeof Model>(
     this: T,
@@ -1778,10 +1210,9 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       }
     }
 
-    // Global scopes must reach writes, not just reads: a tenant scope that is
-    // applied to `find`/`all` but dropped here lets one tenant update another
-    // tenant's rows. Route through the scope-applying builder, but hand it the
-    // already-prepared payload so mutators/casts (and hooks above) run once.
+    // Global scopes must reach writes: a tenant scope applied to reads but
+    // dropped here lets one tenant update another's rows. The payload is
+    // already prepared, so mutators/casts run once.
     const result = this.hasScopes()
       ? await this.newQuery(writeOptions)
           .where(where as Partial<Record<string, unknown>>)
@@ -1806,16 +1237,6 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     return result
   }
 
-  /**
-   * Delete records matching the conditions.
-   *
-   * @param where - Filter conditions to identify records
-   * @returns Number of deleted records or void depending on adapter
-   *
-   * @example
-   * await User.delete({ id: 1 })
-   * await User.delete({ status: 'inactive' })
-   */
   static async delete<T extends typeof Model>(
     this: T,
     where: WhereClauseFor<T>,
@@ -1860,20 +1281,8 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   }
 
   /**
-   * Get a raw Drizzle query builder for complex queries.
-   *
-   * @param db - Optional Drizzle database instance
-   * @returns Drizzle query builder starting with `select().from(table)`
-   *
-   * @example
-   * // Simple query
-   * const users = await User.query(db)
-   *   .where(eq(users.status, 'active'))
-   *   .limit(10)
-   *
-   * // With joins
-   * const usersWithPosts = await User.query(db)
-   *   .leftJoin(posts, eq(users.id, posts.userId))
+   * A raw Drizzle builder starting at `select().from(table)`. Carries no model
+   * scopes, casts or accessors.
    */
   static query<TDatabase extends { select: (...args: any[]) => any } = { select: (...args: any[]) => any }>( // eslint-disable-line @typescript-eslint/no-explicit-any
     this: typeof Model,
@@ -1899,24 +1308,10 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   }
 
   /**
-   * Eager-load relationships on records.
-   *
-   * @param relations - Relation name(s) to load
-   * @param where - Optional filter conditions
-   * @returns Records with loaded relationships
+   * Eager-load relations, one name or several, nested via dot notation.
    *
    * @example
-   * // Single relation
-   * const usersWithPosts = await User.with('posts')
-   *
-   * // Multiple relations
-   * const usersWithAll = await User.with(['posts', 'comments'])
-   *
-   * // With filtering
-   * const activeUsersWithPosts = await User.with('posts', { status: 'active' })
-   *
-   * // Nested relations via dot notation
-   * const usersWithPostComments = await User.with('posts.comments')
+   * await User.with(['posts.comments', 'profile'], { status: 'active' })
    */
   static async with<T extends typeof Model, K extends RelationPath<T>>(
     this: T,
@@ -1950,13 +1345,8 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   }
 
   /**
-   * Fetch records with related record counts attached as `${name}Count`.
-   * Counts hasMany/hasOne/morphMany children per record without attaching
-   * the related rows themselves; belongsTo yields 0 or 1.
-   *
-   * @example
-   * const users = await User.withCount('posts')
-   * users[0].postsCount // number
+   * Attaches a `${name}Count` per record without loading the related rows.
+   * belongsTo yields 0 or 1.
    */
   static async withCount<T extends typeof Model, K extends RelationKey<T>>(
     this: T,
@@ -2066,15 +1456,10 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   }
 
   /**
-   * @internal Used by QueryBuilder for eager loading.
-   * Supports nested paths with dot notation, e.g. `posts.comments`.
-   *
-   * Paths are grouped by their head segment so a relation shared by several
-   * paths is loaded exactly once. Walking `posts.comments` and `posts.tags`
-   * independently would load `posts` twice, and the loaders assign fresh
-   * spread copies — so the second pass would replace the very row objects the
-   * first had already attached children to, and only the last path would
-   * survive.
+   * @internal Used by QueryBuilder for eager loading. Paths are grouped by head
+   * segment so a shared relation loads once: the loaders assign fresh spread
+   * copies, so a second pass over `posts` would replace the very rows the first
+   * attached children to and only the last path would survive.
    */
   static async loadRelationsInto<T extends typeof Model>(
     this: T,
@@ -2086,7 +1471,6 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   ): Promise<void> {
     if (relationNames.length === 0) return
 
-    // head -> the distinct tails to walk beneath it, in first-seen order.
     const groups = new Map<string, string[]>()
     for (const path of relationNames) {
       const [head, ...rest] = path.split('.')
@@ -2094,10 +1478,8 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       groups.set(head, tails)
 
       // A bare path contributes no tail, so `posts` alongside `posts.comments`
-      // loads `posts` once and still descends into the comments. A trailing
-      // dot does contribute one — an empty tail — so a malformed `posts.`
-      // still reaches the unknown-relation throw rather than being read as
-      // the bare `posts`.
+      // loads `posts` once. A trailing dot does contribute one — an empty tail
+      // — so `posts.` still reaches the unknown-relation throw.
       if (rest.length > 0) {
         const tail = rest.join('.')
         if (!tails.includes(tail)) {
@@ -2112,9 +1494,8 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   }
 
   /**
-   * @internal Public since it is reachable from generated code; kept for
-   * backwards compatibility now that the eager loader walks whole path lists.
-   * Internal callers should use {@link loadRelationsInto} instead.
+   * @internal Public because generated code reaches it; internal callers should
+   * use {@link loadRelationsInto}.
    */
   static async loadRelationInto<T extends typeof Model>(
     this: T,
@@ -2128,12 +1509,9 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
   }
 
   /**
-   * Load one relation level and recurse into the tails beneath it.
-   *
-   * `constraints` are keyed by the full path of the level each one constrains,
-   * so `pathPrefix` accumulates the path walked so far as the recursion
-   * descends: at `posts.comments` the leaf looks itself up under that whole
-   * key, not under `comments`.
+   * `constraints` are keyed by the full path of the level each constrains, so
+   * `pathPrefix` accumulates the path walked so far: at `posts.comments` the
+   * leaf looks itself up under that whole key, not under `comments`.
    */
   protected static async loadRelationLevel<T extends typeof Model>(
     this: T,
@@ -2150,9 +1528,8 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       throw new Error(`${this.name}: unknown relation "${head}".`)
     }
 
-    // A constraint is keyed by the full path of the level it constrains, so a
-    // nested walk that re-loads an already-constrained head reapplies the same
-    // filter instead of silently replacing it with unfiltered rows.
+    // Keyed by full path, so a nested walk that re-loads an already-constrained
+    // head reapplies the filter instead of replacing it with unfiltered rows.
     const currentPath = pathPrefix ? `${pathPrefix}.${head}` : head
     const constraint = constraints?.get(currentPath)
 
@@ -2255,7 +1632,6 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     const { pivotTable, foreignPivotKey, relatedPivotKey, parentKey, relatedKey, name } = definition
     const related = await resolveModelReference(definition.related)
 
-    // Collect parent key values
     const parentValues = Array.from(
       new Set(records.map((r) => r[parentKey]).filter((v): v is unknown => v != null)),
     )
@@ -2267,13 +1643,11 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       return
     }
 
-    // Step 1: Query pivot table for matching pivot rows
     const adapter = this.getAdapter()
     const pivotRows = await adapter.findMany<PlainObject>(pivotTable, {
       where: { [foreignPivotKey]: parentValues } as WhereClause,
     }, queryOptions)
 
-    // Build a map: parentKeyValue -> relatedKeyValue[]
     const pivotMap = new Map<unknown, unknown[]>()
     const allRelatedIds = new Set<unknown>()
     for (const row of pivotRows) {
@@ -2291,20 +1665,17 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       return
     }
 
-    // Step 2: Query related table for those IDs. The constraint filters the
-    // related rows, not the pivot lookup.
+    // The constraint filters the related rows, not the pivot lookup.
     const relatedRecords = await applyEagerConstraint(
       related.newQuery(queryOptions).where({ [relatedKey]: Array.from(allRelatedIds) } as WhereClause),
       constraint,
     )
 
-    // Index related records by their key
     const relatedMap = new Map<unknown, PlainObject>()
     for (const item of relatedRecords) {
       relatedMap.set(item[relatedKey], { ...item })
     }
 
-    // Assign to each parent record
     for (const record of records) {
       const pk = record[parentKey]
       if (pk == null) {
@@ -2328,7 +1699,6 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     const related = await resolveModelReference(definition.related)
     const through = await resolveModelReference(definition.through)
 
-    // Collect local key values from parent records
     const localValues = Array.from(
       new Set(records.map((r) => r[localKey]).filter((v): v is unknown => v != null)),
     )
@@ -2340,12 +1710,10 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       return
     }
 
-    // Step 1: Query through model for intermediate records
     const throughRecords = await through.newQuery(queryOptions).where({
       [firstKey]: localValues,
     } as WhereClause) as PlainObject[]
 
-    // Build a map: parentLocalKeyValue -> throughSecondLocalKey[]
     const throughMap = new Map<unknown, unknown[]>()
     const allThroughIds = new Set<unknown>()
     for (const row of throughRecords) {
@@ -2363,14 +1731,12 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       return
     }
 
-    // Step 2: Query related model using through model's keys. The constraint
-    // filters the related rows, not the intermediate lookup.
+    // The constraint filters the related rows, not the intermediate lookup.
     const relatedRecords = await applyEagerConstraint(
       related.newQuery(queryOptions).where({ [secondKey]: Array.from(allThroughIds) } as WhereClause),
       constraint,
     )
 
-    // Index related records by secondKey
     const relatedByKey = new Map<unknown, PlainObject[]>()
     for (const item of relatedRecords) {
       const key = item[secondKey]
@@ -2378,7 +1744,6 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       relatedByKey.get(key)!.push({ ...item })
     }
 
-    // Assign to each parent record
     for (const record of records) {
       const lk = record[localKey]
       if (lk == null) {
@@ -2423,10 +1788,8 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
 
     const map = new Map<unknown, PlainObject[]>()
     for (const item of allRelated) {
-      // Group on the type as well as the id. The query already filters by
-      // type, but a constraint callback is free to widen it (a top-level
-      // `orWhere` does), and grouping on the id alone would then attach
-      // another model's rows to this one.
+      // Grouped on the type as well as the id: the query filters by type, but
+      // a constraint callback may widen it (a top-level `orWhere` does).
       if (item[typeColumn] !== parentType) continue
       const key = item[idColumn]
       if (!map.has(key)) map.set(key, [])
@@ -2450,7 +1813,6 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
     const idColumn = `${morphName}Id`
     const morphMap = Model.morphMap ?? {}
 
-    // Group records by type
     const byType = new Map<string, unknown[]>()
     for (const record of records) {
       const type = record[typeColumn] as string
@@ -2460,7 +1822,6 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
       byType.get(type)!.push(id)
     }
 
-    // Fetch each type's records
     const resolved = new Map<string, Map<unknown, PlainObject>>()
     for (const [type, ids] of byType) {
       const modelClass = morphMap[type]
@@ -2490,12 +1851,10 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
 }
 
 /**
- * Apply an eager-load constraint callback to the query that fetches a
- * relation, then execute it. The callback runs with the foreign-key filter
- * already on the builder, so a `where()` narrows it. A top-level `orWhere()`
- * widens it instead — loaders that group results on something weaker than the
- * full filter (morphMany, which groups on the morph id) must not rely on the
- * query alone to keep other rows out.
+ * The callback runs with the foreign-key filter already on the builder, so a
+ * `where()` narrows it and a top-level `orWhere()` widens it — a loader that
+ * groups on something weaker than the full filter (morphMany, on the morph id)
+ * must not rely on the query alone to keep other rows out.
  */
 async function applyEagerConstraint(
   query: QueryBuilder,
@@ -2579,15 +1938,11 @@ type FieldFor<T extends typeof Model> = keyof TRecordFor<T> & string
 
 type RelationNames = string | readonly string[]
 
-// A declared relation key, or a dot-notation nested path rooted at one
-// ('comments.author'). Only the head segment is checked against
-// relationTypes — the tail is an unvalidated string, so a malformed path
-// ('comments.', 'comments..author') or a typo'd nested segment still
-// type-checks. loadRelationLevel() throws "unknown relation" for a bad tail
-// segment at runtime, but only once it actually recurses into at least one
-// loaded child row — if every record's head relation loads zero rows, the
-// tail is never inspected and the call silently no-ops. Declare the nested
-// record shape inside relationTypes to type the loaded children.
+// Only the head segment is checked against relationTypes; the tail is an
+// unvalidated string, so a typo'd or malformed nested segment type-checks.
+// loadRelationLevel() throws for it at runtime, but only once it recurses into
+// a loaded child row — if the head relation loads zero rows anywhere, the call
+// silently no-ops.
 type RelationPath<T extends typeof Model> = RelationKey<T> | `${RelationKey<T>}.${string}`
 
 type RelationHead<Name> = Name extends `${infer Head}.${string}` ? Head : Name
@@ -2694,59 +2049,43 @@ interface MorphToRelationDefinition {
   morphName: string
 }
 
-/** Type for hasMany relation results (array of related records). */
 export type HasManyRelationResult<T extends typeof Model> = Array<TRecordFor<T>>
 
-/** Type for belongsTo relation results (single record or null). */
 export type BelongsToRelationResult<T extends typeof Model> = TRecordFor<T> | null
 
-/** Utility type for hasMany relation data shape. */
 export type HasManyRecord<TRecord extends PlainObject> = TRecord[]
 
-/** Utility type for belongsTo relation data shape. */
 export type BelongsToRecord<TRecord extends PlainObject> = TRecord | null
 
 /**
- * Utility type for belongsTo relations backed by a NOT NULL foreign key,
- * where the parent is guaranteed to exist once loaded. Declare with the
- * `declare` modifier so no runtime placeholder value is needed:
+ * For a belongsTo backed by a NOT NULL foreign key, where the parent is
+ * guaranteed once loaded.
  *
  * @example
  * declare static relationTypes: { author: BelongsToRequiredRecord<UserRecord> }
  */
 export type BelongsToRequiredRecord<TRecord extends PlainObject> = TRecord
 
-/** Type for hasOne relation results (single record or null). */
 export type HasOneRelationResult<T extends typeof Model> = TRecordFor<T> | null
 
-/** Type for belongsToMany relation results (array of related records). */
 export type BelongsToManyRelationResult<T extends typeof Model> = Array<TRecordFor<T>>
 
-/** Type for hasManyThrough relation results (array of related records). */
 export type HasManyThroughRelationResult<T extends typeof Model> = Array<TRecordFor<T>>
 
-/** Utility type for hasOne relation data shape. */
 export type HasOneRecord<TRecord extends PlainObject> = TRecord | null
 
-/** Utility type for belongsToMany relation data shape. */
 export type BelongsToManyRecord<TRecord extends PlainObject> = TRecord[]
 
-/** Utility type for hasManyThrough relation data shape. */
 export type HasManyThroughRecord<TRecord extends PlainObject> = TRecord[]
 
-/** Type for morphMany relation results (array of related records). */
 export type MorphManyRelationResult<T extends typeof Model> = Array<TRecordFor<T>>
 
-/** Utility type for morphMany relation data shape. */
 export type MorphManyRecord<TRecord extends PlainObject> = TRecord[]
 
-/** Type for morphTo relation results (single record or null). */
 export type MorphToRelationResult = PlainObject | null
 
-/** Utility type for morphTo relation data shape. */
 export type MorphToRecord = PlainObject | null
 
-/** Utility type: model record with specified relations merged. */
 export type WithRelations<
   T extends typeof Model,
   K extends RelationPath<T> | readonly RelationPath<T>[],
@@ -2758,34 +2097,28 @@ type ModelClassWithTable<TTable extends TableShape, TBase extends typeof Model, 
   readonly createType: TCreate
 }
 
-/** A key that can appear in a model's create payload: a table column, or a named field its base contributes. */
 type CreateKey<TTable extends TableShape, TBase extends typeof Model> =
   | keyof InferModelInsert<TTable>
   | keyof TCreateFor<TBase>
 
 /**
- * Named fields a base class contributes to the create payload, such as
- * `AuthenticatableModel`'s virtual `password`. A plain `Model` base has no
- * declared createType, so its keys collapse to `string` — guard against that
- * collapse, or every misspelling would pass the allowlist checks below.
+ * Named fields a base contributes to the create payload (`AuthenticatableModel`'s
+ * virtual `password`). A plain `Model` base declares no createType, so its keys
+ * collapse to `string` — guard that, or every misspelling passes the allowlists.
  */
 type BaseContributedKey<TBase extends typeof Model> =
   string extends keyof TCreateFor<TBase> & string ? never : keyof TCreateFor<TBase> & string
 
-/** A key valid in a `fillable` allowlist: an insertable column, or a base-contributed field. */
 type FillableKey<TTable extends TableShape, TBase extends typeof Model> =
   | (keyof InferModelInsert<TTable> & string)
   | BaseContributedKey<TBase>
 
-/** A key of the record read back from the table. */
 type RecordKey<TTable extends TableShape> = keyof InferModelRecord<TTable> & string
 
 /**
- * Accessor map keyed by TKey whose functions receive the table's inferred
- * record. A homomorphic mapped type so TypeScript infers the key union from
- * the object literal's keys — a plain `Record<string, fn>` constraint fails
- * here: the accessor functions are context-sensitive, which defers inference
- * past the point where the key type parameter falls back to its default.
+ * Homomorphic on purpose, so the key union is inferred from the object
+ * literal's keys: the accessor functions are context-sensitive, which under a
+ * plain `Record<string, fn>` defers inference past the key parameter's default.
  */
 type AccessorsShape<TTable extends TableShape, TKey extends string> = {
   [K in TKey]: (record: InferModelRecord<TTable>) => unknown
@@ -2802,34 +2135,16 @@ type CreateShape<
   Required<Pick<InferModelInsert<TTable> & TCreateFor<TBase>, TRequire & keyof (InferModelInsert<TTable> & TCreateFor<TBase>)>>
 
 /**
- * Create a table-backed model base class from a Drizzle table.
- *
- * `recordType` and `createType` are inferred from the table. The inferred
- * createType requires every non-defaulted column, which is not always the
- * payload a model accepts: `AuthenticatableModel` hashes a plain `password`
- * into `passwordHash`, so a user model wants the column optional and the
- * virtual field required. `optionalOnCreate` and `requireOnCreate` reshape the
- * inferred type without any cast.
- *
- * The allowlist statics (`fillable`, `hidden`, `visible`, `accessors`,
- * `appends`) can be passed here instead of declared on the subclass: the
- * option form checks every name against the table's columns (plus fields the
- * `base` contributes), so a typo is a compile error instead of a silently
- * ineffective entry. A `static` declaration on the subclass still works and
- * shadows the option, matching normal class semantics.
+ * A table-backed model base class. `recordType`/`createType` are inferred from
+ * the table; `optionalOnCreate`/`requireOnCreate` reshape the inferred create
+ * payload without a cast, for a model like `AuthenticatableModel` that hashes a
+ * virtual `password` into `passwordHash`. Passing the allowlist statics as
+ * options rather than declaring them checks every name against the table's
+ * columns, so a typo is a compile error rather than a dead entry; a `static` on
+ * the subclass shadows the option, as normal class semantics.
  *
  * @example
- * export class Post extends defineModel(posts, {
- *   fillable: ['title', 'body'],
- * }) {}
- *
- * export class User extends defineModel(users, {
- *   base: AuthenticatableModel,
- *   optionalOnCreate: ['passwordHash'],
- *   requireOnCreate: ['password'],
- *   fillable: ['name', 'email', 'password'],
- *   hidden: ['passwordHash', 'rememberToken'],
- * }) {}
+ * class User extends defineModel(users, { fillable: ['name', 'email'] }) {}
  */
 export function defineModel<
   TTable extends TableShape,
@@ -2841,45 +2156,28 @@ export function defineModel<
   table: TTable,
   options: {
     base?: TBase
-    /**
-     * Columns the model fills in itself, so callers need not pass them.
-     * Type-level only.
-     */
+    /** Type-level only: columns the model fills in itself. */
     optionalOnCreate?: readonly TOptional[]
     /**
-     * Fields to make required on the create payload. Accepts table columns
-     * (Drizzle marks defaulted ones optional) and named fields contributed by
-     * `base`, such as `AuthenticatableModel`'s virtual `password`.
-     * Type-level only.
+     * Type-level only: fields to make required on the create payload. Accepts
+     * table columns (Drizzle marks defaulted ones optional) and `base`-
+     * contributed fields such as the virtual `password`.
      */
     requireOnCreate?: readonly TRequire[]
-    /**
-     * Typed form of `static fillable`: mass-assignment allowlist checked
-     * against insertable columns and base-contributed fields.
-     */
+    /** Typed `static fillable`, checked against insertable and base fields. */
     fillable?: readonly FillableKey<TTable, TBase>[]
-    /**
-     * Typed form of `static hidden`: fields excluded from serialization,
-     * checked against record columns and declared accessors.
-     */
+    /** Typed `static hidden`, checked against record columns and accessors. */
     hidden?: readonly (RecordKey<TTable> | NoInfer<TAccessorKey>)[]
-    /**
-     * Typed form of `static visible`: serialization allowlist, checked
-     * against record columns and declared accessors.
-     */
+    /** Typed `static visible`, checked against record columns and accessors. */
     visible?: readonly (RecordKey<TTable> | NoInfer<TAccessorKey>)[]
     /**
-     * Typed form of `static accessors`: each function receives the table's
-     * inferred record. Names declared here are what `appends` may reference.
-     * The Record intersection rejects non-object values — with no keys to
-     * infer, the mapped type alone collapses to `{}`, which admits anything.
+     * Typed `static accessors`; the names here are what `appends` may
+     * reference. The Record intersection rejects non-object values — with no
+     * keys to infer, the mapped type alone collapses to `{}`.
      */
     accessors?: AccessorsShape<TTable, TAccessorKey> &
       Record<string, (record: InferModelRecord<TTable>) => unknown>
-    /**
-     * Typed form of `static appends`: virtual attributes to serialize,
-     * checked against the names declared in `accessors`.
-     */
+    /** Typed `static appends`, checked against the names in `accessors`. */
     appends?: readonly NoInfer<TAccessorKey>[]
   } = {},
 ): ModelClassWithTable<TTable, TBase, CreateShape<TTable, TBase, TOptional, TRequire>> {

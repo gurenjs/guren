@@ -14,21 +14,16 @@ import { schemaPathFor } from './schema-parser'
 
 /**
  * The alternative the API-only refusal names, shared with the resource
- * blueprint: both doors lead to this one scaffold, so they point at the same
- * way out.
- *
- * It names `make:controller` rather than telling the reader to write the file:
- * on the app this refusal fires for, that command emits the JSON controller
- * itself.
+ * blueprint so both doors point at the same way out. It names
+ * `make:controller` because on such an app that command emits JSON itself.
  */
 export const API_ONLY_FEATURE_ALTERNATIVE = 'Scaffold a JSON controller with guren make:controller and register it in routes/api.ts'
 
 export interface MakeFeatureOptions extends WriterOptions {
   fields?: string
   /**
-   * Comma-separated attachment collections (`"cover:one,images:many"`).
-   * Wraps the generated model in the `Attachable` mixin and wires the store
-   * and destroy actions; refused when the app has no `configureAttachments()`.
+   * Comma-separated attachment collections (`"cover:one,images:many"`);
+   * refused when the app has no `configureAttachments()`.
    */
   attach?: string
   withTest?: boolean
@@ -53,11 +48,9 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
   const withPolicy = Boolean(options.withPolicy)
   const writerOptions: WriterOptions = writerOptionsFrom(options)
 
-  // A collection sharing a name with a column is a compile error in the
-  // generated model (the mixin rejects declaration keys that shadow columns),
-  // and one sharing a name with an identifier the generated store action
-  // already binds or references would shadow it — both are usage errors this
-  // can say outright instead of shipping as a file that does not compile.
+  // A collection named after a column is a compile error in the mixin, and one
+  // named after an identifier the store action binds would shadow it. Both are
+  // usage errors, said outright rather than shipped as a file that won't build.
   const reserved = reservedAttachmentNames(fields, singular, variableName)
   for (const attachment of attachments) {
     if (reserved.has(attachment.name)) {
@@ -68,29 +61,25 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
     }
   }
 
-  // `--module <name>` moves app/ output under modules/<name>/ (handled by
-  // scaffoldFile for makeModel/makePolicy/makeTest below), but pages are
-  // NOT colocated per RFC 0002's initial scope — they stay under the
-  // top-level resources/js/pages/, namespaced by the module name instead
-  // (resources/js/pages/<module>/<routeName>/...).
+  // `--module <name>` moves app/ output under modules/<name>/, but pages are
+  // NOT colocated per RFC 0002's initial scope — they stay under the top-level
+  // resources/js/pages/, namespaced by the module name.
   const moduleName = options.root ? safeModuleName(options.root) : undefined
   const appPrefix = moduleName ? `modules/${moduleName}/` : ''
   const pagePrefix = moduleName ? `${moduleName}/` : ''
 
-  // Same ordering rule as the resource blueprint's guard: everything above is
-  // pure, so a usage error is reported as one, and the check still precedes
-  // the first write below. It lives here as well because `guren make:feature`
-  // reaches this scaffold without passing through the blueprint registry.
-  // Judged at `writeRoot()` — this command honours `options.cwd`, so the app
-  // judged must be the app written into.
+  // Everything above is pure, so a usage error is reported as one and this
+  // still precedes the first write. Duplicated from the resource blueprint's
+  // guard because `make:feature` bypasses the blueprint registry. Judged at
+  // `writeRoot()`: this command honours `options.cwd`, and the app judged must
+  // be the app written into.
   await assertNotApiOnly(writeRoot(options), {
     does: 'guren make:feature scaffolds Inertia pages and a controller that returns Inertia responses',
     instead: API_ONLY_FEATURE_ALTERNATIVE,
   })
 
-  // Also before the first write: `--attach` output is only usable on an app
-  // that wired the attachments layer — the mixin's statics throw at first use
-  // otherwise. Refusing here, with the fix named, beats scaffolding a feature
+  // Also before the first write: without the attachments layer the mixin's
+  // statics throw at first use, so refusing here beats scaffolding a feature
   // that crashes on its first upload (RFC 0013 Part 4).
   if (attachments.length > 0 && !(await appConfiguresAttachments(writeRoot(options), new ParseCache()))) {
     throw new Error(
@@ -102,9 +91,8 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
     )
   }
 
-  // Composed rather than emitted inline — the same way makeModel/makePolicy/
-  // makeTest are below — so the schema names the generated controller imports
-  // and the ones `make:validator` writes cannot drift apart.
+  // Composed rather than emitted inline, so the schema names the generated
+  // controller imports and the ones `make:validator` writes cannot drift.
   const validatorPath = await makeValidator(singular, { ...writerOptions, fields })
 
   const created = await writeScaffoldFiles([
@@ -134,23 +122,19 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
     },
   ], writerOptions)
 
-  // The pages above style with the Guren UI tokens (bg-g-page, …) — make
-  // sure the app actually loads them.
+  // The pages above style with Guren UI tokens (bg-g-page, …).
   await ensureGurenUiTokens(writeRoot(writerOptions))
 
   created.unshift(validatorPath)
 
-  // Create model
   const modelPath = await makeModel(singular, { ...writerOptions, attachments })
   created.push(modelPath)
 
-  // Optionally create policy
   if (withPolicy) {
     const policyPath = await makePolicy(singular, writerOptions)
     created.push(policyPath)
   }
 
-  // Optionally create test
   if (options.withTest) {
     try {
       const testPath = await makeTest(singular, writerOptions)
@@ -219,24 +203,12 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
 }
 
 /**
- * The route-registration block for a resource: what `make:feature` prints for
- * the developer to paste into their registrar, and what `guren add resource`
- * writes into `routes/web.ts` directly. One builder for both, so the CRUD set
- * cannot drift between the routes an app is told to register and the ones the
- * blueprint registers for it.
- *
- * It has to compile verbatim inside `export function register*Routes(router:
- * Router)` — the shape both the default app template and `make:module`
- * scaffold — so the auth alias binds a *new* name instead of assuming a
- * differently-named parameter or shadowing `router`. Capturing that return
- * value is what puts `'auth'` into the router's type; discard it and every
- * `.middleware('auth')` below stops compiling.
- *
- * `receiver` is the router the group hangs off when there is no auth alias to
- * bind. The blueprint passes the registrar's own parameter, which is the only
- * name guaranteed to be in scope — a registrar that rebinds it (the blog
- * template's `const router = baseRouter.aliasMiddleware(...)`) does so partway
- * down the body.
+ * The route-registration block for a resource: printed by `make:feature`,
+ * written into `routes/web.ts` by `guren add resource`, one builder so the two
+ * cannot drift. It must compile verbatim inside `register*Routes(router:
+ * Router)`, so the auth alias binds a *new* name rather than shadowing
+ * `router` — capturing that return is what puts `'auth'` into the router's
+ * type. `receiver` is what the group hangs off with no alias to bind.
  */
 export function buildRouteRegistrationHint(options: {
   singular: string
@@ -265,20 +237,12 @@ export function buildRouteRegistrationHint(options: {
   ]
 }
 
-// --- Template generators ---
-
 /**
- * Names an attachment collection may not take, derived from what the
- * generated code binds where the attach lines land — kept beside the
- * templates so a renamed store local moves this set in the same edit.
- *
- * `createdAt`/`updatedAt` are reserved even though `make:feature` never sees
- * the table: the resource blueprint always appends both columns, most
- * hand-written tables carry them too, and a declaration key that shadows a
- * column is a compile error in the mixin. `data`, the record variable, the
- * model class, and its payload schema are all in scope before the attach
- * lines in the generated store action, so a collection reusing one of them
- * would shadow a binding the earlier lines already used.
+ * Names an attachment collection may not take: whatever the generated code
+ * binds before the attach lines land. Kept beside the templates so a renamed
+ * store local moves this set in the same edit. `createdAt`/`updatedAt` are in
+ * here even though `make:feature` never sees the table, since the resource
+ * blueprint always appends both and a key shadowing a column fails to compile.
  */
 function reservedAttachmentNames(fields: FieldDefinition[], singular: string, variableName: string): Set<string> {
   return new Set([
@@ -309,29 +273,12 @@ function tsFieldType(field: FieldDefinition): string {
 }
 
 /**
- * How a resource reads one column off its record.
- *
- * The record is `typeof table.$inferSelect`, so every column already carries
- * its own type and reading one needs no cast. Casting anyway is not merely
- * redundant: `as string` on a column the app later makes nullable swallows the
- * `null`, and the resource keeps compiling while it lies to the frontend.
- *
- * `json` is the one exception, in every dialect: `jsonb()`, `json()` and
- * `text({ mode: 'json' })` all infer `unknown` unless the schema pins a
- * `$type`, so the declared `Record<string, unknown>` has to be asserted. The
- * assertion is unconditional, so an author who pinned a `$type` of their own
- * gets it flattened back to `Record<string, unknown>` in the payload.
- *
- * A `date` column serializes to the ISO string `tsFieldType` declares, so it is
- * converted rather than read. It goes through `new Date()` rather than a cast
- * because this renderer does not own the column: `guren add resource` writes
- * the table (and gets a `Date` in all three dialects — see `ColumnMapping` in
- * blueprints.ts), but `make:feature` leaves it to the author, whose `text`
- * column yields a string. `new Date()` takes either.
- *
- * A nullable column keeps its `?? null`. `$inferSelect` alone makes it a no-op,
- * but the record the author widens later — a `WithRelations` union, a partial
- * select — can carry `undefined`, which the declared `T | null` would reject.
+ * How a resource reads one column off its record. No cast, since `$inferSelect`
+ * already carries each column's type and `as string` on a column later made
+ * nullable would swallow the `null`. `json` is the exception — every dialect
+ * infers `unknown` without a pinned `$type` — so it is asserted, flattening an
+ * author's own `$type`. A `date` goes through `new Date()`, which also takes
+ * the string a hand-written `text` column yields.
  */
 function resourceFieldExpression(field: FieldDefinition): string {
   const access = `this.resource.${field.name}`
@@ -355,10 +302,9 @@ function emptyFormValue(field: FieldDefinition): string {
 }
 
 /**
- * Reading a nullable column. It is typed `T | null | undefined`, which neither
- * a controlled input nor `useForm`'s seed accepts, so it coalesces to the same
- * empty value the form starts at. Parenthesized so the result can be used as a
- * receiver — `(a ?? '').slice(...)` — since `??` binds looser than member access.
+ * A nullable column is `T | null | undefined`, which neither a controlled
+ * input nor `useForm`'s seed accepts, so it coalesces to the form's empty
+ * value. Parenthesized because `??` binds looser than member access.
  */
 function withEmptyFallback(field: FieldDefinition, access: string): string {
   return field.nullable ? `(${access} ?? ${emptyFormValue(field)})` : access
@@ -369,10 +315,9 @@ function formValue(field: FieldDefinition, formVar: string): string {
 }
 
 function generateResource(singular: string, fields: FieldDefinition[]): string {
-  // The key's type is read off the record rather than declared, the same rule
-  // `make:resource` follows: `guren add resource` writes an auto-increment
-  // `id`, but `make:feature` leaves the table to the author, and a hard-coded
-  // `number` is wrong the moment they reach for a UUID.
+  // The key's type is read off the record rather than declared, as
+  // `make:resource` does: `make:feature` leaves the table to the author, and a
+  // hard-coded `number` is wrong the moment they reach for a UUID.
   const dataFields = [
     `  id: ${singular}Record['id']`,
     ...fields.map((f) => `  ${f.name}: ${tsFieldType(f)}`),
@@ -418,11 +363,9 @@ function generateController(
     ? `    await this.authorize('update', [${singular}, await ${singular}.findOrFail(id)])\n`
     : ''
   const pagesBase = pagesAccessor(moduleName, routeVar)
-  // Redirect targets are plain path strings, not resolved through the typed
-  // route() helper, so — unlike pagesBase above — this can't be verified
-  // against the actual mounted path. Assumes `make:module`'s own default
-  // `prefix: '/<name>'` convention; update these if the module's prefix
-  // was changed after scaffolding.
+  // Redirect targets are plain path strings, so unlike `pagesBase` above
+  // nothing verifies them against the mounted path. Assumes `make:module`'s
+  // default `prefix: '/<name>'`; update them if the prefix was changed.
   const redirectPrefix = moduleName ? `/${moduleName}` : ''
   const destroyGuard = withPolicy
     ? `    await this.authorize('delete', [${singular}, ${variableName}])\n`
@@ -441,10 +384,9 @@ function generateController(
           + `      await ${singular}.attach(${variableName}.id, '${attachment.name}', file)\n`
           + `    }\n`)
     .join('')
-  // Deletion is explicit (RFC 0013 §8): the polymorphic attachment rows carry
-  // no foreign key, and model delete hooks fire on only some delete paths —
-  // so the destroy action purges before deleting the row. After the
-  // authorization guard, deliberately: purging is destructive.
+  // Explicit (RFC 0013 §8): the polymorphic rows carry no foreign key and
+  // delete hooks fire on only some paths, so destroy purges first — after the
+  // authorization guard, deliberately, since purging is destructive.
   const destroyPurge = attachments.length > 0
     ? `    await ${singular}.purgeAttachments(${variableName}.id)\n`
     : ''
@@ -719,8 +661,7 @@ function generateFormField(field: FieldDefinition, formVar: string): string {
   if (field.type === 'json') {
     // Uncontrolled: a controlled textarea driven by the parsed object would
     // reject every keystroke that leaves the JSON temporarily invalid. The
-    // flag is what keeps that from being silent — without it, submitting
-    // half-typed JSON would quietly send the last value that parsed.
+    // flag stops half-typed JSON silently submitting the last value parsed.
     return `          <textarea
             defaultValue={jsonText.${field.name}}
             onChange={(event) => {
@@ -742,12 +683,9 @@ function generateFormField(field: FieldDefinition, formVar: string): string {
 }
 
 /**
- * The hooks a page's JSON fields need, and the import that comes with them.
- *
- * Both are keyed by field name in one record rather than declared per field:
- * two fields whose names differ only in punctuation would otherwise generate
- * the same identifier, and `jsonText` is seeded once so an Edit page is not
- * re-serializing its record on every keystroke.
+ * Keyed by field name in one record rather than declared per field: two names
+ * differing only in punctuation would generate the same identifier. `jsonText`
+ * is seeded once, so an Edit page is not re-serializing on every keystroke.
  */
 function generateFormState(fields: FieldDefinition[], formVar: string): { imports: string; hooks: string } {
   const jsonFields = fields.filter((f) => f.type === 'json')

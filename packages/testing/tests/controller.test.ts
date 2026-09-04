@@ -16,21 +16,14 @@ const identitySchema = {
 }
 
 /**
- * A multipart body, hand-built rather than via `new FormData()`: handing
- * `fetch` a FormData body lets it pick the boundary *and* the media-type
- * casing, and the casing is one of the things these suites test.
- */
-/**
- * One wire format, one builder. A third element makes the part a file: that is
- * the only thing separating an upload from a text field here, so it is the only
- * thing the signature adds. An empty `value` beside a filename still produces a
- * zero-byte File, which is what the `size > 0` filter in `file()` / `files()`
- * exists to reject.
+ * Hand-built rather than via `new FormData()`: handing `fetch` a FormData body
+ * lets it pick the boundary *and* the media-type casing, and the casing is one
+ * of the things these suites test.
  *
- * The part-level `Content-Type` is emitted only alongside a filename. Adding it
- * unconditionally would change what the text-field callers send — including the
- * "a multipart text field, which is not an upload" row, whose whole point is
- * that the part parses as a string.
+ * A third element makes the part a file. An empty `value` beside a filename
+ * still produces a zero-byte File, which is what the `size > 0` filter in
+ * `file()` / `files()` rejects. The part-level `Content-Type` is emitted only
+ * alongside a filename, so a text field still parses as a string.
  */
 function multipartBody(
   boundary: string,
@@ -237,8 +230,8 @@ describe('createGurenControllerModule', () => {
     expect(payload).toEqual({})
   })
 
-  // The runtime narrows here too: a non-object body has no field to read, so
-  // the record view is `{}`. `parseRequestBody` is the one that keeps it.
+  // The runtime narrows here too; `parseRequestBody` is the one that keeps the
+  // unnarrowed body.
   it('parseRequestPayload narrows a non-object JSON body to an empty object', async () => {
     const module = createGurenControllerModule()
     const ctx = createControllerContext('http://example.com/', {
@@ -319,9 +312,8 @@ describe('createGurenControllerModule', () => {
       }
     }
 
-    // A browser submits every same-named input, filled or not — the real
-    // Controller.file() takes part 0 first and only then checks it is a
-    // non-empty File, so a leading empty part means null.
+    // A browser submits every same-named input, filled or not, and file() takes
+    // part 0 before checking it is a non-empty File: a leading empty part is null.
     const formData = new FormData()
     formData.append('cover', new File([], 'empty.png', { type: 'image/png' }))
     formData.append('cover', new File([new Uint8Array([1])], 'real.png', { type: 'image/png' }))
@@ -382,11 +374,9 @@ describe('createGurenControllerModule', () => {
 })
 
 describe('createControllerModuleMock', () => {
-  // The runtime falls back to `{}` for a body no form parser can decode, so a
-  // malformed body is a validation failure rather than a 500. The mock keeps
-  // its own copy of that parser, so the rule has to be pinned on both sides —
-  // otherwise a controller test passes here against behavior the runtime does
-  // not have.
+  // The runtime falls back to `{}` for an undecodable body, so a malformed body
+  // is a validation failure rather than a 500. The mock keeps its own copy of
+  // that parser, so the rule is pinned on both sides.
   const undecodableForm = {
     method: 'POST',
     body: 'broken',
@@ -418,8 +408,7 @@ describe('createControllerModuleMock', () => {
     await expect(controller.validateBody(requireTitle)).rejects.toThrow(/valid/i)
   })
 
-  // Pins that the fallback is `{}` and not `undefined`: an all-optional schema
-  // has to keep passing, exactly as it does on an empty body.
+  // The fallback is `{}`, not `undefined`: an all-optional schema keeps passing.
   it('validateBody() passes an all-optional schema the empty-object fallback', async () => {
     const { Controller } = createControllerModuleMock()
     const ctx = createControllerContext('http://example.com/posts', undecodableForm)
@@ -432,10 +421,8 @@ describe('createControllerModuleMock', () => {
     expect(await controller.validateBody(allOptional)).toEqual({})
   })
 
-  // The upload helpers read the multipart body on their own rather than
-  // through the parser above, so they need their own guard on both sides —
-  // the runtime answers null/[] here, and a mock that threw would fail a
-  // controller test the real app passes.
+  // The upload helpers read the multipart body themselves rather than through
+  // the parser above, so they need their own guard on both sides.
   it('file() / files() report no upload for a body the parser cannot decode', async () => {
     const { Controller } = createControllerModuleMock()
 
@@ -464,8 +451,7 @@ describe('createControllerModuleMock', () => {
     const controller = new Controller()
     controller.setContext(ctx as unknown as ControllerContext)
 
-    // Hand-rolled rather than a zod import: the mock takes any `safeParse`,
-    // and this test is about the shape reaching the schema at all.
+    // Hand-rolled rather than a zod import: the mock takes any `safeParse`.
     const numberArray = {
       safeParse: (data: unknown) =>
         Array.isArray(data) && data.every((n) => typeof n === 'number')
@@ -477,10 +463,8 @@ describe('createControllerModuleMock', () => {
     expect(await controller.input('title')).toBeUndefined()
   })
 
-  // Every shape the runtime's parseRequestBody preserves, driven through the
-  // path that actually consumes it. `null` is the one worth naming: it is a
-  // parsed body, not an absent one, so coalescing it to `{}` would hand
-  // validation a shape nobody sent.
+  // `null` is the shape worth naming: a parsed body, not an absent one, so
+  // coalescing it to `{}` hands validation something nobody sent.
   it('validateBody() sees the body as sent, whatever its shape', async () => {
     const { Controller } = createControllerModuleMock()
 
@@ -507,9 +491,8 @@ describe('createControllerModuleMock', () => {
     expect(await validate(JSON.stringify([1, 2, 3]))).toEqual([1, 2, 3])
     expect(await validate(JSON.stringify('hello'))).toBe('hello')
     expect(await validate(JSON.stringify(null))).toBeNull()
-    // Malformed bodies fall back to `{}` the way the real Controller does,
-    // rather than throwing out of validateBody(). Both parsers are covered:
-    // JSON by its own catch, form data by the controller's.
+    // Both parsers are covered: JSON by its own catch, form data by the
+    // controller's.
     expect(await validate('{ not json')).toEqual({})
     expect(await validate('broken', 'multipart/form-data')).toEqual({})
     expect(seen).toHaveLength(5)
@@ -673,7 +656,7 @@ describe('readInertiaResponse', () => {
 
   it('decodes HTML entities in data-page', async () => {
     const payload = { component: 'Test', props: { html: '<div>&</div>' }, url: '/' }
-    // Simulate what the controller does: escape special chars
+    // Mirrors the escaping the controller applies.
     const serialized = JSON.stringify(payload)
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
@@ -694,18 +677,14 @@ describe('readInertiaResponse', () => {
 
 /**
  * The mock and the runtime must read a repeated form field identically, or a
- * controller test passes on behavior production does not have.
+ * controller test passes on behavior production does not have. Each case runs
+ * one body through both.
  *
- * The rule is Hono's, not "first wins": `parseBody()` collects every value
- * only for a `[]`-suffixed key, and the runtime's `parseRequestPayload` then
- * flattens with `Array.isArray(v) ? v[0] : v`. So `tags[]` yields the FIRST
- * value and a plain repeated `tags` yields the LAST. Both keys are asserted
- * here on purpose: a `tags[]`-only test also passes under a blanket
- * first-wins mock, which would agree with the runtime on `tags[]` while
- * newly disagreeing on `tags`.
- *
- * Each case runs the same body through the mock and through a real
- * `Application.fetch()`, so the two cannot drift apart again.
+ * The rule is Hono's: `parseBody()` collects every value only for a
+ * `[]`-suffixed key, and `parseRequestPayload` then flattens with
+ * `Array.isArray(v) ? v[0] : v` — so `tags[]` yields the FIRST value and a plain
+ * repeated `tags` the LAST. Both keys are asserted, since a `tags[]`-only test
+ * also passes under a blanket first-wins mock.
  */
 describe('repeated form fields', () => {
   const FIRST = 'core'
@@ -785,10 +764,8 @@ describe('repeated form fields', () => {
   /**
    * `__proto__` must survive as an own property, as it does in the runtime:
    * Hono collects into a null-prototype object and `parseRequestPayload`
-   * materializes it with `Object.fromEntries`. Assigning into an object
-   * literal instead hits the inherited setter and drops the field silently,
-   * which would let a mass-assignment test pass against a body the runtime
-   * actually delivers.
+   * materializes it with `Object.fromEntries`. Assigning into an object literal
+   * hits the inherited setter and drops the field silently.
    */
   for (const { encoding, build } of BODIES) {
     it(`${encoding}: a \`__proto__\` field survives in the mock and the runtime`, async () => {
@@ -818,22 +795,17 @@ describe('repeated form fields', () => {
 })
 
 /**
- * The mock and the runtime must hand a validation schema the same query data,
- * or a controller test passes on behavior production does not have.
+ * The mock and the runtime must hand a validation schema the same query data, or
+ * a controller test passes on behavior production does not have.
  *
- * The runtime validates against `flattenRequestQueries`, which reads
- * `ctx.req.queries()` and returns `values.length === 1 ? values[0] : values` —
- * so a repeated key arrives as an ARRAY and a single occurrence as a string.
- * The mock validated against `ctx.req.query()`, one value per key, so
- * `?tag=a&tag=b` reached a `z.array(...)` schema as `'b'`.
- *
- * The probe is `validateQuery`/`validateQuerySafe` specifically: `input()`
- * takes the keyed `query(key)` form on both sides and already agreed, so an
- * `input()`-based test here could never fail. The schema is an identity one so
- * the buggy mock returns a wrong shape instead of throwing 422, which is what
- * lets the two sides be compared directly. Both keys are asserted on purpose:
- * a repeated-only case also passes under a mock that wraps every value in an
- * array, which would agree on `tag` while newly disagreeing on `page`.
+ * The runtime validates against `flattenRequestQueries`, which returns
+ * `values.length === 1 ? values[0] : values`, so a repeated key arrives as an
+ * ARRAY and a single occurrence as a string. The probe is
+ * `validateQuery`/`validateQuerySafe` specifically: `input()` takes the keyed
+ * `query(key)` form on both sides and could never fail here. The identity schema
+ * lets a wrong shape be compared rather than throwing 422, and both keys are
+ * asserted, since a repeated-only case passes under a mock that arrays every
+ * value.
  */
 describe('repeated query parameters', () => {
   const URL_UNDER_TEST = 'http://example.com/posts?tag=core&tag=framework&page=2'
@@ -916,15 +888,10 @@ describe('repeated query parameters', () => {
   })
 
   /**
-   * The same `__proto__` key as the raw-surface test below, but carried all
-   * the way through `validateQuery()` — the surface an application actually
-   * uses, and the one the flattening step sits on.
-   *
-   * Worth its own case because the two halves failed differently: a single
-   * `?__proto__=x` was silently dropped before reaching the schema, while a
-   * repeated one replaced the flattened record's prototype outright. Reading
-   * the raw `queries()` would have shown neither, because Hono hands the key
-   * over intact and only the flattening lost it.
+   * The same `__proto__` key as the raw-surface test below, carried through
+   * `validateQuery()` — the surface an application uses, and the one the
+   * flattening sits on. Reading the raw `queries()` shows nothing here: Hono
+   * hands the key over intact and only the flattening loses it.
    */
   it('validateQuery() keeps a __proto__ key in the mock and the runtime alike', async () => {
     const url = 'http://example.com/posts?__proto__=one&__proto__=two&page=2'
@@ -946,11 +913,8 @@ describe('repeated query parameters', () => {
   })
 
   it('honors a queries() override that reads `this`', () => {
-    // `queries?: () => Record<string, string[]>` is satisfied by a method as
-    // readily as by an arrow, so an override may legitimately read `this.url`.
-    // The shared rule is reached by handing it an object with a `queries`
-    // member; passing the bare `ctx.req.queries` reference would re-`this` it
-    // onto that object and read `undefined` — the receiver has to survive.
+    // An override may legitimately read `this.url`, so the receiver has to
+    // survive: passing the bare `ctx.req.queries` reference re-`this`es it.
     const full = createControllerContext(URL_UNDER_TEST)
     const withThisOverride = {
       ...full,
@@ -974,19 +938,10 @@ describe('repeated query parameters', () => {
   })
 
   /**
-   * A `__proto__` query key, which is where the mock's hand-rolled `query()`
-   * diverged from the runtime it was imitating.
-   *
-   * The copy built its record by assignment (`first[name] ??= value`), so the
-   * key hit `Object.prototype`'s inherited `__proto__` setter and the field
-   * vanished — a controller read it as absent while production read it as a
-   * value. Hono builds a null-prototype object, which has no setter to hit.
-   * Delegating to `HonoRequest` is what closes it; asserting against a real
-   * `Application.fetch()` is what keeps it closed.
-   *
-   * `queries()` never had the bug — it was already `Object.fromEntries`, which
-   * defines an own property — but it is asserted alongside so the pair cannot
-   * drift apart in the other direction either.
+   * A `__proto__` query key: a record built by assignment (`first[name] ??=
+   * value`) hits `Object.prototype`'s inherited setter and the field vanishes,
+   * where Hono's null-prototype object has no setter to hit. `queries()` is
+   * asserted alongside so the pair cannot drift apart the other way.
    */
   it('keeps a __proto__ query key in the mock and the runtime alike', async () => {
     const url = 'http://example.com/posts?__proto__=pwned&tag=core&tag=framework'
@@ -1019,14 +974,10 @@ describe('repeated query parameters', () => {
       queries: ctx.req.queries?.(),
     }
 
-    // Asserted concretely as well as for parity, so the two cannot agree on
-    // the wrong answer — `toEqual` alone would pass if both dropped the key.
-    //
-    // The expectations are built with `Object.fromEntries`, never as object
-    // literals: a bare `__proto__:` key in a literal sets the prototype rather
-    // than defining an own property, so `{ __proto__: 'pwned', tag: 'core' }`
-    // is just `{ tag: 'core' }` and this test would assert the bug it exists
-    // to catch. That is the same footgun the code under test hits.
+    // Asserted concretely as well as for parity: `toEqual` alone would pass if
+    // both sides dropped the key. The expectations use `Object.fromEntries`,
+    // never an object literal, where a bare `__proto__:` key sets the prototype
+    // instead of defining an own property — the footgun under test.
     expect(Object.hasOwn(fromMock.query as object, '__proto__')).toBe(true)
     expect(fromMock).toEqual({
       query: Object.fromEntries([
@@ -1048,19 +999,14 @@ describe('repeated query parameters', () => {
  *
  * The runtime's rule has two halves, and they are not the same rule:
  *
- * - JSON is a case-sensitive substring test. `parseRequestBody()` reaches
- *   `ctx.req.json()` through `contentType.includes('application/json')`, so
+ * - JSON is a case-sensitive substring test (`contentType.includes(...)`), so
  *   `application/json-evil` is read as JSON while `Application/JSON` is not.
- * - Everything else falls through to `ctx.req.parseBody()`, which compares
- *   the media type — `Content-Type` up to the first `;`, trimmed and
- *   lowercased — with `===`. So `Application/X-WWW-Form-Urlencoded` parses
- *   and `application/x-www-form-urlencoded-evil` does not.
+ * - Everything else falls through to `ctx.req.parseBody()`, which compares the
+ *   media type — up to the first `;`, trimmed and lowercased — with `===`, so
+ *   `Application/X-WWW-Form-Urlencoded` parses and a `-evil` suffix does not.
  *
- * A substring test on the form branches diverges in both directions at once,
- * which is why both directions are asserted here. Each case runs the same
- * request through the mock and through a real `Application.fetch()`, and
- * asserts the concrete value as well, so the pair cannot agree on the wrong
- * answer.
+ * A substring test on the form branches diverges in both directions at once, so
+ * both are asserted, concretely as well as for parity.
  */
 describe('body content-type recognition', () => {
   const FIELD = 'a'
@@ -1179,10 +1125,9 @@ describe('body content-type recognition', () => {
   }
 
   /**
-   * The same rule has to hold on the module's `parseRequestPayload`, not just
-   * on the class: a route contract's `body` and `validateRequest()` reach the
-   * body through that export and never touch a Controller instance, so an app
-   * that mocks `@guren/core` gets its contract validation from here.
+   * The same rule on the module's `parseRequestPayload`: a route contract's
+   * `body` and `validateRequest()` reach the body through that export and never
+   * touch a Controller instance.
    */
   it('parseRequestPayload applies the media-type rule in the mock and the runtime', async () => {
     const init = urlencoded('Application/X-WWW-Form-Urlencoded')
@@ -1216,10 +1161,8 @@ describe('body content-type recognition', () => {
   })
 
   /**
-   * `file()` reads the multipart body through a separate gate in both — the
-   * mock's `readMultipart()`, the runtime's `ctx.req.parseBody({ all: true })`
-   * — so the media-type rule has to hold there too, or an upload test passes
-   * against a file the runtime would have delivered (or missed).
+   * `file()` reads the multipart body through a separate gate on each side, so
+   * the media-type rule has to hold there too.
    */
   it('file() sees a mixed-case multipart media type in the mock and the runtime', async () => {
     const init: RequestInit = {
@@ -1271,15 +1214,11 @@ describe('body content-type recognition', () => {
   })
 
   /**
-   * A body the parser cannot read must reach the field helpers as `{}`, not
-   * as a throw. Both sides swallow it in `parseRequestBody` itself, so every
-   * caller inherits the fallback — the field helpers here and the exported
-   * `parseRequestPayload` alike.
-   *
-   * Both encodings are here because they fail differently: malformed JSON is
-   * caught by the JSON branch's own `.catch(() => ({}))`, while a multipart
-   * body with no boundary rejects out of the form parse and is caught by the
-   * fallback wrapping the whole function.
+   * An unreadable body must reach the field helpers as `{}`, not as a throw;
+   * both sides swallow it in `parseRequestBody`, so every caller inherits the
+   * fallback. Both encodings are here because they fail differently: malformed
+   * JSON in the JSON branch's own catch, a boundary-less multipart body in the
+   * catch wrapping the whole function.
    */
   const MALFORMED = [
     {
@@ -1312,44 +1251,22 @@ describe('body content-type recognition', () => {
 })
 
 /**
- * The runtime-versus-mock table for request bodies.
+ * The runtime-versus-mock table for request bodies: every row runs one request
+ * through a real `Application.fetch()` controller and a mocked one, which must
+ * answer the same thing. The suites either side exercise each implementation
+ * alone, and a test can only catch a disagreement it puts side by side.
  *
- * Every row runs one request through a real `Application.fetch()` controller
- * and through a mocked one, and both must answer the same thing. The suites
- * either side of this one exercise each implementation separately, which is
- * exactly why three divergences lived here unnoticed: a test can only catch a
- * disagreement it puts side by side.
+ * The axes the rows cover: **case** (Hono lowercases the media type before
+ * deciding), **parameters** (Hono compares against `contentType.split(';')[0]`,
+ * so a `;`-parameterized type is the form type while one merely mentioning it in
+ * a parameter is not), and **repeated fields** (Hono arrays only keys ending in
+ * `[]`, other repeats are last-wins, and the runtime then takes `value[0]`).
  *
- * What the rows are chosen to cover — the axes the two used to disagree on:
- *
- * - **Case.** Hono lowercases the media type before deciding; the mock tested
- *   the raw header with `includes()`, so `APPLICATION/X-WWW-FORM-URLENCODED`
- *   parsed in production and read as `{}` in a test.
- * - **Parameters.** Hono compares against `contentType.split(';')[0]`, so a
- *   `;`-parameterized type is the form type, while a type that merely mentions
- *   one in a parameter is not. The mock's substring test could not tell those
- *   apart.
- * - **Repeated fields.** Hono collects keys ending in `[]` into an array
- *   (other repeats are last-wins), and the runtime then takes `value[0]` —
- *   first wins. The mock's `Object.fromEntries(new URLSearchParams(...))` took
- *   the last.
- *
- * Two rows deserve their expectation spelled out, because both look wrong:
- *
- * - `APPLICATION/JSON` reads as `{}` on BOTH sides. The runtime's JSON branch
- *   is a case-sensitive `contentType.includes('application/json')` on the raw
- *   header, so an uppercase one misses it and falls through to Hono, which
- *   does not call it a form either. That is the runtime's behavior, and this
- *   table's job is to state it, not to improve it.
- * - `text/plain; profile=application/json` parses AS JSON, for the same
- *   reason read the other way: the substring is present. This is the one place
- *   the runtime is not Hono-normalized, and so the one row that would break
- *   first if the mock ever grew its own JSON test again.
- *
- * `text/plain; profile=application/x-www-form-urlencoded` is `{}` on both
- * sides today, but it is not a vacuous row: before the fix the mock reached
- * that `{}` by parsing the body as a form and the runtime by refusing it, so
- * the two agreed on this body and would have parted on the next one.
+ * Two expectations look wrong and are not. `APPLICATION/JSON` reads as `{}` on
+ * BOTH sides: the JSON branch is a case-sensitive substring test on the raw
+ * header, so an uppercase one misses it and Hono does not call it a form either.
+ * `text/plain; profile=application/json` parses AS JSON for the same reason read
+ * the other way, and is the one place the runtime is not Hono-normalized.
  */
 describe('request body parity', () => {
   const URL_UNDER_TEST = 'http://example.com/parity'
@@ -1476,11 +1393,8 @@ describe('request body parity', () => {
     },
   ]
 
-  /**
-   * Narrowed to the two fields it reads, so the direct `readMultipart()` cases
-   * below can call it with a content type and a body rather than padding out a
-   * whole row.
-   */
+  /** Narrowed to the two fields it reads, so `readMultipart()` cases below can
+   * call it without padding out a whole row. */
   function initFor(testCase: Pick<BodyCase, 'contentType' | 'body'>): RequestInit {
     return {
       method: 'POST',
@@ -1508,7 +1422,7 @@ describe('request body parity', () => {
 
   /**
    * One booted app serves every row. Lazy, like the rest of this package: the
-   * mock resolves @guren/server on demand so a suite that mocks it still gets
+   * mock resolves @guren/server on demand, so a suite that mocks it still gets
    * the real module here.
    */
   let runtimeApp: Promise<{ fetch: (request: Request) => Response | Promise<Response> }> | undefined
@@ -1521,14 +1435,11 @@ describe('request body parity', () => {
         }
       }
 
-      // Files cannot survive the JSON hop back, so the upload route answers
-      // with the projection the rows compare: which names `file()` and
-      // `files()` selected. Both helpers read the same field, so a row that
-      // moved one and not the other would show up as a disagreement.
+      // Files cannot survive the JSON hop back, so the route answers with what
+      // the rows compare: which names `file()` and `files()` selected.
       class UploadController extends Controller {
         async read() {
-          // Every row supplies `field`, so the parameter is always there; the
-          // fallback exists only because `query()` is typed as optional.
+          // The fallback exists only because `query()` is typed as optional.
           const field = this.ctx.req.query('field') ?? ''
           return this.json({
             file: (await this.file(field))?.name ?? null,
@@ -1562,13 +1473,9 @@ describe('request body parity', () => {
 
   /**
    * The runtime boxes its parse (`Controller.getRawBody`), so two reads in one
-   * action are handed the same object. The mock clones the request, so nothing
-   * forces it to re-read — but re-parsing is not the same answer: it hands out
-   * two objects where the runtime hands out one, and a schema that mutates what
-   * it validates then sees a different body on the second read.
-   *
-   * Identity is the probe because it is the only thing that separates one parse
-   * from two. Every row above reads each request once and so cannot see this.
+   * action get the same object; re-parsing hands out two, and a schema that
+   * mutates what it validates then sees a different body on the second read.
+   * Identity is the probe, and every row above reads each request once.
    */
   it('hands both reads of one body the same object, as the runtime does', async () => {
     const init: RequestInit = {
@@ -1614,41 +1521,22 @@ describe('request body parity', () => {
   })
 
   /**
-   * The same table for uploads, which travel a second read the rows above
-   * never touch: `file()` and `files()` do not go through the body parser at
-   * all. Both sides now call the runtime's `parseRequestUploads` — Hono's
-   * `parseBody({ all: true })` in a try/catch, with no media-type gate — so
-   * the axes that separated them are worth pinning as a pair.
+   * The same table for uploads, which travel a second read: `file()` and
+   * `files()` do not go through the body parser at all. Both sides call the
+   * runtime's `parseRequestUploads` — `parseBody({ all: true })` in a try/catch,
+   * with no media-type gate.
    *
-   * **What these rows guard is `{ all: true }`, on the runtime side** — see
-   * `parseRequestUploads` for why that flag is the contract. Two rows go red
-   * when it is dropped: the repeated plain field and the leading empty upload.
-   * The `doc[]` row does not, because Hono arrays a `[]`-suffixed key with or
-   * without the flag, so it pins that rule rather than this one. They belong
-   * here rather than with the body table's repeated-field rows, which pin the
-   * opposite behavior — the body parser *does* flatten.
+   * What these rows guard is `{ all: true }`: drop it and the repeated plain
+   * field and the leading empty upload go red. The `doc[]` row does not, since
+   * Hono arrays a `[]`-suffixed key either way.
    *
-   * **What they cannot catch is the mock reading uploads the old way**, and
-   * that is stated rather than left to be discovered. Run against the exact
-   * pre-change mock — gate on Hono's lowercased media type, then
-   * `Request.formData()` — every row here passes, the uppercase one included.
-   * `formData()`'s answer for `MULTIPART/FORM-DATA` depends on the host: Bun
-   * 1.3.14 rejects it, Bun 1.4.0 accepts it, Node always accepted it. Vitest
-   * runs this suite on Node, so the divergence the shared read exists to close
-   * (`file()` answering `null` for a file the runtime delivers) is invisible
-   * from here on every one of them. Measured across all three rather than
-   * assumed.
-   *
-   * So the uppercase row states a contract it cannot enforce, and the
-   * assertion that *can* fail on that axis lives in
-   * `packages/server/tests/http/request.test.ts`, whose suite runs on Bun.
-   * These rows are still the ones that keep the two implementations pinned to
-   * each other as the runtime's read changes — which is what the mutation
-   * above shows them doing.
-   *
-   * The delegation itself is not left to the uppercase axis, though: the two
-   * cases after this table observe `readMultipart()`'s shape directly, and
-   * both go red against the pre-change mock on any runtime.
+   * What they cannot catch is the mock reading uploads the old way. Measured:
+   * `Request.formData()`'s answer for `MULTIPART/FORM-DATA` depends on the host
+   * — Bun 1.3.14 rejects it, Bun 1.4.0 accepts it, Node always accepted it — and
+   * Vitest runs this suite on Node, so the uppercase row states a contract it
+   * cannot enforce here. The assertion that *can* fail on that axis lives in
+   * `packages/server/tests/http/request.test.ts`, which runs on Bun, and the two
+   * cases after this table observe `readMultipart()`'s shape directly.
    */
   interface UploadCase {
     name: string
@@ -1675,8 +1563,7 @@ describe('request body parity', () => {
       expected: { file: 'a.txt', files: ['a.txt'] },
     },
     {
-      // `{ all: true }`: every repeated key arrays, not only the `[]` ones,
-      // which is the whole difference between files() and one file.
+      // `{ all: true }` arrays every repeated key, not only the `[]` ones.
       name: 'a repeated file field, which files() sees every part of',
       contentType: `multipart/form-data; boundary=${BOUNDARY}`,
       body: multipartBody(BOUNDARY, [
@@ -1697,9 +1584,8 @@ describe('request body parity', () => {
       expected: { file: 'a.txt', files: ['a.txt', 'b.txt'] },
     },
     {
-      // file() takes the FIRST part and then requires it to be non-empty — a
-      // leading empty upload is `null`, not "skip to the next one" — while
-      // files() filters the empty one out and keeps the rest.
+      // file() takes the FIRST part and then requires it to be non-empty, so a
+      // leading empty upload is `null` rather than "skip to the next one".
       name: 'a leading empty upload, which file() refuses and files() skips',
       contentType: `multipart/form-data; boundary=${BOUNDARY}`,
       body: multipartBody(BOUNDARY, [
@@ -1771,22 +1657,11 @@ describe('request body parity', () => {
   }
 
   /**
-   * The rows above compare `file()` / `files()`, and on Node they cannot tell
-   * the shared read from the `Request.formData()` one it replaced — measured,
-   * and said at length in the comment on the table. These two do tell them
-   * apart, without needing Bun, by observing the thing that actually changed:
-   * `readMultipart()` answers with the runtime's `{ all: true }` record rather
-   * than a `FormData`, and it has no media-type gate to answer `null` from.
-   *
-   * That makes them the regression test for the delegation itself. Restore the
-   * pre-change mock and both go red on any runtime — the first because a
-   * `FormData` has no `doc` property, the second because a non-multipart body
-   * used to short-circuit to `null` before the parser ever ran.
-   *
-   * They read `readMultipart()` directly, which is unusual for this suite and
-   * deliberate: it is a published member, its shape is what this change alters,
-   * and a test that only went through `file()` would be back to observing an
-   * answer both implementations agree on.
+   * The regression test for the delegation itself, and the two cases that do not
+   * need Bun: `readMultipart()` answers with the runtime's `{ all: true }` record
+   * rather than a `FormData`, and has no media-type gate to answer `null` from.
+   * Read directly, deliberately — going through `file()` observes an answer both
+   * implementations agree on.
    */
   function mockControllerAt(contentType: string, body: BodyInit) {
     const { Controller } = createControllerModuleMock()
@@ -1816,9 +1691,8 @@ describe('request body parity', () => {
   it('has no media-type gate, so a non-multipart body reads as its fields', async () => {
     const controller = mockControllerAt('application/x-www-form-urlencoded', 'doc=Guren')
 
-    // `null` is what the gated implementation answered here. The runtime has
-    // no gate to answer it from, so the shared read parses the body and hands
-    // back its fields; `file()` still says null, because a string is not a File.
+    // With no gate, the shared read parses the body and hands back its fields;
+    // `file()` still says null, because a string is not a File.
     expect(await controller.readMultipart()).toEqual({ doc: 'Guren' })
     expect(await controller.file('doc')).toBeNull()
   })

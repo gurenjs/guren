@@ -3,9 +3,8 @@ import { configureOrm, isWorkersRuntime, seedDatabase } from './database.js'
 let bootstrapped = false
 
 async function hasMigrations(): Promise<boolean> {
-  // On Workers there is no filesystem to probe — migrations are applied
-  // out-of-band with `wrangler d1 migrations apply` and the ORM simply
-  // connects to the already-migrated database.
+  // No filesystem on Workers: migrations are applied out-of-band with
+  // `wrangler d1 migrations apply`.
   if (isWorkersRuntime()) {
     return true
   }
@@ -41,10 +40,9 @@ export async function bootModels(): Promise<void> {
 
   try {
     await configureOrm()
-    // D1 seeding is a CLI workflow (`wrangler d1 execute`); the factory's
-    // seedDatabase() intentionally throws on Workers. Seeding is also one-shot
-    // provisioning rather than part of booting, so it stays out of production
-    // boots on every runtime — run `bun run db:seed` explicitly instead.
+    // D1 seeding is a CLI workflow (`wrangler d1 execute`) and seedDatabase()
+    // throws on Workers. One-shot provisioning, not part of booting, so it stays
+    // out of production boots on every runtime: run `bun run db:seed`.
     if (!isWorkersRuntime() && process.env.NODE_ENV !== 'production') {
       await seedDatabase()
     }

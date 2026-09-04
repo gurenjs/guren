@@ -5,9 +5,8 @@ import { tmpdir } from 'node:os'
 import { createFreshContextApi } from '../src/fresh-context'
 import { loadRouteDefinitions } from '../src/load-routes'
 
-// These tests spawn the real CLI, so they are slower than the rest of the
-// suite by design — running a child process is the whole behaviour under
-// test. Fixtures import `Router` as a type only, so the temp app needs no
+// Spawning the real CLI is the behaviour under test, so these are slow by
+// design. Fixtures import `Router` as a type only, so the temp app needs no
 // resolvable node_modules (same trick as load-routes.test.ts).
 
 const ROUTES_HEADER = `import type { Router } from '@guren/core'\n`
@@ -41,9 +40,8 @@ describe('createFreshContextApi', () => {
     expect(ctx.routes.map((route) => route.name)).toEqual(['posts.index'])
   }, 60_000)
 
-  // The regression this module exists for: an in-process second call keeps
-  // returning the module graph captured by the first one, because Bun keys
-  // `.ts` modules on the resolved path and never re-evaluates them.
+  // Bun keys `.ts` modules on the resolved path and never re-evaluates them,
+  // so an in-process second call returns the first call's module graph.
   it('picks up an edit to the routes file that an in-process reload misses', async () => {
     const file = join(tempDir, 'routes/web.ts')
     const api = createFreshContextApi()
@@ -72,9 +70,8 @@ describe('createFreshContextApi', () => {
     await expect(promise).rejects.toThrow(/NoSuchThing/u)
   }, 60_000)
 
-  // The child's stdout is not ours alone: anything the routes graph imports
-  // can log to it while being evaluated (@guren/orm's duplicate-copy warning
-  // does exactly this), which would otherwise break the parse.
+  // Anything the routes graph imports can log to the child's stdout while
+  // being evaluated (@guren/orm's duplicate-copy warning does).
   it('parses the payload even when a loaded module logs to stdout', async () => {
     await writeFile(
       join(tempDir, 'routes/web.ts'),
@@ -86,11 +83,8 @@ describe('createFreshContextApi', () => {
     expect(ctx.routes.map((route) => route.name)).toEqual(['posts.index'])
   }, 60_000)
 
-  // A noise line that itself starts with `{` (a JSON logger, a stray
-  // `console.log(someObject)`) would fool a "first line starting with {"
-  // extraction into slicing from the noise instead of the real payload —
-  // the real payload is always the *last* such line, since nothing runs
-  // after displayContext()'s single closing console.log.
+  // The payload is the *last* line starting with `{` — nothing runs after
+  // displayContext()'s closing console.log — not the first.
   it('parses the payload even when the stdout noise itself looks like JSON', async () => {
     await writeFile(
       join(tempDir, 'routes/web.ts'),

@@ -11,9 +11,8 @@ import {
   toPosixRelative,
 } from './discovery'
 
-// docs-index is the package's doc-scanning facade: the parsers live in
-// their own modules, but consumers (and the public index) reach them
-// from here.
+// The package's doc-scanning facade: the parsers live in their own modules,
+// but consumers (and the public index) reach them from here.
 export {
   parseDocFrontmatter,
   type DocFrontmatterValue,
@@ -32,15 +31,11 @@ export interface DocActorEvent {
 }
 
 /**
- * A markdown document under `docs/` (or `modules/<name>/docs/`) with its
- * parsed frontmatter — an OKF (Open Knowledge Format v0.2) concept
- * document. OKF requires only `type`; `title`/`description`/`resource`/
- * `tags` are its recommended fields, `generated`/`verified`/`status`/
- * `stale_after` its trust and lifecycle families, and `entities`/`related`
- * are Guren's producer extensions. The reserved filenames `index.md` and
- * `log.md` are never concepts and are excluded from the scan. Documents
- * without frontmatter are still listed (`hasFrontmatter: false`) but
- * never linked.
+ * A markdown document under `docs/` (or `modules/<name>/docs/`) with its parsed
+ * frontmatter — an OKF (Open Knowledge Format v0.2) concept document. OKF
+ * requires only `type`; `entities`/`related` are Guren's producer extensions.
+ * The reserved filenames `index.md` and `log.md` are excluded from the scan.
+ * Documents without frontmatter are still listed but never linked.
  */
 export interface DocRef {
   /** Path relative to the app root (POSIX separators). */
@@ -69,8 +64,7 @@ export interface DocRef {
   staleAfter?: string
   /**
    * Local markdown link targets in the body — OKF's relation mechanism.
-   * External links, bare anchors, and links inside code are excluded;
-   * fragments are stripped.
+   * External links, bare anchors and links inside code are excluded.
    */
   links: string[]
   hasFrontmatter: boolean
@@ -92,19 +86,15 @@ function toScalar(value: DocFrontmatterValue | undefined): string | undefined {
 
 
 function toActorEvent(value: DocFrontmatterValue | undefined): DocActorEvent | undefined {
-  // Mapping recognition belongs to the parser: by the time a value gets
-  // here every `{ … }` is already a DocMapping, so a string is one the
-  // parser judged a plain scalar (a quoted one, say) and re-parsing it
-  // would override that.
+  // Mapping recognition belongs to the parser: a string reaching here is one
+  // the parser judged a plain scalar, and re-parsing it would override that.
   if (value === undefined || typeof value === 'string' || Array.isArray(value)) return undefined
   return { by: value.by, at: value.at }
 }
 
 /**
- * OKF `verified` accepts a list of `{ by, at }` mappings or a bare
- * mapping; consumers must treat the bare form as a one-element list
- * (§5.2). Both the inline (`{ … }`) and block (indented) YAML forms
- * reach here.
+ * OKF `verified` accepts a list of `{ by, at }` mappings or a bare mapping;
+ * consumers must treat the bare form as a one-element list (§5.2).
  */
 function toActorEvents(value: DocFrontmatterValue | undefined): DocActorEvent[] {
   if (value === undefined) return []
@@ -145,9 +135,8 @@ export async function scanDocs(cwd: string): Promise<DocRef[]> {
               related: toStringList(data.related),
               generated: toActorEvent(data.generated),
               verified: toActorEvents(data.verified),
-              // Present but not a scalar (`stale_after:` with no value)
-              // becomes '' so the checker can flag it rather than read
-              // it as absent.
+              // Present but not a scalar becomes '' so the checker can flag it
+              // rather than read it as absent.
               staleAfter:
                 'stale_after' in data ? (toScalar(data.stale_after) ?? '') : undefined,
               links: parsed ? extractMarkdownLinks(body) : [],
@@ -181,10 +170,9 @@ export function buildEntityDocIndex(refs: DocRef[]): Map<string, DocRef[]> {
 const DOCS_TAG_REGEX = /@docs\s+([^\s*'"`)]+)/g
 
 /**
- * `@docs <path>` tags in a source file — the code-side half of the doc
- * link. Regex-based like the inertia page scan (a tag in a string literal
- * is a false positive we accept); paths are app-root-relative by
- * convention.
+ * `@docs <path>` tags in a source file — the code-side half of the doc link.
+ * Regex-based like the inertia page scan, so a tag in a string literal is a
+ * false positive we accept; paths are app-root-relative by convention.
  */
 export function extractDocsTags(source: string): string[] {
   const tags = new Set<string>()

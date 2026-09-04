@@ -7,12 +7,9 @@ import { defaultSanitizeOptions } from './sanitize'
 import { createSlugger } from './slugger'
 
 /**
- * Code-fence highlighter. Receives the fence body and the (possibly absent)
- * language tag. A result that begins with `<pre` is treated as a complete
- * code block and emitted as-is (shiki's shape — properly escaped inner HTML
- * can never start with a literal `<`); anything else is wrapped in the
- * default `<pre><code>`. `createShikiHighlight` from
- * `@guren/plugin-markdown/shiki` produces one; any compatible function works.
+ * Code-fence highlighter. A result beginning with `<pre` is emitted as-is
+ * (shiki's shape — properly escaped inner HTML can never start with a literal
+ * `<`); anything else is wrapped in the default `<pre><code>`.
  */
 export type HighlightFn = (code: string, lang?: string) => string | Promise<string>
 
@@ -29,11 +26,9 @@ export interface MarkdownRendererOptions {
   /** GitHub-style `> [!NOTE]` blockquote alerts. Default true. */
   alerts?: boolean
   /**
-   * Label text per alert type (default: `Note`, `Tip`, `Important`,
-   * `Warning`, `Caution`). For i18n or a different vocabulary — several
-   * types may share one label. Class names are unaffected. Labels render as
-   * text (HTML-escaped); an explicit empty string suppresses the label text,
-   * while omitted types keep their default label.
+   * Label text per alert type, for i18n or a different vocabulary. Class names
+   * are unaffected; an explicit empty string empties the label, an omitted type
+   * keeps its default.
    */
   alertLabels?: Partial<Record<AlertType, string>>
   /** Heading `id` attributes via the hardened slugger. Default true. */
@@ -42,8 +37,8 @@ export interface MarkdownRendererOptions {
   rewriteLink?: (href: string) => string
   /**
    * Rewrite every image `src` before rendering. Separate from `rewriteLink`
-   * because the two resolve against different roots in practice: a markdown
-   * link points at another document, an image at a served asset.
+   * because the two resolve against different roots: a link points at another
+   * document, an image at a served asset.
    */
   rewriteImage?: (src: string) => string
   /** Optional code-fence highlighter. Without it, fences render as plain `<pre><code>`. */
@@ -55,13 +50,11 @@ export interface MarkdownRenderer {
 }
 
 /**
- * Builds a markdown → HTML renderer with the RFC 0012 defaults: GFM,
- * sanitized output, alerts, and heading anchors.
- *
- * `render()` is a pure async function of its input: per-render state (the
- * slug uniqueness map, the `Marked` instance) is created inside the call, so
- * one renderer is safe under concurrent requests. Whether the app renders at
- * save time or request time is the app's choice — there is no cache here.
+ * Builds a markdown → HTML renderer with the RFC 0012 defaults: GFM, sanitized
+ * output, alerts, heading anchors. `render()` is a pure async function of its
+ * input — per-render state (the slug map, the `Marked` instance) is created
+ * inside the call — so one renderer is safe under concurrent requests, and
+ * nothing is cached.
  */
 export function createMarkdownRenderer(options: MarkdownRendererOptions = {}): MarkdownRenderer {
   const {
@@ -82,26 +75,22 @@ export function createMarkdownRenderer(options: MarkdownRendererOptions = {}): M
         ? sanitize(defaultSanitizeOptions())
         : defaultSanitizeOptions()
 
-  // Extensions that capture no per-render state, built once and shared:
-  // marked's use() only reads them, and token mutation is scoped to each
-  // parse. Only the heading renderer is per-render (it owns the slug map).
+  // Extensions capturing no per-render state, built once and shared. Only the
+  // heading renderer is per-render: it owns the slug map.
   const staticExtensions: MarkedExtension[] = []
   if (highlight) {
     staticExtensions.push(
       markedHighlight({
         async: true,
-        // The wrapper is load-bearing: HighlightFn may return a plain
-        // string, while the async marked-highlight overload requires a
-        // Promise.
+        // HighlightFn may return a plain string; the async marked-highlight
+        // overload requires a Promise.
         highlight: async (code: string, lang?: string) => highlight(code, lang),
       }),
       {
         renderer: {
           // Block-level highlighters (shiki) return a complete <pre> block;
-          // wrapping that in the default <pre><code> again nests two code
-          // blocks. Emit it unwrapped; anything else falls through to the
-          // default renderer (`false`), which marked-highlight has already
-          // marked as escaped.
+          // wrapping it again nests two code blocks. `false` falls through to
+          // the default renderer, which already treats the text as escaped.
           code({ text }: Tokens.Code) {
             return text.startsWith('<pre') ? `${text}\n` : false
           },

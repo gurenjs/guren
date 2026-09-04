@@ -265,10 +265,9 @@ describe('readBearerToken', () => {
   })
 
   // The header is parsed before any authentication, so its cost must stay
-  // linear in the length an unauthenticated caller controls. `\\s+(.+)` was
-  // quadratic on this shape: the separator and the token could both match a
-  // space, and the trailing newline made `$` unreachable, so every split of
-  // the whitespace run was retried.
+  // linear in the length an unauthenticated caller controls: with `\s+(.+)`
+  // the trailing newline makes `$` unreachable and every split of the
+  // whitespace run is retried.
   it('stays linear on a header built to backtrack', () => {
     const header = `Bearer${' '.repeat(50_000)}\n`
 
@@ -313,7 +312,7 @@ describe('verifyApiToken', () => {
     const { plainTextToken } = await createApiToken(store, {
       name: 'Test Token',
       userId: 1,
-      expiresIn: -1000, // Already expired
+      expiresIn: -1000,
     })
 
     const result = await verifyApiToken(plainTextToken, store)
@@ -321,9 +320,8 @@ describe('verifyApiToken', () => {
   })
 
   it('returns null when the stored expiry is unparseable', async () => {
-    // Not reachable through a store's deserialization guards: this is a record
-    // already in memory, which is what every custom or Memory-backed store
-    // hands verifyApiToken. Comparing the Date directly would read an Invalid
+    // A store hands verifyApiToken an in-memory record, so no deserialization
+    // guard can catch this. Comparing the Date directly would read an Invalid
     // Date as "not past" and authenticate the token forever.
     const { plainTextToken, token } = await createApiToken(store, {
       name: 'Test Token',

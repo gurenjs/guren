@@ -8,7 +8,7 @@ Guren は、時間のかかるタスクをバックグラウンドで処理す�
 
 - **Job** – 非同期で処理される作業単位をカプセル化したクラス。`handle()`メソッドを定義し、リトライ動作を指定できます。
 - **Worker** – キューからジョブを取得して実行する長時間実行プロセス。リトライ、失敗、グレースフルシャットダウンを処理します。
-- **Driver** – ジョブのストレージバックエンド。GurenにはMemoryとRedisドライバが付属しています。
+- **Driver** – ジョブのストレージバックエンド。GurenにはSync、Memory、Redisドライバが付属しています。
 - **QueueManager** – 複数のキュードライバを設定・アクセスするための中央レジストリ。
 
 ディスパッチとワーカーは別々のプロセスで、キューを挟んで非同期に動きます。リクエストはジョブを積んだ時点で返り、実行はワーカーの都合で後から行われます。
@@ -319,6 +319,21 @@ const queue = createQueueManager({
 })
 
 const driver = queue.driver()
+```
+
+### Syncドライバ
+
+Syncドライバはディスパッチしたプロセス内でジョブをその場で実行するため、ワーカーは不要です。開発環境のデフォルト（`QUEUE_CONNECTION=sync`）で、失敗は`dispatch()`の呼び出しからそのまま送出されます。
+
+Syncキューには待ち行列が無いため、リトライのバックオフは適用されません。Syncドライバへ戻されたジョブは、`backoff`戦略が算出する遅延に関係なく即座に再実行されます。リトライのタイミングを確認したい場合はMemoryまたはRedisドライバとワーカーを使用してください。
+
+```ts
+import { createQueueManager, SyncDriver } from '@guren/core'
+
+const queue = createQueueManager({
+  default: 'sync',
+  drivers: { sync: () => new SyncDriver() },
+})
 ```
 
 ## 失敗したジョブ

@@ -1,6 +1,5 @@
 import { describe, test, expect, beforeEach } from 'bun:test'
 import {
-  // Encrypter
   Encrypter,
   generateKey,
   setEncrypter,
@@ -13,7 +12,6 @@ import {
   MessageSigner,
   signUrl,
   verifySignedUrl,
-  // Hash
   hash,
   hmac,
   verifyHmac,
@@ -25,7 +23,6 @@ import {
   needsRehash,
   secureCompare,
   check,
-  // Random
   randomString,
   random,
   randomHex,
@@ -41,10 +38,6 @@ import {
   pick,
   sample,
 } from '../../src/encryption'
-
-// ===================
-// Encrypter Tests
-// ===================
 
 describe('Encrypter', () => {
   let encrypter: Encrypter
@@ -137,16 +130,13 @@ describe('Encrypter', () => {
 
     test('fails with tampered data', () => {
       const encrypted = encrypter.encrypt('secret')
-      // Tamper with base64
       const tampered = encrypted.slice(0, -4) + 'XXXX'
 
       expect(() => encrypter.decrypt(tampered)).toThrow()
     })
 
-    // Node and Bun accept 4-byte GCM tags and `setAuthTag()` adopts whatever
-    // length it is handed, so a payload rewritten with a truncated tag would
-    // drop forgery resistance from 2^128 to 2^32. Nothing this class writes
-    // has a short tag, so requiring the full 16 bytes rejects only rewrites.
+    // `setAuthTag()` adopts whatever length it is handed and Node and Bun accept 4-byte GCM
+    // tags, so a rewritten payload would drop forgery resistance from 2^128 to 2^32.
     test('refuses a payload whose authentication tag has been truncated', () => {
       const encrypted = encrypter.encrypt('secret')
       const payload = JSON.parse(Buffer.from(encrypted, 'base64').toString('utf8'))
@@ -216,15 +206,11 @@ describe('Encrypter', () => {
   })
 })
 
-// ===================
-// Hash Tests
-// ===================
-
 describe('Hash', () => {
   describe('hash', () => {
     test('creates SHA-256 hash by default', () => {
       const result = hash('hello')
-      expect(result).toHaveLength(64) // 32 bytes = 64 hex chars
+      expect(result).toHaveLength(64)
     })
 
     test('creates consistent hashes', () => {
@@ -328,10 +314,6 @@ describe('Hash', () => {
   })
 })
 
-// ===================
-// Password Hash Tests
-// ===================
-
 describe('Password Hashing', () => {
   describe('hashPassword', () => {
     test('creates password hash', async () => {
@@ -379,10 +361,6 @@ describe('Password Hashing', () => {
   })
 })
 
-// ===================
-// Random Tests
-// ===================
-
 describe('Random', () => {
   describe('randomString', () => {
     test('generates string of correct length', () => {
@@ -421,7 +399,7 @@ describe('Random', () => {
 
     test('randomHex generates hex string', () => {
       const hex = randomHex(16)
-      expect(hex).toHaveLength(32) // 16 bytes = 32 hex chars
+      expect(hex).toHaveLength(32)
       expect(hex).toMatch(/^[0-9a-f]+$/)
     })
 
@@ -474,7 +452,6 @@ describe('Random', () => {
     })
 
     test('includes all character types by default', () => {
-      // Generate many passwords to ensure coverage
       const passwords = Array.from({ length: 50 }, () => generatePassword(32))
       const combined = passwords.join('')
 

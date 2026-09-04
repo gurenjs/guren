@@ -62,14 +62,7 @@ const factory = definePlugin<VercelPluginConfig>({
   register() {},
 })
 
-/**
- * Register the Vercel plugin.
- *
- * @example
- * ```typescript
- * createApp({ providers: [vercelPlugin()] })
- * ```
- */
+/** Register the Vercel plugin. */
 export function vercelPlugin(config: VercelPluginConfig = {}): ServiceProviderConstructor {
   return factory(config)
 }
@@ -99,8 +92,8 @@ export async function buildVercelOutput(options: BuildVercelOutputOptions = {}):
   // must not take the previous deploy output with it.
   assertOutputDirOutsideRoot(out, root, LABEL)
 
-  // Checked here rather than left to the spawned `bun build`, which only
-  // fails after the previous output is gone.
+  // Checked here rather than left to the bundler, which only fails after the
+  // previous output is gone.
   if (!existsSync(entrypoint)) {
     throw new Error(
       `${LABEL}: entrypoint not found at ${entrypoint}. Run \`bunx guren plugin @guren/plugin-vercel\` to scaffold src/vercel.ts, or pass "entrypoint".`,
@@ -122,33 +115,26 @@ export async function buildVercelOutput(options: BuildVercelOutputOptions = {}):
         routes: [
           // Built assets self-reference the Vite plugin's derived base,
           // `/public/assets/`, while the files themselves are copied to the
-          // output root. Without this the entry script still loads — its path
-          // is injected directly — but every chunk it imports falls through
-          // to the function and comes back as HTML.
-          //
-          // A `rewrites` entry in vercel.json only covers builds Vercel runs
-          // itself; a `--prebuilt` upload is routed by this file alone, which
-          // is the flow the deployment guide documents.
+          // output root. Without this every chunk the entry imports falls
+          // through to the function and comes back as HTML. A `rewrites` entry
+          // in vercel.json only covers builds Vercel runs itself; a
+          // `--prebuilt` upload is routed by this file alone.
           { src: '/public/(.*)', dest: '/$1' },
           { handle: 'filesystem' },
           { src: '/(.*)', dest: '/index' },
-          // Everything below runs only once a build match was found, and is
-          // matched against the *resolved* destination rather than the
-          // requested path (vercel's dev router passes getReqUrl(routeResult),
-          // i.e. routeResult.dest). Both halves matter: a request the CDN
-          // answered keeps its own path and matches, while one that fell
-          // through the rule above arrives here as "/index" and cannot. In the
-          // initial phase the same pattern would match either, so a dynamic
-          // /sitemap.xml would come back as a download.
+          // Runs only once a build match was found, and matches the *resolved*
+          // destination rather than the requested path (vercel's dev router
+          // passes routeResult.dest): a CDN-answered request keeps its own path
+          // and matches, one that fell through arrives as "/index" and cannot.
+          // In the initial phase a dynamic /sitemap.xml would be a download.
           { handle: 'hit' },
           {
             src: documentAssetPattern(),
             headers: { ...DOCUMENT_ASSET_HEADERS },
             // Required of every route after `handle: 'hit'`, which also
-            // forbids `dest` and `status` — the phase exists to decorate a
-            // response, not to route one. A header the function already set is
-            // left alone in this phase, so a route serving its own
-            // Content-Disposition keeps it.
+            // forbids `dest` and `status`. A header the function already set is
+            // left alone here, so a route serving its own Content-Disposition
+            // keeps it.
             continue: true,
           },
         ],
@@ -208,16 +194,11 @@ export async function buildVercelOutput(options: BuildVercelOutputOptions = {}):
 
 /**
  * Matches a staged path whose extension a browser would render as a document.
- *
  * The CDN serves `.vercel/output/static` ahead of the function, so the
- * framework's own guard never sees these files. This is the same policy
- * expressed in the one place that still reaches them.
- *
- * Spelled with a character class per letter because Vercel compiles `src`
- * case-sensitively: a plain extension would leave logo.SVG inline, while the
- * framework guard lowercases before its mime lookup and catches it. An inline
- * case-insensitive flag is not an option, because `src` is validated by
- * constructing a JavaScript `RegExp` from it.
+ * framework's own guard never sees these files. Spelled with a character class
+ * per letter because Vercel compiles `src` case-sensitively (a plain extension
+ * would leave logo.SVG inline) and validates it by constructing a JavaScript
+ * `RegExp`, which rules out an inline case-insensitive flag.
  */
 function documentAssetPattern(): string {
   const alternatives = DOCUMENT_ASSET_EXTENSIONS.map((extension) =>
@@ -231,18 +212,12 @@ const MCP_UNAVAILABLE =
   'The MCP endpoint is unavailable on Vercel — it generates files on disk, and the function filesystem is read-only.'
 
 /**
- * Why each dev-only module cannot run here, or `null` for one that can and is
- * therefore left alone.
+ * Why each dev-only module cannot run here, or `null` for one that can.
  *
- * `sqlite` is the `null`, and it is written as an entry rather than filtered
- * out somewhere else so the decision sits where the reason does: the function
- * runs on Vercel's Bun runtime, so `bun:sqlite` is a working database here —
- * unlike on Workers and Lambda, whose tables name a replacement for it.
- * Stubbing it would break an app that ships a read-only sqlite file beside
- * its function.
- *
- * Keyed on every kind `DEV_ONLY_MODULES` contains, so a kind added there is a
- * compile error here rather than a module that silently stubs to `undefined`.
+ * `sqlite` is the `null`: the function runs on Vercel's Bun runtime, so
+ * `bun:sqlite` is a working database here, and stubbing it would break an app
+ * that ships a read-only sqlite file beside its function. Keyed on every kind
+ * `DEV_ONLY_MODULES` contains, so a kind added there is a compile error here.
  */
 const UNAVAILABLE_ON_VERCEL: Record<(typeof DEV_ONLY_MODULES)[number]['kind'], string | null> = {
   sqlite: null,
@@ -251,25 +226,13 @@ const UNAVAILABLE_ON_VERCEL: Record<(typeof DEV_ONLY_MODULES)[number]['kind'], s
 }
 
 /**
- * Modules replaced with throwing stubs, in the order they are matched.
- *
- * Two separate reasons, both of them the same defect shape — a *literal*
- * dynamic import of a package the app never installed, which a bundler
- * follows whether or not the branch can be taken:
- *
- * - The dev-only ones. A scaffolded app could not be bundled for Vercel at
- *   all: the disabled MCP endpoint's `import("@guren/cli")` resolves, and the
- *   CLI's own `import("@guren/openapi")` behind it does not. Lambda never saw
- *   this because it has stubbed these since it shipped.
- * - The database clients for dialects the app does not use, decided per app
- *   rather than per platform — the ones it *does* use are load-bearing here,
- *   unlike on Workers where D1 is the only database.
- *
- * The dev-only set is per app in one respect too: an app declaring
- * `@guren/plugin-mcp` serves the App MCP endpoint from this function, so its
- * transport must reach the bundle (RFC 0016 §7). The *Dev* MCP's `McpServer`
- * and the CLI behind it stay stubbed regardless — see
- * `stubbableDevOnlyModules`.
+ * Modules replaced with throwing stubs, in the order they are matched. Both
+ * sets are one defect shape — a *literal* dynamic import of a package the app
+ * never installed, which a bundler follows whether or not the branch can be
+ * taken: the dev-only modules, and the SQL clients for dialects this app does
+ * not use. An app declaring `@guren/plugin-mcp` serves the App MCP endpoint
+ * from this function, so its transport must reach the bundle (RFC 0016 §7);
+ * the *Dev* MCP's `McpServer` and the CLI behind it stay stubbed regardless.
  */
 function stubbedModules(
   root: string,
@@ -291,16 +254,10 @@ function stubbedModules(
 
 /**
  * Fallback for an MCP SDK subpath `DEV_ONLY_MODULES` does not name. It cannot
- * know which names the importer destructures, so it throws on evaluation
- * rather than resolving to an empty module: a subpath reached from app code
- * (not Guren's disabled MCP endpoint) must fail loudly at build or cold start,
- * never silently hand back missing exports.
- *
- * Reachable only for an app that does *not* declare `@guren/plugin-mcp`. For
- * one that does, the SDK is a dependency it deliberately ships, and this
- * fallback would stub `server/index.js` and `types.js` — which
- * `@guren/plugin-mcp` imports statically — leaving the endpoint just as
- * compiled shut as the transport stub did.
+ * know which names the importer destructures, so it throws on evaluation rather
+ * than resolving to an empty module. Reachable only for an app that does *not*
+ * declare `@guren/plugin-mcp`, whose statically imported `server/index.js` and
+ * `types.js` this would otherwise leave compiled shut.
  */
 const unlistedMcpStub = `throw new Error(${JSON.stringify(MCP_UNAVAILABLE)})\n`
 
@@ -308,19 +265,12 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-// Derived from the stubs actually rendered so it stays the only enumeration
-// of stubbed specifiers — a hand-maintained regex could silently fall out of
-// sync, and a specifier that is filtered but has no stub would load as an
-// empty module instead of failing.
-//
-// The catch-all is the one term that cannot be derived from the stubs, and
-// the tempting derivation is actively wrong: "include it while any MCP SDK
-// subpath is still stubbed" holds always, because
-// `@modelcontextprotocol/sdk/server/mcp.js` stays stubbed for every app —
-// so the catch-all would keep swallowing `server/index.js` and `types.js`
-// and undo RFC 0016 Phase 4a silently. So it is gated on the same `mcpPlugin`
-// decision that produced the stubs, threaded from one read of the app's
-// manifest rather than re-derived here.
+// Derived from the stubs actually rendered, so it stays the only enumeration
+// of stubbed specifiers. The catch-all cannot be derived the same way: "include
+// it while any MCP SDK subpath is stubbed" holds always (`server/mcp.js` stays
+// stubbed for every app), so it would keep swallowing `server/index.js` and
+// `types.js` and undo RFC 0016 Phase 4a silently. It is gated on the same
+// `mcpPlugin` decision that produced the stubs instead.
 function stubFilter(stubs: Record<string, string>, mcpPlugin: boolean): RegExp {
   const terms = Object.keys(stubs).map(escapeRegExp)
   if (!mcpPlugin) {
@@ -345,42 +295,35 @@ async function bundleFunction(input: {
   viteManifest: string | undefined
 }): Promise<void> {
   // One read of the app's manifest, threaded to both halves of the stub
-  // decision: which modules are rendered, and whether unlisted MCP SDK
-  // subpaths are swallowed by the catch-all. Two independent reads would be
-  // two places for them to disagree, silently.
+  // decision: which modules are rendered, and whether unlisted MCP SDK subpaths
+  // are swallowed by the catch-all. Two reads could disagree silently.
   const mcpPlugin = appUsesMcpPlugin(input.root)
   const stubs = stubbedModules(input.root, input.dialects, mcpPlugin)
   const filter = stubFilter(stubs, mcpPlugin)
 
   const result = await Bun.build({
     entrypoints: [input.entrypoint],
-    // `Bun.build` rejects with a bare "Bundle failed" AggregateError by
-    // default (Bun >= 1.2), which discards the one line that matters — the
-    // module it could not resolve. Opting out of that is what makes the
-    // `result.logs` report below reachable at all.
+    // `Bun.build` rejects with a bare "Bundle failed" AggregateError by default
+    // (Bun >= 1.2), discarding the module it could not resolve — opting out is
+    // what makes the `result.logs` report below reachable.
     throw: false,
     outdir: input.funcDir,
     target: 'bun',
-    // Whitespace and syntax only — never plain `minify: true`, which also
-    // mangles identifiers. Guren keys durable records on class names: the
-    // queue registry stores each job's wire name (its class name unless it
-    // declares a jobName) in every queued message, and notifications persist
-    // `constructor.name` as their `type`. Mangled, a job dispatched by one
-    // deploy resolves to nothing after the next.
-    //
-    // Not `keepNames`: as of Bun 1.3.14 it is accepted and silently leaves
-    // class names mangled, so it cannot replace this.
+    // Whitespace and syntax only — plain `minify: true` also mangles
+    // identifiers, and Guren keys durable records on class names (the queue
+    // registry stores each job's wire name in every queued message,
+    // notifications persist `constructor.name` as their `type`). Not
+    // `keepNames`: as of Bun 1.3.14 it silently leaves class names mangled.
     minify: { whitespace: true, syntax: true, identifiers: false },
     define: {
       // `bun build` inlines `process.env.NODE_ENV` at bundle time (defaulting
       // to "development"), so pin it to "production" for the deployed function.
       'process.env.NODE_ENV': '"production"',
       // viteAsset() resolves content-page assets from the client manifest at
-      // render time; substitute the read with the manifest JSON so the
-      // function needs neither the file nor environment configuration. A
-      // `define` matches one exact expression — @guren/server pins the read's
-      // form at the source level (tests/env-gate-form.test.ts) so this cannot
-      // silently stop matching.
+      // render time; substituting the read means the function needs neither the
+      // file nor environment configuration. A `define` matches one exact
+      // expression — @guren/server pins the read's form at the source level
+      // (tests/env-gate-form.test.ts).
       ...(input.viteManifest
         ? { 'process.env.GUREN_VITE_MANIFEST': JSON.stringify(input.viteManifest) }
         : {}),

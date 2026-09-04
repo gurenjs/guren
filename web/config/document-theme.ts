@@ -1,16 +1,13 @@
-// Markup inlined into the server-rendered document `<head>`. Imported by
-// `src/app.ts` (Inertia documents) and `app/View/Layout.tsx` (`view()`
-// documents) — both server-only. Keeping these strings out of `theme.ts`
-// keeps them out of the client bundle, where they would ship on every page
-// and never be read.
+// Markup inlined into the server-rendered document `<head>`, by `src/app.ts`
+// and `app/View/Layout.tsx` — both server-only. Kept out of `theme.ts` so these
+// strings stay out of the client bundle, where they would never be read.
 
 import { COLOR_MODE_STORAGE_KEY, LIGHT_SURFACE_BODY_CLASS } from './theme.js'
 
 /**
  * Surface and text colors for the first paint, inlined ahead of the stylesheet
- * links. Duplicates the `--docs-surface-page` / `--docs-text-primary` values
- * from `resources/css/app.css` — CSS custom properties cannot be read from TS,
- * so retheming the docs surface means editing both files.
+ * links. Duplicates `--docs-surface-page` / `--docs-text-primary` from
+ * `resources/css/app.css`, which TS cannot read: retheme both files.
  */
 const SURFACE_CSS = `
 html,body{background:#ffffff;color:#1f2937;}
@@ -30,9 +27,9 @@ const SIZE_UTILITIES = `
 export const LIGHT_SURFACE_CRITICAL_CSS = `${SURFACE_CSS}${SIZE_UTILITIES}`
 
 /**
- * Favicon links, site-wide — the framework has no default of its own. The
- * structured form is the source of truth: the Inertia document consumes the
- * derived string, `app/View/Layout.tsx` maps the same array to elements.
+ * Favicon links, site-wide; the framework has no default. The structured form
+ * is the source of truth — the Inertia document consumes the derived string,
+ * `app/View/Layout.tsx` maps the same array to elements.
  */
 export const FAVICON_LINKS = [
   { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/favicon-32x32.png' },
@@ -48,9 +45,8 @@ export const FAVICON_HEAD = FAVICON_LINKS.map(
 
 /**
  * Resolves the color mode before the first paint, so a dark-mode reader never
- * sees a light flash. Mirrors `applyMode()` in
- * `resources/js/pages/Docs/theme.ts` — the two must agree, and nothing but this
- * comment enforces that.
+ * sees a light flash. Must agree with `applyMode()` in
+ * `resources/js/pages/Docs/theme.ts`; nothing but this comment enforces that.
  */
 export const COLOR_MODE_PREPAINT_SCRIPT = `(function(){
   try{
@@ -65,14 +61,9 @@ export const COLOR_MODE_PREPAINT_SCRIPT = `(function(){
 
 /**
  * The click-to-toggle counterpart to the prepaint script above, inlined by
- * `app/View/Header.tsx` on content pages. Shares the storage key and the
- * two-line apply tail with the prepaint script and `applyMode()` — keeping
- * all three color-mode behaviors in (or mirrored from) this one module.
- *
- * Semantics match the React toggle: a click collapses `system` into an
- * explicit `light`/`dark`, and while the stored mode is `system` an OS theme
- * change is followed live (the `matchMedia` listener, mirroring
- * `Docs/theme.ts`'s subscription).
+ * `app/View/Header.tsx`. Semantics must match the React toggle: a click
+ * collapses `system` into an explicit `light`/`dark`, and while the mode is
+ * `system` an OS theme change is followed live through `matchMedia`.
  */
 export const COLOR_MODE_TOGGLE_SCRIPT = `(function(){
   var root = document.documentElement;

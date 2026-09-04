@@ -1,17 +1,11 @@
 /**
  * Type-checks every package through the tsconfig its bundler reads.
  *
- * tsdown emits declarations with `tsgo --noCheck`, so a module the build
- * config cannot resolve (a sibling the package never declared, a sibling
- * whose dist/ is missing or stale) does not fail the build — it turns every
- * type inferred from that module into `any` in the published .d.ts. The root
- * typecheck cannot see it either: its path mappings resolve siblings to their
- * sources. Running `tsc` with checking on, against the same config, is what
- * makes that class of drift fail.
- *
- * Only packages with a `tsconfig.build.json` are covered — the ones whose
- * sources import a sibling. Run after `bun run build`: the configs resolve
- * siblings through dist/, so on an unbuilt checkout every sibling import
+ * tsdown emits declarations with `tsgo --noCheck`, so an unresolvable sibling
+ * does not fail the build: it turns every type inferred from it into `any` in
+ * the published .d.ts, and the root typecheck cannot see it because its path
+ * mappings resolve siblings to their sources. Covers packages with a
+ * `tsconfig.build.json`; run after `bun run build`, or every sibling import
  * reports TS2307.
  *
  * Usage: bun scripts/check-build-configs.ts

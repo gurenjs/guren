@@ -7,19 +7,17 @@ export interface R2ConformanceHarness {
   /** Empties the bucket between tests. */
   reset(bucket: R2BucketLike): Promise<void>
   /**
-   * Whether methods that hand `get().body` onward can run in this harness:
-   * `copy()`/`move()` pipe it into `put()`, `getStream()` returns it to the
-   * caller. Miniflare's binding proxy cannot marshal that stream, so its
-   * harness runs all three inside workerd instead.
+   * Whether methods that hand `get().body` onward (`copy()`, `move()`,
+   * `getStream()`) can run in this harness. Miniflare's binding proxy cannot
+   * marshal that stream, so its harness runs all three inside workerd instead.
    */
   streamingBody: boolean
 }
 
 /**
- * The driver-level contract, written once and run against both
- * `FakeR2Bucket` and workerd's real R2 (opt-in) — so every semantic the fake
- * encodes is also asserted against the runtime, not only the ones somebody
- * remembered to duplicate. Harness-specific assertions (call counts,
+ * The driver-level contract, written once and run against both `FakeR2Bucket`
+ * and workerd's real R2 (opt-in), so every semantic the fake encodes is also
+ * asserted against the runtime. Harness-specific assertions (call counts,
  * pagination page size, presign URL shape) live in the callers.
  */
 export function describeR2DriverConformance(name: string, harness: R2ConformanceHarness): void {
@@ -182,9 +180,8 @@ export function describeR2DriverConformance(name: string, harness: R2Conformance
         expect(await driver.lastModified('a.txt')).toBeInstanceOf(Date)
         const metadata = await driver.metadata('a.txt')
         expect(metadata?.lastModified).toBeInstanceOf(Date)
-        // Exact, not a subset: an unexpected extra field or a dropped one is
-        // the drift this assertion exists to catch. Only the timestamp is
-        // excluded, since it differs per backend.
+        // Exact, not a subset: an extra or dropped field is the drift this catches.
+        // Only the timestamp is excluded, since it differs per backend.
         expect({ ...metadata, lastModified: undefined }).toEqual({
           path: 'a.txt',
           size: 5,

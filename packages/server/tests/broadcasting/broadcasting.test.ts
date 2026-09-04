@@ -604,8 +604,7 @@ describe('BroadcastManager', () => {
     })
 
     it('should deny when an authorizer falls off the end without returning', async () => {
-      // Callers read anything that is not false/null as authorized, so an
-      // implicit undefined must not read as a grant.
+      // Callers treat anything but false/null as authorized, so undefined must not grant.
       manager.privateChannel('orders.{id}', (() => undefined) as unknown as () => boolean)
 
       const result = await manager.authorize('private-orders.123', { id: 1 })
@@ -777,38 +776,31 @@ describe('Integration scenarios', () => {
   it('should handle chat room scenario', async () => {
     const manager = new BroadcastManager()
 
-    // Register presence channel
     manager.presenceChannel('chat.{roomId}', (_channel, user: any) => {
       if (!user) return null
       return { id: user.id, info: { name: user.name } }
     })
 
-    // Get presence channel
     const chatRoom = manager.toPresence('chat.1')
 
-    // User joins
     await chatRoom.join({ id: 1, info: { name: 'Alice' } })
     await chatRoom.join({ id: 2, info: { name: 'Bob' } })
 
     expect(chatRoom.count()).toBe(2)
 
-    // Subscribe to messages
     const received: BroadcastEvent[] = []
     ;(manager.driver() as MemoryDriver).subscribe(chatRoom.name, (e) =>
       received.push(e)
     )
 
-    // Send message
     await chatRoom.broadcast('NewMessage', {
       userId: 1,
       content: 'Hello everyone!',
     })
 
-    // Check message received
     const messageEvents = received.filter((e) => e.event === 'NewMessage')
     expect(messageEvents).toHaveLength(1)
 
-    // User leaves
     await chatRoom.leave(1)
     expect(chatRoom.count()).toBe(1)
   })
@@ -816,20 +808,16 @@ describe('Integration scenarios', () => {
   it('should handle order notification scenario', async () => {
     const manager = new BroadcastManager()
 
-    // Register private channel for orders
     manager.privateChannel('orders.{orderId}', (channel, user: any) => {
-      // Simulate order ownership check
       return user?.id === 1
     })
 
-    // Check authorization
     const canAccess = await manager.authorize('private-orders.123', { id: 1 })
     const cannotAccess = await manager.authorize('private-orders.123', { id: 2 })
 
     expect(canAccess).toBe(true)
     expect(cannotAccess).toBe(false)
 
-    // Broadcast order update
     const orderChannel = manager.toPrivate('orders.123')
     await orderChannel.broadcast('OrderUpdated', {
       status: 'shipped',
@@ -845,15 +833,12 @@ describe('Integration scenarios', () => {
   it('should handle public notification scenario', async () => {
     const manager = new BroadcastManager()
 
-    // Register public channel
     manager.channel('announcements', () => true)
 
-    // Subscribe
     const received: BroadcastEvent[] = []
     const driver = manager.driver() as MemoryDriver
     driver.subscribe('announcements', (e) => received.push(e))
 
-    // Broadcast announcement
     const channel = manager.toChannel('announcements')
     await channel.broadcast('SystemMaintenance', {
       message: 'Scheduled maintenance at midnight',

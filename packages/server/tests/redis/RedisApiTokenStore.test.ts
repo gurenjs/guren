@@ -4,11 +4,7 @@ import { RedisApiTokenStore } from '../../src/redis/RedisApiTokenStore'
 import { tokenCan, verifyApiToken } from '../../src/auth/api-token'
 import { generateToken, hashToken } from '../../src/auth/utils'
 
-/**
- * In-memory stand-in covering the commands RedisApiTokenStore uses. Hash
- * values are strings, exactly as a real Redis hash returns them — the whole
- * point of these tests is what the store does with a corrupt string.
- */
+/** Hash values are strings, exactly as a real Redis hash returns them. */
 class FakeRedis {
   private readonly strings = new Map<string, string>()
   private readonly hashes = new Map<string, Record<string, string>>()
@@ -104,11 +100,7 @@ class FakeRedis {
 
 const PREFIX = 'apitoken:'
 
-/**
- * Write a token hash straight into the fake, bypassing `store()` — these are
- * records that a healthy `store()` could never produce, which is exactly the
- * corruption the deserializer has to survive.
- */
+/** Bypasses `store()` to write records a healthy `store()` could never produce. */
 async function seedToken(
   redis: FakeRedis,
   overrides: Record<string, string> = {},

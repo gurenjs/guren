@@ -7,20 +7,13 @@ import { EventManager } from '../events'
 
 /**
  * The audit sink, driven through {@link createAuditEmitter} rather than by
- * emitting an event.
- *
- * That is not a shortcut around the design — it *is* the design. The sink used
- * to be an ordinary listener, and a listener is only ever called if every
- * higher-priority listener before it returned; `EventManager.emit` awaits them
- * in a bare `for` loop with no try/catch, so one unrelated application listener
- * throwing ends the loop and the audit trail goes quiet. The emitter calls the
- * sink itself for that reason, and these tests drive the thing that decides.
+ * emitting an event — that *is* the design: `EventManager.emit` awaits
+ * listeners in a bare `for` loop, so while the sink was a listener one
+ * unrelated thrower above it took the trail with it.
  *
  * Imported relatively, never through `@guren/core`: inside `packages/server` a
  * `@guren/core` import resolves back through this package's own `dist`, so
- * these cases would exercise the last build rather than the source they sit
- * beside. `@guren/plugin-mcp`'s own suite covers the emitter as an installed
- * consumer sees it, across that same seam.
+ * these cases would exercise the last build rather than the source beside them.
  */
 
 /** Future-seeded, like the server-side fixtures: a past epoch expires everything. */
@@ -40,13 +33,10 @@ const INVOKED = new AgentToolInvoked(
 const DENIED = new AgentToolDenied({ kind: 'user', id: 42 }, 'posts.store', { title: 'x' }, 'scope', 'mcp')
 
 /**
- * One turn of the event loop.
- *
- * The emitter answers before its work finishes — a tool call may not wait on
- * its own audit record — so an assertion about a rejected sink or about what a
- * listener saw is behind at least one macrotask. `await Promise.resolve()` is
- * not: `emit` awaits each listener, and a rejection routes through a `.catch`
- * of its own.
+ * One turn of the event loop. The emitter answers before its work finishes — a
+ * tool call may not wait on its own audit record — so an assertion about a
+ * rejected sink is behind at least one macrotask. `await Promise.resolve()` is
+ * not enough: a rejection routes through a `.catch` of its own.
  */
 function flush(): Promise<void> {
   return new Promise((done) => setTimeout(done, 0))
@@ -109,12 +99,9 @@ describe('the audit emitter', () => {
 
   test('should still record when a higher-priority listener throws', async () => {
     // The regression. `EventManager.emit` awaits its listeners in priority
-    // order inside a bare `for` loop, so the first to throw ends the loop and
-    // nothing after it runs. While the sink was a listener, any application
-    // listener registered above it could silence the audit trail — and the
-    // only evidence of that would have been an empty file. A record of what
-    // agents did may not be contingent on what else the application listens
-    // for.
+    // order inside a bare `for` loop, so the first to throw ends the loop.
+    // While the sink was a listener, any application listener registered above
+    // it could silence the audit trail, with an empty file as the only evidence.
     const events = new EventManager()
     const records: AgentAuditRecord[] = []
     const listenerRan: string[] = []

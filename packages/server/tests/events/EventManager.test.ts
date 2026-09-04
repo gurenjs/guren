@@ -119,7 +119,6 @@ describe('EventManager', () => {
       const listener = vi.fn()
       events.on('custom:event', listener)
 
-      // Create a custom event that uses string name
       class CustomEvent extends Event {
         static get eventName() { return 'custom:event' }
       }
@@ -196,7 +195,6 @@ describe('EventManager', () => {
 
     it('does nothing if event not registered', () => {
       events.off(TestEvent, vi.fn())
-      // Should not throw
     })
 
     it('works with string event names', () => {
@@ -341,7 +339,6 @@ describe('Listener', () => {
       static priority = 10
 
       handle(_event: TestEvent) {
-        // handle
       }
     }
 
@@ -356,7 +353,6 @@ describe('Listener', () => {
       static event = TestEvent
 
       handle(_event: TestEvent) {
-        // handle
       }
     }
 

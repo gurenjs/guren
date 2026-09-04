@@ -1,9 +1,6 @@
 import type { Redis } from 'ioredis'
 
-/**
- * Scan Redis keys matching a pattern without blocking the server.
- * Uses SCAN with cursor-based iteration to avoid the O(N) KEYS command.
- */
+/** Cursor-based SCAN rather than the O(N), server-blocking KEYS. */
 export async function scanKeys(redis: Redis, pattern: string): Promise<string[]> {
   const keys: string[] = []
   let cursor = '0'

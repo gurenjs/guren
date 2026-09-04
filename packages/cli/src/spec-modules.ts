@@ -16,32 +16,18 @@ import { specHeader, compareStrings, mermaidToken, type SpecArtifact } from './s
 const APP = 'app'
 
 /**
- * Top-level `import ... from '...'` / `export ... from '...'` specifiers.
- * Regex-based rather than AST-based on purpose: this view only needs to know
- * *which locations reference each other*, and a false edge from a specifier
- * inside a comment is a far cheaper error here than the cost of parsing every
- * file in the project (`guren check --arch`, which reports violations, does
- * pay that cost — its equivalents there are module-private, so this scan is
- * self-contained).
- *
- * The clause between the keyword and the specifier deliberately spans lines,
- * so a multi-line `import {\n  A,\n  B,\n} from '...'` is counted. It can
- * never cross a quote, so the captured value is always the first string
- * literal after the keyword.
- *
- * Unlike the boundary checks, type-only imports count here: this is a context
- * map, and a shared type is a real conceptual dependency between two modules
- * even though it compiles away.
+ * Top-level `import`/`export ... from '...'` specifiers. Regex rather than AST on
+ * purpose: this view only needs to know which locations reference each other, so a false
+ * edge from a specifier inside a comment costs less than parsing every file in the
+ * project. The clause spans lines so multi-line imports count, and can never cross a
+ * quote. Type-only imports count too: a shared type is a real conceptual dependency.
  */
 const IMPORT_FROM_REGEX = /(?:^|\n)\s*(?:import|export)\b[^'"]*?\bfrom\s*['"]([^'"]+)['"]/g
 
 /**
- * Side-effect imports (`import '@/modules/billing/setup'`), which have no
- * clause and so no `from` for the pattern above to anchor on. They are real
- * dependencies — the importing location cannot function without the imported
- * one's registration side effects. A separate pattern rather than an optional
- * `from` clause, which would make the multi-line case above backtrack.
- * `import`-only: `export '...'` is not valid syntax.
+ * Side-effect imports (`import '@/modules/billing/setup'`), which have no `from` for the
+ * pattern above to anchor on. A separate pattern rather than an optional `from` clause,
+ * which would make the multi-line case above backtrack. `export '...'` is not valid syntax.
  */
 const SIDE_EFFECT_IMPORT_REGEX = /(?:^|\n)\s*import\b\s*['"]([^'"]+)['"]/g
 
@@ -58,11 +44,9 @@ function extractImportSpecifiers(source: string): string[] {
 }
 
 /**
- * Project-relative POSIX path a specifier points at, or `null` when it leaves
- * the project (a package, or a relative path escaping the root). Existence is
- * deliberately not checked — attribution only needs the path prefix, and
- * skipping the filesystem probes keeps the output a pure function of the
- * sources.
+ * Project-relative POSIX path a specifier points at, or `null` when it leaves the
+ * project. Existence is deliberately not checked: attribution only needs the path prefix,
+ * and skipping the probes keeps the output a pure function of the sources.
  */
 function specifierRelPath(cwd: string, importerAbsPath: string, specifier: string): string | null {
   if (specifier.startsWith('.')) {
@@ -77,9 +61,8 @@ function specifierRelPath(cwd: string, importerAbsPath: string, specifier: strin
 }
 
 /**
- * Location a project-relative path belongs to. The trailing slash lets a bare
- * barrel import (`@/modules/billing`, no path segment after the name) match
- * the same way a file path inside the module does.
+ * Location a project-relative path belongs to. The trailing slash lets a bare barrel
+ * import (`@/modules/billing`) match the same way a file path inside the module does.
  */
 function locationOf(relPath: string): string {
   return moduleNameFromRelPath(`${relPath}/`) ?? APP
@@ -140,12 +123,9 @@ function nodeId(location: string): string {
 }
 
 /**
- * The context map: every module (RFC 0002), the models it owns, and the
- * dependency edges between modules and the application root.
- *
- * An app with no `modules/` directory still gets a valid document — a single
- * `app` node — so the view exists from day one and starts showing structure
- * the moment a module is added.
+ * The context map: every module (RFC 0002), the models it owns, and the dependency edges
+ * between modules and the application root. An app with no `modules/` directory still
+ * gets a valid document — a single `app` node.
  */
 export async function generateModulesSpec(cwd: string): Promise<SpecArtifact> {
   const [roots, modelsByLocation, edges] = await Promise.all([
@@ -162,9 +142,8 @@ export async function generateModulesSpec(cwd: string): Promise<SpecArtifact> {
   const dependenciesOf = (location: string): string[] =>
     [...(edges.get(location) ?? [])].sort(compareStrings)
 
-  // The app root is a node whenever it owns models or takes part in a
-  // dependency — and always when there are no modules at all, so the document
-  // is never empty.
+  // The app root is a node when it owns models or takes part in a dependency — and
+  // always when there are no modules, so the document is never empty.
   const appParticipates =
     (modelsByLocation.get(APP)?.length ?? 0) > 0
     || edges.has(APP)

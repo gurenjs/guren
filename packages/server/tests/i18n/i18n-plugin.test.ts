@@ -164,9 +164,7 @@ describe('createApp({ i18n })', () => {
   })
 
   test('two booted apps keep their shared props isolated', async () => {
-    // Shared props are registered on each app's container, not module-global
-    // state — a second Application booted in the same process (test suites,
-    // serverless warm reuse) must not see the first app's resolvers.
+    // Shared props live on each app's container, not module-global state.
     const sharing = makeApp({ fallback: 'ja' })
     const silent = makeApp({ share: false })
     await sharing.boot()
@@ -240,8 +238,6 @@ describe('createApp({ i18n })', () => {
   })
 
   test('a downstream locale override is honored by t/tc, locale, and _i18n alike', async () => {
-    // Simulates middleware running after locale detection that replaces the
-    // request locale (e.g. a per-user preference read from the session).
     const app = createApp({
       i18n: { supported: ['en', 'ja'], loader: new MemoryLoader(structuredClone(MESSAGES)) },
       boot: (hono) => {

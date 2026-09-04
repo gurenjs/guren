@@ -35,9 +35,7 @@ import type { RouteDefinition } from '@guren/core'
 
 /**
  * Any file that could hold a route's params schema — which is any importable
- * source file, since a schema is usually imported into `routes/` from
- * somewhere else. Stated as the honest input set rather than an allow-list of
- * conventional directories, the way the modules spec view declares its own.
+ * source file, since a schema is usually imported into `routes/` from elsewhere.
  */
 const SOURCE_FILE_PATTERN = /\.(ts|tsx|mts|js|jsx|mjs)$/
 import { checkSchemaTimestamps } from './schema-check'
@@ -68,47 +66,32 @@ export interface RunCheckOptions {
   routesFile?: string
   /**
    * Run architecture boundary checks only (`guren.arch.ts` + derived module
-   * rules), skipping the route/controller/page/manifest checks below. Fast
-   * path for the agent-harness edit hook.
+   * rules). Fast path for the agent-harness edit hook.
    */
   arch?: boolean
   /**
-   * Restrict file-scanning checks (empty methods, arch boundaries) to files
-   * changed vs. the merge base with main, plus uncommitted/untracked files.
-   * Falls back to checking everything when not in a git repo.
-   *
-   * Two checks answer a whole-directory question rather than a per-file one
-   * — translation parity and route registrar wiring — so `--changed` gates
-   * each as a unit on its own directory instead of filtering its inputs.
+   * Restrict file-scanning checks to files changed vs. the merge base with main,
+   * plus uncommitted/untracked ones; checks everything outside a git repo.
+   * Translation parity and route registrar wiring answer a whole-directory
+   * question, so `--changed` gates each as a unit rather than filtering inputs.
    */
   changed?: boolean
-  /**
-   * Run doc-link checks only (docs/ frontmatter + @docs tags), skipping
-   * everything else. Like `--arch`, a brand-new fast path that gates on
-   * exit code from day one.
-   */
+  /** Run doc-link checks only (docs/ frontmatter + @docs tags). */
   docs?: boolean
   /** Run spec drift checks only (docs/spec/ vs regenerated views). */
   spec?: boolean
   /**
    * Run translation catalog checks only (lang/<locale>/*.json key and
-   * placeholder parity). Content-activated: apps without lang/ contribute
-   * zero results.
+   * placeholder parity). Content-activated: apps without lang/ contribute none.
    */
   i18n?: boolean
 }
 
 /**
  * The `guren codegen` invocation that regenerates the artifacts *this* check
- * read — carrying `--routes` when the caller passed one.
- *
- * Without it, a `guren check --routes routes/api.ts` run reports on one route
- * graph and prints a remedy that reads a different one (`routes/web.ts`, the
- * codegen default), so the command cannot clear the state it was printed for
- * — and, worse, writes or deletes the manifest from the wrong graph. Same
- * principle as keying the expectation on the derivation rather than a string
- * scan: a remedy that does not resolve its own finding is a defect, not a
- * cosmetic issue.
+ * read — carrying `--routes` when the caller passed one. Without it, a
+ * `guren check --routes routes/api.ts` prints a remedy that reads the codegen
+ * default instead, and writes or deletes the manifest from the wrong graph.
  */
 function codegenCommandFor(routesFile?: string): string {
   if (routesFile === undefined) return 'bunx guren codegen'
@@ -119,11 +102,10 @@ function codegenCommandFor(routesFile?: string): string {
 }
 
 /**
- * The agent manifest's own presence check (RFC 0016), which the generic
- * manifest loop cannot express: `.guren/agents.gen.ts` is expected only when
- * the derivation yields a tool, and an existing one is *wrong* when it does
- * not — `guren codegen` deletes it. Both states point at the same command,
- * which is the property that makes the check clearable.
+ * The agent manifest's own presence check (RFC 0016), which the generic manifest
+ * loop cannot express: `.guren/agents.gen.ts` is expected only when the
+ * derivation yields a tool, and an existing one is *wrong* when it does not —
+ * `guren codegen` deletes it. Both states point at the same command.
  */
 async function checkAgentManifest(
   cwd: string,
@@ -177,12 +159,9 @@ async function checkAgentManifest(
 }
 
 /**
- * The app's registered route definitions, or the reason they could not be
- * loaded — never a throw, and never an empty list standing in for a failure.
- *
- * Loaded once per run for the two checks that read registered routes. An
- * absent routes file is neither: nothing to load is a legitimate shape (an
- * app mid-scaffold), and both checks contribute nothing for it.
+ * The app's registered route definitions, or the reason they could not be loaded
+ * — never a throw, and never an empty list standing in for a failure. An absent
+ * routes file is neither: an app mid-scaffold is a legitimate shape.
  */
 async function loadRouteGraph(
   cwd: string,
@@ -198,11 +177,9 @@ async function loadRouteGraph(
 }
 
 /**
- * Verifies every `modules/<name>/db/schema.ts` is re-exported from the
- * project's root `db/schema.ts` — the wiring `make:module` performs
- * automatically (RFC 0002). A module without a `db/schema.ts` is skipped
- * (nothing to aggregate); a project without a root `db/schema.ts` warns
- * rather than failing, since not every app uses a database.
+ * Verifies every `modules/<name>/db/schema.ts` is re-exported from the project's
+ * root `db/schema.ts` (RFC 0002). A project without a root `db/schema.ts` warns
+ * rather than fails, since not every app uses a database.
  */
 async function checkModuleSchemaAggregation(cwd: string): Promise<CheckResult[]> {
   const results: CheckResult[] = []
@@ -254,10 +231,8 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
   const changedFiles = options.changed ? await getChangedFiles(cwd) : null
   const filterChanged = (files: string[]): string[] =>
     changedFiles ? files.filter((f) => changedFiles.has(toPosixRelative(cwd, f))) : files
-  // Whether any changed file could affect what the app's modules evaluate to.
-  // The gate for every check that loads the route graph (5.5, 7.7, 8.7) —
-  // hoisted here rather than declared beside the first of them, because they
-  // are spread across the suite and each must ask the same question.
+  // Whether any changed file could affect what the app's modules evaluate to:
+  // the shared gate for every check that loads the route graph (5.5, 7.7, 8.7).
   const sourceChanged = !changedFiles || [...changedFiles].some((file) => SOURCE_FILE_PATTERN.test(file))
 
   // `--arch` / `--docs` / `--spec` select suites; combining them runs the
@@ -291,9 +266,8 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     // model (checks 3 and 8 both consume it).
     const schemaTables = await parseSchemaTables(cwd)
 
-    // 3. Check each model binds a table its schema declares. The unfiltered
-    // list is kept for check 8.6, which (like 8/8.5) is deliberately not
-    // changed-filtered.
+    // 3. Check each model binds a table its schema declares. The unfiltered list
+    // is kept for check 8.6, which is deliberately not changed-filtered.
     const allModelFiles = await discoverModelFiles(cwd)
     const modelFiles = filterChanged(allModelFiles)
     for (const filePath of modelFiles) {
@@ -320,14 +294,11 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     }
 
     // 5. Check generated manifests are present. Whether the pages manifest is
-    // one of them is codegen's call, not this file's — an app with no page
-    // components has none, and neither does an API-only app that somehow
-    // acquired some (see planPageManifest).
+    // one of them is codegen's call, not this file's (see planPageManifest).
     const pagesPlan = await planPageManifest(cwd)
-    // The suppressed manifest, reported rather than assumed. The manifest list
-    // below drops the file on this branch, so without this nothing would say a
-    // word about one left on disk importing a package the app does not have —
-    // which is the state that actually fails the typecheck.
+    // The manifest list below drops the file on this branch, so without this
+    // nothing would report one left on disk importing a package the app does not
+    // have — the state that actually fails the typecheck.
     const suppressed = describePageManifestSuppression(pagesPlan)
     if (suppressed) {
       checks.push({
@@ -353,34 +324,11 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
       )
     }
 
-    // 5.5. The agent manifest is conditional in both directions, so it cannot
-    // ride the loop above: codegen writes it only for apps that derive at
-    // least one tool, and *removes* it otherwise. Keyed on the derivation
-    // rather than on the presence of `.agent()` in a source file, so the
-    // remedy this prints always clears the state it reports — see
-    // planAgentManifest.
-    //
-    // This check, 7.7 and 7.8 all read registered route definitions, so the
-    // graph is loaded once here and handed to all three. Loading it per
-    // consumer would re-run only the registrar (`load-routes.ts` documents
-    // why nothing is re-evaluated), but it would also repeat the same
-    // load-failure warning — one broken routes file reported as several
-    // findings. Scoped to these three, not to the run: check 10's screens
-    // view still loads the graph itself (see 7.7). Any later check that
-    // reads registered routes belongs here too.
-    //
-    // Gated with 7.7 and 7.8 under --changed, and for their reason: this is
-    // a full module evaluation, which a docs- or lang-only run would pay to
-    // re-derive an answer nothing in that run could have changed.
-    //
-    // 8.7 reads these definitions too, and takes them from here rather than
-    // loading its own. Two loads would not only evaluate the app's module
-    // twice — they could resolve *different* routes entries and disagree, in
-    // the same run, about what the app mounted.
-    // Probed, not assumed: the API-only template ships routes/api.ts and no
-    // routes/web.ts, so assuming the default made every consumer of this
-    // graph — the agent manifest, 7.7, 7.8 and 8.7 — judge such an app
-    // against a file it was never going to have.
+    // 5.5. The agent manifest cannot ride the loop above: codegen writes it only
+    // for apps deriving a tool and *removes* it otherwise (see planAgentManifest).
+    // The graph is loaded once here for 5.5, 7.7, 7.8 and 8.7 — two loads could
+    // resolve different routes entries and disagree about what the app mounted.
+    // The entry is probed: the API-only template ships routes/api.ts only.
     const routeGraphFile = options.routesFile ?? (await resolveRoutesEntry(cwd)) ?? DEFAULT_ROUTES_FILE
     let graph: Awaited<ReturnType<typeof loadRouteGraph>> | undefined
     if (sourceChanged) {
@@ -403,135 +351,89 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     }
 
     // 6. Check every module's db/schema.ts is re-exported from the root
-    // db/schema.ts (the wiring make:module performs automatically — this
-    // catches modules created or edited by hand). Not an architecture
-    // boundary rule, so it stays out of `--arch`'s fast path alongside
-    // checks 1-5.
+    // db/schema.ts, for modules created or edited by hand.
     const schemaAggregationResults = await checkModuleSchemaAggregation(cwd)
     checks.push(...schemaAggregationResults)
 
-    // 7. Check every console command is registered with a kernel (the wiring
-    // make:command performs automatically — this catches commands written or
-    // moved by hand). Content-activated: apps with no app/Console/Commands
-    // contribute nothing here.
+    // 7. Check every console command is registered with a kernel, for commands
+    // written or moved by hand. Content-activated.
     const commandRegistrationResults = await checkConsoleCommandRegistration(cwd, cache)
     checks.push(...commandRegistrationResults)
 
     // 7.5. Check every routes file's registrar is reached from the entry
-    // registrar that would mount it — the app's for `routes/`, the registrar
-    // `defineModule({ routes })` names for `modules/<name>/routes/`. This
-    // catches routes files written, moved, or unhooked by hand, whose only
-    // other symptom is a 404. Not an architecture boundary rule, so it stays
-    // out of `--arch`'s fast path alongside checks 6-8.
-    //
-    // Gated as a unit under --changed, the way check 10.5 gates i18n — see
-    // checkRouteRegistrarWiring for why filtering by changed *candidate*
-    // would miss the edit that usually breaks the wiring.
+    // registrar that would mount it — the app's for `routes/`, the one
+    // `defineModule({ routes })` names for `modules/<name>/routes/`. Otherwise
+    // the only symptom is a 404. Gated as a unit under --changed: see
+    // checkRouteRegistrarWiring for why filtering by changed *candidate* misses
+    // the edit that usually breaks the wiring.
     const routesChanged =
       !changedFiles || [...changedFiles].some((file) => affectsRouteWiring(file, options.routesFile))
     if (routesChanged) {
       const routeWiringResults = await checkRouteRegistrarWiring({ cwd, cache, routesFile: options.routesFile })
       checks.push(...routeWiringResults)
 
-      // 7.6. Check route paths for `:name*`, which reads as a wildcard and
-      // is not one — Hono registers a single-segment parameter named
-      // literally `name*`. Unlike 7.5 this is genuinely a per-file question
-      // (a `:slug*` can only arrive by editing the file that holds it), so it
-      // is changed-*filtered* like checks 1-4. It shares 7.5's gate all the
-      // same: `affectsRouteWiring` covers every file this reads, and asking a
-      // string predicate first is what keeps a controller-only save from
-      // paying for a scan of routes/ and every module.
+      // 7.6. Check route paths for `:name*`, which reads as a wildcard and is
+      // not one — Hono registers a single-segment parameter named literally
+      // `name*`. A per-file question, so changed-*filtered*; it shares 7.5's
+      // gate because `affectsRouteWiring` covers every file this reads.
       const routePathFiles = filterChanged(await discoverRoutePathFiles(cwd, options.routesFile))
       checks.push(...(await checkRoutePathParams({ cwd, cache, files: routePathFiles })))
     }
 
     // 7.7. Check each route's `params` schema keys and `bind` keys against the
-    // parameters its path declares. Runs on loaded definitions, not the AST:
-    // the registered path is the joined one (group prefixes, resource
-    // expansions), and a params schema is usually imported from elsewhere, so
-    // its keys are not in the routes file to read.
-    //
-    // Deliberately outside 7.5's `routesChanged` gate: a params schema can be
-    // declared in any source file, so every file pattern narrower than "all
-    // sources" would be a guess that reads as coverage. Under --changed it
-    // gates on exactly that — the same honest input set the modules spec view
-    // declares — which still skips a docs- or lang-only run, the case where
-    // this would otherwise import the whole app for nothing. The edit-hook
-    // fast path is --arch, which skips this suite entirely.
-    //
-    // In an app with docs/spec/, check 10 loads the same route graph for the
-    // screens view. Accepted rather than threaded through a SpecViewDescriptor
-    // signature change: whichever runs first pays the module evaluation, and
-    // the second call re-runs only the registrar (`load-routes.ts` documents
-    // why nothing is re-evaluated).
-    // The graph itself is loaded once at 5.5 — a load failure was reported
-    // there, so this contributes nothing for it.
+    // parameters its path declares. Runs on loaded definitions, not the AST: the
+    // registered path is the joined one (group prefixes, resource expansions),
+    // and a params schema is usually imported from elsewhere. Outside 7.5's
+    // `routesChanged` gate because a params schema can live in any source file,
+    // so `--changed` gates on `sourceChanged` instead. A load failure was already
+    // reported at 5.5, so this contributes nothing for it.
     if (graph?.definitions) {
       const definitions = graph.definitions
       checks.push(...(await checkRouteContracts({ cwd, routesFile: routeGraphFile, definitions })))
 
-      // 7.8. Check the routes that declare `.agent()` metadata (RFC 0016):
-      // the tool name is legal and unique, a non-read-only tool is covered
-      // by authorization rather than merely authentication, and the schemas
-      // an agent reads exist. Shares 7.7's gate and its definitions.
-      // Content-activated inside — an app with no agent routes contributes
-      // nothing, and one whose agent routes are all inline handlers never
-      // scans a controller.
+      // 7.8. Check the routes that declare `.agent()` metadata (RFC 0016): the
+      // tool name is legal and unique, a non-read-only tool is covered by
+      // authorization rather than merely authentication, and the schemas an
+      // agent reads exist. Shares 7.7's gate; content-activated inside.
       checks.push(
         ...(await checkAgentRoutes({ cwd, routesFile: routeGraphFile, definitions, cache })),
       )
     }
 
     // 8. Check Postgres timestamp columns carry a time zone. Content-activated
-    // and dialect-gated: apps with no schema, or a non-Postgres one, contribute
-    // nothing. Not changed-filtered, like checks 6-7 — the schema is a handful
-    // of files, so narrowing would hide a column an unrelated edit never
-    // touched.
+    // and dialect-gated. Not changed-filtered: the schema is a handful of files,
+    // so narrowing would hide a column an unrelated edit never touched.
     const schemaTimestampResults = checkSchemaTimestamps(schemaTables)
     checks.push(...schemaTimestampResults)
 
-    // 8.5. Check configureAttachments() binds a table the schema declares
-    // (RFC 0013). The layer takes the table untyped (session-store
-    // convention), so a renamed schema export only fails at runtime on the
-    // first attach. Not changed-filtered, like check 8: the failure this
-    // catches originates in db/schema.ts, not in the file holding the config
-    // call, so filtering by the config file would hide exactly the schema
-    // rename this exists for. The string pre-filter inside the check keeps
-    // the full scan cheap.
+    // 8.5. Check configureAttachments() binds a table the schema declares (RFC
+    // 0013); the layer takes it untyped, so a renamed export only fails on the
+    // first attach. Not changed-filtered: the failure originates in db/schema.ts,
+    // so filtering by the config file would hide the rename this exists for.
     const attachmentsFiles = await discoverAttachmentsConfigFiles(cwd)
     checks.push(
       ...(await checkAttachmentsConfig({ cwd, cache, files: attachmentsFiles, schemaTables })),
     )
 
-    // 8.6. The prior question: a model mixing in Attachable(...) in an app
-    // with no configureAttachments() call at all. Same runtime-only failure
-    // shape as 8.5, and content-activated the same way — apps without
-    // Attachable models contribute nothing.
+    // 8.6. The prior question: a model mixing in Attachable(...) in an app with
+    // no configureAttachments() call at all. Same runtime-only failure as 8.5.
     checks.push(
       ...(await checkAttachableModels({ cwd, cache, files: allModelFiles, configFiles: attachmentsFiles })),
     )
 
-    // 8.65. The attachments disk rooted inside the statically served
-    // public/ tree — uploaded bytes reachable as static assets, which makes
-    // an uploaded .svg stored XSS on the app's own origin. Purely a config
-    // read (no route loading), so it is not gated on sourceChanged like 8.7,
-    // and not changed-filtered: the two halves of the finding live in
-    // different files (the attachments config names the disk, the storage
-    // provider roots it), so filtering by either would hide it.
+    // 8.65. The attachments disk rooted inside the statically served public/
+    // tree, where uploaded bytes are reachable as static assets. Not
+    // changed-filtered: the two halves of the finding live in different files
+    // (the config names the disk, the storage provider roots it).
     checks.push(
       ...(await checkAttachmentsPublicDisk({ cwd, cache, files: attachmentsFiles })),
     )
 
     // 8.7. Delivery-route wiring (RFC 0015): a `delivery` config with no
     // registerAttachmentRoutes() route in the loaded definitions, and a
-    // serve: 'redirect' disk whose storage driver can never presign. Both
-    // failures are invisible at runtime by design (uniform 404s; a
-    // fail-closed downgrade to proxy), so the static gate is the only
-    // place they surface before traffic. Content-activated by the cheap
-    // AST scan inside; gated like 7.7 under --changed because the wiring
-    // half loads the app's route definitions — a deliberate divergence
-    // from 8.5's not-filtered rule, accepted because sourceChanged is
-    // only false on docs/lang-only runs.
+    // serve: 'redirect' disk whose driver can never presign. Both are invisible
+    // at runtime by design (uniform 404s; a fail-closed downgrade to proxy).
+    // Gated like 7.7, since the wiring half reads the route definitions.
     if (sourceChanged) {
       checks.push(
         ...(await checkAttachmentsDelivery({
@@ -545,26 +447,22 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     }
   }
 
-  // 9. Doc-link checks (docs/ frontmatter + @docs tags, RFC 0004). Runs in
-  // plain mode and under --docs; content-activated, so apps without the
-  // docs convention contribute zero results here.
+  // 9. Doc-link checks (docs/ frontmatter + @docs tags, RFC 0004).
+  // Content-activated: apps without the docs convention contribute nothing.
   if (runs('docs')) {
     const docsResults = await runDocsCheck({ cwd, changedFiles, cache })
     checks.push(...docsResults)
   }
 
-  // 10. Spec drift checks (docs/spec/ vs regenerated views, RFC 0004).
-  // Content-activated like docs; under --changed it only regenerates when
-  // a spec-relevant file changed.
+  // 10. Spec drift checks (docs/spec/ vs regenerated views, RFC 0004). Under
+  // --changed it only regenerates when a spec-relevant file changed.
   if (runs('spec')) {
     const specResults = await runSpecCheck({ cwd, routesFile: options.routesFile, changedFiles })
     checks.push(...specResults)
   }
 
-  // 10.5. Translation catalog checks (lang/<locale>/*.json). Content-
-  // activated like docs: apps without lang/ contribute zero results. Parity
-  // is inherently whole-catalog, so --changed gates the suite as a unit:
-  // skip when no lang/ file changed, run fully otherwise.
+  // 10.5. Translation catalog checks (lang/<locale>/*.json). Parity is
+  // inherently whole-catalog, so --changed gates the suite as a unit.
   if (runs('i18n')) {
     const langChanged =
       !changedFiles || [...changedFiles].some((file) => file === 'lang' || file.startsWith('lang/'))
@@ -580,10 +478,9 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     checks.push(...archResults)
   }
 
-  // Every checker above treats a file it couldn't parse as contributing
-  // nothing, which is indistinguishable from a file with nothing wrong. Report
-  // the skipped ones once, after all suites have finished asking the cache, so
-  // a clean run over an incomplete scan says so instead of implying coverage.
+  // Every checker treats an unparsable file as contributing nothing, which is
+  // indistinguishable from a file with nothing wrong. Reported once here, after
+  // every suite has finished asking the cache.
   const skipped = cache.skippedFiles()
   if (skipped.length > 0) {
     const shown = formatTruncatedList(
@@ -612,9 +509,8 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
 }
 
 /**
- * The name a local binding was imported under, for `import { posts as
- * postTable }`. A model may refer to its table by any local name, so the
- * schema's exported identifier has to be recovered before comparing the two.
+ * The exported name behind a local binding, for `import { posts as postTable }`.
+ * A model may refer to its table by any local name.
  */
 function importedNameOf(body: Statement[], local: string): string | undefined {
   for (const node of body) {
@@ -629,27 +525,11 @@ function importedNameOf(body: Statement[], local: string): string | undefined {
 
 /**
  * Checks the model against what it actually binds — the identifier passed to
- * `defineModel(x)` or assigned to `static table` — rather than a table name
- * guessed from the class name, which reported both false alarms (any model not
- * named after its table) and false clears (the guessed name matched a column
- * name or a comment).
- *
- * The two names being compared are written in different files, so an aliased
- * import is resolved back to the name the schema exports before matching —
- * otherwise every `import { posts as postTable }` would read as a missing
- * table.
- *
- * Two arms skip rather than warn, because neither one is evidence of a
- * problem: a model whose binding cannot be read (no supported spelling, or an
- * unparseable file), and a schema that declared no tables — missing,
- * unparsable, or written in one of the forms `parseSchemaTables` documents as
- * invisible. Note that the schema is parsed outside the `ParseCache`, so an
- * unparsable one is not reported by the `scan-coverage` check either; it is
- * silent here exactly as it already is for `checkSchemaTimestamps`.
- *
- * That skip is all-or-nothing, so a schema that declares some tables inline
- * and re-exports the rest (`export * from './posts'`) still warns on a model
- * bound to a re-exported one — the same blind spot the substring match had.
+ * `defineModel(x)` or assigned to `static table` — with an aliased import
+ * resolved back to the name the schema exports. An unreadable binding and a
+ * schema declaring no tables both skip rather than warn (an unparsable schema is
+ * parsed outside the `ParseCache`, so `scan-coverage` misses it too); the skip
+ * is all-or-nothing, so a partly re-exporting schema still warns.
  */
 async function checkModelTableBinding(
   cache: ParseCache,
@@ -675,8 +555,6 @@ async function checkModelTableBinding(
   if (tables.length === 0) return []
 
   const schemaPath = schemaPathFor(moduleName)
-  // The model's own name for the table, and the schema's, which differ under
-  // an aliased import.
   const exported = importedNameOf(parsed.ast.program.body, identifier) ?? identifier
   const bound = tables.find((table) => table.identifier === exported)
   const declaredAs = bound?.tableName ? ` as table '${bound.tableName}'` : ''
@@ -699,20 +577,13 @@ async function checkModelTableBinding(
 }
 
 /**
- * Mass-assignment definition checks (AST-based via the shared ParseCache, so
- * comments, access modifiers, and type annotations neither hide a declaration
- * nor fake one).
+ * Mass-assignment definition checks, AST-based so comments, access modifiers and
+ * type annotations neither hide a declaration nor fake one.
  *
- * `guarded` and `strictFillable` no longer exist as Model API — a model
- * declaring them ships dead-looking protection that TypeScript accepts
- * silently (agents reproducing older patterns are the likely authors), so
- * the declaration itself is an error, not a warning.
- *
- * A fillable list naming a denied credential column is a contradiction that
- * otherwise only surfaces at the first write: the field throws regardless.
- * The denied set's inputs are parseable statics (passwordHashField /
- * rememberTokenField, defaulting to passwordHash / rememberToken), so it is
- * resolved here the same way the model resolves it at runtime.
+ * `guarded`/`strictFillable` no longer exist as Model API, and TypeScript
+ * accepts the dead declaration silently, so declaring one is an error. A
+ * fillable list naming a denied credential column is the other contradiction:
+ * the field throws on every write regardless.
  */
 async function checkMassAssignmentConfig(
   cache: ParseCache,

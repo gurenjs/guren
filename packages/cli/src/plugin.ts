@@ -41,13 +41,10 @@ function toMessages(kind: PluginInstallMessageKind, texts: string[]): PluginInst
 }
 
 /**
- * Official plugins whose primary export is a zero-config `definePlugin()`
- * factory rather than a provider class, mapped to the factory's export name.
- *
- * This table cannot become a manifest field: the documented flow runs
- * `guren plugin <pkg>` before `bun add <pkg>`, so no manifest is readable at
- * registration time. An installed manifest that declares `provider` (a stale
- * class-shaped release) always wins over this table.
+ * Official plugins whose export is a zero-config `definePlugin()` factory, mapped to
+ * the factory's export name. Not a manifest field: `guren plugin <pkg>` runs before
+ * `bun add <pkg>`, so no manifest is readable yet. An installed manifest declaring
+ * `provider` wins over this table.
  */
 const OFFICIAL_FACTORY_PLUGINS: Record<string, string> = {
   [VERCEL_PLUGIN_PACKAGE]: 'vercelPlugin',
@@ -63,10 +60,8 @@ interface OfficialPluginScaffolder {
 }
 
 /**
- * Official plugins that scaffold project files the manifest `publishes`
- * mechanism cannot write (it is restricted to config/, db/migrations/, and
- * resources/). Keyed like OFFICIAL_FACTORY_PLUGINS and looked up once, so
- * adding an official plugin means adding table rows, not branches.
+ * Official plugins that scaffold project files the manifest `publishes` mechanism
+ * cannot write (it is restricted to config/, db/migrations/, and resources/).
  */
 const OFFICIAL_PLUGIN_SCAFFOLDERS: Record<string, OfficialPluginScaffolder> = {
   [VERCEL_PLUGIN_PACKAGE]: {
@@ -114,9 +109,8 @@ export async function installPlugin(options: InstallPluginOptions): Promise<Plug
 
   const manifest = await readPluginManifest(packageName)
 
-  // Validated here, before the provider is wired into src/app.ts and before any
-  // publish is written: `applyEnvEntries` re-checks, but a throw at that point
-  // would leave a manifest we refused to honour half-installed.
+  // Validated before anything is wired or published: `applyEnvEntries` re-checks,
+  // but throwing there would leave a refused manifest half-installed.
   if (manifest?.env?.length) {
     assertEnvEntriesAllowed(manifest.env)
   }
@@ -134,24 +128,20 @@ export async function installPlugin(options: InstallPluginOptions): Promise<Plug
     }
   }
 
-  // An installed manifest that names a provider class describes the actual
-  // installed version and takes precedence over the official-factory table
-  // (which describes the latest release, for the register-before-install flow).
+  // The installed manifest describes the installed version; the factory table only
+  // describes the latest release, for the register-before-install flow.
   const factoryName = manifest?.provider ? undefined : OFFICIAL_FACTORY_PLUGINS[packageName]
 
   if (manifest && !manifest.provider && !factoryName) {
-    // A manifest exists but intentionally omits `provider` -- e.g. a
-    // command-only plugin, or a definePlugin() factory that must be called
-    // with configuration. Fabricating a name here would write an import
-    // that doesn't exist into src/app.ts.
+    // The manifest omits `provider` on purpose (command-only plugin, or a factory
+    // needing configuration); fabricating a name would write a broken import.
     messages.push({
       kind: 'hint',
       text: `${packageName} does not declare a gurenPlugin.provider; register its export manually in createApp({ providers }).`,
     })
   } else {
-    // Official plugins expose a zero-config definePlugin() factory; the
-    // generic manifest path can only register named provider classes, so
-    // their factory-call expression is known here instead.
+    // The manifest path can only register named provider classes, so the
+    // factory-call expression for official plugins is built here instead.
     const providerName = factoryName
       ?? manifest?.provider
       ?? providerIdentifierForPackage(packageName)
@@ -164,8 +154,8 @@ export async function installPlugin(options: InstallPluginOptions): Promise<Plug
       throw new Error(`Could not find ${APP_ENTRY_CANDIDATES.join(' or ')}. Run this command inside a Guren app.`)
     }
 
-    // A user may already have a configured call (e.g. `vercelPlugin({ ... })`)
-    // registered; any entry invoking the factory counts as registered.
+    // Any entry invoking the factory counts as registered, including a
+    // user-configured `vercelPlugin({ ... })`.
     const wiring = await addProviderRegistration(
       appPath,
       providerExpression,
@@ -190,7 +180,6 @@ export async function installPlugin(options: InstallPluginOptions): Promise<Plug
     messages.push(...toMessages('updated', await scaffolder.scaffold(options)))
   }
 
-  // Independent I/O — apply publishes and env entries concurrently.
   const [published, envModified] = await Promise.all([
     manifest?.publishes?.length
       ? applyPublishes(packageName, manifest.publishes, { force: options.force })

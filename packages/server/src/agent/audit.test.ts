@@ -99,12 +99,10 @@ describe('parseAuditRecord', () => {
   })
 
   test('should refuse a surface or reason that is only a prototype member', () => {
-    // The membership test is `Object.hasOwn`, not `in`, and this is the whole
-    // reason. `in` walks the prototype chain, so `"constructor"` and
-    // `"toString"` are members of *every* object literal — a line naming one of
-    // them would be read back as a genuine record, and the surface or reason it
-    // reported would be a value the framework has never had. An audit trail is
-    // exactly the file where a forged line must not read as real.
+    // The membership test is `Object.hasOwn`, not `in`: `in` walks the
+    // prototype chain, so `"constructor"` and `"toString"` are members of every
+    // object literal and a line naming one would read back as a genuine record
+    // with a surface or reason the framework has never had.
     const invoked = toAuditRecord(new AgentToolInvoked(PRINCIPAL, 'posts.index', {}, 200, 1, 'mcp'), NOW)
     const denied = toAuditRecord(new AgentToolDenied(PRINCIPAL, 'posts.store', {}, 'scope', 'mcp'), NOW)
 
@@ -137,13 +135,10 @@ describe('parseAuditRecord', () => {
 })
 
 /**
- * The writer and the reader against each other, through the real channel.
- *
- * The unit tests above prove `parseAuditRecord` reads records it was handed;
- * only this proves it reads the lines a sink actually writes. The file sink
- * reuses `DailyFileChannel`, whose JSON format wraps a record in a log
- * envelope — so the two halves agreeing is a fact about that envelope, and
- * hand-written strings could never notice it changing.
+ * The writer and the reader against each other, through the real channel. Only
+ * this proves `parseAuditRecord` reads the lines a sink actually writes: the
+ * file sink reuses `DailyFileChannel`, whose JSON format wraps a record in a
+ * log envelope that hand-written strings could never notice changing.
  */
 describe('the audit record through DailyFileChannel', () => {
   const dirs: string[] = []

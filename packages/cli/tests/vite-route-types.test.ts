@@ -18,10 +18,9 @@ describe('routeTypesPlugin CI skip', () => {
   let markerPath: string
   let originalCi: string | undefined
 
-  // `touch` stands in for the codegen process: the marker file existing
-  // is the observable proof that a generation was spawned. The hooks
-  // resolve only after the spawned child closes, so the marker's presence
-  // is already decided when their awaits return — no settle waits needed.
+  // `touch` stands in for the codegen process. The hooks resolve only after the
+  // spawned child closes, so the marker's presence is already decided when
+  // their awaits return — no settle waits needed.
   function createPlugin(): PluginHooks {
     return routeTypesPlugin({ executable: 'touch', args: [markerPath] }) as unknown as PluginHooks
   }
@@ -77,8 +76,7 @@ describe('routeTypesPlugin CI skip', () => {
     handlers.add!(join(root, 'resources/js/pages/Home.tsx'))
     handlers.unlink!(join(root, 'resources/js/pages/Home.tsx'))
     // The watcher handler fires and forgets, so drain the plugin's shared
-    // generation queue through a hook that returns it: any spawn a
-    // regression chained onto the queue has closed once this resolves.
+    // generation queue through a hook that returns it.
     await hotUpdate(plugin)
 
     expect(existsSync(markerPath)).toBe(false)
@@ -96,8 +94,7 @@ describe('routeTypesPlugin CI skip', () => {
   })
 
   it('should spawn codegen from handleHotUpdate when CI is not set', async () => {
-    // Positive control: proves the marker mechanism can detect a spawn,
-    // so the CI assertions above are able to fail.
+    // Positive control: the CI assertions above must be able to fail.
     delete process.env.CI
     const plugin = createPlugin()
 
@@ -108,10 +105,9 @@ describe('routeTypesPlugin CI skip', () => {
 })
 
 /**
- * What the watcher regenerates on has to keep up with what codegen scans:
- * `generateDataTypes` fans out over `modules/<name>/app/Http/Resources`, so a
- * watcher that saw only the project-root copy would leave a module's `Data`
- * types stale for a whole `bun run dev` session, silently.
+ * The watcher has to keep up with what codegen scans: `generateDataTypes` fans
+ * out over `modules/<name>/app/Http/Resources`, and a watcher seeing only the
+ * project-root copy leaves a module's `Data` types stale for the whole session.
  */
 describe('routeTypesPlugin watches module Resources', () => {
   let root: string
@@ -150,8 +146,7 @@ describe('routeTypesPlugin watches module Resources', () => {
   })
 
   it('regenerates for a Model inside a module', async () => {
-    // Models feed attachments.gen.ts: an Attachable(...) declaration edited
-    // in a module must not leave the map stale for the dev session.
+    // Models feed attachments.gen.ts.
     expect(await touchedBy('modules/billing/app/Models/Invoice.ts')).toBe(true)
   })
 
@@ -160,8 +155,7 @@ describe('routeTypesPlugin watches module Resources', () => {
   })
 
   it('ignores other files inside a module', async () => {
-    // Matched by shape, not by "anything under modules/" — a module's
-    // controllers do not feed any generated artifact.
+    // Matched by shape: a module's controllers feed no generated artifact.
     expect(await touchedBy('modules/billing/app/Http/Controllers/InvoiceController.ts')).toBe(false)
   })
 })

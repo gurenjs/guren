@@ -8,12 +8,9 @@ import { Controller, createApp, Router } from '@guren/core'
 import { TestApp } from './test-app'
 
 /**
- * `app.agent()` against a real application (RFC 0016 §6).
- *
- * Driven through `TestApp.create({ routes })` rather than a stub dispatcher:
- * what these assert is that a tool call re-enters the app as a real request —
- * that its validation, its middleware and its auth context all run — which a
- * fake fetch cannot show.
+ * `app.agent()` against a real application (RFC 0016 §6). Driven through
+ * `TestApp.create({ routes })` rather than a stub dispatcher, so a tool call
+ * re-enters the app as a real request: validation, middleware and auth all run.
  */
 const created: Array<{ title: string; author: unknown }> = []
 
@@ -46,10 +43,8 @@ function routes(router: Router): void {
     .agent({ description: 'List posts.' })
 
   router
-    // Declares an `output` schema on purpose: it is the shape `guren check`
-    // steers agent routes toward, and until output validation was scoped to
-    // successful responses the 422 below surfaced as a 500. Keeping it here
-    // means that fix is covered on the surface that found it.
+    // Declares an `output` schema on purpose: it is the shape `guren check` steers
+    // agent routes toward, and it is what made the 422 below surface as a 500.
     .post(
       '/posts',
       {
@@ -129,8 +124,6 @@ describe('TestApp.agent()', () => {
     const app = await freshApp()
     const result = await app.agent().call('drafts.store')
 
-    // 201 is a tool-call success. assertOk() passing here is only explicable
-    // by its isError semantics: an assertStatus(200) in disguise would fail.
     expect(result.status).toBe(201)
     result.assertOk()
     expect(() => result.assertStatus(200)).toThrow()
@@ -204,10 +197,9 @@ describe('TestApp.agent()', () => {
       },
     })
 
-    // `fromApp` is the constructor that carries both a route graph and a
-    // custom baseUrl — the dispatch default (`http://localhost`) would
-    // silently move a Workers-style app off the origin its host
-    // authorization admits.
+    // `fromApp` carries both a route graph and a custom baseUrl: the dispatch
+    // default (`http://localhost`) would move a Workers-style app off the origin
+    // its host authorization admits.
     const app = await TestApp.fromApp(application, 'http://agent.test')
     const result = await app.agent().call('origin.show')
 

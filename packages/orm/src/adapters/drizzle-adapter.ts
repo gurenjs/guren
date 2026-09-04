@@ -177,11 +177,9 @@ function isPromiseLike<T>(value: unknown): value is Promise<T> {
 }
 
 /**
- * Eagerly call `.returning()` on a query builder if available.
- * This ensures SQLite (bun-sqlite) drivers return inserted/updated rows
- * instead of RunResult, since their query builders are thenable —
- * `resolveMutation`'s `isPromiseLike` check would otherwise win
- * before the `.returning()` check is reached.
+ * Eagerly call `.returning()` if available: bun-sqlite's query builders are
+ * thenable, so `resolveMutation`'s `isPromiseLike` check would otherwise win
+ * first and the driver would hand back a RunResult instead of rows.
  */
 async function resolveWithReturning<T>(query: unknown): Promise<{ usedReturning: boolean; row: T | undefined }> {
   if (query && typeof query === 'object' && 'returning' in query && typeof (query as Record<string, unknown>).returning === 'function') {
@@ -350,7 +348,6 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
     const db = resolveExecutor(queryOptions)
     const tableRecord = table as DrizzleTableLike
 
-    // Build select - if specific fields requested, build a selection object
     let query: DrizzleLikeSelect
     if (options.select && options.select.length > 0) {
       const selection: Record<string, unknown> = {}
@@ -366,7 +363,6 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
       query = db.select().from(table)
     }
 
-    // Apply advanced conditions
     if (typeof query.where === 'function') {
       const clause = buildDrizzleConditions(table, conditions)
       if (clause) {
@@ -374,7 +370,6 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
       }
     }
 
-    // Apply ordering
     if (typeof query.orderBy === 'function') {
       const clauses = resolveOrder(table, options.orderBy)
       if (clauses && clauses.length > 0) {
@@ -382,12 +377,10 @@ export const DrizzleAdapter: ORMAdapterAdvanced & {
       }
     }
 
-    // Apply limit
     if (typeof query.limit === 'function' && typeof options.limit === 'number') {
       query = query.limit(options.limit) as DrizzleLikeSelect
     }
 
-    // Apply offset
     if (typeof query.offset === 'function' && typeof options.offset === 'number') {
       query = query.offset(options.offset) as DrizzleLikeSelect
     }

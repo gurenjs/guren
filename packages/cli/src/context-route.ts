@@ -5,40 +5,28 @@ import { schemaToTypeString } from './schema-type-extractor'
 
 /**
  * Optional fields this CLI's `ContextRoute` populates, as a runtime value.
- *
- * `@guren/cli` is resolved from the *app* at runtime, so `@guren/server`'s
- * development MCP endpoint can be handed a CLI older than the field it wants
- * to read — and an older CLI's context output is a route list with no `agent`
- * on any route, which is indistinguishable from an app that exposes no agent
- * tools. A consumer probes this list to tell "nothing exposed" from "this CLI
- * cannot answer", rather than reporting an empty surface either way.
- *
- * Append-only: a name here is a compatibility claim other packages branch on.
+ * `@guren/cli` is resolved from the *app*, so a consumer probes this list to
+ * tell "nothing exposed" from "this CLI is too old to answer" — both look like
+ * a route list with no `agent`. Append-only: other packages branch on a name here.
  */
 export const CONTEXT_ROUTE_FEATURES: readonly string[] = ['agent']
 
 /**
- * What a route's middleware chain authorizes, derived once here from the
- * stamped `capabilities.authorization` (RFC 0007) so every consumer reads the
- * same answer.
- *
- * Derived rather than carried raw: the capability shape is internal to
- * `@guren/server` and documented as changeable, while `guren context --json`
- * is an output contract. The derivability rule lives here and nowhere else —
- * a single ability is `abilities.length === 1` with `mode: 'all'` and no
- * method-map resolution. `mode: 'mixed'`, or an `abilityFor` callback
- * (`fromMethodMap: false`), means authorization is enforced but the ability
- * is *not* statically knowable: consumers must say so rather than pick a name
- * out of `abilities`.
+ * What a route's middleware chain authorizes, derived here from the stamped
+ * `capabilities.authorization` (RFC 0007) — that shape is internal to
+ * `@guren/server` and changeable, while `guren context --json` is a contract.
+ * The derivability rule lives here and nowhere else: `mode: 'mixed'` or an
+ * `abilityFor` callback means authorization is enforced but the ability is not
+ * statically knowable, so consumers must say so rather than pick one out of
+ * `abilities`.
  */
 export interface ContextRouteAuthorization {
   /** The one ability this route enforces, present only when derivable. */
   ability?: string
   /** Ability names the chain checks, in check order. Empty when every check derives its ability at request time. */
   abilities: string[]
-  /** How the checks combine, as stamped. */
   mode: 'all' | 'any' | 'mixed'
-  /** True when a check resolves its ability from the request method via the built-in verb map. */
+  /** A check resolves its ability from the request method via the built-in verb map. */
   fromMethodMap?: boolean
 }
 
@@ -74,13 +62,8 @@ export interface ContextRoute {
   query?: string
   body?: string
   output?: string
-  /**
-   * Agent exposure metadata as declared (RFC 0016), verbatim — absence means
-   * the route is not an agent tool. Plain data, so it needs none of the
-   * schema→string rendering the fields above do.
-   */
+  /** Agent metadata as declared (RFC 0016); absence means the route is not an agent tool. */
   agent?: AgentRouteMetadata
-  /** What the route's middleware chain authorizes. See {@link ContextRouteAuthorization}. */
   authorization?: ContextRouteAuthorization
   summary?: string
   description?: string
@@ -98,9 +81,8 @@ export function routeDefinitionToContextRoute(def: RouteDefinition): ContextRout
     bindings: def.bindings,
     middleware: def.middlewareNames?.length ? def.middlewareNames : undefined,
     hasInlineMiddleware: def.hasInlineMiddleware || undefined,
-    // `params` and `query` document what the controller ends up with — a
-    // coerced `:id` is more useful read as `number` than as the URL's string.
-    // `body` is the one an agent has to *write*, so it renders the wire side.
+    // `params`/`query` render what the controller ends up with (a coerced `:id`
+    // reads as `number`); `body` is written by callers, so it renders the wire side.
     params: schemaToTypeString(def.schemas?.params, { io: 'output' }),
     query: schemaToTypeString(def.schemas?.query, { io: 'output' }),
     body: schemaToTypeString(def.schemas?.body, { io: 'input' }),
@@ -136,18 +118,12 @@ export function escapeMarkdownTableCell(value: string): string {
 
 /**
  * Every route as a `ContextRoute`, or `[]` when the routes file can't be
- * loaded (missing deps, mid-scaffold app, etc.) — context commands degrade
- * to a route-less view instead of failing.
- *
- * `loadErrors`, when passed, receives the reason the load failed. Pass it
- * unless the caller has nothing to render it into: an app whose routes file
- * throws produces the same empty list as an app with no routes at all, so a
- * caller that drops the reason publishes a confident-looking "no routes"
- * that nobody can tell apart from a real one — the defect this degradation
- * had for as long as it swallowed the error outright.
- *
- * When there is nothing to load and that is a legitimate shape rather than a
- * failure, the empty list carries no reason — see `resolveRoutesFile()`.
+ * loaded (missing deps, mid-scaffold app) — context commands degrade to a
+ * route-less view instead of failing. Pass `loadErrors` unless the caller has
+ * nothing to render it into: a failed load and an app with no routes produce
+ * the same empty list, so dropping the reason publishes a "no routes" nobody
+ * can tell apart from a real one. A legitimately absent routes file carries no
+ * reason — see `resolveRoutesFile()`.
  */
 export async function loadContextRoutes(
   cwd: string,

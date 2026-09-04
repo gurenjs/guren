@@ -7,10 +7,6 @@ interface ProcessNewPostPayload {
   postId: number
 }
 
-/**
- * Job that processes a newly created post.
- * This emits the PostCreated event for listeners to handle.
- */
 export class ProcessNewPostJob extends Job<ProcessNewPostPayload> {
   static override queue = 'default'
   static override maxAttempts = 3
@@ -29,7 +25,6 @@ export class ProcessNewPostJob extends Job<ProcessNewPostPayload> {
       return
     }
 
-    // Emit PostCreated event
     await this.make('events').emit(new PostCreated(post, author))
     console.log(`[Job] Post ${post.id} processed successfully`)
   }

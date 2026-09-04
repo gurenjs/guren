@@ -20,7 +20,6 @@ let consoleLogSpy: ReturnType<typeof spyOn>
 const VALID_APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
 
 beforeEach(() => {
-  // Suppress console.log output from --json mode during tests
   consoleLogSpy = spyOn(console, 'log').mockImplementation(() => {})
 })
 
@@ -29,17 +28,15 @@ afterEach(() => {
 })
 
 describe('runDoctor manifest plans', () => {
-  // The agent manifest plan may evaluate the app's whole module graph and
-  // derive every tool. The rules ask for it and `--next` asks again, so a run
-  // has to share one computation or `doctor --next` pays for two.
+  // Deriving the plan walks the app's whole module graph, and both the rules
+  // and `--next` ask for it, so a run must share one computation.
   it('computes the agent manifest plan once across the rules and --next', async () => {
     const workspace = await createTempWorkspace('guren-doctor-plan-memo-')
     try {
       const counter = join(workspace.dir, 'registrar-runs.log')
       await writeWorkspaceFiles(workspace.dir, {
-        // Appends a line every time the registrar runs, which is once per
-        // loadRouteDefinitions() call — module evaluation is cached, the
-        // registrar run is not.
+        // One line per loadRouteDefinitions() call: module evaluation is
+        // cached, the registrar run is not.
         'routes/web.ts': `import { appendFileSync } from 'node:fs'
 import { Router } from '@guren/core'
 
@@ -306,7 +303,6 @@ describe('runDoctor', () => {
       const report = await runDoctor({ cwd: workspace.dir, json: true })
       const bunCheck = report.checks.find((check) => check.key === 'bun-version')
 
-      // Tests run under Bun, so version should be detected and >= 1.1.0
       expect(bunCheck).toBeDefined()
       expect(bunCheck?.status).toBe('pass')
       expect(bunCheck?.message).toContain('Bun')
@@ -388,7 +384,6 @@ describe('runDoctor', () => {
       const envContent = await Bun.file(join(workspace.dir, '.env')).text()
       expect(envContent).toContain('DATABASE_URL=')
 
-      // Re-run doctor to confirm env-file now passes
       const report = await runDoctor({ cwd: workspace.dir, json: true })
       const envCheck = report.checks.find((check) => check.key === 'env-file')
       expect(envCheck?.status).toBe('pass')
@@ -597,9 +592,8 @@ describe('runDoctor', () => {
       await mkdir(join(workspace.dir, '.guren'), { recursive: true })
       await mkdir(join(workspace.dir, 'resources/js/pages'), { recursive: true })
       await writeFile(join(workspace.dir, 'resources/js/pages/Home.tsx'), 'export default function Home() { return null }\n', 'utf8')
-      // routes/web.ts is what makes this a fullstack app rather than one
-      // codegen would decline to write a manifest for — without it the two
-      // checks below still warn, but about the suppressed manifest instead.
+      // routes/web.ts is what makes this fullstack; without it the checks
+      // below warn about the suppressed manifest instead.
       await mkdir(join(workspace.dir, 'routes'), { recursive: true })
       await writeFile(join(workspace.dir, 'routes/web.ts'), BLOG_ROUTES_FIXTURE, 'utf8')
       await writeFile(
@@ -619,12 +613,9 @@ describe('runDoctor', () => {
     }
   })
 
-  /**
-   * Both rules below used to answer "is the file there?" first, which is the
-   * wrong order once codegen can decline to write it: a manifest generated
-   * before the app took this shape sits there importing `@guren/inertia-client`,
-   * failing the typecheck, while doctor calls it healthy.
-   */
+  // "Would codegen write it?" has to come before "is it there?": a manifest
+  // left from an earlier app shape still imports `@guren/inertia-client` and
+  // fails the typecheck, while file presence alone reads as healthy.
   describe('a pages manifest codegen would not write', () => {
     const apiOnlyAppWithPages = {
       ...API_ONLY_APP_FILES,
@@ -795,15 +786,12 @@ describe('runDoctor', () => {
     }
   })
 
-  // A root `baseUrl` has more than one spelling. These reach the same
-  // `mapsToRoot` branch as `"."` above, so they must warn with the TS5102
-  // message and autofix; a literal comparison drops them into the "repoints
-  // the alias" branch, which reports the wrong cause and refuses to fix it.
+  // Other spellings of a root `baseUrl` reach the same `mapsToRoot` branch; a
+  // literal comparison reports the wrong cause and refuses to fix them.
   it.each([
     ['an absolute path equal to the project root', (dir: string) => dir],
     ['a redundant `./.`', () => './.'],
-    // Whatever an older TypeScript made of `""`, TS7 rejects `baseUrl` for
-    // any value, so warn-and-remove is the outcome either way.
+    // TS7 rejects `baseUrl` for any value, `""` included.
     ['an empty string', () => ''],
   ])('warns on a root baseUrl written as %s and the autofix removes it', async (_label, buildBaseUrl) => {
     const workspace = await createTempWorkspace('guren-cli-doctor-alias-root-baseurl-alt-')
@@ -817,9 +805,8 @@ describe('runDoctor', () => {
       await writeFile(
         join(workspace.dir, 'tsconfig.json'),
         JSON.stringify({
-          // Derived from `workspace.dir` — the same string passed as `cwd`
-          // below. A realpath would add macOS's `/private` prefix to one side
-          // of the comparison only.
+          // The same string passed as `cwd` below: a realpath would add
+          // macOS's `/private` prefix to one side of the comparison only.
           compilerOptions: { baseUrl: buildBaseUrl(workspace.dir), paths: { '@/*': ['./*'] } },
           include: ['.guren/**/*'],
         }, null, 2),
@@ -848,9 +835,8 @@ describe('runDoctor', () => {
     }
   })
   it('warns instead of crashing on a non-string baseUrl', async () => {
-    // The root-baseUrl comparison resolves paths, and `resolve()` throws on a
-    // non-string. A hand-edited tsconfig has to stay a warn, not take down the
-    // whole doctor run.
+    // `resolve()` throws on a non-string, and a hand-edited tsconfig must
+    // stay a warn rather than take down the whole doctor run.
     const workspace = await createTempWorkspace('guren-cli-doctor-alias-baseurl-nonstring-')
 
     try {
@@ -1049,7 +1035,6 @@ describe('runDoctor', () => {
       const report = await runDoctor({ cwd: workspace.dir, json: true })
       const jsonOutput = buildJsonOutput(report)
 
-      // Verify stable JSON schema
       expect(jsonOutput.version).toBe(1)
       expect(jsonOutput.cwd).toBe(workspace.dir)
       expect(jsonOutput.timestamp).toBeDefined()
@@ -1057,13 +1042,11 @@ describe('runDoctor', () => {
       expect(jsonOutput.runtime.name).toBe('bun')
       expect(jsonOutput.runtime.version).toBeDefined()
 
-      // Verify summary counts match checks
       expect(jsonOutput.summary.total).toBe(jsonOutput.checks.length)
       expect(
         jsonOutput.summary.pass + jsonOutput.summary.warn + jsonOutput.summary.fail,
       ).toBe(jsonOutput.summary.total)
 
-      // Verify checks have normalized shape (no undefined values)
       for (const check of jsonOutput.checks) {
         expect(check.key).toBeDefined()
         expect(check.title).toBeDefined()
@@ -1074,7 +1057,6 @@ describe('runDoctor', () => {
         expect(check.manualFix === null || typeof check.manualFix === 'string').toBe(true)
       }
 
-      // Verify recommendedCommands
       expect(jsonOutput.recommendedCommands.length).toBeGreaterThan(0)
     } finally {
       await workspace.cleanup()
@@ -1299,7 +1281,6 @@ describe('runDoctor', () => {
         JSON.stringify({ name: 'doctor-test-infra-nontest' }, null, 2),
         'utf8',
       )
-      // A helper file, not a *.test.ts file — should not count as test infrastructure.
       await writeFile(join(workspace.dir, 'tests/helpers.ts'), 'export const noop = () => {}\n', 'utf8')
 
       const report = await runDoctor({ cwd: workspace.dir, json: true })
@@ -1333,10 +1314,8 @@ describe('runDoctor', () => {
     }
   })
 
-  // A decorated controller used to be silently invisible here (the empty-method
-  // scan hand-rolled its own Babel parse without decorator plugins). Also
-  // covers extractClassDeclaration matching a bare, non-exported class, which
-  // this scan's own inline extraction previously did not.
+  // Covers the decorator plugins the empty-method scan needs, and
+  // extractClassDeclaration matching a bare, non-exported class.
   it('suggests implementing an empty method on a decorated, non-exported controller', async () => {
     const workspace = await createTempWorkspace('guren-cli-doctor-empty-method-decorated-')
     try {
@@ -1439,8 +1418,6 @@ describe('suggestNextSteps', () => {
         `export default class PostsController {\n  async index() { return null }\n}`,
         'utf8',
       )
-      // A test file next to the controller must not be reported as a
-      // controller of its own.
       await writeFile(
         join(workspace.dir, 'modules/blog/app/Http/Controllers/PostsController.test.ts'),
         `test('index', () => {})`,
@@ -1461,8 +1438,7 @@ describe('suggestNextSteps', () => {
       const oauthStep = steps.find((step) => step.title === 'Confirm test coverage for OAuthController')
       expect(oauthStep).toBeDefined()
       expect(oauthStep!.command).toBe('bunx guren make:test OAuth --controller --module blog')
-      // The description is the other half of the wording; without this it is the
-      // half free to drift away from `guren check`.
+      // Unasserted, the description half is free to drift from `guren check`.
       expect(oauthStep!.description).toContain('filename-only detection')
       expect(oauthStep!.description).toContain('already covered under another name')
     } finally {
@@ -1475,8 +1451,7 @@ describe('suggestNextSteps', () => {
 
     try {
       // A real API-only app, not merely one with no pages: without the
-      // package.json this fixture is an app the predicate cannot confirm, and
-      // the assertion below would hold with the whole rule removed.
+      // package.json the assertion holds even with the rule removed.
       await seedApiOnlyApp(workspace.dir)
       await mkdir(join(workspace.dir, '.guren'), { recursive: true })
       await writeFile(join(workspace.dir, '.guren/routes.gen.ts'), 'export const routeManifest = {} as const\n', 'utf8')
@@ -1510,7 +1485,6 @@ describe('suggestNextSteps', () => {
     }
   })
 
-  /** Run `suggestNextSteps` over a throwaway workspace built from path → content. */
   async function stepsFor(
     files: Record<string, string>,
   ): Promise<Awaited<ReturnType<typeof suggestNextSteps>>> {
@@ -1524,9 +1498,8 @@ describe('suggestNextSteps', () => {
     }
   }
 
-  // Neither file's contents reach an assertion — models are discovered by
-  // path and factories are matched by basename — so one fixture body serves
-  // both.
+  // Models are discovered by path and factories by basename, so no fixture
+  // body reaches an assertion.
   const SOURCE = 'export default class Fixture {}\n'
 
   it('does not suggest a factory for a model whose factory is named in the plural', async () => {
@@ -1560,9 +1533,8 @@ describe('suggestNextSteps', () => {
     expect(step!.command).toBe('bunx guren make:factory Category')
   })
 
-  // A factory's own test is not a factory. Matching basenames rather than
-  // exact paths puts `PostFactory.test.ts` within reach of the pattern, and
-  // suppressing the step on it would hide a genuinely missing factory.
+  // Basename matching puts `PostFactory.test.ts` within reach of the pattern,
+  // and suppressing on it would hide a genuinely missing factory.
   it('does not treat a factory test file as the factory itself', async () => {
     const steps = await stepsFor({
       'app/Models/Post.ts': SOURCE,
@@ -1586,9 +1558,8 @@ describe('suggestNextSteps', () => {
     expect(planStep!.command).toBe('bunx guren make:factory Plan --module billing')
   })
 
-  // Same class name in two app roots: the root factory belongs to the root
-  // model only. Pooling every root's factories together would leave the
-  // module's own missing factory unreported.
+  // The root factory belongs to the root model only: pooling every root's
+  // factories would leave the module's own missing factory unreported.
   it('does not let a root factory satisfy a same-named model in a module', async () => {
     const steps = await stepsFor({
       'app/Models/Post.ts': SOURCE,
@@ -1665,8 +1636,7 @@ describe('renderDoctorReport', () => {
 
   it('keeps a manual step that says more than the fix', () => {
     // `bun upgrade` cannot run when Bun is missing, so the URL in manualFix is
-    // the only usable instruction — dropping it as a duplicate would strand
-    // the reader.
+    // the only usable instruction.
     const lines = captureReport([
       {
         key: 'bun-version',

@@ -39,9 +39,8 @@ describe('describeCallerFile', () => {
   })
 
   test('should keep a path that contains spaces intact', () => {
-    // "My Projects", iCloud's "Mobile Documents" — ordinary on macOS. A
-    // truncated path no longer identifies the caller: two call sites that
-    // truncate alike land on one registry slot, and under `--hot` the second
+    // "My Projects", iCloud's "Mobile Documents" — ordinary on macOS. Two call
+    // sites that truncate alike land on one slot, and under `--hot` the second
     // would close the first's live connection.
     const bare = [
       'Error',
@@ -76,10 +75,9 @@ describe('describeCallerFile', () => {
   })
 
   test('should key a path that contains an unmatched closing parenthesis', () => {
-    // Nothing in the frame closes it, so counting depth alone runs off the front
-    // and the frame is skipped — the walk then keys the connection on whichever
-    // caller sits above it, collapsing every handle built through that caller
-    // into one slot. The leftmost `(` is the reading that keeps the path whole.
+    // Nothing in the frame closes it, so depth alone runs off the front and the
+    // frame is skipped, collapsing every handle behind the caller above it into
+    // one slot. The leftmost `(` is the reading that keeps the path whole.
     const stack = [
       'Error',
       '    at createPostgresDatabase (/app/dist/index.js:1:1)',
@@ -142,11 +140,9 @@ describe('describeCallerFile', () => {
   })
 
   test('should read a malformed frame exactly as the engine-driven parse did', () => {
-    // These are degenerate frames no runtime emits, pinned because the parse is
-    // deliberately bug-for-bug with the pattern it replaced and nothing else
-    // holds it there: each of these is the only witness that separates the
-    // real rule from a plausible simplification of it. Their values are not
-    // interesting in themselves — that they do not drift is.
+    // Degenerate frames no runtime emits, pinned because the parse is
+    // deliberately bug-for-bug with the pattern it replaced and each of these is
+    // the only witness separating the real rule from a plausible simplification.
     const frame = (last: string) => describeCallerFile(`Error\n    at factory (/app/dist/index.js:1:1)\n${last}`)
 
     // A path may be the whitespace the run after `at` gives back...
@@ -171,11 +167,9 @@ describe('describeCallerFile', () => {
   })
 
   test('should stay linear in the number of frames as well as their length', () => {
-    // The two fixtures above put the adversarial frame last, so the walk exits
-    // after one of them however slow that one is. Cost has to track the total
-    // size of the stack, not the product of frame count and frame length — the
-    // walk visits every frame, and each carries the shapes that used to
-    // backtrack.
+    // The fixtures above put the adversarial frame last, so the walk exits after
+    // one. Cost has to track total stack size, not frame count times frame
+    // length, since here every frame carries the shapes that used to backtrack.
     const stack = (count: number, width: number) =>
       ['Error', '    at factory (/app/dist/index.js:1:1)', ...Array(count).fill(`    at ${' '.repeat(width)}x`)].join(
         '\n',
@@ -206,12 +200,10 @@ describe('describeCallerFile', () => {
   })
 
   test('should parse a stack this runtime actually produced', () => {
-    // The fixtures above are hand-written, so they would keep passing if the
-    // engine changed its stack format and every real key silently became
-    // undefined — leaking again, quietly. This asserts against the real thing,
-    // including through an implicit constructor: a field initializer needs no
-    // explicit constructor and no subclass, so `class Database { db = create() }`
-    // is enough for JSC to put an `unknown` frame where the caller belongs.
+    // The hand-written fixtures above would keep passing if the engine changed
+    // its stack format and every real key silently became undefined. This runs
+    // against the real thing, including `class Database { db = create() }`,
+    // which is enough for JSC to put an `unknown` frame where the caller belongs.
     const factory = () => describeCallerFile(new Error().stack)
 
     class BaseDb {
@@ -228,12 +220,10 @@ describe('describeCallerFile', () => {
   })
 
   test('should walk past a synthetic frame that carries a location', () => {
-    // `unknown` and `native` parse as perfectly good paths — they carry a
-    // `:line:column` like any other frame — so the location check above cannot
-    // reject them. Reading one as the caller keys every handle behind an
-    // implicit constructor to the literal string `unknown`, which is worse than
-    // no key at all: unrelated files collapse into one slot, and under `--hot`
-    // each new handle closes a live connection belonging to someone else.
+    // `unknown` and `native` carry a `:line:column` like any other frame, so the
+    // location check cannot reject them. Keying on one is worse than no key:
+    // unrelated files collapse into one slot, and each new handle then closes a
+    // live connection belonging to someone else.
     const frame = (...synthetic: string[]) =>
       describeCallerFile(
         ['Error', '    at factory (/app/dist/index.js:1:1)', ...synthetic, '    at /app/config/database.ts:3:18'].join(
@@ -261,10 +251,9 @@ describe('describeCallerFile', () => {
 
   test('should walk past a host frame that names no location at all', () => {
     // `at replace (unknown)` — no `:line`, so the shape check rejects it rather
-    // than the synthetic-path set. It is still a host frame, and the real caller
-    // sits behind it: Bun emits exactly this for a callback a built-in invoked
-    // (`'x'.replace(/x/, fn)`). Stopping here instead of stepping over would
-    // read two callers in *different* files as one absent caller and leak both.
+    // than the synthetic-path set. Bun emits exactly this for a callback a
+    // built-in invoked (`'x'.replace(/x/, fn)`), and the real caller sits behind
+    // it: stopping here would read two callers in different files as one.
     const frame = (last: string) =>
       describeCallerFile(
         ['Error', '    at factory (/app/dist/index.js:1:1)', '    at replace (unknown)', last].join('\n'),

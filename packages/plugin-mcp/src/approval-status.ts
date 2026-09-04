@@ -1,23 +1,12 @@
 /**
- * `guren.approval_status` — the approval-status companion tool (RFC 0016
- * §5.4 item 4).
- *
- * A call to an `approval: 'required'` tool comes back refused, carrying a
- * request id. This is what the id is for: the caller asks what became of it,
- * and repeats the original call once the answer is `approved`.
- *
- * It is a meta-tool for the same protocol reason `guren.preflight` is one. A
- * status is not the gated route's output, and MCP forbids a tool advertising
- * an `outputSchema` from answering with a different shape of success — so the
- * answer needs a tool with a schema of its own, and one for the whole
- * catalogue rather than one per gated tool.
- *
- * The module owns the tool's advertised schemas and the translation of a
- * stored record into an answer. It owns no rule: expiry is
- * `agentApprovalStatusAt`, visibility is `agentApprovalVisibleTo`, both in
- * `@guren/core` beside the store interface, because the gate reads the same
- * two and a second copy here is how a record this tool calls "approved" comes
- * to be one the gate refuses.
+ * `guren.approval_status` — the approval-status companion tool (RFC 0016 §5.4
+ * item 4). A call to an `approval: 'required'` tool comes back refused carrying
+ * a request id; this is what the id is for. A meta-tool for the same protocol
+ * reason `guren.preflight` is one: a status is not the gated route's output, and
+ * MCP forbids a schema-declaring tool from answering with a different shape of
+ * success. It owns no rule — expiry is `agentApprovalStatusAt` and visibility
+ * `agentApprovalVisibleTo`, the same two the gate reads, so a record this tool
+ * calls "approved" cannot be one the gate refuses.
  */
 import {
   agentApprovalStatusAt,
@@ -44,9 +33,8 @@ const APPROVAL_STATUS_INPUT_SCHEMA: McpObjectSchema = {
 
 /**
  * `additionalProperties` is deliberately unset, for the reason
- * `PREFLIGHT_OUTPUT_SCHEMA` states: the SDK client validates
- * `structuredContent` against this schema, and a closed object would turn any
- * later field into a `-32602` for a client pinned to an older server.
+ * `PREFLIGHT_OUTPUT_SCHEMA` states: a closed object would turn any later field
+ * into a `-32602` for a client pinned to an older server.
  */
 const APPROVAL_STATUS_OUTPUT_SCHEMA: McpObjectSchema = {
   type: 'object',
@@ -85,12 +73,9 @@ const APPROVAL_STATUS_OUTPUT_SCHEMA: McpObjectSchema = {
 }
 
 /**
- * The tool as `tools/list` advertises it.
- *
- * The description says what an agent should *do* with each answer, not only
- * what the field means: the whole point of the tool is to end a poll loop, and
- * a client that reads "approved" without being told to repeat the original
- * call will sit on it.
+ * The tool as `tools/list` advertises it. The description says what an agent
+ * should *do* with each answer: a client that reads "approved" without being
+ * told to repeat the original call will sit on it.
  */
 export function describeApprovalStatusTool(): {
   name: string
@@ -116,11 +101,8 @@ export function describeApprovalStatusTool(): {
 export type ApprovalStatusRequest = { requestId: string } | { error: string }
 
 /**
- * Read `{ requestId }` off a raw call.
- *
- * Checked here for the reason `readPreflightArguments` checks its two: the
- * low-level `Server` hands arguments through unvalidated, and this argument
- * decides *which record* is addressed.
+ * Read `{ requestId }` off a raw call. The low-level `Server` hands arguments
+ * through unvalidated, and this one decides *which record* is addressed.
  */
 export function readApprovalStatusArguments(
   args: Record<string, unknown>,
@@ -150,20 +132,11 @@ export interface ApprovalStatusReport {
 }
 
 /**
- * The one message for "there is no such request *for you*".
- *
- * A single function, called from both branches, because the two answers must
- * be **indistinguishable**: an unknown id and another principal's id are the
- * same answer, byte for byte. Any difference — a distinct message, a different
- * result shape, a field one carries and the other does not — turns the tool
- * into a way to enumerate other principals' pending actions, which is exactly
- * what the scope rule forbids. Building the two messages separately is how
- * that difference gets reintroduced by a later edit to one of them, so there
- * is only one to edit.
- *
- * The audit trail is the place the distinction *is* kept: the operator should
- * be able to see that a caller asked after someone else's request. The caller
- * may not.
+ * The one message for "there is no such request *for you*". One function for
+ * both branches because an unknown id and another principal's id must be the
+ * same answer byte for byte: any difference turns the tool into a way to
+ * enumerate other principals' pending actions. The audit trail is where the
+ * distinction is kept, for the operator.
  */
 export function approvalStatusNotFoundMessage(requestId: string): string {
   return `No approval request with id "${requestId}" was made by this caller.`
@@ -172,24 +145,16 @@ export function approvalStatusNotFoundMessage(requestId: string): string {
 export type ApprovalStatusOutcome =
   | { report: ApprovalStatusReport }
   /**
-   * Unknown, or not this caller's — one answer to the caller. See above.
-   *
-   * `foreign` is the half the *operator* gets and the caller does not: the
-   * record exists and belongs to someone else. Without it, the claim above —
-   * that the audit trail keeps the distinction the caller is denied — is not
-   * true of anything, because both cases reach the audit event as an identical
-   * 404. It must never reach the result: the message is the same either way,
-   * and this rides beside it rather than in it.
+   * Unknown, or not this caller's — one answer to the caller. `foreign` is the
+   * half the *operator* gets: it rides beside the message, for the audit event,
+   * and must never reach the result.
    */
   | { notFound: string; foreign: boolean }
 
 /**
- * Read a stored record as an answer for `principal` at `now`.
- *
- * `record === null` and "not visible to this principal" converge on the same
- * branch on purpose, and they converge *here* rather than at two call sites,
- * so the sameness is structural rather than a thing two branches happen to
- * agree on today.
+ * Read a stored record as an answer for `principal` at `now`. `record === null`
+ * and "not visible to this principal" converge here rather than at two call
+ * sites, so their sameness is structural.
  */
 export function toApprovalStatusReport(
   requestId: string,

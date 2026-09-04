@@ -142,10 +142,9 @@ function extractDefinitionsFromSource(
   definitions: ChannelDefinitionMap,
   filePath?: string,
 ): void {
-  // Plugins come from the extension rather than a fixed `typescript`+`jsx`
-  // pair: JSX on a `.ts` file makes `<Type>value` cast syntax parse as an
-  // unterminated JSX element, so a channel file using one was silently
-  // contributing no channels.
+  // Plugins come from the extension, not a fixed `typescript`+`jsx` pair: with
+  // jsx on, a `.ts` file's `<Type>value` cast parses as an unterminated JSX
+  // element and the file silently contributes no channels.
   const ast = parseSourceFile(source, filePath)
   if (!ast) return
 
@@ -290,10 +289,9 @@ function renderPayloadType(value: unknown): string {
 }
 
 function normalizePayloadType(input: BabelNode): string {
-  // Unwrapped here rather than at the caller so the recursive descent below
-  // covers nested values too: `{ tags: ['a'] as const } as const` wraps at
-  // two levels, and a payload read as "not an object" renders as `unknown`,
-  // which types every listener's argument as unusable.
+  // Unwrapped here rather than at the caller so the recursive descent covers
+  // nested values: `{ tags: ['a'] as const } as const` wraps at two levels, and
+  // a payload read as "not an object" renders as `unknown`.
   const node = unwrapTypeAssertion(input)
 
   switch (node.type) {

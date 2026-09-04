@@ -52,16 +52,11 @@ export function createControllerContext(
   const parsedUrl = new URL(request.url)
   const store = new Map<string, unknown>(Object.entries(contextValues))
 
-  // The same class a live request is read through, so both query surfaces
-  // below are Hono's own rather than a restatement of them. Both were restated
-  // here once and both drifted: `query()` kept the LAST occurrence of a
-  // repeated key where Hono keeps the FIRST, and — fixed by delegating rather
-  // than by patching the copy again — it dropped a `__proto__` key outright,
-  // because building the record by assignment hits the inherited setter where
-  // Hono's null-prototype object has no setter to hit.
+  // The same class a live request is read through, so both query surfaces below
+  // are Hono's own rather than a restatement that can drift.
   //
-  // Reading a body is what needs a `clone()` (see parseRequestBody); these two
-  // read only the URL, so this wraps `request` directly and leaves it intact.
+  // Reading a body is what needs a `clone()` (see parseRequestBody); these two read
+  // only the URL, so this wraps `request` directly and leaves it intact.
   const honoRequest = new HonoRequest(request)
 
   const req = {
@@ -90,13 +85,10 @@ export function createControllerContext(
 }
 
 /**
- * `@guren/server` is loaded lazily and memoized: this module is the factory
- * behind `vi.mock('@guren/core', …)` — and the testing package's own suite
- * mocks `@guren/server` with it — so a top-level import of either specifier
- * is circular under vitest's hoisting (TDZ on the hoisted binding). The
- * documented app pattern mocks `@guren/core`, which leaves `@guren/server`
- * real; a suite that mocks `@guren/server` itself gets a mock in which
- * `view()`/`viteAsset` are unavailable — circular by construction.
+ * `@guren/server` is loaded lazily and memoized: this module is the factory behind
+ * `vi.mock('@guren/core', …)`, so a top-level import of either specifier is circular
+ * under vitest's hoisting (TDZ on the hoisted binding). A suite that mocks
+ * `@guren/server` itself gets a mock without `view()`/`viteAsset`.
  */
 type ServerModule = typeof import('@guren/server')
 let loadedServer: ServerModule | undefined
@@ -111,19 +103,10 @@ function loadServer(): Promise<ServerModule> {
 }
 
 /**
- * The mock's request body: the parsed value as sent, so an array stays an
- * array for `validateBody()` to judge.
- *
- * Nothing about a body is decided here. Which content types are read, how a
- * repeated `field[]` collapses, what an undecodable body falls back to — all
- * of it comes from the runtime's own parser, reached through
- * `@guren/server/internal/request`. The mock used to carry a second copy of
- * those rules, and every one of them drifted at least once: an uppercase media
- * type, a `;`-parameterized one, a repeated `field[]`, a `__proto__` field,
- * an undecodable body. Each was fixed in the copy; sharing the parser is what
- * stops the next one.
- *
- * What stays local is the adapter — see {@link honoRequestFor}.
+ * The mock's request body: the parsed value as sent, so an array stays an array for
+ * `validateBody()` to judge. Nothing about a body is decided here — content types,
+ * repeated `field[]`, the undecodable fallback all come from the runtime's parser
+ * via `@guren/server/internal/request`. Only the adapter is local ({@link honoRequestFor}).
  */
 async function parseRequestBody(ctx: ControllerContext): Promise<unknown> {
   const req = honoRequestFor(ctx)
@@ -131,14 +114,9 @@ async function parseRequestBody(ctx: ControllerContext): Promise<unknown> {
 }
 
 /**
- * The mock's uploads, behind {@link Controller.file} / {@link Controller.files}
- * — the same delegation as {@link parseRequestBody}, to the runtime's
- * `parseRequestUploads` rather than to its body parser.
- *
- * The two are a deliberate pair and not interchangeable, and there is no
- * media-type gate on this side — `parseRequestUploads` in the runtime owns both
- * reasons, including the `Request.formData()` divergence whose absence here is
- * the fix. Restating them is what this file is being emptied of.
+ * The mock's uploads, behind {@link Controller.file} / {@link Controller.files}: the
+ * same delegation as {@link parseRequestBody}, but to `parseRequestUploads`. The two
+ * are not interchangeable, and the runtime owns the missing media-type gate.
  */
 async function parseRequestUploads(ctx: ControllerContext): Promise<RequestUploads> {
   const req = honoRequestFor(ctx)
@@ -146,31 +124,22 @@ async function parseRequestUploads(ctx: ControllerContext): Promise<RequestUploa
 }
 
 /**
- * The whole of what stays local, because the two sides hold different things:
- * the runtime is handed a Hono context, the mock holds a `Request`. A
- * `HonoRequest` bridges them, supplying the members the shared parsers read
- * (`header()`, `json()`, `parseBody()`) from the same class a live request
- * does — so even the media-type decision inside `parseBody()` is Hono's own
- * rather than a restatement of it.
+ * The local adapter: the runtime is handed a Hono context, the mock holds a
+ * `Request`, and a `HonoRequest` bridges them so even the media-type decision inside
+ * `parseBody()` is Hono's own.
  *
- * Answers `null` on the one failure that is the adapter's own: `clone()` throws
- * on a body already read, which cannot happen to the runtime because Hono hands
- * it the request before anything else touches it. Callers turn that into the
- * empty answer. Everything past this point is the shared parser's to answer,
- * including the `{}` it returns for a body no parser can decode — catching that
- * here too would let the mock swallow a throw the runtime would surface.
+ * Answers `null` only on the adapter's own failure — `clone()` throws on a body
+ * already read, which cannot happen to the runtime. Everything else, including the
+ * `{}` for an undecodable body, is the shared parser's to answer.
  */
 function honoRequestFor(ctx: ControllerContext): HonoRequest | null {
-  // Read outside the fallback on purpose: the fallback is for an unparseable
-  // *body*, and a ctx with no request at all is a broken test setup. Swallowing
-  // that into `{}` would turn a wiring mistake into a confusing validation
-  // failure, and the runtime's parsers do not swallow it either.
+  // Read outside the fallback: that is for an unparseable *body*, while a ctx with
+  // no request at all is a broken test setup the runtime does not swallow either.
   const raw = ctx.req.raw
 
   try {
-    // Clone so the raw body stays readable — the real runtime caches the
-    // parsed body in Hono, letting validateBody() and file() compose on one
-    // request; here the clone is what preserves that property.
+    // Clone so the raw body stays readable: the real runtime caches the parsed body
+    // in Hono, letting validateBody() and file() compose on one request.
     return new HonoRequest(raw.clone())
   } catch {
     return null
@@ -178,45 +147,29 @@ function honoRequestFor(ctx: ControllerContext): HonoRequest | null {
 }
 
 /**
- * Query data as a validation schema sees it: a repeated key as an array, a
- * single occurrence as a plain string (`?tag=a&tag=b` → `{ tag: ['a', 'b'] }`,
- * `?page=2` → `{ page: '2' }`).
+ * Query data as a validation schema sees it: a repeated key as an array, a single
+ * occurrence as a plain string. The shape is the runtime's own
+ * `flattenRequestQueries`; only the adapter is local, because `queries()` is
+ * *optional* on {@link ControllerContext} and a hand-built context may lack one.
  *
- * Nothing about that shape is decided here — it is the runtime's own
- * `flattenRequestQueries`, reached through `@guren/server/internal/request`,
- * exactly as the body parser above reaches the runtime's parser. Only the
- * adapter is local, and it exists for one reason: the runtime calls
- * `ctx.req.queries()` unconditionally, while `queries()` is *optional* on
- * {@link ControllerContext}, so a hand-built context may not carry one.
- *
- * For a context that does, its own `queries()` is handed to the shared rule —
- * an override on a published type stays honored. For one that does not, the
- * grouping is re-derived from the required `req.url` through a `HonoRequest`,
- * which is the same grouping `createControllerContext` gets. That branch must
- * not fall back to `query()`: that surface is one value per key by
- * construction, which is the divergence this function exists to close.
- *
- * `ctx.req.queries` is tested for truthiness, never with `'queries' in ctx.req`
- * — a context built by spreading one and blanking the member carries the key
- * with an explicit `undefined`, so an `in` test would take the override branch
- * and call `undefined()`.
+ * The fallback re-derives the grouping from `req.url` through a `HonoRequest`, never
+ * from `query()` (one value per key — the divergence this closes). `ctx.req.queries`
+ * is tested for truthiness, not with `in`: a blanked member carries an explicit
+ * `undefined`, and the override branch would then call `undefined()`.
  */
 function flattenContextQueries(ctx: ControllerContext): Record<string, unknown> {
   const { req } = ctx
   return flattenRequestQueriesByRuntimeRules({
-    // Invoked as a method on `ctx.req`, never handed over as a bare reference.
-    // `queries?: () => …` is satisfied by a *method* as readily as by an arrow,
-    // and a method reading `this.url` is a reasonable way to write an override;
-    // passing `{ queries }` would re-`this` it onto that fresh literal and read
-    // `undefined`. The wrapper is what keeps the receiver.
+    // Invoked as a method on `ctx.req`, never handed over bare: an override written
+    // as a method reads `this.url`, and `{ queries }` would re-`this` it onto that
+    // fresh literal. The wrapper is what keeps the receiver.
     req: req.queries ? { queries: () => req.queries!() } : new HonoRequest(new Request(req.url)),
   })
 }
 
 export function createGurenControllerModule() {
-  // Prime the memo now: continuations on one promise run in registration
-  // order, so by the time an awaited view() render invokes a component that
-  // calls the sync viteAsset below, the memo is already populated.
+  // Prime the memo now: continuations on one promise run in registration order, so
+  // the memo is populated before an awaited view() render reaches the sync viteAsset.
   void loadServer()
 
   class Controller {
@@ -259,8 +212,7 @@ export function createGurenControllerModule() {
         typeof componentOrPage === 'string'
           ? componentOrPage
           : componentOrPage.component ?? componentOrPage.id
-      // Mirrors the real inertia() engine: the page url defaults to the
-      // request's pathname plus query string, per the Inertia protocol.
+      // Per the Inertia protocol: the page url defaults to pathname plus query string.
       let url = options.url as string | undefined
       if (url === undefined) {
         const { pathname, search } = new URL(request.url)
@@ -300,11 +252,8 @@ export function createGurenControllerModule() {
     }
 
     /**
-     * Delegates to the real `renderDocument()` from `@guren/server` — the
-     * same engine `Controller.view()` uses — so the mock cannot drift on
-     * escaping, the fragment guard, or response shaping. Importing
-     * `@guren/server` here is established practice (`queue.ts` does), and
-     * only the `@guren/core` specifier is replaced by `vi.mock`.
+     * Delegates to the real `renderDocument()` — the same engine `Controller.view()`
+     * uses — so the mock cannot drift on escaping, the fragment guard or shaping.
      */
     async view(
       component: ((props: never) => unknown) & { displayName?: string; name?: string },
@@ -319,13 +268,9 @@ export function createGurenControllerModule() {
   return {
     Controller,
     /**
-     * The real `viteAsset()` from `@guren/server`: under vitest
-     * (`NODE_ENV` is never `production`) it takes the dev branch and returns
-     * deterministic dev-server URLs; a test that forces production gets the
-     * real manifest lookup — including the missing-entry throw — rather
-     * than a fiction that hides a forgotten build input. Sync by contract,
-     * so it reads the lazily-primed memo (populated before any `view()`
-     * render reaches a component; see `loadServer`).
+     * The real `viteAsset()`: under vitest it takes the dev branch, while a test that
+     * forces production gets the real manifest lookup and its missing-entry throw.
+     * Sync by contract, so it reads the lazily-primed memo (see `loadServer`).
      */
     viteAsset: (entry: string, options?: { manifestPaths?: string[] }): string => {
       if (!loadedServer) {
@@ -424,28 +369,17 @@ export function createControllerModuleMock() {
       return this.ctx.req
     }
 
-    // Mirrors the real Controller's split: validation sees the body as sent
-    // (an array stays an array), while the field-by-field helpers see the
-    // record view.
+    // Mirrors the real Controller's split: validation sees the body as sent, the
+    // field-by-field helpers see the record view.
     //
-    // Public like parsedBody below: TS4094 forbids private members on the
-    // exported anonymous class type this factory returns. Boxed rather than
-    // memoized by truthiness, because `null`, `''`, `0` and `false` are all
-    // parsed bodies.
+    // Public because TS4094 forbids private members on the exported anonymous class
+    // type this factory returns. Boxed, since `null`/`''`/`0`/`false` are all bodies.
     public rawBody?: { value: unknown }
 
-    // Deliberately the local raw parser, not `module.parseRequestPayload` —
-    // that one narrows, which is what made a non-object body unreachable. No
-    // fallback of its own either: an unparseable body already arrives as `{}`
-    // from the parser above, which is also what `parseRequestPayload` reads,
-    // so both views agree.
-    //
-    // Memoized for parity rather than for speed. Cloning the request means
-    // there is nothing to exhaust here, so re-parsing is safe — but it is not
-    // *equal*: the real Controller boxes its parse, so two `validateBody()`
-    // calls in one action are handed the same object, where re-parsing hands
-    // out two. A schema that mutates what it validates, or an identity check
-    // across two reads, saw the mock and the runtime disagree.
+    // The local raw parser, not `module.parseRequestPayload`, which narrows and makes
+    // a non-object body unreachable. Memoized for parity, not speed: the real
+    // Controller boxes its parse, so two `validateBody()` calls in one action must be
+    // handed the same object.
     public async getRawBody(): Promise<unknown> {
       this.rawBody ??= { value: await parseRequestBody(this.ctx) }
       return this.rawBody.value
@@ -460,32 +394,21 @@ export function createControllerModuleMock() {
       return this.parsedBody
     }
 
-    // Public like parsedBody above: TS4094 forbids private members on the
-    // exported anonymous class type this factory returns.
-    //
-    // Its type follows the runtime's upload read, which is what it now is: the
-    // `{ all: true }` record `parseBody()` answers with, not the `FormData`
-    // this used to hold. A non-multipart body is `{}` here rather than `null`
-    // for the same reason — the runtime has no media-type gate to answer
-    // `null` from. `file()` and `files()` are unaffected: a urlencoded field
-    // arrives as a string, which fails their `instanceof File` test exactly as
-    // an absent field does.
+    // Public for the TS4094 reason above. Its type follows the runtime's upload read:
+    // the `{ all: true }` record `parseBody()` answers with, so a non-multipart body
+    // is `{}` rather than `null` (the runtime has no media-type gate).
     public multipartBody?: Promise<RequestUploads>
 
     public readMultipart(): Promise<RequestUploads> {
-      // Memoized so repeated file()/files() calls are one parse, and that parse
-      // clones the request, mirroring Hono's cache. The undecodable body is
-      // already handled inside the shared read, so what is memoized is always a
-      // resolved promise — never a rejected one the two callers would each have
-      // to guard. `??=` like getRawBody() above: the memo is a promise, so
-      // there is no falsy value to confuse it.
+      // Memoized so repeated file()/files() calls are one parse, mirroring Hono's
+      // cache. The shared read handles an undecodable body, so the memoized promise
+      // is always resolved — never a rejected one both callers would have to guard.
       return (this.multipartBody ??= parseRequestUploads(this.ctx))
     }
 
     public async file(name: string): Promise<File | null> {
-      // Character for character the real Controller.file(): take the FIRST
-      // part of the field, then require it to be a non-empty File — a leading
-      // empty part means null, not "skip to the next one".
+      // Character for character the real Controller.file(): the FIRST part of the
+      // field must itself be a non-empty File — a leading empty part means null.
       const body = await this.readMultipart()
       const value = body[name]
       const candidate = Array.isArray(value) ? value[0] : value
@@ -674,9 +597,8 @@ export function createControllerModuleMock() {
       return null
     }
 
-    // Read/write entry points a controller commonly reaches for. They are
-    // inert, but they have to exist: tests drive model behaviour by spying
-    // on them, and a spy cannot replace a method that was never defined.
+    // Inert, but they have to exist: tests drive model behaviour by spying on them,
+    // and a spy cannot replace a method that was never defined.
     static async all(): Promise<unknown[]> {
       return []
     }
@@ -709,10 +631,8 @@ export function createControllerModuleMock() {
     }
   }
   /**
-   * `defineModel()` is the function form of a model declaration, and
-   * `@guren/core` exports it alongside the class form — so a controller
-   * under test can reach it through any model module it imports. It returns
-   * the same inert stub, named after the table it was given.
+   * The function form of a model declaration, reachable through any model module a
+   * controller imports. Returns the same inert stub, named after the table.
    */
   function defineModel(table: unknown, config: Record<string, unknown> = {}) {
     return class DefinedModel extends AuthenticatableModel {
@@ -904,15 +824,10 @@ export function createControllerModuleMock() {
     return null
   }
   /**
-   * A module's `index.ts` calls `defineModule()` at import time and lists
-   * providers that `extend ServiceProvider`, so both are evaluated as soon as
-   * a controller reaches the module's public surface. Without them here, such
-   * a controller cannot be loaded under this mock at all.
-   *
-   * `defineModule` mirrors the real one in
-   * `packages/server/src/container/defineModule.ts` — same four fields, same
-   * `providers` normalization — spelled out by hand because this file imports
-   * nothing, so the mock never depends on a fresh framework build.
+   * A module's `index.ts` calls `defineModule()` at import time, so a controller
+   * reaching the module's surface cannot load under this mock without it. Mirrors
+   * `packages/server/src/container/defineModule.ts`, hand-copied so the mock never
+   * depends on a fresh framework build.
    */
   class ServiceProvider {
     constructor(public container: unknown) {}
@@ -935,13 +850,9 @@ export function createControllerModuleMock() {
   })
 
   /**
-   * Mirrors the real `definePlugin` in
-   * `packages/server/src/container/definePlugin.ts` — hand-copied for the
-   * same reason as `defineModule` above. Plugin packages call it at import
-   * time (e.g. `@guren/plugin-markdown`), so controllers that transitively
-   * import one cannot load under this mock without it. Each factory call
-   * yields an independent provider extending the mock `ServiceProvider`,
-   * with the configuration captured in a closure and `register`'s result
+   * Mirrors `packages/server/src/container/definePlugin.ts`, hand-copied for the same
+   * reason as `defineModule` above: plugin packages call it at import time. Each
+   * factory call yields an independent provider, and `register`'s result is
    * propagated (the real container awaits an async register).
    */
   const definePlugin = <TConfig>(definition: {
@@ -1034,11 +945,9 @@ export async function readInertiaResponse(response: Response): Promise<{
 
   const body = await response.text()
 
-  // Inertia v3: the payload lives in a JSON script element. Scan open tags
-  // and check attributes with `includes` — chaining several `[^>]*` groups in
-  // one regex backtracks polynomially on large HTML bodies. Tag names are
-  // case-insensitive in HTML, so both patterns and the attribute comparison
-  // are too.
+  // Inertia v3: the payload lives in a JSON script element. Attributes are checked
+  // with `includes` because chaining several `[^>]*` groups in one regex backtracks
+  // polynomially on large bodies. HTML tag names are case-insensitive, so this is too.
   let scriptPayload: string | undefined
   const openTagPattern = /<script\b[^>]*>/gi
   let openTag: RegExpExecArray | null

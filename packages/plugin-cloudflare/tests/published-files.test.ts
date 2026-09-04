@@ -5,18 +5,12 @@ import { fileURLToPath } from 'node:url'
 import { MCP_OAUTH_TEMPLATE_FILES } from '../src/templates'
 
 /**
- * What an installed copy of this package actually contains.
- *
- * `--mcp-oauth` reads its scaffold templates from `templates/`, which sits
- * *outside* `dist/` — so it is published only because `files` names it. Drop
- * that entry and every gate in this repository stays green while the flag
- * ENOENTs on the first app that installs the package, because in the monorepo
- * the tree is right there on disk. `bun pm pack --dry-run` is the one question
- * whose answer differs between the two.
- *
- * Skipped when the package has not been built: `dist/` is not what this test
- * is about, but a pack that reports no `dist` files is a pack of a checkout
- * that cannot answer the question either.
+ * What an installed copy of this package actually contains. `--mcp-oauth` reads
+ * its scaffold templates from `templates/`, outside `dist/` and published only
+ * because `files` names it: drop that entry and every gate in this repository
+ * stays green — the tree is right there on disk — while the flag ENOENTs on the
+ * first app that installs the package. Skipped when the package has not been
+ * built: a pack reporting no `dist` files cannot answer the question either.
  */
 const packageDir = fileURLToPath(new URL('..', import.meta.url))
 const built = existsSync(`${packageDir}/dist/index.js`)

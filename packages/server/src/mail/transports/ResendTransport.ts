@@ -1,8 +1,6 @@
 import type { MailTransport, MailMessage, SendResult, ResendTransportOptions } from '../types'
 
-/**
- * Resend API response types.
- */
+/** Resend API response types. */
 interface ResendSuccessResponse {
   id: string
 }
@@ -13,23 +11,7 @@ interface ResendErrorResponse {
   name: string
 }
 
-/**
- * Resend mail transport.
- *
- * @example
- * ```ts
- * const transport = new ResendTransport({
- *   apiKey: process.env.RESEND_API_KEY,
- * })
- *
- * await transport.send({
- *   from: { email: 'sender@example.com' },
- *   to: [{ email: 'recipient@example.com' }],
- *   subject: 'Hello',
- *   html: '<p>Hello World!</p>',
- * })
- * ```
- */
+/** Resend mail transport. */
 export class ResendTransport implements MailTransport {
   readonly name = 'resend'
   private readonly apiKey: string
@@ -39,9 +21,6 @@ export class ResendTransport implements MailTransport {
     this.apiKey = options.apiKey
   }
 
-  /**
-   * Format email address for Resend API.
-   */
   private formatAddress(addr: { email: string; name?: string }): string {
     if (addr.name) {
       return `${addr.name} <${addr.email}>`
@@ -49,9 +28,6 @@ export class ResendTransport implements MailTransport {
     return addr.email
   }
 
-  /**
-   * Send an email via Resend API.
-   */
   async send(message: MailMessage): Promise<SendResult> {
     try {
       const payload: Record<string, unknown> = {

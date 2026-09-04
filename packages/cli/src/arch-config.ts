@@ -15,10 +15,6 @@ const CANDIDATE_FILES = ['guren.arch.ts', 'guren.arch.js', 'guren.arch.mjs']
  * Loads `guren.arch.ts` (or `.js`/`.mjs`) from the project root. Returns
  * `{ config: null }` with no `loadError` when no config file exists —
  * architecture checking is opt-in.
- *
- * Imported without cache-busting: like `audit-config.ts`'s loader, this only
- * ever runs once per `guren check` CLI invocation, so there's no stale
- * module-cache risk to guard against.
  */
 export async function loadArchConfig(cwd: string): Promise<LoadedArchConfig> {
   const resolvedFile = await resolveConfigFile(cwd)

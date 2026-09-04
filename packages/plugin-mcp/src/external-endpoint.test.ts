@@ -18,14 +18,11 @@ import { presentExternalMcpAuth, type ExternalMcpAuth } from './external-auth'
 import { mcpPlugin } from './plugin'
 
 /**
- * The endpoint reached over the external-auth seam — the surface an
- * OAuth-fronted Workers deployment presents (RFC 0016 §7).
- *
- * Every case here drives the *real* endpoint through `app.fetch`, because the
- * property under test is precisely that the seam survives the trip: the
- * registration is keyed on the `Request` object identity, and anything between
- * the presentation and `readExternalMcpAuth` that rebuilt the request would
- * break it silently. A unit test of the map alone cannot see that.
+ * The endpoint reached over the external-auth seam — the surface an OAuth-fronted
+ * Workers deployment presents (RFC 0016 §7). Every case drives the *real*
+ * endpoint through `app.fetch`, because the property under test is that the seam
+ * survives the trip: the registration is keyed on `Request` object identity, so
+ * anything in between that rebuilt the request would break it silently.
  */
 function registerRoutes(router: Router): void {
   router
@@ -38,8 +35,8 @@ function registerRoutes(router: Router): void {
     )
     .name('posts.store')
     .agent({ redact: ['ssn'] })
-  // Reports the `Authorization` the *re-entrant* request carried, which is
-  // the only way to observe what `buildToolRequest` was handed.
+  // Reports the `Authorization` the *re-entrant* request carried, the only way
+  // to observe what `buildToolRequest` was handed.
   router
     .get('/echo-auth', (c) => Response.json({ authorization: c.req.header('Authorization') ?? null }))
     .name('echo.auth')
@@ -75,10 +72,9 @@ function seamClient(app: Application, auth: ExternalMcpAuth): Promise<Client> {
 }
 
 /**
- * An app with **no token store at all** — the shape an OAuth-fronted
- * deployment has, and the one that answers 500 on the bearer path. Every seam
- * case runs against it so that a seam request reaching the store would fail
- * loudly rather than pass by accident.
+ * An app with **no token store at all** — the shape an OAuth-fronted deployment
+ * has, and the one that answers 500 on the bearer path. Every seam case runs
+ * against it, so a seam request reaching the store fails loudly.
  */
 describe('mcpPlugin external auth (no token store configured)', () => {
   let app: Application
@@ -153,10 +149,9 @@ describe('mcpPlugin external auth (no token store configured)', () => {
   })
 
   /**
-   * The fail-closed half of `auth: 'external'`. A request that did not arrive
-   * through the authenticating layer must be refused outright — never offered
-   * the bearer path as a second way in, and never the 500 that would leak the
-   * absence of a token store as a hint.
+   * The fail-closed half of `auth: 'external'`: a request that did not arrive
+   * through the authenticating layer is refused outright — never offered the
+   * bearer path, and never the 500 that would leak the absence of a store.
    */
   test('should refuse a request with no seam auth, never falling through to bearer', async () => {
     const response = await app.fetch(jsonRpc({ jsonrpc: '2.0', id: 1, method: 'tools/list' }))
@@ -173,11 +168,10 @@ describe('mcpPlugin external auth (no token store configured)', () => {
   })
 
   /**
-   * The seam carries no credential the *application* can verify, so nothing
-   * is forwarded: the inbound bearer belongs to the authority in front of the
-   * app (the OAuth provider), which the app's own token guard has never seen.
-   * Forwarding it would hand the app an unverifiable credential and put an
-   * unrelated authority's secret wherever the app puts that header.
+   * The seam carries no credential the *application* can verify, so nothing is
+   * forwarded: the inbound bearer belongs to the OAuth provider in front of the
+   * app, and forwarding it would put an unrelated authority's secret wherever
+   * the app puts that header.
    */
   test('should forward no Authorization into the dispatched request', async () => {
     const transport = new StreamableHTTPClientTransport(new URL('http://localhost/mcp'), {
@@ -194,12 +188,10 @@ describe('mcpPlugin external auth (no token store configured)', () => {
   })
 
   /**
-   * The per-caller rate limiter has no token id to key on over the seam, so
-   * the key is derived from the principal. Two properties, and both need
-   * asserting because each alone survives the wrong implementation: a key that
-   * is simply absent still limits (every caller lands in one shared bucket),
-   * and a key that is a constant limits too — it just limits *everyone* the
-   * moment one caller is noisy.
+   * The limiter has no token id to key on over the seam, so the key comes from
+   * the principal. Both properties need asserting: an absent key still limits
+   * (one shared bucket), and a constant key limits too — everyone, the moment
+   * one caller is noisy.
    */
   test('should rate-limit a seam caller, per principal', async () => {
     const limited = createApp({
@@ -242,10 +234,9 @@ describe('mcpPlugin external auth (no token store configured)', () => {
 })
 
 /**
- * The default configuration: the seam is honoured when presented, and every
- * other request takes the bearer path exactly as before. This is the
- * regression half — an app that never presents the seam must be unable to tell
- * this release from the last.
+ * The default configuration: the seam is honoured when presented, every other
+ * request takes the bearer path. The regression half — an app that never
+ * presents the seam must be unable to tell this release from the last.
  */
 describe('mcpPlugin external auth (default config, token store present)', () => {
   const store = new MemoryApiTokenStore()
@@ -291,11 +282,9 @@ describe('mcpPlugin external auth (default config, token store present)', () => 
   })
 
   /**
-   * The seam wins over a bearer presented on the same request, and does so
-   * *narrowing*: this token grants `tools:*`, the seam grants only
-   * `tools:read`, and the endpoint must serve the seam's answer. Reading the
-   * bearer first would silently widen every OAuth grant to whatever token
-   * happened to ride along.
+   * The seam wins over a bearer on the same request, and *narrowing*: the token
+   * grants `tools:*`, the seam only `tools:read`. Reading the bearer first would
+   * widen every OAuth grant to whatever token happened to ride along.
    */
   test('should prefer the seam over an Authorization header on the same request', async () => {
     const transport = new StreamableHTTPClientTransport(new URL('http://localhost/mcp'), {

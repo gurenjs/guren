@@ -112,7 +112,6 @@ function createMockDatabase(options: {
   }
 }
 
-// Type assertion helper for DrizzleAdapter with all methods
 const adapter = DrizzleAdapter as typeof DrizzleAdapter & {
   update: NonNullable<typeof DrizzleAdapter.update>
   delete: NonNullable<typeof DrizzleAdapter.delete>
@@ -121,7 +120,6 @@ const adapter = DrizzleAdapter as typeof DrizzleAdapter & {
 
 describe('DrizzleAdapter', () => {
   beforeEach(() => {
-    // Reset database configuration before each test
     DrizzleAdapter.configure(undefined as never)
   })
 
@@ -302,7 +300,6 @@ describe('DrizzleAdapter', () => {
     it('returns count of all records', async () => {
       
 
-      // Create a special mock for count that returns count result
       const db = {
         select: (_selection?: Record<string, unknown>) => ({
           from: (_table: unknown) => ({

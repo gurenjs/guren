@@ -23,9 +23,8 @@ export default {
       await driver.getStream('moved.txt', { range: { start: 1, end: 3 } }),
     )
     const missingStream = await driver.getStream('missing.txt')
-    // Presigning must work from inside the bundle: the signer has to be
-    // reachable through whatever bundler produced this worker, which a
-    // variable-specifier dynamic import is not.
+    // Presigning must work from inside the bundle: the signer has to be reachable
+    // through the bundler, which a variable-specifier dynamic import is not.
     const presigning = new R2Driver({
       binding: () => env.BUCKET,
       presign: { accountId: 'acct', bucket: 'b', accessKeyId: 'AKIDEXAMPLE', secretAccessKey: 'secret' },

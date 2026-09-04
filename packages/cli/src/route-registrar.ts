@@ -8,14 +8,11 @@ import { parseSourceFile } from './parse-cache'
 import { insertImport, PATCH_REASONS, type PatchResult } from './patch-helpers'
 
 /**
- * The export names `@guren/core`'s route loader looks for, in the order it
- * tries them, and the pattern it falls back to.
- *
- * The one rule for "what counts as this app's route registrar", shared with
- * `load-routes.ts`, which resolves the same names at runtime. A scaffolder that
- * decided for itself which function to patch would eventually patch one the
- * framework never calls — the routes would be written, mounted nowhere, and
- * look wired in the file.
+ * The export names `@guren/core`'s route loader looks for, in try order, plus its
+ * fallback pattern. The one rule for "what counts as this app's route registrar", shared
+ * with `load-routes.ts`, which resolves the same names at runtime: a scaffolder picking
+ * its own target patches a function the framework never calls, and the routes look wired
+ * while mounting nothing.
  */
 export const REGISTRAR_EXPORT_NAMES = [
   'registerRoutes',
@@ -27,23 +24,16 @@ export const REGISTRAR_EXPORT_NAMES = [
 
 export const REGISTRAR_PATTERN = /^register\w*Routes$/u
 
-/**
- * The name an import/export specifier node refers to — `export { x as "y" }`
- * is legal, so the exported name is not always an identifier.
- */
+/** `export { x as "y" }` is legal, so the exported name is not always an identifier. */
 export function specifierName(node: { type: string; name?: string; value?: string }): string {
   return node.type === 'Identifier' ? (node.name ?? '') : (node.value ?? '')
 }
 
 /**
- * Whether an export named `name` is one the route loader would accept as a
- * registrar — the same question `resolveRegistrar()` asks, minus the
- * preference order it needs to pick *one* of several.
- *
- * Every entry in {@link REGISTRAR_EXPORT_NAMES} other than `default` already
- * matches {@link REGISTRAR_PATTERN}, so the two clauses below cover the list
- * without repeating it; a name added there that did not match the pattern
- * would have to be added here too.
+ * Whether the route loader would accept an export named `name` as a registrar — what
+ * `resolveRegistrar()` asks, minus its preference order. Every entry in
+ * {@link REGISTRAR_EXPORT_NAMES} but `default` matches {@link REGISTRAR_PATTERN}; a name
+ * added there that does not would have to be added here too.
  */
 export function isRegistrarExportName(name: string): boolean {
   return name === 'default' || REGISTRAR_PATTERN.test(name)
@@ -53,43 +43,25 @@ export function isRegistrarExportName(name: string): boolean {
 export const DEFAULT_ROUTES_FILE = 'routes/web.ts'
 
 /**
- * Entry files to look for, in order, when a caller was given no `--routes`.
- *
- * {@link DEFAULT_ROUTES_FILE} is only the *first* of these: the API-only
- * template ships `routes/api.ts` and no `routes/web.ts`, wiring `--routes
- * routes/api.ts` into its own `codegen` script — so a command that assumes
- * the default without probing reports a freshly scaffolded API app as having
- * no routes at all. Shared with `doctor`, which has always probed this list.
+ * Entry files to look for, in order, when a caller was given no `--routes`. The API-only
+ * template ships `routes/api.ts` and no `routes/web.ts`, so a command that assumes
+ * {@link DEFAULT_ROUTES_FILE} without probing reports a freshly scaffolded API app as
+ * having no routes at all.
  */
 export const ROUTES_ENTRY_CANDIDATES = [DEFAULT_ROUTES_FILE, 'routes/web.js', 'routes/api.ts', 'routes/api.js']
 
 /**
- * The app's routes entry, or `null` when it has none.
- *
- * The one rule for "which file is this app's routes entry", next to the
- * candidate list it reads. Four callers had open-coded
- * `findFirstExisting(cwd, ROUTES_ENTRY_CANDIDATES)`, each with its own
- * not-found policy, and a fifth assumed {@link DEFAULT_ROUTES_FILE} outright
- * — which is how `guren add attachments` came to mount a delivery route in
- * `routes/api.ts` and `guren check` came to report, in the same app, that
- * nothing had mounted it.
- *
- * `null` rather than a fallback: "no routes entry" is a real answer that
- * callers act on differently — the check rules treat it as positive evidence
- * that nothing can be mounted, the scaffolders warn, `doctor` reports it.
- * Baking {@link DEFAULT_ROUTES_FILE} in here would hand every one of them the
- * name of a file that does not exist.
+ * The app's routes entry, or `null` when it has none — the one rule for "which file is
+ * this app's routes entry". `null` rather than a fallback, because callers act on the
+ * answer differently (the check rules read it as positive evidence that nothing can be
+ * mounted); defaulting would hand them the name of a file that does not exist.
  */
 export async function resolveRoutesEntry(cwd: string): Promise<string | null> {
   return findFirstExisting(cwd, ROUTES_ENTRY_CANDIDATES)
 }
 
 export interface RouteRegistrar {
-  /**
-   * The name the registrar gave its router parameter. The default app template
-   * calls it `router`; the blog template calls it `baseRouter`, because it goes
-   * on to declare `const router = baseRouter.aliasMiddleware(...)`.
-   */
+  /** The registrar's router parameter name — `router`, or `baseRouter` in the blog template. */
   parameterName: string
   /** Index just past the registrar body's opening `{`. */
   bodyStart: number
@@ -126,18 +98,11 @@ function declaredFunctions(body: Statement[]): Map<string, RegistrarFunction> {
 }
 
 /**
- * Every function this file *exports* that the route loader would accept as the
- * registrar, in source order.
- *
- * Two things decide it, and both come from the loader rather than from shape.
- * The function has to be exported — a local `registerAdminRoutes` helper is
- * never what the framework calls, so patching it writes routes nothing mounts.
- * And the export name has to match, rather than the parameter being
- * `Router`-annotated: the annotation can be an alias (`import { Router as
- * AppRouter }`), and a helper that merely takes a router —
- * `buildPrefix(prefix: string, router: Router)` — is not the entry point, so
- * choosing by shape picks the wrong function and then hands the call that
- * function's first parameter.
+ * Every function this file *exports* that the route loader would accept as the registrar,
+ * in source order. Both criteria come from the loader, not from shape: it must be
+ * exported (a local helper is never what the framework calls), and matched by export name
+ * rather than a `Router`-annotated parameter, since the annotation can be aliased and a
+ * helper that merely takes a router is not the entry point.
  */
 function registrarCandidates(body: Statement[]): RegistrarFunction[] {
   const declarations = declaredFunctions(body)
@@ -150,9 +115,8 @@ function registrarCandidates(body: Statement[]): RegistrarFunction[] {
   for (const statement of body) {
     if (statement.type === 'ExportDefaultDeclaration') {
       const declaration = statement.declaration
-      // A default export needs no matching name — the loader takes it as-is,
-      // including the anonymous `export default function (router) {}` and the
-      // `export default registerWebRoutes` indirection.
+      // A default export needs no matching name; the loader takes it as-is, anonymous or
+      // via the `export default registerWebRoutes` indirection.
       if (
         declaration.type === 'FunctionDeclaration'
         || declaration.type === 'FunctionExpression'
@@ -211,25 +175,11 @@ function registrarIn(ast: File): RouteRegistrar | null {
 }
 
 /**
- * Where the app's route registrar keeps its body, and what it named its router.
- *
- * Callers splice text at the returned offsets rather than printing the AST
- * back out, so the rest of the file — formatting, comments, the lot — is
- * untouched. Both values are needed because neither is fixed: patches used to
- * hardcode `router` for both, so a registrar named anything else (the blog
- * template's `baseRouter`) matched nothing and the whole wiring step no-oped.
- * The parameter name is also the only argument a caller may safely pass — a
- * registrar that rebinds its parameter does so with a `const` partway down the
- * body, and a call inserted above that reads it before initialization.
- *
- * Parsed rather than pattern-matched, per the rule in `packages/cli/CLAUDE.md`:
- * reading a signature means reading a grammar, and the regex this replaced got
- * three shapes wrong that Babel gets right for free — a registrar quoted inside
- * a regex literal (which the string mask cannot see into) was patched as if it
- * were real, an overload signature contributed its parameter name to the
- * implementation's body, and only `function` declarations were recognized even
- * though the loader accepts an arrow registrar too. Source Babel cannot parse
- * yields `null`, and callers report that instead of guessing.
+ * Where the app's route registrar keeps its body, and what it named its router. Callers
+ * splice text at these offsets rather than printing the AST back out, so formatting and
+ * comments survive; the parameter name is the only argument they may safely pass, since a
+ * registrar that rebinds it does so with a `const` partway down the body. Parsed rather
+ * than pattern-matched (`packages/cli/CLAUDE.md`); source Babel cannot parse yields `null`.
  */
 export function findRouteRegistrar(content: string): RouteRegistrar | null {
   const ast = parseSourceFile(content, DEFAULT_ROUTES_FILE)
@@ -254,18 +204,10 @@ function callsFunction(ast: File, functionName: string): boolean {
 }
 
 /**
- * Imports a scaffolded routes file into `routes/web.ts` and calls its registrar
- * from the app's own, in a single write.
- *
- * The call and the import land together on purpose: an import of a registrar
- * nothing calls is an unused binding, which under `noUnusedLocals` stops the
- * scaffolded app compiling, and a call without its import does not resolve. A
- * routes file this cannot patch is left exactly as it was.
- *
- * "Already wired" is decided by looking for a *call* to that name anywhere in
- * the file, not for the rendered `name(router)` text: the argument depends on
- * what the registrar named its parameter, and a text match would append a
- * second call to a file that already had one under a different name.
+ * Imports a scaffolded routes file into `routes/web.ts` and calls its registrar from the
+ * app's own, in a single write: a lone import breaks `noUnusedLocals`, a lone call does
+ * not resolve. "Already wired" is decided by looking for a *call* to that name rather
+ * than the rendered `name(router)` text, whose argument depends on the parameter name.
  */
 export async function addRouteRegistrarCall(
   filePath: string,
@@ -314,22 +256,11 @@ export async function addRouteRegistrarCall(
 }
 
 /**
- * `addRouteRegistrarCall` against the app's routes entry, reporting every
- * outcome.
- *
- * Nothing here may be silent. This replaced a `try {} catch {}` around a regex
- * that only matched a registrar whose parameter was literally named `router`:
- * in an app scaffolded from the blog template (`baseRouter`) the scaffolder
- * wrote its routes file, wired nothing, and said nothing — and a routes file
- * that is never mounted looks exactly like a working one until someone requests
- * the route.
- *
- * `routesFile` defaults to {@link DEFAULT_ROUTES_FILE} because most callers
- * scaffold a page-rendering feature, which an API-only app cannot have anyway.
- * A caller whose feature *does* work on an API-only app passes the entry it
- * probed from {@link ROUTES_ENTRY_CANDIDATES} — that template ships
- * `routes/api.ts` and no `routes/web.ts`, so defaulting would report a
- * freshly scaffolded API app as having no routes file to wire.
+ * `addRouteRegistrarCall` against the app's routes entry, reporting every outcome —
+ * nothing here may be silent, since a routes file that is never mounted looks exactly like
+ * a working one until someone requests the route. `routesFile` defaults to
+ * {@link DEFAULT_ROUTES_FILE} because most callers scaffold a page-rendering feature; one
+ * whose feature works on an API-only app passes an entry from {@link ROUTES_ENTRY_CANDIDATES}.
  */
 export async function wireRouteRegistrar(
   functionName: string,

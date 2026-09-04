@@ -9,7 +9,7 @@ export const LAMBDA_HANDLER_EXPORTS = ['http', 'queue', 'schedule', 'console'] a
 
 export type LambdaHandlerExport = (typeof LAMBDA_HANDLER_EXPORTS)[number]
 
-/** Lambda handler identifier for an export, e.g. `handler.http`. */
+/** Lambda handler identifier for an export. */
 export function lambdaHandlerId(name: LambdaHandlerExport): string {
   return `${LAMBDA_HANDLER_MODULE}.${name}`
 }

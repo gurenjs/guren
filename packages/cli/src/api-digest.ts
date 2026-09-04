@@ -1,14 +1,8 @@
 /**
- * Compact digest of the framework API signatures agents hunt for most.
- *
- * Appended to the `guren context` project map so the signatures arrive
- * *before* any work starts — the map is injected at session start by the
- * agent harness's SessionStart hook and served by the `guren_get_context`
- * MCP tool. The glob-scoped rule files under `.claude/rules/` carry the
- * full, verified reference, but they only attach once a matching file is
- * edited; most API research happens earlier, so the essentials ride along
- * here. Keep this digest a strict summary of those rule files — they are
- * the source of truth, and anything stated here must match them.
+ * Compact digest of the API signatures agents hunt for most, appended to the
+ * `guren context` map so they arrive before any work starts — the glob-scoped
+ * rule files under `.claude/rules/` only attach once a matching file is edited.
+ * Those rules are the source of truth; keep this a strict summary of them.
  */
 export const GUREN_API_DIGEST = `## Guren API Signatures (digest)
 

@@ -57,20 +57,16 @@ describe('SQLite default template', () => {
       const dbConfig = await readFile(join(dest, 'config/database.ts'), 'utf8')
       expect(dbConfig).toContain('createSqliteDatabase')
       expect(dbConfig).not.toContain('createPostgresDatabase')
-      // Test DB separation: NODE_ENV=test (set automatically by `bun test`)
-      // routes to a dedicated SQLite file and takes priority over
-      // DATABASE_URL, which .env sets unconditionally — see the runtime
-      // priority assertions below.
+      // NODE_ENV=test (set by `bun test`) routes to a dedicated SQLite file and
+      // takes priority over DATABASE_URL, which .env sets unconditionally.
       expect(dbConfig).toContain('guren.test.db')
       expect(dbConfig).toContain("process.env.NODE_ENV === 'test'")
 
       const resolveDatabaseFilename = extractDatabaseFilenameResolver(dbConfig)
 
-      // A freshly scaffolded .env always sets DATABASE_URL=./data/guren.db
-      // (see the .env.example assertion below) and Bun loads .env even when
-      // running tests — so NODE_ENV=test must win over an inherited
-      // DATABASE_URL for isolation to actually happen, not just look right
-      // in the source text.
+      // A scaffolded .env always sets DATABASE_URL and Bun loads .env even under
+      // test, so NODE_ENV=test must win over an inherited DATABASE_URL for the
+      // isolation to actually happen.
       withEnv(
         { NODE_ENV: 'test', DATABASE_URL: './data/guren.db', TEST_DATABASE_URL: undefined },
         () => {

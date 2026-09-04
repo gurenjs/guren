@@ -32,11 +32,8 @@ export interface RunBlueprintOptions extends WriterOptions {
    */
   attach?: string
   /**
-   * Skip the scaffold's authentication checks. Defaults to false (auth required).
-   *
-   * Scope differs per blueprint: the resource blueprint guards its mutating
-   * actions (store/update/destroy), the admin blueprint guards the whole
-   * dashboard route.
+   * Skip the scaffold's authentication checks (default false). Scope differs per
+   * blueprint: `resource` guards its mutating actions, `admin` the whole route.
    */
   publicAccess?: boolean
 }
@@ -52,11 +49,9 @@ const blueprintRegistry: Record<string, BlueprintDefinition> = {
     run: async (options) => {
       const writerOptions: WriterOptions = { force: Boolean(options.force) }
       const created: string[] = []
-      // Attachments store bytes on a StorageManager disk; an app that never
-      // set one up has no 'storage' binding to resolve. Judged by looking
-      // for a binding anywhere in the app's sources, not by the presence of
-      // one conventional file — a custom CloudStorageProvider must not get
-      // a second manager installed over it.
+      // Attachments need a 'storage' binding. Judged by looking for one
+      // anywhere in the app's sources rather than for a conventional file: a
+      // custom CloudStorageProvider must not get a second manager over it.
       const hasConventionalProvider = await fileExists(process.cwd(), 'app/Providers/StorageProvider.ts')
       if (!hasConventionalProvider && !(await appBindsStorage())) {
         consola.info("No 'storage' binding found — installing the storage blueprint first.")
@@ -80,15 +75,11 @@ const blueprintRegistry: Record<string, BlueprintDefinition> = {
       // Same default as `make:feature`: guarded unless the caller opts out.
       const withAuth = !options.publicAccess
       // Guarded in the action as well as on the route, so re-registering the
-      // route without middleware cannot silently open the dashboard. Emitted
-      // bare, matching `make:feature`'s own guard — the rationale belongs here,
-      // not in the app author's file.
+      // route without middleware cannot silently open the dashboard.
       const controllerGuard = withAuth ? `    await this.auth.userOrFail()\n\n` : ''
-      // Attached inline — the shape `make:auth` writes into its own routes file
-      // — rather than through an 'auth' alias. This file lands in apps that may
-      // never have run `guren add auth`, and `aliasMiddleware('auth', ...)`
-      // writes into the router shared with routes/web.ts, so it would silently
-      // replace an alias the app configured with different options.
+      // Inline rather than through an 'auth' alias: `aliasMiddleware('auth', …)`
+      // writes into the router shared with routes/web.ts, so it would replace an
+      // alias the app configured with different options.
       const routeGuard = withAuth ? `, requireAuthenticated({ redirectTo: '/login' })` : ''
       const created = await writeScaffoldFiles([
         {
@@ -134,18 +125,15 @@ export default registerAdminRoutes
   },
   auth: {
     description: 'Install the default authentication stack for the current app.',
-    // The API-only refusal lives inside makeAuth() rather than here, unlike the
-    // admin blueprint's: `guren make:auth` reaches the same scaffold without
-    // passing through this registry, so a guard placed here would leave that
-    // door open.
+    // The API-only refusal lives inside makeAuth(): `guren make:auth` reaches
+    // the same scaffold without passing through this registry.
     run: async (options) => makeAuth({ force: Boolean(options.force), install: true }),
   },
   oauth: {
     description: 'Install OAuth scaffolding with GitHub, Google, and Discord provider presets.',
-    // No API-only guard, on purpose: this is the one entry that touches
-    // routes/web.ts without needing it. The controller answers with
-    // `this.json(...)`, and `wireRouteRegistrar` warns instead of throwing when
-    // the file is absent — the scaffold genuinely works on an API-only app.
+    // No API-only guard, on purpose: the controller answers with `this.json(…)`
+    // and `wireRouteRegistrar` warns rather than throws when routes/web.ts is
+    // absent, so the scaffold genuinely works on an API-only app.
     run: async (options) => {
       const writerOptions: WriterOptions = { force: Boolean(options.force) }
       const created = await writeScaffoldFiles([
@@ -301,21 +289,16 @@ export default registerAdminRoutes
       const routeVar = camelCase(routeName)
       const fields = parseFieldsString(options.fields ?? '')
 
-      // Last of the checks, and still before the first write: everything above
-      // is pure, so a usage error is reported as one rather than being masked
-      // by the app's shape. The page components and the Inertia-returning
-      // controller are unusable on an API-only app, and `updateResourceSchema`
-      // runs before the route wiring can fail — so reaching that failure
-      // appends a table to the app's own `db/schema.ts` as well.
+      // Last of the checks, still before the first write: `updateResourceSchema`
+      // runs before the route wiring can fail, so reaching that failure would
+      // append a table to the app's own `db/schema.ts`.
       await assertNotApiOnly(process.cwd(), {
         does: 'guren add resource scaffolds Inertia pages and a controller that returns Inertia responses',
         instead: API_ONLY_FEATURE_ALTERNATIVE,
       })
 
-      // Second, so that an app the check above recognizes hears about its
-      // shape rather than about a missing file. What remains here is the app
-      // that shape check deliberately permits: one that declares the client,
-      // or that has no manifest to read, and still cannot be patched.
+      // Second, so an app the check above recognizes hears about its shape
+      // rather than about a missing file.
       await assertResourceTargetsPatchable(routeName)
 
       const created = await makeFeature(singular, {
@@ -353,11 +336,9 @@ interface ColumnCode {
 }
 
 /**
- * Per-dialect column builders, keyed by field type.
- *
- * The `Record<FieldType, …>` is load-bearing: these used to be switches with a
- * `default:` arm, which is how sqlite shipped without a `date` case and quietly
- * emitted a text column for it. A missing key now fails to compile.
+ * Per-dialect column builders, keyed by field type. `Record<FieldType, …>` so a
+ * missing key fails to compile — a switch with a `default:` arm is how sqlite
+ * shipped without a `date` case and quietly emitted text for it.
  */
 type ColumnMapping = Record<FieldType, (name: string, notNull: string) => ColumnCode>
 
@@ -377,13 +358,10 @@ const PG_COLUMNS: ColumnMapping = {
   text: (name, notNull) => ({ code: `text('${name}')${notNull}`, imports: ['text'] }),
   number: (name, notNull) => ({ code: `integer('${name}')${notNull}`, imports: ['integer'] }),
   boolean: (name, notNull) => ({ code: `boolean('${name}')${notNull}`, imports: ['boolean'] }),
-  // `timestamptz`, not `timestamp`. A `date` field holds an instant: drizzle
-  // writes `Date.toISOString()`, so `timestamp without time zone` keeps the UTC
-  // wall clock but drops the offset, and what that wall clock means is then up
-  // to the reader. Drizzle parses it back as UTC, so the app stays
-  // self-consistent — but a raw `postgres` query, psql, or any other client
-  // reads it as local time and sees a different instant. `timestamptz` stores
-  // the instant itself, so every reader agrees.
+  // `timestamptz`, not `timestamp`. Drizzle writes `Date.toISOString()`, so
+  // `timestamp without time zone` drops the offset: drizzle reads it back as UTC
+  // and stays self-consistent, but psql and any other client see a different
+  // instant.
   date: (name, notNull) => ({ code: `timestamp('${name}', { withTimezone: true })${notNull}`, imports: ['timestamp'] }),
   json: (name, notNull) => ({ code: `jsonb('${name}')${notNull}`, imports: ['jsonb'] }),
 }
@@ -406,14 +384,8 @@ function buildColumn(mapping: ColumnMapping, field: FieldDefinition): ColumnCode
 
 /**
  * Column name for a field. Deliberately separate from `tableNameFor()`, which
- * derives the *table* name in the same emitted statement.
- *
- * A field name is a validated JavaScript identifier taken verbatim from the
- * user, and its underscore runs carry meaning: `__dunder__` must stay
- * `__dunder__`. `tableNameFor()` goes through `kebabCase()`, which collapses
- * `[_\s]+` to one separator — fine for a name that has to round-trip through a
- * slug, wrong for one that has to survive intact. Unifying the two would trade
- * a column the user asked for against a coupling nobody wants.
+ * goes through `kebabCase()` and collapses `[_\s]+` to one separator: a field
+ * name is taken verbatim from the user and `__dunder__` must survive intact.
  */
 function snakeCase(value: string): string {
   return value.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase()
@@ -472,12 +444,10 @@ async function updateResourceSchema(singular: string, fields: FieldDefinition[])
 }
 
 /**
- * Whether an app's routes file already registers the resource's own routes.
- *
- * Both probes are anchored on the full literal the registration emits. Matching
- * `/${routeName}'` unanchored made an unrelated `/admin/posts` read as "the
- * posts routes are already registered", so the run reported success while
- * registering nothing.
+ * Whether an app's routes file already registers the resource's own routes. Both
+ * probes are anchored on the full literal the registration emits: unanchored,
+ * an unrelated `/admin/posts` read as already registered and the run reported
+ * success while registering nothing.
  */
 function routesAlreadyRegister(content: string, routeName: string): boolean {
   return content.includes(`'${routeName}.index'`) || content.includes(`'/${routeName}'`)
@@ -488,26 +458,11 @@ function missingRegistrarMessage(routeName: string): string {
 }
 
 /**
- * Every reason the two app-owned files this blueprint patches cannot be
- * patched, established before `makeFeature` writes its first file.
- *
- * The blueprint's own output can be deleted; the table appended to the app's
- * `db/schema.ts` cannot be undone by deleting anything, and that patch runs
- * first. Reordering the two patches only chooses which of the app's files is
- * left half-edited for a resource that was never finished — so neither may
- * start until both are known to be reachable.
- *
- * Runs after {@link assertNotApiOnly}, and covers what that check is documented
- * to leave behind: an app declaring `@guren/inertia-client`, or one with no
- * manifest to read, whose `routes/web.ts` is absent or unpatchable anyway. Both
- * are permitted there on purpose — a shape check has to answer "cannot tell"
- * with "proceed" — and both used to arrive here as a raw `ENOENT` seven
- * `node:fs` frames deep, after the schema patch.
- *
- * Scoped to the two questions the patches themselves answer: is each file
- * there, and does the routes file expose something to patch. It is not a
- * promise that the patches will succeed — a target that exists but cannot be
- * read or written still fails in the writer, as it did before.
+ * Every reason the two app-owned files this blueprint patches cannot be patched,
+ * established before `makeFeature` writes its first file: the table appended to
+ * `db/schema.ts` cannot be undone by deleting anything, so neither patch may
+ * start until both targets are known reachable. Scoped to that — a target that
+ * exists but cannot be written still fails in the writer.
  */
 async function assertResourceTargetsPatchable(routeName: string): Promise<void> {
   const cwd = process.cwd()
@@ -530,13 +485,10 @@ async function assertResourceTargetsPatchable(routeName: string): Promise<void> 
     )
   }
 
-  // Mirrors `updateResourceRoutes` — and must keep mirroring it. Waiving the
-  // registrar requirement is only safe because the writer applies this same
-  // predicate to the same content: nothing between here and there writes to
-  // this file, so whenever the preflight skips this check the writer skips the
-  // insert that would have needed one, and its own throw cannot fire.
-  // Tightening either site alone reintroduces the half-edited app this function
-  // exists to prevent.
+  // Must keep mirroring `updateResourceRoutes`: waiving the registrar
+  // requirement is only safe because the writer applies the same predicate to
+  // the same content. Tightening either site alone reintroduces the half-edited
+  // app this function exists to prevent.
   if (!routesAlreadyRegister(routes, routeName) && !findRouteRegistrar(routes)) {
     throw new Error(missingRegistrarMessage(routeName))
   }
@@ -549,10 +501,8 @@ async function updateResourceRoutes(singular: string, routeName: string, routeVa
   if (!routesAlreadyRegister(content, routeName)) {
     const registrar = findRouteRegistrar(content)
 
-    // Unreachable via `runBlueprint`, which settles this in the preflight
-    // before anything is written — but it is also how the `null` is handled:
-    // the insertion below dereferences `registrar`, so dropping this buys
-    // nothing but a non-null assertion.
+    // Unreachable via `runBlueprint`, which settles this in the preflight, but
+    // the insertion below dereferences `registrar` either way.
     if (!registrar) {
       throw new Error(missingRegistrarMessage(routeName))
     }
@@ -567,14 +517,11 @@ async function updateResourceRoutes(singular: string, routeName: string, routeVa
       receiver: registrar.parameterName,
     })
 
-    // Insert before the closing brace of the route registrar function.
     const groupBlock = `\n${group.map((line) => `  ${line}`).join('\n')}\n`
     content = content.slice(0, registrar.bodyEnd) + groupBlock + content.slice(registrar.bodyEnd)
 
-    // Inside the guard: these identifiers are only used by the group above,
-    // so a skipped registration must skip them too — appended unconditionally
-    // they are unused bindings, and the app stops compiling under
-    // noUnusedLocals.
+    // Inside the guard: appended when the registration is skipped, these are
+    // unused bindings and the app stops compiling under noUnusedLocals.
     for (const statement of [
       `import ${singular}Controller from '../app/Http/Controllers/${singular}Controller.js'`,
       `import { ${singular}PayloadSchema } from '../app/Http/Validators/${singular}Validator.js'`,

@@ -14,15 +14,9 @@ interface RegisteredCheck {
   options: HealthCheckOptions
 }
 
-/**
- * Health check manager.
- */
 export class HealthManager {
   private checks: Map<string, RegisteredCheck> = new Map()
 
-  /**
-   * Register a health check.
-   */
   register(check: HealthCheck, options: HealthCheckOptions = {}): this {
     this.checks.set(check.name, {
       check,
@@ -34,39 +28,24 @@ export class HealthManager {
     return this
   }
 
-  /**
-   * Unregister a health check.
-   */
   unregister(name: string): this {
     this.checks.delete(name)
     return this
   }
 
-  /**
-   * Get all registered check names.
-   */
   getCheckNames(): string[] {
     return Array.from(this.checks.keys())
   }
 
-  /**
-   * Run all health checks.
-   */
   async check(): Promise<HealthReport> {
     return this.runChecks(this.getCheckNames())
   }
 
-  /**
-   * Run specific health checks.
-   */
   async checkOnly(names: string[]): Promise<HealthReport> {
     const validNames = names.filter((name) => this.checks.has(name))
     return this.runChecks(validNames)
   }
 
-  /**
-   * Get a specific check result.
-   */
   async getCheck(name: string): Promise<CheckResult | null> {
     const registered = this.checks.get(name)
     if (!registered) {
@@ -75,9 +54,6 @@ export class HealthManager {
     return this.runCheck(registered)
   }
 
-  /**
-   * Create middleware for health endpoints.
-   */
   middleware(options: HealthMiddlewareOptions = {}): Middleware {
     return async (ctx: Context, _next: () => Promise<void>): Promise<void> => {
       const report = options.checks
@@ -91,9 +67,8 @@ export class HealthManager {
             ? 200
             : 503
 
-      // Finalize the context by assigning `ctx.res`. `ctx.json()` only builds a
-      // Response; a handler that returns undefined without setting one makes the
-      // router synthesize an empty 204, dropping the report entirely.
+      // `ctx.json()` only builds a Response; without assigning `ctx.res` the
+      // router synthesizes an empty 204 and the report is dropped.
       ctx.res = ctx.json(
         {
           status: report.status,
@@ -115,9 +90,6 @@ export class HealthManager {
     }
   }
 
-  /**
-   * Run the specified checks.
-   */
   private async runChecks(names: string[]): Promise<HealthReport> {
     const results: CheckResult[] = []
     let overallStatus: HealthStatus = 'healthy'
@@ -130,7 +102,6 @@ export class HealthManager {
         const result = await this.runCheck(registered)
         results.push(result)
 
-        // Update overall status
         if (result.status === 'unhealthy') {
           if (registered.options.critical) {
             overallStatus = 'unhealthy'
@@ -146,7 +117,6 @@ export class HealthManager {
       })
     )
 
-    // Sort results by name for consistent output
     results.sort((a, b) => a.name.localeCompare(b.name))
 
     return {
@@ -156,9 +126,6 @@ export class HealthManager {
     }
   }
 
-  /**
-   * Run a single check with timeout.
-   */
   private async runCheck(registered: RegisteredCheck): Promise<CheckResult> {
     const { check, options } = registered
     const start = performance.now()
@@ -183,9 +150,6 @@ export class HealthManager {
     }
   }
 
-  /**
-   * Create a timeout promise.
-   */
   private timeoutPromise(ms: number): Promise<never> {
     return new Promise((_, reject) => {
       setTimeout(() => {
@@ -195,9 +159,6 @@ export class HealthManager {
   }
 }
 
-/**
- * Create a health manager.
- */
 export function createHealthManager(): HealthManager {
   return new HealthManager()
 }

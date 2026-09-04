@@ -6,10 +6,6 @@ interface SendRegistrationEmailPayload {
   userId: number
 }
 
-/**
- * Job that sends a registration email to a newly registered user.
- * This runs in the background to avoid blocking the registration flow.
- */
 export class SendRegistrationEmailJob extends Job<SendRegistrationEmailPayload> {
   static override queue = 'emails'
   static override maxAttempts = 3

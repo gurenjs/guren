@@ -7,11 +7,10 @@ import {
 import { oauthStates } from '../../../../db/schema.js'
 
 /**
- * Owns the 'oauth' container binding outright — CoreOAuthServiceProvider is
- * deliberately NOT registered, since it would bind a manager with the
- * in-memory state store first. The database-backed store is required on
- * Workers: the authorize redirect and its callback can land on different
- * isolates that share nothing but the database.
+ * Owns the 'oauth' binding outright: CoreOAuthServiceProvider is deliberately
+ * not registered, since it would bind the in-memory state store first. Workers
+ * needs the database-backed one — the authorize redirect and its callback can
+ * land on different isolates.
  */
 export default class OAuthProvider extends ServiceProvider {
   register(): void {

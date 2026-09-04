@@ -12,10 +12,8 @@ import { docsService, type DocCategoryGroup } from '../../Services/DocsService.j
 import { listPublishedPosts, type PublishedPost } from '../../../modules/blog/index.js'
 
 /**
- * Post titles and descriptions are author-written free text, so they are
- * flattened before going into llms.txt: a newline or a bracket would otherwise
- * split one entry into several, or break the link, in a document whose whole
- * value is being machine-parseable.
+ * Author-written free text is flattened before going into llms.txt: a newline
+ * or a bracket would split one entry into several, or break the link.
  */
 function mdInline(value: string): string {
   return value
@@ -39,10 +37,9 @@ function sitemapEntry(path: string, alternates?: { en: string; ja: string }): st
 }
 
 // Docs content is immutable per deploy, so each body is built once per process
-// (Cache-Control alone does not spare the origin — max-age has no CDN guarantee).
-// Blog posts are deliberately outside this cache: they are rows the admin UI
-// mutates at runtime, and memoizing them per isolate would leave a published
-// post visible from some isolates and missing from others until the next deploy.
+// (max-age gives no CDN guarantee). Blog posts stay outside this cache: the
+// admin UI mutates them, and per-isolate memoization would show a published
+// post from some isolates and not others.
 const bodyCache = new Map<string, Promise<string>>()
 
 function cachedBody(key: string, build: () => Promise<string>): Promise<string> {
@@ -64,10 +61,7 @@ export function resetMetaBodyCache(): void {
   bodyCache.clear()
 }
 
-/**
- * Machine-facing endpoints: sitemap.xml for crawlers, llms.txt / llms-full.txt
- * for LLM agents (llmstxt.org convention).
- */
+/** sitemap.xml for crawlers; llms.txt / llms-full.txt per llmstxt.org. */
 export default class MetaController extends Controller {
   async sitemap(): Promise<Response> {
     const [docsEntries, posts] = await Promise.all([

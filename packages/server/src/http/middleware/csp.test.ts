@@ -114,11 +114,9 @@ describe('createCspMiddleware', () => {
 })
 
 /**
- * The header has to land on the response however the handler produced it.
- * Setting it with `ctx.header()` before `next()` only reaches responses the
- * handler built through the context — a raw `new Response(...)` replaces
- * `ctx.res` and drops it, which is exactly what the framework's own asset
- * handlers return.
+ * The header must land however the handler produced the response. `ctx.header()`
+ * before `next()` misses a raw `new Response(...)`, which replaces `ctx.res` —
+ * and that is what the framework's own asset handlers return.
  */
 describe('createCspMiddleware response shapes', () => {
   test('should set CSP header when the handler returns a raw Response', async () => {

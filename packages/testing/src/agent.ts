@@ -1,27 +1,17 @@
 /**
  * Agent tool calls in tests (RFC 0016 §6).
  *
- * `app.agent().call('posts.store', { title: 'x' })` goes through the framework's
- * own dispatch contract — `deriveAgentTools` to find the tool, `buildToolRequest`
- * to rebuild the HTTP request, `mapToolResponse` to read the answer — and then
- * out through the same `fetch` every other `TestApp` request uses. Nothing here
- * re-implements any of it. A test that asserted against a hand-built request
- * would pass while the tool an agent actually sees did something else, which is
- * the one failure this helper exists to prevent.
- *
- * The seam is deliberately narrow: this module knows how to *dispatch* a tool,
- * and {@link AgentTestBridge} is everything it needs from a `TestApp` to do it.
+ * Goes through the framework's own dispatch contract (`deriveAgentTools`,
+ * `buildToolRequest`, `mapToolResponse`) and out through the same `fetch` every
+ * other `TestApp` request uses; nothing here re-implements any of it, or a test
+ * would pass while the tool an agent actually sees did something else.
  */
 import type { DerivedAgentTool, RouteDefinition, ToolCallOutcome } from '@guren/server'
 
 /**
- * What a tool dispatch needs from the `TestApp` it belongs to.
- *
- * `routeDefinitions` is the load-bearing one: a tool is derived from the app's
- * route graph, and a `TestApp` built from a bare `fetch` function has no graph
- * to derive from. It answers `undefined` there rather than an empty list, so
- * {@link TestAgent} can say which constructor to use instead of reporting that
- * the app exposes no tools.
+ * What a tool dispatch needs from the `TestApp` it belongs to. `routeDefinitions`
+ * answers `undefined` (not an empty list) for a `TestApp` built from a bare
+ * `fetch`, so {@link TestAgent} can name the constructor to use instead.
  */
 export interface AgentTestBridge {
   routeDefinitions(): readonly RouteDefinition[] | undefined
@@ -49,13 +39,9 @@ interface AgentRuntime {
 let runtimePromise: Promise<AgentRuntime> | undefined
 
 /**
- * Load the dispatch contract from whichever framework package is installed.
- *
- * `@guren/core` is an *optional* peer of this package, so the import can
- * legitimately fail — and, more quietly, can succeed against a version
- * predating the agent interface, leaving every destructured name `undefined`
- * and producing a `TypeError` at call time. The symbols are therefore checked,
- * not assumed: an unavailable capability has to say it is unavailable.
+ * `@guren/core` is an *optional* peer, so the import can fail — or succeed against
+ * a version predating the agent interface, leaving every name `undefined` and
+ * throwing a `TypeError` at call time. Hence the symbols are checked, not assumed.
  */
 async function loadAgentRuntime(): Promise<AgentRuntime> {
   runtimePromise ??= (async () => {
@@ -77,10 +63,8 @@ async function loadAgentRuntime(): Promise<AgentRuntime> {
 
     if (missing.length > 0) {
       throw new Error(
-        // The capability, not a version number: which release first carries
-        // these exports is decided by `changeset version`, and a minimum
-        // guessed here would be a confident wrong answer in a user-facing
-        // error.
+        // Names the capability, not a version number: which release first carries
+        // these exports is decided by `changeset version`.
         `The installed @guren/core predates the agent dispatch contract (missing ${missing.join(', ')}). `
           + 'agent() needs a @guren/core with the agent interface (RFC 0016) — upgrade it and try again.',
       )
@@ -95,34 +79,21 @@ async function loadAgentRuntime(): Promise<AgentRuntime> {
 /** Options for one tool call. */
 export interface AgentCallOptions {
   /**
-   * Authenticate the call as this user, exactly as `TestApp.actingAs(user)`
-   * does — the `X-Testing-User` envelope, honoured only while `GUREN_TESTING`
-   * is set (which every `TestApp` constructor sets). There is no token here:
-   * `@guren/testing` has no issuer, so bearer scopes are not part of this
-   * surface.
+   * Authenticate the call as this user, exactly as `TestApp.actingAs(user)` does.
+   * No token is involved, so bearer scopes are not part of this surface.
    */
   as?: unknown
   /**
-   * Ask for a verdict instead of an execution (RFC 0016 §5.4): the request runs
-   * the route's middleware and validates the advertised contract, then stops
-   * before the handler.
-   *
-   * MCP cannot offer this as an argument of the tool being checked — a tool
-   * that advertises an `outputSchema` must answer with conforming
-   * `structuredContent`, and a verdict conforms to no route's output — so it
-   * reaches the same seam through a `guren.preflight` companion tool with its
-   * own result schema. This surface is not bound by that rule, so it asks for
-   * a verdict on the call itself.
+   * Ask for a verdict instead of an execution (RFC 0016 §5.4): the request runs the
+   * route's middleware and validates the contract, then stops before the handler.
+   * MCP reaches the same seam through the `guren.preflight` companion tool instead.
    */
   preflight?: boolean
 }
 
 /**
- * The result of one tool call, as the agent surface produced it.
- *
- * Assertions are synchronous, matching the awaited half of
- * `PendingTestResponse`; {@link PendingAgentToolResult} carries the chainable
- * spellings.
+ * The result of one tool call. Assertions here are synchronous;
+ * {@link PendingAgentToolResult} carries the chainable spellings.
  */
 export class AgentToolResult {
   constructor(
@@ -165,14 +136,9 @@ export class AgentToolResult {
   }
 
   /**
-   * Assert the call succeeded — not an error result.
-   *
-   * Deliberately not `assertStatus(200)` — which is what
-   * `PendingTestResponse.assertOk()` means, and the divergence is on purpose.
-   * A tool call is whatever the route answers: a `store` returning 201 and a
-   * `destroy` returning 204 are successes, and MCP's own result model is a
-   * boolean `isError` rather than a status. Use `assertStatus` when the exact
-   * code is the point.
+   * Assert the call succeeded — not an error result. Deliberately not
+   * `assertStatus(200)` (which is what `PendingTestResponse.assertOk()` means): a
+   * 201 or 204 is a success, and MCP models the outcome as a boolean `isError`.
    */
   assertOk(): this {
     if (this.isError) {
@@ -184,19 +150,11 @@ export class AgentToolResult {
   }
 
   /**
-   * Assert the call was refused, and hand back the refusal.
+   * Assert the application answered 401 or 403. Not a scope denial: this surface
+   * carries no bearer token, so assert scopes against the App MCP plugin's gate.
    *
-   * "Refused" means **the application answered 401 or 403** — its own
-   * authentication or authorization. It is not a scope denial: scopes are a
-   * property of the bearer token the App MCP plugin verifies, and this surface
-   * carries no token (it authenticates by session or `actingAs`), so an
-   * ungranted scope is unreachable from a test. Assert scope behaviour against
-   * the plugin's gate instead.
-   *
-   * One caveat worth knowing: a 403 from the CSRF middleware is
-   * indistinguishable from a 403 from a policy. Dispatch through
-   * `(await app.withCsrf()).agent()` — or against an app that mounts no CSRF —
-   * or this assertion can pass without a policy ever being consulted.
+   * A CSRF 403 is indistinguishable from a policy 403 — dispatch through
+   * `(await app.withCsrf()).agent()` or this can pass with no policy consulted.
    */
   assertDenied(): this {
     if (this.status !== 401 && this.status !== 403) {
@@ -208,11 +166,8 @@ export class AgentToolResult {
   }
 
   /**
-   * Assert the call produced a structured result, and return it typed.
-   *
-   * The type parameter is an assertion by the test author, not a check: the
-   * shape is validated by the route's own `output` schema at runtime, which is
-   * the same schema the tool advertises.
+   * Assert the call produced a structured result, and return it typed. The type
+   * parameter is the author's assertion; the route's `output` schema is the check.
    */
   assertStructured<T = Record<string, unknown>>(): T {
     if (!this.advertisesStructuredOutput(this.tool)) {
@@ -242,14 +197,7 @@ export class AgentToolResult {
   }
 }
 
-/**
- * A promise-like {@link AgentToolResult} that allows chaining assertions
- * directly on the call, mirroring `PendingTestResponse`:
- *
- * ```ts
- * await app.agent().call('posts.index').assertOk()
- * ```
- */
+/** A promise-like {@link AgentToolResult}, so assertions chain on the call. */
 export class PendingAgentToolResult implements PromiseLike<AgentToolResult> {
   constructor(private readonly promise: Promise<AgentToolResult>) {}
 
@@ -282,18 +230,15 @@ export class PendingAgentToolResult implements PromiseLike<AgentToolResult> {
   }
 
   /**
-   * Chainable form of {@link AgentToolResult.assertStructured}. It returns the
-   * pending result rather than the structured payload — `await` the call and
-   * use the awaited `assertStructured<T>()` when you want the value.
+   * Chainable form of {@link AgentToolResult.assertStructured}: returns the pending
+   * result, not the payload. `await` the call to get the value.
    */
   assertStructured(): PendingAgentToolResult {
     return this.chain((result) => result.assertStructured())
   }
 }
 
-/**
- * The agent surface of a `TestApp` — reached through `app.agent()`.
- */
+/** The agent surface of a `TestApp` — reached through `app.agent()`. */
 export class TestAgent {
   constructor(private readonly bridge: AgentTestBridge) {}
 
@@ -345,20 +290,14 @@ export class TestAgent {
       )
     }
 
-    // The bridge for the principal this call authenticates as. Routed through
-    // `TestApp.actingAs` rather than spelling the `X-Testing-User` envelope a
-    // second time: two spellings of that envelope is how they drift.
-    //
-    // Note the order: the tool was derived above from *this* bridge, and the
-    // acting-as copy is used only for headers and dispatch. That is why `{ as }`
-    // works even on a copy that lost its route definitions — a real hazard for
-    // `app.actingAs(user).agent()`, which is why `TestApp.clone()` carries them.
+    // Routed through `TestApp.actingAs` rather than spelling the `X-Testing-User`
+    // envelope a second time. Order matters: the tool was derived above from *this*
+    // bridge, so `{ as }` works even on a copy that lost its route definitions.
     const bridge = options.as === undefined ? this.bridge : this.bridge.actingAs(options.as)
 
     const built = runtime.buildToolRequest(tool, input, {
-      // The app's own baseUrl, not the dispatch default: a TestApp created by
-      // `fromWorkers`/`fromApp` may serve a different origin, and host
-      // authorization reads the Host header this sets.
+      // The app's own baseUrl, not the dispatch default: `fromWorkers`/`fromApp` may
+      // serve another origin, and host authorization reads the Host header this sets.
       origin: bridge.baseUrl,
       preflight: options.preflight,
     })
@@ -376,12 +315,10 @@ export class TestAgent {
       )
     }
 
-    // The app's standing headers underneath, the dispatch's on top: `Accept`,
-    // `Content-Type` and `X-Guren-Agent-Surface` describe the tool call and
-    // must win, while everything the TestApp was configured with — the
-    // `X-Testing-User` envelope, and the `Cookie` + `X-XSRF-TOKEN` pair
-    // `withCsrf()` parks there — has to survive, or a mutating tool call is
-    // refused by CSRF before any policy is consulted.
+    // The app's standing headers underneath, the dispatch's on top: the dispatch
+    // headers describe the tool call and must win, while the `X-Testing-User`
+    // envelope and the `Cookie` + `X-XSRF-TOKEN` pair from `withCsrf()` must
+    // survive, or a mutating call is refused by CSRF before any policy runs.
     const headers = new Headers(bridge.headers())
     built.request.headers.forEach((value, key) => headers.set(key, value))
 

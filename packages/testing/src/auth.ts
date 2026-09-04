@@ -1,7 +1,3 @@
-/**
- * Common test utilities for authentication-related tests.
- */
-
 export interface MockUser {
   id: number
   email: string
@@ -32,9 +28,6 @@ export interface MockAuthContext<User = { id: number; name: string }> {
   session: <T = unknown>() => T | undefined
 }
 
-/**
- * Creates a mock user with Authenticatable interface.
- */
 export function createMockUser(data: {
   id: number
   email: string
@@ -52,9 +45,6 @@ export function createMockUser(data: {
   }
 }
 
-/**
- * Creates a mock user provider for auth tests.
- */
 export function createMockProvider<T extends MockUser>(users: T[]): MockUserProvider<T> {
   return {
     retrieveById: async (id) => users.find((u) => u.id === id) ?? null,
@@ -68,9 +58,6 @@ export function createMockProvider<T extends MockUser>(users: T[]): MockUserProv
   }
 }
 
-/**
- * Creates a mock auth context for middleware tests.
- */
 export function createMockAuthContext(options: {
   isAuthenticated: boolean
   user?: { id: number; name: string }

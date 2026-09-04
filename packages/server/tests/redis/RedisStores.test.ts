@@ -11,7 +11,6 @@ import {
 } from '../../src/redis'
 import { createApiToken } from '../../src/auth/api-token'
 
-// Skip tests if REDIS_URL is not set
 const REDIS_URL = process.env.REDIS_URL
 const describeRedis = REDIS_URL ? describe : describe.skip
 
@@ -161,7 +160,7 @@ describeRedis('Redis Stores (requires REDIS_URL)', () => {
       await store.increment('key-1', 100) // 100ms window
       await new Promise((r) => setTimeout(r, 150))
       const entry = await store.increment('key-1', 100)
-      expect(entry.count).toBe(1) // Old entry removed
+      expect(entry.count).toBe(1)
     })
   })
 
@@ -283,7 +282,7 @@ describeRedis('Redis Stores (requires REDIS_URL)', () => {
     })
 
     it('expires token after TTL', async () => {
-      const expiresAt = new Date(Date.now() + 100) // 100ms
+      const expiresAt = new Date(Date.now() + 100)
       await store.store('hash-1', 'user@example.com', expiresAt)
 
       await new Promise((r) => setTimeout(r, 200))
@@ -372,7 +371,7 @@ describeRedis('Redis Stores (requires REDIS_URL)', () => {
       const token = {
         tokenId: 'hash-1',
         email: 'user@example.com',
-        expiresAt: new Date(Date.now() + 100), // 100ms
+        expiresAt: new Date(Date.now() + 100),
         createdAt: new Date(),
       }
 
@@ -386,17 +385,14 @@ describeRedis('Redis Stores (requires REDIS_URL)', () => {
   })
 })
 
-// Non-Redis tests that can run without Redis
 describe('Redis client options', () => {
   it('createRedisClient returns Redis instance', () => {
-    // This just tests the function signature, not actual connection
     const client = createRedisClient({ host: 'localhost', port: 6379, lazyConnect: true })
     expect(client).toBeDefined()
     client.disconnect()
   })
 })
 
-// Import queue driver for testing
 import { RedisDriver } from '../../src/queue/drivers/RedisDriver'
 import type { QueuedJob } from '../../src/queue/types'
 
@@ -465,13 +461,10 @@ describeRedis('RedisDriver Queue (requires REDIS_URL)', () => {
     const popped = await driver.pop('default')
     expect(popped).not.toBeNull()
 
-    // Queue should be empty now
     expect(await driver.size('default')).toBe(0)
 
-    // Release the job
     await driver.release(popped!, 0)
 
-    // Job should be back in the queue
     expect(await driver.size('default')).toBe(1)
   })
 

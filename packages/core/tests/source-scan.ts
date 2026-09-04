@@ -1,10 +1,9 @@
 /**
  * Source-form scanning for the tests that keep a cross-package constant a
- * single source. Nothing at runtime distinguishes a value read from a
- * constant from one re-typed as a literal, so those tests read the engine's
- * own text — the same reason the MCP endpoint gate pins the source form of
- * `process.env.NODE_ENV`. Shared rather than copied per test file: a second
- * copy of a scanner is the bug those tests exist to prevent.
+ * single source. Nothing at runtime distinguishes a value read from a constant
+ * from one re-typed as a literal, so those tests read the engine's own text.
+ * Shared rather than copied per test file: a second copy of a scanner is the
+ * bug those tests exist to prevent.
  */
 
 /**

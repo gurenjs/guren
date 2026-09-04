@@ -107,8 +107,6 @@ describe('makeController', () => {
   it('creates parent directories if they do not exist', async () => {
     const result = await makeController('Nested')
 
-    // File should be created even though app/Http/Controllers didn't exist
-    // access() resolves without throwing if file exists
     const fileExists = await access(result).then(() => true).catch(() => false)
     expect(fileExists).toBe(true)
   })
@@ -121,8 +119,8 @@ describe('makeController', () => {
     const content = await readFile(result, 'utf8')
     expect(content).toContain('class InvoiceController')
 
-    // pages.gen.ts nests by directory segment (pages-types.ts), so the
-    // generated reference must be namespaced by module, not pages.invoice.Index.
+    // pages.gen.ts nests by directory segment, so the reference must be
+    // namespaced by module (pages-types.ts).
     expect(content).toContain('inertia(pages.billing.invoice.Index')
   })
 
@@ -136,10 +134,8 @@ describe('makeController', () => {
     await expect(makeController('Invoice', { root: '../../outside' })).rejects.toThrow(/Invalid module name/)
   })
 
-  // Only the wiring is pinned here — see makeController's doc comment for why
-  // it adapts where the multi-file scaffolds refuse. "Cannot tell" keeps
-  // Inertia via the tests above, which run in a tempDir with no manifest, and
-  // the predicate's own branches are pinned in blueprints.test.ts.
+  // Only the wiring is pinned here — "cannot tell" keeps Inertia via the tests
+  // above; the predicate's own branches are pinned in blueprints.test.ts.
   describe('on an API-only app', () => {
     it('emits a JSON controller instead of the Inertia template', async () => {
       await seedApiOnlyApp(tempDir)
@@ -171,10 +167,9 @@ describe('makeController', () => {
       }
     })
 
-    // The template is what `create-guren-app` ships; the fixture above is its
-    // reduction, not a substitute for it. This command's *output* flips on the
-    // predicate, so a starter that quietly gained the client would hand users
-    // the Inertia template back with every synthetic test still green.
+    // The fixture above is a reduction of what `create-guren-app` ships: a
+    // starter that quietly gained the client would hand users the Inertia
+    // template back with every synthetic test still green.
     it('emits the JSON dialect for the api-only template as shipped', async () => {
       await seedShippedApiOnlyApp(tempDir)
 
@@ -183,9 +178,8 @@ describe('makeController', () => {
       expect(await readFile(result, 'utf8')).toContain('return this.json(')
     })
 
-    // Judged at the app root even when the file lands under modules/ — a
-    // probe against modules/billing/ would find neither signal and answer
-    // "cannot tell" for an app that is confirmed API-only.
+    // Judged at the app root: a probe against modules/billing/ would find
+    // neither signal and answer "cannot tell" for a confirmed API-only app.
     it('emits the JSON dialect under --module too, judging the app root', async () => {
       await seedApiOnlyApp(tempDir)
 
