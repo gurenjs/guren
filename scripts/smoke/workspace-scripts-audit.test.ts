@@ -1,10 +1,10 @@
-import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { describe, expect, test } from 'bun:test'
 
 import {
   collectManifestViolations,
+  collectShellViolations,
   collectSourceFiles,
   collectSourceViolations,
   invokesRegistryGuren,
@@ -39,71 +39,89 @@ describe('registry runner detection', () => {
   })
 
   test('compares argv elements whole, so a mention holding the phrase is not an invocation', () => {
-    // Spelled through split() rather than as an array literal: this file is
-    // inside the gate's own scope, and a literal argv here would be flagged.
-    expect(tokensInvokeRegistryGuren('bunx guren codegen'.split(' '))).toBe(true)
     expect(tokensInvokeRegistryGuren(['bunx guren add auth', 'bunx guren add storage'])).toBe(false)
   })
 })
 
 describe('the source scan, by spawn shape', () => {
-  test('flags the argv array the upgrade smoke used to spawn', () => {
-    const found = problems(`await run(['bunx', 'guren', 'codegen', '--force'], appDir)\n`)
-    expect(found).toEqual(['1:11 argv array resolves `guren` from the registry: bunx guren codegen --force'])
+  test.each([
+    // argv arrays, whatever consumes them
+    `await run(['bunx', 'guren', 'codegen'], appDir)`,
+    `Bun.spawn({ cmd: ['bunx', '--bun', 'guren', 'check'], cwd })`,
+    `Bun.spawnSync(['bun', 'x', 'guren', 'codegen'])`,
+    // `process.execPath` is the bun binary under Bun, so this is `bunx guren`.
+    // Not contrived: scripts/test-packages.ts already spawns [process.execPath, ...args].
+    `Bun.spawn([process.execPath, 'x', 'guren', 'codegen'])`,
+    // A type assertion on an argv element must not switch the rule off — the
+    // hazard ast-walk's unwrapTypeAssertion exists for. Each of these three
+    // fails if the unwrap is removed; the `satisfies` case is written on the
+    // element rather than the array, because a wrapped *array* is still
+    // reached by the walk and so would pass either way.
+    `Bun.spawn(['bunx' as const, 'guren', 'codegen'])`,
+    `Bun.spawn(['bunx' satisfies string, 'guren', 'codegen'])`,
+    `Bun.spawn([process.execPath as string, 'x', 'guren'])`,
+    // shell templates
+    'await $`bunx guren codegen --force`.cwd(dir)',
+    'await Bun.$`cd ${dir} && npx guren doctor`',
+    // exec/spawn families, both the argv split and the shell command line
+    `execSync('bunx guren codegen', { cwd })`,
+    `spawnSync('bunx', ['guren', 'codegen'], { cwd })`,
+    `execFile('npx', ['guren'], cb)`,
+    `spawn('bunx guren codegen', { shell: true })`,
+    `spawnSync('bunx guren codegen --force', opts)`,
+  ])('flags %p', (source) => {
+    expect(problems(source)).toHaveLength(1)
   })
 
-  test('flags the same argv inside Bun.spawn({ cmd }) and with runner flags', () => {
-    expect(problems(`Bun.spawn({ cmd: ['bunx', '--bun', 'guren', 'check'], cwd })`)).toHaveLength(1)
-    expect(problems(`Bun.spawnSync(['bun', 'x', 'guren', 'codegen'])`)).toHaveLength(1)
+  test.each([
+    // the sanctioned replacement
+    `await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'codegen', '--force'], appDir)`,
+    `Bun.spawn([process.execPath, 'run', 'build'])`,
+    `spawn('bunx', ['add', 'auth'])`,
+    // an unrelated dynamic first element is not a runner
+    `Bun.spawn([someVar, 'guren'])`,
+    // mentions: docs assertions, checker fixtures, lists of documented commands
+    `assert(readme.includes('bunx guren add auth'), 'README must document it.')`,
+    `const md = 'Run \\\`bunx guren agent:init --target codex\\\` now.'`,
+    `const documented = ['bunx guren add auth', 'bunx guren add storage']`,
+    'const text = `bunx guren codegen` // not tagged, not a shell',
+  ])('passes %p', (source) => {
+    expect(problems(source)).toEqual([])
   })
 
-  test('flags a Bun shell template and exec-style calls', () => {
+  test('reports the shape and position it found', () => {
+    expect(problems(`await run(['bunx', 'guren', 'codegen', '--force'], appDir)\n`)).toEqual([
+      '1:11 argv array resolves `guren` from the registry: bunx guren codegen --force',
+    ])
     expect(problems('await $`bunx guren codegen --force`.cwd(dir)')).toEqual([
       '1:7 shell template resolves `guren` from the registry: bunx guren codegen --force',
     ])
-    expect(problems('await Bun.$`cd ${dir} && npx guren doctor`')).toHaveLength(1)
-    expect(problems("execSync('bunx guren codegen', { cwd })")).toHaveLength(1)
-    expect(problems("spawnSync('bunx', ['guren', 'codegen'], { cwd })")).toHaveLength(1)
-    expect(problems("execFile('npx', ['guren'], cb)")).toHaveLength(1)
-  })
-
-  test('passes the sanctioned replacement', () => {
-    expect(
-      problems(`await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'codegen', '--force'], appDir)\n`),
-    ).toEqual([])
-  })
-
-  test('leaves mentions alone: docs assertions, checker fixtures, and lists of documented commands', () => {
-    expect(problems("assert(readme.includes('bunx guren add auth'), 'README must document it.')")).toEqual([])
-    expect(problems("const md = 'Run `bunx guren agent:init --target codex` now.'")).toEqual([])
-    expect(problems("const documented = ['bunx guren add auth', 'bunx guren add storage']")).toEqual([])
-    expect(problems('const text = `bunx guren codegen` // not tagged, not a shell')).toEqual([])
-  })
-
-  test('reads process.execPath as `bun`, since that is what it resolves to under Bun', () => {
-    // This is not a contrived case: scripts/test-packages.ts and others in
-    // this exact tree already spawn `[process.execPath, ...args]` to mean
-    // "run bun with these args" — so `[process.execPath, 'x', 'guren']` is
-    // `bunx guren` exactly as much as spelling `'bun'` out would be.
-    expect(problems(`Bun.spawn([process.execPath, 'x', 'guren'])`)).toHaveLength(1)
-    expect(problems(`Bun.spawn([process.execPath, 'run', 'build'])`)).toEqual([])
-  })
-
-  test('does not read an unrelated dynamic first element as a runner', () => {
-    expect(problems(`Bun.spawn([someVar, 'guren'])`)).toEqual([])
-  })
-
-  test('flags spawn(command, { shell: true }) — the whole first argument runs as a shell command line', () => {
-    expect(problems("spawn('bunx guren codegen', { shell: true })")).toHaveLength(1)
-    expect(problems("spawnSync('bunx guren codegen --force', opts)")).toHaveLength(1)
-    // The ordinary split form must not double-flag or spuriously flag on a
-    // bare executable name alone.
-    expect(problems("spawn('bunx', ['guren', 'codegen'])")).toHaveLength(1)
-    expect(problems("spawn('bunx', ['add', 'auth'])")).toEqual([])
   })
 
   test('throws on a source it cannot parse rather than passing it silently', () => {
     expect(() => problems('const a = ;')).toThrow()
+  })
+})
+
+describe('the shell scan', () => {
+  test('flags a registry invocation and names its line', () => {
+    const source = ['#!/usr/bin/env bash', 'set -e', 'bunx guren codegen --force'].join('\n')
+    expect(collectShellViolations('x.sh', source)).toEqual([
+      {
+        file: 'x.sh',
+        where: 'line 3',
+        problem: 'resolves `guren` from the registry: bunx guren codegen --force',
+      },
+    ])
+  })
+
+  test('passes the sanctioned spelling and leaves commented mentions alone', () => {
+    const source = [
+      'CLI_BIN="$REPO_ROOT/packages/cli/src/bin.ts"',
+      '(cd "$APP_DIR" && bun "$CLI_BIN" codegen --force)',
+      '  # never write `bunx guren codegen` here',
+    ].join('\n')
+    expect(collectShellViolations('x.sh', source)).toEqual([])
   })
 })
 
@@ -117,8 +135,8 @@ describe('manifest scan', () => {
 })
 
 describe('the scope the gate actually covers', () => {
-  test('the scripts/ glob reaches the smokes, including the file this gate exists for', async () => {
-    const files = await collectSourceFiles()
+  test('the scripts/ glob reaches the smokes, including the file this gate exists for', () => {
+    const files = collectSourceFiles()
     expect(files).toContain('scripts/smoke/upgrade-existing-app.ts')
     expect(files).toContain('scripts/smoke/fresh-app.ts')
     expect(files).toContain('scripts/smoke/workspace-scripts-audit.test.ts')
@@ -126,8 +144,8 @@ describe('the scope the gate actually covers', () => {
 
   test('every scripts/ source spawns the CLI locally', async () => {
     const violations = []
-    for (const file of await collectSourceFiles()) {
-      violations.push(...collectSourceViolations(file, await readFile(join(repoRoot, file), 'utf8')))
+    for (const file of collectSourceFiles()) {
+      violations.push(...collectSourceViolations(file, await Bun.file(join(repoRoot, file)).text()))
     }
     expect(violations).toEqual([])
   })

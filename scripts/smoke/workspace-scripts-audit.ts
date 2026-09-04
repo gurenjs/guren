@@ -3,18 +3,13 @@
 // whenever the workspace link is missing the runner falls back to the
 // registry and dies on a 404. Run the source: `bun …/packages/cli/src/bin.ts`.
 //
-// Two scopes: package.json scripts (root manifest + every workspace member),
-// and TypeScript under scripts/ — a smoke's `['bunx', 'guren', …]` argv is
-// invisible to a manifest-only scan and passes locally anyway, because the
-// temp app it builds gets a `.bin/guren` from its `file:` link to
-// packages/cli, which is exactly the link CI cannot be trusted to have.
-// Template trees are neither kind of member, and `bunx guren` is *correct*
-// there — scaffolded apps install @guren/cli from npm and get a real bin.
-//
-// The source scan judges *spawn shapes*, not text: an argv array's elements
-// as tokens, a Bun `$` shell template, or a string handed to `exec`/`spawn`
-// and friends. A mere mention of `bunx guren` (a docs audit asserting a guide
-// documents it) compares as a whole token against nothing, so it passes.
+// Three scopes: package.json scripts (root manifest + every workspace member),
+// TypeScript under scripts/, and shell scripts under scripts/. A smoke's
+// `['bunx', 'guren', …]` argv is invisible to a manifest-only scan and passes
+// locally anyway, because the temp app it builds gets a `.bin/guren` from its
+// `file:` link to packages/cli — exactly the link CI cannot be trusted to
+// have. Template trees are none of the three, and `bunx guren` is *correct*
+// there: scaffolded apps install @guren/cli from npm and get a real bin.
 //
 // Deliberately not chased, since it would trade a bounded honest-mistake
 // detector for an unbounded obfuscation-resistant one: a runner reached
@@ -22,13 +17,12 @@
 // command string. No script in this repo writes the CLI that way today.
 
 import { existsSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 
 import { parse } from '@babel/parser'
 import * as t from '@babel/types'
 
-import { walk } from '../../packages/cli/src/ast-walk'
+import { literalString, unwrapTypeAssertion, walk } from '../../packages/cli/src/ast-walk'
 
 const repoRoot = resolve(import.meta.dir, '../..')
 
@@ -68,7 +62,6 @@ export function tokensInvokeRegistryGuren(tokens: readonly string[]): boolean {
   return false
 }
 
-/** Whether a shell command string resolves `guren` through a registry runner. */
 export function invokesRegistryGuren(command: string): boolean {
   return tokensInvokeRegistryGuren(command.split(/\s+/).filter(Boolean))
 }
@@ -85,7 +78,7 @@ interface Manifest {
 export interface Violation {
   /** Repo-relative path of the manifest or source file. */
   file: string
-  /** `"script-name"` for a manifest, `line:col` for a source file. */
+  /** `"script-name"` in a manifest, `line:col` in TypeScript, `line N` in shell. */
   where: string
   problem: string
 }
@@ -113,24 +106,10 @@ export function collectManifestViolations(manifestPath: string, manifest: Manife
   return violations
 }
 
-// ---------------------------------------------------------------------------
-// Source scan
-// ---------------------------------------------------------------------------
-
 // Callees whose first argument is a shell command string: `exec('bunx guren …')`.
 const SHELL_STRING_CALLEES = new Set(['exec', 'execSync'])
 // Callees taking (file, args[]): `spawn('bunx', ['guren', …])`.
 const FILE_ARGS_CALLEES = new Set(['spawn', 'spawnSync', 'execFile', 'execFileSync'])
-
-/** A string-valued literal's text, or null when it is dynamic. */
-function literalText(node: t.Node | null | undefined): string | null {
-  if (!node) return null
-  if (t.isStringLiteral(node)) return node.value
-  if (t.isTemplateLiteral(node) && node.expressions.length === 0) {
-    return node.quasis.map((q) => q.value.cooked ?? q.value.raw).join('')
-  }
-  return null
-}
 
 /**
  * A template's text with every `${…}` hole replaced by a token that can match
@@ -141,29 +120,26 @@ function templateText(node: t.TemplateLiteral): string {
 }
 
 /**
- * Whether a node is a `process.execPath` reference. Under Bun this resolves
- * to the running `bun` binary itself — `[process.execPath, 'x', 'guren']` is
- * `bunx guren` exactly as much as `['bun', 'x', 'guren']` is, and the former
- * is already how this repo's own scripts (test-packages.ts, build-packages.ts,
- * …) spawn `bun` with fresh arguments.
+ * Under Bun `process.execPath` is the running `bun` binary, so
+ * `[process.execPath, 'x', 'guren']` is `bunx guren` exactly as much as
+ * `['bun', 'x', 'guren']` is — and it is already how this repo's own scripts
+ * (test-packages.ts, build-packages.ts, …) spawn `bun` with fresh arguments.
  */
-function isProcessExecPath(node: t.Node): boolean {
+function isProcessExecPath(node: t.Node | null | undefined): boolean {
+  if (!node) return false
+  const unwrapped = unwrapTypeAssertion(node)
   return (
-    t.isMemberExpression(node) &&
-    !node.computed &&
-    t.isIdentifier(node.object, { name: 'process' }) &&
-    t.isIdentifier(node.property, { name: 'execPath' })
+    t.isMemberExpression(unwrapped) &&
+    !unwrapped.computed &&
+    t.isIdentifier(unwrapped.object, { name: 'process' }) &&
+    t.isIdentifier(unwrapped.property, { name: 'execPath' })
   )
 }
 
-/** One argv element's token text: a literal, or `'bun'` for `process.execPath`. */
 function argvToken(node: t.Node | null | undefined): string | null {
-  if (!node) return null
-  if (isProcessExecPath(node)) return 'bun'
-  return literalText(node)
+  return isProcessExecPath(node) ? 'bun' : literalString(node)
 }
 
-/** Leading argv-token elements of an array (literals, or `process.execPath`). */
 function leadingArgv(node: t.ArrayExpression): string[] {
   const tokens: string[] = []
   for (const element of node.elements) {
@@ -178,10 +154,6 @@ function calleeName(callee: t.Node): string | null {
   if (t.isIdentifier(callee)) return callee.name
   if (t.isMemberExpression(callee) && t.isIdentifier(callee.property)) return callee.property.name
   return null
-}
-
-function isShellTag(tag: t.Node): boolean {
-  return calleeName(tag) === '$'
 }
 
 function position(node: t.Node): string {
@@ -208,50 +180,74 @@ export function collectSourceViolations(file: string, source: string): Violation
 
   walk(ast, (visited) => {
     const node = visited as unknown as t.Node
+
     if (t.isArrayExpression(node)) {
       const argv = leadingArgv(node)
       if (tokensInvokeRegistryGuren(argv)) flag(node, 'argv array', argv.join(' '))
-    } else if (t.isTaggedTemplateExpression(node) && isShellTag(node.tag)) {
+      return
+    }
+
+    if (t.isTaggedTemplateExpression(node) && calleeName(node.tag) === '$') {
       const command = templateText(node.quasi)
       if (invokesRegistryGuren(command)) flag(node, 'shell template', command.trim())
-    } else if (t.isCallExpression(node)) {
-      const name = calleeName(node.callee)
-      const [first, second] = node.arguments
-      if (name && SHELL_STRING_CALLEES.has(name)) {
-        const command = t.isTemplateLiteral(first) ? templateText(first) : literalText(first)
-        if (command !== null && invokesRegistryGuren(command)) flag(node, `${name}()`, command.trim())
-      } else if (name && FILE_ARGS_CALLEES.has(name)) {
-        const fileToken = argvToken(first)
-        if (fileToken !== null) {
-          const args = t.isArrayExpression(second) ? leadingArgv(second) : []
-          const tokens = [fileToken, ...args]
-          // Two shapes share this callee: `spawn('bunx', ['guren', …])` (an
-          // argv split, checked as tokens) and `spawn('bunx guren …', {
-          // shell: true })` (one shell command line, checked as a string —
-          // `invokesRegistryGuren` re-splits it). Checking both costs
-          // nothing on the ordinary split form: a bare `fileToken` like
-          // `'bunx'` alone never matches on its own, since the runner
-          // sequence still needs `guren` immediately after in the same
-          // string.
-          if (tokensInvokeRegistryGuren(tokens) || invokesRegistryGuren(fileToken)) {
-            flag(node, `${name}()`, tokens.join(' '))
-          }
-        }
-      }
+      return
+    }
+
+    if (!t.isCallExpression(node)) return
+    const name = calleeName(node.callee)
+    if (!name) return
+    const [first, second] = node.arguments
+
+    if (SHELL_STRING_CALLEES.has(name)) {
+      const command = t.isTemplateLiteral(first) ? templateText(first) : literalString(first)
+      if (command !== null && invokesRegistryGuren(command)) flag(node, `${name}()`, command.trim())
+      return
+    }
+
+    if (!FILE_ARGS_CALLEES.has(name)) return
+    const fileToken = argvToken(first)
+    if (fileToken === null) return
+    const args = t.isArrayExpression(second) ? leadingArgv(second) : []
+    const tokens = [fileToken, ...args]
+    // `spawn(cmd, { shell: true })` runs its first argument as a whole command
+    // line rather than argv[0]. Checking it as a string too is free: a bare
+    // `'bunx'` token cannot match without `guren` in that same string.
+    if (tokensInvokeRegistryGuren(tokens) || invokesRegistryGuren(fileToken)) {
+      flag(node, `${name}()`, tokens.join(' '))
     }
   })
 
   return violations
 }
 
-export const SOURCE_SCAN_GLOB = 'scripts/**/*.ts'
+/**
+ * Registry-resolving `guren` invocations in one shell script, judged per line.
+ * Full-line comments are skipped for the reason a TypeScript mention passes:
+ * documenting the forbidden spelling is not running it.
+ */
+export function collectShellViolations(file: string, source: string): Violation[] {
+  const violations: Violation[] = []
+  source.split('\n').forEach((line, index) => {
+    if (line.trimStart().startsWith('#')) return
+    if (!invokesRegistryGuren(line)) return
+    violations.push({
+      file,
+      where: `line ${index + 1}`,
+      problem: `resolves \`guren\` from the registry: ${line.trim()}`,
+    })
+  })
+  return violations
+}
 
-export async function collectSourceFiles(): Promise<string[]> {
-  const files: string[] = []
-  for await (const path of new Bun.Glob(SOURCE_SCAN_GLOB).scan({ cwd: repoRoot })) {
-    files.push(path)
-  }
-  return files.sort()
+const SOURCE_SCAN_GLOB = 'scripts/**/*.ts'
+const SHELL_SCAN_GLOB = 'scripts/**/*.sh'
+
+function globFiles(pattern: string): string[] {
+  return [...new Bun.Glob(pattern).scanSync({ cwd: repoRoot })].sort()
+}
+
+export function collectSourceFiles(): string[] {
+  return globFiles(SOURCE_SCAN_GLOB)
 }
 
 async function main(): Promise<void> {
@@ -260,14 +256,9 @@ async function main(): Promise<void> {
     throw new Error('Root package.json declares no workspaces — audit scope would be empty.')
   }
 
-  const memberManifestPaths: string[] = []
-  for (const pattern of rootManifest.workspaces) {
-    const glob = new Bun.Glob(`${pattern}/package.json`)
-    for await (const path of glob.scan({ cwd: repoRoot })) {
-      memberManifestPaths.push(path)
-    }
-  }
-  memberManifestPaths.sort()
+  const memberManifestPaths = rootManifest.workspaces
+    .flatMap((pattern) => globFiles(`${pattern}/package.json`))
+    .sort()
 
   if (memberManifestPaths.length === 0) {
     throw new Error('No workspace members resolved — the workspaces globs no longer match this audit.')
@@ -279,12 +270,20 @@ async function main(): Promise<void> {
     violations.push(...collectManifestViolations(manifestPath, manifest))
   }
 
-  const sourceFiles = await collectSourceFiles()
+  const sourceFiles = collectSourceFiles()
   if (sourceFiles.length === 0) {
     throw new Error(`No sources matched ${SOURCE_SCAN_GLOB} — the source scan scope would be empty.`)
   }
   for (const file of sourceFiles) {
-    violations.push(...collectSourceViolations(file, await readFile(join(repoRoot, file), 'utf8')))
+    violations.push(...collectSourceViolations(file, await Bun.file(join(repoRoot, file)).text()))
+  }
+
+  // No emptiness guard here, unlike the two scans above: scripts/ holding no
+  // shell script is a plausible state rather than a broken glob, so the count
+  // is reported instead of asserted.
+  const shellFiles = globFiles(SHELL_SCAN_GLOB)
+  for (const file of shellFiles) {
+    violations.push(...collectShellViolations(file, await Bun.file(join(repoRoot, file)).text()))
   }
 
   if (violations.length > 0) {
@@ -296,7 +295,11 @@ async function main(): Promise<void> {
     process.exit(1)
   }
 
-  console.log(`Workspace scripts audit passed: ${memberManifestPaths.length} workspace members + root manifest and ${sourceFiles.length} scripts/ sources invoke the CLI locally.`)
+  const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`
+  console.log(
+    `Workspace scripts audit passed: ${plural(memberManifestPaths.length, 'workspace member')} + root manifest, ` +
+      `${plural(sourceFiles.length, 'scripts/ source')} and ${plural(shellFiles.length, 'shell script')} invoke the CLI locally.`,
+  )
 }
 
 if (import.meta.main) {
