@@ -1,7 +1,12 @@
 import { describe, expect, test } from 'bun:test'
-import { collectBlocks, lintSource, newFindings, SKIP_PATH } from './comment-lint'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
+
+import { changedFiles, collectBlocks, lintFileRatcheted, lintSource, newFindings, SKIP_PATH } from './comment-lint'
 
 const rules = (src: string, file = 'x.ts') => lintSource(src, file).map((f) => f.rule)
+const LONG = '// l\n'.repeat(6)
 
 describe('comment-lint rules', () => {
   test('flags a block whose body exceeds five lines', () => {
@@ -17,7 +22,7 @@ describe('comment-lint rules', () => {
   })
 
   test('a run of adjacent line comments is one block', () => {
-    const src = `const z = 0\n${'// l\n'.repeat(6)}const a = 1\n`
+    const src = `const z = 0\n${LONG}const a = 1\n`
     expect(rules(src)).toEqual(['long-block'])
     expect(collectBlocks(src, 'x.ts')).toHaveLength(1)
   })
@@ -35,13 +40,17 @@ describe('comment-lint rules', () => {
     expect(rules(`/**\n * Sum.\n * @param total - bytes, not characters\n */\nexport function f(total: number) { return total }\n`)).toEqual([])
   })
 
+  test('rules see through JSDoc syntax: a step label inside a doc body is a finding', () => {
+    expect(rules(`const z = 0\n/**\n * Step 1: load\n */\nconst a = 1\n`)).toEqual(['step-label'])
+  })
+
   test('never inspects comments inside template literals or strings', () => {
     const src = 'const tpl = `\n// ---- banner ----\n// Step 1\n// used to\n`\nconst s = "// previously"\n'
     expect(rules(src)).toEqual([])
   })
 
   test('protected comments are exempt from every rule', () => {
-    const src = `// eslint-disable-next-line no-console ---------\nconsole.log(1)\n/**\n * @deprecated used to be the default\n${' * l\n'.repeat(7)} */\nexport const a = 1\n// comment-lint-ignore: pinned by tests/x.test.ts\n${'// l\n'.repeat(6)}export const b = 2\n`
+    const src = `// eslint-disable-next-line no-console ---------\nconsole.log(1)\n/**\n * @deprecated used to be the default\n${' * l\n'.repeat(7)} */\nexport const a = 1\n// comment-lint-ignore: pinned by tests/x.test.ts\n${LONG}export const b = 2\n`
     expect(rules(src)).toEqual([])
   })
 
@@ -61,20 +70,18 @@ describe('ratchet', () => {
 })
 
 describe('skip list', () => {
-  test('generated, vendored, template, and fixture paths are excluded', () => {
+  test('generated, vendored, template, and test-fixture paths are excluded; smoke fixtures are not', () => {
     for (const p of ['packages/cli/templates/scaffold/a.ts', 'packages/create-app/templates/b.ts', 'a/.guren/pages.gen.ts', 'x/dist/index.js', 'packages/cli/tests/fixtures/f.ts', 'web/stubs/s.ts', 'packages/server/src/a.d.ts']) {
       expect(SKIP_PATH.test(p)).toBe(true)
     }
     expect(SKIP_PATH.test('packages/server/src/http/Application.ts')).toBe(false)
+    expect(SKIP_PATH.test('scripts/smoke/fixtures/dbcheck.ts')).toBe(false)
   })
 })
 
 describe('ratchet against git revisions', () => {
-  const { mkdtemp, mkdir, rm, writeFile } = require('node:fs/promises') as typeof import('node:fs/promises')
-  const { tmpdir } = require('node:os') as typeof import('node:os')
-  const { join, dirname } = require('node:path') as typeof import('node:path')
-  const { changedFiles, lintFileRatcheted } = require('./comment-lint') as typeof import('./comment-lint')
-  const HERMETIC = ['-c', 'commit.gpgsign=false', '-c', 'user.name=t', '-c', 'user.email=t@guren.dev']
+  // A global core.hooksPath would otherwise reach the throwaway repository.
+  const HERMETIC = ['-c', 'core.hooksPath=', '-c', 'commit.gpgsign=false', '-c', 'user.name=t', '-c', 'user.email=t@guren.dev']
   const git = (repo: string, ...args: string[]) => {
     const p = Bun.spawnSync(['git', ...HERMETIC, ...args], { cwd: repo })
     if (!p.success) throw new Error(`git ${args.join(' ')}: ${p.stderr.toString()}`)
@@ -89,7 +96,6 @@ describe('ratchet against git revisions', () => {
     git(repo, 'commit', '--quiet', '-m', 'c')
     return git(repo, 'rev-parse', 'HEAD')
   }
-  const LONG = `${'// l\n'.repeat(6)}`
 
   test('a committed head is judged against the merge base, not against what main merged later', async () => {
     const repo = await mkdtemp(join(tmpdir(), 'guren-comment-lint-'))

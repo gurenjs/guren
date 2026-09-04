@@ -43,7 +43,7 @@ Review code changes and provide constructive, actionable feedback.
 - [ ] Says something the code cannot: a constraint, pitfall, unit, sync obligation, measured number, RFC/issue reference
 - [ ] Not a restatement of the next line, the symbol's name, or its type; no section banners or step labels
 - [ ] No change history ("used to", "previously", "no longer"): that belongs in the commit message
-- [ ] Block body is 5 lines or fewer (module header 8), one fact per line; longer blocks are compressed, not kept
+- [ ] Within the size limits `.claude/rules/coding-standards.md` sets, one fact per line; longer blocks are compressed, not kept
 - [ ] `@param`/`@returns`/`@example` carry something the signature does not
 - [ ] `bun run audit:comments` passes; a `comment-lint-ignore` marker names its reason
 

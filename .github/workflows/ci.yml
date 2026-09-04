@@ -246,29 +246,37 @@ jobs:
             echo "::${skip_kind}::agent-catalog: the derived-fact rules above passed, but THE CHANGESET GATE DID NOT RUN — ${skip_reason}. A catalog input changed without a @guren/cli changeset would not have been caught. This job being green is not that check passing."
           fi
 
-      # The comment ratchet judges the PR's own commits: merge base vs PR head,
-      # both fetched by SHA so a shallow checkout suffices. Not the base tip —
-      # on a stale branch that blames the PR for whatever main merged since —
-      # and not HEAD, which on a pull_request run is the synthetic merge
-      # commit. A push compares the previous tip with the pushed one. Without
-      # a base (first push, collected SHA) the ratchet cannot run and says so.
+      # Merge base vs PR head, both fetched by SHA so a shallow checkout
+      # suffices: the base tip would blame a stale branch for what main merged
+      # since, and HEAD on a pull_request run is the synthetic merge commit. A
+      # push compares the previous tip with the pushed one. No base at all is
+      # a notice; a base the API or the remote will not serve is a warning.
       - name: Comment lint
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             head_sha="${{ github.event.pull_request.head.sha }}"
-            base_sha=$(gh api "repos/${{ github.repository }}/compare/${{ github.event.pull_request.base.sha }}...$head_sha" --jq .merge_base_commit.sha 2>/dev/null || true)
+            if ! base_sha=$(gh api "repos/${{ github.repository }}/compare/${{ github.event.pull_request.base.sha }}...$head_sha" --jq .merge_base_commit.sha); then
+              echo "::warning::comment-lint: the compare API did not return a merge base, so THE COMMENT RATCHET DID NOT RUN."
+              exit 0
+            fi
           else
             head_sha="${{ github.sha }}"
             base_sha="${{ github.event.before }}"
           fi
           if [ -z "$base_sha" ] || [ "$base_sha" = "0000000000000000000000000000000000000000" ]; then
-            echo "::notice::comment-lint: no base commit to ratchet against for this event, so the comment ratchet did not run."
+            echo "::notice::comment-lint: this event reports no previous tip, so there is no base to ratchet against."
             exit 0
           fi
-          git fetch --no-tags --depth=1 origin "$base_sha:refs/comment-lint-base" "$head_sha:refs/comment-lint-head"
-          bun run audit:comments --base refs/comment-lint-base --head refs/comment-lint-head
+          for attempt in 1 2 3; do
+            if git fetch --no-tags --depth=1 origin "$base_sha:refs/comment-lint-base" "$head_sha:refs/comment-lint-head"; then
+              bun run audit:comments --base refs/comment-lint-base --head refs/comment-lint-head
+              exit $?
+            fi
+            if [ "$attempt" -lt 3 ]; then sleep $((attempt * 5)); fi
+          done
+          echo "::warning::comment-lint: base $base_sha or head $head_sha was not fetchable in 3 attempts, so THE COMMENT RATCHET DID NOT RUN."
 
       - name: Dependency audit
         run: bun run audit:deps
