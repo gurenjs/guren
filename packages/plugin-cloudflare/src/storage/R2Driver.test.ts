@@ -126,14 +126,10 @@ describe('R2Driver against the binding', () => {
       expect(url.origin).toBe('https://acct123.r2.cloudflarestorage.com')
       expect(url.pathname).toBe('/my-bucket/uploads/a%20b/c.png')
       expect(url.searchParams.get('X-Amz-Algorithm')).toBe('AWS4-HMAC-SHA256')
-      // A window, not the exact number: the test reads `Date.now()` to build
-      // the expiration and the driver reads it again to subtract, so a single
-      // millisecond between the two makes `Math.floor` yield 3599. That is
-      // the correct answer to the question actually asked — "whole seconds
-      // from now" — and pinning 3600 made this test fail roughly once per
-      // 30,000 runs on an idle machine, more under CI load. The invariant
-      // worth holding is the unit and the magnitude: seconds, and the window
-      // that was requested.
+      // A window, not the exact number: the test and the driver each read
+      // `Date.now()`, so one millisecond between them makes `Math.floor` yield
+      // 3599. Pinning 3600 failed about once per 30,000 runs; the invariant
+      // worth holding is the unit and the magnitude.
       expect(Number(url.searchParams.get('X-Amz-Expires'))).toBeGreaterThanOrEqual(3599)
       expect(Number(url.searchParams.get('X-Amz-Expires'))).toBeLessThanOrEqual(3600)
       expect(url.searchParams.get('X-Amz-Credential')).toMatch(/^AKIDEXAMPLE\/\d{8}\/auto\/s3\/aws4_request$/)
@@ -177,10 +173,9 @@ describe('R2Driver delivery surface (RFC 0015)', () => {
     const { driver } = createDriver({ presign })
     const expires = new Date(Date.now() + 3600 * 1000)
 
-    // R2's S3 GetObject has no response-* query parameters; signing them in
-    // would look like disposition policy survives the redirect while R2
-    // serves the object's own metadata. The TemporaryUrlOptions contract is
-    // that an incapable driver ignores them — pin that it really does.
+    // R2's S3 GetObject has no response-* query parameters; signing them in would
+    // look like disposition policy survives the redirect while R2 serves the
+    // object's own metadata. TemporaryUrlOptions says an incapable driver ignores them.
     const url = new URL(
       await driver.temporaryUrl('doc.pdf', expires, {
         responseContentDisposition: 'attachment; filename="doc.pdf"',

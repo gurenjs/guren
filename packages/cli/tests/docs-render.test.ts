@@ -121,8 +121,6 @@ bunx guren check --docs
     )
     expect(renderDocHtml('`[orders](/adr/0002.md)`')).not.toContain('md-link')
 
-    // Emphasis wrapping a link bolds the anchor instead of leaving the
-    // asterisks behind.
     expect(renderDocHtml('**[Decision](./decision.md)**')).toContain(
       '<strong><a class="md-link" data-target="./decision.md">Decision</a></strong>',
     )
@@ -155,8 +153,7 @@ bunx guren check --docs
 
   it('escapes markup around a bracket that never becomes a link', () => {
     // The link scanner splits on '['; the slice before an unmatched one
-    // must still be escaped, or a stray bracket makes everything before
-    // it raw markup.
+    // must still be escaped, or the markup before it stays raw.
     const cases = [
       '<img src=x onerror=alert(1)>[\n',
       '<script>alert(1)</script>[broken\n',

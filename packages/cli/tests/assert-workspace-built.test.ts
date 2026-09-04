@@ -5,9 +5,8 @@ import { join } from 'node:path'
 import { SERVER_DIST_ENTRY, assertWorkspaceBuilt } from './helpers'
 
 /**
- * The guard exists to keep an unbuilt checkout from being read as a verdict,
- * and CI always builds before testing — so it only ever fires locally, where
- * nothing else would notice it had stopped firing.
+ * The guard keeps an unbuilt checkout from reading as a verdict. CI always builds first,
+ * so it only ever fires locally, where nothing would notice it had stopped firing.
  */
 describe('assertWorkspaceBuilt', () => {
   it('names every missing artifact and the command that produces it', async () => {
@@ -36,9 +35,8 @@ describe('assertWorkspaceBuilt', () => {
     }
   })
 
-  // The path the spawn helper guards is only useful if it is the one the
-  // resolution actually goes through, and a typo in it would make the guard
-  // silently unfalsifiable — it would pass on every checkout, built or not.
+  // A typo in the guarded path would make the guard unfalsifiable: it would pass on
+  // every checkout, built or not.
   it('points at the built server entry the spawned CLI resolves through', () => {
     expect(SERVER_DIST_ENTRY).toEndWith('packages/server/dist/index.js')
     expect(() => assertWorkspaceBuilt([SERVER_DIST_ENTRY])).not.toThrow()

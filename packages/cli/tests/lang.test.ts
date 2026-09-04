@@ -8,7 +8,6 @@ describe('lang', () => {
   const langPath = join(testDir, 'lang')
 
   beforeEach(() => {
-    // Clean up and create fresh test directories
     if (existsSync(testDir)) {
       rmSync(testDir, { recursive: true })
     }
@@ -16,7 +15,6 @@ describe('lang', () => {
   })
 
   afterEach(() => {
-    // Clean up test directories
     if (existsSync(testDir)) {
       rmSync(testDir, { recursive: true })
     }
@@ -47,7 +45,6 @@ describe('lang', () => {
     test('does not overwrite existing files without force', () => {
       publishLanguageFiles({ appRoot: testDir })
 
-      // Try to publish again
       const files = publishLanguageFiles({ appRoot: testDir })
 
       expect(files.length).toBe(0)
@@ -56,7 +53,6 @@ describe('lang', () => {
     test('overwrites existing files with force', () => {
       publishLanguageFiles({ appRoot: testDir })
 
-      // Publish again with force
       const files = publishLanguageFiles({ appRoot: testDir, force: true })
 
       expect(files.length).toBeGreaterThan(0)
@@ -80,10 +76,8 @@ describe('lang', () => {
     })
 
     test('copies structure from existing locale', () => {
-      // First publish default files
       publishLanguageFiles({ appRoot: testDir })
 
-      // Create new locale from English
       const files = makeLanguage('es', { appRoot: testDir, from: 'en' })
 
       expect(files.length).toBeGreaterThan(0)
@@ -98,11 +92,9 @@ describe('lang', () => {
     })
 
     test('accepts valid locale formats', () => {
-      // Two-letter code
       let files = makeLanguage('ja', { appRoot: testDir })
       expect(files.length).toBeGreaterThan(0)
 
-      // Regional code
       files = makeLanguage('pt-BR', { appRoot: testDir })
       expect(files.length).toBeGreaterThan(0)
     })
@@ -110,7 +102,6 @@ describe('lang', () => {
     test('does not overwrite existing locale without force', () => {
       makeLanguage('ja', { appRoot: testDir })
 
-      // Try again
       const files = makeLanguage('ja', { appRoot: testDir })
 
       expect(files.length).toBe(0)
@@ -119,7 +110,6 @@ describe('lang', () => {
     test('overwrites existing locale with force', () => {
       makeLanguage('ja', { appRoot: testDir })
 
-      // Overwrite with force
       const files = makeLanguage('ja', { appRoot: testDir, force: true })
 
       expect(files.length).toBeGreaterThan(0)

@@ -3,33 +3,15 @@ import type { OAuthStatePayload, OAuthStateStore } from '../auth/oauth'
 import { scanKeys } from './scan-keys'
 import { toDate } from '../support/expiry'
 
-/**
- * Options for RedisOAuthStateStore.
- */
 export interface RedisOAuthStateStoreOptions {
-  /**
-   * Key prefix for OAuth state keys.
-   * @default 'oauthstate:'
-   */
+  /** @default 'oauthstate:' */
   prefix?: string
 }
 
 /**
- * Redis-backed OAuth state store.
- *
- * Required in production whenever more than one server process handles
- * traffic (load balancers, serverless): the default MemoryOAuthStateStore
- * is per-process, so the callback request may land on a process that never
- * saw the state. Entries expire automatically via Redis TTL.
- *
- * @example
- * ```ts
- * import { createOAuthManager } from '@guren/core'
- * import { createRedisClient, RedisOAuthStateStore } from '@guren/core/redis'
- *
- * const redis = createRedisClient({ url: process.env.REDIS_URL })
- * const oauth = createOAuthManager({ stateStore: new RedisOAuthStateStore(redis) })
- * ```
+ * Required in production whenever more than one process handles traffic (load
+ * balancers, serverless): the default MemoryOAuthStateStore is per-process, so
+ * the callback may land on a process that never saw the state.
  */
 // GET + DEL in one script so consumption is atomic on the Redis side.
 // GETDEL would do the same but requires Redis >= 6.2; EVAL works everywhere.
@@ -110,8 +92,7 @@ export class RedisOAuthStateStore implements OAuthStateStore {
         expiresAt: string
         binding?: string
       }
-      // Fail closed on a corrupt expiry: an unparseable value must not reach
-      // the callers below, whose comparisons an Invalid Date always loses.
+      // Fail closed: an Invalid Date loses every comparison the callers make.
       const expiresAt = toDate(parsed.expiresAt)
       if (expiresAt === null) {
         return null
@@ -131,9 +112,7 @@ export class RedisOAuthStateStore implements OAuthStateStore {
     await this.redis.del(`${this.prefix}${stateHash}`)
   }
 
-  /**
-   * Clear all states (for testing).
-   */
+  /** Testing only. */
   async clear(): Promise<void> {
     const keys = await scanKeys(this.redis, this.prefix + '*')
     if (keys.length > 0) {

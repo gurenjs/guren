@@ -8,8 +8,7 @@ import { checkTypes, TSC_TIMEOUT, GENERATED_MODULE_COMPILER_OPTIONS } from './he
 import { buildApiClientContent, type RouteDefinitionLike } from '../src/api-client-types'
 
 const definitions: RouteDefinitionLike[] = [
-  // ':identifier' has ':id' as a prefix — the substitution suite below feeds
-  // both keys at once, the exact shape a union route name produces.
+  // ':identifier' has ':id' as a prefix; the substitution suite below feeds both keys at once.
   { method: 'GET', path: '/library/:identifier', name: 'library.show' },
   { method: 'GET', path: '/posts', name: 'posts.index' },
   { method: 'GET', path: '/posts/:id', name: 'posts.show' },
@@ -35,16 +34,14 @@ const definitions: RouteDefinitionLike[] = [
 
 const resources = [{ className: 'ArticleResource', dataName: 'Article' }]
 
-// What data.gen.ts would carry for ArticleResource — the emitted client
-// imports `Data` from this sibling, so the compile gate needs it on disk.
+// The emitted client imports `Data` from this sibling, so the compile gate needs it on disk.
 const DATA_GEN = `export namespace Data {
   export type Article = { id: number; title: string }
 }
 `
 
-// One emitted module shared by every suite below: the compile gate reads the
-// .ts source next to its usage probe, the runtime suite imports the
-// transpiled .mjs.
+// One emitted module shared by every suite: the compile gate reads the .ts source next
+// to its usage probe, the runtime suite imports the transpiled .mjs.
 let dir: string
 let usageFile: string
 let modulePath: string
@@ -72,10 +69,8 @@ describe('buildApiClientContent', () => {
 
     expect(content).toContain("const XSRF_COOKIE_NAME = 'XSRF-TOKEN'")
     expect(content).toContain("const XSRF_HEADER_NAME = 'X-XSRF-TOKEN'")
-    // A bare `document.cookie` would need the DOM lib to type-check and would
-    // throw on the server, so the lookup has to go through globalThis. Nothing
-    // else in this file type-checks the emitted source: the create-app
-    // template it lands in is excluded from every tsconfig.
+    // A bare `document.cookie` would need the DOM lib and would throw on the server, so the
+    // lookup goes through globalThis. The create-app template it lands in is in no tsconfig.
     expect(content).toContain('(globalThis as { document?: { cookie?: string } }).document?.cookie')
   })
 
@@ -114,8 +109,7 @@ describe('buildApiClientContent', () => {
 
     expect(content).toContain('response: { total: number }')
     expect(content).not.toContain('Data.Article')
-    // Nothing referenced Data, so the import must not be emitted — data.gen
-    // may not even exist for an app whose only hints are shadowed.
+    // data.gen may not even exist for an app whose only hints are shadowed.
     expect(content).not.toContain("from './data.gen'")
   })
 
@@ -131,8 +125,7 @@ describe('buildApiClientContent', () => {
       { resources, warnings },
     )
 
-    // The whole entry, verbatim: proves no response line landed on it (the
-    // static client template legitimately mentions `response:` elsewhere).
+    // The whole entry verbatim: the static client template mentions `response:` elsewhere.
     expect(content).toContain("  'articles.index': {\n    method: 'GET'\n    path: '/articles'\n  }")
     expect(content).not.toContain("from './data.gen'")
     expect(warnings).toEqual([
@@ -154,8 +147,7 @@ describe('buildApiClientContent', () => {
       { resources: [{ className: 'InvoiceResource', dataName: 'BillingInvoice' }], warnings },
     )
 
-    // Module resources are emitted under a qualified `Data` member, and the
-    // hint — which carries only the class name — has to find it there.
+    // Module resources are emitted under a qualified `Data` member, which the class-name-only hint must find.
     expect(content).toContain('response: { data: Array<Data.BillingInvoice> }')
     expect(content).toContain("import type { Data } from './data.gen'")
     expect(warnings).toEqual([])
@@ -213,9 +205,8 @@ describe('buildApiClientContent', () => {
     const content = buildApiClientContent(
       [{ method: 'GET', path: '/posts', name: 'posts.index', resource: 'PostResource' }],
       {
-        // What data-types reports when `modules/2fa/`'s PostResource is
-        // discovered but unemittable: the root one is NOT the only candidate,
-        // so typing the route as Data.Post would hand it the wrong payload.
+        // `modules/2fa/`'s PostResource is discovered but unemittable, so the root one is
+        // not the only candidate and Data.Post could be the wrong payload.
         resources: [
           { className: 'PostResource', dataName: 'Post', filePath: 'app/Http/Resources/PostResource.ts' },
           { className: 'PostResource', dataName: null, filePath: 'modules/2fa/app/Http/Resources/PostResource.ts' },
@@ -337,13 +328,10 @@ export const unionParamsRequired: ApiRequestOptions<'posts.index' | 'posts.show'
 const compilerOptions = GENERATED_MODULE_COMPILER_OPTIONS
 
 /**
- * The emitted module's types are only exercised where a call site exists —
- * scaffolds compile the file, but with no consumer that proved nothing, which
- * is how `createApiClient<ApiRoutes>` shipped rejecting its own documented
- * usage twice (an interface never satisfies a `Record<...>` constraint, and
- * param-less routes' `Record<string, never>` made the params check demand
- * params). This gate is that call site: the `@ts-expect-error` probes keep it
- * able to fail in both directions (an accepted probe surfaces as TS2578).
+ * The emitted module's types are only exercised where a call site exists; compiling the
+ * file with no consumer is how `createApiClient<ApiRoutes>` twice shipped rejecting its
+ * own documented usage. This gate is that call site, and the `@ts-expect-error` probes
+ * keep it able to fail in both directions (an accepted probe surfaces as TS2578).
  */
 describe('generated api client types', () => {
   it('compiles the documented usage against the emitted module', () => {
@@ -352,9 +340,8 @@ describe('generated api client types', () => {
 })
 
 /**
- * The generated file is app-facing code, so the assertions above only prove it
- * mentions the right names. These run it: transpile the emitted TypeScript,
- * import it, and drive `request()` against a stubbed `document`/`fetch`.
+ * The assertions above only prove the generated file mentions the right names. These run
+ * it: transpile, import, and drive `request()` against a stubbed `document`/`fetch`.
  */
 describe('generated createApiClient', () => {
   type CreateApiClient = (config: {
@@ -450,11 +437,9 @@ describe('generated createApiClient', () => {
     expect(headersOf(calls[0]!.init)['X-XSRF-TOKEN']).toBe('right')
   })
 
-  // A union route name requires every member's params, so request() gets
-  // handed keys the selected path does not bind. Token-based substitution
-  // keeps those a no-op — a per-key replace loop would let the ':id' pass
-  // corrupt '/library/:identifier' into '/library/1entifier' before
-  // ':identifier' could ever match.
+  // A union route name requires every member's params, so request() receives keys the
+  // selected path does not bind. A per-key replace loop would let the ':id' pass corrupt
+  // '/library/:identifier' into '/library/1entifier'.
   it('substitutes whole param tokens, so extra or prefix-colliding keys cannot corrupt the path', async () => {
     const { calls } = stubFetch()
     browsingAt(PAGE_ORIGIN, 'XSRF-TOKEN=abc')
@@ -473,9 +458,8 @@ describe('generated createApiClient', () => {
     expect(headersOf(calls[0]!.init)['X-XSRF-TOKEN']).toBeUndefined()
   })
 
-  // QUERY is CSRF-exempt server-side by default, so the token is redundant —
-  // but an app can opt QUERY into protection via the middleware's `methods`
-  // option, and the client keeping the header is what makes that opt-in work.
+  // QUERY is CSRF-exempt by default, but an app can opt it in via the middleware's
+  // `methods` option, and the client keeping the header is what makes that work.
   it('sends the QUERY method with a body and the XSRF header', async () => {
     const { calls } = stubFetch()
     browsingAt(PAGE_ORIGIN, 'XSRF-TOKEN=abc')
@@ -487,9 +471,8 @@ describe('generated createApiClient', () => {
     expect(headersOf(calls[0]!.init)['X-XSRF-TOKEN']).toBe('abc')
   })
 
-  // The cookie belongs to the page's origin. Attaching it to a caller-supplied
-  // cross-origin baseUrl would disclose this page's CSRF token to that server,
-  // which only needs a permissive CORS policy to collect it.
+  // The cookie belongs to the page's origin: sending it to a cross-origin baseUrl would
+  // disclose this page's CSRF token to that server.
   it('never sends the page token to another origin', async () => {
     const { calls } = stubFetch()
     browsingAt(PAGE_ORIGIN, 'XSRF-TOKEN=secret')
@@ -499,9 +482,8 @@ describe('generated createApiClient', () => {
     expect(headersOf(calls[0]!.init)['X-XSRF-TOKEN']).toBeUndefined()
   })
 
-  // Header names are case-insensitive over the wire, so the caller's spelling
-  // must not decide whether their token survives: matching case-sensitively
-  // either overwrites an explicit token or leaves two conflicting keys behind.
+  // Header names are case-insensitive over the wire: matching case-sensitively either
+  // overwrites an explicit token or leaves two conflicting keys behind.
   for (const headerName of ['X-XSRF-TOKEN', 'x-xsrf-token', 'X-CSRF-TOKEN', 'x-csrf-token']) {
     it(`keeps a caller-supplied ${headerName} header`, async () => {
       const { calls } = stubFetch()

@@ -8,22 +8,14 @@ import {
   stubbableDevOnlyModules,
 } from '@guren/core/internal/deploy-build'
 
-// Opt-in end-to-end contract test: proves wrangler can actually bundle a
-// worker that imports `@guren/orm`, with only the stubs `cloudflare:build`
-// scaffolds and none of the database clients installed.
+// Opt-in end-to-end contract test: proves wrangler can bundle a worker that
+// imports `@guren/orm` with only the stubs `cloudflare:build` scaffolds and no
+// database client installed. `@guren/orm` names every dialect's client in a
+// *literal* dynamic import, which a bundler follows whether or not the branch
+// can be taken — a D1 app failed on `Could not resolve "postgres"`.
 //
-// This is the gap that let a real defect ship. `@guren/orm` names every
-// dialect's client in a *literal* dynamic import, and a bundler follows those
-// whether or not the branch can be taken — so a D1 app failed on
-// `Could not resolve "postgres"`, naming a database its author had not
-// chosen. Nothing caught it: no gate ran wrangler over a scaffolded app, and
-// the one Workers app in this repo carries a leftover `postgres` dependency
-// from before it moved to D1, which masked the failure.
-//
-// Requires network on first run (bunx downloads wrangler + workerd), so it is
-// gated behind GUREN_TEST_WRANGLER=1 rather than run on every PR, like
-// wrangler-migrations.test.ts. The nightly canary sets the variable, so this
-// does run — the gate it replaces was one nothing switched on at all.
+// Gated behind GUREN_TEST_WRANGLER=1 because the first run downloads wrangler
+// and workerd; the nightly canary sets it.
 const enabled = process.env.GUREN_TEST_WRANGLER === '1'
 
 /** Installed directories that would let wrangler resolve a client for real. */
@@ -40,11 +32,9 @@ type StubbedModule = { specifier: string; exportNames: readonly string[] }
 /**
  * Write the stub files and the `wrangler.jsonc` aliasing `modules` to them —
  * what `cloudflare:build` scaffolds, written directly so a probe pins the
- * contract rather than the command that emits it.
- *
- * Which modules a probe passes is the whole variable: the ORM probe below
- * stubs everything, and the App MCP probe stubs everything *except* the
- * transport, which is the configuration RFC 0016 Phase 4a produces.
+ * contract rather than the command that emits it. Which modules a probe passes
+ * is the whole variable: the App MCP probe stubs everything *except* the
+ * transport, the configuration RFC 0016 Phase 4a produces.
  */
 function writeWranglerConfig(root: string, name: string, modules: readonly StubbedModule[]): void {
   mkdirSync(join(root, 'stubs'), { recursive: true })
@@ -89,10 +79,9 @@ describe.skipIf(!enabled)('wrangler bundles a worker importing @guren/orm', () =
       JSON.stringify({ name: 'bundle-probe', type: 'module', private: true }),
     )
     // Installed from a tarball, not `file:` — a local path install links the
-    // package, and resolution then walks out of the probe into this
-    // repository's own `node_modules`, where the database clients *are*
-    // installed. That made an earlier version of this test pass with no stubs
-    // at all: it was measuring the monorepo, not the app.
+    // package, and resolution then walks out of the probe into this repository's
+    // own `node_modules`, where the database clients *are* installed. That made
+    // an earlier version measure the monorepo rather than the app.
     const ormDir = new URL('../../orm', import.meta.url).pathname
     const packed = Bun.spawnSync({
       cmd: ['bun', 'pm', 'pack', '--destination', root],
@@ -120,9 +109,8 @@ describe.skipIf(!enabled)('wrangler bundles a worker importing @guren/orm', () =
     }
 
     // A real D1 app installs no database client, so neither does the probe.
-    // Asserted rather than assumed: if a future installer pulls the ORM's
-    // optional peers in, wrangler would resolve them for real and this test
-    // would pass no matter what the stubs say.
+    // Asserted rather than assumed: an installer that pulled the ORM's optional
+    // peers in would let wrangler resolve them whatever the stubs say.
     for (const client of DRIVER_PACKAGES) {
       rmSync(join(root, 'node_modules', client), { recursive: true, force: true })
       if (existsSync(join(root, 'node_modules', client))) {
@@ -140,8 +128,6 @@ describe.skipIf(!enabled)('wrangler bundles a worker importing @guren/orm', () =
         + `}\n`,
     )
 
-    // The stubs and aliases `cloudflare:build` scaffolds, written directly so
-    // the test pins the contract rather than the command that emits it.
     writeWranglerConfig(root, 'bundle-probe', [...DEV_ONLY_MODULES, ...SQL_CLIENT_MODULES])
   })
 
@@ -164,9 +150,8 @@ describe.skipIf(!enabled)('wrangler bundles a worker importing @guren/orm', () =
 })
 
 /**
- * The free plan's compressed worker limit. Written as a byte count rather than
- * copied from the RFC's prose "3 MB", which is loose about MB vs MiB — the
- * platform's limit is 3 MiB of gzipped upload.
+ * The free plan's compressed worker limit: 3 MiB of gzipped upload. A byte count
+ * because the RFC's prose "3 MB" is loose about MB vs MiB.
  */
 const FREE_PLAN_GZIP_BUDGET = 3 * 1024 * 1024
 
@@ -179,11 +164,9 @@ type WorkspacePackage = { dir: string; manifest: Record<string, unknown> }
 /**
  * The `@guren/*` packages a probe must resolve from this checkout, derived
  * rather than listed: seed with the one the worker imports and close over the
- * workspace `dependencies`. A package added to `@guren/plugin-mcp`'s graph
- * enters the probe by itself — a hand-kept list is how a package comes to be
- * installed from npm and silently verified in its *published* form instead
- * (see `scripts/smoke/local-packages.ts`, which owns the same rule for the
- * smokes).
+ * workspace `dependencies`. A hand-kept list is how a package comes to be
+ * installed from npm and silently verified in its *published* form instead (see
+ * `scripts/smoke/local-packages.ts`, the same rule for the smokes).
  */
 function workspaceClosure(seed: string): Map<string, WorkspacePackage> {
   const packagesDir = new URL('../../', import.meta.url).pathname
@@ -215,25 +198,15 @@ function workspaceClosure(seed: string): Map<string, WorkspacePackage> {
 }
 
 /**
- * Install a probe's third-party dependencies from npm and vendor this
- * checkout's `@guren/*` packages over them, flat.
- *
- * Vendoring the workspace packages by *copy* rather than by tarball is not a
- * shortcut: `bun add` of a tarball leaves the packages' own `@guren/*` ranges
- * to resolve, which npm satisfies with published copies nested under each
- * vendored package — measured directly, and a published `@guren/core` that
- * predates the change under test made the bundle fail on exports the checkout
- * has. Third-party deps are therefore flattened to the probe's top level and
- * the copied manifests have their ranges stripped.
- *
- * `required` names packages the probe would be measuring nothing without, and
- * `extra` adds dependencies no `@guren/*` manifest declares — the OAuth probe's
- * provider package, which a real app installs itself.
- *
- * The two loops at the end are the assertion the whole probe rests on: a
- * package resolving *out* of the probe measures this monorepo rather than an
- * installed app, which has reported a real bundle change as no change at all
- * before.
+ * Install a probe's third-party dependencies from npm and vendor this checkout's
+ * `@guren/*` packages over them, flat. By *copy* rather than tarball: `bun add`
+ * of a tarball leaves the packages' own `@guren/*` ranges to resolve, and npm
+ * satisfies them with published copies nested under each vendored package —
+ * measured, and a published `@guren/core` predating the change under test made
+ * the bundle fail. `extra` adds dependencies no `@guren/*` manifest declares.
+ * The two loops at the end are the assertion the probe rests on: a package
+ * resolving *out* of it measures this monorepo, which has reported a real bundle
+ * change as no change at all before.
  */
 function vendorClosure(
   root: string,
@@ -295,16 +268,9 @@ describe.skipIf(!enabled)('wrangler bundles a worker importing @guren/plugin-mcp
 
     const closure = workspaceClosure('@guren/plugin-mcp')
 
-    // Every third-party dependency of the closure, flattened to the probe's
-    // top level. Vendoring the workspace packages by *copy* rather than by
-    // tarball is not a shortcut: `bun add` of a tarball leaves the packages'
-    // own `@guren/*` ranges to resolve, which npm satisfies with published
-    // copies nested under each vendored package — measured directly, and the
-    // published `@guren/core` predates RFC 0016, so the bundle failed on
-    // exports the checkout has.
+    // Every third-party dependency of the closure, flattened to the top level.
     vendorClosure(root, 'mcp-bundle-probe', closure, {
-      // The real SDK, from npm: what the transport actually costs is the
-      // number this probe exists to report.
+      // The real SDK from npm: what the transport costs is what this reports.
       required: ['@modelcontextprotocol/sdk'],
     })
 
@@ -325,13 +291,10 @@ describe.skipIf(!enabled)('wrangler bundles a worker importing @guren/plugin-mcp
 
   /**
    * Bundle the probe with `modules` stubbed and report the gzipped bytes
-   * wrangler would upload.
-   *
-   * Gzipped here rather than parsed out of wrangler's own "Total Upload /
-   * gzip" line — that line is prose and can be reworded — but printed beside
-   * it so a human can reconcile the two. Sourcemaps are excluded: the `.map`
-   * beside the bundle is several times its size and the limit does not count
-   * it, so a whole-directory sum would fail for a file that never ships.
+   * wrangler would upload. Gzipped here rather than parsed out of wrangler's own
+   * "Total Upload / gzip" line, which is prose and can be reworded. Sourcemaps
+   * are excluded: the `.map` is several times the bundle's size and the limit
+   * does not count it.
    */
   function bundleSize(label: string, modules: readonly StubbedModule[]): number {
     writeWranglerConfig(root, 'mcp-bundle-probe', modules)
@@ -339,8 +302,7 @@ describe.skipIf(!enabled)('wrangler bundles a worker importing @guren/plugin-mcp
     const result = wrangler(root, ['deploy', '--dry-run', '--outdir', out])
 
     // Name what is missing rather than only that something is: with the
-    // transport unstubbed, a bundle that cannot resolve reports the SDK
-    // subpath by name.
+    // transport unstubbed, a failed resolve reports the SDK subpath by name.
     expect(result.output).not.toMatch(/Could not resolve/)
     expect(result.exitCode).toBe(0)
 
@@ -374,11 +336,9 @@ describe.skipIf(!enabled)('wrangler bundles a worker importing @guren/plugin-mcp
       ])
       // And the same worker as every deploy plugin built it before RFC 0016
       // Phase 4a. Both are measured because "the bundle resolves" cannot tell
-      // them apart: the stub declares the transport's export name, so the
-      // stubbed configuration bundles perfectly well — it just deploys an
-      // endpoint that throws. The size difference is the only observable
-      // proof that the real transport reached the bundle, and it is also the
-      // number the RFC asks this probe to report.
+      // them apart — the stub declares the transport's export name, so the
+      // stubbed configuration bundles fine and deploys an endpoint that throws.
+      // The size difference is the only proof the real transport reached it.
       const stubbed = bundleSize('transport-stubbed', [...DEV_ONLY_MODULES, ...SQL_CLIENT_MODULES])
 
       console.log(
@@ -394,20 +354,14 @@ describe.skipIf(!enabled)('wrangler bundles a worker importing @guren/plugin-mcp
 })
 
 /**
- * The OAuth-fronted worker `cloudflare:build --mcp-oauth` generates, bundled
- * for real.
- *
- * What only this can answer: whether `@guren/plugin-mcp/oauth` resolves from
- * an *installed* copy of the package. That subpath is imported by code which
- * exists nowhere in this repository — a worker generated into someone else's
- * app — so an `exports` entry or a `files` list that publishes the wrong thing
- * is invisible to every other gate, right up until a deploy cannot resolve it.
- * The bundle also proves `@cloudflare/workers-oauth-provider` itself is
- * workerd-compatible, which the build assumes and never checks.
- *
- * The worker source is the generator's own output, not a hand-written
- * approximation: `renderWorkerModule` is what deploys, and a probe pinning a
- * copy of it would keep passing after the generator changed.
+ * The OAuth-fronted worker `cloudflare:build --mcp-oauth` generates, bundled for
+ * real. Only this can answer whether `@guren/plugin-mcp/oauth` resolves from an
+ * *installed* copy: that subpath is imported by code existing nowhere in this
+ * repository, so an `exports` entry or `files` list publishing the wrong thing
+ * is invisible until a deploy cannot resolve it. It also proves
+ * `@cloudflare/workers-oauth-provider` is workerd-compatible, which the build
+ * assumes and never checks. The worker source is the generator's own output: a
+ * probe pinning a copy would keep passing after the generator changed.
  */
 describe.skipIf(!enabled)('wrangler bundles the --mcp-oauth worker', () => {
   let root: string
@@ -485,21 +439,13 @@ describe.skipIf(!enabled)('wrangler bundles the --mcp-oauth worker', () => {
         .map((file) => readFileSync(join(out, file), 'utf8'))
         .join('\n')
 
-      // No deploy generator in the deployed worker. `Cloudflare build:`
-      // prefixes every message `build.ts` emits and appears nowhere else, so
-      // its absence is the assertion.
-      //
-      // Note what this does *not* prove. The generated worker imports
-      // `createWorkersHandler` from the package root, which re-exports
-      // `buildCloudflareOutput` — and this passes anyway, because wrangler
-      // tree-shakes it out. So the bundle is safe by the bundler's grace, not
-      // by the import graph's shape. That is exactly why the scaffolded
-      // consent controller imports `@guren/plugin-cloudflare/env` instead:
-      // `bun run dev` has no bundler and no tree-shaking, it loads the module
-      // graph file by file, and there the root entry really does drag
-      // `node:fs` and the generator into every boot. This assertion guards the
-      // deploy path; `tests/lean-env-subpath.test.ts` guards the dev one, and
-      // neither substitutes for the other.
+      // No deploy generator in the deployed worker. `Cloudflare build:` prefixes
+      // every message `build.ts` emits and appears nowhere else, so its absence
+      // is the assertion. It does not prove the import graph is clean: the
+      // generated worker imports from the package root, which re-exports
+      // `buildCloudflareOutput`, and this passes only because wrangler
+      // tree-shakes it out. `tests/lean-env-subpath.test.ts` guards the dev
+      // path, where there is no bundler.
       expect(bundle).not.toContain('Cloudflare build:')
       // Which means something only if there is a real bundle to look at.
       expect(bundle).toContain('OAuthProvider')

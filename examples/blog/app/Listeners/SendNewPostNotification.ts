@@ -2,10 +2,6 @@ import { Listener, type BroadcastManager, type NotificationManager, type Notifia
 import { PostCreated } from '../Events/PostCreated.js'
 import { NewPostPublishedNotification } from '../Notifications/NewPostPublishedNotification.js'
 
-/**
- * Listener that sends notifications when a new post is created.
- * This listener is queued for background processing.
- */
 export class SendNewPostNotification extends Listener<PostCreated> {
   static override event = PostCreated
   static override shouldQueue = true
@@ -48,7 +44,6 @@ export class SendNewPostNotification extends Listener<PostCreated> {
   }
 
   override shouldHandle(event: PostCreated): boolean {
-    // Only notify if the post has a title (basic validation)
     return !!event.post.title
   }
 

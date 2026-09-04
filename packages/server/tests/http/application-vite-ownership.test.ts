@@ -9,15 +9,10 @@ import {
 } from './vite-dev-server-fixture'
 
 /**
- * Who may close the managed Vite dev server once a second `listen()` has
- * adopted it.
- *
- * Adoption is the `bun --hot` path: the reload re-runs the entrypoint, builds a
- * fresh `Application`, and that app reuses the dev server the previous run left
- * listening rather than restarting it. Both applications then hold the same
- * server object, so "is this mine?" cannot be answered by comparing references
- * — it is the same reference. It is answered by the active-server slot naming
- * one owner, which adoption transfers.
+ * Who may close the managed Vite dev server once a second `listen()` has adopted
+ * it. Adoption is the `bun --hot` path, and both applications end up holding the
+ * same server object — so ownership is answered by the active-server slot naming
+ * one owner, not by comparing references.
  */
 const vite = createViteDevServerMocks()
 
@@ -51,9 +46,8 @@ describe('managed Vite dev server ownership across listen() adoption', () => {
   })
 
   /**
-   * The defect this pins: A and B both held the adopted server, so A's `stop()`
-   * saw its own field set and closed it — taking the asset server, its port,
-   * and its published env vars out from under B, which was serving from it.
+   * A and B both hold the adopted server, so A's `stop()` must not close it out
+   * from under B, which is serving from its port and published env vars.
    */
   it('leaves the dev server alone when a later listen() has adopted it', async () => {
     const a = new Application()
@@ -125,10 +119,9 @@ describe('managed Vite dev server ownership across listen() adoption', () => {
   })
 
   /**
-   * A released owner must be able to start over. When the disposer lived on the
-   * instance, releasing it from another app left the field truthy-but-spent,
-   * and the registrar's early return then skipped re-attaching on the next
-   * `listen()` — leaving that app's Vite server with no teardown at all.
+   * A released owner must be able to start over: a field left truthy-but-spent
+   * makes the registrar's early return skip re-attaching on the next `listen()`,
+   * leaving that app's Vite server with no teardown at all.
    */
   it('re-attaches teardown when a released app listens again', async () => {
     const before = signalListenerCounts()
@@ -152,11 +145,9 @@ describe('managed Vite dev server ownership across listen() adoption', () => {
   })
 
   /**
-   * `listen()` with no Vite of its own still retires whatever managed server
-   * it finds, and that close is awaited. A record installed by a concurrent
-   * `listen()` during the wait is a live claim — the resuming cleanup must
-   * not erase it, or the new owner is left serving from an unpublished,
-   * unrecorded asset server.
+   * `listen()` with no Vite of its own still retires the managed server it finds,
+   * awaiting the close. A record installed concurrently during that wait is a live
+   * claim the resuming cleanup must not erase.
    */
   it('preserves a record installed while the restart cleanup was mid-close', async () => {
     seedPreviousViteDevServer(
@@ -188,10 +179,8 @@ describe('managed Vite dev server ownership across listen() adoption', () => {
   })
 
   /**
-   * Two `listen()` calls racing through the fresh-start path each start a
-   * Vite dev server; the second to finish takes the slot. The displaced
-   * record's server has no owner left, so adoption has to close it rather
-   * than strand it on its port.
+   * Two `listen()` calls racing through the fresh-start path each start a Vite dev
+   * server; the displaced one has no owner left, so it must be closed, not stranded.
    */
   it('closes the fresh dev server a concurrent listen() displaced', async () => {
     const closeFirst = mock(async () => {})

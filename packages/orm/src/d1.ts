@@ -12,14 +12,14 @@ export interface D1DatabaseOptions {
   binding: () => unknown
   /**
    * Drizzle-kit migrations folder. D1 migrations are applied out-of-band via
-   * `wrangler d1 migrations apply` (point `d1_databases[].migrations_dir` at
-   * this folder); the factory only references it in error guidance.
+   * `wrangler d1 migrations apply` (point `d1_databases[].migrations_dir` here);
+   * the factory only names it in error guidance.
    */
   migrationsFolder?: string | URL
   /**
-   * Drizzle relations for RQB v2 (`db.query.*`).
-   * Build with `defineRelations(schema, ...)` from `drizzle-orm`,
-   * or with `relations()` from `drizzle-orm/_relations` for the RQB v1 partial-upgrade path.
+   * Drizzle relations for RQB v2 (`db.query.*`): `defineRelations(schema, ...)`
+   * from `drizzle-orm`, or `relations()` from `drizzle-orm/_relations` for the
+   * RQB v1 partial-upgrade path.
    */
   relations?: Record<string, unknown>
 }
@@ -40,14 +40,13 @@ export interface D1DatabaseHandle {
 
 /**
  * Cloudflare D1 database factory. D1 speaks the SQLite dialect, so schemas
- * written for `createSqliteDatabase` port unchanged; only the connection and
- * the migration workflow differ (wrangler owns migrations, see RFC 0003).
+ * written for `createSqliteDatabase` port unchanged; wrangler owns migrations
+ * (RFC 0003).
  */
 export function createD1Database(options: D1DatabaseOptions): D1DatabaseHandle {
   const { binding, migrationsFolder, relations } = options
 
-  // Display-only (wrangler owns the folder): keep strings as the caller wrote
-  // them and relativize URLs, so error guidance never leaks a machine-specific
+  // Display-only: relativized so error guidance never leaks a machine-specific
   // absolute path into a copy-pasteable wrangler.jsonc value.
   const migrationsHint =
     migrationsFolder == null
@@ -78,10 +77,8 @@ export function createD1Database(options: D1DatabaseOptions): D1DatabaseHandle {
     getDatabase: databaseHandle.get,
 
     async migrateDatabase() {
-      // The drizzle-kit SQL ↔ wrangler format contract is covered by the
-      // opt-in e2e test in packages/plugin-cloudflare/src/wrangler-migrations.test.ts
-      // (GUREN_TEST_WRANGLER=1); keep its hand-written fixtures in sync with
-      // drizzle-kit output when migration generation changes.
+      // Keep plugin-cloudflare/src/wrangler-migrations.test.ts fixtures
+      // (GUREN_TEST_WRANGLER=1) in sync with drizzle-kit output.
       throw new Error(
         'D1 migrations are not applied at runtime. Run `wrangler d1 migrations apply <database>` ' +
           `(local: add --local) with d1_databases[].migrations_dir pointing at ${migrationsHint}.`,
@@ -89,8 +86,7 @@ export function createD1Database(options: D1DatabaseOptions): D1DatabaseHandle {
     },
 
     async closeDatabase() {
-      // D1 sessions have no connection to close; just drop the cached instance
-      // (mirrors the sqlite factory).
+      // D1 sessions have no connection to close.
       databaseHandle.reset()
     },
 

@@ -25,9 +25,6 @@ let queueManager: QueueManager | null = null
 let containerRef: { make<T>(key: string): T } | null = null
 let initialized = false
 
-/**
- * Initialize events, mail, and queue systems.
- */
 export function initializeEventSystem(): EventManager {
   if (eventManager && initialized) {
     return eventManager
@@ -59,17 +56,12 @@ export function initializeEventSystem(): EventManager {
   return eventManager
 }
 
-/**
- * Register all event listeners.
- */
 function registerListeners(events: EventManager): void {
-  // UserRegistered listeners
   const logUserRegistration = new LogUserRegistration()
   events.on(UserRegistered, (event) => logUserRegistration.handle(event), {
     priority: LogUserRegistration.priority,
   })
 
-  // TaskCompleted listeners
   if (!containerRef) {
     throw new Error('EventServiceProvider container has not been registered.')
   }

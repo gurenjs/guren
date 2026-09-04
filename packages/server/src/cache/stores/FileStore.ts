@@ -4,17 +4,7 @@ import { join, dirname } from 'node:path'
 import { createHash } from 'node:crypto'
 import type { CacheStore, FileStoreOptions, CachedItem } from '../types'
 
-/**
- * File-based cache store.
- *
- * @example
- * ```ts
- * const store = new FileStore({ path: './storage/cache' })
- *
- * await store.set('user:1', { name: 'John' }, 3600)
- * const user = await store.get<User>('user:1')
- * ```
- */
+/** File-based cache store. */
 export class FileStore implements CacheStore {
   private readonly basePath: string
   private readonly extension: string
@@ -26,19 +16,13 @@ export class FileStore implements CacheStore {
     this.now = options.now ?? Date.now
   }
 
-  /**
-   * Generate a hashed filename for a cache key.
-   */
   private getFilePath(key: string): string {
     const hash = createHash('sha256').update(key).digest('hex')
-    // Use first 2 chars as subdirectory for better filesystem distribution
+    // Subdirectory by hash prefix, for filesystem distribution.
     const dir = hash.slice(0, 2)
     return join(this.basePath, dir, `${hash}${this.extension}`)
   }
 
-  /**
-   * Ensure the cache directory exists.
-   */
   private async ensureDirectory(filePath: string): Promise<void> {
     const dir = dirname(filePath)
     if (!existsSync(dir)) {
@@ -46,9 +30,6 @@ export class FileStore implements CacheStore {
     }
   }
 
-  /**
-   * Read a cache file.
-   */
   private async readCacheFile<T>(filePath: string): Promise<CachedItem<T> | null> {
     try {
       const content = await readFile(filePath, 'utf-8')
@@ -58,17 +39,11 @@ export class FileStore implements CacheStore {
     }
   }
 
-  /**
-   * Write a cache file.
-   */
   private async writeCacheFile<T>(filePath: string, item: CachedItem<T>): Promise<void> {
     await this.ensureDirectory(filePath)
     await writeFile(filePath, JSON.stringify(item), 'utf-8')
   }
 
-  /**
-   * Delete a cache file.
-   */
   private async deleteCacheFile(filePath: string): Promise<boolean> {
     try {
       await unlink(filePath)
@@ -78,9 +53,6 @@ export class FileStore implements CacheStore {
     }
   }
 
-  /**
-   * Check if a cached item is expired.
-   */
   private isExpired(item: CachedItem): boolean {
     return item.expiresAt !== null && item.expiresAt <= this.now()
   }
@@ -134,7 +106,7 @@ export class FileStore implements CacheStore {
     const current = await this.get<number>(key)
     const newValue = (current ?? 0) + value
 
-    // Preserve TTL if item exists
+    // Preserve any existing TTL.
     const filePath = this.getFilePath(key)
     const item = await this.readCacheFile<number>(filePath)
     const ttl = item?.expiresAt
@@ -225,10 +197,7 @@ export class FileStore implements CacheStore {
     return Math.max(0, Math.ceil((item.expiresAt - this.now()) / 1000))
   }
 
-  /**
-   * Clean up expired cache files.
-   * This can be called periodically to free disk space.
-   */
+  /** Delete expired cache files; call periodically to free disk space. */
   async cleanup(): Promise<number> {
     let cleaned = 0
 
@@ -266,9 +235,6 @@ export class FileStore implements CacheStore {
     return cleaned
   }
 
-  /**
-   * Get the base path.
-   */
   getBasePath(): string {
     return this.basePath
   }

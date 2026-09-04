@@ -14,18 +14,15 @@ export interface MakeValidatorOptions extends WriterOptions {
 }
 
 /**
- * Scaffolds `app/Http/Validators/<Entity>Validator.ts`.
- *
- * `make:feature` calls this rather than emitting its own copy, the same way it
- * calls `makeModel`/`makePolicy`/`makeTest` — so the schema names its generated
- * controller imports and the ones this writes cannot drift apart.
+ * `make:feature` calls this rather than emitting its own copy, so the schema
+ * names its controller imports and the ones written here cannot drift apart.
  */
 export async function makeValidator(name: string, options: MakeValidatorOptions = {}): Promise<string> {
   return scaffoldFile(name, {
     dir: VALIDATOR_DIR,
     suffix: 'Validator',
-    // `scaffoldFile` appends the suffix; the schema names are built from the
-    // entity, so strip it back off the way the sibling scaffolders do.
+    // `scaffoldFile` appends the suffix; schema names are built from the bare
+    // entity, so strip it back off as the sibling scaffolders do.
     template: ({ normalizedName }) => generateValidator(normalizedName.replace(/Validator$/u, ''), options.fields ?? []),
   }, options)
 }
@@ -49,12 +46,9 @@ function zodFieldType(field: FieldDefinition): string {
 }
 
 /**
- * The three schemas a resource controller validates against.
- *
  * `collection` is pluralized directly rather than through `collectionName()`:
- * it names a generated type, not one of the three names in the schema/model/
- * check triangle, so `Status` should yield `ListStatusesQuerySchema` rather
- * than being singularized first. See the note in inflect.ts.
+ * it names a generated type, not one of the three in the schema/model/check
+ * triangle, so `Status` yields `ListStatusesQuerySchema`. See inflect.ts.
  */
 function generateValidator(singular: string, fields: FieldDefinition[]): string {
   const collection = pluralize(singular)

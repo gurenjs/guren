@@ -1,25 +1,11 @@
 /**
- * Generates the cross-boundary attachment map from `Attachable(...)` model
- * declarations (RFC 0013, RFC 0010 §2).
+ * Generates `.guren/attachments.gen.ts` from `Attachable(...)` model
+ * declarations (RFC 0013, RFC 0010 §2), for the surfaces that cannot see
+ * `typeof Post.attachments` — pages, resources, upload clients, `guren check`.
  *
- * Scans `app/Models/` — at the project root and inside every
- * `modules/<name>/` — for models whose heritage clause wraps
- * `Attachable(Base, { ... })`, reads each collection's kind and variant
- * names from the declaration, and emits `.guren/attachments.gen.ts`. The
- * model itself is typed by the mixin's generics; the map exists for the
- * surfaces that cannot see `typeof Post.attachments` — pages, resources,
- * upload clients, and `guren check`.
- *
- * Apps without Attachable models get no file — a previously generated one
- * is removed so a stale map stops describing collections that no longer
- * exist. Removal is on positive evidence only: when a model was skipped
- * with a warning (an unparsable file, an unreadable declaration), an
- * existing file is left in place rather than deleted on uncertainty — the
- * same rule `attachments:prune` follows.
- *
- * This runs on every codegen (Vite dev startup included), so files are
- * pre-filtered on the mixin's name before parsing; a file that never says
- * `Attachable` can neither declare the mixin nor warrant a warning.
+ * Apps with no Attachable model get no file, and a previously generated one is
+ * removed — but on positive evidence only: a run that skipped a model with a
+ * warning leaves the existing file alone, the rule `attachments:prune` follows.
  */
 import { readFile, rm } from 'node:fs/promises'
 import { resolve } from 'node:path'
@@ -45,19 +31,13 @@ export async function generateAttachmentTypes(
   const appRoot = resolveAppRoot(options)
   const outputFile = resolve(appRoot, DEFAULT_OUTPUT_FILE)
 
-  // Returned rather than logged, same contract as `generateDataTypes`:
-  // `guren codegen` prints them, and the MCP codegen tool hands them to the
-  // agent that asked for the run.
+  // Returned rather than logged, same contract as `generateDataTypes`.
   const warnings: string[] = []
   const entries = await collectAttachmentEntries(appRoot, warnings)
 
   if (entries.length === 0) {
-    // No Attachable models: the app does not use attachments, so remove a
-    // previously generated file (the translations generator's precedent) —
-    // but only when nothing was skipped. A warning means an Attachable
-    // model may exist that this run could not read, and an outdated map
-    // plus the warning beats deleting the module out from under its
-    // importers.
+    // A warning means an Attachable model may exist that this run could not
+    // read: an outdated map beats deleting the module out from under importers.
     if (warnings.length === 0) {
       await rm(outputFile, { force: true })
     }
@@ -71,11 +51,10 @@ export async function generateAttachmentTypes(
 }
 
 /**
- * The emittable entries: models with a readable `Attachable(...)`
- * declaration (an empty one counts — `Attachable(Base, {})` is still an
- * Attachable model), minus class names declared attachable in more than one
- * location. The map keys on class names — the same key the runtime stores
- * as `recordType` — so a duplicated name has no single truthful entry.
+ * The emittable entries: models with a readable `Attachable(...)` declaration
+ * (an empty one counts), minus class names declared attachable in more than one
+ * location. The map keys on class names — the runtime's `recordType` — so a
+ * duplicated name has no single truthful entry.
  */
 async function collectAttachmentEntries(appRoot: string, warnings: string[]): Promise<AttachmentEntry[]> {
   const files = await discoverModelFiles(appRoot)
@@ -136,10 +115,9 @@ async function collectAttachmentEntries(appRoot: string, warnings: string[]): Pr
 }
 
 /**
- * One entry line per model, `{ collection: <value> }` per collection. Both
- * emitted interfaces render through here so they are structurally guaranteed
- * to key identically — consumers index `AttachmentVariantsMap[M]` with names
- * from `AttachmentsMap[M]`.
+ * One entry line per model. Both emitted interfaces render through here so they
+ * key identically — consumers index `AttachmentVariantsMap[M]` with names from
+ * `AttachmentsMap[M]`.
  */
 function renderMap(entries: AttachmentEntry[], valueFor: (collection: ModelAttachmentCollection) => string): string {
   return entries

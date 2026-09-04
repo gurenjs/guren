@@ -27,9 +27,6 @@ let queueManager: QueueManager | null = null
 let containerRef: { make<T>(key: string): T } | null = null
 let initialized = false
 
-/**
- * Initialize events, mail, and queue systems.
- */
 export function initializeEventSystem(): EventManager {
   if (eventManager && initialized) {
     return eventManager
@@ -38,9 +35,8 @@ export function initializeEventSystem(): EventManager {
   eventManager = eventManager ?? createEventManager()
 
   mailManager = mailManager ?? createMailManager({
-    // Defaults to the `log` driver (prints to the console) so verification
-    // and password-reset links are actually visible in development — the
-    // `memory` driver silently discards them, which broke both flows.
+    // Defaults to `log`, not `memory`: development needs the verification and
+    // password-reset links printed, and `memory` discards them silently.
     default: process.env.MAIL_MAILER ?? 'log',
     from: {
       email: process.env.MAIL_FROM_ADDRESS ?? 'noreply@blog.example.com',
@@ -71,17 +67,12 @@ export function initializeEventSystem(): EventManager {
   return eventManager
 }
 
-/**
- * Register all event listeners.
- */
 function registerListeners(events: EventManager): void {
-  // UserLoggedIn listeners
   const logUserLogin = new LogUserLogin()
   events.on(UserLoggedIn, (event) => logUserLogin.handle(event), {
     priority: LogUserLogin.priority,
   })
 
-  // PostCreated listeners
   if (!containerRef) {
     throw new Error('EventServiceProvider container has not been registered.')
   }

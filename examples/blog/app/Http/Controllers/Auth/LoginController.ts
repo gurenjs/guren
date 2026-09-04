@@ -11,9 +11,8 @@ export default class LoginController extends Controller {
   }
 
   async store(): Promise<Response> {
-    // validateBody throws ValidationException on failure →
-    // InertiaServiceProvider catches it, flashes errors to session, and redirects back (303).
-    // Inertia's useForm() preserves client-side input state across the redirect.
+    // A ValidationException here is caught by InertiaServiceProvider, flashed to
+    // the session and redirected back (303); useForm() keeps the typed input.
     const { email, password, remember } = await this.validateBody(LoginSchema)
 
     const session = this.auth.session()
@@ -25,7 +24,6 @@ export default class LoginController extends Controller {
       throw ValidationException.withMessages({ message: 'Invalid credentials.' })
     }
 
-    // Emit UserLoggedIn event
     const user = (await this.auth.user()) as UserRecord | null
     if (user) {
       const ipAddress = this.request.header('x-forwarded-for') ?? this.request.header('x-real-ip') ?? null

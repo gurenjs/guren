@@ -182,10 +182,9 @@ describe('attachments queued generation', () => {
   })
 
   test('should repoint the row before deleting the superseded HEIC original', async () => {
-    // A delete that fails must not fail the job: by then the row already
-    // points at the converted object, and the superseded original is a
-    // leak for the sweeper — the reverse order would risk a row pointing
-    // at nothing.
+    // A delete that fails must not fail the job: the row already points at the
+    // converted object, so the superseded original is only a leak for the
+    // sweeper — the reverse order would risk a row pointing at nothing.
     const record = await Post.attach(1, 'photo', new File([isoBmffHeader('heic')], 'shot.heic'), {
       queued: true,
     })

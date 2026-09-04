@@ -15,11 +15,10 @@ export type ViewOptions = ResponseInit & {
 }
 
 /**
- * Does the rendered output begin with an `<html>` root, allowing leading
- * whitespace and complete comments? A hand-rolled linear scan rather than a
- * regex: the equivalent pattern (`(?:\s|<!--.*?-->)*<html`) backtracks
- * exponentially on adversarial comment runs (CodeQL js/redos), and the body
- * being scanned can embed user-influenced raw markup.
+ * Does the output begin with an `<html>` root, allowing leading whitespace and
+ * complete comments? A linear scan rather than a regex: the equivalent pattern
+ * backtracks exponentially on adversarial comment runs (CodeQL js/redos), and
+ * the scanned body can embed user-influenced raw markup.
  */
 function startsWithHtmlRoot(body: string): boolean {
   let i = 0
@@ -45,18 +44,16 @@ function startsWithHtmlRoot(body: string): boolean {
 
 /**
  * Render a `hono/jsx` component to a plain server-rendered HTML `Response` —
- * the engine behind `Controller.view()` (RFC 0014), separated the way
- * `inertia()` is from `Controller.inertia()`.
+ * the engine behind `Controller.view()` (RFC 0014).
  */
 export async function renderDocument<P>(
   component: FC<P>,
   props: P,
   options: ViewOptions = {},
 ): Promise<Response> {
-  // Build a real hono element and let hono own the reduction. Invoking the
-  // component directly and reducing the result by hand looks equivalent and
-  // is not: it skips hono's escaping of raw strings inside a `Child[]` (a
-  // stored-XSS hole caught in the RFC 0014 review).
+  // Let hono own the reduction: invoking the component directly and reducing by
+  // hand skips hono's escaping of raw strings inside a `Child[]` (a stored-XSS
+  // hole caught in the RFC 0014 review).
   const body = String(await jsx(component as never, props as never, undefined).toString())
 
   if (options.doctype !== false && !startsWithHtmlRoot(body)) {

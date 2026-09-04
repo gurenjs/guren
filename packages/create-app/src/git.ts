@@ -1,16 +1,11 @@
 import { spawnSync, type SpawnSyncReturns } from 'node:child_process'
 
 /**
- * How long the scaffolder waits on `git` before giving up.
- *
- * The bound is tied to how these children are run, not applied to every child
- * the scaffolder spawns. `bun install` and the app's own CLI inherit the
- * terminal: they can answer a prompt, they show progress, and a long one is
- * visibly working. These run with `stdio: 'pipe'` and no terminal, where a
- * signing passphrase prompt, a credential helper, or a stalled name lookup
- * while git guesses the committer identity waits on input that can never
- * arrive — silently, with the app already written to disk. Generous enough
- * that an ordinary commit on a loaded machine never trips it.
+ * How long the scaffolder waits on `git` before giving up. These children run
+ * with `stdio: 'pipe'` and no terminal, so a signing passphrase prompt, a
+ * credential helper, or a stalled identity lookup would wait forever on input
+ * that can never arrive, with the app already on disk. Generous enough that an
+ * ordinary commit on a loaded machine never trips it.
  */
 export const GIT_TIMEOUT_MS = 30_000
 
@@ -33,10 +28,9 @@ function runGit(cwd: string, args: string[], timeoutMs = GIT_TIMEOUT_MS): SpawnS
   return spawnSync('git', args, {
     cwd,
     stdio: 'pipe',
-    // Read at call time rather than hoisted: a caller that sets
-    // GIT_AUTHOR_*/GIT_COMMITTER_* just before this runs has to reach the
-    // child. GIT_TERMINAL_PROMPT keeps git from waiting on a terminal it does
-    // not have.
+    // Read at call time, not hoisted: a caller setting GIT_AUTHOR_*/GIT_COMMITTER_*
+    // just before this runs has to reach the child. GIT_TERMINAL_PROMPT keeps git
+    // from waiting on a terminal it does not have.
     env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
     // spawnSync reads a non-positive timeout as "no timeout".
     timeout: Math.max(1, timeoutMs),
@@ -53,10 +47,9 @@ function wasKilledByTimeout(result: SpawnSyncReturns<Buffer>): boolean {
 export function isInsideGitWorkTree(cwd: string, options: GitCommandOptions = {}): boolean {
   const result = runGit(cwd, ['rev-parse', '--is-inside-work-tree'], options.timeoutMs)
 
-  // A probe that had to be killed answers "yes". The caller uses this to
-  // *decline* `git init`, so an unreadable answer should decline too — the
-  // alternative is nesting a repository inside the user's checkout, which is
-  // the outcome the caller calls never what they wanted.
+  // A probe that had to be killed answers "yes": the caller uses this to
+  // *decline* `git init`, and nesting a repository inside the user's checkout is
+  // the worse failure.
   if (wasKilledByTimeout(result)) {
     return true
   }

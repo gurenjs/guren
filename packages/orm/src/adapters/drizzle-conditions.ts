@@ -20,9 +20,6 @@ function resolveColumn(table: unknown, field: string): AnyColumn {
   return column
 }
 
-/**
- * Builds a Drizzle ORM condition from a single SimpleCondition.
- */
 function buildSimpleCondition(table: unknown, condition: SimpleCondition): SQL | undefined {
   const column = resolveColumn(table, condition.field)
 
@@ -71,9 +68,6 @@ function buildSimpleCondition(table: unknown, condition: SimpleCondition): SQL |
   }
 }
 
-/**
- * Builds a Drizzle ORM condition from a GroupCondition.
- */
 function buildGroupCondition(table: unknown, group: GroupCondition): SQL | undefined {
   const parts = group.conditions
     .map((c) => buildSingleCondition(table, c))
@@ -94,9 +88,6 @@ function buildGroupCondition(table: unknown, group: GroupCondition): SQL | undef
   return and(...parts)
 }
 
-/**
- * Builds a Drizzle ORM condition from any WhereCondition.
- */
 function buildSingleCondition(table: unknown, condition: WhereCondition): SQL | undefined {
   if (condition.type === 'simple') {
     return buildSimpleCondition(table, condition)
@@ -106,19 +97,11 @@ function buildSingleCondition(table: unknown, condition: WhereCondition): SQL | 
 }
 
 /**
- * Translates an array of QueryBuilder WhereConditions into a single
- * Drizzle ORM condition expression.
- *
- * The list's sequential semantics — top-level conditions AND together,
- * an OR group folds everything before it into the OR, so
- *   .where('a', 1).where('b', 2).orWhere('c', 3)
- * produces `(a = 1 AND b = 2) OR (c = 3)` — are applied by
- * `normalizeConditionSequence` (shared with QueryBuilder's grouping
- * callbacks), leaving only a flat-join tree to render here.
- *
- * @param table - The Drizzle table object
- * @param conditions - Array of WhereCondition objects from QueryBuilder
- * @returns A Drizzle SQL condition or undefined if no conditions
+ * Translates an array of QueryBuilder WhereConditions into a single Drizzle ORM
+ * condition expression. The list's sequential semantics — an OR group folds
+ * everything before it into the OR, so `.where('a',1).where('b',2).orWhere('c',3)`
+ * is `(a = 1 AND b = 2) OR (c = 3)` — are already applied by
+ * `normalizeConditionSequence`, leaving a flat-join tree to render here.
  */
 export function buildDrizzleConditions(table: unknown, conditions: WhereCondition[]): SQL | undefined {
   const normalized = normalizeConditionSequence(conditions)

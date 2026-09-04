@@ -16,8 +16,6 @@ async function sourceFiles(dir: string): Promise<string[]> {
   return files.flat()
 }
 
-// Walked and read once — both scans below assert over the same tree, with
-// their own per-file filters.
 const sources = new Map<string, string>()
 
 beforeAll(async () => {
@@ -27,21 +25,11 @@ beforeAll(async () => {
 })
 
 describe('NODE_ENV gate form', () => {
-  // The deploy plugins bundle server code with
-  // `--define 'process.env.NODE_ENV="production"'`, which substitutes that one
-  // exact expression. Inserting an optional chain after `env` makes it a
-  // different expression, so the substitution misses and the gate silently
-  // becomes a runtime read — and on hosts where platform vars never reach the
-  // process environment, that read answers "not production". Every production
-  // gate in this package depends on it: dev endpoints, debug pages, cookie
-  // `Secure` flags, HSTS.
-  //
-  // Runtime behaviour is identical either way, so nothing but the source can
-  // pin this. It is asserted package-wide rather than per file because the one
-  // gate that drifted was the one nobody had written a per-file pin for.
-  //
-  // Scoped to NODE_ENV deliberately: `process.env?.SOMETHING_ELSE` is not a
-  // `--define` target and a blanket rule would collect carve-outs and rot.
+  // The deploy plugins bundle with `--define 'process.env.NODE_ENV="production"'`, which
+  // substitutes that one exact expression: an optional chain after `env` is a different one,
+  // so the gate silently becomes a runtime read that answers "not production" wherever
+  // platform vars never reach the environment. Dev endpoints, debug pages, cookie `Secure`
+  // and HSTS all depend on it, runtime behaviour is identical, and only the source can pin it.
   test('every NODE_ENV read uses the literal form the bundlers substitute', () => {
     const offenders: string[] = []
 
@@ -56,13 +44,9 @@ describe('NODE_ENV gate form', () => {
 })
 
 describe('GUREN_VITE_MANIFEST read form', () => {
-  // The Vercel plugin injects the client manifest by substituting the read
-  // with `define: { 'process.env.GUREN_VITE_MANIFEST': ... }` — the same
-  // exact-expression matching as the NODE_ENV rule above, so the same two
-  // drifts would silently disarm it: an optional chain or an indexed read
-  // (different expressions, no substitution), or a second read site somewhere
-  // else (never substituted, answering undefined on serverless). The rule
-  // lives in vite-manifest.ts; this pins both the form and the single site.
+  // The Vercel plugin injects the manifest with `define: { 'process.env.GUREN_VITE_MANIFEST' }`,
+  // matched the same exact-expression way, so an optional chain, an indexed read, or a second
+  // read site anywhere else disarms it silently. This pins both the form and the single site.
   test('the manifest injection is read once, in vite-manifest.ts, as the literal expression', () => {
     const readers: string[] = []
 

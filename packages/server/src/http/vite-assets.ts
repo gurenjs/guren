@@ -36,11 +36,8 @@ export function __resetViteAssetCache(): void {
 }
 
 /**
- * One manifest resolution, memoized until {@link __resetViteAssetCache}.
- * `null` records "looked and found nothing" so absence is not re-probed per
- * render. The injected manifest shares the cache under its fixed source
- * label, which cannot collide with the other keys — those are joined
- * absolute paths.
+ * One manifest resolution, memoized until {@link __resetViteAssetCache}. `null`
+ * records "looked and found nothing" so absence is not re-probed per render.
  */
 function memoizedManifest(key: string, load: () => ViteManifest | undefined): ViteManifest | null {
   let manifest = manifestCache.get(key)
@@ -66,38 +63,18 @@ function manifestAssetUrl(manifest: ViteManifest, normalizedEntry: string): stri
 
 /**
  * Resolve the public URL of a Vite build input, for server-rendered content
- * pages (RFC 0014). The URL is environment-dependent and this helper owns
- * both branches:
- *
- * - **Development** (a dev server is configured, or `NODE_ENV` is not
- *   `production`): the Vite dev server serves the source path directly, so
- *   this returns `${devServerUrl}/${entry}`.
- * - **Production**: the entry is looked up in the Vite build manifest and the
- *   hashed output file is returned under the `/public/assets/` route that
- *   `configureInertiaAssets` serves with immutable caching.
- *
- * Fails loudly: an unresolvable manifest or an entry the manifest does not
- * record throws with the paths tried and the likely fix — never a silent
- * empty string.
+ * pages (RFC 0014): the dev server URL in development, the hashed manifest
+ * entry under `/public/assets/` in production. Throws with the paths tried
+ * rather than returning an empty string. Production prefers a build-time
+ * injected manifest (`GUREN_VITE_MANIFEST`) over the filesystem, so `view()`
+ * pages work on serverless targets; an explicit `manifestPaths` still reads
+ * exactly the named files. A CSS file bundled *through* a JS entry has no
+ * manifest key of its own — declare it in `build.rollupOptions.input`.
  *
  * @example
  * ```tsx
  * <link rel="stylesheet" href={viteAsset('resources/css/app.css')} />
  * ```
- *
- * Note a CSS file bundled *through* a JS entry (imported from `app.tsx`) has
- * no manifest key of its own — declare it as an explicit build input in
- * `vite.config.ts` (`build.rollupOptions.input`) so Vite emits and records
- * it.
- *
- * **Serverless targets:** production resolution prefers a build-time
- * injected manifest over the filesystem — when `GUREN_VITE_MANIFEST` holds
- * the client manifest JSON, entries resolve from it and no file is read. The
- * deploy plugins (`@guren/plugin-cloudflare`, `@guren/plugin-vercel`,
- * `@guren/plugin-lambda`) populate it during their build step, so `view()`
- * pages work on targets whose runtime never sees
- * `public/assets/manifest.json`. An explicit `manifestPaths` still reads the
- * named files — a caller stating paths is asking for exactly those.
  */
 export function viteAsset(entry: string, options: ViteAssetOptions = {}): string {
   const normalizedEntry = trimSlashes(entry)

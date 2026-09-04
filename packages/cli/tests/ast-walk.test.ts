@@ -4,16 +4,11 @@ import { describe, expect, it } from 'bun:test'
 import { literalString, objectLiteral, unwrapTypeAssertion } from '../src/ast-walk'
 
 /**
- * Parses `source` and returns the initializer of its first `const x = …`.
+ * Returns the initializer of `source`'s first `const x = …`.
  *
- * Deliberately calls `@babel/parser` directly rather than going through
- * `parseSourceFile`: one of the five wrapper spellings
- * (`ParenthesizedExpression`) is unreachable under the plugin set that parser
- * uses, so a test routed through it could not distinguish a live branch from a
- * dead one. `createParenthesizedExpressions` is opt-in here for that reason.
- *
- * No JSX plugin, on purpose — `<T>x` (`TSTypeAssertion`) does not parse when
- * JSX is enabled, since the two grammars claim the same syntax.
+ * Calls `@babel/parser` directly rather than `parseSourceFile`: `ParenthesizedExpression`
+ * is unreachable under that parser's plugin set, so `createParenthesizedExpressions` is
+ * opt-in here. No JSX plugin either — `<T>x` does not parse when JSX claims that syntax.
  */
 function firstInitializer(source: string, options: { parenthesized?: boolean } = {}): Expression {
   const ast: File = parse(source, {
@@ -47,9 +42,8 @@ describe('unwrapTypeAssertion', () => {
   it('sees through a parenthesized expression when the parser produces one', () => {
     const wrapped = firstInitializer('const x = ({ a: 1 })', { parenthesized: true })
 
-    // Guards the fixture rather than the rule: without this the assertion
-    // below would pass on a parser that dropped the node, and the branch
-    // would look covered while never being entered.
+    // Guards the fixture: without it the assertion below passes on a parser that dropped
+    // the node, leaving the branch covered but never entered.
     expect(wrapped.type).toBe('ParenthesizedExpression')
     expect(unwrapTypeAssertion(wrapped).type).toBe('ObjectExpression')
   })
@@ -90,9 +84,8 @@ describe('objectLiteral', () => {
 
 describe('unwrapTypeAssertion on a malformed node', () => {
   it('answers the node rather than throwing when a wrapper carries no expression', () => {
-    // `literalString` takes `unknown` and forwards it here unvalidated, so a
-    // wrapper-shaped object that Babel did not build must not take a scan down
-    // with it.
+    // `literalString` forwards `unknown` here unvalidated, so a wrapper-shaped object
+    // Babel never built must not take a scan down with it.
     const malformed = { type: 'TSAsExpression' } as unknown as Node
 
     expect(unwrapTypeAssertion(malformed)).toBe(malformed)

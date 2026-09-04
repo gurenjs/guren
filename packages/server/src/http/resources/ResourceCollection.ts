@@ -1,9 +1,7 @@
 import type { ResourceData, ResourceClass } from './types'
 import type { Resource } from './Resource'
 
-/**
- * Collection of resources with additional metadata.
- */
+/** Collection of resources with additional metadata. */
 export class ResourceCollection<T, R extends Resource<T>> {
   protected resources: T[]
   protected resourceClass: ResourceClass<T, R>
@@ -15,63 +13,42 @@ export class ResourceCollection<T, R extends Resource<T>> {
     this.resourceClass = resourceClass
   }
 
-  /**
-   * Transform all resources to an array.
-   */
   toArray(): ResourceData[] {
     return this.resources.map((resource) =>
       new this.resourceClass(resource).toJSON()
     )
   }
 
-  /**
-   * Add additional data to the collection response.
-   */
+  /** Keys merged beside the wrapped list. */
   additional(data: ResourceData): this {
     this.additionalData = { ...this.additionalData, ...data }
     return this
   }
 
-  /**
-   * Set the wrapper key for the collection.
-   */
+  /** Defaults to `'data'`; `null` disables wrapping. */
   wrap(key: string | null): this {
     this.wrapKey = key
     return this
   }
 
-  /**
-   * Disable wrapping.
-   */
   withoutWrapping(): this {
     this.wrapKey = null
     return this
   }
 
-  /**
-   * Get the number of resources.
-   */
   count(): number {
     return this.resources.length
   }
 
-  /**
-   * Check if collection is empty.
-   */
   isEmpty(): boolean {
     return this.resources.length === 0
   }
 
-  /**
-   * Check if collection is not empty.
-   */
   isNotEmpty(): boolean {
     return this.resources.length > 0
   }
 
-  /**
-   * Transform to JSON response.
-   */
+  /** Unwrapped with additional data, the list moves under an `items` key. */
   toJSON(): ResourceData {
     const data = this.toArray()
 
@@ -87,16 +64,10 @@ export class ResourceCollection<T, R extends Resource<T>> {
     }
   }
 
-  /**
-   * Map over the resources.
-   */
   map<U>(callback: (resource: T, index: number) => U): U[] {
     return this.resources.map(callback)
   }
 
-  /**
-   * Filter resources.
-   */
   filter(callback: (resource: T, index: number) => boolean): ResourceCollection<T, R> {
     return new ResourceCollection(
       this.resources.filter(callback),
@@ -104,16 +75,11 @@ export class ResourceCollection<T, R extends Resource<T>> {
     )
   }
 
-  /**
-   * Get the underlying resources.
-   */
+  /** The untransformed records. */
   all(): T[] {
     return this.resources
   }
 
-  /**
-   * Create a resource collection.
-   */
   static make<T, R extends Resource<T>>(
     resources: T[],
     resourceClass: ResourceClass<T, R>

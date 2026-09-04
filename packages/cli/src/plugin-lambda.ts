@@ -11,9 +11,7 @@ export async function installOfficialLambdaPlugin(options: WriterOptions = {}): 
   }
 
   // The entrypoint's console handler imports src/console.ts, which projects
-  // created before that file existed do not have. Scaffold it here so
-  // uncommenting the console export can't fail to resolve; apps that already
-  // have one keep it untouched.
+  // predating that file lack — scaffolded here so uncommenting it resolves.
   if (await ensureScaffoldFile('src/console.ts', consoleKernelTemplate(), options)) {
     updated.push('src/console.ts')
   }
@@ -25,9 +23,8 @@ export async function installOfficialLambdaPlugin(options: WriterOptions = {}): 
   return updated
 }
 
-// Kept identical to packages/create-app/templates/{default,api-only}/src/console.ts —
-// see packages/cli/tests/plugin.test.ts, which pins this to that file so the two
-// can't drift the way they did when #223 rewrote the templates without this one.
+// Kept identical to packages/create-app/templates/{default,api-only}/src/console.ts,
+// pinned by packages/cli/tests/plugin.test.ts.
 function consoleKernelTemplate(): string {
   return `import { ConsoleKernel } from '@guren/core'
 import app from './app.js'

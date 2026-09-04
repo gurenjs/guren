@@ -14,8 +14,8 @@ export interface RequireAuthOptions {
 const TESTING_USER_HEADER = 'x-testing-user'
 
 function resolveTestingUser(ctx: Context): Authenticatable | null {
-  // Only allow testing user override when GUREN_TESTING is explicitly set.
-  // This prevents external callers from bypassing auth in production/staging.
+  // Gated on GUREN_TESTING, or an external caller could bypass auth in
+  // production by sending the header.
   if (!process.env.GUREN_TESTING) {
     return null
   }
@@ -27,9 +27,8 @@ function resolveTestingUser(ctx: Context): Authenticatable | null {
 
   try {
     const parsed = JSON.parse(rawUser) as Record<string, unknown>
-    // Re-attach Authenticatable methods lost during JSON serialization.
-    // The serialized payload includes __authId (the pre-serialized identifier)
-    // so we can reconstruct a conforming object.
+    // Re-attach the Authenticatable methods JSON dropped; `__authId` carries
+    // the pre-serialized identifier.
     const authId = parsed.__authId ?? parsed.id ?? null
     return {
       ...parsed,

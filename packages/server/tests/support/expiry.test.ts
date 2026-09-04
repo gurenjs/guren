@@ -6,9 +6,8 @@ import { isExpired, isOptionalExpiryPast, toDate, toOptionalExpiry } from '../..
 const NOW = 4_000_000_000_000
 const MINUTE = 60_000
 
-// Mirrors packages/core/tests/store-utils.test.ts — the two modules are
-// deliberately kept in step (see the block comment atop expiry.ts) — so this
-// suite stays structurally comparable rather than accidentally drifting.
+// Mirrors packages/core/tests/store-utils.test.ts: the two modules are kept in
+// step (see the block comment atop expiry.ts).
 
 describe('toDate', () => {
   test('accepts every representation a driver or Redis value may return for a timestamp', () => {

@@ -1,8 +1,7 @@
-// Storage abstraction behind DocsService. The prebuilt store serves content
-// rendered at build time (scripts/prerender-docs.ts) and keeps shiki, marked,
-// and node:fs out of the request path; the fs store (FsDocsStore.ts) renders
-// live from docs/ and is only loaded via dynamic import when selected, so
-// dev keeps live-editing without shipping the renderer to production.
+// Storage abstraction behind DocsService. The prebuilt store keeps shiki,
+// marked and node:fs off the request path; FsDocsStore renders live from docs/
+// and is dynamically imported only when selected, so the renderer never ships
+// to production.
 import { docsData, type PrerenderedDocsData } from '@/.guren/docs.gen.js'
 
 import { shouldUsePrerendered, type DocCategory, type DocLocale, type DocSummary } from './docs-config.js'
@@ -17,10 +16,7 @@ export interface DocsStore {
   getRaw(category: DocCategory, slug: string, locale: DocLocale): Promise<string | null>
 }
 
-/**
- * Prebuilt content is preferred in production (or with GUREN_DOCS_PRERENDERED=1);
- * everywhere else the live renderer keeps docs editable without a rebuild.
- */
+/** Prebuilt in production (or with GUREN_DOCS_PRERENDERED=1), live elsewhere. */
 export class PrebuiltDocsStore implements DocsStore {
   #data: PrerenderedDocsData
 

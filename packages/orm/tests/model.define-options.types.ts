@@ -1,7 +1,5 @@
 /**
- * Type-level tests for defineModel's typed allowlist options
- * (fillable / hidden / visible / accessors / appends).
- *
+ * Type-level tests for defineModel's typed allowlist options.
  * Compiled by `tsc -p tsconfig.typecheck.json`; never executed.
  */
 import { pgTable, serial, text } from 'drizzle-orm/pg-core'
@@ -21,19 +19,13 @@ const users = pgTable('users', {
   rememberToken: text('remember_token'),
 })
 
-/**
- * Stand-in for AuthenticatableModel (which lives in @guren/server and must
- * not be imported here): a base whose createType contributes virtual fields.
- */
+/** Stand-in for AuthenticatableModel, which lives in @guren/server and must not be imported here. */
 abstract class CredentialedModel<TRecord extends PlainObject = PlainObject> extends Model<TRecord> {
   static override readonly createType: { password?: string } = undefined as unknown as {
     password?: string
   }
 }
 
-// --- fillable ---
-
-// Column names are accepted.
 export class FillableOk extends defineModel(posts, {
   fillable: ['title', 'body'],
 }) {}
@@ -43,7 +35,6 @@ export class FillableTypo extends defineModel(posts, {
   fillable: ['title', 'bod'],
 }) {}
 
-// A base's contributed virtual field is accepted alongside columns.
 export class FillableWithBase extends defineModel(users, {
   base: CredentialedModel,
   optionalOnCreate: ['passwordHash'],
@@ -56,8 +47,6 @@ export class FillableNoBaseVirtual extends defineModel(posts, {
   // Model base must not collapse the key type to `string`
   fillable: ['password'],
 }) {}
-
-// --- hidden / visible ---
 
 export class HiddenOk extends defineModel(users, {
   hidden: ['passwordHash', 'rememberToken'],
@@ -77,9 +66,6 @@ export class VisibleTypo extends defineModel(users, {
   visible: ['emial'],
 }) {}
 
-// --- accessors / appends ---
-
-// Accessor functions receive the table's inferred record.
 export class AccessorsOk extends defineModel(users, {
   accessors: {
     displayName: (record) => `${record.name} <${record.email}>`,
@@ -113,8 +99,7 @@ export class AppendsWithoutAccessors extends defineModel(users, {
   appends: ['displayName'],
 }) {}
 
-// hidden/visible may also name a declared accessor (serialize applies them
-// to appended virtual fields too).
+// hidden/visible may also name a declared accessor: serialize applies them to appended virtual fields.
 export class HiddenAccessorKey extends defineModel(users, {
   accessors: {
     displayName: (record) => record.name,
@@ -123,8 +108,7 @@ export class HiddenAccessorKey extends defineModel(users, {
   hidden: ['passwordHash', 'displayName'],
 }) {}
 
-// --- legacy static declarations keep compiling (loosely typed) ---
-
+// legacy static declarations keep compiling (loosely typed)
 export class LegacyStatic extends defineModel(posts) {
   static override fillable = ['title', 'not-checked-here']
   static override hidden = ['whatever']

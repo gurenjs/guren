@@ -2,18 +2,10 @@ import type { QueueDriver, QueuedJob, FailedJob } from '../types'
 import { getJob } from '../Job'
 
 /**
- * Synchronous queue driver: jobs execute immediately in the dispatching
- * process, no worker required. This is the development default — dispatch
- * semantics stay identical to a real queue, but failures surface right away
- * and nothing needs a second process.
- *
- * @example
- * ```ts
- * const queue = createQueueManager({
- *   default: 'sync',
- *   drivers: { sync: () => new SyncDriver() },
- * })
- * ```
+ * Runs jobs inline in the dispatching process, no worker required: the
+ * development default. Dispatch semantics match a real queue but failures
+ * surface immediately, and retry backoff is not honored because nothing waits
+ * in a sync queue (`release()` re-runs the job at once whatever `delayMs`).
  */
 export class SyncDriver implements QueueDriver {
   private failedJobs: Map<string, FailedJob> = new Map()
@@ -41,8 +33,12 @@ export class SyncDriver implements QueueDriver {
     return null
   }
 
-  async release(job: QueuedJob): Promise<void> {
-    // Re-run immediately: releasing back to a sync queue means retrying now.
+  /**
+   * Re-run the job now, ignoring `delayMs`: honoring a backoff would block the
+   * releasing caller for the full delay, and a detached timer would move the
+   * failure off the call that surfaces it. A failure rethrows, as `push()` does.
+   */
+  async release(job: QueuedJob, _delayMs?: number): Promise<void> {
     await this.push(job)
   }
 

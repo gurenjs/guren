@@ -5,16 +5,11 @@ import { scaffoldAppBlueprint } from '../src/blueprints'
 import { createTempWorkspace } from './helpers'
 
 /**
- * `DATABASE_URL` names the SQLite database for two different implementations:
- * the app opens it with `bun:sqlite`, drizzle-kit with `node:sqlite`. Only the
- * first honours URI filenames, so `file:local.db` migrates the app into
- * `local.db` and drizzle-kit into a file *named* `file:local.db` — two
- * databases, no error from either. The generated config refuses any scheme so
- * that split cannot happen, and these tests run the generated file rather than
- * matching its text, so a guard that is present but inert still fails.
- *
- * Postgres and MySQL take a real connection string here and must not inherit
- * the check.
+ * The app opens `DATABASE_URL` with `bun:sqlite`, drizzle-kit with
+ * `node:sqlite`; only the first honours URI filenames, so `file:local.db` gives
+ * two databases and no error from either. The config refuses any scheme, and
+ * these tests run the generated file so an inert guard still fails. Postgres and
+ * MySQL take a real connection string and must not inherit the check.
  */
 function runGeneratedConfig(source: string, databaseUrl?: string): { dbCredentials: { url: string } } {
   const body = source

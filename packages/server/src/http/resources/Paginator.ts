@@ -17,9 +17,7 @@ export interface PaginatedResultLike<T> {
   }
 }
 
-/**
- * Paginator for offset-based pagination.
- */
+/** Paginator for offset-based pagination. */
 export class Paginator<T> {
   protected _items: T[]
   protected _total: number
@@ -41,102 +39,62 @@ export class Paginator<T> {
     this._options = options
   }
 
-  /**
-   * Get the paginated items.
-   */
   items(): T[] {
     return this._items
   }
 
-  /**
-   * Get total number of items.
-   */
   total(): number {
     return this._total
   }
 
-  /**
-   * Get items per page.
-   */
   perPage(): number {
     return this._perPage
   }
 
-  /**
-   * Get current page number.
-   */
   currentPage(): number {
     return this._currentPage
   }
 
-  /**
-   * Get last page number.
-   */
   lastPage(): number {
     return Math.max(1, Math.ceil(this._total / this._perPage))
   }
 
-  /**
-   * Check if there are more pages.
-   */
   hasMorePages(): boolean {
     return this._currentPage < this.lastPage()
   }
 
-  /**
-   * Check if on first page.
-   */
   onFirstPage(): boolean {
     return this._currentPage <= 1
   }
 
-  /**
-   * Check if on last page.
-   */
   onLastPage(): boolean {
     return this._currentPage >= this.lastPage()
   }
 
-  /**
-   * Get the "from" index (1-based).
-   */
+  /** The 1-based index of the first item on this page. */
   firstItem(): number | null {
     if (this._items.length === 0) return null
     return (this._currentPage - 1) * this._perPage + 1
   }
 
-  /**
-   * Get the "to" index (1-based).
-   */
+  /** The 1-based index of the last item on this page. */
   lastItem(): number | null {
     if (this._items.length === 0) return null
     return this.firstItem()! + this._items.length - 1
   }
 
-  /**
-   * Get the number of items on current page.
-   */
   count(): number {
     return this._items.length
   }
 
-  /**
-   * Check if the paginator is empty.
-   */
   isEmpty(): boolean {
     return this._items.length === 0
   }
 
-  /**
-   * Check if the paginator is not empty.
-   */
   isNotEmpty(): boolean {
     return this._items.length > 0
   }
 
-  /**
-   * Get pagination meta information.
-   */
   meta(): PaginationMeta {
     return {
       currentPage: this._currentPage,
@@ -148,9 +106,6 @@ export class Paginator<T> {
     }
   }
 
-  /**
-   * Build URL for a page.
-   */
   protected url(page: number): string {
     const path = this._options.path ?? ''
     const query = new URLSearchParams(this._options.query ?? {})
@@ -168,9 +123,7 @@ export class Paginator<T> {
     return url
   }
 
-  /**
-   * Get pagination links.
-   */
+  /** Every URL is null until a base path is set with {@link withPath}. */
   links(): PaginationLinks {
     const path = this._options.path
     const pages = Array.from({ length: this.lastPage() }, (_, index) => {
@@ -201,33 +154,21 @@ export class Paginator<T> {
     }
   }
 
-  /**
-   * Set the base path for pagination links.
-   */
   withPath(path: string): this {
     this._options.path = path
     return this
   }
 
-  /**
-   * Set query parameters for pagination links.
-   */
   withQuery(query: Record<string, string>): this {
     this._options.query = { ...this._options.query, ...query }
     return this
   }
 
-  /**
-   * Set fragment for pagination links.
-   */
   fragment(fragment: string): this {
     this._options.fragment = fragment
     return this
   }
 
-  /**
-   * Transform items to resources.
-   */
   toResource<R extends Resource<T>>(
     resourceClass: ResourceClass<T, R>
   ): PaginatedResponse<ResourceData> {
@@ -238,9 +179,6 @@ export class Paginator<T> {
     }
   }
 
-  /**
-   * Transform to JSON.
-   */
   toJSON(): PaginatedResponse<T> {
     return {
       data: this._items,
@@ -249,9 +187,6 @@ export class Paginator<T> {
     }
   }
 
-  /**
-   * Map over items.
-   */
   map<U>(callback: (item: T, index: number) => U): Paginator<U> {
     return new Paginator(
       this._items.map(callback),
@@ -262,23 +197,15 @@ export class Paginator<T> {
     )
   }
 
-  /**
-   * Get items as array.
-   */
   toArray(): T[] {
     return this._items
   }
 
-  /**
-   * Iterate over items.
-   */
   *[Symbol.iterator](): Iterator<T> {
     yield* this._items
   }
 
-  /**
-   * Create paginator from array (slices the array).
-   */
+  /** Slices `items` itself; `total` is the full array length. */
   static fromArray<T>(
     items: T[],
     page: number,
@@ -292,9 +219,7 @@ export class Paginator<T> {
     return new Paginator(pageItems, total, perPage, page, options)
   }
 
-  /**
-   * Create paginator from an ORM-style paginated result.
-   */
+  /** Create a paginator from an ORM-style paginated result. */
   static fromPaginatedResult<T>(
     result: PaginatedResultLike<T>,
     options?: PaginatorOptions
@@ -309,9 +234,7 @@ export class Paginator<T> {
   }
 }
 
-/**
- * Create a paginator.
- */
+/** Create a paginator. */
 export function paginate<T>(
   result: PaginatedResultLike<T>,
   options?: PaginatorOptions

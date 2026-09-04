@@ -4,20 +4,16 @@ import { NodeHasher } from './NodeHasher'
 import { NODE_SCRYPT_PREFIX, looksLikePasswordHash } from './hash-format'
 
 /**
- * Runtime-detecting password hasher: hashes with `Bun.password` when running
- * on Bun (Argon2id by default, despite `ScryptHasher`'s name) and with Node's
- * `crypto.scrypt` otherwise (e.g. AWS Lambda or Cloudflare Workers). This is
- * the hasher behind the `Hash` export, and the default for
- * `AuthenticatableModel` and `ModelUserProvider`.
+ * Runtime-detecting password hasher: `Bun.password` on Bun (Argon2id by
+ * default, despite `ScryptHasher`'s name), Node's `crypto.scrypt` otherwise.
+ * Behind the `Hash` export, and the default for `AuthenticatableModel` and
+ * `ModelUserProvider`.
  *
  * **Verification routes on the stored hash, not on the runtime.** The two
- * delegates write different formats, and neither can read the other's, so
- * picking a delegate by runtime alone would 500 on every login for an app
- * whose password column was written elsewhere - a seeder run on Bun against a
- * database a Node deploy then serves. Bun implements `node:crypto`, so a
- * `$scrypt$` hash verifies on either runtime; an Argon2id or bcrypt hash needs
- * `Bun.password` and cannot be read off Bun at all, which this reports as
- * itself rather than as an opaque parse failure.
+ * delegates write formats neither can read, so choosing by runtime would 500 on
+ * every login for a column written elsewhere. Bun implements `node:crypto`, so
+ * a `$scrypt$` hash verifies on either runtime; an Argon2id or bcrypt hash
+ * needs `Bun.password` and is reported as such rather than as a parse failure.
  */
 export class DefaultHasher implements PasswordHasher {
   private readonly bun: ScryptHasher | null
@@ -57,8 +53,7 @@ export class DefaultHasher implements PasswordHasher {
     if (!this.bun) {
       if (!looksLikePasswordHash(hashed)) {
         // Saying "written by Bun.password" about an `oauth:...` sentinel would
-        // be a confident wrong answer. `ModelUserProvider` never gets here;
-        // a direct caller might.
+        // be a confident wrong answer. `ModelUserProvider` never gets here.
         throw new Error(
           'This value is not a password hash in any format the built-in hashers ' +
             'produce, so it cannot be verified. A credential column holding a ' +

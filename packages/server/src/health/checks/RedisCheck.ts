@@ -1,27 +1,15 @@
 import type { CheckResult } from '../types'
 import { HealthCheck } from '../HealthCheck'
 
-/**
- * Redis client interface (minimal).
- */
 export interface RedisClient {
   ping(): Promise<string>
 }
 
-/**
- * Options for Redis health check.
- */
 export interface RedisCheckOptions {
-  /**
-   * Custom name for this check.
-   * @default 'redis'
-   */
+  /** @default 'redis' */
   name?: string
 }
 
-/**
- * Health check for Redis connectivity.
- */
 export class RedisCheck extends HealthCheck {
   readonly name: string
 

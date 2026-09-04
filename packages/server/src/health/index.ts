@@ -9,7 +9,6 @@ export type {
 export { HealthCheck } from './HealthCheck'
 export { HealthManager, createHealthManager } from './HealthManager'
 
-// Built-in checks
 export {
   DatabaseCheck,
   RedisCheck,

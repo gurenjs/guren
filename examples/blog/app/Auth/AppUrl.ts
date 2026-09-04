@@ -1,21 +1,17 @@
 /**
  * Absolute base URL for links that leave the app (password reset, email
- * verification).
- *
- * Deliberately not derived from the request in production. A request URL is
- * reconstructed from the `Host` header, which any client can forge, so a
- * forged host would make the app mail a genuine single-use token to a link
- * pointing at the attacker's own server. `APP_URL` is the only trustworthy
- * source, and production fails closed rather than falling back to the request.
+ * verification). Never derived from the request in production: a request URL is
+ * reconstructed from the forgeable `Host` header, so a forged host would mail a
+ * genuine single-use token to a link at the attacker's own server. Production
+ * fails closed rather than falling back to the request.
  */
 export function appUrl(request: { url: string }): string {
   const configured = process.env.APP_URL?.trim()
 
   if (configured) {
-    // Parsed rather than concatenated: a malformed APP_URL has to fail here,
-    // where every caller hits it, not later inside one particular link build.
-    // Dropping any query/fragment and the trailing slash keeps the result
-    // safe to append a path to.
+    // Parsed rather than concatenated, so a malformed APP_URL fails here, where
+    // every caller hits it. Dropping query/fragment and the trailing slash
+    // keeps the result safe to append a path to.
     const parsed = new URL(configured)
     return `${parsed.origin}${parsed.pathname.replace(/\/+$/, '')}`
   }

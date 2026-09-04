@@ -5,31 +5,15 @@ import { pathToFileURL } from 'node:url'
 import { matchesCron, parseCron, toTimezone, type ParsedCron } from '@guren/core'
 
 export interface ScheduleOptions {
-  /**
-   * Application root directory.
-   */
   appRoot?: string
-
-  /**
-   * Path to the schedule kernel file.
-   */
   kernel?: string
-
-  /**
-   * Output as JSON.
-   */
   json?: boolean
 }
 
 export interface ScheduleRunOptions extends ScheduleOptions {
-  /**
-   * Run a specific task by name.
-   */
+  /** Run only the task with this name. */
   task?: string
-
-  /**
-   * Force run (ignore schedule).
-   */
+  /** Run regardless of whether the task is due. */
   force?: boolean
 }
 
@@ -80,13 +64,10 @@ function normalizeTask(raw: ScheduledTaskLike): TaskInfo {
   }
 }
 
-/**
- * Try to load the schedule kernel from common locations.
- */
+/** Loads the schedule kernel from `--kernel`, or from the conventional locations. */
 async function loadScheduleKernel(options: ScheduleOptions = {}): Promise<{ tasks: TaskInfo[]; scheduler?: unknown } | null> {
   const appRoot = options.appRoot ? resolve(options.appRoot) : process.cwd()
 
-  // Common kernel file locations
   const kernelPaths = options.kernel
     ? [resolve(appRoot, options.kernel)]
     : [
@@ -103,7 +84,6 @@ async function loadScheduleKernel(options: ScheduleOptions = {}): Promise<{ task
       try {
         const mod = await import(pathToFileURL(kernelPath).href)
 
-        // Look for common export patterns
         const scheduleFunction =
           mod.scheduleTasksKernel ||
           mod.schedule ||
@@ -194,9 +174,6 @@ export function getNextRunTime(
   return null
 }
 
-/**
- * Format time difference as human readable.
- */
 function formatTimeUntil(date: Date): string {
   const now = new Date()
   const diff = date.getTime() - now.getTime()
@@ -213,9 +190,6 @@ function formatTimeUntil(date: Date): string {
   return 'in < 1 min'
 }
 
-/**
- * List all scheduled tasks.
- */
 export async function listScheduledTasks(options: ScheduleOptions = {}): Promise<void> {
   const kernel = await loadScheduleKernel(options)
 
@@ -253,7 +227,6 @@ export async function listScheduledTasks(options: ScheduleOptions = {}): Promise
     return
   }
 
-  // Build table data
   const rows: string[][] = []
 
   for (const task of kernel.tasks) {
@@ -266,23 +239,19 @@ export async function listScheduledTasks(options: ScheduleOptions = {}): Promise
     ])
   }
 
-  // Print header
   console.log('')
   console.log('Scheduled Tasks')
   console.log('================')
   console.log('')
 
-  // Print table
   const headers = ['Name', 'Expression', 'Next Run', 'Timezone']
   const colWidths = headers.map((h, i) =>
     Math.max(h.length, ...rows.map((r) => r[i].length))
   )
 
-  // Header row
   console.log(headers.map((h, i) => h.padEnd(colWidths[i])).join('  '))
   console.log(colWidths.map((w) => '-'.repeat(w)).join('  '))
 
-  // Data rows
   for (const row of rows) {
     console.log(row.map((c, i) => c.padEnd(colWidths[i])).join('  '))
   }
@@ -291,9 +260,6 @@ export async function listScheduledTasks(options: ScheduleOptions = {}): Promise
   console.log(`Total: ${kernel.tasks.length} task${kernel.tasks.length === 1 ? '' : 's'}`)
 }
 
-/**
- * Run scheduled tasks.
- */
 export async function runScheduledTasks(options: ScheduleRunOptions = {}): Promise<void> {
   const kernel = await loadScheduleKernel(options)
 
@@ -302,7 +268,6 @@ export async function runScheduledTasks(options: ScheduleRunOptions = {}): Promi
     return
   }
 
-  // Filter by task name if specified
   const tasksToRun = options.task
     ? kernel.tasks.filter((t) => t.name === options.task)
     : kernel.tasks

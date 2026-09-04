@@ -11,8 +11,7 @@ function writeJson(path: string, value: unknown): void {
 
 /**
  * Import the bundle in a fresh process, like Lambda does, and return what its
- * `http` export produces. Tests vary only that export via `scaffoldApp`'s
- * `entry` option; running out-of-process is required because `bun test
+ * `http` export produces. Out-of-process is required because `bun test
  * --isolate` resolves an in-process dynamic import of a top-level-await module
  * before the wrapper has settled.
  */
@@ -49,15 +48,12 @@ const SDK_TRANSPORT_MARKER = 'fake-sdk-transport'
 
 /**
  * A stand-in for `@modelcontextprotocol/sdk` inside the scaffolded app.
- *
- * Deliberately without an `exports` map: a subpath under one that is slightly
- * wrong fails to resolve and reads exactly like the stub still intercepting,
- * which is the verdict these tests exist to distinguish. Legacy path
- * resolution has no such failure mode.
- *
- * Both subpaths matter and for different reasons — `webStandardStreamableHttp.js`
- * is the entry `stubbableDevOnlyModules` releases, and `server/index.js` is one
- * `DEV_ONLY_MODULES` never named, so only the SDK-prefix catch-all can stub it.
+ * Deliberately without an `exports` map: a slightly wrong subpath under one
+ * fails to resolve and reads exactly like the stub still intercepting, the
+ * verdict these tests exist to distinguish. Both subpaths matter —
+ * `webStandardStreamableHttp.js` is the entry `stubbableDevOnlyModules`
+ * releases, and `server/index.js` is one `DEV_ONLY_MODULES` never named, so only
+ * the SDK-prefix catch-all can stub it.
  */
 function installFakeMcpSdk(root: string): void {
   const pkg = join(root, 'node_modules/@modelcontextprotocol/sdk')
@@ -76,12 +72,11 @@ function installFakeMcpSdk(root: string): void {
 
 /**
  * An entry importing both SDK subpaths and reporting what it got.
- *
  * `server/index.js` comes in as a *namespace*: the catch-all stub for an
- * unlisted subpath is a bare `throw` with no exports at all, so a named import
- * of it fails the bundle rather than the bundled module — which would make the
- * stubbed and unstubbed cases fail at different stages and need different
- * assertions. A namespace import bundles either way and throws on evaluation.
+ * unlisted subpath is a bare `throw` with no exports, so a named import would
+ * fail the bundle rather than the bundled module — making the stubbed and
+ * unstubbed cases fail at different stages. A namespace import bundles either
+ * way and throws on evaluation.
  */
 const SDK_ENTRY: ScaffoldOptions['entry'] = {
   preamble: [
@@ -219,9 +214,9 @@ describe('buildLambdaOutput', () => {
 
     await buildLambdaOutput({ rootDir: root, skipAppBuild: true })
 
-    // Imported in a fresh process, like Lambda does: the wrapper's top-level
-    // await must settle before the exports are read, and `bun test --isolate`
-    // resolves a dynamic in-process import of such a module too early.
+    // A fresh process, like Lambda: the wrapper's top-level await must settle
+    // before the exports are read, and `bun test --isolate` resolves a dynamic
+    // in-process import of such a module too early.
     const probe = [
       `const module = await import(${JSON.stringify(pathToFileURL(join(root, '.lambda/function/handler.js')).href)})`,
       'console.log(JSON.stringify({',
@@ -274,15 +269,12 @@ describe('buildLambdaOutput', () => {
   })
 
   test('should define import.meta.url so `new URL("../db/migrations", import.meta.url)` resolves against the function root', async () => {
-    // Regression test: config/database.ts and config/app.ts (both the
-    // scaffolded default template and examples/blog) resolve their
+    // Regression test: config/database.ts and config/app.ts resolve their
     // migrations/seeders folders via `new URL('../db/migrations',
-    // import.meta.url)` from a file one directory below the app root
-    // (config/). Left undefined, every module in the single bundled
-    // output shares one real import.meta.url — the deployed
-    // `file:///var/task/handler.js` — collapsing that expression to
-    // `/var/db/migrations` instead of `/var/task/db/migrations`, silently
-    // skipping configureOrm()/seedDatabase() in production.
+    // import.meta.url)` from one directory below the app root. Left undefined,
+    // every module in the single bundled output shares the deployed
+    // `file:///var/task/handler.js`, collapsing that to `/var/db/migrations` and
+    // silently skipping configureOrm()/seedDatabase() in production.
     scaffoldApp(root, {
       entry: {
         preamble: ["const resolved = new URL('../db/migrations', import.meta.url)"],
@@ -465,12 +457,11 @@ describe('buildLambdaOutput', () => {
 
     await buildLambdaOutput({ rootDir: root, skipAppBuild: true })
 
-    // Two separate mechanisms had to stop firing, and the markers tell them
-    // apart from "resolved nothing": `webStandardStreamableHttp.js` is the
-    // entry the stub map releases, and `server/index.js` is one no entry ever
-    // named — only the SDK-prefix catch-all could have stubbed it, and
-    // @guren/plugin-mcp imports it *statically*, so a catch-all still in
-    // force would leave the endpoint just as compiled shut.
+    // Two separate mechanisms had to stop firing, and the markers tell them apart
+    // from "resolved nothing": `webStandardStreamableHttp.js` is the entry the
+    // stub map releases, and `server/index.js` is one no entry ever named — only
+    // the catch-all could have stubbed it, and @guren/plugin-mcp imports it
+    // *statically*, so a catch-all still in force leaves the endpoint shut.
     expect(probeHttpExport(root)).toBe(`${SDK_SERVER_INDEX_MARKER}|${SDK_TRANSPORT_MARKER}`)
   })
 
@@ -492,9 +483,9 @@ describe('buildLambdaOutput', () => {
 
     await buildLambdaOutput({ rootDir: root, skipAppBuild: true })
 
-    // The stub's throw is a *function body*, so importing succeeds and
-    // calling is what fails — assert on the bundle text rather than on a
-    // process exit code, which would pass for the wrong reason.
+    // The stub's throw is a *function body*, so importing succeeds and calling is
+    // what fails — asserted on the bundle text rather than on a process exit
+    // code, which would pass for the wrong reason.
     const bundle = readFileSync(join(root, '.lambda/function/handler.js'), 'utf8')
     expect(bundle).toContain('The MCP endpoint is unavailable on AWS Lambda')
     expect(bundle).not.toContain('fake-sdk-mcp-server')

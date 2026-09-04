@@ -1,9 +1,7 @@
-// Every zod schema built after this import parses through a compiled fast
-// path. Keep it the first import so it runs before any module that defines
-// schemas. It honors z.config({ jitless: true }) for CSP-restricted runtimes
-// and never throws — unsupported schemas keep the regular parser. One caveat:
-// on invalid input, refinements/transforms can run twice (fast path, then
-// fallback), so keep .refine()/.transform() free of side effects.
+// Every zod schema built after this import parses through a compiled fast path,
+// so keep it the first import. It honors z.config({ jitless: true }) and never
+// throws. Caveat: on invalid input a refinement/transform can run twice (fast
+// path, then fallback), so keep them free of side effects.
 import 'zod/compile'
 import { fileURLToPath } from 'node:url'
 import {
@@ -32,14 +30,11 @@ import '../config/inertia.js'
 
 const secureCookies = process.env.NODE_ENV === 'production' && !process.env.CI
 
-// The Host header is client-controlled, so production should answer only to the
-// host this app is deployed as, which APP_URL carries.
-//
-// Read at module scope, where not every platform has populated process.env yet
-// (the Cloudflare worker imports this module before wrangler `vars` land). A
-// missing value therefore warns and leaves the check off, rather than throwing
-// and stopping the app from booting at all. Emailed links do not depend on this
-// — app/Auth/AppUrl.ts resolves those per request and fails closed there.
+// The Host header is client-controlled, so production answers only to the host
+// APP_URL carries. Read at module scope, where not every platform has populated
+// process.env yet (a Cloudflare worker imports this before wrangler `vars`
+// land), so a missing value warns and leaves the check off rather than blocking
+// boot. Emailed links fail closed separately, in app/Auth/AppUrl.ts.
 function hostAuthorization() {
   const exclude = ['/health']
 
@@ -81,9 +76,9 @@ const app = createApp({
   ],
   i18n: {
     supported: ['en', 'ja'],
-    // Monorepo artifact: tests can boot this app with cwd = repo root, so
-    // anchor to this file instead of relying on the cwd-relative 'lang'
-    // default. A scaffolded app (cwd = app root) does not need this.
+    // Monorepo artifact: tests boot this app with cwd = repo root, so anchor to
+    // this file rather than the cwd-relative 'lang' default. A scaffolded app
+    // does not need this.
     path: fileURLToPath(new URL('../lang', import.meta.url)),
   },
   auth: {

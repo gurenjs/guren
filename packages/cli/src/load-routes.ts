@@ -7,43 +7,23 @@ import { DEFAULT_ROUTES_FILE, REGISTRAR_EXPORT_NAMES, REGISTRAR_PATTERN } from '
 
 type RouteRegistrar = (router: Router) => void | Promise<void>
 
-// Re-exported so the many commands that resolve the routes entry file keep
-// importing it from here; the constant lives beside the registrar name
-// contract, which the scaffolders need without pulling in `@guren/core`.
+// Lives beside the registrar name contract, which the scaffolders need without
+// pulling in `@guren/core`; re-exported so route-resolving commands find it.
 export { DEFAULT_ROUTES_FILE } from './route-registrar'
 
 export interface RoutesFileTarget {
   /** The path to load, as given or as defaulted. */
   path: string
-  /**
-   * Nothing to load, and that is a legitimate shape rather than a failure —
-   * so the caller degrades to a route-less view in silence.
-   */
+  /** Nothing to load, legitimately — the caller degrades in silence. */
   silentlyAbsent: boolean
 }
 
 /**
  * Which routes file to load, and whether its absence is an answer or a
- * failure.
- *
- * Two rules in one place because they only make sense together. An app with
- * no routes file at all is legitimate — api-only, mid-scaffold — and reports
- * nothing; `guren check` is where a missing entry file is diagnosed. But a
- * caller that *named* the file is a different question: a path that is not
- * there is a typo or a wrong app root, and reporting "no routes" for it is
- * the confident wrong answer #482 exists to prevent.
- *
- * An empty value names nothing, so `--routes=` is the default path, not a
- * file called "". Left to each call site, that distinction went wrong the
- * same way twice: `--health=` applied named-file strictness to the default
- * *search*, and `--routes=` resolved to the app root and reported
- * `Cannot find module '<app root>'` — a diagnostic naming a directory the
- * user never typed.
- *
- * Every caller that degrades a missing routes file asks through here, because
- * `guren context`, `guren context <Entity>` and `spec:generate` must not
- * disagree about the same app — and have: #482 fixed the entity bundle's
- * half of this rule and left the other two spelling it themselves.
+ * failure. Missing is legitimate for an unnamed default (api-only,
+ * mid-scaffold) and a typo or wrong app root for a path the caller *named*
+ * (#482). An empty value names nothing, so `--routes=` is the default path.
+ * Every degrading caller asks here, so `context` and `spec:generate` agree.
  */
 export async function resolveRoutesFile(
   cwd: string,
@@ -95,23 +75,12 @@ function resolveGurenModule(moduleExports: Record<string, unknown>): GurenModule
 }
 
 /**
- * Every load here is a plain `import()` of the file URL, so a process that
- * calls `loadRouteDefinitions()` twice sees the route graph as it was on the
- * *first* call. Bun keys `.ts` modules on the resolved path and ignores the
- * query string, so the usual `?v=<timestamp>` cache-busting trick does not
- * re-evaluate anything (verified on Bun 1.3.11 and 1.3.14, for both `.ts` and
- * `.js`), and Bun exposes no way to evict an ES module. A query-string variant
- * would also unify with the plain `routes/web.js` specifier an app boots
- * with, making that startup import the first load. Transitive imports —
- * controllers, a module's own `routes.ts` — are never re-evaluated on any
- * runtime either, so no entry-file-only trick could make the whole graph
- * fresh even if Bun did honor the query string.
- *
- * That is fine for one-shot CLI commands and the Vite plugin (which spawns
- * `guren` as a child process), so every call there is already a fresh
- * process. Long-lived in-process callers must instead run the CLI in a fresh
- * child process themselves — see `createFreshContextApi()` in
- * `fresh-context.ts`, used by the long-lived MCP dev server.
+ * A plain `import()`, so a second `loadRouteDefinitions()` in one process sees
+ * the route graph as it was on the first call. Bun keys `.ts` modules on the
+ * resolved path and ignores the query string (verified on Bun 1.3.11 and
+ * 1.3.14), so `?v=<timestamp>` busts nothing, and no runtime re-evaluates the
+ * transitive imports anyway. Fine for one-shot commands; a long-lived caller
+ * must spawn a fresh child process — see `createFreshContextApi()`.
  */
 function importUrl(file: string): string {
   return pathToFileURL(file).href
@@ -122,16 +91,11 @@ const ROUTES_MISSING_CONSEQUENCE =
   'its routes will be missing from generated types, audit results, and the OpenAPI spec'
 
 /**
- * Loads a `modules/<name>/index.ts` and returns its `defineModule()` result,
- * or `undefined` (with a warning) if the module can't be imported or doesn't
- * export a recognizable `GurenModule`. Non-fatal on purpose — this is a
- * directory-scan discovery, so a module mid-scaffold or a stray directory
- * under `modules/` shouldn't break `guren codegen`/`audit`/`routes`/
- * `openapi:generate` for the whole app. The warning is always logged via
- * consola *and* appended to `warnings` when the caller passes one (`guren
- * audit` turns these into structured findings, so a skipped module's
- * unaudited routes surface in `--json` output and can fail CI, not just
- * scroll past in a console log).
+ * Non-fatal on purpose: this is a directory scan, so a module mid-scaffold or
+ * a stray `modules/` directory must not break codegen for the whole app. The
+ * warning also lands in `warnings` when passed — `guren audit` turns those
+ * into structured findings, so a skipped module's routes can fail CI rather
+ * than scroll past in a console log.
  */
 async function loadGurenModule(appRoot: string, moduleName: string, warnings?: string[]): Promise<GurenModule | undefined> {
   const indexPath = resolve(appRoot, 'modules', moduleName, 'index.ts')
@@ -163,30 +127,13 @@ async function loadGurenModule(appRoot: string, moduleName: string, warnings?: s
 }
 
 /**
- * Loads every route in the app — the top-level `routesFile` plus every
- * `modules/*` module's own routes, mounted the same way `Application`
- * mounts them at boot (via the shared `mountModuleRoutes()`) — so
- * `guren codegen`/`audit`/`routes`/`openapi:generate` see exactly the
- * routes that will actually serve. `appRoot` is required (not derived from
- * `routesFile`) because `--routes <file>` lets callers point at a routes
- * file anywhere, including nested under a `routes/` directory — `dirname()`
- * of that path is not reliably the app root modules live under.
- *
- * Module discovery is directory-scan based (any `modules/<name>/` present),
- * not `createApp({ modules })`-based — consistent with how `guren check
- * --arch`'s derived module boundary rules already treat module presence.
- * A module directory that exists on disk but isn't passed to `createApp()`
- * will still show up here (typed routes, audit coverage) even though it
- * won't actually be mounted at runtime.
- *
- * `moduleWarnings`, when passed, collects one message per module that was
- * skipped (import failure or no recognizable `GurenModule` export) — see
- * `loadGurenModule`.
- *
- * `moduleProvenance`, when passed, receives one entry per returned
- * definition (same order): the module name that mounted the route, or
- * `null` for routes from the top-level routes file. Lets entity-scoped
- * consumers attribute routes to a bounded context.
+ * Every route in the app, module routes mounted through the shared
+ * `mountModuleRoutes()` so the static analyses see exactly what will serve.
+ * `appRoot` is required rather than derived: `--routes <file>` may point
+ * anywhere. Discovery is directory-scan based, like `check --arch`, so a
+ * module never passed to `createApp()` shows up here without mounting at
+ * runtime. `moduleProvenance` receives one entry per returned definition in
+ * the same order: the mounting module's name, or `null` for `routesFile`.
  */
 export async function loadRouteDefinitions(
   routesFile: string,
@@ -224,15 +171,9 @@ export async function loadRouteDefinitions(
 }
 
 /**
- * What a `route:list`-shaped command needs before it can report anything: the
- * app root, the routes file under it, and the definitions that file registers
- * — with a load failure re-thrown naming the file it came from.
- *
- * Shared rather than repeated because the preamble is not incidental: the
- * resolution rule (`--app` defaults to cwd, `--routes` resolves against it,
- * both default the same way) is what makes two commands agree about which app
- * they are describing, and a bare import failure with no file in it is the
- * least actionable error a CLI can print.
+ * The preamble every `route:list`-shaped command shares, so they cannot
+ * disagree about which app they describe: `--app` defaults to cwd, `--routes`
+ * resolves against it, and a load failure is re-thrown naming the file.
  */
 export async function loadAppRouteDefinitions(
   options: { appRoot?: string; routesFile?: string } = {},

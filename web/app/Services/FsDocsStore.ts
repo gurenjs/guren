@@ -1,6 +1,6 @@
 // Live filesystem store: reads docs/{en,ja} and renders markdown per request.
-// Never import this module statically from the request path — DocsStore.ts
-// loads it via dynamic import only when the prebuilt store is not selected.
+// Never import statically from the request path — DocsStore.ts loads it via
+// dynamic import only when the prebuilt store is not selected.
 import { readdir, readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
@@ -42,7 +42,7 @@ function findNearestDocsDir(startDir: string, maxDepth = 6): string | null {
   return null
 }
 
-// Resolve docs relative to the repository root so it works regardless of where the server is launched or bundled.
+// Relative to the repository root, so the launch directory does not matter.
 export function resolveDefaultDocsDir(options: ResolveDocsDirOptions = {}): string {
   const envDir = options.envDocsDir ?? process.env.GUREN_DOCS_DIR ?? process.env.DOCS_DIR
   if (envDir) {
@@ -63,7 +63,6 @@ export function resolveDefaultDocsDir(options: ResolveDocsDirOptions = {}): stri
     return importMetaMatch
   }
 
-  // Fallback to the original heuristic; this keeps behavior stable even if no docs directory is found.
   return resolve(importMetaDir, '../../..', 'docs')
 }
 

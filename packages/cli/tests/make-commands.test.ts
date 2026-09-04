@@ -21,22 +21,16 @@ import { makeFeature as scaffoldFeature } from '../src/make-feature'
 import { parseFieldsString } from '../src/fields'
 import type { WriterOptions } from '../src/utils'
 
-// A fixed, predictable path under the shared OS temp dir let another process
-// pre-plant a symlink there before a test wrote through it. mkdtempSync's
-// random suffix is what makes the directory this test writes into
-// unguessable, so it has to be created fresh per test rather than reused.
+// A predictable path under the shared OS temp dir lets another process
+// pre-plant a symlink there; mkdtempSync's random suffix is what makes this
+// directory unguessable, so it is created fresh per test.
 let TEST_DIR: string
 
 /**
  * Binds a generator to the per-test workspace, so no test has to chdir() the
  * shared process, and fails if the generator ignores the directory it was
- * given.
- *
- * The check is what makes the assertions below mean anything. They match on
- * the returned path (`toContain('app/Jobs/SendEmailJob.ts')`) and on the file
- * existing — both of which still hold when `cwd` is dropped, because the
- * generator really did write that file, just into the checkout instead. Only
- * comparing against the workspace root can tell the two apart.
+ * given. Path and existence assertions alone still hold when `cwd` is dropped
+ * — the generator wrote that file, just into the checkout instead.
  */
 function inWorkspace<O extends WriterOptions, R>(
   scaffold: (name: string, options?: O) => Promise<R>,
@@ -244,9 +238,8 @@ describe('CLI make:* commands', () => {
       expect(content).toContain("console.info('Ran UserSeeder.')")
     })
 
-    // The context carries the dialect's drizzle database: annotating every
-    // seeder with the PostgreSQL one leaves a MySQL/SQLite app unable to insert
-    // into its own schema.
+    // The context carries the dialect's drizzle database, so a PostgreSQL
+    // annotation leaves a MySQL/SQLite app unable to insert into its schema.
     it('types the context for the schema dialect', async () => {
       fs.mkdirSync(path.join(TEST_DIR, 'db'), { recursive: true })
       fs.writeFileSync(
@@ -291,9 +284,8 @@ describe('CLI make:* commands', () => {
       expect(content).toContain('publishedAt: z.coerce.date().nullable().optional(),')
     })
 
-    // make:feature invents title/body so its model, controller, and pages agree
-    // with each other. A standalone validator has no siblings to agree with, so
-    // inheriting that default would be two fields the caller has to delete.
+    // make:feature invents title/body so its own files agree; a standalone
+    // validator has no siblings, so that default is two fields to delete.
     it('leaves the payload empty rather than inheriting make:feature defaults', async () => {
       const content = fs.readFileSync(await makeValidator('Invoice'), 'utf-8')
       const payload = content.split('export const InvoicePayloadSchema = z.object({\n')[1]?.split('\n})')[0]
@@ -320,10 +312,9 @@ describe('CLI make:* commands', () => {
       expect(fs.existsSync(result)).toBe(true)
     })
 
-    // The controller make:feature generates imports these three schema names by
-    // hand, so the two commands producing different files is a broken build.
-    // Comparing the bytes is what makes that failure reachable — asserting
-    // substrings on makeValidator alone would stay green through any drift.
+    // The controller make:feature generates imports these three schema names
+    // by hand, so the two commands producing different files is a broken
+    // build; substring assertions would stay green through that drift.
     it('produces byte-identical output to the validator make:feature scaffolds', async () => {
       const fields = 'title:string,views:number,publishedAt:date?'
 
@@ -491,9 +482,8 @@ describe('CLI make:* commands', () => {
       const result = await makeChannel('Room', { presence: true })
       const content = fs.readFileSync(result, 'utf-8')
       expect(content).toContain('extends PresenceChannel')
-      // Not `join`: the base class already has `join(member)`, and overriding
-      // it with an incompatible signature is how the previous template ended up
-      // never adding a member.
+      // Not `join`: the base class already has `join(member)`, and an
+      // incompatible override silently never adds a member.
       expect(content).toContain('async authorizeJoin(_channelName: string, user: unknown): Promise<PresenceMember | null>')
     })
 

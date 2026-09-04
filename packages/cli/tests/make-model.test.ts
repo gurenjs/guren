@@ -112,7 +112,6 @@ describe('makeModel', () => {
     const result = await makeModel('UserProfile')
 
     const content = await readFile(result, 'utf8')
-    // UserProfile -> userProfiles (camelCase + pluralized)
     expect(content).toContain('import { userProfiles }')
   })
 })

@@ -11,24 +11,15 @@ const factory = definePlugin<CloudflarePluginConfig>({
   register() {},
 })
 
-/**
- * Register the Cloudflare plugin.
- *
- * @example
- * ```typescript
- * createApp({ providers: [cloudflarePlugin()] })
- * ```
- */
+/** Register the Cloudflare plugin: `createApp({ providers: [cloudflarePlugin()] })`. */
 export function cloudflarePlugin(config: CloudflarePluginConfig = {}): ServiceProviderConstructor {
   return factory(config)
 }
 
 /**
- * Kept for compatibility with everything that already imports these from the
- * root. **Application code should import them from
- * `@guren/plugin-cloudflare/env` instead**: this entry also exports
- * `buildCloudflareOutput`, which drags the deploy generator and its node
- * builtins in behind it. See the header of `./env`.
+ * Compatibility re-export. **Application code should import these from
+ * `@guren/plugin-cloudflare/env`**: this entry also exports `buildCloudflareOutput`,
+ * which drags the deploy generator and its node builtins in behind it.
  */
 export { captureWorkersEnv, getWorkersEnv, resetWorkersEnv } from './env'
 export { createWorkersHandler } from './handler'

@@ -1,9 +1,7 @@
 /**
- * Generates a typed API client registry from route definitions.
- *
- * Combines route manifest data with Resource data types to produce
- * a fully typed client interface for consuming Guren APIs from
- * separate frontend applications.
+ * Generates a typed API client registry from route definitions, combining the
+ * route manifest with Resource data types so a separate frontend can consume
+ * Guren APIs with end-to-end types.
  */
 import { resolve } from 'node:path'
 import type { ResourceResponseShape } from '@guren/core'
@@ -23,19 +21,16 @@ export interface RouteDefinitionLike {
     output?: unknown
   }
   /**
-   * Serialized response hint from `RouteContractOptions.resource`: a Resource
-   * class name, a single-element array (a collection), or an envelope object
-   * of either.
+   * Serialized `RouteContractOptions.resource`: a class name, a single-element
+   * array (a collection), or an envelope object of either.
    */
   resource?: ResourceResponseShape
 }
 
 /**
- * The subset of data-types' ResourceDefinition the client generator needs: the
- * class name a hint serializes to, the `Data` member it resolves to (e.g.
- * 'PostResource' → `Data.Post`, or `Data.BillingPost` under
- * `modules/billing/`), and where it was declared so a warning can name the
- * file. A `null` dataName is a class that exists but was not emitted.
+ * The class name a hint serializes to, the `Data` member it resolves to, and
+ * where it was declared so a warning can name the file. A `null` dataName is a
+ * class that exists but was not emitted.
  */
 export type ResourceTypeRef =
   Pick<ResourceDefinition, 'className' | 'dataName'> & Partial<Pick<ResourceDefinition, 'filePath'>>
@@ -43,11 +38,7 @@ export type ResourceTypeRef =
 export interface GenerateApiClientOptions extends WriterOptions {
   appRoot?: string
   outputFile?: string
-  /**
-   * Resource classes discovered by `generateDataTypes()`. Routes declaring a
-   * `resource` hint resolve their response types against these — without
-   * them every hint is "unknown Resource" and stays untyped.
-   */
+  /** Resource classes from `generateDataTypes()`; without them every hint stays untyped. */
   resources?: ResourceTypeRef[]
 }
 
@@ -66,9 +57,7 @@ export async function generateApiClientTypes(
   const appRoot = resolveAppRoot(options)
   const outputFile = resolve(appRoot, options.outputFile ?? DEFAULT_OUTPUT_FILE)
 
-  // Returned rather than logged (same contract as generateOpenApiSpec), so
-  // programmatic callers — the MCP codegen tool above all — can surface them
-  // to whoever asked for the regeneration.
+  // Returned rather than logged, same contract as generateOpenApiSpec.
   const warnings: string[] = []
   const module = buildApiClientContent(definitions, { resources: options.resources, warnings })
 
@@ -84,10 +73,9 @@ export interface BuildApiClientOptions {
 }
 
 /**
- * What resolving one `resource` hint produced, and everything a caller needs
- * to explain a refusal. Shared with `agents-types.ts`: an agent tool describes
- * its response from the same hint this client types `json()` from, so the two
- * cannot be allowed to resolve a class name differently.
+ * What resolving one `resource` hint produced, plus what a caller needs to
+ * explain a refusal. Shared with `agents-types.ts` so the two cannot resolve a
+ * class name differently.
  */
 export interface ResourceShapeResolution {
   /** The rendered type, with `unknown` in place of every leaf that failed. */
@@ -109,9 +97,8 @@ interface ResourceShapeContext<T extends ResourceTypeRef> {
 }
 
 /**
- * Resource classes keyed by class name. Grouping rather than keying by name is
- * what lets arity refuse the ones that cannot be attributed to a single
- * declaration: class names are unique per app root but not across them — the
+ * Grouped rather than keyed, so arity can refuse a name that cannot be
+ * attributed: class names are unique per app root but not across them — the
  * project root and any `modules/<name>/` may each declare a `PostResource`.
  */
 export function groupResourcesByClassName<T extends ResourceTypeRef>(
@@ -127,12 +114,9 @@ export function groupResourcesByClassName<T extends ResourceTypeRef>(
 }
 
 /**
- * Render a `resource` response hint as a type, one leaf at a time.
- *
- * `renderLeaf` is what varies between callers and nothing else: the API client
- * emits `Data.Post`, an agent tool's description embeds the extracted type
- * text. The refusal rules — which class names resolve and which do not — stay
- * here so one hint cannot mean two things.
+ * Render a `resource` response hint as a type. `renderLeaf` is the only thing
+ * that varies between callers; the refusal rules stay here so one hint cannot
+ * mean two things.
  */
 export function resolveResourceShapeType<T extends ResourceTypeRef>(
   shape: ResourceResponseShape,
@@ -156,11 +140,8 @@ function renderResourceShape<T extends ResourceTypeRef>(
 ): string {
   if (typeof shape === 'string') {
     const declared = context.declared.get(shape) ?? []
-    // A hint carries only the class name (`serializeResourceHint` in the
-    // router), so a name two app roots both declare cannot be attributed to
-    // either — guessing would type the response as the other one's payload.
-    // One declaration with no emitted type is the same refusal for a different
-    // reason, and data.gen's own warnings say which.
+    // A hint carries only the class name, so a name two app roots both declare
+    // cannot be attributed to either — guessing types the other one's payload.
     if (declared.length !== 1 || declared[0]!.dataName === null) {
       ;(declared.length === 0 ? context.missing : context.unresolved).add(shape)
       return 'unknown'
@@ -211,10 +192,9 @@ export function buildApiClientContent(
 
     const context = resolveResourceShapeType(d.resource, declared, (ref) => `Data.${ref.dataName}`)
     const rendered = context.type
-    // All-or-nothing: a response typed around an unresolved leaf would assert
-    // a shape the server does not send. Untyped stays honest. Both sets are
-    // reported — a hint naming one unknown class and one ambiguous class has
-    // two things wrong with it, and fixing either alone leaves it untyped.
+    // All-or-nothing: a response typed around an unresolved leaf would assert a
+    // shape the server does not send. Both sets are reported, since fixing
+    // either alone still leaves the response untyped.
     if (context.missing.size > 0) {
       options.warnings?.push(
         `Route "${d.name}" declares a resource response hint referencing `

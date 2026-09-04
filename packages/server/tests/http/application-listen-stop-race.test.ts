@@ -4,18 +4,13 @@ import { Application } from '../../src/http/Application'
 import { gurenGlobals, resetGurenGlobals } from './vite-dev-server-fixture'
 
 /**
- * `listen()` and `stop()` interleaving.
+ * `listen()` and `stop()` interleaving. Both await a server `stop()` before
+ * touching the fields recording which server this process runs, so a resuming
+ * call must not clear the *newer* server's bookkeeping: a socket with no instance
+ * handle and no signal handlers stays bound for the process lifetime.
  *
- * Both await a server `stop()` before they touch the fields that record which
- * server this process is running, so either can resume to find the state it
- * remembered replaced by a live server. What must never happen is that the
- * resuming call clears the *newer* server's bookkeeping: a socket with no
- * instance handle and no signal handlers is bound for the rest of the process
- * lifetime, and nothing left can close it.
- *
- * `Bun.serve` is stubbed throughout — these cases are about which references
- * survive, and a stub reports that far more precisely than a real socket. The
- * sibling `application-stop.test.ts` binds real ones.
+ * `Bun.serve` is stubbed throughout, since these cases are about which references
+ * survive; the sibling `application-stop.test.ts` binds real ones.
  */
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -44,10 +39,8 @@ describe('Application.listen and Application.stop interleaving', () => {
   })
 
   /**
-   * The graceful/forced asymmetry is Bun's own: `stop(false)` waits for
-   * in-flight requests, `stop(true)` does not. It is what lets `listen()`'s
-   * forced stop run to completion inside the window a graceful `stop()` is
-   * still waiting in.
+   * Bun's own asymmetry: `stop(false)` waits for in-flight requests, `stop(true)`
+   * does not — so a forced stop completes inside a graceful stop's wait window.
    */
   it('leaves the new server owned when a listen() lands inside a graceful stop()', async () => {
     const stops: Array<{ id: string; force: unknown }> = []
@@ -87,16 +80,10 @@ describe('Application.listen and Application.stop interleaving', () => {
   })
 
   /**
-   * The same hazard between two applications. `listen()`'s force-stop of the
-   * previous server used to clear the process-wide slot unconditionally once it
-   * finished — including when a `listen()` elsewhere had already repointed that
-   * slot at a server of its own.
-   *
-   * The `listen()` doing the stale cleanup then fails to bind, which is what
-   * makes the damage stick: it never sets a server of its own into the slot it
-   * just wiped. The slot is what the SIGINT/SIGTERM/exit teardown reads, so a
-   * wiped slot means the surviving app's socket is never closed at shutdown —
-   * and `address` reports nothing is listening while it is.
+   * The same hazard between two applications: a `listen()` whose force-stop
+   * finishes late must not wipe a slot another `listen()` has already repointed,
+   * least of all when its own bind then fails. The slot is what the
+   * SIGINT/SIGTERM/exit teardown reads, so a wiped one never closes the socket.
    */
   it('keeps the active-server slot when a stale cleanup finishes late', async () => {
     process.env.GUREN_STRICT_PORT = '1'
@@ -154,11 +141,9 @@ describe('Application.listen and Application.stop interleaving', () => {
   })
 
   /**
-   * Two `listen()` calls racing on one instance: the empty active slot gives
-   * each call's entry force-stop nothing to wait on, so both bind, and the
-   * later assignment used to overwrite the instance handle — leaving the
-   * earlier socket live with nothing holding it. The displaced server has to
-   * be stopped, not dropped.
+   * Two `listen()` calls racing on one instance: the empty active slot lets both
+   * bind, and the later assignment overwrites the instance handle. The displaced
+   * server has to be stopped, not dropped.
    */
   it('stops the server a concurrent listen() on the same instance displaced', async () => {
     const stopped: string[] = []
@@ -192,9 +177,8 @@ describe('Application.listen and Application.stop interleaving', () => {
   })
 
   /**
-   * A `stop` that throws synchronously must be contained like one that
-   * rejects: letting it escape would leave `stop()` rejected with the
-   * instance fields still set and the signal handlers still attached.
+   * A synchronous throw must be contained like a rejection: escaping would leave
+   * the instance fields set and the signal handlers attached.
    */
   it('survives a stop() that throws synchronously, and still releases the app', async () => {
     const server = {
@@ -218,10 +202,8 @@ describe('Application.listen and Application.stop interleaving', () => {
   })
 
   /**
-   * A graceful stop waits on in-flight requests, and a request that never
-   * completes would hold the wait open forever. The bound is the same shape as
-   * the Vite close bound, and abandoning it is safer here: the socket has
-   * already stopped accepting connections, so what is left is a drain.
+   * A graceful stop waits on in-flight requests, so a request that never completes
+   * needs a bound — safe to abandon, since the socket already stopped accepting.
    */
   it('gives up on a stop() that never resolves, and still releases the app', async () => {
     process.env.GUREN_BUN_STOP_TIMEOUT_MS = '50'

@@ -1,9 +1,6 @@
 import { randomBytes, randomUUID, randomInt as cryptoRandomInt } from 'crypto'
 import type { RandomStringOptions } from './types'
 
-/**
- * Character sets for random string generation.
- */
 const CHARSETS = {
   alphanumeric: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789',
   alphabetic: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz',
@@ -14,10 +11,9 @@ const CHARSETS = {
 } as const
 
 /**
- * Map random bytes onto a character set without modulo bias: bytes that fall
- * into the truncated remainder of the 0-255 range are discarded and redrawn,
- * so every character stays equally likely (a plain `byte % chars.length`
- * skews toward the front of the set whenever 256 is not a multiple of it).
+ * Maps random bytes onto a character set without modulo bias: bytes above the
+ * largest multiple of `chars.length` under 256 are discarded and redrawn, so
+ * every character stays equally likely.
  */
 function unbiasedRandomChars(length: number, chars: string): string {
   if (!Number.isInteger(length) || length < 0) {
@@ -28,8 +24,7 @@ function unbiasedRandomChars(length: number, chars: string): string {
   let result = ''
 
   while (result.length < length) {
-    // Over-draw for the expected rejection rate so a second randomBytes
-    // call stays rare even for charsets with high discard ratios.
+    // Over-draw by the expected rejection rate so a second draw stays rare.
     const remaining = length - result.length
     const bytes = randomBytes(Math.ceil((remaining * 256) / limit) + 8)
     for (const byte of bytes) {
@@ -43,16 +38,7 @@ function unbiasedRandomChars(length: number, chars: string): string {
   return result
 }
 
-/**
- * Generate a cryptographically secure random string.
- *
- * @example
- * ```typescript
- * randomString(32) // 32-character alphanumeric string
- * randomString(16, { charset: 'hex' }) // 16-character hex string
- * randomString(24, { charset: 'url-safe' }) // URL-safe string
- * ```
- */
+/** Cryptographically secure random string. */
 export function randomString(
   length: number,
   options: RandomStringOptions = {}
@@ -61,35 +47,19 @@ export function randomString(
   return unbiasedRandomChars(length, CHARSETS[charset])
 }
 
-/**
- * Generate random bytes.
- *
- * @example
- * ```typescript
- * const bytes = random(32) // 32 random bytes
- * ```
- */
+/** Cryptographically secure random bytes. */
 export function random(length: number): Buffer {
   return randomBytes(length)
 }
 
-/**
- * Generate random bytes as hex string.
- */
 export function randomHex(length: number): string {
   return randomBytes(length).toString('hex')
 }
 
-/**
- * Generate random bytes as base64 string.
- */
 export function randomBase64(length: number): string {
   return randomBytes(length).toString('base64')
 }
 
-/**
- * Generate random bytes as URL-safe base64 string.
- */
 export function randomBase64Url(length: number): string {
   return randomBytes(length)
     .toString('base64')
@@ -98,50 +68,20 @@ export function randomBase64Url(length: number): string {
     .replace(/=/g, '')
 }
 
-/**
- * Generate a UUID v4.
- *
- * @example
- * ```typescript
- * const id = uuid() // e.g., '550e8400-e29b-41d4-a716-446655440000'
- * ```
- */
 export function uuid(): string {
   return randomUUID()
 }
 
-/**
- * Generate a secure random integer.
- *
- * @example
- * ```typescript
- * randomInt(1, 100) // Random number between 1 and 100 (inclusive)
- * ```
- */
+/** Secure random integer in `[min, max]` — `max` is inclusive. */
 export function randomInt(min: number, max: number): number {
   return cryptoRandomInt(min, max + 1)
 }
 
-/**
- * Generate a random token suitable for URLs.
- *
- * @example
- * ```typescript
- * const token = urlSafeToken(32) // URL-safe 32-character token
- * ```
- */
+/** URL-safe token of exactly `length` characters. */
 export function urlSafeToken(length: number = 32): string {
   return randomBase64Url(Math.ceil(length * 0.75)).slice(0, length)
 }
 
-/**
- * Generate a secure random password.
- *
- * @example
- * ```typescript
- * const password = generatePassword(16) // Random 16-character password
- * ```
- */
 export function generatePassword(
   length: number = 16,
   options: {
@@ -171,38 +111,16 @@ export function generatePassword(
   return unbiasedRandomChars(length, chars)
 }
 
-/**
- * Generate a random OTP (One-Time Password).
- *
- * @example
- * ```typescript
- * const otp = generateOtp(6) // e.g., '482901'
- * ```
- */
+/** One-time password. */
 export function generateOtp(length: number = 6): string {
   return randomString(length, { charset: 'numeric' })
 }
 
-/**
- * Generate a random slug-friendly string.
- *
- * @example
- * ```typescript
- * const slug = generateSlug() // e.g., 'a8b2c4d6e8'
- * ```
- */
 export function generateSlug(length: number = 10): string {
   return randomString(length, { charset: 'hex' })
 }
 
-/**
- * Shuffle an array using Fisher-Yates algorithm with secure random.
- *
- * @example
- * ```typescript
- * const shuffled = shuffle([1, 2, 3, 4, 5])
- * ```
- */
+/** Fisher-Yates, drawing from the secure source. */
 export function shuffle<T>(array: T[]): T[] {
   const result = [...array]
 
@@ -214,14 +132,6 @@ export function shuffle<T>(array: T[]): T[] {
   return result
 }
 
-/**
- * Pick a random element from an array.
- *
- * @example
- * ```typescript
- * const item = pick(['a', 'b', 'c']) // Random element
- * ```
- */
 export function pick<T>(array: T[]): T {
   if (array.length === 0) {
     throw new Error('Cannot pick from empty array.')
@@ -229,14 +139,6 @@ export function pick<T>(array: T[]): T {
   return array[randomInt(0, array.length - 1)]
 }
 
-/**
- * Pick multiple random elements from an array.
- *
- * @example
- * ```typescript
- * const items = sample(['a', 'b', 'c', 'd'], 2) // Two random elements
- * ```
- */
 export function sample<T>(array: T[], count: number): T[] {
   if (count > array.length) {
     throw new Error('Sample count exceeds array length.')

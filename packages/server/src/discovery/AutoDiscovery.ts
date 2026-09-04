@@ -6,9 +6,6 @@ declare const Bun: {
   }
 }
 
-/**
- * Options for configuring the auto-discovery engine.
- */
 export interface DiscoveryOptions {
   /** Base path for scanning. Defaults to `process.cwd()`. */
   basePath?: string
@@ -22,49 +19,20 @@ export interface DiscoveryOptions {
   events?: boolean
 }
 
-/**
- * Result of the auto-discovery scan.
- */
 export interface DiscoveryResult {
-  /** Discovered service provider classes. */
   providers: Array<new (...args: unknown[]) => unknown>
-  /** Discovered event listeners with their associated event name. */
   listeners: Array<{ event: string; listener: new () => unknown }>
-  /** Discovered job classes. */
   jobs: Array<new () => unknown>
-  /** Discovered event classes. */
   events: Array<new () => unknown>
 }
 
 /**
- * Auto-discovery engine that scans application directories and discovers
- * framework components (providers, listeners, jobs, events).
- *
- * Standalone by design: nothing in `Application` runs this scan, so
- * registration stays explicit — `createApp({ providers: [...] })`, and
- * `defineModule` lists for modules — which is what `guren check` verifies
- * and what bundle-deploy targets (Workers, Vercel, Lambda) require, since a
- * runtime directory scan finds nothing in a bundle. A caller that wants
- * discovery runs the scan itself and feeds each result into the matching
- * registry, as the example below does.
- *
- * Uses `Bun.Glob` to scan directories and dynamic `import()` to load modules.
- *
- * @example
- * ```typescript
- * const discovery = new AutoDiscovery({ basePath: '/app' })
- * const result = await discovery.discover()
- *
- * // Register discovered providers
- * for (const ProviderClass of result.providers) {
- *   providerManager.register(ProviderClass)
- * }
- *
- * // Register discovered listeners
- * for (const { event, listener } of result.listeners) {
- *   eventManager.listen(event, listener)
- * }
- * ```
+ * Scans application directories for providers, listeners, jobs and events via
+ * `Bun.Glob` and dynamic `import()`. Standalone by design: nothing in
+ * `Application` runs it, so registration stays explicit — which is what
+ * `guren check` verifies and what bundle-deploy targets (Workers, Vercel,
+ * Lambda) require, a runtime directory scan finding nothing in a bundle. A
+ * caller that wants discovery runs the scan and registers the results itself.
  */
 export class AutoDiscovery {
   private basePath: string
@@ -80,9 +48,6 @@ export class AutoDiscovery {
     }
   }
 
-  /**
-   * Run the discovery scan across all enabled directories.
-   */
   async discover(): Promise<DiscoveryResult> {
     const [providers, listeners, jobs, events] = await Promise.all([
       this.options.providers ? this.discoverProviders() : Promise.resolve([]),
@@ -94,12 +59,7 @@ export class AutoDiscovery {
     return { providers, listeners, jobs, events }
   }
 
-  /**
-   * Discover service providers in `app/Providers/`.
-   *
-   * A module is considered a provider if it exports a class (default or named)
-   * that has a `register` method (i.e., implements the Provider interface).
-   */
+  /** `app/Providers/`: any exported class with a `register` method. */
   private async discoverProviders(): Promise<Array<new (...args: unknown[]) => unknown>> {
     const dir = join(this.basePath, 'app', 'Providers')
     const modules = await this.scanDirectory(dir)
@@ -117,12 +77,7 @@ export class AutoDiscovery {
     return providers
   }
 
-  /**
-   * Discover event listeners in `app/Listeners/`.
-   *
-   * A listener class must have a `static event` property (string) that indicates
-   * which event it handles, and a `handle` method.
-   */
+  /** `app/Listeners/`: classes with a string `static event` and a `handle` method. */
   private async discoverListeners(): Promise<
     Array<{ event: string; listener: new () => unknown }>
   > {
@@ -146,11 +101,7 @@ export class AutoDiscovery {
     return listeners
   }
 
-  /**
-   * Discover jobs in `app/Jobs/`.
-   *
-   * A job class must have a `handle` method.
-   */
+  /** `app/Jobs/`: classes with a `handle` method. */
   private async discoverJobs(): Promise<Array<new () => unknown>> {
     const dir = join(this.basePath, 'app', 'Jobs')
     const modules = await this.scanDirectory(dir)
@@ -168,11 +119,7 @@ export class AutoDiscovery {
     return jobs
   }
 
-  /**
-   * Discover events in `app/Events/`.
-   *
-   * Any exported class from the Events directory is considered an event class.
-   */
+  /** `app/Events/`: every exported class counts. */
   private async discoverEvents(): Promise<Array<new () => unknown>> {
     const dir = join(this.basePath, 'app', 'Events')
     const modules = await this.scanDirectory(dir)
@@ -188,10 +135,7 @@ export class AutoDiscovery {
     return events
   }
 
-  /**
-   * Scan a directory for TypeScript files using Bun.Glob.
-   * Returns an array of imported modules. Skips `index.ts` barrel files.
-   */
+  /** Imports every `.ts` file in the directory, skipping `index.ts` barrels. */
   private async scanDirectory(dir: string): Promise<Record<string, unknown>[]> {
     const modules: Record<string, unknown>[] = []
 
@@ -199,7 +143,6 @@ export class AutoDiscovery {
       const glob = new Bun.Glob('**/*.ts')
 
       for await (const file of glob.scan({ cwd: dir, absolute: true })) {
-        // Skip index/barrel files
         if (file.endsWith('/index.ts') || file.endsWith('\\index.ts')) {
           continue
         }
@@ -208,7 +151,7 @@ export class AutoDiscovery {
           const mod = (await import(file)) as Record<string, unknown>
           modules.push(mod)
         } catch {
-          // Skip modules that fail to import (e.g., missing dependencies)
+          // A module that fails to import (missing dependency) is skipped.
           continue
         }
       }
@@ -219,9 +162,6 @@ export class AutoDiscovery {
     return modules
   }
 
-  /**
-   * Extract all class constructors (functions) from a module's exports.
-   */
   private extractClasses(mod: Record<string, unknown>): Array<new (...args: unknown[]) => unknown> {
     const classes: Array<new (...args: unknown[]) => unknown> = []
 
@@ -234,29 +174,20 @@ export class AutoDiscovery {
     return classes
   }
 
-  /**
-   * Check if a value is a constructor function (class).
-   */
   private isConstructor(value: unknown): boolean {
     if (typeof value !== 'function') {
       return false
     }
 
-    // Classes have a prototype with a constructor reference back to themselves
+    // A class's prototype points its constructor back at the class.
     const proto = value.prototype
     return proto !== undefined && proto.constructor === value
   }
 
-  /**
-   * Check if a class looks like a service provider (has a `register` method).
-   */
   private isProvider(cls: new (...args: unknown[]) => unknown): boolean {
     return typeof cls.prototype.register === 'function'
   }
 
-  /**
-   * Get the `static event` property from a class, if it exists and is a string.
-   */
   private getStaticEvent(cls: new (...args: unknown[]) => unknown): string | null {
     const eventProp = (cls as unknown as Record<string, unknown>).event
     if (typeof eventProp === 'string' && eventProp.length > 0) {
@@ -265,9 +196,6 @@ export class AutoDiscovery {
     return null
   }
 
-  /**
-   * Check if a class has a `handle` method on its prototype.
-   */
   private hasHandleMethod(cls: new (...args: unknown[]) => unknown): boolean {
     return typeof cls.prototype.handle === 'function'
   }

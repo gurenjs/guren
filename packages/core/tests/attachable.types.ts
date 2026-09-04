@@ -1,10 +1,6 @@
 /**
- * Type-level tests for the Attachable mixin's declaration inference
- * (RFC 0013 §3): collection names, one/many kinds, and variant names are
- * compile-time facts; declaration keys must not shadow table columns.
- *
- * Compiled by the root `tsc --noEmit`; never executed. Modeled on
- * `packages/orm/tests/model.define-options.types.ts`.
+ * Type-level tests for the Attachable mixin's declaration inference (RFC 0013
+ * §3). Compiled by the root `tsc --noEmit`; never executed.
  */
 import { integer, pgTable, serial, text } from 'drizzle-orm/pg-core'
 import { defineModel, SoftDeletes } from '@guren/orm'
@@ -30,8 +26,6 @@ export class Post extends Attachable(defineModel(posts), {
 declare const file: File
 declare const record: { id: number; title: string; body: string; views: number }
 
-// --- collection names are keyof the declaration ---
-
 export async function collectionNames() {
   await Post.attach(1, 'cover', file)
   await Post.attach(1, 'images', file)
@@ -43,16 +37,12 @@ export async function collectionNames() {
   await Post.attachmentUrl(1, 'covr')
 }
 
-// --- sources are bytes only ---
-
 export async function bytesOnly() {
   await Post.attach(1, 'cover', new Uint8Array([1, 2, 3]))
   await Post.attach(1, 'cover', new Blob(['x']))
   // @ts-expect-error path strings are not accepted anywhere in the API
   await Post.attach(1, 'cover', '/etc/passwd')
 }
-
-// --- kinds: detach's attachment id exists only on hasMany ---
 
 export async function detachKinds() {
   await Post.detach(1, 'images', 'attachment-id')
@@ -62,8 +52,6 @@ export async function detachKinds() {
   await Post.detach(1, 'cover', 'attachment-id')
 }
 
-// --- variant names are keyof the collection's declared variants ---
-
 export async function variantNames() {
   await Post.attachmentUrl(1, 'cover', { variant: 'thumb' })
   await Post.attachmentUrl(record, 'cover', { variant: 'og' })
@@ -72,8 +60,6 @@ export async function variantNames() {
   // @ts-expect-error images declared no variants
   await Post.attachmentUrl(1, 'images', { variant: 'thumb' })
 }
-
-// --- withAttachments: hasOne is nullable-single, hasMany is an array ---
 
 export async function withAttachmentsShapes() {
   const [loaded] = await Post.withAttachments([record], ['cover', 'images'])
@@ -92,21 +78,15 @@ export async function withAttachmentsShapes() {
   await Post.withAttachments([record], ['covr'])
 }
 
-// --- attach returns the row shape ---
-
 export async function attachReturn() {
   const attached: AttachmentRecord = await Post.attach(1, 'cover', file)
   void attached
 }
 
-// --- declaration keys must not shadow table columns ---
-
 export class CollidingPost extends Attachable(defineModel(posts), {
   // @ts-expect-error 'title' is a column of posts — the attachment would shadow it
   title: hasOneAttached(),
 }) {}
-
-// --- composes with other mixins, both ways ---
 
 export class SoftPost extends SoftDeletes(
   Attachable(defineModel(posts), { cover: hasOneAttached() }),

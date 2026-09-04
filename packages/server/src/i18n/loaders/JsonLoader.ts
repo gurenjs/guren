@@ -3,22 +3,10 @@ import { join, basename, extname } from 'node:path'
 import type { TranslationLoader, TranslationMessages } from '../types'
 
 /**
- * JSON file-based translation loader.
- *
- * Expected directory structure:
- * path/
- *   en/
- *     messages.json
- *     validation.json
- *   ja/
- *     messages.json
- *     validation.json
- *
- * This layout (locale subdirectories, namespace = file name) is a contract
- * shared with the CLI: `guren codegen` (packages/cli/src/i18n-types.ts) and
- * `guren check --i18n` (packages/cli/src/i18n-check.ts) re-implement the
- * same walk statically. Changing the layout or parse tolerance here strands
- * them on the old contract — update both together.
+ * JSON file-based translation loader: `<path>/<locale>/<namespace>.json`.
+ * That layout is a contract shared with the CLI — `guren codegen` and
+ * `guren check --i18n` re-implement the same walk statically, so a change to
+ * the layout or the parse tolerance has to be made in all three.
  */
 export class JsonLoader implements TranslationLoader {
   private basePath: string
@@ -30,9 +18,6 @@ export class JsonLoader implements TranslationLoader {
     this.useCache = options.cache ?? true
   }
 
-  /**
-   * Load all translations for a locale.
-   */
   async load(locale: string): Promise<TranslationMessages> {
     const cacheKey = locale
 
@@ -60,7 +45,6 @@ export class JsonLoader implements TranslationLoader {
         }
       }
     } catch {
-      // Directory doesn't exist or can't be read
     }
 
     if (this.useCache) {
@@ -70,9 +54,6 @@ export class JsonLoader implements TranslationLoader {
     return messages
   }
 
-  /**
-   * Load translations for a specific namespace.
-   */
   async loadNamespace(locale: string, namespace: string): Promise<TranslationMessages> {
     const cacheKey = `${locale}:${namespace}`
 
@@ -96,9 +77,6 @@ export class JsonLoader implements TranslationLoader {
     }
   }
 
-  /**
-   * Get available locales.
-   */
   async getAvailableLocales(): Promise<string[]> {
     try {
       const entries = await readdir(this.basePath, { withFileTypes: true })
@@ -110,16 +88,10 @@ export class JsonLoader implements TranslationLoader {
     }
   }
 
-  /**
-   * Clear the cache.
-   */
   clearCache(): void {
     this.cache.clear()
   }
 
-  /**
-   * Enable or disable caching.
-   */
   setCaching(enabled: boolean): void {
     this.useCache = enabled
     if (!enabled) {

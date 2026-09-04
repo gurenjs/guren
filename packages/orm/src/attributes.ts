@@ -6,10 +6,8 @@ export type AccessorFn<T = unknown> = (record: PlainObject) => T
 /** Mutator function: transforms a field value before writing to DB. */
 export type MutatorFn<T = unknown> = (value: T, record: PlainObject) => unknown
 
-/** Map of field names to accessor functions. */
 export type AccessorDefinitions = Record<string, AccessorFn>
 
-/** Map of field names to mutator functions. */
 export type MutatorDefinitions = Record<string, MutatorFn>
 
 /** Apply accessors to a record, returning a new record with computed values. */

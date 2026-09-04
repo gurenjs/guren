@@ -82,13 +82,11 @@ describe('auth/utils', () => {
     })
 
     test('should return true for matching empty strings (zero-length buffers)', () => {
-      // timingSafeEqual with zero-length buffers returns true
       expect(secureCompare('', '')).toBe(true)
     })
 
     test('should return false for different non-hex strings that decode alike', () => {
-      // Buffer.from(value, 'hex') stops at the first invalid pair, so both of
-      // these would decode to the same empty buffer and compare equal.
+      // Buffer.from(value, 'hex') stops at the first invalid pair, so both decode to empty.
       expect(secureCompare('zzzz', 'yyyy')).toBe(false)
       expect(secureCompare('g0000000', 'z0000000')).toBe(false)
     })

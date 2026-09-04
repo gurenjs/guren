@@ -39,8 +39,7 @@ describe('AuthenticatableModel', () => {
 
     class User extends AuthenticatableModel<UserRecord> {
       static override table = 'users'
-      // Direct extension (no defineModel): the base's createType no longer
-      // widens to PlainObject, so declare the payload this model accepts.
+      // Direct extension: createType no longer widens to PlainObject, so declare the payload.
       declare static readonly createType: Partial<UserRecord> & { password?: string }
     }
 
@@ -101,10 +100,8 @@ describe('AuthenticatableModel', () => {
 })
 
 describe('as a defineModel base', () => {
-  // The user models in scaffolded apps reach the hashing pipeline through the
-  // subclass defineModel() synthesizes, not by extending this class directly.
-  // Every other check on that path is a type check, so this is what would fail
-  // if the base ever stopped composing and signups started storing plaintext.
+  // Scaffolded apps reach the hashing pipeline through the subclass defineModel() synthesizes;
+  // every other check on that path is a type check, so only this catches signups storing plaintext.
   const usersTable = {
     $inferSelect: {} as { id: number; email: string; passwordHash: string },
     $inferInsert: {} as { id?: number; email: string; passwordHash: string },
@@ -211,9 +208,8 @@ describe('credential columns are denied from mass assignment', () => {
   })
 
   it('still hashes plaintext when password and hash share one column', async () => {
-    // passwordField === passwordHashField is a supported configuration:
-    // the plaintext arrives under the hash column's name and is hashed in
-    // place, so that column must not be denied.
+    // passwordField === passwordHashField is supported: the plaintext arrives under the
+    // hash column's name and is hashed in place, so that column must not be denied.
     class InPlace extends AuthenticatableModel<PlainObject> {
       static override table = 'users'
       static override passwordField = 'passwordHash'
@@ -261,11 +257,9 @@ describe('ModelUserProvider reads credential columns from the model contract', (
 
     const provider = new ModelUserProvider(Member as unknown as typeof Model)
 
-    // Remember-token lookup goes through the model's renamed column.
     const byToken = await provider.retrieveByCredentials({ rememberToken: 'tok' })
     expect(byToken).not.toBeNull()
 
-    // sanitize() strips the renamed credential columns.
     const clean = provider.sanitize({ id: 1, passwordDigest: 'h', sessionToken: 't', email: 'a@x.com' } as never)
     expect(clean).toEqual({ id: 1, email: 'a@x.com' } as never)
   })
@@ -276,9 +270,8 @@ describe('ModelUserProvider reads credential columns from the model contract', (
     }
     const provider = new ModelUserProvider(Plain as unknown as typeof Model, { passwordColumn: 'pw' })
     const clean = provider.sanitize({ pw: 'h', passwordHash: 'secret', rememberToken: 'x', id: 1 } as never)
-    // The override column is blocked AND the model's own resolved credential
-    // columns stay blocked — an override must not reopen a leak through
-    // auth.user().
+    // An override must not reopen a leak through auth.user(): the model's own resolved
+    // credential columns stay blocked alongside it.
     expect(clean).toEqual({ id: 1 } as never)
   })
 })

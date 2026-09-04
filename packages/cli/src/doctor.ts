@@ -115,14 +115,12 @@ export interface DoctorJsonOutput {
 
 interface DoctorRuleContext {
   cwd: string
-  // Shared so every rule that checks for Inertia pages sees the same
-  // snapshot of the filesystem — computing it per-rule would let concurrent
-  // rules disagree if a page file were added or removed mid-run.
+  // Shared so every rule sees the same snapshot: computing it per-rule would
+  // let concurrent rules disagree if a page file changed mid-run.
   pageManifest: Promise<PageManifestPlan>
-  // Whether codegen would write `.guren/agents.gen.ts`, and whether one on
-  // disk is stale (RFC 0016). Shared for the same reason as the pages plan —
-  // and computed once because, unlike that one, it may load the app's route
-  // graph (only for apps that have a manifest or mention agent metadata).
+  // Whether codegen would write `.guren/agents.gen.ts`, and whether one on disk
+  // is stale (RFC 0016). Shared for the same reason, and computed once because
+  // it may load the app's route graph.
   agentManifest: Promise<AgentManifestPlan>
 }
 
@@ -150,10 +148,9 @@ const GENERATED_FILES = [
 
 /**
  * The agent manifest's rule (RFC 0016). Separate from the generic one because
- * its expectation runs in both directions: codegen writes
- * `.guren/agents.gen.ts` only for apps that derive at least one tool, and
- * deletes it otherwise — so an existing file can itself be the finding. Both
- * findings name the same command, which is what keeps them clearable.
+ * its expectation runs both ways: codegen writes `.guren/agents.gen.ts` only
+ * for apps that derive a tool and deletes it otherwise, so an existing file can
+ * itself be the finding. Both findings name the same command.
  */
 function createAgentManifestRule(): DoctorRule {
   const key = `generated:${AGENTS_MANIFEST_FILE}`
@@ -230,9 +227,8 @@ export const DOCTOR_RECOMMENDED_COMMANDS = [
 
 export const CANONICAL_APP_SCRIPTS = {
   dev: 'bun run codegen && bun run dev:server',
-  // `dev` delegates here, so the pair has to be added together — adding `dev`
-  // alone leaves it calling a script that does not exist. `--hot` is what makes
-  // backend edits take effect without restarting the server.
+  // `dev` delegates here, so the pair has to be added together. `--hot` is what
+  // makes backend edits take effect without restarting the server.
   'dev:server': 'bun --hot bin/serve.ts',
   build: 'bun run codegen && bunx vite build',
   typecheck: 'tsc --noEmit',
@@ -294,12 +290,9 @@ function createCheck(
     manualFix?: string
   } = {},
 ): DoctorCheck {
-  // A passing check carries no remediation, whatever the caller passed. Several
-  // rules build one check with a ternary status and hand the same options bag to
-  // both branches, so the pass branch arrived describing how to repair a problem
-  // the project does not have. Enforcing it here covers the report, `--json`,
-  // and anything added later — the alternative was each consumer filtering by
-  // status, which `buildJsonOutput` did not.
+  // A passing check carries no remediation, whatever the caller passed: rules
+  // that build one check with a ternary status hand the same options bag to
+  // both branches. Enforced here so every consumer inherits it.
   if (status === 'pass') {
     return { key, title, status, message }
   }
@@ -384,12 +377,10 @@ async function detectRoutes(context: DoctorRuleContext): Promise<DoctorCheck> {
 }
 
 /**
- * The two rules below both report on `.guren/pages.gen.ts`, and both used to
- * answer "is it there?" first. That is the wrong order once codegen can decline
- * to write the file: the state worth reporting is a manifest that is present
- * *and* would not be regenerated, because it imports a package the app does not
- * have and is what fails the typecheck. What to say about it belongs to codegen
- * — see `describePageManifestSuppression` — so these rules choose only the key
+ * The two rules below both report on `.guren/pages.gen.ts`, and both ask
+ * "would codegen regenerate it?" before "is it there?": a manifest that is
+ * present *and* suppressed is what fails the typecheck. What to say about it
+ * belongs to `describePageManifestSuppression`; these rules choose only the key
  * and the title.
  */
 function createSuppressedPagesCheck(
@@ -526,12 +517,10 @@ async function detectTsconfig(context: DoctorRuleContext): Promise<DoctorCheck> 
 // `baseUrl` is reported as something to remove, never written.
 const TSCONFIG_ALIAS_FIX = 'Set `"paths": { "@/*": ["./*"] }` in compilerOptions and remove `baseUrl` so `@/.guren/*` and `@/app/*` imports resolve on every TypeScript version.'
 
-// Compares resolved paths rather than enumerating spellings: `.`, `./`, `./.`,
-// `''`, and an absolute path equal to the project root all name the same
-// directory, and a literal list silently drops the ones it forgot into the
-// "repoints the alias" branch — a wrong message plus a `baseUrl` TypeScript 7
-// rejects, left in place because the autofix declined to touch it. The
-// `typeof` guard keeps a malformed tsconfig (`"baseUrl": 1`) a warn instead of
+// Compares resolved paths rather than enumerating spellings: `.`, `./`, `''`
+// and an absolute project-root path all name the same directory, and a literal
+// list drops whatever it forgot into the "repoints the alias" branch. The
+// `typeof` guard keeps a malformed tsconfig (`"baseUrl": 1`) a warn rather than
 // a `resolve()` TypeError, and covers the omitted case in the same expression.
 const isRootBaseUrl = (cwd: string, baseUrl: unknown): boolean =>
   typeof baseUrl === 'string' && resolve(cwd, baseUrl) === resolve(cwd)
@@ -566,10 +555,9 @@ async function detectTsconfigAlias(context: DoctorRuleContext): Promise<DoctorCh
   return createCheck('tsconfig-alias', 'Path Alias', ok ? 'pass' : 'warn', message, {
     fix: TSCONFIG_ALIAS_FIX,
     manualFix: TSCONFIG_ALIAS_FIX,
-    // Only safe to autofix when no custom baseUrl repoints the mapping and the
-    // alias is either absent or already root — rewriting a different mapping
-    // could break imports that rely on the old resolution. Dropping a root
-    // baseUrl changes nothing: `paths` resolves from the same directory.
+    // Rewriting a mapping that points elsewhere could break imports relying on
+    // the old resolution. Dropping a root baseUrl changes nothing: `paths`
+    // resolves from the same directory.
     canAutofix: baseUrlIsRoot && (aliasTargets.length === 0 || targetsRoot),
   })
 }
@@ -774,7 +762,6 @@ async function detectBunVersion(context: DoctorRuleContext): Promise<DoctorCheck
     )
   }
 
-  // Version is below minimum — check if critically old (< 1.0.0)
   const critical = compareVersions(bunVersion, '1.0.0') < 0
 
   return createCheck(
@@ -865,7 +852,6 @@ async function detectConfigDrift(context: DoctorRuleContext): Promise<DoctorChec
 
   const issues: string[] = []
 
-  // Check routes wiring
   const hasRoutesImport = combinedSource.includes('routes') && (
     combinedSource.includes("from 'routes/") ||
     combinedSource.includes("from '@/routes/") ||
@@ -880,14 +866,12 @@ async function detectConfigDrift(context: DoctorRuleContext): Promise<DoctorChec
     issues.push('Route file exists but may not be wired into createApp()')
   }
 
-  // Check providers wiring
   const hasProviders = combinedSource.includes('providers')
   const providerDir = await fileExists(context.cwd, 'app/Providers')
   if (providerDir && !hasProviders) {
     issues.push('Providers directory exists but may not be wired into createApp()')
   }
 
-  // Check that DatabaseProvider is present when database config exists
   const dbConfigFile = await findFirstExisting(context.cwd, DATABASE_CONFIG_CANDIDATES)
   if (dbConfigFile) {
     const hasDatabaseProvider = combinedSource.includes('DatabaseProvider') ||
@@ -1073,7 +1057,6 @@ async function detectDatabaseConfig(context: DoctorRuleContext): Promise<DoctorC
     )
   }
 
-  // Check if .env exists and has DATABASE_URL
   const envContent = await readIfExists(context.cwd, '.env')
   if (envContent !== null) {
     const hasDatabaseUrl = envContent.split('\n').some((line) => {
@@ -1104,11 +1087,9 @@ async function detectDatabaseConfig(context: DoctorRuleContext): Promise<DoctorC
 }
 
 /**
- * Checks whether the project has any test foundation at all: either
- * `@guren/testing` is installed, or at least one `*.test.ts`-style file
- * already exists under `tests/`. Older `create-guren-app` scaffolds and
- * hand-rolled projects can have neither, which leaves `guren doctor`
- * silent even though there is no way to write a controller test.
+ * Whether the project has any test foundation: `@guren/testing` installed, or
+ * at least one test file under `tests/`. Older scaffolds and hand-rolled
+ * projects can have neither.
  */
 async function hasTestInfrastructure(cwd: string): Promise<boolean> {
   const packageJson = await readJsonIfExists<PackageDependenciesShape>(cwd, 'package.json')
@@ -1206,15 +1187,11 @@ async function detectPluginCompatibility(context: DoctorRuleContext): Promise<Do
 const BUN_ONLY_HASHER_FIX = 'Replace `new ScryptHasher()` with `new Hash()`, which hashes with `node:crypto` scrypt off Bun. Rows already written under Bun stay unreadable on this runtime, so existing passwords must still be rehashed.'
 
 /**
- * `DefaultHasher` — the default behind `Hash`, `AuthenticatableModel` and
- * `ModelUserProvider` — falls back to `node:crypto` scrypt off Bun, and
- * workerd's `nodejs_compat` implements that in full (RFC 0003 §4), so simply
- * authenticating with passwords no longer breaks on a Bun-less target.
- *
- * What still breaks is an *explicit* `new ScryptHasher()`: it writes Argon2id
- * or bcrypt, which cannot be read back without `Bun.password`. A seeder is the
- * usual place — it runs under Bun locally and populates the column the
- * deployed app then has to verify against.
+ * `DefaultHasher` falls back to `node:crypto` scrypt off Bun, which workerd's
+ * `nodejs_compat` implements in full (RFC 0003 §4), so password auth alone no
+ * longer breaks on a Bun-less target. What breaks is an *explicit*
+ * `new ScryptHasher()`, whose Argon2id/bcrypt cannot be read back without
+ * `Bun.password` — usually written by a seeder that ran under Bun locally.
  */
 function detectDeployPasswordHashing(analysis: DeployRuntimeAnalysis): DoctorCheck {
   const key = 'deploy-password-hashing'
@@ -1222,8 +1199,8 @@ function detectDeployPasswordHashing(analysis: DeployRuntimeAnalysis): DoctorChe
 
   const bunless = bunlessTargets(analysis)
   // Every verdict carries the parse caveat, target-only ones included: the
-  // Lambda adapter is detected from source, so a skipped file can hide a
-  // target and turn a real warning into "no deploy target detected".
+  // Lambda adapter is detected from source, so a skipped file can turn a real
+  // warning into "no deploy target detected".
   const caveat = formatParseCaveat(analysis)
 
   if (bunless.length === 0) {
@@ -1370,15 +1347,11 @@ const doctorRules: DoctorRule[] = [
 ]
 
 /**
- * The manifest plans a doctor run needs, started once and awaited wherever
- * they are used.
- *
- * Both are expensive for different reasons — the pages plan walks the pages
- * directory, the agent plan may evaluate the app's whole module graph and
- * derive every tool — and both are asked for twice in a `doctor --next` run:
- * once by the rules, once by the next-step suggestions. Sharing the promises
- * is what keeps that a single computation; each is a promise rather than an
- * awaited value so a run that never reaches a consumer never pays for it.
+ * The manifest plans a doctor run needs, started once and awaited wherever used.
+ * Both are expensive (the agent plan may evaluate the app's whole module graph)
+ * and both are asked for twice in a `--next` run, by the rules and by the
+ * next-step suggestions. Promises rather than awaited values, so a run that
+ * never reaches a consumer never pays for one.
  */
 export interface DoctorManifestPlans {
   pageManifest: Promise<PageManifestPlan>
@@ -1399,10 +1372,9 @@ export async function getDoctorRuleEvaluations(
   const cwd = resolve(options.cwd ?? process.cwd())
   const context: DoctorRuleContext = { cwd, ...(plans ?? createManifestPlans(cwd)) }
 
-  // The deploy-runtime checks share one filesystem scan, computed once here
-  // rather than through the DoctorRule interface (they need no autofix and no
-  // per-rule context beyond cwd, so a plain analysis object is simpler than
-  // wrapping each in its own `detect` closure).
+  // The deploy-runtime checks share one filesystem scan, computed here rather
+  // than through the DoctorRule interface: they need no autofix and no context
+  // beyond cwd.
   const [ruleEvaluations, deployAnalysis] = await Promise.all([
     Promise.all(
       doctorRules.map(async (rule) => {
@@ -1529,8 +1501,7 @@ export async function suggestNextSteps(
       }
     }
   } catch {
-    // Ignore unreadable files — parseSourceFile itself never throws, it
-    // returns null and the loop above already skips that case.
+    // Ignore unreadable files; parseSourceFile returns null rather than throwing.
   }
 
   try {
@@ -1541,8 +1512,8 @@ export async function suggestNextSteps(
         steps.push({
           priority: priority++,
           // Titled as a question, not an action: detection is by filename, so a
-          // consumer reading only the title and command (agents do) would
-          // otherwise write a duplicate of a test that exists under another name.
+          // consumer reading only the title would otherwise duplicate a test
+          // that exists under another name.
           title: `Confirm test coverage for ${name}`,
           description: `${describeControllerTestMiss(cwd, filePath)} Check whether these routes are already covered under another name before adding a test.`,
           command: `bunx guren make:test ${name.replace('Controller', '')} --controller${moduleFlag}`,
@@ -1555,13 +1526,10 @@ export async function suggestNextSteps(
 
   try {
     const modelFiles = await discoverModelFiles(cwd)
-    // Listed once up front rather than probed per model, and matched by
-    // `dbArtifactPattern` rather than by an exact path: `make:factory` appends
-    // its suffix to whatever the user typed, so probing `<Name>Factory.ts` is
-    // what let doctor tell a user who already had `CategoriesFactory.ts` to
-    // scaffold a second one. Grouped by app root because a module's models are
-    // paired with that module's factories — the same scoping `guren context
-    // <Entity>` applies.
+    // Matched by `dbArtifactPattern`, not by exact path: `make:factory` appends
+    // its suffix to whatever the user typed, so probing `<Name>Factory.ts` told
+    // a user who already had `CategoriesFactory.ts` to scaffold a second one.
+    // Grouped by app root, the same scoping `guren context <Entity>` applies.
     const factoryNamesByModule = new Map<string | null, string[]>()
     for (const file of await discoverDbArtifactFiles(cwd, 'Factory')) {
       const key = moduleNameFor(cwd, file)
@@ -1590,9 +1558,8 @@ export async function suggestNextSteps(
     '.guren/routes.gen.ts',
     ...(pagesPlan.reason === 'pages' ? [PAGES_MANIFEST_FILE] : []),
     '.guren/data.gen.ts',
-    // Conditional, like the pages manifest, and on the derivation rather than
-    // on a route file mentioning `.agent()` — an app that derives no tool is
-    // not missing a manifest.
+    // Conditional on the derivation rather than on a route file mentioning
+    // `.agent()`: an app that derives no tool is not missing a manifest.
     ...(agentPlan.reason === 'tools' ? [AGENTS_MANIFEST_FILE] : []),
     '.guren/api-client.gen.ts',
   ]
@@ -1637,19 +1604,16 @@ export function renderDoctorReport(report: DoctorReport): void {
       continue
     }
 
-    // Some rules set both fields to the same string; others put a required extra
-    // step in `manualFix` (repair tsconfig.json *and* add `.guren/**/*`; install
-    // Bun from a URL rather than `bun upgrade`, which cannot run when Bun is
-    // missing). Dedupe, then the first line is the fix and any second is the
-    // step it does not cover.
+    // Some rules set both fields to the same string; others put a required
+    // extra step in `manualFix`. Dedupe, then the first line is the fix and any
+    // second is the step it does not cover.
     const steps = [...new Set([check.fix, check.manualFix].filter((step): step is string => Boolean(step)))]
     for (const [index, step] of steps.entries()) {
       consola.info(`       ${index === 0 ? 'Fix' : 'Manual'}: ${step}`)
     }
     if (check.canAutofix) {
       // Not an instruction: `guren upgrade` also realigns every @guren/*
-      // dependency, which is more than someone chasing one check asked for,
-      // and `guren doctor` has no --fix of its own.
+      // dependency, which is more than someone chasing one check asked for.
       consola.info('       Autofix: available — applied by `guren upgrade`')
     }
   }

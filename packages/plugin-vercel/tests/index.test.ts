@@ -13,11 +13,9 @@ const SDK_TRANSPORT_MARKER = 'fake-sdk-transport'
 
 /**
  * An entrypoint importing both SDK subpaths and reporting what it got.
- *
  * `server/index.js` comes in as a *namespace*: the catch-all stub for an
- * unlisted subpath is a bare `throw` with no exports at all, so a named import
- * of it fails the bundle rather than the bundled module, and the stubbed and
- * unstubbed cases would then fail at different stages.
+ * unlisted subpath is a bare `throw` with no exports, so a named import would
+ * fail the bundle rather than the bundled module.
  */
 const SDK_ENTRY_SOURCE =
   "import * as serverIndex from '@modelcontextprotocol/sdk/server/index.js'\n"
@@ -26,10 +24,9 @@ const SDK_ENTRY_SOURCE =
 
 /**
  * A stand-in for `@modelcontextprotocol/sdk` inside the scaffolded app.
- *
- * Deliberately without an `exports` map: a subpath under one that is slightly
- * wrong fails to resolve and reads exactly like the stub still intercepting,
- * which is the verdict these tests exist to distinguish.
+ * Deliberately without an `exports` map: a slightly wrong subpath under one
+ * fails to resolve and reads exactly like the stub still intercepting, which is
+ * the verdict these tests exist to distinguish.
  */
 function installFakeMcpSdk(root: string): void {
   const pkg = join(root, 'node_modules/@modelcontextprotocol/sdk')
@@ -47,10 +44,7 @@ function installFakeMcpSdk(root: string): void {
   )
 }
 
-/**
- * Writes a minimal buildable app under `root` and returns it as
- * `buildVercelOutput` options, so a test can just `await buildVercelOutput(app)`.
- */
+/** Writes a minimal buildable app under `root`, as `buildVercelOutput` options. */
 function scaffoldApp(
   root: string,
   options: { entrypoint?: string; source?: string; mcpPlugin?: boolean } = {},
@@ -147,12 +141,10 @@ describe('@guren/plugin-vercel', () => {
     })
 
     it('inlines the client manifest into the bundle for viteAsset()', async () => {
-      // The function directory ships no public/assets/manifest.json, and the
-      // function environment is size-capped — so the build substitutes the
-      // exact expression `process.env.GUREN_VITE_MANIFEST` with the manifest
-      // JSON via `define`. The fixture reads that expression the same way
-      // @guren/server's vite-manifest.ts does (its form is pinned by a server
-      // source test), so an inlined read here proves the mechanism.
+      // The function directory ships no public/assets/manifest.json and the
+      // function environment is size-capped, so the build substitutes the exact
+      // expression `process.env.GUREN_VITE_MANIFEST` via `define`. The fixture
+      // reads it the same way @guren/server's vite-manifest.ts does.
       const app = scaffoldApp(root, {
         entrypoint: 'src/vercel.ts',
         source:
@@ -222,8 +214,8 @@ describe('@guren/plugin-vercel', () => {
     })
 
     it('fails on a missing entrypoint before touching the previous output', async () => {
-      // The spawned `bun build` would also fail on this, but only after the
-      // previous output was deleted.
+      // The bundler would also fail on this, but only after the previous
+      // output was deleted.
       const app = scaffoldApp(root, { entrypoint: 'src/vercel.ts' })
       rmSync(app.entrypoint)
       mkdirSync(join(app.outputDir, 'functions'), { recursive: true })
@@ -396,12 +388,10 @@ describe('@guren/plugin-vercel', () => {
 
       await buildVercelOutput(app)
 
-      // Two mechanisms had to stop firing, and the markers tell them apart
-      // from "resolved nothing": `webStandardStreamableHttp.js` is the entry
-      // the stub map releases, and `server/index.js` is one no entry ever
-      // named — only the SDK-prefix catch-all could have stubbed it, and
-      // @guren/plugin-mcp imports it *statically*, so a catch-all still in
-      // force would leave the endpoint just as compiled shut.
+      // Two mechanisms had to stop firing, and the markers tell them apart from
+      // "resolved nothing": `webStandardStreamableHttp.js` is the entry the stub
+      // map releases, and `server/index.js` is one only the SDK-prefix catch-all
+      // could have stubbed — @guren/plugin-mcp imports it *statically*.
       const bundle = readFileSync(join(app.outputDir, 'functions/index.func/index.js'), 'utf8')
       expect(bundle).toContain(SDK_TRANSPORT_MARKER)
       expect(bundle).toContain(SDK_SERVER_INDEX_MARKER)

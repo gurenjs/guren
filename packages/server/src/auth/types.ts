@@ -31,19 +31,12 @@ export interface UserProvider<User = Authenticatable> {
   getRememberToken?(user: User): Promise<string | null> | string | null
   /**
    * Strip fields that must never leave the auth layer (password hashes,
-   * remember tokens, model `hidden` fields) from a user record before it
-   * is cached or handed to application code via guard.user().
+   * remember tokens, model `hidden` fields) before caching or exposing a user.
    */
   sanitize?(user: User): User
 }
 
-/**
- * The conventional names for the credential columns that
- * `ModelUserProvider.sanitize()` strips: the password column (`password`
- * by default, commonly configured as `passwordHash`/`password_hash`) and
- * the remember-token column (`remember_token` by default, commonly
- * `rememberToken`).
- */
+/** The conventional credential column names `ModelUserProvider.sanitize()` strips. */
 export type DefaultSanitizedKeys =
   | 'password'
   | 'passwordHash'
@@ -52,26 +45,13 @@ export type DefaultSanitizedKeys =
   | 'remember_token'
 
 /**
- * The shape of a user record after auth-layer sanitization — what
- * `auth.user()` returns at runtime when the provider's column names
- * follow the {@link DefaultSanitizedKeys} conventions. Removes those
- * conventional credential keys plus any extra keys passed as `Hidden`.
+ * A user record after auth-layer sanitization, assuming the provider's columns
+ * follow {@link DefaultSanitizedKeys}. The runtime strips the *configured*
+ * password/remember-token columns plus the model's `hidden` fields, which a
+ * static type cannot see — list any others in `Hidden`. Index-signature records
+ * cannot have individual keys removed.
  *
- * The runtime strips exactly the *configured* password/remember-token
- * columns plus the model's `hidden` fields — a static type cannot see
- * that configuration. If your columns use other names, or the model
- * hides additional fields, list them in `Hidden` explicitly. Only
- * meaningful for concrete record types (index-signature records like
- * `Record<string, string>` cannot have individual keys removed).
- *
- * @example
- * ```ts
- * const user = await this.auth.userOrFail<Sanitized<UserRecord>>()
- * user.passwordHash // compile error — stripped at runtime
- *
- * // With additional hidden fields or custom column names:
- * type SafeUser = Sanitized<UserRecord, 'twoFactorSecret' | 'credentialDigest'>
- * ```
+ * @example `Sanitized<UserRecord, 'twoFactorSecret'>`
  */
 export type Sanitized<User, Hidden extends string = never> = User extends unknown
   ? Omit<User, Extract<keyof User, DefaultSanitizedKeys | Hidden>>
@@ -120,9 +100,8 @@ export interface AuthManagerContract {
   getDefaultGuard(): string
   createAuthContext(ctx: Context, options?: AttachContextOptions): AuthContext
   /**
-   * The guard name an unqualified guard() call resolves to for a request.
-   * Optional for backward compatibility; implementations without it behave
-   * as if it always returned the default guard.
+   * The guard name an unqualified guard() call resolves to. Implementations
+   * without it behave as if it always returned the default guard.
    */
   resolveGuardName?(ctx: Context, name?: string): string
 }

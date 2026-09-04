@@ -52,10 +52,9 @@ describe('cloudflare:build --mcp-oauth', () => {
     })
 
     /**
-     * `wrangler deploy` resolves the generated worker's imports from whatever
-     * the deploy environment installed, and a production install carries no
-     * devDependencies — so a devDependency is exactly the state that passes a
-     * local build and fails the deploy.
+     * `wrangler deploy` resolves the generated worker's imports from the deploy
+     * environment's install, which carries no devDependencies — so a devDependency
+     * passes a local build and fails the deploy.
      */
     test('should refuse the flag when the provider package is only a devDependency', async () => {
       scaffoldApp(root, { mcpPlugin: true, oauthProviderAsDevDependency: true })
@@ -92,11 +91,9 @@ describe('cloudflare:build --mcp-oauth', () => {
     })
 
     /**
-     * The binding is present, so the guard passes and the build proceeds — but
-     * its id is still the placeholder this build scaffolds, which
-     * `wrangler deploy` rejects. Warned rather than failed: the id is not
-     * needed to *build*, and a `--dry-run` deploy or a bundle-size check is a
-     * reasonable thing to be doing with a config nobody has finished.
+     * The binding is present but its id is still the scaffolded placeholder, which
+     * `wrangler deploy` rejects. Warned rather than failed: the id is not needed to
+     * *build*, and a --dry-run deploy on an unfinished config is reasonable.
      */
     test('should warn when the OAUTH_KV binding still has the scaffolded placeholder id', async () => {
       scaffoldApp(root, { mcpPlugin: true, oauthProvider: true })
@@ -127,9 +124,9 @@ describe('cloudflare:build --mcp-oauth', () => {
     })
 
     /**
-     * A `kv_namespaces` array holding some *other* binding is not the
-     * provider's namespace. Asserted separately because "has kv_namespaces" is
-     * the cheap wrong test, and it passes an app one line short of working.
+     * A `kv_namespaces` array holding some *other* binding is not the provider's
+     * namespace: "has kv_namespaces" is the cheap wrong test, and it passes an app
+     * one line short of working.
      */
     test('should refuse a config whose kv_namespaces bind something else', async () => {
       scaffoldApp(root, { mcpPlugin: true, oauthProvider: true })
@@ -153,9 +150,9 @@ describe('cloudflare:build --mcp-oauth', () => {
     })
 
     /**
-     * The guards run before the app build, so a misconfigured app is told in
-     * one second rather than after several minutes of Vite output. Asserted by
-     * giving the app a `build` script that would fail if it ever ran.
+     * The guards run before the app build, so a misconfigured app is told in one
+     * second rather than after minutes of Vite output. Asserted by giving the app
+     * a `build` script that would fail if it ever ran.
      */
     test('should refuse before running the app build', async () => {
       scaffoldApp(root, { mcpPlugin: true })
@@ -212,9 +209,9 @@ describe('cloudflare:build --mcp-oauth', () => {
     })
 
     /**
-     * The handoff must be the request the seam registered against. Dispatching
-     * anything else — a rebuilt request, the original alongside the presented
-     * one — loses the identity the map is keyed on and every call 401s.
+     * The handoff must be the request the seam registered against: dispatching a
+     * rebuilt or original request loses the identity the map is keyed on, and
+     * every call 401s.
      */
     test('should dispatch the presented request itself, not a copy', async () => {
       const worker = await build()
@@ -232,10 +229,9 @@ describe('cloudflare:build --mcp-oauth', () => {
     })
 
     /**
-     * One `createWorkersHandler`, threaded through both halves. Two would each
-     * dedupe boot in their own slot while sharing the module-global env
-     * holder, which is the topology `handler.ts` documents as the one it can
-     * reason about.
+     * One `createWorkersHandler`, threaded through both halves: two would each
+     * dedupe boot in their own slot while sharing the module-global env holder,
+     * the topology `handler.ts` says it cannot reason about.
      */
     test('should construct exactly one handler and share it', async () => {
       const worker = await build()
@@ -396,20 +392,17 @@ describe('cloudflare:build --mcp-oauth', () => {
 })
 
 /**
- * The template tree's own gate. These files ship as real sources and are
- * compiled by the root `tsconfig` program, so types are already covered; what
- * is left is the shape the scaffold and `guren check` depend on, which no
- * compiler asserts.
+ * The template tree's own gate. These files ship as real sources compiled by the
+ * root `tsconfig` program, so what is left is the shape the scaffold and
+ * `guren check` depend on, which no compiler asserts.
  */
 /** The template files that are TSX, derived rather than restated. */
 const TSX_TEMPLATE_FILES = MCP_OAUTH_TEMPLATE_FILES.filter((path) => path.endsWith('.tsx'))
 
 /**
- * Parse a template, picking the loader from its extension.
- *
- * `.tsx` needs `loader: 'tsx'`: under `'ts'` the transpiler reads `<div>` as a
- * type assertion and throws, so a single loader would either fail every view
- * or — the worse direction — stop parsing the controller as TypeScript.
+ * Parse a template, picking the loader from its extension. `.tsx` needs
+ * `loader: 'tsx'`: under `'ts'` the transpiler reads `<div>` as a type assertion
+ * and throws.
  */
 function transpile(source: string, path: string): string {
   return new Bun.Transpiler({ loader: path.endsWith('.tsx') ? 'tsx' : 'ts' }).transformSync(source)
@@ -418,9 +411,8 @@ function transpile(source: string, path: string): string {
 describe('mcp-oauth templates', () => {
   /**
    * A template's code with its comments gone, for the assertions that say a
-   * construct is *absent*. Every one of these files documents at length what it
-   * deliberately does not do, so a raw substring search finds the prose
-   * explaining the absence and reports it as the thing itself.
+   * construct is *absent*: these files document what they deliberately do not do,
+   * so a raw substring search would find the prose and report it as the thing.
    */
   function code(path: string): string {
     return transpile(loadMcpOAuthTemplate(path), path)
@@ -437,21 +429,18 @@ describe('mcp-oauth templates', () => {
   })
 
   /**
-   * The pragma is what lets a `.tsx` template compile in an app whose tsconfig
-   * points `jsx: "react-jsx"` at React for `resources/js` — it overrides
-   * `jsxImportSource` for that module alone, so a scaffolded app needs no
-   * tsconfig change. It is only honoured on the **first** line, which is why
-   * this checks the position and not merely the presence.
+   * The pragma overrides `jsxImportSource` for that module alone, so a `.tsx`
+   * template compiles in an app pointing `jsx: "react-jsx"` at React without a
+   * tsconfig change. It is only honoured on the **first** line, hence the position check.
    */
   test.each(TSX_TEMPLATE_FILES)('should open with the guren jsxImportSource pragma: %s', (path: string) => {
     expect(loadMcpOAuthTemplate(path).split('\n')[0]).toBe('/** @jsxImportSource @guren/core */')
   })
 
   /**
-   * A view that reached for anything else — the plugin root, a node builtin, a
-   * client-side React import — would be a scaffolded file an app cannot
-   * compile or a boot it does not need. `@guren/core` carries everything these
-   * components use: `FC`, `DerivedAgentTool`, `CSRF_FORM_FIELD`.
+   * A view reaching for the plugin root, a node builtin or a client-side React
+   * import would be a scaffolded file an app cannot compile. `@guren/core` carries
+   * everything these components use: `FC`, `DerivedAgentTool`, `CSRF_FORM_FIELD`.
    */
   test.each(TSX_TEMPLATE_FILES)('should import from @guren/core alone: %s', (path: string) => {
     const specifiers = [...loadMcpOAuthTemplate(path).matchAll(/from '([^']+)'/g)].map((m) => m[1])
@@ -465,45 +454,38 @@ describe('mcp-oauth templates', () => {
   })
 
   /**
-   * `@guren/core`'s route loader accepts a registrar named `default` or
-   * matching `/^register\w*Routes$/`, and `guren check`'s routes-check reports
-   * a `routes/*.ts` no registrar reaches. A template whose export fell outside
-   * that pattern would scaffold a file the framework never calls and the check
-   * would then report as unwired — while the file looks perfectly wired.
+   * `@guren/core`'s route loader accepts a registrar named `default` or matching
+   * `/^register\w*Routes$/`. A template whose export fell outside that pattern
+   * would scaffold a file the framework never calls, while looking wired.
    */
   test('should name its registrar inside the pattern the route loader accepts', () => {
     expect(MCP_OAUTH_REGISTRAR).toMatch(/^register\w*Routes$/u)
   })
 
   /**
-   * These routes are the gate an agent passes through, not a tool an agent may
-   * call. `guren check`'s agent-route rules would also have opinions about
-   * them (a mutating agent route needs authorization), but the point is
-   * simpler than that: consent is never something a client grants itself.
+   * These routes are the gate an agent passes through, not a tool it may call:
+   * consent is never something a client grants itself.
    */
   test('should expose no route to agents', () => {
     expect(code(MCP_OAUTH_ROUTES_FILE)).not.toContain('.agent(')
   })
 
   test('should reach the controller by the path the scaffold writes it to', () => {
-    // The layout invariant: a template's path under templates/mcp-oauth/ is the
-    // path it lands on in the app, so this relative import resolves in both.
-    // Both paths spelled out rather than read from the constant — the constant
-    // is one of the two things this is checking agree.
+    // A template's path under templates/mcp-oauth/ is the path it lands on in the
+    // app, so this relative import resolves in both. Both paths are spelled out
+    // because the constant is one of the two things being checked to agree.
     expect(routes).toContain("from '../app/Http/Controllers/McpOAuthController.js'")
     expect(MCP_OAUTH_TEMPLATE_FILES).toContain('app/Http/Controllers/McpOAuthController.ts')
   })
 
   /**
-   * The wire form the endpoint's scope grammar parses. A checkbox valued with
-   * the bare tool name would render a consent screen that says "granted" and
-   * produce a grant that reaches nothing — `parseToolScope` ignores every
-   * entry outside `tool:` / `tools:`, silently and by design.
+   * The wire form the endpoint's scope grammar parses: `parseToolScope` silently
+   * ignores every entry outside `tool:` / `tools:`, so a checkbox valued with the
+   * bare tool name would say "granted" and grant nothing.
    */
   test('should submit granted scopes in the tool: wire form', () => {
-    // Both halves, and they live in different files now: the view renders the
-    // checkbox value, the controller rebuilds the same string to intersect
-    // against. They have to agree, and nothing but this says so.
+    // Both halves live in different files: the view renders the checkbox value,
+    // the controller rebuilds the same string to intersect against.
     expect(consentView).toContain('value={`tool:${tool.toolName}`}')
     expect(controller).toContain('`tool:${tool.toolName}`')
   })
@@ -519,20 +501,17 @@ describe('mcp-oauth templates', () => {
   })
 
   test('should carry the CSRF field into the consent form', () => {
-    // The token is read in the controller and rendered by the view as a plain
-    // JSX input — no string-returning helper, which would be raw HTML in a
-    // world where the renderer owns escaping.
+    // The view renders the token as a plain JSX input, not a string-returning
+    // helper, which would be raw HTML where the renderer owns escaping.
     expect(controller).toContain('csrfToken: getCsrfToken(this.ctx)')
     expect(consentView).toContain('<input type="hidden" name={CSRF_FORM_FIELD} value={csrfToken} />')
   })
 
   /**
-   * And verify it in the action, through the framework's own primitive. The
-   * global middleware may not be mounted — `autoSession: false`, a
-   * hand-composed chain — while `csrfField()` renders a convincing token
-   * regardless, so the screen would *look* protected. A comparison written
-   * here instead of `verifyCsrfToken` would be a second implementation of the
-   * rule, and one of the two would eventually accept what the other rejects.
+   * And verify it in the action, through `verifyCsrfToken` rather than a second
+   * comparison of its own. The global middleware may not be mounted
+   * (`autoSession: false`, a hand-composed chain) while `csrfField()` still
+   * renders a convincing token, so the screen would only *look* protected.
    */
   test('should verify the CSRF token itself, via the framework primitive', () => {
     expect(controller).toContain('verifyCsrfToken(this.ctx, single(form[CSRF_FORM_FIELD]))')
@@ -544,10 +523,9 @@ describe('mcp-oauth templates', () => {
   })
 
   /**
-   * The renderer owns escaping now, so a hand-rolled escaper in these files is
-   * not merely redundant — it is a sign someone reached for raw markup, which
-   * `hono/jsx` would then escape into visible angle brackets or, through
-   * `dangerouslySetInnerHTML`, not escape at all.
+   * The renderer owns escaping, so a hand-rolled escaper here signals raw markup,
+   * which `hono/jsx` escapes into visible angle brackets or, through
+   * `dangerouslySetInnerHTML`, does not escape at all.
    */
   test('should hand-escape nothing and inject no raw HTML', () => {
     for (const path of MCP_OAUTH_TEMPLATE_FILES) {
@@ -557,9 +535,8 @@ describe('mcp-oauth templates', () => {
   })
 
   test('should answer a malformed authorize request with a page, not a throw', () => {
-    // Both actions route through the wrapper rather than calling the provider
-    // directly — a bare `parseAuthRequest` 500s with a stack trace on a
-    // tampered query, which is a routine arrival at this URL.
+    // Both actions route through the wrapper: a bare `parseAuthRequest` 500s with
+    // a stack trace on a tampered query, a routine arrival at this URL.
     expect(controller).toContain('this.parseAuthRequest(provider, this.ctx.req.raw)')
     // Two call sites: show() and approve(). The declaration is
     // `private async parseAuthRequest(`, so it is not one of these.

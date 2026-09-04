@@ -10,8 +10,8 @@ import * as sqlite from './sqlite'
 import * as mixed from '../drizzle'
 
 describe('per-dialect barrels', () => {
-  // Derived from the dialect core's own export surface, not a hand-kept
-  // name list: narrowing `export *` to a curated list must fail here.
+  // Derived from the dialect core's own export surface: narrowing `export *`
+  // to a curated list must fail here.
   const barrels = [
     ['pg', pg, pgCore],
     ['mysql', mysql, mysqlCore],
@@ -73,14 +73,12 @@ describe('@guren/orm/drizzle (mixed barrel, kept for compatibility)', () => {
   })
 })
 
-// These require a built dist/ (`bun run build`), like the CLI tests that
-// load @guren/server through its dist.
+// These require a built dist/ (`bun run build`).
 describe('dist artifacts', () => {
   test('every exports-map entry points at a file that exists in dist', async () => {
-    // Checked on the filesystem, not via self-referencing imports: Bun
-    // resolves `@guren/orm/*` through the root tsconfig paths straight to
-    // src/, so an import-based check stays green with a broken map
-    // (verified by deleting a dist file under it).
+    // Checked on the filesystem: Bun resolves `@guren/orm/*` through the root
+    // tsconfig paths straight to src/, so an import-based check would stay
+    // green with a broken map.
     const packageRoot = new URL('../../', import.meta.url)
     const pkg = await Bun.file(new URL('package.json', packageRoot)).json()
 
@@ -104,9 +102,8 @@ describe('dist artifacts', () => {
   })
 
   test('the @deprecated JSDoc survives the dts rollup for the MySQL value exports', async () => {
-    // The whole reason the mixed barrel re-declares these as consts is that
-    // the rollup drops JSDoc on `export { … } from` statements. Runtime
-    // tests cannot see that regress, so pin the artifact itself.
+    // The rollup drops JSDoc on `export { … } from`, which is why the mixed
+    // barrel re-declares these as consts. Only the artifact can show a regress.
     const dts = await Bun.file(new URL('../../dist/drizzle.d.ts', import.meta.url)).text()
 
     for (const name of ['mysqlTable', 'int', 'varchar', 'datetime']) {

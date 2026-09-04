@@ -3,16 +3,11 @@ import { getMimeType } from 'hono/utils/mime'
 
 /**
  * The one rule for "a browser would render this as a document in the serving
- * origin". A file the app merely *stores* under `public/` — an upload keeping
- * its original extension, most of all — otherwise becomes script running as
+ * origin" — otherwise an upload kept under `public/` becomes script running as
  * the app: same cookies, same session, same CSRF token.
- *
  * A denylist rather than the attachments engine's `INLINE_CONTENT_TYPES`
- * allowlist, because these mounts also serve the app's own build output. An
- * allowlist here would have to enumerate every asset type a project can ship,
- * and would break a deployment the first time it shipped one that was missed.
- * Everything absent from this set — scripts, stylesheets, fonts, images,
- * media, PDFs — is inert when navigated to, and stays inline.
+ * allowlist, because these mounts also serve the app's own build output and an
+ * allowlist would break the first deployment shipping a type it missed.
  */
 const DOCUMENT_CONTENT_TYPES = new Set([
   'text/html',
@@ -22,11 +17,9 @@ const DOCUMENT_CONTENT_TYPES = new Set([
 ])
 
 /**
- * Judged on the media type alone. Both inputs this module reads are
- * parameterised — Hono's `getMimeType` returns `text/html; charset=utf-8`, and
- * so does a hand-written `contentTypeMap` entry — so comparing the header
- * verbatim is precisely how the check stops matching while still looking
- * present.
+ * Judged on the media type alone: both inputs are parameterised (`getMimeType`
+ * returns `text/html; charset=utf-8`, and so does a `contentTypeMap` entry), so
+ * comparing the header verbatim silently stops matching.
  */
 export function rendersAsDocument(contentType: string | undefined | null): boolean {
   if (!contentType) {
@@ -35,25 +28,18 @@ export function rendersAsDocument(contentType: string | undefined | null): boole
 
   const mediaType = contentType.split(';', 1)[0]!.trim().toLowerCase()
 
-  // The `+xml` suffix rather than the three names that reach this through
-  // Hono's own table (`application/xhtml+xml`, `image/svg+xml`,
-  // `application/xslt+xml`): every structured XML type parses as XML, an XML
-  // document carries script through an `<?xml-stylesheet?>` PI, and a
-  // `contentTypeMap` can name one the table never would.
+  // The `+xml` suffix rather than the three names Hono's table produces: every
+  // structured XML type parses as XML and carries script through an
+  // `<?xml-stylesheet?>` PI, and a `contentTypeMap` can name one the table never would.
   return DOCUMENT_CONTENT_TYPES.has(mediaType) || mediaType.endsWith('+xml')
 }
 
 /**
  * Neutralizes a served document by turning it into a download.
- *
- * `Content-Disposition: attachment` is honoured for navigations and ignored
- * for subresource loads, which is what makes it usable on a general asset
- * route: `<img src="/logo.svg">`, `<link rel="icon">` and CSS `url()` keep
- * working unchanged, while `/logo.svg` opened directly is downloaded instead
- * of rendered. An `<iframe>` or `<object>` *is* a navigation, so an SVG or
- * HTML page embedded that way stops rendering — which is the same mechanism
- * as the fix, not an exception to it. `nosniff` rides along for the types a
- * browser would otherwise promote on its own.
+ * `Content-Disposition: attachment` is honoured for navigations and ignored for
+ * subresource loads, so `<img>`, `<link rel="icon">` and CSS `url()` keep
+ * working while a direct visit downloads. An `<iframe>`/`<object>` *is* a
+ * navigation, so embedding an SVG or HTML page that way stops rendering.
  */
 export function applyDocumentDisposition(headers: Headers, contentType: string | undefined | null): void {
   if (!rendersAsDocument(contentType)) {
@@ -65,12 +51,9 @@ export function applyDocumentDisposition(headers: Headers, contentType: string |
 }
 
 /**
- * The {@link import('hono/bun').serveStatic} form of
- * {@link applyDocumentDisposition}, for use as its `onFound` hook.
- *
- * Keyed on the same `getMimeType(path)` the middleware itself used a line
- * earlier to set `Content-Type`, rather than on the extension: the two agree
- * by construction only while they read the same function.
+ * The `serveStatic` `onFound` form of {@link applyDocumentDisposition}. Keyed on
+ * the same `getMimeType(path)` that middleware uses for `Content-Type`, not on
+ * the extension: the two agree only while they read the same function.
  */
 export function guardStaticDocument(path: string, ctx: Context): void {
   if (!rendersAsDocument(getMimeType(path))) {

@@ -25,9 +25,8 @@ interface TranspileContext {
 }
 
 /**
- * Derive the mount point for the vendored Inertia client from its public
- * path: the containing directory (always slash-terminated), the Hono route
- * pattern for it, and the file's path relative to that base.
+ * The vendored Inertia client's mount point: containing directory (always
+ * slash-terminated), Hono route pattern, and the file's path relative to it.
  */
 export function resolveInertiaClientRoute(inertiaClientPath: string): {
   base: string
@@ -74,53 +73,34 @@ export interface DevAssetsOptions {
   /** Serve selected files from the public directory without the `/public` prefix. */
   rootPublicAssets?: RootPublicAssetsConfig
   /**
-   * Serve document types (`.svg`, `.html`, XML) from `/public/*` and
-   * `/resources/css/*` inline instead of forcing them to download. Defaults to
-   * false.
-   *
-   * Off by default because `public/` is also where an app's uploads land, and
-   * a stored `.html` or `.svg` served inline is script in the app's own
-   * origin. Turn it on for a public directory holding nothing user-supplied —
-   * a static microsite under `public/docs/index.html`, say, which Hono resolves
-   * from a directory request and would otherwise hand back as a download.
-   *
-   * The root-level allowlist route has its own switch,
-   * `rootPublicAssets: { inlineDocuments: true }`; an app serving documents
-   * both ways sets both.
+   * Serve document types (`.svg`, `.html`, XML) inline rather than as
+   * downloads. Off by default: `public/` is also where uploads land, and a
+   * stored `.html` or `.svg` served inline is script in the app's own origin.
+   * The root-level allowlist route has its own `rootPublicAssets:
+   * { inlineDocuments: true }`.
    */
   inlineDocuments?: boolean
 }
 
-// Resolve the inertia client lazily: @guren/inertia-client is an optional
-// peer dependency, and API-only apps must be able to import this module
-// without it installed.
+// Lazily: @guren/inertia-client is an optional peer, and API-only apps must be
+// able to import this module without it installed.
 const require = createRequire(import.meta.url)
 function resolveGurenInertiaClient(): string {
-  // Dev *wants* the `./app` specifier's answer, sources included: a tsconfig
-  // `paths` entry mapping the subpath at `src/` hands back `src/app.tsx`, and
-  // the transpile route serves that just fine.
+  // Dev wants the `./app` specifier's answer, sources included — the transpile
+  // route serves a `src/app.tsx` from a tsconfig `paths` mapping just fine.
   return require.resolve('@guren/inertia-client/app')
 }
 
 /**
- * Absolute path to `@guren/inertia-client`'s build output, the directory
- * production serves the vendored client and its chunks from.
- *
- * Unlike {@link resolveGurenInertiaClient}, this must not follow a tsconfig
- * `paths` mapping to the package's TypeScript sources — production serves
- * files, it cannot transpile them. So it anchors on `./package.json`, a
- * subpath such a mapping misses (there is no `src/package.json`) and real
- * package resolution answers with the package root.
+ * `@guren/inertia-client`'s build output. Anchored on `./package.json` rather
+ * than a code subpath, because production serves files and cannot transpile: a
+ * tsconfig `paths` mapping misses that subpath (there is no `src/package.json`)
+ * and real package resolution answers with the package root.
  */
 export function resolveInertiaClientDir(): string {
   return join(dirname(require.resolve('@guren/inertia-client/package.json')), 'dist')
 }
 
-/**
- * Registers development asset serving middleware.
- * @param app
- * @param options 
- */
 export function registerDevAssets(app: Application, options: DevAssetsOptions): void {
   if (typeof Bun === 'undefined') {
     throw new Error('Bun runtime is required for dev asset serving.')
@@ -184,9 +164,8 @@ export function registerDevAssets(app: Application, options: DevAssetsOptions): 
     app.hono.get(inertiaClientPattern, (ctx) => {
       const relativeRequest = ctx.req.path.slice(inertiaClientBase.length) || inertiaClientRequestPath
 
-      // The configured entry is not request-derived, so it is served without a
-      // containment check: it may legitimately sit outside `inertiaClientDir`
-      // when the resolved module is itself a symlink into another tree.
+      // Not request-derived, so no containment check: the resolved module may
+      // legitimately be a symlink out of `inertiaClientDir`.
       if (relativeRequest === inertiaClientRequestPath) {
         return transpileFile(inertiaClientSource, transpile)
       }
@@ -249,14 +228,6 @@ export function createStaticRewrite(route: string): (path: string) => string {
   }
 }
 
-/**
- * Handles a request to transpile a JavaScript or TypeScript file.
- * @param ctx The request context.
- * @param resourcesJsDir The directory containing the resource files.
- * @param prefix The URL prefix for the request.
- * @param transpile The transpilers and JSX runtime to use.
- * @returns A Promise that resolves to a Response object.
- */
 async function handleTranspileRequest(
   ctx: Context,
   resourcesJsDir: string,
@@ -274,11 +245,10 @@ async function handleTranspileRequest(
 }
 
 /**
- * Transpiles a file if it's a TSX or TS file, otherwise serves it as a static asset.
- * @param fsPath The file system path to the file.
- * @param transpile The transpilers and JSX runtime to use.
- * @param containmentRoot Directory the resolved file must really live under. Omit for configured (non request-derived) paths.
- * @returns A Promise that resolves to a Response object.
+ * Transpiles TS/TSX, otherwise serves the file as-is.
+ *
+ * @param containmentRoot Directory the resolved file must really live under.
+ *   Omit for configured (non request-derived) paths.
  */
 async function transpileFile(
   fsPath: string,
@@ -303,9 +273,8 @@ async function transpileFile(
     return new Response('Not Found', { status: 404 })
   }
 
-  // Judged here rather than at the call site because the extension probing above
-  // is what settles which file gets read — and `filePath` is now known to exist,
-  // the precondition for canonicalizing it.
+  // Judged here: the extension probing above settles which file gets read, and
+  // `filePath` is now known to exist, the precondition for canonicalizing it.
   if (containmentRoot && !(await isRealPathWithin(containmentRoot, filePath))) {
     return new Response('Not Found', { status: 404 })
   }
@@ -343,11 +312,9 @@ async function transpileFile(
     'Cache-Control': isDev() ? 'no-cache' : 'public, max-age=31536000',
   })
 
-  // Anything this route resolves that is not TypeScript is handed back as it
-  // sits on disk — a `.html` beside a page component comes back as text/html.
-  // No `inlineDocuments` switch: the two directories reachable here hold the
-  // app's own sources and the vendored client, not the uploads that escape
-  // hatch exists for.
+  // Non-TypeScript is handed back as it sits on disk. No `inlineDocuments`
+  // switch: the two directories reachable here hold the app's own sources and
+  // the vendored client, not the uploads that escape hatch exists for.
   applyDocumentDisposition(headers, contentType)
 
   return new Response(body, { headers })

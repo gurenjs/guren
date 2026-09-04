@@ -1,12 +1,10 @@
 let patched = false
 
 /**
- * Bun 1.x tightened Error.captureStackTrace so it throws unless the first argument is an actual
- * Error instance. Some ecosystem packages (notably follow-redirects) still pass plain objects,
- * because Node silently upgrades them. When those packages execute during SSR boot we end up
- * crashing before Inertia can import the SSR entry. This shim mirrors Node's behavior by copying
- * a stack trace from a real Error onto whatever object was provided, ensuring third-party code
- * keeps working regardless of Bun's stricter contract.
+ * Bun 1.x throws from Error.captureStackTrace unless the first argument is a
+ * real Error. Packages that pass plain objects (notably follow-redirects, which
+ * Node tolerates) then crash SSR boot before Inertia can import the SSR entry.
+ * This mirrors Node by copying a real Error's stack onto whatever it is given.
  */
 export function ensureErrorStackTracePolyfill(): void {
   if (patched) {
@@ -60,7 +58,6 @@ function copyStackFromError(target: any, source: Error): void {
     })
   }
 
-  // Also copy name and message for completeness.
   if (source.name && !('name' in target)) {
     Object.defineProperty(target, 'name', {
       configurable: true,

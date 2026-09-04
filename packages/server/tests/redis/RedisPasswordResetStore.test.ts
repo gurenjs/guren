@@ -18,14 +18,11 @@ describe('RedisPasswordResetStore', () => {
     expect(found!.expiresAt.getTime()).toBe(expiresAt.getTime())
   })
 
-  // `new Date(parsed.expiresAt)` on a corrupt string is an Invalid Date, and
-  // every comparison against one is false — a caller checking `expiresAt <
-  // new Date()` would read the record as never expired instead of refusing it.
+  // A corrupt expiry parses to an Invalid Date, and every comparison against
+  // one is false — the record would read as never expired instead of refused.
   it('returns null when the stored expiry is unparseable', async () => {
     const redis = new FakeRedis()
     const store = new RedisPasswordResetStore(asRedis(redis))
-    // Bypass store(): a healthy store() always writes a valid ISO string, so
-    // this simulates a row corrupted some other way (manual edit, driver bug).
     await redis.set(
       `${PREFIX}token-corrupt`,
       JSON.stringify({ email: 'user@example.com', expiresAt: 'not-a-date' }),

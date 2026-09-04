@@ -1,9 +1,6 @@
 import type { StorageDriver, MemoryDriverOptions, PutOptions, FileMetadata } from '../types'
 import { trimSlashes } from '../../support/trim-slashes'
 
-/**
- * Stored file in memory.
- */
 interface StoredFile {
   content: Buffer
   contentType?: string
@@ -12,17 +9,7 @@ interface StoredFile {
   lastModified: Date
 }
 
-/**
- * In-memory storage driver for testing.
- *
- * @example
- * ```ts
- * const driver = new MemoryDriver()
- *
- * await driver.put('avatars/user-1.jpg', imageBuffer)
- * const content = await driver.get('avatars/user-1.jpg')
- * ```
- */
+/** In-memory storage driver for testing. */
 export class MemoryDriver implements StorageDriver {
   private readonly storage: Map<string, StoredFile> = new Map()
   private readonly baseUrl: string
@@ -31,24 +18,15 @@ export class MemoryDriver implements StorageDriver {
     this.baseUrl = options.url ?? 'memory://'
   }
 
-  /**
-   * Normalize path (remove leading/trailing slashes).
-   */
   private normalizePath(path: string): string {
     return trimSlashes(path)
   }
 
-  /**
-   * Get directory from path.
-   */
   private getDirectory(path: string): string {
     const parts = path.split('/')
     return parts.slice(0, -1).join('/')
   }
 
-  /**
-   * Check if a path is in a directory.
-   */
   private isInDirectory(filePath: string, directory: string): boolean {
     const normalized = this.normalizePath(filePath)
     const normalizedDir = this.normalizePath(directory)
@@ -61,9 +39,6 @@ export class MemoryDriver implements StorageDriver {
       !normalized.slice(normalizedDir.length + 1).includes('/')
   }
 
-  /**
-   * Check if a path is under a directory (recursive).
-   */
   private isUnderDirectory(filePath: string, directory: string): boolean {
     const normalized = this.normalizePath(filePath)
     const normalizedDir = this.normalizePath(directory)
@@ -91,7 +66,6 @@ export class MemoryDriver implements StorageDriver {
   }
 
   async putFile(path: string, localPath: string, options?: PutOptions): Promise<string> {
-    // In memory driver, we can't read local files
     throw new Error('putFile is not supported in MemoryDriver')
   }
 
@@ -246,8 +220,7 @@ export class MemoryDriver implements StorageDriver {
   }
 
   async makeDirectory(path: string): Promise<void> {
-    // Memory driver doesn't need to create directories
-    // Files are stored by path directly
+    // Files are stored by full path; there is nothing to create.
   }
 
   async deleteDirectory(path: string): Promise<void> {
@@ -287,23 +260,15 @@ export class MemoryDriver implements StorageDriver {
     return file.visibility
   }
 
-  /**
-   * Clear all files (for testing).
-   */
+  /** Testing only. */
   clear(): void {
     this.storage.clear()
   }
 
-  /**
-   * Get the number of stored files.
-   */
   count(): number {
     return this.storage.size
   }
 
-  /**
-   * Get all stored file paths.
-   */
   getAllPaths(): string[] {
     return Array.from(this.storage.keys())
   }

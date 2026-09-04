@@ -66,9 +66,8 @@ describe('AgentRouteMetadata (RFC 0016)', () => {
     })
 
     test('an options object whose ONLY key is agent must not be mistaken for a handler', () => {
-      // Regression guard for the isRouteContractOptions key-sniff list: without
-      // 'agent' in it, this registration treats the options object as the
-      // handler and the tuple as middleware.
+      // Without 'agent' in isRouteContractOptions's key-sniff list, this treats
+      // the options object as the handler and the tuple as middleware.
       const router = new Router()
       router.get('/posts', { agent: { description: 'List posts' } }, [PostController, 'index']).name('posts.index')
 
@@ -92,7 +91,6 @@ describe('AgentRouteMetadata (RFC 0016)', () => {
           .agent({ description: 'Transfer funds' }),
       ).toThrow('already carries agent metadata')
 
-      // The first declaration survives intact.
       const definition = definitionByName(router, 'transfers.store')
       expect(definition.agent).toEqual({ approval: 'required', redact: ['ssn'] })
     })
@@ -171,14 +169,11 @@ describe('AgentRouteMetadata (RFC 0016)', () => {
         }),
       ).toThrow()
 
-      // Validation runs before any registration: no phantom half-resource.
       expect(router.definitions()).toHaveLength(0)
       expect(router.hasRoute('posts.index')).toBe(false)
     })
 
     test('an explicitly-undefined metadata value is not a declaration', () => {
-      // The natural conditional spelling must not throw when the action is
-      // excluded — nothing was declared for it.
       const router = new Router()
       router.resource('posts', PostController, {
         except: ['destroy'],

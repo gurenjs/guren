@@ -1,16 +1,11 @@
 /**
- * Stage the mermaid bundle into `web/public/`.
+ * Stage the mermaid bundle into `web/public/`, shared by the docs pages and
+ * the docs-viewer snapshot, whose shell requests a fixed framework path.
+ * Copying it twice would ship ~3.4 MB of identical bytes to Workers Static
+ * Assets and leave two places to bump.
  *
- * Two consumers need it at runtime and both are served from `public/`: the
- * docs pages, which render ```mermaid fences client-side
- * (resources/js/pages/Docs/Show.tsx), and the prerendered docs-viewer
- * snapshot, whose shell requests a path the framework fixes. They share this
- * one staged file — copying it twice would ship ~3.4 MB of identical bytes to
- * Workers Static Assets and leave two places to bump on a mermaid major.
- *
- * Deliberately not `public/assets/`: that tree is the client bundle's output,
- * and `scripts/smoke/build-budget.ts` caps any file there at 600 kB — which
- * mermaid cannot meet in any split.
+ * Deliberately not `public/assets/`: `scripts/smoke/build-budget.ts` caps any
+ * file in the client bundle's output tree at 600 kB, which mermaid cannot meet.
  */
 import { copyFileSync, existsSync, mkdirSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -27,10 +22,9 @@ export function mermaidTargetPath(): string {
 }
 
 /**
- * Copy the installed bundle into place, skipping the write when the staged
- * copy already matches. The callers sit on `prerender:stub`, which `dev`,
- * `codegen`, `typecheck` and `test` all chain — none of which should pay a
- * 3.4 MB write to get a file that is already correct.
+ * Copy the installed bundle into place, skipping the write when the staged copy
+ * already matches: the callers sit on `prerender:stub`, which `dev`, `codegen`,
+ * `typecheck` and `test` all chain.
  */
 export function stageMermaid(): { path: string; copied: boolean } {
   const source = createRequire(import.meta.url).resolve('mermaid/dist/mermaid.min.js')

@@ -30,7 +30,6 @@ describe('config-cache', () => {
     originalCwd = process.cwd()
     process.chdir(tempDir)
 
-    // Create config directory
     await mkdir(join(tempDir, 'config'), { recursive: true })
   })
 

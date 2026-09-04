@@ -18,10 +18,9 @@ function changeset(file: string, ...lines: string[]): ParsedChangeset {
 
 describe('the premise the gate encodes', () => {
   test('@guren/core still re-exports @guren/server wholesale', async () => {
-    // The rule is two string constants in a script that never opens core's
-    // barrel. If that barrel is ever narrowed to a named allowlist — the
-    // direction the header contemplates for @guren/orm — the gate would go on
-    // demanding a core major with nothing left to justify it.
+    // The rule is two string constants in a script that never opens core's barrel.
+    // Narrowed to a named allowlist (as @guren/orm already is), the gate would go
+    // on demanding a core major with nothing left to justify it.
     const barrel = await readFile(
       join(import.meta.dir, '..', '..', 'packages', 'core', 'src', 'index.ts'),
       'utf8',
@@ -102,9 +101,8 @@ describe('readChangesetDirectory', () => {
   })
 
   test('throws rather than reporting an empty plan for a directory it cannot read', async () => {
-    // The fail-open this replaces returned `[]`, which auditReleasePlan reads as
-    // "no pending changesets" and reports at exit 0 — the gate announcing its
-    // own breakage as a clean release.
+    // `[]` here reads as "no pending changesets" and exits 0: the gate announcing
+    // its own breakage as a clean release.
     const missing = join(dir, 'not-here')
 
     await expect(readChangesetDirectory(missing)).rejects.toThrow(/no release plan to judge/)

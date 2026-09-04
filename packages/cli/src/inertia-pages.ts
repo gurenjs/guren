@@ -15,14 +15,10 @@ const INERTIA_CALL_REGEX =
 const MANIFEST_SEGMENT_REGEX = /\.\w+|\[['"][^'"]+['"]\]/g
 
 /**
- * Page references in a controller source via `this.inertia(...)` — the
- * string-literal form (`this.inertia('posts/Index')`) and the typed
- * manifest form (`this.inertia(pages.posts.Index)`, including bracket
- * segments like `pages['sales-admin'].Index`). Regex-based by design (the
- * same trade-off `guren check` has always made), so calls inside comments
- * can produce false positives. The single source of truth for "how a
- * controller references a page", shared by `guren check` and the entity
- * context.
+ * The one rule for how a controller references a page, shared by `guren check`
+ * and the entity context: the string-literal and typed-manifest forms of
+ * `this.inertia(...)`, including bracket segments (`pages['sales-admin']`).
+ * Regex-based by design, so a call inside a comment is a false positive.
  */
 export function extractInertiaPageRefs(source: string): InertiaPageRef[] {
   const seen = new Set<string>()
@@ -48,10 +44,7 @@ export function extractInertiaPageRefs(source: string): InertiaPageRef[] {
   return refs
 }
 
-/**
- * Component file for a page ID (`.tsx` then `.jsx`), relative to `cwd`, or
- * `undefined` when no file exists.
- */
+/** Component file for a page ID (`.tsx` then `.jsx`), relative to `cwd`. */
 export async function resolveInertiaPageFile(cwd: string, id: string): Promise<string | undefined> {
   for (const ext of ['tsx', 'jsx']) {
     const candidate = `resources/js/pages/${id}.${ext}`
@@ -76,9 +69,8 @@ export interface InertiaPageDescription {
 }
 
 /**
- * Resolve a page ID to its component file and one-line Props type — the
- * shared projection behind the entity context's Pages section and the
- * screens spec view.
+ * The projection shared by the entity context's Pages section and the screens
+ * spec view: a page ID resolved to its component file and one-line Props type.
  */
 export async function describeInertiaPage(cwd: string, id: string): Promise<InertiaPageDescription> {
   const filePath = await resolveInertiaPageFile(cwd, id)
@@ -87,7 +79,6 @@ export async function describeInertiaPage(cwd: string, id: string): Promise<Iner
   let props: string | undefined
   try {
     const extracted = await extractPageProps(resolve(cwd, filePath), id)
-    // Props types can span lines; collapse whitespace for one-line rendering.
     props = extracted.rawType?.replace(/\s+/g, ' ').trim()
   } catch {
     // Unparsable page — still list it, just without props.

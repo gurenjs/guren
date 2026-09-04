@@ -16,16 +16,7 @@ const scryptAsync = promisify(scrypt) as (
   options?: ScryptOptions
 ) => Promise<Buffer>
 
-/**
- * Hash a value using the specified algorithm.
- *
- * @example
- * ```typescript
- * hash('hello') // SHA-256 by default
- * hash('hello', 'sha512')
- * hash('hello', 'md5')
- * ```
- */
+/** Hash a value; SHA-256 by default. */
 export function hash(
   value: string | Buffer,
   algorithm: HashAlgorithm = 'sha256',
@@ -34,15 +25,7 @@ export function hash(
   return createHash(algorithm).update(value).digest(encoding)
 }
 
-/**
- * Create an HMAC signature.
- *
- * @example
- * ```typescript
- * hmac('message', 'secret-key')
- * hmac('message', 'secret-key', { algorithm: 'sha512' })
- * ```
- */
+/** Create an HMAC signature; SHA-256 by default. */
 export function hmac(
   value: string | Buffer,
   key: string | Buffer,
@@ -52,9 +35,6 @@ export function hmac(
   return createHmac(algorithm, key).update(value).digest(encoding)
 }
 
-/**
- * Verify an HMAC signature.
- */
 export function verifyHmac(
   value: string | Buffer,
   signature: string,
@@ -65,36 +45,20 @@ export function verifyHmac(
   return secureCompare(signature, expected)
 }
 
-/**
- * Create a SHA-256 hash.
- */
 export function sha256(value: string | Buffer): string {
   return hash(value, 'sha256')
 }
 
-/**
- * Create a SHA-512 hash.
- */
 export function sha512(value: string | Buffer): string {
   return hash(value, 'sha512')
 }
 
-/**
- * Create an MD5 hash (not secure, use only for checksums).
- */
+/** Not secure — checksums only. */
 export function md5(value: string | Buffer): string {
   return hash(value, 'md5')
 }
 
-/**
- * Hash a password using scrypt.
- *
- * @example
- * ```typescript
- * const hashed = await hashPassword('mypassword')
- * // Returns: $scrypt$N=16384,r=8,p=1$salt$hash
- * ```
- */
+/** scrypt, returning `$scrypt$N=16384,r=8,p=1$salt$hash`. */
 export async function hashPassword(
   password: string,
   options: PasswordHashOptions = {}
@@ -113,19 +77,11 @@ export async function hashPassword(
     p: 1,
   })
 
-  // Format: $scrypt$N=16384,r=8,p=1$salt$hash
   const params = `N=${cost},r=${memory},p=1`
   return `$scrypt$${params}$${salt.toString('base64')}$${derived.toString('base64')}`
 }
 
-/**
- * Verify a password against a hash.
- *
- * @example
- * ```typescript
- * const isValid = await verifyPassword('mypassword', hashedPassword)
- * ```
- */
+/** Verify a password against a hash. */
 export async function verifyPassword(
   password: string,
   hash: string
@@ -141,7 +97,6 @@ export async function verifyPassword(
 
   const [, , paramsStr, saltB64, hashB64] = parts
 
-  // Parse parameters
   const params: Record<string, number> = {}
   for (const param of paramsStr.split(',')) {
     const [key, value] = param.split('=')
@@ -152,12 +107,10 @@ export async function verifyPassword(
   const expectedHash = Buffer.from(hashB64, 'base64')
 
   // A hash whose digest decodes to nothing authenticates *every* password:
-  // scrypt asked for a zero-length key returns zero bytes, and
-  // timingSafeEqual() of two empty buffers is true. A truncated column, a
-  // partial write, or a digest that is not valid base64 all reach this shape,
-  // so the guard is on the decoded lengths rather than on the string. The
-  // parameters get the same treatment: parseInt() yields NaN for a corrupt
-  // segment, which scrypt would otherwise coerce into defaults of its own.
+  // scrypt asked for a zero-length key returns zero bytes, and timingSafeEqual()
+  // of two empty buffers is true — hence the guard on decoded lengths rather
+  // than on the string. Likewise parseInt() yields NaN for a corrupt parameter,
+  // which scrypt would otherwise coerce into defaults of its own.
   if (salt.length === 0 || expectedHash.length === 0) {
     throw new Error('Invalid password hash format.')
   }
@@ -178,9 +131,7 @@ function isPositiveInteger(value: number): boolean {
   return Number.isInteger(value) && value > 0
 }
 
-/**
- * Check if a password needs to be rehashed (parameters changed).
- */
+/** Whether the hash was made with different parameters than `options`. */
 export function needsRehash(
   hash: string,
   options: PasswordHashOptions = {}
@@ -206,9 +157,7 @@ export function needsRehash(
   return params.N !== cost || params.r !== memory
 }
 
-/**
- * Constant-time string comparison.
- */
+/** Constant-time comparison. */
 export function secureCompare(a: string, b: string): boolean {
   if (a.length !== b.length) {
     return false
@@ -220,9 +169,6 @@ export function secureCompare(a: string, b: string): boolean {
   return timingSafeEqual(bufA, bufB)
 }
 
-/**
- * Check if a value matches a hash.
- */
 export function check(
   value: string | Buffer,
   hash: string,

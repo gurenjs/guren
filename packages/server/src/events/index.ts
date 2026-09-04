@@ -10,7 +10,6 @@ export type {
   EventSubscription,
 } from './types'
 
-// Built-in events
 export {
   RequestReceived,
   RequestFinished,

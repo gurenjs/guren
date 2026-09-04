@@ -6,9 +6,8 @@ import { createTempWorkspace } from './helpers'
 
 /**
  * The scaffolded document is built by InertiaEngine, which never reads
- * public/index.html — only a `setInertiaDocument({ head })` registration
- * reaches a browser tab. A blueprint may register it from either file, so each
- * one has to be checked where it actually does.
+ * public/index.html — only a `setInertiaDocument({ head })` registration reaches
+ * a browser tab, and a blueprint may register it from either file.
  */
 const REGISTRATION_FILES = ['src/app.ts', 'config/inertia.ts']
 

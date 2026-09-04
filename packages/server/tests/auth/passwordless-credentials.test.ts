@@ -19,9 +19,8 @@ function providerFor(rows: Row[], hasher?: PasswordHasher) {
   })
 }
 
-// A password login against an account that has no password used to reach the
-// hasher, which throws. The 500 that produced told an attacker the address
-// belonged to an OAuth account, while an unknown address answered 401.
+// Reaching the hasher here throws, and that 500 tells an attacker the address belongs to
+// an OAuth account while an unknown address answers 401.
 describe('a credential column that is not a password hash', () => {
   const PASSWORDLESS = {
     'the sentinel this repo documents': 'oauth:github:12345',
@@ -40,9 +39,8 @@ describe('a credential column that is not a password hash', () => {
   })
 
   test('spends the same hashing work as a real verification', async () => {
-    // Without the dummy hash the sentinel would return in microseconds while a
-    // real account pays for scrypt, which is the same enumeration channel
-    // measured with a stopwatch instead of read off a status code.
+    // Without the dummy hash the sentinel returns in microseconds while a real account pays
+    // for scrypt: the same enumeration channel, measured with a stopwatch.
     const calls: string[] = []
     const counting: PasswordHasher = {
       async hash(plain) {
@@ -60,9 +58,8 @@ describe('a credential column that is not a password hash', () => {
   })
 })
 
-// The other half of the rule: a value that claims a hash format and does not
-// satisfy it is a corrupt column, and denying it in silence would leave nothing
-// to notice it by.
+// A value that claims a hash format and does not satisfy it is a corrupt column, and
+// denying it in silence would leave nothing to notice it by.
 describe('a credential column that claims a hash format', () => {
   const CORRUPT = {
     'a truncated digest': '$scrypt$N=1024,r=8,p=1$c2FsdA==$',

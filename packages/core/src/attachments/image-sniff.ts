@@ -1,15 +1,11 @@
 /**
- * Dependency-free image header sniffer for the attachments pipeline.
+ * Dependency-free image header sniffer, backing the synchronous gates that run
+ * on every runtime before any decoder exists: the header-dimension cap (the
+ * decoder allocates from these numbers, so the check must precede decoding) and
+ * the HEIC signature, so the default 415 needs no decode.
  *
- * This backs the two synchronous gates that run on *every* runtime, before
- * any decoder exists: the encoded-byte cap and the header-dimension cap
- * (decompression-bomb defense — the decoder allocates from header-declared
- * dimensions, so the check must happen before decoding). It also detects the
- * HEIC signature so the default 415 rejection needs no decode.
- *
- * Header dimensions are attacker-controlled metadata: they are only ever
- * used to *reject* (too many pixels), never as proof the file is a valid
- * image — validation stays with the full decode where a processor exists.
+ * Header dimensions are attacker-controlled metadata, only ever used to
+ * *reject* — never as proof the file is a valid image.
  */
 
 export interface SniffedImage {
@@ -52,9 +48,8 @@ function sniffPng(bytes: Uint8Array): SniffedImage | null {
   for (let i = 0; i < PNG_SIGNATURE.length; i++) {
     if (bytes[i] !== PNG_SIGNATURE[i]) return null
   }
-  // The first chunk of a valid PNG is IHDR: width and height are the first
-  // two fields. A file whose first chunk is not IHDR still sniffs as PNG
-  // (magic matched), just without dimensions.
+  // A file whose first chunk is not IHDR still sniffs as PNG, just without
+  // dimensions.
   if (ascii(bytes, 12, 4) !== 'IHDR') return { format: 'png' }
   return { format: 'png', width: u32be(bytes, 16), height: u32be(bytes, 20) }
 }
@@ -62,9 +57,8 @@ function sniffPng(bytes: Uint8Array): SniffedImage | null {
 function sniffJpeg(bytes: Uint8Array): SniffedImage | null {
   if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8 || bytes[2] !== 0xff) return null
 
-  // Walk the marker segments to the first SOFn frame header, which carries
-  // the dimensions. C4 (DHT), C8 (JPG) and CC (DAC) look like SOF markers
-  // but are not frame headers.
+  // Walk to the first SOFn frame header, which carries the dimensions. C4
+  // (DHT), C8 (JPG) and CC (DAC) look like SOF markers but are not.
   let offset = 2
   while (offset + 4 <= bytes.length) {
     if (bytes[offset] !== 0xff) {
@@ -130,10 +124,8 @@ const AVIF_BRANDS = new Set(['avif', 'avis'])
 const HEIC_BRANDS = new Set(['heic', 'heix', 'hevc', 'hevx', 'heim', 'heis', 'hevm', 'hevs'])
 
 /**
- * Real `ftyp` boxes list a handful of compatible brands. The declared box
- * size is attacker-controlled, so the scan is capped — walking an
- * arbitrarily long brand list on unvalidated input is an allocation/CPU
- * primitive, not a parser feature.
+ * The declared `ftyp` box size is attacker-controlled, so the brand scan is
+ * capped: walking an arbitrarily long list is a CPU primitive.
  */
 const MAX_FTYP_BRANDS = 16
 
@@ -174,11 +166,10 @@ function findIspe(
   while (offset + 8 <= end) {
     const size = u32be(bytes, offset)
     const type = ascii(bytes, offset + 4, 4)
-    // size 0 (to end of file) and 1 (64-bit) exist but never wrap the tiny
-    // metadata boxes we walk; stop rather than misparse.
+    // Sizes 0 (to EOF) and 1 (64-bit) never wrap these tiny metadata boxes.
     if (size < 8 || offset + size > end) return null
     if (type === 'ispe') {
-      // Full box: 1 byte version + 3 bytes flags, then width/height u32.
+      // Full box: 1 version byte + 3 flag bytes, then width/height u32.
       if (offset + 20 <= end) {
         return { width: u32be(bytes, offset + 12), height: u32be(bytes, offset + 16) }
       }

@@ -23,7 +23,6 @@ import {
   clearJobRegistry,
 } from '../../src/queue'
 
-// Test notification classes
 class TestNotification extends Notification {
   constructor(public message: string = 'Test') {
     super()
@@ -85,7 +84,6 @@ class ConditionalNotification extends Notification {
   }
 }
 
-// Test notifiable
 class TestUser implements Notifiable {
   notifications: any[] = []
   notifiableType?: string
@@ -108,9 +106,8 @@ class TestUser implements Notifiable {
   }
 }
 
-// Captured at module scope, before any describe body runs: a value read inside
-// a describe is already whatever an earlier describe left behind, so restoring
-// to it re-pins the replacement instead of clearing it.
+// Captured at module scope: a value read inside a describe is already whatever
+// an earlier describe left behind, so restoring to it re-pins the stub.
 const realFetch = global.fetch
 
 describe('Notification', () => {
@@ -735,8 +732,7 @@ describe('SlackChannel', () => {
   })
 
   // Without this the stub outlives the describe: every later file in the run
-  // gets a fetch that answers 200 to anything, which reads as a passing HTTP
-  // call right up until a test asserts on the status.
+  // gets a fetch that answers 200 to anything, which reads as a passing call.
   afterEach(() => {
     global.fetch = realFetch
   })
@@ -905,9 +901,8 @@ describe('MailChannel', () => {
 })
 
 describe('Queued notifications', () => {
-  // Routing shaped like the documented Notifiable: the channel name has no
-  // relationship to the property holding the route, so it can only survive the
-  // queue if routeNotificationFor() is actually consulted at dispatch.
+  // The channel name has no relationship to the property holding the route, so
+  // it survives the queue only if routeNotificationFor() is consulted at dispatch.
   class QueuedUser implements Notifiable {
     constructor(
       public id: number,
@@ -930,8 +925,7 @@ describe('Queued notifications', () => {
   class QueuedMultiChannel extends Notification {
     static shouldQueue = true
 
-    // Constructor argument, kept as an own property. The argument is not
-    // recoverable from the payload, so re-running the constructor during
+    // Not recoverable from the payload, so re-running the constructor during
     // rebuild would throw on the undefined order.
     orderId: number
 
@@ -1132,7 +1126,6 @@ describe('Queued notifications', () => {
       'Notification type "QueuedConditional" is not registered'
     )
 
-    // Explicit registration makes the same payload deliverable again.
     registerNotification(QueuedConditional)
     await expect(new JobClass().handle(payload as never)).resolves.toBeUndefined()
   })
@@ -1220,9 +1213,8 @@ describe('queued notification job identity', () => {
     )
 
     const queued = await driver.pop('notifications')
-    // SendNotificationJob is a singleton, so this already matches its class
-    // name — the pinned jobName is what keeps that true if a bundler mangles
-    // the class or it's later renamed.
+    // The pinned jobName keeps this name stable if a bundler mangles the class
+    // or it is later renamed.
     expect(queued?.name).toBe('SendNotificationJob')
     expect(getJob(queued!.name)).toBeDefined()
 
@@ -1242,9 +1234,8 @@ describe('queued notification job identity', () => {
     const payload = queued!.payload as { notifiableData: { type: string } }
     expect(payload.notifiableData.type).toBe('App\\Models\\User')
 
-    // Run it through the real job handler, end to end, into the channel —
-    // the same path a worker uses. The rebuilt notifiable's own constructor
-    // name would be 'Object'; only the restored notifiableType survives.
+    // The same path a worker uses: the rebuilt notifiable's own constructor
+    // name would be 'Object', so only the restored notifiableType survives.
     await new (getJob(queued!.name)!)().handle(queued!.payload)
 
     expect(memoryChannel.sent).toHaveLength(1)
