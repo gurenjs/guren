@@ -246,6 +246,19 @@ jobs:
             echo "::${skip_kind}::agent-catalog: the derived-fact rules above passed, but THE CHANGESET GATE DID NOT RUN — ${skip_reason}. A catalog input changed without a @guren/cli changeset would not have been caught. This job being green is not that check passing."
           fi
 
+      # Ratcheted against the same base ref the agent-catalog step fetched:
+      # a file fails only when a comment rule's count grew, so the legacy
+      # backlog never blocks a PR. No base (first push, collected SHA) means
+      # the ratchet has nothing to compare against, and that is announced
+      # rather than passed.
+      - name: Comment lint
+        run: |
+          if git rev-parse --verify --quiet refs/audit-base >/dev/null; then
+            bun run audit:comments --base refs/audit-base
+          else
+            echo "::notice::comment-lint: no base ref was fetched (see the agent catalog step), so the comment ratchet did not run."
+          fi
+
       - name: Dependency audit
         run: bun run audit:deps
 
