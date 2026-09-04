@@ -5,18 +5,11 @@ import { usePage } from '@inertiajs/react'
  * Client-side translation for the `_i18n` shared prop injected by
  * `createApp({ i18n })` on the server.
  *
- * The translation semantics (dot-notation keys, `:name`/`{name}`
- * interpolation, `|`-separated plural forms, fallback-locale lookup,
- * missing keys echoing the key) intentionally mirror the server's
- * Translator so `useTranslation().t(...)` and `this.t(...)` in a
- * controller agree on every input. The parity suite in
- * `tests/i18n.test.ts` runs both implementations against shared fixtures —
- * extend it when touching anything here.
- *
- * Parity covers the default configuration: server-only Translator options
- * (custom `pluralizationRules`, `onMissingKey`) are functions and cannot
- * travel in the serialized `_i18n` payload, so they have no client-side
- * counterpart.
+ * Semantics mirror the server's Translator so `useTranslation().t(...)` and a
+ * controller's `this.t(...)` agree on every input; the parity suite in
+ * `tests/i18n.test.ts` runs both against shared fixtures — extend it when
+ * touching anything here. It covers the default configuration only: server-only
+ * options are functions and cannot travel in the serialized `_i18n` payload.
  */
 
 export type TranslationMessages = {
@@ -26,10 +19,9 @@ export type TranslationMessages = {
 export type ReplacementValues = Record<string, string | number>
 
 /**
- * Registry for the app's generated translation keys. `guren codegen` emits
- * `.guren/translations.gen.ts`, which augments this interface with a `keys`
- * union derived from `lang/<locale>/*.json`. Left empty, translation
- * helpers accept any string.
+ * Registry for the app's generated translation keys: `guren codegen` augments
+ * this interface with a `keys` union from `lang/<locale>/*.json`. Left empty,
+ * translation helpers accept any string.
  */
 export interface GurenTranslationKeys {}
 
@@ -143,10 +135,9 @@ function getRawTranslation(
   return typeof result === 'string' ? result : undefined
 }
 
-// Interpolation patterns are deterministic per replacement key, so compile
-// them once (bounded by the app's distinct placeholder names). A `g`-flagged
-// regex used with String#replace carries no state between calls. Keys are
-// escaped so regex metacharacters match literally, mirroring the server.
+// Compiled once per replacement key (a `g`-flagged regex carries no state
+// across String#replace calls). Keys are escaped so regex metacharacters match
+// literally, mirroring the server.
 const replacementPatterns = new Map<string, [RegExp, RegExp]>()
 
 const REGEXP_SPECIALS = /[.*+?^${}()|[\]\\]/g
@@ -236,16 +227,9 @@ export function resolveTranslation(i18n: I18nPageProps | undefined): Translation
 
 /**
  * Translate with the locale and messages the server shared for this request.
- *
- * ```tsx
- * const { t, tc, locale } = useTranslation()
- * t('messages.welcome', { name: user.name })
- * tc('messages.items', items.length)
- * ```
- *
- * Requires `createApp({ i18n })` on the server (with `share` left enabled).
- * When the `_i18n` prop is absent, keys are returned untranslated and a
- * warning is logged once.
+ * Requires `createApp({ i18n })` on the server (with `share` left enabled); when
+ * the `_i18n` prop is absent, keys are returned untranslated and a warning is
+ * logged once.
  */
 export function useTranslation(): Translation {
   const i18n = usePage().props._i18n as I18nPageProps | undefined

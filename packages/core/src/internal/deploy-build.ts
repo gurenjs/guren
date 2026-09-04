@@ -1,34 +1,11 @@
 /**
- * Build-time helpers shared by the deploy plugins (`@guren/plugin-cloudflare`,
- * `@guren/plugin-lambda`, `@guren/plugin-vercel`).
- *
- * Internal by the rules in `contributing/api-stability.md`: reachable only
- * through a deep import under `internal/`, never re-exported from
- * `@guren/core`'s index. No stability guarantee — it exists so the three
- * plugins stop carrying three copies of the same knowledge, not as a public
- * extension point.
- *
- * Deliberately imports nothing from the framework itself: a plugin's build
- * step should not drag the runtime into a developer's build process. Only
- * `node:` builtins belong here, and `deploy-build.test.ts` asserts it of the
- * built artifact — the property would otherwise break silently the day the bundler
- * splits a shared chunk out of this entry.
- *
- * What does *not* belong here: anything a platform legitimately decides for
- * itself. The message naming a platform and its replacement API, where a
- * rendered stub is delivered (Workers resolves an alias to a file on disk,
- * Lambda hands source to its bundler plugin), whether a missing `build` script
- * is fatal, and how an SSR bundle's renderer export is verified are all
- * per-plugin by design.
- *
- * One rule holds across the helpers here: a helper that *relates* two paths —
- * a containment test, a relative specifier — canonicalizes both first, because
- * whatever consumes the answer resolves links too. A helper that merely reads
- * or writes one path passes it through, since the OS follows the links itself.
- * That is why `resolveSsrEntryFile` compares raw strings (both operands derive
- * from one `ssrDir`, so no link can come between them) and why the plugins'
- * own `relative(root, out)` for `wrangler.jsonc` must stay lexical: that path
- * is read by wrangler, not by a bundler resolving a module from its real path.
+ * Build-time helpers shared by the deploy plugins (cloudflare, lambda, vercel).
+ * Internal (`contributing/api-stability.md`): deep import only, never re-exported
+ * from `@guren/core`. Imports only `node:` builtins so a plugin build never drags
+ * the runtime in; `deploy-build.test.ts` asserts that of the built artifact.
+ * Platform decisions (messages, stub delivery, whether a missing `build` script is
+ * fatal, SSR renderer verification) stay per-plugin. A helper that *relates* two
+ * paths canonicalizes both first; one that reads or writes a single path does not.
  */
 import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path'
@@ -48,13 +25,10 @@ export function resolvePathLike(value: PathLike): string {
 }
 
 /**
- * Read the first manifest that parses, tolerating both Vite layouts
- * (`.vite/manifest.json` and the flat `manifest.json` older configs emit), and
- * report which path it was. A malformed file is skipped rather than fatal —
- * the caller decides what a missing manifest means for its platform. The path
- * is part of the result because a caller publishing the manifest location to
- * the runtime has to name the file that was actually parsed: testing which one
- * *exists* picks the malformed one that was just skipped.
+ * Read the first manifest that parses, in either Vite layout (`.vite/manifest.json`,
+ * then flat `manifest.json`), and report its path: a caller publishing the location
+ * must name the file actually parsed, not the malformed one that was skipped. What a
+ * missing manifest means is the caller's call.
  */
 export function readManifest(
   ...paths: string[]
@@ -75,41 +49,29 @@ export function readManifest(
 }
 
 /**
- * The two layouts `readManifest` accepts, in preference order: `.vite/` first,
- * because Vite >= 5 writes it there and a flat `manifest.json` beside it is
- * most likely stale output of an older config. `@guren/server`'s runtime
- * lookup (`clientManifestCandidates` in `http/vite-manifest.ts`) prefers the
- * same layout — the orders must agree, or an app with both files resolves
- * different asset versions locally than after a deploy; the server's
- * `tests/http/vite-manifest.test.ts` pins the agreement (the rule cannot be
- * shared as code, since this module imports nothing beyond node builtins).
+ * Layouts `readManifest` accepts, `.vite/` first (Vite >= 5 writes it there; a flat
+ * file beside it is likely stale). Must agree with `clientManifestCandidates` in
+ * @guren/server's http/vite-manifest.ts, pinned by tests/http/vite-manifest.test.ts,
+ * or local and deployed asset versions diverge.
  */
 function manifestPaths(dir: string): [string, string] {
   return [resolve(dir, '.vite/manifest.json'), resolve(dir, 'manifest.json')]
 }
 
 /**
- * The one statement of where an app's *client* manifest lives: under
- * `<publicDir>/assets`, in either Vite layout. `resolveClientAssetEnv` and
- * `clientManifestJson` both answer from this read — stating the composition
- * twice is how the two would come to look in different places.
+ * The one statement of where the client manifest lives: `<publicDir>/assets`, either
+ * layout. `resolveClientAssetEnv` and `clientManifestJson` both read through here.
  */
 function readClientManifest(publicDir: string): Manifest | undefined {
   return readManifest(...manifestPaths(resolve(publicDir, 'assets')))?.manifest
 }
 
 /**
- * Resolve symlinks in the parts of `path` that exist, keeping the trailing
- * components that do not. `realpathSync` throws on a path that is not there
- * yet, and an output directory usually is not on a first build.
- *
- * A sibling of `realpathNearestExisting` in `@guren/cli`'s plugin-manifest.ts,
- * kept as a copy because this module must not import beyond node builtins and
- * cli cannot be imported from core. Only ENOENT walks up, matching the twin:
- * any other failure (an unreadable or non-directory ancestor) is surfaced
- * rather than silently treated as nonexistent — both callers relate two paths
- * (a deletion guard, an import specifier) and neither may answer from a path
- * it could not actually resolve.
+ * Resolve symlinks in the existing parts of `path`, keeping trailing components that
+ * do not exist yet (`realpathSync` throws on a first build's output dir). Twin of
+ * `realpathNearestExisting` in @guren/cli's plugin-manifest.ts, copied because this
+ * module imports only node builtins. Only ENOENT walks up; any other failure
+ * surfaces, since both callers relate two paths and must not answer from a guess.
  */
 function realpathOfNearestExisting(path: string): string {
   try {
@@ -129,24 +91,11 @@ function realpathOfNearestExisting(path: string): string {
 }
 
 /**
- * Throw unless `out` is safe to delete: it must be neither the app root nor a
- * directory containing it.
- *
- * Relates two paths, so it canonicalizes both: comparing lexically would
- * accept `outputDir` values that reach the app root the long way, and the
- * delete that follows resolves the links regardless.
- *
- * Containment is then decided with `relative` rather than a string prefix
- * because `out + sep` is `//` at the filesystem root, which no absolute path
- * is prefixed by — a prefix test lets `outputDir: '/'` through. The escape
- * test is `'..'` exactly or a `'../'` prefix, not `startsWith('..')`: a
- * directory legitimately named `..-source` inside `out` yields the relative
- * path `..-source`, which the looser test would read as an escape.
- *
- * Exported separately from `resetOutputDir` so a caller can validate the
- * option early and delete later, but the delete itself should always go
- * through `resetOutputDir`.
- *
+ * Throw unless `out` is safe to delete: neither the app root nor a directory
+ * containing it. Both paths are canonicalized (a lexical compare accepts an
+ * `outputDir` that reaches the root through links). Containment uses `relative`,
+ * not a prefix test (`out + sep` is `//` at the root, letting `'/'` through), and
+ * escape means `'..'` or a `'../'` prefix, so `..-source` inside `out` is not one.
  * @param label Platform name for the error message, e.g. `'Lambda build'`.
  */
 export function assertOutputDirOutsideRoot(out: string, root: string, label: string): void {
@@ -162,13 +111,8 @@ export function assertOutputDirOutsideRoot(out: string, root: string, label: str
 }
 
 /**
- * Delete the output directory so the build starts from a clean slate, after
- * checking it is safe to delete.
- *
- * The check and the delete are one call on purpose: they were separate
- * statements in each plugin, and a plugin that had only the delete has already
- * shipped.
- *
+ * Delete the output directory after checking it is safe to delete. One call on
+ * purpose: a plugin that carried only the delete has already shipped.
  * @param label Platform name for the error message, e.g. `'Lambda build'`.
  */
 export function resetOutputDir(out: string, root: string, label: string): void {
@@ -180,13 +124,10 @@ export function resetOutputDir(out: string, root: string, label: string): void {
 }
 
 /**
- * Relative specifier for importing `target` from a module written into
- * `fromDir`, in POSIX form so the emitted source is platform-agnostic.
- *
- * Relates two paths, so it canonicalizes both: the bundler resolves the
- * emitted module from its real path, and a link that changes depth would
- * otherwise leave the specifier short a `..` segment.
- *
+ * POSIX relative specifier for importing `target` from a module written into
+ * `fromDir`. Both paths are canonicalized: the bundler resolves the emitted module
+ * from its real path, and a link that changes depth would leave the specifier a
+ * `..` short.
  * @param label Platform name for the error message, e.g. `'Lambda build'`.
  */
 export function importSpecifier(fromDir: string, target: string, label: string): string {
@@ -207,12 +148,9 @@ export interface ClientAssetEnv {
 }
 
 /**
- * Locate the built client entry and its CSS in the Vite client manifest, as
- * the `/assets/`-prefixed URLs the Inertia head expects.
- *
- * Takes the public directory rather than the app root so a caller passing a
- * custom `publicDir` is honoured.
- *
+ * Locate the built client entry and its CSS in the Vite client manifest, as the
+ * `/assets/`-prefixed URLs the Inertia head expects. Takes the public directory so
+ * a custom `publicDir` is honoured.
  * @param label Platform name for the warning message, e.g. `'Lambda build'`.
  */
 export function resolveClientAssetEnv(
@@ -237,27 +175,11 @@ export function resolveClientAssetEnv(
 }
 
 /**
- * The client build manifest as JSON text, for the deploy targets' runtime
- * manifest injection (`GUREN_VITE_MANIFEST`): `viteAsset()` resolves
- * content-page asset URLs from the client manifest at render time, and a
- * bundled function or worker has no `public/assets/manifest.json` to read.
- * How the payload reaches the runtime is per-plugin (a generated-entry
- * assignment, a bundler `define`); *what* the payload is, is this.
- *
- * Separate from `resolveClientAssetEnv` because that helper answers only for
- * the client *entry*: a content-page app can have a manifest of CSS build
- * inputs and no `resources/js/app.tsx` at all, and its `viteAsset()` calls
- * still need the whole manifest.
- *
- * The payload is trimmed to the fields the runtime rule reads — `file` and
- * `css` per entry (`getManifestFile`/`getManifestCss` in @guren/server's
- * vite-manifest.ts) — because it ships inside executable code: a large app's
- * manifest is dominated by per-chunk `imports`/`dynamicImports` graph
- * metadata nothing consumes, and Workers caps bundle size. Trimming also
- * validates the shape at build time, so a parseable-but-not-a-manifest file
- * (`null`, an array) is reported as "no manifest" here instead of being baked
- * in to fail at first render. String and array entry forms pass through
- * untrimmed — the runtime accepts them, and the two paths must not diverge.
+ * The client manifest as JSON for runtime injection (`GUREN_VITE_MANIFEST`): a
+ * bundled function has no `public/assets/manifest.json`. Separate from
+ * `resolveClientAssetEnv`, which answers only for the client entry. Trimmed to
+ * `file`/`css` per entry (all the runtime reads; chunk graph metadata dominates
+ * size and Workers caps bundles); a parseable non-manifest is rejected here.
  */
 export function clientManifestJson(publicDir: string): string | undefined {
   const manifest: unknown = readClientManifest(publicDir)
@@ -294,11 +216,9 @@ export function clientManifestJson(publicDir: string): string | undefined {
 }
 
 /**
- * Absolute path of the built SSR entry chunk, or undefined when the app has no
- * SSR build. Verifying that the chunk actually exports a renderer is left to
- * the caller: the platforms disagree on whether importing it during a build is
- * acceptable.
- *
+ * Absolute path of the built SSR entry chunk, or undefined without an SSR build.
+ * Whether the chunk exports a renderer is the caller's check: platforms disagree
+ * on importing it during a build.
  * @param label Platform name for the error messages, e.g. `'Lambda build'`.
  */
 export function resolveSsrEntryFile(
@@ -325,18 +245,11 @@ export function resolveSsrEntryFile(
 }
 
 /**
- * Runtime locations of a staged SSR bundle, for platforms that copy `ssrDir`
- * under the function root and hand the layout to the server through
- * environment variables. `prefix` is where the caller stages the directory —
- * it cannot be derived here because staging happens later in the caller's own
- * flow.
- *
- * The manifest path is derived from the file that parsed rather than the
- * first one that exists: both Vite layouts occur in the wild, and a malformed
- * `.vite/manifest.json` alongside a valid flat one would otherwise publish the
- * path to the file that was skipped. It is optional only for the mid-build
- * race where the manifest vanishes between `resolveSsrEntryFile` and this
- * call — callers already hold a chunk path that manifest produced.
+ * Runtime locations of a staged SSR bundle, for platforms that copy `ssrDir` under
+ * the function root; `prefix` is where the caller stages it. The manifest path is
+ * the file that parsed, not the first that exists (a malformed `.vite/` file beside
+ * a valid flat one). Optional only for the race where the manifest vanishes after
+ * `resolveSsrEntryFile`.
  */
 export function ssrRuntimePaths(
   ssrDir: string,
@@ -353,22 +266,11 @@ export function ssrRuntimePaths(
 }
 
 /**
- * Delete the dev-mode `index.html` shell from a directory a platform serves
- * statically.
- *
- * Guren-specific knowledge, not platform policy, which is why it is shared:
- * the shell exists so Vite can serve the app in dev, and every deploy target
- * answers for its static directory before the function runs — so shipping it
- * shadows the app's own root route, which then never executes. Exact name
- * only: the shell is written by the framework's own scaffolding, so there is
- * no case variant of it to catch, and a platform's asset directory otherwise
- * belongs to the app.
- *
- * Separate from `stageStaticAssets` because a platform whose layout differs
- * needs this rule without the rest — `@guren/plugin-vercel` stages `public/`
- * itself, having no `/public/assets` mirror to build (its generated
- * `config.json` carries a rewrite instead), and shipped the shadowing shell
- * for exactly as long as the rule lived inside the function it could not call.
+ * Delete the dev-mode `index.html` shell from a statically served directory: every
+ * deploy target answers for its static directory before the function runs, so the
+ * shell shadows the app's root route. Exact name only (the framework writes it).
+ * Separate from `stageStaticAssets` because `@guren/plugin-vercel` stages `public/`
+ * itself and needs this rule alone.
  */
 export function removeShadowingIndex(assetsOut: string): void {
   const shadowingIndex = resolve(assetsOut, 'index.html')
@@ -378,14 +280,10 @@ export function removeShadowingIndex(assetsOut: string): void {
 }
 
 /**
- * Copy `public/` into a platform's static-asset staging directory.
- *
- * Carries one piece of Guren-specific knowledge of its own, which is why it is
- * shared rather than per-plugin: built assets self-reference the Vite plugin's
- * derived base `/public/assets/` while HTML references use `/assets/` — so on
- * a host without rewrites the built-assets directory has to appear under both
- * prefixes. The shadowing-shell rule it also applies belongs to
- * `removeShadowingIndex`, stated there.
+ * Copy `public/` into a platform's static staging directory. Built assets
+ * self-reference `/public/assets/` while HTML uses `/assets/`, so on a host without
+ * rewrites the assets directory must appear under both prefixes. Also applies
+ * `removeShadowingIndex`.
  */
 export function stageStaticAssets(publicDir: string, assetsOut: string): void {
   mkdirSync(assetsOut, { recursive: true })
@@ -405,36 +303,18 @@ export function stageStaticAssets(publicDir: string, assetsOut: string): void {
 }
 
 /**
- * Extensions a browser renders as a *document* in the serving origin, for a
- * platform that answers for `public/` before the app ever runs.
- *
- * Exactly the set `@guren/server`'s `rendersAsDocument` matches over Hono's
- * mime table — the same two inputs the framework's own static guard reads, so
- * a file that downloads locally downloads on a deploy target too. Written out
- * rather than derived because this module imports nothing from the framework
- * (see the header); `packages/server/tests/http/static-documents.test.ts`
- * recomputes it from that table and fails when the two disagree, so a document
- * type Hono adds cannot pass unnoticed.
- *
- * Two things the list does not reach, both of them the framework's own
- * blind spots rather than new ones. `text/xsl` is a document type
- * `rendersAsDocument` matches, but Hono's table names no extension for it, so
- * `getMimeType` returns nothing for a `.xsl` file and the framework serves it
- * unguarded too — adding it here would make a deploy target stricter than the
- * app it deployed. And extension *case*: `getMimeType` lowercases before its
- * lookup, so the framework guard does fire for `logo.SVG`, and a platform
- * matching a literal pattern does not. Each plugin closes that where its own
- * matcher allows, and the three answers differ — see each one's own comment
- * rather than a list here that goes stale on the next target.
+ * Extensions a browser renders as a document, for platforms serving `public/`
+ * before the app runs: exactly what `@guren/server`'s `rendersAsDocument` matches
+ * over Hono's mime table (`tests/http/static-documents.test.ts` fails on drift).
+ * Like the framework it misses `.xsl` (Hono names no extension) and extension
+ * case, which each plugin closes as its own matcher allows.
  */
 export const DOCUMENT_ASSET_EXTENSIONS = ['htm', 'html', 'svg', 'xhtml', 'xml'] as const
 
 /**
- * The pair `applyDocumentDisposition` sets, for a platform to set on the same
- * files. Same reasoning as the framework's: `attachment` is honoured for
- * navigations and ignored for subresource loads, so `<img src="/logo.svg">`
- * and a CSS `url()` keep working while the URL opened directly downloads;
- * `nosniff` stops the promotion a browser would otherwise do on its own.
+ * The headers `applyDocumentDisposition` sets: `attachment` is honoured for
+ * navigations and ignored for subresource loads, so `<img>` and CSS `url()` keep
+ * working while a directly opened URL downloads; `nosniff` stops browser promotion.
  */
 export const DOCUMENT_ASSET_HEADERS: Readonly<Record<string, string>> = {
   'Content-Disposition': 'attachment',
@@ -448,36 +328,18 @@ export interface DevOnlyModule {
   readonly specifier: string
   readonly kind: DevOnlyModuleKind
   /**
-   * Names the importing code destructures. A stub must declare every one of
-   * them: an empty module fails the bundle with "no matching export" rather
-   * than at runtime. Empty means the module is only ever read through
-   * namespace property access, so an empty module suffices.
+   * Names the importing code destructures; a stub must declare every one or the
+   * bundle fails with "no matching export". Empty means namespace access only.
    */
   readonly exportNames: readonly string[]
 }
 
 /**
- * Modules that cannot run off Bun but sit in the graph of any app importing
- * `@guren/core`, reached only through dev-time branches. Core aggregates
- * `@guren/server` and `@guren/orm`, where these imports actually live, so it
- * is the one package that sees the whole set — which is why the list lives
- * here rather than in each plugin, where two copies had already drifted apart.
- *
- * Bundlers follow these imports even when they are dynamic, so without stubs
- * the build either fails to resolve them or ships megabytes of dev tooling.
- *
- * - `sqlite` — the local sqlite ORM factory, opposite the platform's own
- *   database branch in `config/database.ts`.
- * - `vite` — the dev asset server `Application` starts when serving locally.
- * - `mcp` — the opt-in MCP endpoint's lazy imports, which drag the CLI
- *   generators (and Babel) plus the MCP SDK in behind them.
- *
- * SQL client libraries are deliberately *not* here: they are dev-only on
- * Workers, where D1 is the only database, and load-bearing on Lambda and
- * Vercel, which connect to Postgres. See `SQL_CLIENT_MODULES`.
- *
- * `as const` so a consumer can key an exhaustive table on the specifiers and
- * have a new entry here surface as a compile error there.
+ * Dev-only modules in the graph of any app importing `@guren/core`, listed here
+ * because core alone sees the whole set (two plugin copies had drifted). Bundlers
+ * follow even dynamic imports, so unstubbed they fail the build or ship dev tooling.
+ * SQL clients are deliberately elsewhere (`SQL_CLIENT_MODULES`): dev-only on
+ * Workers, load-bearing on Lambda/Vercel. `as const` keys consumers' exhaustive tables.
  */
 export const DEV_ONLY_MODULES = [
   { specifier: 'bun:sqlite', kind: 'sqlite', exportNames: ['Database'] },
@@ -499,10 +361,8 @@ export const DEV_ONLY_MODULES = [
 export type DevOnlyModuleEntry = (typeof DEV_ONLY_MODULES)[number]
 
 /**
- * The specifier `@guren/plugin-mcp` dynamically imports to serve the App MCP
- * endpoint (RFC 0016 §7). Named here rather than inline in three plugins
- * because it is the one entry of `DEV_ONLY_MODULES` whose stubbing is
- * conditional, and each platform has to recognise it.
+ * The specifier `@guren/plugin-mcp` lazily imports for the App MCP endpoint (RFC
+ * 0016 §7): the one `DEV_ONLY_MODULES` entry whose stubbing is conditional.
  */
 export const MCP_TRANSPORT_SPECIFIER =
   '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'
@@ -511,25 +371,11 @@ export const MCP_TRANSPORT_SPECIFIER =
 export const MCP_PLUGIN_PACKAGE = '@guren/plugin-mcp'
 
 /**
- * Whether the app has opted into the App MCP endpoint (RFC 0016 §7).
- *
- * Resolves the RFC's Open Question 5 — how a build learns that an app wants
- * the MCP transport — as **dependency sniffing**: declaring
- * `@guren/plugin-mcp` in `dependencies` *is* the opt-in. Nothing else is
- * asked of the developer, because there is nothing else to ask: an app that
- * installed the plugin and mounted it wants the endpoint to work, and a build
- * flag it must also remember to pass is a way for the endpoint to be silently
- * compiled shut on a platform. The build does not *enable* anything here — it
- * stops sabotaging what the app already configured.
- *
- * `dependencies` only, never `devDependencies`: a devDependency does not ship,
- * so an app that has one has no MCP endpoint at runtime to protect. Reading
- * both would keep the transport in the bundle of every app that merely
- * develops against the plugin.
- *
- * Absent, unreadable, or malformed manifest answers `false` — no opt-in
- * evidence is not the same as opt-in, and the false direction is the safe
- * one: the transport stays stubbed, which is exactly today's behaviour.
+ * Whether the app opted into the App MCP endpoint (RFC 0016 §7, Open Question 5):
+ * declaring `@guren/plugin-mcp` in `dependencies` is the opt-in, so no build flag
+ * can silently compile the endpoint shut. `devDependencies` do not count (they do
+ * not ship). An absent, unreadable, or malformed manifest answers `false`: the
+ * transport stays stubbed, which is the safe direction.
  */
 export function appUsesMcpPlugin(root: string): boolean {
   try {
@@ -548,38 +394,11 @@ export function appUsesMcpPlugin(root: string): boolean {
 }
 
 /**
- * The dev-only modules that must stay stubbed for this app.
- *
- * The policy layer over `DEV_ONLY_MODULES`, which stays exported and
- * unchanged: it is the full inventory, and other consumers (the wrangler
- * bundle probe, the stub-filename table) read it as such. What varies per app
- * is only whether the *transport* entry is in force.
- *
- * `@guren/plugin-mcp` reaches the App MCP endpoint through exactly one lazy
- * import — `MCP_TRANSPORT_SPECIFIER` — plus static imports of the SDK's
- * `server/index.js` and `types.js`, which no entry here names. Stubbing the
- * transport therefore compiles the endpoint shut on every platform, which is
- * what the three deploy plugins did until RFC 0016 Phase 4a. Dropping the
- * entry for an app that declared the plugin is the whole of the fix.
- *
- * `@modelcontextprotocol/sdk/server/mcp.js` stays stubbed regardless, and the
- * distinction matters: that is the **Dev** MCP's `McpServer`, reached from
- * `@guren/server`'s `McpServiceProvider`, which drives the CLI's code
- * generators against the filesystem. It is compiled shut by the `NODE_ENV`
- * define anyway; the stub is the second guard, and a deployed app has no use
- * for it either way. Same for `@guren/cli` behind it, and for `bun:sqlite`
- * and `vite`, none of which the App MCP endpoint touches.
- *
- * The return type keeps each entry's narrow `kind` so that a platform can
- * index its `Record<kind, message>` table with `module.kind` at all. What
- * makes those tables exhaustive is not this function — each is keyed off
- * `DEV_ONLY_MODULES` directly (on Workers, that list plus
- * `SQL_CLIENT_MODULES`), which is what turns a new kind there into a compile
- * error there. Widening the return to `readonly DevOnlyModule[]` would leave
- * that exhaustiveness untouched and instead break every one of the lookups,
- * since `DevOnlyModuleKind` includes `'sql-driver'` — a kind Lambda's and
- * Vercel's tables deliberately omit, because those two platforms decide the
- * SQL clients per app rather than per platform.
+ * The dev-only modules that must stay stubbed for this app: `DEV_ONLY_MODULES`
+ * minus the transport entry when the app declared `@guren/plugin-mcp` (stubbing
+ * `MCP_TRANSPORT_SPECIFIER` compiled the endpoint shut everywhere before RFC 0016
+ * Phase 4a). `server/mcp.js` stays stubbed: that is the Dev MCP. Each entry keeps
+ * its narrow `kind` so platform `Record<kind, message>` tables stay indexable.
  */
 export function stubbableDevOnlyModules(options: {
   mcpPlugin: boolean
@@ -591,22 +410,14 @@ export function stubbableDevOnlyModules(options: {
   return DEV_ONLY_MODULES.filter((module) => module.specifier !== MCP_TRANSPORT_SPECIFIER)
 }
 
-/**
- * A database `@guren/orm` can connect through, named after the factory an
- * app's database config calls to declare it.
- */
+/** A database `@guren/orm` can connect through, named after the factory the app's config calls. */
 export type DatabaseDialect = 'postgres' | 'mysql' | 'sqlite' | 'aws-data-api' | 'd1'
 
 /**
- * The `@guren/orm` factory names an app's database config calls, and the
- * dialect each one declares.
- *
- * Taken from `@guren/core`'s export allowlist rather than from the ORM's
- * implementation files, and pinned there by a test: a list built from the
- * implementation admits names that were never exported and misses the aliases
- * that were. The spelling is `createMySqlDatabase`, not `createMysqlDatabase`
- * — a build that filters on a name nobody exports detects nothing and stubs
- * nothing, which is silent.
+ * The `@guren/orm` factory names an app's config calls, with each one's dialect.
+ * Taken from `@guren/core`'s export allowlist (pinned by a test), not the ORM's
+ * files: it is `createMySqlDatabase`, and a filter on a name nobody exports stubs
+ * nothing, silently.
  */
 export const DATABASE_FACTORIES = {
   createPostgresDatabase: 'postgres',
@@ -622,29 +433,12 @@ export interface SqlClientModule extends DevOnlyModule {
 }
 
 /**
- * The database client libraries `@guren/orm`'s Postgres, MySQL and Aurora
- * Data API factories reach for.
- *
- * They sit apart from `DEV_ONLY_MODULES` because whether they are dead weight
- * depends on the platform: on Workers, D1 is the only database there is, so
- * every one of these is unreachable; on Lambda and Vercel the app connects to
- * Postgres through them and stubbing them would break a working deploy.
- *
- * That makes the list itself the wrong granularity for a platform that hosts
- * more than one dialect. Workers stubs all of it; Lambda and Vercel stub the
- * entries whose `dialect` the app's config does not declare, which is what
- * `unusedSqlClients` decides.
- *
- * A platform where they are unreachable has to stub them rather than ignore
- * them. `@guren/orm` names them in *literal* dynamic imports, which a bundler
- * follows whether or not the branch can be taken — so a D1 app failed to
- * bundle on `Could not resolve "postgres"`, naming a database its author had
- * deliberately not chosen. Both the client and the drizzle entry point that
- * imports it need stubbing: aliasing only the client leaves drizzle's own
- * `import pgClient from "postgres"` to resolve.
- *
- * Export names are read off drizzle-orm's driver and session modules, which
- * is what a bundler checks a stub against.
+ * Client libraries the Postgres, MySQL and Aurora Data API factories reach for,
+ * apart from `DEV_ONLY_MODULES` because their fate is per platform: unreachable on
+ * Workers (D1 only), load-bearing on Lambda/Vercel, which stub only undeclared
+ * dialects (`unusedSqlClients`). Stub the client *and* drizzle's entry importing it
+ * (literal dynamic imports made a D1 app fail on `Could not resolve "postgres"`);
+ * export names are read off drizzle-orm's driver and session modules.
  */
 export const SQL_CLIENT_MODULES = [
   { specifier: 'postgres', kind: 'sql-driver', dialect: 'postgres', exportNames: [] },
@@ -667,13 +461,9 @@ export const SQL_CLIENT_MODULES = [
 export type SqlClientSpecifier = (typeof SQL_CLIENT_MODULES)[number]['specifier']
 
 /**
- * Where an app declares its database, in the order it is looked for.
- *
- * The same pair `guren doctor` checks, kept as a copy for the same reason
- * `realpathOfNearestExisting` above is one: this module must not import
- * beyond node builtins, and cli cannot be imported from core. If the two ever
- * disagree, a build would stub clients for an app whose config the doctor
- * says is fine — so a change to either belongs in both.
+ * Where an app declares its database, in lookup order. Same pair `guren doctor`
+ * checks, copied because this module imports only node builtins; a change to
+ * either belongs in both.
  */
 export const DATABASE_CONFIG_CANDIDATES = ['config/database.ts', 'db/config.ts'] as const
 
@@ -689,22 +479,11 @@ export interface DatabaseDialectDetection {
 }
 
 /**
- * Which databases an app connects to, read off its database config.
- *
- * A *union*, never a single answer: an app legitimately names two factories in
- * one file, picking between them at runtime — the Workers app in this
- * repository declares D1 for the deployed worker and sqlite for local
- * development, and a Lambda app can pair Postgres with sqlite the same way.
- * Taking the first match would stub a client the app really does reach for.
- *
- * Matching is a scan for the factory names, not a parse: every way of being
- * wrong about a name that *is* in the file — mentioned in a comment, imported
- * but never called, called in a branch this deploy will not take — errs
- * toward reporting a dialect the app might not use, and the caller stubs
- * fewer clients as a result. The opposite error is the dangerous one, so the
- * cheap reading is the right one. A config that reaches a factory without
- * naming it (a re-export, an indirection through another module) reports
- * nothing, and the caller stubs nothing.
+ * Which databases an app connects to, read off its config. A union, never a single
+ * answer: a config may name two factories and pick at runtime (D1 plus sqlite).
+ * A name scan, not a parse: every way of being wrong about a name that is in the
+ * file errs toward reporting an unused dialect, which only stubs fewer clients.
+ * A factory reached without being named reports nothing, and nothing is stubbed.
  */
 export function detectDatabaseDialects(root: string): DatabaseDialectDetection {
   for (const candidate of DATABASE_CONFIG_CANDIDATES) {
@@ -737,22 +516,11 @@ export function detectDatabaseDialects(root: string): DatabaseDialectDetection {
 export const DATABASE_DIALECTS = [...new Set(Object.values(DATABASE_FACTORIES))] as readonly DatabaseDialect[]
 
 /**
- * Reject a dialect list that names nothing, or names something that is not a
- * dialect.
- *
- * Both are rejected rather than dropped because both mean the same thing to
- * the filter downstream — a dialect it never sees is a dialect whose client it
- * stubs. An empty list stubs *every* client, and `['postgress']` stubs the
- * Postgres one; either way the bundle builds clean and the deployed function
- * cannot reach its own database. That is the failure the caller reached for
- * this option to avoid, so it fails here, at build time, with the typo in the
- * message.
- *
- * Deliberately not a fail-open: the surrounding code stubs nothing when it
- * cannot *read* an app's dialects, but this input is a caller stating them.
- * Falling back to detection would discard the override and then stub according
- * to the very config the caller was overriding.
- *
+ * Reject a dialect list that is empty or names a non-dialect: either stubs the
+ * client the app needs (`[]` stubs every one, `['postgress']` the Postgres one),
+ * and the bundle builds clean but cannot reach its database. Not fail-open: this
+ * is a caller's explicit override, and falling back to detection would stub by the
+ * very config being overridden.
  * @param label Platform name for the error message, e.g. `'Lambda build'`.
  */
 function assertDatabaseDialects(
@@ -791,21 +559,11 @@ export interface UnusedSqlClient {
 }
 
 /**
- * The database clients an app does not connect through, for a platform where
- * the ones it *does* connect through are load-bearing — Lambda and Vercel,
- * as opposed to Workers, where D1 is the only database and every client in
- * `SQL_CLIENT_MODULES` is unreachable regardless of what the config says.
- *
- * Fails open: when the dialects cannot be read, this warns and returns
- * nothing to stub. The two errors are not symmetric. Under-stubbing leaves
- * today's behaviour — the build fails to resolve a client the app never
- * installed, loudly, at build time. Over-stubbing produces a bundle that
- * builds clean and then cannot reach its own database, at runtime, in
- * production. Only the second is worth protecting against, so anything less
- * than positive evidence means stub nothing.
- *
- * @param dialects Overrides detection when the caller already knows, for an
- *   app whose config the scan cannot read.
+ * The database clients an app does not connect through, for Lambda and Vercel
+ * (on Workers every client is unreachable). Fails open: unreadable dialects warn
+ * and stub nothing, because under-stubbing fails loudly at build time while
+ * over-stubbing ships a bundle that cannot reach its database in production.
+ * @param dialects Overrides detection when the caller already knows.
  * @param label Platform name for the messages, e.g. `'Lambda build'`.
  */
 export function unusedSqlClients(input: {
@@ -845,55 +603,41 @@ export function unusedSqlClients(input: {
 export type DevOnlySpecifier = (typeof DEV_ONLY_MODULES)[number]['specifier']
 
 /**
- * A JavaScript string literal for `value`.
- *
- * `JSON.stringify` alone is not one: JSON and JavaScript disagree about
- * U+2028 and U+2029, which JSON leaves raw while JavaScript reads them as
- * line terminators — so a message containing either ends the statement it was
- * embedded in on any target below ES2019.
+ * A JavaScript string literal for `value`. `JSON.stringify` alone is not one: it
+ * leaves U+2028/U+2029 raw, which JavaScript below ES2019 reads as line terminators.
  */
 function toJsStringLiteral(value: string): string {
   return JSON.stringify(value).replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')
 }
 
 /**
- * Source for a stub replacing one dev-only module. Shared because what it
- * encodes is a bundler constraint, not a platform choice: every name the
- * importer destructures must be present or the bundle fails with "no matching
- * export", and each is emitted as a throwing *function* because the stubbed
- * names mix constructors (`new Database()`) with plain calls
- * (`createServer()`) — a class invoked without `new` reports "Class
- * constructor cannot be invoked without 'new'" instead of the real reason.
- *
+ * Source for a stub replacing one dev-only module. Every destructured name must be
+ * present or the bundle fails with "no matching export", and each is a throwing
+ * *function* because stubbed names mix constructors and plain calls (a class
+ * called without `new` would hide the real reason).
  * @param message Platform-specific explanation, including the replacement API.
  */
 export function renderDevOnlyStub(module: DevOnlyModule, message: string): string {
-  // The message reaches the file twice and needs different escaping each
-  // time: as a string literal in the thrown error, and as text in a comment
-  // that any line terminator would end, running whatever followed as code.
-  // Callers pass literals today; the escaping is here because this is where
-  // the file is constructed, not where the strings happen to come from.
+  // The message lands in the file twice with different escaping: as the thrown
+  // error's string literal and as comment text, where a line terminator would end
+  // the comment and run what follows as code.
   const comment = message.replace(/[\r\n\u2028\u2029]+/g, ' ')
   const error = `throw new Error(${toJsStringLiteral(message)})`
   const throwing = module.exportNames
     .map((name) => `export function ${name}() { ${error} }`)
     .join('\n')
 
-  // The default export is a *function*, not an object of the named ones:
-  // `drizzle-orm/postgres-js` does `import pgClient from "postgres"` and calls
-  // it, and a module with no default at all fails the bundle outright with
-  // "no matching export". Attaching the named exports keeps the previous
-  // object-shaped access working.
+  // The default export is a *function*: `drizzle-orm/postgres-js` does
+  // `import pgClient from "postgres"` and calls it, and a module with no default
+  // fails the bundle. Named exports are attached so object-shaped access still works.
   const named = module.exportNames.length > 0 ? `, { ${module.exportNames.join(', ')} }` : ''
   const fallback = `function unavailable() { ${error} }`
   return `// ${comment}\n${throwing}\n${fallback}\nexport default Object.assign(unavailable${named})\n`
 }
 
 /**
- * The MCP SDK is only ever reached through subpaths, and a bundler alias on a
- * package name does not cover them — which is why `DEV_ONLY_MODULES` lists
- * each one. A platform whose aliasing supports prefixes should also route
- * unlisted subpaths under this prefix to a stub, so a new subpath added
- * upstream cannot pull the real SDK into a deployed bundle.
+ * The MCP SDK is reached only through subpaths, which a package-name alias does not
+ * cover (hence each one in `DEV_ONLY_MODULES`). A platform whose aliasing supports
+ * prefixes should route unlisted subpaths under this prefix to a stub too.
  */
 export const MCP_SDK_SUBPATH_PREFIX = '@modelcontextprotocol/sdk/'

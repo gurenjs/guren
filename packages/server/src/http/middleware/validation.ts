@@ -10,51 +10,23 @@ export interface ValidationSchema<T = unknown> {
 }
 
 export interface ValidateRequestOptions {
-  /**
-   * Custom error handler when validation fails.
-   * Defaults to returning a 422 JSON response with formatted errors.
-   */
+  /** Defaults to a 422 JSON response with formatted errors. */
   onError?: (ctx: Context, errors: Record<string, string>) => Response | Promise<Response>
 
-  /**
-   * HTTP status code for validation errors.
-   * Defaults to 422 (Unprocessable Entity).
-   */
+  /** @default 422 */
   status?: number
 
-  /**
-   * Fallback message when no field-specific errors are available.
-   */
+  /** Used when no field-specific errors are available. */
   fallbackMessage?: string
 }
 
-/**
- * Get validated data from the request context.
- * Returns undefined if validation middleware hasn't run or validation failed.
- */
+/** Undefined when the validation middleware has not run, or validation failed. */
 export function getValidatedData<T = Record<string, unknown>>(ctx: Context): T | undefined {
   return ctx.get(VALIDATED_DATA_KEY) as T | undefined
 }
 
 /**
- * Creates a validation middleware that validates the request body against a Zod schema.
- *
- * @example
- * ```ts
- * import { z } from 'zod'
- * import { validateRequest, getValidatedData } from '@guren/server'
- *
- * const CreateUserSchema = z.object({
- *   name: z.string().min(1),
- *   email: z.email(),
- * })
- *
- * app.post('/users', validateRequest(CreateUserSchema), (c) => {
- *   const data = getValidatedData<z.infer<typeof CreateUserSchema>>(c)
- *   // data is typed and validated
- *   return c.json({ user: data })
- * })
- * ```
+ * Validates the request body against a schema; read it with {@link getValidatedData}.
  */
 export function validateRequest<T>(
   schema: ValidationSchema<T>,
@@ -81,18 +53,7 @@ export function validateRequest<T>(
   }
 }
 
-/**
- * Creates a validation middleware from a schema factory function.
- * Useful when the schema depends on request context.
- *
- * @example
- * ```ts
- * app.post('/users/:role', validateRequestWith((ctx) => {
- *   const role = ctx.req.param('role')
- *   return role === 'admin' ? AdminSchema : UserSchema
- * }), handler)
- * ```
- */
+/** Like {@link validateRequest}, for a schema that depends on request context. */
 export function validateRequestWith<T>(
   schemaFactory: (ctx: Context) => ValidationSchema<T>,
   options: ValidateRequestOptions = {},
@@ -119,28 +80,12 @@ export function validateRequestWith<T>(
   }
 }
 
-/**
- * Validates data against a schema and throws if invalid.
- * Useful for manual validation in handlers.
- *
- * @example
- * ```ts
- * app.post('/data', async (c) => {
- *   const payload = await parseRequestPayload(c)
- *   const data = validate(MySchema, payload)
- *   // throws ValidationError if invalid
- *   return c.json(data)
- * })
- * ```
- */
+/** Manual validation for handlers; throws when the data is invalid. */
 export function validate<T>(schema: ValidationSchema<T>, data: unknown): T {
   return schema.parse(data)
 }
 
-/**
- * Validates data against a schema and returns a result object.
- * Does not throw on validation failure.
- */
+/** Like {@link validate}, but reports failure in the result instead of throwing. */
 export function validateSafe<T>(
   schema: ValidationSchema<T>,
   data: unknown,

@@ -1,17 +1,14 @@
 /**
- * The minimal YAML subset the OKF docs convention needs — scalars,
- * inline collections (`[a, b]`, `{ by: x }`), block lists (`- item`,
- * including `- by: x` mappings), and block mappings (indented
- * `key: value` lines) — same frozen-vocabulary philosophy as
- * `glob-match.ts`. Pure syntax: what the fields *mean* (actors,
- * lifecycle, relations) is `docs-index.ts` and `docs-check.ts`
- * territory. Anything unrecognized is ignored, never an error.
+ * The minimal YAML subset the OKF docs convention needs — scalars, inline
+ * collections, block lists (including `- by: x` mappings), and block mappings —
+ * same frozen-vocabulary philosophy as `glob-match.ts`. Pure syntax: what the
+ * fields *mean* is `docs-index.ts` and `docs-check.ts` territory. Anything
+ * unrecognized is ignored, never an error.
  */
 
 /**
- * Strip the surrounding quotes from a YAML scalar, undoing the escapes
- * each quoting style defines: `\"` inside double quotes, `''` inside
- * single quotes.
+ * Strip the surrounding quotes from a YAML scalar, undoing each style's
+ * escapes: `\"` inside double quotes, `''` inside single quotes.
  */
 function unquote(value: string): string {
   const quote = value[0]
@@ -45,10 +42,9 @@ function endOfQuoted(value: string, start: number): number {
 }
 
 /**
- * Strip a trailing YAML comment. A `#` only starts one at the beginning
- * or after whitespace, and never inside a quoted scalar — including a
- * scalar nested in an array, mapping, or list item (`tags: ["C # lang"]`),
- * which is why this scans rather than testing the first character.
+ * Strip a trailing YAML comment. A `#` only starts one at the beginning or
+ * after whitespace, and never inside a quoted scalar — including one nested in
+ * an array or list item, which is why this scans the whole value.
  */
 function stripInlineComment(value: string): string {
   for (let index = 0; index < value.length; index += 1) {
@@ -104,11 +100,9 @@ function splitInlineArray(inner: string): string[] {
 }
 
 /**
- * Parse a YAML inline mapping (`{ by: human:ada, at: 2026-06-25T09:00:00Z }`)
- * into a flat string record — the shape OKF's `generated` and `verified`
- * entries use. Values may contain colons (datetimes, actor ids), so each
- * part splits on the first `key:` prefix only. Null when the value is not
- * an inline mapping.
+ * Parse a YAML inline mapping into a flat string record — the shape OKF's
+ * `generated`/`verified` entries use. Values may contain colons (datetimes,
+ * actor ids), so each part splits on the first `key:` prefix only.
  */
 function parseInlineMapping(value: string): DocMapping | null {
   const trimmed = value.trim()
@@ -141,14 +135,7 @@ function parseInlineValue(value: string): DocFrontmatterValue {
   return unquote(value)
 }
 
-/**
- * Parse a leading `---` frontmatter block. Deliberately a minimal YAML
- * subset — scalars, inline collections (`[a, b]`, `{ by: x }`), block
- * lists (`- item`, including `- by: x` mappings), and block mappings
- * (indented `key: value` lines) — the frozen vocabulary the docs
- * convention needs, same philosophy as `glob-match.ts`. Anything else is
- * ignored, never an error.
- */
+/** Parse a leading `---` frontmatter block. See the module header. */
 export function parseDocFrontmatter(
   source: string,
 ): { data: Record<string, DocFrontmatterValue>; body: string } | null {
@@ -157,9 +144,8 @@ export function parseDocFrontmatter(
 
   const data: Record<string, DocFrontmatterValue> = {}
 
-  // The top-level key whose indented body is being collected, with the
-  // entries gathered so far. A key can turn out to hold a list or a
-  // mapping; whichever appears first wins.
+  // The top-level key whose indented body is being collected. A key can turn
+  // out to hold a list or a mapping; whichever appears first wins.
   let open: { key: string; list: Array<string | DocMapping>; mapping: DocMapping | null } | null =
     null
   // The mapping started by the most recent `- key: value` item, so its
@@ -183,9 +169,8 @@ export function parseDocFrontmatter(
     if (item && open) {
       const entry = stripInlineComment(item[1].trim())
       if (!entry) {
-        // `-` alone opens an entry whose body is on the following
-        // indented lines; the mapping is created when the first one
-        // arrives, so a stray dash contributes nothing.
+        // `-` alone opens an entry whose body is on the following indented
+        // lines, so a stray dash contributes nothing.
         itemMapping = null
         pendingItem = true
         continue

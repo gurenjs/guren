@@ -6,12 +6,10 @@ import { registerBuiltInertiaClient } from '../../src/http/inertia-assets'
 import { useAssetFixture } from './asset-fixture'
 
 describe('resolveInertiaClientDir', () => {
-  // The bug this pins is in the resolution, not in the serving: a tsconfig
-  // `paths` entry for `@guren/inertia-client/*` sends the `./app` subpath to
-  // `src/app.tsx`, so a directory derived from it holds sources rather than a
-  // build. Asserted against the package's own `exports` contract so it does
-  // not need `dist/` on disk — and so the resolver's `dist` and the serving
-  // route's `app.js` both go red here if the package's build layout moves.
+  // The bug is in the resolution, not the serving: a tsconfig `paths` entry for
+  // `@guren/inertia-client/*` sends `./app` to `src/app.tsx`, yielding sources
+  // rather than a build. Asserted against the package's `exports` contract so no
+  // `dist/` need exist on disk.
   it('resolves the directory the package exports its built entry from', async () => {
     const clientDir = resolveInertiaClientDir()
     const packageRoot = dirname(clientDir)

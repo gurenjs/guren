@@ -3,13 +3,11 @@ import { resolve } from 'node:path'
 import { trimTrailingSlashes } from '../support/trim-slashes'
 
 /**
- * The one rule for how Vite build output is found and addressed, shared
- * between the Inertia asset wiring (`inertia-assets.ts`) and the content-page
- * `viteAsset()` helper (`vite-assets.ts`, RFC 0014): what counts as a
- * manifest, where one may live (a filesystem path, or the build-time
- * `GUREN_VITE_MANIFEST` injection for runtimes without one), which URL prefix
- * serves the hashed files, and what "the dev server is on" means. Factored
- * out so the two consumers cannot drift on any of it.
+ * The one rule for how Vite build output is found and addressed, shared by the
+ * Inertia asset wiring (`inertia-assets.ts`) and `viteAsset()` (`vite-assets.ts`,
+ * RFC 0014) so the two cannot drift: what counts as a manifest, where one may
+ * live, which URL prefix serves the hashed files, and what "the dev server is
+ * on" means.
  */
 
 /** Where `configureInertiaAssets` serves hashed build output from. */
@@ -44,16 +42,12 @@ export function normalizeDevServerUrl(value: string): string {
 }
 
 /**
- * Candidate client-manifest locations under a project root, in preference
- * order: `.vite/manifest.json` first, because Vite >= 5 writes it there — a
- * flat `manifest.json` beside it is most likely a stale leftover from an
- * older Vite config. The deploy plugins locate the same pair through
- * `@guren/core`'s deploy-build helpers, and the two orders must agree, or an
- * app with both layouts resolves different asset versions locally than after
- * a serverless deploy; `tests/http/vite-manifest.test.ts` pins the agreement.
- *
- * `baseDir` defaults to the working directory (`viteAsset()`'s anchor); the
- * Inertia wiring passes the root it derives from the app entry module.
+ * Candidate client-manifest locations, `.vite/manifest.json` first because Vite
+ * >= 5 writes it there and a flat `manifest.json` is likely a stale leftover.
+ * The deploy plugins order the same pair through `@guren/core`'s deploy-build
+ * helpers and must agree, or an app with both layouts resolves different asset
+ * versions after a serverless deploy; `tests/http/vite-manifest.test.ts` pins it.
+ * `baseDir` defaults to the working directory.
  */
 export function clientManifestCandidates(baseDir?: string): string[] {
   const root = baseDir ?? process.cwd()
@@ -64,9 +58,8 @@ export function clientManifestCandidates(baseDir?: string): string[] {
 }
 
 /**
- * `__path__` label for a manifest injected through {@link injectedClientManifest},
- * so "entry not in the manifest" errors name the real source instead of a
- * filesystem path that was never read.
+ * `__path__` label for an injected manifest, so "entry not in the manifest"
+ * errors name the real source rather than a path that was never read.
  */
 export const INJECTED_CLIENT_MANIFEST_SOURCE = 'GUREN_VITE_MANIFEST (injected by the deploy build)'
 
@@ -74,10 +67,9 @@ const INJECTED_MANIFEST_HINT =
   'It must hold the Vite client manifest text (deploy plugins inject it at build time), not a path.'
 
 /**
- * Attach one of the manifest's non-enumerable bookkeeping fields.
- * `enumerable: false` is the invariant both stamping sites must agree on — a
- * stamped field must never leak into `Object.keys` or a re-serialization of
- * the manifest.
+ * Attach one of the manifest's bookkeeping fields. `enumerable: false` is the
+ * invariant: a stamped field must never leak into `Object.keys` or a
+ * re-serialization of the manifest.
  */
 function defineHidden(manifest: ViteManifest, key: '__path__' | '__raw__', value: string): void {
   Object.defineProperty(manifest, key, { value, enumerable: false })
@@ -85,21 +77,16 @@ function defineHidden(manifest: ViteManifest, key: '__path__' | '__raw__', value
 
 /**
  * The client manifest a deploy build injected for runtimes that do not ship
- * `public/assets/manifest.json`: `GUREN_VITE_MANIFEST` holds the manifest
- * *JSON text* (not a path). The deploy plugins populate it during their build
- * step — Workers and Lambda as an assignment in their generated entry module,
- * Vercel by substituting the read at bundle time.
- *
- * Fails loudly on a value that is set but not a manifest: falling through to
- * the filesystem would end in "run `bunx vite build`", a diagnosis pointing
- * away from the variable that is actually broken.
+ * `public/assets/manifest.json`: `GUREN_VITE_MANIFEST` holds the manifest *JSON
+ * text*, not a path. Fails loudly on a value that is set but not a manifest,
+ * because falling through to the filesystem would end in "run `bunx vite build`"
+ * — a diagnosis pointing away from the variable that is actually broken.
  */
 export function injectedClientManifest(): ViteManifest | undefined {
-  // Read as this one exact member expression on purpose: the Vercel plugin
-  // substitutes it with a bundler `define`, which matches nothing else — an
-  // optional chain or an indexed read silently opts back into a runtime read
-  // that serverless bundles cannot answer. Same rule as the NODE_ENV gates;
-  // pinned at the source level by tests/env-gate-form.test.ts.
+  // This one exact member expression on purpose: the Vercel plugin substitutes
+  // it with a bundler `define`, which matches nothing else — an optional chain
+  // or an indexed read silently opts back into a runtime read serverless
+  // bundles cannot answer. Pinned by tests/env-gate-form.test.ts.
   const raw = process.env.GUREN_VITE_MANIFEST
   if (typeof raw !== 'string' || raw.length === 0) {
     return undefined
@@ -140,14 +127,12 @@ export type ViteManifest = Record<string, ViteManifestValue> & { __path__?: stri
 export interface LoadViteManifestOptions {
   /**
    * Emit console warnings when no manifest is found (the Inertia wiring's
-   * behavior). `viteAsset()` passes `false` and throws its own error instead
-   * — a warning can scroll past, a missing stylesheet URL cannot.
+   * behavior). `viteAsset()` passes `false` and throws instead.
    */
   warnOnMissing?: boolean
   /**
-   * Retain the raw manifest text as `__raw__` on the result. Off by default:
-   * only the Inertia wiring hashes it (for the build id), and long-lived
-   * caches should not pin hundreds of KB of JSON text nothing reads.
+   * Retain the raw manifest text as `__raw__`. Off by default: only the Inertia
+   * wiring hashes it, and caches should not pin JSON text nothing reads.
    */
   includeRaw?: boolean
 }

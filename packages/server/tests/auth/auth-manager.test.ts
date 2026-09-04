@@ -5,8 +5,6 @@ import { createApiToken, MemoryApiTokenStore } from '../../src/auth/api-token'
 import { TokenGuard } from '../../src/auth/TokenGuard'
 import { fakeContext } from '../support/fake-context'
 
-// --- Test helpers ---
-
 function createMockGuardFactory(): (ctx: GuardContext) => Guard {
   return () => ({
     async check() { return false },
@@ -29,8 +27,6 @@ function createMockProviderFactory(): (manager: any) => UserProvider {
     getId() { return null },
   })
 }
-
-// --- Tests ---
 
 describe('AuthManager', () => {
   describe('constructor', () => {
@@ -145,8 +141,6 @@ describe('ModelUserProvider.sanitize', () => {
   })
 })
 
-// --- RFC 0016: token guard selection ---
-
 describe('AuthManager.useTokens', () => {
   function createManagerWithSessionAndTokens(store: MemoryApiTokenStore) {
     const manager = new AuthManager()
@@ -169,7 +163,6 @@ describe('AuthManager.useTokens', () => {
     expect(manager.resolveGuardName(fakeContext() as never)).toBe('web')
     expect(manager.resolveGuardName(fakeContext({ headers: { Authorization: 'Bearer abc' } }) as never)).toBe('token')
     expect(manager.resolveGuardName(fakeContext({ headers: { Authorization: 'Basic abc' } }) as never)).toBe('web')
-    // Explicit names always win over header selection.
     expect(manager.resolveGuardName(fakeContext({ headers: { Authorization: 'Bearer abc' } }) as never, 'web')).toBe('web')
   })
 
@@ -203,7 +196,6 @@ describe('AuthManager.useTokens', () => {
 
     expect(auth.guard()).toBeInstanceOf(TokenGuard)
     expect(auth.guard('web')).toBe(sessionGuard)
-    // The implicit guard stays the token guard after the explicit lookup.
     expect(auth.guard()).toBeInstanceOf(TokenGuard)
   })
 

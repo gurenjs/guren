@@ -13,8 +13,7 @@ function post(overrides: Partial<PublishedPost> = {}): PublishedPost {
 }
 
 describe('toRfc822', () => {
-  // RSS 2.0 mandates RFC-822 dates; an ISO-8601 string is the classic bug
-  // here and readers that parse strictly drop the item.
+  // RSS 2.0 mandates RFC-822 dates; strict readers drop an ISO-8601 item.
   test('formats a date as RFC-822 in GMT', () => {
     expect(toRfc822(new Date('2026-07-26T09:05:00Z'))).toBe('Sun, 26 Jul 2026 09:05:00 GMT')
   })
@@ -70,8 +69,7 @@ describe('buildRssFeed', () => {
     expect(xml).not.toContain('<generics>')
   })
 
-  // A single stray control character makes the whole document unparseable,
-  // so one bad post must not take the entire feed down with it.
+  // One stray control character makes the whole document unparseable.
   test('drops control characters XML 1.0 forbids', () => {
     const xml = buildRssFeed([post({ title: 'Bad\u0000title\u0008here' })])
 

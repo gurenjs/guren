@@ -4,13 +4,9 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { loadRouteDefinitions } from '../src/load-routes'
 
-// Module fixtures below export a plain object literal shaped like a
-// GurenModule instead of calling the real `defineModule()` from
-// `@guren/core` — `resolveGurenModule()`'s duck-typing accepts either.
-// This keeps these tests independent of `@guren/core` being resolvable
-// from a bare temp directory (it's a real workspace package with no
-// node_modules entry outside the monorepo); `defineModule()` itself is
-// covered separately by packages/server/tests/module.test.ts.
+// Module fixtures export a plain object shaped like a GurenModule rather than
+// calling `defineModule()` — `resolveGurenModule()` duck-types either — so
+// these tests need no `@guren/core` resolvable from a bare temp directory.
 
 describe('loadRouteDefinitions', () => {
   let tempDir: string
@@ -170,10 +166,8 @@ export const ${name}Module = {
   })
 
   it('requires an explicit appRoot — dirname(routesFile) is not reliably the app root', async () => {
-    // routes/web.ts's directory is "routes", not the app root — modules/
-    // lives one level up. There is no correct default to derive here, so
-    // appRoot must be passed explicitly (it's a required parameter, not
-    // just conventionally always supplied).
+    // routes/web.ts's directory is "routes" and modules/ lives one level up,
+    // so there is no correct default: appRoot is a required parameter.
     await writeFile(
       join(tempDir, 'routes/web.ts'),
       `import type { Router } from '@guren/core'

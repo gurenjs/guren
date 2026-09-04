@@ -1,12 +1,8 @@
 import type { MiddlewareHandler, Hono } from 'hono'
 
 /**
- * Mounts a route on a Hono app with a dynamic HTTP method string.
- *
- * Hono's app.on() uses complex overloads that expect literal types for the
- * method parameter, making it incompatible with dynamic `string` values at
- * the type level. This helper encapsulates the single narrowing cast needed,
- * keeping the rest of the codebase cast-free.
+ * Mounts a route with a dynamic HTTP method string. Hono's `app.on()` overloads
+ * expect literal method types, so this helper holds the one narrowing cast.
  */
 export function mountRoute(
   app: Hono,

@@ -387,7 +387,6 @@ describe('MethodNotAllowedException', () => {
 describe('ExceptionHandler', () => {
   let handler: ExceptionHandler
 
-  // Mock context
   const createMockContext = () => ({
     json: (body: unknown, status?: number) => {
       return new Response(JSON.stringify(body), {
@@ -447,11 +446,8 @@ describe('ExceptionHandler', () => {
   })
 
   /**
-   * The console fallback exists so an app with no reporter still surfaces a
-   * *server* failure on stdout. A 4xx is not one: it is delivered to the
-   * caller in full, so logging it turns a route rejecting invalid input as
-   * designed into a stack trace per request — which is how a correct 422 came
-   * to be printed as `Unhandled exception:`.
+   * The console fallback surfaces a *server* failure for an app with no reporter. A 4xx is
+   * not one: logging it prints a stack trace per request for input a route correctly rejects.
    */
   describe('fallback console reporting', () => {
     const captureConsoleError = () => {

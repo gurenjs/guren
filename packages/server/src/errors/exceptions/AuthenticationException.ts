@@ -1,26 +1,10 @@
 import { HttpException } from '../HttpException'
 
-/**
- * Authentication exception.
- *
- * Thrown when a user is not authenticated or credentials are invalid.
- *
- * @example
- * ```typescript
- * throw new AuthenticationException()
- * throw new AuthenticationException('Invalid token')
- * throw new AuthenticationException('Session expired', 'login')
- * ```
- */
+/** 401: the user is not authenticated, or the credentials were invalid. */
 export class AuthenticationException extends HttpException {
-  /**
-   * The guard that threw the exception.
-   */
+  /** The guard that threw. */
   readonly guard?: string
 
-  /**
-   * URL to redirect to for authentication.
-   */
   readonly redirectTo?: string
 
   constructor(
@@ -34,16 +18,10 @@ export class AuthenticationException extends HttpException {
     this.redirectTo = redirectTo
   }
 
-  /**
-   * Create exception with redirect URL.
-   */
   static withRedirect(redirectTo: string, message?: string): AuthenticationException {
     return new AuthenticationException(message, undefined, redirectTo)
   }
 
-  /**
-   * Create exception for a specific guard.
-   */
   static forGuard(guard: string, message?: string): AuthenticationException {
     return new AuthenticationException(message, guard)
   }

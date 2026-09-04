@@ -2,13 +2,9 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 /**
- * The minimum app on disk `buildCloudflareOutput` will assemble a worker from:
- * an entry module, a manifest, a client bundle, and optionally an SSR build.
- *
- * One definition, shared by `build.test.ts` and `mcp-oauth.test.ts`. Two
- * copies is how the second suite comes to test a fixture the first stopped
- * writing — and every assertion here is about the *generated* output, so the
- * input has to be the same input.
+ * The minimum app on disk `buildCloudflareOutput` will assemble a worker from.
+ * One definition, shared by `build.test.ts` and `mcp-oauth.test.ts`: every
+ * assertion is about the *generated* output, so the input has to be the same.
  */
 
 export function writeJson(path: string, value: unknown): void {

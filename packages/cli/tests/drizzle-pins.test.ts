@@ -107,8 +107,8 @@ describe('planDrizzlePins', () => {
     expect(asked).toEqual(['drizzle-kit@1.0.0-rc.4'])
   })
 
-  // Every refusal, with the entry it leaves behind and the reason a caller acts
-  // on. Adding a case is a row, not another copied block.
+  // Every refusal, with the entry it leaves behind and the reason a caller
+  // acts on.
   const declined = [
     {
       label: 'a specifier that names a location',

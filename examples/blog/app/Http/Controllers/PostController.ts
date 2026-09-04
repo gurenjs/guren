@@ -99,8 +99,8 @@ export default class PostController extends Controller {
 
     await Post.update({ id: post.id }, { ...data, authorId: post.authorId })
 
-    // Invalidate before the attach: a rejected cover throws, and the row is
-    // already updated — the cached list must not keep serving the old fields.
+    // Invalidate before the attach: a rejected cover throws after the row is
+    // already updated, and the cached list must not keep the old fields.
     const cacheService = this.#cacheService()
     await cacheService.invalidatePost(post.id)
 
@@ -118,8 +118,6 @@ export default class PostController extends Controller {
     const { id } = this.validateParams(PostIdParamSchema)
     const post = await Post.findOrFail(id) as BoundPost
 
-    // Deletion is irreversible and also purges stored objects — only the
-    // author may do it.
     const authUser = await this.auth.userOrFail<UserRecord>()
     if (post.authorId !== authUser.id) {
       throw new HttpException(403, 'You can only delete your own posts.')

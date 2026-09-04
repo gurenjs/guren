@@ -15,24 +15,17 @@ import { readDeclaredDependencyNames } from './plugin-manifest'
 /**
  * Deploy targets whose runtime invalidates one or more of Guren's Bun-first
  * defaults. The prose versions of these warnings live in
- * packages/plugin-cloudflare/README.md ("Things Workers changes") and
- * docs/{en,ja}/guides/serverless.md; the checks below are their mechanical
- * counterpart.
+ * packages/plugin-cloudflare/README.md and docs/{en,ja}/guides/serverless.md.
  */
 type DeployTargetId = 'cloudflare' | 'vercel' | 'lambda'
 
 export interface DeployTargetProfile {
   label: string
   /**
-   * Whether `Bun.password` exists at runtime. Vercel functions are built by
-   * `@guren/plugin-vercel` with `runtime: 'bun1.x'`, so Bun's password APIs
-   * are present there; only Workers (workerd) and Lambda (Node.js) lose them.
-   *
-   * The default hasher no longer depends on this — `DefaultHasher` falls back
-   * to `node:crypto` scrypt, which workerd's `nodejs_compat` implements in
-   * full (RFC 0003 §4). What still breaks on these targets is an *explicit*
-   * `new ScryptHasher()`, because the Argon2id it writes cannot be read back
-   * without `Bun.password`.
+   * Whether `Bun.password` exists at runtime: only Workers (workerd) and
+   * Lambda (Node.js) lose it, since Vercel functions run `runtime: 'bun1.x'`.
+   * `DefaultHasher` no longer depends on it (RFC 0003 §4); what breaks is an
+   * explicit `new ScryptHasher()`, whose Argon2id cannot be read back.
    */
   hasBunRuntime: boolean
   /** Why filesystem-scanning provider discovery cannot work on this target. */
@@ -47,8 +40,6 @@ const DEPLOY_TARGET_PROFILES: Record<DeployTargetId, DeployTargetProfile> = {
   },
   vercel: {
     label: 'Vercel',
-    // The function is a `bun build` bundle; buildVercelOutput copies
-    // .guren/ssr, db/migrations, docs and public into it, never `app/`.
     hasBunRuntime: true,
     discoveryBlocker: 'The Vercel function is a `bun build` bundle that ships no `app/` directory to scan.',
   },
@@ -61,9 +52,8 @@ const DEPLOY_TARGET_PROFILES: Record<DeployTargetId, DeployTargetProfile> = {
 
 /**
  * Deploy plugin package names, matched against the app's own package.json.
- * Matched by name rather than driven off the `gurenPlugin` manifest because the
- * manifest lives in `node_modules/<pkg>/package.json`, so reading it would stop
- * detection working before `bun install`.
+ * Matched by name rather than off the `gurenPlugin` manifest, which lives in
+ * `node_modules/` and so would not exist before `bun install`.
  */
 const DEPLOY_PLUGIN_PACKAGES: Record<string, DeployTargetId> = {
   '@guren/plugin-cloudflare': 'cloudflare',
@@ -87,13 +77,11 @@ export interface SourceSignal {
 
 export interface DeployRuntimeAnalysis {
   targets: DeployTargetDetection[]
-  /** Evidence that the app authenticates with passwords at all. */
   passwordAuthSignals: SourceSignal[]
   /** `ScryptHasher` constructions — a hash format only Bun can read back. */
   bunOnlyHasherSignals: SourceSignal[]
   /** Hashers that work without `Bun.password`: `NodeHasher`, `Hash`. */
   nodeHasherSignals: SourceSignal[]
-  /** Evidence that sessions are enabled. */
   sessionSignals: SourceSignal[]
   /** `autoSession: false` anywhere in the app — an explicit opt-out. */
   sessionDisabledSignals: SourceSignal[]
@@ -109,42 +97,25 @@ export interface DeployRuntimeAnalysis {
   discoverySignals: SourceSignal[]
   /**
    * Files that could not be read or parsed and therefore contributed no
-   * signals. Surfaced in every deploy check message so a missed hazard or
-   * remediation is a visible caveat, not a silent false negative — the same
-   * stance ESLint (parse errors are errors) and semgrep (skipped files are
-   * counted) take. Note this also covers *target* detection: the Lambda
-   * adapter is found in source, so a skipped file can hide a target too.
+   * signals. Surfaced in every deploy check message so a missed hazard is a
+   * visible caveat, not a silent false negative. Covers *target* detection
+   * too: the Lambda adapter is found in source, so a skipped file hides it.
    */
   unparsedFiles: string[]
 }
 
-/** Directories scanned for signal symbols. */
 const DEPLOY_SCAN_DIRS = ['src', 'app', 'config', 'db', 'routes', 'modules', 'bin', 'functions', 'api'] as const
 
 /** Test files are excluded from the scan — see readAppSources. */
 const TEST_FILE_PATTERN = /\.(test|spec)\.[cm]?[jt]sx?$/
 
-// --- AST signal extraction -------------------------------------------------
-//
-// Signals are read from a Babel AST (the same parser audit.ts and
-// model-parser.ts already use), not from per-line regexes. That buys, in one
-// mechanism, everything the regex generation of this file had to carve out
-// case by case: values split across lines match, and text inside comments,
-// string literals, and TypeScript type positions cannot trip a check.
-//
 // Every signal name is resolved through the file's own `@guren/*` value
-// imports rather than matched bare. A name only means the Guren API of that
-// name when it was imported from Guren, so `import { NodeHasher } from
-// './my-own'` no longer satisfies a remediation and an unrelated
-// `DatabaseSessionStore` no longer hides a real gap. Aliases and namespace
-// imports resolve to their canonical exported names, so `NodeHasher as X`
-// and `g.NodeHasher` both count.
-//
-// Known limitations, both needing scope/dataflow analysis this deliberately
-// stops short of: a local binding that shadows an imported signal name still
-// counts, and an options object built elsewhere and passed into createApp
-// (`const o = { auth: {} }; createApp(o)`) is not seen — though any
-// `autoSession`/`sessionOptions` key inside it is, wherever it lives.
+// imports rather than matched bare, so `import { NodeHasher } from './my-own'`
+// cannot satisfy a remediation; aliases and namespace imports resolve to their
+// canonical exported names. Known limitations, both needing scope/dataflow
+// analysis this stops short of: a local binding shadowing an imported signal
+// name still counts, and an options object built elsewhere and passed into
+// createApp is not seen — though any key inside it is, wherever it lives.
 
 type SignalKind =
   | 'passwordAuth'
@@ -166,19 +137,15 @@ interface ExtractedSignal {
 }
 
 /**
- * Classes whose construction is a signal. Construction — not a bare import —
- * is what counts throughout: a leftover import survives long after the app
- * stops using the thing it names, and must neither satisfy a remediation
- * (NodeHasher, the backed stores) nor raise a warning (AutoDiscovery).
+ * Classes whose *construction* is a signal. A bare import never counts: it
+ * survives long after the app stops using the thing it names, and must neither
+ * satisfy a remediation nor raise a warning.
  *
- * ScryptHasher is `bunOnlyHasher` rather than `passwordAuth`: constructing one
- * is only ever done to hash a password (seeders do this), and unlike the
- * default it pins the app to a format only `Bun.password` can read.
- * `DefaultHasher` / `Hash` count as remediation because they pick their
- * delegate from the runtime and from the stored hash. AutoDiscovery maps to
- * `discovery`; a `discover: true` option in `createApp()` is deliberately not
- * a signal — the option never had an effect (`ApplicationOptions` no longer
- * declares it), so a leftover in an older app is inert, not discovery.
+ * ScryptHasher is `bunOnlyHasher` because it pins the app to a format only
+ * `Bun.password` can read; `DefaultHasher`/`Hash` are remediation because they
+ * pick their delegate from the runtime and the stored hash. A `discover: true`
+ * option in `createApp()` is deliberately not a signal — it never had an
+ * effect, so a leftover in an older app is inert.
  */
 const CONSTRUCTED_SIGNALS: Record<string, SignalKind> = {
   ScryptHasher: 'bunOnlyHasher',
@@ -208,9 +175,9 @@ const CALLED_SIGNALS: Record<string, SignalKind> = {
 }
 
 /**
- * Identifiers whose mere reference (outside an import declaration) is a
- * signal — OAuthServiceProvider is listed in `createApp({ providers })`
- * rather than constructed or called.
+ * Identifiers whose mere reference (outside an import declaration) is a signal:
+ * OAuthServiceProvider is listed in `createApp({ providers })` rather than
+ * constructed or called.
  */
 const REFERENCED_SIGNALS: Record<string, SignalKind> = {
   OAuthServiceProvider: 'oauth',
@@ -220,11 +187,10 @@ const REFERENCED_SIGNALS: Record<string, SignalKind> = {
 const GUREN_PACKAGE_PREFIX = '@guren/'
 
 /**
- * Type-only syntax. Skipped wholesale so an identifier in a type annotation,
- * generic constraint, type query, or interface body never reads as usage.
- * Nodes that merely *carry* a type while wrapping a real expression
- * (TSAsExpression, TSNonNullExpression, TSSatisfiesExpression) are absent
- * here on purpose — their expression still has to be walked.
+ * Type-only syntax, skipped wholesale so an identifier in a type position never
+ * reads as usage. Nodes that merely *carry* a type while wrapping a real
+ * expression (TSAsExpression, TSNonNullExpression, TSSatisfiesExpression) are
+ * absent on purpose — their expression still has to be walked.
  */
 const TYPE_ONLY_NODES = new Set([
   'TSTypeAnnotation',
@@ -251,12 +217,10 @@ const TYPE_ONLY_NODES = new Set([
 
 /**
  * The Lambda adapter ships inside `@guren/core`/`@guren/server` rather than a
- * plugin package, so it is detected from these import sources (plus bare
- * `createLambdaHandler` calls via CALLED_SIGNALS).
+ * plugin package, so it is detected from these import sources.
  */
 const LAMBDA_IMPORT_SOURCES = new Set(['@guren/core/lambda', '@guren/server/lambda'])
 
-/** Line a node starts on, defaulting to 1 when location info is absent. */
 function lineOf(node: BabelNode): number {
   return node.loc?.start.line ?? 1
 }
@@ -267,19 +231,14 @@ function propertyKeyName(property: BabelNode): string | null {
   return memberKeyName({ computed: Boolean(property.computed), key }) ?? null
 }
 
-/** Extract every deploy-runtime signal from one parsed source file. */
 function extractSignals(ast: File): ExtractedSignal[] {
-  // Value imports from `@guren/*`, mapping the file's local name to the
-  // canonical exported name. Type-only imports are excluded — they cannot be
-  // constructed or called — and so is every non-Guren source, so a same-named
-  // export from another package never resolves to a signal.
+  // Local name → canonical exported name, for value imports from `@guren/*`
+  // only, so a same-named export from another package resolves to nothing.
   const gurenNames = new Map<string, string>()
   const gurenNamespaces = new Set<string>()
-  // Whether the file imports from Guren at all, type-only imports included.
-  // The two signals resolved structurally rather than through a binding —
-  // `auth.attempt()` (a controller property) and the session option keys —
-  // use this to stay inside Guren code: without it any library's
-  // `auth.attempt()` or `sessionOptions` key raised a Guren signal.
+  // Type-only imports included. The two signals resolved structurally rather
+  // than through a binding — `auth.attempt()` and the session option keys —
+  // use this to stay inside Guren code.
   let importsGuren = false
   for (const statement of ast.program.body) {
     if (statement.type !== 'ImportDeclaration') continue
@@ -298,9 +257,8 @@ function extractSignals(ast: File): ExtractedSignal[] {
   }
 
   /**
-   * Canonical Guren export name for a callee/identifier, or null when it does
-   * not resolve to one. Covers plain and aliased named imports plus
-   * `ns.Member` access through a namespace import.
+   * Canonical Guren export name for a callee/identifier, or null. Covers plain
+   * and aliased named imports plus `ns.Member` namespace access.
    */
   const resolve = (node: BabelNode | undefined): string | null => {
     if (!node) return null
@@ -368,18 +326,14 @@ function extractSignals(ast: File): ExtractedSignal[] {
           const kind = CALLED_SIGNALS[name]
           if (kind) emit(kind, name, lineOf(node))
 
-          // An `auth` key in createApp's options object enables sessions:
+          // An `auth` key in createApp's options enables sessions:
           // AuthServiceProvider attaches session middleware whenever
           // `options.auth` is present and autoSession isn't explicitly false.
-          // `make:auth` itself tells users to add exactly `auth: {}`, so the
-          // bare key with no session-specific fields is the most common
-          // real-world shape. Scoping to createApp (rather than any `auth:`
-          // object) keeps SMTP-style `auth: { user, pass }` mailer config
-          // from reading as a session.
+          // Scoped to createApp so SMTP-style `auth: { user, pass }` mailer
+          // config does not read as a session.
           if (name === 'createApp') {
-            // Unlike the generic identifier scan, which walks through
-            // `satisfies`/`as const` (see TYPE_ONLY_NODES above), this
-            // positional read has to unwrap them itself.
+            // Unlike the generic identifier scan, this positional read has to
+            // unwrap `satisfies`/`as const` itself.
             const options = objectLiteral((node.arguments as Node[])[0])
             if (options) {
               for (const property of options.properties as unknown as BabelNode[]) {
@@ -392,15 +346,10 @@ function extractSignals(ast: File): ExtractedSignal[] {
         }
 
         if (callee?.type === 'MemberExpression') {
-          // `auth.attempt(...)` / `this.auth.attempt(...)` is the entry point
-          // app code calls to verify a password (`guard.attempt()` sits
-          // underneath it but is never called directly outside the
-          // framework's own tests). Resolved structurally rather than through
-          // the import map: `auth` here is a controller property, not an
-          // import. Known gap: a registration-only app that creates
-          // password-hashing records without ever calling attempt() passes
-          // undetected — `make:auth` always scaffolds login alongside
-          // registration, so that shape doesn't occur in generated apps.
+          // `auth.attempt(...)` is the entry point app code calls to verify a
+          // password. Resolved structurally, not through the import map: `auth`
+          // here is a controller property. Known gap: a registration-only app
+          // that never calls attempt() passes undetected.
           const property = callee.property as BabelNode
           const object = callee.object as BabelNode
           const isAttempt = property?.type === 'Identifier' && property.name === 'attempt'
@@ -420,16 +369,11 @@ function extractSignals(ast: File): ExtractedSignal[] {
       }
 
       case 'ObjectProperty': {
-        // autoSession/sessionOptions count wherever they appear — session
-        // config objects are routinely built outside the createApp call and
-        // passed in — but only inside a file that imports from Guren, since
-        // neither key is distinctive enough to claim on its own.
-        //
-        // `autoSession: false` is the deliberate exception: it *suppresses*
-        // the warning, so it is read everywhere, gate or no gate. Missing an
-        // opt-out warns a correctly-configured app, which is the failure
-        // direction this check exists to avoid; missing an opt-in only costs
-        // a warning the `auth` key already raises in the common shape.
+        // autoSession/sessionOptions count wherever they appear, but only in a
+        // file importing from Guren: neither key is distinctive on its own.
+        // `autoSession: false` is the exception — it *suppresses* the warning,
+        // so it is read gate or no gate, since missing an opt-out warns a
+        // correctly-configured app.
         const keyName = propertyKeyName(node)
         if (keyName === 'autoSession') {
           if (importsGuren) emit('session', 'autoSession', lineOf(node))
@@ -463,10 +407,9 @@ interface ScannedFile {
 }
 
 /**
- * Source files sitting directly in the project root. Deploy entrypoints
- * (`lambda.ts`, `worker.ts`) conventionally live there, and no DEPLOY_SCAN_DIRS
- * entry covers the root itself — pointing collectFiles at it would walk the
- * whole tree, so the root gets its own non-recursive pass.
+ * Source files sitting directly in the project root, where deploy entrypoints
+ * conventionally live. Its own non-recursive pass because pointing collectFiles
+ * at the root would walk the whole tree.
  */
 async function readRootSourceFiles(cwd: string): Promise<string[]> {
   try {
@@ -482,14 +425,10 @@ async function readRootSourceFiles(cwd: string): Promise<string[]> {
 }
 
 /**
- * Read and signal-scan the app's own source files from a bounded set of
- * roots: the directories in DEPLOY_SCAN_DIRS plus any source file in the
- * project root.
- *
- * Test files are excluded. A fixture that constructs a backed store or a
- * NodeHasher would otherwise satisfy the remediation check on behalf of an
- * application that never wires one up, hiding a real production gap — and a
- * fixture enabling sessions would report sessions the app itself never enables.
+ * Read and signal-scan the app's own source files: DEPLOY_SCAN_DIRS plus any
+ * source file in the project root. Test files are excluded — a fixture
+ * constructing a backed store would otherwise satisfy the remediation check on
+ * behalf of an app that never wires one up.
  */
 async function readAppSources(cwd: string): Promise<{ files: ScannedFile[]; unparsed: string[] }> {
   const [directoryFiles, rootFiles] = await Promise.all([
@@ -503,18 +442,15 @@ async function readAppSources(cwd: string): Promise<{ files: ScannedFile[]; unpa
 
   const paths = [...rootFiles, ...directoryFiles.flat()].filter((path) => !TEST_FILE_PATTERN.test(path))
 
-  // Signals are extracted inside the map so each AST is released as soon as
-  // its file is reduced to signals. A ParseCache would be the obvious fit but
-  // is the wrong tool here: DEPLOY_SCAN_DIRS never covers the project root, so
-  // no path in this list repeats and the cache would score zero hits while
-  // holding every AST alive until the whole scan finished.
+  // Signals are extracted inside the map so each AST is released as soon as its
+  // file is reduced to signals. Not a ParseCache: no path in this list repeats,
+  // so it would score zero hits while holding every AST alive to the end.
   const scanned = await Promise.all(
     paths.map(async (path) => {
       const filePath = toPosixRelative(cwd, path)
       const source = await readFile(path, 'utf8').catch(() => null)
       // An unreadable file is reported alongside an unparseable one: both
-      // contribute no signals, and silently dropping either is the hole the
-      // caveat exists to close.
+      // contribute no signals.
       if (source === null) return { filePath, signals: null }
       const ast = parseSourceFile(source, path)
       return { filePath, signals: ast ? extractSignals(ast) : null }
@@ -548,10 +484,9 @@ async function detectDeployTargets(cwd: string, files: ScannedFile[]): Promise<D
     }
   }
 
-  // The Lambda adapter ships inside @guren/core, so a hand-rolled deploy can
-  // import it without installing the plugin — catch that from source imports.
-  // Skipped when the plugin already declared the target: installing it also
-  // scaffolds src/lambda.ts, and reporting Lambda twice doubles every warning.
+  // A hand-rolled deploy can import the adapter without installing the plugin.
+  // Skipped when the plugin already declared the target: it also scaffolds
+  // src/lambda.ts, and reporting Lambda twice doubles every warning.
   if (!detections.some((detection) => detection.profile === DEPLOY_TARGET_PROFILES.lambda)) {
     const lambdaFile = files.find((file) => file.signals.some((signal) => signal.kind === 'lambda'))
     if (lambdaFile) {
@@ -566,9 +501,8 @@ async function detectDeployTargets(cwd: string, files: ScannedFile[]): Promise<D
 }
 
 /**
- * Scan the app once and collect everything the deploy-runtime doctor checks
- * need: which deploy targets are declared, and which Bun-only defaults are
- * still in force.
+ * Scan the app once for everything the deploy-runtime doctor checks need:
+ * declared deploy targets, and Bun-only defaults still in force.
  */
 export async function analyzeDeployRuntime(cwd: string): Promise<DeployRuntimeAnalysis> {
   const { files, unparsed } = await readAppSources(cwd)
@@ -597,10 +531,7 @@ export async function analyzeDeployRuntime(cwd: string): Promise<DeployRuntimeAn
   }
 }
 
-/**
- * Caveat appended to signal-dependent check messages when files were skipped:
- * a verdict computed over an incomplete scan should say so.
- */
+/** Caveat appended to a check message when the scan was incomplete. */
 export function formatParseCaveat(analysis: DeployRuntimeAnalysis): string {
   const { unparsedFiles } = analysis
   if (unparsedFiles.length === 0) return ''

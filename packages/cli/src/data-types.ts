@@ -1,17 +1,12 @@
 /**
  * Generates typed data contracts from JsonResource subclasses.
  *
- * Scans `app/Http/Resources/` — at the project root and inside every
- * `modules/<name>/` (RFC 0002) — for classes extending `Resource`, extracts
- * the return type of `toArray()` (or an explicit `interface XxxData`), and
- * emits a `data.gen.ts` file that exports a `Data` namespace.
- *
- * A payload type whose body cannot be copied — `z.infer<typeof Schema>`, an
- * intersection, a merged interface — is emitted as an import-type *reference*
- * to its own declaration instead, provided the file exports it. Copy first,
- * reference second: a copy works for unexported declarations and keeps
- * data.gen.ts self-describing, and a pure fallback cannot change any output
- * that was already being emitted.
+ * Scans `app/Http/Resources/` at the project root and inside every
+ * `modules/<name>/` (RFC 0002), extracts the return type of `toArray()` (or an
+ * explicit `interface XxxData`), and emits `data.gen.ts` exporting a `Data`
+ * namespace. Copy first, reference second: a payload whose body cannot be
+ * copied is emitted as an `import(...)` reference when the file exports it, a
+ * fallback that cannot change output already being emitted.
  */
 import { readFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve } from 'node:path'
@@ -21,27 +16,21 @@ import { isIdentifier, pascalCase, relativeImportPath, resolveAppRoot, writeGene
 import { parseSourceFile } from './parse-cache'
 
 export interface ResourceDefinition {
-  /** Class name (e.g. 'PostResource') */
   className: string
   /**
-   * `Data` namespace member this resource is emitted as (e.g. 'Post'), or
-   * `null` when the class was discovered but nothing was emitted for it —
-   * see {@link resolveEmittableNames}.
-   *
-   * Module resources are qualified with their module — `modules/billing/`'s
-   * `InvoiceResource` becomes `Data.BillingInvoice` — so that a name depends
-   * only on where the class lives. Qualifying only on collision would be
-   * prettier and unstable: adding a second `InvoiceResource` elsewhere would
+   * `Data` namespace member this resource is emitted as, or `null` when the
+   * class was discovered but nothing was emitted — see
+   * {@link resolveEmittableNames}. Module resources are always qualified
+   * (`modules/billing/`'s `InvoiceResource` → `Data.BillingInvoice`) so a name
+   * depends only on where the class lives; qualifying only on collision would
    * rename an existing type out from under the frontend importing it.
    */
   dataName: string | null
   /**
    * Right-hand side of the emitted `export type` — a brace body copied from
-   * the source, or an `import('…').Name` reference to a declaration that
-   * could not be copied. `null` if neither was possible.
+   * the source, or an `import('…').Name` reference. `null` if neither.
    */
   rawType: string | null
-  /** Type imports required by this data type */
   imports: string[]
   /** Module (`modules/<name>/`) the class lives in — `null` at the project root. */
   module: string | null
@@ -53,9 +42,8 @@ export interface GenerateDataTypesOptions extends WriterOptions {
   appRoot?: string
   /**
    * Scan this sub-directory of each app root instead of `app/Http/Resources`.
-   * An escape hatch for a non-conventional layout; it still fans out over
-   * `modules/<name>/` and still skips test files, because it is the same
-   * scanner with a different sub-path rather than a second scanning rule.
+   * Still fans out over `modules/<name>/` and still skips test files: the same
+   * scanner with a different sub-path, not a second scanning rule.
    */
   resourcesDir?: string
   outputFile?: string
@@ -70,9 +58,8 @@ export async function generateDataTypes(
   const outputFile = resolve(appRoot, options.outputFile ?? DEFAULT_OUTPUT_FILE)
   const outputDirectory = dirname(outputFile)
 
-  // Returned rather than logged, same contract as `generateApiClientTypes`:
-  // `guren codegen` prints them, and the MCP codegen tool hands them to the
-  // agent that asked for the run, where a console line would reach nobody.
+  // Returned rather than logged, same contract as `generateApiClientTypes`: the
+  // MCP codegen tool hands them to its caller, where a console line reaches nobody.
   const warnings: string[] = []
 
   const resourcesDir = options.resourcesDir ?? RESOURCES_DIR
@@ -131,10 +118,9 @@ ${typeEntries || '  // No resources found'}
 
 /**
  * Parses every discovered Resource file, ordered by app-root-relative path so
- * that {@link resolveEmittableNames}'s first-wins rule is reproducible rather
- * than dependent on the order the filesystem reported. Compared bytewise, not
- * by locale: the order decides which of two colliding resources keeps the
- * name, and that verdict must not vary by machine.
+ * {@link resolveEmittableNames}'s first-wins rule is reproducible. Compared
+ * bytewise, not by locale: which of two colliding resources keeps the name
+ * must not vary by machine.
  */
 async function collectResourceDefinitions(
   appRoot: string,
@@ -157,9 +143,8 @@ async function collectResourceDefinitions(
 
 /**
  * Words TypeScript rejects as a type alias name even though they are
- * identifier-shaped, so `export type default = …` never reaches the file.
- * Contextual keywords (`any`, `string`, `await`) are absent because they are
- * legal here — verified against `tsc`, not assumed.
+ * identifier-shaped. Contextual keywords (`any`, `string`, `await`) are absent
+ * because they are legal here — verified against `tsc`, not assumed.
  */
 const RESERVED_WORDS = new Set([
   'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default', 'delete', 'do',
@@ -170,29 +155,18 @@ const RESERVED_WORDS = new Set([
 
 /**
  * Clears the `dataName` of every definition that cannot be emitted as its own
- * `Data` member, and warns about each. One uncompilable `data.gen.ts` costs the
+ * `Data` member, and warns about each: one uncompilable `data.gen.ts` costs the
  * app every type in it, so a named omission is the cheaper failure.
  *
- * Cleared rather than removed: a discovered-but-unemitted class still occupies
- * its class name, and `buildApiClientContent` has to be able to tell "no such
- * Resource" from "that Resource exists but has no type" — a response hint
- * carries only the class name, so without the tombstone the surviving twin
- * would look unique and type the route with the other root's payload.
- *
- * Three ways to be unemittable:
- *
- * - No `toArray()` type could be extracted (`rawType === null`). Warned about
- *   by {@link extractResourceType}, the only place that knows *which*
- *   recognised shape the file missed and so what to tell the author to change.
- * - The name is one TypeScript will not accept. A class name is always an
- *   identifier, but a module directory name is not — `modules/2fa/` qualifies
- *   to `2faInvoice` — and neither is safe from reserved words.
- * - Another definition claimed the name first. Module qualification rules out
- *   the collision that motivates the fan-out (root `PostResource` vs
- *   `modules/blog/`'s) but not every one: two module directories differing
- *   only in separator (`my-module`, `my_module`) qualify to the same prefix,
- *   and a root `BillingInvoiceResource` collides with `modules/billing/`'s
- *   `InvoiceResource`.
+ * Cleared rather than removed, because the class still occupies its class name:
+ * a response hint carries only that name, so without the tombstone
+ * `buildApiClientContent` reads a surviving twin as unique and types the route
+ * with the other root's payload. Unemittable means no extractable `toArray()`
+ * type, a name TypeScript rejects (a module *directory* need not be an
+ * identifier — `modules/2fa/` qualifies to `2faInvoice`), or a name another
+ * definition claimed first (module qualification does not rule every collision
+ * out: `my-module`/`my_module` share a prefix, and a root
+ * `BillingInvoiceResource` collides with `modules/billing/`'s `InvoiceResource`).
  */
 function resolveEmittableNames(definitions: ResourceDefinition[], warnings: string[]): void {
   const claimed = new Map<string, ResourceDefinition>()
@@ -239,10 +213,8 @@ async function extractResourceType(
 ): Promise<ResourceDefinition | null> {
   const source = await readFile(filePath, 'utf-8')
 
-  // Match class name: `export class PostResource extends Resource<...>`.
-  // Gated ahead of parseSourceFile(), which is a full Babel parse and the
-  // bulk of the per-file cost: every path below discards its results when this
-  // misses, and the scan now covers modules/*/ too.
+  // Gated ahead of parseSourceFile(), a full Babel parse and the bulk of the
+  // per-file cost, which every path below discards when this misses.
   const classMatch = source.match(/export\s+class\s+(\w+Resource)\s+extends\s+Resource/)
   if (!classMatch) return null
 
@@ -255,17 +227,14 @@ async function extractResourceType(
   const className = classMatch[1]
   const baseName = className.replace(/Resource$/, '')
   const module = moduleNameFromRelPath(relPath)
-  // Qualified with the module so the emitted name depends only on where the
-  // class lives — see ResourceDefinition.dataName.
+  // Qualification rule: see ResourceDefinition.dataName.
   const dataName = module ? `${pascalCase(module)}${baseName}` : baseName
   const common = { className, dataName, imports, module, filePath: relPath }
 
-  // A declaration that cannot be copied may still be *referencable*: an
-  // import-type reference hands the frontend the declaration itself — unlike
-  // a guessed body, it cannot be wrong. The file's type imports are dropped on
-  // that path: the reference resolves inside the resource's own module, which
-  // resolves its own imports, and two roots' same-named imports must not
-  // collide in the shared import block.
+  // A declaration that cannot be copied may still be referencable. The file's
+  // type imports are dropped on that path: the reference resolves inside the
+  // resource's own module, and two roots' same-named imports must not collide
+  // in the shared import block.
   const resolveUnreadable = (
     read: Extract<ObjectTypeRead, { kind: 'unreadable' }>,
     warningPrefix: string,
@@ -278,20 +247,18 @@ async function extractResourceType(
     return { ...common, rawType: null }
   }
 
-  // Comments and string literals are blanked out before anything is matched
-  // against the source. Both routinely carry text that looks like a
-  // declaration or an unbalanced brace and is neither — a commented-out draft
-  // of the very interface being looked for is the ordinary case — and a regex
-  // reading the raw file cannot tell the difference.
+  // Everything is matched against the mask: a commented-out draft of the very
+  // interface being looked for is the ordinary case, and a regex over the raw
+  // file cannot tell it from the real one.
   const masked = maskCommentsAndStrings(source)
 
-  // Strategy 1: an interface named after the class, `interface PostResourceData { ... }`
+  // Strategy 1: an interface named after the class.
   const named = readObjectType(source, masked, `${baseName}(?:Resource)?Data`)
   if (named.kind === 'body') {
     return { ...common, rawType: named.body }
   }
 
-  // Strategy 2: Explicit return type on toArray(): `toArray(): SomeType {`
+  // Strategy 2: an explicit return type on toArray().
   const returnTypeMatch = masked.match(/toArray\s*\(\s*\)\s*:\s*(\w+(?:Data)?)\s*\{/)
   if (returnTypeMatch) {
     const typeName = returnTypeMatch[1]
@@ -307,9 +274,8 @@ async function extractResourceType(
       )
     }
 
-    // The annotation names a type this file does not hand over: a declaration
-    // that is simply elsewhere is a different fix from one that is right here
-    // in a form that cannot be copied, so say which.
+    // A declaration that is simply elsewhere is a different fix from one that
+    // is right here in a form that cannot be copied, so say which.
     warnings.push(
       `Resource ${className} (${relPath}) annotates toArray(): ${typeName}, but no `
       + `interface or type ${typeName} is declared in that file — omitted from data.gen.ts. `
@@ -319,21 +285,16 @@ async function extractResourceType(
   }
 
   // An unannotated `toArray()` whose payload interface is right there but
-  // unreadable is a different sentence again, and the one Strategy 1 alone can
-  // reach.
+  // unreadable is a different sentence again.
   if (named.kind === 'unreadable') {
     return resolveUnreadable(named, `Resource ${className} (${relPath}) `)
   }
 
-  // Nothing recognised described the payload. Reported anyway, with no type:
-  // the class still claims its name, which is what stops a same-named twin
-  // elsewhere from resolving a response hint to this one's payload.
-  //
-  // An annotation in a shape Strategy 2 does not read — `Types.PostPayload`,
-  // `PostData<string>` — is a different sentence from no annotation at all.
-  // Telling an author who wrote one that they wrote none sends them to add a
-  // second, which is how the silence this replaces wasted time in the first
-  // place.
+  // Nothing recognised described the payload. Still reported with no type, so
+  // the class keeps claiming its name against a same-named twin. An annotation
+  // in a shape Strategy 2 does not read (`Types.PostPayload`, `PostData<string>`)
+  // gets its own sentence: telling that author they wrote none sends them to
+  // add a second one.
   const looseAnnotation = masked.match(/toArray\s*\(\s*\)\s*:\s*([^{;\n]+?)\s*\{/u)
   // Quoted from the source rather than the mask, so a string literal type
   // inside the annotation reads back as the author wrote it.
@@ -357,15 +318,10 @@ async function extractResourceType(
  * What the file declares under `namePattern`: a copyable object body, nothing
  * at all, or a declaration that exists but cannot be copied.
  *
- * The third case is why this is not just `string | null`. Every shape in it
- * used to yield *some* brace body — the wrong one — which is worse than
- * yielding none: the frontend gets a type that compiles and lies. Refusing
- * costs one `Data` member; guessing costs the trust in all of them.
- *
- * An unreadable declaration is not always a lost member: when the file
- * *exports* it, the caller falls back to an import-type reference
- * ({@link readTypeReference}), which cannot lie the way a guessed body can —
- * it names the declaration instead of restating it.
+ * The third case is why this is not `string | null`: guessing a brace body for
+ * it hands the frontend a type that compiles and lies, where refusing costs one
+ * `Data` member. An unreadable declaration the file *exports* is not even lost —
+ * the caller falls back to an import-type reference ({@link readTypeReference}).
  */
 type ObjectTypeRead =
   | { kind: 'body'; body: string }
@@ -377,40 +333,25 @@ type ObjectTypeRead =
  * anywhere in `source`.
  *
  * `masked` is {@link maskCommentsAndStrings} of the same string: everything is
- * *matched* against it and *sliced* from `source`, so offsets stay usable
- * while text that only looks like code cannot be found.
- *
- * `namePattern` is spliced into a regex, so a caller may pass alternatives
- * (`Post(?:Resource)?Data`) rather than probing one spelling at a time.
- *
- * The brace that opens the body has to be found by the pattern rather than by
- * searching forward for the next `{`: a `type PostData = string` followed by
- * the class declaration would otherwise hand back the class body.
+ * *matched* against it and *sliced* from `source`. `namePattern` is spliced
+ * into a regex, so a caller may pass alternatives. The opening brace must be
+ * found by the pattern, not by searching forward for the next `{`: a
+ * `type PostData = string` would otherwise hand back the class body below it.
  */
 function readObjectType(source: string, masked: string, namePattern: string): ObjectTypeRead {
   const declaration = new RegExp(
-    // Anchored to column 0, which is what "the file's payload type" means
-    // here: a declaration nested in a namespace, an ambient module or a
-    // function body is a different type that merely shares the name, and
-    // emitting its members as the Resource's payload is silently wrong. No
-    // formatter indents a top-level declaration, so the anchor costs nothing.
-    //
-    // `[^{;]*` for the heritage clause, so `extends Record<string, unknown>`
-    // is stepped over; `;` bounds it so an aliasless declaration cannot run
-    // into a later statement's brace.
-    //
-    // `declare` is admitted so this reader and the AST index in
-    // collectTopLevelTypeDeclarations() agree on what counts as declared here
-    // — a modifier only one of them saw would split the verdict between
-    // "copy this" and "no such declaration".
+    // Anchored to column 0: a declaration nested in a namespace or a function
+    // body merely shares the name. `[^{;]*` steps over a heritage clause, with
+    // `;` bounding it so an aliasless declaration cannot run into a later
+    // statement's brace. `declare` is admitted so this reader and
+    // collectTopLevelTypeDeclarations() agree on what counts as declared.
     `^(?:export\\s+)?(?:declare\\s+)?(?:interface|type)\\s+(${namePattern})\\b\\s*(?:(=)\\s*|(extends[^{;]*))?\\{`,
     'mu',
   )
   const match = declaration.exec(masked)
   if (!match) {
-    // Declared, but not in a form with a body this can copy — `type X = string`,
-    // an intersection, a generic. Distinguishing this from "not declared here"
-    // is what lets the caller say which of the two it is.
+    // Declared, but with no copyable body. Distinguishing this from "not
+    // declared here" is what lets the caller say which of the two it is.
     const anyDeclaration = new RegExp(
       `^(?:export\\s+)?(?:declare\\s+)?(?:interface|type)\\s+(${namePattern})\\b(\\s*<)?`,
       'mu',
@@ -420,9 +361,8 @@ function readObjectType(source: string, masked: string, namePattern: string): Ob
     return {
       kind: 'unreadable',
       typeName: anyDeclaration[1],
-      // A generic *is* an object type, so saying it is not one sends the
-      // author to rewrite the shape rather than the one thing in the way.
-      // `{ id: T }` copied out of its declaration does not compile.
+      // A generic *is* an object type; `{ id: T }` copied out of its
+      // declaration is what does not compile.
       reason: anyDeclaration[2]
         ? 'takes type parameters, which have no meaning once the body is copied out'
         : 'is not a plain object type',
@@ -431,10 +371,9 @@ function readObjectType(source: string, masked: string, namePattern: string): Ob
 
   const [, typeName, isAlias, heritage] = match
 
-  // An `extends` clause holding an object type — `extends Record<string, { … }>`
-  // — puts a brace in front of the real one, and the heritage pattern stops at
-  // the first. Unbalanced angle brackets are what gives that away: the clause
-  // was cut mid-generic. `=>` is stripped so a function type's arrow does not
+  // An `extends Record<string, { … }>` puts a brace in front of the real one,
+  // and the heritage pattern stops at the first; unbalanced angle brackets are
+  // what gives that away. `=>` is stripped so a function type's arrow does not
   // read as a closing one.
   if (heritage) {
     const brackets = heritage.replace(/=>/gu, '')
@@ -462,9 +401,7 @@ function readObjectType(source: string, masked: string, namePattern: string): Ob
   }
 
   // Declaration merging: TypeScript unions every block, this reads one. Same
-  // anchor as above — only top-level declarations merge with each other, so a
-  // same-named type inside a namespace or a function body is not a second
-  // block and must not cost this one its type.
+  // anchor as above, since only top-level declarations merge with each other.
   const declarations = masked.match(
     new RegExp(`^(?:export\\s+)?(?:declare\\s+)?(?:interface|type)\\s+${typeName}\\b`, 'gmu'),
   )
@@ -477,11 +414,8 @@ function readObjectType(source: string, masked: string, namePattern: string): Ob
   }
 
   // A type alias's right-hand side runs to the end of the statement, so a body
-  // followed by an operator is only its first term: `&`/`|` compose, a
-  // conditional `extends` branches, and `[` makes the body an operand —
-  // `{ … }[]` is an array of it and `{ … }['k']` is one member of it, neither
-  // of which is the body. An interface always ends at its brace, so none of
-  // this can apply to one.
+  // followed by `&`/`|`, a conditional `extends`, or `[` is only its first
+  // term. An interface always ends at its brace, so this cannot apply to one.
   if (isAlias) {
     const rest = masked.slice(end)
     if (/^\s*[&|[]/u.test(rest) || /^\s*extends\b/u.test(rest)) {
@@ -502,9 +436,9 @@ function countOccurrences(haystack: string, needle: string): number {
 
 /**
  * The half of an unreadable-declaration warning that does not name the
- * Resource. `exportWouldFix` is the caller's knowledge that the declaration
- * only missed the reference fallback for being unexported — the one-word fix,
- * which the default advice would otherwise never mention.
+ * Resource. `exportWouldFix` says the declaration only missed the reference
+ * fallback for being unexported — a one-word fix the default advice never
+ * mentions.
  */
 function describeUnreadable(
   read: { typeName: string; reason: string; fix?: string },
@@ -523,18 +457,10 @@ function describeUnreadable(
 
 /**
  * Index just past the `}` closing the `{` at `openIndex`, by counting depth,
- * or `null` for an unterminated body.
- *
- * Depth, not a delimiter: the predecessor regexes ended a body at the first
- * `\n}`, which is neither necessary nor sufficient. A one-line
- * `interface PostResourceData { id: number }` ran past its own closing brace
- * and swallowed the class declaration below it — emitting a `data.gen.ts`
- * that did not compile, the one failure mode dropping a definition exists to
- * avoid — while a legitimately nested property forced a shape the convention
- * never promised.
- *
- * Takes the masked source, so no brace it counts is inside a comment or a
- * string.
+ * or `null` for an unterminated body. Depth, not a delimiter: ending a body at
+ * the first `\n}` is neither necessary (a nested property) nor sufficient (a
+ * one-line declaration, which then swallows the class below it). Takes the
+ * masked source, so no brace it counts is inside a comment or a string.
  */
 function findBodyEnd(masked: string, openIndex: number): number | null {
   let depth = 0
@@ -557,17 +483,10 @@ function findBodyEnd(masked: string, openIndex: number): number | null {
  * spaces, newlines and length preserved so every index still addresses the
  * same character in the original.
  *
- * Everything this module matches runs against the result: a declaration
- * inside a comment is not a declaration, and a brace inside a string is not
- * structure. Neither is exotic — a commented-out draft of an interface, or a
- * string literal type like `marker: '}'`, is ordinary code that a regex over
- * the raw file reads as the real thing.
- *
- * `patch-helpers.ts` masks for its own matching too, and deliberately does not
- * share this: it keeps the quotes so a masked `'A', 'B'` still splits into two
- * entries, and it is a write path that edits an app's own files, where the
- * divergences here (blanked quotes, an unterminated quote stopping at the
- * newline) would change what gets patched.
+ * `patch-helpers.ts` masks for its own matching and deliberately does not share
+ * this: it keeps the quotes so a masked `'A', 'B'` still splits into two
+ * entries, and it is a write path where the divergences here (blanked quotes,
+ * an unterminated quote stopping at the newline) would change what gets patched.
  */
 function maskCommentsAndStrings(source: string): string {
   // Split on UTF-16 units so an index into `chars` is an index into `source`.
@@ -631,8 +550,7 @@ function maskStringLiteral(
     // lone apostrophe in prose from swallowing the rest of the file.
     if (quote !== '`' && char === '\n') break
     // A template's `${ … }` can hold another template, whose backtick would
-    // otherwise be read as this one's closing delimiter — which truncates the
-    // body being read, silently and mid-property.
+    // otherwise be read as this one's closing delimiter.
     if (quote === '`' && char === '$' && source[index + 1] === '{') {
       index = maskTemplateExpression(source, index + 1, blank)
       continue
@@ -677,13 +595,11 @@ function maskTemplateExpression(
 /**
  * Outcome of trying to emit a payload type as an import-type reference.
  *
- * The gate is *exportedness, proven from the AST*: a reference to an
- * unexported name is a TS2694 that takes the whole artifact — every other
- * resource's type with it — out of compilation, and the `export` keyword on
- * the declaration line is not the test (`export type { X }` exports without
- * one). `exportWouldFix` is true only when exporting the declaration is all
- * that stands in the way — what lets the warning say "export it", the
- * one-word fix, instead of "rewrite the shape".
+ * The gate is exportedness proven from the AST: a reference to an unexported
+ * name is a TS2694 that takes the whole artifact out of compilation, and the
+ * `export` keyword on the declaration line is not the test (`export type { X }`
+ * exports without one). `exportWouldFix` is true only when exporting is all
+ * that stands in the way, so the warning can say "export it".
  */
 type TypeReferenceRead =
   | { rawType: string }
@@ -692,15 +608,14 @@ type TypeReferenceRead =
 interface TypeDeclarationInfo {
   /** Name the declaration is exported under, or `null` when it is not exported. */
   exportedName: string | null
-  /** Whether any declaration of this name takes type parameters. */
+  /** True when *any* declaration of this name takes type parameters. */
   generic: boolean
 }
 
 /**
  * Every top-level `interface`/`type` declaration in the file, keyed by local
- * name. Local declarations only — an `export … from` re-export forwards a
- * declaration this file does not hold, whose genericity this parse cannot
- * see, so it stays out on purpose.
+ * name. Local declarations only: an `export … from` re-export forwards a
+ * declaration whose genericity this parse cannot see.
  */
 function collectTopLevelTypeDeclarations(ast: File | null): Map<string, TypeDeclarationInfo> {
   const declarations = new Map<string, TypeDeclarationInfo>()
@@ -720,11 +635,10 @@ function collectTopLevelTypeDeclarations(ast: File | null): Map<string, TypeDecl
     declarations.set(declaration.id.name, info)
   }
 
-  // Export lists (`export type { X }`, `export { X as Y }`) in a second pass,
-  // so a list above its declaration still finds it. Only identifier names are
-  // recorded — the dotted reference cannot spell `export { X as 'wire name' }`
-  // — and skipping the rest here is what keeps a plainly-named specifier of
-  // the same declaration in play, whichever order the list spells them in.
+  // Export lists in a second pass, so a list above its declaration still finds
+  // it. Only identifier names are recorded (a dotted reference cannot spell
+  // `export { X as 'wire name' }`); skipping the rest keeps a plainly-named
+  // specifier of the same declaration in play whatever the list order.
   for (const node of ast.program.body) {
     if (node.type !== 'ExportNamedDeclaration' || node.declaration || node.source) continue
     for (const specifier of node.specifiers) {
@@ -746,9 +660,8 @@ function collectTopLevelTypeDeclarations(ast: File | null): Map<string, TypeDecl
  * An `import('…').Name` reference to `typeName`'s own declaration, for a
  * payload {@link readObjectType} declared unreadable.
  *
- * A generic stays refused even when exported: a reference must pass type
- * arguments a payload reference has nowhere to get — and the existing warning
- * already names the type parameters as the thing in the way.
+ * A generic stays refused even when exported: a reference would have to pass
+ * type arguments this has nowhere to get.
  */
 function readTypeReference(
   declared: Map<string, TypeDeclarationInfo>,
@@ -768,19 +681,14 @@ function readTypeReference(
 
 /**
  * Module specifier for an import-type reference from `data.gen.ts` to
- * `filePath`, or `null` for a file an extensionless specifier does not
- * resolve to (`.mts`, `.mjs` — and `.js`/`.mjs` cannot declare types anyway).
- * The `.d.ts` guard looks unreachable — discovery skips those files — but it
- * sits here because this is the site that slices: stripping only `.ts` from
- * one would emit a specifier ending in `.d`, silently.
- * Extensionless because that is the shape this repo's generators *choose*
- * (api-client.gen.ts's `'./data.gen'`); the `.js` suffixes seen in generated
- * imports are author-written statements copied verbatim, not a convention.
+ * `filePath`, or `null` for a file an extensionless specifier does not resolve
+ * to. Extensionless is what this repo's generators choose; the `.js` suffixes
+ * in generated imports are author-written statements copied verbatim. The
+ * `.d.ts` guard sits here because this is the site that slices: stripping only
+ * `.ts` from one would silently emit a specifier ending in `.d`.
  */
 function importTypeSpecifier(filePath: string, outputDirectory: string): string | null {
   if (!filePath.endsWith('.ts') || filePath.endsWith('.d.ts')) return null
-  // Only data.gen.ts's directory matters here; the basename rides along
-  // because relativeImportPath answers for a file, not a directory.
   return relativeImportPath(join(outputDirectory, 'data.gen.ts'), filePath.slice(0, -'.ts'.length))
 }
 

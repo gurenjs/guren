@@ -2,10 +2,9 @@ import { describe, expect, test } from 'bun:test'
 import type { R2Bucket } from '@cloudflare/workers-types'
 import type { R2BucketLike } from './R2Driver'
 
-// Compile-time contract: the real Workers `R2Bucket` must satisfy the
-// structural `R2BucketLike` the driver is written against. If workers-types
-// renames or retypes a member this driver reads, `tsc --noEmit` fails here
-// instead of the driver failing at runtime.
+// Compile-time contract: the real Workers `R2Bucket` must satisfy the structural
+// `R2BucketLike` the driver is written against, so a workers-types rename fails
+// `tsc --noEmit` here instead of the driver at runtime.
 type Assignable<From, To> = From extends To ? true : never
 const bucketIsBucketLike: Assignable<R2Bucket, R2BucketLike> = true
 

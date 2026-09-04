@@ -10,11 +10,8 @@ useGitIdentity()
 const originalPath = process.env.PATH ?? ''
 
 /**
- * Put a `git` on PATH that never returns for the given subcommand.
- *
- * The scaffolder shells out to whatever `git` the user has, and the failure
- * this guards against — a git that blocks instead of exiting — cannot be
- * provoked from a real one on demand.
+ * Put a `git` on PATH that never returns for the given subcommand. A real git
+ * cannot be made to block on demand.
  */
 async function stallingGitOnPath(dir: string, subcommand: string): Promise<void> {
   const shim = join(dir, 'git')
@@ -24,8 +21,7 @@ async function stallingGitOnPath(dir: string, subcommand: string): Promise<void>
   await writeFile(shim, script, 'utf8')
   await chmod(shim, 0o755)
   // The first exec of a freshly written file costs a few hundred milliseconds;
-  // spending it here keeps it out of the budgets the tests hand the scaffolder,
-  // which would otherwise have to be padded past it.
+  // spending it here keeps it out of the budgets the tests hand the scaffolder.
   spawnSync(shim, ['--warm'], { stdio: 'pipe' })
   process.env.PATH = `${dir}:${originalPath}`
 }

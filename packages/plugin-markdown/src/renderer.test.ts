@@ -241,8 +241,8 @@ describe('createMarkdownRenderer', () => {
 
   describe('known-answer fixture', () => {
     // Freezes the wrapped libraries' observable behavior: a marked or
-    // sanitize-html upgrade that changes output must fail here loudly
-    // instead of shifting silently under consumers.
+    // sanitize-html upgrade that changes output fails here rather than shifting
+    // silently under consumers.
     test('should render the fixture document byte-for-byte', async () => {
       const renderer = createMarkdownRenderer()
       const fixture = [

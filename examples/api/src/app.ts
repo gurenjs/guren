@@ -1,9 +1,7 @@
-// Every zod schema built after this import parses through a compiled fast
-// path. Keep it the first import so it runs before any module that defines
-// schemas. It honors z.config({ jitless: true }) for CSP-restricted runtimes
-// and never throws — unsupported schemas keep the regular parser. One caveat:
-// on invalid input, refinements/transforms can run twice (fast path, then
-// fallback), so keep .refine()/.transform() free of side effects.
+// Every zod schema built after this import parses through a compiled fast path,
+// so keep it the first import. It honors z.config({ jitless: true }) and never
+// throws. Caveat: on invalid input a refinement/transform can run twice (fast
+// path, then fallback), so keep them free of side effects.
 import 'zod/compile'
 import {
   createApp,
@@ -43,10 +41,9 @@ mountOpenApiDocs(app, {
   description: 'Example API for authentication, tokens, and task management.',
   jsonPath: '/api/openapi.json',
   docsPath: '/api/docs',
-  // A function, not a list: read per request, so the address the app bound
-  // still lands. Under `PORT=0` the OS picks the port, so it does not exist
-  // until `listen()` returns; the fallback covers callers that never bind a
-  // socket at all (`app.fetch()`, tests).
+  // A function, not a list, so it is read per request: under `PORT=0` the OS
+  // picks the port, which does not exist until `listen()` returns. The fallback
+  // covers callers that never bind a socket (`app.fetch()`, tests).
   servers: () => [app.address?.url ?? 'http://localhost:3334'],
 })
 

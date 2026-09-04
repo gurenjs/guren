@@ -1,4 +1,3 @@
-// Types
 export type {
   QueuedJob,
   FailedJob,
@@ -9,7 +8,6 @@ export type {
   JobFailureHandler,
 } from './types'
 
-// Job base class
 export {
   Job,
   setQueueDriver,
@@ -22,23 +20,19 @@ export {
   type JobClass,
 } from './Job'
 
-// Drivers
 export { MemoryDriver } from './drivers/MemoryDriver'
 export { SyncDriver } from './drivers/SyncDriver'
 export { RedisDriver, type RedisDriverOptions } from './drivers/RedisDriver'
 export { SqsDriver, createSqsAdapter, type SqsDriverOptions, type SqsAdapter } from './drivers/SqsDriver'
 
-// Worker
 export { Worker, processJob, type WorkerEvents } from './Worker'
 
-// Failed job reporter
 export {
   FailedJobReporter,
   type FailedJobInfo,
   type FailedJobHandler,
 } from './FailedJobReporter'
 
-// Manager
 export {
   QueueManager,
   createQueueManager,

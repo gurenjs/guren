@@ -1,145 +1,64 @@
-/**
- * Serialized job data stored in the queue.
- */
+/** Serialized job data stored in the queue. */
 export interface QueuedJob<T = unknown> {
-  /**
-   * Unique job identifier.
-   */
   id: string
 
-  /**
-   * Job class name.
-   */
+  /** The job class name; the registry resolves it back to the class. */
   name: string
 
-  /**
-   * Job payload data.
-   */
   payload: T
 
-  /**
-   * Queue name this job belongs to.
-   */
   queue: string
 
-  /**
-   * Number of times this job has been attempted.
-   */
   attempts: number
 
-  /**
-   * Maximum number of attempts before failing permanently.
-   */
   maxAttempts: number
 
-  /**
-   * When the job becomes available for processing.
-   */
   availableAt: Date
 
-  /**
-   * When the job was created.
-   */
   createdAt: Date
 
-  /**
-   * When the job was reserved by a worker (null if not reserved).
-   */
   reservedAt: Date | null
 
-  /**
-   * Last error message if the job failed.
-   */
   lastError?: string
 }
 
-/**
- * Failed job record.
- */
+/** Failed job record. */
 export interface FailedJob<T = unknown> extends QueuedJob<T> {
-  /**
-   * When the job failed.
-   */
   failedAt: Date
 
-  /**
-   * Error that caused the failure.
-   */
   error: string
 
-  /**
-   * Stack trace of the error.
-   */
   stack?: string
 }
 
-/**
- * Queue driver interface.
- * Implement this to create a custom queue backend.
- */
+/** Implement to add a queue backend. */
 export interface QueueDriver {
-  /**
-   * Push a job onto the queue.
-   */
   push(job: QueuedJob): Promise<void>
 
-  /**
-   * Pop the next available job from the queue.
-   * Returns null if no jobs are available.
-   */
   pop(queue: string): Promise<QueuedJob | null>
 
   /**
-   * Release a job back onto the queue (for retry).
-   *
-   * The driver owns the delay. A driver with nothing to wait in (`SyncDriver`)
-   * may run the job again immediately, so callers must not assume time has
-   * passed once this resolves.
-   *
-   * @param job - The job to release
-   * @param delayMs - Delay before the job becomes available again
+   * Release a job for retry. The driver owns the delay: one with nothing to wait
+   * in (`SyncDriver`) may run the job again before this resolves.
    */
   release(job: QueuedJob, delayMs?: number): Promise<void>
 
-  /**
-   * Delete a job from the queue.
-   */
   delete(jobId: string): Promise<void>
 
-  /**
-   * Mark a job as failed and move to failed jobs.
-   */
   fail(job: QueuedJob, error: Error): Promise<void>
 
-  /**
-   * Get the number of jobs in a queue.
-   */
   size(queue: string): Promise<number>
 
-  /**
-   * Get failed jobs.
-   */
   getFailedJobs(queue?: string): Promise<FailedJob[]>
 
-  /**
-   * Retry a failed job.
-   */
   retryFailedJob(jobId: string): Promise<void>
 
-  /**
-   * Delete a failed job.
-   */
   deleteFailedJob(jobId: string): Promise<void>
 
-  /**
-   * Clear all jobs (for testing).
-   */
   clear(): Promise<void>
 }
 
-/**
- * Options for creating a job.
- */
+/** Options for creating a job. */
 export interface JobOptions {
   /**
    * Queue to dispatch the job to.
@@ -160,9 +79,7 @@ export interface JobOptions {
   maxAttempts?: number
 }
 
-/**
- * Worker options.
- */
+/** Worker options. */
 export interface WorkerOptions {
   /**
    * Queues to process (in priority order).
@@ -197,12 +114,8 @@ export interface WorkerOptions {
   stopWhenEmpty?: boolean
 }
 
-/**
- * Job handler function type.
- */
+/** Job handler function type. */
 export type JobHandler<T = unknown> = (payload: T) => void | Promise<void>
 
-/**
- * Job failure handler function type.
- */
+/** Job failure handler function type. */
 export type JobFailureHandler<T = unknown> = (payload: T, error: Error) => void | Promise<void>

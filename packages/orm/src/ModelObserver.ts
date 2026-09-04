@@ -2,18 +2,8 @@ import type { HookName } from './hooks'
 import type { PlainObject } from './Model'
 
 /**
- * Base interface for model observers.
- *
- * Observers allow extracting lifecycle hook logic into dedicated classes.
- * Each method corresponds to a model lifecycle event and is optional.
- *
- * @example
- * class UserObserver implements ModelObserver {
- *   async creating(data) { data.slug = slugify(data.name) }
- *   async created(data) { await sendWelcomeEmail(data) }
- * }
- *
- * User.observe(UserObserver)
+ * Lifecycle hook logic extracted into a class, registered with
+ * `User.observe(UserObserver)`.
  */
 export interface ModelObserver {
   creating?(data: PlainObject): void | Promise<void> | false | Promise<false>
@@ -28,10 +18,7 @@ export interface ModelObserver {
 
 export type ModelObserverConstructor = new () => ModelObserver
 
-/**
- * Execute all registered observers for a given hook.
- * Returns false if any observer aborts the operation.
- */
+/** Returns false as soon as an observer aborts the operation. */
 export async function executeObservers(
   observers: ModelObserver[] | undefined,
   name: HookName,

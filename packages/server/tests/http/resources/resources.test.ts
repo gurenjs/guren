@@ -12,7 +12,6 @@ import {
   decodeCursor,
 } from '../../../src/http/resources'
 
-// Test types
 interface User {
   id: number
   name: string
@@ -28,7 +27,6 @@ interface Post {
   content: string
 }
 
-// Test resource classes
 class UserResource extends Resource<User> {
   toArray() {
     return {

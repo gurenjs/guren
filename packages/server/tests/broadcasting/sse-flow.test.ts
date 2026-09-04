@@ -48,11 +48,8 @@ async function readEvents(
 }
 
 /**
- * Read the `connected` frame's clientId, leaving the reader open.
- *
- * `readEvents` above cancels its reader before returning, and cancelling runs
- * the stream's cleanup, which drops the client from `sseClients` — so a test
- * that goes on to POST /auth against that client has to keep the stream alive.
+ * Read the `connected` frame's clientId, leaving the reader open: cancelling runs the
+ * stream's cleanup, which drops the client from `sseClients`.
  */
 async function readClientId(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<string> {
   const decoder = new TextDecoder()
@@ -81,7 +78,6 @@ describe('SSE subscription flow', () => {
       events.some((entry) => entry.event === 'BoardUpdated'),
     )
 
-    // Give the stream a beat to register its subscription, then publish.
     await new Promise((resolve) => setTimeout(resolve, 50))
     await manager.broadcast('announcements', 'BoardUpdated', { taskId: 7 })
 
@@ -112,10 +108,8 @@ describe('SSE subscription flow', () => {
     expect((connected!.data as { channels: string[] }).channels).toEqual([])
   })
 
-  // The auth endpoint reads the channel out of the request payload, so it
-  // inherits the shared parser's empty-object fallback. A body no form parser
-  // can decode names no channel, which is the ordinary 400 — not the 500 the
-  // parser's TypeError used to produce.
+  // The channel comes out of the request payload, so an undecodable body names no channel:
+  // that is the ordinary 400, not a 500 out of the parser.
   test('answers 400 for a request body the form parser cannot decode', async () => {
     const manager = createManager()
     manager.privateChannel('users.1.notifications', () => true)
@@ -161,10 +155,8 @@ describe('SSE subscription flow', () => {
     await reader.cancel().catch(() => {})
   })
 
-  // Authorization answers "may this user read the channel", not "may this user
-  // attach it to that stream". Without the ownership check, user 1 — genuinely
-  // authorized for their own channel — pushes their events into user 2's
-  // stream by naming user 2's clientId.
+  // Authorization answers "may this user read the channel", not "may this user attach it to
+  // that stream": without an ownership check, user 1 pushes events into user 2's stream.
   test('refuses to attach a channel to a stream owned by another user', async () => {
     const manager = createManager()
     manager.privateChannel('users.1.notifications', (_channel, user) => (user as { id: number } | null)?.id === 1)
@@ -186,8 +178,7 @@ describe('SSE subscription flow', () => {
     })
     const authJson = (await authResponse.json()) as Record<string, { authorized: boolean; subscribed: boolean }>
 
-    // User 1 really is authorized for their own channel — the attach is what
-    // must fail.
+    // User 1 really is authorized for their own channel: the attach is what must fail.
     expect(authJson['private-users.1.notifications'].authorized).toBe(true)
     expect(authJson['private-users.1.notifications'].subscribed).toBe(false)
 

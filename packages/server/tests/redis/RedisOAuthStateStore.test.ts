@@ -2,11 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import type { Redis } from 'ioredis'
 import { RedisOAuthStateStore } from '../../src/redis/RedisOAuthStateStore'
 
-/**
- * In-memory stand-in covering the commands RedisOAuthStateStore uses.
- * eval mirrors the real GET+DEL script contract: the read and the delete
- * happen in one atomic step, so only one caller can receive the value.
- */
+/** eval mirrors the real GET+DEL script: read and delete are one atomic step. */
 class FakeRedis {
   private readonly data = new Map<string, string>()
 
@@ -77,8 +73,7 @@ describe('RedisOAuthStateStore', () => {
   })
 
   it('consume returns null for an expired payload', async () => {
-    // Write an already-expired payload directly, simulating one whose
-    // embedded expiry lapsed while the Redis TTL has not fired yet.
+    // The embedded expiry has lapsed while the Redis TTL has not fired yet.
     const redis = new FakeRedis()
     const store = new RedisOAuthStateStore(redis as unknown as Redis)
     await redis.psetex(
@@ -91,22 +86,18 @@ describe('RedisOAuthStateStore', () => {
     )
 
     expect(await store.consume('hash-expired')).toBeNull()
-    // The key was still consumed atomically.
     expect(await redis.get('oauthstate:hash-expired')).toBeNull()
   })
 
-  // `new Date('not-a-date')` is an Invalid Date, and `NaN <= Date.now()` is
-  // false — so a corrupt expiry would read as never expiring and hand back a
-  // live state. The database sibling fails closed here; so must this one.
+  // A corrupt expiry compares false against Date.now(), so it would read as
+  // never expiring and hand back a live state. Must fail closed.
   it('treats an unparseable expiry as expired', async () => {
     const redis = new FakeRedis()
     const store = new RedisOAuthStateStore(redis as unknown as Redis)
     const corrupt = JSON.stringify({ provider: 'github', expiresAt: 'not-a-date' })
     await redis.psetex('oauthstate:hash-corrupt', 60_000, corrupt)
 
-    // Order matters: `find` does not delete, so `consume` still has data to
-    // read. Reversed, `consume` would delete the key and `find` would return
-    // null for the wrong reason.
+    // Order matters: `consume` deletes, so it must run after `find`.
     expect(await store.find('hash-corrupt')).toBeNull()
     expect(await store.consume('hash-corrupt')).toBeNull()
   })

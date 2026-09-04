@@ -15,7 +15,6 @@ import {
 import { runBlueprint } from '../src/blueprints'
 import { runCheck } from '../src/check'
 
-/** The conventional web routes entry, seeded by the tests that need one mounted. */
 const WEB_ROUTES = { file: 'routes/web.ts', source: DEFAULT_ROUTES_FIXTURE }
 
 const CONSOLE_FIXTURE = `import { ConsoleKernel } from '@guren/core'
@@ -92,26 +91,18 @@ describe('guren add attachments', () => {
     expect(result).toBeDefined()
     expect(result!.status).toBe('pass')
 
-    // The scaffold's own disk must satisfy the rule the scaffold's own
-    // shape exists to establish — uploads outside the served tree.
+    // The scaffold's own disk must satisfy the rule it exists to establish: uploads outside the served tree.
     const publicDisk = report.checks.find((c) => c.key.startsWith('attachments-public-disk:'))
     expect(publicDisk?.status).toBe('pass')
 
-    // Nothing the blueprint writes may leave a failing attachments check
-    // behind in a freshly scaffolded app.
     expect(
       report.checks.filter((c) => c.key.startsWith('attachments-') && c.status === 'fail'),
     ).toEqual([])
 
-    // That last assertion is deliberately *not* read as proof about the
-    // delivery rule, which reports nothing here rather than 'pass': it loads
-    // the app's route definitions, and this workspace is a bare temp
-    // directory the test has chdir'd into, so the scaffolded routes file
-    // cannot resolve its own `@guren/core` import. The rule catches that and
-    // stays quiet by design. Its two halves are covered where they can
-    // actually run — the call this blueprint writes, by the wiring tests
-    // below, and the rule's own verdicts in attachments-check.test.ts, which
-    // injects route definitions instead of loading them.
+    // The delivery rule reports nothing here rather than 'pass': it loads route
+    // definitions, and the scaffolded routes file in this bare temp workspace cannot
+    // resolve `@guren/core`. Covered instead by the wiring tests below and by
+    // attachments-check.test.ts, which injects definitions instead of loading them.
     expect(report.checks.find((c) => c.key === 'attachments-delivery')).toBeUndefined()
   })
 
@@ -159,8 +150,7 @@ describe('guren add attachments', () => {
   it('does not install a second storage manager over a custom binding', async () => {
     await seedApp(PG_SCHEMA_FIXTURE)
     await mkdir('app/Providers', { recursive: true })
-    // Storage bound under an unconventional file name: the prerequisite must
-    // judge by the binding, not by the conventional filename.
+    // Storage bound under an unconventional file name: the prerequisite must judge by the binding.
     await writeFile(
       'app/Providers/CloudStorageProvider.ts',
       `export default class CloudStorageProvider {
@@ -198,8 +188,7 @@ describe('guren add attachments', () => {
     const schema = await readFile(resolve('db/schema.ts'), 'utf8')
     expect(schema.split('export const attachments').length - 1).toBe(1)
   })
-  // The scaffolded config makes every attachment URL point at this route, so
-  // the blueprint mounting it is load-bearing (see checkAttachmentsDelivery).
+  // The scaffolded config points every attachment URL at this route (see checkAttachmentsDelivery).
   describe('delivery route wiring', () => {
     it('mounts registerAttachmentRoutes in the web routes entry', async () => {
       await seedApp(PG_SCHEMA_FIXTURE, { routes: WEB_ROUTES })
@@ -221,9 +210,7 @@ describe('guren add attachments', () => {
       expect(routes).toContain('registerAttachmentRoutes(router)')
     })
 
-    // The call takes the registrar's own parameter name, which the blog
-    // template spells `baseRouter` — a patch hard-coding `router` would emit
-    // a file that does not compile.
+    // The blog template spells the parameter `baseRouter`: a patch hard-coding `router` would not compile.
     it("passes the registrar's own router parameter", async () => {
       await seedApp(PG_SCHEMA_FIXTURE, { routes: { file: 'routes/web.ts', source: BLOG_ROUTES_FIXTURE } })
 

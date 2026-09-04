@@ -1,9 +1,7 @@
 import type { Page } from '@playwright/test'
 
-// Filling a field or clicking a React-only control before Inertia's client
-// hydration completes gets clobbered (or ignored) by React's hydration
-// reconciliation. Layout.tsx exposes data-hydrated for this — wait on it
-// after any navigation to an interactive page.
+// React's hydration reconciliation clobbers input typed before it finishes, so
+// wait on Layout.tsx's data-hydrated after navigating to an interactive page.
 export async function waitForHydrated(page: Page) {
   await page.waitForSelector('main[data-hydrated="true"]')
 }

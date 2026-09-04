@@ -26,10 +26,8 @@ describe('configureInertiaVitest', () => {
       throw new Error('configureInertiaVitest({ stubBun: true }) installed no Bun stub')
     }
 
-    // The Bun.password stub is a working hasher on purpose. When it threw,
-    // every app test touching a password had to hand-write a hasher double,
-    // and a double is a copy of a contract that no type constrains - which is
-    // how a `verify(plain, hashed)` inversion once shipped with a green suite.
+    // A working hasher on purpose: a hand-written double is a copy of a contract no
+    // type constrains, which is how a `verify(plain, hashed)` inversion once shipped.
     const hashed = await installed.password.hash('password123')
 
     // The format `hashPassword()` writes, so the framework's real
@@ -38,9 +36,8 @@ describe('configureInertiaVitest', () => {
     expect(await installed.password.verify('password123', hashed)).toBe(true)
     expect(await installed.password.verify('wrong', hashed)).toBe(false)
 
-    // Throws on an unparseable hash exactly as Bun.password.verify does.
-    // Returning false there would make a swapped call look like a wrong
-    // password in tests while it is a 500 in production.
+    // Throws on an unparseable hash exactly as Bun.password.verify does: returning
+    // false would read as a wrong password in tests while it is a 500 in production.
     await expect(
       installed.password.verify('password123', 'not-a-hash'),
     ).rejects.toThrow()

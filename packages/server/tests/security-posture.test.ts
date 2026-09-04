@@ -6,15 +6,9 @@ import { getSessionFromContext } from '../src/http/middleware/session'
 import { MCP_ENDPOINT_PATH } from '../src/mcp/endpoint'
 
 /**
- * Locks the framework's secure DEFAULTS in one place.
- *
- * Every assertion here is a security decision the framework has already
- * made: what an app gets when the developer configures nothing. The
- * per-middleware test files cover option behavior; this file covers the
- * wiring. If a change makes this file fail — or edits it — that diff IS
- * the security review trigger. Do not weaken an assertion here to make
- * a refactor pass without treating it as a deliberate change of the
- * framework's security posture.
+ * Locks the framework's secure DEFAULTS: what an app gets when the developer
+ * configures nothing. Per-middleware files cover option behavior; this one covers
+ * the wiring. A diff that fails or edits this file IS the security review trigger.
  */
 
 async function bootDefaultApp(): Promise<Application> {
@@ -81,10 +75,9 @@ describe('security posture: default response headers', () => {
   })
 
   it('host authorization is opt-in: a bare Application serves any Host header', async () => {
-    // Documented tradeoff, not an endorsement: the framework cannot know the
-    // app's legitimate hosts, so scaffolded templates opt in for development
-    // (create-app passes hostAuthorization) rather than the core guessing.
-    // If host authorization ever becomes a default, this test must flip.
+    // The framework cannot know the app's legitimate hosts, so scaffolded
+    // templates opt in (create-app passes hostAuthorization) rather than the core
+    // guessing. If host authorization ever becomes a default, this test must flip.
     const app = await bootDefaultApp()
     const response = await app.fetch(
       new Request('http://example.com/probe', { headers: { Host: 'evil.example' } }),
@@ -96,18 +89,14 @@ describe('security posture: default response headers', () => {
 
 describe('security posture: middleware registered before the app can get in front of it', () => {
   /**
-   * Hono composes the handlers it matched in registration order, so anything
-   * registered before `boot()` used to run ahead of the security middleware
-   * and answer without it. Real apps do exactly that: the scaffolded
-   * templates call `autoConfigureInertiaAssets()` at module scope, which
-   * registers `/resources/js/*` handlers before `bootstrap()` awaits
-   * `boot()`. These two cases go through the real router on that same path.
+   * Hono composes matched handlers in registration order, and real apps register
+   * before `boot()`: the templates call `autoConfigureInertiaAssets()` at module
+   * scope, mounting `/resources/js/*` before `bootstrap()` awaits `boot()`.
    */
   async function bootAppWithPreBootAssetRoutes(): Promise<Application> {
     const app = new Application({ hostAuthorization: { allowedHosts: ['localhost:*'] } })
-    // Both registered directly on Hono before boot(), the way the asset
-    // pipeline does. The JS route returns a raw Response like the real
-    // transpiler does; the CSS route answers through the context.
+    // Both registered directly on Hono before boot(), the way the asset pipeline
+    // does. The JS route returns a raw Response; the CSS route uses the context.
     app.hono.get('/resources/js/app.js', () => new Response('console.log(1)'))
     app.hono.get('/resources/css/app.css', (ctx) => ctx.text('body{}'))
     await app.boot()

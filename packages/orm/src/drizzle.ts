@@ -1,10 +1,8 @@
-// Mixed-dialect barrel, kept for compatibility. Prefer the per-dialect
-// subpaths — `@guren/orm/drizzle/pg`, `/mysql`, `/sqlite` — which re-export
-// their dialect wholesale so every builder is available and each name can
-// only mean one thing. Here the names collide: `varchar` resolves to the
-// MySQL builder, so a Postgres schema that reaches for it type-checks and
-// then throws at import time (#379). The unqualified column builders below
-// (`text`, `timestamp`, `boolean`, …) are the pg-core ones.
+// Mixed-dialect barrel, kept for compatibility. Prefer `@guren/orm/drizzle/pg`
+// `/mysql` `/sqlite`, where each name can only mean one thing. Here they
+// collide: `varchar` is the MySQL builder, so a Postgres schema type-checks
+// and then throws at import time (#379). The unqualified builders below
+// (`text`, `timestamp`, …) are the pg-core ones.
 export { sql } from 'drizzle-orm'
 export type { SQL } from 'drizzle-orm'
 
@@ -49,9 +47,9 @@ export const varchar: typeof mysqlCoreVarchar = mysqlCoreVarchar
 /** @deprecated Import from `@guren/orm/drizzle/mysql` instead. */
 export const datetime: typeof mysqlCoreDatetime = mysqlCoreDatetime
 
-// No @deprecated here: the dts rollup drops JSDoc on `export type { … } from`
-// statements, and re-declaring the aliases would mean copying their generic
-// signatures from a drizzle RC. The value exports above carry the marker.
+// No @deprecated here: the dts rollup drops JSDoc on `export type { … } from`,
+// and re-declaring the aliases would mean copying generic signatures from a
+// drizzle RC. The value exports above carry the marker.
 export type {
   MySqlTable,
   MySqlColumn,

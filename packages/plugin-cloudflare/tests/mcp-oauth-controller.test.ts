@@ -10,27 +10,19 @@ import {
   type Router,
 } from '@guren/core'
 // Through the *published subpath*, not `../src/env`: the template resolves
-// `@guren/plugin-cloudflare/env` to `dist/`, and the holder is module state.
-// Capturing into the source copy would fill a holder the controller never
-// reads — the same one-module invariant `@guren/plugin-mcp/oauth` has, and it
-// fails exactly as loudly here.
+// `@guren/plugin-cloudflare/env` to `dist/`, and the holder is module state, so
+// capturing into the source copy would fill a holder nothing reads.
 import { captureWorkersEnv, resetWorkersEnv } from '@guren/plugin-cloudflare/env'
 
 import { registerMcpOAuthRoutes } from '../templates/mcp-oauth/routes/mcp-oauth'
 
 /**
- * The scaffolded consent flow, exercised as a running application.
- *
- * The template tests next door are substring matches over the source — they
- * catch a construct going missing, and nothing else. None of them would notice
- * the intersection filtering the wrong way round, the CSRF check accepting a
- * forged token, or `parseBody({ all: true })` losing checkboxes on the way
- * through the real middleware stack. Those are the failures that matter here,
- * and every one of them needs the controller to actually run.
- *
- * The template module is imported **directly** rather than copied into a
- * fixture: the file under `templates/` is the file that gets scaffolded, and a
- * copy is a second thing that can drift from it.
+ * The scaffolded consent flow, exercised as a running application. The template
+ * tests next door are substring matches over the source; none would notice the
+ * intersection filtering the wrong way round, the CSRF check accepting a forged
+ * token, or `parseBody({ all: true })` losing checkboxes through the real
+ * middleware stack. The template module is imported **directly** rather than
+ * copied: the file under `templates/` is the file that gets scaffolded.
  */
 
 /** The provider calls the controller makes, recorded and answerable per test. */
@@ -43,13 +35,10 @@ let calls: ProviderCalls
 let parseAuthRequestThrows: boolean
 
 /**
- * A stand-in for `env.OAUTH_PROVIDER`. Only the three methods the controller
- * touches: the real provider's job (PKCE, token issuance, encryption) is not
- * what this suite is about, and faking it would be testing the fake.
- *
- * `parseAuthRequest` reads the query the way the real one does — which is what
- * makes the POST path's "re-parse rather than trust a hidden field" behaviour
- * observable at all.
+ * A stand-in for `env.OAUTH_PROVIDER`, with only the three methods the
+ * controller touches. `parseAuthRequest` reads the query the way the real one
+ * does, which is what makes the POST path's "re-parse rather than trust a hidden
+ * field" behaviour observable at all.
  */
 const fakeProvider = {
   async parseAuthRequest(request: Request): Promise<Record<string, unknown>> {
@@ -102,8 +91,7 @@ let previousAppKey: string | undefined
 
 /**
  * `X-Testing-User` is how `attachAuthContext` authenticates without a real
- * session, and it is honoured only while `GUREN_TESTING` is set — the same
- * envelope `@guren/testing` uses.
+ * session, honoured only while `GUREN_TESTING` is set.
  */
 function asUser(id: string | number | undefined): Record<string, string> {
   return id === undefined ? {} : { 'X-Testing-User': JSON.stringify({ id, __authId: id }) }
@@ -153,8 +141,7 @@ describe('scaffolded McpOAuthController', () => {
 
     app = createApp({ routes: registerRoutes })
     // `'*'`, because `use()` takes a path first — and no `secret` option:
-    // `SessionOptions` has none, so one passed here would be silently ignored
-    // and this suite would read as configuring something it was not.
+    // `SessionOptions` has none, so one passed here would be silently ignored.
     app.use('*', createSessionMiddleware({ store: new MemorySessionStore() }))
     app.use('*', createCsrfMiddleware())
     await app.boot()
@@ -221,10 +208,9 @@ describe('scaffolded McpOAuthController', () => {
 
       expect(html).toContain('value="tool:posts.index" checked')
       // The write is rendered and *not* ticked. Asserted as "present, without
-      // `checked`" rather than by matching the tag's closing punctuation: how
-      // a renderer spells a void element is its business (`hono/jsx` writes
-      // `"/>`, the hand-built string wrote `" />`), and pinning that would be
-      // testing the renderer instead of the default.
+      // `checked`" rather than by matching the tag's closing punctuation: how a
+      // renderer spells a void element is its business, and pinning that would
+      // test the renderer instead of the default.
       expect(html).toContain('value="tool:posts.store"')
       expect(html).not.toContain('value="tool:posts.store" checked')
     })
@@ -268,9 +254,9 @@ describe('scaffolded McpOAuthController', () => {
     })
 
     /**
-     * The security property of the POST path. A form is user input however it
-     * arrived, so a submitted scope the client never requested must be dropped
-     * — not merely unrendered on a screen the submitter did not have to use.
+     * The security property of the POST path: a form is user input however it
+     * arrived, so a submitted scope the client never requested must be dropped,
+     * not merely unrendered on a screen the submitter did not have to use.
      */
     test('should drop a submitted scope outside the offered set', async () => {
       const { token, cookie } = await consentSession()
@@ -317,10 +303,10 @@ describe('scaffolded McpOAuthController', () => {
     })
 
     /**
-     * The hidden field decides *which* authorize request this is, and nothing
-     * more: the query is handed back to `parseAuthRequest`, which re-validates
-     * the client and its redirect URI. A tampered field therefore cannot widen
-     * a grant, because the offered set is recomputed from what came back.
+     * The hidden field decides *which* authorize request this is and nothing
+     * more: the query goes back to `parseAuthRequest`, which re-validates the
+     * client and its redirect URI, so a tampered field cannot widen a grant —
+     * the offered set is recomputed from what came back.
      */
     test('should re-parse the authorize query rather than trust it', async () => {
       const { token, cookie } = await consentSession()
@@ -373,9 +359,8 @@ describe('scaffolded McpOAuthController', () => {
     /**
      * The defensive half: the controller must refuse a bad token *itself*, not
      * only because a global middleware happened to be mounted. An app with
-     * `autoSession: false` or a hand-composed chain may not have that
-     * middleware — and `csrfField()` renders a convincing token either way, so
-     * the screen would look protected while any site could POST a grant.
+     * `autoSession: false` may not have it, and the rendered token looks
+     * convincing either way, so the screen would look protected regardless.
      */
     test('should still refuse a forged token with no CSRF middleware mounted', async () => {
       const bare = createApp({ routes: registerRoutes })
@@ -412,9 +397,8 @@ describe('scaffolded McpOAuthController', () => {
       // Neither the provider's message nor a stack: both are derived from
       // attacker-controllable query parameters.
       expect(html).not.toContain('unregistered redirect_uri')
-      // A stack frame, spelled as one. A bare `'at '` matches the word
-      // "th`at `" in the page's own advice — an assertion that passes for a
-      // reason it does not mean is one that will fail for one too.
+      // A stack frame, spelled as one: a bare `'at '` matches the word
+      // "th`at `" in the page's own advice.
       expect(html).not.toMatch(/\n\s+at\s/u)
       expect(html).not.toContain('Error:')
     })

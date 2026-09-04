@@ -24,11 +24,9 @@ export default defineConfig({
         find: /^@guren\/core\/(.+)$/,
         replacement: `${resolveFromRoot('../../packages/core/src')}/$1`,
       },
-      // `@guren/core`'s index re-exports the server package wholesale, so
-      // without these two the suite runs core from src while the server it
-      // re-exports comes from dist. The generic form deliberately does not
-      // append '.ts': a subpath may name a file ('internal/route-path') or a
-      // directory resolved by index ('vite').
+      // `@guren/core`'s index re-exports the server wholesale, so without these
+      // the suite runs core from src and the server from dist. The generic form
+      // appends no '.ts': a subpath may name a file or a directory.
       {
         find: /^@guren\/server$/,
         replacement: resolveFromRoot('../../packages/server/src/index.ts'),
@@ -41,12 +39,8 @@ export default defineConfig({
         find: /^@guren\/orm$/,
         replacement: resolveFromRoot('../../packages/orm/src/index.ts'),
       },
-      // The only explicit subpath entries here, and first match wins, so both
-      // must stay above the generic orm rule. Every other subpath is served by
-      // a generic `/(.+)$/` rule, whose replacement is extensionless on purpose
-      // so that vite's resolver completes it. The drizzle mapping is pinned
-      // anyway because 'src/drizzle.ts' and the 'src/drizzle/' directory
-      // coexist.
+      // First match wins, so these must stay above the generic orm rule. Pinned
+      // because 'src/drizzle.ts' and the 'src/drizzle/' directory coexist.
       {
         find: /^@guren\/orm\/drizzle$/,
         replacement: resolveFromRoot('../../packages/orm/src/drizzle.ts'),

@@ -10,9 +10,7 @@ import type { AuthManager } from '../auth'
 const DEFAULT_GUARD = 'web'
 const DEFAULT_PROVIDER = 'users'
 
-/**
- * Sets up authentication guards, session middleware, and auth context.
- */
+/** Sets up authentication guards, session middleware, and auth context. */
 export class AuthServiceProvider extends ServiceProvider {
   register(): void {
     const app = this.container.make<Application>('app')

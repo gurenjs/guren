@@ -1,17 +1,6 @@
 import type { CacheStore, TaggedCacheStore } from './types'
 
-/**
- * Tagged cache implementation.
- * Allows grouping cache items by tags for bulk invalidation.
- *
- * @example
- * ```ts
- * const tagged = new TaggedCache(store, ['posts', 'user:1'])
- *
- * await tagged.set('user:1:posts', posts, 3600)
- * await tagged.flush() // Removes all items with these tags
- * ```
- */
+/** Groups cache items by tags for bulk invalidation. */
 export class TaggedCache implements TaggedCacheStore {
   private readonly store: CacheStore
   private readonly tags: string[]
@@ -23,9 +12,6 @@ export class TaggedCache implements TaggedCacheStore {
     this.tagSetPrefix = tagSetPrefix
   }
 
-  /**
-   * Get a unique namespace for the current tags.
-   */
   private async getTagNamespace(): Promise<string> {
     const namespaces: string[] = []
 
@@ -44,24 +30,15 @@ export class TaggedCache implements TaggedCacheStore {
     return namespaces.join(':')
   }
 
-  /**
-   * Generate a unique namespace identifier.
-   */
   private generateNamespace(): string {
     return `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`
   }
 
-  /**
-   * Get the tagged key.
-   */
   private async taggedKey(key: string): Promise<string> {
     const namespace = await this.getTagNamespace()
     return `tagged:${namespace}:${key}`
   }
 
-  /**
-   * Track a key in the tag sets.
-   */
   private async trackKey(key: string): Promise<void> {
     const taggedKey = await this.taggedKey(key)
 
@@ -98,7 +75,7 @@ export class TaggedCache implements TaggedCacheStore {
   }
 
   async clear(): Promise<void> {
-    // Clear only tagged items, not the entire store
+    // Only the tagged items, not the entire store.
     await this.flush()
   }
 
@@ -171,38 +148,26 @@ export class TaggedCache implements TaggedCacheStore {
     return this.store.ttl(taggedKey)
   }
 
-  /**
-   * Flush all items with the current tags.
-   * This works by resetting the tag namespaces, effectively
-   * making all previously tagged items inaccessible.
-   */
+  /** Flush every item carrying the current tags, and the tag namespaces themselves. */
   async flush(): Promise<void> {
     for (const tag of this.tags) {
       const tagKey = `${this.tagSetPrefix}${tag}`
       const setKey = `${this.tagSetPrefix}${tag}:keys`
 
-      // Get tracked keys and delete them
       const keys = (await this.store.get<string[]>(setKey)) ?? []
       for (const key of keys) {
         await this.store.delete(key)
       }
 
-      // Reset the tag namespace
       await this.store.delete(tagKey)
       await this.store.delete(setKey)
     }
   }
 
-  /**
-   * Get the current tags.
-   */
   getTags(): string[] {
     return [...this.tags]
   }
 
-  /**
-   * Get the underlying store.
-   */
   getStore(): CacheStore {
     return this.store
   }

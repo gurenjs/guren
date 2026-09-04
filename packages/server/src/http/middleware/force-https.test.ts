@@ -42,7 +42,6 @@ describe('createForceHttpsMiddleware', () => {
     app.use('*', createForceHttpsMiddleware())
     app.get('/', (c) => c.text('ok'))
 
-    // Request appears HTTP but X-Forwarded-Proto says HTTPS (behind proxy)
     const res = await app.request('http://example.com/', {
       headers: { 'X-Forwarded-Proto': 'https' },
     })
@@ -76,11 +75,9 @@ describe('createForceHttpsMiddleware', () => {
 })
 
 /**
- * The header has to land on the response however the handler produced it.
- * Setting it with `ctx.header()` before `next()` only reaches responses the
- * handler built through the context — a raw `new Response(...)` replaces
- * `ctx.res` and drops it, which is exactly what the framework's own asset
- * handlers return.
+ * The header must land however the handler produced the response. `ctx.header()`
+ * before `next()` misses a raw `new Response(...)`, which replaces `ctx.res` —
+ * and that is what the framework's own asset handlers return.
  */
 describe('createForceHttpsMiddleware response shapes', () => {
   test('should set HSTS header when the handler returns a raw Response', async () => {
@@ -113,22 +110,17 @@ describe('createForceHttpsMiddleware response shapes', () => {
 })
 
 /**
- * `applyResponseHeaders` is set-if-absent, so whichever middleware's `finally`
- * runs first supplies the value. Mounted inside `createSecurityHeaders` (i.e.
- * registered after it), force-https is the inner middleware — its `finally`
- * fires before the outer `createSecurityHeaders` finally gets a turn, so its
- * HSTS value reaches the response first and security-headers' own HSTS write
- * becomes a no-op.
+ * `applyResponseHeaders` is set-if-absent, so the first `finally` to run wins.
+ * Registered after `createSecurityHeaders`, force-https is the inner
+ * middleware, so its HSTS value lands first and the outer write is a no-op.
  */
 describe('createForceHttpsMiddleware precedence over createSecurityHeaders', () => {
   test('wins the Strict-Transport-Security header when mounted inside it', async () => {
     const app = new Hono()
     app.use('*', createSecurityHeaders({ hsts: { maxAge: 100 } }))
     app.use('*', createForceHttpsMiddleware({ hstsMaxAge: 999999, hstsIncludeSubDomains: false }))
-    // A raw Response is what actually distinguishes the two implementations:
-    // through ctx.text(), a header set via ctx.header() before next() also
-    // reaches the final response, so this precedence would hold even with the
-    // old ctx.header()-before-next() shape. Only a raw Response exposes it.
+    // Only a raw Response distinguishes the two shapes: through ctx.text(),
+    // a ctx.header()-before-next() write would reach the response too.
     app.get('/raw', () => new Response('raw body'))
 
     const res = await app.request('https://example.com/raw')

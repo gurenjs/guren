@@ -1,13 +1,7 @@
 import type { MiddlewareHandler } from 'hono'
 import { matchingOpenParen } from '../support/stack-frames'
 
-/**
- * Render a rich HTML debug error page for development mode.
- *
- * When an error occurs and NODE_ENV is not 'production', this function
- * generates a helpful page displaying the error class, message, stack trace
- * with source context, and request details.
- */
+/** Development-only error page: exposes the stack trace and request details. */
 export function renderDebugPage(error: Error, request?: Request): string {
   const errorName = error.name || 'Error'
   const errorMessage = escapeHtml(error.message || 'An unknown error occurred')
@@ -112,30 +106,19 @@ function toggleSection(button) {
 }
 
 /**
- * Middleware that catches errors and renders a debug page in development.
- * In production (NODE_ENV === 'production'), errors are re-thrown so
- * downstream handlers or the ExceptionHandler can process them normally.
- *
- * @example
- * ```typescript
- * import { debugErrorMiddleware } from '@guren/server/errors/debug-page'
- *
- * app.use('*', debugErrorMiddleware())
- * ```
+ * Renders a debug page in development; in production the error is re-thrown for
+ * the ExceptionHandler.
  */
 export function debugErrorMiddleware(): MiddlewareHandler {
   return async (c, next) => {
     try {
       await next()
     } catch (err) {
-      // Written without optional chaining on purpose: the deploy plugins bundle
-      // with `--define 'process.env.NODE_ENV="production"'`, which substitutes
-      // that one exact expression. Inserting an optional chain after `env`
-      // makes it a different expression, turning this gate back into a runtime
-      // read — and on hosts where platform vars never reach the process
-      // environment, that read answers "not production" and serves the stack
-      // trace to the public. The `typeof process` check already covers
-      // runtimes with no `process` at all.
+      // No optional chaining, on purpose: the deploy plugins bundle with
+      // `--define 'process.env.NODE_ENV="production"'`, which substitutes that
+      // one exact expression. An optional chain is a different expression, so
+      // the gate becomes a runtime read that answers "not production" on hosts
+      // where platform vars never reach the environment.
       const isProduction =
         typeof process !== 'undefined' && process.env.NODE_ENV === 'production'
 
@@ -154,8 +137,6 @@ export function debugErrorMiddleware(): MiddlewareHandler {
     }
   }
 }
-
-// --- Internal helpers ---
 
 interface StackFrame {
   func: string
@@ -181,13 +162,11 @@ function splitLocation(location: string): { file: string; line: string; col: str
   return { file: location.slice(0, prevColon), line, col }
 }
 
-// Parsed with string operations instead of `/\s+at\s+(.+?)\s+\((.+?):…/`,
-// whose lazy groups backtrack polynomially — error stacks can embed
-// request-derived messages.
-//
-// The parenthesized shape is read first because its parentheses bound the path;
-// only the bare shape has to fall back to whitespace, which truncates a path
-// that contains any.
+// String operations rather than `/\s+at\s+(.+?)\s+\((.+?):…/`, whose lazy
+// groups backtrack polynomially over the request-derived text a stack can
+// embed. The parenthesized shape is read first because its parentheses bound
+// the path; only the bare shape falls back to whitespace, which truncates a
+// path containing any.
 function parseStackTrace(stack: string): StackFrame[] {
   const lines = stack.split('\n').slice(1)
   return lines
@@ -199,8 +178,8 @@ function parseStackTrace(stack: string): StackFrame[] {
       // Format: at functionName (file:line:col)
       if (rest.endsWith(')')) {
         const open = matchingOpenParen(rest, rest.length - 1)
-        // `open === 0` leaves no room for a function name in front of the
-        // group, so that frame is read as the bare shape below instead.
+        // `open === 0` leaves no room for a function name, so that frame falls
+        // through to the bare shape below.
         if (open !== undefined && open > 0) {
           const location = splitLocation(rest.slice(open + 1, -1))
           if (location) {

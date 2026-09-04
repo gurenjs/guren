@@ -33,10 +33,9 @@ export default class BlogController extends Controller {
     )
   }
 
-  // The public post page is server-rendered HTML (`Controller.view()`,
-  // RFC 0014) rather than Inertia: the article body used to ship twice —
-  // once as escaped `__INERTIA_PAGE__` JSON, once as SSR HTML — and the
-  // page hydrates nothing worth a framework.
+  // Server-rendered HTML rather than Inertia: the article body would otherwise
+  // ship twice (escaped `__INERTIA_PAGE__` JSON and SSR HTML) for a page that
+  // hydrates nothing.
   async show(): Promise<Response> {
     const { slug } = this.validateParams(SlugParamSchema)
     const record = await Post.where({ slug }).first()
@@ -54,9 +53,8 @@ export default class BlogController extends Controller {
     })
   }
 
-  // Read through the auth context key directly instead of `this.auth`: the
-  // public blog must keep working (as guest) even when no auth middleware is
-  // attached, where the `auth` accessor throws.
+  // The context key directly rather than `this.auth`, whose accessor throws
+  // when no auth middleware is attached — the public blog must still serve.
   private async viewerAuthenticated(): Promise<boolean> {
     const auth = this.ctx.get('guren:auth') as { check(): Promise<boolean> } | undefined
     return auth ? auth.check() : false

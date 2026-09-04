@@ -1,12 +1,9 @@
 /**
- * Slash-trimming without regex: patterns like `/\/+$/` backtrack
- * quadratically on adversarial input (long slash runs mid-string), and
- * several call sites here feed request-derived paths.
+ * No regex: patterns like `/\/+$/` backtrack quadratically on long slash runs
+ * mid-string, and several call sites feed request-derived paths.
  *
- * Twins live in `@guren/cli` (`src/utils.ts`, `trimSlashes`) and
- * `@guren/plugin-cloudflare` (`src/storage/R2Driver.ts`, both functions);
- * neither package can import this module, so the lines are duplicated by
- * convention.
+ * Twins that cannot import this module: `@guren/cli` (`src/utils.ts`) and
+ * `@guren/plugin-cloudflare` (`src/storage/R2Driver.ts`) — keep them in step.
  */
 
 export function trimTrailingSlashes(value: string): string {

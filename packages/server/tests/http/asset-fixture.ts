@@ -18,15 +18,11 @@ export interface AssetFixture {
 }
 
 /**
- * A throwaway directory per test, for the asset handlers that judge whether a
- * requested file really lives under their configured root.
- *
- * The root is canonicalized because `os.tmpdir()` is itself reached through a
- * symlink on macOS (`/var` → `/private/var`): left raw, a containment assertion
- * would be reporting the fixture rather than the handler under test.
- *
- * Call from a `describe` body, above the `beforeEach` that populates the
- * directory — Bun runs the hooks in registration order.
+ * A throwaway directory per test, for the asset handlers that judge containment.
+ * The root is canonicalized because `os.tmpdir()` is itself a symlink on macOS
+ * (`/var` → `/private/var`), which a containment assertion would otherwise report
+ * instead of the handler. Call from a `describe` body, above the `beforeEach` that
+ * populates it — Bun runs hooks in registration order.
  */
 export function useAssetFixture(prefix: string): AssetFixture {
   let root: string | undefined
@@ -44,8 +40,7 @@ export function useAssetFixture(prefix: string): AssetFixture {
   })
 
   afterEach(() => {
-    // Tolerant rather than guarded: teardown should never be what reports a
-    // fixture that was never set up.
+    // Teardown should never be what reports a fixture that was never set up.
     if (root) {
       rmSync(root, { recursive: true, force: true })
     }

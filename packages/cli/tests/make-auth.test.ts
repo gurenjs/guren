@@ -6,13 +6,10 @@ import { consola } from 'consola'
 import { API_ONLY_REFUSAL, API_ROUTES_FIXTURE, BLOG_ROUTES_FIXTURE, captureWarnings, createTempWorkspace, DEFAULT_ROUTES_FIXTURE, MYSQL_SCHEMA_FIXTURE, PG_SCHEMA_FIXTURE, seedApiOnlyApp, SQLITE_SCHEMA_FIXTURE, writeWorkspaceFiles } from './helpers'
 import { makeAuth } from '../src/make-auth'
 
-// Shared with packages/create-app/templates/blog/app/Providers/AuthProvider.ts,
-// which ports this same boot() so the blog blueprint's Layout.tsx nav (also
-// reading `props.auth.user`) doesn't render as a guest while signed in. Pinning
-// both copies to this snippet is how the two are kept from silently drifting.
-// AuthProvider diverges from the blueprint on purpose (showcase nav), so only
-// this snippet is pinned; the files the two trees share byte-for-byte are
-// pinned whole in scaffold-blog-sync.test.ts, which also documents the policy.
+// Shared with the blog blueprint's AuthProvider, which ports this boot() so
+// its nav does not render as a guest while signed in. That file diverges on
+// purpose, so only this snippet is pinned (whole-file pairs live in
+// scaffold-blog-sync.test.ts).
 const SHARE_INERTIA_AUTH_PROPS_SNIPPET = `shareInertiaProps(async (ctx) => {
       const auth = ctx.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
       return { auth: { user: await auth?.user() } }
@@ -106,11 +103,8 @@ export function registerWebRoutes(router: Router): void {
       const appContent = await readFile(join(workspace.dir, 'src/app.ts'), 'utf8')
       expect(appContent).toContain('AuthProvider')
       expect(appContent).toContain('MailProvider')
-      // CoreMailServiceProvider must be wired before our own MailProvider so
-      // that container.singleton('mail', ...) resolves to our configured
-      // manager instead of Core's empty-config default — matching the same
-      // Core-then-app convention `guren add mail` uses, so the two stay
-      // compatible if a user layers both onto the same app.
+      // CoreMailServiceProvider must be wired before MailProvider, or
+      // container.singleton('mail') resolves to Core's empty-config default.
       expect(appContent).toContain("import { MailServiceProvider as CoreMailServiceProvider } from '@guren/core'")
       expect(appContent).toContain('providers: [DatabaseProvider, AuthProvider, CoreMailServiceProvider, MailProvider]')
       expect(appContent).toContain('auth: {}')
@@ -128,9 +122,8 @@ export function registerWebRoutes(router: Router): void {
       expect(authRoutes).toContain("router.get('/reset-password'")
       expect(authRoutes).toContain("router.post('/reset-password'")
 
-      // Emailed links must never be built from the request URL: it is
-      // reconstructed from the `Host` header, so a forged host would mail the
-      // victim a genuine reset token pointing at the attacker's server.
+      // Emailed links must never be built from the request URL: it comes from
+      // the `Host` header, so a forged host mails a real token to the attacker.
       const forgotPasswordController = await readFile(
         join(workspace.dir, 'app/Http/Controllers/Auth/ForgotPasswordController.ts'),
         'utf8',
@@ -250,10 +243,8 @@ export function registerWebRoutes(router: Router): void {
   })
 
   // A blog-shaped registrar takes `baseRouter` and rebinds it to `router`
-  // inside the body. Wiring keyed on the literal name `router` matched no
-  // registrar at all here, so the auth routes were scaffolded and never
-  // mounted; passing `router` instead of the parameter would be worse still,
-  // since that `const` is declared below the call.
+  // inside the body: wiring keyed on the literal name `router` mounts nothing,
+  // and passing `router` names a `const` declared below the call.
   it('calls the auth registrar with the parameter its registrar declares', async () => {
     const workspace = await createTempWorkspace('guren-cli-make-auth-base-router-')
     try {
@@ -377,11 +368,9 @@ export const posts = pgTable('posts', {
   })
 
   it('inserts emailVerifiedAt next to an existing three-argument pgTable users block', async () => {
-    // Regression test: a whole-block regex replace only matches Drizzle's
-    // two-argument pgTable(name, columns) form. A users table already
-    // carrying auth columns *and* a trailing index callback — the shape
-    // make:auth's own generated schema.ts uses once wired up — must get a
-    // single, in-place column insertion, not a duplicated `users` export.
+    // A whole-block regex replace matches only Drizzle's two-argument
+    // pgTable(name, columns) form, and would duplicate the `users` export for
+    // a table that also carries a trailing index callback.
     const workspace = await createTempWorkspace('guren-cli-make-auth-verify-existing-')
     try {
       await mkdir(join(workspace.dir, 'db'), { recursive: true })
@@ -482,21 +471,18 @@ export const posts = pgTable('posts', {
       expect(controller).not.toContain('password:')
       expect(controller).not.toContain('password: randomUUID')
 
-      // `state` alone is transferable between browsers: an attacker can
-      // authorize their own account, hold the `code`, and walk a visitor
-      // through the callback to log them into the attacker's account. Handing
-      // the session to the manager is what binds the state to this browser.
+      // `state` alone is transferable between browsers: an attacker can hold
+      // their own `code` and walk a visitor through the callback into the
+      // attacker's account. The session is what binds state to this browser.
       expect(controller).toContain('session: this.auth.session()')
       // Both legs must present the same session — authorize() stores the
       // binding in it, handleCallback() reads it back.
       expect((controller.match(/session: this\.auth\.session\(\)/g) ?? []).length).toBe(2)
       expect(controller).toContain('already exists. Sign in with the method you originally used.')
 
-      // Returning an email is not a claim that the provider checked it, so the
-      // scaffold reads the typed signal @guren/server maps from the provider's
-      // own key. Creating an account from an unverified address would let it
-      // claim an email it does not own, which the collision check above then
-      // makes permanent for the real owner.
+      // Returning an email is not a claim the provider checked it, so the
+      // scaffold reads the typed signal instead: an account created from an
+      // unverified address claims one the collision check then locks away.
       expect(controller).toContain('profile.emailVerified === false')
       expect(controller).toContain('has not verified this email address')
       // Providers that send no signal leave the field undefined — those users
@@ -789,9 +775,8 @@ export const posts = pgTable('posts', {
 
       const created = await makeAuth({ force: true, oauth: 'github', oauthOnly: true })
 
-      // Pinned so a newly added scaffold file can't slip into the
-      // passwordless variant unnoticed — the per-file negative assertions
-      // below only cover the files we already know about.
+      // Pinned so a new scaffold file cannot slip into the passwordless
+      // variant: the negative assertions below cover only known files.
       expect(created).toHaveLength(13)
       expect(created).toEqual(expect.arrayContaining([
         expect.stringContaining('LoginController.ts'),
@@ -858,10 +843,8 @@ export const posts = pgTable('posts', {
       const profilePage = await readFile(join(workspace.dir, 'resources/js/pages/profile/Edit.tsx'), 'utf8')
       expect(profilePage).not.toContain('password')
 
-      // The email is provider-vouched and nothing re-verifies it in this mode,
-      // so the profile must not be able to replace it — otherwise an account
-      // could claim an address it never proved, and OAuthController's
-      // collision check would then reject the real owner's first sign-in.
+      // Nothing re-verifies the email in this mode, so a profile that could
+      // replace it would claim an address the account never proved.
       expect(profileValidator).not.toContain('email')
       expect(profileController).toContain('const { name } = await this.validateBody(ProfileUpdateSchema)')
       expect(profileController).not.toContain('Email is already in use.')
@@ -899,7 +882,6 @@ export const posts = pgTable('posts', {
       await mkdir(join(workspace.dir, 'db'), { recursive: true })
       await writeFile(join(workspace.dir, 'db/schema.ts'), `export const posts = 'posts'\n`, 'utf8')
 
-      // First a normal password scaffold, then convert it.
       await makeAuth({ force: true, verify: true })
 
       consola.warn = ((...args: unknown[]) => {
@@ -911,8 +893,6 @@ export const posts = pgTable('posts', {
       // make:auth only writes the files it scaffolds — it never deletes — so
       // the password artifacts survive and must at least be reported.
       const report = warnings.join('\n')
-      // Every file the password experience owns, including the mail wiring
-      // that only exists to serve reset and verification.
       for (const stale of [
         'app/Http/Validators/LoginValidator.ts',
         'db/seeders/UsersSeeder.ts',
@@ -1001,9 +981,8 @@ export const posts = pgTable('posts', {
       expect(schema).toContain("googleId: text('google_id').unique()")
       expect(schema.match(/export const users = /g)).toHaveLength(1)
 
-      // Without this, requireVerifiedEmail would strand every OAuth signup
-      // at /verify-email forever — OAuthController never sends a
-      // verification email, so there'd be nothing for them to click.
+      // OAuthController sends no verification email, so without this
+      // requireVerifiedEmail strands every OAuth signup at /verify-email.
       const controller = await readFile(join(workspace.dir, 'app/Http/Controllers/Auth/OAuthController.ts'), 'utf8')
       expect(controller).toContain('emailVerifiedAt: new Date()')
     } finally {
@@ -1116,11 +1095,8 @@ export function registerWebRoutes(router: Router): void {
     return workspace
   }
 
-  // Every provider makeAuth can wire, in one run: AuthProvider,
-  // CoreMailServiceProvider, MailProvider (both from includeExtras, which
-  // --minimal would switch off), CoreOAuthServiceProvider and OAuthProvider.
-  // A regression that restored import-first ordering at only one of those five
-  // call sites has to fail here.
+  // Every provider makeAuth can wire, in one run, so import-first ordering
+  // restored at any one of the five call sites fails here.
   it('withholds every provider import when the providers array cannot be found', async () => {
     const workspace = await seedAuthWorkspace(
       'guren-cli-make-auth-providerless-',
@@ -1145,9 +1121,8 @@ export default app
         expect(reported).toContain(`Could not register ${provider} in src/app.ts: Could not find providers array.`)
       }
 
-      // The failed array patch must not leave imports behind: an import whose
-      // registration never landed is an unused binding, and the app stops
-      // compiling under noUnusedLocals.
+      // An import whose registration never landed is an unused binding, and
+      // the app stops compiling under noUnusedLocals.
       const appContent = await readFile(join(workspace.dir, 'src/app.ts'), 'utf8')
       for (const provider of ['AuthProvider', 'MailServiceProvider', 'MailProvider', 'OAuthServiceProvider', 'OAuthProvider']) {
         expect(appContent).not.toContain(provider)
@@ -1283,9 +1258,8 @@ export default app
     }
   })
 
-  // `guren add auth` reaches this same function through the blueprint registry,
-  // which is where the sibling `add admin` refusal lives. These cover the other
-  // door: `guren make:auth` calls makeAuth() directly.
+  // The other door into the same refusal: `guren add auth` arrives through the
+  // blueprint registry, `guren make:auth` calls makeAuth() directly.
   describe('on an API-only app', () => {
     it('refuses, naming the two signals it read', async () => {
       const workspace = await createTempWorkspace('guren-cli-make-auth-api-only-')
@@ -1298,9 +1272,8 @@ export default app
       }
     })
 
-    // The refusal has to land before the schema patch and the migration, not
-    // just before the first file write: `--force` reruns overwrite scaffolded
-    // files, but nothing undoes a patched db/schema.ts.
+    // The refusal has to land before the schema patch: `--force` reruns
+    // overwrite scaffolded files, but nothing undoes a patched db/schema.ts.
     it('leaves the schema and the routes file untouched', async () => {
       const workspace = await createTempWorkspace('guren-cli-make-auth-api-only-intact-')
       try {
@@ -1317,10 +1290,8 @@ export default app
       }
     })
 
-    // The app shape is reported ahead of the flag validation, which would
-    // otherwise reject this same call for `--oauth-only` without `--oauth`.
-    // Fixing the flags gets you no further here, so naming that first would
-    // send the caller down a path that ends in this error anyway.
+    // The app shape is reported ahead of flag validation: fixing the flags
+    // gets the caller no further on an app shaped like this.
     it('reports the app shape ahead of an invalid flag combination', async () => {
       const workspace = await createTempWorkspace('guren-cli-make-auth-api-only-oauth-')
       try {

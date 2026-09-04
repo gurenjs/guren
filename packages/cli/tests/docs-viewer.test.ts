@@ -55,7 +55,6 @@ Everyone can read.
       expect(doc.path).toBe('docs/adr/0001-posts.md')
       expect(doc.type).toBe('adr')
       expect(doc.trustTier).toBe('human-reviewed')
-      // Body H1 is dropped; the rest renders
       expect(doc.html).not.toContain('Posts are public')
       expect(doc.html).toContain('<h3>Context</h3>')
       expect(doc.html).toContain('<p>Everyone can read.</p>')
@@ -86,9 +85,8 @@ Everyone can read.
 
       const data = await buildDocsViewerData(dir)
 
-      // The H1 stands behind two comments, so it is reachable only through the
-      // optional comment prefix — and only by looking past the first `-->`,
-      // which is the step that decides where the dropped span ends.
+      // Two comments in front of the H1: the dropped span ends at the last
+      // `-->`, not the first.
       const [doc] = data.docs
       expect(doc.html).not.toContain('Posts are public')
       expect(doc.html).toContain('Everyone can read.')
@@ -103,11 +101,8 @@ Everyone can read.
       const dir = workspace.dir
       await mkdir(join(dir, 'docs/adr'), { recursive: true })
       await writeFile(join(dir, 'package.json'), '{}', 'utf8')
-      // Every `-->` here has a `#` behind it, and none of them ends a line.
-      // Resolving where each one's heading ends re-walks the rest of the line,
-      // so doing that per closer is quadratic — 13 seconds at this size, well
-      // past the pattern this replaced. The heading is on the same line as the
-      // closers, so nothing is dropped and only the cost is under test.
+      // Resolving each `-->`'s heading end re-walks the rest of the line, so
+      // doing it per closer is quadratic: 13 seconds at this size.
       await writeFile(
         join(dir, 'docs/adr/0001-posts.md'),
         `---\ntype: adr\nstatus: stable\n---\n\n${'--> # '.repeat(16_000)}\n`,
@@ -129,8 +124,7 @@ Everyone can read.
       const dir = workspace.dir
       await mkdir(join(dir, 'docs/adr'), { recursive: true })
       await writeFile(join(dir, 'package.json'), '{}', 'utf8')
-      // Every one of these line starts used to re-scan the rest of the file
-      // looking for a `-->` that is not there, which is the quadratic case.
+      // Openers with no `-->` anywhere: the other quadratic case.
       const noise = '<!-- generated, do not edit\n'.repeat(4_000)
       await writeFile(
         join(dir, 'docs/adr/0001-posts.md'),
@@ -140,8 +134,7 @@ Everyone can read.
 
       const data = await buildDocsViewerData(dir)
 
-      // Nothing to drop: no heading is reachable behind those openers, so the
-      // prose after them has to survive rather than be swallowed as a heading.
+      // No heading is reachable behind those openers, so the prose must survive.
       expect(data.docs[0].html).toContain('Everyone can read.')
     } finally {
       await workspace.cleanup()
@@ -174,8 +167,7 @@ Superseded by [the second](/adr/0002-second.md#context) and see
       const data = await buildDocsViewerData(dir)
       const first = data.docs.find((doc) => doc.path === 'docs/adr/0001-first.md')!
 
-      // The fragment is dropped so the target matches a graph node id;
-      // external URLs stay verbatim.
+      // The fragment is dropped so the target matches a graph node id.
       expect(first.html).toContain('data-target="docs/adr/0002-second.md"')
       expect(first.html).toContain('data-target="https://example.com"')
       expect(data.nodes.some((node) => node.id === 'docs/adr/0002-second.md')).toBe(true)

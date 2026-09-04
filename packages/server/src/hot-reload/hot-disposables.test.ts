@@ -36,9 +36,8 @@ describe('describeCallerFile', () => {
   })
 
   test('should keep a path that contains spaces intact', () => {
-    // Ordinary on macOS. Splitting the frame on whitespace truncates this to
-    // `Projects/app/routes/api.ts`, which collides with any other project whose
-    // path ends the same way.
+    // Splitting the frame on whitespace truncates this to
+    // `Projects/app/routes/api.ts`, colliding with any similarly-ending path.
     const parenthesized = 'Error\n    at f (/app/dist/index.js:1:1)\n    at g (/Users/me/My Projects/app/api.ts:31:26)'
     const bare = 'Error\n    at f (/app/dist/index.js:1:1)\n    at /Users/me/My Projects/app/api.ts:31:26'
 
@@ -47,9 +46,8 @@ describe('describeCallerFile', () => {
   })
 
   test('should keep a path that contains parentheses intact', () => {
-    // Also ordinary on macOS — a checkout under `~/Projects (2024)`. The path is
-    // bounded by the `(` that matches the frame's final `)`, not by the first one
-    // the path happens to contain.
+    // The path is bounded by the `(` matching the frame's final `)`, not the
+    // first one the path contains.
     const parenthesized = 'Error\n    at f (/app/dist/index.js:1:1)\n    at g (/app (old)/routes/api.ts:31:26)'
     const bare = 'Error\n    at f (/app/dist/index.js:1:1)\n    at /app (old)/routes/api.ts:31:26'
 
@@ -58,29 +56,24 @@ describe('describeCallerFile', () => {
   })
 
   test('should key a path that contains an unmatched closing parenthesis', () => {
-    // Nothing in the frame closes it, so counting depth alone runs off the front
-    // and the frame is skipped — the walk then keys the owner on whichever
-    // caller sits above it, collapsing every owner built through that caller
-    // into one slot. The leftmost `(` is the reading that keeps the path whole.
+    // Counting depth alone runs off the front and skips the frame, keying the
+    // owner on whatever caller sits above it. The leftmost `(` keeps the path.
     const stack = 'Error\n    at f (/app/dist/index.js:1:1)\n    at g (/app/name).ts:31:26)'
 
     expect(describeCallerFile(stack)).toBe('/app/name).ts')
   })
 
   test('should read past a function name that contains parentheses', () => {
-    // Bun emits this for a method whose key carries parentheses:
-    //   ({ 'weird (name)'() {} })['weird (name)']()
-    // Taking the leftmost `(` yields `name) (/app/routes/api.ts`, which is not a
-    // path but is stable enough to key an owner on.
+    // Emitted for a method key like `'weird (name)'`. The leftmost `(` yields
+    // `name) (/app/routes/api.ts` — not a path, yet stable enough to key on.
     const stack = 'Error\n    at f (/app/dist/index.js:1:1)\n    at weird (name) (/app/routes/api.ts:31:26)'
 
     expect(describeCallerFile(stack)).toBe('/app/routes/api.ts')
   })
 
   test('should still see a synthetic frame through a parenthesized function name', () => {
-    // The combination of the two cases above, and the reason the leftmost `(` is
-    // not merely imprecise: `unknown` has to survive parsing intact or the filter
-    // below never fires, and every such owner in the process shares one slot.
+    // Both cases at once: `unknown` must survive parsing intact or the filter
+    // never fires and every such owner shares one slot.
     const stack = [
       'Error',
       '    at new Base (/app/dist/index.js:120:15)',
@@ -101,10 +94,8 @@ describe('describeCallerFile', () => {
   })
 
   test('should step over the synthetic frame of an implicit constructor', () => {
-    // A subclass with no constructor of its own gets an implicit one, which JSC
-    // reports with no source location. Taking that frame keys every such owner
-    // to the literal string `unknown`, so stores built in unrelated files share
-    // a slot and stop each other.
+    // JSC reports an implicit constructor with no source location; taking that
+    // frame keys every such owner to `unknown` and they stop each other.
     const stack = [
       'Error',
       '    at new BaseMemoryStore (/app/dist/index.js:120:15)',
@@ -128,14 +119,11 @@ describe('describeCallerFile', () => {
   })
 
   test('should step over a group that leaves no path in front of the location', () => {
-    // Degenerate — no engine emits these — but the twin in `@guren/orm` still
-    // reads the first two as the path `:1`, because it keeps whatever its own
-    // earlier pattern returned for a malformed frame. It can afford that: it
-    // reads one frame and stops. This walks until a frame names a file, so any
-    // non-empty string would end the walk and become a key, and a key two
-    // unrelated files both land on is one where the second owner stops the
-    // first's live timer. Pinned so that carrying the twin's parse across
-    // wholesale — rather than by result — cannot quietly introduce it.
+    // Degenerate frames no engine emits, but the `@guren/orm` twin reads the
+    // first two as the path `:1` — it can afford to, reading one frame and
+    // stopping. This walks until a frame names a file, so any non-empty string
+    // becomes a key two unrelated files share. Pinned so carrying the twin's
+    // parse across wholesale cannot introduce it.
     const stepsOver = (frame: string) =>
       describeCallerFile(
         ['Error', '    at new Base (/app/dist/index.js:120:15)', frame, '    at /app/routes/api.ts:31:26'].join('\n'),
@@ -161,29 +149,25 @@ describe('describeCallerFile', () => {
   })
 
   test('should not take time superlinear in the length of a frame', () => {
-    // The bare shape previously let a lazy body and a greedy whitespace tail
-    // claim the same spaces. A run of them followed by anything that is not a
-    // location made the two re-divide the run at every offset, so the cost grew
-    // quadratically before the frame was finally rejected. The padding sits
-    // *after* a non-space character on purpose: a frame that is only `at` plus
-    // spaces matches on the first try and never reaches the slow path.
+    // A lazy body and greedy whitespace tail contending for the same run of
+    // spaces re-divided it at every offset, costing quadratic time before
+    // rejecting. The padding follows a non-space character on purpose: `at`
+    // plus spaces alone matches first try and never reaches the slow path.
     const padded = (last: string) => describeCallerFile(`Error\n    at new Base (/app/dist/index.js:1:1)\n${last}`)
     const started = performance.now()
 
     expect(padded(`    at a${' '.repeat(100_000)}a`)).toBeUndefined()
-    // The depth scan needs its own padding: the frame above does not end in `)`,
-    // so it is rejected before reaching it. A run of unmatched `(` is what the
-    // lazy match this replaced retried the whole suffix at, once per paren.
+    // Its own padding: the frame above does not end in `)`, so it is rejected
+    // first. A run of unmatched `(` is what the old lazy match retried at.
     expect(padded(`    at f (${'('.repeat(100_000)}x)`)).toBeUndefined()
 
     expect(performance.now() - started).toBeLessThan(1_000)
   })
 
   test('should parse a stack this runtime actually produced', () => {
-    // The fixtures above are hand-written, so they would keep passing if the
-    // engine changed its stack format and every real key silently became
-    // undefined — leaking again, quietly. This asserts against the real thing,
-    // through an implicit constructor, which is the shape that broke first.
+    // The fixtures above are hand-written and would keep passing if the engine
+    // changed its stack format. This asserts against a real stack, through an
+    // implicit constructor — the shape that broke first.
     class Base {
       readonly builtBy = describeCallerFile(new Error().stack)
     }
@@ -218,8 +202,8 @@ describe('hotReloadKey', () => {
   })
 
   test('should survive the call moving to another line', () => {
-    // The whole point of dropping line and column: adding an import above the
-    // call must not orphan the entry holding the previous timer.
+    // Why line and column are dropped: adding an import above the call must
+    // not orphan the entry holding the previous timer.
     withHotRuntime(() => {
       expect(hotReloadKey('rate-limit-store', stack, 'X')).toBe(
         hotReloadKey('rate-limit-store', stackFrom('/app/routes/api.ts', 48), 'X'),
@@ -280,12 +264,9 @@ describe('claimHotDisposable', () => {
   })
 
   test('should reclaim an owner built under a directory whose name contains parens', () => {
-    // The symptom rather than the parse behind it: while a named frame under
-    // `Projects (old)` could not be read, this call no-opped and the previous
-    // evaluation's interval went on firing — one leaked timer per reload for
-    // anyone whose checkout sits in such a directory. The two claims use
-    // different line numbers because a reload rarely leaves the call where it
-    // was, and the key has to survive that.
+    // The symptom rather than the parse behind it: an unreadable frame made
+    // this call no-op and leaked one timer per reload. The two claims use
+    // different line numbers because a reload rarely leaves the call in place.
     withHotRuntime(() => {
       const stopped: string[] = []
       const reloadAt = (line: number) =>
@@ -354,9 +335,8 @@ describe('claimHotDisposable', () => {
     withHotRuntime(() => {
       const stopped: string[] = []
 
-      // A store's own destroy() runs as the teardown here, and an application
-      // can put anything in one — including something that resolves the store
-      // again. The owner this call is installing must survive that.
+      // A store's own destroy() runs as the teardown, and may resolve the
+      // store again. The owner this call installs must survive that.
       claim('reentrant', () => {
         stopped.push('first')
         claim('reentrant', () => stopped.push('nested'))

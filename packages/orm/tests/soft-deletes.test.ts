@@ -10,14 +10,11 @@ import { SoftDeletes } from '../src/SoftDeletes'
 import type { WhereCondition } from '../src/QueryBuilder'
 
 /**
- * Soft deletes on a multi-tenant model.
- *
- * The mixin's three write entry points used to hand the caller's `where`
- * straight to the adapter, so every global scope the model carried was dropped:
- * `delete()` soft-deleted, `restore()` un-deleted, and `forceDelete()`
- * *permanently* removed rows belonging to another tenant. The read helpers had
- * the mirror-image bug — `withTrashed()` / `onlyTrashed()` dropped every scope
- * to escape the softDelete filter, and returned other tenants' trashed rows.
+ * Soft deletes on a multi-tenant model: a write path that hands the caller's
+ * `where` straight to the adapter drops every global scope, so `forceDelete()`
+ * permanently removes another tenant's rows. `withTrashed()` / `onlyTrashed()`
+ * are the mirror image — they must escape the softDelete filter without
+ * dropping the other scopes.
  */
 
 type PostRecord = {
@@ -27,9 +24,8 @@ type PostRecord = {
   deletedAt: Date | null
 }
 
-// Rows carry an explicit `deletedAt: null` because the soft-delete write path
-// matches on it (`deletedAt IS NULL`), and an absent field is not the same as a
-// null one for a strict matcher.
+// Rows carry an explicit `deletedAt: null` because the write path matches on
+// `deletedAt IS NULL`, and an absent field is not a null one for a strict matcher.
 const SEED: PostRecord[] = [
   { id: 1, title: 'ours-live', tenantId: 1, deletedAt: null },
   { id: 2, title: 'ours-trashed', tenantId: 1, deletedAt: new Date('2020-01-01') },
@@ -70,8 +66,7 @@ function matchesConditions(record: PlainObject, conditions: WhereCondition[]): b
  * Reads go through `findManyAdvanced` because `onlyTrashed()`'s `IS NOT NULL`
  * cannot survive the simple-where conversion. Writes deliberately have no
  * `updateAdvanced` / `deleteAdvanced`, so they exercise the
- * `toSimpleWhereClause()` fallback — the shipped Drizzle adapter implements the
- * advanced pair and produces the same shape from the same conditions.
+ * `toSimpleWhereClause()` fallback.
  */
 function createAdapter(store: PostRecord[]): ORMAdapter {
   return {
@@ -124,8 +119,7 @@ function tenantScopedPost() {
   }
   Post.useAdapter(createAdapter(store))
   // Registered on the subclass, after the mixin registered 'softDelete' on the
-  // class it built — this is the composition that used to shadow the inherited
-  // registry with a fresh empty one.
+  // class it built: this composition must not shadow the inherited registry.
   ;(Post as unknown as typeof Model).addGlobalScope('tenant', (q) => q.where('tenantId', 1))
 
   return { Post, store }
@@ -135,18 +129,15 @@ const titles = (rows: PlainObject[]) => rows.map((r) => r.title as string).sort(
 
 describe('SoftDeletes: reads', () => {
   it('excludes trashed rows and other tenants from the default query', async () => {
-    // Both halves of the fix are load-bearing here: the mixin no longer
-    // registers softDelete as a `defaultScope`, so the only thing still hiding
-    // trashed rows is the named scope reaching the subclass through the cloned
-    // registry.
+    // softDelete is not registered as a `defaultScope`, so the only thing hiding
+    // trashed rows is the named scope reaching the subclass through the cloned registry.
     const { Post } = tenantScopedPost()
     expect(titles(await Post.all())).toEqual(['ours-live'])
   })
 
   it('keeps the inherited softDelete scope when the mixin is applied over an already-scoped base', async () => {
-    // The reverse composition order: the base already carries a scope when the
-    // mixin registers its own, so the mixin's `addGlobalScope` is the call that
-    // must not start from an empty registry.
+    // Reverse composition order: the base already carries a scope, so the mixin's
+    // `addGlobalScope` is the call that must not start from an empty registry.
     const store = SEED.map((r) => ({ ...r }))
 
     class Base extends Model<PostRecord> {

@@ -6,33 +6,14 @@ import type {
 } from '../auth/email-verification'
 import { toDate } from '../support/expiry'
 
-/**
- * Options for RedisEmailVerificationStore.
- */
 export interface RedisEmailVerificationStoreOptions {
-  /**
-   * Key prefix for email verification keys.
-   * @default 'emailverify:'
-   */
+  /** @default 'emailverify:' */
   prefix?: string
 }
 
 /**
- * Redis-backed email verification token store.
- *
- * Uses the following key structure:
- * - `emailverify:{tokenId}` - Token data (JSON)
- * - `emailverify:email:{email}` - Set of token IDs for an email
- *
- * @example
- * ```ts
- * import { createRedisClient } from '@guren/server/redis'
- *
- * const redis = createRedisClient({ url: process.env.REDIS_URL })
- * const store = new RedisEmailVerificationStore(redis)
- *
- * const { token } = await createEmailVerificationToken(email, store, { expiresIn: 86400000 })
- * ```
+ * Key layout: `emailverify:{tokenId}` JSON token data,
+ * `emailverify:email:{email}` Set of an email's token IDs.
  */
 export class RedisEmailVerificationStore implements EmailVerificationTokenStore {
   private readonly prefix: string
@@ -44,16 +25,13 @@ export class RedisEmailVerificationStore implements EmailVerificationTokenStore 
     this.prefix = options.prefix ?? 'emailverify:'
   }
 
-  /**
-   * Store an email verification token.
-   */
   async store(token: EmailVerificationToken): Promise<void> {
     const tokenKey = `${this.prefix}${token.tokenId}`
     const emailKey = `${this.prefix}email:${token.email.toLowerCase()}`
     const ttlMs = Math.max(0, token.expiresAt.getTime() - Date.now())
 
     if (ttlMs <= 0) {
-      return // Token already expired
+      return
     }
 
     const data = JSON.stringify({
@@ -70,9 +48,6 @@ export class RedisEmailVerificationStore implements EmailVerificationTokenStore 
     await pipeline.exec()
   }
 
-  /**
-   * Find a token by its hash.
-   */
   async findByTokenId(tokenId: string): Promise<EmailVerificationToken | null> {
     const tokenKey = `${this.prefix}${tokenId}`
     const data = await this.redis.get(tokenKey)
@@ -88,8 +63,8 @@ export class RedisEmailVerificationStore implements EmailVerificationTokenStore 
         expiresAt: string
         createdAt: string
       }
-      // A corrupt expiry must not reach callers as an Invalid Date: every
-      // comparison against one is false, so it would read as never expiring.
+      // Fail closed: an Invalid Date loses every comparison, so a corrupt expiry
+      // would read as never expiring.
       const expiresAt = toDate(parsed.expiresAt)
       if (expiresAt === null) {
         return null
@@ -105,9 +80,6 @@ export class RedisEmailVerificationStore implements EmailVerificationTokenStore 
     }
   }
 
-  /**
-   * Delete a token by its hash.
-   */
   async delete(tokenId: string): Promise<void> {
     const tokenKey = `${this.prefix}${tokenId}`
     const data = await this.redis.get(tokenKey)
@@ -125,9 +97,6 @@ export class RedisEmailVerificationStore implements EmailVerificationTokenStore 
     await this.redis.del(tokenKey)
   }
 
-  /**
-   * Delete all tokens for an email.
-   */
   async deleteForEmail(email: string): Promise<void> {
     const emailKey = `${this.prefix}email:${email.toLowerCase()}`
     const tokenIds = await this.redis.smembers(emailKey)
@@ -140,9 +109,7 @@ export class RedisEmailVerificationStore implements EmailVerificationTokenStore 
     }
   }
 
-  /**
-   * Clear all tokens (for testing).
-   */
+  /** Testing only. */
   async clear(): Promise<void> {
     const keys = await scanKeys(this.redis, this.prefix + '*')
     if (keys.length > 0) {

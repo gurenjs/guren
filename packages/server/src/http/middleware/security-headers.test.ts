@@ -93,11 +93,9 @@ describe('createSecurityHeaders', () => {
 })
 
 /**
- * The headers have to land on the response however the handler produced it.
- * Setting them with `ctx.header()` before `next()` only reaches responses the
- * handler built through the context — a raw `new Response(...)` replaces
- * `ctx.res` and drops them, which is exactly what the framework's own asset
- * handlers return.
+ * The headers have to land however the handler produced the response. Prepared
+ * headers (`ctx.header()` before `next()`) are dropped by a raw
+ * `new Response(...)`, which is what the framework's asset handlers return.
  */
 describe('createSecurityHeaders response shapes', () => {
   test('should set headers on a handler that returns a raw Response', async () => {
@@ -209,10 +207,9 @@ describe('createSecurityHeaders response shapes', () => {
 })
 
 /**
- * First writer wins. Anything registered closer to the handler already
- * overwrote these defaults (that is how `createForceHttpsMiddleware` supplies
- * its own Strict-Transport-Security, and how a route opts out of
- * X-Frame-Options to allow embedding), so these defaults only fill gaps.
+ * First writer wins: anything closer to the handler overrides these defaults —
+ * `createForceHttpsMiddleware`'s own Strict-Transport-Security, or a route
+ * opting out of X-Frame-Options to allow embedding.
  */
 describe('createSecurityHeaders precedence', () => {
   test('should keep a value the handler set on a raw Response and still add the missing ones', async () => {

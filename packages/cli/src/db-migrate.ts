@@ -59,13 +59,11 @@ function pickFunction(module: Record<string, unknown>, names: string[]): (() => 
 }
 
 /**
- * What the app's `migrateDatabase()` reported about the run. Mirrors
- * `MigrationRunSummary` from `@guren/orm`, but declared here and read
- * structurally rather than imported: the config module belongs to the app, so
- * it may be backed by an older ORM that resolves to undefined, or by a
- * migration function the user wrote themselves. The cost of that decoupling is
- * that nothing pins the two shapes together — a field added to the ORM's
- * summary has to be added here too before the CLI can see it.
+ * What the app's `migrateDatabase()` reported. Mirrors `MigrationRunSummary`
+ * from `@guren/orm` but is read structurally, because the config module belongs
+ * to the app and may be backed by an older ORM or a hand-written function.
+ * Nothing pins the two shapes together: a field added to the ORM's summary has
+ * to be added here too before the CLI can see it.
  */
 export interface MigrationRunSummary {
   migrationsFolder?: string
@@ -91,11 +89,9 @@ function asMigrationRunSummary(value: unknown): MigrationRunSummary | undefined 
 }
 
 /**
- * What the app's `seedDatabase()` reported about the run. Mirrors
- * `SeederRunSummary` from `@guren/orm`, and is read structurally for the same
- * reason `MigrationRunSummary` is: the config module belongs to the app, so it
- * may be backed by an older ORM that resolves to undefined, or by a seed
- * function the user wrote themselves.
+ * What the app's `seedDatabase()` reported. Mirrors `SeederRunSummary` from
+ * `@guren/orm`, read structurally for the same reason as
+ * {@link MigrationRunSummary}.
  */
 export interface SeederRunSummary {
   seedersFolder?: string
@@ -121,9 +117,8 @@ function asSeederRunSummary(value: unknown): SeederRunSummary | undefined {
 }
 
 /**
- * Runs the app's migrations. Returns what the run found when the app's ORM
- * reports it, and undefined when it does not — an older `@guren/orm`, or a
- * `config/database.ts` exporting a migration function of its own.
+ * Runs the app's migrations. Undefined when the app's ORM reports nothing —
+ * an older `@guren/orm`, or a hand-written migration function.
  */
 export async function runDatabaseMigrations(): Promise<MigrationRunSummary | undefined> {
   const module = await resolveDatabaseModule()
@@ -144,9 +139,8 @@ export async function runDatabaseMigrations(): Promise<MigrationRunSummary | und
 }
 
 /**
- * Runs the app's seeders. Returns what the run found when the app's ORM reports
- * it, and undefined when it does not — an older `@guren/orm`, or a
- * `config/database.ts` exporting a seed function of its own.
+ * Runs the app's seeders. Undefined when the app's ORM reports nothing — an
+ * older `@guren/orm`, or a hand-written seed function.
  */
 export async function runDatabaseSeeders(): Promise<SeederRunSummary | undefined> {
   const module = await resolveDatabaseModule()
@@ -173,10 +167,9 @@ export interface ResetDatabaseOptions {
 
 /**
  * What a reset run reported, half by half. Either field is absent when the
- * app's config reported nothing for it, and `seeders` is also absent when the
- * run was not asked to seed — a reset without `--seed` has no seed run to
- * describe, which is not the same as one that seeded nothing. Being asked to
- * seed a config that cannot is neither: it throws before anything is dropped.
+ * app's config reported nothing for it; `seeders` is also absent when the run
+ * was not asked to seed, which is not the same as seeding nothing. Being asked
+ * to seed a config that cannot throws before anything is dropped.
  */
 export interface ResetRunSummary {
   migrations?: MigrationRunSummary
@@ -184,11 +177,9 @@ export interface ResetRunSummary {
 }
 
 /**
- * Drops the schema, re-applies migrations, and optionally seeds. Returns the
- * same summaries `runDatabaseMigrations()` and `runDatabaseSeeders()` do: a
- * reset that finds no migrations leaves an empty database behind, and one that
- * finds no seeders leaves it unpopulated — both worth reporting rather than
- * calling done.
+ * Drops the schema, re-applies migrations, and optionally seeds. Reports the
+ * same summaries as `runDatabaseMigrations()`/`runDatabaseSeeders()`: a reset
+ * that finds no migrations leaves an empty database behind.
  */
 export async function resetDatabase(options: ResetDatabaseOptions = {}): Promise<ResetRunSummary> {
   const module = await resolveDatabaseModule()
@@ -205,9 +196,8 @@ export async function resetDatabase(options: ResetDatabaseOptions = {}): Promise
     throw new Error('config/database.ts must export migrateDatabase(), runMigrations(), or getDatabase().')
   }
 
-  // Checked before reset() drops anything: seeding was asked for and cannot
-  // happen, and the alternative is to empty the database and then report a
-  // seed that never ran. `db:seed` already refuses the same config.
+  // Checked before reset() drops anything: the alternative is to empty the
+  // database and then report a seed that never ran.
   if (options.seed && !seed) {
     throw new Error('config/database.ts must export seedDatabase() or runSeeders().')
   }
@@ -215,9 +205,8 @@ export async function resetDatabase(options: ResetDatabaseOptions = {}): Promise
   try {
     const summary = asMigrationRunSummary(await reset())
     // `reset()` already re-applies migrations; this second call hits the
-    // driver's memo and no-ops, and exists for a config that only exports a
-    // bare dropAllTables() — which is also the only case the fallback below
-    // describes, since a driver reset that reports nothing ran nothing.
+    // driver's memo and no-ops, and exists for a config exporting only a bare
+    // dropAllTables() — the one case the fallback below describes.
     const migrated = asMigrationRunSummary(await migrate())
 
     // `seed` is present whenever options.seed is — the guard above threw

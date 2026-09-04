@@ -6,9 +6,8 @@ import { ServiceProvider } from '../container/ServiceProvider'
 import { createDocsViewerAccessGuard, DOCS_VIEWER_PATH, isDocsViewerEnabled } from './endpoint'
 
 /**
- * The slice of `@guren/cli` the viewer needs, loaded via dynamic import
- * (same pattern as `McpServiceProvider`) so `@guren/server` takes no
- * static dependency on the CLI and production bundles stay clean.
+ * The slice of `@guren/cli` the viewer needs, loaded via dynamic import so
+ * `@guren/server` takes no static dependency on the CLI.
  */
 interface DocsViewerCliApi {
   buildDocsViewerData(cwd: string): Promise<unknown>
@@ -16,20 +15,15 @@ interface DocsViewerCliApi {
 }
 
 /**
- * How long a built `data.json` payload answers subsequent requests.
- * Comfortably longer than the UI's poll interval, so a visible tab does
- * not rebuild the whole bundle every few seconds only to find the ETag
- * unchanged — the build reads and renders every doc, which is real work
- * inside the process serving the app under development.
+ * How long a built `data.json` payload answers requests. Longer than the UI's
+ * poll interval, so a visible tab does not re-read and re-render every doc
+ * inside the dev server every few seconds only to find the ETag unchanged.
  */
 const DATA_CACHE_TTL_MS = 15_000
 
 /**
- * Registers the docs viewer (RFC 0005) at /_guren/docs: a read-only,
- * loopback-guarded UI that renders the OKF docs bundle as an
- * interactive relation graph. Only active while `isDocsViewerEnabled()`
- * holds. All routes are GET; the whole bundle ships as one payload, so
- * no route takes a path parameter.
+ * The docs viewer (RFC 0005) at /_guren/docs: a read-only, loopback-guarded UI
+ * over the OKF docs bundle, mounted only while `isDocsViewerEnabled()` holds.
  */
 export class DocsViewerServiceProvider extends ServiceProvider {
   register(): void {
@@ -83,12 +77,10 @@ export class DocsViewerServiceProvider extends ServiceProvider {
       return ctx.body(body, 200, { 'Content-Type': 'application/json', ETag: etag })
     })
 
-    // Mermaid is resolved from the *app's* node_modules rather than
-    // shipped in a @guren/* package (~1 MB that every install would
-    // otherwise carry for a dev-only screen). Absent, the UI degrades
-    // diagram fences to plain code blocks with an install hint.
-    // Several megabytes, identical on every request: resolved and read
-    // once, and served with a validator so a reload does not refetch it.
+    // Mermaid is resolved from the *app's* node_modules rather than shipped in
+    // a @guren/* package (~1 MB every install would carry for a dev-only
+    // screen); absent, the UI degrades diagram fences to code blocks. Read once
+    // and served with a validator, since it is identical on every request.
     let mermaid: Promise<Buffer> | null = null
     hono.get(`${DOCS_VIEWER_PATH}/assets/mermaid.js`, async (ctx) => {
       try {

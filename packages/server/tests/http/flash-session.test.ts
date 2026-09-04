@@ -31,19 +31,16 @@ describe('Session flash data', () => {
       return ctx.json({ message })
     })
 
-    // Flash data in request 1
     const res1 = await app.request('/flash', { method: 'POST' })
     expect(res1.status).toBe(200)
     const cookie = res1.headers.get('set-cookie')!
 
-    // Read flash data in request 2
     const res2 = await app.request('/read', {
       headers: { Cookie: cookie.split(';')[0] },
     })
     const body2 = await res2.json() as { message: string | undefined }
     expect(body2.message).toBe('Hello!')
 
-    // Flash data should be gone in request 3
     const res3 = await app.request('/read', {
       headers: { Cookie: cookie.split(';')[0] },
     })
@@ -89,25 +86,21 @@ describe('Session flash data', () => {
       return ctx.json({ notice })
     })
 
-    // Request 1: flash
     const res1 = await app.request('/flash', { method: 'POST' })
     const cookie = res1.headers.get('set-cookie')!.split(';')[0]
 
-    // Request 2: reflash (keeps data alive for another request)
     const res2 = await app.request('/reflash', {
       headers: { Cookie: cookie },
     })
     const body2 = await res2.json() as { notice: string | undefined }
     expect(body2.notice).toBe('Saved!')
 
-    // Request 3: data should still be available
     const res3 = await app.request('/read', {
       headers: { Cookie: cookie },
     })
     const body3 = await res3.json() as { notice: string | undefined }
     expect(body3.notice).toBe('Saved!')
 
-    // Request 4: now it should be gone
     const res4 = await app.request('/read', {
       headers: { Cookie: cookie },
     })
@@ -146,13 +139,11 @@ describe('Session flash data', () => {
     const res1 = await app.request('/flash', { method: 'POST' })
     const cookie = res1.headers.get('set-cookie')!.split(';')[0]
 
-    // Request 2: keep only 'keep-me'
     const res2 = await app.request('/keep', { headers: { Cookie: cookie } })
     const body2 = await res2.json() as { kept: string; dropped: string }
     expect(body2.kept).toBe('yes')
     expect(body2.dropped).toBe('no')
 
-    // Request 3: only 'keep-me' survived
     const res3 = await app.request('/read', { headers: { Cookie: cookie } })
     const body3 = await res3.json() as { kept: string | undefined; dropped: string | undefined }
     expect(body3.kept).toBe('yes')
@@ -181,13 +172,11 @@ describe('Session flash data', () => {
     const res1 = await app.request('/set', { method: 'POST' })
     const cookie = res1.headers.get('set-cookie')!.split(';')[0]
 
-    // Request 2: both available
     const res2 = await app.request('/read', { headers: { Cookie: cookie } })
     const body2 = await res2.json() as { permanent: string; temporary: string }
     expect(body2.permanent).toBe('value')
     expect(body2.temporary).toBe('flash-value')
 
-    // Request 3: flash gone, permanent stays
     const res3 = await app.request('/read', { headers: { Cookie: cookie } })
     const body3 = await res3.json() as { permanent: string; temporary: string | undefined }
     expect(body3.permanent).toBe('value')

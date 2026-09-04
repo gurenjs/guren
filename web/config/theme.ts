@@ -8,9 +8,8 @@
 export const COLOR_MODE_STORAGE_KEY = 'guren-color-mode'
 
 /**
- * `<body>` class that swaps the default crimson marketing surface for the
- * light documentation surface. Mirrors the `body.docs-theme` rule in
- * `resources/css/app.css`.
+ * `<body>` class swapping the crimson marketing surface for the light
+ * documentation one. Mirrors `body.docs-theme` in `resources/css/app.css`.
  */
 export const LIGHT_SURFACE_BODY_CLASS = 'docs-theme'
 

@@ -1,25 +1,9 @@
 import { HttpException } from '../HttpException'
 
-/**
- * Method Not Allowed exception.
- *
- * Thrown when an HTTP method is not allowed for a route.
- *
- * @example
- * ```typescript
- * throw new MethodNotAllowedException()
- * throw new MethodNotAllowedException('POST', ['GET', 'HEAD'])
- * ```
- */
+/** 405: the HTTP method is not allowed for the route. */
 export class MethodNotAllowedException extends HttpException {
-  /**
-   * The HTTP method that was attempted.
-   */
   readonly method?: string
 
-  /**
-   * The allowed HTTP methods.
-   */
   readonly allowedMethods?: string[]
 
   constructor(
@@ -36,16 +20,10 @@ export class MethodNotAllowedException extends HttpException {
     this.allowedMethods = allowedMethods
   }
 
-  /**
-   * Get the Allow header value.
-   */
   getAllowHeader(): string {
     return this.allowedMethods?.join(', ') ?? ''
   }
 
-  /**
-   * Create exception with method details.
-   */
   static forMethod(
     method: string,
     allowedMethods: string[]

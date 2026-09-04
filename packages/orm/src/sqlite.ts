@@ -14,9 +14,9 @@ export interface SqliteDatabaseOptions {
   filename?: ConnectionResolver
   seedersFolder?: string | URL
   /**
-   * Drizzle relations for RQB v2 (`db.query.*`).
-   * Build with `defineRelations(schema, ...)` from `drizzle-orm`,
-   * or with `relations()` from `drizzle-orm/_relations` for the RQB v1 partial-upgrade path.
+   * Drizzle relations for RQB v2 (`db.query.*`): `defineRelations(schema, ...)`
+   * from `drizzle-orm`, or `relations()` from `drizzle-orm/_relations` for the
+   * RQB v1 partial-upgrade path.
    */
   relations?: Record<string, unknown>
 }
@@ -31,9 +31,8 @@ export interface SqliteDatabase {
   seedDatabase(): Promise<SeederRunSummary>
   /**
    * Drops every table and view (including the drizzle migration tracker), then
-   * re-applies migrations — same end state as `guren db:reset`. Resolves
-   * undefined only when a concurrent `closeDatabase()` left nothing to drop, so
-   * there was no migration run to report.
+   * re-applies migrations — same end state as `guren db:reset`. Undefined only
+   * when a concurrent `closeDatabase()` left nothing to drop.
    */
   resetDatabase(): Promise<MigrationRunSummary | undefined>
   /** Per-migration applied state derived from the drizzle-kit journal and the __drizzle_migrations table. */
@@ -46,30 +45,16 @@ function isInMemory(dbPath: string): boolean {
 
 /**
  * The filesystem path to open for `dbPath`, or undefined when there is no file
- * to name — the in-memory forms, and the URIs this cannot resolve.
+ * to name — the in-memory forms and the URIs this cannot resolve, which go to
+ * `new Database()` to be refused with no directory created.
  *
- * `file:` is sqlite's own URI scheme, so `file://…` names a *file* and not a
- * server — which is why the connection-URI guard below lets every form of it
- * through. What it is not is a path: handed to `resolve()` it is taken as a
- * relative name, so the `mkdir -p` below used to prepare a `file:/…` tree under
- * the cwd.
- *
- * **Whether the host's sqlite would have parsed it is not knowable from here,
- * which is why the driver parses it itself and opens the plain path.** URI
- * filenames are a compile-time option (`SQLITE_USE_URI`), and the two builds
- * Guren runs on disagree: measured, Bun on macOS goes through the system
- * libsqlite3, which has it on, while Bun's own Linux build has it off and takes
- * `file:local.db` as a filename that literally starts with `file:`. The stray
- * tree was therefore not the same defect on both — empty on macOS, holding the
- * actual database on Linux. Resolving here is what makes one filename mean one
- * file on every host.
- *
- * The rules are sqlite's (https://sqlite.org/uri.html), not the WHATWG URL
- * parser's — `new URL('file:local.db')` resolves to `/local.db`, an absolute
- * path at the filesystem root, where sqlite resolves it against the cwd.
- * A URI sqlite itself rejects (an authority that is neither empty nor
- * `localhost`) resolves to undefined, and the original string is handed to
- * `new Database()` to be refused there, with no directory created on the way.
+ * `file:` names a file, not a server, but it is not a path either, and whether
+ * the host's sqlite parses it is not knowable here: URI filenames are the
+ * compile-time `SQLITE_USE_URI`, and measured, Bun on macOS has it on via the
+ * system libsqlite3 while Bun's Linux build reads `file:local.db` as a literal
+ * filename. The rules followed are sqlite's (https://sqlite.org/uri.html), not
+ * the WHATWG parser's — `new URL('file:local.db')` gives `/local.db`, at the
+ * filesystem root, where sqlite resolves against the cwd.
  */
 function sqliteFilePath(dbPath: string): string | undefined {
   if (isInMemory(dbPath)) return undefined
@@ -89,10 +74,9 @@ function sqliteFilePath(dbPath: string): string | undefined {
   // decoding first would hand the query it introduces to the filesystem.
   const marker = rest.search(/[?#]/)
   const encodedPath = marker === -1 ? rest : rest.slice(0, marker)
-  // A fragment is dropped the way sqlite drops it. A query is not: its
-  // parameters change how the database opens, and a plain path cannot carry
-  // them — `mode=ro` silently becoming writable is the case that has to stop
-  // rather than degrade.
+  // A fragment is dropped the way sqlite drops it. A query is not: it changes
+  // how the database opens and a plain path cannot carry it — `mode=ro`
+  // silently becoming writable has to stop rather than degrade.
   const query = marker !== -1 && rest[marker] === '?' ? rest.slice(marker + 1).split('#')[0] : ''
   if (query !== '') {
     throw new Error(
@@ -114,30 +98,18 @@ function sqliteFilePath(dbPath: string): string | undefined {
 
 /**
  * A scheme *with an authority* — the `//` is what separates a connection URI
- * from a filename — for every scheme that could name a database server.
- *
- * Two exclusions keep legal filenames out of it. `file:` is sqlite's own URI
- * scheme and never addresses a server, so all of its forms stay legal, the
- * authority-shaped `file:///absolute/path.db` included. And the scheme must be
- * at least two characters: no registered scheme is one letter, while `C://db`
- * is a Windows drive path whose separator merely got doubled.
- *
- * Everything without a scheme is untouched — `:memory:`, `file::memory:`,
- * `file:local.db`, and every relative and absolute path.
+ * from a filename. Two exclusions keep legal filenames out: `file:` never
+ * addresses a server, so every form of it stays legal; and a one-letter scheme
+ * is `C://db`, a Windows drive path with a doubled separator.
  */
 const CONNECTION_URI = /^(?!file:)[a-z][a-z0-9+.-]+:\/\//i
 
 /**
- * This driver `mkdir -p`s the filename's directory, which is what makes a
- * connection string dangerous rather than merely wrong: `postgres://u:pw@host/db`
- * does not fail, it *succeeds* — creating a `postgres:/u:pw@host/db` tree and
- * migrating into a database nobody ever reads, while `db:migrate` and
- * `db:status` agree with each other on that stray file. Rejecting before the
- * mkdir is the difference between a stop and a silent success.
- *
- * The likeliest source is an ambient `DATABASE_URL` that a sqlite app never
- * meant to consume — the resolved value is checked, not the option, so the
- * env fallback below is covered too.
+ * This driver `mkdir -p`s the filename's directory, so `postgres://u:pw@host/db`
+ * does not fail but *succeeds*: it creates a `postgres:/u:pw@host/db` tree and
+ * migrates into a database nobody reads. Rejecting before the mkdir is the
+ * difference between a stop and a silent success. The resolved value is
+ * checked, not the option, so an ambient `DATABASE_URL` is covered too.
  */
 function assertNotConnectionUri(dbPath: string, source: string): void {
   if (!CONNECTION_URI.test(dbPath)) return
@@ -192,12 +164,10 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
   const database = singleFlight(async (): Promise<unknown> => {
     const dbPath = resolveFilename()
 
-    // The path to open, resolved once: the mkdir below, the open, and the
-    // hot-reload key all have to name the same file, and `dbPath` may be a
-    // `file:` URI that is none of them.
+    // Resolved once: the mkdir, the open and the hot-reload key all have to
+    // name the same file, and `dbPath` may be a `file:` URI that is none of them.
     const dbFile = sqliteFilePath(dbPath)
 
-    // Ensure the directory exists
     if (dbFile) {
       const { mkdirSync } = await import('node:fs')
       const { dirname } = await import('node:path')
@@ -208,34 +178,28 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
       }
     }
 
-    // Both driver modules are resolved before any client exists. An attempt
-    // that rejects with the client already open strands it — the memo is
-    // dropped, so the retry opens a second one and overwrites `sqliteClient` —
-    // and a missing `drizzle-orm/bun-sqlite` is the likeliest way to reject
-    // here. Keeping the two loads above `new Database()` also leaves
-    // `replaceActiveConnection` as the only await the attempt takes once the
-    // client is live.
+    // Both loads stay above `new Database()`: an attempt that rejects with the
+    // client already open strands it, since the memo is dropped and the retry
+    // opens a second one over `sqliteClient`. That leaves
+    // `replaceActiveConnection` as the only await taken with a live client.
     const { Database } = await import('bun:sqlite')
     const { drizzle } = await import('drizzle-orm/bun-sqlite')
     type DrizzleConfig = NonNullable<Exclude<Parameters<typeof drizzle>[0], string>>
 
-    // The resolved path, not the original: a `file:` URI reaches a host whose
-    // sqlite may or may not parse it, and `dbFile` is what the mkdir above
-    // prepared. `dbPath` survives only where there is no path to resolve — the
-    // in-memory forms, and a URI left for `new Database()` to refuse.
+    // The resolved path, which is what the mkdir prepared. `dbPath` survives
+    // only where there is nothing to resolve — the in-memory forms, and a URI
+    // left for `new Database()` to refuse.
     const sqlite = new Database(dbFile ?? dbPath)
     sqlite.exec('PRAGMA journal_mode = WAL;')
     sqliteClient = sqlite
-    // Returned from this local, not from closure state: a newer evaluation may
-    // close this handle while the await below is suspended, clearing
-    // `sqliteClient` and dropping the memo this attempt is filling. The attempt
+    // Returned from this local: a newer evaluation may close this handle while
+    // the await below is suspended, clearing `sqliteClient`, and the attempt
     // still owes its own callers the handle it built.
     const handle = drizzle({ client: sqlite, ...(relations ? { relations } : {}) } as DrizzleConfig)
 
-    // In-memory databases share no underlying file, so two of them are distinct
-    // handles even when every option matches — there is nothing to key them on.
-    // Keying on the resolved file rather than on `dbPath` is what makes
-    // `file:///data/app.db` and `/data/app.db` one database across a reload.
+    // In-memory databases share no file, so there is nothing to key them on.
+    // Keying on the resolved file makes `file:///data/app.db` and
+    // `/data/app.db` one database across a reload.
     activeKey = dbFile === undefined ? undefined : hotReloadKey('sqlite', callSite, dbFile)
     if (activeKey) {
       await replaceActiveConnection(activeKey, closeDatabase)
@@ -291,18 +255,15 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
 
     async resetDatabase(): Promise<MigrationRunSummary | undefined> {
       await database.get()
-      // Only reachable when a concurrent evaluation closed the handle while the
-      // await above was suspended. Nothing here can act on a closed handle, and
-      // migrating would re-open one against a database this call never dropped.
-      // No migration ran, so there is nothing to report about one.
+      // Only reachable when a concurrent evaluation closed the handle mid-await.
+      // Migrating would re-open one against a database this call never dropped.
       if (!sqliteClient) return undefined
 
       // Anything left behind fails the next migration run, and three things
-      // stand between this loop and that: SQLite refuses DROP TABLE on a view,
-      // `_` is a LIKE wildcard so the internal-name filter needs ESCAPE, and an
-      // unqualified drop resolves against `temp` before `main`. Each has a
-      // regression test alongside. Indexes and triggers stay out of the
-      // selection; they go with their table.
+      // stand in the way: SQLite refuses DROP TABLE on a view, `_` is a LIKE
+      // wildcard so the internal-name filter needs ESCAPE, and an unqualified
+      // drop resolves against `temp` before `main`. Indexes and triggers go
+      // with their table.
       const objects = sqliteClient
         .query(
           "SELECT name, type FROM main.sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\'",
@@ -319,10 +280,9 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
         sqliteClient.exec('PRAGMA foreign_keys = ON;')
       }
 
-      // Drop the memo so the run below re-applies everything from scratch, then
-      // migrate: a reset ends on a migrated database, the same state `guren
-      // db:reset` leaves behind. A caller that migrates again — the documented
-      // reset-then-migrate pattern — hits the memo and no-ops.
+      // A reset ends on a migrated database, like `guren db:reset`. Dropping
+      // the memo re-applies from scratch; a caller that then migrates again
+      // hits the fresh memo and no-ops.
       migrations.reset()
       return migrations.get()
     },
@@ -339,7 +299,6 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
           .all() as Array<{ name: string | null; applied_at: string | null }> | undefined
         appliedRows = (rows ?? []).map((row) => ({ name: row.name, appliedAt: row.applied_at }))
       } catch {
-        // Tracker table does not exist yet — nothing applied.
       }
 
       return buildMigrationStatus(localMigrations, appliedRows)

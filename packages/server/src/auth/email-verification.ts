@@ -4,8 +4,8 @@ import { MessageSigner } from '../encryption/MessageSigner'
 import { deriveAppKeyring, getAppKeyringFromEnv } from '../encryption/app-key'
 
 /**
- * Email verification token data stored in the backing store.
- * Only the hashed token is stored for security.
+ * Email verification token data stored in the backing store. Only the opaque
+ * token ID is stored, never the signed token itself.
  */
 export interface EmailVerificationToken {
   email: string
@@ -14,36 +14,22 @@ export interface EmailVerificationToken {
   createdAt: Date
 }
 
-/**
- * Store interface for email verification tokens.
- * Implement this to use database-backed storage.
- */
+/** Store interface for email verification tokens. */
 export interface EmailVerificationTokenStore {
-  /**
-   * Store a new verification token.
-   */
+  /** Store a new verification token. */
   store(token: EmailVerificationToken): Promise<void>
 
-  /**
-   * Find a token by its opaque token ID.
-   */
+  /** Find a token by its opaque token ID. */
   findByTokenId(tokenId: string): Promise<EmailVerificationToken | null>
 
-  /**
-   * Delete a token by its opaque token ID.
-   */
+  /** Delete a token by its opaque token ID. */
   delete(tokenId: string): Promise<void>
 
-  /**
-   * Delete all tokens for a given email.
-   */
+  /** Delete all tokens for a given email. */
   deleteForEmail(email: string): Promise<void>
 }
 
-/**
- * In-memory store for testing purposes.
- * Do NOT use in production - tokens will be lost on restart.
- */
+/** In-memory store for testing. Tokens are lost on restart. */
 export class MemoryEmailVerificationStore implements EmailVerificationTokenStore {
   private tokens: Map<string, EmailVerificationToken> = new Map()
 
@@ -68,24 +54,18 @@ export class MemoryEmailVerificationStore implements EmailVerificationTokenStore
     }
   }
 
-  /**
-   * Clear all tokens (useful for testing).
-   */
+  /** Clear all tokens (useful for testing). */
   clear(): void {
     this.tokens.clear()
   }
 
-  /**
-   * Get the count of stored tokens (useful for testing).
-   */
+  /** Count of stored tokens (useful for testing). */
   get size(): number {
     return this.tokens.size
   }
 }
 
-/**
- * Configuration options for email verification.
- */
+/** Configuration options for email verification. */
 export interface EmailVerificationConfig {
   /**
    * Token expiration time in milliseconds.
@@ -110,44 +90,21 @@ function createEmailVerificationSigner(): MessageSigner {
   return new MessageSigner(deriveAppKeyring(getAppKeyringFromEnv(), 'email-verification-signing'))
 }
 
-/**
- * Result of creating an email verification token.
- */
+/** Result of creating an email verification token. */
 export interface EmailVerificationTokenResult {
   /**
-   * The raw token to send to the user via email.
-   * This is NOT stored - only the hash is stored.
+   * The raw token to send to the user via email. Not stored — only its opaque
+   * token ID is.
    */
   token: string
 
-  /**
-   * When the token expires.
-   */
+  /** When the token expires. */
   expiresAt: Date
 }
 
 /**
- * Create a new email verification token.
- *
- * @param email - The email address to verify
- * @param store - Token store implementation
- * @param config - Optional configuration
- * @returns The raw token to send via email
- *
- * @example
- * ```ts
- * const { token, expiresAt } = await createEmailVerificationToken(
- *   user.email,
- *   verificationStore
- * )
- *
- * // Send email with verification link
- * await sendEmail({
- *   to: user.email,
- *   subject: 'Verify your email',
- *   html: `<a href="${buildVerificationUrl(baseUrl, token)}">Verify Email</a>`,
- * })
- * ```
+ * Create a new email verification token; the raw token is returned to send by
+ * email and is never stored.
  */
 export async function createEmailVerificationToken(
   email: string,
@@ -156,10 +113,8 @@ export async function createEmailVerificationToken(
 ): Promise<EmailVerificationTokenResult> {
   const { expiresIn, tokenLength } = { ...DEFAULT_CONFIG, ...config }
 
-  // Delete any existing tokens for this email
   await store.deleteForEmail(email)
 
-  // Generate a secure random token
   const tokenId = generateId()
   const now = new Date()
   const expiresAt = new Date(now.getTime() + expiresIn)
@@ -187,24 +142,8 @@ export async function createEmailVerificationToken(
 }
 
 /**
- * Verify an email verification token.
- *
- * @param token - The raw token from the verification link
- * @param store - Token store implementation
- * @param config - Optional configuration (not currently used, reserved for future)
- * @returns The email address if valid, null if invalid or expired
- *
- * @example
- * ```ts
- * const email = await verifyEmailToken(token, verificationStore)
- *
- * if (!email) {
- *   return ctx.json({ error: 'Invalid or expired token' }, 400)
- * }
- *
- * // Mark user as verified
- * await User.update({ email }, { emailVerifiedAt: new Date() })
- * ```
+ * Verify an email verification token, returning the email address it was
+ * issued for or `null` when it is invalid or expired.
  */
 export async function verifyEmailToken(
   token: string,
@@ -231,7 +170,6 @@ export async function verifyEmailToken(
     return null
   }
 
-  // Check if expired
   if (new Date() > storedToken.expiresAt) {
     await store.delete(payload.id)
     return null
@@ -243,30 +181,8 @@ export async function verifyEmailToken(
 }
 
 /**
- * Complete email verification by consuming the token.
- *
- * @param token - The raw token from the verification link
- * @param store - Token store implementation
- * @param markVerified - Function to mark the user as verified
- * @returns The result of markVerified if successful, null if token invalid
- *
- * @example
- * ```ts
- * const result = await completeEmailVerification(
- *   token,
- *   verificationStore,
- *   async (email) => {
- *     await User.update({ email }, { emailVerifiedAt: new Date() })
- *     return User.findByEmail(email)
- *   }
- * )
- *
- * if (!result) {
- *   return ctx.json({ error: 'Invalid or expired token' }, 400)
- * }
- *
- * return ctx.redirect('/dashboard')
- * ```
+ * Complete email verification by consuming the token. Returns the result of
+ * `markVerified`, or `null` when the token is invalid.
  */
 export async function completeEmailVerification<T>(
   token: string,
@@ -293,50 +209,31 @@ export async function completeEmailVerification<T>(
     return null
   }
 
-  // Check if expired
   if (new Date() > storedToken.expiresAt) {
     await store.delete(payload.id)
     return null
   }
 
-  // Verify email matches between JWT and store
+  // Cross-check the two independently-authenticated sources: the signer
+  // vouched for payload.email, the store holds storedToken.email of its own.
   if (storedToken.email.toLowerCase() !== payload.email.toLowerCase()) {
     return null
   }
 
-  // Mark as verified
   const result = await markVerified(storedToken.email)
 
-  // Delete the used token
   await store.delete(payload.id)
 
   return result
 }
 
-/**
- * Build a verification URL.
- */
+/** Build a verification URL. */
 export const buildVerificationUrl = buildTokenUrl
 
-/**
- * Parse a verification URL to extract token and email.
- */
+/** Parse a verification URL to extract token and email. */
 export const parseVerificationUrl = parseTokenUrl
 
-/**
- * Check if a user's email is verified.
- * Helper function for use with User models.
- *
- * @param user - User object with emailVerifiedAt field
- * @returns true if verified, false otherwise
- *
- * @example
- * ```ts
- * if (!isEmailVerified(user)) {
- *   return ctx.redirect('/verify-email')
- * }
- * ```
- */
+/** Whether a user's `emailVerifiedAt` is set. */
 export function isEmailVerified(user: { emailVerifiedAt?: Date | null } | null): boolean {
   return user?.emailVerifiedAt != null
 }
@@ -344,15 +241,9 @@ export function isEmailVerified(user: { emailVerifiedAt?: Date | null } | null):
 /**
  * Middleware factory to require verified email.
  *
- * @param options - Configuration options
- * @returns Middleware function
- *
  * @example
  * ```ts
- * router.get('/dashboard', [DashboardController, 'index'],
- *   requireAuthenticated(),
- *   requireVerifiedEmail({ redirectTo: '/verify-email' })
- * )
+ * requireVerifiedEmail({ redirectTo: '/verify-email' })
  * ```
  */
 export function requireVerifiedEmail(options: {

@@ -196,9 +196,8 @@ kernel.registerMany([SendDigestCommand])`,
 
     try {
       await mkdir(join(workspace.dir, 'app/Console/Commands'), { recursive: true })
-      // `export default { … } as const` is a TSAsExpression, so the inert-shape
-      // test used to miss it and the module was treated as possibly holding a
-      // command — a registration warning nothing could ever resolve.
+      // `export default { … } as const` is a TSAsExpression: an inert-shape
+      // test that misses it warns for a registration nothing can resolve.
       await writeFile(
         join(workspace.dir, 'app/Console/Commands/table-config.ts'),
         `export default { users: 'users', posts: 'posts' } as const`,
@@ -335,9 +334,8 @@ export class TableFormatter {
     const workspace = await createTempWorkspace('guren-cli-check-console-error-helper-')
 
     try {
-      // any superclass counts as command evidence (aliased imports defeat a
-      // name match), so an extends-Error helper stays in the check; this test
-      // pins that as a known, deliberate tradeoff rather than an accident
+      // Any superclass counts as command evidence (aliased imports defeat a
+      // name match), so an extends-Error helper stays in the check.
       await mkdir(join(workspace.dir, 'app/Console/Commands'), { recursive: true })
       await writeFile(
         join(workspace.dir, 'app/Console/Commands/CommandTimeoutError.ts'),
@@ -366,8 +364,8 @@ kernel.registerMany([])`,
     const workspace = await createTempWorkspace('guren-cli-check-console-unparseable-command-')
 
     try {
-      // Cannot be shown to declare no command, so the conservative reading is
-      // the old one: ask for a registration.
+      // Cannot be shown to declare no command, so the conservative reading
+      // wins: ask for a registration.
       await mkdir(join(workspace.dir, 'app/Console/Commands'), { recursive: true })
       await writeFile(
         join(workspace.dir, 'app/Console/Commands/BrokenCommand.ts'),

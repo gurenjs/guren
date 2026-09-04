@@ -1,14 +1,10 @@
 /**
  * Relation graph over the OKF docs bundle (RFC 0005).
  *
- * A pure join of `scanDocs()` and `runDocsCheck()` output: docs become
- * nodes, their declared relations (`entities`, `related`, body markdown
- * links) become verdict-colored edges, and generated spec views gain
- * derivation edges from the code sources they regenerate from
- * (`SPEC_VIEWS[].sources` — the same descriptor the drift gate uses).
- * `buildDocsGraph` itself does no filesystem access; `loadDocsGraph`
- * is the one filesystem pass shared by every consumer (the docs viewer
- * endpoint, `guren docs:graph`, and the MCP tool).
+ * A pure join of `scanDocs()` and `runDocsCheck()` output; generated spec views
+ * additionally gain derivation edges from `SPEC_VIEWS[].sources`, the same
+ * descriptor the drift gate uses. `buildDocsGraph` does no filesystem access;
+ * `loadDocsGraph` is the one filesystem pass shared by every consumer.
  */
 import { posix } from 'node:path'
 import { scanDocs, type DocRef } from './docs-index'
@@ -47,9 +43,8 @@ function basename(path: string): string {
 }
 
 /**
- * The verdict `runDocsCheck` recorded under `key`. A key with no result
- * is a pass: the checker only emits per-link entries for problems (plus
- * one aggregate pass entry per document).
+ * The verdict `runDocsCheck` recorded under `key`. A key with no result is a
+ * pass: the checker only emits per-link entries for problems.
  */
 function verdictOf(byKey: Map<string, CheckResult>, key: string): CheckStatus {
   return byKey.get(key)?.status ?? 'pass'
@@ -102,10 +97,8 @@ export function buildDocsGraph(refs: DocRef[], checks: CheckResult[]): DocsGraph
     }
 
     for (const target of ref.links) {
-      // A body link resolving to another scanned doc joins the two doc
-      // nodes; anything else (code, assets, missing files) is a code node
-      // keyed by its resolved app-root path so links from different docs
-      // to the same file share one node.
+      // Anything that is not another scanned doc becomes a code node keyed by
+      // its resolved app-root path, so links from different docs share it.
       const id = resolveDocLink(ref.path, target) ?? target
       if (!docPaths.has(id)) addNode({ id, kind: 'code', label: basename(target) })
       edges.push({
@@ -117,13 +110,13 @@ export function buildDocsGraph(refs: DocRef[], checks: CheckResult[]): DocsGraph
     }
   }
 
-  // Derivation edges for generated spec views — only the app-root bundle
-  // carries them (spec:generate writes to <root>/docs/spec).
+  // Only the app-root bundle carries these: spec:generate writes to
+  // <root>/docs/spec.
   for (const view of SPEC_VIEWS) {
     const specPath = `${SPEC_DIR}/${view.fileName}`
     if (!docPaths.has(specPath)) continue
-    // Several patterns can share a label (a root and a module schema are
-    // both `db/schema.ts` to a reader), so the node set dedupes them.
+    // Several patterns can share a label (a root and a module schema are both
+    // `db/schema.ts` to a reader), so the node set dedupes them.
     for (const { label } of view.sources) {
       addNode({ id: label, kind: 'code', label: basename(label) })
       if (!edges.some((edge) => edge.from === label && edge.to === specPath)) {
@@ -141,10 +134,7 @@ export interface LoadedDocsGraph {
   graph: DocsGraph
 }
 
-/**
- * One filesystem pass behind every graph consumer: scan the bundle
- * once, feed the same refs to the checker, join.
- */
+/** One filesystem pass behind every graph consumer. */
 export async function loadDocsGraph(cwd: string): Promise<LoadedDocsGraph> {
   const refs = await scanDocs(cwd)
   const checks = await runDocsCheck({ cwd, refs })
@@ -172,14 +162,11 @@ export interface DocsGraphReport extends DocsGraph {
 }
 
 /**
- * Whether a query path names this node. Exact ids and directory nodes
- * match literally; glob nodes (`related` entries like `modules/billing/**`)
- * go through the same matcher `check --docs` resolves them with; and
- * derivation-source nodes match when any `SPEC_VIEWS` pattern that
- * carries the node's label accepts the path — the label alone can't say
- * which files feed a view (module schemas collapse to `db/schema.ts`,
- * and the module map's `(all source files)` is not a path at all), so
- * the patterns the drift gate matches changed files against decide.
+ * Whether a query path names this node. Exact ids and directory nodes match
+ * literally; glob nodes go through the matcher `check --docs` uses; and a
+ * derivation-source node matches when a `SPEC_VIEWS` pattern carrying its label
+ * accepts the path — the label alone cannot say which files feed a view
+ * (module schemas all collapse to `db/schema.ts`).
  */
 function nodeMatchesPath(
   node: DocsGraphNode,
@@ -193,11 +180,10 @@ function nodeMatchesPath(
 }
 
 /**
- * The docs relation graph, optionally narrowed to one node's
- * neighborhood — the agent-facing entry behind `guren docs:graph` and
- * the MCP tool. Narrowing answers the impact question directly: which
- * documents govern this path or entity, and which spec views regenerate
- * from it, before a rename or edit rather than after `check` fails.
+ * The docs relation graph, optionally narrowed to one node's neighborhood —
+ * the entry behind `guren docs:graph` and the MCP tool. Narrowing answers the
+ * impact question: which documents govern this path or entity, and which spec
+ * views regenerate from it.
  */
 export async function buildDocsGraphReport(
   options: DocsGraphReportOptions = {},

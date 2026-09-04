@@ -1,20 +1,9 @@
 /**
- * Memoizes an async factory so concurrent callers share one in-flight promise.
- *
- * Internal to @guren/orm — every driver factory needs the same three
- * behaviours for its connection and migration handles:
- *
- * - concurrent callers await the same promise (one connection, one migration run)
- * - a resolved result stays memoized until it is explicitly invalidated
- * - a rejection is *not* memoized, so the next caller retries
- *
- * `reset()` covers the invalidation the drivers do from outside the failure
- * path: `closeDatabase()` drops the connection handle, `resetDatabase()` drops
- * the migration handle so migrations can be re-applied from scratch.
- *
- * Error shaping stays in the factory. The drivers that wrap a migration failure
- * need per-attempt state to do it (the endpoint resolved partway through), and
- * a mapper living out here would read whatever the *latest* attempt left behind.
+ * Memoizes an async factory so concurrent callers share one in-flight promise:
+ * a resolved result stays memoized until `reset()`, a rejection does not, so
+ * the next caller retries. Error shaping stays in the factory — wrapping a
+ * migration failure needs per-attempt state (the endpoint resolved partway
+ * through), and a mapper out here would read the *latest* attempt's.
  */
 export interface SingleFlight<T> {
   /** Runs the factory, or returns the promise an earlier call memoized. */
@@ -24,9 +13,8 @@ export interface SingleFlight<T> {
 }
 
 export function singleFlight<T>(factory: () => Promise<T>): SingleFlight<T> {
-  // Closure state rather than instance fields: call sites hand these methods
-  // out by reference (`migrateDatabase: migrations.get`), which would lose a
-  // `this` binding.
+  // Closure state, not instance fields: call sites hand these methods out by
+  // reference (`migrateDatabase: migrations.get`), losing a `this` binding.
   let inFlight: Promise<T> | undefined
 
   function get(): Promise<T> {
@@ -35,9 +23,8 @@ export function singleFlight<T>(factory: () => Promise<T>): SingleFlight<T> {
     }
 
     const attempt = factory().catch((error) => {
-      // Only clear when the cell still holds *this* attempt. A late rejection
-      // from an attempt that `reset()` already superseded must not evict the
-      // newer one.
+      // A late rejection from an attempt `reset()` already superseded must
+      // not evict the newer one.
       if (inFlight === attempt) {
         inFlight = undefined
       }

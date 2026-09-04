@@ -26,10 +26,8 @@ function countOccurrences(haystack: string, needle: string): number {
   return haystack.split(needle).length - 1
 }
 
-// consola renders `showUsage`'s markdown-style code spans as ANSI styling on
-// a TTY, but leaves the literal backticks in place on CI's non-TTY stdout
-// (e.g. "USAGE `guren [OPTIONS] ...`"). Strip both so assertions work in
-// either environment.
+// consola styles `showUsage`'s code spans with ANSI on a TTY but leaves literal backticks
+// on CI's non-TTY stdout, so strip both.
 function plainText(text: string): string {
   return stripAnsi(text).replace(/`/g, '')
 }

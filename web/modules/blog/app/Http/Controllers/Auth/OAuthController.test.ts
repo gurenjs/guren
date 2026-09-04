@@ -8,8 +8,8 @@ import type { Context } from '@guren/core'
 
 vi.mock('@guren/core', () => {
   const mock = createControllerModuleMock()
-  // The controller module mock has no AuthorizationException; supply a
-  // 403-carrying stand-in so admin-allowlist works under the mock.
+  // The module mock has no AuthorizationException; a 403-carrying stand-in
+  // keeps admin-allowlist working under it.
   class AuthorizationException extends Error {
     statusCode = 403
   }

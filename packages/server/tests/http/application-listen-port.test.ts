@@ -3,12 +3,9 @@ import { afterEach, describe, expect, it } from 'bun:test'
 import { Application } from '../../src/http/Application'
 
 /**
- * These tests bind real sockets rather than stubbing `Bun.serve`.
- *
- * The behaviour under test *is* what happens when a port is genuinely taken —
- * a stub that throws a hand-made `EADDRINUSE` would pin the framework's
- * reaction to its own fixture, not to the runtime. Everything here is on
- * 127.0.0.1 and closed in `afterEach`.
+ * Real sockets rather than a stubbed `Bun.serve`: a stub throwing a hand-made
+ * `EADDRINUSE` would pin the framework's reaction to its own fixture, not to the
+ * runtime. Everything binds 127.0.0.1 and is closed in `afterEach`.
  */
 
 type StoppableServer = { stop?: (closeConnections?: boolean) => void | Promise<void> }
@@ -43,11 +40,9 @@ async function stopServer(server: StoppableServer | undefined): Promise<void> {
 }
 
 /**
- * A base port with `length` consecutive free ports after it.
- *
- * Binding the whole run up front and releasing it is the only way to know the
- * run is free; probing one port at a time would race with whatever else on the
- * machine is handing out ephemeral ports.
+ * A base port with `length` consecutive free ports after it. Binding the whole
+ * run up front is the only way to know it is free; probing one port at a time
+ * races with whatever else is handing out ephemeral ports.
  */
 function findFreeRun(length: number): number | undefined {
   for (let attempt = 0; attempt < 10; attempt += 1) {
@@ -78,9 +73,8 @@ async function listen(
   options: Parameters<Application['listen']>[0],
 ): Promise<Awaited<ReturnType<Application['listen']>>> {
   const address = await app.listen(options)
-  // `stop()` is the public undo for `listen()`, and an Application satisfies
-  // StoppableServer through it — so the shared `afterEach` drain closes apps and
-  // the raw Bun servers the helpers above bind through the same loop.
+  // An Application satisfies StoppableServer through `stop()`, so the shared
+  // `afterEach` drain closes apps and raw Bun servers in one loop.
   openServers.push(app)
   return address
 }
@@ -115,17 +109,13 @@ describe('Application.listen port binding', () => {
     expect(address.port).toBeLessThanOrEqual(requested + 20)
     expect(address.url).toBe(`http://127.0.0.1:${address.port}`)
 
-    // The returned address is the one that answers — the whole point of
-    // returning it is that a caller can use it without guessing.
     const response = await fetch(`${address.url}/__does-not-exist`)
     expect(response.status).toBe(404)
   })
 
   it('gives up after exactly 20 ports, matching the scaffolded loop', async () => {
-    // The `<= requested + 20` assertion above cannot tell 20 attempts from 21.
-    // The boundary needs its own case: a scaffolded app and the framework must
-    // give up on the same port, or the two disagree about when a range is
-    // exhausted — and the scaffolded loop is the behaviour being preserved.
+    // The `<= requested + 20` assertion above cannot tell 20 attempts from 21,
+    // and the framework must give up on the same port as the scaffolded loop.
     const base = findFreeRun(20)
     if (base === undefined) {
       throw new Error('No run of 20 consecutive free ports available to test the boundary')
@@ -169,9 +159,8 @@ describe('Application.listen port binding', () => {
     const response = await fetch(`${address.url}/__does-not-exist`)
     expect(response.status).toBe(404)
 
-    // The case the accessor exists for: with `port: 0` nothing outside the app
-    // knows the port, so a caller that did not receive the value above — an
-    // OpenAPI `servers` entry built inside the app — has no other source.
+    // With `port: 0` nothing outside the app knows the port, so a caller that
+    // never received the value above (an in-app OpenAPI `servers` entry) needs it.
     expect(app.address).toEqual(address)
   })
 
@@ -184,9 +173,8 @@ describe('Application.listen port binding', () => {
       port: requested,
       hostname: '127.0.0.1',
       vite: false,
-      // Even an explicit opt-in to the walk loses to the strict flag: an
-      // automated consumer pins the port from the outside, without editing
-      // the app's entrypoint.
+      // An explicit opt-in to the walk still loses to the strict flag, which an
+      // automated consumer sets from outside the app's entrypoint.
       portFallback: true,
     })
 

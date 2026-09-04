@@ -1,6 +1,5 @@
 import { describe, test, expect, afterEach } from 'bun:test'
 import { chmod, mkdtemp, readFile, rm } from 'node:fs/promises'
-// (rm is reused by the stale-file test)
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { CAN_DENY_FILE_READS, writeWorkspaceFiles } from './helpers'
@@ -86,9 +85,8 @@ describe('generateTranslationTypes', () => {
     expect(content).not.toContain('@guren/inertia-client')
   })
 
-  // The augmentation is optional output, so a manifest codegen cannot read has
-  // to degrade to plain string keys — never abort the run. An earlier refactor
-  // onto the shared dependency probe let an EACCES propagate out of here.
+  // The augmentation is optional output, so a manifest codegen cannot read
+  // degrades to plain string keys rather than aborting the run.
   test.skipIf(!CAN_DENY_FILE_READS)('still emits keys when package.json cannot be read', async () => {
     const dir = await makeApp({
       'package.json': INERTIA_PACKAGE_JSON,

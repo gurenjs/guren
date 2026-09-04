@@ -79,16 +79,16 @@ describe('CronParser', () => {
 
   describe('getNextOccurrence', () => {
     it('gets next occurrence', () => {
-      const from = new Date(2024, 5, 15, 14, 29) // 14:29
+      const from = new Date(2024, 5, 15, 14, 29)
       const next = getNextOccurrence('30 14 * * *', from)
       expect(next.getHours()).toBe(14)
       expect(next.getMinutes()).toBe(30)
     })
 
     it('moves to next day if past time', () => {
-      const from = new Date(2024, 5, 15, 14, 31) // 14:31
+      const from = new Date(2024, 5, 15, 14, 31)
       const next = getNextOccurrence('30 14 * * *', from)
-      expect(next.getDate()).toBe(16) // Next day
+      expect(next.getDate()).toBe(16)
       expect(next.getHours()).toBe(14)
       expect(next.getMinutes()).toBe(30)
     })
@@ -392,17 +392,13 @@ describe('ScheduledTask', () => {
       withoutOverlapping: true,
     })
 
-    // Start first run
     const run1 = task.run()
 
-    // Try to run again while first is running
     await task.run()
 
-    // Resolve first run
     resolveFirst!()
     await run1
 
-    // Only one call should have happened
     expect(calls).toHaveLength(1)
   })
 })

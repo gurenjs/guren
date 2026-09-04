@@ -5,8 +5,7 @@ import { createD1Database } from './d1'
 function createStubBinding() {
   return {
     prepare(query: string) {
-      // Sentinel proving a query actually reached the D1 client boundary —
-      // guards the drizzle(client, config) positional invocation shape.
+      // Sentinel proving a query reached the D1 client boundary.
       throw new Error(`stub-prepare:${query}`)
     },
   }
@@ -46,9 +45,8 @@ describe('createD1Database', () => {
     const database = createD1Database({ binding: createStubBinding })
     const db = (await database.getDatabase()) as { run(query: unknown): Promise<unknown> }
 
-    // Statement preparation happens synchronously inside run(); drizzle wraps
-    // the stub sentinel in a DrizzleQueryError carrying the SQL text — enough
-    // to prove the query reached client.prepare through the positional form.
+    // run() prepares synchronously; drizzle wraps the stub sentinel in a
+    // DrizzleQueryError carrying the SQL text.
     expect(() => db.run(sql`select 1`)).toThrow(/Failed query: select 1/)
   })
 

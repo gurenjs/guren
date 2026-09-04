@@ -1,10 +1,8 @@
-// The dbcheck fixtures only ever run inside `smoke:golden-path`, one driver per
-// invocation, and the two server-backed drivers need a container — so a fixture
-// that quietly started checking less than its siblings would go unnoticed for as
-// long as nobody ran that driver by hand. That is the history here: three copies
-// of one table list, and sqlite drifted into asserting the migration tracker
-// merely *existed* while postgres and mysql counted its rows. These run in a
-// second and pin the shape that made the drift possible.
+// The dbcheck fixtures only run inside `smoke:golden-path`, one driver per
+// invocation, and the server-backed ones need a container, so a fixture checking
+// less than its siblings goes unnoticed until someone runs that driver by hand.
+// The drift these pin: three copies of one table list, with sqlite asserting the
+// migration tracker merely *existed* while postgres and mysql counted its rows.
 import { describe, expect, test } from 'bun:test'
 import { readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -16,10 +14,9 @@ import { MIGRATION_TRACKER, REQUIRED_APP_TABLES } from './fixtures/expected-tabl
 const fixturesDir = join(import.meta.dir, 'fixtures')
 const smokeScript = join(import.meta.dir, '..', 'smoke-golden-path.sh')
 
-// The drivers the smoke can be asked for, imported rather than restated:
-// `$SMOKE_DB` goes straight to `create-app --db`, so this set and the fixture
-// set have to move together. A local copy would let a fourth driver be added
-// with no fixture behind it while the count assertion below stayed green.
+// Imported rather than restated: `$SMOKE_DB` goes straight to `create-app --db`,
+// so a local copy would let a fourth driver be added with no fixture behind it
+// while the count assertion below stayed green.
 const DRIVERS = DATABASE_DRIVERS
 
 // sqlite addresses a file, so it is the one driver with no URL to require.
@@ -63,10 +60,9 @@ describe('dbcheck fixtures', () => {
       test('hard-codes no table names of its own', async () => {
         const source = await fixtureSource(driver)
 
-        // The exact drift: a private list beside the shared one. Every table
-        // name must arrive through the shared module, so none may appear as a
-        // literal here. The tracker is included because writing it into the
-        // presence list is precisely how sqlite stopped counting its rows.
+        // Every table name must arrive through the shared module, the tracker
+        // included: writing it into the presence list is how sqlite stopped
+        // counting its rows.
         for (const table of [...REQUIRED_APP_TABLES, MIGRATION_TRACKER]) {
           expect(source).not.toContain(`'${table}'`)
           expect(source).not.toContain(`"${table}"`)
@@ -83,9 +79,8 @@ describe('dbcheck fixtures', () => {
       test('does not smuggle the tracker into the required-table list', async () => {
         const source = await fixtureSource(driver)
 
-        // Referencing the constant is fine; appending it to the list the
-        // presence check reads is not, because presence is a side effect of
-        // opening the migrator and proves no migration ran.
+        // Referencing the constant is fine; appending it to the presence list is
+        // not, since the tracker exists as a side effect of opening the migrator.
         expect(source).not.toMatch(/REQUIRED_APP_TABLES\s*,\s*MIGRATION_TRACKER/)
       })
     })
@@ -95,9 +90,8 @@ describe('dbcheck fixtures', () => {
     test(`${driver} does not fall back to a default database URL`, async () => {
       const source = await fixtureSource(driver)
 
-      // A default is a fail-open: postgres used to default to the *development*
-      // database while the smoke exports a dedicated one, so an unset URL would
-      // have inspected a database no migration under test had touched.
+      // A default is a fail-open: the smoke exports a dedicated database, so an
+      // unset URL would inspect one no migration under test had touched.
       expect(source).toContain('requireDatabaseUrl()')
       expect(source).not.toMatch(/DATABASE_URL\s*\?\?/)
     })
@@ -112,12 +106,10 @@ describe('dbcheck fixtures', () => {
   test('the required-table list still matches what the smoke scaffolds', async () => {
     const script = await readFile(smokeScript, 'utf8')
 
-    // The list is hand-written on purpose: it is the smoke's independent
-    // statement of intent, and deriving it from the app's own schema would let a
-    // scaffolder that emitted no table agree with itself and pass. What must not
-    // happen is that statement going stale in silence, so the resources the
-    // script actually asks for are cross-checked against it here. `users` comes
-    // from `add auth` rather than from a resource, so it is excluded.
+    // The list is hand-written on purpose: derived from the app's own schema, a
+    // scaffolder that emitted no table would agree with itself and pass. This
+    // cross-check keeps it from going stale. `users` comes from `add auth` rather
+    // than from a resource, so it is excluded.
     const scaffolded = [...script.matchAll(/add resource (\w+)/g)].map((match) => tableNameFor(match[1]))
 
     expect(scaffolded.length).toBeGreaterThan(0)
