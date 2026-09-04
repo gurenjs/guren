@@ -1051,6 +1051,10 @@ describe('FakeEvent', () => {
 
       const recorded = manager.getEventsOf(UserRegistered)
       expect(recorded).toHaveLength(1)
+
+      // ...and the listener never ran: a fake that invoked listeners would
+      // run real side effects from inside a test.
+      expect(received).toBeNull()
     })
 
     it('tracks listeners', () => {

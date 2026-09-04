@@ -380,7 +380,8 @@ describe('PresenceChannel', () => {
 
     it('should broadcast presence:joining event', async () => {
       const channel = new PresenceChannel('chat.1', driver)
-      const events = driver.getPublishedEventsFor(channel.name)
+      // Nothing published before the join, so the one event below is its doing.
+      expect(driver.getPublishedEventsFor(channel.name)).toHaveLength(0)
 
       await channel.join({ id: 1, info: { name: 'Alice' } })
 
