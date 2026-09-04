@@ -49,6 +49,16 @@ export class BroadcastManager {
 
   protected wsClients: Map<string, WebSocketClient> = new Map()
 
+  /**
+   * Driver-level unsubscribe functions, per client id and channel.
+   *
+   * `driver().subscribe()` hands back the only handle there is on the
+   * subscription it opened. Dropping it leaves the driver fanning out to a
+   * client that has already gone — and on Redis, keeps the SUBSCRIBE for
+   * that channel open for as long as the process lives.
+   */
+  protected driverSubscriptions: Map<string, Map<string, () => void>> = new Map()
+
   constructor(options: BroadcastManagerOptions = {}) {
     if (options.default) {
       this.defaultDriver = options.default
@@ -224,6 +234,7 @@ export class BroadcastManager {
         }
 
         if (client) {
+          manager.releaseDriverSubscriptions(client.id)
           manager.sseClients.delete(client.id)
           client = null
         }
@@ -354,14 +365,63 @@ export class BroadcastManager {
     if (!client) return false
 
     client.channels.add(channel)
-
-    this.driver().subscribe(channel, (event: BroadcastEvent) => {
+    this.openDriverSubscription(clientId, channel, (event) => {
       if (client.channels.has(channel)) {
         client.send(event.event, event.data)
       }
     })
 
     return true
+  }
+
+  /**
+   * Open one driver subscription for a client/channel pair, keeping its
+   * unsubscribe handle so the pair can be torn down later.
+   *
+   * A pair that is already subscribed is left alone: a second `subscribe`
+   * would register a second callback and deliver every event twice.
+   */
+  protected openDriverSubscription(
+    clientId: string,
+    channel: string,
+    callback: (event: BroadcastEvent) => void
+  ): void {
+    let subscriptions = this.driverSubscriptions.get(clientId)
+    if (!subscriptions) {
+      subscriptions = new Map()
+      this.driverSubscriptions.set(clientId, subscriptions)
+    }
+    if (subscriptions.has(channel)) return
+
+    subscriptions.set(channel, this.driver().subscribe(channel, callback))
+  }
+
+  /**
+   * Close the driver subscription for one client/channel pair.
+   */
+  protected closeDriverSubscription(clientId: string, channel: string): void {
+    const subscriptions = this.driverSubscriptions.get(clientId)
+    const unsubscribe = subscriptions?.get(channel)
+    if (!subscriptions || !unsubscribe) return
+
+    subscriptions.delete(channel)
+    if (subscriptions.size === 0) {
+      this.driverSubscriptions.delete(clientId)
+    }
+    unsubscribe()
+  }
+
+  /**
+   * Close every driver subscription a client holds.
+   */
+  protected releaseDriverSubscriptions(clientId: string): void {
+    const subscriptions = this.driverSubscriptions.get(clientId)
+    if (!subscriptions) return
+
+    this.driverSubscriptions.delete(clientId)
+    for (const unsubscribe of subscriptions.values()) {
+      unsubscribe()
+    }
   }
 
   /** Returns the generated client ID. */
@@ -378,6 +438,7 @@ export class BroadcastManager {
   removeWebSocketClient(clientId: string): boolean {
     const client = this.wsClients.get(clientId)
     if (!client) return false
+    this.releaseDriverSubscriptions(clientId)
     this.wsClients.delete(clientId)
     client.close()
     return true
@@ -388,7 +449,7 @@ export class BroadcastManager {
     if (!client) return false
 
     client.channels.add(channel)
-    this.driver().subscribe(channel, async (event: BroadcastEvent) => {
+    this.openDriverSubscription(clientId, channel, async (event) => {
       if (client.channels.has(channel)) {
         await client.send(event.event, event.data)
       }
@@ -402,6 +463,7 @@ export class BroadcastManager {
     if (!client) return false
 
     client.channels.delete(channel)
+    this.closeDriverSubscription(clientId, channel)
     return true
   }
 
@@ -418,6 +480,7 @@ export class BroadcastManager {
     if (!client) return false
 
     client.channels.delete(channel)
+    this.closeDriverSubscription(clientId, channel)
     return true
   }
 

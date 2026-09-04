@@ -5,6 +5,21 @@ import type {
 } from '../types'
 
 /**
+ * Memory broadcast driver options.
+ */
+export interface MemoryDriverOptions {
+  /**
+   * How many published events `getPublishedEvents()` keeps, oldest dropped
+   * first; `0` turns recording off. The record is for tests, but the driver
+   * also serves single-server deployments, where an unbounded one is a leak
+   * the size of the app's traffic.
+   *
+   * @default 1000
+   */
+  maxPublishedEvents?: number
+}
+
+/**
  * Keeps subscriptions and presence data in memory — for testing and
  * single-server deployments.
  */
@@ -19,8 +34,14 @@ export class MemoryDriver implements PresenceBroadcastDriver {
     Map<string | number, PresenceMember>
   > = new Map()
 
-  /** Kept for testing only. */
+  /** Kept for testing only, capped at `maxPublishedEvents`. */
   protected publishedEvents: BroadcastEvent[] = []
+
+  protected maxPublishedEvents: number
+
+  constructor(options: MemoryDriverOptions = {}) {
+    this.maxPublishedEvents = Math.max(0, Math.floor(options.maxPublishedEvents ?? 1000))
+  }
 
   async publish(channel: string, event: string, data: unknown): Promise<void> {
     const broadcastEvent: BroadcastEvent = {
@@ -30,7 +51,7 @@ export class MemoryDriver implements PresenceBroadcastDriver {
       timestamp: new Date(),
     }
 
-    this.publishedEvents.push(broadcastEvent)
+    this.recordPublishedEvent(broadcastEvent)
 
     const callbacks = this.subscribers.get(channel)
     if (callbacks) {
@@ -41,6 +62,15 @@ export class MemoryDriver implements PresenceBroadcastDriver {
           console.error(`Error in broadcast subscriber:`, error)
         }
       }
+    }
+  }
+
+  protected recordPublishedEvent(event: BroadcastEvent): void {
+    if (this.maxPublishedEvents === 0) return
+
+    this.publishedEvents.push(event)
+    if (this.publishedEvents.length > this.maxPublishedEvents) {
+      this.publishedEvents.splice(0, this.publishedEvents.length - this.maxPublishedEvents)
     }
   }
 
@@ -116,6 +146,7 @@ export class MemoryDriver implements PresenceBroadcastDriver {
     return Array.from(this.presenceMembers.keys())
   }
 
+  /** The newest `maxPublishedEvents` at most. */
   getPublishedEvents(): BroadcastEvent[] {
     return [...this.publishedEvents]
   }
