@@ -1,18 +1,36 @@
-import { describe, test, expect, afterEach } from 'bun:test'
+import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
 
 import { isLambda, getLambdaContext } from '../../src/lambda'
 
-describe('isLambda', () => {
-  
+const LAMBDA_ENV_KEYS = [
+  'AWS_LAMBDA_FUNCTION_NAME',
+  'AWS_LAMBDA_FUNCTION_VERSION',
+  'AWS_LAMBDA_FUNCTION_MEMORY_SIZE',
+  'AWS_REGION',
+  'AWS_LAMBDA_LOG_GROUP_NAME',
+  'AWS_LAMBDA_LOG_STREAM_NAME',
+] as const
 
-  afterEach(() => {
-    delete process.env.AWS_LAMBDA_FUNCTION_NAME
-    delete process.env.AWS_LAMBDA_FUNCTION_VERSION
-    delete process.env.AWS_LAMBDA_FUNCTION_MEMORY_SIZE
-    delete process.env.AWS_REGION
-    delete process.env.AWS_LAMBDA_LOG_GROUP_NAME
-    delete process.env.AWS_LAMBDA_LOG_STREAM_NAME
-  })
+const originalEnv = { ...process.env }
+
+// Each test starts outside Lambda whatever the developer's shell exports,
+// and every key it touches goes back to what the process started with —
+// deleting them would strip AWS_* variables that were set before the run.
+function clearEnv(): void {
+  for (const key of LAMBDA_ENV_KEYS) delete process.env[key]
+}
+
+function restoreEnv(): void {
+  for (const key of LAMBDA_ENV_KEYS) {
+    const value = originalEnv[key]
+    if (value === undefined) delete process.env[key]
+    else process.env[key] = value
+  }
+}
+
+describe('isLambda', () => {
+  beforeEach(clearEnv)
+  afterEach(restoreEnv)
 
   test('should return false when not on Lambda', () => {
     delete process.env.AWS_LAMBDA_FUNCTION_NAME
@@ -26,14 +44,8 @@ describe('isLambda', () => {
 })
 
 describe('getLambdaContext', () => {
-  afterEach(() => {
-    delete process.env.AWS_LAMBDA_FUNCTION_NAME
-    delete process.env.AWS_LAMBDA_FUNCTION_VERSION
-    delete process.env.AWS_LAMBDA_FUNCTION_MEMORY_SIZE
-    delete process.env.AWS_REGION
-    delete process.env.AWS_LAMBDA_LOG_GROUP_NAME
-    delete process.env.AWS_LAMBDA_LOG_STREAM_NAME
-  })
+  beforeEach(clearEnv)
+  afterEach(restoreEnv)
 
   test('should return null when not on Lambda', () => {
     delete process.env.AWS_LAMBDA_FUNCTION_NAME

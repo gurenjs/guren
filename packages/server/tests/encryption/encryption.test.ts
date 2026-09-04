@@ -2,6 +2,7 @@ import { describe, test, expect, beforeEach } from 'bun:test'
 import {
   Encrypter,
   generateKey,
+  createEncrypter,
   setEncrypter,
   getEncrypter,
   encrypt,
@@ -458,7 +459,7 @@ describe('Random', () => {
       expect(combined).toMatch(/[A-Z]/)
       expect(combined).toMatch(/[a-z]/)
       expect(combined).toMatch(/[0-9]/)
-      expect(combined).toMatch(/[!@#$%^&*()\-_=+[\]{}|;:,.<>?]/)
+      expect(combined).toMatch(/[!@#$%^&*()\-_=+\[\]{}|;:,.<>?]/)
     })
   })
 
@@ -484,7 +485,15 @@ describe('Random', () => {
       const shuffled = shuffle(original)
 
       expect(shuffled).toHaveLength(original.length)
-      expect(shuffled.sort()).toEqual(original.sort())
+      expect([...shuffled].sort((a, b) => a - b)).toEqual(original)
+
+      // Length and element set are satisfied by a shuffle that moves nothing.
+      // One draw may legitimately come back in the original order (1 in 10!),
+      // so look across several: only an implementation that returns its
+      // input unchanged fails every one of them.
+      const changesOrder = (result: number[]): boolean => result.some((value, i) => value !== original[i])
+      const attempts = Array.from({ length: 20 }, () => shuffle(original))
+      expect(attempts.some(changesOrder)).toBe(true)
     })
 
     test('does not modify original array', () => {

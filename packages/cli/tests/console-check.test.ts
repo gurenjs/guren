@@ -5,16 +5,27 @@ import { runCheck } from '../src/check'
 import { createTempWorkspace } from './helpers'
 
 describe('runCheck — console command registration', () => {
-  const COMMAND_SOURCE = `import { Command } from '@guren/core'
-export default class SendDigestCommand extends Command {
-  static signature = 'send-digest'
-  static description = 'Send the digest'
+  // The class is named after the file it is written to: resolution goes by
+  // file name today, and a fixture whose class disagreed with its file would
+  // silently stop describing an app the moment that switched.
+  function commandSource(className: string): string {
+    const signature = className
+      .replace(/Command$/, '')
+      .replace(/([a-z])([A-Z])/g, '$1-$2')
+      .toLowerCase()
+    return `import { Command } from '@guren/core'
+export default class ${className} extends Command {
+  static signature = '${signature}'
+  static description = 'Run ${signature}'
   async handle(): Promise<void> {}
 }`
+  }
+
+  const COMMAND_SOURCE = commandSource('SendDigestCommand')
 
   async function writeRootCommand(dir: string, name = 'SendDigestCommand'): Promise<void> {
     await mkdir(join(dir, 'app/Console/Commands'), { recursive: true })
-    await writeFile(join(dir, `app/Console/Commands/${name}.ts`), COMMAND_SOURCE, 'utf8')
+    await writeFile(join(dir, `app/Console/Commands/${name}.ts`), commandSource(name), 'utf8')
   }
 
   it('passes when src/console.ts registers the command', async () => {
