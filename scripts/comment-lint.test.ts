@@ -68,3 +68,47 @@ describe('skip list', () => {
     expect(SKIP_PATH.test('packages/server/src/http/Application.ts')).toBe(false)
   })
 })
+
+describe('ratchet against git revisions', () => {
+  const { mkdtemp, mkdir, rm, writeFile } = require('node:fs/promises') as typeof import('node:fs/promises')
+  const { tmpdir } = require('node:os') as typeof import('node:os')
+  const { join, dirname } = require('node:path') as typeof import('node:path')
+  const { changedFiles, lintFileRatcheted } = require('./comment-lint') as typeof import('./comment-lint')
+  const HERMETIC = ['-c', 'commit.gpgsign=false', '-c', 'user.name=t', '-c', 'user.email=t@guren.dev']
+  const git = (repo: string, ...args: string[]) => {
+    const p = Bun.spawnSync(['git', ...HERMETIC, ...args], { cwd: repo })
+    if (!p.success) throw new Error(`git ${args.join(' ')}: ${p.stderr.toString()}`)
+    return p.stdout.toString().trim()
+  }
+  const commit = async (repo: string, files: Record<string, string>) => {
+    for (const [p, c] of Object.entries(files)) {
+      await mkdir(dirname(join(repo, p)), { recursive: true })
+      await writeFile(join(repo, p), c)
+    }
+    git(repo, 'add', '-A')
+    git(repo, 'commit', '--quiet', '-m', 'c')
+    return git(repo, 'rev-parse', 'HEAD')
+  }
+  const LONG = `${'// l\n'.repeat(6)}`
+
+  test('a committed head is judged against the merge base, not against what main merged later', async () => {
+    const repo = await mkdtemp(join(tmpdir(), 'guren-comment-lint-'))
+    try {
+      git(repo, 'init', '--quiet', '--initial-branch=main')
+      const base = await commit(repo, { 'src/a.ts': `export const a = 1\n${LONG}export const b = 2\n`, 'src/pr.ts': 'export const p = 1\n' })
+      git(repo, 'checkout', '--quiet', '-b', 'pr')
+      const head = await commit(repo, { 'src/pr.ts': `export const p = 1\n${LONG}export const q = 2\n` })
+      git(repo, 'checkout', '--quiet', 'main')
+      const tip = await commit(repo, { 'src/a.ts': 'export const a = 1\nexport const b = 2\n' })
+
+      expect(changedFiles(base, head, repo)).toEqual(['src/pr.ts'])
+      expect(lintFileRatcheted('src/pr.ts', base, head, repo).map((f) => f.rule)).toEqual(['long-block'])
+      // Diffing against the moved tip would blame the PR for main's own cleanup of src/a.ts.
+      expect(changedFiles(tip, head, repo)).toContain('src/a.ts')
+      expect(lintFileRatcheted('src/a.ts', tip, head, repo)).toHaveLength(1)
+      expect(lintFileRatcheted('src/a.ts', base, head, repo)).toHaveLength(0)
+    } finally {
+      await rm(repo, { recursive: true, force: true })
+    }
+  })
+})

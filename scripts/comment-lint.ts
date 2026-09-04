@@ -158,8 +158,8 @@ export function newFindings(base: Finding[], head: Finding[]): Finding[] {
 
 const repoRoot = resolve(import.meta.dir, '..')
 
-function git(args: string[]): { ok: boolean; out: string } {
-  const r = Bun.spawnSync(['git', ...args], { cwd: repoRoot })
+function git(args: string[], cwd = repoRoot): { ok: boolean; out: string } {
+  const r = Bun.spawnSync(['git', ...args], { cwd })
   return { ok: r.success, out: r.stdout.toString() }
 }
 
@@ -167,38 +167,47 @@ function isLintable(file: string): boolean {
   return /\.(ts|tsx|js|jsx|mjs)$/.test(file) && !SKIP_PATH.test(file)
 }
 
-function baseSource(rev: string, file: string): string | undefined {
-  const r = git(['show', `${rev}:${file}`])
+function sourceAt(rev: string | undefined, file: string, cwd: string): string | undefined {
+  if (rev === undefined) {
+    try {
+      return readFileSync(resolve(cwd, file), 'utf8')
+    } catch {
+      return undefined
+    }
+  }
+  const r = git(['show', `${rev}:${file}`], cwd)
   return r.ok ? r.out : undefined
 }
 
-function lintFileRatcheted(file: string, rev: string | undefined): Finding[] {
-  let head: string
-  try {
-    head = readFileSync(resolve(repoRoot, file), 'utf8')
-  } catch {
-    return []
-  }
-  const headFindings = lintSource(head, file)
-  if (!rev) return headFindings
-  const base = baseSource(rev, file)
-  return base === undefined ? headFindings : newFindings(lintSource(base, file), headFindings)
+/**
+ * Findings in `file` at `head` (a rev, or the working tree when undefined) that
+ * its `base` version did not have. No base means every finding is new.
+ */
+export function lintFileRatcheted(file: string, base: string | undefined, head: string | undefined, cwd = repoRoot): Finding[] {
+  const headSource = sourceAt(head, file, cwd)
+  if (headSource === undefined) return []
+  const headFindings = lintSource(headSource, file)
+  if (base === undefined) return headFindings
+  const baseSource = sourceAt(base, file, cwd)
+  return baseSource === undefined ? headFindings : newFindings(lintSource(baseSource, file), headFindings)
 }
 
-export function resolveBase(base: string | undefined): string | undefined {
+export function resolveBase(base: string | undefined, cwd = repoRoot): string | undefined {
   const candidates = base ? [base] : ['origin/main', 'main']
   for (const c of candidates) {
-    const mb = git(['merge-base', c, 'HEAD'])
+    const mb = git(['merge-base', c, 'HEAD'], cwd)
     if (mb.ok && mb.out.trim()) return mb.out.trim()
-    if (git(['rev-parse', '--verify', `${c}^{commit}`]).ok) return c
+    if (git(['rev-parse', '--verify', `${c}^{commit}`], cwd).ok) return c
   }
   return undefined
 }
 
-function changedFiles(rev: string): string[] {
-  const tracked = git(['diff', '--name-only', rev])
-  const untracked = git(['ls-files', '--others', '--exclude-standard'])
-  return [...tracked.out.split('\n'), ...untracked.out.split('\n')].map((l) => l.trim()).filter(Boolean)
+/** Files that differ between `base` and `head` (the working tree plus untracked files when head is undefined). */
+export function changedFiles(base: string, head: string | undefined, cwd = repoRoot): string[] {
+  const lines = head === undefined
+    ? [...git(['diff', '--name-only', base], cwd).out.split('\n'), ...git(['ls-files', '--others', '--exclude-standard'], cwd).out.split('\n')]
+    : git(['diff', '--name-only', base, head], cwd).out.split('\n')
+  return lines.map((l) => l.trim()).filter(Boolean)
 }
 
 function format(findings: Finding[]): string {
@@ -206,6 +215,10 @@ function format(findings: Finding[]): string {
 }
 
 const RULE_DOC = 'Rules: .claude/rules/coding-standards.md (Comments). A comment that must exceed the limit can carry `comment-lint-ignore` with the reason.'
+
+function label(rev: string): string {
+  return /^[0-9a-f]{40}$/.test(rev) ? rev.slice(0, 12) : rev
+}
 
 async function main(): Promise<number> {
   const args = process.argv.slice(2)
@@ -218,34 +231,40 @@ async function main(): Promise<number> {
     }
     const rel = relative(repoRoot, filePath)
     if (!filePath || rel.startsWith('..') || !isLintable(rel)) return 0
-    const findings = lintFileRatcheted(rel, 'HEAD')
+    const findings = lintFileRatcheted(rel, 'HEAD', undefined)
     if (findings.length === 0) return 0
     console.error(`comment-lint: ${findings.length} new comment issue(s) in ${rel}:\n${format(findings)}\n${RULE_DOC}`)
     return 2
   }
 
   const all = args.includes('--all')
-  const baseIdx = args.indexOf('--base')
-  const baseArg = baseIdx >= 0 ? args[baseIdx + 1] : undefined
-  const explicit = args.filter((a, i) => !a.startsWith('--') && !(baseIdx >= 0 && i === baseIdx + 1))
+  const opt = (name: string) => {
+    const i = args.indexOf(name)
+    return i >= 0 ? args[i + 1] : undefined
+  }
+  const baseArg = opt('--base')
+  // A committed head rev pins both the file list and the contents, so a CI run on
+  // a synthetic merge commit judges the PR's own commits, not what main merged.
+  const head = opt('--head')
+  const explicit = args.filter((a, i) => !a.startsWith('--') && args[i - 1] !== '--base' && args[i - 1] !== '--head')
 
-  let rev: string | undefined
+  let base: string | undefined
   let files: string[]
   if (all) {
     files = explicit.length ? explicit : git(['ls-files']).out.split('\n')
   } else {
-    rev = resolveBase(baseArg)
-    if (!rev) {
+    base = head ? baseArg : resolveBase(baseArg)
+    if (!base) {
       console.error('comment-lint: could not resolve a base to ratchet against (pass --base <ref>, or fetch main)')
       return 1
     }
-    files = explicit.length ? explicit : changedFiles(rev)
+    files = explicit.length ? explicit : changedFiles(base, head)
   }
   files = files.map((f) => f.trim()).filter(isLintable)
 
-  const findings = files.flatMap((f) => (all ? lintFileRatcheted(f, undefined) : lintFileRatcheted(f, rev)))
+  const findings = files.flatMap((f) => lintFileRatcheted(f, all ? undefined : base, head))
   if (findings.length === 0) {
-    console.log(`comment-lint passed (${files.length} file(s)${rev ? `, ratcheted against ${/^[0-9a-f]{40}$/.test(rev) ? rev.slice(0, 12) : rev}` : ''})`)
+    console.log(`comment-lint passed (${files.length} file(s)${base ? `, ratcheted against ${label(base)}` : ''}${head ? ` at ${label(head)}` : ''})`)
     return 0
   }
   console.error(format(findings))

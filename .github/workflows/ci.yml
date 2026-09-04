@@ -246,18 +246,29 @@ jobs:
             echo "::${skip_kind}::agent-catalog: the derived-fact rules above passed, but THE CHANGESET GATE DID NOT RUN — ${skip_reason}. A catalog input changed without a @guren/cli changeset would not have been caught. This job being green is not that check passing."
           fi
 
-      # Ratcheted against the same base ref the agent-catalog step fetched:
-      # a file fails only when a comment rule's count grew, so the legacy
-      # backlog never blocks a PR. No base (first push, collected SHA) means
-      # the ratchet has nothing to compare against, and that is announced
-      # rather than passed.
+      # The comment ratchet judges the PR's own commits: merge base vs PR head,
+      # both fetched by SHA so a shallow checkout suffices. Not the base tip —
+      # on a stale branch that blames the PR for whatever main merged since —
+      # and not HEAD, which on a pull_request run is the synthetic merge
+      # commit. A push compares the previous tip with the pushed one. Without
+      # a base (first push, collected SHA) the ratchet cannot run and says so.
       - name: Comment lint
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if git rev-parse --verify --quiet refs/audit-base >/dev/null; then
-            bun run audit:comments --base refs/audit-base
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            head_sha="${{ github.event.pull_request.head.sha }}"
+            base_sha=$(gh api "repos/${{ github.repository }}/compare/${{ github.event.pull_request.base.sha }}...$head_sha" --jq .merge_base_commit.sha 2>/dev/null || true)
           else
-            echo "::notice::comment-lint: no base ref was fetched (see the agent catalog step), so the comment ratchet did not run."
+            head_sha="${{ github.sha }}"
+            base_sha="${{ github.event.before }}"
           fi
+          if [ -z "$base_sha" ] || [ "$base_sha" = "0000000000000000000000000000000000000000" ]; then
+            echo "::notice::comment-lint: no base commit to ratchet against for this event, so the comment ratchet did not run."
+            exit 0
+          fi
+          git fetch --no-tags --depth=1 origin "$base_sha:refs/comment-lint-base" "$head_sha:refs/comment-lint-head"
+          bun run audit:comments --base refs/comment-lint-base --head refs/comment-lint-head
 
       - name: Dependency audit
         run: bun run audit:deps
