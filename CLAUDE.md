@@ -170,6 +170,11 @@ bunx guren make:controller Invoice --module billing  # Most make:* commands acce
 - **Variables/functions:** camelCase
 - **Constants:** UPPER_SNAKE_CASE for true constants
 
+### Comments
+- Code shows *how*; a comment carries only what the code cannot: a constraint, a pitfall, a unit, a cross-file sync obligation, a measured number, an RFC/issue reference. No narration of the next line, no section banners, no change history ("used to", "previously")
+- A block keeps to 5 body lines, a module header to 8; one fact per line
+- Full rule: `.claude/rules/coding-standards.md` (Comments). `bun run audit:comments` enforces the mechanical half, ratcheted per file against main, and runs as a PostToolUse hook after every edit
+
 ### Imports
 ```typescript
 // Use package aliases
