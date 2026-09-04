@@ -34,4 +34,6 @@ the token id still exists (single use and revocation). A store may still drop
 expired records for housekeeping — the in-memory and Redis stores do — but
 verification does not rely on it, so a custom store that returns stale rows is
 no longer a way to keep an expired link alive, and one that keeps them is not a
-way to extend it either.
+way to extend it either. The claim is the authority on what verification will
+*accept*; a store that drops a row before that claim expires still ends the
+link early, which is what `MemoryPasswordResetStore.find` does by design.

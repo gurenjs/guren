@@ -21,18 +21,21 @@ export async function readSignedTokenClaims(
   purpose: string,
   store: { delete(tokenId: string): Promise<void> },
 ): Promise<SignedTokenClaims | null> {
-  const payload = signer.verify<{ id?: string; email?: string }>(token, {
-    purpose,
-    allowExpired: true,
-  })
-  if (!payload?.id || !payload.email) {
-    return null
+  const claims = signer.verify<{ id?: string; email?: string }>(token, { purpose })
+  if (claims?.id && claims.email) {
+    return { id: claims.id, email: claims.email }
   }
 
-  if (typeof payload.exp === 'number' && payload.exp < Math.floor(Date.now() / 1000)) {
-    await store.delete(payload.id)
-    return null
+  // Ask again without the expiry check rather than re-deriving the comparison
+  // here. The two calls differ only in that one branch, so a token the strict
+  // call rejected and this one accepts is expired rather than forged. It also
+  // keeps the comparison the signer's: were it to grow clock-skew leeway, the
+  // strict call would accept a token inside the window and this path would
+  // never delete it.
+  const expired = signer.verify<{ id?: string }>(token, { purpose, allowExpired: true })
+  if (expired?.id) {
+    await store.delete(expired.id)
   }
 
-  return { id: payload.id, email: payload.email }
+  return null
 }
