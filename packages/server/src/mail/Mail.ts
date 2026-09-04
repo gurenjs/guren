@@ -8,6 +8,17 @@ import type { MailManager } from './MailManager'
 import { Job, getQueueDriver, registerJob } from '../queue'
 import { parseMailAddress as parseAddress } from './address'
 
+/**
+ * The message of a thrown value, whether or not it is an `Error`: a failed
+ * dynamic import throws Bun's `ResolveMessage`, which is not one.
+ */
+function errorMessage(error: unknown): string {
+  if (typeof error === 'object' && error !== null && 'message' in error) {
+    return String((error as { message: unknown }).message)
+  }
+  return String(error)
+}
+
 /** Fluent mail builder for composing and sending emails. */
 export class Mail {
   private message: Partial<MailMessage> = {
@@ -77,21 +88,35 @@ export class Mail {
     component: (props: P) => unknown,
     props: P
   ): Promise<this> {
+    const name = component.name || '(anonymous)'
+    let reactEmail: { render: (element: unknown) => Promise<string> }
+
     try {
       const reactEmailModule = '@react-email/render'
 
       // Dynamic import to avoid requiring react-email in production
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const reactEmail = await import(/* @vite-ignore */ reactEmailModule as any) as {
+      reactEmail = await import(/* @vite-ignore */ reactEmailModule as any) as {
         render: (element: unknown) => Promise<string>
       }
-      const html = await reactEmail.render(component(props))
-      this.message.html = html
-    } catch  {
+    } catch (error) {
       throw new Error(
-        'Failed to render email template. Make sure @react-email/render is installed.'
+        `Failed to load @react-email/render for template "${name}": ${errorMessage(error)}. ` +
+          'Make sure @react-email/render is installed.',
+        { cause: error }
       )
     }
+
+    try {
+      this.message.html = await reactEmail.render(component(props))
+    } catch (error) {
+      // No install hint here: the package loaded, so the failure is the
+      // template's own.
+      throw new Error(`Failed to render email template "${name}": ${errorMessage(error)}`, {
+        cause: error,
+      })
+    }
+
     return this
   }
 
