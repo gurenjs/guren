@@ -78,8 +78,8 @@ interface RateLimitOptions {
   /** Error message when limited (default: 'Too many requests...') */
   message?: string
 
-  /** HTTP status code when limited (default: 429) */
-  statusCode?: number
+  /** HTTP status code when limited (default: 429). Hono's `ContentfulStatusCode`, re-exported from `@guren/core`. */
+  statusCode?: ContentfulStatusCode
 
   /** Prefix for rate limit keys (default: 'rl:') */
   keyPrefix?: string

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'bun:test'
 import { Application } from '../../src'
-import { registerRootPublicAssets } from '../../src/http/public-assets'
+import { DEFAULT_ROOT_PUBLIC_ASSET_EXTENSIONS, registerRootPublicAssets } from '../../src/http/public-assets'
 import { useAssetFixture } from './asset-fixture'
 
 // Real files rather than a stubbed `Bun.file`: containment is a filesystem
@@ -134,5 +134,38 @@ describe('registerRootPublicAssets with a public directory reached through a sym
 
     expect(response.status).toBe(200)
     expect(await response.text()).toContain('linked readme')
+  })
+})
+
+// `extensions` replaces the default list, so an app adding one extension used
+// to restate the defaults and drift from them. The export exists so it can
+// spread instead — these pin the export to what the middleware actually serves.
+describe('DEFAULT_ROOT_PUBLIC_ASSET_EXTENSIONS', () => {
+  const fixture = useAssetFixture('guren-public-assets-defaults-')
+
+  it('is the list served when extensions is omitted', async () => {
+    await fixture.write('public/readme.txt', 'default txt\n')
+    await fixture.write('public/script.js', 'console.log(1)\n')
+    const app = new Application()
+    registerRootPublicAssets(app, fixture.path('public'), {})
+
+    expect(DEFAULT_ROOT_PUBLIC_ASSET_EXTENSIONS).toContain('.txt')
+    expect(DEFAULT_ROOT_PUBLIC_ASSET_EXTENSIONS).not.toContain('.js')
+    expect((await app.fetch(new Request('http://example.com/readme.txt'))).status).toBe(200)
+    expect((await app.fetch(new Request('http://example.com/script.js'))).status).toBe(404)
+  })
+
+  it('spreads into extensions so an app extends the defaults instead of replacing them', async () => {
+    await fixture.write('public/readme.txt', 'default txt\n')
+    await fixture.write('public/script.js', 'console.log(1)\n')
+    const app = new Application()
+    registerRootPublicAssets(app, fixture.path('public'), {
+      extensions: [...DEFAULT_ROOT_PUBLIC_ASSET_EXTENSIONS, '.js'],
+    })
+
+    expect((await app.fetch(new Request('http://example.com/readme.txt'))).status).toBe(200)
+    const script = await app.fetch(new Request('http://example.com/script.js'))
+    expect(script.status).toBe(200)
+    expect(script.headers.get('Content-Type')).toContain('text/javascript')
   })
 })

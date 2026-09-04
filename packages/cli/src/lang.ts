@@ -1,6 +1,6 @@
 import { consola } from 'consola'
 import { resolve, join } from 'node:path'
-import { existsSync, mkdirSync, writeFileSync, readdirSync, readFileSync, copyFileSync, constants as fsConstants } from 'node:fs'
+import { existsSync, mkdirSync, writeFileSync, readdirSync, copyFileSync, constants as fsConstants } from 'node:fs'
 
 /**
  * The `wx` flag makes the exists-check and the write one atomic operation; a

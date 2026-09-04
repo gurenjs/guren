@@ -1326,9 +1326,6 @@ async function generateUsersMigration(): Promise<boolean> {
   }
 }
 
-async function updatePageContracts(): Promise<void> {
-}
-
 /**
  * Every file only the password experience needs. Re-running with
  * `--oauth-only` reports these rather than deleting files this run did not
@@ -1570,7 +1567,6 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
   await ensureGurenUiTokens()
 
   await updateSchema(features)
-  await updatePageContracts()
   if (!includePassword) {
     await warnAboutStalePasswordScaffold()
   }

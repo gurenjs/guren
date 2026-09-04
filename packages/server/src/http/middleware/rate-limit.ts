@@ -1,4 +1,5 @@
 import type { MiddlewareHandler, Context } from 'hono'
+import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import { claimHotDisposable, isHotReloadRuntime, type HotDisposableClaim } from '../../hot-reload/hot-disposables'
 
 /** Rate limit entry stored in the backing store. */
@@ -141,7 +142,7 @@ export interface RateLimitOptions {
   message?: string
 
   /** @default 429 */
-  statusCode?: number
+  statusCode?: ContentfulStatusCode
 
   /** @default 'rl:' */
   keyPrefix?: string
@@ -218,14 +219,14 @@ function defaultOnRateLimited(
   ctx: Context,
   retryAfter: number,
   message: string,
-  statusCode: number
+  statusCode: ContentfulStatusCode
 ): Response {
   return ctx.json(
     {
       error: message,
       retryAfter,
     },
-    statusCode as 429
+    statusCode
   )
 }
 
@@ -374,7 +375,7 @@ export class SlidingWindowRateLimitStore extends BaseMemoryStore {
     const now = this.now()
     const windowStart = now - windowMs
     const entry = this.requests.get(key)
-    let timestamps = entry ? entry.timestamps.filter((t) => t > windowStart) : []
+    const timestamps = entry ? entry.timestamps.filter((t) => t > windowStart) : []
     timestamps.push(now)
     this.requests.set(key, { windowMs, timestamps })
     return { count: timestamps.length, resetAt: timestamps[0] + windowMs }
