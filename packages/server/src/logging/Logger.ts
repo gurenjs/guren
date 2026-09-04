@@ -64,6 +64,16 @@ const reportLoggingError = (error: unknown): void => {
   console.error('Logging error:', error)
 }
 
+/**
+ * Whether a channel's `log()` handed back something to wait on. A duck-typed
+ * check rather than `instanceof Promise`: a promise created in another realm
+ * (a `node:vm` context, a worker's module graph) satisfies the channel
+ * contract and would otherwise slip past the reporter as an unhandled rejection.
+ */
+export function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
+  return typeof value === 'object' && value !== null && typeof (value as { then?: unknown }).then === 'function'
+}
+
 /** Logger instance for writing log entries. */
 export class Logger {
   private readonly channels: LogChannel[]
@@ -130,8 +140,8 @@ export class Logger {
     for (const channel of this.channels) {
       try {
         const pending = channel.log(entry)
-        if (pending instanceof Promise) {
-          pending.catch(reportLoggingError)
+        if (isPromiseLike(pending)) {
+          Promise.resolve(pending).catch(reportLoggingError)
         }
       } catch (error) {
         reportLoggingError(error)
