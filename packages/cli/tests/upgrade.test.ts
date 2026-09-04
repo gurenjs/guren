@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path'
 import { createTempWorkspace, type TempWorkspace } from './helpers'
 import { upgradeCanary, checkVersionCompatibility } from '../src/upgrade'
 import { findApplicableCodemods, runCodemods, compareVersions, codemods, type Codemod } from '../src/codemods'
-import { checkDeprecations, deprecations } from '../src/deprecations'
+import { checkDeprecations } from '../src/deprecations'
 
 describe('upgradeCanary', () => {
   let workspace: TempWorkspace
