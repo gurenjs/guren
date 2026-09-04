@@ -1,6 +1,12 @@
 import { pathToFileURL } from 'node:url'
 import { resolve } from 'node:path'
 import { consola } from 'consola'
+// citty's own 'defineCommand', not this package's wrapper, and deliberately:
+// the proxy below reads none of its own parsed args (it forwards 'rawArgs'),
+// so wrapping it would normalize nothing, and normalizing the plugin's
+// definition instead would change a third-party parse this repo cannot test —
+// a repeated flag is citty's only multi-value channel, and a plugin may mean
+// its array.
 import { defineCommand, runCommand as runCittyCommand } from 'citty'
 import type { ArgsDef, CommandDef } from 'citty'
 import { packageContentRoot, readInstalledPluginManifests, resolveInside } from './plugin-manifest'

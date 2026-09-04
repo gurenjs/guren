@@ -11,8 +11,9 @@ import { readFileSync } from 'node:fs'
 import { relative } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { consola } from 'consola'
-import { defineCommand, showUsage } from 'citty'
+import { showUsage } from 'citty'
 import type { CommandDef } from 'citty'
+import { defineCommand } from './define-command'
 import { runCli, UsageError } from './run-cli'
 import { newCommand } from './new-command'
 import { listBlueprints, runBlueprint } from './blueprints'
@@ -743,31 +744,6 @@ const makeExceptionCommand = defineCommand({
   },
 })
 
-/**
- * The last value of a repeated citty flag.
- *
- * citty types every `string` arg as `string | undefined` and then hands back a
- * `string[]` when the flag is passed twice — a lie no compiler catches. Three
- * shapes on this bin crash; the quiet ones are worse
- * (`--schema a.ts --schema b.ts` comma-joins into a path nothing can open and
- * still exits 0). Last-wins is what repeating a flag means to whoever typed it.
- */
-function lastFlagValue(value: unknown): string | undefined {
-  const candidate = Array.isArray(value) ? value.at(-1) : value
-  return typeof candidate === 'string' ? candidate : undefined
-}
-
-/**
- * The last value of a repeated citty `boolean` flag. `Boolean(args.flag)` is not
- * safe: citty arrays a repeated boolean and every array is truthy, so
- * `--json=false --json=false` turns *off* into *on*. Only the `=value` spellings
- * can express a false, so a bare `--json --json` is unaffected — which is what
- * makes this survive casual testing. citty coerces the value itself.
- */
-function lastBooleanFlag(value: unknown): boolean {
-  return Boolean(Array.isArray(value) ? value.at(-1) : value)
-}
-
 const makeMigrationCommand = defineCommand({
   meta: {
     name: 'make:migration',
@@ -805,12 +781,12 @@ const makeMigrationCommand = defineCommand({
     // alongside other flags, so `makeMigration` reassembles the config's
     // dialect, schema and out onto the command line instead.
     const result = await makeMigration({
-      name: lastFlagValue(args.name) ?? args._[0],
-      schema: lastFlagValue(args.schema),
-      out: lastFlagValue(args.out),
+      name: args.name ?? args._[0],
+      schema: args.schema,
+      out: args.out,
       // `--dialect` reaches drizzle-kit verbatim, so a repeated flag would
       // arrive comma-joined as a dialect nothing accepts.
-      dialect: lastFlagValue(args.dialect),
+      dialect: args.dialect,
     })
 
     // Overrides drop `--config`, and `generate` has no flag for every field it
@@ -1636,11 +1612,11 @@ const toolCallCommand = defineCommand({
       name: args.name,
       // Repeat-safe readers: `--input a --input b` would otherwise arrive
       // comma-joined and not be JSON.
-      input: lastFlagValue(args.input),
-      as: lastFlagValue(args.as),
-      preflight: lastBooleanFlag(args.preflight),
-      appRoot: lastFlagValue(args.app),
-      json: lastBooleanFlag(args.json),
+      input: args.input,
+      as: args.as,
+      preflight: Boolean(args.preflight),
+      appRoot: args.app,
+      json: Boolean(args.json),
     })
   },
 })
@@ -1700,17 +1676,17 @@ const toolLogCommand = defineCommand({
   async run({ args }) {
     // Repeat-safe readers: `--denied=false --denied=false` would otherwise read
     // as *on* and hide every invocation from a listing that looks complete.
-    const rawNumber = lastFlagValue(args.number)
+    const rawNumber = args.number
     await runToolLog({
-      file: lastFlagValue(args.file),
-      tail: lastBooleanFlag(args.tail),
-      tool: lastFlagValue(args.tool),
-      surface: lastFlagValue(args.surface),
-      denied: lastBooleanFlag(args.denied),
-      since: lastFlagValue(args.since),
+      file: args.file,
+      tail: Boolean(args.tail),
+      tool: args.tool,
+      surface: args.surface,
+      denied: Boolean(args.denied),
+      since: args.since,
       limit: rawNumber === undefined ? undefined : parseRecordCount(rawNumber),
-      appRoot: lastFlagValue(args.app),
-      json: lastBooleanFlag(args.json),
+      appRoot: args.app,
+      json: Boolean(args.json),
     })
   },
 })
@@ -1785,9 +1761,9 @@ const tokenIssueCommand = defineCommand({
     // Repeat-safe readers, on a command that mints credentials:
     // `--yes=false --yes=false` would authorize a `tools:*` grant the user twice
     // declined, and a repeated `--user` be stored as a principal nobody is.
-    const name = lastFlagValue(args.name)
-    const user = lastFlagValue(args.user)
-    const tools = lastFlagValue(args.tools)
+    const name = args.name
+    const user = args.user
+    const tools = args.tools
     if (name === undefined || user === undefined || tools === undefined) {
       throw new Error('token:issue requires --name, --user and --tools.')
     }
@@ -1796,13 +1772,13 @@ const tokenIssueCommand = defineCommand({
       name,
       user,
       tools,
-      readOnly: lastBooleanFlag(args['read-only']),
-      allowUnmatched: lastBooleanFlag(args['allow-unmatched']),
-      yes: lastBooleanFlag(args.yes),
-      expires: lastFlagValue(args.expires),
-      routesFile: lastFlagValue(args.routes),
-      appRoot: lastFlagValue(args.app),
-      json: lastBooleanFlag(args.json),
+      readOnly: Boolean(args['read-only']),
+      allowUnmatched: Boolean(args['allow-unmatched']),
+      yes: Boolean(args.yes),
+      expires: args.expires,
+      routesFile: args.routes,
+      appRoot: args.app,
+      json: Boolean(args.json),
     })
 
     // Booting the app opens whatever the app opens — a database pool, a Redis
@@ -1844,7 +1820,7 @@ const toolDevCommand = defineCommand({
     // Decimal digits and nothing else: `parseInt` stops at the first non-digit
     // so `3333abc` would bind 3333, and `Number` turns `--port=`, `0x10` and
     // `1e3` into real ports nobody asked for.
-    const rawPort = lastFlagValue(args.port)
+    const rawPort = args.port
     const port = rawPort === undefined ? undefined : Number(rawPort)
     if (
       rawPort !== undefined
@@ -1854,11 +1830,11 @@ const toolDevCommand = defineCommand({
     }
 
     await runToolDev({
-      as: lastFlagValue(args.as),
-      path: lastFlagValue(args.path),
+      as: args.as,
+      path: args.path,
       port,
-      hostname: lastFlagValue(args.host),
-      appRoot: lastFlagValue(args.app),
+      hostname: args.host,
+      appRoot: args.app,
     })
 
     // Deliberately no process.exit: this command *is* the server, and it ends
@@ -2389,17 +2365,17 @@ const contextCommand = defineCommand({
   async run({ args }) {
     // Narrowed here so both branches get the same treatment: `--app` and
     // `--routes` reach a `resolve()` that throws on an array either way.
-    const cwd = lastFlagValue(args.app)
-    const routesFile = lastFlagValue(args.routes)
-    const json = lastBooleanFlag(args.json)
-    const entity = lastFlagValue(args.entity) ?? args._[0]
+    const cwd = args.app
+    const routesFile = args.routes
+    const json = Boolean(args.json)
+    const entity = args.entity ?? args._[0]
 
     if (entity) {
       await displayEntityContext(entity, {
         cwd,
         json,
         routesFile,
-        module: lastFlagValue(args.module),
+        module: args.module,
       })
       return
     }
