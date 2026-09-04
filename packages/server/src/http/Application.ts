@@ -285,13 +285,9 @@ function registerProcessTeardown(onSignal: () => void, onExit: () => void): () =
   process.on('exit', onExit)
 
   return () => {
-    // Via the EventEmitter surface: bun-types 1.4.0 declares `off` on Process
-    // with only a "memoryPressure" overload, shadowing the generic `off`, so
-    // signal names stop compiling. `on`/`once` are unaffected.
-    const emitter: NodeJS.EventEmitter = process
-    emitter.off('SIGINT', onSignal)
-    emitter.off('SIGTERM', onSignal)
-    emitter.off('exit', onExit)
+    process.off('SIGINT', onSignal)
+    process.off('SIGTERM', onSignal)
+    process.off('exit', onExit)
   }
 }
 
