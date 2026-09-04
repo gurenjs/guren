@@ -2,14 +2,11 @@ import { createRateLimitMiddleware, MemoryRateLimitStore } from '@guren/core'
 import type { Context, RateLimitEntry, RateLimitStore } from '@guren/core'
 
 /**
- * `/docs/search` is the only public endpoint here that reaches the database,
- * and it does so per keystroke. This bounds one client's share of D1's daily
- * read budget.
- *
- * Honest about what it is: the store is per-isolate memory, and Workers runs
- * many isolates, so the effective ceiling is higher than the number below and
- * varies. It stops a loop hammering the endpoint, which is what it is for;
- * Cloudflare's own protections are the perimeter.
+ * `/docs/search` is the only public endpoint here that reaches the database, per
+ * keystroke; this bounds one client's share of D1's daily read budget. The store
+ * is per-isolate memory and Workers runs many isolates, so the effective ceiling
+ * is higher than the number below and varies. It stops a loop hammering the
+ * endpoint; Cloudflare's own protections are the perimeter.
  */
 /**
  * Above what typing can reach. The client debounces, but a debounce collapses
@@ -44,14 +41,11 @@ export function docsSearchRateLimitKey(ctx: Context): string {
 const SWEEP_EVERY = 256
 
 /**
- * The memory store, minus its timer, plus a sweep it drives itself.
- *
- * The timer has to go: this module is evaluated while the Worker's global
- * scope is still running, and Cloudflare disallows timers there. But the
- * store only drops an expired entry when that same key is seen again, and
- * the key here is a visitor's address — so an isolate would hold one entry
- * per address it had ever served, for as long as it lived. Sweeping on write
- * keeps the map proportional to recent traffic instead of to all of it.
+ * The memory store, minus its timer, plus a sweep it drives itself. This module
+ * is evaluated while the Worker's global scope is still running, where Cloudflare
+ * disallows timers. But the store only drops an expired entry when that key is
+ * seen again, and the key is a visitor's address, so an isolate would hold one
+ * entry per address it ever served. Sweeping on write bounds the map to recent traffic.
  */
 export class SweepingRateLimitStore implements RateLimitStore {
   readonly #entries: MemoryRateLimitStore

@@ -105,16 +105,11 @@ export interface AttachableStatic<TBase extends typeof Model, TDecl extends Decl
 }
 
 /**
- * Mixin that declares attachment collections on a model (RFC 0013). The
- * declaration is a static argument in the heritage clause, so it stays
- * statically readable to `guren check` and `guren context` while its collection
- * names, kinds, and variant names are inferred as compile-time facts.
- *
+ * Mixin declaring attachment collections on a model (RFC 0013). The declaration
+ * sits in the heritage clause so `guren check` and `guren context` read it
+ * statically while collection names, kinds, and variant names are inferred types.
  * @example
- * export class Post extends Attachable(defineModel(posts), {
- *   cover: hasOneAttached({ image: 'require', variants: { thumb: { width: 320 } } }),
- *   images: hasManyAttached({ image: 'require' }),
- * }) {}
+ * class Post extends Attachable(defineModel(posts), { cover: hasOneAttached({ image: 'require' }), images: hasManyAttached() }) {}
  */
 export function Attachable<
   TBase extends typeof Model,

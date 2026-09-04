@@ -15,7 +15,7 @@ export interface SessionStore {
   /**
    * Refresh an existing session's TTL without rewriting its data (rolling
    * expiry); stores omitting it fall back to a full `write`. Refreshing a
-   * session that no longer exists must be a no-op, not a resurrection.
+   * session that does not exist must be a no-op, not a resurrection.
    */
   touch?(id: string, ttlSeconds: number): Promise<void>
 }
@@ -97,10 +97,9 @@ export interface Session {
   /**
    * Whether this session survives the current response under `id`. A session
    * created *during* the request stays `isNew` for its lifetime yet is
-   * persisted once a handler writes to it, so anything anchoring a value to
-   * the session id (CSRF token binding) must ask this, not `!isNew`.
-   * Optional only so a custom `Session` predating it type-checks; the `!isNew`
-   * fallback reproduces the bug this exists to prevent, so implement it.
+   * persisted once a handler writes to it, so anything anchoring a value to the
+   * session id (CSRF token binding) must ask this, not `!isNew`. Optional only
+   * so a custom `Session` predating it type-checks; the `!isNew` fallback has that bug, so implement it.
    */
   willPersist?(): boolean
   flash(key: string, value: unknown): void

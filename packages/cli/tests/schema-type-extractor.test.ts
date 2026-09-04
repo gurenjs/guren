@@ -169,8 +169,8 @@ describe('schemaToTypeString', () => {
 })
 
 describe('degenerate schemas', () => {
-  // An enum with no members accepts nothing. This used to render as an empty
-  // string, which is not valid TypeScript wherever the result is spliced in.
+  // An enum with no members accepts nothing. An empty string is not valid
+  // TypeScript wherever the result is spliced in.
   it('renders an empty enum as never', () => {
     expect(schemaToTypeString(z.enum([]), { io: 'output' })).toBe('never')
   })

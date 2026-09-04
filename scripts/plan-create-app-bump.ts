@@ -1,16 +1,12 @@
 /**
- * Add the `create-guren-app` bump a release needs, before `changeset version`
- * runs.
+ * Add the `create-guren-app` bump a release needs, before `changeset version` runs.
  *
- * The scaffold's `@guren/*` ranges are generated from the workspace versions, so
- * any release moving one must republish the scaffolder (`assertCreateAppRepublishes`
- * in `sync-template-deps.ts`). That refusal stays as the backstop for what cannot
- * be predicted here, but only covers a release that rewrote a range; a drizzle pin
- * is synced in the ordinary PR that moved it, so it is covered by neither half.
- *
+ * The scaffold's `@guren/*` ranges are generated from the workspace versions, so any
+ * release moving one must republish the scaffolder; `assertCreateAppRepublishes` in
+ * `sync-template-deps.ts` stays as the backstop but only sees a rewritten range, and
+ * a drizzle pin is synced in the ordinary PR that moved it, so neither half covers it.
  * Writes a changeset rather than editing a version, so the bump appears in the
- * release PR diff and the changelog. Every path logs its decision: a silent run
- * is indistinguishable from a script that never executed.
+ * release PR diff and the changelog. Every path logs its decision.
  */
 import { readFile, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'

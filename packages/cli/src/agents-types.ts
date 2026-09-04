@@ -5,7 +5,7 @@
  * What this adds is CLI-only: definitions carry a `resource` hint as a class
  * name, and the payload type behind it lives in `data.gen.ts`'s AST extraction —
  * hence running after the data generator. An app with no derivable tools gets no
- * file, and a previously generated one is removed.
+ * file, and a stale one is removed.
  */
 import { readFile, rm } from 'node:fs/promises'
 import { resolve } from 'node:path'
@@ -40,11 +40,10 @@ export interface GenerateAgentTypesOptions extends WriterOptions {
 
 /**
  * Whether an app's route sources mention agent metadata at all — a cheap string
- * scan, so that `check` and `doctor` need not evaluate the module graph. Wrong
- * in both directions and cheap in both: nothing decides *exposure* from this,
- * only whether {@link planAgentManifest} falls through to `deriveAgentTools()`.
- * An unreadable file therefore counts as declaring; answering "no" would turn an
- * unreadable routes directory into a clean bill of health.
+ * scan, so `check` and `doctor` need not evaluate the module graph. Nothing decides
+ * *exposure* from this, only whether {@link planAgentManifest} falls through to
+ * `deriveAgentTools()`. An unreadable file therefore counts as declaring; a "no"
+ * would turn an unreadable routes directory into a clean bill of health.
  */
 export async function appDeclaresAgentRoutes(cwd: string, routesFile?: string): Promise<boolean> {
   const files = await discoverRoutePathFiles(cwd, routesFile)
@@ -78,11 +77,10 @@ export interface AgentManifestPlan {
 
 /**
  * The one rule for "does this app get a `.guren/agents.gen.ts`?", which `check`
- * and `doctor` read rather than restate. The condition is *derivation produces
- * at least one tool*, not "a route mentions .agent()": a `.agent()` route with
- * no `.name()` makes codegen delete the manifest, so a check keyed on the string
- * scan would loop, demanding a `guren codegen` that deletes it again. A caller
- * already holding the route graph passes `preloadedDefinitions` to save a load.
+ * and `doctor` read rather than restate. The condition is *derivation produces at
+ * least one tool*, not "a route mentions .agent()": a `.agent()` route with no
+ * `.name()` makes codegen delete the manifest, so a check keyed on the string scan
+ * would loop. `preloadedDefinitions` skips the load for a caller holding the graph.
  */
 export async function planAgentManifest(
   cwd: string,

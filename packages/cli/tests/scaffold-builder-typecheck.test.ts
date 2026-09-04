@@ -8,22 +8,20 @@ import { generatePageTypes } from '../src/pages-types'
 
 /**
  * The compile gate for make:auth's *builder* output: flag-dependent
- * `build*Template()` code exists nowhere until generation time, so a type error
- * in a branch survives the parse gate and reaches a user's editor first. Renders
- * flag combinations into a workspace, regenerates `.guren/pages.gen.ts`, and
- * typechecks the lot as one program. The three combos here (oauth+verify, oauth,
- * oauth-only) reach every builder branch; the rest differ only by omission.
+ * `build*Template()` code exists only at generation time, so a type error in a
+ * branch survives the parse gate. Renders flag combinations into a workspace,
+ * regenerates `.guren/pages.gen.ts`, and typechecks the lot as one program. The
+ * three combos (oauth+verify, oauth, oauth-only) reach every builder branch.
  */
 
 const cliRoot = join(import.meta.dir, '..')
 
 /**
- * The options of tsconfig.templates.json, pointed at a rendered workspace.
- * Loaded from the config rather than restated so this gate and
- * `typecheck:templates` cannot drift. The three overrides are all consequences
- * of the render living outside the repo: `@/.guren/pages.gen` moves to this
- * render's generated file, bare imports resolve to this package's dependencies,
- * and the root config's `types: ["bun-types"]` gives way to node's globals.
+ * The options of tsconfig.templates.json, pointed at a rendered workspace;
+ * loaded from the config so this gate and `typecheck:templates` cannot drift.
+ * The three overrides follow from the render living outside the repo:
+ * `@/.guren/pages.gen` moves to this render's file, bare imports resolve to
+ * this package's dependencies, and `types: ["bun-types"]` yields to node's globals.
  */
 function renderedScaffoldCompilerOptions(workspaceDir: string): TsconfigCompilerOptions {
   const parsed = resolvedCompilerOptions(join(cliRoot, 'tsconfig.templates.json'))

@@ -124,12 +124,10 @@ async function parseRequestUploads(ctx: ControllerContext): Promise<RequestUploa
 }
 
 /**
- * The local adapter: the runtime is handed a Hono context, the mock holds a
- * `Request`, and a `HonoRequest` bridges them so even the media-type decision inside
- * `parseBody()` is Hono's own.
- *
- * Answers `null` only on the adapter's own failure — `clone()` throws on a body
- * already read, which cannot happen to the runtime. Everything else, including the
+ * The local adapter: the runtime is handed a Hono context, the mock holds a `Request`,
+ * and a `HonoRequest` bridges them so even the media-type decision inside `parseBody()`
+ * is Hono's own. Answers `null` only on the adapter's own failure (`clone()` throws on a
+ * body already read, which cannot happen to the runtime); everything else, including the
  * `{}` for an undecodable body, is the shared parser's to answer.
  */
 function honoRequestFor(ctx: ControllerContext): HonoRequest | null {
@@ -148,14 +146,10 @@ function honoRequestFor(ctx: ControllerContext): HonoRequest | null {
 
 /**
  * Query data as a validation schema sees it: a repeated key as an array, a single
- * occurrence as a plain string. The shape is the runtime's own
- * `flattenRequestQueries`; only the adapter is local, because `queries()` is
- * *optional* on {@link ControllerContext} and a hand-built context may lack one.
- *
- * The fallback re-derives the grouping from `req.url` through a `HonoRequest`, never
- * from `query()` (one value per key — the divergence this closes). `ctx.req.queries`
- * is tested for truthiness, not with `in`: a blanked member carries an explicit
- * `undefined`, and the override branch would then call `undefined()`.
+ * occurrence as a string, per the runtime's `flattenRequestQueries`. Only the adapter is
+ * local, because `queries()` is optional on {@link ControllerContext}; the fallback
+ * re-derives the grouping from `req.url` through a `HonoRequest`, never from `query()`
+ * (one value per key). Truthiness, not `in`: a blanked member is an explicit `undefined`.
  */
 function flattenContextQueries(ctx: ControllerContext): Record<string, unknown> {
   const { req } = ctx

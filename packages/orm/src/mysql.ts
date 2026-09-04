@@ -14,13 +14,11 @@ type CreatePool = typeof import('mysql2')['createPool']
 type MySqlPool = ReturnType<CreatePool>
 type DrizzleConfig = Exclude<Parameters<MySql2Drizzle['drizzle']>[0], string>
 
-// Lazy so importing @guren/orm does not require `mysql2`.
-//
-// `createPool` comes from mysql2's callback API on purpose: handed a
-// `connection:`, drizzle builds its own pool through `mysql2/promise`, whose
-// wrapper exposes no `.config` for the driver to write `supportBigNumbers`
-// onto, so every query throws before reaching a socket. Pools built here go to
-// `drizzle({ client })` instead.
+// Lazy so importing @guren/orm does not require `mysql2`. `createPool` comes
+// from mysql2's callback API on purpose: handed a `connection:`, drizzle builds
+// its own pool through `mysql2/promise`, whose wrapper exposes no `.config` for
+// the driver to write `supportBigNumbers` onto, so every query throws before
+// reaching a socket. Pools built here go to `drizzle({ client })` instead.
 async function loadMySqlModules(): Promise<{
   drizzle: MySql2Drizzle['drizzle']
   migrate: typeof import('drizzle-orm/mysql2/migrator')['migrate']

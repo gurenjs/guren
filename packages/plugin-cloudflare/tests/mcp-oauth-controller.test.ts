@@ -19,10 +19,9 @@ import { registerMcpOAuthRoutes } from '../templates/mcp-oauth/routes/mcp-oauth'
 /**
  * The scaffolded consent flow, exercised as a running application. The template
  * tests next door are substring matches over the source; none would notice the
- * intersection filtering the wrong way round, the CSRF check accepting a forged
- * token, or `parseBody({ all: true })` losing checkboxes through the real
- * middleware stack. The template module is imported **directly** rather than
- * copied: the file under `templates/` is the file that gets scaffolded.
+ * intersection filtering the wrong way round, a forged CSRF token accepted, or
+ * `parseBody({ all: true })` losing checkboxes through the real middleware stack.
+ * Imported **directly**, not copied: the file under `templates/` is what gets scaffolded.
  */
 
 /** The provider calls the controller makes, recorded and answerable per test. */

@@ -28,13 +28,11 @@ export interface ModelInfo {
   usesAuth: boolean
   hasSoftDeletes: boolean
   /**
-   * The `Attachable(Base, { ... })` declaration: `null` when not Attachable,
-   * the collections otherwise, `'unreadable'` when the mixin is there but its
-   * declaration cannot be read (a spread, a computed key, an options object
-   * built elsewhere). One field, not an array plus a flag, so "attachable at
-   * all" is never conflated with "zero collections" and a partial read is
-   * unrepresentable — it would make consumers reject collections the runtime
-   * accepts.
+   * The `Attachable(Base, { ... })` declaration: `null` when not Attachable, the
+   * collections otherwise, `'unreadable'` when the mixin is there but its declaration
+   * cannot be read (a spread, a computed key, an options object built elsewhere). One
+   * field, not an array plus a flag: "attachable at all" is never conflated with "zero
+   * collections", and a partial read (rejecting collections the runtime accepts) is unrepresentable.
    */
   attachments: ModelAttachmentCollection[] | 'unreadable' | null
   /** `@docs <path>` tags in the model source (code-side doc links). */

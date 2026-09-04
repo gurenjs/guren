@@ -4,10 +4,9 @@ import { getMimeType } from 'hono/utils/mime'
 /**
  * The one rule for "a browser would render this as a document in the serving
  * origin" — otherwise an upload kept under `public/` becomes script running as
- * the app: same cookies, same session, same CSRF token.
- * A denylist rather than the attachments engine's `INLINE_CONTENT_TYPES`
- * allowlist, because these mounts also serve the app's own build output and an
- * allowlist would break the first deployment shipping a type it missed.
+ * the app: same cookies, same session, same CSRF token. A denylist rather than
+ * the attachments engine's `INLINE_CONTENT_TYPES` allowlist, because these mounts
+ * also serve the app's build output and an allowlist breaks the first deployment shipping a type it missed.
  */
 const DOCUMENT_CONTENT_TYPES = new Set([
   'text/html',

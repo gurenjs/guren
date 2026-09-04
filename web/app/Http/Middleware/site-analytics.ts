@@ -2,14 +2,11 @@ import { defineMiddleware } from '@guren/core'
 import { getWorkersEnv } from '@guren/plugin-cloudflare'
 
 /**
- * First-party, cookie-less request analytics into Workers Analytics Engine.
- * Server-side because this audience blocks client beacons and AI agents run no
- * JavaScript. No cookies, IPs or full referrers are stored, so no consent
- * banner is needed. Positions to query via the SQL API:
- *   index1: user-agent class     blob1: pathname   blob2: content class
- *   blob3:  user-agent class     blob4: referrer host ('' direct or same-site)
- *   blob5:  Accept-Language      blob6: country    blob7: method
- *   blob8:  initial | inertia    double1: status   double2: duration in ms
+ * Cookie-less, server-side request analytics into Workers Analytics Engine: this
+ * audience blocks client beacons and AI agents run no JavaScript. No cookies, IPs
+ * or full referrers are stored, so no consent banner. SQL API positions: index1 ua
+ * class; blob1..8 pathname, content class, ua class, referrer host ('' = direct or
+ * same-site), Accept-Language, country, method, initial|inertia; double1..2 status, ms.
  */
 
 interface AnalyticsEngineDataset {

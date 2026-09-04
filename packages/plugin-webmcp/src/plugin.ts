@@ -41,11 +41,7 @@ const factory = definePlugin<WebMcpPluginConfig>({
 
 /**
  * Register the WebMCP plugin.
- *
- * @example
- * ```typescript
- * createApp({ providers: [webMcpPlugin({ originTrial: token })] })
- * ```
+ * @example createApp({ providers: [webMcpPlugin({ originTrial: token })] })
  */
 export function webMcpPlugin(config: WebMcpPluginConfig = {}): ServiceProviderConstructor {
   return factory(config)

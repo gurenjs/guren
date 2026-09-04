@@ -71,11 +71,10 @@ describe('collectRows', () => {
 
   it('hashes the text it stores, not the text it was given', () => {
     // A NUL truncates a SQL literal inside the parser, so it is dropped before
-    // storage. Hashing it anyway would give two corpora that generate
-    // byte-identical SQL different ids, and reindex production for nothing.
-    // One NUL against two: they tokenize identically (a NUL separates, like
-    // any other non-letter) and they store identically once it is dropped, so
-    // the SQL is byte for byte the same and the id has to be too.
+    // storage; hashing it anyway would give two corpora with byte-identical
+    // SQL different ids and reindex production for nothing. One NUL against
+    // two: a NUL separates like any other non-letter, so they tokenize and
+    // store identically, the SQL is byte for byte the same, and so is the id.
     const one = collectRows(corpus({ body: 'a\u0000b' }))
     const two = collectRows(corpus({ body: 'a\u0000\u0000b' }))
 
@@ -109,12 +108,11 @@ describe('computeBuildId', () => {
   })
 
   it('is the same value this corpus has always produced', () => {
-    // A golden value, because the property that matters is a negative one:
-    // if a clock, a git sha or a build counter ever reached the id, a
-    // docs-unchanged deploy would skip reindexing and then bake a table name
-    // nobody created. Nothing weaker than a fixed expectation catches that.
-    // Update it deliberately, together with INDEX_FORMAT, when the stored
-    // shape changes.
+    // A golden value, because the property is a negative one: if a clock, a
+    // git sha or a build counter ever reached the id, a docs-unchanged deploy
+    // would skip reindexing and then bake a table name nobody created. Update
+    // it deliberately, together with INDEX_FORMAT, when the stored shape
+    // changes.
     expect(computeBuildId(collectRows(corpus()))).toBe('2b92f12c25318af8')
   })
 })

@@ -1,22 +1,12 @@
 /**
  * Loopback-only access guard shared by the dev-only framework endpoints
- * (`/_guren/mcp`, `/_guren/docs`).
- *
- * Two classes of caller have to be stopped (see
- * `.claude/rules/common-pitfalls.md`): browser pages, rejected unless
- * their `Origin` is loopback (which also defeats DNS rebinding), and
- * non-browser clients, rejected unless the socket peer is loopback —
- * templates bind `0.0.0.0` and `Host` is trivially forged, so host
- * authorization does not help, and a client that sends no `Origin` is
- * otherwise indistinguishable from a local process.
- *
- * The guard fails closed. A request is served only once the runtime has
- * reported a loopback peer; if it reports no peer at all, the request is
- * denied rather than waved through, because "no `Origin` and no peer" is
- * exactly the shape of a remote `curl`. Runtimes that cannot report a peer
- * (Node, or any host calling `app.fetch()` directly instead of
- * `Application.listen()`) need `GUREN_ALLOW_UNVERIFIED_PEER=1`, which the
- * denial names.
+ * (`/_guren/mcp`, `/_guren/docs`). Two classes of caller are stopped (see
+ * `.claude/rules/common-pitfalls.md`): browser pages, rejected unless `Origin`
+ * is loopback (also defeats DNS rebinding), and non-browser clients, rejected
+ * unless the socket peer is loopback — templates bind `0.0.0.0`, `Host` is
+ * trivially forged, and a client sending no `Origin` looks like a local process.
+ * Fails closed: no reported peer is denied ("no `Origin`, no peer" is a remote
+ * `curl`); peer-less runtimes (Node, `app.fetch()`) need `GUREN_ALLOW_UNVERIFIED_PEER=1`.
  */
 import type { Context, MiddlewareHandler } from 'hono'
 
@@ -25,15 +15,10 @@ const LOOPBACK_IPV4 = /^127\.\d+\.\d+\.\d+$/
 
 /**
  * Whether an `Origin` header value belongs to the developer's own machine.
- *
- * Non-browser clients send no `Origin` at all; a value only appears when a
- * web page made the request. Restricting those to loopback blocks both
- * ordinary cross-site requests and DNS rebinding, where an attacker's
- * domain resolves to 127.0.0.1 so the browser skips preflight.
- *
- * This is a *negative* filter only. A loopback `Origin` is never proof that
- * the caller is local: browsers set the header honestly, but any other
- * client sets it with one flag. Never use it to satisfy the peer check.
+ * Only a web page's request carries one; restricting it to loopback blocks
+ * cross-site requests and DNS rebinding (an attacker's domain resolving to
+ * 127.0.0.1 so the browser skips preflight). A *negative* filter only: any
+ * non-browser client sets the header with one flag, so never use it to satisfy the peer check.
  */
 export function isLoopbackOrigin(origin: string): boolean {
   try {
@@ -58,17 +43,10 @@ export function isLoopbackAddress(address: string): boolean {
 
 /**
  * The peer address of the current request, when the runtime exposes one.
- *
- * `Bun.serve` passes `{ server }` through Hono's env — the same access path
- * the rate limiter uses, and the one `Application.listen()` wires up. Proxy
- * headers are deliberately ignored: they are attacker-controlled, and these
- * endpoints are never meant to sit behind a proxy.
- *
- * `undefined` means "this runtime did not tell us", not "the peer is
- * remote": either the host never passed a `server` through (Node, Vercel's
- * `app.fetch(request)`, in-process test requests), or `requestIP()` itself
- * returned `null`, which Bun does for a socket that is already closed or is
- * not TCP.
+ * `Bun.serve` passes `{ server }` through Hono's env, wired by
+ * `Application.listen()`; proxy headers are attacker-controlled and ignored.
+ * `undefined` means "the runtime did not say", not "remote": no `server` in env
+ * (Node, Vercel's `app.fetch(request)`, in-process tests), or `requestIP()` null (closed or non-TCP socket).
  */
 function clientAddress(ctx: Context): string | undefined {
   const env = ctx.env as { server?: { requestIP?: (req: Request) => { address?: string } | null } } | undefined
@@ -91,13 +69,10 @@ function allowsUnverifiedPeer(): boolean {
 }
 
 /**
- * Restricts an endpoint to the developer's own machine. `resource` names
- * the endpoint in the 403 body (e.g. "the MCP endpoint").
- *
- * Three outcomes, and the two denials say different things on purpose:
- * a peer that is present and not loopback is a remote caller, while a peer
- * the runtime never reported is a deployment the guard cannot vouch for —
- * the developer needs to know which one they are looking at.
+ * Restricts an endpoint to the developer's own machine. `resource` names the
+ * endpoint in the 403 body (e.g. "the MCP endpoint"). The two denials say
+ * different things on purpose: a present non-loopback peer is a remote caller,
+ * a peer the runtime never reported is a deployment the guard cannot vouch for.
  */
 export function createLoopbackGuard(resource: string): MiddlewareHandler {
   return async (ctx, next) => {

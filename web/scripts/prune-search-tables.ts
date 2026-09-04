@@ -1,27 +1,12 @@
 /**
- * Drop the search tables no build can still be asked for.
- *
- * Runs *after* a successful deploy, and keeps two: the build just deployed and
- * the one it replaced. Both halves of that matter.
- *
- * After, because the state row records what has been *loaded*, not what is
- * live — the index goes in before `wrangler deploy`. A deploy that fails at
- * that last step leaves the row ahead of the Worker, and a prune trusting it
- * would delete the tables the live Worker is still naming. Running only on
- * the success path means the row and the Worker agree by the time this reads
- * it.
- *
- * Two, because `wrangler rollback` activates an earlier Worker version and
- * does not roll D1 back with it. The previous build's tables have to still be
- * there for the Worker that names them. Rolling back more than one docs
- * change is not covered; a redeploy is the way out of that.
- *
- * Dropping at the head of the index SQL instead would be the same mistake one
- * step earlier: a failed deploy leaving the live Worker naming tables the SQL
- * had already removed.
- *
- *   bun scripts/prune-search-tables.ts            # remote (deploy)
- *   bun scripts/prune-search-tables.ts --local    # rehearse against wrangler dev
+ * Drop the search tables no build can still be asked for. Runs after a
+ * successful deploy and keeps two builds: the one just deployed and the one it
+ * replaced. After, because the state row records what is loaded, not what is
+ * live (the index goes in before `wrangler deploy`), so a prune before the
+ * deploy succeeds could drop tables the live Worker still names. Two, because
+ * `wrangler rollback` activates an earlier Worker without rolling D1 back;
+ * rolling back more than one docs change is not covered (redeploy instead).
+ *   bun scripts/prune-search-tables.ts [--local]   # --local rehearses against wrangler dev
  */
 import { createD1Client, isRemote } from './d1.js'
 

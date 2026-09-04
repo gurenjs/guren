@@ -23,9 +23,8 @@ export type ParseOutcome =
  * Decorator dialects, in the order attempted. Measured against this repo's
  * `@babel/parser`: only `decorators` parses `export @Dec class X {}`, only
  * `decorators-legacy` parses `constructor(@inject() private x)`, and enabling
- * both at once is a config error. Legacy first, since parameter decorators are
- * the commoner shape; a file mixing both forms parses under neither order (see
- * parse-cache.test.ts).
+ * both at once is a config error. Legacy first, the commoner shape; a file
+ * mixing both forms parses under neither order (see parse-cache.test.ts).
  */
 const DECORATOR_PLUGINS: readonly ParserPlugin[] = ['decorators-legacy', 'decorators']
 

@@ -132,12 +132,10 @@ function isMcpEndpointRequest(path: string): boolean {
 
 /**
  * A bearer request carrying no cookies at all (RFC 0016 §3). CSRF defends
- * cookie ambient authority, which *requires a cookie* — so the raw `Cookie`
- * header's absence is proof by itself, independent of where this middleware
- * sits relative to the session mount. A session-based predicate would fail open
- * before that mount and 403 a cookie-less client after an intermediate write.
- * Bearer detection is `hasBearerHeader`, the same predicate
- * `AuthManager.resolveGuardName` routes by, so the two cannot disagree.
+ * cookie ambient authority, so the raw `Cookie` header's absence is proof
+ * wherever this sits relative to the session mount; a session-based predicate
+ * fails open before it and 403s a cookie-less client after an intermediate
+ * write. Bearer detection is `hasBearerHeader`, shared with `AuthManager.resolveGuardName`.
  */
 function isBearerRequestWithoutCookies(ctx: Context): boolean {
   if (!hasBearerHeader(ctx)) {
@@ -197,10 +195,9 @@ export function csrfField(ctx: Context): string {
 /**
  * The token must carry a valid app-key signature, and be in the mode the
  * *request* fixes: session-bound needs a matching `sid` (a sibling-subdomain
- * attacker can plant a cookie but cannot know the session id, and a stateless
- * token — which anyone can mint — is rejected); stateless must match the
- * `XSRF-TOKEN` cookie. TODO: drop the legacy session-stored fallback once all
- * pre-upgrade sessions have aged out (a major release).
+ * attacker can plant a cookie but cannot know the session id; a stateless
+ * token, which anyone can mint, is rejected); stateless must match the
+ * `XSRF-TOKEN` cookie. TODO: drop the legacy session-stored fallback in a major release.
  */
 export function verifyCsrfToken(ctx: Context, token: string | undefined): boolean {
   if (!token) {
@@ -273,12 +270,10 @@ async function getTokenFromRequest(ctx: Context): Promise<string | undefined> {
 
 /**
  * Issues a signed `XSRF-TOKEN` on safe requests and verifies it on
- * state-changing ones, from a `_token` field or an `X-CSRF-TOKEN` /
- * `X-XSRF-TOKEN` header. `cookie: false` suits session-authenticated flows
- * only — guest (stateless) tokens need the cookie to verify. **Mount it
- * directly inside the session middleware:** the response cookie is settled
- * after the handler, so anything between the two that mutates the session
- * after its own `await next()` moves the id once this has committed.
+ * state-changing ones (`_token` field, `X-CSRF-TOKEN` / `X-XSRF-TOKEN` header).
+ * `cookie: false` suits session-authenticated flows only; guest tokens need the
+ * cookie. **Mount directly inside the session middleware:** anything between
+ * the two that mutates the session after its own `await next()` moves the id after this has committed.
  */
 export function createCsrfMiddleware(options: CsrfOptions = {}): MiddlewareHandler {
   const {

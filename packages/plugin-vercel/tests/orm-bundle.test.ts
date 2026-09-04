@@ -5,14 +5,11 @@ import { join } from 'node:path'
 import { DATABASE_DIALECTS, type DatabaseDialect } from '@guren/core/internal/deploy-build'
 import { buildVercelOutput } from '../src/index'
 
-// Opt-in end-to-end contract test (GUREN_TEST_BUNDLE=1, like the Workers bundle
-// test's GUREN_TEST_WRANGLER; the nightly canary sets both): can `vercel:build`
-// bundle an app importing `@guren/orm` with only its own database client
-// installed? `@guren/orm` names every dialect's client in a *literal* dynamic
-// import, which a bundler follows whether or not the branch can be taken, so a
-// Postgres app failed on `Could not resolve "mysql2"`. Over-stubbing matters
-// here and did not on Workers: the client the app *does* use is load-bearing.
-// Assertions are about behaviour — the stub's text is dropped with its branch.
+// Opt-in contract test (GUREN_TEST_BUNDLE=1, like the Workers bundle test's
+// GUREN_TEST_WRANGLER; the nightly canary sets both): `vercel:build` bundles an
+// `@guren/orm` app with only its own database client, which the ORM's *literal*
+// dynamic import of every dialect's client otherwise breaks. Over-stubbing matters
+// here and not on Workers: the client the app *does* use is load-bearing.
 const enabled = process.env.GUREN_TEST_BUNDLE === '1'
 
 /**

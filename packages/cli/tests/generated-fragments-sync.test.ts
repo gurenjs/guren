@@ -13,19 +13,10 @@ const repoRoot = join(import.meta.dir, '../../..')
 
 /**
  * Tracked generated artifacts must carry the current generator's fragments.
- *
  * Nothing else guards this: the starter smokes typecheck the shipped stubs
- * without regenerating them, so a fragment edit that skips the committed
- * `.guren` trees ships starters whose runtime differs from what
- * `guren codegen` produces — and CI stays green. This is how examples/api
- * once kept the pre-fix substitution for a full release cycle: it has no
- * `.guren.gitignore` (examples/blog does — see its `.gitignore`), so it is
- * tracked and in scope here.
- *
- * The inertia-client hand-mirror itself is pinned by
- * routes-types-fragments.test.ts, in the same package as the fragments it
- * mirrors; this file only covers the artifacts that pin isn't positioned to
- * see.
+ * without regenerating them, so a stale committed `.guren` tree ships with CI
+ * green. examples/api is tracked (no `.guren` gitignore, unlike examples/blog).
+ * The inertia-client hand-mirror is pinned by routes-types-fragments.test.ts.
  */
 const TRACKED_ROUTE_MODULES = [
   'packages/create-app/templates/default/.guren/routes.gen.ts',

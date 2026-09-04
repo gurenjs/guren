@@ -11,9 +11,7 @@ export interface MemoryDriverOptions {
   /**
    * How many published events `getPublishedEvents()` keeps, oldest dropped
    * first; `0` turns recording off. The record is for tests, but the driver
-   * also serves single-server deployments, where an unbounded one is a leak
-   * the size of the app's traffic.
-   *
+   * also serves single-server deployments, where an unbounded one is a leak.
    * @default 1000
    */
   maxPublishedEvents?: number

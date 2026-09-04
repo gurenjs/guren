@@ -6,14 +6,11 @@ import { generatePageTypes } from '../src/pages-types'
 import { generateRouteTypes } from '../src/routes-types'
 import { writeGeneratedFile } from '../src/utils'
 
-// Codegen re-runs on every save the Vite plugin watches, and controllers
-// import the results, so rewriting byte-identical output bumps the mtime of a
-// file the backend watcher is on: a frontend-only edit restarts the server and
-// kills the browser's HMR connection.
-//
-// Two writes can land inside one filesystem timestamp tick and compare equal,
-// so each test back-dates the artifact first and pairs the no-op case with a
-// control asserting the mtime does move when the output changes.
+// Codegen re-runs on every save the Vite plugin watches, and controllers import
+// the results, so a byte-identical rewrite bumps the mtime of a file the backend
+// watcher is on: a frontend-only edit restarts the server and kills HMR.
+// Two writes can land inside one filesystem timestamp tick, so each test
+// back-dates the artifact first and pairs the no-op case with a moving control.
 
 const BACKDATED_SECONDS = 1000
 const BACKDATED_MS = BACKDATED_SECONDS * 1000

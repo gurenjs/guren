@@ -39,7 +39,7 @@ describe('AuthenticatableModel', () => {
 
     class User extends AuthenticatableModel<UserRecord> {
       static override table = 'users'
-      // Direct extension: createType no longer widens to PlainObject, so declare the payload.
+      // Direct extension: createType does not widen to PlainObject, so declare the payload.
       declare static readonly createType: Partial<UserRecord> & { password?: string }
     }
 

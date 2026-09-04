@@ -159,8 +159,7 @@ export interface RateLimitOptions {
    * Trust reverse-proxy headers for client IP, in order: `CF-Connecting-IP`,
    * `True-Client-IP`, `X-Real-IP`, first entry of `X-Forwarded-For`; falls back
    * to `server.requestIP()`. Enable ONLY behind a proxy that sets or strips
-   * them — otherwise clients spoof them to bypass per-client limits. Ignored
-   * when a custom `keyGenerator` is supplied.
+   * them, or clients spoof them to bypass limits. Ignored with a custom `keyGenerator`.
    * @default false
    */
   trustProxy?: boolean
@@ -241,7 +240,6 @@ function getDefaultStore(): MemoryRateLimitStore {
 
 /**
  * Create a rate limiting middleware.
- *
  * @example
  * ```ts
  * app.use('*', createRateLimitMiddleware({ limit: 100, windowMs: 60000 }))

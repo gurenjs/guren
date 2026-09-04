@@ -1,16 +1,12 @@
 /**
  * Zod 4 schema-reading primitives shared by everything that reads an
- * application's schemas without parsing: the JSON Schema walker next door, and
- * `@guren/cli`'s type renderer and route contract check.
- * Internal per `contributing/api-stability.md`; it sits here rather than in
- * `@guren/core` for the build-order reason `zod-json-schema.ts`'s header gives,
- * and `@guren/core/internal/zod-compat` re-exports it.
- * Zod 4 only: a v3 node (which tags `_def.typeName` and overloads `_def.type`
- * to hold a nested schema) is detected up front and refused, so everything
- * below assumes `_def.type` is always the type name.
- * Deliberately absent: the two switches turning a node into an output, and each
- * caller's `isOptional` — those are rendering decisions and approximations,
- * not schema reading.
+ * application's schemas without parsing: the JSON Schema walker next door and
+ * `@guren/cli`'s type renderer and route contract check. Internal per
+ * `contributing/api-stability.md`; it lives here rather than in `@guren/core` for
+ * the build-order reason `zod-json-schema.ts`'s header gives, re-exported by
+ * `@guren/core/internal/zod-compat`. Zod 4 only: a v3 node (tags `_def.typeName`,
+ * overloads `_def.type` with a nested schema) is refused up front, so `_def.type`
+ * is always the type name here. Rendering decisions (node → output, `isOptional`) stay with callers.
  */
 
 export interface ZodSchemaLike {

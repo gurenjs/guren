@@ -2,12 +2,11 @@
  * `guren tool:call` — invoke one agent tool against the real application (RFC 0016 §6).
  *
  * No second dispatch path: `deriveAgentTools`, `buildToolRequest`, `app.fetch`,
- * `mapToolResponse` — the same three calls `@guren/plugin-mcp` makes, so what this shows
- * is what an agent actually gets. Tools come from the *booted* app's own
- * `router.definitions()`, not `listTools()`'s file scan, which both misses routes
- * registered at boot and includes unmounted `modules/<name>/` on disk; that is also why
- * there is no `--routes` flag here. And the call is recorded: `'cli'` is one of RFC 0016
- * §5.2's four surfaces, through the emitter the app bound (see {@link resolveAuditEmitter}).
+ * `mapToolResponse` — the same calls `@guren/plugin-mcp` makes, so what this shows is
+ * what an agent actually gets. Tools come from the *booted* app's `router.definitions()`,
+ * not `listTools()`'s file scan, which misses routes registered at boot and includes
+ * unmounted `modules/<name>/` on disk — hence no `--routes` flag. The call is recorded:
+ * `'cli'` is one of RFC 0016 §5.2's four surfaces, via the emitter the app bound ({@link resolveAuditEmitter}).
  */
 import { consola } from 'consola'
 import {

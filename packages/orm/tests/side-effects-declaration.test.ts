@@ -3,16 +3,11 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 /**
- * Pins the `"sideEffects"` array in packages/orm/package.json to the files that
- * actually carry the side effect.
- *
- * `src/instance-guard.ts` detects a second copy of @guren/orm in one process
- * ("database has not been configured" on models from the extra copy). It is
- * imported for that effect alone, so a bundler told the package is side-effect-free
- * drops it. The entries must name what the build emits: `./dist/instance-guard.js`
- * matches nothing while tsdown bundles the guard into the barrel, and giving it its
- * own entry only moves the guard off `./dist/index.js`. A wrong path fails open —
- * everything builds and passes, and the loss appears only in a bundled app.
+ * Pins `"sideEffects"` in packages/orm/package.json to the files carrying the
+ * effect: `src/instance-guard.ts` (second-copy-of-@guren/orm detection) is
+ * imported for that alone, so a side-effect-free package drops it. Entries must
+ * name what the build emits — tsdown bundles the guard into the barrel, so
+ * `./dist/instance-guard.js` matches nothing. A wrong path fails open until bundled.
  */
 
 const ORM_ROOT = join(import.meta.dir, '..')

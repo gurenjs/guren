@@ -24,11 +24,10 @@ export interface VariantSpec {
 
 /**
  * Per-variant status entry in the row's `variants` JSON column. Every *declared*
- * variant gets an entry at attach time, which is what lets `attachmentUrl()`
- * tell "not yet generated" (fall back) from "never declared" (throw).
- *
- * `pending` is queued generation, `ready` means the object exists at `path`,
- * `failed` was attempted, `unavailable` means the runtime has no processor.
+ * variant gets an entry at attach time, which lets `attachmentUrl()` tell "not
+ * yet generated" (fall back) from "never declared" (throw). `pending` is queued,
+ * `ready` means the object exists at `path`, `failed` was attempted,
+ * `unavailable` means the runtime has no processor.
  */
 export interface AttachmentVariantRecord {
   status: 'pending' | 'ready' | 'failed' | 'unavailable'
@@ -92,11 +91,9 @@ export interface AttachmentData {
 /**
  * Image processing behind the attachments pipeline. The default wraps
  * `Bun.Image`; other runtimes inject their own via
- * `configureAttachments({ processor })`.
- *
- * Implementations signal an OS-level codec gap by throwing with `code ===
- * 'ERR_IMAGE_FORMAT_UNSUPPORTED'` — format support is a runtime property, so
- * that code is the only authority the pipeline branches on.
+ * `configureAttachments({ processor })`. An OS-level codec gap is signalled by
+ * throwing with `code === 'ERR_IMAGE_FORMAT_UNSUPPORTED'`; format support is a
+ * runtime property, so that code is the only thing the pipeline branches on.
  */
 export interface ImageProcessor {
   /**

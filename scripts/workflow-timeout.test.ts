@@ -5,13 +5,11 @@ import { join } from 'node:path'
 import { repoRoot } from './workspace-packages.ts'
 
 /**
- * A job with no `timeout-minutes` inherits GitHub's 6-hour default — a cap on
- * how long a *hang* holds a runner. The Bun 1.4.0 trial lane hit
- * oven-sh/bun#34069 four times in one day, sitting `in_progress` 11 to 57
- * minutes until cancelled by hand. The property is totality: every job declares
- * one, read off disk rather than from a list, with caps well above the observed
- * ceiling. Parsed rather than pattern-matched, since `timeout-minutes` on a
- * *step* caps that step only and two steps in ci.yml are named `Run tests`.
+ * A job with no `timeout-minutes` inherits GitHub's 6-hour default, a cap on how
+ * long a *hang* holds a runner: the Bun 1.4.0 lane hit oven-sh/bun#34069 four
+ * times in one day, `in_progress` 11 to 57 minutes until cancelled by hand. Every
+ * job must declare one, read off disk, with caps well above that ceiling. Parsed,
+ * not pattern-matched: `timeout-minutes` on a *step* caps that step only.
  */
 const WORKFLOW_DIR = join(repoRoot, '.github/workflows')
 

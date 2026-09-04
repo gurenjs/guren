@@ -93,13 +93,11 @@ export class ModelUserProvider<User extends Authenticatable = Authenticatable> e
     }
 
     const hashed = (user as PlainObject)[this.passwordColumn]
-    // A column holding something that is not a password hash means the account
-    // cannot authenticate with one: null, empty, or a sentinel such as the
-    // `passwordHash: 'oauth:...'` this repo documents. That is a failed login,
-    // not a server error — handing it to the hasher throws, surfacing as a 500
-    // that tells an attacker the address belongs to an OAuth account while an
-    // unknown address gets a 401. A value that *claims* a hash format and fails
-    // it keeps throwing: that is a corrupt column, and silence hides it.
+    // A column that is not a password hash (null, empty, or a sentinel such as
+    // `passwordHash: 'oauth:...'`) is a failed login, not a server error: handing
+    // it to the hasher throws, and that 500 tells an attacker the address is an
+    // OAuth account while an unknown address gets a 401. A value that claims a
+    // hash format and fails it still throws: a corrupt column, and silence hides it.
     if (typeof hashed !== 'string' || !looksLikePasswordHash(hashed)) {
       // Run a dummy hash to prevent timing-based user enumeration.
       await this.hasher.hash('dummy-timing-equalization')

@@ -30,12 +30,11 @@ type InstallMode = (typeof INSTALL_MODES)[number]
 const repoRoot = resolve(import.meta.dir, '../..')
 
 /**
- * The `--fields` the resource blueprint is scaffolded with.
- *
- * Derived from `FIELD_TYPES`, not written out: this is the only gate that
- * *compiles* the per-type code the resource builders emit, and a hand-written
- * list would keep claiming full coverage after a new type is added. Nullable
- * and non-nullable per type, since those render differently.
+ * The `--fields` the resource blueprint is scaffolded with, derived from
+ * `FIELD_TYPES`: this is the only gate that *compiles* the per-type code the
+ * resource builders emit, and a hand-written list would keep claiming full
+ * coverage after a new type is added. Nullable and non-nullable per type,
+ * since those render differently.
  */
 const RESOURCE_FIELDS = FIELD_TYPES.flatMap((type) => [
   `${type}Field:${type}`,
@@ -69,13 +68,11 @@ const DEFAULT_BLUEPRINT_FEATURES: readonly (readonly string[])[] = [
 ]
 
 /**
- * Fail when the CLI grows a blueprint this smoke does not scaffold.
- *
- * The pointer back from packages/cli/tests/blueprints.test.ts, where a new
- * blueprint gets added. Imported dynamically because packages/cli/src/blueprints
- * reaches @guren/server through untracked dist/: a top-level import evaluates
- * before ensureBuiltPackages(), turning a missing build into a resolution error
- * instead of the message that names the fix.
+ * Fail when the CLI grows a blueprint this smoke does not scaffold (the pointer
+ * back from packages/cli/tests/blueprints.test.ts). Imported dynamically because
+ * packages/cli/src/blueprints reaches @guren/server through untracked dist/: a
+ * top-level import evaluates before ensureBuiltPackages(), turning a missing
+ * build into a resolution error instead of the message that names the fix.
  */
 async function assertCoversEveryBlueprint(): Promise<void> {
   const { listBlueprints } = await import('../../packages/cli/src/blueprints')
@@ -90,12 +87,10 @@ async function assertCoversEveryBlueprint(): Promise<void> {
 }
 
 /**
- * Run the feature blueprints through *this checkout's* CLI.
- *
- * In npm mode this is what lets the gate fail: the app's own installed `guren`
- * ships published blueprints, so it would emit published templates against
- * published packages. Templates from here, dependencies from the registry, is
- * the mismatch the drift check measures.
+ * Run the feature blueprints through *this checkout's* CLI. In npm mode this is
+ * what lets the gate fail: the app's installed `guren` ships published blueprints
+ * and would emit published templates against published packages. Templates from
+ * here, dependencies from the registry, is the mismatch the drift check measures.
  */
 async function addDefaultBlueprintFeatures(
   appDir: string,
@@ -474,12 +469,10 @@ async function assertFeatureScaffolds(appDir: string): Promise<void> {
 
 /**
  * Install the scaffolded app from the registry, scaffold its features with this
- * checkout's CLI, and typecheck the result.
- *
- * Resolving the template's own ranges is the point: this fails whenever any
- * template uses an API that exists only in this repository, which the other
- * install modes and the root `typecheck` (it excludes `templates`) cannot see.
- * Deliberately runs no build, test, check or audit — the vendored mode owns them.
+ * checkout's CLI, and typecheck the result. Resolving the template's own ranges is
+ * the point: this fails whenever a template uses an API that exists only in this
+ * repository, which the other install modes and the root `typecheck` (it excludes
+ * `templates`) cannot see. No build, test, check or audit: the vendored mode owns them.
  */
 async function runPublishedDependencyDrift(
   appDir: string,
@@ -563,12 +556,10 @@ async function runPublishedDependencyDrift(
 
 /**
  * Typecheck the app through its own `typecheck` script, and assert tsc actually
- * read the files it was supposed to.
- *
- * The bug `--listFiles` exists for: `"include": [".guren"]` matches no files,
- * since TypeScript expands a bare directory to a wildcard whose matcher skips
+ * read the files it was supposed to. `"include": [".guren"]` matches no files:
+ * TypeScript expands a bare directory to a wildcard whose matcher skips
  * dot-prefixed segments. Imported files still arrive through the import graph,
- * so the ones nothing imports are the tell.
+ * so the ones nothing imports are the tell (`--listFiles`).
  */
 async function typecheckApp(appDir: string, runtimeEnv: Record<string, string>): Promise<string[]> {
   const output = await runCapture(['bun', 'run', 'typecheck', '--listFiles'], appDir, runtimeEnv)

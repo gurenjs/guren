@@ -18,8 +18,7 @@ export function singularize(name: string): string {
  * export, the model's import of it, and `guren check`'s lookup only agree
  * because all three derive the name here. A lone trailing `s` reads as plural,
  * so a singular `Status` becomes `Statu`; route slugs and generated type names
- * therefore pluralize directly, and `dbArtifactPattern()` treats the result as
- * one spelling among several.
+ * pluralize directly, and `dbArtifactPattern()` treats the result as one spelling.
  */
 export function collectionName(name: string): string {
   return pluralize(singularize(name))

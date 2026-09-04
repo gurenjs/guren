@@ -131,11 +131,12 @@ tags the framework reads (`@docs`, `@deprecated`, `guren-audit-ignore`), comment
 test reads as source text, and comments inside template literals (they are
 generated output, not commentary).
 
-`bun run audit:comments` (`scripts/comment-lint.ts`) enforces the mechanical half,
-ratcheted per file against main, and runs as a PostToolUse hook after every edit.
-A comment that genuinely must exceed the limit carries `comment-lint-ignore` with
-the reason on the same block. Whether a comment merely narrates the code is a
-review judgment: the `code-review` agent checks it on every diff.
+The `guren/comment-*` oxlint rules (`scripts/lint/comments.js`; `bun run lint`, and
+the PostToolUse hook after every edit) enforce the mechanical half. A block that
+genuinely must exceed the limit (a test pins its text, or every line is a measured
+fact) carries, on the line above it, `// oxlint-disable-next-line guren/comment-length -- <reason>`.
+Whether a comment merely narrates the code is a review judgment: the `code-review`
+agent checks it on every diff.
 
 ```typescript
 // Bad: restates the code

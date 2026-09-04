@@ -4,13 +4,10 @@ import { join } from 'node:path'
 
 /**
  * Pins the premise behind `"sideEffects": false` in packages/server/package.json:
- * nothing in `src/` may be imported *purely* for a side effect, which is what lets
- * a deployed function drop unimported subsystems (roughly 40% of the bundle).
- *
- * Source-level because `bun test` never bundles — a violation stays green
- * everywhere and surfaces only as a subsystem that silently stopped initialising.
- * Deliberately narrow: bare imports only, so a module with exports plus top-level
- * statements (`src/http/dev-banner.ts`) is not flagged.
+ * nothing in `src/` may be imported purely for a side effect, which is what lets a
+ * deployed function drop unimported subsystems (roughly 40% of the bundle).
+ * Source-level because `bun test` never bundles. Bare imports only, so a module
+ * with exports plus top-level statements (`src/http/dev-banner.ts`) is not flagged.
  */
 
 const SERVER_ROOT = join(import.meta.dir, '..')

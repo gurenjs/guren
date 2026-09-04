@@ -1,19 +1,12 @@
 /**
  * The OAuth consent screen for this application's own agent tools, scaffolded
  * once by `guren cloudflare:build --mcp-oauth` and yours to edit from here.
- * `@cloudflare/workers-oauth-provider` owns every other part of the flow —
- * discovery, client registration, the token endpoint, PKCE, refresh, `props`
- * encryption — and hands back the one decision it cannot make: who is signed in
- * and what they agreed to. The markup is in `app/View/`, rendered by
- * `Controller.view()` (RFC 0014).
- *
- * The tools are derived live from the router, never read from
- * `.guren/agents.gen.ts`: a build artifact can be stale, and a screen omitting a
- * tool the dispatcher would allow is the one bug it cannot have. The grant is an
- * intersection of what the client asked for, because the provider does not
- * enforce that and a form is user input. Off Workers `getWorkersEnv` throws at
- * request time rather than import time, so `guren codegen`, `guren check` and
- * your tests can still import this file.
+ * `@cloudflare/workers-oauth-provider` owns the rest of the flow (discovery,
+ * registration, tokens, PKCE, refresh, `props` encryption) and hands back the one
+ * decision it cannot make: who is signed in and what they agreed to. Markup is in
+ * `app/View/` (RFC 0014). Tools come live from the router, never from a stale
+ * `.guren/agents.gen.ts`; the grant is intersected with the client's request, as
+ * the provider does not enforce that. Off Workers `getWorkersEnv` throws at request time.
  */
 import {
   CSRF_FORM_FIELD,
@@ -86,19 +79,17 @@ export default class McpOAuthController extends Controller {
     }
 
     // `all: true` turns the repeated `scope` checkboxes into an array instead of
-    // the last one winning. The CSRF middleware already called `parseBody()`
-    // with no options, but Hono keys its body cache on those options rather than
-    // on the request alone, so this second call still returns the array —
-    // measured, and kept standing by @guren/plugin-cloudflare's
-    // `tests/hono-parse-body.test.ts` across Hono upgrades.
+    // the last one winning. The CSRF middleware already called `parseBody()` with
+    // no options, but Hono keys its body cache on those options rather than on the
+    // request alone, so this call still returns the array — measured, and kept
+    // standing by @guren/plugin-cloudflare's `tests/hono-parse-body.test.ts`.
     const form = await this.ctx.req.parseBody({ all: true })
 
     // Verified here as well as by the global CSRF middleware, because this form
-    // must not depend on that middleware being mounted: an app with
-    // `autoSession: false` or its own chain may not have it, and the rendered
-    // token looks convincing either way, so the screen would look protected
-    // while any site could POST a grant. Through the framework's own
-    // `verifyCsrfToken`, never a comparison written here.
+    // must not depend on that middleware being mounted: with `autoSession: false`
+    // or a custom chain it may be absent, and the rendered token looks convincing
+    // either way, so the screen would look protected while any site could POST a
+    // grant. Through the framework's own `verifyCsrfToken`, never a comparison here.
     if (!verifyCsrfToken(this.ctx, single(form[CSRF_FORM_FIELD]))) {
       return this.errorPage(
         419,
@@ -163,11 +154,10 @@ export default class McpOAuthController extends Controller {
 
   /**
    * The provider helpers, from the Workers env this request captured.
-   * `getWorkersEnv()` is first-call-wins, which is safe here because
-   * `OAuthProvider` injects `OAUTH_PROVIDER` into `env` on *both* of its paths
-   * before either handler runs (read out of the published `oauth-provider.js`),
-   * so the absence below is diagnostic rather than a race. Wrapped so the
-   * failure names the cause: not on Workers, or built without `--mcp-oauth`.
+   * `getWorkersEnv()` is first-call-wins, safe here because `OAuthProvider`
+   * injects `OAUTH_PROVIDER` into `env` on *both* of its paths before either
+   * handler runs (read out of the published `oauth-provider.js`), so an absence
+   * is diagnostic, not a race: not on Workers, or built without `--mcp-oauth`.
    */
   private provider(): OAuthHelpers {
     let env: WorkerEnvWithProvider

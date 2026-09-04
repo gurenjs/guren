@@ -44,17 +44,11 @@ function isInMemory(dbPath: string): boolean {
 }
 
 /**
- * The filesystem path to open for `dbPath`, or undefined when there is no file
- * to name — the in-memory forms and the URIs this cannot resolve, which go to
- * `new Database()` to be refused with no directory created.
- *
- * `file:` names a file, not a server, but it is not a path either, and whether
- * the host's sqlite parses it is not knowable here: URI filenames are the
- * compile-time `SQLITE_USE_URI`, and measured, Bun on macOS has it on via the
- * system libsqlite3 while Bun's Linux build reads `file:local.db` as a literal
- * filename. The rules followed are sqlite's (https://sqlite.org/uri.html), not
- * the WHATWG parser's — `new URL('file:local.db')` gives `/local.db`, at the
- * filesystem root, where sqlite resolves against the cwd.
+ * Path to open for `dbPath`; undefined for in-memory forms and unresolvable
+ * URIs, which `new Database()` refuses with no directory created. `file:` URI
+ * support is compile-time `SQLITE_USE_URI` (measured: on for Bun/macOS via system
+ * libsqlite3, off in Bun's Linux build, which opens `file:local.db` literally), so
+ * parsing follows https://sqlite.org/uri.html, not WHATWG (`/local.db` vs the cwd).
  */
 function sqliteFilePath(dbPath: string): string | undefined {
   if (isInMemory(dbPath)) return undefined

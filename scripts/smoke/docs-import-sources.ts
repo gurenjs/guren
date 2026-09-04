@@ -1,49 +1,12 @@
 /**
- * Prove that every named import in a docs snippet names a symbol its specifier
- * actually exports — the gap that let `import { mcpPlugin } from '@guren/core'`
- * ship, when `mcpPlugin` only ever came from `@guren/plugin-mcp`.
- *
- * Four decisions, each with a cheaper wrong answer:
- *
- * 1. IMPORTS ARE EXTRACTED TEXTUALLY, EACH STATEMENT PARSED IN ISOLATION.
- *    67 of the 1286 TypeScript fences under `docs/` are deliberate fragments
- *    @babel/parser cannot parse even with `errorRecovery`, and there the AST
- *    reports *zero* imports while real ones sit in the text; an AST-only reader
- *    passes those files by never having read them. `crossCheckExtraction()`
- *    keeps the textual scan honest: on every cleanly parsing fence the two
- *    import lists must agree (1219/1219 today), and a disagreement is a gate
- *    error rather than a missing finding.
- *
- * 2. THE EXPORT SURFACE COMES FROM THE ENTRY POINT, TRANSITIVELY, never from
- *    globbed implementation files: a symbol present in a file but not
- *    re-exported is not exported, and a rename would be missed entirely
- *    (`packages/core/src/index.ts` reaches ORM names through an allowlist, so
- *    `src/` membership and export membership differ there by design). A
- *    package's `exports` map names the entry point; `./dist/X.js` maps back to
- *    `src/X.ts` | `src/X.tsx` | `src/X/index.ts`, and re-exports are followed
- *    through relative files and on into sibling `@guren/*` entry points.
- *
- * 3. TYPE AND VALUE EXPORTS GO IN ONE SET; `import type` IS NOT DISTINGUISHED.
- *    A name absent from the merged set cannot compile however it is imported,
- *    which is sound without a type checker. The converse ("this is a value, not
- *    a type") is not, so this gate does not claim it.
- *
- * 4. UNRESOLVABLE FAILS. UNKNOWABLE IS REPORTED, NEVER SKIPPED. An unknown
- *    `@guren/*` package, a subpath absent from the `exports` map, an unfindable
- *    entry-point source, or an unresolvable re-export target all fail: an
- *    unavailable check is not a green one. The exception is an *open* surface —
- *    `@guren/orm/drizzle/pg` and the jsx runtimes `export *` from a third-party
- *    package — where absence is unprovable, so no verdict is issued and
- *    `openEntryPoints` names it on every run instead. Their known names still
- *    feed the reverse index. A package *root* going open fails in
- *    `docs-audit.ts`, since most snippets import from a root.
- *
- * A finding names the file, line, symbol, specifier, and which first-party
- * entry points do export the symbol; when the only exporters are `@guren/server`
- * or its subpaths it says so, because swapping the specifier there trades this
- * failure for an `audit:core-first` one.
- *
- * No top-level side effects: `docs-audit.ts` drives it, and the tests import it.
+ * Every named import in a docs snippet must name a symbol its specifier exports.
+ * Imports are extracted textually, one statement at a time: 67 of 1286 TS fences
+ * are fragments whose AST reports zero imports. `crossCheckExtraction()` fails the
+ * gate when text and AST disagree on a cleanly parsing fence (1219/1219 agree).
+ * The surface is the `exports` entry point, followed transitively; type and value
+ * names share one set, so absence is sound but "is a value" is never claimed.
+ * Unresolvable fails; an open surface (`export *` from a third-party package) is
+ * reported in `openEntryPoints`, never skipped. No top-level side effects.
  */
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { join, relative, dirname, resolve } from 'node:path'
@@ -576,12 +539,10 @@ export async function auditDocsImportSources(root: string, docsDir = 'docs'): Pr
           })
           continue
         }
-        // The specifier is resolved for every import; only the per-symbol loop is
-        // skipped when nothing is named. A namespace or bare import names no
-        // symbols, and returning here would exempt it from the check that still
-        // applies: that the package and subpath exist (decision 4). The one
-        // exception is an asset subpath, which has no surface to read but must
-        // still be declared in the exports map.
+        // The specifier is resolved for every import: a namespace or bare import
+        // names no symbols but must still hit an existing package and subpath.
+        // The one exemption is an asset subpath, which has no surface to read
+        // but must still be declared in the exports map.
         if (names.length === 0 && entryPoints.get(entry.specifier)?.kind === 'asset') {
           continue
         }

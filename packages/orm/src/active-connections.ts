@@ -2,12 +2,11 @@
  * Closes the database client a previous module evaluation left open.
  *
  * `bun --hot` re-runs the module graph in-process: a `create*Database()`
- * factory's cached client resets but the connection it opened leaks, one per
- * reload. Bun exposes no `import.meta.hot` under `--hot` (checked on 1.3.14),
- * so the previous teardown is parked on `globalThis`, which survives
- * re-evaluation. Handles are keyed by caller file + target, not line (any edit
- * above moves a line), so two handles built in one file against one database
- * share a key; give them separate modules.
+ * factory's cached client resets but its connection leaks, one per reload.
+ * Bun exposes no `import.meta.hot` under `--hot` (checked on 1.3.14), so the
+ * teardown is parked on `globalThis`, which survives re-evaluation. Handles are
+ * keyed by caller file + target, not line, so two handles built in one file
+ * against one database share a key; give them separate modules.
  */
 
 type Teardown = () => Promise<void> | void

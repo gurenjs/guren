@@ -1,35 +1,12 @@
 /**
- * Build the docs search index that D1 serves.
- *
- * Reads the docs already rendered into `.guren/docs.gen.ts` and writes two
- * files, neither of them committed:
- *
- *   .guren/search-index.sql     — applied to D1 by the deploy workflow
- *   .guren/search-index.gen.ts  — the table names, baked into the Worker
- *
- * Ordering matters in both directions, and `vite build` is not one of them:
- * `.cloudflare/worker.js` imports `src/app.ts` by path, so wrangler bundles
- * the app — and reads the generated module — at deploy time. What this has to
- * sit between is the docs prerender, which it reads, and `wrangler deploy`,
- * which is what bakes the table names in and what the SQL has to precede.
- * Nothing goes in `.cloudflare/` either: `buildCloudflareOutput()` deletes
- * that directory wholesale (packages/plugin-cloudflare/src/build.ts).
- *
- *   bun run --cwd web cloudflare:build    # prerenders, then builds this
- *   wrangler d1 execute … --file=.guren/search-index.sql   # if the id moved
- *   wrangler deploy
- *
- * Every build names its own tables and the deploy is what switches between
- * them. Two reasons it has to work that way: a contentless FTS5 table cannot
- * be emptied (`DELETE` fails outright), and D1 has no explicit transactions,
- * so there is no moment at which a rename could be made atomic against a
- * Worker that is still serving.
- *
- * Usage:
- *   bun scripts/build-search-index.ts          # real build
- *   bun scripts/build-search-index.ts --stub   # write an empty generated
- *                                              # module if none exists, so
- *                                              # tsc/dev/test resolve it
+ * Build the docs search index D1 serves, from `.guren/docs.gen.ts`. Writes two
+ * uncommitted files: `.guren/search-index.sql` (applied to D1 by the deploy
+ * workflow) and `.guren/search-index.gen.ts` (table names, bundled into the
+ * Worker by wrangler at deploy time). Runs after the docs prerender and before
+ * `wrangler deploy`; never into `.cloudflare/`, which `buildCloudflareOutput()`
+ * deletes wholesale. Every build names its own tables: a contentless FTS5 table
+ * cannot be emptied (`DELETE` fails) and D1 has no transactions to make a
+ * rename atomic against a serving Worker. `--stub` writes an empty module if none exists.
  */
 import { closeSync, mkdirSync, openSync, statSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'

@@ -1,13 +1,12 @@
 /**
  * Rewrites extensionless relative import specifiers in emitted .d.ts files to
  * explicit .js specifiers (./foo -> ./foo.js, ./dir -> ./dir/index.js).
+ * Usage: bun scripts/fix-dts-extensions.ts <distDir>
  *
  * `tsc --emitDeclarationOnly` preserves source specifiers verbatim, but an ESM
  * package's declarations must be runtime-resolvable for consumers on
  * `moduleResolution: node16`/`nodenext` (TS maps the .js specifier back to the
  * sibling .d.ts). Bundler-resolution consumers accept both forms.
- *
- * Usage: bun scripts/fix-dts-extensions.ts <distDir>
  */
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'

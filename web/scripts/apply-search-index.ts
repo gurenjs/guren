@@ -1,25 +1,12 @@
 /**
  * Load this build's docs search index into D1, unless it is already there.
- *
- * The gate is not an optimisation. Every reindex writes ~4,700 rows counting
- * FTS5's shadow tables, and D1's free tier allows 100,000 written rows a day;
- * at the observed peak deploy rate, reindexing unconditionally would exceed
- * that on its own. Deploys that do not touch `docs/` — the large majority —
- * must cost nothing here.
- *
- * The comparison is sound because the build id is a hash of the indexed
- * content and of nothing else (see app/Services/search-index-build.ts). If a
- * clock or a commit sha could move it, this would reindex every time; if
- * something outside the corpus could hold it *still*, the deploy would name
- * tables nobody created.
- *
- * Runs before `wrangler deploy`, which is the moment the new table names go
- * live. If this step fails the deploy does not happen and the old index keeps
- * serving; if it succeeds and the deploy then fails, the new tables sit
- * unused until the next one, which is the harmless direction.
- *
- *   bun scripts/apply-search-index.ts            # remote (deploy)
- *   bun scripts/apply-search-index.ts --local    # rehearse against wrangler dev
+ * The gate is a budget: a reindex writes ~4,700 rows (FTS5 shadow tables
+ * included) against D1's free tier of 100,000 a day, and the observed peak
+ * deploy rate alone would exceed that. Sound because the build id hashes the
+ * indexed content and nothing else (app/Services/search-index-build.ts). Runs
+ * before `wrangler deploy`: a failure here stops the deploy and the old index
+ * keeps serving; a deploy failing afterwards leaves the new tables unused.
+ *   bun scripts/apply-search-index.ts [--local]   # --local rehearses against wrangler dev
  */
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'

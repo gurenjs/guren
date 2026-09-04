@@ -9,9 +9,8 @@ import type {
  * Parse a command signature: `command:name`, then `{arg}` `{arg?}` `{arg=default}`
  * `{arg*}` (array, must be last) and `{--opt}` `{--opt=}` `{--opt=default}`
  * `{--opt=*}` `{-o|--opt}`, each optionally followed by ` : Description`. The
- * separator needs whitespace on at least one side, which keeps colons inside
- * default values out of descriptions; unspaced `{arg:Description}` is accepted
- * only on a token carrying no other marker.
+ * separator needs whitespace on at least one side (keeps colons in defaults out
+ * of descriptions); unspaced `{arg:Description}` only on a token with no other marker.
  */
 export function parseSignature(signature: string): ParsedSignature {
   const { name, tokens } = tokenizeSignature(signature)

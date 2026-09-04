@@ -2,12 +2,10 @@ import type { AuditFinding } from './audit'
 
 /**
  * Dependency vulnerability scan for `guren audit` (RFC 0007): runs
- * `bun audit --json` in the app and converts advisories into findings.
- *
- * Exit 0 (clean) or 1 (advisories) carry valid JSON; any other code is an
- * execution/registry failure. The shape is validated, not assumed, and "could
- * not scan" is its own status, never a pass. Keep in step with
- * scripts/smoke/dependency-audit.ts, which reads the same output shape.
+ * `bun audit --json` in the app and converts advisories into findings. Exit 0
+ * (clean) or 1 (advisories) carry valid JSON; any other code is an execution or
+ * registry failure. The shape is validated, not assumed, and "could not scan" is
+ * its own status, never a pass. Keep in step with scripts/smoke/dependency-audit.ts.
  */
 
 export interface DependencyScan {

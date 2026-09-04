@@ -45,7 +45,7 @@ Review code changes and provide constructive, actionable feedback.
 - [ ] No change history ("used to", "previously", "no longer"): that belongs in the commit message
 - [ ] Within the size limits `.claude/rules/coding-standards.md` sets, one fact per line; longer blocks are compressed, not kept
 - [ ] `@param`/`@returns`/`@example` carry something the signature does not
-- [ ] `bun run audit:comments` passes; a `comment-lint-ignore` marker names its reason
+- [ ] `bun run lint` passes; an `oxlint-disable-next-line guren/comment-*` marker names its reason
 
 ### Guren Patterns
 - [ ] Controllers extend `Controller` base class

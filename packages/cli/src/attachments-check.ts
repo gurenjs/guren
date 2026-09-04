@@ -143,11 +143,9 @@ async function fileCallsConfigureAttachments(cache: ParseCache, filePath: string
 /**
  * Whether the app (or one of its modules) wires the attachments layer: a
  * `configureAttachments` imported from `@guren/core` that is actually called.
- *
- * For scaffolders (`make:feature --attach`) that would otherwise emit models
- * whose `Attachable` statics all throw at first use. Positive evidence only: a
- * file that cannot be read or parsed contributes nothing, so an app this cannot
- * see into is refused rather than scaffolded broken.
+ * For scaffolders (`make:feature --attach`) that would otherwise emit models whose
+ * `Attachable` statics all throw at first use. Positive evidence only: a file that
+ * cannot be read or parsed contributes nothing, so an opaque app is refused, not scaffolded broken.
  */
 export async function appConfiguresAttachments(appRoot: string, cache: ParseCache): Promise<boolean> {
   for (const filePath of await discoverAttachmentsConfigFiles(appRoot)) {
@@ -161,7 +159,6 @@ export async function appConfiguresAttachments(appRoot: string, cache: ParseCach
  * `configureAttachments()` call anywhere (RFC 0013). The mixin's statics resolve
  * the configured layer lazily, so a model builds, typechecks and boots with no
  * attachments config at all and only fails on the first `attach()`.
- *
  * Presence-only: which table the config binds is {@link checkAttachmentsConfig}.
  */
 export async function checkAttachableModels(options: {
@@ -215,11 +212,10 @@ export async function checkAttachableModels(options: {
 
 /**
  * Flags a `configureAttachments()` whose `table` is not a table the app's
- * `db/schema.ts` declares (RFC 0013 Part 3). The layer takes the table as
- * `unknown`, so a renamed export only fails on the first attach. Positive
- * evidence only: a `table` that is not a plain identifier, or is imported from
- * outside a `db/schema` module, is skipped. Known limitation: a schema renaming
- * on export (`export { attachmentRows as attachments }`) reads as missing.
+ * `db/schema.ts` declares (RFC 0013 Part 3). The layer takes the table as `unknown`,
+ * so a renamed export only fails on the first attach. Positive evidence only: a
+ * `table` that is not a plain identifier, or is imported from outside a `db/schema`
+ * module, is skipped. A schema renaming on export (`export { a as attachments }`) reads as missing.
  */
 export async function checkAttachmentsConfig(options: {
   cwd: string
@@ -422,12 +418,11 @@ interface StorageDiskDeclaration {
 }
 
 /**
- * The storage disks the app's config declares, per disk name. A field counts
- * when a `disks` property carries an object literal (inline, or through a
- * same-file `const`) with a string-literal value; two sources disagreeing makes
- * it unreadable (`null`). The candidate set must keep sweeping all of config/,
- * src/, and app/ — narrowing it blinds the redirect rule (a runCheck test pins
- * this), since nothing proves a map reaches `createStorageManager()`.
+ * The storage disks the app's config declares, per disk name. A field counts when
+ * a `disks` property carries an object literal (inline, or through a same-file
+ * `const`) with a string-literal value; two sources disagreeing makes it unreadable
+ * (`null`). The candidate set must keep sweeping all of config/, src/, and app/:
+ * narrowing it blinds the redirect rule (a runCheck test pins this), since nothing proves a map reaches `createStorageManager()`.
  */
 async function scanStorageDisks(cache: ParseCache, files: string[]): Promise<Map<string, StorageDiskDeclaration>> {
   const disks = new Map<string, StorageDiskDeclaration>()
@@ -484,13 +479,11 @@ function isAtOrWithin(root: string, candidate: string): boolean {
 }
 
 /**
- * Is the disk rooted at `root` reachable through the served `publicDir`?
- *
- * Three tests, none subsuming the others: lexical (a root that does not exist
- * yet cannot be canonicalized), canonical on *both* sides (a project reached
- * through a symlink is routine), and the served tree's own entries (a link
- * pointing out at the root, which `guren storage:link` creates). Only the
- * immediate entries of `publicDir` are read; a deeper link goes unjudged.
+ * Is the disk rooted at `root` reachable through the served `publicDir`? Three
+ * tests, none subsuming the others: lexical (a root that does not exist yet cannot
+ * be canonicalized), canonical on *both* sides (a project reached through a symlink
+ * is routine), and the served tree's own entries (a link pointing out at the root, which
+ * `guren storage:link` creates). Only the immediate entries of `publicDir` are read.
  */
 async function isReachableFromPublicDir(publicDir: string, root: string): Promise<boolean> {
   if (isAtOrWithin(publicDir, root)) return true
@@ -517,12 +510,10 @@ async function isReachableFromPublicDir(publicDir: string, root: string): Promis
 
 /**
  * `realpath` for a path that need not exist: the deepest existing ancestor is
- * resolved and the remaining segments appended unchanged.
- *
- * Falling back to the raw input instead is a false pass — one side resolved and
- * the other not are written in different vocabularies and never match (on macOS
- * `/var/folders/…` against `/private/var/folders/…`), and both sides here
- * routinely name directories the app has not created yet.
+ * resolved and the remaining segments appended unchanged. Falling back to the raw
+ * input instead is a false pass — one side resolved and the other not are written in
+ * different vocabularies and never match (on macOS `/var/folders/…` against
+ * `/private/var/folders/…`), and both sides here routinely name directories not yet created.
  */
 async function canonicalize(path: string): Promise<string> {
   let current = path
@@ -540,12 +531,11 @@ async function canonicalize(path: string): Promise<string> {
 }
 
 /**
- * Where a symlink points, canonicalized — falling back to the link's own
- * resolved target when the destination does not exist yet.
- *
- * `realpath` alone fails open: a link created before its target resolves to the
- * link's own path under `public/`, which matches nothing, and the first upload
- * then creates the directory and serves every attachment.
+ * Where a symlink points, canonicalized — falling back to the link's own resolved
+ * target when the destination does not exist yet. `realpath` alone fails open: a
+ * link created before its target resolves to the link's own path under `public/`,
+ * which matches nothing, and the first upload then creates the directory and
+ * serves every attachment.
  */
 async function linkTarget(path: string): Promise<string> {
   const target = await readlink(path).catch(() => null)
@@ -656,12 +646,10 @@ const KNOWN_FILESYSTEM_DRIVERS = new Set(['local'])
 
 /**
  * The RFC 0015 delivery-route wiring rules:
- *
  * 1. `delivery` with no `registerAttachmentRoutes()` route in the *loaded*
  *    definitions (not the AST, which cannot follow helpers) — URLs 404 mutely.
  * 2. A delivery route name claimed twice — `Router.name()` silently overwrites.
- * 3. `serve: 'redirect'` on a driver that cannot presign — at serve time it
- *    downgrades to proxy with a warning, invisible before traffic.
+ * 3. `serve: 'redirect'` on a driver that cannot presign — downgrades to proxy with a warning at serve time.
  */
 export async function checkAttachmentsDelivery(options: {
   cwd: string

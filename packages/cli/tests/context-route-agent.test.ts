@@ -92,7 +92,7 @@ describe('routeDefinitionToContextRoute — agent metadata', () => {
     expect(route?.authorization?.fromMethodMap).toBe(true)
   })
 
-  // An abilityFor callback wins over the verb map, so the map is no longer
+  // An abilityFor callback wins over the verb map, so the map is not
   // authoritative and nothing static can name the ability.
   it('marks an abilityFor override as not resolvable from the method map', () => {
     const router = new Router()

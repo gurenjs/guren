@@ -49,9 +49,8 @@ export interface PageManifestPlan {
  * The one rule for "does this app get a `.guren/pages.gen.ts`?", which `check`
  * and `doctor` read rather than restate. Page components on disk are not
  * enough: the manifest imports `@guren/inertia-client`, which an api-blueprint
- * app never installs while its tsconfig still includes `.guren/**`. A
- * suppressed manifest is a *reported* state (see {@link
- * describePageManifestSuppression}), and codegen never deletes one.
+ * app never installs while its tsconfig still includes `.guren/**`. A suppressed
+ * manifest is *reported* ({@link describePageManifestSuppression}); codegen never deletes one.
  */
 export async function planPageManifest(appRoot: string, options: PagePathOptions = {}): Promise<PageManifestPlan> {
   return (await surveyPages(appRoot, options)).plan

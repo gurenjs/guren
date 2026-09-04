@@ -740,13 +740,11 @@ const makeExceptionCommand = defineCommand({
 })
 
 /**
- * The last value of a repeated citty flag.
- *
- * citty types every `string` arg as `string | undefined` and then hands back a
- * `string[]` when the flag is passed twice — a lie no compiler catches. Three
- * shapes on this bin crash; the quiet ones are worse
- * (`--schema a.ts --schema b.ts` comma-joins into a path nothing can open and
- * still exits 0). Last-wins is what repeating a flag means to whoever typed it.
+ * The last value of a repeated citty flag. citty types every `string` arg as
+ * `string | undefined` and then hands back a `string[]` when the flag is passed
+ * twice — a lie no compiler catches. Three shapes on this bin crash; the quiet ones
+ * are worse (`--schema a.ts --schema b.ts` comma-joins into a path nothing can open
+ * and still exits 0). Last-wins is what repeating a flag means to whoever typed it.
  */
 function lastFlagValue(value: unknown): string | undefined {
   const candidate = Array.isArray(value) ? value.at(-1) : value
@@ -2356,7 +2354,7 @@ const contextCommand = defineCommand({
   args: {
     // Declared `string`, not `positional`, so both spellings reach the entity
     // path: citty drops a value passed as a flag to a positional and raises no
-    // unknown-flag error, so `guren context --entity User` used to print the
+    // unknown-flag error, so `guren context --entity User` would print the
     // whole-project map and exit 0. A `string` arg still leaves the bare
     // positional in `_`.
     entity: {

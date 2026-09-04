@@ -91,8 +91,8 @@ describe('upgradeCanary', () => {
       },
     })
 
-    // A cached rejection used to be replayed uncaught by the second caller,
-    // taking the whole command down when the registry was unreachable.
+    // A cached rejection must not replay uncaught into the second caller,
+    // taking the whole command down when the registry is unreachable.
     expect(result.updatedDependencies).toHaveLength(0)
     expect(result.versionCompatibility?.resolvedTarget).toBe(false)
     expect(result.versionCompatibility?.warnings.join('\n')).toContain('Could not resolve')

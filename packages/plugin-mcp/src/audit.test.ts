@@ -20,12 +20,10 @@ import { createFileAuditSink } from './audit-file'
 import { mcpPlugin } from './plugin'
 
 /**
- * What this endpoint does *with* the emitter, plus the file sink it can build.
- * The emitter's own rules live beside it, in
- * `packages/server/src/agent/audit-emitter.test.ts`. What is genuinely this
- * package's is below: that the plugin registers no listener, that it publishes
- * the emitter for other surfaces, and that the file sink writes lines the reader
- * parses back.
+ * What this endpoint does *with* the emitter, plus the file sink it can build;
+ * the emitter's own rules live in `packages/server/src/agent/audit-emitter.test.ts`.
+ * Genuinely this package's: the plugin registers no listener, publishes the
+ * emitter for other surfaces, and the file sink writes lines the reader parses back.
  */
 
 /** Future-seeded, like the server-side fixtures: a past epoch expires everything. */

@@ -221,7 +221,6 @@ export function isEmailVerified(user: { emailVerifiedAt?: Date | null } | null):
 
 /**
  * Middleware factory to require verified email.
- *
  * @example
  * ```ts
  * requireVerifiedEmail({ redirectTo: '/verify-email' })

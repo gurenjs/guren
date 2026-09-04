@@ -11,27 +11,11 @@ export { isLoopbackAddress, isLoopbackOrigin } from '../http/middleware/loopback
 export const MCP_ENDPOINT_PATH = '/_guren/mcp'
 
 /**
- * Whether the MCP endpoint is mounted for this process.
- *
- * Opt-in via `GUREN_MCP=1` and never active in production: the endpoint
- * exposes project introspection and code generation, so it must not be
- * reachable unless the developer asked for it.
- *
- * The environment reads below are deliberately written as plain member
- * access. Do not "harden" them with optional chaining: the deploy plugins
- * bundle server code with `--define 'process.env.NODE_ENV="production"'`,
- * and a define matches one exact expression. Inserting `?.` produces a
- * different expression that no define touches, leaving this gate a runtime
- * read — and on hosts where the platform's environment is not in
- * `process.env` by the time the module graph evaluates (workerd is the
- * documented case; see the comment on the Cloudflare plugin's `define`),
- * that runtime read answers "not production" and the gate silently reopens.
- * A test in `tests/mcp/endpoint.test.ts` reads this file and fails on any
- * optional chain after `process.env`, because nothing observable at runtime
- * distinguishes the two forms.
- *
- * The `typeof process` check covers the only runtimes without `process`;
- * every runtime the framework supports that has `process` has `process.env`.
+ * Whether the MCP endpoint is mounted: opt-in via `GUREN_MCP=1`, never in
+ * production (it exposes project introspection and code generation). The env
+ * reads are plain member access on purpose: the deploy plugins settle NODE_ENV
+ * with `--define`, which matches one exact expression, so an optional chain
+ * leaves a runtime read that reopens the gate on workerd; `tests/mcp/endpoint.test.ts` pins the form.
  */
 export function isMcpEndpointEnabled(): boolean {
   if (typeof process === 'undefined') {

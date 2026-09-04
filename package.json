@@ -31,7 +31,6 @@
     "audit:contracts": "bun run ./scripts/smoke/contract-audit.ts",
     "audit:feature-runtime": "bun run ./scripts/smoke/feature-runtime-audit.ts",
     "audit:bundle-budgets": "bun run ./scripts/smoke/build-budget.ts --max-kb 600",
-    "audit:comments": "bun run ./scripts/comment-lint.ts",
     "audit:starter-template": "bun run ./scripts/smoke/starter-template-audit.ts",
     "audit:docs": "bun run ./scripts/smoke/docs-audit.ts",
     "audit:deps": "bun run ./scripts/smoke/dependency-audit.ts",

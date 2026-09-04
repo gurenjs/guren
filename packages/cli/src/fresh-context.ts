@@ -106,12 +106,9 @@ async function runCliJson<T>(args: string[], cwd: string): Promise<T> {
 /**
  * The subset of context generation a long-lived process must not call
  * in-process: everything here reaches `loadRouteDefinitions()`, whose module
- * graph is frozen for the process lifetime (see `load-routes.ts`), so a dev
- * server would answer every MCP request from the graph captured at the first
- * one. A child process re-evaluates the whole graph, which no in-process trick
- * can do on Bun. Returns the same shapes as the in-process functions, and is
- * structurally compatible with `GurenCliApi` in `@guren/server` — keep the
- * signatures in sync with that interface.
+ * graph is frozen for the process lifetime (see `load-routes.ts`), and no
+ * in-process trick re-evaluates it on Bun; a child process does. Returns the
+ * in-process shapes; keep the signatures in step with `GurenCliApi` in `@guren/server`.
  */
 export function createFreshContextApi(): {
   generateContext(options: { cwd: string }): Promise<ProjectContext>

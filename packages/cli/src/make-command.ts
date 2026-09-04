@@ -47,13 +47,11 @@ function commandSpecifier(fromFile: string, file: string): string {
 }
 
 /**
- * Registers a scaffolded command with its console kernel: `src/console.ts`, or
- * the owning module's `defineModule({ commands: [...] })` under `--module`.
- * Nothing discovers `app/Console/Commands` at runtime — registration is
- * explicit so a bundled deployment matches a local checkout — so an unwired
- * command is dead; a patch that cannot apply prints the manual step rather
- * than failing the scaffold. Takes only `root` because the patching goes
- * through `patch-helpers`, which still resolves against `process.cwd()`.
+ * Registers a scaffolded command with its console kernel: `src/console.ts`, or the
+ * owning module's `defineModule({ commands: [...] })` under `--module`. Nothing
+ * discovers `app/Console/Commands` at runtime (so a bundled deployment matches a
+ * checkout), so an unwired command is dead; a patch that cannot apply prints the
+ * manual step. Takes only `root` because `patch-helpers` still resolves against `process.cwd()`.
  */
 export async function registerScaffoldedCommand(
   name: string,

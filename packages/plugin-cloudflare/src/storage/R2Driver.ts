@@ -137,7 +137,6 @@ const DELETE_CONCURRENCY = 6
 
 /**
  * Cloudflare R2 storage driver over the Workers binding.
- *
  * @example
  * ```ts
  * new R2Driver({ binding: () => getWorkersEnv<Env>().MEDIA, publicUrl: 'https://media.example.com' })

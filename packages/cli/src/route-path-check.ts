@@ -15,11 +15,10 @@ import { check, type CheckResult } from './check-result'
 
 /**
  * Route registration methods, mapped to the argument index holding the path.
- *
- * A hand-kept mirror of `Router`'s path-taking surface in @guren/server: anything added
- * there that takes a path belongs here too. `on` is at index 1 because its signature is
- * `on(method, path, ...)`. `group`/`resource` paths are not routes themselves but are
- * concatenated onto every route they cover.
+ * A hand-kept mirror of `Router`'s path-taking surface in @guren/server: anything
+ * added there that takes a path belongs here too. `on` is at index 1 because its
+ * signature is `on(method, path, ...)`. `group`/`resource` paths are not routes
+ * themselves but are concatenated onto every route they cover.
  */
 const ROUTE_PATH_ARGUMENT: Record<string, number> = {
   get: 0,

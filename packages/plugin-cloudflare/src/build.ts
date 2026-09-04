@@ -57,22 +57,17 @@ export interface BuildCloudflareOutputOptions {
   /**
    * Front the worker with `@cloudflare/workers-oauth-provider`, so the App MCP
    * endpoint is reached by OAuth-authorized clients instead of bearer tokens
-   * (RFC 0016 §7).
-   *
-   * A **build** option rather than plugin configuration: the generator runs in
-   * another process and cannot read what `mcpPlugin()` was passed. Nothing
-   * records the choice, so pass it on every build that wants it; a committed
-   * config carrying the OAuth binding without the flag is warned about.
+   * (RFC 0016 §7). A **build** option, not plugin configuration: the generator
+   * runs in another process and cannot read what `mcpPlugin()` was passed, and
+   * nothing records the choice, so pass it on every build that wants it.
    */
   mcpOAuth?: boolean
   /**
    * Path the App MCP endpoint is mounted at, used as the OAuth provider's
-   * protected `apiRoute`. Only read when `mcpOAuth` is on.
-   *
-   * Defaults to `mcpPlugin()`'s own default; an app that passed
-   * `mcpPlugin({ path })` must repeat it here. A provider protecting a path the
-   * endpoint does not serve leaves the endpoint outside the OAuth boundary,
-   * silently, because the request still reaches the app.
+   * protected `apiRoute`. Only read when `mcpOAuth` is on. Defaults to
+   * `mcpPlugin()`'s own default; an app that passed `mcpPlugin({ path })` must
+   * repeat it here — a provider protecting a path the endpoint does not serve
+   * leaves the endpoint outside the OAuth boundary silently.
    */
   mcpPath?: string
 }
@@ -186,11 +181,10 @@ const OAUTH_ENDPOINTS = {
 
 /**
  * Refuse `--mcp-oauth` on an app that cannot serve it, before anything is built.
- * Both prerequisites are the app's own `dependencies`: `@guren/plugin-mcp` (or
+ * Both prerequisites are the app's own `dependencies`: `@guren/plugin-mcp` (else
  * there is no endpoint to front and the seam module is not installed) and
  * `@cloudflare/workers-oauth-provider`, which wrangler resolves from the *app's*
- * `node_modules`, so only apps opting in install it. Not `devDependencies`:
- * `wrangler deploy` resolves from a production install.
+ * `node_modules` at `wrangler deploy`, from a production install — not devDeps.
  */
 function assertMcpOAuthUsable(root: string, mcpPlugin: boolean): void {
   if (!mcpPlugin) {
@@ -213,14 +207,10 @@ function assertMcpOAuthUsable(root: string, mcpPlugin: boolean): void {
 
 /**
  * `OAuthProvider` stores clients, grants and tokens in a KV namespace bound as
- * `OAUTH_KV`, with no default: without the binding the worker deploys and then
- * fails on its first authorize request.
- *
- * Build-owned **only while the flag is on**, so the caller decides whether to
- * ask. A fresh scaffold gets the entry written; an existing `wrangler.jsonc` is
- * failed rather than warned, since the consequence is invisible in the build
- * output and the fix is a paste of JSON this can spell exactly. A config that
- * does not parse is left to {@link warnMissingBuildOwnedKeys}.
+ * `OAUTH_KV`, with no default: unbound, the worker deploys and fails on its
+ * first authorize request. Checked only while the flag is on. A fresh scaffold
+ * gets the entry written; an existing `wrangler.jsonc` fails rather than warns,
+ * since the fix is exact JSON. Unparseable configs: {@link warnMissingBuildOwnedKeys}.
  */
 function assertOAuthKvBound(root: string): void {
   const configPath = resolve(root, 'wrangler.jsonc')
@@ -349,13 +339,10 @@ function writeDevOnlyStubs(out: string): void {
 
 /**
  * A package-name alias does not cover subpaths and wrangler cannot match a
- * prefix, so every stubbed specifier needs its own entry — an SDK subpath added
- * upstream needs a new `DEV_ONLY_MODULES` entry to stay stubbed.
- *
- * `mcpPlugin` drops the App MCP transport's entry (RFC 0016 §7): the adapter is
- * workerd-compatible, and the alias was the only thing killing it. The Dev MCP's
- * `McpServer` keeps its alias either way. The *files* are written unconditionally
- * by `writeDevOnlyStubs`, so a config still pointing at one keeps finding it.
+ * prefix, so every stubbed specifier needs its own entry (an SDK subpath added
+ * upstream needs a new `DEV_ONLY_MODULES` entry). `mcpPlugin` drops only the App
+ * MCP transport's alias (RFC 0016 §7; the adapter is workerd-compatible). Stub
+ * *files* are written unconditionally, so a config still pointing at one keeps finding it.
  */
 function devOnlyAliases(outRelative: string, mcpPlugin: boolean): Record<string, string> {
   const stubbed = [...stubbableDevOnlyModules({ mcpPlugin }), ...SQL_CLIENT_MODULES]
@@ -369,16 +356,11 @@ function devOnlyAliases(outRelative: string, mcpPlugin: boolean): Record<string,
 }
 
 /**
- * Fail rather than deploy an app that declares `@guren/plugin-mcp` while its
- * committed `wrangler.jsonc` still aliases the App MCP transport to a stub *this
- * build generated* — the endpoint stays compiled shut with every gate green.
- *
- * The *value* decides, not the key: an alias naming anything else is a deliberate
- * override. Matched on the last path segment (the output directory is an option)
- * against `STUB_FILES`, splitting on both separators for hand-edited configs; a
- * developer shim named `stub-mcp-transport.js` is the one false positive left.
- * Read through `parseJsonc`, so a comment mentioning the specifier does not fail
- * the build; an unparseable file is left to `warnMissingBuildOwnedKeys`.
+ * Fail rather than deploy an app declaring `@guren/plugin-mcp` while its committed
+ * `wrangler.jsonc` aliases the App MCP transport to a stub *this build generated*:
+ * the endpoint stays compiled shut with every gate green. The *value* decides
+ * (another target is a deliberate override), matched on the last path segment of
+ * either separator against `STUB_FILES`; `parseJsonc` keeps comments from matching.
  */
 function assertMcpTransportNotAliased(root: string, mcpPlugin: boolean): void {
   const configPath = resolve(root, 'wrangler.jsonc')
@@ -411,12 +393,11 @@ function assertMcpTransportNotAliased(root: string, mcpPlugin: boolean): void {
 }
 
 /**
- * Wrangler's `migrations_dir` only discovers flat `*.sql` files, but
- * drizzle-kit (1.x) emits one `<timestamp>_<name>/migration.sql` folder per
- * migration. Flatten each folder into `<folder-name>.sql` (plain `*.sql`
- * files pass through unchanged, `meta/` bookkeeping is skipped) so
- * `wrangler d1 migrations apply` sees them in filename order. Regenerated on
- * every build — run `cloudflare:build` after adding a migration.
+ * Wrangler's `migrations_dir` only discovers flat `*.sql` files, but drizzle-kit
+ * (1.x) emits one `<timestamp>_<name>/migration.sql` folder per migration.
+ * Flatten each folder into `<folder-name>.sql` (plain `*.sql` files pass
+ * through, `meta/` is skipped) so `wrangler d1 migrations apply` sees them in
+ * filename order. Regenerated on every build — run `cloudflare:build` after adding one.
  */
 export function flattenD1Migrations(migrationsDir: string, outDir: string): void {
   if (!existsSync(migrationsDir)) {
@@ -467,15 +448,11 @@ export function flattenD1Migrations(migrationsDir: string, outDir: string): void
 }
 
 /**
- * Neutralize the document types staged under `assets/` with a `_headers` file.
- * Static Assets answer before the worker runs, so the framework's
- * `guardStaticDocument` never sees one and an SVG would render inline, script and
- * all, on the app's own origin. That `_headers` does not reach worker-generated
- * responses is right, not a limitation: those go through the framework guard.
- *
- * One splat per pattern: /*.svg is anchored and its splat greedy across slashes,
- * so it matches at any depth, while a second splat is a parse error the platform
- * reports by *dropping the rule*.
+ * Neutralize the document types staged under `assets/` with a `_headers` file:
+ * Static Assets answer before the worker runs, so `guardStaticDocument` never
+ * sees one and an SVG would render inline, script and all, on the app's origin.
+ * One splat per pattern: /*.svg matches at any depth, and a second splat is a
+ * parse error the platform reports by *dropping the rule*.
  */
 function renderAssetHeaders(assetsOut: string): string {
   const headerLines = Object.entries(DOCUMENT_ASSET_HEADERS).map(([name, value]) => `  ${name}: ${value}`)
@@ -495,10 +472,8 @@ function renderAssetHeaders(assetsOut: string): string {
  * Staged document files whose extension is not already lowercase, as exact
  * patterns: the one hole the `/*.<ext>` globs cannot reach. `getMimeType`
  * lowercases before its lookup while Cloudflare compiles a `_headers` pattern
- * case-sensitively with no flag to say otherwise (measured against the asset
- * worker), and enumerating the variants is impossible at one splat per rule —
- * `.svg` alone has eight spellings. An exact rule is complete because the asset
- * set is closed at build time; the normal result is an empty list.
+ * case-sensitively (measured), and `.svg` alone has eight spellings at one splat
+ * per rule. Exact rules are complete: the asset set is closed at build time.
  */
 function oddlyCasedDocumentPaths(assetsOut: string): string[] {
   const documents = new Set<string>(DOCUMENT_ASSET_EXTENSIONS)
@@ -525,14 +500,11 @@ function oddlyCasedDocumentPaths(assetsOut: string): string[] {
 }
 
 /**
- * An app may ship a `_headers` of its own under `public/`, already copied here by
- * `stageStaticAssets`. Prepend rather than overwrite or append: only the *first*
- * rule naming a header sets it and a later one appends, so going second would
- * turn an app's own `Content-Disposition` into "inline, attachment".
- *
- * The cost: the platform parses at most 100 rules and *stops* at the hundredth,
- * so these five push an app's own five closer to that cap. Warned about rather
- * than resolved, since reordering would break the set-versus-append reasoning.
+ * An app may ship its own `_headers` under `public/`, already copied here by
+ * `stageStaticAssets`. Prepend rather than append: only the *first* rule naming
+ * a header sets it and a later one appends, so going second would turn an app's
+ * own `Content-Disposition` into "inline, attachment". The cost, warned about
+ * rather than resolved: these rules push the app's own toward the 100-rule cap.
  */
 function writeAssetHeaders(assetsOut: string): void {
   const headersFile = resolve(assetsOut, '_headers')
@@ -561,11 +533,10 @@ const HEADER_RULE_LIMIT = 100
 
 /**
  * Say so when the rules added here push an app's own past what the platform
- * reads. Cloudflare parses at most 100 rules and *stops* at the hundredth
+ * reads: Cloudflare parses at most 100 rules and *stops* at the hundredth
  * silently, so going first — which the set-versus-append reasoning above
- * requires — drops the app's last rules. Counted rather than resolved: ordering
- * the app's rules first would let its `Content-Disposition` turn ours into
- * "inline, attachment".
+ * requires — drops the app's last rules. Counted, not resolved: app rules first
+ * would let its `Content-Disposition` turn ours into "inline, attachment".
  */
 function warnHeaderRuleBudget(merged: string, existing: string): void {
   if (!existing) {
@@ -739,9 +710,8 @@ function renderWorkerModule(input: {
  * wrangler resolves its config as `wrangler.json` ?? `wrangler.jsonc` ??
  * `wrangler.toml`, first match winning silently (workers-sdk config-helpers.ts).
  * This plugin manages `wrangler.jsonc`, so a `wrangler.json` outranks everything
- * the build scaffolds or checks, and scaffolding beside a lone `wrangler.toml`
- * makes wrangler stop reading the user's own config. Neither can be repaired
- * here: name the migration and stop before the app build spends minutes on it.
+ * it scaffolds or checks, and scaffolding beside a lone `wrangler.toml` stops
+ * wrangler reading the user's config. Name the migration before the app build runs.
  */
 function assertWranglerJsoncIsAuthoritative(root: string): void {
   if (wranglerConfigExists(resolve(root, 'wrangler.json'))) {
@@ -783,25 +753,20 @@ function wranglerConfigExists(path: string): boolean {
 }
 
 /**
- * Serve a staged `.html` file at its own path and nowhere else.
- *
- * The platform default, `auto-trailing-slash`, serves `public/page.html` at
- * `/page` and *redirects* `/page.html` there (measured against the asset worker).
- * That would leave the /*.html rule in `_headers` landing only on the redirect,
- * and let a file under `public/` shadow the app's own route of that name, since
- * assets answer before the worker. A miss now falls through to the worker.
+ * Serve a staged `.html` file at its own path and nowhere else. The platform
+ * default, `auto-trailing-slash`, serves `public/page.html` at `/page` and
+ * *redirects* `/page.html` there (measured), which lands the /*.html `_headers`
+ * rule only on the redirect and lets a file under `public/` shadow the app's
+ * route of that name, since assets answer first. A miss falls through to the worker.
  */
 const HTML_HANDLING = 'none'
 
 /**
  * The OAuth-fronted export: one `createWorkersHandler` threaded through both
  * halves of the provider (two would share the module-global env holder without
- * sharing the boot slot — see `handler.ts`).
- *
- * The grant travels through the seam, not a header: `ctx.props` is what the
- * provider decrypted from the access token it validated, so a caller reaching the
- * app another way cannot forge it. `defaultHandler` is the same handler unwrapped,
- * so every non-MCP route is served as it would be without the provider.
+ * sharing the boot slot — see `handler.ts`). The grant travels through the seam,
+ * not a header: `ctx.props` is what the provider decrypted from the access token
+ * it validated, so it cannot be forged. `defaultHandler` is the same handler unwrapped.
  */
 function renderOAuthWorker(mcpPath: string): string {
   // A template literal rather than a line array, so a reviewer can read the
@@ -950,12 +915,10 @@ function scaffoldConsentFlow(root: string): void {
 
 /**
  * `wrangler.jsonc` carries comments in any app that has edited it, and
- * `JSON.parse` rejects the first one.
- *
- * Only comments and trailing commas are stripped, the whole of what wrangler
- * accepts beyond JSON. The scan tracks string literals rather than pattern-
- * matching, because `define` holds `"\"file:///worker.js\""` — a `//` inside a
- * string, with escaped quotes around it.
+ * `JSON.parse` rejects the first one. Only comments and trailing commas are
+ * stripped, the whole of what wrangler accepts beyond JSON. The scan tracks
+ * string literals rather than pattern-matching, because `define` holds
+ * `"\"file:///worker.js\""` — a `//` inside a string, with escaped quotes around it.
  */
 function parseJsonc(text: string): unknown {
   const out: string[] = []
@@ -1019,12 +982,8 @@ function parseJsonc(text: string): unknown {
  * The scaffold never overwrites an existing config, but `alias`, `define` and
  * `migrations_dir` are build-owned invariants pointing into the output directory:
  * an app scaffolded before they existed deploys a worker that cannot resolve
- * `bun:sqlite` or never applies its migrations. Name what is missing rather than
- * failing the build.
- *
- * Individual entries, never a whole `"alias"` or `"define"` object: apps keep
- * their own entries under both keys, and a complete object reads as one to paste
- * over what is there.
+ * `bun:sqlite` or never applies its migrations. Named per entry, never as a whole
+ * `"alias"`/`"define"` object, which reads as one to paste over the app's own entries.
  */
 function warnMissingBuildOwnedKeys(
   configPath: string,
@@ -1078,10 +1037,9 @@ function warnMissingBuildOwnedKeys(
 /**
  * Kept out of `warnMissingBuildOwnedKeys`: that list's shared sentence ends "the
  * worker will fail to start or skip migrations", which is not true here — adding
- * this key *changes* how the app's own HTML is served, and needs saying.
- *
- * Warned only when the key is absent: any other value is a decision an app typed,
- * and a config with no `assets` serves no static files for `_headers` to protect.
+ * this key *changes* how the app's own HTML is served, and needs saying. Warned
+ * only when the key is absent: any other value is a decision an app typed, and a
+ * config with no `assets` serves no static files for `_headers` to protect.
  */
 function warnMissingHtmlHandling(configPath: string, config: Record<string, unknown>): void {
   const assets = config.assets as Record<string, unknown> | undefined
@@ -1098,12 +1056,9 @@ function warnMissingHtmlHandling(configPath: string, config: Record<string, unkn
 /**
  * The drift `--mcp-oauth` leaves detectable in the other direction: a config
  * scaffolded *with* the flag (carrying `OAUTH_KV`) while today's build omitted
- * it. The replacing worker has no `OAuthProvider`, `/oauth/token` and
- * `/oauth/register` answer 404, and every authorized client stops working with
- * nothing in the build output mentioning OAuth.
- *
- * A warning, not a failure: building a non-OAuth worker from the same repository
- * is legitimate and the binding is inert either way.
+ * it, so the replacing worker has no `OAuthProvider`, `/oauth/token` answers 404
+ * and every authorized client stops working with no build output mentioning
+ * OAuth. A warning: a non-OAuth worker from the same repository is legitimate.
  */
 function warnOAuthDrift(
   configPath: string,

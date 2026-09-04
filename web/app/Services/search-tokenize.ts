@@ -1,23 +1,17 @@
 // Tokenization for the docs search index (D1 + SQLite FTS5).
+// Indexing and querying share this segmentation; if they diverge, recall
+// drops silently. Dependency-free on purpose: it runs in the build script and
+// inside the Worker.
 //
-// Indexing and querying go through the *same* segmentation here: if the two
-// ever diverge, recall drops silently — nothing fails, results just stop
-// appearing. Keep this module dependency-free, it runs both in the build
-// script and inside the Worker.
-//
-// FTS5's own `trigram` tokenizer cannot match anything shorter than three
-// characters, which rules it out for Japanese docs (「認証」「検証」are the
-// common queries). So the index stores a pre-expanded token stream and uses
-// `unicode61`, which keeps each emitted token whole: CJK codepoints are
-// letters to it, and the separators we emit are plain spaces.
+// FTS5's `trigram` tokenizer cannot match under three characters (「認証」is a
+// common query), so the index stores a pre-expanded token stream under
+// `unicode61`, which keeps each token whole: CJK codepoints are letters to it.
 
 /**
- * Scripts written without spaces, where a run of characters has to be
- * decomposed into bigrams to be searchable at all. `scx=` rather than `sc=`
- * so 「ー」(Lm, Script=Common) stays inside its katakana run.
- *
- * Only ever consulted for characters that already passed `WORD_CHAR`: the
- * same script extensions also cover CJK punctuation, and 「。」joining a run
+ * Scripts written without spaces, whose runs are decomposed into bigrams.
+ * `scx=` rather than `sc=` so 「ー」(Lm, Script=Common) stays inside its
+ * katakana run. Only consulted for characters that already passed `WORD_CHAR`:
+ * the same script extensions cover CJK punctuation, and 「。」joining a run
  * would put 「る。」in the index as a bigram no query can produce.
  */
 const CJK_CHAR = /[\p{scx=Han}\p{scx=Hiragana}\p{scx=Katakana}\p{scx=Hangul}]/u
@@ -100,10 +94,9 @@ function bigrams(run: string): string[] {
 /**
  * Index-side tokens for one piece of text.
  *
- * Single-character CJK runs deliberately produce no token in `tokens` — they
- * have no bigram — and are reachable only through `unigrams`. Every CJK
- * character lands in `unigrams`, including those inside longer runs, so
- * 「型」finds 「型安全」; repeats are kept so bm25 can rank by frequency.
+ * Single-character CJK runs produce no token in `tokens` (no bigram) and are
+ * reachable only through `unigrams`. Every CJK character lands in `unigrams`,
+ * so 「型」finds 「型安全」; repeats are kept so bm25 can rank by frequency.
  */
 export function tokenizeText(text: string): TokenizedText {
   const tokens: string[] = []
@@ -123,11 +116,9 @@ export function tokenizeText(text: string): TokenizedText {
 
 /**
  * The literal runs a query was written as, lowercased — not its tokens.
- *
  * Snippets are cut from the stored body, which holds prose rather than
- * bigrams, so locating the hit there takes the words the reader actually
- * typed. Case is folded because the body keeps its original casing while a
- * token stream does not.
+ * bigrams, so locating the hit takes the words the reader typed. Case is
+ * folded because the body keeps its original casing.
  */
 export function queryTerms(query: string): string[] {
   return segment(query).map((run) => run.text.toLowerCase())
@@ -144,12 +135,11 @@ function quote(token: string): string {
  * script creates and the weights below.
  */
 export const SEARCH_COLUMNS = [
-  // Two title columns, because matching and ranking want opposite things.
-  // `doc_title_lead` carries the title on the doc's first section alone and
-  // takes the weight; `doc_title_tokens` carries it on every section and takes
-  // none. With the title on one row only, `ルーティング ミドルウェア` could
-  // not match at all — FTS5 ANDs terms within a row. With it weighted on every
-  // row, one title hit swept the result list with sections of a single doc.
+  // Two title columns: `doc_title_lead` carries the title on the doc's first
+  // section alone and takes the weight; `doc_title_tokens` carries it on every
+  // section and takes none. FTS5 ANDs terms within a row, so with the title on
+  // one row only `ルーティング ミドルウェア` cannot match; weighted on every
+  // row, one title hit sweeps the result list with sections of a single doc.
   'doc_title_lead',
   'doc_title_tokens',
   'heading_tokens',
@@ -159,13 +149,11 @@ export const SEARCH_COLUMNS = [
 ] as const
 
 /**
- * One weight vector per query shape, and they cannot be merged.
- *
- * bm25 returns the same value for every row when the only column that matched
- * is weighted 0.0 — the ordering does not degrade, it disappears, and results
- * come back in rowid order. So a single vector cannot serve both shapes: the
- * unigram column has to be weighted when it is the one being read, and
- * ignored when it is not.
+ * One weight vector per query shape; they cannot be merged. bm25 returns the
+ * same value for every row when the only column that matched is weighted 0.0
+ * — ordering does not degrade, it disappears (rowid order). The unigram
+ * column has to be weighted when it is the one being read and ignored when
+ * it is not.
  */
 export const BM25_WEIGHTS = {
   tokens: [8.0, 0.0, 4.0, 1.0, 0.0, 0.0],
@@ -188,13 +176,10 @@ export interface SearchMatch {
 
 /**
  * Build the MATCH expression for a user query, or `null` when nothing in it
- * is searchable.
- *
- * CJK runs become phrases so that the bigrams have to appear adjacently:
- * without that, 「コントローラ」would also match a document that merely
- * contains 「コン」and 「トロ」far apart. A CJK run of one character has no
- * bigram, so it is dropped from a multi-run query and only drives the whole
- * query when it is all the user typed.
+ * is searchable. CJK runs become phrases so the bigrams must appear adjacently
+ * (otherwise 「コントローラ」also matches a doc holding 「コン」and 「トロ」far
+ * apart). A one-character CJK run has no bigram: it is dropped from a
+ * multi-run query and drives the query only when it is all the user typed.
  */
 export function buildSearchMatch(query: string, locale?: SearchLocale): SearchMatch | null {
   const terms: string[] = []

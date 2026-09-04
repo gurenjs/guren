@@ -16,14 +16,11 @@ const identitySchema = {
 }
 
 /**
- * Hand-built rather than via `new FormData()`: handing `fetch` a FormData body
- * lets it pick the boundary *and* the media-type casing, and the casing is one
- * of the things these suites test.
- *
- * A third element makes the part a file. An empty `value` beside a filename
- * still produces a zero-byte File, which is what the `size > 0` filter in
- * `file()` / `files()` rejects. The part-level `Content-Type` is emitted only
- * alongside a filename, so a text field still parses as a string.
+ * Hand-built rather than via `new FormData()`: handing `fetch` a FormData body lets it
+ * pick the boundary *and* the media-type casing, and the casing is under test here.
+ * A third element makes the part a file; an empty `value` beside a filename still
+ * produces a zero-byte File, which the `size > 0` filter in `file()` / `files()` rejects.
+ * The part-level `Content-Type` is emitted only with a filename, so a text field stays a string.
  */
 function multipartBody(
   boundary: string,
@@ -676,15 +673,11 @@ describe('readInertiaResponse', () => {
 })
 
 /**
- * The mock and the runtime must read a repeated form field identically, or a
- * controller test passes on behavior production does not have. Each case runs
- * one body through both.
- *
- * The rule is Hono's: `parseBody()` collects every value only for a
- * `[]`-suffixed key, and `parseRequestPayload` then flattens with
- * `Array.isArray(v) ? v[0] : v` — so `tags[]` yields the FIRST value and a plain
- * repeated `tags` the LAST. Both keys are asserted, since a `tags[]`-only test
- * also passes under a blanket first-wins mock.
+ * The mock and the runtime must read a repeated form field identically, or a controller
+ * test passes on behavior production does not have. The rule is Hono's: `parseBody()`
+ * collects every value only for a `[]`-suffixed key, and `parseRequestPayload` flattens
+ * with `Array.isArray(v) ? v[0] : v`, so `tags[]` yields the FIRST value and a plain
+ * repeated `tags` the LAST. Both keys are asserted: `tags[]` alone passes a first-wins mock.
  */
 describe('repeated form fields', () => {
   const FIRST = 'core'
@@ -795,17 +788,11 @@ describe('repeated form fields', () => {
 })
 
 /**
- * The mock and the runtime must hand a validation schema the same query data, or
- * a controller test passes on behavior production does not have.
- *
- * The runtime validates against `flattenRequestQueries`, which returns
- * `values.length === 1 ? values[0] : values`, so a repeated key arrives as an
- * ARRAY and a single occurrence as a string. The probe is
- * `validateQuery`/`validateQuerySafe` specifically: `input()` takes the keyed
- * `query(key)` form on both sides and could never fail here. The identity schema
- * lets a wrong shape be compared rather than throwing 422, and both keys are
- * asserted, since a repeated-only case passes under a mock that arrays every
- * value.
+ * The mock and the runtime must hand a validation schema the same query data, or a
+ * controller test passes on behavior production does not have. The runtime validates via
+ * `flattenRequestQueries` (`values.length === 1 ? values[0] : values`): a repeated key is
+ * an ARRAY, a single one a string. Probed via `validateQuery`/`validateQuerySafe`, since
+ * `input()` reads keyed `query(key)` on both sides. Both keys: a repeated-only case passes a mock that arrays all.
  */
 describe('repeated query parameters', () => {
   const URL_UNDER_TEST = 'http://example.com/posts?tag=core&tag=framework&page=2'
@@ -994,19 +981,11 @@ describe('repeated query parameters', () => {
 })
 
 /**
- * The mock and the runtime must agree on *which* bodies they read, or a
- * controller test passes on behavior production does not have.
- *
- * The runtime's rule has two halves, and they are not the same rule:
- *
- * - JSON is a case-sensitive substring test (`contentType.includes(...)`), so
- *   `application/json-evil` is read as JSON while `Application/JSON` is not.
- * - Everything else falls through to `ctx.req.parseBody()`, which compares the
- *   media type — up to the first `;`, trimmed and lowercased — with `===`, so
- *   `Application/X-WWW-Form-Urlencoded` parses and a `-evil` suffix does not.
- *
- * A substring test on the form branches diverges in both directions at once, so
- * both are asserted, concretely as well as for parity.
+ * The mock and the runtime must agree on *which* bodies they read, or a controller test
+ * passes on behavior production lacks. Two unlike halves: JSON is a case-sensitive substring
+ * test (`contentType.includes(...)`), so `application/json-evil` is JSON and `Application/JSON`
+ * is not; the rest goes to `ctx.req.parseBody()`, which `===`s the media type up to the first
+ * `;`, trimmed and lowercased, so `Application/X-WWW-Form-Urlencoded` parses and `-evil` does not.
  */
 describe('body content-type recognition', () => {
   const FIELD = 'a'
@@ -1251,22 +1230,11 @@ describe('body content-type recognition', () => {
 })
 
 /**
- * The runtime-versus-mock table for request bodies: every row runs one request
- * through a real `Application.fetch()` controller and a mocked one, which must
- * answer the same thing. The suites either side exercise each implementation
- * alone, and a test can only catch a disagreement it puts side by side.
- *
- * The axes the rows cover: **case** (Hono lowercases the media type before
- * deciding), **parameters** (Hono compares against `contentType.split(';')[0]`,
- * so a `;`-parameterized type is the form type while one merely mentioning it in
- * a parameter is not), and **repeated fields** (Hono arrays only keys ending in
- * `[]`, other repeats are last-wins, and the runtime then takes `value[0]`).
- *
- * Two expectations look wrong and are not. `APPLICATION/JSON` reads as `{}` on
- * BOTH sides: the JSON branch is a case-sensitive substring test on the raw
- * header, so an uppercase one misses it and Hono does not call it a form either.
- * `text/plain; profile=application/json` parses AS JSON for the same reason read
- * the other way, and is the one place the runtime is not Hono-normalized.
+ * Runtime-versus-mock table for request bodies: each row runs one request through a real
+ * `Application.fetch()` controller and a mocked one, which must agree. Axes: media-type case
+ * (Hono lowercases), parameters (Hono compares `split(';')[0]`), repeats (Hono arrays only `[]`
+ * keys, else last-wins; the runtime takes `value[0]`). Two rows look wrong and are not: `APPLICATION/JSON`
+ * is `{}` on BOTH sides (case-sensitive substring test on the raw header; Hono calls it no form), and `text/plain; profile=application/json` parses AS JSON.
  */
 describe('request body parity', () => {
   const URL_UNDER_TEST = 'http://example.com/parity'
@@ -1521,22 +1489,11 @@ describe('request body parity', () => {
   })
 
   /**
-   * The same table for uploads, which travel a second read: `file()` and
-   * `files()` do not go through the body parser at all. Both sides call the
-   * runtime's `parseRequestUploads` — `parseBody({ all: true })` in a try/catch,
-   * with no media-type gate.
-   *
-   * What these rows guard is `{ all: true }`: drop it and the repeated plain
-   * field and the leading empty upload go red. The `doc[]` row does not, since
-   * Hono arrays a `[]`-suffixed key either way.
-   *
-   * What they cannot catch is the mock reading uploads the old way. Measured:
-   * `Request.formData()`'s answer for `MULTIPART/FORM-DATA` depends on the host
-   * — Bun 1.3.14 rejects it, Bun 1.4.0 accepts it, Node always accepted it — and
-   * Vitest runs this suite on Node, so the uppercase row states a contract it
-   * cannot enforce here. The assertion that *can* fail on that axis lives in
-   * `packages/server/tests/http/request.test.ts`, which runs on Bun, and the two
-   * cases after this table observe `readMultipart()`'s shape directly.
+   * The same table for uploads, which travel a second read: `file()` / `files()` skip the body parser
+   * and call the runtime's `parseRequestUploads` on both sides. The rows guard its `{ all: true }`: drop it
+   * and the repeated plain field and the leading empty upload go red (`doc[]` does not; Hono arrays `[]`
+   * keys anyway). Measured: `Request.formData()` on `MULTIPART/FORM-DATA` is host-dependent (Bun 1.3.14
+   * rejects, Bun 1.4.0 and Node accept) and Vitest runs on Node; only `packages/server/tests/http/request.test.ts` (Bun) can fail the uppercase row.
    */
   interface UploadCase {
     name: string
@@ -1606,8 +1563,8 @@ describe('request body parity', () => {
     },
     {
       // Same point on the other encoding: the shared read parses it happily
-      // and hands back strings, which fail `instanceof File`. The mock used to
-      // reach the same answer by refusing to parse it at all.
+      // and hands back strings, which fail `instanceof File`. Both sides take
+      // that read; a mock that refused to parse would agree only by accident.
       name: 'a urlencoded body, which carries no uploads',
       contentType: 'application/x-www-form-urlencoded',
       body: 'doc=Guren',

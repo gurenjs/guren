@@ -2,10 +2,9 @@ import { createRateLimitMiddleware } from '../../../src/http/middleware/rate-lim
 
 /**
  * A type-only fixture: none of these middlewares is ever mounted, and `bun run
- * typecheck` is the assertion. `statusCode` used to be `number`, and the
- * default handler cast it to the literal `429` before calling `ctx.json()`, so
- * a status Hono cannot send a body with type-checked here and failed at
- * runtime instead.
+ * typecheck` is the assertion. `statusCode` is `ContentfulStatusCode`, not
+ * `number`: the default handler hands it to `ctx.json()`, so a status Hono
+ * cannot send a body with must fail here rather than at runtime.
  */
 
 createRateLimitMiddleware({ limit: 1, statusCode: 429 })

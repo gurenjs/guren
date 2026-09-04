@@ -8,12 +8,9 @@ import { blankComments } from './source-scan'
 /**
  * The object-key prefix is a cross-package contract: `guren check`'s attachments
  * rules name `<disk root>/attachments` from another package to judge whether
- * uploaded bytes land somewhere the app serves statically. A restated copy over
- * there would stop matching when the layout moves and report an exposed app as
- * safe — a security rule failing *open*.
- *
- * These two tests make the single source structural: the engine may not
- * re-hardcode the prefix, and the constant stays reachable as `@guren/core`.
+ * uploaded bytes land somewhere the app serves statically. A restated copy there
+ * would stop matching when the layout moves and report an exposed app as safe,
+ * a security rule failing *open*. These tests make the single source structural.
  */
 describe('attachment object key prefix', () => {
   it('is reachable from the @guren/core surface', () => {

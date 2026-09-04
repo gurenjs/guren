@@ -48,10 +48,8 @@ export type DefaultSanitizedKeys =
  * A user record after auth-layer sanitization, assuming the provider's columns
  * follow {@link DefaultSanitizedKeys}. The runtime strips the *configured*
  * password/remember-token columns plus the model's `hidden` fields, which a
- * static type cannot see — list any others in `Hidden`. Index-signature records
- * cannot have individual keys removed.
- *
- * @example `Sanitized<UserRecord, 'twoFactorSecret'>`
+ * static type cannot see — list any others in `Hidden`, e.g.
+ * `Sanitized<UserRecord, 'twoFactorSecret'>`. Index-signature records cannot have keys removed.
  */
 export type Sanitized<User, Hidden extends string = never> = User extends unknown
   ? Omit<User, Extract<keyof User, DefaultSanitizedKeys | Hidden>>

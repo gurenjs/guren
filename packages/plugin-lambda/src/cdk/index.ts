@@ -69,15 +69,11 @@ export interface GurenLambdaAppProps {
 }
 
 /**
- * The full serverless topology for a Guren app in one construct: an HTTP API
- * in front of the `http` handler, and opt-in SQS/EventBridge/console wiring
- * plus CloudFront + S3 for static assets. Handler names follow the module
- * `guren lambda:build` emits (`handler.http`, `handler.queue`, ...).
+ * The full serverless topology in one construct: an HTTP API in front of the
+ * `http` handler, opt-in SQS/EventBridge/console wiring, and CloudFront + S3
+ * assets. Handler names follow `guren lambda:build` (`handler.http`, ...).
  *
- * @example
- * ```typescript
- * new GurenLambdaApp(this, 'App', { functionDir: '../.lambda/function' })
- * ```
+ * @example new GurenLambdaApp(this, 'App', { functionDir: '../.lambda/function' })
  */
 export class GurenLambdaApp extends Construct {
   readonly httpFunction: lambda.Function
@@ -278,16 +274,11 @@ export class GurenLambdaApp extends Construct {
 }
 
 /**
- * The CloudFront function body that turns a staged document into a download.
- * CloudFront answers asset behaviours from S3 directly, so the framework's own
- * `guardStaticDocument` never sees these files and an SVG that downloads
- * locally would render inline, script and all, on the app's origin.
- *
- * A viewer-response function rather than one cache behaviour per extension: a
- * behaviour is chosen by path, so `*.svg` would also capture a `/feed.svg` the
- * *app* renders, and the default limit of 25 is already spent one per staged
- * root entry. The extension is read from the request path (which is the S3 key
- * here) and lowercased, so `logo.SVG` is caught as the framework catches it.
+ * CloudFront answers asset behaviours from S3 directly, so `guardStaticDocument`
+ * never sees these files and an SVG would render inline, script and all. A
+ * viewer-response function, not a cache behaviour per extension: those match by
+ * path, so `*.svg` would also capture a `/feed.svg` the *app* renders, and the
+ * limit of 25 is spent one per staged root entry. Lowercased, so `logo.SVG` too.
  */
 function renderAssetDocumentGuard(): string {
   // CloudFront rejects a header a function names in any case but lower.

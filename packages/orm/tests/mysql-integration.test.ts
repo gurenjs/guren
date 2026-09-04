@@ -102,12 +102,11 @@ describeMySql('createMySqlDatabase against a real MySQL server (requires MYSQL_U
   })
 
   it('separates a missing tracker from a tracker it cannot read', async () => {
-    // The driver signals the absorbed-error rule is written against, measured
-    // rather than assumed: a missing tracker is ER_NO_SUCH_TABLE (1146) and a
-    // tracker whose columns drifted is ER_BAD_FIELD_ERROR (1054), both on the
-    // `cause` of the DrizzleQueryError. Only the first may be reported as
-    // "nothing applied" — the second, read as all-pending, invites a re-run of
-    // migrations that were applied.
+    // Measured driver signals the absorbed-error rule is written against: a
+    // missing tracker is ER_NO_SUCH_TABLE (1146), a tracker whose columns
+    // drifted is ER_BAD_FIELD_ERROR (1054), both on the DrizzleQueryError's
+    // `cause`. Only the first may read as "nothing applied"; the second read as
+    // all-pending invites a re-run of migrations that were applied.
     await database.migrateDatabase()
     const db = await database.getDatabase()
 

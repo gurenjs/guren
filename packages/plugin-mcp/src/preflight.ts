@@ -164,14 +164,11 @@ export type PreflightOutcome =
   | { executed: string }
 
 /**
- * Read the dispatched response as a verdict. The seam is mounted last before the
- * handler and answers unconditionally, which settles the three branches: the
- * `preflightVerdict` marker (set from the response header, never re-read from
- * the body) means allowed and unrun; a 4xx/5xx can only come from a gate in
- * front of the seam or the seam's own validation, so nothing ran and it is
- * `allowed: false`; anything else means a handler ran, reported as an error
- * rather than a rehearsal — a redirect from a controller that just created a
- * record must not be described as a call that did not happen.
+ * The seam is mounted last before the handler and answers unconditionally, which
+ * settles three branches: the `preflightVerdict` marker (from the response
+ * header, never re-read from the body) means allowed and unrun; a 4xx/5xx can
+ * only come from a gate in front of the seam or its own validation, so nothing
+ * ran; anything else means a handler ran, reported as an error, not a rehearsal.
  */
 export function toPreflightVerdict(toolName: string, outcome: ToolCallOutcome): PreflightOutcome {
   const parsed = parseContent(outcome)

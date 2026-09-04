@@ -1,13 +1,12 @@
 /**
  * `guren tool:log` — read the agent audit trail back (RFC 0016 §5.2).
  *
- * The read half of the sink `@guren/plugin-mcp`'s `audit` option installs. Unlike its
- * `tool:` neighbours it does **not** boot the application: an operator investigating an
- * incident must be able to read the log whether or not the app still starts. Which files
- * belong to a base path is `matchDailyFileDate`'s answer and what a line means is
- * `parseAuditRecord`'s — neither is re-derived here. **An empty result is a claim**: the
- * sink is opt-in, so an absent file prints the configuration line rather than a list, and
- * nothing pre-checks with `existsSync`, whose "does not exist" hides a permission error.
+ * The read half of the sink `@guren/plugin-mcp`'s `audit` option installs. Unlike its `tool:`
+ * neighbours it does **not** boot the application: an operator investigating an incident
+ * must be able to read the log whether or not the app still starts. Which files belong to a
+ * base path is `matchDailyFileDate`'s answer, what a line means is `parseAuditRecord`'s.
+ * **An empty result is a claim**: the sink is opt-in, so an absent file prints the configuration
+ * line, and nothing pre-checks with `existsSync`, whose "does not exist" hides a permission error.
  */
 import { consola } from 'consola'
 import { readdir, readFile, open } from 'node:fs/promises'

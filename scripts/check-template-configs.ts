@@ -1,16 +1,12 @@
 /**
  * Type-checks every scaffold-template project and proves that, together, they
- * cover every shipped template.
+ * cover every shipped template. Usage: bun scripts/check-template-configs.ts
  *
  * `packages/cli/templates/scaffold/` is reached by no other tsconfig (the root
- * typecheck excludes it), and is split across `tsconfig.templates*.json`
- * projects because `rootDirs` merges every listed scaffold into one virtual
- * root, so colliding scaffolds need separate projects. A scaffold left out of
- * every config is then typechecked by *nothing* while `typecheck` stays green,
- * so the configs are discovered rather than listed and the union of their
- * `--listFilesOnly` lists must contain every `.ts`/`.tsx` under the tree.
- *
- * Usage: bun scripts/check-template-configs.ts
+ * typecheck excludes it) and is split across `tsconfig.templates*.json` projects
+ * because `rootDirs` merges every scaffold into one virtual root. A scaffold left
+ * out of every config is typechecked by nothing, so the configs are discovered and
+ * the union of their `--listFilesOnly` lists must contain every `.ts`/`.tsx`.
  */
 import { readdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'

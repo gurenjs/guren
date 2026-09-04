@@ -96,11 +96,10 @@ describe('DailyFileChannel through the extracted rule', () => {
   })
 
   test('should sweep a base path that names no directory, against the working directory', () => {
-    // `path.parse('audit.log').dir` is `''` and `existsSync('')` is false, so a
-    // bare filename used to skip `cleanup()` entirely; `path.dirname` answers
-    // `'.'`, the directory the channel writes into. Pinned because every
-    // `DailyFileChannel` on a relative bare name now deletes files it used to
-    // leave alone, and only `matchDailyFileDate` keeps it to its own.
+    // `path.parse('audit.log').dir` is `''` and `existsSync('')` is false, which
+    // would skip `cleanup()` entirely; `path.dirname` answers `'.'`, the directory
+    // the channel writes into. Pinned because a `DailyFileChannel` on a relative
+    // bare name deletes files there, and only `matchDailyFileDate` keeps it to its own.
     const dir = tempDir()
     const originalCwd = process.cwd()
     try {

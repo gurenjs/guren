@@ -2,14 +2,11 @@ import { Command } from '@guren/server'
 import { resolveAttachmentEngine } from './engine.js'
 
 /**
- * Console sweeper for the attachments layer (RFC 0013 §8). The polymorphic
- * `attachableType`/`attachableId` pair cannot carry a foreign key, so deletion
- * is explicit (`purgeAttachments()`) plus this sweep. Register it in the app's
- * console kernel.
- *
- * Orphan rows are detected by resolving each `attachableType` through
- * `Model.morphMap`, so every model declaring attachments must appear there or
- * its rows are reported as unverifiable and left alone.
+ * Console sweeper for the attachments layer (RFC 0013 §8): the polymorphic
+ * `attachableType`/`attachableId` pair carries no foreign key, so deletion is
+ * explicit (`purgeAttachments()`) plus this sweep. Register it in the console
+ * kernel. Orphans are found by resolving `attachableType` through `Model.morphMap`;
+ * a model missing there has its rows reported as unverifiable and left alone.
  */
 export class AttachmentsPruneCommand extends Command {
   static override signature =

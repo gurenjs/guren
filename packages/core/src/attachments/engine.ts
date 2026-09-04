@@ -165,12 +165,10 @@ export interface DeliveryOptions {
 
 /**
  * The single storage key prefix every attachment object lives under:
- * `attachments/<id>/<name>` for an original, `attachments/<id>/variants/…` for
- * a derivative, `attachments/` for the prune sweep's listing.
- *
- * Exported because `guren check`'s attachments rules name `<disk root>/
- * attachments` from another package. A restated copy there would not fail when
- * this layout moves — it would stop matching and report an exposed app as safe.
+ * `attachments/<id>/<name>` originals, `attachments/<id>/variants/…`
+ * derivatives, `attachments/` the prune sweep's listing. Exported because
+ * `guren check` names `<disk root>/attachments` from another package; a restated
+ * copy there would stop matching when this moves and report an exposed app safe.
  */
 export const ATTACHMENT_OBJECT_PREFIX = 'attachments'
 
@@ -194,7 +192,7 @@ export interface PruneOptions {
 export interface PruneReport {
   /** Rows examined. */
   scannedRows: number
-  /** Rows whose owning record no longer exists (deleted unless dry-run). */
+  /** Rows whose owning record is gone (deleted unless dry-run). */
   orphanRows: Array<{ id: string; attachableType: string; attachableId: string }>
   /**
    * Morph types that could not be verified and were left untouched. A type that
@@ -1195,11 +1193,10 @@ export class AttachmentEngine {
 
   /**
    * Serve one delivery-route request (RFC 0015 §1). Every failure is the same
-   * 404: invalid signature, expired URL, and unknown id must be
-   * indistinguishable. Takes the raw `Request` so every semantic parameter is
-   * re-read from the *same* `URLSearchParams` parse the signature canonicalizes
-   * with — a route framework's decoder disagrees on malformed percent-encoding,
-   * and that mismatch is a signed-URL rewrite primitive.
+   * 404: invalid signature, expired URL, and unknown id stay indistinguishable.
+   * Takes the raw `Request` so each parameter is re-read from the *same*
+   * `URLSearchParams` parse the signature canonicalizes with; a route decoder
+   * disagrees on malformed percent-encoding, a signed-URL rewrite primitive.
    */
   async handleDeliveryRequest(request: Request): Promise<Response> {
     const notFound = () =>

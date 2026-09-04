@@ -3,15 +3,11 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /**
- * The OAuth consent flow this plugin scaffolds, shipped as **real source files**
- * under `templates/mcp-oauth/` rather than string literals. A template's path
- * relative to that tree is exactly the path it is written to in the app, so the
- * relative import from `routes/mcp-oauth.ts` into `app/Http/Controllers/`
- * resolves in the template tree *and* in the scaffolded app. Real sources
- * because a template literal is TypeScript to no tool; these are inside the root
- * `tsconfig` program, so `bun run typecheck` compiles them as app-shaped code.
- * `templates/` is published and sits outside `dist/`, which is why the URL below
- * climbs one level and works from `dist/` and `src/` alike.
+ * The OAuth consent flow this plugin scaffolds, shipped as real sources under
+ * `templates/mcp-oauth/` (published, outside `dist/`, so the URL below climbs one
+ * level from `dist/` and `src/` alike). A template's path relative to that tree
+ * is exactly its path in the app, so the relative import from `routes/` into
+ * `app/Http/Controllers/` resolves in both; the root `tsconfig` typechecks them.
  */
 const templateDir = fileURLToPath(new URL('../templates/mcp-oauth', import.meta.url))
 

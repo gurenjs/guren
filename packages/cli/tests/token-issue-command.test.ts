@@ -13,9 +13,8 @@ const repoRoot = resolve(import.meta.dir, '../../..')
  * The command's I/O boundary — deriving the tool list, reaching the token store,
  * and what it prints; `token-issue.test.ts` covers the issuance rules. The app
  * lives in a *subdirectory* of the workspace so `--app` names a root the process
- * cwd is not: at the workspace root every case would pass whether or not the
- * command honoured the flag, which is what hid the store landing in a different
- * application than the tools were derived from.
+ * cwd is not: at the workspace root every case passes whether or not the flag is
+ * honoured, which hides the store landing in a different app than the tools.
  */
 async function linkFixtureDependencies(dir: string): Promise<void> {
   await linkWorkspaceCore(dir)

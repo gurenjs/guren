@@ -24,7 +24,7 @@ const DEFAULT_GUARD = 'web'
 
 /** How `useTokens()` configures the guard it registers. */
 export interface ApiTokenGuardOptions {
-  /** Registered provider name used to load the full user record from a token's userId. */
+  /** Registered provider name that loads the full user record from a token's userId. */
   provider?: string
   /** Guard registry name (defaults to 'token'). */
   guardName?: string
@@ -180,11 +180,8 @@ export class AuthManager implements AuthManagerContract {
    * Register a bearer-token guard backed by an ApiTokenStore and enable
    * header-based guard selection: requests carrying `Authorization: Bearer`
    * resolve to this guard, everything else keeps the default (session) guard.
-   *
-   * @param options.provider - Registered provider name used to load the full
-   *   user record from the token's userId. Without it, `auth.user()` resolves
-   *   to a minimal `{ id }` record (enough for Gate/policy evaluation).
-   * @param options.guardName - Guard registry name (defaults to 'token')
+   * Without `options.provider`, `auth.user()` resolves to a minimal `{ id }`
+   * record (enough for Gate/policy evaluation).
    */
   useTokens(
     store: ApiTokenStore,
@@ -232,15 +229,11 @@ export class AuthManager implements AuthManagerContract {
   }
 
   /**
-   * The token store {@link useTokens} was configured with, or `undefined` when
-   * this app never called it.
-   *
-   * The one path by which out-of-request machinery (`guren token:issue`, the
-   * App MCP adapter's principal lookup) reaches the same store the guard
-   * verifies against: `useTokens` otherwise closes over `store` inside the
-   * guard factory, so an issuance command could only write into a store no
-   * running app would read. Deliberately on this class rather than on
-   * `AuthManagerContract`, which describes what a *request* needs from auth.
+   * The token store {@link useTokens} was configured with, or `undefined`. The
+   * one path by which out-of-request machinery (`guren token:issue`, the App MCP
+   * adapter's principal lookup) reaches the store the guard verifies against —
+   * otherwise `store` is closed over inside the guard factory. On this class
+   * rather than `AuthManagerContract`, which describes what a *request* needs.
    */
   getApiTokenStore(): ApiTokenStore | undefined {
     return this.apiTokenStore ?? undefined

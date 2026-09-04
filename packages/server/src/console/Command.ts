@@ -156,10 +156,8 @@ export abstract class Command implements CommandInstance {
   /**
    * Run one readline prompt to completion. Settles exactly once, and tears the
    * interface, the mask listener and raw mode down on every exit path, so a
-   * later prompt starts clean.
-   *
-   * Returns null when input ended with nothing typed. Callers decide what that
-   * means; leaving it unanswered would hang them forever.
+   * later prompt starts clean. Returns null when input ended with nothing
+   * typed; callers decide what that means, as leaving it unanswered would hang.
    */
   private prompt(prompt: string, options: { mask: boolean }): Promise<string | null> {
     const stdin = this.inputStream()

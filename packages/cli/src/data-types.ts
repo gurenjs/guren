@@ -18,12 +18,11 @@ import { parseSourceFile } from './parse-cache'
 export interface ResourceDefinition {
   className: string
   /**
-   * `Data` namespace member this resource is emitted as, or `null` when the
-   * class was discovered but nothing was emitted — see
-   * {@link resolveEmittableNames}. Module resources are always qualified
-   * (`modules/billing/`'s `InvoiceResource` → `Data.BillingInvoice`) so a name
-   * depends only on where the class lives; qualifying only on collision would
-   * rename an existing type out from under the frontend importing it.
+   * `Data` namespace member this resource is emitted as, or `null` when the class
+   * was discovered but nothing was emitted — see {@link resolveEmittableNames}.
+   * Module resources are always qualified (`modules/billing/`'s `InvoiceResource` →
+   * `Data.BillingInvoice`) so a name depends only on where the class lives; qualifying
+   * only on collision would rename an existing type out from under the frontend.
    */
   dataName: string | null
   /**
@@ -154,19 +153,11 @@ const RESERVED_WORDS = new Set([
 ])
 
 /**
- * Clears the `dataName` of every definition that cannot be emitted as its own
- * `Data` member, and warns about each: one uncompilable `data.gen.ts` costs the
- * app every type in it, so a named omission is the cheaper failure.
- *
- * Cleared rather than removed, because the class still occupies its class name:
- * a response hint carries only that name, so without the tombstone
- * `buildApiClientContent` reads a surviving twin as unique and types the route
- * with the other root's payload. Unemittable means no extractable `toArray()`
- * type, a name TypeScript rejects (a module *directory* need not be an
- * identifier — `modules/2fa/` qualifies to `2faInvoice`), or a name another
- * definition claimed first (module qualification does not rule every collision
- * out: `my-module`/`my_module` share a prefix, and a root
- * `BillingInvoiceResource` collides with `modules/billing/`'s `InvoiceResource`).
+ * Clears the `dataName` of every definition that cannot be emitted as its own `Data` member,
+ * and warns: one uncompilable `data.gen.ts` costs the app every type in it. Cleared, not removed,
+ * because the class still occupies its class name: a response hint carries only that, so without
+ * the tombstone `buildApiClientContent` reads a surviving twin as unique. Unemittable: no `toArray()`
+ * type, a non-identifier name (`modules/2fa/`), or a name claimed first (`my-module`/`my_module` collide).
  */
 function resolveEmittableNames(definitions: ResourceDefinition[], warnings: string[]): void {
   const claimed = new Map<string, ResourceDefinition>()
@@ -315,13 +306,11 @@ async function extractResourceType(
 }
 
 /**
- * What the file declares under `namePattern`: a copyable object body, nothing
- * at all, or a declaration that exists but cannot be copied.
- *
- * The third case is why this is not `string | null`: guessing a brace body for
- * it hands the frontend a type that compiles and lies, where refusing costs one
- * `Data` member. An unreadable declaration the file *exports* is not even lost —
- * the caller falls back to an import-type reference ({@link readTypeReference}).
+ * What the file declares under `namePattern`: a copyable object body, nothing at
+ * all, or a declaration that exists but cannot be copied. The third case is why
+ * this is not `string | null`: guessing a brace body for it hands the frontend a
+ * type that compiles and lies, where refusing costs one `Data` member. An unreadable
+ * declaration the file *exports* falls back to an import-type reference ({@link readTypeReference}).
  */
 type ObjectTypeRead =
   | { kind: 'body'; body: string }
@@ -329,14 +318,11 @@ type ObjectTypeRead =
   | { kind: 'unreadable'; typeName: string; reason: string; fix?: string }
 
 /**
- * The body of `interface <name> { … }` / `type <name> = { … }`, declared
- * anywhere in `source`.
- *
- * `masked` is {@link maskCommentsAndStrings} of the same string: everything is
- * *matched* against it and *sliced* from `source`. `namePattern` is spliced
- * into a regex, so a caller may pass alternatives. The opening brace must be
- * found by the pattern, not by searching forward for the next `{`: a
- * `type PostData = string` would otherwise hand back the class body below it.
+ * The body of `interface <name> { … }` / `type <name> = { … }`, declared anywhere in
+ * `source`. `masked` is {@link maskCommentsAndStrings} of the same string: everything
+ * is *matched* against it and *sliced* from `source`. `namePattern` is spliced into a
+ * regex, so a caller may pass alternatives. The opening brace must be found by the
+ * pattern, not the next `{`: `type PostData = string` would otherwise yield the class body below it.
  */
 function readObjectType(source: string, masked: string, namePattern: string): ObjectTypeRead {
   const declaration = new RegExp(
@@ -479,14 +465,11 @@ function findBodyEnd(masked: string, openIndex: number): number | null {
 }
 
 /**
- * `source` with the contents of comments and string literals replaced by
- * spaces, newlines and length preserved so every index still addresses the
- * same character in the original.
- *
- * `patch-helpers.ts` masks for its own matching and deliberately does not share
- * this: it keeps the quotes so a masked `'A', 'B'` still splits into two
- * entries, and it is a write path where the divergences here (blanked quotes,
- * an unterminated quote stopping at the newline) would change what gets patched.
+ * `source` with the contents of comments and string literals replaced by spaces, newlines
+ * and length preserved so every index still addresses the same character. `patch-helpers.ts`
+ * masks for its own matching and deliberately does not share this: it keeps the quotes so a
+ * masked `'A', 'B'` still splits into two entries, and it is a write path where the divergences
+ * here (blanked quotes, an unterminated quote stopping at the newline) would change what is patched.
  */
 function maskCommentsAndStrings(source: string): string {
   // Split on UTF-16 units so an index into `chars` is an index into `source`.
@@ -593,13 +576,11 @@ function maskTemplateExpression(
 }
 
 /**
- * Outcome of trying to emit a payload type as an import-type reference.
- *
- * The gate is exportedness proven from the AST: a reference to an unexported
- * name is a TS2694 that takes the whole artifact out of compilation, and the
- * `export` keyword on the declaration line is not the test (`export type { X }`
- * exports without one). `exportWouldFix` is true only when exporting is all
- * that stands in the way, so the warning can say "export it".
+ * Outcome of trying to emit a payload type as an import-type reference. The gate is
+ * exportedness proven from the AST: a reference to an unexported name is a TS2694
+ * that takes the whole artifact out of compilation, and the `export` keyword on the
+ * declaration line is not the test (`export type { X }` exports without one).
+ * `exportWouldFix` is true only when exporting is all that stands in the way.
  */
 type TypeReferenceRead =
   | { rawType: string }
@@ -680,12 +661,11 @@ function readTypeReference(
 }
 
 /**
- * Module specifier for an import-type reference from `data.gen.ts` to
- * `filePath`, or `null` for a file an extensionless specifier does not resolve
- * to. Extensionless is what this repo's generators choose; the `.js` suffixes
- * in generated imports are author-written statements copied verbatim. The
- * `.d.ts` guard sits here because this is the site that slices: stripping only
- * `.ts` from one would silently emit a specifier ending in `.d`.
+ * Module specifier for an import-type reference from `data.gen.ts` to `filePath`, or
+ * `null` for a file an extensionless specifier does not resolve to. Extensionless is
+ * what this repo's generators choose; `.js` suffixes in generated imports are author-written
+ * statements copied verbatim. The `.d.ts` guard sits here because this is the site that
+ * slices: stripping only `.ts` from one would silently emit a specifier ending in `.d`.
  */
 function importTypeSpecifier(filePath: string, outputDirectory: string): string | null {
   if (!filePath.endsWith('.ts') || filePath.endsWith('.d.ts')) return null

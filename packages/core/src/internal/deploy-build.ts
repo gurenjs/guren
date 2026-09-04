@@ -96,7 +96,6 @@ function realpathOfNearestExisting(path: string): string {
  * `outputDir` that reaches the root through links). Containment uses `relative`,
  * not a prefix test (`out + sep` is `//` at the root, letting `'/'` through), and
  * escape means `'..'` or a `'../'` prefix, so `..-source` inside `out` is not one.
- * @param label Platform name for the error message, e.g. `'Lambda build'`.
  */
 export function assertOutputDirOutsideRoot(out: string, root: string, label: string): void {
   const outToRoot = relative(realpathOfNearestExisting(out), realpathOfNearestExisting(root))
@@ -433,12 +432,11 @@ export interface SqlClientModule extends DevOnlyModule {
 }
 
 /**
- * Client libraries the Postgres, MySQL and Aurora Data API factories reach for,
- * apart from `DEV_ONLY_MODULES` because their fate is per platform: unreachable on
+ * Client libraries the Postgres, MySQL and Aurora Data API factories reach for.
+ * Apart from `DEV_ONLY_MODULES` because their fate is per platform: unreachable on
  * Workers (D1 only), load-bearing on Lambda/Vercel, which stub only undeclared
- * dialects (`unusedSqlClients`). Stub the client *and* drizzle's entry importing it
- * (literal dynamic imports made a D1 app fail on `Could not resolve "postgres"`);
- * export names are read off drizzle-orm's driver and session modules.
+ * dialects (`unusedSqlClients`). Stub the client *and* drizzle's entry importing it,
+ * or a D1 app fails on `Could not resolve "postgres"`; export names mirror drizzle-orm's.
  */
 export const SQL_CLIENT_MODULES = [
   { specifier: 'postgres', kind: 'sql-driver', dialect: 'postgres', exportNames: [] },
@@ -521,7 +519,6 @@ export const DATABASE_DIALECTS = [...new Set(Object.values(DATABASE_FACTORIES))]
  * and the bundle builds clean but cannot reach its database. Not fail-open: this
  * is a caller's explicit override, and falling back to detection would stub by the
  * very config being overridden.
- * @param label Platform name for the error message, e.g. `'Lambda build'`.
  */
 function assertDatabaseDialects(
   names: readonly string[],
@@ -564,7 +561,6 @@ export interface UnusedSqlClient {
  * and stub nothing, because under-stubbing fails loudly at build time while
  * over-stubbing ships a bundle that cannot reach its database in production.
  * @param dialects Overrides detection when the caller already knows.
- * @param label Platform name for the messages, e.g. `'Lambda build'`.
  */
 export function unusedSqlClients(input: {
   root: string

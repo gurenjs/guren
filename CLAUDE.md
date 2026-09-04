@@ -172,7 +172,7 @@ bunx guren make:controller Invoice --module billing  # Most make:* commands acce
 
 ### Comments
 - Code shows *how*; a comment carries only what the code cannot: a constraint, a pitfall, a unit, a cross-file sync obligation, a measured number, an RFC/issue reference. No narration of the next line, no section banners, no change history
-- The full rule and the size limits live in `.claude/rules/coding-standards.md` (Comments); `bun run audit:comments` enforces the mechanical half, ratcheted per file against main, and runs as a PostToolUse hook after every edit
+- The full rule and the size limits live in `.claude/rules/coding-standards.md` (Comments); the `guren/comment-*` oxlint rules (`bun run lint`, and the PostToolUse hook after every edit) enforce the mechanical half
 
 ### Imports
 ```typescript

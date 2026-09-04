@@ -9,10 +9,9 @@ const DEFAULT_OUTPUT = 'db/migrations'
 /**
  * Wider than drizzle-kit's own discovery (`.ts`/`.js`/`.json`): its loader
  * accepts an explicit `--config` pointing at `.mts`/`.mjs` too. `.json` is
- * probed although drizzle-kit cannot load one under its Node shebang, because
- * an error naming the user's own config beats a missing-`dialect` report for a
- * dialect they did declare. Order matters — a loadable config must beat a
- * `.json`. Verified against drizzle-kit 1.0.0-rc.4.
+ * probed although drizzle-kit cannot load one under its Node shebang: an error
+ * naming the user's own config beats a missing-`dialect` report. Order matters —
+ * a loadable config must beat a `.json`. Verified against drizzle-kit 1.0.0-rc.4.
  */
 const DRIZZLE_CONFIG_CANDIDATES = [
   'drizzle.config.ts',
@@ -200,13 +199,11 @@ export async function makeMigration(options: MakeMigrationOptions = {}): Promise
   const hasOverrides = options.schema != null || options.out != null || options.dialect != null
   const useConfig = Boolean(configPath) && !hasOverrides
 
-  // Read on both branches: any override drops `--config`, and drizzle-kit
-  // 1.0.0-rc.4 refuses that combination outright ("You can't use both --config
-  // and other cli options for generate command"), so the flags must restate
-  // what the config would have supplied. Its `assertCollisions` only rejects
-  // `driver`, `breakpoints`, `schema`, `out` and `dialect` beside `--config`,
-  // which is why `--name` below rides along on either branch. `breakpoints:
-  // false` is the one field flags cannot carry.
+  // Read on both branches: any override drops `--config`, which drizzle-kit 1.0.0-rc.4
+  // refuses beside other flags ("You can't use both --config and other cli options for
+  // generate command"), so the flags must restate what the config supplied. Its
+  // `assertCollisions` only rejects `driver`, `breakpoints`, `schema`, `out` and `dialect`
+  // beside `--config`, so `--name` rides on either branch. `breakpoints: false` flags cannot carry.
   const configured = configPath ? await readDrizzleConfig(configPath) : {}
 
   const args = ['x', 'drizzle-kit', 'generate']

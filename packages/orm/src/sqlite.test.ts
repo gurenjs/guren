@@ -328,9 +328,9 @@ describe('createSqliteDatabase connection-URI filenames', () => {
     await expect(database.getDatabase()).rejects.toThrow(/connection URI where it expects a file path/)
   })
 
-  // The failure this guards is not the rejection but what used to happen instead:
-  // the driver mkdir -p's the filename's directory, so an unguarded URI is created
-  // as a `postgres:/guren:guren@localhost:54322` tree and migrated into silently.
+  // The failure this guards is not the rejection but the driver's fallback: it
+  // mkdir -p's the filename's directory, so an unguarded URI is created as a
+  // `postgres:/guren:guren@localhost:54322` tree and migrated into silently.
   test('should create no directory tree for the rejected URI', async () => {
     const database = createSqliteDatabase({
       migrationsFolder: join(workDir, 'migrations'),
@@ -437,7 +437,7 @@ describe('createSqliteDatabase connection-URI filenames', () => {
   // Resolving the URI to a path is what makes it portable, and a path cannot
   // carry the parameters a URI can. Dropping them silently is the one outcome
   // worth refusing: `mode=ro` would come back as a writable database on a host
-  // that used to honour it.
+  // whose sqlite honours URI parameters.
   test('should reject a file: URI carrying query parameters', async () => {
     const database = createSqliteDatabase({
       migrationsFolder: join(workDir, 'migrations'),

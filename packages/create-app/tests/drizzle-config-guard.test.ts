@@ -39,8 +39,8 @@ describe('generated drizzle.config.ts DATABASE_URL guard', () => {
     )
   })
 
-  // The value both guards used to allow, and the one that splits silently
-  // rather than failing: neither implementation errors on it.
+  // A URI a scheme-blind guard admits, and the one that splits the app across
+  // two databases rather than failing: neither sqlite binding errors on it.
   it('refuses a file: URI for --db sqlite', async () => {
     const config = await generateConfig('sqlite')
 

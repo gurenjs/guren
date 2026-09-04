@@ -117,12 +117,11 @@ async function collectSeeders<TDatabase>(
 ): Promise<{ root: string; seeders: Array<SeederHandler<TDatabase>>; filesWithoutSeeder: number }> {
   const root = directory instanceof URL ? fileURLToPath(directory) : resolve(directory)
 
-  // A folder that was never created is the same nothing-to-run an empty one
-  // reports; letting the ENOENT out surfaced it as "Failed to seed the
-  // database: ENOENT ... scandir". Only ENOENT is absence, and it is read off
-  // the listing rather than a preceding existsSync, which answers false for a
-  // folder whose *parent* is unreadable and would turn a permission problem
-  // into a silent "no seeders found". ENOTDIR and EACCES still throw.
+  // A missing folder is the same nothing-to-run an empty one reports, so only
+  // ENOENT is absence, and it is read off the listing rather than a preceding
+  // existsSync, which answers false for a folder whose *parent* is unreadable
+  // and would turn a permission problem into a silent "no seeders found".
+  // ENOTDIR and EACCES still throw.
   let entries: Dirent[]
   try {
     entries = await readdir(root, { withFileTypes: true })

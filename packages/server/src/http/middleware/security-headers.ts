@@ -31,7 +31,6 @@ export interface SecurityHeadersOptions {
 
 /**
  * Sets common HTTP security headers on every response.
- *
  * @example
  * ```ts
  * app.use('*', createSecurityHeaders({ hsts: { maxAge: 31536000 } }))
@@ -61,12 +60,10 @@ export function createSecurityHeaders(options: SecurityHeadersOptions = {}): Mid
 
   return async (ctx, next) => {
     // Applied after the response exists, never via ctx.header() before next():
-    // prepared headers are dropped by a handler returning a raw
-    // `new Response(...)`, which is every asset response the framework serves.
-    // `finally` rather than a plain post-next call, because `next()` does not
-    // resolve when an error escapes compose (an exception handler that throws
-    // while rendering); Hono re-renders through this same context, inheriting
-    // whatever ctx.res carries on the way out.
+    // a handler returning a raw `new Response(...)` (every asset response the
+    // framework serves) drops prepared headers. `finally` because `next()` does
+    // not resolve when an error escapes compose (an exception handler that throws
+    // while rendering); Hono re-renders through this same context, inheriting ctx.res.
     try {
       await next()
     } finally {

@@ -24,12 +24,11 @@ export const PATCH_REASONS = {
 } as const
 
 /**
- * `source` with comment and string contents blanked character for character,
- * so every index still lines up with the original. These patches find their
- * edit site by regex, and text that merely looks like code misleads both ways.
- * `data-types.ts` masks for itself rather than sharing this: it blanks the
- * quotes too, which `parseArrayEntries` below cannot have — it counts masked
- * entries and needs `'A', 'B'` to stay two of them.
+ * `source` with comment and string contents blanked character for character, so
+ * every index still lines up with the original; these patches find their edit
+ * site by regex, and text that merely looks like code misleads both ways.
+ * `data-types.ts` masks for itself: it blanks the quotes too, which
+ * `parseArrayEntries` below cannot have — it needs `'A', 'B'` to stay two entries.
  */
 function maskNonCode(source: string): string {
   const mask = source.split('')
@@ -127,14 +126,11 @@ function appendArrayEntry(arrayInterior: string, valueSource: string): string {
 }
 
 /**
- * Whether every value binding `importStatement` asks for is already imported
- * from the same module. {@link insertImport}'s literal-line test only knows
- * the statement this package writes, so a *merged* import reads as absent and
- * the patch appends a duplicate binding. Decided on the AST, unlike the rest
- * of this file, because regex got five cases wrong here: an import inside a
- * comment or template literal, a `type`-only import, `X as wanted`, a comment
- * between the braces, and a pattern spanning two imports. Unparseable content
- * answers `false`, so a duplicate surfaces rather than a dropped import.
+ * Whether every value binding `importStatement` asks for is already imported from the
+ * same module: {@link insertImport}'s literal-line test only knows the statement this
+ * package writes, so a *merged* import reads as absent and gets a duplicate. AST-based, since
+ * regex got five cases wrong (import in a comment or template literal, `type`-only, `X as
+ * wanted`, a comment between braces, one spanning two imports); unparseable answers `false`.
  */
 function namedBindingsAlreadyImported(content: string, importStatement: string): boolean {
   const requested = parseNamedImport(importStatement)
@@ -362,7 +358,6 @@ function findCallOptionsSpan(
  * Adds an entry to an array-valued option of a single-object-argument call
  * (`modules: [...]` in `createApp`, `commands: [...]` in `defineModule`),
  * creating the option when absent and scoped to `callName`'s own object.
- *
  * `addProvider` stays a separate implementation rather than delegating here,
  * so its existing callers keep its failure-when-absent behaviour.
  */
@@ -505,11 +500,10 @@ export const DIALECT_BARRELS = {
 
 /**
  * The dialect an app's `db/schema.ts` is written in. Every column-appending
- * patcher must agree: drizzle's table builders accept a foreign dialect's
- * column builders, so two patchers disagreeing fails silently. A whole-file
- * content sniff rather than the parser's per-table resolution, because
- * patchers call it mid-write and a schema with no tables still needs an
- * answer — hence the `pg` fallback.
+ * patcher must agree: drizzle's table builders accept a foreign dialect's column
+ * builders, so two patchers disagreeing fails silently. A whole-file content
+ * sniff rather than the parser's per-table resolution, because patchers call it
+ * mid-write and a schema with no tables still needs an answer — hence the `pg` fallback.
  */
 export function detectSchemaDialect(content: string): SchemaDialect {
   if (
@@ -545,13 +539,11 @@ export async function readSchemaDialect(cwd: string = process.cwd()): Promise<Sc
 }
 
 /**
- * Merges `needed` into the first `import { ... } from '<specifier>'`, or
- * prepends one. Three limits inherited from the dialect-specific patchers this
- * generalizes: the already-imported check is **not** module-scoped (a name in
- * scope from any module counts as present); only the plain named form merges,
- * so `import type`, default and namespace imports get a second line beside
- * them; and `needed` must be plain identifiers, used unescaped in a `\b`
- * pattern.
+ * Merges `needed` into the first `import { ... } from '<specifier>'`, or prepends
+ * one. Three limits inherited from the dialect-specific patchers: the
+ * already-imported check is **not** module-scoped (a name in scope from any module
+ * counts); only the plain named form merges, so `import type`, default and namespace
+ * imports get a second line; and `needed` must be plain identifiers, used unescaped in a `\b` pattern.
  */
 export function ensureNamedImports(content: string, specifier: string, needed: string[]): string {
   const importContent = content

@@ -67,12 +67,11 @@ const UNAVAILABLE_ON_LAMBDA: Record<(typeof DEV_ONLY_MODULES)[number]['kind'], s
 }
 
 /**
- * Dev-only modules replaced with throwing stubs rather than left external:
- * inlining a lazily-imported module hoists its static imports to the bundle top
- * level, so an external module reached that way (the MCP SDK) would fail at
- * import time even though no code path ever runs it. An app declaring
+ * Stubs rather than externals: inlining a lazily-imported module hoists its
+ * static imports to the bundle top level, so an external reached that way (the
+ * MCP SDK) fails at import time though no code path runs it. An app declaring
  * `@guren/plugin-mcp` serves the endpoint here, so its transport must reach the
- * bundle instead (RFC 0016 §7) — `stubbableDevOnlyModules` owns that split.
+ * bundle (RFC 0016 §7) — `stubbableDevOnlyModules` owns that split.
  */
 function devOnlyStubs(mcpPlugin: boolean): Record<string, string> {
   return Object.fromEntries(
@@ -108,10 +107,9 @@ function stubsFor(
 /**
  * Fallback for an MCP SDK subpath `DEV_ONLY_MODULES` does not name. It cannot
  * know which names the importer destructures, so it throws on evaluation rather
- * than silently handing back missing exports. Reachable only for an app that
- * does *not* declare `@guren/plugin-mcp`, whose statically imported
- * `server/index.js` and `types.js` it would otherwise stub shut — see
- * `stubFilter`.
+ * than handing back missing exports. Reachable only for an app that does *not*
+ * declare `@guren/plugin-mcp`, whose statically imported `server/index.js` and
+ * `types.js` it would otherwise stub shut — see `stubFilter`.
  */
 const unlistedMcpStub = `throw new Error(${JSON.stringify(MCP_UNAVAILABLE)})\n`
 
@@ -121,10 +119,9 @@ function escapeRegExp(value: string): string {
 
 // Derived from the stubs actually rendered, so it stays the only enumeration of
 // stubbed specifiers: a specifier filtered with no stub loads as an empty module
-// instead of failing. The catch-all cannot be derived — gating it on "any MCP
-// SDK subpath is still stubbed" holds always and would swallow the
-// `server/index.js` and `types.js` an MCP app imports statically — so it follows
-// the same `mcpPlugin` decision as the stubs.
+// instead of failing. The catch-all cannot be derived — "any MCP SDK subpath is
+// stubbed" holds always and would swallow the `server/index.js` and `types.js`
+// an MCP app imports statically — so it follows the same `mcpPlugin` decision.
 function stubFilter(stubs: Record<string, string>, mcpPlugin: boolean): RegExp {
   const terms = Object.keys(stubs).map(escapeRegExp)
   if (!mcpPlugin) {

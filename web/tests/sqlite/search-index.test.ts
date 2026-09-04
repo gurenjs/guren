@@ -1,14 +1,11 @@
 /**
- * The search index against a real FTS5 engine.
+ * The search index against a real FTS5 engine. Runs under `bun test`, not
+ * vitest: Node's bundled SQLite is compiled without FTS5 (`no such module:
+ * fts5`); `bun:sqlite` ships the same 3.51.0 build D1 does.
  *
- * Runs under `bun test`, not vitest: vitest executes in Node, whose bundled
- * SQLite is compiled without FTS5 (`no such module: fts5`), so none of this
- * could run there. `bun:sqlite` ships the same 3.51.0 build D1 does.
- *
- * What only an engine can settle: that the generated SQL parses at all, that
- * the contentless table joins back to its rows, that a hostile query is inert
- * rather than a syntax error, and that the two bm25 weight vectors are not
- * interchangeable.
+ * Only an engine can settle that the generated SQL parses, that the contentless
+ * table joins back to its rows, that a hostile query is inert rather than a
+ * syntax error, and that the two bm25 weight vectors are not interchangeable.
  */
 import { Database } from 'bun:sqlite'
 
@@ -205,12 +202,10 @@ describe('bm25 weights', () => {
 describe('SQL string escaping', () => {
   /**
    * What drizzle would put in the statement for this value, had it built one.
-   *
-   * `inlineParams()` is public; reaching the dialect that renders it is not,
-   * which is why the generator does its own quoting rather than depending on
-   * this. Using it here is the point: it turns three lines of hand-written
-   * `replace` into something checked against a parser-aware implementation,
-   * and if the internal moves, only this test breaks.
+   * `inlineParams()` is public; the dialect that renders it is not, which is
+   * why the generator does its own quoting rather than depending on this. Here
+   * it checks the hand-written `replace` against a parser-aware
+   * implementation, and if the internal moves, only this test breaks.
    */
   const inlineAsDrizzleWould = (() => {
     const handle = drizzle({ client: new Database(':memory:') }) as unknown as {

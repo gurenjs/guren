@@ -136,12 +136,11 @@ async function realpathNearestExisting(candidate: string): Promise<string> {
 }
 
 /**
- * Null when `relPath` is absolute or escapes `baseDir`, symlinks resolved, so
- * a link inside the package cannot read or write outside it. The candidate
- * path is returned rather than its realpath, keeping callers on the logical
- * location. `extraRealRoots` admits local installs (`bun add file:`, `link:`,
- * `workspace:*`), whose per-file symlinks all point outside node_modules —
- * package-side callers pass `packageContentRoot()`.
+ * Null when `relPath` is absolute or escapes `baseDir`, symlinks resolved, so a
+ * link inside the package cannot read or write outside it. The candidate path is
+ * returned rather than its realpath, keeping callers on the logical location.
+ * `extraRealRoots` admits local installs (`bun add file:`, `link:`, `workspace:*`),
+ * whose per-file symlinks point outside node_modules — pass `packageContentRoot()`.
  */
 export async function resolveInside(
   baseDir: string,

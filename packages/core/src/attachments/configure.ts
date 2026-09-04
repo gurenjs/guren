@@ -23,15 +23,8 @@ export interface ConfiguredAttachments {
  * Wire the attachments layer, once per app: the app owns the table, the
  * framework returns the model. `Attachable` statics resolve this lazily and
  * throw a clear error when it was never called.
- *
  * @example
- * ```ts
- * export const { Attachment } = configureAttachments({
- *   table: attachments,
- *   storage: () => container.make('storage'),
- *   disk: 'media',
- * })
- * ```
+ * export const { Attachment } = configureAttachments({ table: attachments, storage: () => container.make('storage'), disk: 'media' })
  */
 export function configureAttachments(options: ConfigureAttachmentsOptions): ConfiguredAttachments {
   const engine = new AttachmentEngine(options)
