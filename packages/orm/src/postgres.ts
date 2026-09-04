@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import type postgres from 'postgres'
 import { hotReloadKey, releaseActiveConnection, replaceActiveConnection } from './active-connections'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
-import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailure, isConnectionFailure, migrationFailure, seedFailure, inspectMigrationsFolder, listLocalMigrations, noMigrationsToRun, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
+import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailure, isMissingTrackerTable, migrationFailure, seedFailure, inspectMigrationsFolder, listLocalMigrations, noMigrationsToRun, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders, type SeederRunSummary } from './seeder'
 import { singleFlight } from './single-flight'
 
@@ -226,12 +226,12 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
           return { name: record.name, appliedAt: null }
         })
       } catch (error) {
-        // An unreachable server reaches this catch too, and reporting it as
-        // "nothing applied" makes db:status indistinguishable from a database
-        // that is up with no migrations run.
-        if (isConnectionFailure(error)) throw error
-        // Tracker table does not exist yet — nothing applied.
-        return []
+        // Only a missing tracker table means "nothing applied". An unreachable
+        // server, a denied SELECT, or a broken `drizzle` schema reach this
+        // catch too, and reported as all-pending they are indistinguishable
+        // from a database that is up with no migrations run.
+        if (isMissingTrackerTable(error, 'postgres')) return []
+        throw error
       }
     })
 

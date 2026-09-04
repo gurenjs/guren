@@ -98,6 +98,27 @@ describePostgres('createPostgresDatabase against a real PostgreSQL server (requi
     expect(widgets).toEqual([])
   })
 
+  it('separates a missing tracker from a tracker it cannot read', async () => {
+    // The SQLSTATEs the absorbed-error rule is written against, measured here
+    // rather than assumed: a fresh database (no `drizzle` schema at all) is
+    // 42P01 undefined_table, and a tracker whose columns drifted is 42703.
+    // Only the first may be reported as "nothing applied" — the second, read
+    // as all-pending, invites a re-run of migrations that were applied.
+    const db = await database.getDatabase()
+
+    await db.execute(sql`DROP SCHEMA IF EXISTS "drizzle" CASCADE`)
+    expect(await database.migrationStatus()).toEqual([
+      { name: '20240101000000_init', applied: false, appliedAt: null },
+    ])
+
+    await db.execute(sql`CREATE SCHEMA "drizzle"`)
+    await db.execute(sql`CREATE TABLE "drizzle"."__drizzle_migrations" ("id" serial PRIMARY KEY)`)
+    await expect(database.migrationStatus()).rejects.toThrow(/column "name" does not exist/)
+
+    // Leave a migrated database behind for whatever runs next.
+    await database.resetDatabase()
+  })
+
   it('drops views on reset, not just base tables', async () => {
     // `widgets` has to exist for the view to select from it, whatever the
     // preceding test left behind.

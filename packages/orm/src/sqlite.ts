@@ -2,7 +2,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { hotReloadKey, releaseActiveConnection, replaceActiveConnection } from './active-connections'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
-import { buildMigrationStatus, migrationFailure, seedFailure, inspectMigrationsFolder, listLocalMigrations, noMigrationsToRun, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
+import { buildMigrationStatus, isMissingTrackerTable, migrationFailure, seedFailure, inspectMigrationsFolder, listLocalMigrations, noMigrationsToRun, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders, type SeederRunSummary } from './seeder'
 import { singleFlight } from './single-flight'
 
@@ -338,8 +338,11 @@ export function createSqliteDatabase(options: SqliteDatabaseOptions): SqliteData
           ?.query('SELECT name, applied_at FROM __drizzle_migrations')
           .all() as Array<{ name: string | null; applied_at: string | null }> | undefined
         appliedRows = (rows ?? []).map((row) => ({ name: row.name, appliedAt: row.applied_at }))
-      } catch {
-        // Tracker table does not exist yet — nothing applied.
+      } catch (error) {
+        // Only a missing tracker table means "nothing applied". A tracker
+        // whose columns drifted fails here too, and reported as all-pending
+        // it is indistinguishable from a database no migration ever touched.
+        if (!isMissingTrackerTable(error, 'sqlite')) throw error
       }
 
       return buildMigrationStatus(localMigrations, appliedRows)

@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { hotReloadKey, releaseActiveConnection, replaceActiveConnection } from './active-connections'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
-import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailure, isConnectionFailure, migrationFailure, seedFailure, inspectMigrationsFolder, listLocalMigrations, noMigrationsToRun, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
+import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailure, isMissingTrackerTable, migrationFailure, seedFailure, inspectMigrationsFolder, listLocalMigrations, noMigrationsToRun, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders, type SeederRunSummary } from './seeder'
 import { singleFlight } from './single-flight'
 
@@ -249,12 +249,12 @@ export function createMySqlDatabase(options: MySqlDatabaseOptions): MySqlDatabas
         )) as unknown as [Array<{ name: string | null; applied_at: string | Date | null }>]
         return rows.map((row) => ({ name: row.name, appliedAt: row.applied_at }))
       } catch (error) {
-        // An unreachable server reaches this catch too, and reporting it as
-        // "nothing applied" makes db:status indistinguishable from a database
-        // that is up with no migrations run.
-        if (isConnectionFailure(error)) throw error
-        // Tracker table does not exist yet — nothing applied.
-        return []
+        // Only a missing tracker table means "nothing applied". An unreachable
+        // server or a denied SELECT reach this catch too, and reported as
+        // all-pending they are indistinguishable from a database that is up
+        // with no migrations run.
+        if (isMissingTrackerTable(error, 'mysql')) return []
+        throw error
       }
     })
 
