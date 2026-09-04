@@ -4,10 +4,9 @@ export interface StartViteDevServerOptions {
   root?: string
   config?: InlineConfig
   /**
-   * What the dev server binds to. Left unset it follows Vite's own
-   * localhost-only default, which is the safe choice: the dev server serves
-   * every file under the project root, including the default SQLite database,
-   * with no authentication. Pass `true` to expose it on the network.
+   * What the dev server binds to. Unset it follows Vite's localhost-only
+   * default, which is the safe choice: the dev server serves every file under
+   * the project root, unauthenticated. Pass `true` to expose it on the network.
    */
   host?: boolean | string
   port?: number
@@ -20,11 +19,9 @@ export interface StartedViteDevServer {
 }
 
 /**
- * Build the inline config the managed dev server starts with.
- *
- * `server.host` is only set when the caller asked for one. Left undefined it
- * is dropped during Vite's config merge, so the project's own `vite.config.ts`
- * decides, falling back to Vite's localhost-only default.
+ * Build the inline config the managed dev server starts with. `server.host` is
+ * left undefined unless asked for, so Vite's config merge drops it and the
+ * project's own `vite.config.ts` decides.
  */
 export function resolveViteDevServerConfig(
   options: StartViteDevServerOptions = {},

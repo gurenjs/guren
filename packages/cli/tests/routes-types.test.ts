@@ -122,7 +122,6 @@ describe('buildDeclarationContent', () => {
 
     const content = buildDeclarationContent(definitions, { source: 'routes/web.ts' })
 
-    // '/users' should appear only once in RoutePath
     const matches = content.match(/'\/users'/g)
     expect(matches).toHaveLength(1)
   })
@@ -208,8 +207,7 @@ describe('buildRouteModuleContent', () => {
   })
 
   // The empty manifest used to ship under `@ts-nocheck`, which made the
-  // scaffolded app's typecheck skip this file entirely. Compiling both shapes
-  // is what keeps that suppression from coming back as a hidden type error.
+  // scaffolded app's typecheck skip the file entirely.
   it('type-checks under strict tsc with and without named routes', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'guren-routes-types-'))
     try {
@@ -248,11 +246,10 @@ describe('buildRouteModuleContent', () => {
 })
 
 /**
- * The generated module is app-facing code, so string assertions only prove it
- * mentions the right names. These run it (transpile, import, call `route()`)
- * and compile a usage probe against it, covering the one bug class both
- * gates exist for: Hono path modifiers (`{regex}`, `?`, `*`) leaking into
- * param keys or substituted URLs.
+ * String assertions only prove the generated module mentions the right names.
+ * These run it (transpile, import, call `route()`) and compile a usage probe,
+ * covering the bug class both gates exist for: Hono path modifiers (`{regex}`,
+ * `?`, `*`) leaking into param keys or substituted URLs.
  */
 describe('generated route() with Hono path modifiers', () => {
   const definitions: RouteDefinition[] = [
@@ -309,8 +306,7 @@ describe('generated route() with Hono path modifiers', () => {
 
   it('still appends the query string for a literal-colon path with no params', () => {
     // hasPathParams() decides arity for the no-params-arg call form; a route
-    // whose type-level RouteArgs disagrees with the runtime check would
-    // silently drop this query string instead of appending it.
+    // whose RouteArgs disagrees would drop this query string instead.
     expect(route('status.show', { tab: 'x' })).toBe('/status/foo:bar?tab=x')
   })
 

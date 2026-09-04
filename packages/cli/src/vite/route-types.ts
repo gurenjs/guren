@@ -11,19 +11,16 @@ export interface RouteTypesPluginOptions {
    */
   appRoot?: string
   /**
-   * Relative path (from the app root) to watch for changes. Defaults to `routes/web.ts`.
-   * Forwarded to the spawned codegen as `--routes`.
+   * Routes file to watch, relative to the app root. Defaults to `routes/web.ts`; forwarded as `--routes`.
    */
   watchFile?: string
   /**
-   * Relative path (from the app root) to the frontend pages directory. Defaults to `resources/js/pages`.
-   * Forwarded to the spawned codegen as `--pages`.
+   * Frontend pages directory, relative to the app root. Defaults to `resources/js/pages`; forwarded as `--pages`.
    */
   pagesDir?: string
   /**
-   * Relative path (from the app root) to the Resources directory. Defaults to `app/Http/Resources`.
-   * Watch-only: codegen (like make:resource and check) always scans the conventional
-   * directory, so this option cannot relocate it.
+   * Resources directory, relative to the app root. Defaults to `app/Http/Resources`.
+   * Watch-only: codegen always scans the conventional directory, so this cannot relocate it.
    */
   resourcesDir?: string
   /**
@@ -32,11 +29,7 @@ export interface RouteTypesPluginOptions {
   executable?: string
   /**
    * Arguments passed to the executable, replacing the generated command entirely.
-   * By default the plugin invokes this package's own `guren` bin entry with
-   * `['codegen', '--force']`, passing `watchFile`/`pagesDir` as `--routes`/`--pages`.
-   * Pass `args: ['run', 'codegen']` when your app's codegen npm script carries
-   * extra flags or a pre-step, so watcher-triggered regeneration matches that
-   * script exactly.
+   * Pass `['run', 'codegen']` when the app's codegen script carries extra flags or a pre-step.
    */
   args?: string[]
   /**
@@ -55,16 +48,13 @@ const DEFAULT_WATCH_FILE = 'routes/web.ts'
 const DEFAULT_PAGES_DIR = 'resources/js/pages'
 // Fixed by convention across codegen and check (see cli/src/i18n-types.ts).
 const DEFAULT_LANG_DIR = 'lang'
-// Models feed attachments.gen.ts: an edited Attachable(...) declaration must
-// regenerate the map, root and module models alike. Matched on the
-// POSIX-relative path (unlike the options-derived dirs below, this one is
-// static), which also keeps the test separator-safe on Windows.
+// Models feed attachments.gen.ts: an edited Attachable(...) must regenerate the
+// map, root and module models alike. Matched POSIX-relative, so also Windows-safe.
 const MODELS_PATTERN = new RegExp(`^(?:modules/[^/]+/)?${escapeRegExp(MODELS_DIR)}(?:/|$)`, 'u')
 
 /**
- * The one place plugin path options are defaulted: `shouldRegenerate` (what to
- * watch) and `resolveCodegenCommand` (what to scan) both read from here, so the
- * watched and scanned locations cannot drift apart.
+ * The one place path options are defaulted: `shouldRegenerate` (what to watch) and
+ * `resolveCodegenCommand` (what to scan) both read it, so the two cannot drift apart.
  */
 function resolvePathOptions(options: RouteTypesPluginOptions) {
   return {
@@ -76,11 +66,9 @@ function resolvePathOptions(options: RouteTypesPluginOptions) {
 
 let cachedCliEntry: string | undefined
 
-// Self-referencing this package's name needs no linked `.bin/guren` (`bun x
-// guren` consults the npm registry, where the package does not exist) and
-// works for workspace links and npm installs alike. Lazy so consumers who
-// override `args` never resolve, and a failure surfaces through the
-// generation error path instead of breaking the module import.
+// Self-resolving the package name needs no linked `.bin/guren` (`bun x guren`
+// hits the npm registry, where the package does not exist). Lazy so consumers
+// overriding `args` never resolve, and failures surface as generation errors.
 function cliEntry(): string {
   cachedCliEntry ??= fileURLToPath(import.meta.resolve('@guren/cli/bin'))
   return cachedCliEntry
@@ -163,8 +151,7 @@ export function routeTypesPlugin(options: RouteTypesPluginOptions = {}): Plugin 
   function scheduleGeneration(root: string): Promise<void> {
     if (!enabled) return Promise.resolve()
 
-    // Events arriving while a run is in flight collapse into a single
-    // follow-up run that picks up all of their changes at once.
+    // Events arriving mid-run collapse into one follow-up run covering all their changes.
     if (running) {
       queued = true
       return running
@@ -187,11 +174,9 @@ export function routeTypesPlugin(options: RouteTypesPluginOptions = {}): Plugin 
     const watchFile = resolve(root, paths.watchFile)
     const pagesDir = resolve(root, paths.pagesDir)
     const resourcesDir = resolve(root, paths.resourcesDir)
-    // Codegen scans the Resources directory at the project root AND inside
-    // every `modules/<name>/`, so watching only the root one leaves a module's
-    // Data types stale for the whole dev session with no signal. Matched by
-    // shape rather than by listing `modules/`, so a module created mid-session
-    // needs no restart.
+    // Codegen also scans each `modules/<name>/` Resources dir; watching only the
+    // root leaves a module's Data types stale for the session with no signal.
+    // Matched by shape, so a module created mid-session needs no restart.
     const moduleResources = new RegExp(`^modules/[^/]+/${escapeRegExp(paths.resourcesDir)}(?:/|$)`, 'u')
     const langDir = resolve(root, DEFAULT_LANG_DIR)
     const changedFile = resolve(file)
@@ -200,15 +185,13 @@ export function routeTypesPlugin(options: RouteTypesPluginOptions = {}): Plugin 
       changedFile === watchFile ||
       changedFile.startsWith(`${pagesDir}/`) || changedFile === pagesDir ||
       changedFile.startsWith(`${resourcesDir}/`) || changedFile === resourcesDir ||
-      // Codegen only reads lang/<locale>/*.json — other files under lang/
-      // (notes, fixtures) never affect the generated union.
+      // Codegen only reads lang/<locale>/*.json; other files under lang/ never affect the union.
       (changedFile.startsWith(`${langDir}/`) && changedFile.endsWith('.json'))
     ) {
       return true
     }
 
-    // Relativized only when the cheap absolute-prefix checks above miss —
-    // this runs on every watcher event.
+    // Relativized only when the cheap prefix checks above miss: this runs on every watcher event.
     const relativeFile = toPosixRelative(root, changedFile)
     return moduleResources.test(relativeFile) || MODELS_PATTERN.test(relativeFile)
   }
@@ -221,8 +204,7 @@ export function routeTypesPlugin(options: RouteTypesPluginOptions = {}): Plugin 
       await scheduleGeneration(appRoot)
     },
     configureServer(server: ViteDevServer) {
-      // handleHotUpdate only fires for updates; creating or deleting a
-      // page, resource, or translation file must regenerate too.
+      // handleHotUpdate only fires for updates; creation and deletion must regenerate too.
       const root = () => appRoot ?? server.config.root
       const onFileEvent = (file: string) => {
         if (shouldRegenerate(root(), file)) {

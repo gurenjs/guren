@@ -35,11 +35,7 @@ async function makeApp(files: Record<string, string> = {}): Promise<string> {
   return dir
 }
 
-/**
- * Stands in for a JsonResource subclass: the router serializes a `resource`
- * hint by reading the class's `name`, so a real class is what makes the hint
- * survive `definitions()` as `'ArticleResource'`.
- */
+/** Stands in for a JsonResource subclass: the hint survives `definitions()` as the class's `name`. */
 class ArticleResource {
   toJSON(): unknown {
     return {}
@@ -57,9 +53,8 @@ class PostController extends Controller {
 }
 
 /**
- * A router carrying the shapes this generator has to describe: a read-only
- * list with a `resource` hint, an authorized write with a body schema, and a
- * route with an `output` schema that outranks its hint.
+ * The shapes this generator must describe: a read-only list with a `resource` hint, an
+ * authorized write with a body schema, and an `output` schema that outranks its hint.
  */
 function fixtureDefinitions(): RouteDefinition[] {
   const router = new Router()
@@ -131,10 +126,8 @@ describe('buildAgentToolsContent', () => {
     const { tools } = deriveAgentTools(fixtureDefinitions())
     const content = buildAgentToolsContent(tools, { resources })
 
-    // posts.store is POST /posts/:id with an object body: `id` substitutes
-    // into the path, `title` rides in the JSON body. Without these fields a
-    // client can only guess by method, and would post `id` in the body of a
-    // route whose URL cannot be built without it.
+    // posts.store is POST /posts/:id: `id` substitutes into the path, `title` rides in the
+    // body. Without these fields a client can only guess by method.
     expect(content).toContain('"id": "path"')
     expect(content).toContain('"title": "body"')
     expect(content).toContain('inputBodyNested: false')
@@ -151,9 +144,8 @@ describe('buildAgentToolsContent', () => {
     const { tools } = deriveAgentTools(router.definitions())
     const content = buildAgentToolsContent(tools)
 
-    // The derivation nested the array under `body` to give the tool an object
-    // root; a client that missed this flag would post `{ body: [...] }` to a
-    // route that validates the array itself.
+    // The array is nested under `body` to give the tool an object root; missing this flag,
+    // a client would post `{ body: [...] }` to a route validating the array itself.
     expect(content).toContain('inputBodyNested: true')
     expect(content).toContain('"body": "body"')
   })
@@ -171,8 +163,7 @@ describe('buildAgentToolsContent', () => {
     const { tools } = deriveAgentTools(fixtureDefinitions())
     const content = buildAgentToolsContent(tools, { resources })
 
-    // posts.summary declares both; the validated schema wins, so no type text
-    // is appended and no output-type entry is emitted for it.
+    // posts.summary declares both; the validated schema wins, so no output-type entry is emitted.
     expect(content).not.toContain("'posts.summary': Data.Article")
     expect(content).toContain('"total"')
   })
@@ -203,15 +194,13 @@ describe('buildAgentToolsContent', () => {
     const { tools } = deriveAgentTools(router.definitions())
 
     const content = buildAgentToolsContent(tools)
-    // A quoted `"__proto__":` key in an object literal sets [[Prototype]]
-    // instead of defining a property, so the manifest would describe a tool
-    // argument that is not there.
+    // A quoted `"__proto__":` key sets [[Prototype]] instead of defining a property, so the
+    // manifest would describe an argument that is not there.
     expect(content).toContain('["__proto__"]:')
     expect(content).not.toContain('"__proto__":')
 
-    // Evaluated rather than matched, because two maps are keyed by argument
-    // name now — `inputSchema.properties` and `inputSources` — and a string
-    // assertion passes as soon as *one* of them uses the computed form.
+    // Evaluated, not matched: two maps are keyed by argument name, and a string assertion
+    // passes as soon as one of them uses the computed form.
     const dir = await makeApp()
     const modulePath = join(dir, 'proto-property.gen.mjs')
     await writeFile(modulePath, new Bun.Transpiler({ loader: 'ts' }).transformSync(content), 'utf8')
@@ -226,8 +215,7 @@ describe('buildAgentToolsContent', () => {
 
   test('emits a tool named __proto__ as a computed key, and it survives evaluation', async () => {
     const router = new Router()
-    // A legal tool name: the MCP grammar is ^[A-Za-z0-9._-]{1,128}$, and tool
-    // names are route names verbatim.
+    // A legal tool name: the MCP grammar is ^[A-Za-z0-9._-]{1,128}$, and tool names are route names verbatim.
     router.get('/posts', [PostController, 'index']).name('__proto__').agent({})
     const { tools } = deriveAgentTools(router.definitions())
 
@@ -235,9 +223,8 @@ describe('buildAgentToolsContent', () => {
     expect(content).toContain("['__proto__']: {")
     expect(content).not.toContain("  '__proto__': {")
 
-    // Evaluated, not merely matched: with a plain-string key here the entry
-    // sets [[Prototype]] and the tool disappears from the manifest that
-    // appears to declare it.
+    // Evaluated, not matched: with a plain-string key the entry sets [[Prototype]] and the
+    // tool disappears from the manifest that appears to declare it.
     const dir = await makeApp()
     const modulePath = join(dir, 'agents.gen.mjs')
     await writeFile(modulePath, new Bun.Transpiler({ loader: 'ts' }).transformSync(content), 'utf8')
@@ -286,9 +273,7 @@ describe('generateAgentTypes', () => {
     router.get('/posts', [PostController, 'index']).name('posts.index')
     const { outputPath, tools } = await generateAgentTypes(router.definitions(), { appRoot: dir })
 
-    // An empty path is the "nothing to describe" signal the MCP codegen tool
-    // reads; a stale manifest describing tools the app no longer exposes is
-    // worse than none.
+    // An empty path is the "nothing to describe" signal the MCP codegen tool reads.
     expect(outputPath).toBe('')
     expect(tools).toEqual([])
     expect(existsSync(join(dir, AGENTS_MANIFEST_FILE))).toBe(false)
@@ -323,9 +308,8 @@ export function registerWebRoutes(router: Router): void {
 export default registerWebRoutes
 `
 
-  // An .agent() route that cannot become a tool: no .name(). The string scan
-  // says "agent routes here", the derivation says "no tools" — the
-  // disagreement that used to strand check and doctor in a loop.
+  // An .agent() route with no .name(): the string scan says "agent routes here", the
+  // derivation says "no tools", a disagreement that stranded check and doctor in a loop.
   const UNNAMED_AGENT_ROUTE = `import { Router } from '@guren/core'
 
 export function registerWebRoutes(router: Router): void {
@@ -348,9 +332,8 @@ export default registerWebRoutes
   })
 
   test('expects none when no route declares agent metadata, without loading the app', async () => {
-    // The routes file throws on import, so a plan that comes back cleanly is
-    // proof the derivation was never attempted — the cheap path an app with
-    // no manifest and no `.agent()` in its sources must keep.
+    // The routes file throws on import, so a clean plan proves the derivation was never
+    // attempted: the cheap path an app with no manifest and no `.agent()` must keep.
     const dir = await makeLinkedApp({
       'routes/web.ts': `throw new Error('the route graph must not be loaded here')\n`,
     })
@@ -364,9 +347,8 @@ export default registerWebRoutes
       '.guren/agents.gen.ts': '// left over\n',
     })
 
-    // The remedy both check and doctor print is `guren codegen`, which removes
-    // the file. Expecting one here instead would print a remedy that deletes
-    // what it just demanded.
+    // The remedy check and doctor print is `guren codegen`, which removes the file;
+    // expecting one here would print a remedy that deletes what it demanded.
     expect(await planAgentManifest(dir)).toEqual({ reason: 'no-tools', toolCount: 0, staleManifest: true })
   })
 
@@ -376,14 +358,13 @@ export default registerWebRoutes
       '.guren/agents.gen.ts': '// left over\n',
     })
 
-    // Reached despite the string scan saying "no agent routes": a file on disk
-    // is itself reason enough to ask the derivation.
+    // Reached despite the string scan saying "no agent routes": a file on disk is reason enough.
     expect(await planAgentManifest(dir)).toEqual({ reason: 'no-tools', toolCount: 0, staleManifest: true })
   })
 
   test('claims nothing when the route graph cannot be loaded', async () => {
-    // Mentions agent metadata, so the cheap path does not apply — and then
-    // fails to load. Neither "expected" nor "stale" would be honest.
+    // Mentions agent metadata, so the cheap path does not apply, then fails to load:
+    // neither "expected" nor "stale" would be honest.
     const dir = await makeLinkedApp({
       'routes/web.ts': `// .agent(\nthrow new Error('boom')\n`,
     })

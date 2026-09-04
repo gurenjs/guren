@@ -13,13 +13,11 @@ export default class OAuthController extends Controller {
     return this.make<OAuthManager>('oauth')
   }
 
-  // Note: not named `redirect` — that would shadow the base
-  // Controller.redirect() helper used below.
+  // Not named `redirect`: that would shadow Controller.redirect(), used below.
   async redirectToProvider(): Promise<Response> {
-    // Passing the session ties `state` to this browser: the manager keeps a
-    // binding in it that the callback must present back. Without it an
-    // attacker could authorize their own account, keep the `code` unconsumed,
-    // and walk a visitor's browser through the callback.
+    // Passing the session ties `state` to this browser. Without it an attacker
+    // could authorize their own account, keep the `code` unconsumed, and walk a
+    // visitor's browser through the callback.
     const { url } = await this.oauth().authorize('github', {
       redirectTo: this.request.query('redirectTo') ?? undefined,
       session: this.auth.session(),
@@ -37,12 +35,11 @@ export default class OAuthController extends Controller {
       session: this.auth.session(),
     })
 
-    // Enforced before any account lookup or creation: this is a single-admin
-    // blog, so arbitrary GitHub users must never get accounts.
+    // Before any lookup or creation: a single-admin blog must never create
+    // accounts for arbitrary GitHub users.
     assertAllowlistedAdmin(profile.id, process.env.BLOG_ADMIN_GITHUB_ID)
 
-    // Lowercased to keep lookups stable; provider casing isn't guaranteed
-    // to be consistent across logins.
+    // Lowercased: provider casing is not guaranteed stable across logins.
     const email = profile.email?.toLowerCase()
     if (!email) {
       throw ValidationException.withMessages({ message: 'GitHub did not return an email address.' })
@@ -58,9 +55,8 @@ export default class OAuthController extends Controller {
         })
       }
 
-      // OAuth accounts are passwordless: no synthetic password is hashed —
-      // password login rejects accounts without a hash, and hashing here
-      // would blow the request CPU budget on Cloudflare Workers.
+      // Passwordless: password login rejects accounts with no hash, and hashing
+      // one here would blow the request CPU budget on Workers.
       user = await User.create({
         name: profile.name ?? email,
         email,

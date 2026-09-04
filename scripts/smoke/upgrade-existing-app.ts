@@ -54,9 +54,8 @@ async function rewriteManifestToLocalFiles(appDir: string): Promise<void> {
 
   await writeFile(packageJsonPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
 
-  // `upgrade` has just rewritten every @guren/* range to the fixture version,
-  // which no registry has. Anything the vendor set does not cover would be
-  // installed from npm — so fail here, naming it, rather than at `bun install`.
+  // `upgrade` has just rewritten every @guren/* range to a fixture version no
+  // registry has, so fail here by name rather than at `bun install`.
   await assertLocalGurenDependencies(appDir, 'The upgraded fixture app')
 }
 
@@ -106,10 +105,9 @@ async function main(): Promise<void> {
     let installInvoked = false
     const result = await upgradeCanary({
       cwd: appDir,
-      // Resolve to a fixture version instead of the registry. The smoke checks
-      // that upgrade rewrites pins and restores scripts/tsconfig, none of which
-      // needs a real lookup — and pinning the tag to `canary` instead would
-      // skip resolution entirely, leaving the resolved path uncovered.
+      // A fixture version rather than the registry: nothing here needs a real
+      // lookup, and a `canary` tag would skip resolution entirely, leaving the
+      // resolved path uncovered.
       versionResolver: async () => FIXTURE_VERSION,
       install: true,
       installRunner: async (cwd) => {

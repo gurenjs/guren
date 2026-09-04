@@ -11,14 +11,10 @@ import {
 /**
  * `@guren/plugin-cloudflare/env` exists so application code can reach the
  * Workers env holder without the root entry's `buildCloudflareOutput` — and
- * `node:fs`, `node:path`, `node:url`, plus the whole deploy generator — coming
- * with it. A scaffolded controller importing from the root would pull all of
- * that into the app's route graph on every `bun run dev` boot and into the
- * wrangler bundle on every deploy, for three functions that import nothing.
- *
- * Nothing else can catch a regression here. The import would still typecheck,
- * still resolve, still work; the only symptom is a slower boot and a fatter
- * bundle, which no assertion in this repository makes.
+ * `node:fs`, `node:path`, `node:url`, plus the deploy generator — coming with
+ * it, on every `bun run dev` boot and in every wrangler bundle. Nothing else can
+ * catch a regression: an import from the root typechecks, resolves and works,
+ * and the only symptom is a slower boot and a fatter bundle.
  */
 const packageDir = fileURLToPath(new URL('..', import.meta.url))
 const built = existsSync(`${packageDir}/dist/env.js`)
@@ -45,9 +41,8 @@ describe('lean env subpath', () => {
   test('should have no imports at all in source', () => {
     const source = readFileSync(`${packageDir}/src/env.ts`, 'utf8')
 
-    // Not "no node builtins" but *no imports*: the module's whole value is
-    // that its transitive graph is empty, and any import at all is the first
-    // step back to a graph nobody is watching.
+    // Not "no node builtins" but *no imports*: the module's whole value is that
+    // its transitive graph is empty, and any import is the first step back.
     expect(source).not.toMatch(/^\s*import\s/mu)
     expect(source).not.toMatch(/\brequire\(/u)
   })
@@ -55,9 +50,9 @@ describe('lean env subpath', () => {
 
 describe.if(built)('lean env subpath (built)', () => {
   test('should carry no build tooling into the built entry', () => {
-    // Comments stripped before the absence assertions: this module's own
-    // header explains at length which builtins it exists to keep out, and a
-    // raw search finds the explanation and reports it as the thing itself.
+    // Comments stripped before the absence assertions: this module's own header
+    // names the builtins it exists to keep out, and a raw search would find the
+    // explanation and report it as the thing itself.
     const bundle = new Bun.Transpiler({ loader: 'js' }).transformSync(
       readFileSync(`${packageDir}/dist/env.js`, 'utf8'),
     )
@@ -73,9 +68,8 @@ describe.if(built)('lean env subpath (built)', () => {
   })
 
   /**
-   * The root still re-exports the same names, so an app that already imports
-   * them from there keeps working. Asserted because "move the module" and
-   * "move the module and drop the old names" look identical in a diff.
+   * The root still re-exports the same names. Asserted because "move the module"
+   * and "move the module and drop the old names" look identical in a diff.
    */
   test('should leave the root re-export in place', () => {
     const bundle = readFileSync(`${packageDir}/dist/index.js`, 'utf8')

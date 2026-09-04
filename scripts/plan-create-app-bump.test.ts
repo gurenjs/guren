@@ -12,13 +12,10 @@ import {
 } from './plan-create-app-bump.ts'
 
 /**
- * The bump has to be conditional to be worth having: a script that always adds
- * `create-guren-app` to the plan would publish a tarball identical to the last
- * one on every deploy-plugin release, and would look exactly like a working one
- * from the release that needs the bump. So both directions are pinned here, and
- * the negative direction is checked against the *real* template manifests — a
- * mocked "declared" set would keep passing on the day a template starts
- * depending on the package the negative case names.
+ * Both directions are pinned: a script that always bumps looks identical to a
+ * working one from the release that needs the bump. The negative direction runs
+ * against the *real* template manifests, so it goes red the day a template starts
+ * depending on the package that case names.
  */
 const plan = (...names: string[]): ReleasePlan => ({
   releases: names.map((name) => ({ name, oldVersion: '1.0.0', newVersion: '1.0.1' })),
@@ -52,11 +49,9 @@ describe('planScaffolderBump', () => {
   })
 
   /**
-   * `changeset status` lists a package it pulled in but left alone with its
-   * version unchanged — `@guren/example-blog` does this today, because it is the
-   * one entry in the config's `ignore`. Such an entry rewrites no range, so a
-   * name-only match here would bump the scaffolder into publishing a tarball
-   * identical to the last one.
+   * `@guren/example-blog` is such an entry today (the config's one `ignore`). It
+   * rewrites no range, so a name-only match would bump the scaffolder into
+   * publishing a tarball identical to the last one.
    */
   it('ignores a planned release that does not move a version', () => {
     expect(planScaffolderBump({ releases: [unmoved('@guren/orm')] }, new Set(['@guren/orm']))).toEqual({
@@ -93,10 +88,8 @@ describe('the packages the templates actually declare', () => {
   it('covers the framework packages a scaffolded app resolves from npm', async () => {
     const declared = await packagesTemplatesDeclare()
 
-    // Not an exhaustive list: a template gaining a dependency is fine, and the
-    // script reads the manifests rather than a list like this one. What would
-    // not be fine is a template quietly dropping the packages whose versions
-    // are the whole reason the scaffolder has to be republished.
+    // Not exhaustive: a template gaining a dependency is fine, dropping one of
+    // these silently is not.
     for (const name of ['@guren/cli', '@guren/core', '@guren/inertia-client', '@guren/orm', '@guren/testing']) {
       expect(declared.has(name)).toBe(true)
     }
@@ -112,12 +105,9 @@ describe('the packages the templates actually declare', () => {
 })
 
 /**
- * The script's whole value is in being invoked, and ahead of `changeset
- * version` — behind it, the plan it reads is already spent. Nothing else here
- * would notice it being dropped from the release command: every unit test above
- * keeps passing, and the release goes back to being refused by
- * `sync-template-deps --release` with a human writing the changeset by hand,
- * which is the state this exists to leave.
+ * The script must be invoked *ahead of* `changeset version`; behind it, the plan
+ * it reads is already spent. Nothing else here notices it being dropped from the
+ * release command: every unit test above keeps passing.
  */
 describe('the version-packages wiring', () => {
   const versionPackages = (

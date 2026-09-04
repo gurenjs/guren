@@ -182,8 +182,8 @@ describe('planComponents', () => {
     const templates = fakeTemplates()
     templates.delete('core/rules/testing.md')
     templates.set('core/rules/http/auth.md', FAKE_RULE)
-    // the native projections would fold it into guren-http/auth.mdc, and
-    // every prune claim scans a directory's top level only
+    // the native projections would fold it into guren-http/auth.mdc, and prune claims scan
+    // a directory's top level only
     expect(() => planComponents(['claude'], templates, 'My App')).toThrow(
       'Agent harness rule http/auth.md must be a flat file',
     )
@@ -221,10 +221,8 @@ describe('managedNamespaces', () => {
     planComponents(components, fakeTemplates(), 'My App')
 
   it('claims the rules and skills roots only by the names the harness ships', () => {
-    // both roots are shared: the skills roots with external installers (npx
-    // skills add, Agent Plugins clients), the rules roots with the project's
-    // own conventions files — so a whole-root claim in either would prune
-    // files the framework never wrote
+    // both roots are shared (skills with external installers, rules with the project's own
+    // conventions), so a whole-root claim would prune files the framework never wrote
     expect(managedNamespaces(['claude', 'agents'], plan(['claude', 'agents']))).toEqual([
       { kind: 'files', dir: '.claude/rules', names: ['testing.md'] },
       { kind: 'children', dir: '.claude/skills', names: ['scaffold'] },
@@ -253,10 +251,8 @@ describe('managedNamespaces', () => {
 
   it('rejects a retired name that is not a single path segment — the claim is rm-adjacent', () => {
     const claim = (bad: string) => () => managedNamespaces(['claude'], plan(['claude']), { skills: [bad] })
-    // the traversal half is safePathSegments' rule, reported in its words —
-    // including the backslash (a separator on Windows) and the NUL that
-    // truncates a path syscall-side, neither of which a hand-written
-    // separator check here would have caught
+    // safePathSegments' rule in its own words, including the Windows separator and the NUL
+    // that truncates a path syscall-side
     for (const bad of ['.', '..', '../x', 'a\\b', '..\\x', 'a\u0000b']) {
       expect(claim(bad)).toThrow('path traversal')
     }
@@ -278,9 +274,8 @@ describe('managedNamespaces', () => {
     if (claude.kind !== 'files') {
       throw new Error('expected a files claim')
     }
-    // same derivation and the same review obligation as the skill claim
-    // below: shipped ∪ retired, with nothing able to know a rule was dropped
-    // without a tombstone in RETIRED_CANONICAL_RULES
+    // shipped ∪ retired: nothing can know a rule was dropped without a
+    // tombstone in RETIRED_CANONICAL_RULES
     const shipped = real
       .filter((file) => file.path.startsWith('.claude/rules/'))
       .map((file) => file.path.slice('.claude/rules/'.length))
@@ -298,12 +293,9 @@ describe('managedNamespaces', () => {
     if (claude.kind !== 'children') {
       throw new Error('expected a children claim')
     }
-    // the claim is exactly shipped ∪ retired — the derivation, not history.
-    // Nothing here can know a skill was dropped without a tombstone: that
-    // discipline is enforced by review of core/skills/ removals, and the
-    // comment on RETIRED_CANONICAL_SKILLS says so. What this does pin is
-    // that a retired name never silently returns as a shipped one, which
-    // would make the tombstone claim a duplicate.
+    // the claim is exactly shipped ∪ retired. A dropped skill is caught by review of
+    // core/skills/ removals, not here; what this pins is that a retired name never
+    // returns as a shipped one, which would duplicate the tombstone claim.
     const shipped = [...new Set(real.filter((f) => f.path.startsWith('.claude/skills/')).map((f) => f.path.split('/')[2]))].sort()
     expect(claude.names).toEqual([...new Set([...shipped, ...RETIRED_CANONICAL_SKILLS])].sort())
     for (const retired of RETIRED_CANONICAL_SKILLS) {
@@ -323,8 +315,8 @@ describe('managedNamespaces', () => {
   })
 
   it('every planned file inside a shared namespace carries its ownership pattern', () => {
-    // .cursor/rules and .github/instructions also hold user files, so a
-    // managed file the pattern cannot claim would be orphaned on rename
+    // .cursor/rules and .github/instructions also hold user files, so an unclaimable
+    // managed file would be orphaned on rename
     const allPlanned = planComponents(ALL_COMPONENTS, fakeTemplates(), 'My App')
     const namespaces = managedNamespaces(ALL_COMPONENTS, allPlanned).filter(
       (namespace) => namespace.kind === 'pattern',
@@ -350,8 +342,7 @@ describe('managedNamespaces', () => {
 describe('template completeness', () => {
   it('every shipped template file is consumed by the planner', async () => {
     const templates = await loadAgentTemplates()
-    // evidence, not declaration: record which templates the planner actually
-    // reads by name, so a file added to the tree but never wired into
+    // evidence, not declaration: a template added to the tree but never wired into
     // planComponents fails here instead of shipping uninstalled
     const used = new Set<string>()
     class RecordingTemplates extends Map<string, string> {

@@ -6,11 +6,8 @@ import { CLI_BIN_PATH, SERVER_DIST_ENTRY, assertWorkspaceBuilt, createTempWorksp
 /**
  * Spawn the real bin: `bin.ts` exports nothing and builds its commands at
  * module scope, so the citty declaration under test — whether `entity` is a
- * positional or a string — is only observable through a subprocess.
- *
- * Exit code alone cannot tell the two apart here: `context --entity User`
- * exited 0 before this was fixed too, just having printed the whole-project
- * map. The assertions read stdout for that reason.
+ * positional or a string — is only observable through a subprocess, and only
+ * on stdout: both spellings exit 0, one just prints the whole-project map.
  */
 async function runBin(args: string[], cwd: string): Promise<{ exitCode: number; stdout: string }> {
   assertWorkspaceBuilt([SERVER_DIST_ENTRY])
@@ -71,20 +68,16 @@ export class Post extends defineModel(posts) {}
 
 /**
  * One route reaching one of the fixture's models, so the bundle's `## Routes`
- * section has something to lose. A repeated `--routes` never crashed — its
- * `resolve()` TypeError landed in the `catch` that degrades an unloadable
- * routes file to a route-less bundle, and it exited 0 reporting no routes.
- *
- * Deliberately not at `routes/web.ts`: that is the path `--routes` defaults to,
- * so an implementation that dropped the flag entirely would find the same file
- * anyway and this test would pass without asserting anything.
+ * section has something to lose. Deliberately not at `routes/web.ts`, the path
+ * `--routes` defaults to: an implementation that dropped the flag entirely
+ * would find that file anyway and pass without asserting anything.
  */
 const CUSTOM_ROUTES_FILE = 'routes/custom.ts'
 
 async function writeRoutesFixture(dir: string): Promise<void> {
   await linkWorkspaceCore(dir)
-  // this fixture is imported, not just parsed: `guren context` loads the
-  // routes file to read its definitions, so its `@guren/core` has to resolve
+  // `guren context` imports the routes file rather than parsing it, so this
+  // fixture's `@guren/core` has to resolve.
   await mkdir(join(dir, 'app/Http/Controllers'), { recursive: true })
   await mkdir(join(dir, 'routes'), { recursive: true })
   await writeFile(
@@ -169,8 +162,8 @@ describe('context entity argument', () => {
       expect(exitCode).toBe(0)
       expect(stdout).toContain('# User')
       expect(stdout).toContain('## Model — app/Models/User.ts')
-      // The regression: an `entity` declared `type: 'positional'` swallowed the
-      // flag's value entirely, so this printed the whole-project map instead.
+      // An `entity` declared `type: 'positional'` swallows the flag's value
+      // entirely and prints the whole-project map instead.
       expect(stdout).not.toContain('# Project Context')
     } finally {
       await workspace.cleanup()
@@ -214,10 +207,9 @@ describe('context entity argument', () => {
     try {
       await writeModelFixture(workspace.dir)
 
-      // citty hands a twice-passed `string` arg back as `string[]`, which
-      // `generateEntityContext()` reached with `entityName.toLowerCase is not a
-      // function` — exit 1, no bundle. Naming a different entity first pins the
-      // half a same-value repeat cannot see: last wins, not first.
+      // citty hands a twice-passed `string` arg back as `string[]`. Naming a
+      // different entity first pins the half a same-value repeat cannot see:
+      // last wins, not first.
       const { exitCode, stdout } = await runBin(
         ['context', '--entity', 'Post', '--entity', 'User'],
         workspace.dir,
@@ -238,10 +230,9 @@ describe('context entity argument', () => {
       await writeModuleModelFixture(workspace.dir)
 
       // The array shape does not crash here, it compares: `['billing', 'app']`
-      // matches no model's location, so this used to exit 1 reporting `User`
-      // missing from a module named `billing,app`. Two `User`s, and two
-      // different values, so neither dropping the flag (ambiguity, exit 1) nor
-      // taking the first (the module's `User`) can reach this assertion.
+      // matches no model's location. Two `User`s and two different values, so
+      // neither dropping the flag (ambiguity, exit 1) nor taking the first
+      // (the module's `User`) can reach this assertion.
       const { exitCode, stdout } = await runBin(
         ['context', '--module', 'billing', '--module', 'app', 'User'],
         workspace.dir,
@@ -256,10 +247,8 @@ describe('context entity argument', () => {
   })
 
   it('says the routes file could not be read, rather than reporting no routes', async () => {
-    // the shape that hid a broken environment: an unloadable routes file used
-    // to render exactly what an entity with no routes renders, so a machine
-    // that could not resolve the fixture's imports produced a confident,
-    // wrong answer instead of an error
+    // An unloadable routes file rendering what an entity with no routes
+    // renders hides a broken environment behind a confident answer.
     const workspace = await createTempWorkspace('guren-cli-context-routes-broken-')
     try {
       await writeModelFixture(workspace.dir)
@@ -281,10 +270,8 @@ describe('context entity argument', () => {
   })
 
   it('reports a --routes path that is not there, rather than reporting no routes', async () => {
-    // The other side of the absent-file split. A named file that is not there
-    // is a typo or a wrong --app, not the shape an api-only app has, and #482
-    // exists precisely so that reads as an error rather than as an entity
-    // with no routes.
+    // The other side of the absent-file split: a named file that is not there
+    // is a typo or a wrong --app, not the shape an api-only app has.
     const workspace = await createTempWorkspace('guren-cli-entity-routes-typo-')
     try {
       await writeModelFixture(workspace.dir)
@@ -303,10 +290,9 @@ describe('context entity argument', () => {
   })
 
   it('reports nothing when the app simply has no routes file', async () => {
-    // The other half of the split: "could not be read" has to stay rare
-    // enough to mean something. An api-only or mid-scaffold app has no routes
-    // file at all, and `guren context` (whole-project) says so plainly — the
-    // two commands must not disagree about the same app.
+    // "Could not be read" has to stay rare enough to mean something: an
+    // api-only or mid-scaffold app has no routes file at all, and whole-project
+    // `guren context` says so plainly.
     const workspace = await createTempWorkspace('guren-cli-entity-routes-absent-')
     try {
       await writeModelFixture(workspace.dir)
@@ -333,10 +319,9 @@ describe('context entity argument', () => {
         workspace.dir,
       )
 
-      // Asserted against the single-flag run rather than a literal: this is the
-      // one shape here that never crashed, so the only evidence it was wrong is
-      // that repeating the flag changed the answer. It used to print
-      // `## Routes (0)` / `No routes reference this entity.` and exit 0.
+      // Asserted against the single-flag run rather than a literal: this shape
+      // does not crash, so the only evidence of a regression is the repeated
+      // flag changing the answer.
       expect(single.exitCode).toBe(0)
       expect(single.stdout).toContain('## Routes (1)')
       expect(repeated.exitCode).toBe(0)
@@ -356,8 +341,7 @@ describe('context entity argument', () => {
 
       // Run from the parent so `--app` is doing the work rather than agreeing
       // with the cwd, and point the first value somewhere with no models: only
-      // last-wins reaches a bundle at all. Before the fix this exited 1 on
-      // `The "paths[0]" property must be of type string, got array`.
+      // last-wins reaches a bundle at all.
       const parent = dirname(workspace.dir)
       const leaf = basename(workspace.dir)
       const { exitCode, stdout } = await runBin(
@@ -377,10 +361,9 @@ describe('context entity argument', () => {
     try {
       await writeModelFixture(workspace.dir)
 
-      // A repeated boolean arrays too, and `Boolean([true, false])` is `true` —
-      // so this printed JSON, ignoring the half typed last. Only the `=value`
-      // spelling can say false, which is why a bare `--json --json` never
-      // exposed it.
+      // A repeated boolean arrays too, and `Boolean([true, false])` is `true`.
+      // Only the `=value` spelling can say false, so a bare `--json --json`
+      // cannot expose this.
       const { exitCode, stdout } = await runBin(
         ['context', '--json=true', '--json=false', 'User'],
         workspace.dir,
@@ -410,10 +393,9 @@ describe('context entity argument', () => {
 })
 
 describe('queue:retry id argument', () => {
-  // `id` stays positional (see bin.ts). This pins the reason: the flag spelling
-  // is refused loudly rather than silently retrying the wrong thing, so it does
-  // not need `context`'s treatment. If someone converts `id` to a `string`,
-  // this test tells them the behavior it was protecting.
+  // `id` stays positional (see bin.ts): the flag spelling is refused loudly
+  // rather than silently retrying the wrong job, so it does not need
+  // `context`'s treatment.
   it('refuses --id rather than silently retrying nothing', async () => {
     const workspace = await createTempWorkspace('guren-cli-queue-retry-flag-')
     try {

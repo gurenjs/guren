@@ -1,12 +1,8 @@
 /**
  * Proves the four interval owners actually register with the hot-reload
- * registry. `hot-disposables.test.ts` covers the registry itself, which it
- * would keep doing perfectly while nothing on the boot path ever called it.
- *
- * Every teardown here is synchronous, so a reload can be simulated by building
- * the owner twice from this file and asserting against the first one right
- * after — no waiting on a real interval to fire, and no shortened periods to
- * make the wait bearable.
+ * registry — `hot-disposables.test.ts` would keep passing while nothing on the
+ * boot path ever called it. Teardowns are synchronous, so a reload is simulated
+ * by building the owner twice rather than waiting on a real interval.
  */
 import { afterEach, describe, expect, test } from 'bun:test'
 import { CacheManager } from '../cache/CacheManager'
@@ -63,12 +59,9 @@ function hasRegisteredSlot(scope: string, target: string): boolean {
 }
 
 /**
- * The call site recorded in the slot an owner claimed.
- *
- * Asserting on this rather than just on the slot existing: a frame offset that
- * lands on a synthetic stack entry still produces a stable key, so every owner
- * would keep replacing itself correctly while owners built in *different* files
- * silently collapsed into one slot and stopped each other.
+ * The call site recorded in the slot an owner claimed. Asserted rather than
+ * mere slot existence: a frame offset landing on a synthetic entry still yields
+ * a stable key, so owners in *different* files would collapse into one slot.
  */
 function callSiteOf(scope: string, target: string): string | undefined {
   return registeredSlots(scope, target)[0]?.split('|')[1]
@@ -78,8 +71,8 @@ describe('CacheManager hot-reload wiring', () => {
   const survivors: Destroyable[] = []
 
   afterEach(() => {
-    // The sweep timer is unref()ed, so a survivor cannot hang the test run — but
-    // leaving one running would let it sweep during a later test.
+    // The sweep timer is unref()ed, so a survivor cannot hang the run — but it
+    // would sweep during a later test.
     for (const store of survivors.splice(0)) {
       store.destroy?.()
     }
@@ -169,8 +162,8 @@ describe('rate limit store hot-reload wiring', () => {
   test('should not claim a slot when cleanup is disabled', () => {
     withHotRuntime(() => {
       const running = new MemoryRateLimitStore()
-      // A store built with cleanup off owns no timer, so it has nothing to hand
-      // the registry — and must not displace the store that does.
+      // A store with cleanup off owns no timer, so it must not displace one
+      // that does.
       new MemoryRateLimitStore(0)
 
       expect(cleanupTimerOf(running)).toBeDefined()
@@ -182,8 +175,8 @@ describe('rate limit store hot-reload wiring', () => {
     withHotRuntime(() => {
       const store = new MemoryRateLimitStore()
 
-      // These subclasses declare no constructor, so the frame between
-      // BaseMemoryStore and this file has no source location.
+      // No constructor declared, so the frame between BaseMemoryStore and this
+      // file has no source location.
       expect(callSiteOf('rate-limit-store', 'MemoryRateLimitStore')).toEndWith('hot-reload-wiring.test.ts')
       store.destroy()
     })
@@ -294,9 +287,8 @@ describe('Scheduler hot-reload wiring', () => {
       scheduler.stop()
       scheduler.start()
 
-      // Restarting re-claims the same identity, so the claim must not run the
-      // teardown left behind by the first start() against the interval the
-      // second one just created.
+      // Restarting re-claims the same identity, so the first start()'s
+      // teardown must not run against the interval the second just created.
       expect(scheduler.getIsRunning()).toBe(true)
       survivors.push(scheduler)
     })

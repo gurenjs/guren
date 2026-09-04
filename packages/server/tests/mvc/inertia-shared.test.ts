@@ -60,7 +60,6 @@ describe('shareInertiaProps', () => {
     shareInertiaProps(() => ({ second: 2 }))
 
     const composed = getInertiaSharedPropsResolver()!
-    // A snapshot: registrations made after the read are not picked up.
     shareInertiaProps(() => ({ third: 3 }))
 
     expect(await composed(fakeCtx)).toEqual({ first: 1, second: 2 })
@@ -101,8 +100,7 @@ describe('container-scoped shared props', () => {
   })
 
   it('lets a globally registered resolver override an earlier scoped one', async () => {
-    // Registration order wins across both scopes — an app provider registered
-    // after a framework one can still override its props.
+    // Registration order wins across both scopes.
     const container = new Container()
 
     shareInertiaProps(() => ({ _i18n: { locale: 'en' } }), container)

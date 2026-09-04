@@ -4,14 +4,10 @@ import { escapeTemplateLiteral, kebabCase, scaffoldFile } from './utils'
 const CHANNELS_DIR = 'app/Broadcasting'
 
 /**
- * The generated `authorize()` method, signature and body together.
- *
  * A single placeholder is per-user by convention, so the default check ties
- * the subscription to that user. Anything else can only default to "any
- * authenticated user" plus a TODO — the scaffolder cannot know the ownership
- * rule, and a check that silently allows everyone is what this exists to
- * avoid. Returned as one string so the parameter name cannot drift out of
- * step with whether the body uses it.
+ * the subscription to that user; any other shape can only get "any
+ * authenticated user" plus a TODO. Signature and body come back as one string
+ * so the parameter name cannot drift from whether the body uses it.
  */
 function privateAuthorizeMethod(channelName: string): string {
   const placeholders = channelName.match(/\{[^}]+\}/gu) ?? []

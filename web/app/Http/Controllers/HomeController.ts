@@ -15,7 +15,6 @@ function getHighlightedExamples(): Promise<Record<string, string>> {
     highlightedPromise = import('../../Services/highlight-code-examples.js')
       .then((mod) => mod.highlightCodeExamples())
       .catch((err) => {
-        // Clear cache on failure so the next request can retry
         highlightedPromise = null
         throw err
       })

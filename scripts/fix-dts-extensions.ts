@@ -2,11 +2,10 @@
  * Rewrites extensionless relative import specifiers in emitted .d.ts files to
  * explicit .js specifiers (./foo -> ./foo.js, ./dir -> ./dir/index.js).
  *
- * `tsc --emitDeclarationOnly` preserves source specifiers verbatim, but
- * declaration files in an ESM package must use runtime-resolvable specifiers
- * for consumers on `moduleResolution: node16`/`nodenext` (TS maps the .js
- * specifier back to the sibling .d.ts). Bundler-resolution consumers accept
- * both forms.
+ * `tsc --emitDeclarationOnly` preserves source specifiers verbatim, but an ESM
+ * package's declarations must be runtime-resolvable for consumers on
+ * `moduleResolution: node16`/`nodenext` (TS maps the .js specifier back to the
+ * sibling .d.ts). Bundler-resolution consumers accept both forms.
  *
  * Usage: bun scripts/fix-dts-extensions.ts <distDir>
  */
@@ -41,7 +40,6 @@ function resolveRewrite(filePath: string, specifier: string): string | null {
   throw new Error(`fix-dts-extensions: cannot resolve '${specifier}' from ${filePath}`)
 }
 
-/** String-literal specifier nodes: import/export declarations and import types. */
 function collectSpecifierNodes(text: string, filePath: string): t.StringLiteral[] {
   const ast = parse(text, {
     sourceType: 'module',

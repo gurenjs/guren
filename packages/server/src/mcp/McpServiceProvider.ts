@@ -4,16 +4,10 @@ import type { GurenCliApi } from './create-mcp-server'
 import { createMcpAccessGuard, isMcpEndpointEnabled, MCP_ENDPOINT_PATH } from './endpoint'
 
 /**
- * Registers the MCP (Model Context Protocol) endpoint at /_guren/mcp.
- *
- * Only active while `isMcpEndpointEnabled()` holds, so registering this
- * provider directly honours the same `GUREN_MCP=1` opt-in that `Application`
- * gates on — and the same condition that exempts the endpoint from CSRF.
- * It allows AI coding agents (Claude Code, Cursor, etc.) to introspect
- * the project structure, run integrity checks, and scaffold code.
- *
- * @guren/cli is loaded via dynamic import to avoid circular dependencies
- * (@guren/server -> @guren/cli -> @guren/core -> @guren/server).
+ * Registers the MCP endpoint at /_guren/mcp, so AI coding agents can introspect
+ * the project, run integrity checks, and scaffold code. Only active while
+ * `isMcpEndpointEnabled()` holds — the same `GUREN_MCP=1` opt-in that exempts
+ * the endpoint from CSRF. @guren/cli is imported dynamically to break a cycle.
  */
 export class McpServiceProvider extends ServiceProvider {
   register(): void {
@@ -37,37 +31,20 @@ export class McpServiceProvider extends ServiceProvider {
       (import('@guren/cli') as Promise<GurenCliApi>),
     ])
 
-    // This provider lives inside a long-running dev server, so the CLI's
-    // route loading — which imports routes/web.ts and everything it reaches —
-    // would answer every request from the module graph captured at the first
-    // one. Bun offers no way to evict an ES module, so route-dependent
-    // context generation runs the CLI in a child process instead. Guarded
-    // because @guren/cli is resolved from the app and may predate the helper;
-    // an older CLI keeps the previous in-process (stale) behaviour rather
-    // than failing outright.
-    //
-    // guren_codegen (generateRouteTypes et al.) has the same staleness
-    // exposure and is still left in-process here, so the route-derived
-    // artifacts it writes — routes.gen.ts, routes.d.ts, api-client.gen.ts —
-    // describe the graph as of this process's first route load. It now writes
-    // with `force`, so that snapshot overwrites what is on disk instead of
-    // failing the way it used to. Page, data, and channel manifests are
-    // unaffected: those generators re-scan the filesystem on every call.
-    //
-    // An app using the default Vite setup repairs the difference on the next
-    // save, because routeTypesPlugin's handleHotUpdate spawns `guren codegen`
-    // in a child process. A dev server running without that plugin has no
-    // such repair, and there MCP-driven codegen is the only writer. Moving
-    // codegen behind the same child process is tracked separately.
+    // In a long-running dev server the CLI's route loading would answer every
+    // request from the module graph captured at the first one, and Bun cannot
+    // evict an ES module — so route-dependent context generation runs the CLI in
+    // a child process (guarded: an older @guren/cli lacks the helper).
+    // guren_codegen still runs in-process, writing route-derived artifacts from
+    // that first snapshot; Vite's routeTypesPlugin repairs them on the next save.
     const routeAwareCli: GurenCliApi = cli.createFreshContextApi
       ? { ...cli, ...cli.createFreshContextApi() }
       : cli
 
     hono.use(MCP_ENDPOINT_PATH, createMcpAccessGuard())
 
-    // Stateless mode: each request gets a fresh McpServer + transport pair.
-    // McpServer.connect() can only be called once per instance, so we
-    // create a new server for each request.
+    // Stateless: McpServer.connect() may be called only once per instance, so
+    // each request gets a fresh server + transport pair.
     hono.all(MCP_ENDPOINT_PATH, async (c) => {
       const mcpServer = createMcpServer({ cwd, cli: routeAwareCli })
       const transport = new WebStandardStreamableHTTPServerTransport({

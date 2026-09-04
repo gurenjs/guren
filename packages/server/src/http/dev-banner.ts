@@ -32,11 +32,8 @@ export interface DevBannerOptions {
 
 /**
  * A wildcard bind answers on every interface but is not itself dialable on
- * every platform.
- *
- * Lives here rather than beside its other caller because the banner and
- * `Application.listen()`'s returned address are two renderings of one fact,
- * and a platform caveat added to only one of them is the drift this replaces.
+ * every platform. Shared with `Application.listen()`'s returned address, which
+ * is the same fact rendered twice.
  */
 export function isWildcardHost(hostname: string): boolean {
   return hostname === '0.0.0.0' || hostname === '::'

@@ -5,9 +5,6 @@ interface RegistrationMailData {
   name: string
 }
 
-/**
- * Send a registration confirmation email.
- */
 export async function sendRegistrationMail(manager: MailManager, data: RegistrationMailData): Promise<void> {
   await mail(manager)
     .to(data.email)

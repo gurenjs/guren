@@ -18,9 +18,8 @@ afterEach(() => {
 
 describe('MCP_ENDPOINT_PATH', () => {
   test('matches the URL shipped in .mcp.json templates', () => {
-    // Pins the contract: changing this constant requires updating the MCP
-    // client templates under packages/cli/templates/agent/targets/*/ (five
-    // files carry the URL) and examples/blog/.mcp.json.
+    // Changing this requires updating packages/cli/templates/agent/targets/*/
+    // (five files carry the URL) and examples/blog/.mcp.json.
     expect(MCP_ENDPOINT_PATH).toBe('/_guren/mcp')
   })
 })
@@ -48,13 +47,10 @@ describe('isMcpEndpointEnabled', () => {
   })
 
   test('reads the environment in the form the deploy bundlers substitute', async () => {
-    // The deploy plugins build server code with
-    // `--define 'process.env.NODE_ENV="production"'`, which matches that one
-    // exact expression. `process.env?.NODE_ENV` is a different expression, so
-    // an optional chain here silently turns the production gate back into a
-    // runtime read — and on hosts where platform vars are not in `process.env`
-    // when the module graph evaluates, that read answers "not production".
-    // Runtime behaviour is identical either way, so only the source can pin it.
+    // The deploy plugins substitute one exact expression via `--define`; an
+    // optional chain is a different one, and silently turns the production
+    // gate into a runtime read that answers "not production" where platform
+    // vars are absent. Runtime behaviour is identical, so only source pins it.
     const source = await readFile(join(import.meta.dir, '../../src/mcp/endpoint.ts'), 'utf8')
 
     expect(source).toContain('process.env.NODE_ENV')
@@ -153,8 +149,8 @@ describe('createMcpAccessGuard', () => {
   })
 
   test('blocks DNS rebinding, where the attacker host resolves to loopback', async () => {
-    // The rebound page really does reach a loopback socket, so the peer check
-    // passes and the origin check has to carry this one alone.
+    // The rebound page reaches a loopback socket, so only the origin check
+    // can produce this 403.
     const res = await createGuardedApp().request(
       MCP_ENDPOINT_PATH,
       { method: 'POST', headers: { Origin: 'http://rebind.evil.example.com' } },
@@ -202,9 +198,8 @@ describe('createMcpAccessGuard', () => {
   })
 
   test('blocks a client the runtime cannot place — no Origin, no peer', async () => {
-    // The hole this closes: `curl` sends no Origin, and on a host that reports
-    // no peer (Node, or anything calling app.fetch() directly) both signals are
-    // absent. Absent is not local, so the guard fails closed.
+    // `curl` sends no Origin, and a host calling app.fetch() reports no peer:
+    // absent is not local, so the guard fails closed.
     delete process.env.GUREN_ALLOW_UNVERIFIED_PEER
 
     const res = await createGuardedApp().request(MCP_ENDPOINT_PATH, { method: 'POST' })
@@ -275,10 +270,8 @@ describe('createMcpAccessGuard', () => {
   })
 
   test('reads its opt-out in the form the deploy bundlers substitute', async () => {
-    // The guard's own `process.env` read carries the same constraint as the
-    // endpoint gates: optional chaining puts it out of reach of a `--define`,
-    // and this is the newest of the three reads, so the likeliest to be
-    // "hardened" by someone who has not read the comment above it.
+    // Same constraint as the endpoint gates: optional chaining puts the read
+    // out of reach of a `--define`.
     const source = await readFile(
       join(import.meta.dir, '../../src/http/middleware/loopback-guard.ts'),
       'utf8',

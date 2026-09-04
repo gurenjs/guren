@@ -28,10 +28,8 @@ export function walk(value: unknown, visit: (node: BabelNode) => boolean | void)
   // for...in rather than Object.entries: the latter allocates an entry array
   // per node, which measurably dominates traversal on a large AST.
   for (const key in node) {
-    // `leadingComments`/`trailingComments`/`innerComments` hold entries
-    // node-shaped enough to fool a structural check — they carry a `type` of
-    // `CommentLine`/`CommentBlock` — so walking them spends traversal on text
-    // that is by definition not code.
+    // `*Comments` children carry a `type` of `CommentLine`/`CommentBlock`, so
+    // a structural check would walk them as if they were code.
     if (key === 'loc' || key.endsWith('Comments')) continue
     walk(node[key], visit)
   }
@@ -39,11 +37,9 @@ export function walk(value: unknown, visit: (node: BabelNode) => boolean | void)
 
 /**
  * The name a non-computed Identifier or string-literal key spells — the one
- * rule for reading a member's name off an object property or a class member,
- * shared by every scanner that asks (model, schema, deploy-runtime, console
- * command surface). Computed keys answer `undefined`: `[x]` names whatever
- * `x` holds at runtime, which a static scan cannot know, so treating
- * `[signature]` as the literal name `signature` would be a guess.
+ * rule for reading a member's name off an object property or a class member.
+ * Computed keys answer `undefined`: `[x]` names whatever `x` holds at runtime,
+ * which a static scan cannot know.
  */
 export function memberKeyName(member: {
   computed?: boolean
@@ -57,20 +53,12 @@ export function memberKeyName(member: {
 
 /**
  * The expression under any transparent TypeScript wrapping — `x as const`,
- * `x satisfies T`, `x!`, `<T>x`, `(x)`. These change nothing about what the
- * runtime receives, so every scanner judging a node's *shape* unwraps first.
+ * `x satisfies T`, `x!`, `<T>x`, `(x)`. The one rule for it: a scanner missing
+ * a wrapper reports a fully static declaration as unreadable and says nothing,
+ * so a second copy costs silence rather than a wrong answer.
  *
- * The one rule for it, because the cost of a second copy is silence rather
- * than a wrong answer: these scanners report "cannot read" and "nothing to
- * flag" as the same empty result, so a scanner missing a wrapper reports a
- * fully static declaration as unreadable and says nothing. Three spellings
- * of this loop had already drifted apart across the package before it was
- * hoisted here.
- *
- * `ParenthesizedExpression` cannot currently occur — `parseSourceFile` does
- * not enable `createParenthesizedExpressions` — but it is kept so that
- * turning that option on stays a one-line change rather than a silent
- * regression in every scanner at once.
+ * `ParenthesizedExpression` cannot currently occur (`parseSourceFile` does not
+ * enable `createParenthesizedExpressions`) and is kept for when it does.
  */
 export function unwrapTypeAssertion(node: Node): Node
 export function unwrapTypeAssertion(node: BabelNode): BabelNode
@@ -84,10 +72,8 @@ export function unwrapTypeAssertion(node: Node | BabelNode): Node | BabelNode {
     current.type === 'TSTypeAssertion' ||
     current.type === 'ParenthesizedExpression'
   ) {
-    // A wrapper always carries an expression when Babel built it, but
-    // `literalString` accepts `unknown` and hands whatever it was given
-    // straight here. Stopping on a missing one keeps a malformed node
-    // answering "not a wrapper" rather than throwing out of a scan.
+    // `literalString` accepts `unknown` and hands it straight here, so a
+    // malformed node must answer "not a wrapper" rather than throw.
     if (!current.expression) return current
     current = current.expression
   }
@@ -95,29 +81,11 @@ export function unwrapTypeAssertion(node: Node | BabelNode): Node | BabelNode {
 }
 
 /**
- * The object literal a node denotes, through any transparent wrapping, or
- * `null` when it does not denote one.
- *
- * Every `x.type !== 'ObjectExpression'` test in a scanner wants this: the
- * bare test reads `{ … } as const` — the shape the storage and module
- * scaffolds actually emit — as "not an object", and the scan then skips the
- * one config it most needed to read.
- *
- * A source-level guard over quoted `'ObjectExpression'`, in the style of
- * `class-member-walk-guard.test.ts`, was considered for this rule and
- * deliberately rejected: the invariant is a dataflow property, not a lexical
- * one. `model-parser.ts` spells the bare test in several places and each is
- * *correct*, because the node was unwrapped by its caller; `findDefineModelOption`
- * in that same file spelled the identical test and was a bug. A grep cannot
- * separate the two, so the allowlist would have had to name the whole file and
- * would have blinded the guard to the one site it was meant to catch. The
- * class-member rule that a guard here does pin has no "already handled
- * upstream" spelling, which is why it works there and not this rule.
- *
- * The rule also deliberately stops short of the shape tests on other node
- * types: a drizzle table factory call, a route registrar's arrow function and
- * a `.references(() => …)` callback have no idiomatic wrapped spelling, so
- * unwrapping there would widen the rule without widening what it can read.
+ * The object literal a node denotes, through any transparent wrapping, or `null`
+ * when it does not denote one. Every `x.type !== 'ObjectExpression'` test wants
+ * this: the bare test reads `{ … } as const` — what the storage and module
+ * scaffolds emit — as "not an object". No source-level guard pins the rule,
+ * since the bare test is correct wherever the caller already unwrapped.
  */
 export function objectLiteral(node: Node | null | undefined): ObjectExpression | null {
   if (!node) return null
@@ -128,23 +96,16 @@ export function objectLiteral(node: Node | null | undefined): ObjectExpression |
 /**
  * The string a node spells statically, or `null` when it does not spell one.
  *
- * A no-substitution template literal counts, because ``router.get(`/posts`,
- * ...)`` and `router.get('/posts', ...)` are the same route — a scanner that
- * knows only `StringLiteral` reads the first as no route at all. Anything with
- * an interpolation, or a reference to a constant declared elsewhere, is `null`:
- * these scanners miss rather than invent.
- *
- * Reading `null` for a wrapped literal is not always a mere gap: it took
- * `broadcast.channel('announcements' as const, …)` out of the generated
- * channel types entirely, rather than degrading what it generated for it.
+ * A no-substitution template literal counts: ``router.get(`/posts`, …)`` and
+ * `router.get('/posts', …)` are the same route. Anything with an interpolation,
+ * or a reference to a constant declared elsewhere, is `null` — these scanners
+ * miss rather than invent.
  */
 export function literalString(value: unknown): string | null {
   if (!value || typeof value !== 'object') return null
-  // `disk: 'media' as const` and `root: './x' satisfies string` spell a
-  // string as plainly as the bare literal does. Unwrapped here rather than
-  // at each caller because the miss is silent: a scanner reading `null` here
-  // reports "no value declared", which is the same answer it gives for a
-  // genuinely dynamic value — so the rule withdraws instead of failing.
+  // Unwrapped here rather than at each caller because the miss is silent: a
+  // `null` reads as "no value declared", the same answer a genuinely dynamic
+  // value gets.
   const node = unwrapTypeAssertion(value as Node) as {
     type?: string
     value?: unknown

@@ -10,19 +10,13 @@ export const LOCALE_CONTEXT_KEY = 'locale'
 /** Request-scoped translator surface bound by {@link detectLocaleMiddleware}. */
 export type TranslatorBinding = { t: Translator['t']; tc: Translator['tc'] }
 
-/**
- * Read the request locale resolved by {@link detectLocaleMiddleware} (or any
- * middleware that sets the `locale` context variable).
- */
+/** Reads the `locale` context variable, whoever set it. */
 export function getRequestLocale(c: Context): string | undefined {
   const locale = (c.var as Record<string, unknown> | undefined)?.[LOCALE_CONTEXT_KEY]
   return typeof locale === 'string' && locale.length > 0 ? locale : undefined
 }
 
-/**
- * Read the request-scoped `t`/`tc` translator bound by
- * {@link detectLocaleMiddleware}, when present.
- */
+/** The request-scoped translator bound by {@link detectLocaleMiddleware}. */
 export function getRequestTranslator(c: Context): TranslatorBinding | undefined {
   const vars = c.var as Record<string, unknown> | undefined
   const t = vars?.['t']
@@ -53,10 +47,8 @@ export interface DetectLocaleOptions {
   /** Cookie to read (defaults to `locale`). */
   cookieName?: string
   /**
-   * i18n manager used to bind request-scoped `t`/`tc` translator helpers.
-   * Defaults to the global manager when one was registered via `setI18n()`;
-   * pass a manager explicitly (e.g. `app.container.make('i18n')`), or `false`
-   * to skip the translator binding entirely.
+   * Manager backing the request-scoped `t`/`tc` helpers. Defaults to the
+   * global one registered via `setI18n()`; `false` skips the binding.
    */
   i18n?: I18nManager | false
 }
@@ -64,21 +56,9 @@ export interface DetectLocaleOptions {
 const DEFAULT_SOURCES: readonly LocaleSource[] = ['query', 'cookie', 'header']
 
 /**
- * Middleware that resolves the request locale from the query string, a cookie,
- * or the `Accept-Language` header — in that order by default — restricted to
- * the `supported` allowlist.
- *
- * The result is stored as the `locale` context variable, which Inertia
- * responses pick up for the root `<html lang>` attribute. When an i18n manager
- * is available (see the `i18n` option), request-scoped `t`/`tc` translator
- * helpers are attached as well.
- *
- * @example
- * ```ts
- * import { detectLocaleMiddleware } from '@guren/core'
- *
- * app.use('*', detectLocaleMiddleware({ supported: ['en', 'ja'] }))
- * ```
+ * Resolves the request locale from the query string, a cookie, or
+ * `Accept-Language`, restricted to the `supported` allowlist, and stores it as
+ * the `locale` context variable that Inertia reads for `<html lang>`.
  */
 export function detectLocaleMiddleware(options: DetectLocaleOptions) {
   const supported = options.supported.map((locale) => locale.trim()).filter(Boolean)
@@ -121,12 +101,9 @@ export function detectLocaleMiddleware(options: DetectLocaleOptions) {
     return undefined
   }
 
-  // Bound t/tc helpers, cached per locale. Only supported, already-loaded
-  // locales are cached: the bound-on-uncached-locale case rebuilds per call
-  // (and self-heals once the locale loads), and an unvalidated override from
-  // downstream middleware cannot grow the map without bound. Messages added
-  // to the manager after a locale is cached are not picked up — acceptable
-  // for the load-once translation lifecycle.
+  // Only supported, already-loaded locales are cached, so an unvalidated
+  // override from downstream middleware cannot grow the map without bound.
+  // Messages added to the manager after a locale is cached are not picked up.
   const translators = new Map<string, TranslatorBinding>()
   const supportedSet = new Set(supported)
 
@@ -169,9 +146,8 @@ export function detectLocaleMiddleware(options: DetectLocaleOptions) {
     if (i18n) {
       await i18n.loadLocale(resolved).catch(() => {})
 
-      // Resolve the translator per call, not per request: middleware running
-      // after detection may override the `locale` context variable (e.g. a
-      // per-user preference from the session), and t/tc must follow it.
+      // Per call, not per request: middleware running after detection may
+      // override the `locale` context variable, and t/tc must follow it.
       const current = () => bindingFor(getRequestLocale(c) ?? resolved, i18n)
       c.set('t', (key, replacements) => current().t(key, replacements))
       c.set('tc', (key, count, replacements) => current().tc(key, count, replacements))

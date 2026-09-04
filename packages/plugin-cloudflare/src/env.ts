@@ -1,19 +1,12 @@
 /**
  * The Workers env holder, published as `@guren/plugin-cloudflare/env`.
  *
- * **This module must stay import-free.** It is the one thing *application*
- * code reaches for at runtime — a scaffolded controller resolving a binding,
- * the OAuth consent screen reading `env.OAUTH_PROVIDER` — and the package's
- * root entry re-exports `buildCloudflareOutput`, which pulls `node:fs`,
- * `node:path` and the whole deploy generator behind it. An app importing
- * `getWorkersEnv` from the root therefore drags the build tooling into its
- * route graph on every `bun run dev` boot and into the wrangler bundle on
- * every deploy, for three functions that need nothing at all.
- *
- * The root keeps re-exporting these names, so nothing that already imports
- * them from there breaks. New application code should import from this
- * subpath; `tests/lean-env-subpath.test.ts` holds that boundary, and the
- * scaffolded consent controller is checked against it by name.
+ * **This module must stay import-free.** It is what application code reaches for
+ * at runtime, while the package root also re-exports `buildCloudflareOutput` and
+ * pulls `node:fs`, `node:path` and the deploy generator behind it — importing
+ * these names from the root drags that into the route graph and the wrangler
+ * bundle. The root keeps re-exporting them for compatibility;
+ * `tests/lean-env-subpath.test.ts` holds the boundary.
  */
 
 // Wrapper object distinguishes "never captured" from "captured undefined".

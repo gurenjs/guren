@@ -8,7 +8,7 @@ The standard vNext path is: import queue APIs from `@guren/core`, configure the 
 
 - **Job** – A class that encapsulates a unit of work to be processed asynchronously. Jobs define their own `handle()` method and can specify retry behavior.
 - **Worker** – A long-running process that pulls jobs from queues and executes them. Workers handle retries, failures, and graceful shutdown.
-- **Driver** – The storage backend for jobs. Guren ships with Memory and Redis drivers.
+- **Driver** – The storage backend for jobs. Guren ships with Sync, Memory and Redis drivers.
 - **QueueManager** – Central registry for configuring and accessing multiple queue drivers.
 
 Dispatching and working are separate processes, joined asynchronously through the queue. The request returns as soon as the job is enqueued; it runs later, on the worker's schedule.
@@ -317,6 +317,26 @@ const queue = createQueueManager({
 })
 
 const driver = queue.driver()
+```
+
+### Sync Driver
+
+The sync driver runs each job inline, in the process that dispatched it, so
+nothing needs a worker. It is the development default (`QUEUE_CONNECTION=sync`)
+and a failure surfaces from the `dispatch()` call itself.
+
+Because nothing waits in a sync queue, retry backoff is not honored: a job
+released back to the sync driver runs again immediately, whatever delay its
+`backoff` strategy computes. Use the Memory or Redis driver with a worker when
+you need to observe retry timing.
+
+```ts
+import { createQueueManager, SyncDriver } from '@guren/core'
+
+const queue = createQueueManager({
+  default: 'sync',
+  drivers: { sync: () => new SyncDriver() },
+})
 ```
 
 ## Failed Jobs

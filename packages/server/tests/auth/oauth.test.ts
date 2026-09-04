@@ -15,13 +15,9 @@ import {
 } from '../../src/auth/oauth'
 import { hashToken } from '../../src/auth/utils'
 
-// The OAuth cases below drive the manager by replacing `globalThis.fetch`
-// outright — `mock.restore()` only unwinds spies, so nothing here puts the real
-// one back. Bun runs every test file in one process, and whether a file's
-// globals reach the next one is a runtime detail rather than a promise: under
-// Bun 1.3.11 they do, so the replacement outlived this file and answered 200 to
-// the port tests' `fetch(...)` against their own freshly bound servers, whose
-// whole point is a 404.
+// These cases replace `globalThis.fetch` outright, and `mock.restore()` only unwinds spies.
+// Bun runs every test file in one process and shares globals across them (1.3.11), so an
+// unrestored replacement answers other files' `fetch()` calls: restore it here explicitly.
 const realFetch = globalThis.fetch
 
 afterEach(() => {
@@ -61,10 +57,8 @@ describe('oauth helpers', () => {
     expect(secondUse).toBeNull()
   })
 
-  // Without a binding, `state` is unguessable and single-use but transferable:
-  // the attacker starts a flow, keeps their own `code` unconsumed, and walks
-  // the victim's browser through the callback — logging the victim into the
-  // attacker's account.
+  // Unbound, a `state` is single-use but transferable: the attacker walks the victim's
+  // browser through the callback with their own unconsumed `code` and captures the login.
   it('rejects a state bound to another browser', async () => {
     const store = new MemoryOAuthStateStore()
     const { state } = await createOAuthState('github', store, {}, '/dashboard', undefined, 'attacker-session')
@@ -98,12 +92,8 @@ describe('oauth helpers', () => {
     expect(state).toBe('fixed-state')
   })
 
-  // Apps written against the previous API pass no binding at all. They stay
-  // exposed to the transfer above — authorize() warns about it — but must not
-  // break on upgrade.
-  // A store that drops `binding` reverts the protection with no other signal,
-  // so the mismatch between "bound at authorize" and "unbound at callback" is
-  // reported rather than passing silently.
+  // A store that drops `binding` reverts the protection with no other signal, so the
+  // mismatch between "bound at authorize" and "unbound at callback" must be reported.
   it('warns when a bound flow comes back from the store unbound', async () => {
     const store = new MemoryOAuthStateStore()
     const original = console.warn
@@ -112,8 +102,7 @@ describe('oauth helpers', () => {
 
     try {
       const { state } = await createOAuthState('github', store, {}, undefined, 'dropped-state')
-      // Simulate the store losing the field: the state was minted unbound, but
-      // the caller presents one, which is the shape a dropping store produces.
+      // Minted unbound but presented with a binding: the shape a dropping store produces.
       expect(await verifyOAuthState(state, 'github', store, {}, 'session-abc')).not.toBeNull()
     } finally {
       console.warn = original
@@ -164,9 +153,8 @@ describe('oauth helpers', () => {
     expect(await store.find('hash-expired')).toBeNull()
   })
 
-  // `new Date('not-a-date')` is an Invalid Date, and `NaN <= Date.now()` is
-  // false, so a naive `expiresAt.getTime() <= Date.now()` check reads a
-  // corrupt expiry as "not past" and hands the state back forever.
+  // `NaN <= Date.now()` is false, so a naive expiry check reads an Invalid Date as
+  // "not past" and hands the state back forever.
   it('find does not return a state with an unparseable (Invalid Date) expiry', async () => {
     const store = new MemoryOAuthStateStore()
     await store.store('hash-corrupt-find', {
@@ -187,8 +175,7 @@ describe('oauth helpers', () => {
     expect(await store.consume('hash-corrupt-consume')).toBeNull()
   })
 
-  // Guard in the other direction: the corruption check must not swallow a
-  // perfectly good, still-live state.
+  // The corruption check must not swallow a still-live state.
   it('find and consume still return a state with a valid future expiry', async () => {
     const findStore = new MemoryOAuthStateStore()
     await findStore.store('hash-valid-find', {
@@ -251,8 +238,7 @@ describe('oauth helpers', () => {
     const store = new MemoryOAuthStateStore()
     const { state } = await createOAuthState('github', store, {}, '/ok', 'fixed-state')
 
-    // Overwrite the stored payload with an unsafe target, simulating a custom
-    // store (or a state persisted before an allowlist change).
+    // An unsafe target as a custom store (or a pre-allowlist state) could have persisted it.
     await store.store(hashToken(state, 'sha256'), {
       provider: 'github',
       redirectTo: '//evil.example.com',
@@ -446,7 +432,6 @@ describe('OAuthManager', () => {
 
       const session = createSessionStub()
       const { state } = await manager.authorize('github', { session })
-      // Filed under the state it belongs to, so concurrent flows coexist.
       expect(session.get<unknown[]>(OAUTH_SESSION_BINDING_KEY)).toHaveLength(1)
 
       const { profile } = await manager.handleCallback('github', { code: 'auth-code', state, session })
@@ -467,10 +452,8 @@ describe('OAuthManager', () => {
       ).rejects.toThrow('Invalid or expired OAuth state.')
     })
 
-    // Bindings are filed under the state they belong to, so a callback
-    // carrying a state this browser never started cannot strip the binding of
-    // the flow it did start. Otherwise anyone could navigate a visitor to
-    // `/callback?code=x&state=x` mid-login and lock them out of their own.
+    // Bindings are filed per state, so a forged `/callback?code=x&state=x` cannot strip
+    // the binding of the flow this browser did start and lock the visitor out of it.
     it('leaves an unrelated flow untouched when a forged callback arrives', async () => {
       const manager = createManager()
       installOAuthFetchMock({ access_token: 'token-123' }, { id: 42 })
@@ -486,9 +469,7 @@ describe('OAuthManager', () => {
       expect(profile.id).toBe('42')
     })
 
-    // One slot per browser meant the second authorize() overwrote the first,
-    // so two tabs — or a visitor who picks a different provider — could not
-    // both finish. Callback order must not matter either.
+    // Two tabs, or two providers, must both be able to finish, in either callback order.
     it('keeps concurrent flows in the same browser independent', async () => {
       const manager = createManager()
       installOAuthFetchMock({ access_token: 'token-123' }, { id: 42 })
@@ -497,7 +478,6 @@ describe('OAuthManager', () => {
       const first = await manager.authorize('github', { session })
       const second = await manager.authorize('github', { session, redirectTo: '/second' })
 
-      // Oldest first: the order that used to fail both.
       const firstResult = await manager.handleCallback('github', { code: 'auth-code', state: first.state, session })
       const secondResult = await manager.handleCallback('github', { code: 'auth-code', state: second.state, session })
 
@@ -534,7 +514,7 @@ describe('OAuthManager', () => {
 
       const session = createSessionStub()
       const { state } = await manager.authorize('github', { bindTo: 'external-value', session })
-      // The session was not written to — the caller owns the binding.
+      // With an explicit bindTo the caller owns the binding, so the session is untouched.
       expect(session.data.size).toBe(0)
 
       const { profile } = await manager.handleCallback('github', { code: 'auth-code', state, bindTo: 'external-value' })
@@ -543,8 +523,7 @@ describe('OAuthManager', () => {
   })
 
   it('reports the provider verification signal from the configured key', async () => {
-    // Discord names it `verified`, not OIDC's `email_verified` — the preset
-    // declares the key so the shared mapper never has to know about it.
+    // Discord names it `verified`, not OIDC's `email_verified`; the preset declares the key.
     const discordConfig = createDiscordOAuthProviderConfig({
       clientId: 'd-id',
       clientSecret: 'd-secret',
@@ -553,8 +532,7 @@ describe('OAuthManager', () => {
     const manager = new OAuthManager({ stateStore: new MemoryOAuthStateStore() })
     manager.registerProvider('discord', discordConfig)
 
-    // Discord's token endpoint is `/api/oauth2/token`, which the shared
-    // `installOAuthFetchMock` helper would misroute to the userinfo body.
+    // Discord's token endpoint is `/api/oauth2/token`, which installOAuthFetchMock misroutes.
     const fetchMock = mock(async (input: string) => {
       const body = input.includes('/oauth2/token')
         ? { access_token: 'token-123' }
@@ -593,8 +571,7 @@ describe('OAuthManager', () => {
     const { state } = await manager.authorize('oidc')
     expect((await manager.user('oidc', { code: 'auth-code', state })).emailVerified).toBe(true)
 
-    // Non-boolean values carry no signal — the field stays undefined rather
-    // than coercing a string into a verification claim.
+    // A non-boolean claim carries no signal, so it must not be coerced into one.
     installOAuthFetchMock(
       { access_token: 'token-123' },
       { sub: 'user-1', email: 'user@example.com', email_verified: 'true' },
@@ -607,8 +584,7 @@ describe('OAuthManager', () => {
     const manager = new OAuthManager({ stateStore: new MemoryOAuthStateStore() })
     manager.registerProvider('github', githubConfig)
 
-    // GitHub's /user carries no verification field. Consumers must be able to
-    // tell "no signal" apart from "the provider says no".
+    // GitHub's /user carries no verification field: "no signal" must stay distinct from false.
     installOAuthFetchMock(
       { access_token: 'token-123' },
       { id: 42, email: 'octo@example.com', name: 'Octo Cat' },
@@ -641,8 +617,7 @@ describe('OAuthManager', () => {
     const { state } = await manager.authorize('github')
     const profile = await manager.user('github', { code: 'auth-code', state })
 
-    // GitHub's lookup filters on the address's own `verified` flag, so it
-    // returns the object form and can claim verification for it.
+    // GitHub's lookup filters on the address's own `verified` flag, so it may claim it.
     expect(profile.email).toBe('primary@example.com')
     expect(profile.emailVerified).toBe(true)
   })
@@ -651,8 +626,7 @@ describe('OAuthManager', () => {
     const manager = new OAuthManager({ stateStore: new MemoryOAuthStateStore() })
     manager.registerProvider('custom', {
       ...githubConfig,
-      // The original signature every pre-existing implementation was written
-      // against. It promises nothing about verification, so neither do we.
+      // The original signature promises nothing about verification, so neither do we.
       fetchFallbackEmail: async () => 'from-elsewhere@example.com',
     })
 
@@ -718,7 +692,6 @@ describe('OAuthManager', () => {
 
     expect(google.authorizeUrl).toContain('accounts.google.com')
     expect(discord.authorizeUrl).toContain('discord.com')
-    // Each preset declares how to read its own verification signal.
     expect(google.emailVerifiedKey).toBe('email_verified')
     expect(discord.emailVerifiedKey).toBe('verified')
   })

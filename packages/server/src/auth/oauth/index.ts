@@ -20,22 +20,17 @@ export interface OAuthProviderConfig {
   mapProfile?: (raw: Record<string, unknown>, token: OAuthTokenResult) => OAuthUserProfile
   /**
    * Key in the userinfo response carrying the provider's own verification
-   * signal for the email address — Discord returns `verified`, for example.
-   * Defaults to OIDC's standard `email_verified` claim. Only boolean values
-   * are read; anything else leaves `profile.emailVerified` undefined. Ignored
-   * when `mapProfile` is set, since that owns the whole mapping.
+   * signal (Discord returns `verified`); defaults to OIDC's `email_verified`.
+   * Only boolean values are read. Ignored when `mapProfile` is set.
    */
   emailVerifiedKey?: string
   /**
-   * Fallback used when the userinfo response carries no email — e.g. GitHub
-   * returns `email: null` for accounts with a private email even when the
-   * `user:email` scope was granted. Returns the email to use, or undefined
-   * to leave the profile without one.
+   * Fallback used when the userinfo response carries no email — GitHub returns
+   * `email: null` for a private address even with the `user:email` scope.
    *
-   * The signal read via `emailVerifiedKey` does not carry over to a fallback
-   * address — it was read against a response that had no email. A bare string
-   * therefore makes no verification claim and leaves `profile.emailVerified`
-   * undefined; return `{ email, emailVerified: true }` to assert one.
+   * `emailVerifiedKey` does not carry over to a fallback address: it was read
+   * against a response that had no email. A bare string therefore makes no
+   * verification claim; return `{ email, emailVerified: true }` to assert one.
    */
   fetchFallbackEmail?: (token: OAuthTokenResult) => Promise<string | OAuthFallbackEmail | undefined>
 }
@@ -66,11 +61,9 @@ export interface OAuthUserProfile {
   avatar?: string
   /**
    * Whether the provider itself verified `email`. Tri-state on purpose:
-   * `true` — the provider asserts the address is verified; `false` — it
-   * asserts it is not; `undefined` — the provider sends no such signal
-   * (GitHub's `/user`, for instance), so the consumer decides its own policy.
-   * Returning an email is not by itself a claim that it was checked, so
-   * treating `undefined` as verified is a decision, not a default.
+   * `undefined` means the provider sends no such signal (GitHub's `/user`), so
+   * the consumer decides its own policy — returning an email is not by itself a
+   * claim that it was checked.
    */
   emailVerified?: boolean
   token: OAuthTokenResult
@@ -83,12 +76,9 @@ export interface OAuthStatePayload {
   expiresAt: Date
   /**
    * Hash of the value tying this state to the browser that started the flow.
-   *
    * Without it `state` is unguessable and single-use but *transferable*: an
    * attacker can start a flow, capture their own `code`, and walk a victim's
-   * browser through the callback, logging the victim into the attacker's
-   * account. RFC 6749 §10.12 requires the binding; storing only the provider
-   * name does not provide it.
+   * browser through the callback into the attacker's account (RFC 6749 §10.12).
    */
   binding?: string
 }
@@ -98,14 +88,11 @@ export interface OAuthStateStore {
   find(stateHash: string): Promise<OAuthStatePayload | null>
   delete(stateHash: string): Promise<void>
   /**
-   * Atomically fetch and delete a state in one step. Exactly one caller may
-   * receive the payload; every other concurrent caller (and any later call)
-   * must get null. Expired states must also return null, mirroring `find`.
-   *
-   * Optional for backward compatibility: `verifyOAuthState` prefers this
-   * when present. Stores that only implement find/delete keep working, but
-   * leave a window where two concurrent callbacks with the same state can
-   * both pass verification.
+   * Atomically fetch and delete a state. Exactly one caller may receive the
+   * payload; every other concurrent or later call must get null, as must an
+   * expired state. Optional for backward compatibility — stores implementing
+   * only find/delete keep working, but leave a window where two concurrent
+   * callbacks with the same state both pass verification.
    */
   consume?(stateHash: string): Promise<OAuthStatePayload | null>
 }
@@ -123,10 +110,9 @@ export interface OAuthStateConfig {
 }
 
 /**
- * The slice of a session the manager needs to bind an OAuth flow to a
- * browser. The framework `Session` satisfies it structurally, so controllers
- * pass `this.auth.session()` straight through; anything else with these three
- * methods (a cookie jar wrapper, a test double) works too.
+ * The slice of a session the manager needs to bind an OAuth flow to a browser.
+ * The framework `Session` satisfies it structurally, so controllers pass
+ * `this.auth.session()` straight through.
  */
 export interface OAuthBindingSession {
   get<T = unknown>(key: string): T | undefined
@@ -138,12 +124,9 @@ export interface OAuthBindingSession {
 export const OAUTH_SESSION_BINDING_KEY = 'guren:oauth.bindings'
 
 /**
- * How many unfinished flows one browser may have bindings for.
- *
- * Every `authorize()` parks one entry, and an abandoned flow leaves it behind
- * until it expires, so the list is capped. Beyond the cap the oldest entry is
- * dropped — that flow's callback then fails, which is the same outcome it had
- * before any of this existed.
+ * How many unfinished flows one browser may have bindings for. An abandoned
+ * flow leaves an entry behind until it expires, so the list is capped; beyond
+ * it the oldest is dropped and that flow's callback fails.
  */
 const MAX_PENDING_SESSION_BINDINGS = 5
 
@@ -155,22 +138,18 @@ export interface OAuthAuthorizeOptions {
   /**
    * Session of the browser starting the flow — pass `this.auth.session()`.
    *
-   * The manager mints a per-browser binding, keeps it in the session, and
-   * hashes it into the state; `handleCallback({ session })` presents it back.
-   * Writing to the session is also what makes a visitor's brand-new session
-   * persist across the provider round trip. `undefined` (no session
-   * middleware, or none established yet) leaves the state unbound — the flow
-   * still works, and `authorize()` warns once about the exposure.
+   * The manager mints a per-browser binding, keeps it here, and hashes it into
+   * the state; writing to the session is also what makes a brand-new session
+   * persist across the provider round trip. `undefined` leaves the state
+   * unbound — the flow works, and `authorize()` warns once about the exposure.
    */
   session?: OAuthBindingSession
   /**
    * Bind the flow to the browser that started it, keeping the value yourself.
-   *
-   * Prefer `session` — it does the storing and consuming for you. Use this
-   * when the binding lives somewhere else (an encrypted cookie, a test): pass
-   * a value only this browser can present back. Only its hash reaches the
-   * state store, and `handleCallback()` then requires the same value. Takes
-   * precedence over `session` when both are given.
+   * Prefer `session`, which stores and consumes for you; use this when the
+   * binding lives elsewhere (an encrypted cookie, a test). Only its hash
+   * reaches the state store, and `handleCallback()` requires the same value.
+   * Takes precedence over `session` when both are given.
    */
   bindTo?: string
 }
@@ -200,9 +179,8 @@ let warnedAboutUnboundState = false
 
 /**
  * An unbound `state` is transferable between browsers, which is exactly the
- * attack `state` exists to stop. Verification stays permissive so apps written
- * against the previous API keep working, so this is the only thing that tells
- * them they are exposed.
+ * attack `state` exists to stop. Verification stays permissive so older apps
+ * keep working, so this warning is the only thing telling them they are exposed.
  */
 function warnOnceAboutUnboundState(): void {
   if (warnedAboutUnboundState) return
@@ -236,10 +214,9 @@ function warnOnceAboutDroppedBinding(): void {
 }
 
 /**
- * Mint a fresh binding and park it in the session for the callback. A new
- * value per flow (rather than the session id) keeps session identifiers out
- * of the state store's inputs entirely and survives a login-triggered
- * session-id rotation happening mid-flow.
+ * Mint a fresh binding and park it in the session for the callback. A new value
+ * per flow (rather than the session id) keeps session identifiers out of the
+ * state store and survives a login-triggered session-id rotation mid-flow.
  */
 interface PendingSessionBinding {
   /** Hash of the `state` this binding belongs to. */
@@ -269,11 +246,9 @@ function issueSessionBinding(session: OAuthBindingSession | undefined): string |
 }
 
 /**
- * Park a minted binding against the state it belongs to.
- *
- * Keyed by state rather than kept in one slot, so a browser can have several
- * flows in flight — two tabs, or a visitor who picks a different provider —
- * without each `authorize()` invalidating the one before it.
+ * Park a minted binding against the state it belongs to. Keyed by state rather
+ * than kept in one slot, so a browser can have several flows in flight without
+ * each `authorize()` invalidating the one before it.
  */
 function rememberSessionBinding(
   session: OAuthBindingSession,
@@ -290,11 +265,9 @@ function rememberSessionBinding(
 }
 
 /**
- * Take the binding belonging to this callback's state, leaving the rest.
- *
- * Only the matching entry is removed: a forged callback carrying an unknown
- * state must not be able to strip a real flow's binding and lock the visitor
- * out of the login they actually started.
+ * Take the binding belonging to this callback's state, leaving the rest. Only
+ * the matching entry is removed: a forged callback carrying an unknown state
+ * must not be able to strip a real flow's binding and lock the visitor out.
  */
 function consumeSessionBinding(
   session: OAuthBindingSession | undefined,
@@ -449,10 +422,9 @@ export class OAuthManager {
   }
 
   /**
-   * Verify the callback and return the user profile together with the
-   * sanitized `redirectTo` stored at authorize time. `redirectTo` is safe to
-   * pass to a redirect response: app-relative paths and allowlisted hosts
-   * only.
+   * Verify the callback and return the user profile together with the sanitized
+   * `redirectTo` stored at authorize time — app-relative paths and allowlisted
+   * hosts only, so it is safe to pass to a redirect response.
    */
   async handleCallback(
     providerName: string,
@@ -529,11 +501,9 @@ export async function verifyOAuthState(
 
 /**
  * Whether the presented value matches the binding recorded at authorize time.
- *
  * A state created without a binding still verifies, so an app that has not
- * adopted `bindTo` keeps working. A state created *with* one is useless to a
- * browser that cannot present it, which is the whole point — so a missing or
- * wrong value fails.
+ * adopted `bindTo` keeps working; a state created *with* one is useless to a
+ * browser that cannot present it, so a missing or wrong value fails.
  */
 function bindingMatches(
   stored: string | undefined,
@@ -568,11 +538,10 @@ async function findAndDeleteState(
 }
 
 /**
- * Reduce a `redirectTo` value to a safe target: app-relative paths always
- * pass; absolute http(s) URLs pass only when their host is in the allowlist
- * (supports `*.example.com` wildcards). Everything else — protocol-relative
- * URLs, backslash tricks, `javascript:` and other schemes — returns
- * `undefined`.
+ * Reduce a `redirectTo` value to a safe target: app-relative paths always pass;
+ * absolute http(s) URLs pass only when their host is in the allowlist (with
+ * `*.example.com` wildcards). Everything else — protocol-relative URLs,
+ * backslash tricks, `javascript:` and other schemes — returns `undefined`.
  */
 export function sanitizeOAuthRedirect(
   redirectTo: string | undefined,

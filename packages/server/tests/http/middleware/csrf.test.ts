@@ -31,10 +31,9 @@ afterEach(() => {
 })
 
 /**
- * A single `name=value` pair from the response, or ''. Needed wherever a test
- * must control which XSRF cookie the server sees: `extractCookie` joins every
- * Set-Cookie, so carrying a logged-in response wholesale also carries that
- * session's own XSRF token, which then shadows any planted one.
+ * A single `name=value` pair from the response, for tests that control which XSRF
+ * cookie the server sees: `extractCookie` joins every Set-Cookie, so a logged-in
+ * response carries a session XSRF token that shadows any planted one.
  */
 function pickCookie(res: Response, name: string): string {
   const cookies = res.headers.getSetCookie?.() ?? []
@@ -43,8 +42,7 @@ function pickCookie(res: Response, name: string): string {
 }
 
 function extractCookie(res: Response): string {
-  // When multiple Set-Cookie headers exist (session + XSRF-TOKEN),
-  // collect all cookies and join them so the session is preserved.
+  // Joined rather than picked, so a session cookie beside XSRF-TOKEN survives.
   const cookies = res.headers.getSetCookie?.() ?? []
   if (cookies.length > 0) {
     return cookies.map((c) => c.split(';')[0]).join('; ')
@@ -67,7 +65,7 @@ describe('getCsrfToken', () => {
     await app.request('/token')
 
     expect(token1).toBeDefined()
-    expect(token1).toBe(token2) // Same token on repeated calls
+    expect(token1).toBe(token2)
   })
 
   it('works without session middleware (stateless double-submit)', async () => {
@@ -134,7 +132,7 @@ describe('verifyCsrfToken', () => {
     let result: boolean | undefined
 
     app.get('/test', (c) => {
-      getCsrfToken(c) // Generate token
+      getCsrfToken(c)
       result = verifyCsrfToken(c, 'wrong-token')
       return c.text('ok')
     })
@@ -195,11 +193,9 @@ describe('createCsrfMiddleware', () => {
 
     app.post('/submit', (c) => c.text('submitted'))
 
-    // Get token and cookie
     const getRes = await app.request('/form')
     const cookie = extractCookie(getRes)
 
-    // Submit with token
     const formData = new URLSearchParams()
     formData.set(CSRF_FORM_FIELD, token!)
 
@@ -227,11 +223,9 @@ describe('createCsrfMiddleware', () => {
 
     app.post('/api/data', (c) => c.json({ success: true }))
 
-    // Get token and cookie
     const getRes = await app.request('/api/token')
     const cookie = extractCookie(getRes)
 
-    // Submit with header
     const postRes = await app.request('/api/data', {
       method: 'POST',
       headers: {
@@ -258,11 +252,9 @@ describe('createCsrfMiddleware', () => {
 
     app.post('/api/data', (c) => c.json({ success: true }))
 
-    // Get token and cookie
     const getRes = await app.request('/api/token')
     const cookie = extractCookie(getRes)
 
-    // Submit with token in JSON body
     const postRes = await app.request('/api/data', {
       method: 'POST',
       headers: {
@@ -351,7 +343,6 @@ describe('createCsrfMiddleware', () => {
     app.post('/health', (c) => c.text('healthy'))
     app.post('/api/data', (c) => c.text('data'))
 
-    // Excluded paths should work without token
     const webhookRes = await app.request('/api/webhooks/stripe', { method: 'POST' })
     expect(webhookRes.status).toBe(200)
 
@@ -361,7 +352,6 @@ describe('createCsrfMiddleware', () => {
     const healthRes = await app.request('/health', { method: 'POST' })
     expect(healthRes.status).toBe(200)
 
-    // Non-excluded path should still require token
     const dataRes = await app.request('/api/data', { method: 'POST' })
     expect(dataRes.status).toBe(403)
   })
@@ -423,7 +413,7 @@ describe('createCsrfMiddleware', () => {
 
   it('allows customizing protected methods', async () => {
     const app = createTestApp({
-      methods: ['POST'], // Only protect POST, not PUT/PATCH/DELETE
+      methods: ['POST'],
     })
 
     app.post('/data', (c) => c.text('post'))
@@ -431,13 +421,13 @@ describe('createCsrfMiddleware', () => {
     app.delete('/data', (c) => c.text('delete'))
 
     const postRes = await app.request('/data', { method: 'POST' })
-    expect(postRes.status).toBe(403) // Protected
+    expect(postRes.status).toBe(403)
 
     const putRes = await app.request('/data', { method: 'PUT' })
-    expect(putRes.status).toBe(200) // Not protected
+    expect(putRes.status).toBe(200)
 
     const deleteRes = await app.request('/data', { method: 'DELETE' })
-    expect(deleteRes.status).toBe(200) // Not protected
+    expect(deleteRes.status).toBe(200)
   })
 
   it('rejects requests with wrong token', async () => {
@@ -450,11 +440,9 @@ describe('createCsrfMiddleware', () => {
 
     app.post('/submit', (c) => c.text('submitted'))
 
-    // Get cookie (which has the real token)
     const getRes = await app.request('/form')
     const cookie = extractCookie(getRes)
 
-    // Submit with wrong token
     const formData = new URLSearchParams()
     formData.set(CSRF_FORM_FIELD, 'wrong-token-value')
 
@@ -493,7 +481,7 @@ describe('createCsrfMiddleware', () => {
     })
 
     expect(token1).toBeDefined()
-    expect(token1).toBe(token2) // Same token across session
+    expect(token1).toBe(token2)
   })
 })
 
@@ -717,7 +705,6 @@ describe('session-bound tokens (cookie-injection immunity)', () => {
     const { token: attackerToken } = (await attackerForm.json()) as { token: string }
     const attackerXsrf = extractCookie(attackerForm)
 
-    // Victim's own logged-in session cookie.
     const victimSession = await loginCookie(app)
 
     // Attacker plants their XSRF cookie + header on the victim's request.
@@ -780,10 +767,9 @@ describe('mode enforcement between minting and verification', () => {
       logIn(c)
       return c.text('ok')
     })
-    // Reads the token, establishes the session, then reads it again to
-    // render — shared props or a layout touching the token before the
-    // controller logs the user in. The second read has to reflect the
-    // session that now exists, not the guest answer cached by the first.
+    // Shared props or a layout touching the token before the controller logs the
+    // user in: the second read must reflect the session that now exists, not the
+    // guest answer the first cached.
     app.get('/login-and-render', (c) => {
       const before = getCsrfToken(c)
       logIn(c)
@@ -819,10 +805,9 @@ describe('mode enforcement between minting and verification', () => {
     expect(guestXsrf).not.toBe('')
     expect(xsrfFrom(guestRes)).toBe(guestToken)
 
-    // A logged-in victim. Only their session cookie is carried over — the
-    // XSRF cookie is the attacker's guest one, which is the whole point of
-    // planting it. Sending the victim's own XSRF cookie too would make the
-    // request fail on the cookie mismatch instead of on the mode rule.
+    // A logged-in victim: only their session cookie is carried over, since the
+    // planted XSRF cookie is the attacker's. Sending the victim's own too would
+    // fail on the cookie mismatch instead of on the mode rule.
     const victimSession = pickCookie(await app.request('/login'), 'guren.session')
     expect(victimSession).not.toBe('')
 
@@ -873,11 +858,9 @@ describe('mode enforcement between minting and verification', () => {
   it('hands the handler the same token it writes to the cookie', async () => {
     const app = createApp()
 
-    // A handler that logs the user in and then renders the token — a form's
-    // hidden `_token`, or Inertia shared props. If it were handed the token
-    // computed before the session existed, the rendered form would carry a
-    // guest token while the cookie carried a bound one, and submitting that
-    // form would 403.
+    // A handler that logs the user in and then renders the token (a form's hidden
+    // `_token`). Handed the token computed before the session existed, the form
+    // would carry a guest token against a bound cookie and 403 on submit.
     const res = await app.request('/login-and-render')
     const { before, token: rendered } = (await res.json()) as { before: string; token: string }
 

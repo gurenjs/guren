@@ -3,9 +3,7 @@ import * as path from 'node:path'
 import type { LogChannel, LogEntry, FileChannelConfig } from '../types'
 import { LOG_LEVEL_PRIORITY } from '../types'
 
-/**
- * File log channel.
- */
+/** File log channel. */
 export class FileChannel implements LogChannel {
   private readonly config: FileChannelConfig
   private readonly minLevel: number

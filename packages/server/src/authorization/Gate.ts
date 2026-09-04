@@ -13,9 +13,7 @@ import type {
 import { AuthorizationException, HttpException } from '../errors'
 import { getAuthContext } from '../auth/context'
 
-/**
- * Response builder for authorization checks.
- */
+/** Response builder for authorization checks. */
 export const Response: ResponseBuilder = {
   allow(message?: string): AuthorizationResponse {
     return { allowed: true, message }
@@ -34,12 +32,7 @@ export const Response: ResponseBuilder = {
   },
 }
 
-/**
- * Narrow a policy/gate return value to an `AuthorizationResponse`.
- *
- * Policies may return either a boolean or one of the `Response` objects
- * produced by `allow()`/`deny()`/`denyWithStatus()`/`denyAsNotFound()`.
- */
+/** Narrow a policy/gate return value to an `AuthorizationResponse`. */
 export function isAuthorizationResponse(value: unknown): value is AuthorizationResponse {
   return (
     typeof value === 'object'
@@ -49,11 +42,8 @@ export function isAuthorizationResponse(value: unknown): value is AuthorizationR
 }
 
 /**
- * Normalize whatever a policy or gate callback returned into a response.
- *
- * A `{ allowed: false }` object is truthy, so anything that decides access
- * from the raw return value fails open. Every path in this class routes
- * through here, and unknown shapes deny.
+ * A `{ allowed: false }` object is truthy, so deciding access from a raw return
+ * value fails open. Every path routes through here, and unknown shapes deny.
  */
 function toAuthorizationResponse(value: unknown): AuthorizationResponse {
   if (isAuthorizationResponse(value)) {
@@ -62,10 +52,7 @@ function toAuthorizationResponse(value: unknown): AuthorizationResponse {
   return value === true ? Response.allow() : Response.deny()
 }
 
-/**
- * Build the exception for a denial, honouring `denyWithStatus()` /
- * `denyAsNotFound()` so a policy can hide a record as a 404.
- */
+/** Honours `denyWithStatus()` / `denyAsNotFound()` so a policy can hide a record as a 404. */
 export function denialToException(response: AuthorizationResponse): Error {
   const message = response.message ?? 'This action is unauthorized.'
   const status = (response as AuthorizationResponse & { status?: number }).status
@@ -77,96 +64,44 @@ export function denialToException(response: AuthorizationResponse): Error {
   return new AuthorizationException(message)
 }
 
-/**
- * Authorization gate for defining and checking abilities.
- *
- * @example
- * ```typescript
- * const gate = new Gate()
- *
- * // Define abilities
- * gate.define('edit-post', (user, post) => user.id === post.authorId)
- * gate.define('admin', (user) => user.role === 'admin')
- *
- * // Check abilities
- * if (await gate.allows('edit-post', post)) {
- *   // User can edit
- * }
- *
- * // Or throw on denial
- * await gate.authorize('edit-post', post) // throws if not allowed
- * ```
- */
+/** Authorization gate for defining and checking abilities. */
 export class Gate {
-  /**
-   * Defined gates.
-   */
   protected gates: Map<string, GateDefinition> = new Map()
 
-  /**
-   * Registered policies.
-   */
   protected policies: Map<unknown, PolicyClass> = new Map()
 
-  /**
-   * Policy instances cache.
-   */
   protected policyInstances: Map<PolicyClass, Policy> = new Map()
 
-  /**
-   * Before callbacks.
-   */
   protected beforeCallbacks: GateBeforeCallback[] = []
 
-  /**
-   * After callbacks.
-   */
   protected afterCallbacks: Array<
     (user: AuthUser | null, ability: string, result: boolean, args: unknown[]) => void | Promise<void>
   > = []
 
-  /**
-   * User resolver function.
-   */
   protected userResolver?: (ctx: Context) => AuthUser | null | Promise<AuthUser | null>
 
-  /**
-   * Current user for checks.
-   */
   protected currentUser: AuthUser | null = null
 
   constructor(options: GateOptions = {}) {
     this.userResolver = options.userResolver
   }
 
-  /**
-   * Define a new gate.
-   */
   define<Args extends unknown[]>(ability: string, callback: GateCallback<Args>): this {
     this.gates.set(ability, { callback })
     return this
   }
 
-  /**
-   * Register a policy for a model class.
-   */
   policy(modelClass: unknown, policyClass: PolicyClass): this {
     this.policies.set(modelClass, policyClass)
     return this
   }
 
-  /**
-   * Register a before callback.
-   * Return true to allow, false to deny, undefined to continue.
-   */
+  /** Return true to allow, false to deny, undefined to continue. */
   before<Args extends unknown[]>(callback: GateBeforeCallback<Args>): this {
     this.beforeCallbacks.push(callback)
     return this
   }
 
-  /**
-   * Register an after callback.
-   */
   after(
     callback: (user: AuthUser | null, ability: string, result: boolean, args: unknown[]) => void | Promise<void>
   ): this {
@@ -174,9 +109,6 @@ export class Gate {
     return this
   }
 
-  /**
-   * Set the current user for authorization checks.
-   */
   forUser(user: AuthUser | null): this {
     const clone = Object.assign(
       Object.create(Object.getPrototypeOf(this)),
@@ -186,9 +118,6 @@ export class Gate {
     return clone
   }
 
-  /**
-   * Resolve the user from context.
-   */
   async resolveUser(ctx: Context): Promise<AuthUser | null> {
     if (this.currentUser !== null) {
       return this.currentUser
@@ -198,16 +127,10 @@ export class Gate {
       return this.userResolver(ctx)
     }
 
-    // When a framework auth context (guren:auth) is attached, its answer is
-    // authoritative — including null. Falling back to the legacy
-    // ctx.get('user') here would resurrect a principal that authentication
-    // just rejected (e.g. an invalid Bearer token on a request that also
-    // carries a manually-set user), letting authorizeMiddleware pass where
-    // requireAuthenticated denies (RFC 0016). The legacy fallback survives
+    // An attached auth context's answer is authoritative, including null:
+    // falling back to ctx.get('user') would resurrect a principal that
+    // authentication just rejected (RFC 0016). The legacy fallback survives
     // only for requests with no auth context at all.
-    // Duck-typed on purpose: ctx.get returns arbitrary values for unknown
-    // keys, and here that answer decides whether the fallback below runs at
-    // all. getAuthContext deliberately does not probe — see its contract.
     const auth = getAuthContext(ctx)
     if (auth && typeof auth.user === 'function') {
       return ((await auth.user()) as AuthUser | null) ?? null
@@ -217,23 +140,14 @@ export class Gate {
     return user ?? null
   }
 
-  /**
-   * Check if the user has the given ability.
-   */
   async allows(ability: string, ...args: unknown[]): Promise<boolean> {
     return this.check(ability, this.currentUser, ...args)
   }
 
-  /**
-   * Check if the user doesn't have the given ability.
-   */
   async denies(ability: string, ...args: unknown[]): Promise<boolean> {
     return !(await this.allows(ability, ...args))
   }
 
-  /**
-   * Check if the user has any of the given abilities.
-   */
   async any(abilities: string[], ...args: unknown[]): Promise<boolean> {
     for (const ability of abilities) {
       if (await this.allows(ability, ...args)) {
@@ -243,9 +157,6 @@ export class Gate {
     return false
   }
 
-  /**
-   * Check if the user has all of the given abilities.
-   */
   async all(abilities: string[], ...args: unknown[]): Promise<boolean> {
     for (const ability of abilities) {
       if (!(await this.allows(ability, ...args))) {
@@ -255,16 +166,10 @@ export class Gate {
     return true
   }
 
-  /**
-   * Check if the user has none of the given abilities.
-   */
   async none(abilities: string[], ...args: unknown[]): Promise<boolean> {
     return !(await this.any(abilities, ...args))
   }
 
-  /**
-   * Authorize the ability or throw an exception.
-   */
   async authorize(ability: string, ...args: unknown[]): Promise<void> {
     const response = await this.checkResponse(ability, this.currentUser, ...args)
 
@@ -273,36 +178,23 @@ export class Gate {
     }
   }
 
-  /**
-   * Get the authorization response.
-   */
   async inspect(ability: string, ...args: unknown[]): Promise<AuthorizationResponse> {
     return this.checkResponse(ability, this.currentUser, ...args)
   }
 
-  /**
-   * Check the ability with a specific user.
-   */
   async check(ability: string, user: AuthUser | null, ...args: unknown[]): Promise<boolean> {
     const response = await this.checkResponse(ability, user, ...args)
     return response.allowed
   }
 
-  /**
-   * Check the ability with a specific user and keep the full response.
-   *
-   * Policies may answer with a boolean or with a `Response` object. Both
-   * shapes are normalized here so no caller has to truthy-test a
-   * `{ allowed: false }` object.
-   */
+  /** Like check(), but keeps the full response instead of just `allowed`. */
   async checkResponse(
     ability: string,
     user: AuthUser | null,
     ...args: unknown[]
   ): Promise<AuthorizationResponse> {
-    // Run before callbacks. Only `undefined` means "keep checking" — anything
-    // else is an answer, and a `Response.deny()` object read as "not a boolean,
-    // so continue" would drop the denial on the floor.
+    // Only `undefined` means "keep checking" — anything else is an answer, and
+    // a `Response.deny()` object read as "not a boolean" would drop the denial.
     for (const beforeCallback of this.beforeCallbacks) {
       const result = await beforeCallback(user, ability, ...args)
       if (result !== undefined) {
@@ -310,7 +202,6 @@ export class Gate {
       }
     }
 
-    // Check for policy
     const model = args[0]
     if (model !== undefined && model !== null) {
       const policyResult = await this.checkPolicy(ability, user, model, args.slice(1))
@@ -319,14 +210,12 @@ export class Gate {
       }
     }
 
-    // Check gate
     const gate = this.gates.get(ability)
     if (gate) {
       const result = await gate.callback(user, ...args)
       return this.settle(user, ability, toAuthorizationResponse(result), args)
     }
 
-    // No gate or policy found
     return this.settle(user, ability, Response.deny(), args)
   }
 
@@ -341,12 +230,9 @@ export class Gate {
   }
 
   /**
-   * Check a policy for the given ability.
-   *
    * The subject may be a class instance (policy resolved via its constructor)
-   * or a `[ModelClass, record]` / `['key', record]` tuple. The tuple form is
-   * required for plain records returned by the ORM, which carry no constructor
-   * information.
+   * or a `[ModelClass, record]` / `['key', record]` tuple — the tuple form is
+   * required for plain ORM records, which carry no constructor information.
    */
   protected async checkPolicy(
     ability: string,
@@ -384,8 +270,7 @@ export class Gate {
 
     const policy = this.getPolicyInstance(policyClass)
 
-    // Check before method — same rule as the gate-level before callbacks:
-    // only `undefined` continues to the ability method.
+    // Only `undefined` continues to the ability method.
     if (policy.before) {
       const beforeResult = await policy.before(user, ability)
       if (beforeResult !== undefined) {
@@ -393,7 +278,6 @@ export class Gate {
       }
     }
 
-    // Check ability method
     const method = (policy as Record<string, unknown>)[ability]
     if (typeof method === 'function') {
       return hasSubject
@@ -404,9 +288,6 @@ export class Gate {
     return undefined
   }
 
-  /**
-   * Get or create a policy instance.
-   */
   protected getPolicyInstance(policyClass: PolicyClass): Policy {
     let instance = this.policyInstances.get(policyClass)
     if (!instance) {
@@ -416,9 +297,6 @@ export class Gate {
     return instance
   }
 
-  /**
-   * Run after callbacks.
-   */
   protected async runAfterCallbacks(
     user: AuthUser | null,
     ability: string,
@@ -430,23 +308,14 @@ export class Gate {
     }
   }
 
-  /**
-   * Get all defined abilities.
-   */
   abilities(): string[] {
     return Array.from(this.gates.keys())
   }
 
-  /**
-   * Check if an ability is defined.
-   */
   has(ability: string): boolean {
     return this.gates.has(ability)
   }
 
-  /**
-   * Get the policy for a model.
-   */
   getPolicyFor(model: unknown): Policy | undefined {
     const modelConstructor = model?.constructor
     if (!modelConstructor) {
@@ -462,26 +331,16 @@ export class Gate {
   }
 }
 
-// Global gate instance
 let globalGate: Gate | null = null
 
-/**
- * Create a new gate instance.
- */
 export function createGate(options?: GateOptions): Gate {
   return new Gate(options)
 }
 
-/**
- * Set the global gate instance.
- */
 export function setGate(gate: Gate): void {
   globalGate = gate
 }
 
-/**
- * Get the global gate instance.
- */
 export function getGate(): Gate {
   if (!globalGate) {
     throw new Error('Gate not initialized. Call setGate() first.')
@@ -489,30 +348,19 @@ export function getGate(): Gate {
   return globalGate
 }
 
-/**
- * Define a gate on the global instance.
- */
+/** Define a gate on the global instance. */
 export function defineGate(ability: string, callback: GateCallback): void {
   getGate().define(ability, callback)
 }
 
-/**
- * Check if the current user can perform an ability.
- */
 export async function can(ability: string, ...args: unknown[]): Promise<boolean> {
   return getGate().allows(ability, ...args)
 }
 
-/**
- * Check if the current user cannot perform an ability.
- */
 export async function cannot(ability: string, ...args: unknown[]): Promise<boolean> {
   return getGate().denies(ability, ...args)
 }
 
-/**
- * Authorize or throw.
- */
 export async function authorize(ability: string, ...args: unknown[]): Promise<void> {
   return getGate().authorize(ability, ...args)
 }

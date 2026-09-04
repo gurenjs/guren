@@ -1,12 +1,10 @@
 import { AuthorizationException } from '@guren/core'
 
 /**
- * Single-admin allowlist. `BLOG_ADMIN_GITHUB_ID` names the only GitHub
- * account that may sign in (or have an account created).
- *
- * Unset means "nobody" in production: an env var missed during deployment
- * must never hand post management to whoever signs in first. Local
- * development, where the id often isn't known yet, accepts any account.
+ * Single-admin allowlist: `BLOG_ADMIN_GITHUB_ID` names the only GitHub account
+ * that may sign in. Unset means "nobody" in production, since an env var missed
+ * during deployment must not hand post management to whoever signs in first;
+ * local development accepts any account.
  */
 export function isAllowlistedAdmin(
   profileId: string,

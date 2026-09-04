@@ -20,10 +20,9 @@ const RELATIONSHIP_CARDINALITY: Record<ModelRelationship['type'], string | undef
 }
 
 /**
- * The related model's table for a relationship edge. Same-named models can
- * exist in several locations; preference order (owning model's module,
- * then app root, then code-unit order) keeps the choice deterministic
- * regardless of filesystem discovery order.
+ * The related model's table for a relationship edge. Same-named models can exist in
+ * several locations, so the preference order (owning module, app root, code-unit) keeps
+ * the choice independent of filesystem discovery order.
  */
 function resolveTargetTable(owner: DiscoveredModel, candidates: DiscoveredModel[]): string | undefined {
   const sorted = [...candidates].sort(
@@ -37,10 +36,9 @@ function resolveTargetTable(owner: DiscoveredModel, candidates: DiscoveredModel[
 }
 
 /**
- * ER view of the database: entities/attributes come from the parsed
- * Drizzle schema, edges come from model relationship declarations (plus
- * explicit `.references()` FKs when present) — scaffolded schemas don't
- * emit FK constraints, so the model layer is the reliable edge source.
+ * ER view of the database: entities and attributes from the parsed Drizzle schema, edges
+ * from model relationship declarations plus explicit `.references()` FKs. Scaffolded
+ * schemas emit no FK constraints, so the model layer is the reliable edge source.
  */
 export async function generateErSpec(cwd: string): Promise<SpecArtifact> {
   const tables = (await parseSchemaTables(cwd)).sort((a, b) =>
@@ -73,8 +71,6 @@ export async function generateErSpec(cwd: string): Promise<SpecArtifact> {
     }
   }
 
-  // Explicit FKs complement the model edges (skipped when a model
-  // relationship already covers the same table pair)
   for (const table of tables) {
     for (const column of table.columns) {
       const reference = column.references
@@ -124,7 +120,7 @@ export async function generateErSpec(cwd: string): Promise<SpecArtifact> {
   }
   lines.push('```', '')
 
-  // Attribute detail per table (what the diagram can't carry: nullability)
+  // Attribute detail per table, for what the diagram cannot carry (nullability).
   for (const table of tables) {
     lines.push(`## ${table.identifier}${renderTableOrigin(table)}`, '')
     lines.push('| Column | Type | Constraints |')

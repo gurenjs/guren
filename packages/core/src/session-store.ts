@@ -2,9 +2,6 @@ import { Model, type PlainObject } from '@guren/orm'
 import type { SessionData, SessionStore } from '@guren/server'
 import { decodeJsonColumn, isExpired } from './store-utils.js'
 
-/**
- * Options for DatabaseSessionStore.
- */
 export interface DatabaseSessionStoreOptions {
   /**
    * How the `data` column stores the serialized session.
@@ -20,34 +17,17 @@ export interface DatabaseSessionStoreOptions {
 }
 
 /**
- * Database-backed session store built on the Guren ORM — works on any
- * configured connection (SQLite, Postgres, MySQL, or Cloudflare D1), which
- * makes it the serverless default: no Redis required on Lambda, Vercel, or
- * Workers, and reads are strongly consistent (login → redirect → read works).
+ * Database-backed session store built on the Guren ORM — the serverless default:
+ * no Redis on Lambda, Vercel, or Workers, and reads are strongly consistent.
  *
- * Pass the Drizzle table for your `sessions` schema. Column property names
- * must match `id` (text primary key), `data`, and `expiresAt`:
+ * Pass the Drizzle table for your `sessions` schema; column property names must
+ * be `id` (text primary key), `data`, and `expiresAt`.
  *
- * ```ts
- * export const sessions = sqliteTable('sessions', {
- *   id: text('id').primaryKey(),
- *   data: text('data', { mode: 'json' }).$type<Record<string, unknown>>().notNull(),
- *   expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
- * })
- * ```
+ * Session values must be JSON-serializable, unlike `MemorySessionStore` which
+ * keeps live references: Dates come back as ISO strings, `undefined` properties
+ * are dropped, and `bigint` fails to serialize.
  *
- * Session values must be JSON-serializable: Dates come back as ISO strings,
- * `undefined` properties are dropped, and `bigint` values fail to serialize —
- * unlike `MemorySessionStore`, which keeps live references. Store primitives
- * and plain objects/arrays in sessions.
- *
- * @example
- * ```ts
- * import { DatabaseSessionStore } from '@guren/core'
- * import { sessions } from '@/db/schema'
- *
- * app.use(createSessionMiddleware({ store: new DatabaseSessionStore(sessions) }))
- * ```
+ * @example `new DatabaseSessionStore(sessions)`
  */
 export class DatabaseSessionStore implements SessionStore {
   private readonly model: typeof Model
@@ -67,9 +47,8 @@ export class DatabaseSessionStore implements SessionStore {
     }
 
     if (isExpired(record.expiresAt)) {
-      // Delete only the observed row version (raw value equality binds
-      // portably across column modes), so a concurrent request that just
-      // refreshed this id cannot have its fresh session deleted.
+      // Only the observed row version, so a concurrent request that just
+      // refreshed this id does not lose its fresh session.
       await this.model.where({ id, expiresAt: record.expiresAt }).delete()
       return undefined
     }
@@ -93,9 +72,9 @@ export class DatabaseSessionStore implements SessionStore {
       await this.model.forceCreate({ id, ...payload })
     } catch (error) {
       // Only a lost concurrent-create race leaves the row present; any other
-      // insert failure must propagate instead of silently "succeeding" via a
-      // zero-row update. (Dialect error shapes are not normalized by the
-      // adapter, so existence is the portable discriminator.)
+      // insert failure must propagate rather than "succeed" via a zero-row
+      // update. Dialect error shapes are not normalized, so existence is the
+      // portable discriminator.
       const nowExists = await this.model.where({ id }).first()
       if (!nowExists) {
         throw error
@@ -109,11 +88,9 @@ export class DatabaseSessionStore implements SessionStore {
   }
 
   /**
-   * Refresh an existing session's TTL with a single conditional UPDATE — no
-   * data rewrite, no existence check. Missing rows and rows that have
-   * already expired (but not yet been swept) are left untouched, never
-   * resurrected — matching the `SessionStore.touch` contract and the memory
-   * store's behavior.
+   * Refresh an existing session's TTL with one conditional UPDATE. Missing and
+   * already-expired rows are left untouched, never resurrected, per the
+   * `SessionStore.touch` contract.
    */
   async touch(id: string, ttlSeconds: number): Promise<void> {
     await this.model
@@ -123,9 +100,8 @@ export class DatabaseSessionStore implements SessionStore {
   }
 
   /**
-   * Delete sessions whose expiration time has passed. Expired rows are
-   * already treated as missing (and removed) by `read`; call this from a
-   * scheduled job to keep the table small.
+   * Delete sessions whose expiration has passed. `read` already treats them as
+   * missing; this only keeps the table small.
    */
   async deleteExpired(now: Date = new Date()): Promise<void> {
     await this.model.where('expiresAt', '<=', now).delete()

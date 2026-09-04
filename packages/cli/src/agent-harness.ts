@@ -18,23 +18,14 @@ import {
 } from './agent-targets'
 
 /**
- * AI agent harness installer (RFC 0008).
+ * AI agent harness installer (RFC 0008): the I/O half of `agent-targets.ts`,
+ * which owns every path, content, and classification decision.
  *
- * Renders the canonical harness template (`templates/agent/core` +
- * `templates/agent/targets`) into the per-agent files planned by
- * `agent-targets.ts` — Claude Code's `.claude/` tree, and the shared
- * `AGENTS.md` + `.agents/` family for Codex, Cursor, Copilot, and OpenCode.
- * The planner owns every path, content, and classification decision; this
- * module is the I/O half.
- *
- * Files fall into two groups:
- * - Managed (rules, skills, subagents, hooks) — owned by the framework,
- *   `agent:sync` overwrites them with the latest version. Overwrites are
- *   never silent: a file whose contents differed is reported in `replaced`,
- *   and `dryRun` answers what a sync would touch before it does.
- * - User-owned (CLAUDE.md, AGENTS.md, settings, MCP client configs) —
- *   written once, never overwritten by `agent:sync` (only by
- *   `agent:init --force`).
+ * Managed files (rules, skills, subagents, hooks) are overwritten by
+ * `agent:sync`, never silently — a differing file is reported in `replaced`, and
+ * `dryRun` answers what a sync would touch first. User-owned files (CLAUDE.md,
+ * AGENTS.md, settings, MCP configs) are written once and replaced only by
+ * `agent:init --force`.
  */
 
 const templateDir = fileURLToPath(new URL('../templates/agent', import.meta.url))
@@ -51,40 +42,27 @@ export interface AgentHarnessOptions {
    */
   targets?: AgentTarget[]
   /**
-   * Sync only: delete the files reported in `stale` instead of just listing
-   * them. Off by default because the managed namespaces can hold
-   * user-authored files under colliding names — the report names every
-   * candidate first, and deletion stays an explicit opt-in.
+   * Sync only: delete the files reported in `stale`. Off by default because the
+   * managed namespaces can hold user-authored files under colliding names.
    */
   prune?: boolean
-  /**
-   * Report what the run would write, replace, and prune without touching the
-   * filesystem. The answer to "will this sync lose my edits?" before the sync,
-   * not after.
-   */
+  /** Report what the run would write, replace, and prune without touching the filesystem. */
   dryRun?: boolean
 }
 
 export interface AgentHarnessResult {
-  /** Planned files written (or, under `dryRun`, that would be). A file whose
-   * on-disk contents already match the plan is reported in `unchanged`
-   * instead, so this list is the actual delta, not the whole plan. */
+  /** Planned files written (or, under `dryRun`, that would be) — the delta, not the whole plan. */
   written: string[]
   /**
-   * The subset of `written` that existed with different contents before the
-   * run — where sync discarded something, whether an older template version
-   * or a local edit. The two cannot be told apart (nothing records which
-   * template version a file came from), which is exactly why the replacement
-   * has to be called out rather than folded into `written`.
+   * The subset of `written` that existed with different contents: where sync
+   * discarded an older template version or a local edit, which nothing can tell apart.
    */
   replaced: string[]
   /** Planned files whose on-disk contents already matched — nothing written. */
   unchanged: string[]
   /**
-   * The run's own parameters, echoed so the result describes the run without
-   * a side channel: the reporter phrases its advice per mode, and a
-   * `--prune --dry-run` is only distinguishable from a plain `--dry-run`
-   * through `pruneRequested` (`pruned` is false in both).
+   * The run's own parameters, echoed: `--prune --dry-run` is distinguishable
+   * from a plain `--dry-run` only through `pruneRequested` (`pruned` is false in both).
    */
   mode: AgentHarnessMode
   /** True when `dryRun` held: nothing was written or deleted. */
@@ -93,28 +71,23 @@ export interface AgentHarnessResult {
   pruneRequested: boolean
   skipped: string[]
   /**
-   * Sync only: files inside the framework-managed namespaces
-   * (`managedNamespaces`) that the current plan no longer writes — what a
-   * renamed or removed canonical rule/skill leaves behind, in every root it
-   * fanned out to. Reported so the user can decide; deleted only with
-   * `prune`. A file of the project's own lands here only under a name the
-   * framework itself ships, which is why the default is report-only.
+   * Sync only: files inside `managedNamespaces` the current plan no longer
+   * writes. Deleted only with `prune`, because a project's own file can land
+   * here under a name the framework itself ships.
    */
   stale: string[]
   /** True when `prune` deleted the files listed in `stale` (always false without it). */
   pruned: boolean
   /**
    * True when the installed MCP client config points at an endpoint no script
-   * in the app enables. The endpoint is opt-in via `GUREN_MCP=1`; apps
-   * scaffolded before that landed have a `dev` script that never sets it, so
-   * their agent config would silently fail to connect.
+   * enables. The endpoint is opt-in via `GUREN_MCP=1`, which apps scaffolded
+   * before it landed never set, so their agent config silently fails to connect.
    */
   mcpEndpointNotEnabled: boolean
   /**
-   * MCP client configs that already existed without the Guren endpoint.
-   * Those files routinely carry unrelated user configuration (`opencode.json`,
-   * `.codex/config.toml`, `.vscode/mcp.json`), so the installer never merges
-   * into them — it reports the snippet to add by hand instead.
+   * MCP client configs that already existed without the Guren endpoint. They
+   * routinely carry unrelated user configuration, so the installer never merges
+   * into them — it reports the snippet to add by hand.
    */
   mcpMergeHints: Array<{ path: string; snippet: string }>
 }
@@ -154,10 +127,9 @@ async function resolveAppTitle(cwd: string): Promise<string> {
 }
 
 /**
- * Whether any npm script turns the MCP endpoint on.
- *
- * Unreadable or malformed `package.json` counts as "enabled" — staying quiet
- * beats nagging about a file we could not inspect.
+ * Whether any npm script turns the MCP endpoint on. An unreadable or malformed
+ * `package.json` counts as enabled — better quiet than nagging about a file we
+ * could not inspect.
  */
 async function scriptsEnableMcp(cwd: string): Promise<boolean> {
   try {
@@ -184,15 +156,10 @@ export async function loadAgentTemplates(): Promise<TemplateFiles> {
 }
 
 /**
- * Which harness components an app already has. The evidence is the plans
- * themselves: a component counts as installed when any of the managed files
- * `planComponents` would write for it exists on disk — detection can never
- * drift from the planner because it has no path knowledge of its own. A
- * user-authored file that happens to collide with a managed path is still
- * read as evidence (and `sync` would refresh it); that residual risk is
- * narrower than the pre-multi-agent behavior, which overwrote the managed
- * set unconditionally. A bare app with no evidence gets the Claude default,
- * preserving the long-standing "sync acts as install" behavior.
+ * Which harness components an app already has, evidenced by the plans
+ * themselves: a component is installed when any managed file `planComponents`
+ * would write for it exists, so detection cannot drift from the planner. A bare
+ * app with no evidence gets the Claude default, so sync acts as install.
  */
 async function detectInstalledComponents(
   cwd: string,
@@ -211,32 +178,15 @@ async function detectInstalledComponents(
   if (components.length === 0) {
     components.push('claude')
   }
-  // restore the install invariant (cursor/copilot imply the agents family),
-  // so a deleted .agents/ tree is recreated rather than left dangling
   return normalizeComponents(components)
 }
 
 /**
- * Do two app-relative paths name the same file on disk? Only ever asked about
- * a pair that differs by case alone, where the path strings cannot answer it:
- * on a case-insensitive filesystem the two are one directory entry the write
- * loop has just refreshed through the casing it found, on a case-sensitive one
- * they are two files and the unplanned casing is a genuine leftover. `bigint`
- * because a Windows file ID is 64 bits and would not survive a `number` — two
- * distinct NTFS files could compare equal and spare a real leftover.
- *
- * One name that plainly does not exist (ENOENT) answers "different": two
- * names, one of which has no directory entry, cannot be one entry — and on a
- * dry run the planned side may legitimately not exist yet, which is exactly
- * when the real `--prune` *would* report the scanned leftover. Answering
- * "same" there made `--prune --dry-run` preview a stale list the real run
- * would not produce.
- *
- * Any other `lstat` failure leaves the two indistinguishable, so it answers
- * "same": the entry is left alone rather than deleted on a claim that could
- * not be established. Nothing is lost by that on the one plausible path — a
- * directory readable but not searchable lists its names and refuses to stat
- * them, and `rm` would be refused there too.
+ * Only asked about a pair differing by case alone, which the path strings cannot
+ * settle. `bigint` because a Windows file ID is 64 bits. ENOENT answers
+ * "different" — under `dryRun` the planned side may not exist yet, which is when
+ * a real `--prune` would report the leftover — while any other `lstat` failure
+ * answers "same", leaving the entry alone rather than deleting it unproven.
  */
 async function isSameFile(cwd: string, left: string, right: string): Promise<boolean> {
   const probe = (relPath: string) =>
@@ -251,20 +201,11 @@ async function isSameFile(cwd: string, left: string, right: string): Promise<boo
 }
 
 /**
- * Files inside the active components' managed namespaces that the current
- * plan does not write. Planned files (managed or user-owned) are excluded
- * via the full planned path set, so a future planner change cannot turn its
- * own output into a prune candidate. A scanned entry that matches a planned
- * path by case alone is settled by `isSameFile` rather than by string. After
- * a real write loop both sides exist to compare; under `dryRun` the planned
- * side may not, and `isSameFile` answers "different" for a missing name so
- * the dry run previews the same stale list the real run would produce.
- *
- * Exported for tests: `retired` defaults to `RETIRED_CANONICAL_RULES` /
- * `RETIRED_CANONICAL_SKILLS`, both empty, so the retired-name path has no
- * other way to be exercised. The seam belongs here rather than on
- * `AgentHarnessOptions`, which is a published type — a test hook there would
- * outlive the reason for it.
+ * Files inside the active components' managed namespaces that the plan does not
+ * write. Planned paths are excluded wholesale, so a planner change cannot turn
+ * its own output into a prune candidate; a match by case alone is `isSameFile`'s
+ * call. `retired` is a test seam — it defaults to the tombstone constants, both
+ * empty, so that path has no other way to be exercised.
  */
 export async function findStaleManagedFiles(
   cwd: string,
@@ -277,13 +218,10 @@ export async function findStaleManagedFiles(
   const stale: string[] = []
 
   /**
-   * Is every path component from `cwd` down to `dir` a real directory inside
-   * the app? A claim is only safe over files that live there, and `lstat`
-   * refuses to follow just the component it is given: lstat'ing
-   * `.claude/skills/dev-workflow` says nothing about `.claude/skills`, which
-   * a symlink would hand the walk as an ordinary external directory. So each
-   * component is checked in turn, and a symlink anywhere along the way ends
-   * the walk before `readdir` — and `rm` — can follow it.
+   * Is every path component from `cwd` down to `dir` a real directory inside the
+   * app? Each is checked in turn because lstat'ing the leaf says nothing about
+   * its parents — a symlink anywhere along the way ends the walk before
+   * `readdir`, and `rm`, can follow it out of the app.
    */
   const insideTheApp = async (dir: string): Promise<boolean> => {
     let current = cwd
@@ -302,11 +240,6 @@ export async function findStaleManagedFiles(
     return true
   }
 
-  /**
-   * One walk over one directory. `recursive` is the only knob: a `tree` and
-   * each named child of a `children` claim walk their whole subtree; a
-   * `pattern` looks only at the top level and only at framework-named files.
-   */
   const walk = async (
     dir: string,
     recursive: boolean,
@@ -342,11 +275,9 @@ export async function findStaleManagedFiles(
   for (const namespace of managedNamespaces(components, plan, retired)) {
     switch (namespace.kind) {
       case 'files': {
-        // matched case-insensitively so that a case-only rename of a claimed
-        // rule is still reached; whether the entry is a second file or the
-        // one the write loop just refreshed is `isSameFile`'s call, not a
-        // name comparison's. Top level only: a directory a project made
-        // under the rules root is not read, let alone claimed.
+        // Case-insensitive so a case-only rename is still reached; whether the
+        // entry is a second file is `isSameFile`'s call. Top level only, so a
+        // directory the project made under the rules root is never read.
         const claimed = new Set(namespace.names.map((name) => name.toLowerCase()))
         await walk(namespace.dir, false, (entry) => claimed.has(entry.name.toLowerCase()))
         break
@@ -359,8 +290,8 @@ export async function findStaleManagedFiles(
         )
         break
       case 'children':
-        // only the named children are ever entered; a sibling directory
-        // an external installer put there is not read, let alone claimed
+        // Only named children are entered, so a directory an external installer
+        // put beside them is never read, let alone claimed.
         for (const name of namespace.names) {
           await walk(`${namespace.dir}/${name}`, true, everything)
         }
@@ -400,8 +331,8 @@ export async function installAgentHarness(options: AgentHarnessOptions = {}): Pr
     const overwrite = force || (mode === 'sync' && file.managed)
     if (exists && !overwrite) {
       skipped.push(file.path)
-      // onboarding guidance, not a recurring nag — sync stays quiet about
-      // configs the user has decided to keep without the Guren endpoint
+      // Onboarding guidance, not a recurring nag: sync stays quiet about a
+      // config the user has decided to keep without the Guren endpoint.
       if (file.mergeMarker && mode === 'init') {
         const current = (await readIfExists(cwd, file.path)) ?? ''
         if (!current.includes(file.mergeMarker)) {
@@ -411,18 +342,11 @@ export async function installAgentHarness(options: AgentHarnessOptions = {}): Pr
       continue
     }
 
-    // Already at the planned contents — writing would change nothing, so
-    // don't, and don't report it as a write either. What's left in `written`
-    // is the run's actual delta, which is what makes `replaced` trustworthy:
-    // every overwrite it names really discarded something. An unreadable file
-    // counts as differing — the write is where the real failure surfaces.
-    //
-    // The comparison ignores line-ending differences. A checkout that
-    // normalizes to CRLF (core.autocrlf, editor hooks) would otherwise list
-    // every managed file under the replaced warning on every sync, forever —
-    // noise that trains users to ignore the one warning that matters. A
-    // CRLF-only variant counts as up to date and is left as the checkout
-    // made it.
+    // Not reported as a write, so `written` is the run's real delta and every
+    // overwrite `replaced` names discarded something. An unreadable file counts
+    // as differing; the write is where that failure surfaces. Line endings are
+    // ignored: a CRLF-normalizing checkout would otherwise flag every managed
+    // file as replaced on every sync.
     const existing = exists ? await readFile(destPath, 'utf8').catch(() => null) : null
     if (
       existing !== null &&
@@ -443,8 +367,7 @@ export async function installAgentHarness(options: AgentHarnessOptions = {}): Pr
     }
   }
 
-  // Stale cleanup is a sync concern: init installs into places it has never
-  // written, so "not in the plan" carries no leftover signal there.
+  // Sync only: on init, "not in the plan" carries no leftover signal.
   const stale =
     mode === 'sync' ? await findStaleManagedFiles(cwd, components, plan) : []
   const pruned = Boolean(options.prune) && !dryRun && stale.length > 0
@@ -452,9 +375,8 @@ export async function installAgentHarness(options: AgentHarnessOptions = {}): Pr
     for (const relPath of stale) {
       await rm(join(cwd, relPath), { force: true })
     }
-    // sweep only what the deletions emptied: from each removed file, walk up
-    // and rmdir until a directory refuses (still holds files) — pre-existing
-    // empty directories elsewhere in a namespace are none of our business
+    // Sweep only what the deletions emptied: walk up until an rmdir refuses.
+    // Pre-existing empty directories elsewhere are none of our business.
     for (const startDir of new Set(stale.map((relPath) => dirname(relPath)))) {
       for (let dir = startDir; dir !== '.' && dir !== ''; dir = dirname(dir)) {
         try {

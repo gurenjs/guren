@@ -52,18 +52,13 @@ describe('rendersAsDocument', () => {
 })
 
 /**
- * The deploy plugins cannot call `rendersAsDocument`: Cloudflare Workers
- * Static Assets and Vercel's CDN both answer for `public/` before the app
- * runs, so each plugin declares the same policy to its platform at build time,
- * keyed on file extension rather than on a content type it never computes.
- * That list lives in `@guren/core/internal/deploy-build`, which deliberately
- * imports nothing from the framework — so this is the seam where the two can
- * drift, and the only place both halves are in scope.
+ * The deploy plugins cannot call `rendersAsDocument` — Cloudflare Static Assets and
+ * Vercel's CDN answer for `public/` before the app runs — so each declares the same
+ * policy by file extension in `@guren/core/internal/deploy-build`. This is the seam
+ * where the two can drift, and the only place both halves are in scope.
  *
- * Reached by relative path rather than through the package: the module is
- * node-builtins-only, and importing `@guren/core` here would resolve through
- * its `exports` map to a built artifact, making this gate read a stale
- * `dist/` instead of the source it is guarding.
+ * Reached by relative path: importing `@guren/core` would resolve through its
+ * `exports` map and make this gate read a stale `dist/`.
  */
 describe('the document extensions the deploy plugins declare', () => {
   it('matches what rendersAsDocument makes of Hono’s mime table', () => {
@@ -79,29 +74,24 @@ describe('the document extensions the deploy plugins declare', () => {
   })
 
   it('does not claim the document types Hono names no extension for', () => {
-    // `text/xsl` is a document by `rendersAsDocument`, but nothing maps an
-    // extension onto it — so `getMimeType` returns undefined for a .xsl file
-    // and the framework's own mounts leave it unguarded. The deploy targets
-    // are kept level with the app rather than ahead of it.
+    // `text/xsl` is a document by `rendersAsDocument`, but no extension maps onto
+    // it, so the framework's own mounts leave a .xsl file unguarded. The deploy
+    // targets are kept level with the app rather than ahead of it.
     expect(rendersAsDocument('text/xsl')).toBe(true)
     expect(Object.keys(mimes)).not.toContain('xsl')
     expect([...DOCUMENT_ASSET_EXTENSIONS]).not.toContain('xsl')
   })
 
   it('declares the headers the framework guard actually sets', () => {
-    // The other half of the same duplication, and the half nothing was
-    // holding: the plugins restate the *pair* as data because they cannot
-    // call `applyDocumentDisposition`. A header added to the guard — a CSP
-    // sandbox directive is the obvious next one — would otherwise ship on the
-    // app's own mounts and on none of the deploy targets, with every suite
-    // green.
+    // The plugins restate the header *pair* as data because they cannot call
+    // `applyDocumentDisposition`, so a header added to the guard would otherwise
+    // ship on the app's mounts and on no deploy target, with every suite green.
     const headers = new Headers()
     applyDocumentDisposition(headers, 'text/html')
 
     expect(Object.fromEntries(headers)).toEqual(
       // `Headers` lowercases its names; the constant carries the canonical
-      // spelling, which is what the platforms that take a header name
-      // verbatim write out.
+      // spelling, which platforms taking a header name verbatim write out.
       Object.fromEntries(
         Object.entries(DOCUMENT_ASSET_HEADERS).map(([name, value]) => [name.toLowerCase(), value]),
       ),
@@ -117,18 +107,13 @@ describe('the document extensions the deploy plugins declare', () => {
 })
 
 /**
- * The `public/` tree is not only the app's build output: the attachments
- * scaffold roots its `public` storage disk inside it, so a file there can be
- * an upload that kept the uploader's own extension. Served as `text/html` or
- * `image/svg+xml` from the app's origin, that is stored XSS.
+ * The attachments scaffold roots its `public` storage disk inside `public/`, so a
+ * file there can be an upload that kept the uploader's extension — served as
+ * `text/html` or `image/svg+xml` from the app's origin, that is stored XSS.
  *
- * Both routes over the directory are asserted, in both modes, because the
- * two are complementary and a patch to one leaves the other live: the
- * extension allowlist skips `/public/` paths and serves `.svg` at the root,
- * while the `/public/*` mount has no allowlist and serves everything.
- *
- * Written to fail before `guardStaticDocument` / `applyDocumentDisposition`
- * existed: without them every assertion below reads a null header.
+ * Both routes over the directory are asserted in both modes: the extension
+ * allowlist skips `/public/` paths and serves `.svg` at the root, while the
+ * `/public/*` mount has no allowlist and serves everything.
  */
 describe('document types served out of public/', () => {
   const fixture = useAssetFixture('guren-static-documents-')
@@ -173,10 +158,8 @@ describe('document types served out of public/', () => {
     })
 
     // Hono's Bun adapter supplies `isDir`, so a directory request resolves to
-    // `index.html` *before* onFound runs — which is why the guard is keyed on
-    // the path the middleware resolved rather than on `ctx.req.path`. Keying it
-    // on the request path would pass every other case in this file and let a
-    // directory request through.
+    // `index.html` *before* onFound runs: the guard must key on the resolved path,
+    // not `ctx.req.path`, which would pass every other case in this file.
     it('forces a directory index to download', async () => {
       await fixture.write('public/site/index.html', '<script>alert(1)</script>\n')
 

@@ -139,12 +139,10 @@ describe('MemoryTransport', () => {
       text: 'Hello',
     })
 
-    // These should not throw
     expect(() => transport.assertSentTo('user@example.com')).not.toThrow()
     expect(() => transport.assertSentWithSubject('Welcome')).not.toThrow()
     expect(() => transport.assertSentCount(1)).not.toThrow()
 
-    // These should throw
     expect(() => transport.assertSentTo('other@example.com')).toThrow()
     expect(() => transport.assertSentWithSubject('Goodbye')).toThrow()
     expect(() => transport.assertSentCount(2)).toThrow()
@@ -405,7 +403,7 @@ describe('Mail with Queue', () => {
 
     expect(jobId).toBeDefined()
     expect(await queueDriver.size('emails')).toBe(1)
-    expect(transport.count()).toBe(0) // Not sent yet
+    expect(transport.count()).toBe(0)
   })
 
   it('throws when queue driver not configured', async () => {

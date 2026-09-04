@@ -2,35 +2,12 @@
  * The notification an application sends its approvers when an agent tool call
  * becomes a pending approval request (RFC 0016 §5.4 item 4).
  *
- * A ready-made {@link Notification} rather than a message the adapter composes,
- * so "notify approvers through the existing notifications system" is one line
- * in an application's configuration:
- *
- * ```typescript
- * mcpPlugin({
- *   approvals: {
- *     store,
- *     notify: (request) => notifications.sendToMany(admins, new AgentApprovalRequested(request)),
- *   },
- * })
- * ```
- *
- * **Who the approvers are is never the framework's decision**, which is why
- * this class takes a request and not a recipient. The plugin hands the request
- * over; the application picks who hears about it, over which channels, with
- * whatever escalation it already has. An adapter that chose recipients would be
- * choosing them from a list it cannot see.
- *
- * Deliberately in its own module, and deliberately not imported by
- * `approval.ts`: the store interface and its derivations stay declaration-only
- * and free of the notifications subsystem, so a runtime that never notifies
- * never pulls it into the graph.
- *
- * Not queued (`shouldQueue` stays false). An approval request is answered by a
- * human in the next few minutes or it expires, and a queue worker that is
- * behind — or absent, which is the common case in the small deployments this
- * endpoint targets — turns "notify approvers" into "notify approvers
- * eventually", after the window closed.
+ * It takes a request and not a recipient: **who the approvers are is never the
+ * framework's decision**. Kept in its own module and deliberately unimported by
+ * `approval.ts`, so a runtime that never notifies does not pull the
+ * notifications subsystem into its graph. Not queued (`shouldQueue` stays
+ * false): an approval is answered within minutes or it expires, and a worker
+ * that is behind or absent notifies after the window closed.
  */
 import { Notification } from '../notifications/Notification'
 import type { Notifiable, NotificationMailMessage, SlackMessage } from '../notifications/types'
@@ -42,10 +19,8 @@ export class AgentApprovalRequested extends Notification {
   }
 
   /**
-   * Mail and database by default — the two channels an application configures
-   * first, and the pair that covers "tell someone now" and "there is a list of
-   * things waiting". An application overrides by subclassing, exactly as it
-   * would for any other notification.
+   * Mail and database by default — "tell someone now" and "there is a list of
+   * things waiting". An application overrides by subclassing.
    */
   via(_notifiable: Notifiable): string[] {
     return ['mail', 'database']
@@ -65,12 +40,10 @@ export class AgentApprovalRequested extends Notification {
   }
 
   /**
-   * The record's own fields, minus the fingerprint.
-   *
-   * The fingerprint is a hash of the *raw* arguments (see `approval.ts`), and
-   * a database notification is read by more people, and kept longer, than the
-   * approval store itself. It decides nothing an approver looks at: the
-   * arguments they judge are `input`, already masked.
+   * The record's own fields, minus the fingerprint: that is a hash of the *raw*
+   * arguments (see `approval.ts`), while a database notification is read by
+   * more people and kept longer. The arguments an approver judges are `input`,
+   * already masked.
    */
   toDatabase(_notifiable: Notifiable): Record<string, unknown> {
     return {

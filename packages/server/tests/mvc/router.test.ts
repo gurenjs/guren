@@ -208,11 +208,9 @@ describe('Router resource response hint', () => {
     expect(router.definitions()[0]?.resource).toBeUndefined()
   })
 
-  // The hint type admits only classes, single-element arrays and plain objects,
-  // but nothing validates it at runtime: a string used to recurse forever (every
-  // character is itself a one-character string) and `null` threw out of
-  // `Object.entries`. Anything unusable follows the same all-or-nothing rule as
-  // an unnamed class.
+  // Nothing validates the hint at runtime: a string used to recurse forever
+  // (every character is itself a one-character string) and `null` threw out of
+  // `Object.entries`. Anything unusable is dropped whole, like an unnamed class.
   it.each([
     ['a bare string', 'PostResource'],
     ['null', null],
@@ -242,11 +240,9 @@ describe('Router resource response hint', () => {
   })
 })
 
-// `RouterMiddlewareGroupBuilder` mirrors `Router`'s per-verb overloads by hand,
-// and drifting out of sync is exactly the bug these tests were added for. This
-// assignment fails to compile the moment the builder stops accepting everything
-// `Router` does — including overloads added long after this was written, which a
-// per-call test can never anticipate. Root `tsc --noEmit` covers this directory.
+// `RouterMiddlewareGroupBuilder` mirrors `Router`'s per-verb overloads by hand.
+// This assignment fails to compile the moment the builder stops accepting
+// everything `Router` does. Root `tsc --noEmit` covers this directory.
 const _verbParityGuard: Pick<Router<'auth'>, 'get' | 'post' | 'put' | 'patch' | 'delete' | 'query' | 'on'> =
   new Router<'auth'>().aliasMiddleware('auth', async (_c, next) => { await next() }).middleware('auth')
 void _verbParityGuard
@@ -255,8 +251,8 @@ describe('Router middleware group builder with contract options', () => {
   const body = z.object({ title: z.string().min(1) })
 
   it('accepts a controller action alongside contract options on every verb', () => {
-    // The alias name is inferred from the captured aliasMiddleware() return —
-    // the form the routing docs teach — rather than declared as `new Router<'auth'>()`.
+    // The alias name is inferred from the captured aliasMiddleware() return,
+    // the form the routing docs teach.
     const router = new Router().aliasMiddleware('auth', async (_c, next) => { await next() })
 
     const scoped = router.middleware('auth')
@@ -737,9 +733,8 @@ describe('route contract output validation for Response-returning handlers', () 
     expect(response.headers.get('Content-Type')).toBe('application/json')
   })
 
-  // Headers describing the replaced body must not survive the rebuild. Hono's `c.res`
-  // setter re-copies headers off the response it replaces, so dropping them before
-  // the assignment is not enough.
+  // Hono's `c.res` setter re-copies headers off the response it replaces, so
+  // dropping the stale Content-Length and ETag before the assignment is not enough.
   it('drops Content-Length and ETag that no longer describe the rebuilt body', async () => {
     const router = new Router()
     router.get('/stale', {
@@ -881,8 +876,7 @@ describe('Router capability aggregation', () => {
   })
 
   it('skips unregistered middleware names instead of throwing', () => {
-    // Declared but never aliased: the name typechecks while staying
-    // unregistered at runtime, which is the case under test.
+    // Declared but never aliased: the name typechecks while unregistered at runtime.
     const router = new Router<'auth'>()
     router.post('/posts', () => 'ok').middleware('auth')
 

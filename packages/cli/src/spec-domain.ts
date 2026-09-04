@@ -23,9 +23,8 @@ function classLines(model: DiscoveredModel, indent: string): string[] {
 }
 
 /**
- * Domain view: model classes grouped by module with relationship edges —
- * deliberately distinct from the DB-level ER view (`er.md`). One diagram
- * answers one question.
+ * Domain view: model classes grouped by module with relationship edges, deliberately
+ * distinct from the DB-level ER view (`er.md`).
  */
 export async function generateDomainSpec(cwd: string): Promise<SpecArtifact> {
   const models = (await discoverParsedModels(cwd)).sort(
@@ -45,7 +44,6 @@ export async function generateDomainSpec(cwd: string): Promise<SpecArtifact> {
     return { fileName: 'domain.md', content: lines.join('\n') }
   }
 
-  // One grouping, three consumers: root classes, module namespaces, edges.
   const byModule = new Map<string | null, DiscoveredModel[]>()
   for (const model of models) {
     const list = byModule.get(model.module) ?? []

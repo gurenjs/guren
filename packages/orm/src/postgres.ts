@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import type postgres from 'postgres'
 import { hotReloadKey, releaseActiveConnection, replaceActiveConnection } from './active-connections'
 import { DrizzleAdapter } from './adapters/drizzle-adapter'
-import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailure, isConnectionFailure, migrationFailure, seedFailure, inspectMigrationsFolder, listLocalMigrations, noMigrationsToRun, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
+import { buildMigrationStatus, describeConnectionEndpoint, describeDatabaseFailure, isMissingTrackerTable, migrationFailure, seedFailure, inspectMigrationsFolder, listLocalMigrations, noMigrationsToRun, type MigrationRunSummary, type MigrationStatusEntry } from './migration-utils'
 import { runSeeders, type SeederRunSummary } from './seeder'
 import { singleFlight } from './single-flight'
 
@@ -40,9 +40,9 @@ export interface PostgresDatabaseOptions {
   clientOptions?: postgres.Options<Record<string, never>>
   seedersFolder?: string | URL
   /**
-   * Drizzle relations for RQB v2 (`db.query.*`).
-   * Build with `defineRelations(schema, ...)` from `drizzle-orm`,
-   * or with `relations()` from `drizzle-orm/_relations` for the RQB v1 partial-upgrade path.
+   * Drizzle relations for RQB v2 (`db.query.*`): `defineRelations(schema, ...)`
+   * from `drizzle-orm`, or `relations()` from `drizzle-orm/_relations` for the
+   * RQB v1 partial-upgrade path.
    */
   relations?: Record<string, unknown>
 }
@@ -87,10 +87,8 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
   }
 
   const migrations = singleFlight(async (): Promise<MigrationRunSummary> => {
-    // Scoped to this attempt, and resolved below rather than up front:
-    // resolveConnectionString() throws when no connection string is configured,
-    // so it must not run before the no-migrations early return. The catch needs
-    // it afterwards.
+    // Resolved below, not up front: resolveConnectionString() throws when
+    // nothing is configured, so it must not run before the early return.
     let endpoint: string | undefined
 
     try {
@@ -206,10 +204,9 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
       await adminClient.unsafe('DROP SCHEMA IF EXISTS drizzle CASCADE')
     })
 
-    // Drop the memo so the run below re-applies everything from scratch, then
-    // migrate: a reset ends on a migrated database, the same state `guren
-    // db:reset` leaves behind. A caller that migrates again — the documented
-    // reset-then-migrate pattern — hits the memo and no-ops.
+    // A reset ends on a migrated database, like `guren db:reset`. Dropping the
+    // memo re-applies from scratch; a caller that then migrates again hits the
+    // fresh memo and no-ops.
     migrations.reset()
     return migrations.get()
   }
@@ -226,12 +223,10 @@ export function createPostgresDatabase(options: PostgresDatabaseOptions): Postgr
           return { name: record.name, appliedAt: null }
         })
       } catch (error) {
-        // An unreachable server reaches this catch too, and reporting it as
-        // "nothing applied" makes db:status indistinguishable from a database
-        // that is up with no migrations run.
-        if (isConnectionFailure(error)) throw error
-        // Tracker table does not exist yet — nothing applied.
-        return []
+        // Only a missing tracker means "nothing applied". A denied SELECT, a
+        // broken schema, or an unreachable server must not read as all-pending.
+        if (isMissingTrackerTable(error, 'postgres')) return []
+        throw error
       }
     })
 

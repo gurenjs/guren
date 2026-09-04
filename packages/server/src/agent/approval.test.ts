@@ -1,10 +1,7 @@
 /**
- * The approval queue's pure rules (RFC 0016 §5.4 item 4).
- *
- * Every clock in here is seeded in the *future* relative to nothing at all —
- * an absolute instant, with expiry set after it and the "later" clock advanced
- * past it. A fake clock seeded at the epoch would make every record expired
- * and every expiry assertion pass for the wrong reason.
+ * The approval queue's pure rules (RFC 0016 §5.4 item 4). Every clock here is
+ * seeded at an absolute instant in the *future*: a fake clock at the epoch
+ * would make every record expired and every expiry assertion pass anyway.
  */
 import { describe, test, expect } from 'bun:test'
 

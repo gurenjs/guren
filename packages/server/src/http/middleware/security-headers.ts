@@ -30,24 +30,11 @@ export interface SecurityHeadersOptions {
 }
 
 /**
- * Middleware that sets common HTTP security headers on every response.
+ * Sets common HTTP security headers on every response.
  *
  * @example
  * ```ts
- * import { createSecurityHeaders } from '@guren/core'
- *
- * app.use('*', createSecurityHeaders())
- *
- * // With HSTS enabled
- * app.use('*', createSecurityHeaders({
- *   hsts: { maxAge: 31536000, includeSubDomains: true },
- * }))
- *
- * // Disable specific headers
- * app.use('*', createSecurityHeaders({
- *   frameOptions: false,
- *   xssProtection: false,
- * }))
+ * app.use('*', createSecurityHeaders({ hsts: { maxAge: 31536000 } }))
  * ```
  */
 export function createSecurityHeaders(options: SecurityHeadersOptions = {}): MiddlewareHandler {
@@ -73,19 +60,13 @@ export function createSecurityHeaders(options: SecurityHeadersOptions = {}): Mid
   if (hstsValue) headers.push(['Strict-Transport-Security', hstsValue])
 
   return async (ctx, next) => {
-    // Applied AFTER the response exists, never with ctx.header() before next().
-    // ctx.header() writes into Hono's prepared headers, which are only merged
-    // when the handler answers through the context (ctx.text/json/html). A
-    // handler returning a raw `new Response(...)` replaces ctx.res outright and
-    // drops them — which is every asset response the framework itself serves.
-    //
-    // `finally`, not a plain post-next call: Hono's compose catches a thrown
-    // Error in the frame that invoked the throwing handler, so `next()` usually
-    // resolves and the ExceptionHandler's response is decorated like any other.
-    // It does not resolve when the error escapes that frame — an exception
-    // handler that throws while rendering, which Hono re-renders through this
-    // same context at its outer boundary. Materializing ctx.res on the way out
-    // makes these headers the base that re-render inherits.
+    // Applied after the response exists, never via ctx.header() before next():
+    // prepared headers are dropped by a handler returning a raw
+    // `new Response(...)`, which is every asset response the framework serves.
+    // `finally` rather than a plain post-next call, because `next()` does not
+    // resolve when an error escapes compose (an exception handler that throws
+    // while rendering); Hono re-renders through this same context, inheriting
+    // whatever ctx.res carries on the way out.
     try {
       await next()
     } finally {

@@ -1,11 +1,5 @@
-/**
- * Health check status.
- */
 export type HealthStatus = 'healthy' | 'degraded' | 'unhealthy'
 
-/**
- * Result of a single health check.
- */
 export interface CheckResult {
   name: string
   status: HealthStatus
@@ -14,9 +8,6 @@ export interface CheckResult {
   duration: number // milliseconds
 }
 
-/**
- * Complete health report.
- */
 export interface HealthReport {
   status: HealthStatus
   timestamp: Date
@@ -24,35 +15,24 @@ export interface HealthReport {
   meta?: Record<string, unknown>
 }
 
-/**
- * Options for registering a health check.
- */
 export interface HealthCheckOptions {
   /**
-   * Timeout in milliseconds for the check.
+   * Milliseconds.
    * @default 5000
    */
   timeout?: number
 
   /**
-   * If true, failure of this check will set overall status to unhealthy.
+   * Failure sets the whole report's status to unhealthy.
    * @default false
    */
   critical?: boolean
 }
 
-/**
- * Options for health middleware.
- */
 export interface HealthMiddlewareOptions {
-  /**
-   * Only run these specific checks.
-   */
+  /** Run only these checks, by name. */
   checks?: string[]
 
-  /**
-   * Include detailed check results.
-   * @default true
-   */
+  /** @default true */
   detailed?: boolean
 }

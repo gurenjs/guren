@@ -14,17 +14,8 @@ interface ErrorBoundaryState {
 }
 
 /**
- * React error boundary that catches rendering errors in child components.
- * Provides a fallback UI and optional error reporting callback.
- *
- * @example
- * ```tsx
- * import { ErrorBoundary } from '@guren/inertia-client'
- *
- * <ErrorBoundary fallback={<div>Something went wrong</div>}>
- *   <App />
- * </ErrorBoundary>
- * ```
+ * React error boundary that catches rendering errors in child components, with
+ * a default fallback UI and an optional error-reporting callback.
  */
 export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   constructor(props: ErrorBoundaryProps) {

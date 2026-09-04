@@ -4,37 +4,17 @@ import { CSRF_FORM_FIELD, type DerivedAgentTool, type FC } from '@guren/core'
 /**
  * The OAuth consent screen for this application's own agent tools, scaffolded
  * once by `guren cloudflare:build --mcp-oauth` and yours to edit from here.
- *
  * Server-rendered through `Controller.view()` (RFC 0014) — `hono/jsx`, no
- * hydration, no client bundle. **Not** an Inertia page, for three reasons in
- * order: an API-only app has no client build to render one into; a consent
- * screen that depends on the asset pipeline is one that breaks when the
- * pipeline does; and the OAuth client showing this is a browser popup that may
- * not carry the session cookies an SPA boot needs.
+ * hydration, deliberately not Inertia: an API-only app has no client build, and
+ * the browser popup showing this may not carry the cookies an SPA boot needs.
+ * Keep the `@jsxImportSource` pragma on line 1, the only place TypeScript
+ * honours it: it is what lets this compile, with no tsconfig change, in an app
+ * pointing `jsx: "react-jsx"` at React.
  *
- * The `@jsxImportSource` pragma on line 1 is what lets this file compile in an
- * app whose `tsconfig` points `jsx: "react-jsx"` at React for `resources/js`.
- * It is per-file and overrides `jsxImportSource` for this module only, so
- * **your app needs no tsconfig change** — the same way `web/app/View/*.tsx`
- * does it. Verified by dropping both components into a stock fullstack app
- * (`jsx: "react-jsx"`, React types installed) and running its own `tsc`: clean
- * with the pragma, eleven errors without it. Keep it on the first line, where
- * it is the only place TypeScript honours it.
- *
- * **Escaping is the renderer's job, not this file's.** Text children and
- * attribute values are escaped by `hono/jsx`, so a client name containing
- * markup cannot break out of either. What it does *not* do is validate URL
- * schemes: a `javascript:` href built from untrusted data would be emitted
- * verbatim. Nothing here renders a user-supplied URL, and nothing added here
- * should without sanitizing it first.
- *
- * **What the screen shows, and why it shows tools rather than scopes.** The
- * endpoint's scope grammar (`tool:<name>`, `tools:read`, `tools:*`,
- * `tools:<prefix>.*`) is compact enough for a client to request and far too
- * compact for a human to consent to: nobody can look at `tools:*` and say what
- * it reaches. The controller expands the requested scopes against the
- * application's live tool derivation and hands the result here, one checkbox
- * per tool, carrying the read-only and approval-required facts each one has.
+ * `hono/jsx` escapes text children and attribute values but does not validate
+ * URL schemes, so nothing user-supplied may be added as an `href` unsanitized.
+ * The screen lists *tools*, not scopes — nobody can look at `tools:*` and say
+ * what it reaches — expanded by the controller into one checkbox each.
  */
 
 /** The form field each granted scope is submitted under. */
@@ -68,12 +48,9 @@ const STYLES = `
 `
 
 /**
- * One tool, as a checkbox.
- *
- * The value is the `tool:<name>` wire form the scope grammar parses. A bare
- * tool name is not a scope: `parseToolScope` ignores every entry outside
- * `tool:` / `tools:`, so a screen submitting bare names would report success
- * and produce a grant that reaches nothing.
+ * One tool, as a checkbox. The value is the `tool:<name>` wire form the scope
+ * grammar parses: `parseToolScope` ignores a bare tool name, so a screen
+ * submitting those would report success and grant nothing.
  */
 const ToolRow: FC<{ tool: DerivedAgentTool }> = ({ tool }) => (
   <li>
@@ -82,11 +59,9 @@ const ToolRow: FC<{ tool: DerivedAgentTool }> = ({ tool }) => (
         type="checkbox"
         name={SCOPE_FIELD}
         value={`tool:${tool.toolName}`}
-        // Read-only tools arrive ticked; anything that can write does not.
-        // The default is what most people accept unread, so it is the
-        // framework's fail-closed posture rendered as a checkbox: granting a
-        // write has to be a decision somebody made, not one they failed to
-        // undo.
+        // Read-only tools arrive ticked, anything that can write does not:
+        // granting a write has to be a decision somebody made, not one they
+        // failed to undo.
         checked={tool.annotations.readOnlyHint}
       />
       <span class="name">{tool.toolName}</span>

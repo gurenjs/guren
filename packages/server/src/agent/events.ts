@@ -1,16 +1,13 @@
 /**
  * The audit trail of the agent surface (RFC 0016 §5.2): every tool invocation
  * and every denial, as framework events, so an application forwards them
- * wherever it already forwards events instead of learning a second logging
- * API.
+ * wherever it already forwards events.
  *
- * Declarations only. Nothing here emits — the dispatch path does, once, at
- * the one place that knows the verdict — and nothing here redacts:
+ * Declarations only. Nothing here emits or redacts:
  * {@link AgentToolInvoked.arguments} is a *contract* that the emitter has
- * already run the arguments through `redactAgentArguments`. An event class
- * that redacted on construction would give a second, quieter redaction rule
- * beside the real one, and a listener has no way to tell a masked payload
- * from an unmasked one.
+ * already run them through `redactAgentArguments`. Redacting on construction
+ * would be a second, quieter rule beside the real one, and a listener cannot
+ * tell a masked payload from an unmasked one.
  */
 import { Event } from '../events/Event'
 
@@ -42,10 +39,9 @@ export type AgentSurface = 'mcp' | 'dev-mcp' | 'cli' | 'webmcp'
 export class AgentToolInvoked extends Event {
   /**
    * The invocation arguments **already redacted** by the emitter (see the
-   * module header). Assigned in the body rather than declared as a
-   * constructor parameter property: `arguments` is not a legal binding
-   * identifier in strict mode, which every ES module is, though it is a
-   * perfectly legal property name.
+   * module header). Assigned in the body rather than as a constructor parameter
+   * property: `arguments` is not a legal binding identifier in strict mode,
+   * though it is a legal property name.
    */
   readonly arguments: Record<string, unknown>
 
@@ -65,12 +61,10 @@ export class AgentToolInvoked extends Event {
 /**
  * Why a tool invocation was refused before it reached the route handler.
  *
- * Deliberately no `'policy'`: `Gate` policies evaluate *inside* the
- * dispatched request, so a policy denial is an execution that returned 403 —
- * an {@link AgentToolInvoked} with that status — not an adapter-level
- * refusal. The reasons here are exactly the checks the adapter runs before
- * synthesizing the request, which is also why a denial carries no HTTP
- * status: no HTTP happened.
+ * Deliberately no `'policy'`: `Gate` policies evaluate *inside* the dispatched
+ * request, so a policy denial is an execution that returned 403. These are
+ * exactly the checks the adapter runs before synthesizing the request, which is
+ * also why a denial carries no HTTP status — no HTTP happened.
  */
 export type AgentToolDenialReason = 'auth' | 'scope' | 'approval' | 'rate-limit'
 

@@ -1,12 +1,8 @@
 /**
- * The `@guren/server/agent` entry (RFC 0016 §3, §8): what an out-of-process
- * dispatcher — the WebMCP client, `guren tool:call`, `@guren/testing` — is
- * promised, and the one option that entry added for them.
- *
- * Imported through the entry module rather than `../../src/agent/dispatch`,
- * on purpose: a re-export dropped from `public.ts` is the failure this file
- * exists to catch, and reaching past it would leave that entirely to the
- * exports map, which nothing in the source tree checks.
+ * What the `@guren/server/agent` entry promises an out-of-process dispatcher
+ * (RFC 0016 §3, §8). Imported through the entry module, not
+ * `../../src/agent/dispatch`: a re-export dropped from `public.ts` is the
+ * failure this file exists to catch.
  */
 import { describe, test, expect } from 'bun:test'
 import { z } from 'zod'

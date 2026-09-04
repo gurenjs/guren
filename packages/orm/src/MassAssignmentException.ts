@@ -1,14 +1,8 @@
 /**
- * Thrown when mass assignment receives fields it must not write. Silently
- * discarding them hides bugs (a typo'd fillable entry surfaces as a NOT NULL
- * violation much later) and can mask injection attempts, so models fail
- * loudly instead.
- *
- * `reason` distinguishes the two rules that throw:
- * - `'not-fillable'` — the field is outside the model's `fillable` allowlist.
- * - `'denied'` — the field is in the model's `deniedFields()` (e.g. a
- *   credential column on an authenticatable model) and can never be
- *   mass-assigned, `fillable` notwithstanding.
+ * Thrown when mass assignment receives fields it must not write. Discarding
+ * them silently hides bugs and can mask injection attempts, so models throw.
+ * `reason` is `'not-fillable'` (outside the `fillable` allowlist) or
+ * `'denied'` (in `deniedFields()`, unassignable whatever `fillable` says).
  */
 export class MassAssignmentException extends Error {
   readonly model: string

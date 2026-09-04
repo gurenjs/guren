@@ -1,11 +1,9 @@
 /**
  * Payload assembly for the docs viewer endpoint (RFC 0005).
  *
- * `buildDocsViewerData` bundles everything the UI needs into one
- * payload — graph nodes/edges with verdicts, plus every document's
- * frontmatter and rendered body — so the server exposes a single
- * whole-bundle route with no path parameters (and therefore no
- * traversal surface).
+ * `buildDocsViewerData` bundles everything the UI needs into one payload, so
+ * the server exposes a single whole-bundle route with no path parameters and
+ * therefore no traversal surface.
  */
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
@@ -42,9 +40,9 @@ export interface DocsViewerDoc {
   verified: DocActorEvent[]
   staleAfter?: string
   /**
-   * Whether `stale_after` has passed, as `guren check --docs` judged it.
-   * Derived here so the UI does not re-implement the calendar-day rule
-   * (a bare `Date.parse` accepts `2026-02-30` and rolls it forward).
+   * Whether `stale_after` has passed, as `guren check --docs` judged it, so the
+   * UI does not re-implement the calendar-day rule (a bare `Date.parse` accepts
+   * `2026-02-30` and rolls it forward).
    */
   stale: boolean
   trustTier: DocTrustTier
@@ -82,8 +80,8 @@ function headingEnd(body: string, at: number): number {
 
 /**
  * Where the first heading standing behind a comment closed at or after `from`
- * ends, or -1 when no `-->` from there on has one behind it. Which `<!--`
- * opened the comment never changes the answer, so the search need not know.
+ * ends, or -1 when none does. Which `<!--` opened the comment never changes the
+ * answer, so the search need not know.
  */
 function headingBehindComment(body: string, from: number): number {
   for (let closer = body.indexOf('-->', from); closer !== -1; closer = body.indexOf('-->', closer + 3)) {
@@ -96,27 +94,14 @@ function headingBehindComment(body: string, from: number): number {
 
 /**
  * The body without its first H1, and without the HTML comment that may precede
- * it — the panel header carries the title, so the body H1 would repeat it.
+ * it — the panel header carries the title.
  *
  * Scanned rather than matched with `/^\s*(?:<!--[\s\S]*?-->\s*)?#\s+.*$/m`,
  * whose lazy comment body was re-scanned from every line start: a doc holding
- * many `<!--` took time quadratic in its length. Every `-->` is classified once
- * here instead, which is enough, because whether a heading may follow a comment
- * turns only on where that comment ends and never on where it opened.
- *
- * Two things keep this to a bounded number of visits per character, and both
- * are easy to lose:
- *
- *  - `headingBehindComment` asks where the heading *ends* only for the closer
- *    it settles on. Resolving that for every `-->` up front re-walked the rest
- *    of the line once each, so one long line of them cost quadratic time —
- *    worse than the pattern this replaced. It also runs at most twice: once
- *    that finds a heading and returns, or once that finds none, after which no
- *    later `<!--` can reach what this search has already ruled out.
- *  - the line loop resumes at `from` rather than at `lineStart`. Every line
- *    start between the two sits inside the whitespace just skipped and lands
- *    on the same `from`, so re-testing them repeats a failure already known,
- *    once per blank line.
+ * many `<!--` took quadratic time. Two easily-lost invariants keep the visits
+ * per character bounded: `headingBehindComment` resolves the heading *end* only
+ * for the closer it settles on, and runs at most twice; and the line loop
+ * resumes at `from`, not `lineStart`, so blank lines are not re-tested.
  */
 function stripLeadingH1(body: string): string {
   let noHeadingBehindComments = false
@@ -142,10 +127,9 @@ function stripLeadingH1(body: string): string {
 }
 
 /**
- * The graph node id a body link points at. `localLinkTarget` is the
- * same filter `scanDocs` ran to derive the edge, so the rendered target
- * and the node id cannot disagree; anything it rejects, and anything
- * that fails to resolve, keeps its literal text.
+ * The graph node id a body link points at. `localLinkTarget` is the same filter
+ * `scanDocs` ran to derive the edge, so the rendered target and the node id
+ * cannot disagree; anything it rejects keeps its literal text.
  */
 function resolveViewerLink(docPath: string, target: string): string {
   const local = localLinkTarget(target)
@@ -184,8 +168,7 @@ export async function buildDocsViewerData(cwd: string): Promise<DocsViewerData> 
         stale: staleDocs.has(ref.path),
         trustTier: docTrustTier(ref),
         // Links carry the app-root path they resolve to, so the viewer
-        // navigates by map lookup instead of re-deriving the resolution
-        // rules client-side (where they would drift).
+        // navigates by map lookup instead of re-deriving the rules client-side.
         html: renderDocHtml(body, { resolveLink: (target) => resolveViewerLink(ref.path, target) }),
       }
     }),
@@ -195,9 +178,8 @@ export async function buildDocsViewerData(cwd: string): Promise<DocsViewerData> 
 }
 
 /**
- * Absolute path of the viewer's static UI shell, shipped with this
- * package. `assets/` sits next to both `src/` and `dist/`, so the
- * relative hop works from source (dev, tests) and from the build alike.
+ * Absolute path of the viewer's static UI shell. `assets/` sits next to both
+ * `src/` and `dist/`, so the relative hop works from source and build alike.
  */
 export function docsViewerAssetPath(): string {
   return fileURLToPath(new URL('../assets/docs-viewer/index.html', import.meta.url))

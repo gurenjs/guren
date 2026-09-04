@@ -2,10 +2,6 @@ import { Listener, type BroadcastManager, type NotificationManager, type Notifia
 import { TaskCompleted } from '../Events/TaskCompleted.js'
 import { TaskCompletedNotification } from '../Notifications/TaskCompletedNotification.js'
 
-/**
- * Listener that sends notifications when a task is completed.
- * This listener is queued for background processing.
- */
 export class NotifyTaskCompleted extends Listener<TaskCompleted> {
   static override event = TaskCompleted
   static override shouldQueue = true
@@ -45,7 +41,6 @@ export class NotifyTaskCompleted extends Listener<TaskCompleted> {
   }
 
   override shouldHandle(event: TaskCompleted): boolean {
-    // Only notify if the task was marked as completed
     return event.task.completed === true
   }
 

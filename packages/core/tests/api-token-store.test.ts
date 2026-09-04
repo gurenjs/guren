@@ -117,15 +117,14 @@ describe('DatabaseApiTokenStore', () => {
       userId: 'user-1',
     })
 
-    // Corrupt the column the way a bad migration or a hand-edited row would.
-    // Drizzle's timestamp mapper wraps the text in `new Date(...)`, so the
-    // store reads an Invalid Date — which must not degrade to "no expiry",
-    // because `verifyApiToken` skips its expiry check entirely on null.
+    // Drizzle's timestamp mapper wraps the text in `new Date(...)`, so the store
+    // reads an Invalid Date — which must not degrade to "no expiry", since
+    // `verifyApiToken` skips its expiry check entirely on null.
     sqlite.exec(`UPDATE api_tokens SET expires_at = 'not-a-date' WHERE id = '${token.id}'`)
 
-    // Pin the premise: INTEGER affinity cannot convert this, so the driver
-    // hands the text straight back. If a future driver coerced it instead,
-    // the assertions below would pass for the wrong reason.
+    // Pin the premise: INTEGER affinity cannot convert this, so the driver hands
+    // the text back. A driver that coerced it would pass below for the wrong
+    // reason.
     const raw = sqlite.query('SELECT expires_at FROM api_tokens WHERE id = ?').get(token.id) as {
       expires_at: unknown
     }
@@ -195,8 +194,8 @@ describe('DatabaseApiTokenStore', () => {
 
   test('degrades non-array abilities to an empty list instead of granting them', async () => {
     const textStore = new DatabaseApiTokenStore(apiTokensText, { abilitiesMode: 'text' })
-    // Valid JSON, wrong shape: decoded as a bare string, `tokenCan` would run
-    // `String.prototype.includes` on it and read '"*"' as the wildcard.
+    // Valid JSON, wrong shape: as a bare string `tokenCan` would run
+    // `String.prototype.includes` and read '"*"' as the wildcard.
     sqlite.exec(
       'INSERT INTO api_tokens_text (id, name, hashed_token, user_id, abilities, created_at) ' +
         `VALUES ('t2', 'Wildcard String', 'hash-2', 'user-1', '"*"', ${Date.now()})`,

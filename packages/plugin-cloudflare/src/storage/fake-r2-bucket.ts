@@ -28,10 +28,9 @@ export interface FakeR2BucketOptions {
 
 /**
  * In-memory `R2BucketLike` with the semantics the driver relies on: sorted
- * listing, prefix/delimiter grouping, cursor pagination, the 1000-key
- * `delete()` cap, and `R2ObjectBody` readers. It is a test double, not a
- * spec — the opt-in Miniflare test in `r2-miniflare.test.ts` runs the same
- * assertions against workerd's R2 to keep this honest.
+ * listing, prefix/delimiter grouping, cursor pagination, the 1000-key `delete()`
+ * cap, and `R2ObjectBody` readers. A test double, not a spec — the opt-in
+ * `r2-miniflare.test.ts` runs the same assertions against workerd's R2.
  */
 export class FakeR2Bucket implements R2BucketLike {
   private readonly objects = new Map<string, StoredObject>()
@@ -56,8 +55,7 @@ export class FakeR2Bucket implements R2BucketLike {
     const stored = this.objects.get(key)
     if (!stored) return null
     // Real R2 rejects an unsatisfiable range; only a missing key is null.
-    // subarray() would silently return an empty slice here, masking the
-    // production behavior the driver deliberately propagates.
+    // subarray() would return an empty slice and mask that.
     const range = options?.range
     if (range && (range.offset >= stored.bytes.byteLength || (range.length !== undefined && range.length <= 0))) {
       throw new Error('get: The requested range is not satisfiable (10039)')
@@ -106,10 +104,9 @@ export class FakeR2Bucket implements R2BucketLike {
     const delimiter = options.delimiter
     const limit = options.limit ?? this.pageSize
 
-    // One sorted entry list mixing objects and delimited prefixes. The
-    // cursor is the last key returned, not an offset: R2 resumes *after a
-    // key*, so a caller that deletes what it listed (deleteDirectory) must
-    // not skip entries — an offset cursor would.
+    // The cursor is the last key returned, not an offset: R2 resumes *after a
+    // key*, so a caller that deletes what it listed (deleteDirectory) does not
+    // skip entries, as an offset cursor would.
     const entries: Array<{ key: string; kind: 'object' | 'prefix' }> = []
     const seenPrefixes = new Set<string>()
     for (const key of this.keys()) {

@@ -42,10 +42,7 @@ export class InertiaServiceProvider extends ServiceProvider {
     this.registerSharedErrors()
   }
 
-  /**
-   * Register a custom renderer for ValidationException on Inertia requests.
-   * Non-Inertia requests fall through to the default JSON 422 response.
-   */
+  /** ValidationException on Inertia requests; others fall through to JSON 422. */
   private registerValidationRenderer(): void {
     let handler: ExceptionHandler
     try {
@@ -58,7 +55,6 @@ export class InertiaServiceProvider extends ServiceProvider {
     handler.render(ValidationException, (error, ctx) => {
       const isInertia = ctx.req.header('X-Inertia')
       if (!isInertia) {
-        // Non-Inertia: return default JSON 422
         return ctx.json(
           {
             message: error.message,
@@ -68,7 +64,6 @@ export class InertiaServiceProvider extends ServiceProvider {
         )
       }
 
-      // Inertia: flash errors and redirect back
       const flattened: Record<string, string> = {}
       for (const [key, messages] of Object.entries(error.errors ?? {})) {
         flattened[key] = messages[0] ?? ''

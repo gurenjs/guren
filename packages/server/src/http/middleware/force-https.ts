@@ -2,37 +2,19 @@ import type { MiddlewareHandler } from 'hono'
 import { applyResponseHeaders } from './response-headers'
 
 export interface ForceHttpsOptions {
-  /**
-   * HSTS max-age in seconds. Default: 31536000 (1 year).
-   */
+  /** Seconds. Default: 31536000 (1 year). */
   hstsMaxAge?: number
-  /**
-   * Include subdomains in HSTS. Default: true.
-   */
+  /** Default: true. */
   hstsIncludeSubDomains?: boolean
-  /**
-   * Enable HSTS preload. Default: false.
-   */
+  /** Default: false. */
   hstsPreload?: boolean
-  /**
-   * Paths to exclude from HTTPS redirect (e.g., health checks).
-   */
+  /** Paths exempt from the redirect; a trailing `*` matches a prefix. */
   exclude?: string[]
 }
 
 /**
- * Middleware that redirects HTTP requests to HTTPS and sets the
- * Strict-Transport-Security header. Equivalent to Rails' `force_ssl`.
- *
- * @example
- * ```ts
- * import { createForceHttpsMiddleware } from '@guren/core'
- *
- * // In production only
- * if (process.env.NODE_ENV === 'production') {
- *   app.use('*', createForceHttpsMiddleware())
- * }
- * ```
+ * Redirects HTTP to HTTPS and sets Strict-Transport-Security. Equivalent to
+ * Rails' `force_ssl`.
  */
 export function createForceHttpsMiddleware(options: ForceHttpsOptions = {}): MiddlewareHandler {
   const {
@@ -53,7 +35,6 @@ export function createForceHttpsMiddleware(options: ForceHttpsOptions = {}): Mid
     if (proto !== 'https') {
       const path = url.pathname + url.search
 
-      // Skip excluded paths
       for (const pattern of exclude) {
         if (pattern.endsWith('*')) {
           if (path.startsWith(pattern.slice(0, -1))) {

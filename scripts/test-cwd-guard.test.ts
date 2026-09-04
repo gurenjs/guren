@@ -6,10 +6,8 @@ import { join, resolve } from 'node:path'
 import { isAllowed, strayScaffoldOutput } from './test-cwd-guard.ts'
 
 /**
- * The guard is the thing that turns a silent, intermittent repo-pollution bug
- * into a failing test, so a guard that quietly stops detecting is worse than
- * none. Its two predicates are pure, which is what makes them testable here
- * without reaching into a lifecycle hook.
+ * A guard that quietly stops detecting is worse than none. Its two predicates
+ * are pure, so they are testable without reaching into a lifecycle hook.
  */
 describe('test-cwd-guard predicates', () => {
   const repoRoot = resolve(import.meta.dir, '..')
@@ -38,8 +36,7 @@ describe('test-cwd-guard predicates', () => {
 
   describe('strayScaffoldOutput', () => {
     it('reports nothing for a clean checkout', () => {
-      // Every watched directory is either absent or was present before the run
-      // started; both mean "not this run's doing".
+      // Absent or pre-existing; both mean "not this run's doing".
       expect(strayScaffoldOutput()).toEqual([])
     })
   })

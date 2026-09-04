@@ -1,11 +1,9 @@
 import type { Notification } from './Notification'
 
 /**
- * A notification class usable for queue reconstruction.
- *
- * Only the prototype and name are required: queued notifications are rebuilt
- * with `Object.create(prototype)` and never constructed, so classes with
- * required constructor arguments are supported.
+ * A notification class usable for queue reconstruction. Only the prototype and
+ * name are needed: queued notifications are rebuilt with
+ * `Object.create(prototype)`, so required constructor arguments are fine.
  */
 export interface NotificationConstructor {
   readonly name: string
@@ -15,10 +13,8 @@ export interface NotificationConstructor {
 const notificationRegistry = new Map<string, NotificationConstructor>()
 
 /**
- * Resolve the registry key for a class without constructing it.
- *
- * Reads the `type` getter off the prototype so a class overriding it registers
- * under the same key the dispatched payload carries.
+ * The registry key for a class, read off the prototype's `type` getter so a
+ * class overriding it registers under the key its payloads carry.
  */
 function resolveRegistryKey(notificationClass: NotificationConstructor): string {
   try {
@@ -34,22 +30,10 @@ function resolveRegistryKey(notificationClass: NotificationConstructor): string 
 }
 
 /**
- * Register a notification class so queued instances can be rebuilt.
- *
- * Notifications are registered automatically when they are queued, which
- * covers delivery by a worker running in the same process. A worker running
- * in a separate process must register them explicitly at boot.
- *
- * Type names must be unique within an application: as with the job registry,
- * registering a second class under an existing type replaces the first.
- *
- * @param notificationClass - The notification class to register
- * @param type - Registry key, defaulting to the class's own `type` value
- *
- * @example
- * ```typescript
- * registerNotification(OrderShipped)
- * ```
+ * Register a notification class so queued instances can be rebuilt. Queueing
+ * registers automatically, which covers a worker in the same process; a worker
+ * in a separate process must register at boot. Type names must be unique — a
+ * second class under an existing type replaces the first.
  */
 export function registerNotification(
   notificationClass: NotificationConstructor,
@@ -61,18 +45,13 @@ export function registerNotification(
   )
 }
 
-/**
- * Get a registered notification class by type.
- */
 export function getNotification(
   type: string
 ): NotificationConstructor | undefined {
   return notificationRegistry.get(type)
 }
 
-/**
- * Clear all registered notifications (for testing).
- */
+/** Clear all registered notifications (for testing). */
 export function clearNotificationRegistry(): void {
   notificationRegistry.clear()
 }

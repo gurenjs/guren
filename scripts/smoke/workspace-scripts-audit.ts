@@ -1,43 +1,25 @@
-// Asserts that nothing workspace-internal invokes the CLI as `bunx guren`
-// (or `bun x guren` / `npx guren`).
+// No workspace-internal code may invoke the CLI as `bunx guren` (or `bun x
+// guren` / `npx guren`): the `guren` package does not exist on npm, so
+// whenever the workspace link is missing the runner falls back to the
+// registry and dies on a 404. Run the source: `bun …/packages/cli/src/bin.ts`.
 //
-// The `guren` package does not exist on npm. Inside this checkout the CLI is
-// only reachable through the workspace link (`node_modules/.bin/guren`), and
-// whenever that link is missing — fresh clone, partial install, CI cache — the
-// runner falls back to the registry and dies on a 404. Workspace code must run
-// the CLI source directly: `bun <path-to>/packages/cli/src/bin.ts`.
+// Two scopes: package.json scripts (root manifest + every workspace member),
+// and TypeScript under scripts/ — a smoke's `['bunx', 'guren', …]` argv is
+// invisible to a manifest-only scan and passes locally anyway, because the
+// temp app it builds gets a `.bin/guren` from its `file:` link to
+// packages/cli, which is exactly the link CI cannot be trusted to have.
+// Template trees are neither kind of member, and `bunx guren` is *correct*
+// there — scaffolded apps install @guren/cli from npm and get a real bin.
 //
-// Two scopes, because the rule has two ways of being broken:
+// The source scan judges *spawn shapes*, not text: an argv array's elements
+// as tokens, a Bun `$` shell template, or a string handed to `exec`/`spawn`
+// and friends. A mere mention of `bunx guren` (a docs audit asserting a guide
+// documents it) compares as a whole token against nothing, so it passes.
 //
-//   1. package.json scripts — the root manifest plus every workspace member
-//      resolved from the root `workspaces` globs.
-//   2. TypeScript under scripts/ — the smokes and gates spawn commands
-//      themselves, and a `['bunx', 'guren', …]` argv there is invisible to a
-//      manifest-only audit. It even passes locally, because the temp app a
-//      smoke builds gets a `.bin/guren` from its `file:` link to
-//      packages/cli, which is exactly the link CI cannot be trusted to have.
-//
-// Template trees (`packages/create-app/templates/**`, `packages/cli/templates/**`)
-// are structurally out of scope — they are not workspace members and not
-// under scripts/ — and `bunx guren` is *correct* there, because scaffolded
-// apps install @guren/cli from npm and get a real `node_modules/.bin/guren`.
-//
-// The source scan judges *spawn shapes*, not text: an argv array whose
-// elements are the tokens, a Bun shell `$` template, or a string handed to
-// `exec`/`spawn` and friends. A string that merely mentions `bunx guren` — a
-// docs audit asserting a guide documents it, a test of a docs checker — is
-// a mention, not an invocation, and is left alone.
-//
-// What the scan deliberately does not chase, because doing so would trade a
-// bounded, honest-mistake detector for an unbounded obfuscation-resistant
-// one: a runner identifier reached through an import alias (`import {
-// execSync as run } from 'node:child_process'`) or a local rebinding
-// (`const runner = 'bunx'; spawn([runner, 'guren'])`), and shell quoting
-// inside a command string (`exec('bunx "guren" codegen')` keeps its quotes
-// when tokenized). None of this repo's current scripts/ writes the CLI that
-// way; if one starts to, the manifest-style spelling this gate teaches
-// (`bun packages/cli/src/bin.ts …`) has no reason to need aliasing or
-// quoting in the first place.
+// Deliberately not chased, since it would trade a bounded honest-mistake
+// detector for an unbounded obfuscation-resistant one: a runner reached
+// through an import alias or a local rebinding, and shell quoting inside a
+// command string. No script in this repo writes the CLI that way today.
 
 import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
@@ -50,13 +32,9 @@ import { walk } from '../../packages/cli/src/ast-walk'
 
 const repoRoot = resolve(import.meta.dir, '../..')
 
-// `bunx guren`, `bunx --bun guren`, `bun x guren`, `npx guren`, `pnpm dlx
-// guren`, `guren@…` — the registry-resolving spellings of the CLI, as token
-// sequences rather than a regex: a run of `--flag`/`-f` tokens between the
-// runner and `guren` is unbounded and package-manager flags are unbounded
-// too, and a regex expressing "skip N flag tokens" backtracks exponentially
-// on pathological input (CodeQL flagged exactly this). A token scan is
-// linear by construction.
+// The registry-resolving spellings of the CLI, as token sequences rather than a
+// regex: "skip N flag tokens" backtracks exponentially on pathological input
+// (CodeQL flagged exactly this), while a token scan is linear.
 const RUNNER_TOKEN_SEQUENCES: readonly (readonly string[])[] = [
   ['bunx'],
   ['bun', 'x'],
@@ -96,8 +74,7 @@ export function invokesRegistryGuren(command: string): boolean {
 }
 
 // The sanctioned replacement, when spelled dot-relative. Cwd-shifting forms
-// (`cd .. && bun packages/cli/src/bin.ts …`) can't be resolved statically and
-// are left to the negative check above.
+// cannot be resolved statically and are left to the negative check above.
 const RELATIVE_CLI_PATH = /\bbun\s+((?:\.\.?\/)\S*packages\/cli\/src\/bin\.ts)\b/g
 
 interface Manifest {

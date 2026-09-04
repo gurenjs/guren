@@ -6,9 +6,8 @@ import { makeCommand, registerScaffoldedCommand } from '../src/make-command'
 import { makeModule } from '../src/make-module'
 import { createTempWorkspace } from './helpers'
 
-// The real scaffolded entrypoint, not a copy of it: this suite asserts that
-// make:command can patch what create-guren-app actually writes, which a
-// hand-copied fixture stops proving the moment the template is edited.
+// The real scaffolded entrypoint, not a copy: a hand-copied fixture stops
+// proving make:command can patch it the moment the template is edited.
 const TEMPLATE_CONSOLE_ENTRY = join(
   dirname(fileURLToPath(import.meta.url)),
   '../../create-app/templates/default/src/console.ts',

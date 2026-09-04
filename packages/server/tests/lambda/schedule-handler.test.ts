@@ -31,16 +31,13 @@ describe('createScheduleHandler', () => {
   test('should not fail when no tasks are due', async () => {
     const scheduler = new Scheduler()
 
-    // Schedule a task for a specific time that is not now
     scheduler.schedule((schedule: Schedule) => {
       schedule.call(async () => {
-        // This should not run
       }).yearly().name('yearly-task')
     })
 
     const handler = createScheduleHandler(scheduler)
 
-    // Should not throw
     await handler()
   })
 })

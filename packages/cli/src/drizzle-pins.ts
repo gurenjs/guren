@@ -2,21 +2,14 @@
  * The one rule that keeps a manifest's `drizzle-orm` and `drizzle-kit` pins on
  * the copy `@guren/orm` brings with it.
  *
- * `@guren/orm` names an exact `drizzle-orm` version under `dependencies`, not a
- * range, so a manifest pinning a different one gets a second nested copy on
- * install — the app builds its table descriptors against one copy while the
- * adapter runs on the other. Aligning `@guren/*` alone is what leaves that
- * behind.
- *
- * `drizzle-kit` has no upstream declaration to read: it is not a dependency of
- * `@guren/orm`, only of apps and of the scaffold templates. Keeping the pair in
- * step is a convention rather than something npm enforces, and the two packages
- * have never shared numbers on their stable lines — so the companion release is
- * checked for existence before its version is written.
- *
- * Two callers apply this to two manifests: `guren upgrade` to an installed app,
- * against the published `@guren/orm` manifest, and `scripts/sync-template-deps.ts`
- * to the scaffold templates, against `packages/orm/package.json`.
+ * `@guren/orm` names an exact `drizzle-orm` version, so a manifest pinning a
+ * different one installs a second nested copy: the app builds its table
+ * descriptors against one while the adapter runs on the other. `drizzle-kit`
+ * has no upstream declaration to read and has never shared numbers with
+ * `drizzle-orm` on the stable lines, so the companion release is checked for
+ * existence before its version is written. Two callers: `guren upgrade` against
+ * the published ORM manifest, `scripts/sync-template-deps.ts` against this
+ * repository's.
  */
 import { isExactVersion, isLocationSpecifier } from './codemods'
 
@@ -56,11 +49,9 @@ export interface DrizzlePinChange {
 }
 
 /**
- * Why a pin the rule looked at was left where it is.
- *
- * Refusals are part of the verdict, not narration: a caller that only reads the
- * changes cannot tell "nothing to do" from "there is drift here I will not
- * touch". `guren upgrade` reports all four to the user and moves on, while the
+ * Why a pin the rule looked at was left where it is. Refusals are part of the
+ * verdict: a caller reading only the changes cannot tell "nothing to do" from
+ * "drift I will not touch". `guren upgrade` reports all four and moves on; the
  * template sync fails on the two a maintainer can fix in this repository.
  */
 export type DrizzlePinDeclineReason =
@@ -82,10 +73,9 @@ export interface DrizzlePinDecline {
 export interface DrizzlePinOptions {
   /**
    * Does `<name>@<version>` exist as a release? Asked only about the companion,
-   * only when its pin actually has to move — so a manifest that is already
-   * aligned costs no lookup — and at most once per version within one call.
-   * A rejection is not fatal here; it becomes a `companion-unverifiable`
-   * decline, so an unreachable registry cannot read as "nothing to align".
+   * only when its pin has to move, and at most once per version per call. A
+   * rejection becomes a `companion-unverifiable` decline, so an unreachable
+   * registry cannot read as "nothing to align".
    */
   companionPublished: (name: string, version: string) => Promise<boolean>
   onDecline?: (decline: DrizzlePinDecline) => void
@@ -126,12 +116,9 @@ export function needsDrizzleAlignment(manifest: DependencyManifest): boolean {
 
 /**
  * The pin rewrites this manifest needs to dedupe on `@guren/orm`'s drizzle copy.
- *
- * Returns the changes rather than applying them: `guren upgrade` writes them
- * into the app manifest it already holds, while the template sync reports them
- * under `--check` and writes them otherwise, and both need the same verdict.
- * Everything this refuses to rewrite goes to `onDecline` — a caller reading only
- * the changes would take "there is drift here I will not touch" for "aligned".
+ * Returned rather than applied, because the two callers write them differently
+ * but need the same verdict. Everything this refuses to rewrite goes to
+ * `onDecline`.
  */
 export async function planDrizzlePins(
   manifest: DependencyManifest,
@@ -152,9 +139,8 @@ export async function planDrizzlePins(
     return []
   }
 
-  // Deduping only works if the ORM names one exact version. A range would let
-  // the manifest and the nested copy resolve differently, which is the situation
-  // being fixed — and copying a range into `drizzle-kit` says nothing useful.
+  // Deduping only works if the ORM names one exact version: a range lets the
+  // manifest and the nested copy resolve differently, which is what is broken.
   if (!isExactVersion(pin)) {
     onDecline({
       reason: 'no-exact-pin',
@@ -163,10 +149,9 @@ export async function planDrizzlePins(
     return []
   }
 
-  // This loop is what can ask about the same package twice — `drizzle-kit`
-  // declared in both `dependencies` and `devDependencies` — so the dedupe
-  // belongs here rather than in every caller. A memo across *manifests* is still
-  // the caller's business; this one lives and dies with the call.
+  // The loop can ask about the same package twice (`drizzle-kit` declared in
+  // both dependency fields), so the dedupe belongs here. A memo across
+  // *manifests* is still the caller's business.
   const asked = new Map<string, Promise<boolean | null>>()
   const exists = (name: string): Promise<boolean | null> => {
     let pending = asked.get(name)

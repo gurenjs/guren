@@ -4,11 +4,9 @@ import { describeR2DriverConformance } from './r2-driver-conformance'
 import { R2Driver, type R2BucketLike } from './R2Driver'
 
 // Opt-in end-to-end test: runs the same driver contract as R2Driver.test.ts
-// against workerd's real R2 through Miniflare's `getR2Bucket()`, so every
-// semantic the in-memory `FakeR2Bucket` encodes is checked against the
-// runtime rather than assumed. Miniflare spawns workerd (a native binary
-// fetched on install), so like wrangler-migrations.test.ts it is gated
-// behind GUREN_TEST_WRANGLER=1 and skipped in CI.
+// against workerd's real R2 through Miniflare's `getR2Bucket()`, checking every
+// semantic `FakeR2Bucket` encodes. Miniflare spawns workerd (a native binary),
+// so it is gated behind GUREN_TEST_WRANGLER=1 and skipped in CI.
 const enabled = process.env.GUREN_TEST_WRANGLER === '1'
 
 let mf: Miniflare | undefined
@@ -59,10 +57,9 @@ describe.skipIf(!enabled)('R2Driver against Miniflare R2 at scale', () => {
   })
 })
 
-// The paths that need `get().body` to stay inside workerd (see the
-// harness's streamingBody flag): this block bundles the driver and runs
-// them in workerd itself, where handing the stream onward is the
-// documented R2 pattern.
+// The paths that need `get().body` to stay inside workerd (see the harness's
+// streamingBody flag): this block bundles the driver and runs them in workerd,
+// where handing the stream onward is the documented R2 pattern.
 describe.skipIf(!enabled)('R2Driver streaming paths inside workerd', () => {
   test('copy/move pipe get().body into put(); getStream returns it', async () => {
     const entry = new URL('./r2-miniflare.worker.ts', import.meta.url).pathname

@@ -15,14 +15,10 @@ import { makeView } from '../src/make-view'
 import { writeWorkspaceFiles } from './helpers'
 
 /**
- * The codegen generators have to honour `appRoot` on its own — without the
- * caller also steering `process.cwd()` into the project.
- *
- * `guren mcp` is the caller that needs it: it serves a workspace from a
- * long-lived server, so it cannot chdir per request. Every other generator
- * test uses `createTempWorkspace`, which chdir()s — there `appRoot` and
- * `process.cwd()` are the same directory, so a generator that ignored
- * `appRoot` would still pass. These deliberately do not chdir.
+ * `guren mcp` serves a workspace from a long-lived server and cannot chdir per
+ * request, so the generators have to honour `appRoot` on its own. Every other
+ * generator test goes through `createTempWorkspace`, which chdir()s, where a
+ * generator ignoring `appRoot` still passes; these deliberately do not chdir.
  */
 describe('codegen resolves against appRoot rather than process.cwd()', () => {
   let appRoot: string
@@ -140,10 +136,9 @@ describe('single-component scaffolders honour an explicit cwd', () => {
   }
 
   it('makeTest detects the runner in the target project, not the process cwd', async () => {
-    // The fixture has to disagree with the directory the process is in, or the
-    // assertion proves nothing. This monorepo's own package.json lists vitest,
-    // so `detectRunner()` reading process.cwd() answers "vitest"; a project
-    // with neither a vitest config nor the dependency must get bun:test.
+    // This monorepo's own package.json lists vitest, so `detectRunner()`
+    // reading process.cwd() answers "vitest" — the fixture has to disagree
+    // with it or the assertion proves nothing.
     await writeWorkspaceFiles(root, { 'package.json': '{ "name": "probe-app" }\n' })
 
     const written = await makeTest('Probe', { cwd: root })

@@ -6,10 +6,8 @@ import { findStaleManagedFiles, installAgentHarness, loadAgentTemplates } from '
 import { AGENT_TARGETS, planComponents } from '../src/agent-targets'
 
 /**
- * Whether `dir` lives on a case-insensitive filesystem. Probed rather than
- * inferred from `process.platform`: macOS mounts case-sensitive volumes and
- * Linux case-insensitive ones, and the behavior under test follows the
- * filesystem the app was scaffolded on, not the OS running the test.
+ * Probed rather than inferred from `process.platform`: macOS mounts case-sensitive
+ * volumes and Linux case-insensitive ones, and the behavior follows the filesystem.
  */
 async function filesystemIsCaseInsensitive(dir: string): Promise<boolean> {
   const probe = join(dir, 'case-probe.tmp')
@@ -112,8 +110,7 @@ describe('installAgentHarness', () => {
 
     expect(result.replaced).toEqual(['.claude/rules/orm-models.md'])
     expect(result.written).toEqual(['.claude/rules/orm-models.md'])
-    // every other managed file already matches the template — no writes, no
-    // "Wrote" lines claiming otherwise
+    // every other managed file already matches the template: no writes, no "Wrote" lines
     expect(result.unchanged).toContain('.claude/rules/docs-and-spec.md')
     expect(result.unchanged).not.toContain('.claude/rules/orm-models.md')
   })
@@ -146,9 +143,7 @@ describe('installAgentHarness', () => {
   it('treats a CRLF-only variant of a managed file as up to date', async () => {
     await installAgentHarness({ cwd: tempDir, mode: 'init' })
     const lf = await readFile(join(tempDir, '.claude/rules/orm-models.md'), 'utf8')
-    // what a core.autocrlf checkout (or an editor hook) leaves behind — not a
-    // local edit, and warning about it on every sync would drown the warning
-    // that matters
+    // what a core.autocrlf checkout leaves behind: not a local edit, and warning every sync drowns the real ones
     await writeFile(join(tempDir, '.claude/rules/orm-models.md'), lf.replaceAll('\n', '\r\n'), 'utf8')
 
     const result = await installAgentHarness({ cwd: tempDir, mode: 'sync' })
@@ -344,16 +339,11 @@ describe('installAgentHarness', () => {
     expect(await readFile(join(tempDir, '.agents/rules/orm-models.md'), 'utf8')).not.toBe('stale\n')
     expect(result.written.some((path) => path.startsWith('.claude/'))).toBe(false)
     expect(result.written).not.toContain('CLAUDE.md')
-    // the user-owned MCP snippet is not re-planned by a detected sync,
-    // so a deleted .codex/config.toml stays deleted
+    // the user-owned MCP snippet is not re-planned by a detected sync, so a deletion stays
     expect(result.written).not.toContain('.codex/config.toml')
   })
 
-  /**
-   * Simulate an install from an older release whose canonical rule carried a
-   * different name: rename the rule's copies in whichever managed roots the
-   * install produced.
-   */
+  /** Simulate an older release whose canonical rule carried a different name. */
   const renameInstalledRule = async (from: string, to: string): Promise<void> => {
     const spellings = [
       [`.claude/rules/${from}.md`, `.claude/rules/${to}.md`],
@@ -375,9 +365,8 @@ describe('installAgentHarness', () => {
 
     const result = await installAgentHarness({ cwd: tempDir, mode: 'sync' })
 
-    // the native roots recognize the leftover by its guren- pattern; the
-    // canonical roots are claimed by name, so an old name is theirs to report
-    // only once it is recorded in RETIRED_CANONICAL_RULES (below)
+    // native roots recognize the leftover by its guren- pattern; canonical roots claim by
+    // name, so an old name is theirs only once RETIRED_CANONICAL_RULES records it (below)
     expect(result.stale).toEqual(['.cursor/rules/guren-models.mdc'])
     expect(result.pruned).toBe(false)
     // the current name is restored, the old copies stay until an explicit --prune
@@ -405,10 +394,8 @@ describe('installAgentHarness', () => {
   })
 
   it('sync claims a retired canonical rule the plan no longer writes', async () => {
-    // the canonical roots' half of the rename above: an old rule filename is
-    // claimed once RETIRED_CANONICAL_RULES records it. Injected here through
-    // findStaleManagedFiles because that list is empty today — same seam, and
-    // same review obligation, as the retired skill below.
+    // the canonical roots' half of the rename above. Injected through findStaleManagedFiles
+    // because RETIRED_CANONICAL_RULES is empty today — same seam as the retired skill below.
     await installAgentHarness({ cwd: tempDir, mode: 'init' })
     await renameInstalledRule('orm-models', 'models')
 
@@ -421,12 +408,9 @@ describe('installAgentHarness', () => {
   })
 
   it('sync claims a retired canonical skill the plan no longer writes', async () => {
-    // "retired" is a name the framework used to ship — recorded in
-    // RETIRED_CANONICAL_SKILLS, injected here because that list is empty
-    // today. Driven through findStaleManagedFiles rather than the installer:
-    // the seam for an empty constant belongs on an internal function, not on
-    // the published options type. What prune then does with a stale file is
-    // the shared machinery the retired-rule test above already pins.
+    // RETIRED_CANONICAL_SKILLS is empty today, so the name is injected through
+    // findStaleManagedFiles: a seam for an empty constant belongs on an internal
+    // function, not on the published options type.
     await installAgentHarness({ cwd: tempDir, mode: 'init' })
     await mkdir(join(tempDir, '.claude/skills/retired-skill'), { recursive: true })
     await writeFile(join(tempDir, '.claude/skills/retired-skill/SKILL.md'), 'old skill\n', 'utf8')
@@ -442,9 +426,8 @@ describe('installAgentHarness', () => {
   })
 
   it('sync never claims a skill the framework did not write — the skills roots are shared with external installers', async () => {
-    // `npx skills add` and Agent Plugins clients copy third-party skills flat
-    // into these same directories; before the `children` claim every one of
-    // them was a prune candidate, including Guren's own catalog skills
+    // `npx skills add` and Agent Plugins clients copy third-party skills flat into these
+    // same directories; without the `children` claim every one is a prune candidate
     await installAgentHarness({ cwd: tempDir, mode: 'init', targets: ['claude', 'codex'] })
     for (const dir of ['.claude/skills/guren-new-app', '.agents/skills/guren-new-app', '.agents/skills/some-vendor-skill']) {
       await mkdir(join(tempDir, dir, 'references'), { recursive: true })
@@ -465,12 +448,10 @@ describe('installAgentHarness', () => {
   })
 
   it('sync still claims a stray file inside a canonical skill directory', async () => {
-    // the claim is per named child, recursively — a leftover file inside
-    // dev-workflow/ that the current plan does not write is still stale
+    // the claim is per named child, recursively: an unplanned file inside dev-workflow/ is stale
     await installAgentHarness({ cwd: tempDir, mode: 'init' })
     await writeFile(join(tempDir, '.claude/skills/dev-workflow/OLD.md'), 'leftover\n', 'utf8')
-    // one level down as well: a claim that only read the child's top level
-    // would report the first file and walk past this one
+    // one level down: a top-level-only claim would walk past this one
     await mkdir(join(tempDir, '.claude/skills/dev-workflow/references'), { recursive: true })
     await writeFile(join(tempDir, '.claude/skills/dev-workflow/references/OLD.md'), 'leftover\n', 'utf8')
 
@@ -488,10 +469,8 @@ describe('installAgentHarness', () => {
   })
 
   it('sync --prune does not delete through a symlinked skill directory even under a claimed name', async () => {
-    // same guard as the symlinked-root case: readdir and rm would follow it,
-    // and a claim is only safe over files that live inside the app. (The
-    // write loop still refreshes SKILL.md through the link — that is the
-    // pre-existing managed-file contract, not the claim under test here.)
+    // readdir and rm would follow the link, and a claim is only safe over files inside
+    // the app. The write loop still refreshes SKILL.md through it; only deletion stops.
     await installAgentHarness({ cwd: tempDir, mode: 'init' })
     const outside = join(tempDir, '..', `${basename(tempDir)}-outside`)
     await mkdir(outside, { recursive: true })
@@ -501,17 +480,15 @@ describe('installAgentHarness', () => {
 
     const result = await installAgentHarness({ cwd: tempDir, mode: 'sync', prune: true })
 
-    // STRAY.md is not planned; through a real directory it would be stale.
-    // Through a symlink the child is not entered at all.
+    // STRAY.md would be stale through a real directory; through a symlink the child is not entered.
     expect(result.stale).toEqual([])
     expect(await readFile(join(outside, 'STRAY.md'), 'utf8')).toBe('not ours to delete\n')
     await rm(outside, { recursive: true, force: true })
   })
 
   it('sync --prune does not delete through a symlinked skills root above a claimed name', async () => {
-    // the children claim walks `.claude/skills/<name>`, so an lstat of that
-    // path alone says nothing about `.claude/skills` itself: through a
-    // symlinked root the external target reports as an ordinary directory
+    // the claim walks `.claude/skills/<name>`, so an lstat of that path says nothing about
+    // `.claude/skills` itself: through a symlinked root the target looks like a plain directory
     await installAgentHarness({ cwd: tempDir, mode: 'init' })
     const outside = join(tempDir, '..', `${basename(tempDir)}-skills`)
     await rename(join(tempDir, '.claude/skills'), outside)
@@ -540,20 +517,17 @@ describe('installAgentHarness', () => {
   })
 
   it('sync --prune never claims a rule the framework did not write — the rules roots are where projects keep their own', async () => {
-    // the advice sync itself prints ("keep project-specific rules in files of
-    // your own") puts a project's conventions in this directory, so a
-    // whole-root claim deleted exactly the file the tool asked for
+    // sync itself advises keeping project rules here, so a whole-root claim would delete
+    // exactly the file the tool asked for
     await installAgentHarness({ cwd: tempDir, mode: 'init' })
     await writeFile(join(tempDir, '.claude/rules/team-conventions.md'), 'user rule\n', 'utf8')
-    // the nested file carries a shipped rule's filename: the claim is
-    // top-level only, so a walk that turned recursive would delete it
+    // the nested file carries a shipped rule's filename: a recursive walk would delete it
     await mkdir(join(tempDir, '.claude/rules/team'), { recursive: true })
     await writeFile(join(tempDir, '.claude/rules/team/testing.md'), 'nested user rule\n', 'utf8')
 
     const result = await installAgentHarness({ cwd: tempDir, mode: 'sync', prune: true })
 
-    // not deleted, and not reported either: the report and the prune list are
-    // one answer, and a file the framework never wrote is neither's business
+    // not deleted, and not reported: the report and the prune list are one answer
     expect(result.stale).toEqual([])
     expect(result.pruned).toBe(false)
     expect(await readFile(join(tempDir, '.claude/rules/team-conventions.md'), 'utf8')).toBe('user rule\n')
@@ -564,8 +538,7 @@ describe('installAgentHarness', () => {
 
   it('a user file under a claimed rule name is still the framework\'s to remove — why deletion is opt-in', async () => {
     await installAgentHarness({ cwd: tempDir, mode: 'init' })
-    // a retired name is claimed the same way a planned one is, so a file of
-    // the project's own under that name is still the framework's to remove
+    // a retired name is claimed like a planned one, whoever wrote the file
     const plan = planComponents(['claude'], await loadAgentTemplates(), 'My App')
     await writeFile(join(tempDir, '.claude/rules/team-conventions.md'), 'user rule\n', 'utf8')
 
@@ -577,10 +550,8 @@ describe('installAgentHarness', () => {
   })
 
   it('sync --prune does not delete through a symlinked .claude, above every namespace in it', async () => {
-    // the dotfiles pattern: .claude itself is a link into a shared checkout,
-    // and every namespace under it — the rules tree as much as the skills
-    // children — is then outside the app. The write loop still refreshes
-    // managed files through the link; only the claim to delete stops here.
+    // the dotfiles pattern: .claude is a link into a shared checkout, so every namespace
+    // under it is outside the app. Writes still follow the link; only deletion stops here.
     await installAgentHarness({ cwd: tempDir, mode: 'init' })
     const outside = join(tempDir, '..', `${basename(tempDir)}-dotfiles`)
     await rename(join(tempDir, '.claude'), outside)
@@ -590,8 +561,7 @@ describe('installAgentHarness', () => {
     const result = await installAgentHarness({ cwd: tempDir, mode: 'sync', prune: true })
 
     expect(result.stale).toEqual([])
-    // a claimed name behind the link is out of reach too — the containment
-    // check is what stops here, not the claim
+    // the containment check is what stops here, not the claim
     const plan = planComponents(['claude'], await loadAgentTemplates(), 'My App')
     expect(await findStaleManagedFiles(tempDir, ['claude'], plan, { rules: ['legacy.md'] })).toEqual(
       [],
@@ -620,15 +590,13 @@ describe('installAgentHarness', () => {
     const result = await installAgentHarness({ cwd: tempDir, mode: 'sync', prune: true })
 
     expect(result.stale).toEqual(['.cursor/rules/guren-retired.mdc'])
-    // the sweep follows the deleted files upward; it never removes empty
-    // directories the pruning did not create
+    // the sweep follows deleted files upward; it never removes directories pruning did not empty
     await access(join(tempDir, '.cursor/rules/drafts'))
   })
 
   it('sync never claims through a symlinked managed root', async () => {
     await installAgentHarness({ cwd: tempDir, mode: 'init' })
-    // an external rules directory linked into the app: scanning (and prune)
-    // must not reach through the link
+    // an external rules directory linked into the app: scanning must not reach through it
     await rename(join(tempDir, '.claude/rules'), join(tempDir, 'shared-rules'))
     await symlink(join(tempDir, 'shared-rules'), join(tempDir, '.claude/rules'))
     await writeFile(join(tempDir, 'shared-rules/legacy.md'), 'external\n', 'utf8')
@@ -636,8 +604,7 @@ describe('installAgentHarness', () => {
     const result = await installAgentHarness({ cwd: tempDir, mode: 'sync', prune: true })
 
     expect(result.stale).toEqual([])
-    // and it is the link that stops the walk, not the name: the same file
-    // under a claimed name is still not reached
+    // the link stops the walk, not the name
     const plan = planComponents(['claude'], await loadAgentTemplates(), 'My App')
     expect(await findStaleManagedFiles(tempDir, ['claude'], plan, { rules: ['legacy.md'] })).toEqual(
       [],
@@ -648,9 +615,8 @@ describe('installAgentHarness', () => {
   it('sync --prune settles a differently-cased entry by identity, not by name', async () => {
     await installAgentHarness({ cwd: tempDir, mode: 'init' })
     const caseInsensitive = await filesystemIsCaseInsensitive(tempDir)
-    // what a case-only rename of a managed rule leaves behind: one directory
-    // entry on a case-insensitive filesystem, two distinct files on a
-    // case-sensitive one, so the two branches assert opposite outcomes
+    // a case-only rename leaves one entry on a case-insensitive filesystem and two on a
+    // case-sensitive one, so the branches below assert opposite outcomes
     await rename(
       join(tempDir, '.claude/rules/orm-models.md'),
       join(tempDir, '.claude/rules/ORM-MODELS.md'),
@@ -677,8 +643,7 @@ describe('installAgentHarness', () => {
       join(tempDir, '.claude/rules/ORM-MODELS.md'),
     )
 
-    // under dryRun the planned orm-models.md is NOT written first, so the
-    // identity check must not collapse "planned side missing" into "same"
+    // dryRun does not write orm-models.md first, so the identity check must not read "planned side missing" as "same"
     const result = await installAgentHarness({ cwd: tempDir, mode: 'sync', prune: true, dryRun: true })
 
     if (caseInsensitive) {
@@ -693,8 +658,7 @@ describe('installAgentHarness', () => {
 
   it('sync --prune scans only the namespaces of the components being synced', async () => {
     await installAgentHarness({ cwd: tempDir, mode: 'init' })
-    // an .agents tree with no managed evidence is not a detected component,
-    // so its namespace is out of scope for this sync
+    // an .agents tree with no managed evidence is not a detected component
     await mkdir(join(tempDir, '.agents/rules'), { recursive: true })
     await writeFile(join(tempDir, '.agents/rules/leftover.md'), 'x\n', 'utf8')
 

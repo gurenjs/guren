@@ -106,9 +106,9 @@ describe('createPostgresDatabase', () => {
       connectionString: () => 'postgres://guren:hunter2@db.internal:54322/guren',
     })
 
-    // Shape drizzle + postgres-js produce when the server is not reachable: the
-    // outer message names the migrator's own bookkeeping statement, and the
-    // AggregateError cause carries the code with no message of its own.
+    // Shape drizzle + postgres-js produce when the server is unreachable: the outer
+    // message names the migrator's bookkeeping statement, and the AggregateError
+    // cause carries the code with no message of its own.
     const cause = Object.assign(new AggregateError([], ''), { code: 'ECONNREFUSED' })
     migrateMock.mockImplementationOnce(async () => {
       throw new Error('Failed query: CREATE SCHEMA IF NOT EXISTS "drizzle"\nparams: ', { cause })
@@ -187,11 +187,30 @@ describe('createPostgresDatabase', () => {
     expect(status).toEqual([{ name: '20240101000000_init', applied: false, appliedAt: null }])
   })
 
+  it('surfaces a denied tracker read from db:status instead of calling every migration pending', async () => {
+    const database = createPostgresDatabase({
+      migrationsFolder: createMigrationsFolder(true),
+      connectionString: () => 'postgres://guren:hunter2@db.internal:54322/guren',
+    })
+
+    // SQLSTATE 42501 insufficient_privilege: the tracker exists, this role
+    // just cannot read it. Absorbing it reports applied migrations as pending.
+    unsafeImpl = async () => {
+      throw Object.assign(new Error('permission denied for schema drizzle'), { code: '42501' })
+    }
+
+    const error = await database.migrationStatus().then(
+      () => null,
+      (reason: unknown) => reason as Error,
+    )
+
+    expect(error?.message).toContain('permission denied for schema drizzle')
+    expect(error?.message).not.toContain('hunter2')
+  })
+
   it('re-applies migrations after dropping the schema', async () => {
-    // Mock-level coverage: the live equivalent is the sqlite test in
+    // Mock-level coverage; the live equivalent is the sqlite test in
     // src/migration-utils.test.ts, which queries a table after a bare reset.
-    // Without this run the reset would leave the schema it just dropped gone,
-    // and the next query would fail with `relation ... does not exist`.
     const database = createPostgresDatabase({
       migrationsFolder: createMigrationsFolder(true),
       connectionString: () => 'postgres://example',

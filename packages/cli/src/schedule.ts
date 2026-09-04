@@ -2,33 +2,18 @@ import { consola } from 'consola'
 import { resolve } from 'node:path'
 import { existsSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
+import { matchesCron, parseCron, toTimezone, type ParsedCron } from '@guren/core'
 
 export interface ScheduleOptions {
-  /**
-   * Application root directory.
-   */
   appRoot?: string
-
-  /**
-   * Path to the schedule kernel file.
-   */
   kernel?: string
-
-  /**
-   * Output as JSON.
-   */
   json?: boolean
 }
 
 export interface ScheduleRunOptions extends ScheduleOptions {
-  /**
-   * Run a specific task by name.
-   */
+  /** Run only the task with this name. */
   task?: string
-
-  /**
-   * Force run (ignore schedule).
-   */
+  /** Run regardless of whether the task is due. */
   force?: boolean
 }
 
@@ -79,13 +64,10 @@ function normalizeTask(raw: ScheduledTaskLike): TaskInfo {
   }
 }
 
-/**
- * Try to load the schedule kernel from common locations.
- */
+/** Loads the schedule kernel from `--kernel`, or from the conventional locations. */
 async function loadScheduleKernel(options: ScheduleOptions = {}): Promise<{ tasks: TaskInfo[]; scheduler?: unknown } | null> {
   const appRoot = options.appRoot ? resolve(options.appRoot) : process.cwd()
 
-  // Common kernel file locations
   const kernelPaths = options.kernel
     ? [resolve(appRoot, options.kernel)]
     : [
@@ -102,7 +84,6 @@ async function loadScheduleKernel(options: ScheduleOptions = {}): Promise<{ task
       try {
         const mod = await import(pathToFileURL(kernelPath).href)
 
-        // Look for common export patterns
         const scheduleFunction =
           mod.scheduleTasksKernel ||
           mod.schedule ||
@@ -132,55 +113,67 @@ async function loadScheduleKernel(options: ScheduleOptions = {}): Promise<{ task
 }
 
 /**
- * Parse cron expression and get next run time.
+ * How far ahead a "next run" is searched. Four years covers a Feb 29 task;
+ * a day-of-week + Feb 29 combination past that shows as "-" in the listing.
  */
-function getNextRunTime(expression: string, timezone?: string): Date | null {
+const NEXT_RUN_HORIZON_MS = 4 * 366 * 24 * 60 * 60 * 1000
+
+/**
+ * The next instant at which the scheduler would fire `expression`.
+ *
+ * Mirrors `ScheduledTask.isDue()`: a timezone-bearing task is matched against
+ * its wall clock in that zone, the rest against local time. Walking the same
+ * predicate forward is what keeps the listed "next run" honest — a second
+ * estimator is how the CLI came to announce a local-time run for a task the
+ * scheduler fires on Tokyo time.
+ *
+ * Steps a wall-clock hour at a time while the hour or day cannot match, then
+ * a minute at a time. An hour step can only skip wall-clock minutes a DST gap
+ * removed, so it never overshoots a real occurrence.
+ */
+export function getNextRunTime(
+  expression: string,
+  timezone?: string,
+  from: Date = new Date(),
+): Date | null {
+  let cron: ParsedCron
   try {
-    const parts = expression.split(' ')
-    if (parts.length !== 5) return null
-
-    const now = new Date()
-    const [minute, hour, dayOfMonth, month, dayOfWeek] = parts
-
-    // Simple estimation for common patterns
-    const next = new Date(now)
-
-    if (minute === '*' && hour === '*') {
-      // Every minute
-      next.setMinutes(next.getMinutes() + 1)
-      next.setSeconds(0)
-    } else if (minute !== '*' && hour === '*') {
-      // Every hour at specific minute
-      const targetMinute = parseInt(minute, 10)
-      if (next.getMinutes() >= targetMinute) {
-        next.setHours(next.getHours() + 1)
-      }
-      next.setMinutes(targetMinute)
-      next.setSeconds(0)
-    } else if (minute !== '*' && hour !== '*') {
-      // Daily at specific time
-      const targetHour = parseInt(hour, 10)
-      const targetMinute = parseInt(minute, 10)
-      if (
-        next.getHours() > targetHour ||
-        (next.getHours() === targetHour && next.getMinutes() >= targetMinute)
-      ) {
-        next.setDate(next.getDate() + 1)
-      }
-      next.setHours(targetHour)
-      next.setMinutes(targetMinute)
-      next.setSeconds(0)
-    }
-
-    return next
+    cron = parseCron(expression)
   } catch {
     return null
   }
+  // A field outside its range ("0 25 * * *") parses to no values at all.
+  if (Object.values(cron).some((values) => values.length === 0)) return null
+
+  const wallClock = (instant: Date): Date => (timezone ? toTimezone(instant, timezone) : instant)
+  const dayMatches = (wall: Date): boolean =>
+    cron.dayOfMonth.includes(wall.getDate()) &&
+    cron.month.includes(wall.getMonth() + 1) &&
+    cron.dayOfWeek.includes(wall.getDay())
+
+  const next = new Date(from)
+  next.setSeconds(0, 0)
+  next.setMinutes(next.getMinutes() + 1)
+
+  const horizon = from.getTime() + NEXT_RUN_HORIZON_MS
+
+  try {
+    while (next.getTime() <= horizon) {
+      const wall = wallClock(next)
+      if (matchesCron(wall, cron)) return next
+
+      const stepMinutes =
+        cron.hour.includes(wall.getHours()) && dayMatches(wall) ? 1 : 60 - wall.getMinutes()
+      next.setTime(next.getTime() + stepMinutes * 60_000)
+    }
+  } catch {
+    // An unknown timezone throws from Intl; the listing shows "-" for it.
+    return null
+  }
+
+  return null
 }
 
-/**
- * Format time difference as human readable.
- */
 function formatTimeUntil(date: Date): string {
   const now = new Date()
   const diff = date.getTime() - now.getTime()
@@ -197,9 +190,6 @@ function formatTimeUntil(date: Date): string {
   return 'in < 1 min'
 }
 
-/**
- * List all scheduled tasks.
- */
 export async function listScheduledTasks(options: ScheduleOptions = {}): Promise<void> {
   const kernel = await loadScheduleKernel(options)
 
@@ -237,7 +227,6 @@ export async function listScheduledTasks(options: ScheduleOptions = {}): Promise
     return
   }
 
-  // Build table data
   const rows: string[][] = []
 
   for (const task of kernel.tasks) {
@@ -250,23 +239,19 @@ export async function listScheduledTasks(options: ScheduleOptions = {}): Promise
     ])
   }
 
-  // Print header
   console.log('')
   console.log('Scheduled Tasks')
   console.log('================')
   console.log('')
 
-  // Print table
   const headers = ['Name', 'Expression', 'Next Run', 'Timezone']
   const colWidths = headers.map((h, i) =>
     Math.max(h.length, ...rows.map((r) => r[i].length))
   )
 
-  // Header row
   console.log(headers.map((h, i) => h.padEnd(colWidths[i])).join('  '))
   console.log(colWidths.map((w) => '-'.repeat(w)).join('  '))
 
-  // Data rows
   for (const row of rows) {
     console.log(row.map((c, i) => c.padEnd(colWidths[i])).join('  '))
   }
@@ -275,9 +260,6 @@ export async function listScheduledTasks(options: ScheduleOptions = {}): Promise
   console.log(`Total: ${kernel.tasks.length} task${kernel.tasks.length === 1 ? '' : 's'}`)
 }
 
-/**
- * Run scheduled tasks.
- */
 export async function runScheduledTasks(options: ScheduleRunOptions = {}): Promise<void> {
   const kernel = await loadScheduleKernel(options)
 
@@ -286,7 +268,6 @@ export async function runScheduledTasks(options: ScheduleRunOptions = {}): Promi
     return
   }
 
-  // Filter by task name if specified
   const tasksToRun = options.task
     ? kernel.tasks.filter((t) => t.name === options.task)
     : kernel.tasks

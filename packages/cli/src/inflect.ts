@@ -14,21 +14,12 @@ export function singularize(name: string): string {
 }
 
 /**
- * Collection name for a resource, tolerant of input that is already plural.
- *
- * Every scaffolder must route through this: the schema export, the model's
- * import of it, and `guren check`'s lookup are three independent derivations
- * that only agree if they share one rule.
- *
- * A lone trailing `s` is read as plural, so a singular `Status` becomes
- * `Statu`. English cannot resolve that without a dictionary — `News` and
- * `Status` are structurally identical — which is why only the names inside the
- * triangle route through here. Route slugs and generated type names in
- * `make:feature` pluralize directly, so `Status` still yields `/statuses`.
- *
- * The one caller outside the triangle is `dbArtifactPattern()`, which does not
- * derive a name from this: it accepts the result as one spelling among several
- * when matching user-chosen file names, so a wrong plural costs it nothing.
+ * Collection name for a resource, tolerant of already-plural input. The schema
+ * export, the model's import of it, and `guren check`'s lookup only agree
+ * because all three derive the name here. A lone trailing `s` reads as plural,
+ * so a singular `Status` becomes `Statu`; route slugs and generated type names
+ * therefore pluralize directly, and `dbArtifactPattern()` treats the result as
+ * one spelling among several.
  */
 export function collectionName(name: string): string {
   return pluralize(singularize(name))

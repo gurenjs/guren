@@ -12,67 +12,26 @@ import type {
 import { HttpException } from './HttpException'
 import { renderErrorPage } from './error-page'
 
-/**
- * Exception handler for centralized error handling.
- *
- * @example
- * ```typescript
- * const handler = new ExceptionHandler({ debug: false })
- *
- * // Report exceptions (e.g., to Sentry)
- * handler.report(async (error) => {
- *   await sentry.captureException(error)
- * })
- *
- * // Custom renderer for validation errors
- * handler.render(ValidationException, (error, ctx) => {
- *   return ctx.json({ errors: error.errors }, 422)
- * })
- *
- * // Don't report 404 errors
- * handler.dontReport(NotFoundHttpException)
- *
- * // Use as middleware
- * app.use('*', handler.middleware())
- * ```
- */
+/** Centralized error handling: reporting, per-class renderers, middleware. */
 export class ExceptionHandler {
-  /**
-   * Exception reporters.
-   */
   protected reporters: ExceptionReporter[] = []
 
-  /**
-   * Exception renderers.
-   */
   protected renderers: RendererRegistration[] = []
 
-  /**
-   * Exception classes to not report.
-   */
   protected dontReportClasses: ExceptionClass[] = []
 
-  /**
-   * Handler options.
-   */
   protected options: ExceptionHandlerOptions
 
   constructor(options: ExceptionHandlerOptions = {}) {
     this.options = options
   }
 
-  /**
-   * Register an exception reporter.
-   * Reporters are called for every exception (unless in dontReport list).
-   */
+  /** Reporters run for every exception outside the `dontReport` list. */
   report(callback: ExceptionReporter): this {
     this.reporters.push(callback)
     return this
   }
 
-  /**
-   * Register a custom renderer for an exception type.
-   */
   render<T extends Error>(
     errorClass: ExceptionClass<T>,
     renderer: ExceptionRenderer<T>
@@ -84,17 +43,11 @@ export class ExceptionHandler {
     return this
   }
 
-  /**
-   * Add an exception class to the don't report list.
-   */
   dontReport(errorClass: ExceptionClass): this {
     this.dontReportClasses.push(errorClass)
     return this
   }
 
-  /**
-   * Check if debug mode is enabled.
-   */
   shouldShowDetails(): boolean {
     if (this.options.isDebug) {
       return this.options.isDebug()
@@ -105,56 +58,35 @@ export class ExceptionHandler {
     return process.env.NODE_ENV !== 'production'
   }
 
-  /**
-   * Handle an exception.
-   */
   async handle(error: Error, ctx: Context): Promise<Response> {
-    // Report the exception
     await this.reportException(error)
 
-    // Render the exception
     return this.renderException(error, ctx)
   }
 
-  /**
-   * Report an exception to all reporters.
-   */
   protected async reportException(error: Error): Promise<void> {
-    // Check if we should report
     if (this.shouldNotReport(error)) {
       return
     }
 
-    // An app with no reporter configured would otherwise turn a 500 into a
-    // rendered page and nothing else — on a hosted runtime, where stdout is
-    // the only channel back to the operator, that leaves the failure
-    // undiagnosable. Anything registering a reporter owns the reporting.
-    //
-    // Server failures only. A 4xx is already delivered to the caller in full —
-    // a `ValidationException`'s field errors are the response body — so
-    // logging it adds nothing an operator can act on, while a route that
-    // rejects invalid input as designed prints a stack trace per request.
-    // This gate is deliberately *not* `shouldNotReport()`: a registered
-    // reporter still receives 4xx, because an app tracking auth failures or
-    // validation churn through one is asking for exactly those.
+    // Last-resort logging for an app with no reporter, where stdout is the
+    // only channel back to the operator. 5xx only: a 4xx is already delivered
+    // to the caller in full, and logging it would print a stack trace per
+    // rejected request. Not `shouldNotReport()` — a *registered* reporter
+    // still receives 4xx.
     if (this.reporters.length === 0 && resolveExceptionStatus(error) >= 500) {
       console.error('Unhandled exception:', error)
     }
 
-    // Call all reporters
     for (const reporter of this.reporters) {
       try {
         await reporter(error)
       } catch (reporterError) {
-        // Don't let reporter errors crash the app
         console.error('Exception reporter failed:', reporterError)
       }
     }
   }
 
-  /**
-   * Check if an exception should not be reported.
-   */
   protected shouldNotReport(error: Error): boolean {
     return this.dontReportClasses.some(
       (errorClass) => this.matchesErrorClass(error, errorClass)
@@ -171,29 +103,20 @@ export class ExceptionHandler {
       || constructorName === errorClassName
   }
 
-  /**
-   * Render an exception to a response.
-   */
   protected async renderException(error: Error, ctx: Context): Promise<Response> {
-    // Check for custom renderer
     for (const { errorClass, renderer } of this.renderers) {
       if (this.matchesErrorClass(error, errorClass)) {
         return renderer(error, ctx)
       }
     }
 
-    // Default rendering
     return this.renderDefaultException(error, ctx)
   }
 
-  /**
-   * Default exception rendering.
-   */
   protected renderDefaultException(error: Error, ctx: Context): Response {
     const debug = this.shouldShowDetails()
-    // Resolved before the branch, so the status this renders with is the same
-    // number `reportException` judged it by. `toResponse()` supplies the body;
-    // the status comes from the one rule either way.
+    // Resolved before the branch so this renders with the same number
+    // `reportException` judged it by; `toResponse()` supplies only the body.
     const statusCode = resolveExceptionStatus(error)
 
     if (HttpException.isHttpException(error)) {
@@ -222,11 +145,7 @@ export class ExceptionHandler {
     return ctx.json(body, statusCode as ContentfulStatusCode)
   }
 
-  /**
-   * Determine whether the request expects an HTML response.
-   * Returns false for Inertia, XHR, and JSON API requests so they
-   * continue to receive JSON error payloads.
-   */
+  /** False for Inertia, XHR and JSON callers, which need a JSON payload. */
   protected wantsHtmlResponse(ctx: Context): boolean {
     if (!ctx?.req?.header) return false
     const accept = ctx.req.header('accept') ?? ''
@@ -238,9 +157,6 @@ export class ExceptionHandler {
     return !isJsonRequest && accept.includes('text/html')
   }
 
-  /**
-   * Create middleware for exception handling.
-   */
   middleware(): Middleware {
     return async (ctx, next) => {
       try {
@@ -259,48 +175,29 @@ export class ExceptionHandler {
 }
 
 /**
- * The HTTP status an exception carries, or 500 when it names none.
- *
- * Duck-typed on `statusCode` rather than on `instanceof HttpException`, which
- * is what lets a foreign exception (`ModelNotFoundException` from
- * `@guren/orm`, crossing a package boundary) render as its own 404 rather than
- * a 500. `HttpException.isHttpException()` treats the same property as the
- * authority, so this reads what that check already required.
- *
- * One rule, read by both halves of the handler: what an exception is delivered
- * as and whether the fallback logger treats it as a server failure must be the
- * same number, or an exception could be sent as a 422 and reported as a crash.
- * That is why `renderDefaultException` takes the status from here rather than
- * from `toResponse()`, whose `status` a duck-typed implementation could spell
- * differently from its own `statusCode`.
+ * The HTTP status an exception carries, or 500 when it names none. Duck-typed
+ * on `statusCode` rather than `instanceof`, so a foreign exception crossing a
+ * package boundary (`ModelNotFoundException` from `@guren/orm`) still renders
+ * as its own 404. The one rule both halves of the handler read: rendering and
+ * the fallback logger must judge an exception by the same number.
  */
 function resolveExceptionStatus(error: unknown): number {
   const statusCode = (error as { statusCode?: unknown } | null | undefined)?.statusCode
   return typeof statusCode === 'number' ? statusCode : 500
 }
 
-/**
- * Create an exception handler.
- */
 export function createExceptionHandler(
   options?: ExceptionHandlerOptions
 ): ExceptionHandler {
   return new ExceptionHandler(options)
 }
 
-// Global exception handler
 let globalExceptionHandler: ExceptionHandler | null = null
 
-/**
- * Set the global exception handler.
- */
 export function setExceptionHandler(handler: ExceptionHandler): void {
   globalExceptionHandler = handler
 }
 
-/**
- * Get the global exception handler.
- */
 export function getExceptionHandler(): ExceptionHandler {
   if (!globalExceptionHandler) {
     throw new Error(
@@ -310,9 +207,6 @@ export function getExceptionHandler(): ExceptionHandler {
   return globalExceptionHandler
 }
 
-/**
- * Abort the request with an HTTP exception.
- */
 export function abort(
   statusCode: number,
   message?: string,
@@ -321,9 +215,6 @@ export function abort(
   throw new HttpException(statusCode, message ?? 'Error', errors)
 }
 
-/**
- * Abort if condition is true.
- */
 export function abortIf(
   condition: boolean,
   statusCode: number,
@@ -334,9 +225,6 @@ export function abortIf(
   }
 }
 
-/**
- * Abort unless condition is true.
- */
 export function abortUnless(
   condition: boolean,
   statusCode: number,

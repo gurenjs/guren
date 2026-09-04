@@ -1,8 +1,6 @@
 import type { CacheStore, RedisStoreOptions } from '../types'
 
-/**
- * Redis interface (ioredis-compatible).
- */
+/** ioredis-compatible client surface. */
 interface RedisClient {
   get(key: string): Promise<string | null>
   set(key: string, value: string, mode?: string, duration?: number): Promise<unknown>
@@ -24,20 +22,7 @@ interface RedisPipeline {
   exec(): Promise<unknown>
 }
 
-/**
- * Redis-backed cache store.
- *
- * @example
- * ```ts
- * import Redis from 'ioredis'
- *
- * const redis = new Redis(process.env.REDIS_URL)
- * const store = new RedisStore({ client: redis })
- *
- * await store.set('user:1', { name: 'John' }, 3600)
- * const user = await store.get<User>('user:1')
- * ```
- */
+/** Redis-backed cache store. */
 export class RedisStore implements CacheStore {
   private readonly client: RedisClient
   private readonly prefix: string
@@ -47,23 +32,14 @@ export class RedisStore implements CacheStore {
     this.prefix = options.prefix ?? 'cache:'
   }
 
-  /**
-   * Get the prefixed key.
-   */
   private prefixKey(key: string): string {
     return `${this.prefix}${key}`
   }
 
-  /**
-   * Serialize a value for storage.
-   */
   private serialize<T>(value: T): string {
     return JSON.stringify(value)
   }
 
-  /**
-   * Deserialize a stored value.
-   */
   private deserialize<T>(value: string | null): T | null {
     if (value === null) {
       return null
@@ -111,27 +87,15 @@ export class RedisStore implements CacheStore {
   }
 
   async increment(key: string, value = 1): Promise<number> {
-    const prefixedKey = this.prefixKey(key)
-
-    // Check if key exists, if not initialize to 0
-    const exists = await this.client.exists(prefixedKey)
-    if (!exists) {
-      await this.client.set(prefixedKey, '0')
-    }
-
-    return this.client.incrby(prefixedKey, value)
+    // INCRBY treats a missing key as 0 and leaves an existing key's TTL alone,
+    // so the one command is the whole operation. An exists-then-SET preamble
+    // is not: two callers can both see "missing", both write 0, and one
+    // increment is lost.
+    return this.client.incrby(this.prefixKey(key), value)
   }
 
   async decrement(key: string, value = 1): Promise<number> {
-    const prefixedKey = this.prefixKey(key)
-
-    // Check if key exists, if not initialize to 0
-    const exists = await this.client.exists(prefixedKey)
-    if (!exists) {
-      await this.client.set(prefixedKey, '0')
-    }
-
-    return this.client.decrby(prefixedKey, value)
+    return this.client.decrby(this.prefixKey(key), value)
   }
 
   async remember<T>(key: string, ttl: number, callback: () => Promise<T>): Promise<T> {
@@ -201,16 +165,10 @@ export class RedisStore implements CacheStore {
     return this.client.ttl(this.prefixKey(key))
   }
 
-  /**
-   * Get the Redis client instance.
-   */
   getClient(): unknown {
     return this.client
   }
 
-  /**
-   * Get the key prefix.
-   */
   getPrefix(): string {
     return this.prefix
   }

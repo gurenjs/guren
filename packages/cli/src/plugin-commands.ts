@@ -6,10 +6,8 @@ import type { ArgsDef, CommandDef } from 'citty'
 import { packageContentRoot, readInstalledPluginManifests, resolveInside } from './plugin-manifest'
 
 /**
- * A CLI command contributed by an installed plugin, discovered from its
- * `gurenPlugin.commands` manifest. Discovery never imports plugin code —
- * the entry module is only loaded when the command is invoked (or when its
- * own --help needs the real argument definitions).
+ * A CLI command contributed by an installed plugin. Discovery never imports
+ * plugin code; the entry module loads only when the command is invoked.
  */
 export interface DiscoveredPluginCommand {
   name: string
@@ -19,15 +17,9 @@ export interface DiscoveredPluginCommand {
 }
 
 /**
- * Discover CLI commands declared by installed plugins via the
- * `gurenPlugin.commands` manifest field.
- *
- * Rules:
- * - Command names must contain a `:` namespace.
- * - Built-in command names (`reservedNames`) always win.
- * - A name declared by multiple plugins is dropped for all of them, with a
- *   single warning naming every declaring package.
- * - The commands entry must resolve inside the plugin's package directory.
+ * Commands declared by installed plugins via `gurenPlugin.commands`. Built-in
+ * names win, and a name declared by more than one plugin is dropped for all of
+ * them rather than resolved.
  */
 export async function discoverPluginCommands(
   cwd: string = process.cwd(),
@@ -94,11 +86,9 @@ async function loadPluginCommand(discovered: DiscoveredPluginCommand): Promise<C
 }
 
 /**
- * Wrap a discovered plugin command in a lightweight citty command whose
- * metadata comes from the manifest. The plugin's entry module is imported
- * only when the command runs or renders its own usage; it must
- * default-export a record of citty command definitions keyed by command
- * name.
+ * Wraps the command in a citty command whose metadata comes from the manifest.
+ * The plugin entry must default-export a record of citty command definitions
+ * keyed by command name.
  */
 export function createPluginCommandProxy(discovered: DiscoveredPluginCommand): CommandDef {
   return defineCommand({
@@ -106,9 +96,8 @@ export function createPluginCommandProxy(discovered: DiscoveredPluginCommand): C
       name: discovered.name,
       description: `Provided by ${discovered.packageName}`,
     },
-    // Lazy so the root `guren --help` listing (which only resolves meta)
-    // never imports plugin code, while this command's own usage shows the
-    // real argument definitions.
+    // Lazy so the root `guren --help` listing, which only resolves meta, never
+    // imports plugin code.
     args: async (): Promise<ArgsDef> => {
       const command = await loadPluginCommand(discovered)
       return (typeof command.args === 'function' ? await command.args() : command.args) ?? {}

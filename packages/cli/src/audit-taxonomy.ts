@@ -1,8 +1,6 @@
 /**
- * Standard security classifications for audit findings (RFC 0007).
- *
- * Classifications are versioned: OWASP Top 10 2021 and 2025 number their
- * categories differently, so a bare "A03" is ambiguous without one.
+ * Standard security classifications for audit findings (RFC 0007). Versioned,
+ * because OWASP Top 10 2021 and 2025 number their categories differently.
  */
 
 export interface AuditClassification {
@@ -27,10 +25,8 @@ function cwe(id: string, name: string): AuditClassification {
 
 /**
  * Rule classifications, keyed by finding-key prefix (`authz:`, `secret:`, …).
- * Infrastructure findings (routes:load, audit-config:*) carry none.
- *
- * CWE pairings follow the official OWASP Top 10 2021 CWE mapping where one
- * exists (e.g. CWE-798 hardcoded credentials sits under A07, not A02).
+ * Infrastructure findings (routes:load, audit-config:*) carry none. CWE pairings
+ * follow the official OWASP Top 10 2021 CWE mapping where one exists.
  */
 const RULE_CLASSIFICATIONS: Record<string, AuditClassification[]> = {
   validation: [owasp('A03', 'Injection'), cwe('CWE-20', 'Improper Input Validation')],
@@ -66,9 +62,7 @@ const RULE_CLASSIFICATIONS: Record<string, AuditClassification[]> = {
   /**
    * Agent-tool annotations that contradict the action behind them (RFC 0016).
    * Its own prefix rather than a shared `agent:` bucket: `classifyFindingKey`
-   * slices at the first `:`, so one prefix can only carry one classification
-   * — and the other agent-facing rules are validation and authorization
-   * failures, already classified as such.
+   * slices at the first `:`, so one prefix carries one classification.
    */
   'agent-annotation': [
     owaspApi('API9', 'Improper Inventory Management'),

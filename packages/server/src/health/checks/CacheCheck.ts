@@ -1,35 +1,20 @@
 import type { CheckResult } from '../types'
 import { HealthCheck } from '../HealthCheck'
 
-/**
- * Cache store interface (minimal).
- */
 export interface CacheStoreInterface {
   get<T>(key: string): Promise<T | null>
   put<T>(key: string, value: T, ttl?: number): Promise<void>
   forget(key: string): Promise<boolean>
 }
 
-/**
- * Options for cache health check.
- */
 export interface CacheCheckOptions {
-  /**
-   * Custom name for this check.
-   * @default 'cache'
-   */
+  /** @default 'cache' */
   name?: string
 
-  /**
-   * Key to use for health check test.
-   * @default '__health_check__'
-   */
+  /** @default '__health_check__' */
   testKey?: string
 }
 
-/**
- * Health check for cache functionality.
- */
 export class CacheCheck extends HealthCheck {
   readonly name: string
 
@@ -47,13 +32,10 @@ export class CacheCheck extends HealthCheck {
     const testValue = `health_check_${Date.now()}`
 
     try {
-      // Test write
       await this.cache.put(this.testKey, testValue, 60)
 
-      // Test read
       const retrieved = await this.cache.get<string>(this.testKey)
 
-      // Clean up
       await this.cache.forget(this.testKey)
 
       if (retrieved === testValue) {

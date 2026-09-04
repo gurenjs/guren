@@ -13,14 +13,10 @@ export const DATABASE_DRIVERS = ['sqlite', 'postgres', 'mysql'] as const
 export type DatabaseDriver = (typeof DATABASE_DRIVERS)[number]
 
 /**
- * The directory holding every template a blueprint can copy from. It is the
- * only source tree in this package's `files` field, so a layer resolved outside
- * it scaffolds fine from the monorepo and ENOENTs from an npm install: that is
- * how the `blog` blueprint shipped broken for releases, overlaying
- * `examples/blog`, which no tarball contains.
- *
- * Layers are therefore named, not pathed — `TemplateName` makes a layer outside
- * this directory unrepresentable rather than merely asserted against.
+ * The directory holding every template a blueprint can copy from, and the only
+ * source tree in this package's `files` field: a layer resolved outside it
+ * scaffolds fine from the monorepo and ENOENTs from an npm install (how `blog`
+ * shipped broken, overlaying `examples/blog`). Layers are named, not pathed.
  */
 export const TEMPLATES_ROOT = fileURLToPath(new URL('../templates', import.meta.url))
 
@@ -32,11 +28,10 @@ export function templateDir(name: TemplateName): string {
 
 /**
  * Every template that ships a manifest — `blog` and `default-ssr` overlay one
- * instead. Exported because a template's `package.json` is the one manifest in
- * this repository that resolves against npm, so more than one gate has to read
- * exactly this set: `scripts/sync-template-deps.ts` keeps their versions
- * following the workspace, and `scripts/smoke/local-packages.ts` derives from
- * their dependencies which packages a smoke must resolve from the checkout.
+ * instead. Exported because these resolve against npm, so more than one gate
+ * reads exactly this set: `scripts/sync-template-deps.ts` (versions follow the
+ * workspace) and `scripts/smoke/local-packages.ts` (which packages a smoke
+ * resolves from the checkout).
  */
 export async function templateManifests(): Promise<string[]> {
   const paths: string[] = []
@@ -100,9 +95,8 @@ const API_TRANSFORM_FILES = [
   'bin/serve.ts',
 ]
 
-// Transforms run once, after every layer has landed, and each path is read
-// unconditionally — so this lists every tokenised file in the scaffolded tree,
-// base template and overlay alike, not just what the overlay ships.
+// Transforms read each path unconditionally after every layer has landed, so
+// this lists every tokenised file in the tree, base template and overlay alike.
 const BLOG_TRANSFORM_FILES = [
   ...DEFAULT_TRANSFORM_FILES,
   'resources/js/components/Layout.tsx',
@@ -130,9 +124,8 @@ const blueprintRegistry: Record<AppBlueprintName, AppBlueprint> = {
     name: 'blog',
     description: 'Blog starter — posts CRUD, session auth, and a seeded demo account.',
     baseTemplate: 'default',
-    // The overlay lands last in both modes so its pages and controllers win, and
-    // SSR still gets `default-ssr` — the blueprint this replaces overlaid only
-    // itself in SSR mode and shipped an app with no ssr.tsx entry.
+    // The overlay lands last so its pages and controllers win; SSR still needs
+    // `default-ssr` for its ssr.tsx entry.
     overlayTemplates: {
       spa: ['blog'],
       ssr: ['default-ssr', 'blog'],
@@ -182,11 +175,9 @@ function replaceTokens(content: string, tokens: Map<string, string>): string {
 const TEMPLATE_DOTFILES = new Map<string, string>([['_gitignore', '.gitignore']])
 
 async function copyLayer(layer: TemplateName, destination: string): Promise<void> {
-  // Collected from the copy itself rather than by walking the destination:
-  // `--force` scaffolds into a directory that may already hold files this
-  // layer never wrote, and those are none of our business to rename. A Set
-  // because neither Node nor Bun documents `filter` as running exactly once
-  // per entry, and a repeat would make the second rename fail on ENOENT.
+  // Collected from the copy rather than by walking the destination: `--force`
+  // may scaffold into files this layer never wrote. A Set because `filter` is
+  // not documented as running once per entry, and a repeat rename would ENOENT.
   const dotfiles = new Set<string>()
   const source = templateDir(layer)
 
@@ -201,9 +192,8 @@ async function copyLayer(layer: TemplateName, destination: string): Promise<void
     },
   })
 
-  // Per layer, not once after every layer has copied: an overlay shipping its
-  // own ignore file has to win over the base template's, and a single restore
-  // at the end would rename the base's leftover on top of it.
+  // Per layer: an overlay's own ignore file must win over the base template's,
+  // which a single restore at the end would rename on top of.
   for (const path of dotfiles) {
     const dotted = TEMPLATE_DOTFILES.get(basename(path)) as string
     await rename(join(destination, path), join(destination, dirname(path), dotted))
@@ -237,8 +227,6 @@ async function scaffoldEnvFiles(destination: string): Promise<void> {
   await writeFile(envPath, envContent.endsWith('\n') ? envContent : `${envContent}\n`, 'utf8')
 }
 
-/* ---------- Database-specific files ---------- */
-
 export const DATABASE_DEFAULTS = {
   postgres: { url: 'postgres://guren:guren@localhost:54322/guren', dialect: 'postgresql', dep: { postgres: '^3.4.3' } },
   mysql:    { url: 'mysql://guren:guren@localhost:33306/guren',    dialect: 'mysql',      dep: { mysql2: '^3.11.3' } },
@@ -249,12 +237,10 @@ export const DATABASE_DEFAULTS = {
 >
 
 /**
- * `config/database.ts` ships as one real source file per driver, copied
- * verbatim — no tokens, and `templates/database` is not a `TemplateName`
- * layer, so only the selected driver's file reaches the app. The full
- * rationale lives in this package's CLAUDE.md;
- * `tests/database-config-template.test.ts` pins the files to this path and to
- * the `DATABASE_DEFAULTS` constants they hardcode.
+ * `config/database.ts` ships as one real source per driver, copied verbatim —
+ * no tokens, and `templates/database` is not a `TemplateName` layer, so only the
+ * selected driver's file reaches the app. `tests/database-config-template.test.ts`
+ * pins the files to this path and to the `DATABASE_DEFAULTS` they hardcode.
  */
 export function databaseConfigTemplatePath(driver: DatabaseDriver): string {
   return join(TEMPLATES_ROOT, 'database', driver, 'config/database.ts')
@@ -274,16 +260,11 @@ async function loadDatabaseConfig(driver: DatabaseDriver): Promise<string> {
 }
 
 /**
- * The generic single-`users`-table schema, one real source per driver under
- * `templates/database/<driver>/db/schema.ts` — the same verbatim-copy shape
- * `config/database.ts` uses, and for the same reason (a string-emitted file
- * is a file no tsconfig covers). Each dialect imports from its own
- * `@guren/orm/drizzle/<dialect>` barrel, the same modules `guren add auth` /
- * `add resource` merge new columns into.
- *
- * Named `db/schema.ts`, not `db/schema.<driver>.ts`: the suffixed name means
- * "a template ships its own schema" (see `schemaVariantPath`), and these are
- * the fallback for templates that ship none.
+ * The generic single-`users`-table schema, one real source per driver, each
+ * importing its own `@guren/orm/drizzle/<dialect>` barrel — what `guren add
+ * auth` / `add resource` merge columns into. The suffixed
+ * `db/schema.<driver>.ts` name means "a template ships its own schema" (see
+ * `schemaVariantPath`); this is the fallback for the rest.
  */
 export function databaseSchemaTemplatePath(driver: DatabaseDriver): string {
   return join(TEMPLATES_ROOT, 'database', driver, 'db/schema.ts')
@@ -303,19 +284,11 @@ async function loadFallbackSchema(driver: DatabaseDriver): Promise<string> {
 }
 
 /**
- * Templates whose app code needs more than the single `users` table above ship
- * their own schema, one file per driver, as `db/schema.<driver>.ts`. The variant
- * for the selected driver becomes `db/schema.ts` and the rest are deleted.
- *
- * The indirection exists because `applyDatabaseConfig` has to overwrite
- * `db/schema.ts` — a template carrying a plain `db/schema.ts` written for one
- * driver would otherwise be handed to users who picked another. The blueprint
- * this replaced worked around that by regenerating its schema from a copy kept
- * in this file, which then drifted from the columns its own controllers read.
- *
- * A template that ships some variants but not the selected one is a packaging
- * bug, not a reason to fall back to the generic schema: the fallback would
- * scaffold an app whose models reference tables that do not exist.
+ * Templates needing more than the generic `users` table ship a schema per driver
+ * as `db/schema.<driver>.ts`; the selected one becomes `db/schema.ts` and the
+ * rest are deleted — `applyDatabaseConfig` overwrites `db/schema.ts` regardless.
+ * A template shipping variants but not the selected driver is a packaging bug,
+ * not a reason to fall back to the generic schema.
  */
 function schemaVariantPath(destination: string, driver: DatabaseDriver): string {
   return join(destination, `db/schema.${driver}.ts`)
@@ -342,12 +315,9 @@ async function resolveSchema(destination: string, driver: DatabaseDriver): Promi
 }
 
 /**
- * `drizzle.config.ts` ships the same way as `config/database.ts` above: one
- * real source per driver, copied verbatim. The only variance the deleted
- * string generator had was driver-keyed — the URL and dialect from
- * `DATABASE_DEFAULTS`, plus the SQLite-only DATABASE_URL guard that Postgres
- * and MySQL must not inherit (they take a real connection string here, so a
- * scheme check would reject every valid value they have).
+ * `drizzle.config.ts` ships one real source per driver, copied verbatim. Only
+ * SQLite carries the DATABASE_URL scheme guard: Postgres and MySQL take a real
+ * connection string here, which such a check would reject.
  */
 export function drizzleConfigTemplatePath(driver: DatabaseDriver): string {
   return join(TEMPLATES_ROOT, 'database', driver, 'drizzle.config.ts')
@@ -367,9 +337,8 @@ async function loadDrizzleConfig(driver: DatabaseDriver): Promise<string> {
 }
 
 /**
- * True when the driver runs in a container the scaffolder provisions — the one
- * fact that decides docker-compose.yml, the db:up/db:down scripts, and whether
- * the next-steps output mentions starting a database.
+ * True when the driver runs in a container the scaffolder provisions — decides
+ * docker-compose.yml, the db:up/db:down scripts, and the next-steps output.
  */
 export function usesDatabaseContainer(driver: DatabaseDriver): boolean {
   return generateDockerCompose(driver) !== null
@@ -426,15 +395,13 @@ async function applyDatabaseConfig(destination: string, driver: DatabaseDriver):
   const databaseConfig = await loadDatabaseConfig(driver)
   const drizzleConfig = await loadDrizzleConfig(driver)
 
-  // This function is the only source of `db/schema.ts`, so it owns the
-  // directory too: a template ships one only to have it overwritten, and
-  // `api-only` has nothing else under `db/` — git would not carry the empty
+  // This function is the only source of `db/schema.ts`, so it owns the directory
+  // too: `api-only` has nothing else under `db/`, so git carries no such
   // directory and the write below would ENOENT for every user.
   await mkdir(join(destination, 'db'), { recursive: true })
 
-  // Write all DB-variant files in parallel — including SQLite, since an overlay
-  // template may ship a schema written for one driver that has to be replaced
-  // with the driver the user actually selected.
+  // Written for every driver, SQLite included: an overlay may ship a schema
+  // written for another driver.
   await Promise.all([
     writeFile(join(destination, 'config/database.ts'), databaseConfig, 'utf8'),
     writeFile(join(destination, 'db/schema.ts'), schema, 'utf8'),
@@ -443,7 +410,6 @@ async function applyDatabaseConfig(destination: string, driver: DatabaseDriver):
     ...DATABASE_DRIVERS.map((name) => rm(schemaVariantPath(destination, name), { force: true })),
     writeFile(join(destination, 'drizzle.config.ts'), drizzleConfig, 'utf8'),
     dockerCompose ? writeFile(join(destination, 'docker-compose.yml'), dockerCompose, 'utf8') : Promise.resolve(),
-    // Update .env and .env.example with the correct DATABASE_URL
     ...['.env', '.env.example'].map(async (envFile) => {
       const envPath = join(destination, envFile)
       try {
@@ -455,7 +421,6 @@ async function applyDatabaseConfig(destination: string, driver: DatabaseDriver):
     }),
   ])
 
-  // SQLite needs neither a driver dependency nor a container, so both edits are skipped.
   if (dep || dockerCompose) {
     const packageJsonPath = join(destination, 'package.json')
     const raw = await readFile(packageJsonPath, 'utf8')
@@ -466,9 +431,8 @@ async function applyDatabaseConfig(destination: string, driver: DatabaseDriver):
       Object.assign(pkg.dependencies, dep)
     }
 
-    // Without these, the generated docker-compose.yml is something the user has
-    // to discover on their own — and an unstarted container surfaces only as a
-    // migration failure.
+    // Without these the generated docker-compose.yml is undiscoverable, and an
+    // unstarted container surfaces only as a migration failure.
     if (dockerCompose) {
       pkg.scripts ??= {}
       pkg.scripts['db:up'] = 'docker compose up -d'
@@ -486,12 +450,9 @@ export function listAppBlueprints(): AppBlueprintName[] {
 /**
  * The templates a blueprint copies from, in copy order: base first, then
  * overlays, each overwriting what came before. Omit `renderingMode` for every
- * mode the blueprint supports — what the packaging checks need; pass one for
- * the templates a single scaffold will actually copy.
- *
- * Repeats are returned as-is rather than deduped: a name listed twice means
- * "copy it again at this point", and collapsing it would silently change which
- * template wins.
+ * mode the blueprint supports; pass one for a single scaffold. Repeats are not
+ * deduped — a name listed twice means "copy it again", and collapsing it would
+ * change which template wins.
  */
 export function listBlueprintTemplates(
   blueprint: AppBlueprint,
@@ -544,8 +505,7 @@ export async function scaffoldAppBlueprint(options: ScaffoldAppBlueprintOptions)
     ['__APP_NAME__', appName],
   ])
 
-  // Checked up front so a missing layer fails before anything is written —
-  // otherwise the base template lands and the user is left with a half-built app.
+  // Up front so a missing layer fails before anything is written.
   await assertBlueprintLayersExist(blueprint, options.renderingMode)
 
   for (const layer of listBlueprintTemplates(blueprint, options.renderingMode)) {

@@ -1,10 +1,7 @@
 /**
- * Extracts Props type declarations from React page components using Babel AST.
- *
- * Supports:
- * 1. `interface Props { ... }` or `type Props = { ... }`
- * 2. Default export function's first parameter type annotation
- * 3. Local type/interface definitions referenced by Props (transitively)
+ * Extracts Props type declarations from React page components: a `Props`
+ * interface or alias, else the default export's first parameter annotation,
+ * plus the local types either references transitively.
  */
 import { readFile } from 'node:fs/promises'
 import { parseSourceFile } from './parse-cache'
@@ -36,10 +33,9 @@ export function extractPagePropsFromSource(
   const ast = parseSourceFile(source, filePath)
   if (!ast) return result
 
-  // Collect imported type names (to distinguish from local types)
+  // Tracked so `collectReferencedLocalTypes` can exclude them.
   const importedNames = new Set<string>()
 
-  // Collect type-only imports
   for (const node of ast.program.body) {
     if (node.type === 'ImportDeclaration' && node.importKind === 'type') {
       result.imports.push(source.slice(node.start!, node.end!))
@@ -71,7 +67,6 @@ export function extractPagePropsFromSource(
     }
   }
 
-  // Collect all local type/interface definitions (excluding Props itself)
   const localTypeMap = new Map<string, string>()
   for (const node of ast.program.body) {
     if (node.type === 'TSTypeAliasDeclaration' && node.id.name !== 'Props') {
@@ -91,9 +86,8 @@ export function extractPagePropsFromSource(
     }
   }
 
-  // Interfaces may extend other types (e.g. PaginatedPageProps<T>); compose
-  // the heritage clauses with the body as an intersection so inherited
-  // members stay part of the contract.
+  // Heritage clauses compose with the body as an intersection, so members
+  // inherited from e.g. PaginatedPageProps<T> stay part of the contract.
   function interfaceRawType(node: {
     body: { start?: number | null; end?: number | null }
     extends?: Array<{ start?: number | null; end?: number | null }> | null
@@ -105,7 +99,6 @@ export function extractPagePropsFromSource(
     return heritage.length > 0 ? `${heritage.join(' & ')} & ${body}` : body
   }
 
-  // Strategy 1: `interface Props` / `type Props` / `export interface Props` / `export type Props`
   for (const node of ast.program.body) {
     if (node.type === 'TSInterfaceDeclaration' && node.id.name === 'Props') {
       result.rawType = interfaceRawType(node)
@@ -132,7 +125,7 @@ export function extractPagePropsFromSource(
     }
   }
 
-  // Strategy 2: Default export function's first param type annotation
+  // Fallback: the default export function's first parameter annotation.
   for (const node of ast.program.body) {
     if (node.type !== 'ExportDefaultDeclaration') continue
     const decl = node.declaration
@@ -155,10 +148,7 @@ export function extractPagePropsFromSource(
   return result
 }
 
-/**
- * Finds local type/interface definitions transitively referenced from a type body string.
- * Returns the definitions in dependency order (dependencies first).
- */
+/** Local types referenced from `typeBody`, in dependency order. */
 function collectReferencedLocalTypes(
   typeBody: string,
   localTypeMap: Map<string, string>,
@@ -168,12 +158,10 @@ function collectReferencedLocalTypes(
   const visiting = new Set<string>()
 
   function visit(text: string): void {
-    // Match PascalCase identifiers that could be type references
     const identifiers = text.match(/\b[A-Z][A-Za-z0-9]*\b/g)
     if (!identifiers) return
 
     for (const name of identifiers) {
-      // Skip if it's an imported type, built-in, or already collected
       if (importedNames.has(name)) continue
       if (collected.has(name)) continue
       if (visiting.has(name)) continue
@@ -181,7 +169,6 @@ function collectReferencedLocalTypes(
 
       visiting.add(name)
       const definition = localTypeMap.get(name)!
-      // Recurse to collect transitive dependencies first
       visit(definition)
       collected.set(name, definition)
       visiting.delete(name)

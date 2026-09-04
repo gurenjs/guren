@@ -23,9 +23,8 @@ export default async function seed({ db }: SeederContext): Promise<void> {
     ])
     .onConflictDoNothing({ target: posts.id })
 
-  // The rows above carry explicit ids, which never advance the serial
-  // sequence — without this, the first `Post.create()` is handed id 1 and
-  // dies on posts_pkey (CI only stayed green because Playwright retries).
+  // The explicit ids above never advance the serial sequence, so without this
+  // the first `Post.create()` is handed id 1 and dies on posts_pkey.
   await db.execute(
     sql`SELECT setval(pg_get_serial_sequence('posts', 'id'), (SELECT COALESCE(MAX(id), 1) FROM posts))`,
   )

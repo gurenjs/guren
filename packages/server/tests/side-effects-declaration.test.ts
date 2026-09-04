@@ -3,25 +3,14 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 /**
- * Pins the premise behind `"sideEffects": false` in packages/server/package.json.
+ * Pins the premise behind `"sideEffects": false` in packages/server/package.json:
+ * nothing in `src/` may be imported *purely* for a side effect, which is what lets
+ * a deployed function drop unimported subsystems (roughly 40% of the bundle).
  *
- * That declaration promises bundlers that no module here needs to be evaluated
- * for its own sake, which is what lets a deployed function drop the subsystems
- * an app never imports (mail, redis, queue and the rest — roughly 40% of the
- * bundle). The promise is only true while nothing in `src/` is imported *purely*
- * for a side effect.
- *
- * Nothing at runtime can tell the two apart, which is why this is a
- * source-level test: `bun test` never bundles, so a violation would leave every
- * local and CI check green and surface only in a bundled serverless build, as a
- * subsystem that silently stopped initialising. Same reasoning as the
- * `process.env.NODE_ENV` form pinned in tests/mcp/endpoint.test.ts.
- *
- * Deliberately narrow: it flags bare imports and nothing else. A module that
- * has both exports and top-level statements is fine as long as something
- * imports its exports, and `src/http/dev-banner.ts` (which calls
- * `figlet.parseFont` at module scope) is exactly that shape — a rule broad
- * enough to catch it would cost more in false positives than it protects.
+ * Source-level because `bun test` never bundles — a violation stays green
+ * everywhere and surfaces only as a subsystem that silently stopped initialising.
+ * Deliberately narrow: bare imports only, so a module with exports plus top-level
+ * statements (`src/http/dev-banner.ts`) is not flagged.
  */
 
 const SERVER_ROOT = join(import.meta.dir, '..')
@@ -61,9 +50,8 @@ describe('@guren/server sideEffects declaration', () => {
       }
     }
 
-    // Message rather than a bare toEqual([]): whoever trips this is reading it
-    // in a failing CI log with no other context for why a plain import is a
-    // problem here.
+    // Message rather than a bare toEqual([]): whoever trips this reads it in a
+    // failing CI log with no other context.
     expect(
       offenders,
       offenders.length === 0

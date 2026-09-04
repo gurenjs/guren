@@ -2,11 +2,9 @@
  * Prerender docs and landing-page code samples into static TypeScript modules
  * under web/.guren/, so production request paths need no shiki/marked/node:fs.
  *
- * Usage:
  *   bun scripts/prerender-docs.ts          # full render (build time)
- *   bun scripts/prerender-docs.ts --stub   # write empty stubs only if the
- *                                          # modules are missing (dev/test/tsc
- *                                          # need the static imports to resolve)
+ *   bun scripts/prerender-docs.ts --stub   # empty stubs only when missing, so
+ *                                          # dev/test/tsc resolve the imports
  */
 import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'

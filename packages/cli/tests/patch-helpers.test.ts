@@ -55,7 +55,6 @@ const app = createApp({})
 
       const content = await readFile(target, 'utf8')
 
-      // The multi-line import block must stay intact.
       expect(content).toContain(`import {
   createApp,
   ErrorServiceProvider,
@@ -67,8 +66,7 @@ const app = createApp({})
         "import AuthProvider from '../app/Providers/AuthProvider.js'\nimport MailProvider from '../app/Providers/MailProvider.js'\n\nconst app",
       )
 
-      // Sanity check: every line inside the multi-line block is still
-      // valid — no import statement got spliced between `{` and `}`.
+      // No import statement got spliced between `{` and `}`.
       const lines = content.split('\n')
       const openIndex = lines.indexOf('import {')
       const closeIndex = lines.findIndex((line) => line.startsWith('} from'))
@@ -400,10 +398,9 @@ describe('addToArrayArgument — safe declines', () => {
   it('declines without corrupting a file whose masking cannot be trusted', async () => {
     const workspace = await createTempWorkspace('guren-cli-array-argument-regex-')
     try {
-      // A regex literal containing a quote defeats the string mask — telling
-      // a regex from division needs a real lexer (the AST follow-up). The
-      // contract until then: decline with a reason and leave the file alone,
-      // never edit the wrong site.
+      // A regex literal containing a quote defeats the string mask (telling a
+      // regex from division needs a real lexer), so the contract is: decline
+      // with a reason, never edit the wrong site.
       const source = "const apostrophe = /'/; kernel.registerMany([])\n"
       await mkdir(join(workspace.dir, 'src'), { recursive: true })
       await writeFile(join(workspace.dir, 'src/console.ts'), source, 'utf8')
@@ -435,11 +432,9 @@ describe('addToArrayArgument — safe declines', () => {
 describe('insertImport — already-imported detection', () => {
   const STATEMENT = "import { registerAttachmentRoutes } from '@guren/core'"
 
-  // The literal-line test only recognizes the exact statement a scaffolder
-  // would have written. Merging that import into a neighbouring one — the
-  // idiomatic form, and what any formatter produces — used to read as absent,
-  // so a re-run appended a second one and the app stopped compiling on a
-  // duplicate binding.
+  // A binding merged into a neighbouring import — what any formatter produces —
+  // used to read as absent, so a re-run appended a second one and the app
+  // stopped compiling on a duplicate binding.
   it('treats a binding merged into another import from the same module as present', () => {
     const merged = "import { Router, registerAttachmentRoutes, requireAuthenticated } from '@guren/core'\n"
     expect(insertImport(merged, STATEMENT)).toBeNull()
@@ -459,10 +454,8 @@ describe('insertImport — already-imported detection', () => {
   })
 
   // Each of these binds no usable value, so reading it as "already imported"
-  // makes a scaffolder omit an import its generated code calls. Text that
-  // merely looks like an import is the failure mode this file names in
-  // maskNonCode's docblock; the type and alias cases are ones only the AST
-  // distinguishes.
+  // makes a scaffolder omit an import its generated code calls. The type and
+  // alias cases are ones only the AST distinguishes.
   it('does not mistake a lookalike or a non-value import for the binding', () => {
     const cases = [
       `// ${STATEMENT}\nimport { Router } from '@guren/core'\n`,

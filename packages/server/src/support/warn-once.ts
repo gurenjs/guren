@@ -1,12 +1,8 @@
 const warned = new Set<string>()
 
 /**
- * Emit a warning the first time a given key is seen in this process.
- *
- * Deprecation warnings have to be loud enough to be read once and quiet
- * enough not to drown a request log, which is the same shape the OAuth
- * warnings settled on (`auth/oauth/index.ts`) — this is that pattern with a
- * key, so several call sites can share it.
+ * Warn the first time a key is seen in this process: loud enough to be read
+ * once, quiet enough not to drown a request log.
  */
 export function warnOnce(key: string, message: string): void {
   if (warned.has(key)) {

@@ -4,24 +4,9 @@ import { pathToFileURL } from 'node:url'
 import { consola } from 'consola'
 
 export interface ConfigCacheOptions {
-  /**
-   * Config directory path.
-   */
   configDir?: string
-
-  /**
-   * Application root directory.
-   */
   appRoot?: string
-
-  /**
-   * Cache output directory.
-   */
   cacheDir?: string
-
-  /**
-   * Output as JSON.
-   */
   json?: boolean
 }
 
@@ -29,9 +14,7 @@ const DEFAULT_CONFIG_DIR = 'config'
 const DEFAULT_CACHE_DIR = 'bootstrap/cache'
 const CACHE_FILE = 'config.json'
 
-/**
- * Cache all configuration files into a single JSON file.
- */
+/** Cache all configuration files into a single JSON file. */
 export async function cacheConfig(options: ConfigCacheOptions = {}): Promise<string> {
   const appRoot = options.appRoot ? resolve(options.appRoot) : process.cwd()
   const configDir = resolve(appRoot, options.configDir ?? DEFAULT_CONFIG_DIR)
@@ -41,12 +24,10 @@ export async function cacheConfig(options: ConfigCacheOptions = {}): Promise<str
     throw new Error(`Config directory not found: ${configDir}`)
   }
 
-  // Ensure cache directory exists
   if (!existsSync(cacheDir)) {
     mkdirSync(cacheDir, { recursive: true })
   }
 
-  // Read all config files
   const configFiles = getConfigFiles(configDir)
   const config: Record<string, unknown> = {}
 
@@ -55,7 +36,6 @@ export async function cacheConfig(options: ConfigCacheOptions = {}): Promise<str
 
     try {
       const module = await import(pathToFileURL(file).href)
-      // Support both default export and named 'config' export
       config[key] = module.default ?? module.config ?? module
     } catch (error) {
       consola.warn(
@@ -64,7 +44,6 @@ export async function cacheConfig(options: ConfigCacheOptions = {}): Promise<str
     }
   }
 
-  // Write cached config
   const cacheFile = join(cacheDir, CACHE_FILE)
   const cacheContent = JSON.stringify(config, null, 2)
   writeFileSync(cacheFile, cacheContent, 'utf-8')
@@ -75,9 +54,7 @@ export async function cacheConfig(options: ConfigCacheOptions = {}): Promise<str
   return cacheFile
 }
 
-/**
- * Clear the configuration cache.
- */
+/** Clear the configuration cache. */
 export function clearConfigCache(options: ConfigCacheOptions = {}): boolean {
   const appRoot = options.appRoot ? resolve(options.appRoot) : process.cwd()
   const cacheDir = resolve(appRoot, options.cacheDir ?? DEFAULT_CACHE_DIR)
@@ -93,9 +70,7 @@ export function clearConfigCache(options: ConfigCacheOptions = {}): boolean {
   return false
 }
 
-/**
- * Load cached configuration.
- */
+/** Load cached configuration. */
 export function loadCachedConfig(options: ConfigCacheOptions = {}): Record<string, unknown> | null {
   const appRoot = options.appRoot ? resolve(options.appRoot) : process.cwd()
   const cacheDir = resolve(appRoot, options.cacheDir ?? DEFAULT_CACHE_DIR)
@@ -113,9 +88,6 @@ export function loadCachedConfig(options: ConfigCacheOptions = {}): Record<strin
   }
 }
 
-/**
- * Check if configuration cache exists.
- */
 export function hasConfigCache(options: ConfigCacheOptions = {}): boolean {
   const appRoot = options.appRoot ? resolve(options.appRoot) : process.cwd()
   const cacheDir = resolve(appRoot, options.cacheDir ?? DEFAULT_CACHE_DIR)
@@ -124,9 +96,6 @@ export function hasConfigCache(options: ConfigCacheOptions = {}): boolean {
   return existsSync(cacheFile)
 }
 
-/**
- * Get all configuration files from a directory.
- */
 function getConfigFiles(dir: string, files: string[] = []): string[] {
   const entries = readdirSync(dir)
 
@@ -135,10 +104,8 @@ function getConfigFiles(dir: string, files: string[] = []): string[] {
     const stat = statSync(fullPath)
 
     if (stat.isDirectory()) {
-      // Recursively scan subdirectories
       getConfigFiles(fullPath, files)
     } else if (entry.endsWith('.ts') || entry.endsWith('.js') || entry.endsWith('.mjs')) {
-      // Skip test and spec files
       if (!entry.includes('.test.') && !entry.includes('.spec.')) {
         files.push(fullPath)
       }
@@ -148,9 +115,6 @@ function getConfigFiles(dir: string, files: string[] = []): string[] {
   return files
 }
 
-/**
- * Display configuration cache info.
- */
 export function showConfigCacheInfo(options: ConfigCacheOptions = {}): void {
   const appRoot = options.appRoot ? resolve(options.appRoot) : process.cwd()
   const cacheDir = resolve(appRoot, options.cacheDir ?? DEFAULT_CACHE_DIR)

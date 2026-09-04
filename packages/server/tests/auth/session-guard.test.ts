@@ -3,8 +3,6 @@ import { SessionGuard } from '../../src/auth/SessionGuard'
 import type { Authenticatable, AuthCredentials, UserProvider } from '../../src/auth/types'
 import type { Session } from '../../src/http/middleware'
 
-// --- Test helpers ---
-
 interface MockUser extends Authenticatable {
   id: number
   email: string
@@ -90,8 +88,6 @@ function createMockProvider(users: MockUser[] = []): UserProvider<MockUser> {
     },
   }
 }
-
-// --- Tests ---
 
 describe('SessionGuard', () => {
   let session: ReturnType<typeof createMockSession>
@@ -241,14 +237,14 @@ describe('SessionGuard', () => {
     test('should clear cached user', async () => {
       session.set('auth:user_id', 1)
       const guard = createGuard()
-      await guard.user() // populate cache
+      await guard.user()
       await guard.logout()
       expect(await guard.user()).toBeNull()
     })
 
     test('should be safe to call without session', async () => {
       const guard = createGuard({ session: undefined })
-      await guard.logout() // should not throw
+      await guard.logout()
     })
   })
 
