@@ -1,12 +1,13 @@
 # Email Verification Guide
 
-Guren provides a secure email verification system with token generation, verification, and expiration. Tokens are hashed before storage for security.
+Guren provides a secure email verification system with token generation, verification, and expiration. The token is signed rather than stored: only an opaque token id reaches the store.
 
 ## Core Concepts
 
 - **EmailVerificationTokenStore** – Interface for storing verification tokens.
-- **Token Hashing** – Tokens are hashed using SHA-256 before storage.
-- **No Plain Storage** – Only token hashes are stored.
+- **Signed Tokens** – The token is signed with a key derived from `APP_KEY`, and carries its own expiry.
+- **No Plain Storage** – Only an opaque token id is stored, never the token itself.
+- **One Authority on Expiry** – Verification reads the expiry signed into the token; the store is asked only whether the token id still exists.
 - **Single Use** – Tokens are deleted after successful verification.
 - **Expiration** – Tokens expire after a configurable time (default: 24 hours).
 
@@ -264,32 +265,32 @@ import { eq } from 'drizzle-orm'
 export class DatabaseEmailVerificationStore implements EmailVerificationTokenStore {
   async store(token: EmailVerificationToken): Promise<void> {
     await db.insert(emailVerifications).values({
-      hashedToken: token.hashedToken,
+      tokenId: token.tokenId,
       email: token.email,
       expiresAt: token.expiresAt,
       createdAt: token.createdAt,
     })
   }
 
-  async findByHashedToken(hashedToken: string): Promise<EmailVerificationToken | null> {
+  async findByTokenId(tokenId: string): Promise<EmailVerificationToken | null> {
     const result = await db.select()
       .from(emailVerifications)
-      .where(eq(emailVerifications.hashedToken, hashedToken))
+      .where(eq(emailVerifications.tokenId, tokenId))
       .limit(1)
 
     if (!result[0]) return null
 
     return {
       email: result[0].email,
-      hashedToken: result[0].hashedToken,
+      tokenId: result[0].tokenId,
       expiresAt: result[0].expiresAt,
       createdAt: result[0].createdAt,
     }
   }
 
-  async delete(hashedToken: string): Promise<void> {
+  async delete(tokenId: string): Promise<void> {
     await db.delete(emailVerifications)
-      .where(eq(emailVerifications.hashedToken, hashedToken))
+      .where(eq(emailVerifications.tokenId, tokenId))
   }
 
   async deleteForEmail(email: string): Promise<void> {
@@ -306,7 +307,7 @@ export class DatabaseEmailVerificationStore implements EmailVerificationTokenSto
 import { pgTable, text, timestamp } from '@guren/orm/drizzle/pg'
 
 export const emailVerifications = pgTable('email_verifications', {
-  hashedToken: text('hashed_token').primaryKey(),
+  tokenId: text('token_id').primaryKey(),
   email: text('email').notNull(),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -320,6 +321,8 @@ export const users = pgTable('users', {
   // ... other fields
 })
 ```
+
+The physical column name is yours to choose; only the store's method signatures are fixed. An earlier version of this guide called it `hashed_token`, from when the store held a hash of the token. If you already have that column, keep it and map it to `tokenId` rather than migrating.
 
 ## Configuration
 
@@ -339,6 +342,8 @@ const { token } = await createEmailVerificationToken(email, store, {
   tokenLength: 64,
 })
 ```
+
+The configuration applies when a token is issued. `createEmailVerificationToken` signs the expiry into the token itself, so `verifyEmailToken` and `completeEmailVerification` take no configuration: expiry is read from the token's signed claim, and the store is only asked whether the token id still exists. Changing `expiresIn` affects tokens issued from then on, not links already sent, and the signing key comes from `APP_KEY`.
 
 ## Testing
 
