@@ -14,10 +14,6 @@ import {
 } from '../../src/health'
 import type { CacheStoreInterface, CheckResult, HealthStatus } from '../../src/health'
 
-// ============================================================
-// HealthCheck (Base Class) Tests
-// ============================================================
-
 describe('HealthCheck', () => {
   class TestCheck extends HealthCheck {
     readonly name = 'test'
@@ -96,10 +92,6 @@ describe('HealthCheck', () => {
     expect(result.meta).toBeUndefined()
   })
 })
-
-// ============================================================
-// HealthManager Tests
-// ============================================================
 
 describe('HealthManager', () => {
   class SimpleCheck extends HealthCheck {
@@ -301,11 +293,8 @@ describe('HealthManager', () => {
   })
 
   describe('middleware', () => {
-    // Driven through a real router rather than a hand-built Context double: the
-    // bug these guard is that a handler which returns undefined without
-    // finalizing yields an empty response, and only a real router exhibits that.
-    // A double mirroring the `res` setter would stay green even if the router
-    // stopped honouring it.
+    // A real router, not a Context double: the bug guarded here is a handler
+    // returning undefined without finalizing, which only a real router exhibits.
     async function callHealth(middleware: ReturnType<HealthManager['middleware']>) {
       const app = new Hono()
       app.get('/health', middleware as never)
@@ -360,10 +349,6 @@ describe('createHealthManager', () => {
   })
 })
 
-// ============================================================
-// DatabaseCheck Tests
-// ============================================================
-
 describe('DatabaseCheck', () => {
   it('should return healthy when query succeeds', async () => {
     const db = {
@@ -406,10 +391,6 @@ describe('DatabaseCheck', () => {
     expect(db.query).toHaveBeenCalledWith('SELECT NOW()')
   })
 })
-
-// ============================================================
-// RedisCheck Tests
-// ============================================================
 
 describe('RedisCheck', () => {
   it('should return healthy when ping returns PONG', async () => {
@@ -456,10 +437,6 @@ describe('RedisCheck', () => {
     expect(check.name).toBe('redis-session')
   })
 })
-
-// ============================================================
-// CacheCheck Tests
-// ============================================================
 
 describe('CacheCheck', () => {
   it('should return healthy when cache operations succeed', async () => {
@@ -531,10 +508,6 @@ describe('CacheCheck', () => {
   })
 })
 
-// ============================================================
-// StorageCheck Tests
-// ============================================================
-
 describe('StorageCheck', () => {
   it('should return healthy when storage operations succeed', async () => {
     let stored: string | null = null
@@ -585,15 +558,10 @@ describe('StorageCheck', () => {
   })
 })
 
-// ============================================================
-// MemoryCheck Tests
-// ============================================================
-
 describe('MemoryCheck', () => {
   it('should return healthy when memory is below threshold', async () => {
-    // Pin criticalThresholdMb too: its 1024MB default sits below thresholdMb
-    // here, and a test process whose heapUsed crosses 1GB would report
-    // "unhealthy" regardless of thresholdMb.
+    // criticalThresholdMb is pinned above thresholdMb: its 1024MB default would
+    // report "unhealthy" as soon as the test process crosses 1GB.
     const check = new MemoryCheck({ thresholdMb: 10000, criticalThresholdMb: 20000 })
     const result = await check.check()
 
@@ -635,10 +603,6 @@ describe('MemoryCheck', () => {
     expect(check.name).toBe('heap-memory')
   })
 })
-
-// ============================================================
-// CustomCheck Tests
-// ============================================================
 
 describe('CustomCheck', () => {
   it('should call the callback', async () => {

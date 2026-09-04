@@ -1,8 +1,5 @@
 import type { Container } from '../container'
 
-/**
- * Parsed argument definition.
- */
 export interface ArgumentDefinition {
   name: string
   description?: string
@@ -11,9 +8,6 @@ export interface ArgumentDefinition {
   defaultValue?: string
 }
 
-/**
- * Parsed option definition.
- */
 export interface OptionDefinition {
   name: string
   shortcut?: string
@@ -23,27 +17,18 @@ export interface OptionDefinition {
   array: boolean
 }
 
-/**
- * Parsed signature.
- */
 export interface ParsedSignature {
   name: string
   arguments: ArgumentDefinition[]
   options: OptionDefinition[]
 }
 
-/**
- * Command class type.
- */
 export interface CommandClass {
   signature: string
   description: string
   new (container?: Container): CommandInstance
 }
 
-/**
- * Command instance type.
- */
 export interface CommandInstance {
   setInput(argv: string[]): void
   setOutput(output: OutputInterface): void
@@ -51,9 +36,6 @@ export interface CommandInstance {
   run(): Promise<number>
 }
 
-/**
- * Output interface.
- */
 export interface OutputInterface {
   info(message: string): void
   error(message: string): void
@@ -65,9 +47,6 @@ export interface OutputInterface {
   write(message: string): void
 }
 
-/**
- * Input interface.
- */
 export interface InputInterface {
   argument<T = string>(name: string): T
   arguments(): Record<string, string | string[]>
@@ -76,16 +55,11 @@ export interface InputInterface {
   hasOption(name: string): boolean
 }
 
-/**
- * Console kernel options.
- */
 export interface ConsoleKernelOptions {
   container?: Container
 }
 
-/**
- * Schedule definition for a command.
- */
+/** Schedule definition for a command. */
 export interface ScheduledCommand {
   command: string
   args?: string[]
@@ -94,9 +68,6 @@ export interface ScheduledCommand {
   description?: string
 }
 
-/**
- * Interactive prompt types.
- */
 export interface PromptInterface {
   ask(question: string, defaultValue?: string): Promise<string>
   confirm(question: string, defaultValue?: boolean): Promise<boolean>
@@ -104,9 +75,6 @@ export interface PromptInterface {
   secret(question: string): Promise<string>
 }
 
-/**
- * Progress bar interface.
- */
 export interface ProgressInterface {
   start(total: number): void
   advance(step?: number): void

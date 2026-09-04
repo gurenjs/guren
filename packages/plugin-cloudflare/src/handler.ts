@@ -7,8 +7,7 @@ export interface WorkersExecutionContext {
 
 /**
  * The shape `createWorkersHandler` needs from an app. Structural rather than
- * `Application` itself, so `boot()` is not assumed to be idempotent — each
- * handler dedupes boot across its own requests for anything conforming here.
+ * `Application` itself, so `boot()` is not assumed to be idempotent.
  */
 export interface WorkersAppLike {
   boot(): Promise<void>
@@ -21,10 +20,8 @@ export interface WorkersHandler {
 
 export function createWorkersHandler(app: WorkersAppLike): WorkersHandler {
   // Boot is deferred to the first request because it performs I/O (ORM setup
-  // against D1), which workerd forbids in global scope — not because bindings
-  // are unreachable there (RFC 0003). Deduped here rather than delegated to
-  // the app: conforming to `WorkersAppLike` does not imply an idempotent
-  // `boot()`.
+  // against D1), which workerd forbids in global scope (RFC 0003). Deduped here
+  // because conforming to `WorkersAppLike` does not imply an idempotent `boot()`.
   let bootPromise: Promise<void> | undefined
 
   return {
@@ -34,28 +31,18 @@ export function createWorkersHandler(app: WorkersAppLike): WorkersHandler {
       let attempt: Promise<void> | undefined
 
       try {
-        // Inside the try: a conforming non-async boot() can throw
-        // synchronously, and that throw has to reach the cleanup too.
+        // Inside the try: a conforming non-async boot() can throw synchronously,
+        // and that throw has to reach the cleanup too.
         attempt = bootPromise ??= app.boot()
         await attempt
       } catch (error) {
-        // Every waiter on a failed boot reaches here, but only the one whose
-        // attempt is still installed may clear: a retry can start between two
-        // waiters' catches — the app can register a rejection reaction on the
-        // very promise `boot()` returned — and `fetch` installs the new boot
-        // promise and captures the new env before its first `await`, so a
-        // stale waiter clearing unconditionally wipes a live retry.
-        //
-        // The same token settles the env holder, which is first-call-wins and
-        // is reset nowhere else in production — so still owning the boot
-        // promise means the holder still holds what this request captured.
-        // That equivalence holds for the one-handler-per-module topology
-        // `buildCloudflareOutput` generates: the holder is module-global while
-        // this slot is per-handler, so a second handler in the same module
-        // shares the former without sharing the latter, and neither can guard
-        // the other. A synchronous throw leaves both sides `undefined` and
-        // nothing can interleave before the catch, so that path clears its own
-        // capture.
+        // Every waiter on a failed boot reaches here, but only the one whose attempt
+        // is still installed may clear: a retry can start between two waiters' catches
+        // and installs its boot promise and env before its first `await`, so clearing
+        // unconditionally would wipe a live retry. The same token settles the env
+        // holder (first-call-wins, reset nowhere else in production). The equivalence
+        // relies on the one-handler-per-module topology `buildCloudflareOutput`
+        // generates: the holder is module-global while this slot is per-handler.
         if (bootPromise === attempt) {
           bootPromise = undefined
           resetWorkersEnv()

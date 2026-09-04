@@ -14,12 +14,10 @@ const warnMock = mock(() => {})
 const debugMock = mock(() => {})
 const errorMock = mock(() => {})
 
-// Bun runs all test files in one shared process, and mock.module()
-// replacements are not undone by mock.restore() — even with --isolate the
-// replacement leaks into other test files through the shared module
-// registry. Spread the real module and override only runMain (all this file
-// needs), so leaked imports still get the real defineCommand/runCommand —
-// stubbing runCommand here silently broke the plugin-commands tests.
+// mock.module() replacements are not undone by mock.restore() and leak into
+// other test files through the shared module registry, even with --isolate. So
+// spread the real module and override only runMain, leaving leaked imports the
+// real defineCommand/runCommand.
 const realCitty = await import('citty')
 await mock.module('citty', () => ({
   ...realCitty,
@@ -50,11 +48,10 @@ await import('../src/cli')
 
 useGitIdentity()
 
-// Derived, not a second literal: staying above the scaffolder's own budget for
-// the whole git sequence is what makes a wedged `git` surface as its
-// "initialize the repository manually" warning — an assertion failure naming
-// the real problem — instead of a bare timeout, whose leftover blocking time
-// Bun charges to the *next* test.
+// Derived, not a second literal: staying above the scaffolder's own git budget
+// makes a wedged `git` surface as its "initialize the repository manually"
+// warning rather than a bare timeout, whose blocking time Bun charges to the
+// *next* test.
 const GIT_TEST_TIMEOUT_MS = GIT_TIMEOUT_MS * 2
 
 function logged(target: typeof warnMock, text: string): boolean {
@@ -454,11 +451,9 @@ describe('create-guren-app CLI', () => {
     }
   })
 
-  // Deliberately NOT a test of overlay precedence: `default-ssr` ships no
-  // `_gitignore`, so no current blueprint can demonstrate an overlay's own
-  // ignore file replacing the base one. copyLayer restores per layer rather
-  // than once at the end so that it will, but only a template that does not
-  // exist yet would prove it — this covers the multi-layer path only.
+  // NOT a test of overlay precedence: `default-ssr` ships no `_gitignore`, so
+  // no current blueprint can demonstrate an overlay's ignore file replacing the
+  // base one. This covers the multi-layer path only.
   it('restores the .gitignore in a multi-layer scaffold', async () => {
     const workspace = await createTempWorkspace('guren-create-app-cli-gitignore-overlay-')
     try {

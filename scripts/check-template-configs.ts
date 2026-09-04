@@ -2,23 +2,13 @@
  * Type-checks every scaffold-template project and proves that, together, they
  * cover every shipped template.
  *
- * The templates under `packages/cli/templates/scaffold/` are app-shaped
- * sources no other tsconfig reaches — the root typecheck deliberately
- * excludes them. They are split across `tsconfig.templates*.json` projects
- * because `rootDirs` merges every listed scaffold into one virtual root, so
- * colliding scaffolds need separate projects (see
- * `packages/cli/src/scaffold-templates.ts`). That split has a silent failure
- * mode this script exists to close: exclude a scaffold from the main project
- * and forget the follow-up config (or forget to run it), and the scaffold is
- * typechecked by *nothing* while `bun run typecheck` stays green.
- *
- * So, like `check-build-configs.ts` for `tsconfig.build.json`, the configs
- * are discovered rather than listed: every `tsconfig.templates*.json` in
- * `packages/cli/` is run through `tsc -p`, and the union of the programs'
- * file lists (`--listFilesOnly`, free once tsc is spawned anyway) must
- * contain every `.ts`/`.tsx` under `templates/scaffold/`. A new config needs
- * no script wiring; a template covered by no config names itself in the
- * failure.
+ * `packages/cli/templates/scaffold/` is reached by no other tsconfig (the root
+ * typecheck excludes it), and is split across `tsconfig.templates*.json`
+ * projects because `rootDirs` merges every listed scaffold into one virtual
+ * root, so colliding scaffolds need separate projects. A scaffold left out of
+ * every config is then typechecked by *nothing* while `typecheck` stays green,
+ * so the configs are discovered rather than listed and the union of their
+ * `--listFilesOnly` lists must contain every `.ts`/`.tsx` under the tree.
  *
  * Usage: bun scripts/check-template-configs.ts
  */

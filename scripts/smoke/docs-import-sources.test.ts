@@ -26,9 +26,8 @@ afterAll(async () => {
 })
 
 /**
- * Run the audit over one synthetic markdown file, resolving specifiers against
- * this workspace's real `packages/` tree — the surfaces under test are the
- * actual ones, not a fixture that could drift away from them.
+ * One synthetic markdown file, resolved against the real `packages/` tree: the
+ * surfaces under test are the actual ones, not a fixture that could drift.
  */
 let fixtureCount = 0
 async function auditSnippet(...lines: string[]): Promise<DocsImportReport> {
@@ -41,9 +40,8 @@ async function auditSnippet(...lines: string[]): Promise<DocsImportReport> {
 
 describe('the premises the gate encodes', () => {
   test('@guren/core reaches @guren/server wholesale but @guren/orm by allowlist', async () => {
-    // The whole point of deriving the surface from the entry point rather than
-    // from globbed files. If core ever re-exported ORM wholesale, the
-    // interesting half of this check would quietly stop being interesting.
+    // If core ever re-exported ORM wholesale, the interesting half of this check
+    // would quietly stop being interesting.
     const barrel = await readFile(join(repoRoot, 'packages', 'core', 'src', 'index.ts'), 'utf8')
 
     expect(barrel).toContain("export * from '@guren/server'")
@@ -51,9 +49,8 @@ describe('the premises the gate encodes', () => {
   })
 
   test('every declared @guren/* TypeScript entry point resolves to a source file', async () => {
-    // A subpath whose source cannot be found breaks the derivation rule, so it
-    // fails the gate on its own. That is the intended behaviour, but it must
-    // not be the state of the workspace on an ordinary day.
+    // Such a subpath fails the gate on its own, which is intended behaviour but
+    // must not be the workspace's state on an ordinary day.
     const entryPoints = [...(await collectEntryPoints(repoRoot)).values()]
 
     expect(entryPoints.filter((entry) => entry.kind === 'unresolved')).toEqual([])
@@ -69,9 +66,8 @@ describe('the premises the gate encodes', () => {
 
 describe('extraction', () => {
   test('reads an import out of a fence no parser can read', () => {
-    // The design's central claim. This fragment is what 67 of the repo's 1286
-    // TypeScript fences look like: a class body with no class. @babel/parser
-    // fails on it even with errorRecovery, and an AST-only scanner therefore
+    // A class body with no class, the shape 67 of the repo's fences take:
+    // @babel/parser fails on it even with errorRecovery, so an AST-only scanner
     // reports zero imports for the whole fence.
     const fragment = ['  async store() {', '    // ...', '  }', "import { Controller } from '@guren/core'"].join('\n')
 
@@ -110,9 +106,8 @@ describe('a symbol the specifier does not export', () => {
   })
 
   test('fails a symbol imported from the wrong first-party package, and names the right one', async () => {
-    // The exact line that shipped in docs/en/guides/agent-interface.md:
-    // AgentApprovalRequested is genuinely re-exported from core; mcpPlugin
-    // only ever came from @guren/plugin-mcp.
+    // The line that shipped: AgentApprovalRequested really is re-exported from
+    // core, while mcpPlugin only ever came from @guren/plugin-mcp.
     const report = await auditSnippet("import { AgentApprovalRequested, mcpPlugin } from '@guren/core'")
 
     expect(report.unexported).toHaveLength(1)
@@ -140,10 +135,8 @@ describe('a symbol the specifier does not export', () => {
 })
 
 describe('type-only imports', () => {
-  // Decision 3: type and value exports share one set and `import type` is not
-  // distinguished. Absent from the merged set means absent from both spaces,
-  // which is a sound compile-error verdict; the finer claim needs a type
-  // checker this gate does not run.
+  // Decision 3: absent from the merged set means absent from both spaces, a
+  // sound verdict; the finer claim needs a type checker this gate does not run.
   test('checks a type-only import exactly like a value import', async () => {
     const report = await auditSnippet("import type { NotARealType } from '@guren/core'")
 
@@ -190,9 +183,8 @@ describe('specifiers the gate cannot resolve', () => {
     expect(report.unresolvable[0]?.reason).toContain('static asset')
   })
 
-  // Two import forms name no symbols, which is exactly why they slipped past
-  // the specifier check once: the loop skipped ahead when there was nothing to
-  // look up, and skipped the "does this package even exist" question with it.
+  // These two forms name no symbols, so a loop that skips ahead when there is
+  // nothing to look up skips "does this package exist" with it.
   test('fails a namespace import of a package that does not exist', async () => {
     const report = await auditSnippet("import * as everything from '@guren/not-a-package'")
 
@@ -208,9 +200,8 @@ describe('specifiers the gate cannot resolve', () => {
   })
 
   test('allows a bare side-effect import of a real asset subpath', async () => {
-    // What a bare import is usually for, and what `docs/{en,ja}/guides/markdown.md`
-    // actually does. A stylesheet having no named exports is not a finding —
-    // the subpath existing is the whole of what can be asked here.
+    // What `docs/{en,ja}/guides/markdown.md` does. A stylesheet having no named
+    // exports is not a finding; the subpath existing is all that can be asked.
     const report = await auditSnippet("import '@guren/plugin-markdown/styles.css'")
 
     expect(report.unresolvable).toEqual([])
@@ -227,9 +218,8 @@ describe('specifiers the gate cannot resolve', () => {
 
 describe('entry points whose surface is open', () => {
   test('issues no absence verdict for a wholesale third-party re-export, and names it', async () => {
-    // @guren/orm/drizzle/pg is `export * from 'drizzle-orm/pg-core'`. pgTable
-    // is a drizzle name this gate cannot enumerate, so claiming it absent
-    // would be unsound — and 10 docs snippets import from here.
+    // @guren/orm/drizzle/pg is `export * from 'drizzle-orm/pg-core'`, so calling
+    // pgTable absent would be unsound; 10 docs snippets import from here.
     const report = await auditSnippet("import { pgTable, sql } from '@guren/orm/drizzle/pg'")
 
     expect(report.unexported).toEqual([])
@@ -237,10 +227,8 @@ describe('entry points whose surface is open', () => {
   })
 
   test('the set of open entry points is exactly the subpaths that earn it', async () => {
-    // Pinned so it cannot grow unnoticed. Every exempt entry point is one this
-    // gate issues no verdict for, so each addition is a slice of `docs/` that
-    // stops being checked — a decision worth making on purpose. Roots are
-    // covered separately and harder: `docs-audit.ts` fails on one outright.
+    // Pinned so it cannot grow unnoticed: each addition is a slice of `docs/`
+    // that stops being checked. `docs-audit.ts` fails on an open root outright.
     const report = await auditDocsImportSources(repoRoot, join(repoRoot, 'docs'))
     const open = [...report.openEntryPoints].map((entry) => entry.split(' ')[0]).sort()
 

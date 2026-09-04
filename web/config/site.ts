@@ -44,10 +44,9 @@ export function docPaths(category: string, slug: string): { en: string; ja: stri
 }
 
 /**
- * The blog's published-date format, shared by the server-rendered post page
- * and the React index. Pinned to UTC: the post page renders on the server
- * now, and without an explicit zone the same instant formats as different
- * dates depending on where it renders (server region vs. reader's browser).
+ * The blog's published-date format, shared by the server-rendered post page and
+ * the React index. Pinned to UTC, or the same instant formats as different
+ * dates depending on where it renders.
  */
 const POST_DATE_FORMAT = new Intl.DateTimeFormat('en-US', {
   year: 'numeric',

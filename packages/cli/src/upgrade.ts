@@ -116,9 +116,8 @@ async function runBunInstall(cwd: string): Promise<void> {
 }
 
 async function resolveDistTagVersion(packageName: string, tag: string): Promise<string | null> {
-  // The dist-tags endpoint returns just the tag map. The full packument carries
-  // every published version's metadata — 33 KB for @guren/cli against 61 B
-  // here, and it grows with every release.
+  // The dist-tags endpoint returns just the tag map: 61 B against the full packument's
+  // 33 KB for @guren/cli, which grows with every release.
   const response = await fetch(`https://registry.npmjs.org/-/package/${packageName}/dist-tags`)
   if (!response.ok) {
     return null
@@ -131,12 +130,10 @@ async function resolveDistTagVersion(packageName: string, tag: string): Promise<
 type PublishedManifest = OrmManifest
 
 /**
- * One published version's manifest, by version or by dist-tag. 404 means that
- * version does not exist, which is a useful answer rather than an error.
- *
- * This endpoint, not the packument: `@guren/orm/latest` is 2 KB and carries the
- * version *and* its dependencies, where the abbreviated packument is 28 KB —
- * and `drizzle-kit`'s is 1.2 MB, for one boolean.
+ * One published version's manifest, by version or dist-tag; 404 means that version does
+ * not exist, which is an answer rather than an error. This endpoint, not the packument:
+ * `@guren/orm/latest` is 2 KB against an abbreviated packument's 28 KB, and
+ * `drizzle-kit`'s is 1.2 MB for one boolean.
  */
 async function resolveManifest(packageName: string, versionOrTag: string): Promise<PublishedManifest | null> {
   const response = await fetch(`https://registry.npmjs.org/${packageName}/${versionOrTag}`)
@@ -150,9 +147,8 @@ type VersionResolver = (packageName: string, tag: string) => Promise<string | nu
 type ManifestResolver = (packageName: string, versionOrTag: string) => Promise<PublishedManifest | null>
 
 /**
- * Resolve each package once. The tag is looked up both to report the target
- * version and to rewrite the manifest, and a package appears in more than one
- * manifest field in real apps.
+ * Resolve each package once: the tag is looked up both to report the target version and
+ * to rewrite the manifest, and a package appears in more than one manifest field.
  */
 function memoizeResolver(resolver: VersionResolver): VersionResolver {
   const cache = new Map<string, Promise<string | null>>()
@@ -162,9 +158,8 @@ function memoizeResolver(resolver: VersionResolver): VersionResolver {
     if (cached) {
       return cached
     }
-    // Cache the normalized result, never a rejected promise: replaying one to a
-    // caller that does not catch took the whole command down when the registry
-    // was unreachable.
+    // Cache the normalized result, never a rejected promise: replaying one to a caller
+    // that does not catch took the whole command down when the registry was unreachable.
     const pending = Promise.resolve()
       .then(() => resolver(packageName, tag))
       .catch(() => null)
@@ -174,21 +169,18 @@ function memoizeResolver(resolver: VersionResolver): VersionResolver {
 }
 
 /**
- * Align the app's `drizzle-orm` and `drizzle-kit` pins with the version the
- * target `@guren/orm` release depends on.
- *
- * The rule itself lives in `drizzle-pins.ts`, shared with the template sync;
- * what belongs here is where the ORM manifest comes from (the registry, at the
- * tag being upgraded to) and how an unreachable registry is treated.
+ * Align the app's `drizzle-orm` and `drizzle-kit` pins with the version the target
+ * `@guren/orm` release depends on. The rule lives in `drizzle-pins.ts`, shared with the
+ * template sync; what belongs here is where the ORM manifest comes from and how an
+ * unreachable registry is treated.
  */
 async function alignDrizzlePins(
   manifest: PackageManifest,
   tag: string,
   manifestResolver: ManifestResolver,
 ): Promise<UpgradedDependency[]> {
-  // canary keeps a floating pin on purpose; writing an exact drizzle version
-  // beside it would contradict the mode, and there is nothing to converge on.
-  // This is the guard that keeps the mode offline, and a test says so.
+  // canary keeps a floating pin on purpose, and this is the guard that keeps the mode
+  // offline — a test says so.
   if (tag === CANARY_TAG) {
     return []
   }
@@ -330,16 +322,14 @@ export async function checkVersionCompatibility(
   const currentVersion = reference?.version ?? 'unknown'
   const warnings: string[] = []
 
-  // Check Bun version compatibility
   const bunVersion = process.versions?.bun
   if (bunVersion && compareVersions(bunVersion, '1.0.0') < 0) {
     warnings.push(`Bun ${bunVersion} may not be compatible. Recommend Bun 1.3.x or later.`)
   }
 
-  // Resolve the tag so the report names a version: a tag left behind by an
-  // older release line must not read as a clean upgrade. Only the anchor pin is
-  // checked, and tags can resolve per-package, so this is a safety net over the
-  // common case rather than a guarantee for every rewrite the updater makes.
+  // Resolve the tag so the report names a version: a tag left behind by an older release
+  // line must not read as a clean upgrade. Only the anchor pin is checked and tags resolve
+  // per-package, so this is a safety net over the common case, not a guarantee.
   const resolved =
     reference && targetTag !== CANARY_TAG
       // The resolver passed in by upgradeCanary already normalizes failures;
@@ -383,11 +373,9 @@ export async function upgradeCanary(options: UpgradeCanaryOptions = {}): Promise
   const manualStepsExtra: string[] = []
   const versionResolver = memoizeResolver(options.versionResolver ?? resolveDistTagVersion)
 
-  // Run version compatibility and deprecation checks
   const versionCompatibility = await checkVersionCompatibility(cwd, tag, versionResolver)
   const deprecationWarnings = await checkDeprecations(cwd)
 
-  // If check-only mode, return early with just the checks
   if (options.checkOnly) {
     const packageJsonPath = resolve(cwd, PACKAGE_JSON)
     return {
@@ -455,9 +443,9 @@ export async function upgradeCanary(options: UpgradeCanaryOptions = {}): Promise
     await installRunner(cwd)
   }
 
-  // Nested @guren copies survive plain `bun install` because the lockfile
-  // keeps the old resolution. Two loaded copies of @guren/orm means adapter
-  // state is split and database access fails, so surface it loudly.
+  // Nested @guren copies survive plain `bun install` because the lockfile keeps the old
+  // resolution, and two loaded copies of @guren/orm split adapter state — database access
+  // then fails, so surface it loudly.
   const nestedCopies = await findNestedGurenCopies(cwd)
   if (nestedCopies.length > 0) {
     manualStepsExtra.push(

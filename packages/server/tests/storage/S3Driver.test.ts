@@ -1,13 +1,9 @@
 import { describe, expect, it, mock } from 'bun:test'
 
-// The AWS SDK is an optional peer that is not installed in this workspace.
-// The driver only needs the command classes as carriers for their input, so
-// bare stand-ins are enough — the logic under test (following continuation
-// tokens, batching deletes, mapping keys) is the driver's own, exercised
-// through an injected client that scripts the responses. Note bun never
-// restores mock.module, so this replacement outlives this file; the module
-// is otherwise absent here, so the only behavior it can mask in another
-// test is the missing-optional-dependency error.
+// The AWS SDK is an optional peer not installed in this workspace, and the driver
+// only needs the command classes as carriers for their input. bun never restores
+// mock.module, so this replacement outlives this file; the only behavior it can
+// mask elsewhere is the missing-optional-dependency error.
 mock.module('@aws-sdk/client-s3', () => ({
   ListObjectsV2Command: class {
     constructor(readonly input: Record<string, unknown>) {}

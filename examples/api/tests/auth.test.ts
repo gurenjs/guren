@@ -5,18 +5,15 @@ import {
 } from '@guren/testing/controller'
 import { NodeHasher, type Context } from '@guren/core'
 
-// Mock dependencies
 vi.mock('@guren/core', async () => {
   const actual = await vi.importActual<typeof import('@guren/core')>('@guren/core')
   return {
     ...actual,
     ...createControllerModuleMock(),
     ServiceProvider: actual.ServiceProvider,
-    // No hasher override. The controller verifies through `Hash`, which picks
-    // NodeHasher off Bun, so the real implementation runs here. A hand-rolled
-    // fake would be the hazard: its argument order can drift from
-    // `verify(hashed, plain)` with no type error, which is what let a swapped
-    // call site in the controller ship green.
+    // No hasher override, so the real implementation runs. A hand-rolled fake
+    // is the hazard: its argument order can drift from `verify(hashed, plain)`
+    // with no type error, which let a swapped call site ship green.
   }
 })
 

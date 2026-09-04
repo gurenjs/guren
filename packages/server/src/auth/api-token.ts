@@ -22,34 +22,16 @@ export interface ApiToken {
  * Implement this for database-backed storage.
  */
 export interface ApiTokenStore {
-  /**
-   * Store a new API token.
-   */
   store(token: ApiToken): Promise<void>
 
-  /**
-   * Find a token by its hashed value.
-   */
   findByHashedToken(hashedToken: string): Promise<ApiToken | null>
 
-  /**
-   * Find all tokens for a user.
-   */
   findByUserId(userId: string | number): Promise<ApiToken[]>
 
-  /**
-   * Delete a token by its ID.
-   */
   delete(id: string): Promise<void>
 
-  /**
-   * Delete all tokens for a user.
-   */
   deleteForUser(userId: string | number): Promise<void>
 
-  /**
-   * Update the last used timestamp.
-   */
   updateLastUsed(id: string, timestamp: Date): Promise<void>
 }
 
@@ -59,7 +41,7 @@ export interface ApiTokenStore {
  */
 export class MemoryApiTokenStore implements ApiTokenStore {
   private tokens: Map<string, ApiToken> = new Map()
-  private byHash: Map<string, string> = new Map() // hash -> id
+  private byHash: Map<string, string> = new Map()
 
   async store(token: ApiToken): Promise<void> {
     this.tokens.set(token.id, token)
@@ -104,17 +86,11 @@ export class MemoryApiTokenStore implements ApiTokenStore {
     }
   }
 
-  /**
-   * Clear all tokens (useful for testing).
-   */
   clear(): void {
     this.tokens.clear()
     this.byHash.clear()
   }
 
-  /**
-   * Get the number of stored tokens.
-   */
   get size(): number {
     return this.tokens.size
   }
@@ -124,30 +100,21 @@ export class MemoryApiTokenStore implements ApiTokenStore {
  * Configuration for API token creation.
  */
 export interface CreateApiTokenOptions {
-  /**
-   * Human-readable name for the token.
-   */
   name: string
 
-  /**
-   * User ID the token belongs to.
-   */
   userId: string | number
 
-  /**
-   * Token abilities/scopes.
-   * @default ['*'] (all abilities)
-   */
+  /** @default ['*'] (all abilities) */
   abilities?: string[]
 
   /**
-   * Token expiration time in milliseconds from now.
+   * Expiration in milliseconds from now.
    * @default null (never expires)
    */
   expiresIn?: number | null
 
   /**
-   * Token byte length (before encoding).
+   * Token byte length, before encoding.
    * @default 32
    */
   tokenLength?: number
@@ -158,34 +125,17 @@ export interface CreateApiTokenOptions {
  */
 export interface CreateApiTokenResult {
   /**
-   * The full token to give to the user.
-   * Format: {id}|{plainToken}
+   * The full token to give to the user, formatted `{id}|{plainToken}`.
    * This is the ONLY time the plain token is available.
    */
   plainTextToken: string
 
-  /**
-   * The token record (without the plain token).
-   */
   token: ApiToken
 }
 
 
 /**
  * Create a new API token.
- *
- * @example
- * ```ts
- * const { plainTextToken, token } = await createApiToken(store, {
- *   name: 'My App Token',
- *   userId: user.id,
- *   abilities: ['read', 'write'],
- *   expiresIn: 30 * 24 * 60 * 60 * 1000, // 30 days
- * })
- *
- * // Return plainTextToken to user - this is the only time it's available
- * return ctx.json({ token: plainTextToken })
- * ```
  */
 export async function createApiToken(
   store: ApiTokenStore,
@@ -237,20 +187,12 @@ export function parseApiToken(plainTextToken: string): { id: string; token: stri
 }
 
 /**
- * Extract the bearer token from an Authorization header value. The one
- * parsing rule shared by `createBearerTokenMiddleware`, `TokenGuard`, and
- * `hasBearerHeader` below — three readers of the same header must not
- * disagree about what a bearer request is.
- *
- * The `\S` anchoring the capture is load-bearing, not cosmetic: `\s+(.+)`
- * lets the separator and the token both match a space, so an attacker-supplied
- * `Bearer` + many spaces + a newline (`.` never matches one, so `$` is
- * unreachable) makes the engine retry every split of the whitespace run —
- * quadratic in the header length, on a header read before any authentication.
- * Requiring the token to start with a non-space removes the overlap. The only
- * input whose result changes is an all-whitespace token, which was never a
- * token: it now reads as "not a bearer request" rather than as a bearer
- * request carrying a space, so CSRF is no longer skipped for it.
+ * Extract the bearer token from an Authorization header. The one parsing rule
+ * shared by `createBearerTokenMiddleware`, `TokenGuard` and `hasBearerHeader`.
+ * `\S` keeps the match linear — `\s+(.+)` backtracks quadratically when a
+ * trailing newline makes `$` unreachable, on a header read before any
+ * authentication — and makes an all-whitespace token "not a bearer request",
+ * so CSRF is not skipped for it.
  */
 export function readBearerToken(header: string | undefined | null): string | null {
   if (!header) return null
@@ -259,11 +201,9 @@ export function readBearerToken(header: string | undefined | null): string | nul
 }
 
 /**
- * The one answer to "is this request bearer-authenticated?" — the parsing
- * rule above applied to the header it is read from. Shared by guard selection
- * (`AuthManager.resolveGuardName`) and the CSRF skip for cookie-less bearer
- * requests: both must classify a request identically, and a second copy of
- * the header name is how they would drift apart.
+ * The one answer to "is this request bearer-authenticated?", shared by
+ * `AuthManager.resolveGuardName` and the CSRF skip for cookie-less bearer
+ * requests, which must classify a request identically.
  */
 export function hasBearerHeader(ctx: Context): boolean {
   return readBearerToken(ctx.req.header('Authorization')) !== null
@@ -281,17 +221,6 @@ export interface VerifiedApiToken {
 
 /**
  * Verify an API token and return the associated user ID.
- *
- * @example
- * ```ts
- * const result = await verifyApiToken(plainTextToken, store)
- *
- * if (!result) {
- *   return ctx.json({ error: 'Invalid token' }, 401)
- * }
- *
- * console.log(`User ${result.userId} authenticated with abilities:`, result.abilities)
- * ```
  */
 export async function verifyApiToken(
   plainTextToken: string,
@@ -311,21 +240,17 @@ export async function verifyApiToken(
   // Verify the ID matches (prevents using hash from one token with ID of another)
   if (token.id !== parsed.id) return null
 
-  // Check expiration. This is the authoritative check — every store hands its
-  // records here, including Memory and app-supplied ones that never run the
-  // deserialization guards, and `createApiToken` itself can mint an Invalid
-  // Date from a non-finite `expiresIn`. Comparing the Date directly would read
-  // any of those as "not past", so the predicate treats unparseable as expired.
+  // Authoritative expiry check: Memory and app-supplied stores never run the
+  // deserialization guards, and `createApiToken` can mint an Invalid Date from
+  // a non-finite `expiresIn`, so the predicate treats unparseable as expired.
   if (isOptionalExpiryPast(token.expiresAt)) {
     return null
   }
 
-  // Securely verify the hash
   if (!secureCompare(token.hashedToken, hashedToken)) {
     return null
   }
 
-  // Update last used timestamp
   if (updateLastUsed) {
     await store.updateLastUsed(token.id, new Date())
   }
@@ -341,7 +266,6 @@ export async function verifyApiToken(
  * Check if a token has a specific ability.
  */
 export function tokenCan(token: ApiToken | { abilities: string[] }, ability: string): boolean {
-  // Wildcard grants all abilities
   if (token.abilities.includes('*')) return true
   return token.abilities.includes(ability)
 }
@@ -370,11 +294,6 @@ export function tokenCanAny(
 
 /**
  * Revoke (delete) an API token.
- *
- * @example
- * ```ts
- * await revokeApiToken(tokenId, store)
- * ```
  */
 export async function revokeApiToken(id: string, store: ApiTokenStore): Promise<void> {
   await store.delete(id)
@@ -382,12 +301,6 @@ export async function revokeApiToken(id: string, store: ApiTokenStore): Promise<
 
 /**
  * Revoke all API tokens for a user.
- *
- * @example
- * ```ts
- * // Revoke all tokens when user changes password
- * await revokeAllApiTokens(user.id, store)
- * ```
  */
 export async function revokeAllApiTokens(
   userId: string | number,
@@ -398,12 +311,6 @@ export async function revokeAllApiTokens(
 
 /**
  * Get all API tokens for a user.
- *
- * @example
- * ```ts
- * const tokens = await getUserApiTokens(user.id, store)
- * // Returns tokens without the plain text (only metadata)
- * ```
  */
 export async function getUserApiTokens(
   userId: string | number,
@@ -421,42 +328,21 @@ export const API_TOKEN_KEY = 'guren:api-token'
  * Options for the bearer token middleware.
  */
 export interface BearerTokenMiddlewareOptions {
-  /**
-   * Token store implementation.
-   */
   store: ApiTokenStore
 
-  /**
-   * Function to load the user from the user ID.
-   */
   loadUser?: (userId: string | number) => Promise<unknown>
 
-  /**
-   * Required abilities for this route.
-   * If not specified, any valid token is accepted.
-   */
+  /** Required abilities. Any valid token is accepted when unset. */
   abilities?: string[]
 
-  /**
-   * Custom handler when authentication fails.
-   */
   onUnauthorized?: (ctx: Context) => Response | Promise<Response>
 
-  /**
-   * Custom handler when token lacks required abilities.
-   */
   onForbidden?: (ctx: Context, required: string[]) => Response | Promise<Response>
 
-  /**
-   * Header name to extract the token from.
-   * @default 'Authorization'
-   */
+  /** @default 'Authorization' */
   headerName?: string
 
-  /**
-   * Whether to update the token's lastUsedAt timestamp.
-   * @default true
-   */
+  /** @default true */
   updateLastUsed?: boolean
 }
 
@@ -465,22 +351,7 @@ export interface BearerTokenMiddlewareOptions {
  *
  * @example
  * ```ts
- * // Basic usage
- * app.use('/api/*', createBearerTokenMiddleware({ store }))
- *
- * // With ability requirement
- * router.delete('/api/posts/:id', [PostController, 'destroy'],
- *   createBearerTokenMiddleware({
- *     store,
- *     abilities: ['posts:delete'],
- *   })
- * )
- *
- * // With user loading
- * app.use('/api/*', createBearerTokenMiddleware({
- *   store,
- *   loadUser: async (userId) => User.find(userId),
- * }))
+ * app.use('/api/*', createBearerTokenMiddleware({ store, abilities: ['posts:delete'] }))
  * ```
  */
 export function createBearerTokenMiddleware(
@@ -497,28 +368,24 @@ export function createBearerTokenMiddleware(
   } = options
 
   return async (ctx, next) => {
-    // Extract token from Authorization header
     const authHeader = ctx.req.header(headerName)
     if (!authHeader) {
       if (onUnauthorized) return onUnauthorized(ctx)
       return ctx.json({ error: 'Authentication required' }, 401)
     }
 
-    // Parse Bearer token
     const plainTextToken = readBearerToken(authHeader)
     if (!plainTextToken) {
       if (onUnauthorized) return onUnauthorized(ctx)
       return ctx.json({ error: 'Invalid authorization format' }, 401)
     }
 
-    // Verify token
     const result = await verifyApiToken(plainTextToken, store, { updateLastUsed })
     if (!result) {
       if (onUnauthorized) return onUnauthorized(ctx)
       return ctx.json({ error: 'Invalid or expired token' }, 401)
     }
 
-    // Check abilities if required
     if (abilities && abilities.length > 0) {
       if (!tokenCanAll(result.token, abilities)) {
         if (onForbidden) return onForbidden(ctx, abilities)
@@ -529,10 +396,8 @@ export function createBearerTokenMiddleware(
       }
     }
 
-    // Store token info in context
     ctx.set(API_TOKEN_KEY, result)
 
-    // Load and store user if loadUser provided
     if (loadUser) {
       const user = await loadUser(result.userId)
       ctx.set('guren:user', user)
@@ -544,14 +409,6 @@ export function createBearerTokenMiddleware(
 
 /**
  * Get the authenticated API token from the request context.
- *
- * @example
- * ```ts
- * router.get('/api/me', async (ctx) => {
- *   const { token, userId, abilities } = getApiToken(ctx)!
- *   return ctx.json({ userId, tokenName: token.name, abilities })
- * })
- * ```
  */
 export function getApiToken(
   ctx: Context
@@ -567,14 +424,6 @@ export function getApiToken(
  * Get the authenticated API token from the request context, or throw.
  *
  * @throws {AuthenticationException} When no token is present in the context.
- *
- * @example
- * ```ts
- * router.get('/api/me', async (ctx) => {
- *   const { token, userId, abilities } = getApiTokenOrFail(ctx)
- *   return ctx.json({ userId, tokenName: token.name, abilities })
- * })
- * ```
  */
 export function getApiTokenOrFail(
   ctx: Context

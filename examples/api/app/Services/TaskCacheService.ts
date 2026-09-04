@@ -24,16 +24,9 @@ function completedFilterSegment(completed?: boolean): (typeof TASKS_FILTER_SEGME
   return 'all'
 }
 
-/**
- * Cache service for tasks.
- * Provides cached access to task data with automatic invalidation.
- */
 export class TaskCacheService {
   constructor(private readonly cache: CacheManager) {}
 
-  /**
-   * Get paginated tasks for a user with caching.
-   */
   async getUserTasks(
     userId: number,
     page: number,
@@ -60,9 +53,6 @@ export class TaskCacheService {
     })
   }
 
-  /**
-   * Get a single task with caching.
-   */
   async getTask(id: number): Promise<Task | null> {
     const cacheKey = `tasks:${id}`
     const ttl = 300 // 5 minutes cache
@@ -72,14 +62,9 @@ export class TaskCacheService {
     })
   }
 
-  /**
-   * Invalidate task cache when a task is created or updated.
-   */
   async invalidateTask(id: number, userId: number): Promise<void> {
-    // Invalidate specific task cache
     await this.cache.store().delete(`tasks:${id}`)
 
-    // Invalidate user's paginated task caches
     for (let page = 1; page <= TASKS_PAGE_INVALIDATION_DEPTH; page++) {
       for (const completed of TASKS_FILTER_SEGMENTS) {
         await this.cache.store().delete(`tasks:user:${userId}:page:${page}:per:${TASKS_PAGE_SIZE}:completed:${completed}`)
@@ -87,9 +72,6 @@ export class TaskCacheService {
     }
   }
 
-  /**
-   * Invalidate all task caches for a user.
-   */
   async invalidateUserTasks(userId: number): Promise<void> {
     for (let page = 1; page <= TASKS_PAGE_INVALIDATION_DEPTH; page++) {
       for (const completed of TASKS_FILTER_SEGMENTS) {
@@ -98,9 +80,6 @@ export class TaskCacheService {
     }
   }
 
-  /**
-   * Clear all task caches.
-   */
   async clearAll(): Promise<void> {
     await this.cache.store().clear()
   }

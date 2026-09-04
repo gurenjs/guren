@@ -406,8 +406,7 @@ describe('InertiaEngine dev stylesheet links', () => {
   })
 
   it('drops the dev source stylesheet when a Vite dev server owns the entry', async () => {
-    // The raw `/resources/css/app.css` is the *source* file — with Tailwind
-    // in it, the browser 404s its bare `@import 'tailwindcss'` on every page
+    // The source file's bare `@import 'tailwindcss'` 404s on every page,
     // while the compiled CSS already arrives through Vite's module graph.
     process.env.NODE_ENV = 'development'
     process.env.GUREN_INERTIA_ENTRY = 'http://localhost:5173/resources/js/dev-entry.ts'
@@ -432,8 +431,7 @@ describe('InertiaEngine dev stylesheet links', () => {
   })
 
   it('never filters a per-call styles override', async () => {
-    // `options.styles` is an explicit choice; only the ambient env-derived
-    // styles can carry the dev fallback the filter targets.
+    // Only the ambient env-derived styles carry the fallback the filter targets.
     process.env.NODE_ENV = 'development'
     process.env.GUREN_INERTIA_ENTRY = 'http://localhost:5173/resources/js/dev-entry.ts'
 
@@ -448,8 +446,6 @@ describe('InertiaEngine dev stylesheet links', () => {
   })
 
   it('keeps the dev source stylesheet when the fallback pipeline serves the entry', async () => {
-    // No Vite: the entry is a same-origin path and the raw stylesheet link is
-    // the only styling the page gets.
     process.env.NODE_ENV = 'development'
     process.env.GUREN_INERTIA_ENTRY = '/resources/js/app.tsx'
     process.env.GUREN_INERTIA_STYLES = '/resources/css/app.css'

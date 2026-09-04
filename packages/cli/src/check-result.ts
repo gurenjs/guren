@@ -8,9 +8,8 @@ export interface CheckResult {
   suggestion?: string
   filePath?: string
   /**
-   * Advice rather than integrity (e.g. test-coverage nudges): exit-code
-   * gates such as `check --ci` skip advisory warns, and JSON consumers can
-   * predict the exit code without re-deriving the rule from finding keys.
+   * Advice rather than integrity (e.g. test-coverage nudges): exit-code gates
+   * such as `check --ci` skip advisory warns.
    */
   advisory?: boolean
 }

@@ -1,9 +1,8 @@
 // Weekly adoption-metrics snapshot: npm downloads for every public workspace
-// package plus GitHub repository traffic. GitHub's traffic API only retains
-// 14 days, so without a periodic snapshot the referrer data around a launch
-// is lost for good. Run by .github/workflows/metrics-snapshot.yml, which
-// uploads the JSON to a private R2 bucket — the referrer list is admin-only
-// data on GitHub and must not land anywhere in this public repository.
+// package plus GitHub repository traffic, which the traffic API retains for
+// only 14 days. Run by .github/workflows/metrics-snapshot.yml, which uploads
+// the JSON to a private R2 bucket: the referrer list is admin-only data and
+// must not land anywhere in this public repository.
 //
 // Usage: bun scripts/metrics-snapshot.ts [--out path.json]
 //   GITHUB_TOKEN   token with push access to the repo (traffic endpoints
@@ -14,10 +13,9 @@ import { resolve } from 'node:path'
 
 const REPO = 'gurenjs/guren'
 
-// npm's own package-name grammar. Everything fetched or persisted flows
-// through this and the shaping helpers below, so a hostile value in a
-// package.json or an API response cannot smuggle URL segments or arbitrary
-// payload shapes into the snapshot.
+// npm's own package-name grammar. Everything fetched or persisted flows through
+// this and the shaping helpers below, so a hostile package.json or API response
+// cannot smuggle URL segments or arbitrary shapes into the snapshot.
 const NPM_NAME_PATTERN = /^(?:@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/
 
 function asCount(value: unknown): number | null {
@@ -87,7 +85,6 @@ async function github(path: string, token: string | undefined): Promise<unknown 
   return response.json()
 }
 
-/** Daily views/clones series: {count, uniques, <key>: [{timestamp, count, uniques}]} */
 function shapeSeries(raw: unknown, key: 'views' | 'clones') {
   if (raw === null || typeof raw !== 'object') return null
   const record = raw as Record<string, unknown>
@@ -106,7 +103,6 @@ function shapeSeries(raw: unknown, key: 'views' | 'clones') {
   }
 }
 
-/** Top-10 referrers/paths: keep only the documented fields, length-capped. */
 function shapeRanking(raw: unknown, nameKey: 'referrer' | 'path') {
   if (!Array.isArray(raw)) return null
   return raw.slice(0, 20).map((entry) => {
@@ -143,7 +139,6 @@ const snapshot = {
     stars: asCount(repoInfo.stargazers_count),
     forks: asCount(repoInfo.forks_count),
     openIssues: asCount(repoInfo.open_issues_count),
-    // Each traffic payload covers the trailing 14 days.
     traffic: {
       views: shapeSeries(await github('/traffic/views', token), 'views'),
       clones: shapeSeries(await github('/traffic/clones', token), 'clones'),

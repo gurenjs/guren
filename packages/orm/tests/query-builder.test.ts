@@ -43,11 +43,9 @@ function createAdvancedAdapter(records: TestRecord[]): ORMAdapterAdvanced {
       let result = true
       for (const c of conditions) {
         if (c.type === 'group' && c.boolean === 'or') {
-          // OR: previous result OR this group's conditions
           const groupResult = c.conditions.some((sub) => evaluateCondition(record, sub))
           result = result || groupResult
         } else {
-          // AND: accumulate
           result = result && evaluateCondition(record, c)
         }
       }
@@ -540,7 +538,6 @@ describe('QueryBuilder', () => {
 
   describe('complex conditions', () => {
     it('should combine where and orWhere', async () => {
-      // (role = admin) OR (score > 85)
       const results = await qb().where('role', 'admin').orWhere('score', '>', 85).get()
       // Alice (admin, 95), Diana (admin, 60), Eve (90)
       expect(results).toHaveLength(3)

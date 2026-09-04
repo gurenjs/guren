@@ -1,17 +1,11 @@
 /**
- * The approval queue on the App MCP endpoint (RFC 0016 §5.4 item 4): the gate
- * that turns a call into a pending record, the approval that lets exactly one
- * call through, and the `guren.approval_status` companion.
- *
- * Driven through the real MCP client wherever the answer the *caller* sees is
- * the thing under test, because the pending answer rides as an `isError`
- * result carrying JSON — the one measured protocol fact this feature rests on
- * — and asserting it against the server object directly would never exercise
- * the SDK's delivery of it.
- *
- * Clocks are seeded at an absolute instant with expiry after it; the "later"
- * clock advances past that instant. Seeding in the past would expire every
- * record and make the expiry cases pass for the wrong reason.
+ * The approval queue on the App MCP endpoint (RFC 0016 §5.4 item 4). Driven
+ * through the real MCP client wherever the answer the *caller* sees is under
+ * test: the pending answer rides as an `isError` result carrying JSON — the one
+ * measured protocol fact this feature rests on — and asserting against the
+ * server object directly would never exercise the SDK's delivery of it. Clocks
+ * are seeded at an absolute instant with expiry after it; seeding in the past
+ * would expire every record and pass the expiry cases for the wrong reason.
  */
 import { describe, test, expect } from 'bun:test'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
@@ -43,9 +37,9 @@ const OTHER: AgentPrincipal = { kind: 'user', id: 8 }
 
 /**
  * A store with no cleverness in it: an array, and a `consume` that is a
- * compare-and-set because the interface says one is required. Nothing here
- * filters expiry or status — that is the framework's job, and a fixture that
- * filtered would hide a gate that had stopped checking.
+ * compare-and-set because the interface requires one. Nothing here filters
+ * expiry or status — that is the framework's job, and a fixture that filtered
+ * would hide a gate that had stopped checking.
  */
 class MemoryApprovalStore implements AgentApprovalStore {
   readonly records: AgentApprovalRequest[] = []
@@ -150,9 +144,7 @@ async function connect(
             redact: (tool, args) => redactAgentArguments(args, tool.redact),
             // Through the plugin's own wrapper, not around it: the guarantee
             // that a failed notification neither fails the call nor loses the
-            // record lives in `notifyApprovers`, so a harness that called the
-            // application's function directly would be testing a promise
-            // nothing keeps.
+            // record lives in `notifyApprovers`.
             notify: notifyApprovers(
               options.notify
               ?? ((request) => {
@@ -179,10 +171,9 @@ async function connect(
 }
 
 /**
- * The preflight seam's own verdict header, spelled out for the same reason
- * `server.test.ts` spells it: the constant is internal to `@guren/server`, and
- * a rename leaves this string classifying nothing, which turns the rehearsal
- * case red rather than letting it quietly keep passing.
+ * The preflight seam's own verdict header, spelled out because the constant is
+ * internal to `@guren/server`: a rename leaves this string classifying nothing,
+ * turning the rehearsal case red rather than letting it quietly keep passing.
  */
 const VERDICT_HEADER = 'X-Guren-Agent-Preflight-Verdict'
 
@@ -196,11 +187,10 @@ async function seamVerdict(tool: DerivedAgentTool): Promise<ToolCallOutcome> {
 }
 
 /**
- * The JSON body an approval refusal carries beside its message.
- *
- * Takes `unknown` rather than a `{ content }` shape: the SDK's own
- * `CallToolResult` carries an index signature, and narrowing it structurally
- * here would be a second, weaker statement of what a result is.
+ * The JSON body an approval refusal carries beside its message. Takes `unknown`
+ * rather than a `{ content }` shape: the SDK's own `CallToolResult` carries an
+ * index signature, and narrowing it here would restate, more weakly, what a
+ * result is.
  */
 function refusalBody(result: unknown): Record<string, unknown> {
   const blocks = (result as { content: Array<{ type: string; text: string }> }).content
@@ -307,12 +297,10 @@ describe('the approval gate with a queue', () => {
 
   test('should let an expired rejection be asked again as a new question', async () => {
     // A rejection blocks while its record is live, which is what stops a retry
-    // from costing a human's "no" nothing. Blocking *forever* is a different
-    // claim: one premature rejection would denylist that exact call for that
-    // principal permanently, with no remedy short of an operator deleting the
-    // row. `guren.approval_status` still reports it as rejected — a human's
-    // answer stays true — but the gate stops holding it against a new request
-    // once the window has closed.
+    // from costing a human's "no" nothing. Blocking *forever* would denylist
+    // that exact call for that principal permanently, with no remedy short of
+    // deleting the row. `guren.approval_status` still reports it as rejected,
+    // but the gate stops holding it against a new request once it expires.
     const store = new MemoryApprovalStore()
     await seedApproved(store, { id: 5 }, {
       status: 'rejected',
@@ -346,10 +334,8 @@ describe('the approval gate with a queue', () => {
   test('should refuse to bind an approval to a call with no identified caller', async () => {
     // `agentApprovalPrincipalKey` answers 'anonymous' for every principal-less
     // caller, so a record filed for one would be spendable — and readable
-    // through guren.approval_status — by any other. No surface reaches the
-    // gate without a verified bearer today; this refuses at the gate so the
-    // first adapter that passes null gets a refusal rather than a shared
-    // bucket. Driven directly: the plugin cannot produce this call.
+    // through guren.approval_status — by any other. Driven directly: the plugin
+    // cannot produce this call.
     const store = new MemoryApprovalStore()
     const notified: AgentApprovalRequest[] = []
 
@@ -370,11 +356,9 @@ describe('the approval gate with a queue', () => {
   })
 
   test('should meter the request before filing it or paging anyone', async () => {
-    // The gate writes a record and sends mail, and it deduplicates only on
-    // identical arguments — so a caller varying one field files one request
-    // and pages a human per call. Metering after that work would leave the
-    // budget guarding the execution while the amplification happened in front
-    // of it.
+    // The gate writes a record and sends mail, and deduplicates only on identical
+    // arguments — so a caller varying one field pages a human per call. Metering
+    // after that work would leave the amplification in front of the budget.
     const store = new MemoryApprovalStore()
     const limiter = new AgentRateLimiter({ max: 10, writeMax: 1, windowMs: 60_000 })
     const { client, denied, notified } = await connect({ store, overrides: { limiter } })
@@ -390,17 +374,13 @@ describe('the approval gate with a queue', () => {
   })
 
   test('should refuse a lost consume race as spent, without filing a new request', async () => {
-    // The concurrent shape of "exactly once". Both calls read the same
-    // unconsumed record and both pass the usability check; one wins `consume`.
-    // The loser holds a copy that still says approved and unspent, so falling
-    // through to the generic branch would read it as "no usable match" and
-    // open a fresh request — N concurrent calls on one approval producing N-1
-    // records and N-1 pages to a human, which is the unbounded-records failure
-    // the pending-match lookup exists to prevent.
-    //
-    // Driven by a store whose `consume` always loses rather than by real
-    // concurrency: a scheduler race is not a test, and the branch under test
-    // is exactly "findMatch returned it, consume said no".
+    // The concurrent shape of "exactly once". Both calls read the same unconsumed
+    // record and pass the usability check; one wins `consume`. The loser holds a
+    // copy that still says approved, so falling through to the generic branch
+    // would open a fresh request — N concurrent calls producing N-1 records and
+    // N-1 pages to a human. Driven by a store whose `consume` always loses: a
+    // scheduler race is not a test, and the branch is "findMatch returned it,
+    // consume said no".
     class ContendedStore extends MemoryApprovalStore {
       override async consume(): Promise<boolean> {
         return false
@@ -514,9 +494,8 @@ describe('the approval gate with a queue', () => {
       arguments: { tool: 'posts.destroy', input: { id: 5 } },
     })
 
-    // Rehearsing is not requesting: the verdict comes back, and the queue is
-    // untouched. A preflight that filed a request would let an agent page the
-    // approvers by asking questions.
+    // Rehearsing is not requesting: a preflight that filed a request would let an
+    // agent page the approvers by asking questions.
     expect(result.isError).toBeUndefined()
     expect((result.structuredContent as { allowed: boolean }).allowed).toBe(true)
     expect(dispatched).toEqual([{ tool: 'posts.destroy', args: { id: 5 } }])
@@ -577,10 +556,10 @@ describe('guren.approval_status', () => {
   })
 
   test('should answer another principal\'s id exactly as it answers an unknown one', async () => {
-    // Two servers over the same principal and the *same request id string*.
-    // One store holds the record (owned by USER, asked after by OTHER); the
-    // other has never heard of it. Only the id's existence differs, which is
-    // exactly the bit that must not be observable.
+    // Two servers over the same principal and the *same request id string*: one
+    // store holds the record (owned by USER, asked after by OTHER), the other
+    // has never heard of it. Only the id's existence differs, which is exactly
+    // the bit that must not be observable.
     const owning = new MemoryApprovalStore()
     const owned = await seedApproved(owning, { id: 5 })
     const empty = new MemoryApprovalStore()
@@ -597,17 +576,15 @@ describe('guren.approval_status', () => {
     })
 
     // Deep equality of the whole result, not `isError` on each: two refusals
-    // whose text differs are two distinguishable answers — the enumeration the
-    // scope rule forbids — and a pair of `isError` assertions would pass
-    // straight through that difference.
+    // whose text differs are two distinguishable answers, and a pair of
+    // `isError` assertions would pass straight through that difference.
     expect(foreign).toEqual(unknown)
     expect(foreign.isError).toBe(true)
 
     // And the other half of the same rule: the audit trail *does* keep the
-    // distinction the caller is denied. Without this the claim is true of
-    // nothing — both cases reach the trail as an identical 404, and a caller
-    // walking ids to find other principals' pending actions is indistinguish-
-    // able from one mistyping its own.
+    // distinction the caller is denied. Without it both cases reach the trail as
+    // an identical 404, and a caller walking ids to find other principals'
+    // pending actions looks like one mistyping its own.
     expect(foreignHarness.invoked.at(-1)?.status).toBe(403)
     expect(unknownHarness.invoked.at(-1)?.status).toBe(404)
   })

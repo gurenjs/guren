@@ -1,9 +1,7 @@
 import nodemailer from 'nodemailer'
 import type { MailTransport, MailMessage, SendResult, SmtpTransportOptions } from '../types'
 
-/**
- * Format email address for nodemailer.
- */
+/** Format an email address for nodemailer. */
 function formatAddress(addr: { email: string; name?: string }): string {
   if (addr.name) {
     return `"${addr.name}" <${addr.email}>`
@@ -11,31 +9,10 @@ function formatAddress(addr: { email: string; name?: string }): string {
   return addr.email
 }
 
-/**
- * SMTP mail transport using Nodemailer.
- *
- * @example
- * ```ts
- * const transport = new SmtpTransport({
- *   host: 'smtp.example.com',
- *   port: 587,
- *   auth: {
- *     user: 'user@example.com',
- *     pass: 'password',
- *   },
- * })
- *
- * await transport.send({
- *   from: { email: 'sender@example.com' },
- *   to: [{ email: 'recipient@example.com' }],
- *   subject: 'Hello',
- *   text: 'Hello World!',
- * })
- * ```
- */
+/** SMTP mail transport using Nodemailer. */
 export class SmtpTransport implements MailTransport {
   readonly name = 'smtp'
-  // Using any to avoid complex nodemailer type gymnastics
+  // `any` avoids nodemailer type gymnastics.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private readonly transporter: any
 
@@ -50,9 +27,6 @@ export class SmtpTransport implements MailTransport {
     } as nodemailer.TransportOptions)
   }
 
-  /**
-   * Send an email via SMTP.
-   */
   async send(message: MailMessage): Promise<SendResult> {
     try {
       const mailOptions = {
@@ -89,9 +63,6 @@ export class SmtpTransport implements MailTransport {
     }
   }
 
-  /**
-   * Verify SMTP connection.
-   */
   async verify(): Promise<boolean> {
     try {
       await this.transporter.verify()
@@ -101,9 +72,6 @@ export class SmtpTransport implements MailTransport {
     }
   }
 
-  /**
-   * Close the transport.
-   */
   close(): void {
     this.transporter.close()
   }

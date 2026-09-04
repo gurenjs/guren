@@ -1,17 +1,12 @@
 /**
- * Public types for the attachments layer (RFC 0013).
- *
- * One table, one service, one processor interface: attachments ride the ORM's
+ * Public types for the attachments layer (RFC 0013): attachments ride the ORM's
  * polymorphic `attachable` morph convention, bytes live on a `StorageManager`
  * disk, and image work happens behind {@link ImageProcessor}.
  */
 
 /**
- * A named image variant specification, declared on the model via
- * `hasOneAttached({ variants: { thumb: { width: 320 } } })`.
- *
- * `fit` is limited to what `Bun.Image` actually supports (`'fill'` and
- * `'inside'`); `'cover'` is reserved for a future, non-breaking addition.
+ * A named image variant specification. `fit` is limited to what `Bun.Image`
+ * supports; `'cover'` is reserved for a future, non-breaking addition.
  */
 export interface VariantSpec {
   width?: number
@@ -28,17 +23,12 @@ export interface VariantSpec {
 }
 
 /**
- * Per-variant status entry stored in the attachment row's `variants` JSON
- * column. Every *declared* variant gets an entry at attach time — recording
- * declared names, not just generated ones, is what lets `attachmentUrl()`
- * distinguish "not yet generated" (fall back to the original) from "never
- * declared" (throw) after a reload.
+ * Per-variant status entry in the row's `variants` JSON column. Every *declared*
+ * variant gets an entry at attach time, which is what lets `attachmentUrl()`
+ * tell "not yet generated" (fall back) from "never declared" (throw).
  *
- * - `pending`  — generation is queued (`attach(..., { queued: true })`)
- *   and a worker has not finished it yet
- * - `ready`    — the variant object exists at `path`
- * - `failed`   — generation was attempted and failed
- * - `unavailable` — the runtime has no image processor
+ * `pending` is queued generation, `ready` means the object exists at `path`,
+ * `failed` was attempted, `unavailable` means the runtime has no processor.
  */
 export interface AttachmentVariantRecord {
   status: 'pending' | 'ready' | 'failed' | 'unavailable'
@@ -51,9 +41,7 @@ export interface AttachmentVariantRecord {
   size?: number
 }
 
-/**
- * A row of the `attachments` table, as returned by the attachment statics.
- */
+/** A row of the `attachments` table, as returned by the attachment statics. */
 export interface AttachmentRecord {
   /** ULID — sortable, unguessable object-key prefix. */
   id: string
@@ -84,12 +72,9 @@ export interface AttachmentRecord {
 }
 
 /**
- * The resource-facing shape returned by `withAttachments()`, ready for
- * `JsonResource.toArray()` so pages can carry typed attachment props.
- *
- * `variants` has an entry for every *declared* variant name; a variant that
- * is not `ready` yet falls back to the original's URL, so pages keep
- * rendering (the `placeholder` LQIP covers the perceived-latency gap).
+ * The resource-facing shape returned by `withAttachments()`. `variants` has an
+ * entry for every *declared* variant name; one that is not `ready` yet falls
+ * back to the original's URL, so pages keep rendering.
  */
 export interface AttachmentData {
   id: string
@@ -105,22 +90,19 @@ export interface AttachmentData {
 }
 
 /**
- * Image processing behind the attachments pipeline.
+ * Image processing behind the attachments pipeline. The default wraps
+ * `Bun.Image`; other runtimes inject their own via
+ * `configureAttachments({ processor })`.
  *
- * The default implementation wraps `Bun.Image` and is resolved only when the
- * runtime has it; apps on other runtimes may inject their own (e.g. a
- * sharp-backed one) via `configureAttachments({ processor })`.
- *
- * Implementations signal an OS-level codec gap by throwing an error whose
- * `code` is `'ERR_IMAGE_FORMAT_UNSUPPORTED'` — format support is a runtime
- * property (OS codecs), never a static table, so that error code is the only
- * authority the pipeline branches on.
+ * Implementations signal an OS-level codec gap by throwing with `code ===
+ * 'ERR_IMAGE_FORMAT_UNSUPPORTED'` — format support is a runtime property, so
+ * that code is the only authority the pipeline branches on.
  */
 export interface ImageProcessor {
   /**
-   * Full decode: validates the bytes, enforces `maxPixels`, reports
-   * dimensions. Header sniffing is *not* validation — truncated files pass
-   * it — so implementations must decode pixels before resolving.
+   * Full decode: validates the bytes, enforces `maxPixels`, reports dimensions.
+   * Header sniffing is *not* validation (truncated files pass it), so
+   * implementations must decode pixels before resolving.
    */
   probe(
     input: Uint8Array,
@@ -135,22 +117,15 @@ export interface ImageProcessor {
 }
 
 /**
- * What an attachment collection accepts as image input.
- *
- * - unset      — opaque bytes: no image pipeline at all, `width`/`height`/
- *   `placeholder` stay `null` (a `draftPdf` collection)
- * - `'allow'`  — images are decoded and measured when recognized; anything
- *   else is stored as opaque bytes
- * - `'require'`— input must be a decodable image; non-images are rejected
- *   with a 422 `ValidationException`
- * - `'forbid'` — inputs that sniff as images are rejected with 422
+ * What an attachment collection accepts as image input. Unset means opaque
+ * bytes with no image pipeline; `'allow'` decodes recognized images and stores
+ * anything else opaquely; `'require'` and `'forbid'` reject with a 422.
  */
 export type ImagePolicy = 'forbid' | 'allow' | 'require'
 
 /**
- * The bytes-only attach input. Filesystem path strings are deliberately not
- * accepted anywhere in this API: `Bun.Image`'s path form is an
- * arbitrary-file-read primitive if a user-influenced string ever reaches it,
- * so the pipeline never exposes the shape at all.
+ * The bytes-only attach input. Filesystem path strings are never accepted:
+ * `Bun.Image`'s path form is an arbitrary-file-read primitive once a
+ * user-influenced string reaches it.
  */
 export type AttachmentSource = File | Blob | Uint8Array

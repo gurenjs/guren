@@ -147,9 +147,8 @@ describe('deploy target detection', () => {
   })
 
   it('reports Lambda once when the plugin and the adapter import are both present', async () => {
-    // Installing the plugin also scaffolds src/lambda.ts, so this is the normal
-    // shape of a plugin-based app — both detectors fire on it and every deploy
-    // warning would otherwise be emitted twice.
+    // Installing the plugin also scaffolds src/lambda.ts, so both detectors
+    // fire on a normal plugin-based app and every warning would be doubled.
     const files = {
       'src/lambda.ts': `import { createLambdaHandler } from '@guren/core/lambda'\n`,
     }
@@ -225,9 +224,8 @@ export const handler = createLambdaHandler(app)
 
 describe('deploy-password-hashing check', () => {
   // The default hasher falls back to node:crypto scrypt off Bun, and workerd's
-  // nodejs_compat implements it in full (RFC 0003 §4), so authenticating with
-  // passwords is no longer by itself a break on a Bun-less target. Warning here
-  // would prescribe a destructive rehash for a problem the framework handles.
+  // nodejs_compat implements it in full (RFC 0003 §4), so password auth alone
+  // is not a break on a Bun-less target; warning prescribes a needless rehash.
   it('passes when a Workers app verifies passwords through the default hasher', async () => {
     const files = { 'app/Http/Controllers/LoginController.ts': PASSWORD_LOGIN_CONTROLLER }
 
@@ -320,10 +318,9 @@ export class User extends AuthenticatableModel {
     })
   })
 
-  // Regression: guren.dev is an OAuth-only Workers app that keeps
-  // AuthenticatableModel and passwordColumn so the guard can reject password
-  // logins for hash-less accounts. Treating those as password auth reported a
-  // break that cannot happen.
+  // An OAuth-only app keeps AuthenticatableModel and passwordColumn so the
+  // guard can reject password logins for hash-less accounts; reading those as
+  // password auth reports a break that cannot happen.
   it('does not warn for a passwordless app that still configures passwordColumn', async () => {
     const files = { 'app/Providers/AuthProvider.ts': OAUTH_ONLY_AUTH }
 
@@ -398,10 +395,8 @@ export const app = createApp({ auth: { autoSession: false } })
   })
 
   // The `auth` key is read off createApp's first argument positionally, and a
-  // transparent assertion around the options object is not the object — the
-  // generic identifier scan walks through `satisfies`/`as const`, but this
-  // positional read did not, so an app written this way lost the session
-  // signal entirely and passed a check it should fail.
+  // transparent assertion around the options object is not the object: without
+  // unwrapping it, an app written this way loses the session signal entirely.
   it.each([' satisfies Record<string, unknown>', ' as const'])(
     'reads createApp options written with %s',
     async (suffix) => {
@@ -418,10 +413,9 @@ export const app = createApp({ auth: { autoSession: false } })
     },
   )
 
-  // The `auth: {` match alone can't see what's inside the object it opens, so
-  // suppression must come from a whole-app check for `autoSession: false`,
-  // not from excluding it within the same regex pass (that reintroduces the
-  // exact backtracking bug fixed above).
+  // The `auth: {` match alone cannot see inside the object it opens, so
+  // suppression comes from a whole-app check for `autoSession: false` rather
+  // than from excluding it within the same regex pass.
   it('does not warn when autoSession: false sits inside the same auth: { line', async () => {
     const files = {
       'src/app.ts': `import { createApp } from '@guren/core'
@@ -515,9 +509,8 @@ export const oauth = createOAuthManager({})
     })
   })
 
-  // Without these the whole BACKED_OAUTH_PATTERNS table could be broken and
-  // every other test would still pass — a correctly-configured OAuth app would
-  // then be warned at, the exact false positive this check exists to avoid.
+  // Without these the whole BACKED_OAUTH_PATTERNS table could be broken with
+  // every other test still passing, warning at a correctly-configured app.
   for (const store of ['DatabaseOAuthStateStore', 'RedisOAuthStateStore'] as const) {
     it(`passes once ${store} is constructed`, async () => {
       const files = {
@@ -663,8 +656,8 @@ const discovery = new AutoDiscovery({ basePath: 'app' })
     })
   })
 
-  // A bare import is not active use — it survives refactors that drop the
-  // actual discovery call, the same false positive fixed for NodeHasher.
+  // A bare import is not active use: it survives refactors that drop the
+  // discovery call itself.
   it('does not warn on an AutoDiscovery import that is never constructed', async () => {
     const files = { 'src/app.ts': `import { AutoDiscovery } from '@guren/core'\n` }
 
@@ -673,9 +666,8 @@ const discovery = new AutoDiscovery({ basePath: 'app' })
     })
   })
 
-  // ApplicationOptions no longer declares `discover` (it was accepted and
-  // silently ignored, then removed), but an older app may still carry the
-  // key — inert then and now, so it must not read as discovery.
+  // ApplicationOptions no longer declares `discover`, but an older app may
+  // still carry the key: inert, so it must not read as discovery.
   it('does not warn on the inert discover: true option', async () => {
     const files = {
       'src/app.ts': `import { createApp } from '@guren/core'\nexport const app = createApp({ discover: true })\n`,
@@ -769,9 +761,8 @@ describe('runDoctor integration', () => {
 })
 
 describe('AST-based matching', () => {
-  // The regex generation of this scanner documented aliased imports as a
-  // known gap in both directions. The AST resolves them, so an aliased
-  // remediation must count and an aliased hazard must still warn.
+  // Aliased imports run both ways: an aliased remediation has to count and an
+  // aliased hazard still has to warn.
   it('recognizes an aliased NodeHasher construction as remediation', async () => {
     const files = {
       'app/Http/Controllers/LoginController.ts': PASSWORD_LOGIN_CONTROLLER,
@@ -905,9 +896,8 @@ export class Custom implements OAuthServiceProvider {}
     })
   })
 
-  // Regex-era false positive: the make:auth mail config contains
-  // `auth: { user, pass }` for SMTP credentials, which has nothing to do
-  // with sessions. Scoping the auth-key signal to createApp options fixes it.
+  // The make:auth mail config carries `auth: { user, pass }` for SMTP
+  // credentials, so the auth-key signal is scoped to createApp options.
   it('does not read SMTP mailer auth config as a session', async () => {
     const files = {
       'config/mail.ts': `export const mail = {
@@ -941,9 +931,8 @@ export const app = createApp({ auth })
     })
   })
 
-  // Resolving names bare made any same-named export a signal. An unrelated
-  // `ScryptHasher` would report a Workers app as broken over a class that has
-  // nothing to do with Bun.password, and the fix it prescribes is a rehash.
+  // Resolving names bare makes any same-named export a signal: an unrelated
+  // `ScryptHasher` would report a Workers app as broken and prescribe a rehash.
   it('does not let a same-named import from another package raise the hasher warning', async () => {
     const files = {
       'app/Http/Controllers/LoginController.ts': PASSWORD_LOGIN_CONTROLLER,
@@ -966,8 +955,8 @@ export const app = createApp({ auth })
     })
   })
 
-  // A decorator anywhere in the file used to make it unparseable, and an
-  // unparseable file contributes nothing — hiding every signal it holds.
+  // A decorator the parser cannot read makes the whole file unparseable, and
+  // an unparseable file contributes nothing — hiding every signal it holds.
   it('still sees signals in a file that uses decorators', async () => {
     const files = {
       'src/app.ts': `import { AutoDiscovery } from '@guren/core'
@@ -1033,9 +1022,8 @@ export const store = new guren.DatabaseSessionStore(sessions)
       const analysis = await analyzeDeployRuntime(dir)
       expect(analysis.unparsedFiles).toEqual(['src/broken.ts'])
 
-      // The broken file contributes nothing; the valid one still signals —
-      // and the verdict discloses that the scan was incomplete, so a skipped
-      // file is a visible caveat rather than a silent false negative.
+      // The broken file contributes nothing and the valid one still signals,
+      // with the incompleteness disclosed rather than silently absorbed.
       const check = (await deployChecks(dir))['deploy-runtime-stores']
 
       expect(check.status).toBe('warn')
@@ -1045,9 +1033,7 @@ export const store = new guren.DatabaseSessionStore(sessions)
   })
 
   // The Lambda target is detected from source, so a skipped file can hide a
-  // target entirely. "No deploy plugin detected" computed over an incomplete
-  // scan has to disclose that, or the caveat has a hole exactly where the
-  // scan was least complete.
+  // target entirely and "no deploy plugin detected" has to carry the caveat.
   it('carries the caveat on the no-target verdict, since a skipped file can hide a Lambda target', async () => {
     const files = { 'lambda.ts': `import { createLambdaHandler } from '@guren/core/lambda'\nexport const = broken {{{` }
 
@@ -1078,8 +1064,7 @@ export const store = new guren.DatabaseSessionStore(sessions)
 
 describe('test files are excluded from the scan', () => {
   // A test fixture constructing a backed store would otherwise satisfy the
-  // remediation check on behalf of an app that never wires one up, hiding a
-  // real production gap.
+  // remediation check for an app that never wires one up.
   it('does not let a store constructed in a test file mask a production gap', async () => {
     const files = {
       'src/app.ts': SESSION_APP,
@@ -1122,9 +1107,8 @@ const store = new DatabaseSessionStore(sessions)
 })
 
 describe('analyzeDeployRuntime', () => {
-  // Every entry in DEPLOY_SCAN_DIRS. Without this, dropping a directory from
-  // that list — including `functions`/`api`, added for serverless entrypoint
-  // layouts — would silently stop the whole scan there with no test failing.
+  // Every entry in DEPLOY_SCAN_DIRS: dropping one would silently stop the
+  // whole scan there with no other test failing.
   for (const dir of ['src', 'app', 'config', 'db', 'routes', 'modules', 'bin', 'functions', 'api'] as const) {
     it(`scans the ${dir}/ directory`, async () => {
       const files = {

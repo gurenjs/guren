@@ -1,9 +1,6 @@
 import type { Context } from 'hono'
 
-/**
- * Minimal Map-backed Hono context double shared by the auth/authorization
- * unit tests: header lookup plus get/set storage, nothing else.
- */
+/** Minimal Map-backed Hono context double: header lookup plus get/set storage. */
 export function fakeContext(
   options: { headers?: Record<string, string>; values?: Record<string, unknown> } = {},
 ): Context {

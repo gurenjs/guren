@@ -9,30 +9,11 @@ import type {
 } from '../types'
 import { assertVisibilitySupported, cannedAcl, putAclFields } from './s3-acl'
 
-/**
- * S3 Client interface (@aws-sdk/client-s3 compatible).
- */
 interface S3Client {
   send(command: unknown): Promise<unknown>
 }
 
-/**
- * AWS S3 storage driver.
- *
- * @example
- * ```ts
- * import { S3Client } from '@aws-sdk/client-s3'
- *
- * const client = new S3Client({ region: 'ap-northeast-1' })
- * const driver = new S3Driver({
- *   client,
- *   bucket: 'my-bucket',
- * })
- *
- * await driver.put('avatars/user-1.jpg', imageBuffer)
- * const url = driver.url('avatars/user-1.jpg')
- * ```
- */
+/** AWS S3 storage driver. */
 export class S3Driver implements StorageDriver {
   // S3's temporaryUrl() is a real SigV4 presign the bucket enforces —
   // declared, not probed (RFC 0015 §3).
@@ -62,15 +43,11 @@ export class S3Driver implements StorageDriver {
     this.acl = options.acl ?? true
   }
 
-  /**
-   * Get or create the S3 client.
-   */
   private async getClient(): Promise<S3Client> {
     if (this.client) {
       return this.client
     }
 
-    // Dynamically import @aws-sdk/client-s3
     const { S3Client } = await importAwsModule('@aws-sdk/client-s3') as {
       S3Client: new (config: unknown) => S3Client
     }
@@ -95,18 +72,13 @@ export class S3Driver implements StorageDriver {
     return this.client
   }
 
-  /**
-   * Get the prefixed key.
-   */
   private prefixKey(path: string): string {
     return this.prefix ? `${this.prefix}/${path}` : path
   }
 
-
   async put(path: string, content: Buffer | string, options?: PutOptions): Promise<string> {
-    // Before the client and the SDK import: a request this disk cannot
-    // honour should say so, not report a missing optional dependency that
-    // would not have made it succeed.
+    // Before the SDK import: a request this disk cannot honour should say so,
+    // not report a missing optional dependency that would not have helped.
     assertVisibilitySupported(this.acl, this.defaultVisibility, options?.visibility, 'put')
 
     const client = await this.getClient()
@@ -381,9 +353,8 @@ export class S3Driver implements StorageDriver {
   }
 
   /**
-   * Run ListObjectsV2 to exhaustion, following `NextContinuationToken` —
-   * a single request returns at most 1000 entries, so a one-page read
-   * silently truncates larger listings.
+   * Follows `NextContinuationToken` to exhaustion: one request returns at most
+   * 1000 entries, so a single-page read silently truncates larger listings.
    */
   private async listAll(input: Record<string, unknown>): Promise<{
     contents: Array<{ Key?: string }>
@@ -411,10 +382,8 @@ export class S3Driver implements StorageDriver {
       contents.push(...(response.Contents ?? []))
       commonPrefixes.push(...(response.CommonPrefixes ?? []))
       if (response.IsTruncated) {
-        // A truncated page whose token is missing or repeats the last one
-        // cannot advance: returning what we have would silently truncate,
-        // and re-sending the same token would loop forever. S3-compatible
-        // endpoints are exactly where such malformed pages show up.
+        // A token that is missing or repeats cannot advance: returning here would
+        // truncate, re-sending would loop. S3-compatible endpoints emit such pages.
         const next = response.NextContinuationToken
         if (!next || next === continuationToken) {
           throw new Error(
@@ -431,10 +400,9 @@ export class S3Driver implements StorageDriver {
   }
 
   /**
-   * The ListObjectsV2 `Prefix` for a directory: the prefixed key with exactly
-   * one trailing slash, or empty for the bucket (or disk prefix) root —
-   * naively appending `/` to `prefixKey('')` on a prefixed disk yields
-   * `prefix//`, which matches nothing.
+   * The prefixed key with exactly one trailing slash, empty at the root —
+   * appending `/` to `prefixKey('')` on a prefixed disk yields `prefix//`,
+   * which matches nothing.
    */
   private listingPrefix(directory: string): string {
     const prefix = this.prefixKey(directory)
@@ -498,9 +466,8 @@ export class S3Driver implements StorageDriver {
   async setVisibility(path: string, visibility: 'public' | 'private'): Promise<void> {
     assertVisibilitySupported(this.acl, this.defaultVisibility, visibility, 'setVisibility')
     if (!this.acl) {
-      // Equal to the disk's visibility (the guard above proved it), so there
-      // is no ACL to write — but the contract still forbids reporting
-      // success for an object that is not there.
+      // No ACL to write, but the contract still forbids reporting success for an
+      // object that is not there.
       await this.metadataOrFail(path)
       return
     }
@@ -537,7 +504,6 @@ export class S3Driver implements StorageDriver {
       Grants?: Array<{ Grantee?: { URI?: string }; Permission?: string }>
     }
 
-    // Check if there's a public-read grant
     const isPublic = response.Grants?.some(
       (grant) =>
         grant.Grantee?.URI === 'http://acs.amazonaws.com/groups/global/AllUsers' &&
@@ -547,16 +513,10 @@ export class S3Driver implements StorageDriver {
     return isPublic ? 'public' : 'private'
   }
 
-  /**
-   * Get the bucket name.
-   */
   getBucket(): string {
     return this.bucket
   }
 
-  /**
-   * Get the prefix.
-   */
   getPrefix(): string {
     return this.prefix
   }

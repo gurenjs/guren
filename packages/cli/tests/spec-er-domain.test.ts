@@ -96,11 +96,8 @@ export class Invoice extends defineModel(invoices) {}
     expect(artifact.content).toContain('erDiagram')
     expect(artifact.content).toContain('serial id PK')
     expect(artifact.content).toContain('integer authorId FK')
-    // Edge from the model relationship (belongsTo author)
     expect(artifact.content).toContain('posts }o--|| users : author')
-    // Attribute detail table carries nullability
     expect(artifact.content).toContain('| title | text | not null |')
-    // Module table present and tagged
     expect(artifact.content).toContain('## invoices (module: billing)')
   })
 

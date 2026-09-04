@@ -20,9 +20,8 @@ function pageFor(...frames: string[]): string {
 }
 
 /**
- * The frames a rendered page shows, which is the only form a developer ever
- * sees — `parseStackTrace` itself is internal, and asserting on it would let the
- * two halves of a frame be reported under the wrong headings unnoticed.
+ * Asserted through the rendered page rather than the internal `parseStackTrace`,
+ * so a frame's two halves cannot land under the wrong headings unnoticed.
  */
 function framesIn(html: string): RenderedFrame[] {
   return [...html.matchAll(FRAME_PATTERN)].map(([, func, location]) => ({
@@ -49,10 +48,8 @@ describe('renderDebugPage stack frames', () => {
   })
 
   test('should keep a path that contains parentheses intact', () => {
-    // Ordinary on macOS — a checkout under `~/Projects (old)`. The path is
-    // bounded by the `(` that matches the frame's final `)`, not by the last one
-    // the frame happens to contain: taking that one reports the file as
-    // `old)/app/config/cache.ts`, a path that exists nowhere.
+    // The path is bounded by the `(` matching the frame's final `)`, not the
+    // last one it contains — that one reports `old)/app/config/cache.ts`.
     expect(framesOf('    at makeStore (/Users/me/Projects (old)/app/config/cache.ts:3:18)')).toEqual([
       { func: 'makeStore', location: '/Users/me/Projects (old)/app/config/cache.ts:3:18' },
     ])
@@ -69,18 +66,16 @@ describe('renderDebugPage stack frames', () => {
   })
 
   test('should read past a function name that contains parentheses', () => {
-    // Emitted for a method whose key carries parentheses:
-    //   ({ 'weird (name)'() {} })['weird (name)']()
-    // Here the *rightmost* `(` is the correct one — the opposite of the case
-    // above, which is why neither end of the frame can be trusted on its own.
+    // Emitted for a method key like `'weird (name)'`. Here the *rightmost* `(`
+    // is correct — the opposite of the case above, so neither end can be
+    // trusted on its own.
     expect(framesOf('    at weird (name) (/app/config/cache.ts:3:18)')).toEqual([
       { func: 'weird (name)', location: '/app/config/cache.ts:3:18' },
     ])
   })
 
   test('should split a frame whose name and path both contain parentheses', () => {
-    // One developer's checkout directory away from the case above, and the
-    // reason the split counts nesting depth rather than preferring one end:
+    // Why the split counts nesting depth rather than preferring one end:
     // every fixed choice of `(` gets this frame wrong.
     expect(framesOf('    at weird (name) (/app (old)/config/cache.ts:3:18)')).toEqual([
       { func: 'weird (name)', location: '/app (old)/config/cache.ts:3:18' },
@@ -88,10 +83,8 @@ describe('renderDebugPage stack frames', () => {
   })
 
   test('should keep a path that contains an unmatched closing parenthesis', () => {
-    // Nothing in the frame closes it, so counting depth alone runs off the
-    // front and would drop the frame rather than show the location sitting
-    // right there. Rarer than the case above, but a lost frame is worse than a
-    // mis-split one.
+    // Counting depth alone runs off the front here and would drop the frame;
+    // a lost frame is worse than a mis-split one.
     expect(framesOf('    at makeStore (/app/name).ts:3:18)')).toEqual([
       { func: 'makeStore', location: '/app/name).ts:3:18' },
     ])
@@ -104,9 +97,8 @@ describe('renderDebugPage stack frames', () => {
   })
 
   test('should drop a frame that carries a line but no column', () => {
-    // Unlike the hot-reload registry, which keys owners on the path alone and
-    // so accepts a bare `:line`, this page prints `file:line:col` and has
-    // nothing to show for a frame missing either half.
+    // This page prints `file:line:col` (the hot-reload registry, keyed on path
+    // alone, does accept a bare `:line`).
     expect(framesOf('    at makeStore (/app/config/cache.ts:3)')).toEqual([])
   })
 

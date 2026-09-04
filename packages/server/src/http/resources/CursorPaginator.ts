@@ -7,10 +7,7 @@ import type {
 } from './types'
 import type { Resource } from './Resource'
 
-/**
- * Cursor paginator for cursor-based pagination.
- * Ideal for infinite scroll and real-time data.
- */
+/** Cursor-based pagination, for infinite scroll and real-time data. */
 export class CursorPaginator<T> {
   protected _items: T[]
   protected _perPage: number
@@ -39,79 +36,46 @@ export class CursorPaginator<T> {
     this._options = options
   }
 
-  /**
-   * Get the paginated items.
-   */
   items(): T[] {
     return this._items
   }
 
-  /**
-   * Get items per page.
-   */
   perPage(): number {
     return this._perPage
   }
 
-  /**
-   * Get the current cursor.
-   */
   currentCursor(): string | null {
     return this._currentCursor
   }
 
-  /**
-   * Get the next cursor.
-   */
   nextCursor(): string | null {
     return this._nextCursor
   }
 
-  /**
-   * Get the previous cursor.
-   */
   prevCursor(): string | null {
     return this._prevCursor
   }
 
-  /**
-   * Check if there are more items.
-   */
   hasMorePages(): boolean {
     return this._hasMore
   }
 
-  /**
-   * Check if there are previous items.
-   */
   hasPreviousPages(): boolean {
     return this._prevCursor !== null
   }
 
-  /**
-   * Get the number of items.
-   */
   count(): number {
     return this._items.length
   }
 
-  /**
-   * Check if empty.
-   */
   isEmpty(): boolean {
     return this._items.length === 0
   }
 
-  /**
-   * Check if not empty.
-   */
   isNotEmpty(): boolean {
     return this._items.length > 0
   }
 
-  /**
-   * Get cursor pagination meta.
-   */
   meta(): CursorPaginationMeta {
     return {
       perPage: this._perPage,
@@ -121,9 +85,6 @@ export class CursorPaginator<T> {
     }
   }
 
-  /**
-   * Transform items to resources.
-   */
   toResource<R extends Resource<T>>(
     resourceClass: ResourceClass<T, R>
   ): CursorPaginatedResponse<ResourceData> {
@@ -133,9 +94,6 @@ export class CursorPaginator<T> {
     }
   }
 
-  /**
-   * Transform to JSON.
-   */
   toJSON(): CursorPaginatedResponse<T> {
     return {
       data: this._items,
@@ -143,9 +101,6 @@ export class CursorPaginator<T> {
     }
   }
 
-  /**
-   * Map over items.
-   */
   map<U>(callback: (item: T, index: number) => U): CursorPaginator<U> {
     return new CursorPaginator(
       this._items.map(callback),
@@ -160,23 +115,15 @@ export class CursorPaginator<T> {
     )
   }
 
-  /**
-   * Get items as array.
-   */
   toArray(): T[] {
     return this._items
   }
 
-  /**
-   * Iterate over items.
-   */
   *[Symbol.iterator](): Iterator<T> {
     yield* this._items
   }
 
-  /**
-   * Create cursor paginator from array with ID-based cursor.
-   */
+  /** The cursor is the id of the last item on the previous page. */
   static fromArray<T extends { id: string | number }>(
     items: T[],
     cursor: string | null,
@@ -213,17 +160,13 @@ export class CursorPaginator<T> {
   }
 }
 
-/**
- * Encode a cursor value.
- */
+/** Encode a cursor value. */
 export function encodeCursor(value: string | number | Date): string {
   const strValue = value instanceof Date ? value.toISOString() : String(value)
   return Buffer.from(strValue).toString('base64url')
 }
 
-/**
- * Decode a cursor value.
- */
+/** Returns the cursor unchanged when it is not valid base64url. */
 export function decodeCursor(cursor: string): string {
   try {
     return Buffer.from(cursor, 'base64url').toString('utf-8')
@@ -232,9 +175,7 @@ export function decodeCursor(cursor: string): string {
   }
 }
 
-/**
- * Create a cursor paginator.
- */
+/** Create a cursor paginator. */
 export function cursorPaginate<T>(
   items: T[],
   perPage: number,

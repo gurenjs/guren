@@ -3,26 +3,13 @@ import { getWorkersEnv } from '@guren/plugin-cloudflare'
 
 /**
  * First-party, cookie-less request analytics into Workers Analytics Engine.
- *
- * Server-side measurement is the only kind this site's audience does not
- * defeat: developers run ad blockers that drop client-side beacons, and AI
- * agents fetching the Markdown mirrors never execute JavaScript at all.
- * No cookies, no IP addresses, and no full referrer URLs are stored — only
- * the request path (length-capped) and the referrer's hostname — so no
- * consent banner is needed.
- *
- * Data point layout (query these positions via the SQL API):
- *   index1: user-agent class (human / ai-agent / bot / unknown)
- *   blob1:  pathname
- *   blob2:  content class (home / docs / blog / markdown / llms / other)
- *   blob3:  user-agent class (again, so blobs are self-contained)
- *   blob4:  referrer host ('' for direct or same-site)
- *   blob5:  primary Accept-Language subtag
- *   blob6:  country code from Cloudflare
- *   blob7:  HTTP method
- *   blob8:  navigation type (initial / inertia)
- *   double1: response status
- *   double2: duration in milliseconds
+ * Server-side because this audience blocks client beacons and AI agents run no
+ * JavaScript. No cookies, IPs or full referrers are stored, so no consent
+ * banner is needed. Positions to query via the SQL API:
+ *   index1: user-agent class     blob1: pathname   blob2: content class
+ *   blob3:  user-agent class     blob4: referrer host ('' direct or same-site)
+ *   blob5:  Accept-Language      blob6: country    blob7: method
+ *   blob8:  initial | inertia    double1: status   double2: duration in ms
  */
 
 interface AnalyticsEngineDataset {
@@ -33,9 +20,9 @@ interface AnalyticsEnv {
   SITE_ANALYTICS?: AnalyticsEngineDataset
 }
 
-// AI agents and assistants, checked before the generic bot pattern — most of
-// their user agents also contain "bot". Sources: the crawlers each vendor
-// documents for robots.txt, plus the coding-agent CLIs seen in access logs.
+// Checked before the generic bot pattern — most of these user agents also
+// contain "bot". From each vendor's documented robots.txt crawlers, plus the
+// coding-agent CLIs seen in access logs.
 const AI_AGENT_PATTERN =
   /GPTBot|OAI-SearchBot|ChatGPT-User|ClaudeBot|Claude-Web|Claude-User|Claude-SearchBot|claude-code|anthropic-ai|PerplexityBot|Perplexity-User|Google-Extended|GoogleAgent|Applebot-Extended|meta-externalagent|cohere-ai|DuckAssistBot|YouBot|MistralAI|Devin|Cursor/i
 
@@ -61,9 +48,8 @@ export function classifyContent(pathname: string): string {
 }
 
 // Analytics Engine rejects a whole data point when its blobs exceed the size
-// limit, and request URLs can be as long as Cloudflare accepts (~16 KB). Real
-// paths on this site are short; anything longer is scanner noise, so truncate
-// rather than lose the data point.
+// limit, and a URL can be ~16 KB. Anything longer than a real path is scanner
+// noise, so truncate rather than lose the point.
 const MAX_PATH_LENGTH = 512
 const MAX_HOST_LENGTH = 256
 

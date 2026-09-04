@@ -1,114 +1,69 @@
-/**
- * Validation rule function type.
- */
+/** Returns `true` when valid, or the error message. */
 export type ValidationRule<T = unknown> = (
   value: T,
   field: string,
   data: Record<string, unknown>
 ) => true | string | Promise<true | string>
 
-/**
- * Validation rule definition.
- */
+/** Validation rule definition. */
 export interface RuleDefinition {
   name: string
   validate: ValidationRule
   message?: string
 }
 
-/**
- * Validation result.
- */
+/** Validation result. */
 export interface ValidationResult {
   success: boolean
   data?: Record<string, unknown>
   errors?: Record<string, string[]>
 }
 
-/**
- * File validation options.
- */
+/** File validation options. */
 export interface FileValidationOptions {
-  /**
-   * Maximum file size in bytes.
-   */
+  /** In bytes. */
   maxSize?: number
 
-  /**
-   * Allowed MIME types.
-   */
   mimes?: string[]
 
-  /**
-   * Allowed file extensions.
-   */
   extensions?: string[]
 
-  /**
-   * Minimum file size in bytes.
-   */
+  /** In bytes. */
   minSize?: number
 }
 
-/**
- * Image validation options.
- */
+/** Image validation options. */
 export interface ImageValidationOptions extends FileValidationOptions {
-  /**
-   * Maximum width in pixels.
-   */
+  /** In pixels. */
   maxWidth?: number
 
-  /**
-   * Maximum height in pixels.
-   */
+  /** In pixels. */
   maxHeight?: number
 
-  /**
-   * Minimum width in pixels.
-   */
+  /** In pixels. */
   minWidth?: number
 
-  /**
-   * Minimum height in pixels.
-   */
+  /** In pixels. */
   minHeight?: number
 
-  /**
-   * Required aspect ratio (width/height).
-   */
+  /** Required aspect ratio (width/height). */
   ratio?: number
 
-  /**
-   * Allowed aspect ratio tolerance.
-   */
   ratioTolerance?: number
 }
 
-/**
- * Validator options.
- */
+/** Validator options. */
 export interface ValidatorOptions {
-  /**
-   * Stop on first error for each field.
-   * @default true
-   */
+  /** Stop on the first error for each field. @default true */
   stopOnFirstError?: boolean
 
-  /**
-   * Custom error messages.
-   */
   messages?: Record<string, string>
 
-  /**
-   * Custom attribute names for error messages.
-   */
+  /** Attribute names substituted into error messages. */
   attributes?: Record<string, string>
 }
 
-/**
- * File-like interface for validation.
- */
+/** File-like interface for validation. */
 export interface FileLike {
   name: string
   size: number

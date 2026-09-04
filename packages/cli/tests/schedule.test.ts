@@ -9,7 +9,6 @@ describe('schedule', () => {
   const kernelPath = join(kernelDir, 'Kernel.ts')
 
   beforeEach(() => {
-    // Clean up and create fresh test directories
     if (existsSync(testDir)) {
       rmSync(testDir, { recursive: true })
     }
@@ -17,7 +16,6 @@ describe('schedule', () => {
   })
 
   afterEach(() => {
-    // Clean up test directories
     if (existsSync(testDir)) {
       rmSync(testDir, { recursive: true })
     }
@@ -25,12 +23,10 @@ describe('schedule', () => {
 
   describe('listScheduledTasks', () => {
     test('shows message when no kernel file exists', async () => {
-      // Just ensure it doesn't throw
       await listScheduledTasks({ appRoot: testDir })
     })
 
     test('loads tasks from kernel file', async () => {
-      // Create a mock kernel file
       const kernelContent = `
 export class Schedule {
   private tasks = []
@@ -71,19 +67,16 @@ export function scheduleTasksKernel() {
 `
       writeFileSync(kernelPath, kernelContent)
 
-      // Just ensure it doesn't throw
       await listScheduledTasks({ appRoot: testDir })
     })
   })
 
   describe('runScheduledTasks', () => {
     test('shows message when no kernel file exists', async () => {
-      // Just ensure it doesn't throw
       await runScheduledTasks({ appRoot: testDir })
     })
 
     test('can filter by task name', async () => {
-      // Create a mock kernel file
       const kernelContent = `
 export class Schedule {
   private tasks = []
@@ -125,12 +118,10 @@ export function scheduleTasksKernel() {
 `
       writeFileSync(kernelPath, kernelContent)
 
-      // Just ensure it doesn't throw when filtering
       await runScheduledTasks({ appRoot: testDir, task: 'task-1' })
     })
 
     test('can force run tasks', async () => {
-      // Create a mock kernel file
       const kernelContent = `
 export class Schedule {
   private tasks = []
@@ -171,7 +162,6 @@ export function scheduleTasksKernel() {
 `
       writeFileSync(kernelPath, kernelContent)
 
-      // Just ensure it doesn't throw when forcing
       await runScheduledTasks({ appRoot: testDir, force: true })
     })
   })

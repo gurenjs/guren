@@ -67,12 +67,9 @@ export default defineConfig({
         find: /^@guren\/orm$/,
         replacement: resolve(rootDir, '../../packages/orm/src/index.ts'),
       },
-      // The only explicit subpath entries left, and first match wins, so both
-      // must stay above the generic orm rule. Every other subpath is served by
-      // a generic `/(.+)$/` rule, whose replacement is extensionless on purpose
-      // so that vite's resolver completes it ('src/support/expiry' -> the
-      // neighbouring expiry.ts). The drizzle mapping is pinned anyway because
-      // 'src/drizzle.ts' and the 'src/drizzle/' directory coexist.
+      // First match wins, so these must stay above the generic orm rule, whose
+      // replacement is extensionless on purpose so vite's resolver completes it.
+      // Pinned because 'src/drizzle.ts' and the 'src/drizzle/' directory coexist.
       {
         find: /^@guren\/orm\/drizzle$/,
         replacement: resolve(rootDir, '../../packages/orm/src/drizzle.ts'),

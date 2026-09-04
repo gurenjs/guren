@@ -1,24 +1,13 @@
 /**
- * The one rule for which `@guren/*` packages a smoke run must resolve from this
- * checkout instead of from npm, and the vendoring that applies it.
+ * The one rule for which `@guren/*` packages a smoke run resolves from this
+ * checkout instead of npm, and the vendoring that applies it.
  *
- * Every smoke that installs a scaffolded app needs the same set, and each copy
- * of it was a way for a package to miss a gate: `@guren/testing` was absent from
- * two of the three lists, so `smoke:starter` and `smoke:golden-path` quietly
- * resolved it from the registry and never exercised anything added to
- * `packages/testing` since its last release. Nothing failed until a release
- * bumped it to a version npm did not have.
- *
- * So the list is not written down here either. It is derived: seed from the
- * `@guren/*` dependencies the scaffold templates declare — a scaffolded app can
- * only resolve what its own manifest names — then close over the workspace
- * dependency graph, because whatever those packages pull in resolves from the
- * app's `node_modules` too. Adding a package to the workspace enters the smokes
- * the moment a template depends on it, and never before.
- *
- * `assertLocalGurenDependencies()` is what makes that derivation safe to trust:
- * it re-reads the manifest a smoke just rewrote and fails on any `@guren/*`
- * entry still carrying a registry range, whatever the seed produced.
+ * The set is derived, never listed: a hand-kept list is how `@guren/testing`
+ * went missing from two of three, leaving `smoke:starter` and
+ * `smoke:golden-path` verifying the *published* copy. Seed from the `@guren/*`
+ * the scaffold templates declare, then close over the workspace dependency
+ * graph. `assertLocalGurenDependencies()` re-reads the rewritten manifest and
+ * fails on any `@guren/*` still carrying a registry range.
  */
 import { cp, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join, relative, resolve } from 'node:path'
@@ -28,9 +17,8 @@ import { collectPackages, repoRoot, type WorkspacePackage } from '../workspace-p
 
 /**
  * Every group a manifest can declare a dependency in — the same four
- * `guren upgrade` rewrites. Rewriting and checking read the same list on
- * purpose: a group one of them skipped would be a place for a dependency to
- * keep its registry range while the post-condition still passed.
+ * `guren upgrade` rewrites. Rewriting and checking read the same list: a group
+ * one of them skipped would let a registry range survive the post-condition.
  */
 export const DEPENDENCY_GROUPS = [
   'dependencies',
@@ -54,10 +42,9 @@ export interface LocalPackage {
 
 /**
  * Does this specifier resolve to a path in this checkout rather than to the
- * registry? Deliberately narrower than `isLocationSpecifier()` in
- * `packages/cli/src/codemods.ts`, which also counts `npm:`, `git:` and
- * `github:` as locations — for that question they are, for this one they are
- * exactly the failure being checked for.
+ * registry? Narrower than `isLocationSpecifier()` in
+ * `packages/cli/src/codemods.ts`: `npm:`, `git:` and `github:` are locations
+ * there, and exactly the failure being checked for here.
  */
 export function isLocalSpecifier(range: string): boolean {
   return /^(?:file|link|workspace|portal):|^[./]/u.test(range)
@@ -103,9 +90,7 @@ export function collectLocalPackages(): Promise<LocalPackage[]> {
     const workspace = new Map((await collectPackages()).map((pkg) => [pkg.name, pkg]))
     const seed = await templateDependencies()
 
-    // A template naming a package this workspace does not have cannot be
-    // vendored, and installing it from npm is the failure this module exists to
-    // prevent — so say which one rather than quietly shipping a shorter list.
+    // Naming the package rather than quietly shipping a shorter vendor set.
     const unknown = [...seed].filter((name) => !workspace.has(name))
     if (unknown.length > 0) {
       throw new Error(
@@ -115,11 +100,9 @@ export function collectLocalPackages(): Promise<LocalPackage[]> {
       )
     }
 
-    // Reachability, not build order: `dependencySchedule()` in
-    // workspace-packages.ts drops the core↔cli edge to break that cycle, and a
-    // vendor set missing either side of it would resolve the other from npm.
-    // Note the traversal follows `dependencies` + `peerDependencies` (what
-    // WorkspacePackage carries), which is what an install actually pulls in.
+    // Reachability, not build order: `dependencySchedule()` drops the core↔cli
+    // edge to break that cycle, and a vendor set missing either side of it would
+    // resolve the other from npm. Follows dependencies + peerDependencies.
     const selected = new Map<string, WorkspacePackage>()
     const queue = [...seed]
     while (queue.length > 0) {
@@ -144,9 +127,9 @@ export function collectLocalPackages(): Promise<LocalPackage[]> {
 }
 
 /**
- * Fail before a smoke scaffolds anything if the checkout is unbuilt — the
- * vendored copies are `dist/` and nothing else, so a missing build reads as a
- * broken framework several minutes later.
+ * Fail before a smoke scaffolds anything if the checkout is unbuilt: the
+ * vendored copies are `dist/` and nothing else, so a missing build otherwise
+ * reads as a broken framework several minutes later.
  */
 export async function ensureBuiltPackages(): Promise<void> {
   for (const pkg of await collectLocalPackages()) {
@@ -217,10 +200,9 @@ export async function rewriteAppDependencies(
 
   for (const [name, target] of roots) {
     const specifier = localSpecifier(appDir, target)
-    // Rewrite the entry where the template already declares it — `@guren/testing`
-    // is a devDependency. Adding it to `dependencies` instead would leave the
-    // template's own range in `devDependencies`, and bun still resolves that
-    // range against the registry, where an unreleased version does not exist.
+    // Rewrite in the group the template declares it in (`@guren/testing` is a
+    // devDependency): a second entry elsewhere leaves the original range, which
+    // bun still resolves against the registry.
     const group = DEPENDENCY_GROUPS.find((field) => manifest[field]?.[name])
     if (group) {
       manifest[group]![name] = specifier
@@ -238,13 +220,9 @@ export async function rewriteAppDependencies(
 
 /**
  * The post-condition every smoke that rewrites a manifest has to pass: no
- * `@guren/*` dependency is left resolving from npm.
- *
- * The derived list above is only as good as its derivation, and the failure it
- * guards against is silent — a package that keeps its published range installs
- * fine and gates nothing. This reads the rewritten manifest instead of trusting
- * the list, so a template or fixture that grows a dependency the vendor set does
- * not cover fails here, by name.
+ * `@guren/*` dependency is left resolving from npm. Reads the rewritten
+ * manifest rather than trusting the derived list, because the failure it guards
+ * against is silent — a published range installs fine and gates nothing.
  */
 export async function assertLocalGurenDependencies(appDir: string, context: string): Promise<void> {
   const manifest = await readManifest(appDir)
@@ -267,9 +245,7 @@ export async function assertLocalGurenDependencies(appDir: string, context: stri
   }
 }
 
-/**
- * CLI face, for `scripts/smoke-golden-path.sh` — bash holds no copy of the list.
- */
+/** CLI face for `scripts/smoke-golden-path.sh` — bash holds no copy of the list. */
 async function main(argv: string[]): Promise<void> {
   const [command, ...args] = argv
 

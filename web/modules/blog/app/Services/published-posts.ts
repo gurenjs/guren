@@ -1,9 +1,8 @@
 import { Post, type PostRecord } from '../Models/Post.js'
 
 /**
- * A post goes live once its publish date has arrived: a future `publishedAt`
- * is scheduled, not published, so it stays out of the list, the feed, and the
- * sitemap until then.
+ * A future `publishedAt` is scheduled, not published: it stays out of the list,
+ * the feed and the sitemap until the date arrives.
  */
 export function isPublished(post: Pick<PostRecord, 'publishedAt'>, now: Date = new Date()): boolean {
   return post.publishedAt !== null && post.publishedAt.getTime() <= now.getTime()
@@ -18,8 +17,8 @@ export interface PublishedPost {
 
 /**
  * Published posts, newest first — the one query behind the blog index, the RSS
- * feed, and the sitemap. Only the summary columns: bodyMarkdown and bodyHtml
- * are the two large columns on the table and no caller here needs them.
+ * feed and the sitemap. Summary columns only: no caller here needs the two
+ * large body columns.
  */
 export async function listPublishedPosts(now: Date = new Date()): Promise<PublishedPost[]> {
   const records = await Post.select('slug', 'title', 'description', 'publishedAt')

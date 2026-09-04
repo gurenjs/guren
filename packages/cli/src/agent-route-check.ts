@@ -26,39 +26,23 @@ export interface AgentRouteCheckOptions {
   cwd: string
   /** Routes entry file, POSIX-relative to `cwd`. Defaults to `routes/web.ts`. */
   routesFile?: string
-  /**
-   * Definitions to check instead of loading them. `runCheck` passes the graph
-   * it already loaded for the route-contract checks, so one `guren check` run
-   * loads it once; tests pass hand-built definitions. Absent, this loads its
-   * own.
-   */
+  /** Definitions to check instead of loading them, so one `guren check` run loads the graph once. */
   definitions?: RouteDefinition[]
-  /**
-   * Parse cache to read controller sources through. `runCheck` passes its
-   * own, so the files earlier checks already parsed are not parsed twice.
-   */
+  /** Parse cache to read controller sources through, shared so files are not parsed twice. */
   cache?: ParseCache
 }
 
 /**
- * The MCP tool-name grammar (SEP-986). Dots are permitted, which is why a
- * route name is used verbatim as the tool name — see RFC 0016 §1.
- *
- * Consolidation follow-up, like {@link AGENT_READ_ONLY_METHODS}: the
- * derivation layer (`deriveAgentTools`) has to know this grammar too. RFC
- * 0016 §1 is the shared source until one of the two can import the other —
- * do not fork the pattern in the meantime.
+ * The MCP tool-name grammar (SEP-986, RFC 0016 §1). `deriveAgentTools` knows it
+ * too; RFC 0016 §1 is the shared source until one side can import the other, so
+ * do not fork the pattern.
  */
 const TOOL_NAME_PATTERN = /^[A-Za-z0-9._-]{1,128}$/
 
 /**
- * The methods whose tools default to `readOnlyHint: true` (RFC 0016 §1).
- *
- * Deliberately narrower than `describeMethod().safe`, which also holds HEAD
- * and OPTIONS: those are not tool-shaped verbs, and counting them as
- * read-only would exempt such a route from the authorization rule below on
- * the strength of a default nobody wrote. The two agree on everything an
- * agent route realistically registers.
+ * Methods whose tools default to `readOnlyHint: true` (RFC 0016 §1). Narrower
+ * than `describeMethod().safe` on purpose: HEAD/OPTIONS would gain the
+ * authorization-rule exemption below on a default nobody wrote.
  */
 const AGENT_READ_ONLY_METHODS = new Set(['GET', 'QUERY'])
 
@@ -68,7 +52,6 @@ interface AgentRoute {
   method: string
   /** The tool's identity: `toolName ?? name`. Undefined when the route has no name. */
   toolName?: string
-  /** Human label for finding titles. */
   label: string
   /** Stable finding-key suffix, unique per route even when the tool name is not. */
   keySuffix: string
@@ -80,16 +63,11 @@ function readOnlyOf(route: AgentRoute): boolean {
   return route.agent.readOnlyHint ?? AGENT_READ_ONLY_METHODS.has(route.method)
 }
 
-/**
- * Whether `readOnlyHint: true` was *written* rather than inherited from the
- * method — the declaration that exempts a mutating route from the
- * authorization rule below.
- */
+/** `readOnlyHint: true` written rather than inherited — what exempts a mutating route below. */
 function overridesReadOnly(route: AgentRoute): boolean {
   return route.agent.readOnlyHint === true && !AGENT_READ_ONLY_METHODS.has(route.method)
 }
 
-/** Whether the route advertises any output shape an agent can read (RFC 0016 §2). */
 function describesOutput(definition: RouteDefinition): boolean {
   return Boolean(definition.schemas?.output || definition.resource)
 }
@@ -125,18 +103,9 @@ function toolNameFinding(route: AgentRoute): CheckResult | undefined {
 }
 
 /**
- * A tool name the framework occupies (RFC 0016 §5.4).
- *
- * The reserved list is imported, never restated: `@guren/plugin-mcp` adds
- * `guren.preflight` to the catalogue it serves, and if the two lists drift
- * this check keeps passing a route whose tool the endpoint has already
- * shadowed. The endpoint drops the colliding route rather than serving two
- * tools with one name — an MCP client answers that by rejecting the whole
- * catalogue — so the cost of not failing here is a route that is silently
- * absent from the surface it declared itself for.
- *
- * A fail rather than a warn for the same reason the duplicate rule is one:
- * the tool name is the tool's identity, and the route does not get it.
+ * A tool name the framework occupies (RFC 0016 §5.4). The reserved list is
+ * imported, never restated: drift from `@guren/plugin-mcp`'s catalogue would
+ * pass a route whose tool the endpoint has already dropped.
  */
 function reservedNameFinding(route: AgentRoute): CheckResult | undefined {
   const { toolName } = route
@@ -155,12 +124,8 @@ function reservedNameFinding(route: AgentRoute): CheckResult | undefined {
 }
 
 /**
- * One finding per collision group rather than per route: two routes sharing a
- * tool name are one defect, and the reader needs both sides of it named.
- *
- * A name the grammar rejects is skipped here: it is already failing under its
- * own rule, and renaming it is the fix for both, so reporting it twice more
- * as a collision would spend three findings on one defect.
+ * One finding per collision group rather than per route. A name the grammar
+ * rejects is skipped: it already fails under its own rule and renaming fixes both.
  */
 function duplicateFindings(routes: AgentRoute[]): CheckResult[] {
   const byToolName = new Map<string, AgentRoute[]>()
@@ -190,14 +155,10 @@ function duplicateFindings(routes: AgentRoute[]): CheckResult[] {
 }
 
 /**
- * RFC 0016 §5.5: a non-read-only tool with neither an authorization
- * capability nor a detected `this.authorize(` fails — authentication is not
- * authorization.
- *
- * `capabilities` needs no "older server" branch here the way
- * `authMiddlewareVerdict` does: a server old enough to omit the field is far
- * too old to emit `agent` at all, so a definition that reached this function
- * came from a router that stamps capabilities.
+ * RFC 0016 §5.5: a non-read-only tool with neither an authorization capability
+ * nor a detected `this.authorize(` fails — authentication is not authorization.
+ * No "older server" branch on `capabilities`: a server old enough to omit it
+ * cannot emit `agent` at all.
  */
 function authorizationFinding(route: AgentRoute): CheckResult | undefined {
   if (readOnlyOf(route)) return undefined
@@ -205,9 +166,8 @@ function authorizationFinding(route: AgentRoute): CheckResult | undefined {
   const key = `agent-route-authorization:${route.keySuffix}`
   const title = `${route.label} agent tool`
 
-  // Present, not derivable: `mode: 'mixed'` or an `abilityFor` callback makes
-  // the *ability* unknowable statically, but the chain still authorizes. The
-  // question this rule asks is whether anything authorizes at all.
+  // Presence, not derivability: `mode: 'mixed'` or an `abilityFor` callback
+  // leaves the ability unknowable statically, but the chain still authorizes.
   if (route.definition.capabilities?.authorization) return undefined
   if (route.methodInfo && AUTHORIZE_CALL_PATTERN.test(route.methodInfo.body)) return undefined
 
@@ -215,14 +175,8 @@ function authorizationFinding(route: AgentRoute): CheckResult | undefined {
     'Add authorize()/authorizeResource() middleware to the route, or call await this.authorize(ability, ...) '
     + 'in the action.'
 
-  // A handler body this check never read cannot be failed over. Two shapes
-  // reach here: a controller action whose source is not among the files
-  // discovered (moved out of app/Http/Controllers, unparseable, or supplied
-  // by a package), and an inline handler, whose body is a closure in the
-  // routes file that this check does not read at all. Both get a warn rather
-  // than the fail — unlike `guren audit`, this command has no per-finding
-  // ignore config, so a false positive here would be unsuppressible — and
-  // both say which half is actually known: the middleware chain.
+  // A body this check never read gets a warn, not the fail: `guren check` has
+  // no per-finding ignore config, so a false positive would be unsuppressible.
   if (!route.methodInfo) {
     return check(
       key,
@@ -258,19 +212,9 @@ function authorizationFinding(route: AgentRoute): CheckResult | undefined {
 }
 
 /**
- * Annotation honesty for `readOnlyHint` (RFC 0016 §5.5), the counterpart to
- * `guren audit`'s `destructiveHint` rule.
- *
- * Two routes are read-only tools, and both are checked against the action:
- *
- * - An explicit `readOnlyHint: true` on a mutating verb. This is the one
- *   declaration that *exempts* a route from the authorization rule above, so
- *   leaving it unchecked would make the exemption self-service — writing the
- *   hint would be enough to silence the failure it was meant to answer.
- * - A GET or QUERY route, which inherits the same read-only default with the
- *   same exemption. Nobody wrote the claim, but a GET that deletes records is
- *   advertised to agents as safe to call unattended either way, and the
- *   safe-verb contract it breaks is HTTP's before it is MCP's.
+ * Annotation honesty for `readOnlyHint` (RFC 0016 §5.5). Read-only is what
+ * exempts a route from the authorization rule above, so both the written hint and
+ * the GET/QUERY default are checked against the action.
  */
 function readOnlyHonestyFinding(route: AgentRoute): CheckResult | undefined {
   if (!readOnlyOf(route)) return undefined
@@ -284,9 +228,8 @@ function readOnlyHonestyFinding(route: AgentRoute): CheckResult | undefined {
     : `Move the state change to a non-safe method, or declare agent: { readOnlyHint: false } and cover `
       + `${route.label} with authorization.`
 
-  // Only the written claim is chased into an unreadable body: an unverifiable
-  // *default* on a GET would fire on every ordinary read route whose
-  // controller this check cannot see, which is noise about nothing declared.
+  // Only the written claim is chased into an unreadable body: warning on the
+  // GET default would fire on every ordinary read route with an unseen controller.
   if (!route.methodInfo) {
     if (!override) return undefined
     return check(
@@ -319,13 +262,9 @@ function readOnlyHonestyFinding(route: AgentRoute): CheckResult | undefined {
 }
 
 /**
- * The output half of the tier ladder (RFC 0016 §2/§4): *any* agent route with
+ * The output half of the tier ladder (RFC 0016 §2/§4): any agent route with
  * neither an `output` schema nor a `resource` hint is tier 3, whatever its
- * method — a write tool whose result an agent cannot read is no better off
- * than a read tool.
- *
- * The Inertia finding is the more specific of the two and suppresses the
- * generic one, so a page route reports once rather than twice.
+ * method. The Inertia finding is the more specific one and suppresses the generic.
  */
 function outputFinding(route: AgentRoute): CheckResult | undefined {
   if (describesOutput(route.definition)) return undefined
@@ -360,21 +299,10 @@ function outputFinding(route: AgentRoute): CheckResult | undefined {
 
 /**
  * A body-carrying tool whose route declares no `body` schema: the derived
- * inputSchema is built from the route's contracts, so a body the controller
- * validates internally never reaches the agent's view of the tool.
- *
- * Body-carrying is `describeMethod()`, shared with `guren audit`, rather than
- * a hand-listed POST/PUT/PATCH — that also covers QUERY (RFC 10008) and is
- * fail-closed on custom verbs.
- *
- * Inline handlers are covered too, and are the worse case: for them a route
- * `body` schema is *runtime-enforced*, so its absence means nothing validates
- * the payload either — the agent guesses at a shape the app never checks.
- *
- * Best-effort matching of the route's body schema identifier against the
- * `validateBody(X)` call in the action is deliberately not attempted: the
- * schema is usually imported under a different local name, so the comparison
- * would report drift that isn't there.
+ * inputSchema comes from the route's contracts alone. Body-carrying is
+ * `describeMethod()`, which also covers QUERY (RFC 10008). Matching the route's
+ * schema identifier against `validateBody(X)` is not attempted — the schema is
+ * usually imported under another local name, so it would report phantom drift.
  */
 function inputFinding(route: AgentRoute): CheckResult | undefined {
   if (!describeMethod(route.method).bodyCarrying) return undefined
@@ -402,41 +330,22 @@ function inputFinding(route: AgentRoute): CheckResult | undefined {
   )
 }
 
-/**
- * The package the App MCP plugin's factory comes from. A local alias is
- * followed (`import { mcpPlugin as mcp }`), because the binding is what the
- * call site spells; a same-named function from anywhere else is not, because
- * it is not this plugin.
- */
+/** Local aliases of this export are followed; a same-named function from elsewhere is not. */
 const MCP_PLUGIN_SPECIFIER = '@guren/plugin-mcp'
 const MCP_PLUGIN_EXPORT = 'mcpPlugin'
 
 /** What one readable `mcpPlugin({ … })` call says about the approval queue. */
 type ApprovalConfigEvidence =
-  /** A call whose options are an object literal carrying the queue. */
   | { kind: 'configured'; relPath: string }
-  /** A call whose options are an object literal *without* the queue. */
   | { kind: 'absent'; relPath: string }
 
 /**
- * Whether this app configures an approval queue, judged from the one place it
- * can be: the `mcpPlugin({ … })` call that mounts the endpoint.
- *
- * **Positive evidence only**, the rule `app-surface.ts` states for the same
- * class of question. A call whose options are not an object literal
- * (`mcpPlugin(config)`, a spread, a helper that builds them elsewhere) says
- * nothing this scan may act on, and an app with no readable call at all is an
- * app that may not mount App MCP — where `approval: 'required'` costs nothing
- * because no adapter reads it. Both answer `undefined`: silence, not a guess.
- * `guren check` has no per-finding ignore configuration, so a false positive
- * here would be unsuppressible, which is the reason `authorizationFinding`
- * warns rather than fails on a body it could not read.
- *
- * The key is `AGENT_APPROVAL_CONFIG_KEY` from `@guren/core`, never the literal
- * string: the CLI cannot import `@guren/plugin-mcp` (it does not depend on it,
- * and an app that never installs App MCP is still checked), so restating the
- * option name is how renaming it would leave this check quietly passing every
- * app — the same drift the reserved-name rule refuses.
+ * Whether this app configures an approval queue, judged from the `mcpPlugin({ …
+ * })` call that mounts the endpoint. Positive evidence only (the rule
+ * `app-surface.ts` states): anything unreadable answers `undefined`, since a
+ * false positive would be unsuppressible. The key is `AGENT_APPROVAL_CONFIG_KEY`
+ * from `@guren/core`, never the literal string — the CLI cannot import
+ * `@guren/plugin-mcp`, so a restated option name would silently stop matching.
  */
 async function scanApprovalConfig(
   cwd: string,
@@ -450,8 +359,7 @@ async function scanApprovalConfig(
 
   let absent: ApprovalConfigEvidence | undefined
   for (const filePath of files) {
-    // String pre-filter before any parse, the way the attachments scan does:
-    // the overwhelming majority of an app's sources never mention the plugin.
+    // String pre-filter before any parse: almost no source mentions the plugin.
     const source = await cache.source(filePath)
     if (!source || !source.includes(MCP_PLUGIN_EXPORT)) continue
     const parsed = await cache.get(filePath)
@@ -459,8 +367,7 @@ async function scanApprovalConfig(
 
     const relPath = relative(cwd, filePath).replace(/\\/g, '/')
     const evidence = readMcpPluginCalls(parsed)
-    // A configured call anywhere settles it: an app may mount the endpoint
-    // from more than one place, and one queue is a queue.
+    // A configured call anywhere settles it: an app may mount the endpoint twice.
     if (evidence === 'configured') return { kind: 'configured', relPath }
     if (evidence === 'absent') absent ??= { kind: 'absent', relPath }
   }
@@ -469,9 +376,8 @@ async function scanApprovalConfig(
 }
 
 /**
- * What the `mcpPlugin(...)` calls in one file say: `'configured'` if any
- * carries the queue key, `'absent'` if one has readable options without it,
- * `undefined` if none was readable.
+ * `'configured'` if any call carries the queue key, `'absent'` if one has
+ * readable options without it, `undefined` if none was readable.
  */
 function readMcpPluginCalls(parsed: ParsedFile): 'configured' | 'absent' | undefined {
   const locals = new Set<string>()
@@ -490,24 +396,19 @@ function readMcpPluginCalls(parsed: ParsedFile): 'configured' | 'absent' | undef
   let answer: 'configured' | 'absent' | undefined
   walk(parsed.ast.program, (node) => {
     if (node.type !== 'CallExpression') return
-    // Typed once at the seam, the way the attachments scan reads its own
-    // calls: everything below is `@babel/types` rather than a cast per field.
+    // Typed once at the seam so everything below is `@babel/types`.
     const call = node as unknown as CallExpression
     const callee = call.callee
     if (callee.type !== 'Identifier' || !locals.has(callee.name)) return
 
     const argument = call.arguments[0]
-    // `mcpPlugin()` with no argument is a readable call with no queue: the
-    // default is the unconfigured one.
+    // `mcpPlugin()` with no argument is a readable call with no queue.
     if (!argument) {
       answer ??= 'absent'
       return
     }
-    // Read through transparent wrapping: `mcpPlugin({ … } satisfies
-    // McpPluginOptions)` is the same options object at runtime, and the bare
-    // shape test read it as unreadable — which this scan's positive-evidence
-    // rule then turns into silence, so a gated route with nowhere to queue
-    // its approvals went unreported.
+    // Read through transparent wrapping: a bare shape test read `{ … } satisfies
+    // McpPluginOptions` as unreadable, which silenced the finding entirely.
     const options = objectLiteral(argument)
     if (!options) return
 
@@ -517,8 +418,7 @@ function readMcpPluginCalls(parsed: ParsedFile): 'configured' | 'absent' | undef
         (property.type === 'ObjectProperty' || property.type === 'ObjectMethod')
         && memberKeyName(property) === AGENT_APPROVAL_CONFIG_KEY,
     )
-    // A spread makes an absence unreadable — the queue may be in the spread
-    // object — but a key that is literally there is still positive evidence.
+    // A spread makes an absence unreadable; a key literally there is still evidence.
     const spreads = properties.some((property) => property.type === 'SpreadElement')
     if (carriesQueue) answer = 'configured'
     else if (!spreads) answer ??= 'absent'
@@ -529,21 +429,9 @@ function readMcpPluginCalls(parsed: ParsedFile): 'configured' | 'absent' | undef
 
 /**
  * A route declaring `approval: 'required'` on a server whose App MCP endpoint
- * has no approval queue (RFC 0016 §5.4 item 4).
- *
- * A **fail**, unlike the "could not verify" warns above, and the difference is
- * what the check knows rather than how serious the defect is. This finding is
- * only ever raised on positive evidence: a `mcpPlugin({ … })` call whose
- * options this check read, in which the queue key is not present. Given that,
- * the tool is categorically uncallable — every call is refused fail-closed and
- * the tool is not even in `tools/list` — which is a wiring mistake with a
- * one-line fix, not a policy someone might have meant. The same reasoning
- * makes the name and duplicate rules fails: the route does not become a tool
- * at all.
- *
- * One finding per app, not per route: the missing configuration line is one
- * defect however many routes declare approval, and naming them all in one
- * message is what tells the reader the scale of it.
+ * has no approval queue (RFC 0016 §5.4 item 4). A fail rather than a warn
+ * because it is raised only on positive evidence, and the tool is then
+ * categorically uncallable. One finding per app, not per route.
  */
 function approvalStoreFinding(
   routes: AgentRoute[],
@@ -600,20 +488,11 @@ function toAgentRoute(
 }
 
 /**
- * Agent-route checks (RFC 0016 §13): the wiring rules for routes that declare
- * `.agent()` metadata — the tool name is legal and unique, a non-read-only
- * tool is covered by authorization rather than merely authentication, and the
- * schemas an agent reads actually exist.
- *
- * Runs against loaded definitions rather than the routes file's AST for the
- * same reasons `checkRouteContracts` does: the registered path is the joined
- * one (group prefixes, `resource()` expansions), and the metadata may arrive
- * through `resource({ agent })` or a chained `.agent()` rather than a literal
- * in the routes file.
- *
- * Content-activated: an app with no agent routes contributes nothing, and the
- * controller sources are not even scanned in that case — which is every app
- * until one opts in.
+ * Agent-route checks (RFC 0016 §13): the wiring rules for routes declaring
+ * `.agent()` metadata. Runs against loaded definitions rather than the routes
+ * file's AST, like `checkRouteContracts` — the registered path is the joined one
+ * and the metadata may arrive via `resource({ agent })`. Content-activated: an
+ * app with no agent routes contributes nothing and scans no controller.
  */
 export async function checkAgentRoutes(options: AgentRouteCheckOptions): Promise<CheckResult[]> {
   const { cwd, routesFile = DEFAULT_ROUTES_FILE } = options
@@ -626,8 +505,7 @@ export async function checkAgentRoutes(options: AgentRouteCheckOptions): Promise
       definitions = await loadRouteDefinitions(resolve(cwd, routesFile), cwd)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      // A load failure is reported, never swallowed: staying silent here is
-      // indistinguishable from an app that exposes no agent tools.
+      // Never swallowed: silence is indistinguishable from an app with no agent tools.
       return [
         check(
           'agent-routes',
@@ -644,9 +522,7 @@ export async function checkAgentRoutes(options: AgentRouteCheckOptions): Promise
   const agentDefinitions = definitions.filter((definition) => definition.agent)
   if (agentDefinitions.length === 0) return []
 
-  // The controller scan is skipped outright when no agent route names one: an
-  // app whose agent routes are all inline handlers has no body for any rule
-  // here to read, so parsing every controller in it would buy nothing.
+  // Skipped when every agent route is an inline handler: no body for any rule to read.
   const scan = agentDefinitions.some((definition) => definition.controller)
     ? await parseControllerMethods(cwd, options.cache)
     : EMPTY_CONTROLLER_SCAN
@@ -658,10 +534,8 @@ export async function checkAgentRoutes(options: AgentRouteCheckOptions): Promise
 
   const results: CheckResult[] = []
 
-  // A controller file that could not be read at all. The routes naming it
-  // already take the could-not-verify path, but that message blames the
-  // discovery set ("not among the controller sources this check reads") when
-  // the real cause is a file right where it should be that would not open.
+  // Reported separately because the per-route could-not-verify message blames
+  // the discovery set, not a file that is there and would not open.
   for (const filePath of scan.unreadableFiles) {
     results.push(
       check(
@@ -676,16 +550,9 @@ export async function checkAgentRoutes(options: AgentRouteCheckOptions): Promise
     )
   }
 
-  // Two controllers sharing a class name make every body-derived verdict
-  // below unreliable — routes carry the class name alone, so an authorize()
-  // in one file can clear a route belonging to the other. `guren audit` fails
-  // on the collision itself; here it is reported as the reason the agent
-  // verdicts cannot be trusted.
-  //
-  // Narrowed to the controllers agent routes actually name: a collision
-  // between two classes with no agent route between them changes no verdict
-  // this check draws, and reporting it here would be this check answering for
-  // the audit's rule.
+  // Routes carry a class name alone, so two controllers sharing one make every
+  // body-derived verdict unreliable. Narrowed to controllers agent routes name:
+  // any other collision changes no verdict here and belongs to `guren audit`.
   const agentControllers = new Set(
     routes.flatMap((route) => (route.definition.controller ? [route.definition.controller.name] : [])),
   )
@@ -706,8 +573,7 @@ export async function checkAgentRoutes(options: AgentRouteCheckOptions): Promise
 
   results.push(...duplicateFindings(routes))
 
-  // Only asked when a route declares approval: the scan reads app sources, and
-  // an app with no approval-gated route has no question for it to answer.
+  // Only asked when a route declares approval — the scan reads every app source.
   if (routes.some((route) => route.agent.approval === 'required')) {
     const approval = approvalStoreFinding(
       routes,
@@ -717,12 +583,8 @@ export async function checkAgentRoutes(options: AgentRouteCheckOptions): Promise
   }
 
   for (const route of routes) {
-    // At most one naming finding per route, first applicable wins. The
-    // tool-name grammar has nothing to test on a route with no name, and the
-    // reserved-name rule applies only to a grammar-legal one: an illegal name
-    // is already failing, renaming it fixes both, and no reserved name is
-    // illegal anyway. Reporting more than one would name a single defect
-    // twice.
+    // At most one naming finding per route, first applicable wins: the three
+    // rules describe one defect with one fix, renaming the route.
     const nameResult = nameFinding(route) ?? toolNameFinding(route) ?? reservedNameFinding(route)
     if (nameResult) results.push(nameResult)
 

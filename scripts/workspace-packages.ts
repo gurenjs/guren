@@ -1,20 +1,12 @@
-// Shared reading of the workspace's package manifests.
-//
-// Two questions, both answered here so that no script answers either one twice:
+// Shared reading of the workspace's package manifests, so no script answers
+// either question twice:
 //
 // - which packages live under packages/, and in what order they depend on each
-//   other. Used by scripts/build-packages.ts and scripts/test-packages.ts so
-//   that adding a package (a plugin, for example) never requires editing a
-//   hand-maintained list in the root package.json.
-// - what a manifest said at a git rev, which is how the release gates in
-//   scripts/ tell a version that moved from one that did not. `versionOf` is
-//   the rule that a version nobody could read is *not* a version: a gate that
-//   lets an unreadable manifest stand in for a number silently stops gating.
-//   Only one of the two gates had reached that conclusion. The other compared
-//   a bare `.version` against a bare `.version`, so an unreadable side read as
-//   *the version moved* and exempted the release it existed to gate. The rule
-//   lives here because a gate that reimplements it locally is how that
-//   happened, not because two correct copies wanted deduplicating.
+//   other, so adding one never requires editing a hand-maintained list.
+// - what a manifest said at a git rev, which is how the release gates tell a
+//   version that moved from one that did not. `versionOf` carries the rule that
+//   an unreadable version is *not* a version — a gate that reimplemented that
+//   locally read `undefined !== '2.8.0'` as "moved" and exempted itself.
 
 import { readdir, readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
@@ -113,21 +105,10 @@ export async function collectPackages(): Promise<WorkspacePackage[]> {
 
 /**
  * The text of `manifestPath` as of `rev`, or `undefined` when git could not
- * produce it there — the file did not exist at that commit, or the rev itself
- * does not resolve.
- *
- * Deliberately separate from `versionOf` rather than folded into one
- * `versionAtRev`: "there is no manifest at that rev" and "there is one and its
- * version cannot be read" are the same `undefined` to a caller that only wants
- * a version, and callers that must tell them apart would have no way back.
- *
- * `repo` is the checkout to read, not a test hook — a gate is only observable
- * against real commits, so its tests build throwaway repositories. It must be
- * the repository *root*: git resolves `<rev>:<path>` against the top of the
- * working tree whatever the cwd is (from packages/cli, `git show HEAD:package.json`
- * hands back the root manifest), while every caller pairs this with a
- * working-tree `join(repo, manifestPath)` that resolves against `repo`. Point
- * it at a subdirectory and the two sides read different files.
+ * produce it. Separate from `versionOf` so a caller can tell "no manifest at
+ * that rev" from "its version cannot be read". `repo` must be the repository
+ * *root*: git resolves `<rev>:<path>` against the top of the working tree
+ * whatever the cwd is, while `join(repo, …)` on the other side does not.
  */
 export function manifestAtRev(rev: string, manifestPath: string, repo: string = repoRoot): string | undefined {
   const show = Bun.spawnSync(['git', 'show', `${rev}:${manifestPath}`], { cwd: repo })
@@ -135,15 +116,10 @@ export function manifestAtRev(rev: string, manifestPath: string, repo: string = 
 }
 
 /**
- * The `version` a package manifest declares, or `undefined` when it declares
- * none this rule recognizes: unparseable JSON, an absent `version`, a
- * `version` that is not a string, or no manifest text at all.
- *
- * Every one of those collapses to `undefined` on purpose, and callers must
- * treat `undefined` as "unknown" rather than as a value. Comparing two
- * unknowns reads as "unchanged"; comparing one against a real version reads as
- * "moved". Both readings are wrong, and the second is the dangerous one — it
- * is a release gate exempting itself.
+ * The `version` a package manifest declares, or `undefined` for unparseable
+ * JSON, an absent or non-string `version`, or no manifest at all. Callers must
+ * treat `undefined` as "unknown", never as a value: compared against a real
+ * version it reads as "moved", which is a release gate exempting itself.
  */
 export function versionOf(manifest: string | undefined): string | undefined {
   if (manifest === undefined) return undefined
@@ -171,14 +147,10 @@ export interface DependencySchedule {
 
 /**
  * The Kahn bookkeeping shared by the topological sort and the parallel build
- * scheduler: in-workspace dependency counts and the reverse index, with
- * `ignoredEdges` removed. Returns fresh maps — callers mutate `remainingDeps`
- * as packages complete.
- *
- * When `closureThrough` is wider than `packages` (a subset selection), edges
- * are followed through the unselected packages, so `server` still orders
- * before `openapi` when `core` sits between them but is not selected.
- * Dependencies outside `closureThrough` entirely are treated as satisfied.
+ * scheduler, with `ignoredEdges` removed. Returns fresh maps — callers mutate
+ * `remainingDeps` as packages complete. When `closureThrough` is wider than
+ * `packages`, edges are followed through the unselected packages; dependencies
+ * outside it entirely count as satisfied.
  */
 export function dependencySchedule(
   packages: WorkspacePackage[],
@@ -197,9 +169,7 @@ export function dependencySchedule(
   const dependents = new Map<string, WorkspacePackage[]>()
 
   for (const pkg of packages) {
-    // BFS that stops at selected packages and traverses through unselected
-    // ones. With closureThrough === packages every dependency is selected, so
-    // this degenerates to the direct-edge case the sorter uses.
+    // BFS stopping at selected packages, traversing through unselected ones.
     const deps = new Set<string>()
     const visited = new Set<string>()
     const queue = directDeps(pkg)
@@ -227,8 +197,7 @@ export function dependencySchedule(
 export function sortByDependencies(
   packages: WorkspacePackage[],
 ): WorkspacePackage[] {
-  // The stale check lives here rather than in dependencySchedule so it prints
-  // once per run — every build/test entry point sorts before scheduling.
+  // Here rather than in dependencySchedule so it prints once per run.
   const byName = new Map(packages.map((pkg) => [pkg.name, pkg]))
   for (const [from, to] of ignoredEdges) {
     const dependent = byName.get(from)

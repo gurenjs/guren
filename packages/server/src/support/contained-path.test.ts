@@ -67,11 +67,9 @@ describe('isRealPathWithin', () => {
 
   it('rejects a symlink to a sibling whose name extends the canonical root', async () => {
     // The separator has to anchor the comparison on *both* sides. Every other
-    // escape here links to a directory named `outside`, which a bare
-    // `realCandidate.startsWith(realRoot)` also rejects — and the lexical
-    // sibling-prefix cases never reach canonicalization, because the cheap
-    // pre-check refuses them first. Without this fixture, dropping the
-    // separator after canonicalization passes the whole suite.
+    // escape here links to a directory a bare `startsWith(realRoot)` also
+    // rejects, and the lexical sibling-prefix cases never reach canonicalization
+    // — without this fixture, dropping the separator there passes the suite.
     symlinkSync(join(tmpRoot, 'root-secrets'), join(root, 'link'))
 
     expect(isPathWithin(root, join(root, 'link', 'secret.txt'))).toBe(true)

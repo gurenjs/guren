@@ -36,8 +36,7 @@ export const posts = sqliteTable('posts', {
   title: text('title').notNull(),
   description: text('description'),
   bodyMarkdown: text('body_markdown').notNull(),
-  // Rendered once at save time so the read path serves stored HTML — no
-  // markdown or highlighting work per request.
+  // Rendered at save time, so the read path does no markdown or highlighting.
   bodyHtml: text('body_html').notNull(),
   publishedAt: integer('published_at', { mode: 'timestamp_ms' }),
   createdAt: integer('created_at', { mode: 'timestamp_ms' })

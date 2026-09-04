@@ -2,9 +2,8 @@ import { ServiceProvider } from '../container/ServiceProvider'
 import { createGate, setGate } from '../authorization'
 
 /**
- * Binds the Gate as a singleton in the container and exposes it as the
- * global gate so `getGate()`, `can()`, and controller authorization helpers
- * work without manual wiring.
+ * Binds the Gate as a singleton and sets it as the global gate, so `getGate()`,
+ * `can()`, and the controller authorization helpers need no manual wiring.
  */
 export class AuthorizationServiceProvider extends ServiceProvider {
   register(): void {

@@ -1,13 +1,10 @@
 /**
- * GitHub-style blockquote alerts (`> [!NOTE]` …), ported from guren.dev's
- * docs pipeline (RFC 0012) with framework-neutral class names. The package
- * ships a reference stylesheet (`@guren/plugin-markdown/styles.css`) but
- * applies no styling itself.
- *
- * This module is the single source of the alert vocabulary: the type set,
- * the directive pattern, the emitted markup, and the class names the default
- * sanitizer admits are all derived from `ALERT_LABELS` and
- * `ALERT_CLASS_PREFIX` here. (`styles.css` necessarily keeps a manual copy.)
+ * GitHub-style blockquote alerts (`> [!NOTE]` …), ported from guren.dev's docs
+ * pipeline (RFC 0012) with framework-neutral class names; the package ships a
+ * reference stylesheet but applies no styling itself. The single source of the
+ * alert vocabulary — the type set, the directive pattern, the markup and the
+ * class names the default sanitizer admits all derive from `ALERT_LABELS` and
+ * `ALERT_CLASS_PREFIX` here. (`styles.css` keeps a manual copy.)
  */
 import type { MarkedExtension, Tokens } from 'marked'
 
@@ -32,12 +29,10 @@ const ALERT_DIRECTIVE_PATTERN = new RegExp(
 
 type AlertBlockquote = Tokens.Blockquote & { alertType?: AlertType }
 
-// Labels are configuration, but they are still interpolated into markup —
-// and the sanitize: false path has no later line of defense.
 /**
  * Escape for both element and attribute contexts. Exported because consumers
- * that pass `sanitize: false` (trusted content) still have to escape anything
- * they hand back through the `highlight` callback.
+ * passing `sanitize: false` still have to escape anything they hand back
+ * through the `highlight` callback, where nothing downstream will.
  */
 export function escapeHtml(value: string): string {
   return value
@@ -60,11 +55,7 @@ export function alertAllowedClasses(): { div: string[]; p: string[] } {
   }
 }
 
-/**
- * Detects an alert directive at the head of a blockquote's first paragraph
- * and removes it from the paragraph's text/tokens so it does not render.
- * Returns the alert type, or null when the blockquote is a plain quote.
- */
+/** The directive at the head of a paragraph, removed from it, or null. */
 function extractAlertType(paragraph: Tokens.Paragraph): AlertType | null {
   const match = paragraph.text.match(ALERT_DIRECTIVE_PATTERN)
   if (!match) {
@@ -89,17 +80,11 @@ function extractAlertType(paragraph: Tokens.Paragraph): AlertType | null {
 }
 
 /**
- * The whole alert mechanism as one marked extension: directive detection in
- * `walkTokens` (which tags the blockquote token and drops an emptied first
- * paragraph) and the matching blockquote renderer. Captures no per-render
- * state — one instance is safe to share across concurrent renders, since
- * token mutation is scoped to each parse.
- *
- * `labels` overrides the rendered label text per alert type (i18n, or a
- * different vocabulary — several types may share one label). Class names are
- * not affected: styling stays keyed to the directive that was written.
- * Labels render as text (HTML-escaped); an explicit empty string suppresses
- * the label text while keeping the label element for styling.
+ * The whole alert mechanism as one marked extension. Captures no per-render
+ * state — one instance is safe to share across concurrent renders, since token
+ * mutation is scoped to each parse. `labels` overrides the rendered label text
+ * per alert type; class names stay keyed to the directive that was written, and
+ * an explicit empty string keeps the label element while emptying it.
  */
 export function alertsExtension(labels: Partial<Record<AlertType, string>> = {}): MarkedExtension {
   return {

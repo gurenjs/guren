@@ -7,7 +7,6 @@ const handled: Array<{ value: number }> = []
 
 class SuccessJob extends Job<{ value: number }> {
   async handle(payload: { value: number }): Promise<void> {
-    // Simulate successful processing
     if (payload.value < 0) throw new Error('negative value')
     handled.push(payload)
   }
@@ -94,9 +93,8 @@ describe('createSqsHandler', () => {
 
     expect(result.batchItemFailures).toHaveLength(1)
     expect(result.batchItemFailures[0].itemIdentifier).toBe('msg-2')
-    // The surviving records must actually reach the job with their payloads
-    // intact — an empty batchItemFailures list alone is also what a handler
-    // that silently resolved nothing would return.
+    // An empty batchItemFailures list is also what a handler that silently
+    // resolved nothing would return, so pin what actually reached the job.
     expect(handled).toEqual([{ value: 1 }, { value: 3 }])
   })
 

@@ -2,24 +2,13 @@
  * The agent audit record (RFC 0016 §5.2): one invocation or one denial, in the
  * one shape a sink writes as a line and `guren tool:log` reads back.
  *
- * Declarations and pure derivation only. Nothing here opens a file or reads a
- * clock — {@link toAuditRecord} takes the instant as an argument — because
- * this module is reachable from every runtime the framework targets, including
- * the ones with no filesystem, and because a record builder that timestamped
- * itself could not be pinned by a test. *Where* records go is a sink's
- * decision, made once by the application (`@guren/plugin-mcp`'s `audit`
- * option); this module only says what one looks like.
- *
- * **Redaction is the emitter's contract, and nothing here may re-run it.**
- * `AgentToolInvoked.arguments` arrives having already been through
- * `redactAgentArguments`, exactly as `events.ts` states, and this module
- * carries it across verbatim. Masking again here would install a second,
- * quieter redaction rule beside the real one — the two would drift, and
- * nothing reading a record could tell which of them produced a mask it is
- * looking at. That is the reasoning `events.ts` used to refuse redacting on
- * construction, and it holds one layer down without change. A sink that wants
- * different masking changes the route's `.agent({ redact })`, which is the
- * one place the rule lives.
+ * Declarations and pure derivation only — {@link toAuditRecord} takes the
+ * instant as an argument — because this module is reachable from runtimes with
+ * no filesystem, and a builder that timestamped itself could not be pinned by a
+ * test. **Redaction is the emitter's contract:** `AgentToolInvoked.arguments`
+ * arrives already through `redactAgentArguments` and is carried across
+ * verbatim, or a second quieter masking rule would drift from the real one. A
+ * sink wanting different masking changes the route's `.agent({ redact })`.
  */
 import type { AgentPrincipal, AgentSurface, AgentToolDenialReason, AgentToolDenied, AgentToolInvoked } from './events'
 
@@ -92,17 +81,12 @@ const DENIAL_REASONS: Record<AgentToolDenialReason, true> = {
 /**
  * Derive the record for one audit event.
  *
- * `now` is a parameter rather than a `Date.now()` inside: the sink writing
- * this record also picks the dated file it lands in, and two clock reads can
- * disagree across a midnight boundary — a record stamped just before it,
- * filed just after. One read, used for both.
- *
- * The two events are told apart structurally, not with `instanceof`. The event
- * classes cross a package boundary that this repo resolves twice — `@guren/cli`
- * and the plugins reach `@guren/server` through its `dist`, a test inside
- * `packages/server` through `src` — so an `instanceof` here would answer
- * `false` for a genuine event constructed on the other side of that seam, and
- * would do it by mislabelling the record rather than by failing.
+ * `now` is a parameter because the sink writing the record also picks the dated
+ * file it lands in, and two clock reads can disagree across midnight. The two
+ * events are told apart structurally, not with `instanceof`: the event classes
+ * cross a boundary this repo resolves twice (`dist` for the CLI and plugins,
+ * `src` inside `packages/server`), so `instanceof` would mislabel a genuine
+ * event rather than fail.
  */
 export function toAuditRecord(event: AgentToolInvoked | AgentToolDenied, now: Date): AgentAuditRecord {
   const base = {
@@ -119,24 +103,15 @@ export function toAuditRecord(event: AgentToolInvoked | AgentToolDenied, now: Da
 }
 
 /**
- * Read one line of an audit file back, or `null` if it is not a record.
+ * Read one line of an audit file back, or `null` if it is not a record. The one
+ * parser on the read side; a second would fail silently, since a record it
+ * stops recognising reads as an empty trail.
  *
- * The one parser on the read side. A caller that hand-rolled a second would be
- * the reader half of the drift this whole feature is built to avoid, and would
- * be the half that fails silently: a record it stops recognising reads as an
- * empty trail.
- *
- * Returning `null` rather than throwing is what makes the reader usable
- * against a file that is being appended to right now. The last line of such a
- * file is routinely a *partial* record — an append is not atomic — and a blank
- * line is what a file ends with. Neither is corruption, and neither should
- * take down a command whose whole job is to show what the earlier lines say.
- *
- * Extra keys are ignored, deliberately: the file sink writes through
- * `DailyFileChannel`, whose JSON format wraps the record in a log envelope
- * (`timestamp`, `level`, `message`). Tolerating that envelope is what lets the
- * sink reuse the channel's rotation and retention instead of reimplementing
- * both, and the record's own fields are unambiguous beside it.
+ * `null` rather than a throw keeps the reader usable against a file being
+ * appended to: its last line is routinely a partial record or a blank one, and
+ * neither is corruption. Extra keys are ignored because the file sink writes
+ * through `DailyFileChannel`, whose JSON format wraps the record in a log
+ * envelope — tolerating it is what lets the sink reuse rotation and retention.
  */
 export function parseAuditRecord(line: string): AgentAuditRecord | null {
   if (line.trim() === '') return null
@@ -187,12 +162,10 @@ export function parseAuditRecord(line: string): AgentAuditRecord | null {
 }
 
 /**
- * The principal of a record, or `null`.
- *
- * An unreadable principal is `null` rather than a rejected record: who made a
- * call is the field most likely to change shape over the life of a log, and
- * losing the whole line — the tool, the arguments, the outcome — to recover
- * nothing is the wrong trade for an audit trail.
+ * The principal of a record, or `null`. An unreadable principal is `null`
+ * rather than a rejected record: who called is the field most likely to change
+ * shape over the life of a log, and losing the tool, arguments and outcome to
+ * recover nothing is the wrong trade for an audit trail.
  */
 function readPrincipal(value: unknown): AgentPrincipal | null {
   if (!isRecord(value)) return null

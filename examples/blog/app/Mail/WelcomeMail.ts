@@ -1,9 +1,6 @@
 import { mail, type MailManager } from '@guren/core'
 import type { UserRecord } from '../Models/User.js'
 
-/**
- * Send a welcome email to a newly registered user.
- */
 export async function sendWelcomeMail(manager: MailManager, user: UserRecord): Promise<void> {
   await mail(manager)
     .to(user.email)

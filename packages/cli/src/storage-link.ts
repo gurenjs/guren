@@ -3,41 +3,28 @@ import { resolve, relative } from 'node:path'
 import { consola } from 'consola'
 
 export interface StorageLinkOptions {
-  /**
-   * Application root directory.
-   */
   appRoot?: string
-
-  /**
-   * Force recreate the link.
-   */
+  /** Recreate the link when one already exists. */
   force?: boolean
-
-  /**
-   * Use relative path for symlink.
-   */
+  /** Point the symlink at a relative path instead of an absolute one. */
   relative?: boolean
 }
 
 const DEFAULT_STORAGE_PATH = 'storage/app/public'
 const DEFAULT_PUBLIC_PATH = 'public/storage'
 
-/**
- * Create a symbolic link from public/storage to storage/app/public.
- */
+/** Links `public/storage` to `storage/app/public`. */
 export function createStorageLink(options: StorageLinkOptions = {}): boolean {
   const appRoot = options.appRoot ? resolve(options.appRoot) : process.cwd()
   const storagePath = resolve(appRoot, DEFAULT_STORAGE_PATH)
   const publicPath = resolve(appRoot, DEFAULT_PUBLIC_PATH)
 
-  // Check if storage directory exists
   if (!existsSync(storagePath)) {
     consola.error(`Storage directory not found: ${storagePath}`)
     consola.info('Create the directory first or check your configuration.')
     return false
   }
 
-  // Check if link already exists
   if (existsSync(publicPath)) {
     if (options.force) {
       try {
@@ -55,7 +42,6 @@ export function createStorageLink(options: StorageLinkOptions = {}): boolean {
         return false
       }
     } else {
-      // Check if it's already the correct link
       try {
         const stats = lstatSync(publicPath)
         if (stats.isSymbolicLink()) {
@@ -70,7 +56,6 @@ export function createStorageLink(options: StorageLinkOptions = {}): boolean {
     }
   }
 
-  // Determine link target (relative or absolute)
   const linkTarget = options.relative
     ? relative(resolve(appRoot, 'public'), storagePath)
     : storagePath
@@ -85,9 +70,6 @@ export function createStorageLink(options: StorageLinkOptions = {}): boolean {
   }
 }
 
-/**
- * Remove the storage symbolic link.
- */
 export function removeStorageLink(options: StorageLinkOptions = {}): boolean {
   const appRoot = options.appRoot ? resolve(options.appRoot) : process.cwd()
   const publicPath = resolve(appRoot, DEFAULT_PUBLIC_PATH)
@@ -113,9 +95,6 @@ export function removeStorageLink(options: StorageLinkOptions = {}): boolean {
   }
 }
 
-/**
- * Check if storage link exists and is valid.
- */
 export function hasStorageLink(options: StorageLinkOptions = {}): boolean {
   const appRoot = options.appRoot ? resolve(options.appRoot) : process.cwd()
   const publicPath = resolve(appRoot, DEFAULT_PUBLIC_PATH)

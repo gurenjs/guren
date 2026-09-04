@@ -1,22 +1,18 @@
 /**
  * Dependency-free monotonic ULID generator (https://github.com/ulid/spec):
- * 48-bit millisecond timestamp + 80 bits of randomness, Crockford base32.
+ * 48-bit ms timestamp + 80 bits of randomness, Crockford base32.
  *
- * Attachment ids double as object-key prefixes and as the sort key for
- * `hasMany` collections, so they must be sortable — including *within* one
- * millisecond, where the spec's monotonic mode applies: the random half is
- * incremented instead of redrawn, keeping ids generated in the same process
- * in insertion order. They must also be unguessable before the row exists
- * (the random half). `byte % 32` is bias-free here because 256 is a
- * multiple of 32.
+ * Attachment ids are the sort key for `hasMany` collections, so they must sort
+ * even *within* one millisecond — the spec's monotonic mode increments the
+ * random half rather than redrawing it. `byte % 32` is bias-free because 256
+ * is a multiple of 32.
  */
 
 const ENCODING = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'
 
 /**
- * The millisecond timestamp encoded in a ULID's first 10 characters, or
- * `null` for anything that is not a 26-character Crockford string. The
- * prune sweep uses it to leave recently-minted prefixes alone.
+ * The ms timestamp in a ULID's first 10 characters, or `null` for anything that
+ * is not a 26-character Crockford string.
  */
 export function ulidTime(id: string): number | null {
   if (!/^[0-9A-HJKMNP-TV-Z]{26}$/.test(id)) return null
@@ -50,8 +46,7 @@ function incrementRandom(): boolean {
 }
 
 export function ulid(now: number = Date.now()): string {
-  // A clock that stands still or steps backwards must not break ordering:
-  // stay on the last timestamp and keep incrementing.
+  // A clock that stands still or steps backwards must not break ordering.
   let time = now > lastTime ? now : lastTime
   if (time === lastTime) {
     if (!incrementRandom()) {

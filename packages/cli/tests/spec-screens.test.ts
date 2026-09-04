@@ -299,9 +299,8 @@ describe('screens spec (module routes directory)', () => {
     const dir = workspace.dir
     await writeScreensFixture(dir, { routes: true })
 
-    // The shape `make:route Invoice --module billing` scaffolds: the route
-    // definitions live under modules/billing/routes/, reached only through
-    // the module's registrar entry.
+    // The shape `make:route Invoice --module billing` scaffolds: definitions
+    // under modules/billing/routes/, reached only through the module registrar.
     await mkdir(join(dir, 'modules/billing/routes'), { recursive: true })
     await mkdir(join(dir, 'modules/billing/app/Http/Controllers'), { recursive: true })
 
@@ -361,10 +360,8 @@ export function registerInvoiceRoutes(router: Router): void {
   it('derives routes from files under modules/*/routes/, so those files are a screens.md source', async () => {
     const { content } = await generateScreensSpec(workspace.dir)
 
-    // The route reaching the document exists only in
-    // modules/billing/routes/invoice.ts — proof that a change to a module
-    // routes-directory file can change screens.md, which is what the
-    // matching source pattern in SPEC_VIEWS promises `check --spec --changed`.
+    // The route reaching the document exists only in modules/billing/routes/,
+    // which is what SPEC_VIEWS' source pattern promises `check --spec --changed`.
     const row = content.split('\n').find((line) => line.startsWith('| billing/Invoices '))
     expect(row).toBeDefined()
     expect(row).toContain('GET /billing/invoices → InvoiceController.index')
@@ -373,9 +370,7 @@ export function registerInvoiceRoutes(router: Router): void {
 
 /**
  * A page rendered from a class-field action used to land in the file-level
- * leftovers instead of being attributed to the action, so it appeared in
- * screens.md joined to no route at all — or, worse, its controller's other
- * routes were the only ones the reader saw.
+ * leftovers, so it appeared in screens.md joined to no route at all.
  */
 describe('screens spec (class-field actions)', () => {
   let workspace: TempWorkspace

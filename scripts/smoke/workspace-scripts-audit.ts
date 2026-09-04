@@ -1,30 +1,20 @@
-// Asserts that no workspace-internal package.json script invokes the CLI as
-// `bunx guren` (or `bun x guren` / `npx guren`).
+// No workspace-internal package.json script may invoke the CLI as `bunx guren`
+// (or `bun x guren` / `npx guren`): the `guren` package does not exist on npm,
+// so whenever the workspace link is missing the runner falls back to the
+// registry and dies on a 404. Run the source: `bun …/packages/cli/src/bin.ts`.
 //
-// The `guren` package does not exist on npm. Inside this checkout the CLI is
-// only reachable through the workspace link (`node_modules/.bin/guren`), and
-// whenever that link is missing — fresh clone, partial install, CI cache — the
-// runner falls back to the registry and dies on a 404. Workspace apps must run
-// the CLI source directly: `bun <path-to>/packages/cli/src/bin.ts`.
-//
-// Scope: the root manifest plus every workspace member resolved from the root
-// `workspaces` globs. Template trees (`packages/create-app/templates/**`,
-// `packages/cli/templates/**`) are structurally out of scope — they are not
-// workspace members — and `bunx guren` is *correct* there, because scaffolded
-// apps install @guren/cli from npm and get a real `node_modules/.bin/guren`.
+// Scope is the root manifest plus every workspace member. Template trees are
+// not members, and `bunx guren` is *correct* there, because scaffolded apps
+// install @guren/cli from npm and get a real `node_modules/.bin/guren`.
 
 import { existsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 
 const repoRoot = resolve(import.meta.dir, '../..')
 
-// `bunx guren`, `bunx --bun guren`, `bun x guren`, `npx guren`, `pnpm dlx
-// guren`, `guren@…` — the registry-resolving spellings of the CLI, as token
-// sequences rather than a regex: a run of `--flag`/`-f` tokens between the
-// runner and `guren` is unbounded and package-manager flags are unbounded
-// too, and a regex expressing "skip N flag tokens" backtracks exponentially
-// on pathological input (CodeQL flagged exactly this). A token scan is
-// linear by construction.
+// The registry-resolving spellings of the CLI, as token sequences rather than a
+// regex: "skip N flag tokens" backtracks exponentially on pathological input
+// (CodeQL flagged exactly this), while a token scan is linear.
 const RUNNER_TOKEN_SEQUENCES: readonly (readonly string[])[] = [
   ['bunx'],
   ['bun', 'x'],
@@ -54,8 +44,7 @@ function invokesRegistryGuren(command: string): boolean {
 }
 
 // The sanctioned replacement, when spelled dot-relative. Cwd-shifting forms
-// (`cd .. && bun packages/cli/src/bin.ts …`) can't be resolved statically and
-// are left to the negative check above.
+// cannot be resolved statically and are left to the negative check above.
 const RELATIVE_CLI_PATH = /\bbun\s+((?:\.\.?\/)\S*packages\/cli\/src\/bin\.ts)\b/g
 
 interface Manifest {

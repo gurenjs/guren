@@ -4,26 +4,14 @@ import type { FC } from '@guren/core'
 /**
  * The page a visitor gets when the authorize request itself is unusable —
  * scaffolded once by `guren cloudflare:build --mcp-oauth` and yours to edit.
+ * These arrivals are routine (a malformed, stale or tampered query, an expired
+ * CSRF token) and would otherwise surface as a 500 with a stack trace.
  *
- * These arrivals are routine, not application faults: a query that is
- * malformed, truncated, tampered with, or simply stale, and a consent form
- * submitted after its CSRF token expired. Left to the exception handler they
- * would surface as a 500 with a stack trace in it — alarming, and useless to
- * the person reading it, because the fix is never anything they can do on this
- * page. It is to start again from the client that sent them.
- *
- * **Nothing derived from the request is rendered here.** No provider message,
- * no query parameter, no exception text: all of it is attacker-controllable,
- * and this page is reached by a browser. `title` and `advice` are the
- * caller's own fixed strings.
- *
- * A file of its own rather than a second export beside the consent screen: it
- * is a different document with different styling and no form, and a developer
- * editing the consent screen should not have to scroll past it.
- *
- * See `McpOAuthConsentPage.tsx` for why the `@jsxImportSource` pragma on line
- * 1 is what lets this compile in an app whose `tsconfig` points
- * `jsx: "react-jsx"` at React. Keep it on the first line.
+ * **Nothing derived from the request is rendered here**: a provider message, a
+ * query parameter or an exception text is attacker-controllable and a browser
+ * reads this page, so `title` and `advice` are the caller's fixed strings. The
+ * `@jsxImportSource` pragma lets this compile in an app whose `tsconfig` points
+ * `jsx: "react-jsx"` at React — keep it on line 1, the only place it counts.
  */
 export interface McpOAuthErrorPageProps {
   /** What went wrong, in the visitor's terms. A fixed string, never echoed input. */

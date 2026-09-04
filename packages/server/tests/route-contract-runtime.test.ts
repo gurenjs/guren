@@ -3,10 +3,8 @@ import { z } from 'zod'
 import { Application, Controller, NotFoundHttpException, type Router } from '../src/index'
 
 /**
- * The runtime failure modes `guren check`'s route contract check describes in
- * its findings. Pinned here because the check's messages tell users what will
- * happen — a message that drifts from the behavior is worse than no message,
- * and nothing else ties the two together.
+ * The runtime failure modes `guren check`'s route contract check promises in its
+ * findings. Nothing else ties the messages to the behavior they describe.
  */
 
 class Post {
@@ -56,12 +54,9 @@ describe('route contract failure modes', () => {
     expect(JSON.parse(body)).toEqual({ post: { id: 7 } })
   })
 
-  // 422 on both handler kinds, which is what the finding message promises.
-  // These two used to disagree: the contract middleware built a 400 response
-  // and discarded it to throw ValidationException (422) instead, while the
-  // functional-handler path returned its 400 to the client. The status is what
-  // clients branch on — an Inertia form reads 422 to populate `form.errors`
-  // and ignores a 400 — so the pair is pinned together here.
+  // 422 on both handler kinds, which is what the finding message promises. Clients
+  // branch on the status — an Inertia form reads 422 to populate `form.errors` and
+  // ignores a 400 — so the pair is pinned together here.
   test('a required params key the path does not declare fails a controller action with 422', async () => {
     const { status, body } = await get(
       (router) => router.get(
@@ -140,10 +135,8 @@ describe('route contract failure modes', () => {
 })
 
 /**
- * An `output` schema states what the *action returns*. A failure response is
- * written by the exception handler, not the action, so it is outside that
- * schema by construction — and validating it anyway turned every rejection
- * into a report that the app had violated its own contract.
+ * An `output` schema states what the *action returns*. A failure response is written
+ * by the exception handler, so it is outside that schema and must not be validated.
  */
 describe('output schema scope', () => {
   const Body = z.object({ title: z.string().min(3) })
@@ -187,12 +180,9 @@ describe('output schema scope', () => {
     expect(JSON.parse(body)).toEqual({ id: 1, title: 'hello' })
   })
 
-  // Not the same path as the 422 above: that one is thrown by `validateBody()`
-  // inside the action, this one stands in for a `Model.findOrFail()` miss. Both
-  // reach the contract middleware the same counterintuitive way — Hono's
-  // `compose` catches at the inner dispatch frame, calls `onError`, assigns the
-  // rendered response to `context.res` and returns normally, so the error body
-  // arrives at `await next()` as an ordinary return rather than as a throw.
+  // Stands in for a `Model.findOrFail()` miss. Hono's `compose` catches at the inner
+  // dispatch frame, calls `onError` and assigns the rendered response to `context.res`,
+  // so the error body arrives at `await next()` as a return rather than a throw.
   test('a 404 from the exception handler keeps its status', async () => {
     class MissingController extends Controller {
       async show(): Promise<never> {

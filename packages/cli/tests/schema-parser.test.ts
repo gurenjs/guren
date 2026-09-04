@@ -102,8 +102,7 @@ export const posts = p.pgTable('posts', { id: serial('id') })
   })
 
   // Per-table rather than per-file: drizzle's table builders accept a foreign
-  // dialect's column builders, so one schema can legally mix them and a
-  // dialect-gated consumer has to judge a table at a time.
+  // dialect's column builders, so one schema can legally mix them.
   it('records each table\'s dialect separately in a mixed schema', async () => {
     const workspace = await createTempWorkspace('guren-cli-schema-dialect-')
     try {

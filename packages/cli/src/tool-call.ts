@@ -1,33 +1,13 @@
 /**
- * `guren tool:call` — invoke one agent tool against the real application
- * (RFC 0016 §6).
+ * `guren tool:call` — invoke one agent tool against the real application (RFC 0016 §6).
  *
- * There is no second dispatch path here. The command derives tools with
- * `deriveAgentTools`, rebuilds the HTTP request with `buildToolRequest`, sends
- * it through `app.fetch`, and reads the answer with `mapToolResponse` — the
- * same three calls `@guren/plugin-mcp` makes. A CLI that assembled its own
- * request would be a second, quieter adapter, and the first thing to drift
- * would be the one thing this command exists to show: what an agent actually
- * gets.
- *
- * **Where the tools come from.** The booted application's own
- * `router.definitions()`, not `listTools()`'s file scan. The two disagree in
- * both directions and either disagreement produces a tool this command can
- * name and then a 404 it cannot explain: the file scan misses routes a
- * provider or plugin registers at boot, and it *includes* every `modules/<name>/`
- * present on disk whether or not `createApp({ modules })` mounts it. After
- * `boot()` the app router is by construction the graph `app.fetch` dispatches
- * into, so naming a tool and calling it cannot come apart. That is also why
- * this command has no `--routes` flag while `tool:list` does: pointing at a
- * routes file could not change what the booted app serves, and a flag that
- * silently does not apply is worse than an absent one.
- *
- * **And the call is recorded.** `'cli'` is one of RFC 0016 §5.2's four
- * surfaces, and this command is the whole of it. A developer calling a write
- * tool here, as any user they like via `--as`, is exactly the event an audit
- * trail exists to hold — so a booted app that configured an audit sink gets a
- * record of it, through the emitter that app bound rather than one this
- * command built. See {@link resolveAuditEmitter}.
+ * No second dispatch path: `deriveAgentTools`, `buildToolRequest`, `app.fetch`,
+ * `mapToolResponse` — the same three calls `@guren/plugin-mcp` makes, so what this shows
+ * is what an agent actually gets. Tools come from the *booted* app's own
+ * `router.definitions()`, not `listTools()`'s file scan, which both misses routes
+ * registered at boot and includes unmounted `modules/<name>/` on disk; that is also why
+ * there is no `--routes` flag here. And the call is recorded: `'cli'` is one of RFC 0016
+ * §5.2's four surfaces, through the emitter the app bound (see {@link resolveAuditEmitter}).
  */
 import { consola } from 'consola'
 import {
@@ -75,12 +55,9 @@ export interface ToolCallOptions {
 }
 
 /**
- * Parse `--input` into the flat argument object a tool call is.
- *
- * The offending text is quoted back on every refusal. A JSON error alone
- * ("Unexpected token }") describes a string the user cannot see from here —
- * shell quoting is what mangles these, so the value as it *arrived* is the
- * one piece of evidence that settles it.
+ * Parse `--input` into the flat argument object a tool call is. The offending text is
+ * quoted back on every refusal: shell quoting is what mangles these, so the value as it
+ * *arrived* is the one piece of evidence that settles it.
  */
 export function parseToolInput(raw: string | undefined): Record<string, unknown> {
   if (raw === undefined || raw.trim() === '') return {}
@@ -108,14 +85,10 @@ export function parseToolInput(raw: string | undefined): Record<string, unknown>
 }
 
 /**
- * Read `--as` as the user the call authenticates as.
- *
- * `user:42` and a bare `42` both work; any other prefix is refused by name
- * rather than treated as an opaque id, because `admin:1` reads as a role
- * selector and silently authenticating as a user literally called `admin:1`
- * is the confident wrong answer. The id itself goes through the same
- * {@link parseUserId} `token:issue` uses, so `0042` and `42` stay the
- * different ids they are.
+ * Read `--as` as the user the call authenticates as. `user:42` and a bare `42` both work;
+ * any other prefix is refused by name rather than treated as an opaque id, since
+ * `admin:1` reads as a role selector. The id goes through the same {@link parseUserId}
+ * `token:issue` uses, so `0042` and `42` stay the different ids they are.
  */
 export function parseActingAs(raw: string): string | number {
   const value = raw.trim()
@@ -148,12 +121,9 @@ function testingUserHeader(userId: string | number): string {
 }
 
 /**
- * Boot the application and hand back its route definitions and `fetch`.
- *
- * Structural and optional all the way down, like `MaybeApplication` itself:
- * the app being loaded is the *user's*, and one resolving a `@guren/core`
- * older than the agent surface must land on the message below rather than on
- * a `TypeError` naming an internal.
+ * Boot the application and hand back its route definitions and `fetch`. Structural and
+ * optional all the way down: the user's app may resolve a `@guren/core` older than the
+ * agent surface, and must land on the message below rather than a `TypeError`.
  */
 async function loadAgentSurface(
   appRoot?: string,
@@ -162,9 +132,8 @@ async function loadAgentSurface(
   fetch: (request: Request) => Promise<Response>
   audit: AgentAuditEmitter | undefined
 }> {
-  // Booted, and failing rather than warning if it cannot be: a tool dispatched
-  // into a half-booted app reaches a route graph whose configuration never
-  // completed.
+  // Booted, failing rather than warning: a tool dispatched into a half-booted app
+  // reaches a route graph whose configuration never completed.
   const app = await loadBootedApplication(appRoot)
 
   const definitions = app.router?.definitions?.()
@@ -186,24 +155,11 @@ async function loadAgentSurface(
 }
 
 /**
- * The application's own audit emitter, or `undefined`.
- *
- * `undefined` covers every honest absence and is not a degraded mode: an app
- * with no MCP plugin, or one whose plugin was given no `audit` sink, has asked
- * for no trail, and this command inventing one would be a second audit
- * configuration the operator never wrote — writing records somewhere they do
- * not look, in a format they did not choose. The absence here is the same
- * absence the endpoint has.
- *
- * Every step is guarded, and that is the point rather than defensive padding.
- * The app is the *user's*: its `container` may be absent or some other object,
- * `has`/`make` may not be functions, `make` may hand back something that is not
- * one, and a container resolving a failing factory **throws**. Letting any of
- * those reach the caller would fail a tool call in order to record it — the
- * exact inversion the emitter itself is built to prevent, one layer up. A
- * failure is warned about rather than swallowed, for the reason a dropped
- * record always is: an operator who believes a trail is being written needs to
- * hear that it is not.
+ * The application's own audit emitter, or `undefined` — an honest absence, not a degraded
+ * mode: inventing one would write records the operator never asked for. Every step is
+ * guarded because the app is the *user's*: `container` may be some other object, and one
+ * resolving a failing factory **throws**, which would fail a tool call in order to record
+ * it. A failure is warned about, since an operator expecting a trail must hear it is not.
  */
 function resolveAuditEmitter(app: MaybeApplication): AgentAuditEmitter | undefined {
   const container = app.container
@@ -213,10 +169,8 @@ function resolveAuditEmitter(app: MaybeApplication): AgentAuditEmitter | undefin
     if (!container.has(AGENT_AUDIT_BINDING)) return undefined
     const emitter = container.make<unknown>(AGENT_AUDIT_BINDING)
     if (typeof emitter !== 'function') {
-      // Said out loud, unlike the absent binding above. Nothing bound is an
-      // application that asked for no trail; something bound that cannot be
-      // called is one that asked for a trail and will not get it — and from
-      // the outside those two produce the same empty log.
+      // Said out loud, unlike the absent binding above: something bound that cannot be
+      // called asked for a trail and will not get it, yet logs the same empty result.
       consola.warn(
         `This application binds "${AGENT_AUDIT_BINDING}" to a ${typeof emitter} rather than a function, `
           + 'so this call is not being recorded. Bind what createAuditEmitter() returns.',
@@ -234,43 +188,22 @@ function resolveAuditEmitter(app: MaybeApplication): AgentAuditEmitter | undefin
 }
 
 /**
- * Who an audit record says this call acted as.
- *
- * `--as user:42` becomes `{ kind: 'user', id: 42 }` and its absence `null`,
- * which is the honest pair. Dropping to `null` for both would make a developer
- * impersonating user 42 indistinguishable from an anonymous call, and *who*
- * a write was performed as is the one fact a reader of this trail most needs.
- *
- * The two fields answer different questions and neither may be asked to carry
- * the other's. `principal` records who the application acted as; `surface:
- * 'cli'` carries the standing fact that **no credential was verified** — this
- * command authenticates with an injected `X-Testing-User` header, not a token
- * or a session, so every `'cli'` record is a developer-initiated call by
- * construction.
- *
- * `abilities` is therefore omitted rather than sent empty. Abilities are a
- * *token's*, and there was no token; `abilities: []` would read as "a token
- * that granted nothing", which is a claim about a credential that does not
- * exist.
- *
- * `kind: 'service'` is never right here: it names an App MCP bearer with no
- * user behind it, which is the opposite of what `--as` says.
+ * Who an audit record says this call acted as. `--as user:42` becomes
+ * `{ kind: 'user', id: 42 }` and its absence `null`; collapsing both would make
+ * impersonation indistinguishable from an anonymous call. `surface: 'cli'` carries the
+ * standing fact that **no credential was verified**, so `abilities` is omitted rather than
+ * sent empty; `kind: 'service'` names a bearer with no user, the opposite of what `--as` says.
  */
 function auditPrincipal(actingAs: string | number | undefined): AgentPrincipal | null {
   return actingAs === undefined ? null : { kind: 'user', id: actingAs }
 }
 
 /**
- * The path a `Set-Cookie` is actually scoped to (RFC 6265 §5.2.4, §5.3).
- *
- * Three rules, each of which the obvious reading gets wrong in a direction
- * that matters here. The *last* `Path` wins, not the first — taking the first
- * of `Path=/; Path=/admin` sends a cookie a browser withholds. An empty or
- * non-absolute value is not a path at all and falls back to the default path
- * of the request that set it; since priming always requests `/`, that is `/`
- * — treating `path: 'admin'` as a scope instead withholds a cookie a browser
- * sends, and turns a working app into a 403 nobody can explain. Attribute
- * whitespace is not part of the value.
+ * The path a `Set-Cookie` is actually scoped to (RFC 6265 §5.2.4, §5.3). Three rules the
+ * obvious reading gets wrong: the *last* `Path` wins, not the first; an empty or
+ * non-absolute value is not a path and falls back to the default path of the setting
+ * request (always `/` here, since priming requests `/`); attribute whitespace is not part
+ * of the value.
  */
 function cookiePath(attributes: string[]): string {
   const declared = attributes
@@ -292,16 +225,11 @@ function pathMatches(requestPath: string, cookiePath: string): boolean {
 }
 
 /**
- * Fetch a CSRF token pair the way a browser does, and hand back the headers
- * that present it.
- *
- * A dispatched tool call is neither of the two shapes `createCsrfMiddleware`
- * lets past: it carries no `Authorization: Bearer` (this command authenticates
- * with `--as`, not a token) and no cookies. So a mutating call into any app
- * with the default auth stack answers `403 CSRF token mismatch` — a refusal
- * about the transport, not about the tool, and the one the caller can do
- * nothing with. Priming is not a bypass: it performs exactly the round-trip a
- * browser performs, and an app that issues no token gets no headers added.
+ * Fetch a CSRF token pair the way a browser does, and hand back the headers that present
+ * it. A dispatched tool call matches neither shape `createCsrfMiddleware` lets past (no
+ * `Authorization: Bearer`, no cookies), so a mutating call into a default auth stack
+ * answers `403 CSRF token mismatch` — about the transport, not the tool. Not a bypass: the
+ * same round-trip a browser performs, and an app issuing no token gets no headers added.
  */
 async function primeCsrfHeaders(
   fetch: (request: Request) => Promise<Response>,
@@ -322,12 +250,10 @@ async function primeCsrfHeaders(
     const separator = pair?.indexOf('=') ?? -1
     if (!pair || separator <= 0) continue
 
-    // Path is honoured because it is configurable (`cookieOptions.path`), so
-    // ignoring it would let this command present a cookie a browser would
-    // withhold — presenting *more* than a browser is the one direction that
-    // could turn a real CSRF misconfiguration into a green run here. Domain
-    // and Secure are not evaluated: the request never leaves the process and
-    // both are fixed by that.
+    // Path is honoured because it is configurable (`cookieOptions.path`): presenting
+    // *more* than a browser would is the direction that could turn a real CSRF
+    // misconfiguration into a green run. Domain and Secure are fixed by the request never
+    // leaving the process.
     if (!pathMatches(toolPath, cookiePath(attributes))) continue
 
     cookies.set(pair.slice(0, separator).trim(), pair.slice(separator + 1).trim())
@@ -350,19 +276,16 @@ export interface ToolCallResult {
   /** `--preflight` was asked for but the app ran the call instead. */
   preflightUnanswered: boolean
   /**
-   * Derivation warnings for this tool alone, for the reason `tool:inspect`
-   * gives: the rest belong to routes the caller did not ask about, and burying
-   * the one line that concerns this call among them is how a warning stops
+   * Derivation warnings for this tool alone: the rest belong to routes the caller did not
+   * ask about, and burying the one line that concerns this call is how a warning stops
    * being read.
    */
   warnings: string[]
 }
 
 /**
- * Find the tool, build its request, send it, map the response.
- *
- * Separated from the printing below so the rules are testable against a
- * hand-built route graph, with no application on disk.
+ * Find the tool, build its request, send it, map the response. Separated from the
+ * printing so the rules are testable against a hand-built route graph, with no app on disk.
  */
 export async function dispatchToolCall(
   definitions: readonly RouteDefinition[],
@@ -373,10 +296,8 @@ export async function dispatchToolCall(
     actingAs?: string | number
     preflight?: boolean
     /**
-     * The application's audit emitter, when it configured one. Passed in
-     * rather than resolved here so the recording rules are testable against a
-     * hand-built route graph, with no application on disk — the same reason
-     * this function takes `definitions` and `fetch` instead of an app.
+     * The application's audit emitter, when it configured one. Passed in rather than
+     * resolved here so the recording rules stay testable with no app on disk.
      */
     audit?: AgentAuditEmitter
   },
@@ -389,9 +310,8 @@ export async function dispatchToolCall(
     throw new Error(
       `No agent tool named "${options.name}".`
         + (available.length > 0
-          // The names themselves, not a pointer at `tool:list`: the answer to
-          // "what did I mistype" is the list, and a second command to run is
-          // a step between the question and it.
+          // The names themselves, not a pointer at `tool:list`: the answer to "what did
+          // I mistype" is the list.
           ? ` This app exposes: ${available.join(', ')}.`
           : ' This app exposes no agent tools — declare .agent() on a named route.'),
     )
@@ -402,15 +322,11 @@ export async function dispatchToolCall(
     preflight: options.preflight,
   })
 
-  // Nothing is recorded for either refusal below, and that is a deliberate
-  // divergence from the App MCP endpoint, which answers both with a synthetic
-  // 400 and records that as an invocation. The two surfaces are answering
-  // different questions. There, the caller is a remote agent whose malformed
-  // call is itself worth a line in the trail, and MCP has no channel to refuse
-  // a call outside a tool result. Here the caller is the person reading the
-  // error, the command exits non-zero, and no request was ever sent — so there
-  // is no status a record could honestly carry, and the alternative would be
-  // an invented one. Do not "align" these without moving the refusal itself.
+  // Nothing is recorded for either refusal below — a deliberate divergence from the App
+  // MCP endpoint, which records a synthetic 400 because its caller is a remote agent and
+  // it has no channel to refuse outside a tool result. Here the caller reads the error,
+  // the command exits non-zero, and no request was sent, so no status could honestly be
+  // recorded. Do not "align" these without moving the refusal itself.
   if ('missing' in built) {
     throw new Error(
       `--input is missing ${built.missing.length === 1 ? 'a path parameter' : 'path parameters'} `
@@ -438,39 +354,29 @@ export async function dispatchToolCall(
     }
   }
 
-  // The span the App MCP endpoint measures: the dispatch, from the request
-  // going out to the response having been read back. The CSRF priming above is
-  // outside it on purpose — that round trip is this surface's transport setup,
-  // not part of what the tool cost, and including it would make every mutating
-  // call here look slower than the same call over MCP for a reason that has
-  // nothing to do with the tool.
+  // The span the App MCP endpoint measures: request out to response read back. The CSRF
+  // priming is outside it on purpose — transport setup, not what the tool cost.
   const startedAt = performance.now()
   let outcome: ToolCallOutcome
   try {
     outcome = await mapToolResponse(tool, await fetch(new Request(request, { headers })))
   } catch (error) {
-    // The route's own failures came back as responses; reaching here means the
-    // dispatch itself broke. Still an invocation — it ran — recorded with the
-    // status the app would have reported for an unhandled throw, exactly as
-    // the MCP endpoint records the same case. Recorded *before* the rethrow,
-    // so the trail keeps a call whose error the caller is about to see. Under
-    // `--preflight` too, and under the real tool's name: with no answer to
-    // read, nothing here can say the handler did not run.
+    // Reaching here means the dispatch itself broke, not the route. Still an invocation,
+    // recorded before the rethrow with the status an unhandled throw would report — under
+    // `--preflight` too, and under the real tool's name: with no answer to read, nothing
+    // here can say the handler did not run.
     record(tool, options, 500, startedAt, false)
     throw error
   }
 
-  // Read once, from the marker `mapToolResponse` carried off the seam's
-  // response header — see `readVerdict` for why the body is not where this
-  // question is answered. It also tells us when a `--preflight` went
-  // unanswered: an app on a `@guren/core` predating the seam runs the call,
-  // and reporting that as a rehearsal would be a lie about a write.
+  // Read once, from the marker `mapToolResponse` took off the seam's response header (see
+  // `readVerdict`). It also catches an unanswered `--preflight`: an app predating the seam
+  // runs the call, and reporting that as a rehearsal would be a lie about a write.
   const verdict = options.preflight ? readVerdict(outcome) : undefined
 
-  // Recorded *after* the verdict is read, because the verdict is what decides
-  // which tool the record names. A rehearsal that answered goes down as
-  // `guren.preflight`; anything else — including a `--preflight` the app ran
-  // anyway — goes down as the tool that actually executed. See `record`.
+  // Recorded *after* the verdict is read: the verdict decides which tool the record
+  // names. An answered rehearsal goes down as `guren.preflight`, anything else as the
+  // tool that actually executed. See `record`.
   record(tool, options, outcome.status, startedAt, verdict !== undefined)
 
   return {
@@ -484,53 +390,11 @@ export async function dispatchToolCall(
 }
 
 /**
- * Record one invocation, if the application configured somewhere to record it.
- *
- * **This surface emits no `AgentToolDenied`, ever.** The four denial reasons —
- * `auth`, `scope`, `approval`, `rate-limit` — each name a check an *adapter*
- * runs before synthesizing a request, and this command runs none of them: it
- * has no token to scope, no rate budget, and it dispatches directly. The two
- * refusals it does make (a missing path parameter, a dot-segment) are argument
- * errors that none of those four reasons describes, and inventing one would put
- * a word in the trail that means something else everywhere it appears. What the
- * application itself refuses — a 401, a 403 from a policy — arrives as a
- * response, and is an invocation carrying that status, exactly as on every
- * other surface.
- *
- * Note what this does *not* claim: an `approval: 'required'` tool genuinely
- * does execute from here, because the approval gate lives in the MCP adapter.
- * That is a gap in this surface, recorded honestly as the invocation it is,
- * and not something a denial event would close.
- *
- * Arguments go through the *called tool's* `redact` list, not a copy of one.
- * `.agent({ redact })` is where a route says which of its fields must never be
- * written down, and a surface that masked with anything else would be a second
- * rule producing masks a reader cannot tell from the real ones. That holds for
- * a rehearsal too: the checked tool's rules mask the payload it was checked
- * with, wherever in the record that payload sits.
- *
- * **A rehearsal is recorded under `guren.preflight`, never under the tool it
- * rehearsed**, which is the rule the App MCP endpoint already follows and the
- * one this surface most needs. `--preflight` runs the middleware and validates
- * the contract but stops before the handler, so a record naming `posts.destroy`
- * with status 200 would be indistinguishable from a destroy that happened. The
- * probed tool is not lost: it rides in the record's arguments, exactly as the
- * meta-tool's own arguments carry it on MCP.
- *
- * `rehearsed` is decided by the *answer*, not by the flag, and specifically by
- * the seam's own marker on the response — see {@link readVerdict}. A
- * `--preflight` against an application whose `@guren/core` predates the seam
- * runs the call for real, and that write is recorded under the real tool; the
- * command warns about the same thing on stdout. Naming it a rehearsal because
- * the caller asked for one would be the trail lying about a write.
- *
- * One case the marker cannot settle: a `--preflight` that comes back an error.
- * The seam marks only the verdict it answers with, so a 401 from an auth
- * middleware, a 422 from the seam's own contract validation, and a 500 from
- * the handler of an app that has no seam are indistinguishable here. Recorded
- * under the real tool, which is the reading that claims least: an invocation
- * with a 4xx says a call was made and refused, while `guren.preflight` would
- * assert the handler did not run — a thing this surface would be guessing.
+ * Record one invocation, if the application configured somewhere to record it. **This
+ * surface emits no `AgentToolDenied`, ever** — the four denial reasons each name an
+ * adapter check it does not run. Arguments go through the called tool's
+ * `.agent({ redact })` list. **A rehearsal is recorded under `guren.preflight`, never the
+ * tool it rehearsed**, decided by the seam's response marker, not the flag ({@link readVerdict}).
  */
 function record(
   tool: DerivedAgentTool,
@@ -545,16 +409,10 @@ function record(
   // parses `guren.preflight` records from either surface.
   const args = rehearsed ? { tool: tool.toolName, input: options.args } : options.args
 
-  // Guarded at the call, not only at the resolution. `agent.audit` is a public
-  // binding an application writes itself — the fixtures in this package's own
-  // tests do — so nothing guarantees the bound value is what
-  // `createAuditEmitter` returns, and any function satisfies the typeof check
-  // that resolved it. What `createAuditEmitter` returns never throws
-  // synchronously; something else might, and by this point on the ordinary
-  // path the tool's write has already happened. Failing the command then would
-  // be the inversion this whole emitter is built to prevent: the mutation
-  // taken, the report unprinted, the exit code non-zero. So the record is
-  // attempted, its failure is said, and the call still answers.
+  // Guarded at the call, not only at the resolution: `agent.audit` is a public binding an
+  // application writes itself, so the bound value need not be what `createAuditEmitter`
+  // returns, and by this point the tool's write has already happened. Failing here would
+  // take the mutation, print nothing, and exit non-zero.
   try {
     options.audit?.(
       new AgentToolInvoked(
@@ -575,22 +433,11 @@ function record(
 }
 
 /**
- * Whether the app answered a rehearsal, and with what.
- *
- * **The answer comes from `outcome.preflightVerdict`, never from the body.**
- * `mapToolResponse` sets that field from the seam's response header and is the
- * one place that sees it; re-deriving the same conclusion here by looking for
- * a `preflight` field in the JSON would be the second, weaker copy the header
- * exists to make unnecessary — and it fails in the direction an audit trail
- * cannot afford. An app whose `@guren/core` predates the seam runs a
- * `--preflight` call *for real*; if that route's own output happens to carry a
- * `preflight` field, the body test reads a write that happened as a rehearsal
- * that did not, and the mutation leaves no trace. A route's output cannot set
- * the header.
- *
- * The body is still where the verdict's *contents* come from — what was
- * validated, what went unverified — once the header has settled that this is a
- * verdict at all.
+ * Whether the app answered a rehearsal, and with what. **The answer comes from
+ * `outcome.preflightVerdict`, never from the body.** An app predating the seam runs a
+ * `--preflight` call *for real*, and if that route's output carries a `preflight` field a
+ * body test would read the write as a rehearsal — a route's output cannot set the header.
+ * The body still supplies the verdict's contents, once the header has settled that it is one.
  */
 export function readVerdict(outcome: ToolCallOutcome): Record<string, unknown> | undefined {
   if (outcome.preflightVerdict !== true) return undefined
@@ -604,10 +451,9 @@ export function readVerdict(outcome: ToolCallOutcome): Record<string, unknown> |
       return parsed as Record<string, unknown>
     }
   } catch {
-    // Marked as a verdict but unreadable. The marker is what establishes that
-    // the handler did not run, so the caller still gets a verdict — an empty
-    // one. Falling back to `undefined` here would file the call under the
-    // rehearsed tool's name, which is the claim this whole branch avoids.
+    // Marked as a verdict but unreadable. The marker establishes that the handler did not
+    // run, so the caller gets an empty verdict; `undefined` would file the call under the
+    // rehearsed tool's name.
   }
   return {}
 }
@@ -617,17 +463,11 @@ export async function runToolCall(options: ToolCallOptions): Promise<void> {
   const actingAs = options.as === undefined ? undefined : parseActingAs(options.as)
 
   if (actingAs !== undefined) {
-    // `--as` rides `X-Testing-User`, which `attachAuthContext` honours only
-    // while `GUREN_TESTING` is set — so the flag cannot work without setting
-    // it here, before the app is imported and booted. Set loudly and never by
-    // default: this is the same trust boundary `guren console` sits on (anyone
-    // who can run it can already execute code in this project), but the header
-    // it turns on is the one thing standing between a deployed app and
-    // unauthenticated impersonation, so a run that enables it says so.
-    // Never restored: this is a one-shot CLI process that exits after the
-    // call, and a restore would only matter to a caller importing
-    // runToolCall into a longer-lived process — which the tests do, and
-    // which is why they save and restore it themselves.
+    // `--as` rides `X-Testing-User`, which `attachAuthContext` honours only while
+    // `GUREN_TESTING` is set, so it must be set here before the app is imported. Set
+    // loudly and never by default: that header is the one thing standing between a
+    // deployed app and unauthenticated impersonation. Never restored — this process exits
+    // after the call, and the tests that import `runToolCall` restore it themselves.
     process.env.GUREN_TESTING = '1'
     consola.warn(
       `--as user:${String(actingAs)} bypasses authentication: it sets GUREN_TESTING=1 for this process so the `
@@ -650,18 +490,17 @@ export async function runToolCall(options: ToolCallOptions): Promise<void> {
     printReport(result)
   }
 
-  // The dispatch itself succeeded; what failed is the call. A script asking
-  // "did this tool work" must not read a 422 as a success, so the status is
-  // reflected in the exit code — set, not thrown, so the body still prints.
+  // The dispatch succeeded; the call failed. A script asking "did this tool work" must
+  // not read a 422 as success, so the status sets the exit code — set, not thrown, so the
+  // body still prints.
   if (result.outcome.isError) {
     process.exitCode = 1
   }
 }
 
 function printJson(result: ToolCallResult): void {
-  // One JSON object on stdout and nothing beside it — warnings ride inside,
-  // because a consola line next to it makes the output unparseable for
-  // exactly the callers that pass this flag.
+  // One JSON object on stdout and nothing beside it — warnings ride inside, since a
+  // consola line would make the output unparseable for callers passing --json.
   const { tool, outcome, verdict } = result
   console.log(
     JSON.stringify(

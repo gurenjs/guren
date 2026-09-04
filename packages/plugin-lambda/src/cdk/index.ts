@@ -76,12 +76,7 @@ export interface GurenLambdaAppProps {
  *
  * @example
  * ```typescript
- * new GurenLambdaApp(this, 'App', {
- *   functionDir: '../.lambda/function',
- *   assets: { dir: '../.lambda/assets' },
- *   queue: {},
- *   environment: { DATABASE_NAME: 'appdb', DATABASE_RESOURCE_ARN: '...', DATABASE_SECRET_ARN: '...' },
- * })
+ * new GurenLambdaApp(this, 'App', { functionDir: '../.lambda/function' })
  * ```
  */
 export class GurenLambdaApp extends Construct {
@@ -112,7 +107,6 @@ export class GurenLambdaApp extends Construct {
 
     const functionDefaults = { code, runtime, memorySize, environment }
 
-    // --- HTTP ---
     this.httpFunction = new lambda.Function(this, 'Http', {
       ...functionDefaults,
       handler: lambdaHandlerId('http'),
@@ -123,7 +117,6 @@ export class GurenLambdaApp extends Construct {
       defaultIntegration: new HttpLambdaIntegration('HttpIntegration', this.httpFunction),
     })
 
-    // --- Queue ---
     if (props.queue) {
       const workerTimeout = props.queue.timeout ?? Duration.seconds(60)
 
@@ -155,7 +148,6 @@ export class GurenLambdaApp extends Construct {
       )
     }
 
-    // --- Schedule ---
     if (props.schedule) {
       this.scheduleFunction = new lambda.Function(this, 'Scheduler', {
         ...functionDefaults,
@@ -169,7 +161,6 @@ export class GurenLambdaApp extends Construct {
       })
     }
 
-    // --- Console ---
     if (props.console) {
       this.consoleFunction = new lambda.Function(this, 'Console', {
         ...functionDefaults,
@@ -178,7 +169,6 @@ export class GurenLambdaApp extends Construct {
       })
     }
 
-    // --- Cross-cutting wiring, after every function exists ---
     const functions = [this.httpFunction, this.queueFunction, this.scheduleFunction, this.consoleFunction]
       .filter((fn): fn is lambda.Function => fn !== undefined)
 
@@ -212,7 +202,6 @@ export class GurenLambdaApp extends Construct {
       }
     }
 
-    // --- Assets (S3 + CloudFront) ---
     if (props.assets) {
       this.assetsBucket = new s3.Bucket(this, 'Assets', {
         blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
@@ -290,31 +279,15 @@ export class GurenLambdaApp extends Construct {
 
 /**
  * The CloudFront function body that turns a staged document into a download.
+ * CloudFront answers asset behaviours from S3 directly, so the framework's own
+ * `guardStaticDocument` never sees these files and an SVG that downloads
+ * locally would render inline, script and all, on the app's origin.
  *
- * CloudFront answers every asset behaviour from S3 directly, so
- * `guardStaticDocument` — which the framework applies on each mount that
- * reaches `public/` — never sees these files. Without this the same app
- * downloads an SVG locally and renders it inline, script and all, on its own
- * origin in production.
- *
- * A viewer-response function rather than one cache behaviour per extension:
- * a behaviour is chosen by path, so `*.svg` would also capture a `/feed.svg`
- * the *app* renders and send it to S3, and the default limit of 25
- * behaviours is already spent one per staged root entry. The association
- * rides on `assetBehavior` alone, which is what keeps it off the default
- * behaviour — the app, whose responses carry the framework's own headers.
- *
- * The extension is read from the request path because that path is the S3
- * key here: this distribution sets no `defaultRootObject` and rewrites no
- * index, so nothing stands between `/page.html` and the document. A platform
- * that served `public/page.html` at `/page` would leave the `.html` half of
- * this rule matching only the redirect.
- *
- * `toLowerCase()` covers the extension case `DOCUMENT_ASSET_EXTENSIONS`
- * records as unreachable from a literal pattern: `getMimeType` lowercases
- * before its lookup, so `logo.SVG` downloads under the framework's own guard,
- * and reading the extension rather than matching a pattern is what lets this
- * target agree with it.
+ * A viewer-response function rather than one cache behaviour per extension: a
+ * behaviour is chosen by path, so `*.svg` would also capture a `/feed.svg` the
+ * *app* renders, and the default limit of 25 is already spent one per staged
+ * root entry. The extension is read from the request path (which is the S3 key
+ * here) and lowercased, so `logo.SVG` is caught as the framework catches it.
  */
 function renderAssetDocumentGuard(): string {
   // CloudFront rejects a header a function names in any case but lower.
@@ -322,10 +295,8 @@ function renderAssetDocumentGuard(): string {
     Object.entries(DOCUMENT_ASSET_HEADERS).map(([name, value]) => [name.toLowerCase(), value]),
   )
 
-  // The two constants are the only thing this build decides. Both go through
-  // JSON.stringify, the one quoting rule that cannot emit a broken function
-  // body — a header value carrying an apostrophe would — and they are declared
-  // ahead of a body that never interpolates rather than woven into it.
+  // Both constants go through JSON.stringify, the one quoting rule that cannot
+  // emit a broken function body — a header value carrying an apostrophe would.
   return [
     `var DOCUMENT_EXTENSIONS = ${JSON.stringify(DOCUMENT_ASSET_EXTENSIONS)}`,
     `var DOCUMENT_HEADERS = ${JSON.stringify(headers)}`,
@@ -336,14 +307,9 @@ function renderAssetDocumentGuard(): string {
 
 /**
  * The function CloudFront runs, verbatim, reading the two constants
- * {@link renderAssetDocumentGuard} declares above it.
- *
- * Free of interpolation on purpose. A template that substitutes into its own
- * body has to be read twice, once as TypeScript and once as the JavaScript it
- * becomes, and a `$` or a backtick in the JavaScript changes the result of the
- * first reading. Here the string is the program: it can be pasted into the
- * CloudFront console, or run beside the two `var` lines anywhere else, and
- * behave exactly as it does deployed.
+ * {@link renderAssetDocumentGuard} declares above it. Free of interpolation on
+ * purpose: a `$` or a backtick in the JavaScript would change how the
+ * TypeScript reads, and as written the string is exactly the deployed program.
  */
 const ASSET_DOCUMENT_GUARD_BODY = `function handler(event) {
   var uri = event.request.uri

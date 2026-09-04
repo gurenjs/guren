@@ -24,10 +24,9 @@ describe('presentExternalMcpAuth', () => {
   })
 
   /**
-   * The security property, and the half a no-op implementation would also
-   * pass — which is why it is asserted next to the positive case above rather
-   * than alone. A caller who has the bytes of an authenticated request can
-   * construct either of these; neither may carry the grant.
+   * The security property, asserted next to the positive case above because a
+   * no-op implementation would pass this half alone. A caller who has the bytes
+   * of an authenticated request can construct either of these.
    */
   test('should not carry to a request rebuilt from the same URL and headers', () => {
     const request = presentExternalMcpAuth(

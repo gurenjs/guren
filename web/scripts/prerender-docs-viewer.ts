@@ -1,20 +1,14 @@
 /**
  * Publish a static snapshot of the docs viewer (RFC 0005) under
- * web/public/_guren/docs/, so guren.dev can serve the real screen the
- * homepage advertises instead of only a screenshot of it.
+ * web/public/_guren/docs/. Usage: bun scripts/prerender-docs-viewer.ts
  *
- * The viewer itself never runs here. `DocsViewerServiceProvider` reads the
- * bundle off disk through @guren/cli on every request, and this app deploys
- * to Workers — no filesystem, and wrangler.jsonc aliases @guren/cli to a
- * stub. So the payload is built once at build time and the shipped shell is
- * copied beside it; both are plain static assets after that.
+ * The viewer never runs here: `DocsViewerServiceProvider` reads the bundle off
+ * disk through @guren/cli per request, but this app deploys to Workers — no
+ * filesystem, and wrangler.jsonc aliases @guren/cli to a stub. So the payload
+ * and the shipped shell are emitted once as plain static assets.
  *
- * The framework gate is deliberately untouched: `isDocsViewerEnabled()`
- * still refuses to mount anything in production. What this publishes is a
- * snapshot of the *blog example's* public docs, which is why exposing it
- * costs nothing — see the injected banner, which says so on the page.
- *
- * Usage: bun scripts/prerender-docs-viewer.ts
+ * `isDocsViewerEnabled()` is deliberately untouched and still refuses to mount
+ * in production; what this publishes is the blog example's public docs.
  */
 import { mkdirSync, statSync, writeFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
@@ -28,10 +22,8 @@ import { stageMermaid } from './lib/stage-mermaid.js'
 const webRoot = fileURLToPath(new URL('..', import.meta.url))
 
 /**
- * The bundle to publish. The framework's own docs/ carries no OKF relations
- * (109 documents, zero edges), so the blog example is the only bundle whose
- * graph shows what the viewer is for — and it is the one the homepage
- * screenshot already describes.
+ * The framework's own docs/ carries no OKF relations (109 documents, zero
+ * edges), so the blog example is the only bundle with a graph to show.
  */
 const bundleRoot = resolve(webRoot, '../examples/blog')
 const outDir = resolve(webRoot, 'public/_guren/docs')
@@ -91,9 +83,8 @@ function formatBytes(bytes: number): string {
 
 const data = await buildDocsViewerData(bundleRoot)
 
-// A bundle that resolved to the wrong directory still builds — it just comes
-// back empty, and an empty graph is indistinguishable from a working one that
-// happens to render nothing. Fail here instead of publishing a blank screen.
+// A bundle resolved to the wrong directory still builds, just empty — which is
+// indistinguishable from a working one that renders nothing.
 if (data.nodes.length === 0 || data.edges.length === 0) {
   console.error(
     `No docs graph at ${bundleRoot} (${data.nodes.length} nodes, ${data.edges.length} edges). ` +
@@ -126,7 +117,5 @@ write(
 )
 
 // The shell loads mermaid from a fixed path and degrades to "bun add -d
-// mermaid" hints without it — three of the example's spec views are mermaid
-// diagrams, so a snapshot without it reads as broken. The docs pages render
-// their own diagrams from the same staged file.
+// mermaid" hints without it; three of the example's spec views are diagrams.
 report(stageMermaid().path)

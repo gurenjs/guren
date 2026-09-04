@@ -46,10 +46,8 @@ ${indent}  <span className="text-g-text">${body}</span>
 ${indent}</p>`
 }
 
-// Passwordless apps keep show() (the OAuth button page) and destroy()
-// (logout) but have no credential exchange at all — there is no POST /login
-// route pointing at store(), so scaffolding it would leave a dead action that
-// still pulls in the password validator.
+// A passwordless app keeps show() and destroy() but registers no POST /login,
+// so a scaffolded store() would be dead code pulling in the password validator.
 function buildLoginControllerTemplate(includePassword: boolean): string {
   const coreImports = includePassword ? 'Controller, ValidationException' : 'Controller'
   const validatorImport = includePassword
@@ -174,12 +172,9 @@ function buildOAuthProviderTemplate(providers: string[]): string {
     })
     .join('\n\n')
 
-  // Matches the wiring convention scaffolded by `guren add oauth`: providers
-  // are registered against the shared `oauth` singleton (bound by
-  // CoreOAuthServiceProvider) and only when all three env vars are set. The
-  // login buttons still render either way — but clicking one fails fast with
-  // a clear "provider not configured" error app-side, instead of redirecting
-  // to the provider with empty credentials and failing confusingly there.
+  // Matches `guren add oauth`: registered against the shared `oauth` singleton
+  // and only when all three env vars are set, so a half-configured provider
+  // fails app-side rather than at the provider with empty credentials.
   return `import { ServiceProvider, type OAuthManager, ${factoryImports} } from '@guren/core'
 
 export default class OAuthProvider extends ServiceProvider {
@@ -198,10 +193,9 @@ function buildOAuthControllerTemplate(providers: string[], includeVerify: boolea
     .map((provider) => `    ${provider}: { ${provider}Id: profileId },`)
     .join('\n')
 
-  // The provider already vouches for this address, so an OAuth-created
-  // account is verified on arrival — without this, requireVerifiedEmail
-  // would strand OAuth users at /verify-email forever, since this
-  // controller never sends a verification email for them to click.
+  // Verified on arrival, since the provider vouches for the address and this
+  // controller sends no verification email — without it requireVerifiedEmail
+  // would strand every OAuth user at /verify-email forever.
   const emailVerifiedAtField = includeVerify ? '\n        emailVerifiedAt: new Date(),' : ''
 
   return `import { Controller, ValidationException, type OAuthManager } from '@guren/core'
@@ -312,12 +306,10 @@ export default class OAuthController extends Controller {
 }
 
 /**
- * When OAuth is the only way in, the stored email is a copy of what the
- * provider vouched for and the profile form must not be able to replace it:
- * an account could otherwise claim an address it has never proven, and
- * OAuthController's email-collision check would then reject the real owner's
- * first sign-in. Nothing re-verifies it here — `--verify` is unavailable in
- * this mode — so the only safe form is one that can't change it.
+ * With OAuth the only way in, the stored email is the provider's and nothing
+ * here can re-verify a replacement (`--verify` is unavailable in this mode).
+ * An editable form would let an account claim an address it never proved, and
+ * OAuthController's collision check would then reject the real owner.
  */
 function buildProviderOwnedEmailProfileControllerTemplate(includePassword: boolean): string {
   const destructuredFields = includePassword ? '{ name, password }' : '{ name }'
@@ -578,12 +570,9 @@ ${buildOAuthButtonLinks(providers)}
 }
 
 /**
- * A separate template rather than more holes in buildLoginViewTemplate: the
- * convention in this file is to splice fragments in when a variant *adds or
- * drops fields*, and to write a second template when the component's
- * structure changes. Here the entire controlled form — useForm, useId, every
- * input, the submit button — is gone, so splicing would leave a builder whose
- * two outputs share little more than the card chrome.
+ * Separate rather than more holes in buildLoginViewTemplate: this file splices
+ * fragments when a variant adds or drops fields, and writes a second template
+ * when the structure changes. Here the whole controlled form is gone.
  */
 function buildOAuthOnlyLoginViewTemplate(providers: string[]): string {
   return `import { Head } from '@inertiajs/react'
@@ -1117,10 +1106,9 @@ export default defineSeeder(async ({ db }: ${context}) => {
 `
 }
 
-// The timestamps in these blocks — and in `emailVerifiedAtField` below — all
-// hold instants, so pg gets `timestamptz`. An offset-less column stores a bare
-// wall clock whose meaning is left to the reader, and `defaultNow()` writes it
-// in the database session's zone while the app reads it back as UTC.
+// These timestamps hold instants, so pg gets `timestamptz`: an offset-less
+// column would take `defaultNow()` in the database session's zone while the
+// app reads it back as UTC.
 const usersTableBlocks: Record<SchemaDialect, string> = {
   sqlite: `export const users = sqliteTable('users', {
   id: integer('id').primaryKey({ autoIncrement: true }),
@@ -1180,12 +1168,9 @@ function ensureAuthColumnImports(content: string, dialect: SchemaDialect): strin
 }
 
 /**
- * Insert one or more column definitions right after the `rememberToken`
- * column of a `users` table block, preserving its indentation. Used both to
- * build the "with verify/oauth" variant of a fresh table block and to patch
- * an existing one — a single source of truth for the splice, instead of
- * hand-maintaining full table-block template variants per feature
- * combination.
+ * Splices columns after `rememberToken`, preserving its indentation. One rule
+ * for both the fresh table block and an existing one, so no full table-block
+ * variant has to be hand-maintained per feature combination.
  */
 function insertColumnsAfterRememberToken(content: string, fieldLines: string[]): string | null {
   if (fieldLines.length === 0) {
@@ -1209,13 +1194,11 @@ function insertColumnsAfterRememberToken(content: string, fieldLines: string[]):
 const usersTablePattern = /export const users = (?:pgTable|sqliteTable|mysqlTable)\('users',\s*\{[\s\S]*?\n\}\)\s*\n?/
 
 /**
- * OAuth-created accounts are passwordless, so the users table must accept a
- * NULL password hash. Applies to both freshly written and pre-existing users
- * tables (adding --oauth to a password-auth app would otherwise hit a
- * NOT NULL violation on the first OAuth signup). Scoped to the users table
- * so a same-named column on another table is never touched, and
- * line-anchored so argument lists containing commas (mysql
- * `varchar('password_hash', { length: 255 })`) still match.
+ * OAuth accounts are passwordless, so the column must accept NULL — including
+ * on a pre-existing table, which `--oauth` would otherwise hit with a NOT NULL
+ * violation at the first signup. Scoped to the users table so a same-named
+ * column elsewhere is untouched, and line-anchored so an argument list with
+ * commas (mysql `varchar('password_hash', { length: 255 })`) still matches.
  */
 function relaxPasswordHashForOAuth(content: string): string {
   const tableMatch = content.match(usersTablePattern)
@@ -1241,12 +1224,9 @@ async function updateSchema({ includeVerify, includePassword, oauthProviders }: 
   const dialect = detectSchemaDialect(content)
 
   if (hasAuthColumns) {
-    // The users table already has auth columns (from an earlier make:auth
-    // run) and may have been customized since — e.g. extra columns or a
-    // trailing index callback (`pgTable('users', {...}, (table) => [...])`).
-    // Rather than risk mangling a table shape we can't fully parse, insert
-    // just the new columns next to the rememberToken column we know we
-    // generated, preserving its indentation.
+    // The table already has auth columns and may have been customized since —
+    // extra columns, a trailing index callback. Rather than mangle a shape
+    // this cannot fully parse, only the new columns are spliced in.
     if (oauthProviders.length > 0) {
       const relaxed = relaxPasswordHashForOAuth(content)
       if (relaxed !== content) {
@@ -1350,16 +1330,11 @@ async function updatePageContracts(): Promise<void> {
 }
 
 /**
- * Every file only the password experience needs — login, registration, reset,
- * and the mail and email-verification wiring that exist to serve them.
- *
- * Files this run no longer scaffolds are omitted, never deleted, so
- * re-running an existing password app with `--oauth-only` leaves all of these
- * on disk. The rewritten routes/auth.ts makes the stale controllers
- * unreachable, but `db/seeders/UsersSeeder.ts` is discovered by `db:seed`
- * rather than routed, so it would still hash a password and insert an account
- * that has no way to sign in. Report what is left rather than deleting files
- * we did not write on this run.
+ * Every file only the password experience needs. Re-running with
+ * `--oauth-only` reports these rather than deleting files this run did not
+ * write — the rewritten routes/auth.ts makes the controllers unreachable, but
+ * `db/seeders/UsersSeeder.ts` is discovered by `db:seed` rather than routed,
+ * so it would still insert an account with no way to sign in.
  */
 const PASSWORD_SCAFFOLD_PATHS = [
   'app/Http/Validators/LoginValidator.ts',
@@ -1445,11 +1420,9 @@ export interface MakeAuthOptions extends WriterOptions {
 }
 
 /**
- * What the scaffold is actually going to contain, derived once from the raw
- * options. Everything downstream — every template builder, the schema patch,
- * the install step — consumes these capabilities rather than the flags that
- * produced them, so a second way to switch a capability off lands in
- * resolveAuthFeatures() alone.
+ * What the scaffold will contain, derived once from the raw options.
+ * Everything downstream consumes these capabilities rather than the flags, so
+ * a new way to switch one off lands in `resolveAuthFeatures()` alone.
  */
 interface AuthFeatures {
   /** Registration and password reset, plus the mail wiring they need. */
@@ -1470,10 +1443,9 @@ function resolveAuthFeatures(options: MakeAuthOptions): AuthFeatures {
   const oauthProviders = parseOAuthProviders(options.oauth)
   const oauthOnly = Boolean(options.oauthOnly)
 
-  // Neither degraded reading of `--oauth-only` without providers is
-  // defensible: honouring it scaffolds an app with no way to sign in, and
-  // ignoring it scaffolds the full password experience the flag exists to
-  // opt out of.
+  // Neither degraded reading is defensible: honouring `--oauth-only` without
+  // providers scaffolds an app with no way to sign in, ignoring it scaffolds
+  // the password experience the flag exists to opt out of.
   if (oauthOnly && oauthProviders.length === 0) {
     throw new Error(
       `--oauth-only requires --oauth with at least one supported provider (${KNOWN_OAUTH_PROVIDERS.join(', ')}).`,
@@ -1493,10 +1465,8 @@ function resolveAuthFeatures(options: MakeAuthOptions): AuthFeatures {
     )
   }
 
-  // An OAuth account's email is asserted by the provider. Without --verify,
-  // nothing in the scaffold can re-prove a replacement, so the profile form
-  // must not accept one — that covers --oauth-only (which always disables
-  // --verify) as well as plain --oauth without --verify.
+  // Without --verify nothing in the scaffold can re-prove a replacement
+  // address, so the profile form must not accept one.
   const providerOwnedEmail = oauthProviders.length > 0 && !includeVerify
 
   // OAuth accounts are created passwordless, so the user model can only
@@ -1516,10 +1486,9 @@ function resolveAuthFeatures(options: MakeAuthOptions): AuthFeatures {
 export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]> {
   assertCwdUnsupported(options, 'make:auth')
 
-  // Every variant of this scaffold is Inertia-shaped, and the refusal has to
-  // precede the schema patch and the migration as well as the first write — a
-  // run stopped halfway through those is harder to undo than one that never
-  // started.
+  // Every variant is Inertia-shaped, and the refusal must precede the schema
+  // patch and the migration as well as the first write: a run stopped halfway
+  // through those is harder to undo than one that never started.
   await assertNotApiOnly(process.cwd(), {
     does: 'The auth scaffold renders Inertia sign-in pages',
     instead: 'Guard routes/api.ts with createBearerTokenMiddleware from @guren/core instead',
@@ -1551,10 +1520,9 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
   if (includePassword) {
     files.push(
       authFile('app/Http/Validators/LoginValidator.ts'),
-      // The demo user only exists to be signed in as with a password. Without
-      // password login it is an unreachable row — and seeding it would hash a
-      // password with scrypt, the exact cost --oauth-only avoids. The seeder is
-      // the only dialect-sensitive file here, so the schema is read only now.
+      // Without password login the demo user is an unreachable row, and
+      // seeding it would hash with scrypt — the cost --oauth-only avoids. The
+      // only dialect-sensitive file here, hence the late schema read.
       { path: 'db/seeders/UsersSeeder.ts', contents: buildSeederTemplate(await readSchemaDialect()) },
     )
   }
@@ -1598,8 +1566,7 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
 
   const created = await writeScaffoldFiles(files, options)
 
-  // The pages above style with the Guren UI tokens (bg-g-page, …) — make
-  // sure the app actually loads them.
+  // The pages above style with Guren UI tokens (bg-g-page, …).
   await ensureGurenUiTokens()
 
   await updateSchema(features)
@@ -1656,11 +1623,9 @@ async function installAuth(
   await wireAppProvider('AuthProvider', wiring)
 
   if (includeExtras) {
-    // Wire CoreMailServiceProvider before our own MailProvider — matching
-    // the `guren add mail` blueprint's convention — so `container.singleton(
-    // 'mail', ...)` resolves to our configured manager rather than Core's
-    // empty-config default, regardless of whether `add mail` also runs
-    // (before or after this) against the same app.
+    // Core's provider goes before MailProvider (the `guren add mail`
+    // convention) so `'mail'` resolves to the configured manager rather than
+    // Core's empty-config default, whichever order the two commands run in.
     await wireProvider(
       'CoreMailServiceProvider',
       "import { MailServiceProvider as CoreMailServiceProvider } from '@guren/core'",

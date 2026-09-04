@@ -29,10 +29,9 @@ describe('matchingOpenParen', () => {
   })
 
   test('should fall back to the leftmost paren when the frame never balances', () => {
-    // An unmatched `)` inside the location — a directory literally named
-    // `name)`, or a URL carrying one — leaves the depth scan owing a paren when
-    // it runs off the front. Dropping the frame loses a location that is right
-    // there; the leftmost `(` is the reading that keeps it whole.
+    // An unmatched `)` in the location — a directory named `name)`, or a URL
+    // carrying one — leaves the depth scan owing a paren at the front. The
+    // leftmost `(` is the reading that keeps such a location whole.
     expect(groupIn('at fn (/app/name).ts:1:2)')).toBe('/app/name).ts:1:2')
     expect(groupIn('at fn (file:///app/x.ts?label=):1:2)')).toBe('file:///app/x.ts?label=):1:2')
   })
@@ -49,17 +48,15 @@ describe('matchingOpenParen', () => {
 
   test('should not reach a paren on the far side of a line terminator', () => {
     // U+2028 and U+2029 end a line without being `\n`, so a caller that split
-    // the stack on `\n` can still hand one over. Neither the balanced paren nor
-    // the fallback may come from beyond it.
+    // on `\n` can still hand one over. Nothing beyond it may be read.
     expect(groupIn('at fn (/app/x.ts:1:2\u2028 tail)')).toBeUndefined()
     expect(groupIn('at fn (\u2029/app/x.ts:1:2)')).toBeUndefined()
   })
 
   test('should not take time superlinear in the length of a frame', () => {
-    // Lazily matching from the leftmost `(` retried the whole suffix at every
-    // parenthesis. A run of unmatched ones is what made that quadratic — and a
-    // run of `)` is also what drives this scan all the way to the front, so the
-    // fallback is what answers here.
+    // A run of unmatched parens is what made lazy left-to-right matching
+    // quadratic, and what drives this scan to the front — so the fallback
+    // answers here.
     const frame = `at fn (/app/${')'.repeat(200_000)}x.ts:1:2)`
     const started = performance.now()
 

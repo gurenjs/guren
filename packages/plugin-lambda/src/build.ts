@@ -55,14 +55,10 @@ export interface BuildLambdaOutputOptions {
 const MCP_UNAVAILABLE = 'The MCP endpoint is unavailable on AWS Lambda — it generates files on disk.'
 
 /**
- * Why the dev-only modules in `DEV_ONLY_MODULES` cannot run here, worded for
- * this platform: each names the Lambda-appropriate replacement.
- *
- * Keyed on the kinds this platform stubs unconditionally, not on every kind
- * that exists. The SQL clients are load-bearing on Lambda — the app connects
- * to Postgres or the Data API through them — so which of those are dead
- * weight is decided per app, not here, and their messages come from
- * `unusedSqlClients`.
+ * Why the dev-only modules in `DEV_ONLY_MODULES` cannot run here, each naming
+ * the Lambda-appropriate replacement. Keyed only on the kinds this platform
+ * stubs unconditionally: the SQL clients are load-bearing on Lambda, so which
+ * of those are dead weight is decided per app by `unusedSqlClients`.
  */
 const UNAVAILABLE_ON_LAMBDA: Record<(typeof DEV_ONLY_MODULES)[number]['kind'], string> = {
   sqlite: 'bun:sqlite is unavailable on AWS Lambda — use createAwsDataApiDatabase() or createPostgresDatabase().',
@@ -71,18 +67,12 @@ const UNAVAILABLE_ON_LAMBDA: Record<(typeof DEV_ONLY_MODULES)[number]['kind'], s
 }
 
 /**
- * Dev-only modules replaced with throwing stubs rather than left external.
- * Inlining a lazily-imported module hoists that module's own static imports to
- * the bundle top level, so an external module reached this way (the MCP SDK)
- * would fail at import time on Lambda even though no code path ever runs it.
- * Stubbing also keeps megabytes of dev tooling out of the bundle.
- *
- * Which of them are in force is per app, and for one reason only: an app that
- * declares `@guren/plugin-mcp` serves the App MCP endpoint here, so its
- * transport must reach the bundle rather than a stub (RFC 0016 §7). The rest
- * are unconditional — nothing an app can declare makes the Vite dev server or
- * the *Dev* MCP's generators run on Lambda. `stubbableDevOnlyModules` owns
- * that distinction; this function only renders what it is handed.
+ * Dev-only modules replaced with throwing stubs rather than left external:
+ * inlining a lazily-imported module hoists its static imports to the bundle top
+ * level, so an external module reached that way (the MCP SDK) would fail at
+ * import time even though no code path ever runs it. An app declaring
+ * `@guren/plugin-mcp` serves the endpoint here, so its transport must reach the
+ * bundle instead (RFC 0016 §7) — `stubbableDevOnlyModules` owns that split.
  */
 function devOnlyStubs(mcpPlugin: boolean): Record<string, string> {
   return Object.fromEntries(
@@ -95,14 +85,10 @@ function devOnlyStubs(mcpPlugin: boolean): Record<string, string> {
 
 /**
  * The dev-only stubs plus one per database client this app does not connect
- * through. Both halves depend on the app, so it is built per build rather
- * than at module scope.
- *
- * A stub here also *overrides* `external`, verified against Bun 1.3.14: the
- * bundler consults plugins before it consults the external list, so stubbing
- * `@aws-sdk/client-rds-data` for a Postgres app really does replace it rather
- * than leaving `external: ['@aws-sdk/*']` to keep drizzle's hoisted top-level
- * import of a package the runtime may not provide.
+ * through. A stub also *overrides* `external`, verified against Bun 1.3.14: the
+ * bundler consults plugins before the external list, so stubbing
+ * `@aws-sdk/client-rds-data` for a Postgres app really does replace drizzle's
+ * hoisted top-level import of it.
  */
 function stubsFor(
   root: string,
@@ -121,16 +107,11 @@ function stubsFor(
 
 /**
  * Fallback for an MCP SDK subpath `DEV_ONLY_MODULES` does not name. It cannot
- * know which names the importer destructures, so it throws on evaluation
- * rather than resolving to an empty module: a subpath reached from app code
- * (not Guren's disabled MCP endpoint) must fail loudly at build or cold start,
- * never silently hand back missing exports.
- *
- * Reachable only for an app that does *not* declare `@guren/plugin-mcp`. For
- * one that does, the SDK is a dependency it deliberately ships, and this
- * fallback would stub `server/index.js` and `types.js` — which
- * `@guren/plugin-mcp` imports statically — leaving the endpoint just as
- * compiled shut as the transport stub did. See `stubFilter`.
+ * know which names the importer destructures, so it throws on evaluation rather
+ * than silently handing back missing exports. Reachable only for an app that
+ * does *not* declare `@guren/plugin-mcp`, whose statically imported
+ * `server/index.js` and `types.js` it would otherwise stub shut — see
+ * `stubFilter`.
  */
 const unlistedMcpStub = `throw new Error(${JSON.stringify(MCP_UNAVAILABLE)})\n`
 
@@ -138,19 +119,12 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-// Derived from the stubs actually rendered so it stays the only enumeration
-// of stubbed specifiers — a hand-maintained regex could silently fall out of
-// sync, and a client that is filtered but has no stub loads as an empty
-// module instead of failing.
-//
-// The catch-all is the one term that cannot be derived from the stubs, and
-// the tempting derivation is actively wrong: "include it while any MCP SDK
-// subpath is still stubbed" reads well and holds always, because
-// `@modelcontextprotocol/sdk/server/mcp.js` stays stubbed for every app —
-// which would leave the catch-all swallowing `server/index.js` and `types.js`
-// and undo the whole of RFC 0016 Phase 4a silently. So it is gated on the
-// same `mcpPlugin` decision that produced the stubs, threaded from one read
-// of the app's manifest rather than re-derived here.
+// Derived from the stubs actually rendered, so it stays the only enumeration of
+// stubbed specifiers: a specifier filtered with no stub loads as an empty module
+// instead of failing. The catch-all cannot be derived — gating it on "any MCP
+// SDK subpath is still stubbed" holds always and would swallow the
+// `server/index.js` and `types.js` an MCP app imports statically — so it follows
+// the same `mcpPlugin` decision as the stubs.
 function stubFilter(stubs: Record<string, string>, mcpPlugin: boolean): RegExp {
   const terms = Object.keys(stubs).map(escapeRegExp)
   if (!mcpPlugin) {
@@ -176,9 +150,8 @@ export async function buildLambdaOutput(options: BuildLambdaOutputOptions = {}):
   const clientEntryKey = options.clientEntryKey ?? 'resources/js/app.tsx'
   const ssrEntryKey = options.ssrEntryKey ?? 'resources/js/ssr.tsx'
 
-  // Validated up front so a bad option fails before running the app build,
-  // but the delete waits until every check below has passed — a failed build
-  // must not take the previous deploy output with it.
+  // Validated up front so a bad option fails before the app build, but the
+  // delete waits: a failed build must not take the previous output with it.
   assertOutputDirOutsideRoot(out, root, 'Lambda build')
 
   if (!options.skipAppBuild) {
@@ -202,23 +175,18 @@ export async function buildLambdaOutput(options: BuildLambdaOutputOptions = {}):
   stageStaticAssets(publicDir, resolve(out, 'assets'))
 
   const env = buildLambdaEnvironment(assetEnv, ssrFile, ssrDir)
-  // viteAsset() resolves content-page assets from the client manifest at
-  // render time, and the function bundle ships no public/assets/manifest.json
-  // — so the manifest is baked into the wrapper with the other defaults.
-  // Merged here, past the env.json write below, never into `env` itself:
-  // Lambda caps function environment configuration at 4KB total, which a real
-  // app's manifest alone can exceed — as wrapper code it rides in the bundle
-  // instead.
+  // viteAsset() resolves content-page assets from the client manifest at render
+  // time and the bundle ships no manifest.json, so it is baked into the wrapper
+  // rather than into `env`: Lambda caps function environment configuration at
+  // 4KB total, which a real app's manifest alone can exceed.
   const viteManifest = clientManifestJson(publicDir)
   const bakedEnv = viteManifest ? { ...env, GUREN_VITE_MANIFEST: viteManifest } : env
   const wrapperPath = resolve(out, `${LAMBDA_HANDLER_MODULE}.ts`)
   writeFileSync(wrapperPath, renderHandlerModule({ out, entrypoint, env: bakedEnv }))
 
   // One read of the app's manifest, threaded to both halves of the stub
-  // decision: which modules are rendered, and whether unlisted MCP SDK
-  // subpaths are swallowed by the catch-all. Two independent reads would be
-  // two places for them to disagree, and the disagreement is silent — the
-  // catch-all would stub what the stub map deliberately released.
+  // decision: two reads are two places for them to disagree, silently — the
+  // catch-all stubbing what the stub map deliberately released.
   const mcpPlugin = appUsesMcpPlugin(root)
 
   await bundleHandler(
@@ -237,9 +205,8 @@ export async function buildLambdaOutput(options: BuildLambdaOutputOptions = {}):
   }
 
   // Migrations travel with the function so a console-handler `db:migrate` can
-  // apply them in place. Seeders deliberately do not: they are raw .ts modules
-  // importing the app's schema and @guren/* packages, which the self-contained
-  // bundle can never resolve — run them from the project source instead.
+  // apply them. Seeders deliberately do not: they are raw .ts importing the
+  // app's schema and @guren/* packages, which the bundle cannot resolve.
   if (existsSync(migrationsDir)) {
     cpSync(migrationsDir, resolve(funcDir, 'db/migrations'), { recursive: true })
   }
@@ -327,33 +294,26 @@ async function bundleHandler(
 
   const result = await Bun.build({
     entrypoints: [handlerEntry],
-    // `Bun.build` rejects with a bare "Bundle failed" AggregateError by
-    // default (Bun >= 1.2), which discards the one line that matters — the
-    // module it could not resolve. Opting out of that is what makes the
-    // `result.logs` report below reachable at all.
+    // `Bun.build` rejects with a bare "Bundle failed" AggregateError by default
+    // (Bun >= 1.2), discarding the module it could not resolve.
     throw: false,
     outdir: funcDir,
     target: 'node',
-    // `identifiers: false`: class names are runtime identity here.
-    // `registerJob()`/`getJob()` key the job registry on `JobClass.name`, and
-    // that name is serialized into every queued message (SqsDriver,
-    // RedisDriver), a notification's persisted `type`, and `HttpException.name`
-    // — mangling silently breaks all of them.
-    //
-    // Not `keepNames`/`--keep-names`: as of Bun 1.3.14 both are accepted and
-    // silently leave class names mangled, so they cannot replace this.
+    // `identifiers: false`: class names are runtime identity here — the job
+    // registry keys on `JobClass.name` and serializes it into every queued
+    // message, and notifications persist theirs as `type`. Not
+    // `keepNames`/`--keep-names`: as of Bun 1.3.14 both are accepted and
+    // silently leave class names mangled.
     minify: { whitespace: true, syntax: true, identifiers: false },
     define: {
       // `bun build` inlines `process.env.NODE_ENV` at bundle time (defaulting
       // to "development"), so pin it to "production" for the deployed function.
       'process.env.NODE_ENV': '"production"',
-      // Every module in the bundle shares one `import.meta.url` — the real
-      // runtime value of the single output file, `file:///var/task/handler.js`.
-      // That breaks the framework's `new URL('../db/migrations', import.meta.url)`
-      // convention (config/database.ts, config/app.ts's migration check): those
-      // files live one directory below the app root, so the same expression
-      // must resolve from one level under /var/task to reach the db/migrations
-      // folder `lambda:build` copies next to the bundle.
+      // Every module in the bundle shares one `import.meta.url` — the real value
+      // of the single output file, `file:///var/task/handler.js`. The
+      // framework's `new URL('../db/migrations', import.meta.url)` convention
+      // needs it to resolve from one level under /var/task, where
+      // `lambda:build` copies those files.
       'import.meta.url': '"file:///var/task/config/lambda.js"',
     },
     // Provided by the managed Lambda runtime.
@@ -437,9 +397,8 @@ function resolveSsrEntry(ssrDir: string, ssrEntryKey: string): string | undefine
   }
 
   // Checked statically rather than by importing the chunk: executing the SSR
-  // bundle here would run the app's module-scope side effects inside the
-  // build. Without this check a missing renderer only surfaces at request
-  // time as a silent fallback to client-side rendering.
+  // bundle here would run the app's module-scope side effects inside the build.
+  // A missing renderer otherwise surfaces as a silent fallback to CSR.
   if (!hasRendererExport(readFileSync(file, 'utf8'))) {
     throw new Error(
       `Lambda build: SSR entry ${file} does not export a renderer (expected a named "render" or default export).`,

@@ -1,22 +1,14 @@
 /**
- * Argument masking for the agent audit trail (RFC 0016 §5.2).
+ * Argument masking for the agent audit trail (RFC 0016 §5.2). Two sources,
+ * unioned: a fixed list of sensitive key *fragments* every application gets,
+ * and the route's own `.agent({ redact })`.
  *
- * Agent tool arguments are logged by default, which is only safe if the
- * logging path masks the fields that must not be written down. Two sources,
- * unioned: a fixed list of sensitive key *fragments* every application gets
- * without asking, and the route's own `.agent({ redact })` metadata.
- *
- * The rule is deliberately blunt — a key matches when its lowercased name
- * *contains* a fragment, and that applies to the declared `redact` entries
- * too, not just the built-ins. So `redact: ['id']` also masks `userId`, and
- * the built-in `session` masks `sessionCount`. Over-redaction is the safe
- * direction for a log: a masked field that did not need masking costs a
- * debugging round trip, an unmasked credential costs a rotation.
- *
- * The walk is total for the same reason the derivation is: it runs while
- * *recording* what happened, including a denial taken before the route's own
- * validation, so it must not be the thing that throws. A cycle and a payload
- * nested past {@link MAX_DEPTH} both terminate with a marker.
+ * A key matches when its lowercased name *contains* a fragment, declared
+ * entries included — `redact: ['id']` also masks `userId`. Over-redaction is
+ * the safe direction: a needless mask costs a debugging round trip, an unmasked
+ * credential costs a rotation. The walk is total because it runs while
+ * recording what happened, including a denial taken before validation: a cycle
+ * and a payload nested past {@link MAX_DEPTH} both terminate with a marker.
  */
 
 /**
@@ -26,10 +18,9 @@
 export const AGENT_REDACTED = '[REDACTED]'
 
 /**
- * Written in place of a value that closes a cycle, so a self-referencing
- * argument object produces a finite record instead of throwing or hanging.
- * Distinct from {@link AGENT_REDACTED} on purpose: one says "we would not show
- * you", the other "there is nothing further here to show".
+ * Written in place of a value that closes a cycle. Distinct from
+ * {@link AGENT_REDACTED} on purpose: one says "we would not show you", the
+ * other "there is nothing further here to show".
  */
 export const AGENT_CIRCULAR = '[Circular]'
 
@@ -39,18 +30,11 @@ export const AGENT_CIRCULAR = '[Circular]'
 export const AGENT_TRUNCATED = '[Truncated]'
 
 /**
- * How deep the walk goes before it stops descending.
- *
- * A cycle is not the only way an argument record ends recursion badly: a
- * deeply nested one ends it with a `RangeError`. That matters here more than
- * in an ordinary utility, because this is the *audit* path and a denial is
- * recorded before the route's own schema validation has run — an argument
- * payload that overflows the stack would throw inside the code writing the
- * record about it, suppressing the very `AgentToolDenied` that says a
- * hostile call arrived. Truncating keeps the record.
- *
- * Far past anything a tool input schema describes; a record this deep is
- * already unreadable in a log.
+ * How deep the walk goes before it stops descending. A deeply nested argument
+ * record ends recursion with a `RangeError`, and this is the audit path: a
+ * denial is recorded before the route's own validation, so an overflow here
+ * would suppress the very `AgentToolDenied` saying a hostile call arrived. Far
+ * past anything a tool input schema describes.
  */
 const MAX_DEPTH = 64
 
@@ -70,25 +54,21 @@ const DEFAULT_SENSITIVE_KEY_FRAGMENTS: readonly string[] = [
   'credential',
   'cookie',
   'session',
-  // Spellings the list above does not reach on its own: `privateKey` shares no
-  // fragment with `secret`, a field named `jwt` or `pwd` shares none with
-  // `token` or `password`. Deliberately absent: a bare `otp`, which at three
-  // characters is a substring of ordinary names (`slotProvider`, `notPublic`)
-  // and would mask them — over-masking is the safe direction for a *credential*
-  // fragment, not for one that mostly hits non-credentials.
+  // Spellings the list above does not reach: `privateKey` shares no fragment
+  // with `secret`, `jwt` and `pwd` share none with `token` or `password`.
+  // Deliberately absent: a bare `otp`, a substring of ordinary names
+  // (`slotProvider`, `notPublic`) — over-masking is the safe direction for a
+  // *credential* fragment, not for one that mostly hits non-credentials.
   'privatekey',
   'pwd',
   'jwt',
 ]
 
 /**
- * The form keys and fragments are compared in: lowercased, with separator
- * characters removed. `apiKey`, `api_key`, `api-key` and `X-Api-Key` are the
- * same name to a human reading a log, so they must be the same name to the
- * mask — a literal substring test lets the hyphenated spelling of a fragment
- * through, and header-shaped argument names (`x-api-key`) are exactly where
- * credentials live. Applied to declared `redact` entries too, so a route
- * author writes any spelling.
+ * The form keys and fragments are compared in: lowercased, separators removed,
+ * so `apiKey`, `api_key` and `X-Api-Key` are one name. A literal substring test
+ * would let the hyphenated spelling through, and header-shaped argument names
+ * are exactly where credentials live. Applied to declared `redact` entries too.
  */
 function normalizeKeyText(text: string): string {
   return text.toLowerCase().replace(/[-_\s]/gu, '')
@@ -97,16 +77,11 @@ function normalizeKeyText(text: string): string {
 /**
  * Mask the sensitive fields of an agent tool's arguments.
  *
- * Returns a deep copy: the input is never mutated, and a caller may keep
- * holding the unredacted original. The copy is deep only through the
- * structures this walks — plain objects and arrays. Anything else (a `Date`,
- * a `Map`, a `Set`, a class instance) is carried across as the *same
- * reference*, because copying it would need a rule per type and would still
- * get the exotic cases wrong; nothing below such a value is inspected, so a
- * credential hidden inside a class instance is masked only if the key holding
- * that instance matches. Tool arguments arrive as parsed JSON on every
- * surface, where this case does not occur; a caller synthesizing arguments in
- * process is the one that can hit it.
+ * Returns a deep copy — but deep only through plain objects and arrays.
+ * Anything else (a `Date`, a `Map`, a class instance) is carried across by the
+ * same reference and never inspected, so a credential inside one is masked only
+ * if the key holding it matches. Tool arguments arrive as parsed JSON on every
+ * surface; only an in-process caller can hit that case.
  *
  * @param args The invocation arguments. Walked as a record whatever its
  *   prototype, so the return is always a fresh plain object.
@@ -116,25 +91,21 @@ export function redactAgentArguments(
   args: Record<string, unknown>,
   redact?: readonly string[]
 ): Record<string, unknown> {
-  // The whole point of this function is to be total on the audit path, and
-  // the type annotation is no guard there: a denial is recorded before any
-  // validation, so `arguments: null` from a raw JSON-RPC call arrives here
-  // as-is. A root that is not an object has no keys to mask and nothing to
-  // walk — an empty record is the whole truth about it.
+  // Total on the audit path, and the type annotation is no guard there: a
+  // denial is recorded before any validation, so `arguments: null` from a raw
+  // JSON-RPC call arrives here as-is. An empty record is the whole truth.
   if (args === null || typeof args !== 'object') return {}
 
   const fragments = [...DEFAULT_SENSITIVE_KEY_FRAGMENTS]
   for (const entry of redact ?? []) {
     const fragment = normalizeKeyText(entry)
     // An empty fragment is a substring of every key and would mask the whole
-    // record — almost certainly a typo in route metadata rather than a
-    // request to log nothing.
+    // record — a typo in route metadata rather than a request to log nothing.
     if (fragment.length > 0) fragments.push(fragment)
   }
 
   // The root is on the ancestor path like any other node, so an argument
-  // referencing the whole record is `[Circular]` at its own depth rather than
-  // one copy deeper.
+  // referencing the whole record is `[Circular]` at its own depth.
   const ancestors = new WeakSet<object>([args])
   return redactRecord(args, fragments, ancestors, 0)
 }
@@ -149,13 +120,11 @@ function isSensitiveKey(key: string, fragments: readonly string[]): boolean {
  * Copy one object's entries, masking sensitive keys.
  *
  * Accumulates on a null-prototype object: an argument named `__proto__`
- * survives `JSON.parse` as an own property, and assigning that key on a
- * plain `{}` invokes the prototype setter instead of defining a property —
- * the value would vanish from the record, and a crafted payload would be
- * reaching the prototype chain from inside the logging path. The result is
- * then spread onto a normal object so a consumer calling `hasOwnProperty` on
- * it works; spread *defines* own properties (`Object.assign` would assign
- * them, putting the `__proto__` hazard straight back).
+ * survives `JSON.parse` as an own property, and assigning it on a plain `{}`
+ * invokes the prototype setter — the value would vanish and a crafted payload
+ * would reach the prototype chain from inside the logging path. Spread back
+ * onto a normal object *defines* own properties; `Object.assign` would assign
+ * them, putting the hazard straight back.
  */
 function redactRecord(
   source: object,
@@ -187,10 +156,9 @@ function redactValue(
   // call that would overflow. See MAX_DEPTH.
   if (depth > MAX_DEPTH) return AGENT_TRUNCATED
 
-  // Ancestors, not "everything seen": a plain visited-set would report the
-  // second reference to a shared object as a cycle, and an argument record
-  // referencing one object from two keys is a DAG, not a loop. Removing the
-  // node on the way out keeps the set to the current path.
+  // Ancestors, not "everything seen": a visited-set would report the second
+  // reference to a shared object as a cycle, and a record referencing one object
+  // from two keys is a DAG. Removing on the way out keeps the set to the path.
   if (ancestors.has(value)) return AGENT_CIRCULAR
   ancestors.add(value)
   try {

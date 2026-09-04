@@ -15,13 +15,10 @@ import { mcpPlugin } from './plugin'
 
 /**
  * `guren.preflight` against a real application (RFC 0016 §5.4): the SDK's own
- * client, the endpoint, the dispatch re-entry, and the router's preflight
- * seam — no stub anywhere in the path.
- *
- * The stubbed cases in `server.test.ts` pin the companion tool's own rules.
- * What only this test can show is that the verdict describes what the
- * application would really have done: that the handler did not run, and that
- * the seam's own `validated` / `unverified` reach the caller.
+ * client, the endpoint, the dispatch re-entry and the router's preflight seam,
+ * with no stub in the path. `server.test.ts` pins the companion tool's own
+ * rules; what only this can show is that the verdict describes what the
+ * application would really have done.
  */
 describe('guren.preflight (integration)', () => {
   const store = new MemoryApiTokenStore()
@@ -44,10 +41,9 @@ describe('guren.preflight (integration)', () => {
         },
       )
       .name('posts.store')
-      // No authorization middleware on the chain, which is what makes the
-      // seam report `unverified: ['authorization']` — a route may authorize
-      // inside its action, and a seam stopping before the handler cannot see
-      // that.
+      // No authorization middleware on the chain, which is what makes the seam
+      // report `unverified: ['authorization']` — a route may authorize inside
+      // its action, which a seam stopping before the handler cannot see.
       .agent({})
   }
 
@@ -122,9 +118,9 @@ describe('guren.preflight (integration)', () => {
       arguments: { tool: 'posts.store', input: { title: '' } },
     })
 
-    // A refusal is an answer to the question that was asked, so the call
-    // itself succeeded — the SDK would reject a plain-content success here,
-    // which is why the verdict has an output schema of its own.
+    // A refusal is an answer to the question asked, so the call itself
+    // succeeded — the SDK would reject a plain-content success here, which is
+    // why the verdict has an output schema of its own.
     expect(result.isError).toBeUndefined()
     const verdict = result.structuredContent as {
       allowed: boolean

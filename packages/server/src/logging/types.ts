@@ -1,6 +1,4 @@
-/**
- * Log level types (RFC 5424 severity levels).
- */
+/** Log level types (RFC 5424 severity levels). */
 export type LogLevel =
   | 'emergency'
   | 'alert'
@@ -11,9 +9,7 @@ export type LogLevel =
   | 'info'
   | 'debug'
 
-/**
- * Log level priority (lower = more severe).
- */
+/** Log level priority (lower = more severe). */
 export const LOG_LEVEL_PRIORITY: Record<LogLevel, number> = {
   emergency: 0,
   alert: 1,
@@ -25,14 +21,10 @@ export const LOG_LEVEL_PRIORITY: Record<LogLevel, number> = {
   debug: 7,
 }
 
-/**
- * Log context (additional data attached to log entries).
- */
+/** Log context (additional data attached to log entries). */
 export type LogContext = Record<string, unknown>
 
-/**
- * Log entry structure.
- */
+/** Log entry structure. */
 export interface LogEntry {
   level: LogLevel
   message: string
@@ -40,38 +32,24 @@ export interface LogEntry {
   timestamp: Date
 }
 
-/**
- * Log channel interface.
- */
+/** Log channel interface. */
 export interface LogChannel {
-  /**
-   * Write a log entry.
-   */
   log(entry: LogEntry): void | Promise<void>
 
-  /**
-   * Close the channel (cleanup resources).
-   */
   close?(): void | Promise<void>
 }
 
-/**
- * Log channel factory.
- */
+/** Log channel factory. */
 export type LogChannelFactory = (config: LogChannelConfig) => LogChannel
 
-/**
- * Base channel configuration.
- */
+/** Base channel configuration. */
 export interface LogChannelConfig {
   driver: string
   level?: LogLevel
   [key: string]: unknown
 }
 
-/**
- * Console channel configuration.
- */
+/** Console channel configuration. */
 export interface ConsoleChannelConfig extends LogChannelConfig {
   driver: 'console'
   colors?: boolean
@@ -79,18 +57,14 @@ export interface ConsoleChannelConfig extends LogChannelConfig {
   format?: 'text' | 'json'
 }
 
-/**
- * File channel configuration.
- */
+/** File channel configuration. */
 export interface FileChannelConfig extends LogChannelConfig {
   driver: 'file'
   path: string
   format?: 'text' | 'json'
 }
 
-/**
- * Daily file channel configuration.
- */
+/** Daily file channel configuration. */
 export interface DailyFileChannelConfig extends LogChannelConfig {
   driver: 'daily'
   path: string
@@ -98,17 +72,13 @@ export interface DailyFileChannelConfig extends LogChannelConfig {
   format?: 'text' | 'json'
 }
 
-/**
- * Stack channel configuration.
- */
+/** Stack channel configuration. */
 export interface StackChannelConfig extends LogChannelConfig {
   driver: 'stack'
   channels: string[]
 }
 
-/**
- * Log manager configuration.
- */
+/** Log manager configuration. */
 export interface LogConfig {
   default: string
   channels: Record<string, LogChannelConfig>
@@ -118,9 +88,7 @@ export interface LogConfig {
   filterReplacement?: string
 }
 
-/**
- * Log formatter.
- */
+/** Log formatter. */
 export interface LogFormatter {
   format(entry: LogEntry): string
 }

@@ -1,16 +1,12 @@
 import type { ParsedCron } from './types'
 
-/**
- * Parse a cron field value.
- */
 function parseField(field: string, min: number, max: number): number[] {
   const values: Set<number> = new Set()
 
-  // Handle comma-separated values
   const parts = field.split(',')
 
   for (const part of parts) {
-    // Handle step values (*/5, 1-10/2)
+    // Step values: */5, 1-10/2
     const stepMatch = part.match(/^(.+)\/(\d+)$/)
     let range: string
     let step = 1
@@ -22,7 +18,6 @@ function parseField(field: string, min: number, max: number): number[] {
       range = part
     }
 
-    // Handle wildcard
     if (range === '*') {
       for (let i = min; i <= max; i += step) {
         values.add(i)
@@ -30,7 +25,6 @@ function parseField(field: string, min: number, max: number): number[] {
       continue
     }
 
-    // Handle range (1-5)
     const rangeMatch = range.match(/^(\d+)-(\d+)$/)
     if (rangeMatch) {
       const start = parseInt(rangeMatch[1], 10)
@@ -43,7 +37,6 @@ function parseField(field: string, min: number, max: number): number[] {
       continue
     }
 
-    // Handle single value
     const value = parseInt(range, 10)
     if (!isNaN(value) && value >= min && value <= max) {
       values.add(value)
@@ -53,17 +46,6 @@ function parseField(field: string, min: number, max: number): number[] {
   return Array.from(values).sort((a, b) => a - b)
 }
 
-/**
- * Parse a cron expression.
- *
- * Cron format: minute hour dayOfMonth month dayOfWeek
- *
- * Examples:
- * - Every minute: "* * * * *"
- * - Every 5 minutes: "*​/5 * * * *" (step value)
- * - At 3:00 AM daily: "0 3 * * *"
- * - Every Monday at 9:00 AM: "0 9 * * 1"
- */
 export function parseCron(expression: string): ParsedCron {
   const parts = expression.trim().split(/\s+/)
 
@@ -80,9 +62,6 @@ export function parseCron(expression: string): ParsedCron {
   }
 }
 
-/**
- * Check if a date matches a parsed cron expression.
- */
 export function matchesCron(date: Date, cron: ParsedCron): boolean {
   const minute = date.getMinutes()
   const hour = date.getHours()
@@ -99,9 +78,6 @@ export function matchesCron(date: Date, cron: ParsedCron): boolean {
   )
 }
 
-/**
- * Get the next occurrence of a cron expression.
- */
 export function getNextOccurrence(
   expression: string,
   from: Date = new Date()
@@ -109,12 +85,10 @@ export function getNextOccurrence(
   const cron = parseCron(expression)
   const next = new Date(from)
 
-  // Start from the next minute
   next.setSeconds(0)
   next.setMilliseconds(0)
   next.setMinutes(next.getMinutes() + 1)
 
-  // Search for the next matching time (up to 2 years)
   const maxIterations = 525600 // 1 year in minutes
   let iterations = 0
 
@@ -130,17 +104,11 @@ export function getNextOccurrence(
   throw new Error(`Could not find next occurrence for: ${expression}`)
 }
 
-/**
- * Check if a cron expression is due at the given date.
- */
 export function isDue(expression: string, date: Date = new Date()): boolean {
   const cron = parseCron(expression)
   return matchesCron(date, cron)
 }
 
-/**
- * Get multiple next occurrences.
- */
 export function getNextOccurrences(
   expression: string,
   count: number,
@@ -158,11 +126,7 @@ export function getNextOccurrences(
   return occurrences
 }
 
-/**
- * Convert a Date to a specific timezone.
- */
 export function toTimezone(date: Date, timezone: string): Date {
-  // Create a date string in the target timezone
   const options: Intl.DateTimeFormatOptions = {
     timeZone: timezone,
     year: 'numeric',
@@ -189,9 +153,6 @@ export function toTimezone(date: Date, timezone: string): Date {
   return new Date(year, month, day, hour, minute, second)
 }
 
-/**
- * Check if a cron expression is due in a specific timezone.
- */
 export function isDueInTimezone(
   expression: string,
   timezone: string,

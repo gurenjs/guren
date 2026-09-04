@@ -2,21 +2,11 @@ import type { Redis } from 'ioredis'
 import type { RateLimitStore, RateLimitEntry } from '../http/middleware/rate-limit'
 import { scanKeys } from './scan-keys'
 
-/**
- * Options for RedisRateLimitStore.
- */
 export interface RedisRateLimitStoreOptions {
-  /**
-   * Key prefix for rate limit keys.
-   * @default 'ratelimit:'
-   */
+  /** @default 'ratelimit:' */
   prefix?: string
 }
 
-/**
- * Lua script for atomic increment with expiration.
- * Returns [count, resetAt] where resetAt is the timestamp when the window resets.
- */
 const INCREMENT_SCRIPT = `
 local key = KEYS[1]
 local window = tonumber(ARGV[1])
@@ -31,20 +21,7 @@ local resetAt = now + ttl
 return {count, resetAt}
 `
 
-/**
- * Redis-backed rate limit store using fixed window algorithm.
- * Uses Lua script for atomic increment operations.
- *
- * @example
- * ```ts
- * import { createRedisClient } from '@guren/server/redis'
- *
- * const redis = createRedisClient({ url: process.env.REDIS_URL })
- * const store = new RedisRateLimitStore(redis)
- *
- * app.use(createRateLimitMiddleware({ store, limit: 100 }))
- * ```
- */
+/** Fixed-window rate limiting; the Lua script keeps the increment atomic. */
 export class RedisRateLimitStore implements RateLimitStore {
   private readonly prefix: string
 
@@ -55,9 +32,6 @@ export class RedisRateLimitStore implements RateLimitStore {
     this.prefix = options.prefix ?? 'ratelimit:'
   }
 
-  /**
-   * Get current rate limit entry for a key.
-   */
   async get(key: string): Promise<RateLimitEntry | null> {
     const redisKey = this.prefix + key
     const [countStr, ttl] = await Promise.all([
@@ -75,9 +49,6 @@ export class RedisRateLimitStore implements RateLimitStore {
     }
   }
 
-  /**
-   * Increment the rate limit counter atomically.
-   */
   async increment(key: string, windowMs: number): Promise<RateLimitEntry> {
     const redisKey = this.prefix + key
     const now = Date.now()
@@ -96,25 +67,17 @@ export class RedisRateLimitStore implements RateLimitStore {
     }
   }
 
-  /**
-   * Reset the rate limit for a key.
-   */
   async reset(key: string): Promise<void> {
     const redisKey = this.prefix + key
     await this.redis.del(redisKey)
   }
 
-  /**
-   * Get all rate limit keys (for debugging/admin purposes).
-   */
+  /** Debugging/admin. */
   async keys(): Promise<string[]> {
     const keys = await scanKeys(this.redis, this.prefix + '*')
     return keys.map((key) => key.slice(this.prefix.length))
   }
 
-  /**
-   * Clear all rate limits.
-   */
   async clear(): Promise<void> {
     const keys = await this.keys()
     if (keys.length > 0) {
@@ -124,10 +87,7 @@ export class RedisRateLimitStore implements RateLimitStore {
   }
 }
 
-/**
- * Redis-backed rate limit store using sliding window algorithm.
- * More accurate than fixed window but slightly more expensive.
- */
+/** Sliding window: more accurate than the fixed window, slightly more expensive. */
 export class RedisSlidingWindowRateLimitStore implements RateLimitStore {
   private readonly prefix: string
 
@@ -138,9 +98,6 @@ export class RedisSlidingWindowRateLimitStore implements RateLimitStore {
     this.prefix = options.prefix ?? 'ratelimit:sw:'
   }
 
-  /**
-   * Get current rate limit entry for a key.
-   */
   async get(key: string): Promise<RateLimitEntry | null> {
     const redisKey = this.prefix + key
     const count = await this.redis.zcard(redisKey)
@@ -156,25 +113,16 @@ export class RedisSlidingWindowRateLimitStore implements RateLimitStore {
     }
   }
 
-  /**
-   * Increment the rate limit counter using sorted set.
-   * Each request is stored with its timestamp as score.
-   */
   async increment(key: string, windowMs: number): Promise<RateLimitEntry> {
     const redisKey = this.prefix + key
     const now = Date.now()
     const windowStart = now - windowMs
 
-    // Use pipeline for atomic operations
     const pipeline = this.redis.pipeline()
 
-    // Remove expired entries
     pipeline.zremrangebyscore(redisKey, '-inf', windowStart)
-    // Add current request
     pipeline.zadd(redisKey, now, `${now}:${Math.random()}`)
-    // Count entries in window
     pipeline.zcard(redisKey)
-    // Set expiration
     pipeline.pexpire(redisKey, windowMs)
 
     const results = await pipeline.exec()
@@ -188,17 +136,11 @@ export class RedisSlidingWindowRateLimitStore implements RateLimitStore {
     }
   }
 
-  /**
-   * Reset the rate limit for a key.
-   */
   async reset(key: string): Promise<void> {
     const redisKey = this.prefix + key
     await this.redis.del(redisKey)
   }
 
-  /**
-   * Clear all rate limits.
-   */
   async clear(): Promise<void> {
     const keys = await scanKeys(this.redis, this.prefix + '*')
     if (keys.length > 0) {

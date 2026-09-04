@@ -1,7 +1,6 @@
 // @vitest-environment node
-// The suite default is jsdom, whose File is not a real Blob — a multipart
-// Request holding one stalls undici's formData() forever. Controller tests
-// render no DOM, and the upload tests need working multipart parsing.
+// The suite default is jsdom, whose File is not a real Blob: a multipart Request
+// holding one stalls undici's formData() forever.
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import {
   createControllerContext,
@@ -141,7 +140,6 @@ function createControllerWithAuth<T extends { setContext: (ctx: Context) => void
   return controller
 }
 
-// Sample post data
 const samplePost = {
   id: 1,
   title: 'Test Post',
@@ -167,8 +165,7 @@ const paginatedPostsResponse = {
 describe('PostController', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    // Same default as the real static: records pass through gaining a typed
-    // `cover` property (null when nothing is attached).
+    // Same default as the real static: a typed `cover`, null when unattached.
     mockWithAttachments.mockImplementation(async (records: Array<Record<string, unknown>>) =>
       records.map((record) => ({ ...record, cover: null })),
     )
@@ -626,8 +623,7 @@ describe('PostController', () => {
       expect(response.headers.get('Location')).toBe('/posts')
       expect(mockPurgeAttachments).toHaveBeenCalledWith(1)
       expect(mockDelete).toHaveBeenCalledWith({ id: 1 })
-      // No cascade exists for the polymorphic pair — the purge must run
-      // before the row disappears.
+      // No cascade for the polymorphic pair: the purge must precede the delete.
       expect(mockPurgeAttachments.mock.invocationCallOrder[0]).toBeLessThan(
         mockDelete.mock.invocationCallOrder[0]!,
       )

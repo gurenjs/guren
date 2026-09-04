@@ -31,9 +31,9 @@ describe('buildCloudflareOutput', () => {
     expect(worker).toContain('setInertiaSsrRenderer(ssrModule.render)')
     expect(worker).toContain('export default createWorkersHandler(app)')
 
-    // The env assignments live in a module the worker imports *first*: a
-    // statement in worker.js itself would run after the app's module graph
-    // evaluated, so a module-scope viteAsset() call would see no manifest.
+    // The env assignments live in a module the worker imports *first*: a statement
+    // in worker.js runs after the app's module graph evaluated, so a module-scope
+    // viteAsset() call would see no manifest.
     const workerEnv = readFileSync(join(root, '.cloudflare/worker-env.js'), 'utf8')
     expect(workerEnv).toContain('process.env.GUREN_INERTIA_ENTRY = "/assets/app-Abc123.js"')
     expect(workerEnv).toContain('process.env.GUREN_INERTIA_STYLES = "/assets/app-Def456.css"')
@@ -292,11 +292,9 @@ describe('static document headers', () => {
       .join('')
 
     for (const extension of DOCUMENT_ASSET_EXTENSIONS) {
-      // Anchored on the newline before the pattern rather than matched as a
-      // substring. One splat per rule is the platform's limit, and a second
-      // one is a parse error it answers by *dropping* the rule — but
-      // `/*/*.svg` still contains `/*.svg`, so a substring check would call
-      // a rule that reaches nothing present and correct.
+      // Anchored on the preceding newline, not matched as a substring: a second
+      // splat is a parse error the platform answers by dropping the rule, and
+      // `/*/*.svg` contains `/*.svg`, so a substring check would call it present.
       expect(headers).toContain(`\n/*.${extension}${rule}`)
     }
   })
@@ -336,10 +334,9 @@ describe('static document headers', () => {
     await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
 
     const headers = readFileSync(join(root, '.cloudflare/assets/_headers'), 'utf8')
-    // The glob cannot reach these: the platform compiles a pattern
-    // case-sensitively, while `getMimeType` lowercases before its lookup, so
-    // the framework's own mounts do guard them. The asset set is closed at
-    // build time, so naming the offenders exactly is a complete answer.
+    // The glob cannot reach these: the platform compiles a pattern case-sensitively
+    // while `getMimeType` lowercases first. The asset set is closed at build time,
+    // so naming the offenders exactly is a complete answer.
     expect(headers).toContain('\n/LOGO.SVG\n')
     expect(headers).toContain('\n/nested/Page.Html\n')
   })
@@ -390,9 +387,8 @@ describe('static document headers', () => {
     scaffoldApp(root)
     const configPath = join(root, 'wrangler.jsonc')
 
-    // Scaffold a complete config and take only html_handling back out, so the
-    // build-owned warning stays silent and this asserts the new message rather
-    // than whatever else an incomplete fixture would have triggered.
+    // Take only html_handling back out of a complete config, so the build-owned
+    // warning stays silent and this asserts the new message alone.
     await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
     const scaffolded = JSON.parse(readFileSync(configPath, 'utf8'))
     delete scaffolded.assets.html_handling
@@ -402,10 +398,9 @@ describe('static document headers', () => {
       await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
     })
 
-    // Its own message, with its own consequence. Folded into the build-owned
-    // list it would arrive under "the worker will fail to start or skip
-    // migrations", which is not true of it, and would never say the thing the
-    // reader most needs to know — that adding it changes how HTML is served.
+    // Its own message: folded into the build-owned list it would arrive under
+    // "fail to start or skip migrations", and never say that adding it changes
+    // how HTML is served.
     expect(warning).toContain('"html_handling": "none"')
     expect(warning).toContain('stops answering at /about')
     expect(warning).not.toContain('predates this plugin version')
@@ -435,8 +430,7 @@ describe('static document headers', () => {
 
     const config = JSON.parse(readFileSync(join(root, 'wrangler.jsonc'), 'utf8'))
     // The platform default serves public/page.html at /page and redirects
-    // /page.html there, so the /*.html rule would only ever land on the
-    // redirect and the document itself would stay inline.
+    // /page.html there, so a /*.html rule would only land on the redirect.
     expect(config.assets.html_handling).toBe('none')
   })
 })
@@ -559,9 +553,9 @@ describe('workers runtime configuration', () => {
 
     await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
 
-    // Both Vite's createRequire(import.meta.url) and scaffolded
-    // new URL(..., import.meta.url) run at module scope; workerd leaves the
-    // value undefined and the worker never starts without this.
+    // Vite's createRequire(import.meta.url) and scaffolded new URL(..., import.meta.url)
+    // both run at module scope; workerd leaves the value undefined and the worker
+    // never starts without this.
     const config = JSON.parse(readFileSync(join(root, 'wrangler.jsonc'), 'utf8'))
     expect(config.define['import.meta.url']).toBe('"file:///worker.js"')
   })
@@ -586,9 +580,8 @@ describe('workers runtime configuration', () => {
     scaffoldApp(root)
     const configPath = join(root, 'wrangler.jsonc')
 
-    // Scaffold first, then take one alias back out — the expectation is
-    // derived from the alias map the build itself owns, so this test keeps
-    // holding as that list grows.
+    // The expectation is derived from the alias map the build owns, so this test
+    // keeps holding as that list grows.
     await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
     const scaffolded = JSON.parse(readFileSync(configPath, 'utf8'))
     const [dropped, ...kept] = Object.keys(scaffolded.alias)
@@ -628,15 +621,13 @@ describe('workers runtime configuration', () => {
     })
 
     expect(warning).toContain(dropped)
-    // A stripper that mangled `"\"file:///worker.js\""` or the escaped quotes
-    // around `"production"` would either fail to parse — losing the alias line
-    // above — or report `define` as missing when the file has it.
+    // A stripper that mangled the escaped quotes would either fail to parse,
+    // losing the alias line above, or report `define` as missing when it is there.
     expect(warning).not.toContain('process.env.NODE_ENV')
     expect(warning).not.toContain('could not parse')
-    // Only the missing entry is suggested, so nothing the file already has —
-    // the app's own `shiki` stub included — is named. A suggestion carrying
-    // those entries reads as an object to paste over `alias`, which would
-    // drop the ones the build does not own.
+    // Only the missing entry is suggested: a suggestion carrying entries the file
+    // already has reads as an object to paste over `alias`, dropping the ones the
+    // build does not own.
     for (const [specifier, target] of Object.entries(alias)) {
       expect(warning).not.toContain(specifier)
       expect(warning).not.toContain(target)
@@ -645,9 +636,8 @@ describe('workers runtime configuration', () => {
 
   test('should warn rather than throw when alias is not an object', async () => {
     scaffoldApp(root)
-    // Malformed rather than outdated. `in` on a string throws, and this
-    // warning runs inside the scaffold's catch block, so the TypeError would
-    // escape as a build failure instead of the guidance the check exists for.
+    // Malformed rather than outdated: `in` on a string throws, and this warning
+    // runs inside the scaffold's catch, so the TypeError would escape as a build failure.
     writeFileSync(join(root, 'wrangler.jsonc'), '{ "name": "legacy", "alias": "./stubs" }\n')
 
     const warning = await captureWarnings(async () => {
@@ -688,9 +678,8 @@ describe('workers runtime configuration', () => {
 
     await buildCloudflareOutput({ rootDir: root, skipAppBuild: true })
 
-    // The alias map and the files on disk are derived from one list but through
-    // two code paths; a stub the config points at but the build never writes
-    // fails only at `wrangler deploy`.
+    // The alias map and the files on disk come from one list through two code paths;
+    // a stub the config points at but the build never writes fails only at deploy.
     const config = JSON.parse(readFileSync(join(root, 'wrangler.jsonc'), 'utf8'))
     const aliases = Object.values(config.alias) as string[]
     expect(aliases.length).toBeGreaterThan(0)
@@ -737,9 +726,8 @@ describe('buildCloudflareOutput with a stale committed wrangler.jsonc', () => {
     scaffoldApp(root, { mcpPlugin: true })
     writeStaleConfig(root)
 
-    // The scaffold never overwrites an existing config, so this alias would
-    // otherwise survive every build and deploy the endpoint compiled shut,
-    // with nothing red anywhere.
+    // The scaffold never overwrites an existing config, so this alias would survive
+    // every build and deploy the endpoint compiled shut, with nothing red anywhere.
     const error = await buildCloudflareOutput({ rootDir: root, skipAppBuild: true }).catch(
       (thrown: Error) => thrown,
     )
@@ -757,9 +745,8 @@ describe('buildCloudflareOutput with a stale committed wrangler.jsonc', () => {
 
   test('should fail on generated residue under a custom output directory', async () => {
     scaffoldApp(root, { mcpPlugin: true })
-    // Same residue, different outputDir — the alias target is a path this
-    // build chose, so matching the whole of it would miss every app that
-    // moved its output.
+    // Same residue, different outputDir: the alias target is a path this build
+    // chose, so matching the whole of it would miss every app that moved its output.
     writeFileSync(
       join(root, 'wrangler.jsonc'),
       `{\n  "name": "legacy",\n  "alias": {\n`
@@ -774,11 +761,9 @@ describe('buildCloudflareOutput with a stale committed wrangler.jsonc', () => {
 
   test('should leave an alias pointing at the developer own shim alone', async () => {
     scaffoldApp(root, { mcpPlugin: true })
-    // An alias on this specifier is only *build residue* when it names the
-    // stub file this build writes. Pointing it somewhere else is a deliberate
-    // override — an alternative transport, an instrumented wrapper — and
-    // failing on it would refuse a config with nothing wrong with it, while
-    // claiming in the message that a stub is there when it is not.
+    // An alias on this specifier is only *build residue* when it names the stub
+    // file this build writes; pointing it elsewhere is a deliberate override, and
+    // failing on it would refuse a config with nothing wrong with it.
     writeFileSync(
       join(root, 'wrangler.jsonc'),
       `{\n  "name": "legacy",\n  "alias": {\n`
@@ -818,11 +803,9 @@ describe('buildCloudflareOutput with a stale committed wrangler.jsonc', () => {
 
   test('should not fail on the alias line commented out rather than deleted', async () => {
     scaffoldApp(root, { mcpPlugin: true })
-    // What a developer following the failure message actually leaves behind:
-    // the line commented out, not deleted. Both the specifier and the stub
-    // filename are still in the file, so a guard that matched the text rather
-    // than the parsed keys would fail this build permanently, with the
-    // instruction it prints already carried out.
+    // A developer following the failure message comments the line out rather than
+    // deleting it, so specifier and stub filename are still in the file: a guard
+    // matching text rather than parsed keys would fail this build forever.
     writeFileSync(
       join(root, 'wrangler.jsonc'),
       `{\n  "name": "legacy",\n  "main": ".cloudflare/worker.js",\n  "alias": {\n`

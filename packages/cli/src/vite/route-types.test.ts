@@ -13,9 +13,7 @@ describe('resolveCodegenCommand', () => {
     const { executable, args } = resolveCodegenCommand({})
 
     expect(executable).toBe('bun')
-    // Resolves via `@guren/cli`'s own package export — `dist/bin.js` in a built
-    // package, or `src/bin.ts` when tsconfig path mapping favors source (as in
-    // this monorepo's own test run).
+    // `@guren/cli`'s own package export: `dist/bin.js` when built, `src/bin.ts` under this monorepo's path mapping.
     expect(args[0]).toMatch(/bin\.(ts|js)$/)
     expect(args.slice(1)).toEqual([
       ...CODEGEN_TAIL,

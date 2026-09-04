@@ -89,7 +89,6 @@ describe('relations on real bun:sqlite driver', () => {
   Post.belongsToMany('tags', Tag, postTagsTable, 'postId', 'tagId', 'id', 'id')
   Post.morphMany('images', Image, 'imageable', 'id')
   Image.morphTo('imageable', 'imageable')
-  // users -> posts (through) -> comments
   User.hasManyThrough('postComments', Comment, Post, 'authorId', 'postId', 'id', 'id')
 
   beforeEach(() => {
@@ -158,12 +157,8 @@ describe('relations on real bun:sqlite driver', () => {
     expect(posts).toHaveLength(3)
   })
 
-  // paginate() once handed back the raw rows from executeQuery(), so
-  // `.with('author').paginate(...)` returned pages whose relation was missing
-  // while the same chain ending in `.get()` attached it — the blog starter's
-  // /posts index rendered without author names because of it. It delegates to
-  // get() now; these assert that on the real driver, which the in-memory
-  // adapter used elsewhere cannot speak for.
+  // paginate() must attach relations like get() does; asserted on the real
+  // driver, which the in-memory adapter used elsewhere cannot speak for.
   it('should eager load through paginate() like get() does', async () => {
     const query = () => Post.newQuery().with('author').orderBy('id', 'desc')
 
@@ -176,7 +171,6 @@ describe('relations on real bun:sqlite driver', () => {
     expect(viaPaginate).toEqual(viaGet)
     expect(page.meta).toMatchObject({ total: 3, perPage: 2, currentPage: 1, totalPages: 2, hasMore: true })
 
-    // The remaining page loads its relation as well.
     const last = await query().paginate({ page: 2, perPage: 2 })
     expect((last.data as PostWithAuthor[]).map((p) => [p.title, p.author?.name])).toEqual([['A1', 'Alice']])
   })
@@ -228,9 +222,7 @@ describe('relations on real bun:sqlite driver', () => {
       .get()) as UserWithPostComments[]
 
     const alice = users.find((u) => u.name === 'Alice')
-    // head is unconstrained: both of Alice's posts load
     expect(alice?.posts.map((p) => p.title).sort()).toEqual(['A1', 'A2'])
-    // leaf is constrained: only 'keep' comments attach
     expect(alice?.posts.find((p) => p.title === 'A1')?.comments.map((c) => c.body)).toEqual(['keep'])
     expect(alice?.posts.find((p) => p.title === 'A2')?.comments.map((c) => c.body)).toEqual(['keep'])
   })
@@ -242,7 +234,6 @@ describe('relations on real bun:sqlite driver', () => {
       .get()) as UserWithPostComments[]
 
     const alice = users.find((u) => u.name === 'Alice')
-    // the nested path must not re-load `posts` unconstrained
     expect(alice?.posts.map((p) => p.title)).toEqual(['A1'])
     expect(alice?.posts[0]?.comments.map((c) => c.body).sort()).toEqual(['drop', 'keep'])
   })
@@ -286,7 +277,6 @@ describe('relations on real bun:sqlite driver', () => {
     expect(posts.find((p) => p.title === 'A1')?.tags.map((t) => t.name)).toEqual(['news'])
     // post A2's only tag is 'draft', so it ends up with none
     expect(posts.find((p) => p.title === 'A2')?.tags).toEqual([])
-    // unconstrained, A1 keeps both
     const all = (await Post.newQuery().with('tags').get()) as Array<PostRecord & { tags: TagRecord[] }>
     expect(all.find((p) => p.title === 'A1')?.tags.map((t) => t.name).sort()).toEqual(['draft', 'news'])
   })
@@ -326,10 +316,9 @@ describe('relations on real bun:sqlite driver', () => {
       const byUrl = (url: string, type: string) =>
         images.find((i) => i.url === url && i.imageableType === type)
 
-      // both target queries saw the constraint: id 1 resolves for each class...
+      // the constraint reaches both target queries: id 1 resolves for each class, id 2 is excluded
       expect(byUrl('cover.png', 'Post')?.imageable?.title).toBe('A1')
       expect(byUrl('cover.png', 'User')?.imageable?.name).toBe('Alice')
-      // ...and id 2 is excluded for each class
       expect(byUrl('p2.png', 'Post')?.imageable).toBeNull()
       expect(byUrl('u2.png', 'User')?.imageable).toBeNull()
     } finally {
@@ -451,8 +440,7 @@ describe('relations on real bun:sqlite driver', () => {
   })
 
   it('should reject a path with a trailing dot instead of reading it as bare', async () => {
-    // `posts.` names an empty tail segment; silently treating it as `posts`
-    // would swallow a typo that used to be reported
+    // `posts.` names an empty tail segment; reading it as `posts` would swallow a typo
     await expect(User.newQuery().with('posts.' as never).get()).rejects.toThrow(
       /unknown relation ""/,
     )

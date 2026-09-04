@@ -61,9 +61,8 @@ export function registerWebRoutes(appRouter: AppRouter): void {
     expect(findRouteRegistrar(source)?.parameterName).toBe('appRouter')
   })
 
-  // Selection is by the name the route loader resolves, not by "takes a
-  // Router" — otherwise a helper that happens to accept one is patched, and
-  // the call is handed that helper's first parameter.
+  // Selection is by the name the route loader resolves, not by "takes a Router":
+  // otherwise a helper that happens to accept one gets patched instead.
   it('skips an unrelated exported function that also takes a router', () => {
     const source = `export function buildPrefix(prefix: string, router: Router): void {}
 

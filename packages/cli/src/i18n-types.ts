@@ -1,17 +1,10 @@
 /**
- * Generates typed translation keys from the app's `lang/` directory.
+ * Generates typed translation keys from the app's `lang/` directory, in the
+ * layout `createApp({ i18n })` loads via JsonLoader: one namespace per file.
+ * Apps without a `lang/` directory get no file, and keys degrade to `string`.
  *
- * Scans `lang/<locale>/*.json` (the layout `createApp({ i18n })` loads via
- * JsonLoader: one namespace per file), flattens nested objects into
- * dot-notation keys prefixed with the file's namespace, and emits
- * `.guren/translations.gen.ts` exporting a `TranslationKey` union plus
- * declaration-merging augmentations that type `this.t()` / `this.tc()` on
- * the server and `useTranslation()` on the client. Apps without a `lang/`
- * directory get no file — the registries stay empty and keys degrade to
- * `string`.
- *
- * The union covers every key present in *any* locale (the CLI cannot know
- * which locale the app configured as fallback); `guren check --i18n` is the
+ * The union covers every key present in *any* locale — the CLI cannot know
+ * which locale the app configured as fallback; `guren check --i18n` is the
  * companion that reports keys missing from individual locales.
  */
 import { readdir, readFile, rm } from 'node:fs/promises'
@@ -24,9 +17,8 @@ export interface GenerateTranslationTypesOptions extends WriterOptions {
 }
 
 /**
- * The conventional translation directory all framework tooling assumes
- * (codegen, `check --i18n`, the Vite watch). Apps relocating catalogs via
- * `createApp({ i18n: { path } })` opt out of that tooling.
+ * The directory codegen, `check --i18n` and the Vite watch all assume. Apps
+ * relocating catalogs via `createApp({ i18n: { path } })` opt out of them.
  */
 export const DEFAULT_LANG_DIR = 'lang'
 
@@ -39,18 +31,14 @@ export interface TranslationCatalog {
   /** Files that failed to parse, relative to the app root. */
   invalidFiles: string[]
   /**
-   * Keys the runtime can never resolve: a JSON property name or catalog
-   * file name contains a literal dot, which the Translator always treats as
-   * a path separator. Excluded from `entries` (and thus the generated key
-   * union) and reported by `guren check --i18n`.
+   * Keys the runtime can never resolve, because a JSON property or catalog
+   * file name contains a literal dot and the Translator always reads a dot as
+   * a path separator. Excluded from `entries`, reported by `check --i18n`.
    */
   unreachableKeys: string[]
 }
 
-/**
- * Read every `<langDir>/<locale>/*.json` catalog. Returns an empty array
- * when the directory does not exist.
- */
+/** Every `<langDir>/<locale>/*.json` catalog; empty when there is no such dir. */
 export async function readTranslationCatalogs(
   appRoot: string,
   langDir: string = DEFAULT_LANG_DIR,
@@ -136,9 +124,8 @@ export async function generateTranslationTypes(
   const catalogs = await readTranslationCatalogs(appRoot)
   const outputFile = resolve(appRoot, DEFAULT_OUTPUT_FILE)
 
-  // No lang/ directory (or no locale subdirectories): the app does not use
-  // file-based translations. Remove a previously generated file so its
-  // stale augmentation stops applying and keys return to plain strings.
+  // Removed rather than left in place, so a stale augmentation stops applying
+  // and keys return to plain strings.
   if (catalogs.length === 0) {
     await rm(outputFile, { force: true })
     return { outputPath: null, keyCount: 0 }
@@ -148,9 +135,8 @@ export async function generateTranslationTypes(
 
   const content = buildTranslationTypesContent(keys, {
     locales: catalogs.map((catalog) => catalog.locale),
-    // The client augmentation must only be emitted when the module is
-    // resolvable: TypeScript rejects augmenting an uninstalled module
-    // (TS2664), which would break API-only apps.
+    // TypeScript rejects augmenting an uninstalled module (TS2664), which
+    // would break API-only apps.
     augmentInertiaClient: await appUsesInertiaClient(appRoot),
   })
 

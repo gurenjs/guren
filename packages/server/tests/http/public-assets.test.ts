@@ -3,9 +3,8 @@ import { Application } from '../../src'
 import { registerRootPublicAssets } from '../../src/http/public-assets'
 import { useAssetFixture } from './asset-fixture'
 
-// These fixtures are real files rather than a stubbed `Bun.file`: containment is
-// a property of the filesystem, so a mocked reader would report every one of
-// these cases as a pass regardless of what the middleware does.
+// Real files rather than a stubbed `Bun.file`: containment is a filesystem
+// property, so a mocked reader would pass every case regardless of the middleware.
 describe('registerRootPublicAssets', () => {
   const fixture = useAssetFixture('guren-public-assets-')
   let app: Application

@@ -59,7 +59,6 @@ describe('signUrl / verifySignedUrl', () => {
       const signed = signUrl('/p?a=1&B=2', keyring)
       const signature = new URL(signed, 'https://x.invalid').searchParams.get('signature')
 
-      // The same signature verifies with the parameters reordered.
       expect(verifySignedUrl(`/p?B=2&a=1&signature=${signature}`, keyring)).toBe(true)
     })
 
@@ -67,9 +66,7 @@ describe('signUrl / verifySignedUrl', () => {
       const keyring = makeKeyring()
       const signer = new MessageSigner(keyring)
 
-      // Code-unit order puts 'B' (0x42) before 'a' (0x61); locale-aware
-      // collation would reverse them. Pin the direction by verifying
-      // against independently built tokens over each canonical form.
+      // Code-unit order puts 'B' (0x42) before 'a' (0x61); locale collation reverses them.
       const codeUnit = signer.sign({ url: '/p?B=2&a=1' }, { purpose: 'signed-url' })
       const localeish = signer.sign({ url: '/p?a=1&B=2' }, { purpose: 'signed-url' })
 
@@ -92,8 +89,7 @@ describe('signUrl / verifySignedUrl', () => {
     test('non-integer expires values fail closed even when validly signed', () => {
       const keyring = makeKeyring()
 
-      // Sign URLs that already carry a malformed expires param: the
-      // signature over them is genuine, so only the shape gate can reject.
+      // The signature over a malformed expires param is genuine, so only the shape gate rejects.
       for (const expires of ['NaN', 'Infinity', '-1', '1e10', '9'.repeat(16)]) {
         const signed = signUrl(`/p?expires=${encodeURIComponent(expires)}`, keyring)
         expect(verifySignedUrl(signed, keyring)).toBe(false)
@@ -119,11 +115,9 @@ describe('signUrl / verifySignedUrl', () => {
   })
 
   describe('authority absorption', () => {
-    // The canonical form is path + query, so an authority the parser folds out
-    // of a `/`-leading value is covered by no signature at all. Both spellings
-    // are the WHATWG parser's, not a guess: `new URL('/\\evil/a', base)` puts
-    // `evil` in `host` exactly as `//evil/a` does, because `\` is `/` for a
-    // special scheme.
+    // The canonical form is path + query, so an authority the parser folds out of a
+    // `/`-leading value is covered by no signature. `\` is `/` for a special scheme, so
+    // `new URL('/\\evil/a', base)` puts `evil` in `host` exactly as `//evil/a` does.
     const authorityPrefixes = ['//evil.example', '/\\evil.example', '/\\\\evil.example']
 
     test('an authority prefixed onto a signed relative URL does not verify', () => {
@@ -146,9 +140,8 @@ describe('signUrl / verifySignedUrl', () => {
     })
 
     test('a single-slash first segment that merely looks host-like still signs', () => {
-      // The near miss the guard must not swallow: `/evil.example/...` is an
-      // ordinary app-relative path, and the parser leaves it on the
-      // placeholder origin.
+      // The near miss the guard must not swallow: `/evil.example/...` is an ordinary
+      // app-relative path the parser leaves on the placeholder origin.
       const keyring = makeKeyring()
 
       for (const path of ['/evil.example/a.pdf', '/api/v1/x?a=1', '/a//b/c']) {
@@ -158,9 +151,7 @@ describe('signUrl / verifySignedUrl', () => {
     })
 
     test('signUrl refuses a path that normalizes onto an authority in its output', () => {
-      // `/.//host/a` parses onto the placeholder origin, so the input side of
-      // the guard says nothing — but its pathname is `//host/a`, and the
-      // returned relative string would not parse back to the same thing.
+      // `/.//host/a` parses onto the placeholder origin, but its pathname is `//host/a`:
       // signUrl must not hand back a URL its own verifier rejects.
       const keyring = makeKeyring()
 

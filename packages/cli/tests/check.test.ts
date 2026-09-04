@@ -58,8 +58,7 @@ export default class PostController extends Controller {
   })
 
   // extractClassDeclaration (shared with audit.ts/spec-screens.ts) also
-  // matches a bare, non-exported class — a case the inline check this used to
-  // do before this fix did not cover.
+  // matches a bare, non-exported class.
   it('detects an empty method on a bare, non-exported controller class', async () => {
     const workspace = await createTempWorkspace('guren-cli-check-empty-bare-class-')
     try {
@@ -78,8 +77,8 @@ export default class PostController extends Controller {
     }
   })
 
-  // `store = async () => {}` dispatches exactly like `async store() {}`, so it
-  // is exactly as empty. Scanning only ClassMethod left it unreported.
+  // `store = async () => {}` dispatches exactly like `async store() {}`, so a
+  // scan that walks method declarations only leaves it unreported.
   it('detects an empty class-field action, and does not flag a concise arrow', async () => {
     const workspace = await createTempWorkspace('guren-cli-check-empty-field-')
     try {
@@ -158,7 +157,7 @@ test('lists tasks', async () => {
       expect(testCheck!.message).toContain('tests/controllers/TaskController.test.ts')
       expect(testCheck!.message).toContain('filename-only detection')
       expect(testCheck!.suggestion).toContain('If these routes are not already covered')
-      // The old wording asserted an absence it cannot establish.
+      // Asserting this absence is beyond what filename detection can establish.
       expect(testCheck!.message).not.toContain('No test file found')
     } finally {
       await workspace.cleanup()
@@ -235,8 +234,7 @@ export function registerWebRoutes(router: Router): void {
       const check = agentCheck(report)
       expect(check?.status).toBe('warn')
       // A bare `guren codegen` reads routes/web.ts, so it would write the
-      // manifest from a different route graph — a remedy that cannot clear the
-      // state it was printed for.
+      // manifest from a different route graph and not clear this finding.
       expect(check?.suggestion).toContain('--routes routes/api.ts')
     })
 
@@ -264,10 +262,8 @@ export function registerWebRoutes(router: Router): void {
     })
 
     it('is skipped under --changed when only non-source files changed', async () => {
-      // The gate 7.7 and 8.7 share, and for their reason: this check loads the
-      // app's route graph and derives every tool, so a docs-only run must not
-      // pay a full module evaluation to re-derive an answer nothing in that
-      // run could have changed.
+      // This check loads the app's route graph and derives every tool, so a
+      // docs-only run must not pay a module evaluation for an unchanged answer.
       const workspace = await createTempWorkspace('guren-cli-check-agent-changed-')
       try {
         await writeWorkspaceFiles(workspace.dir, {
@@ -388,11 +384,9 @@ export function registerWebRoutes(router: Router): void {
     const workspace = await createTempWorkspace('guren-cli-check-arch-only-schema-agg-')
 
     try {
-      // A module schema that isn't re-exported from the root — outside
-      // --arch mode this fails the schema-aggregation check (see the
-      // "warns when a module schema exists but is not re-exported" test
-      // below). --arch is documented as the architecture-boundary-only
-      // fast path, so this unrelated check must not run under it.
+      // A module schema not re-exported from the root fails the
+      // schema-aggregation check outside --arch, which is documented as the
+      // architecture-boundary-only fast path.
       await mkdir(join(workspace.dir, 'modules/billing/db'), { recursive: true })
       await writeFile(join(workspace.dir, 'modules/billing/db/schema.ts'), `export const invoices = {}`, 'utf8')
       await mkdir(join(workspace.dir, 'db'), { recursive: true })
@@ -663,9 +657,8 @@ export class Account extends Model {
     expect(report.checks.find(c => c.key === 'model-schema:Account')?.status).toBe('pass')
   })
 
-  // The old check matched the guessed name as a substring of the schema
-  // source, so a column named `posts` (or a comment mentioning it) counted as
-  // a table definition.
+  // Matching the guessed name as a substring of the schema source would let a
+  // column named `posts` (or a comment mentioning it) count as a table.
   it('warns when the model binds a table the schema does not declare, even if the guessed name appears in it', async () => {
     const report = await withWorkspace({
       'app/Models/Post.ts': `import { defineModel } from '@guren/core'
@@ -764,8 +757,7 @@ export class Post extends defineModel(posts) {}`,
   })
 
   // A checker that skips a file it could not parse is indistinguishable from
-  // one that found nothing wrong, which is how a decorated file could go
-  // unchecked while the report still read clean.
+  // one that found nothing wrong.
   it('reports files that were skipped because they could not be parsed', async () => {
     const workspace = await createTempWorkspace('guren-cli-check-scan-coverage-')
     try {
@@ -787,10 +779,9 @@ export class Post extends defineModel(posts) {}`,
     }
   })
 
-  // Breadth is whatever the active suites asked the cache for, which the module
-  // rules widen to every importable file. A junk file outside app/Http or
-  // app/Models is therefore named too — accurate, since the boundary scan
-  // genuinely could not read it — but it is a warn, so exit codes are unaffected.
+  // Breadth is whatever the active suites asked the cache for, and the module
+  // rules widen that to every importable file, so a junk file outside app/Http
+  // or app/Models is named too.
   it('names files outside the controller/model dirs once module rules widen the scan', async () => {
     const workspace = await createTempWorkspace('guren-cli-check-scan-coverage-wide-')
     try {
@@ -862,8 +853,7 @@ export const posts = pgTable('posts', {
 
       const findings = timestamptzFindings(report)
       // An exact list, so the tz'd columns above assert silence as strongly as
-      // the bare ones assert detection — including through `.array()`, whose
-      // `[]` suffix must neither hide a bare column nor surface a tz'd one.
+      // the bare ones assert detection, `.array()` forms included.
       expect(findings.map((c) => c.key)).toEqual([
         'schema-timestamptz:posts.createdAt',
         'schema-timestamptz:posts.slots',
@@ -872,8 +862,7 @@ export const posts = pgTable('posts', {
       // The suggestion names the database column, not the object key.
       expect(findings[0].suggestion).toContain("timestamp('created_at', { withTimezone: true })")
       expect(findings[0].filePath).toBe('db/schema.ts')
-      // Informational: the core suite never gates on exit code (see
-      // check-exit-code.test.ts for that contract end to end).
+      // Informational: the core suite never gates on exit code.
       expect(report.failCount).toBe(0)
     })
 
@@ -900,9 +889,7 @@ export const posts = pgTable('posts', {
 
     // MySQL's bare timestamp is correct (no timestamptz exists, and its
     // TIMESTAMP is already UTC-normalized) and is spelled identically to the
-    // Postgres one — which is why the rule gates on the declaring table's
-    // factory rather than the builder name. The fixture is the schema
-    // `create-guren-app --db mysql` actually writes.
+    // Postgres one, so the rule gates on the declaring table's factory.
     it('ignores a MySQL schema, whose bare timestamp is spelled the same', async () => {
       const report = await withWorkspace({ 'db/schema.ts': MYSQL_SCHEMA_FIXTURE })
 
@@ -958,8 +945,8 @@ export const invoices = pgTable('invoices', { issuedAt: timestamp('issued_at') }
     })
 
     // Under drizzle's name-less form the database name comes from a casing
-    // config this parser does not read, so the SQL hint is dropped rather than
-    // quoting the object key, which would not resolve.
+    // config this parser does not read, so quoting the object key in the SQL
+    // hint would not resolve.
     it('omits the USING hint when the column has no explicit database name', async () => {
       const report = await withWorkspace({
         'db/schema.ts': `import { pgTable, timestamp } from 'drizzle-orm/pg-core'
@@ -1006,11 +993,10 @@ export const posts = pgTable('posts', { createdAt: timestamp('created_at') })
 
 /**
  * `.guren/pages.gen.ts` imports `@guren/inertia-client`, and the api blueprint's
- * tsconfig type-checks `.guren/**` without installing that package — so codegen
- * declines to write the manifest there, however many page components turn up.
- * That decision is only safe if it is visible: an app misread as API-only loses
- * a file its controllers import, and a manifest generated before the app took
- * this shape stays on disk failing the typecheck. Both states are reported here.
+ * tsconfig type-checks `.guren/**` without installing it, so codegen declines to
+ * write the manifest there. Both failure states of that decision are reported:
+ * an app misread as API-only loses a file its controllers import, and a manifest
+ * written before the app took this shape stays on disk failing the typecheck.
  */
 describe('pages manifest on an API-only app', () => {
   const withPage = { ...API_ONLY_APP_FILES, 'resources/js/pages/Home.tsx': PAGE_COMPONENT_FIXTURE }
@@ -1024,9 +1010,8 @@ describe('pages manifest on an API-only app', () => {
     expect(pagesCheck?.status).toBe('warn')
     expect(pagesCheck?.message).toContain('1 page component under resources/js/pages')
     expect(pagesCheck?.message).toMatch(API_ONLY_REFUSAL)
-    // Reported, never removed — codegen leaving it on disk is covered in
-    // pages-types.test.ts, and is deliberate: if the rule is ever wrong about
-    // an app, deleting the manifest turns a type error into a mystery.
+    // Reported, never removed: if the rule is ever wrong about an app,
+    // deleting the manifest turns a type error into a mystery.
     expect(pagesCheck?.suggestion).toContain('Delete .guren/pages.gen.ts')
     // This one really does fail `tsc`, so `check --ci` has to gate on it.
     expect(pagesCheck?.advisory).toBe(false)
@@ -1175,10 +1160,9 @@ export function registerAdminRoutes(router: Router): void {
 export default registerAdminRoutes
 `
 
-  // The specifier a Node-ESM app actually writes: `./admin.js` for a file
-  // that is `admin.ts` on disk. Nothing else in this suite would notice a
-  // resolver that only tried the specifier as written — it would report
-  // every real app's routes files as unmounted.
+  // The specifier a Node-ESM app actually writes: `./admin.js` for a file that
+  // is `admin.ts` on disk. A resolver trying only the specifier as written
+  // reports every real app's routes files as unmounted.
   it('resolves a .js specifier back to the .ts file it names', async () => {
     const report = await withWorkspace({ 'routes/web.ts': ROUTES_ENTRY, 'routes/admin.ts': ADMIN_ROUTES })
 
@@ -1521,11 +1505,9 @@ export function registerRoutes(router: Router): void {
   })
 
   // The entry is the file `defineModule({ routes })` names, not a
-  // conventionally named one: here a stale `routes.ts` sits beside the real
-  // registrar at `routes/index.ts`, and judging against the convention would
-  // report the whole directory unmounted. The entry is also one of the very
-  // files the directory scan turns up, so it has to be excluded by resolved
-  // path rather than reported against itself.
+  // conventionally named one: the stale `routes.ts` beside the real registrar
+  // would make the whole directory read as unmounted. The entry also turns up
+  // in the directory scan, so it is excluded by resolved path.
   it('follows defineModule({ routes }) to a registrar at routes/index.ts', async () => {
     const report = await withWorkspace({
       'routes/web.ts': PLAIN_ENTRY,
@@ -1543,13 +1525,10 @@ export const billingModule = defineModule({ name: 'billing', routes: registerBil
     expect(wiring(report).has('modules/billing/routes/index.ts')).toBe(false)
   })
 
-  // `defineModule({ … } satisfies ModuleDefinition)` is still a module
-  // descriptor: the assertion changes nothing the runtime sees. Reading the
-  // call's argument without unwrapping it made the descriptor invisible, and
-  // the module then fell back to the conventional `routes.ts` — the stale
-  // registrar this fixture keeps in place — so a wired directory reported as
-  // unmounted. Silent by construction: "cannot read the descriptor" and
-  // "the descriptor names nothing" are the same absence.
+  // The type assertion changes nothing the runtime sees, but reading the call's
+  // argument without unwrapping it makes the descriptor invisible and falls
+  // back to the conventional `routes.ts`. Silent by construction: "cannot read
+  // the descriptor" and "the descriptor names nothing" are the same absence.
   it.each([' satisfies Record<string, unknown>', ' as const'])(
     'reads a defineModule descriptor written with %s',
     async (suffix) => {
@@ -1569,10 +1548,9 @@ export const billingModule = defineModule({ name: 'billing', routes: registerBil
     },
   )
 
-  // The runtime mounts only what `defineModule({ routes })` names — a
-  // descriptor without `routes` mounts nothing, however well-wired the
-  // conventional `routes.ts` is internally. Judging against that file would
-  // report a pass while every module route 404s.
+  // The runtime mounts only what `defineModule({ routes })` names, so judging
+  // against a well-wired `routes.ts` instead reports a pass while every module
+  // route 404s.
   it('warns when defineModule names no routes registrar, however wired routes.ts is', async () => {
     const report = await withWorkspace({
       'routes/web.ts': PLAIN_ENTRY,
@@ -1806,9 +1784,8 @@ export function registerRoutes(router: Router): void {
       )
       expect(wiring(await runCheck({ cwd: workspace.dir, changed: true })).size).toBe(0)
 
-      // A brand-new, never-committed routes file does — this is how
-      // `make:route` output reaches the check, and the gate only sees it
-      // because getChangedFiles unions `ls-files --others`.
+      // A brand-new, never-committed routes file does — how `make:route`
+      // output reaches the check, via getChangedFiles' `ls-files --others`.
       await writeFile(join(workspace.dir, 'routes/orphan.ts'), ADMIN_ROUTES, 'utf8')
       expect(statusOf(await runCheck({ cwd: workspace.dir, changed: true }), 'routes/orphan.ts')).toBe('warn')
 
@@ -1823,10 +1800,8 @@ export function registerRoutes(router: Router): void {
   }, 30_000)
 
   // `make:route --module billing` writes under `modules/`, not `routes/`, so
-  // the changed-file gate has to know that path too. Nothing under `routes/`
-  // is touched here on purpose: with only the project directory in the gate,
-  // this check would never run in the edit hook — the one path that passes
-  // --changed — and the module half would be dead on arrival.
+  // the changed-file gate has to know that path too — nothing under `routes/`
+  // is touched here on purpose.
   it('wakes under --changed for a module routes file alone', async () => {
     const workspace = await createTempWorkspace('guren-cli-check-module-routes-changed-')
 
@@ -1848,9 +1823,8 @@ export function registerRoutes(router: Router): void {
         statusOf(await runCheck({ cwd: workspace.dir, changed: true }), 'modules/billing/routes/invoice.ts'),
       ).toBe('warn')
 
-      // A descriptor-only edit — deleting `routes:` from defineModule() —
-      // must wake it too: that one line severs every module route, and the
-      // only changed path is modules/billing/index.ts.
+      // A descriptor-only edit severs every module route while the only
+      // changed path is modules/billing/index.ts, so it has to wake it too.
       git('add', '.')
       git('commit', '-m', 'add invoice routes')
       await writeFile(
@@ -1907,8 +1881,7 @@ ${body}
     expect(finding?.message).toContain("named literally 'slug*'")
     expect(finding?.message).toContain("req.param('slug') is undefined")
     expect(finding?.suggestion).toContain("'/files/:slug{.+}'")
-    // Not advisory: `check --ci` gates on this the way it does on an unmounted
-    // registrar, so an app carrying one goes red there.
+    // Not advisory: `check --ci` gates on this, so an app carrying one goes red.
     expect(finding?.advisory).toBeUndefined()
   })
 
@@ -1944,8 +1917,7 @@ ${body}
     expect(modifiers(report).map((c) => c.key)).toEqual(['route-path-modifier:routes/web.ts:/:tenant*'])
   })
 
-  // resource() spreads one path over up to seven routes, and was the hole a
-  // hand-kept mirror of Router's surface shipped with.
+  // resource() spreads one path over up to seven routes.
   it('warns about a resource path carrying one', async () => {
     const report = await withWorkspace({
       'routes/web.ts': entryWith(`  router.resource('/files/:slug*', FileController)`),
@@ -2001,8 +1973,8 @@ ${body}
   })
 
   // make:module scaffolds a single modules/<name>/routes.ts and no routes/
-  // directory, so the module discovery this check shares with the wiring
-  // check drops it — the file most modules actually route from.
+  // directory, so a discovery that scans only directories drops the file most
+  // modules actually route from.
   it('reads a module that keeps its routes in a single routes.ts', async () => {
     const report = await withWorkspace({
       'routes/web.ts': entryWith(`  router.get('/', [HomeController, 'index'])`),
@@ -2040,11 +2012,9 @@ export function registerInvoiceRoutes(router: Router): void {
     ])
   })
 
-  // The non-detections, in one app rather than seven: this is a per-segment
-  // string predicate, and a failure still names the path it fired on. Three of
-  // the seven contain a `*` — the `{.*}` one is what a rule matching a star
-  // anywhere in the segment gets wrong, and it is also the syntax this check
-  // tells people to move to.
+  // The non-detections, in one app: a failure still names the path it fired on.
+  // `{.*}` is what a rule matching a star anywhere in the segment gets wrong,
+  // and it is also the syntax this check tells people to move to.
   const SAFE_PATHS = [
     '/docs/:path{.+}',
     '/docs/:path{.*}',
@@ -2083,11 +2053,9 @@ export function registerWebRoutes(router: Router): void {
     expect(modifiers(report)).toEqual([])
   })
 
-  // The edit hook runs `runCheck({ changed: true })` on every save, so this
-  // path matters more than the unfiltered one — and it is the path where a
-  // finding can vanish silently, since the file set comes from three
-  // different producers and each POSIX-relative path has to match what git
-  // reports for its file to be looked at at all.
+  // Where a finding can vanish silently: the file set comes from three
+  // producers, and each POSIX-relative path has to match what git reports for
+  // its file to be looked at at all.
   it('reports a :name* added to either a project or a module routes file under --changed', async () => {
     const workspace = await createTempWorkspace('guren-cli-check-route-path-changed-')
 
@@ -2138,9 +2106,8 @@ export function registerBillingRoutes(router: Router): void {
         'route-path-modifier:routes/web.ts:/files/:slug*',
       ])
 
-      // The other half of the filter, and the cost of it: once both are
-      // committed, an unrelated edit says nothing about them. A plain
-      // `guren check` is what surfaces what an app already carries.
+      // The cost of the filter: once both are committed, an unrelated edit says
+      // nothing about them; a plain `guren check` surfaces what an app carries.
       git('add', '.')
       git('commit', '-m', 'add routes')
       await writeFile(
@@ -2167,10 +2134,9 @@ export function registerBillingRoutes(router: Router): void {
 })
 
 /**
- * Wiring only. The comparison itself is covered by
- * `route-contract-check.test.ts`, which drives the check directly with real
- * zod schemas; a temp workspace cannot import zod (or any value from
- * `@guren/core`), so the fixture here binds a locally declared class instead.
+ * Wiring only; `route-contract-check.test.ts` covers the comparison with real
+ * zod schemas. A temp workspace cannot import zod (or any value from
+ * `@guren/core`), so the fixture binds a locally declared class instead.
  */
 describe('runCheck route contracts', () => {
   const ROUTES_WITH_STRAY_BIND = `import type { Router } from '@guren/core'

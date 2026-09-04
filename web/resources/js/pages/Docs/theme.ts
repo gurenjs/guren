@@ -31,8 +31,6 @@ export const docsTheme = {
 
 export type DocsTheme = typeof docsTheme
 
-// ─── Color mode (light / dark / system) ───
-
 export type ColorMode = 'light' | 'dark' | 'system'
 
 function getStoredMode(): ColorMode {
@@ -67,7 +65,6 @@ function emitChange() {
   listeners.forEach((l) => l())
 }
 
-// Initialize on first import (client only)
 if (typeof window !== 'undefined') {
   applyMode(getStoredMode())
 
@@ -86,19 +83,14 @@ export function useColorMode(): { mode: ColorMode; isDark: boolean; setMode: (m:
     () => 'system' as ColorMode,
   )
 
-  // Start with `null` (unknown) to avoid hydration mismatch — the server
-  // snapshot always returns `false`, but the client may resolve to `true`
-  // from localStorage / matchMedia on the very first render.  Deferring the
-  // real value to a useEffect keeps the initial client render identical to
-  // the server render.
+  // Starts at `false`, what the server render resolves to, so the first client
+  // render matches; the real value arrives in a useEffect.
   const [isDark, setIsDark] = useState<boolean>(false)
 
   useEffect(() => {
     setIsDark(getResolvedDark(getStoredMode()))
   }, [mode])
 
-  // Keep isDark in sync when the external store emits changes (e.g. system
-  // preference toggle while mode === 'system').
   useEffect(() => {
     return subscribe(() => {
       setIsDark(getResolvedDark(getStoredMode()))
