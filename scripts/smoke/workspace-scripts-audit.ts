@@ -27,6 +27,17 @@
 // `exec`/`spawn` and friends. A string that merely mentions `bunx guren` — a
 // docs audit asserting a guide documents it, a test of a docs checker — is
 // a mention, not an invocation, and is left alone.
+//
+// What the scan deliberately does not chase, because doing so would trade a
+// bounded, honest-mistake detector for an unbounded obfuscation-resistant
+// one: a runner identifier reached through an import alias (`import {
+// execSync as run } from 'node:child_process'`) or a local rebinding
+// (`const runner = 'bunx'; spawn([runner, 'guren'])`), and shell quoting
+// inside a command string (`exec('bunx "guren" codegen')` keeps its quotes
+// when tokenized). None of this repo's current scripts/ writes the CLI that
+// way; if one starts to, the manifest-style spelling this gate teaches
+// (`bun packages/cli/src/bin.ts …`) has no reason to need aliasing or
+// quoting in the first place.
 
 import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
@@ -34,6 +45,8 @@ import { dirname, join, resolve } from 'node:path'
 
 import { parse } from '@babel/parser'
 import * as t from '@babel/types'
+
+import { walk } from '../../packages/cli/src/ast-walk'
 
 const repoRoot = resolve(import.meta.dir, '../..')
 
@@ -150,11 +163,34 @@ function templateText(node: t.TemplateLiteral): string {
   return node.quasis.map((q) => q.value.cooked ?? q.value.raw).join(' <expr> ')
 }
 
-/** Leading string-literal elements of an argv array, one token each. */
+/**
+ * Whether a node is a `process.execPath` reference. Under Bun this resolves
+ * to the running `bun` binary itself — `[process.execPath, 'x', 'guren']` is
+ * `bunx guren` exactly as much as `['bun', 'x', 'guren']` is, and the former
+ * is already how this repo's own scripts (test-packages.ts, build-packages.ts,
+ * …) spawn `bun` with fresh arguments.
+ */
+function isProcessExecPath(node: t.Node): boolean {
+  return (
+    t.isMemberExpression(node) &&
+    !node.computed &&
+    t.isIdentifier(node.object, { name: 'process' }) &&
+    t.isIdentifier(node.property, { name: 'execPath' })
+  )
+}
+
+/** One argv element's token text: a literal, or `'bun'` for `process.execPath`. */
+function argvToken(node: t.Node | null | undefined): string | null {
+  if (!node) return null
+  if (isProcessExecPath(node)) return 'bun'
+  return literalText(node)
+}
+
+/** Leading argv-token elements of an array (literals, or `process.execPath`). */
 function leadingArgv(node: t.ArrayExpression): string[] {
   const tokens: string[] = []
   for (const element of node.elements) {
-    const text = literalText(element)
+    const text = argvToken(element)
     if (text === null) break
     tokens.push(text)
   }
@@ -193,7 +229,8 @@ export function collectSourceViolations(file: string, source: string): Violation
     })
   }
 
-  const visit = (node: t.Node): void => {
+  walk(ast, (visited) => {
+    const node = visited as unknown as t.Node
     if (t.isArrayExpression(node)) {
       const argv = leadingArgv(node)
       if (tokensInvokeRegistryGuren(argv)) flag(node, 'argv array', argv.join(' '))
@@ -207,26 +244,26 @@ export function collectSourceViolations(file: string, source: string): Violation
         const command = t.isTemplateLiteral(first) ? templateText(first) : literalText(first)
         if (command !== null && invokesRegistryGuren(command)) flag(node, `${name}()`, command.trim())
       } else if (name && FILE_ARGS_CALLEES.has(name)) {
-        const fileToken = literalText(first)
+        const fileToken = argvToken(first)
         if (fileToken !== null) {
           const args = t.isArrayExpression(second) ? leadingArgv(second) : []
           const tokens = [fileToken, ...args]
-          if (tokensInvokeRegistryGuren(tokens)) flag(node, `${name}()`, tokens.join(' '))
+          // Two shapes share this callee: `spawn('bunx', ['guren', …])` (an
+          // argv split, checked as tokens) and `spawn('bunx guren …', {
+          // shell: true })` (one shell command line, checked as a string —
+          // `invokesRegistryGuren` re-splits it). Checking both costs
+          // nothing on the ordinary split form: a bare `fileToken` like
+          // `'bunx'` alone never matches on its own, since the runner
+          // sequence still needs `guren` immediately after in the same
+          // string.
+          if (tokensInvokeRegistryGuren(tokens) || invokesRegistryGuren(fileToken)) {
+            flag(node, `${name}()`, tokens.join(' '))
+          }
         }
       }
     }
+  })
 
-    for (const key of t.VISITOR_KEYS[node.type] ?? []) {
-      const child = (node as unknown as Record<string, unknown>)[key]
-      if (Array.isArray(child)) {
-        for (const item of child) if (item && typeof (item as t.Node).type === 'string') visit(item as t.Node)
-      } else if (child && typeof (child as t.Node).type === 'string') {
-        visit(child as t.Node)
-      }
-    }
-  }
-
-  visit(ast)
   return violations
 }
 

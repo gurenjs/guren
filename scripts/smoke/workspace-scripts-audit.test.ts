@@ -80,8 +80,26 @@ describe('the source scan, by spawn shape', () => {
     expect(problems('const text = `bunx guren codegen` // not tagged, not a shell')).toEqual([])
   })
 
-  test('does not read a dynamic first element as a runner', () => {
-    expect(problems(`Bun.spawn([process.execPath, 'x', 'guren'])`)).toEqual([])
+  test('reads process.execPath as `bun`, since that is what it resolves to under Bun', () => {
+    // This is not a contrived case: scripts/test-packages.ts and others in
+    // this exact tree already spawn `[process.execPath, ...args]` to mean
+    // "run bun with these args" — so `[process.execPath, 'x', 'guren']` is
+    // `bunx guren` exactly as much as spelling `'bun'` out would be.
+    expect(problems(`Bun.spawn([process.execPath, 'x', 'guren'])`)).toHaveLength(1)
+    expect(problems(`Bun.spawn([process.execPath, 'run', 'build'])`)).toEqual([])
+  })
+
+  test('does not read an unrelated dynamic first element as a runner', () => {
+    expect(problems(`Bun.spawn([someVar, 'guren'])`)).toEqual([])
+  })
+
+  test('flags spawn(command, { shell: true }) — the whole first argument runs as a shell command line', () => {
+    expect(problems("spawn('bunx guren codegen', { shell: true })")).toHaveLength(1)
+    expect(problems("spawnSync('bunx guren codegen --force', opts)")).toHaveLength(1)
+    // The ordinary split form must not double-flag or spuriously flag on a
+    // bare executable name alone.
+    expect(problems("spawn('bunx', ['guren', 'codegen'])")).toHaveLength(1)
+    expect(problems("spawn('bunx', ['add', 'auth'])")).toEqual([])
   })
 
   test('throws on a source it cannot parse rather than passing it silently', () => {
