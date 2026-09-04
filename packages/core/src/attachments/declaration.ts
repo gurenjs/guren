@@ -1,12 +1,10 @@
 import type { ImagePolicy, VariantSpec } from './types.js'
 
 /**
- * How HEIC/HEIF input is handled. The default is `'reject'` (415): HEIC
- * decoding depends on OS codecs — it works on macOS dev machines and fails
- * on Linux production — and the default must not let that skew pass
- * silently. `'convert'` opts in: the service attempts decode-and-convert to
- * JPEG and still answers 415 when the runtime cannot decode HEIC
- * (`ERR_IMAGE_FORMAT_UNSUPPORTED`).
+ * How HEIC/HEIF input is handled. Defaults to `'reject'` (415) because HEIC
+ * decoding depends on OS codecs — it works on macOS dev machines and fails on
+ * Linux production. `'convert'` opts into decode-and-convert to JPEG, still
+ * answering 415 when the runtime cannot decode HEIC.
  */
 export type HeicPolicy = 'reject' | 'convert'
 
@@ -23,10 +21,9 @@ export interface AttachedCollectionOptions<V extends string = never> {
 }
 
 /**
- * One collection's declaration as stored on the model's
- * `static attachments`. Produced by {@link hasOneAttached} /
- * {@link hasManyAttached}; the generics carry the collection kind and the
- * declared variant names into the mixin's compile-time checks.
+ * One collection's declaration as stored on the model's `static attachments`.
+ * The generics carry the collection kind and the declared variant names into
+ * the mixin's compile-time checks.
  */
 export interface AttachmentCollectionSpec<
   TKind extends 'one' | 'many' = 'one' | 'many',
@@ -61,16 +58,8 @@ function buildSpec<TKind extends 'one' | 'many', V extends string>(
 
 /**
  * Declare a single-attachment collection (`attach` replaces the previous
- * attachment, purging its row and objects).
- *
- * @example
- * export class Post extends Attachable(defineModel(posts), {
- *   cover: hasOneAttached({
- *     image: 'require',
- *     variants: { thumb: { width: 320 }, og: { width: 1200 } },
- *   }),
- *   draftPdf: hasOneAttached(), // opaque bytes; width/height/placeholder null
- * }) {}
+ * attachment, purging its row and objects). Called with no options the bytes
+ * stay opaque: width/height/placeholder are null.
  */
 export function hasOneAttached<const V extends string = never>(
   options: AttachedCollectionOptions<V> = {},
@@ -78,14 +67,7 @@ export function hasOneAttached<const V extends string = never>(
   return buildSpec('one', options)
 }
 
-/**
- * Declare a multi-attachment collection (`attach` appends).
- *
- * @example
- * export class Post extends Attachable(defineModel(posts), {
- *   images: hasManyAttached({ image: 'require' }),
- * }) {}
- */
+/** Declare a multi-attachment collection (`attach` appends). */
 export function hasManyAttached<const V extends string = never>(
   options: AttachedCollectionOptions<V> = {},
 ): AttachmentCollectionSpec<'many', V> {

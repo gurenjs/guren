@@ -1,25 +1,11 @@
 /**
- * Keeps `@guren/plugin-webmcp`'s manifest fixture honest.
+ * Keeps `@guren/plugin-webmcp`'s manifest fixture honest: it is a pasted snapshot of
+ * `buildAgentToolsContent()` output, kept so its `as const` shape can be type-checked
+ * against `WebMcpToolSource`. Nothing else regenerates it, so the routes that produced
+ * it live here and this re-renders and compares them byte for byte from the generated
+ * doc comment on, leaving the fixture's provenance header free to change.
  *
- * That fixture is a snapshot of `buildAgentToolsContent()` output, pasted
- * into the plugin's source so its `as const` shape can be type-checked
- * against `WebMcpToolSource` — the one assignment the plugin's own suite
- * cannot make any other way (everything else there builds mutable
- * `DerivedAgentTool` objects, which satisfy the interface trivially).
- *
- * A pasted snapshot nothing regenerates is the "test that cannot fail" shape
- * this repo has been bitten by: change what `renderTool` emits and the
- * fixture keeps standing in for a manifest codegen no longer writes, while
- * every assertion around it stays green. So the routes that produced it live
- * here, and this regenerates and compares.
- *
- * The comparison starts at the generated doc comment, so the fixture's own
- * provenance header is free to change while every emitted byte after it —
- * doc comment, field order, field values — must match exactly.
- *
- * Read as a *file*, not imported as a module: `@guren/cli` must not grow a
- * dependency edge on a plugin, and this is the one direction that would
- * create one.
+ * Read as a *file*, not imported: `@guren/cli` must not gain a dependency on a plugin.
  */
 import { describe, test, expect } from 'bun:test'
 import { readFile } from 'node:fs/promises'
@@ -55,10 +41,9 @@ class PostController extends Controller {
 }
 
 /**
- * The routes the fixture was generated from — the shapes a WebMCP client has
- * to handle: a params+body split, a query-only GET, a nested non-object body,
- * an `output` schema, an empty `inputSources`, an `expose.webMcp: false`
- * route and an `approval: 'required'` one.
+ * The routes the fixture was generated from: a params+body split, a query-only GET, a
+ * non-object body, an `output` schema, an empty `inputSources`, `expose.webMcp: false`
+ * and `approval: 'required'`.
  */
 function fixtureRouter(): Router {
   const router = new Router()
@@ -113,10 +98,8 @@ describe('plugin-webmcp manifest fixture', () => {
     expect(generatedFrom).toBeGreaterThanOrEqual(0)
     expect(fixtureFrom).toBeGreaterThanOrEqual(0)
 
-    // Exact, byte for byte. Regenerate the fixture rather than editing it:
-    //   bun run --cwd examples/blog codegen   (for a real app), or re-render
-    //   these routes through buildAgentToolsContent and paste the output
-    //   under the fixture's provenance header.
+    // Regenerate the fixture rather than editing it: re-render these routes through
+    // buildAgentToolsContent and paste the output under its provenance header.
     expect(fixture.slice(fixtureFrom)).toBe(generated.slice(generatedFrom))
   })
 })

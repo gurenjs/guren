@@ -24,22 +24,13 @@ export const PATCH_REASONS = {
 } as const
 
 /**
- * A copy of `source` with the contents of comments and string literals
- * blanked out, character for character, so every index still lines up with
- * the original.
- *
- * These patches locate their edit site by regex, and text that merely *looks*
- * like code is the failure mode in both directions: a disabled
- * `// kernel.registerMany([Foo])` or a docblock example gets edited in place
- * of the real call, while a `'https://…'` earlier on the line makes a real
- * call look commented out. Matching against the mask and slicing from the
- * original settles both, and keeps brace/bracket counting from tripping over
- * a `{` inside a string.
+ * `source` with comment and string contents blanked character for character,
+ * so every index still lines up with the original. These patches find their
+ * edit site by regex, and text that merely looks like code misleads both ways.
+ * `data-types.ts` masks for itself rather than sharing this: it blanks the
+ * quotes too, which `parseArrayEntries` below cannot have — it counts masked
+ * entries and needs `'A', 'B'` to stay two of them.
  */
-// `data-types.ts` masks for its own matching and does not share this one: it
-// blanks the quotes as well and stops an unterminated `'`/`"` at the newline,
-// which `parseArrayEntries` below cannot have — it counts masked entries and
-// needs `'A', 'B'` to stay two of them.
 function maskNonCode(source: string): string {
   const mask = source.split('')
   let i = 0
@@ -81,18 +72,16 @@ function maskNonCode(source: string): string {
 }
 
 /**
- * First match of `pattern` that lands in real code rather than a comment or
- * a string. Indices refer to `content`; read spans out of `content`, not out
- * of the mask, which is blanked.
+ * First match of `pattern` landing in real code. Indices refer to `content`;
+ * read spans out of `content`, never out of the blanked mask.
  */
 function matchInCode(content: string, pattern: RegExp): RegExpExecArray | null {
   return new RegExp(pattern.source, 'g').exec(maskNonCode(content))
 }
 
 /**
- * Index of the delimiter closing the one at `openIndex`, or `-1`. Counts
- * depth over the masked source, so nesting is respected and a bracket inside
- * a string or comment does not shift the result.
+ * Counts depth over the masked source, so nesting is respected and a bracket
+ * inside a string or comment does not shift the result.
  */
 function findClosingDelimiter(content: string, openIndex: number, open: string, close: string): number {
   const masked = maskNonCode(content)
@@ -110,9 +99,8 @@ function findClosingDelimiter(content: string, openIndex: number, open: string, 
 }
 
 /**
- * Entries of an array literal's interior, e.g. `'A, B'` -> `['A', 'B']`.
- * Comment and string text is blanked first, so a name that only appears in a
- * comment is not mistaken for an existing entry.
+ * Entries of an array literal's interior. Masked first, so a name appearing
+ * only in a comment is not mistaken for an existing entry.
  */
 function parseArrayEntries(inner: string): string[] {
   return maskNonCode(inner)
@@ -122,10 +110,9 @@ function parseArrayEntries(inner: string): string[] {
 }
 
 /**
- * `arrayInterior` with `valueSource` appended. The existing text is preserved
- * verbatim rather than re-joined from parsed entries: re-joining collapses a
- * formatted multi-line array onto one line and folds any trailing `// note`
- * over the rest of the statement.
+ * The existing text is preserved verbatim rather than re-joined from parsed
+ * entries: re-joining collapses a multi-line array onto one line and folds any
+ * trailing comment over the rest of the statement.
  */
 function appendArrayEntry(arrayInterior: string, valueSource: string): string {
   // Length of the interior up to its last code character: everything after it
@@ -141,28 +128,13 @@ function appendArrayEntry(arrayInterior: string, valueSource: string): string {
 
 /**
  * Whether every value binding `importStatement` asks for is already imported
- * from the same module.
- *
- * The literal-line test in {@link insertImport} only recognizes the exact
- * statement this package would have written, so an import that has since been
- * *merged* — `import { Router, registerAttachmentRoutes } from '@guren/core'`,
- * the idiomatic form and what any formatter produces — reads as absent. The
- * patch then appends a second import of the same name and the app stops
- * compiling on a duplicate binding. Re-running a scaffolder must repair, not
- * break.
- *
- * Decided on the AST rather than by regex, unlike the rest of this file. The
- * file locates *edit sites* textually on purpose (see `maskNonCode`) because
- * it must preserve formatting it did not write — but this function performs no
- * edit, and a wrong answer here is silent in the worst direction: it makes a
- * scaffolder skip an import the generated code needs. Regex got five distinct
- * cases wrong, each of which the AST answers for free: an import inside a
- * comment or template literal, a `type`-only import (which binds no value),
- * `X as wanted` (which binds the name from a *different* symbol), a comment
- * between the braces, and a pattern spanning two imports.
- *
- * Unparseable content answers `false` — insert, and let the duplicate-binding
- * error surface — rather than `true`, which would silently drop the import.
+ * from the same module. {@link insertImport}'s literal-line test only knows
+ * the statement this package writes, so a *merged* import reads as absent and
+ * the patch appends a duplicate binding. Decided on the AST, unlike the rest
+ * of this file, because regex got five cases wrong here: an import inside a
+ * comment or template literal, a `type`-only import, `X as wanted`, a comment
+ * between the braces, and a pattern spanning two imports. Unparseable content
+ * answers `false`, so a duplicate surfaces rather than a dropped import.
  */
 function namedBindingsAlreadyImported(content: string, importStatement: string): boolean {
   const requested = parseNamedImport(importStatement)
@@ -180,9 +152,8 @@ function namedBindingsAlreadyImported(content: string, importStatement: string):
     for (const specifier of statement.specifiers) {
       if (specifier.type !== 'ImportSpecifier') continue
       if (specifier.importKind === 'type') continue
-      // Both halves must match: `Router as wanted` binds the wanted *name*,
-      // but to the wrong symbol, so skipping the insert would leave the
-      // generated call invoking Router.
+      // Both halves must match: `Router as wanted` binds the wanted name to
+      // the wrong symbol, so skipping the insert leaves the call invoking it.
       const imported = specifierName(specifier.imported)
       if (imported === specifier.local.name) bound.add(imported)
     }
@@ -198,8 +169,7 @@ function specifierName(node: { type: string; name?: string; value?: string }): s
 
 /**
  * The bindings and module of a plain named import, or `null` for any other
- * form. Parsed from the caller-supplied statement, which is first-party
- * literal text — the file's own callers pass a string constant.
+ * form. The statement is first-party literal text from this file's callers.
  */
 function parseNamedImport(statement: string): { bindings: string[]; source: string } | null {
   const ast = parseSourceFile(statement)
@@ -209,8 +179,8 @@ function parseNamedImport(statement: string): { bindings: string[]; source: stri
 
   const bindings: string[] = []
   for (const specifier of declaration.specifiers) {
-    // A default or namespace import is a different question than this
-    // function answers, so decline the whole statement rather than half of it.
+    // A default or namespace import is a different question, so decline the
+    // whole statement rather than half of it.
     if (specifier.type !== 'ImportSpecifier') return null
     if (specifier.importKind === 'type') return null
     const imported = specifierName(specifier.imported)
@@ -222,12 +192,9 @@ function parseNamedImport(statement: string): { bindings: string[]; source: stri
 }
 
 /**
- * `content` with `importStatement` inserted after the last existing import, or
- * `null` when it is already there.
- *
- * Split out from `addImport` so a patch that also edits the body can apply both
- * in one write: the alternative is a second file-level pass that can leave an
- * import behind when the body edit is the one that failed.
+ * `null` when the import is already there. Split out from `addImport` so a
+ * patch that also edits the body applies both in one write — a second
+ * file-level pass can leave an import behind when the body edit fails.
  */
 export function insertImport(content: string, importStatement: string): string | null {
   const normalizedImport = importStatement.trim()
@@ -279,10 +246,7 @@ export function insertImport(content: string, importStatement: string): string |
   return lines.join('\n')
 }
 
-/**
- * Adds an import statement to a file if not already present.
- * Inserts the import at the top of the file, after any existing imports.
- */
+/** Adds an import after the file's existing ones, unless already present. */
 export async function addImport(
   filePath: string,
   importStatement: string,
@@ -305,34 +269,24 @@ export async function addImport(
 }
 
 /**
- * Either the patched content or the reason it could not be produced. The
- * in-memory counterpart of `PatchResult`, for patches whose "nothing to do"
- * and "cannot do it" outcomes are more than one bit — `insertImport` gets away
- * with `string | null` because it has only one.
+ * The in-memory counterpart of `PatchResult`, for patches whose "nothing to
+ * do" and "cannot do it" outcomes are more than one bit.
  */
 export type InsertResult = { content: string; reason?: undefined } | { content?: undefined; reason: string }
 
 /**
- * `content` with `providerName` appended to its `providers: [ ... ]` array.
- *
- * Pure, and split out for the same reason as `insertImport`: a caller that
- * also has to add the provider's import applies both here and writes once, so
- * a failure cannot leave one half of the pair on disk. Composed with
- * `insertImport` by `addProviderRegistration`.
- *
- * The array is re-joined from its parsed entries rather than appended to in
- * place (what `appendArrayEntry` does), so a multi-line `providers` array is
- * collapsed onto one line. That is long-standing output every provider-wiring
- * test pins; it is preserved deliberately.
+ * Pure, and split out for the same reason as `insertImport`: a caller adding
+ * the provider's import too applies both here and writes once, so a failure
+ * cannot leave half the pair on disk. Re-joins from parsed entries rather than
+ * appending in place, collapsing a multi-line array onto one line — long-
+ * standing output that every provider-wiring test pins.
  */
 export function insertProvider(
   content: string,
   providerName: string,
   /**
-   * Custom "already registered" check over the existing array entries.
-   * Defaults to exact-match against `providerName`; factory registrations
-   * pass a prefix check so a configured call like `vercelPlugin({ ... })`
-   * counts as registered.
+   * Defaults to exact-match against `providerName`; factory registrations pass
+   * a prefix check so `vercelPlugin({ ... })` counts as registered.
    */
   isRegistered?: (entries: string[]) => boolean,
 ): InsertResult {
@@ -359,9 +313,7 @@ export function insertProvider(
   }
 }
 
-/**
- * Adds a provider to the providers array in Application initialization.
- */
+/** Adds a provider to the `providers` array in the app's createApp() call. */
 export async function addProvider(
   filePath: string,
   providerName: string,
@@ -385,11 +337,9 @@ export async function addProvider(
 }
 
 /**
- * Index range of the `{ ... }` options object passed to `callName(` — the
- * span every "edit an option of this call" patch works within, so that a
- * `key:` belonging to some other call in the same file is never touched.
- * Returns the failure `reason` as a string when the call or its object
- * cannot be located.
+ * The span every "edit an option of this call" patch works within, so a `key:`
+ * belonging to another call in the same file is never touched. Returns the
+ * failure `reason` as a string when the call cannot be located.
  */
 function findCallOptionsSpan(
   content: string,
@@ -409,20 +359,12 @@ function findCallOptionsSpan(
 }
 
 /**
- * Adds an entry to an arbitrary array-valued option of a single-object-
- * argument call (e.g. `modules: [...]` in `createApp({ ... })`, or
- * `commands: [...]` in `defineModule({ ... })`), creating the option (via
- * `addCreateAppOption`) if it isn't present at all yet. Generalizes
- * `addProvider`'s array-editing logic to a caller-supplied `key` instead of
- * the hardcoded `providers:`.
+ * Adds an entry to an array-valued option of a single-object-argument call
+ * (`modules: [...]` in `createApp`, `commands: [...]` in `defineModule`),
+ * creating the option when absent and scoped to `callName`'s own object.
  *
- * The search is scoped to `callName`'s own options object, so a same-named
- * key on an unrelated call in the file is left alone.
- *
- * `addProvider` is kept as its own independent implementation rather than
- * delegating here, to avoid changing its existing behavior (it fails with
- * `'Could not find providers array'` when the array is absent, rather than
- * creating one) for its existing callers.
+ * `addProvider` stays a separate implementation rather than delegating here,
+ * so its existing callers keep its failure-when-absent behaviour.
  */
 export async function addToArrayOption(
   filePath: string,
@@ -471,15 +413,11 @@ export async function addToArrayOption(
 }
 
 /**
- * Adds an entry to an array literal passed straight to a method call, e.g.
- * the `kernel.registerMany([...])` in a project's `src/console.ts`. The
- * receiver is matched loosely (any identifier or member expression, or none)
- * so a kernel bound to a name other than `kernel` still gets patched.
- *
- * Only a call whose argument is an array *literal* matches, which is what
- * makes this safe in a console entrypoint that also contains
- * `kernel.registerMany(billingModule.commands)` — that form is skipped
- * rather than mangled.
+ * Adds an entry to an array literal passed straight to a method call, such as
+ * `kernel.registerMany([...])`. The receiver is matched loosely, so a kernel
+ * bound to another name still gets patched, but only an array *literal*
+ * argument matches — `registerMany(billingModule.commands)` is skipped rather
+ * than mangled.
  */
 export async function addToArrayArgument(
   filePath: string,
@@ -524,9 +462,7 @@ export async function addToArrayArgument(
   return { modified: true }
 }
 
-/**
- * Checks if a specific import statement exists in a file.
- */
+/** Whether the exact import statement already exists in a file. */
 export async function hasImport(filePath: string, importStatement: string): Promise<boolean> {
   const absolutePath = resolve(process.cwd(), filePath)
 
@@ -541,9 +477,7 @@ export async function hasImport(filePath: string, importStatement: string): Prom
   }
 }
 
-/**
- * Checks if AuthProvider is already registered in a file.
- */
+/** Whether AuthProvider is already registered in a file. */
 export async function hasAuthProvider(filePath: string): Promise<boolean> {
   const absolutePath = resolve(process.cwd(), filePath)
 
@@ -560,20 +494,8 @@ import type { SchemaDialect } from './schema-parser'
 export type { SchemaDialect }
 
 /**
- * The drizzle dialect an app's `db/schema.ts` is written in. Every patcher
- * that appends columns or tables has to agree on this — `add auth` and
- * `add resource` writing different dialects into one schema is silent, since
- * drizzle's table builders accept a foreign dialect's column builders.
- *
- * Deliberately a whole-file content sniff, not the parser's per-table
- * resolution: patchers call this with content they hold mid-write, and the
- * case that matters most is a schema with no tables yet — hence the `pg`
- * fallback below, which a parse-based answer could not produce.
- */
-/**
- * The `@guren/orm/drizzle/<dialect>` barrel each dialect's schema imports its
- * column builders from: a dialect signal for `detectSchemaDialect`, and the
- * module the `ensure*Imports` patchers below merge new builders into.
+ * The barrel each dialect's schema imports its column builders from: a signal
+ * for `detectSchemaDialect`, and where `ensure*Imports` merges new builders.
  */
 export const DIALECT_BARRELS = {
   sqlite: '@guren/orm/drizzle/sqlite',
@@ -581,6 +503,14 @@ export const DIALECT_BARRELS = {
   mysql: '@guren/orm/drizzle/mysql',
 } as const satisfies Record<SchemaDialect, string>
 
+/**
+ * The dialect an app's `db/schema.ts` is written in. Every column-appending
+ * patcher must agree: drizzle's table builders accept a foreign dialect's
+ * column builders, so two patchers disagreeing fails silently. A whole-file
+ * content sniff rather than the parser's per-table resolution, because
+ * patchers call it mid-write and a schema with no tables still needs an
+ * answer — hence the `pg` fallback.
+ */
 export function detectSchemaDialect(content: string): SchemaDialect {
   if (
     content.includes('sqliteTable') ||
@@ -600,9 +530,8 @@ export function detectSchemaDialect(content: string): SchemaDialect {
 }
 
 /**
- * The `@guren/core` seeder context type each dialect's seeders must be
- * annotated with. `SeederContext` alone is PostgreSQL-shaped, so an
- * unannotated seeder in a MySQL or SQLite app rejects its own schema.
+ * `SeederContext` alone is PostgreSQL-shaped, so an unannotated seeder in a
+ * MySQL or SQLite app rejects its own schema.
  */
 export const seederContextTypes = {
   sqlite: 'SqliteSeederContext',
@@ -610,33 +539,21 @@ export const seederContextTypes = {
   mysql: 'MySqlSeederContext',
 } as const satisfies Record<SchemaDialect, string>
 
-/**
- * The dialect of the app's `db/schema.ts`. An app that has none yet reads as
- * PostgreSQL, the same default an empty schema yields.
- */
+/** An app with no `db/schema.ts` yet reads as PostgreSQL, like an empty one. */
 export async function readSchemaDialect(cwd: string = process.cwd()): Promise<SchemaDialect> {
   return detectSchemaDialect((await readIfExists(cwd, 'db/schema.ts')) ?? '')
 }
 
 /**
- * Ensures that a set of named imports from `specifier` are present in file
- * content. Merges into the first `import { ... } from '<specifier>'` or
- * prepends a new one. Returns the (possibly updated) content string.
- *
- * Three limits are inherited from the dialect-specific patchers this
- * generalizes, and callers have to know them:
- *
- * - The "already imported?" check is **not** module-scoped. A name in scope
- *   from any module counts as present, so nothing is added — see the mixed
- *   dialect case in `patch-helpers.test.ts`.
- * - Only the plain named form is merged. `import type`, default, and
- *   namespace imports of the same specifier do not match, so a second import
- *   line gets prepended alongside them.
- * - `needed` must be plain identifiers; they go into a `\b...\b` pattern
- *   unescaped.
+ * Merges `needed` into the first `import { ... } from '<specifier>'`, or
+ * prepends one. Three limits inherited from the dialect-specific patchers this
+ * generalizes: the already-imported check is **not** module-scoped (a name in
+ * scope from any module counts as present); only the plain named form merges,
+ * so `import type`, default and namespace imports get a second line beside
+ * them; and `needed` must be plain identifiers, used unescaped in a `\b`
+ * pattern.
  */
 export function ensureNamedImports(content: string, specifier: string, needed: string[]): string {
-  // Check only import lines for existing identifiers, not the entire file content
   const importContent = content
     .split('\n')
     .filter((line) => line.trimStart().startsWith('import '))
@@ -656,9 +573,8 @@ export function ensureNamedImports(content: string, specifier: string, needed: s
   const names = [...new Set([...existingNames, ...missing])].sort()
   const importLine = `import { ${names.join(', ')} } from '${specifier}'`
 
-  // A function replacer, not a replacement string: `specifier` and the merged
-  // names are parameters now, and `$&`/`$1` in a replacement string would be
-  // expanded instead of inserted literally.
+  // A function replacer, not a replacement string: `$&`/`$1` in the merged
+  // names would otherwise be expanded instead of inserted literally.
   return match ? content.replace(existingImport, () => importLine) : `${importLine}\n${content}`
 }
 
@@ -679,12 +595,9 @@ export function ensureMysqlImports(content: string, needed: string[]): string {
 }
 
 /**
- * Adds a top-level option to the createApp({ ... }) call in a file.
- * The value is inserted verbatim, e.g. addCreateAppOption(path, 'auth', '{}').
- *
- * `callName` selects which single-object-argument call to edit — the default
- * targets `createApp({ ... })`; `'defineModule'` targets a module's
- * `modules/<name>/index.ts` descriptor.
+ * Adds a top-level option to a single-object-argument call, its value inserted
+ * verbatim. `callName` defaults to `createApp`; `'defineModule'` targets a
+ * module's `modules/<name>/index.ts` descriptor.
  */
 export async function addCreateAppOption(
   filePath: string,

@@ -35,16 +35,13 @@ export default class ${className} extends Controller {
 
 /**
  * Adapts rather than refuses on an API-only app, unlike the multi-file
- * scaffolds: one controller has an obvious API dialect where a whole sign-in
- * flow does not. The Inertia template is the one file such an app's own
- * tsconfig flags — it imports a `@/.guren/pages.gen` codegen never writes
- * there — so emitting JSON is what the app asked for, not a lesser fallback.
+ * scaffolds: the Inertia template imports a `@/.guren/pages.gen` codegen never
+ * writes there, so JSON is what such an app asked for.
  */
 export async function makeController(name: string, options: WriterOptions = {}): Promise<string> {
   const moduleName = options.root ? safeModuleName(options.root) : undefined
-  // Resolved once and handed to the write as well: a relative `cwd`
-  // re-resolved after the probe's awaits could name a different app than the
-  // one judged.
+  // Resolved once and handed to the write too: a relative `cwd` re-resolved
+  // after the probe's awaits could name a different app than the one judged.
   const appRoot = writeRoot(options)
   const apiOnly = await isConfirmedApiOnlyApp(appRoot)
   return scaffoldFile(name, {

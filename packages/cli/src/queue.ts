@@ -8,45 +8,24 @@ import {
 } from './queue-deps'
 import { bootstrapApplication, resolveMainEntry } from './runtime'
 
-/**
- * Options for running the queue worker.
- */
 export interface QueueWorkOptions {
-  /**
-   * Queues to process (comma-separated).
-   * @default 'default'
-   */
+  /** Queues to process (comma-separated). @default 'default' */
   queue?: string
 
-  /**
-   * Process only one job and exit.
-   */
+  /** Process only one job and exit. */
   once?: boolean
 
-  /**
-   * Sleep time between job polling (ms).
-   * @default 1000
-   */
+  /** Sleep time between job polling (ms). @default 1000 */
   sleep?: number
 
-  /**
-   * Maximum number of jobs to process.
-   * @default 0 (unlimited)
-   */
+  /** Maximum number of jobs to process. @default 0 (unlimited) */
   maxJobs?: number
 
-  /**
-   * Job timeout in seconds.
-   * @default 60
-   */
+  /** Job timeout in seconds. @default 60 */
   timeout?: number
 }
 
-/**
- * Start the queue worker.
- */
 export async function runQueueWorker(options: QueueWorkOptions = {}): Promise<void> {
-  // Bootstrap the application to get the queue driver
   const driver = await getConfiguredDriver()
 
   const queues = (options.queue ?? 'default').split(',').map((q) => q.trim())
@@ -80,7 +59,6 @@ export async function runQueueWorker(options: QueueWorkOptions = {}): Promise<vo
 
   const worker = new Worker(driver, { queues, sleep, maxJobs, timeout, stopWhenEmpty }, events)
 
-  // Handle graceful shutdown
   const shutdown = async () => {
     consola.info('Shutting down worker...')
     await worker.stop()
@@ -93,9 +71,6 @@ export async function runQueueWorker(options: QueueWorkOptions = {}): Promise<vo
   await worker.start()
 }
 
-/**
- * List failed jobs.
- */
 export async function listFailedJobs(queue?: string, options: { json?: boolean } = {}): Promise<void> {
   const driver = await getConfiguredDriver()
   const failedJobs = await driver.getFailedJobs(queue)
@@ -131,9 +106,6 @@ export async function listFailedJobs(queue?: string, options: { json?: boolean }
   }
 }
 
-/**
- * Retry a failed job.
- */
 export async function retryFailedJob(jobId: string): Promise<void> {
   const driver = await getConfiguredDriver()
 
@@ -171,23 +143,15 @@ async function processFailedJobs(
   consola.success(`${action === 'retry' ? 'Retried' : 'Flushed'} ${count} job(s).`)
 }
 
-/**
- * Retry all failed jobs.
- */
 export async function retryAllFailedJobs(queue?: string): Promise<void> {
   await processFailedJobs('retry', queue)
 }
 
-/**
- * Flush (delete) all failed jobs.
- */
 export async function flushFailedJobs(queue?: string): Promise<void> {
   await processFailedJobs('flush', queue)
 }
 
-/**
- * Bootstrap the application and get the configured queue driver.
- */
+/** Boots the app so its queue manager can register a driver, then returns it. */
 async function getConfiguredDriver(): Promise<QueueDriver> {
   let entry: string
   try {

@@ -1,12 +1,6 @@
 import type { ValidationRule, FileValidationOptions, ImageValidationOptions, FileLike } from './types'
 
-/**
- * Built-in validation rules.
- */
-
-/**
- * Required rule - value must be present and not empty.
- */
+/** Required rule - value must be present and not empty. */
 export function required(): ValidationRule {
   return (value: unknown) => {
     if (value === undefined || value === null) {
@@ -22,16 +16,12 @@ export function required(): ValidationRule {
   }
 }
 
-/**
- * Nullable rule - allows null values (removes other validation if null).
- */
+/** Nullable rule - allows null values (removes other validation if null). */
 export function nullable(): ValidationRule {
   return () => true
 }
 
-/**
- * Required if another field equals a value.
- */
+/** Required if another field equals a value. */
 export function requiredIf(field: string, value: unknown): ValidationRule {
   return (v: unknown, _f: string, data: Record<string, unknown>) => {
     if (data[field] === value) {
@@ -43,9 +33,7 @@ export function requiredIf(field: string, value: unknown): ValidationRule {
   }
 }
 
-/**
- * Required unless another field equals a value.
- */
+/** Required unless another field equals a value. */
 export function requiredUnless(field: string, value: unknown): ValidationRule {
   return (v: unknown, _f: string, data: Record<string, unknown>) => {
     if (data[field] !== value) {
@@ -57,9 +45,7 @@ export function requiredUnless(field: string, value: unknown): ValidationRule {
   }
 }
 
-/**
- * Required with - field is required if any of the other fields are present.
- */
+/** Required with - field is required if any of the other fields are present. */
 export function requiredWith(...fields: string[]): ValidationRule {
   return (v: unknown, _f: string, data: Record<string, unknown>) => {
     const hasAny = fields.some((f) => data[f] !== undefined && data[f] !== null && data[f] !== '')
@@ -70,9 +56,7 @@ export function requiredWith(...fields: string[]): ValidationRule {
   }
 }
 
-/**
- * Required without - field is required if any of the other fields are not present.
- */
+/** Required without - field is required if any of the other fields are not present. */
 export function requiredWithout(...fields: string[]): ValidationRule {
   return (v: unknown, _f: string, data: Record<string, unknown>) => {
     const missingAny = fields.some((f) => data[f] === undefined || data[f] === null || data[f] === '')
@@ -83,9 +67,7 @@ export function requiredWithout(...fields: string[]): ValidationRule {
   }
 }
 
-/**
- * String rule - value must be a string.
- */
+/** String rule - value must be a string. */
 export function string(): ValidationRule {
   return (value: unknown) => {
     if (value === undefined || value === null) return true
@@ -96,9 +78,7 @@ export function string(): ValidationRule {
   }
 }
 
-/**
- * Numeric rule - value must be a number.
- */
+/** Numeric rule - value must be a number. */
 export function numeric(): ValidationRule {
   return (value: unknown) => {
     if (value === undefined || value === null) return true
@@ -108,9 +88,7 @@ export function numeric(): ValidationRule {
   }
 }
 
-/**
- * Integer rule - value must be an integer.
- */
+/** Integer rule - value must be an integer. */
 export function integer(): ValidationRule {
   return (value: unknown) => {
     if (value === undefined || value === null) return true
@@ -122,9 +100,7 @@ export function integer(): ValidationRule {
   }
 }
 
-/**
- * Boolean rule - value must be a boolean.
- */
+/** Boolean rule - value must be a boolean. */
 export function boolean(): ValidationRule {
   return (value: unknown) => {
     if (value === undefined || value === null) return true
@@ -143,9 +119,7 @@ export function boolean(): ValidationRule {
   }
 }
 
-/**
- * Array rule - value must be an array.
- */
+/** Array rule - value must be an array. */
 export function array(): ValidationRule {
   return (value: unknown) => {
     if (value === undefined || value === null) return true
@@ -156,9 +130,7 @@ export function array(): ValidationRule {
   }
 }
 
-/**
- * Object rule - value must be an object.
- */
+/** Object rule - value must be an object. */
 export function object(): ValidationRule {
   return (value: unknown) => {
     if (value === undefined || value === null) return true
@@ -169,9 +141,7 @@ export function object(): ValidationRule {
   }
 }
 
-/**
- * Email rule - value must be a valid email.
- */
+/** Email rule - value must be a valid email. */
 export function email(): ValidationRule {
   return (value: unknown) => {
     if (value === undefined || value === null || value === '') return true
@@ -186,10 +156,8 @@ export function email(): ValidationRule {
 }
 
 /**
- * Same accept set as `/^[^\s@]+@[^\s@]+\.[^\s@]+$/` — non-empty local part,
- * exactly one `@`, no whitespace, and a dot inside the domain with at least
- * one character on each side — but scanned linearly. That regex backtracks
- * quadratically on request-derived input (e.g. `"a@" + ".".repeat(n) + " "`).
+ * The accept set of `/^[^\s@]+@[^\s@]+\.[^\s@]+$/`, scanned linearly: that regex
+ * backtracks quadratically on request-derived input (`"a@" + ".".repeat(n) + " "`).
  */
 function isPlausibleEmail(value: string): boolean {
   const at = value.indexOf('@')
@@ -203,9 +171,7 @@ function isPlausibleEmail(value: string): boolean {
   return domain.slice(1, -1).includes('.')
 }
 
-/**
- * URL rule - value must be a valid URL.
- */
+/** URL rule - value must be a valid URL. */
 export function url(): ValidationRule {
   return (value: unknown) => {
     if (value === undefined || value === null || value === '') return true
@@ -221,9 +187,7 @@ export function url(): ValidationRule {
   }
 }
 
-/**
- * UUID rule - value must be a valid UUID.
- */
+/** UUID rule - value must be a valid UUID. */
 export function uuid(): ValidationRule {
   return (value: unknown) => {
     if (value === undefined || value === null || value === '') return true
@@ -238,9 +202,7 @@ export function uuid(): ValidationRule {
   }
 }
 
-/**
- * Minimum rule - value must be at least min.
- */
+/** Minimum rule - value must be at least min. */
 export function min(minValue: number): ValidationRule {
   return (value: unknown) => {
     if (value === undefined || value === null || value === '') return true
@@ -262,9 +224,7 @@ export function min(minValue: number): ValidationRule {
   }
 }
 
-/**
- * Maximum rule - value must be at most max.
- */
+/** Maximum rule - value must be at most max. */
 export function max(maxValue: number): ValidationRule {
   return (value: unknown) => {
     if (value === undefined || value === null || value === '') return true
@@ -286,9 +246,7 @@ export function max(maxValue: number): ValidationRule {
   }
 }
 
-/**
- * Between rule - value must be between min and max.
- */
+/** Between rule - value must be between min and max. */
 export function between(minValue: number, maxValue: number): ValidationRule {
   return (value: unknown) => {
     if (value === undefined || value === null || value === '') return true
@@ -310,9 +268,7 @@ export function between(minValue: number, maxValue: number): ValidationRule {
   }
 }
 
-/**
- * Size rule - value must be exactly size.
- */
+/** Size rule - value must be exactly size. */
 export function size(exactSize: number): ValidationRule {
   return (value: unknown) => {
     if (value === undefined || value === null || value === '') return true
@@ -330,9 +286,7 @@ export function size(exactSize: number): ValidationRule {
   }
 }
 
-/**
- * In rule - value must be in the given array.
- */
+/** In rule - value must be in the given array. */
 export function inValues(values: unknown[]): ValidationRule {
   return (value: unknown) => {
     if (value === undefined || value === null || value === '') return true
@@ -343,9 +297,7 @@ export function inValues(values: unknown[]): ValidationRule {
   }
 }
 
-/**
- * Not in rule - value must not be in the given array.
- */
+/** Not in rule - value must not be in the given array. */
 export function notIn(values: unknown[]): ValidationRule {
   return (value: unknown) => {
     if (value === undefined || value === null || value === '') return true
@@ -356,9 +308,7 @@ export function notIn(values: unknown[]): ValidationRule {
   }
 }
 
-/**
- * Regex rule - value must match the regex.
- */
+/** Regex rule - value must match the regex. */
 export function regex(pattern: RegExp): ValidationRule {
   return (value: unknown) => {
     if (value === undefined || value === null || value === '') return true
@@ -372,9 +322,7 @@ export function regex(pattern: RegExp): ValidationRule {
   }
 }
 
-/**
- * Confirmed rule - field must have a matching field_confirmation.
- */
+/** Confirmed rule - field must have a matching field_confirmation. */
 export function confirmed(): ValidationRule {
   return (value: unknown, field: string, data: Record<string, unknown>) => {
     const confirmField = `${field}_confirmation`
@@ -385,9 +333,7 @@ export function confirmed(): ValidationRule {
   }
 }
 
-/**
- * Same rule - field must match another field.
- */
+/** Same rule - field must match another field. */
 export function same(otherField: string): ValidationRule {
   return (value: unknown, _field: string, data: Record<string, unknown>) => {
     if (value !== data[otherField]) {
@@ -397,9 +343,7 @@ export function same(otherField: string): ValidationRule {
   }
 }
 
-/**
- * Different rule - field must be different from another field.
- */
+/** Different rule - field must be different from another field. */
 export function different(otherField: string): ValidationRule {
   return (value: unknown, _field: string, data: Record<string, unknown>) => {
     if (value === data[otherField]) {
@@ -409,9 +353,7 @@ export function different(otherField: string): ValidationRule {
   }
 }
 
-/**
- * After rule - date must be after another date.
- */
+/** After rule - date must be after another date. */
 export function after(date: string | Date): ValidationRule {
   return (value: unknown) => {
     if (value === undefined || value === null || value === '') return true
@@ -427,9 +369,7 @@ export function after(date: string | Date): ValidationRule {
   }
 }
 
-/**
- * After or equal rule - date must be after or equal to another date.
- */
+/** After or equal rule - date must be after or equal to another date. */
 export function afterOrEqual(date: string | Date): ValidationRule {
   return (value: unknown) => {
     if (value === undefined || value === null || value === '') return true
@@ -445,9 +385,7 @@ export function afterOrEqual(date: string | Date): ValidationRule {
   }
 }
 
-/**
- * Before rule - date must be before another date.
- */
+/** Before rule - date must be before another date. */
 export function before(date: string | Date): ValidationRule {
   return (value: unknown) => {
     if (value === undefined || value === null || value === '') return true
@@ -463,9 +401,7 @@ export function before(date: string | Date): ValidationRule {
   }
 }
 
-/**
- * Before or equal rule - date must be before or equal to another date.
- */
+/** Before or equal rule - date must be before or equal to another date. */
 export function beforeOrEqual(date: string | Date): ValidationRule {
   return (value: unknown) => {
     if (value === undefined || value === null || value === '') return true
@@ -481,9 +417,7 @@ export function beforeOrEqual(date: string | Date): ValidationRule {
   }
 }
 
-/**
- * Date rule - value must be a valid date.
- */
+/** Date rule - value must be a valid date. */
 export function date(): ValidationRule {
   return (value: unknown) => {
     if (value === undefined || value === null || value === '') return true
@@ -495,16 +429,13 @@ export function date(): ValidationRule {
   }
 }
 
-/**
- * Date format rule - value must match the given format.
- */
+/** Date format rule - value must match the given format. */
 export function dateFormat(format: string): ValidationRule {
   return (value: unknown) => {
     if (value === undefined || value === null || value === '') return true
     if (typeof value !== 'string') {
       return `The :attribute does not match the format ${format}.`
     }
-    // Basic format validation
     const patterns: Record<string, RegExp> = {
       'YYYY-MM-DD': /^\d{4}-\d{2}-\d{2}$/,
       'DD/MM/YYYY': /^\d{2}\/\d{2}\/\d{4}$/,
@@ -519,9 +450,7 @@ export function dateFormat(format: string): ValidationRule {
   }
 }
 
-/**
- * Alpha rule - value must only contain letters.
- */
+/** Alpha rule - value must only contain letters. */
 export function alpha(): ValidationRule {
   return (value: unknown) => {
     if (value === undefined || value === null || value === '') return true
@@ -532,9 +461,7 @@ export function alpha(): ValidationRule {
   }
 }
 
-/**
- * Alpha numeric rule - value must only contain letters and numbers.
- */
+/** Alpha numeric rule - value must only contain letters and numbers. */
 export function alphaNum(): ValidationRule {
   return (value: unknown) => {
     if (value === undefined || value === null || value === '') return true
@@ -545,9 +472,7 @@ export function alphaNum(): ValidationRule {
   }
 }
 
-/**
- * Alpha dash rule - value must only contain letters, numbers, dashes, and underscores.
- */
+/** Alpha dash rule - value must only contain letters, numbers, dashes, and underscores. */
 export function alphaDash(): ValidationRule {
   return (value: unknown) => {
     if (value === undefined || value === null || value === '') return true
@@ -558,9 +483,7 @@ export function alphaDash(): ValidationRule {
   }
 }
 
-/**
- * Starts with rule - value must start with one of the given prefixes.
- */
+/** Starts with rule - value must start with one of the given prefixes. */
 export function startsWith(...prefixes: string[]): ValidationRule {
   return (value: unknown) => {
     if (value === undefined || value === null || value === '') return true
@@ -574,9 +497,7 @@ export function startsWith(...prefixes: string[]): ValidationRule {
   }
 }
 
-/**
- * Ends with rule - value must end with one of the given suffixes.
- */
+/** Ends with rule - value must end with one of the given suffixes. */
 export function endsWith(...suffixes: string[]): ValidationRule {
   return (value: unknown) => {
     if (value === undefined || value === null || value === '') return true
@@ -590,9 +511,7 @@ export function endsWith(...suffixes: string[]): ValidationRule {
   }
 }
 
-/**
- * JSON rule - value must be a valid JSON string.
- */
+/** JSON rule - value must be a valid JSON string. */
 export function json(): ValidationRule {
   return (value: unknown) => {
     if (value === undefined || value === null || value === '') return true
@@ -608,16 +527,13 @@ export function json(): ValidationRule {
   }
 }
 
-/**
- * IP rule - value must be a valid IP address.
- */
+/** IP rule - value must be a valid IP address. */
 export function ip(): ValidationRule {
   return (value: unknown) => {
     if (value === undefined || value === null || value === '') return true
     if (typeof value !== 'string') {
       return 'The :attribute must be a valid IP address.'
     }
-    // IPv4 pattern
     const ipv4 = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/
     // Simple IPv6 pattern
     const ipv6 = /^([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$/
@@ -628,9 +544,7 @@ export function ip(): ValidationRule {
   }
 }
 
-/**
- * IPv4 rule - value must be a valid IPv4 address.
- */
+/** IPv4 rule - value must be a valid IPv4 address. */
 export function ipv4(): ValidationRule {
   return (value: unknown) => {
     if (value === undefined || value === null || value === '') return true
@@ -645,9 +559,7 @@ export function ipv4(): ValidationRule {
   }
 }
 
-/**
- * IPv6 rule - value must be a valid IPv6 address.
- */
+/** IPv6 rule - value must be a valid IPv6 address. */
 export function ipv6(): ValidationRule {
   return (value: unknown) => {
     if (value === undefined || value === null || value === '') return true
@@ -663,11 +575,7 @@ export function ipv6(): ValidationRule {
   }
 }
 
-// File validation rules
-
-/**
- * File rule - validates a file object.
- */
+/** File rule - validates a file object. */
 export function file(options: FileValidationOptions = {}): ValidationRule {
   return (value: unknown) => {
     if (value === undefined || value === null) return true
@@ -706,9 +614,7 @@ export function file(options: FileValidationOptions = {}): ValidationRule {
   }
 }
 
-/**
- * Image rule - validates an image file.
- */
+/** Image rule - validates an image file. */
 export function image(options: ImageValidationOptions = {}): ValidationRule {
   const defaultMimes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml']
 
@@ -724,13 +630,11 @@ export function image(options: ImageValidationOptions = {}): ValidationRule {
       return 'The :attribute must be an image.'
     }
 
-    // Check MIME type
     const allowedMimes = options.mimes ?? defaultMimes
     if (!allowedMimes.includes(fileValue.type)) {
       return 'The :attribute must be an image.'
     }
 
-    // Apply file validation
     if (options.maxSize && fileValue.size > options.maxSize) {
       return `The :attribute must not exceed ${formatBytes(options.maxSize)}.`
     }
@@ -743,30 +647,21 @@ export function image(options: ImageValidationOptions = {}): ValidationRule {
   }
 }
 
-/**
- * Mimes rule - validates file MIME types.
- */
+/** Mimes rule - validates file MIME types. */
 export function mimes(...mimeTypes: string[]): ValidationRule {
   return file({ mimes: mimeTypes })
 }
 
-/**
- * Max file size rule.
- */
+/** Max file size rule. */
 export function maxFileSize(bytes: number): ValidationRule {
   return file({ maxSize: bytes })
 }
 
-/**
- * Min file size rule.
- */
+/** Min file size rule. */
 export function minFileSize(bytes: number): ValidationRule {
   return file({ minSize: bytes })
 }
 
-/**
- * Helper to format bytes.
- */
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
@@ -774,9 +669,7 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`
 }
 
-/**
- * Custom rule - create a custom validation rule.
- */
+/** Custom rule - create a custom validation rule. */
 export function custom(
   validate: (value: unknown, field: string, data: Record<string, unknown>) => boolean | string | Promise<boolean | string>,
   message?: string
@@ -789,9 +682,7 @@ export function custom(
   }
 }
 
-/**
- * Unique rule (async) - checks uniqueness via callback.
- */
+/** Unique rule (async) - checks uniqueness via callback. */
 export function unique(
   callback: (value: unknown, field: string) => Promise<boolean>
 ): ValidationRule {
@@ -805,9 +696,7 @@ export function unique(
   }
 }
 
-/**
- * Exists rule (async) - checks existence via callback.
- */
+/** Exists rule (async) - checks existence via callback. */
 export function exists(
   callback: (value: unknown, field: string) => Promise<boolean>
 ): ValidationRule {

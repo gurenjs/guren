@@ -3,28 +3,14 @@
  * runs.
  *
  * The scaffold's `@guren/*` ranges are generated from the workspace versions, so
- * any release that moves one of them also has to republish the scaffolder — see
- * `assertCreateAppRepublishes` in `sync-template-deps.ts` for why. That refusal
- * fired on both the v2.7.0 and v2.7.1 releases, and each time the recovery was a
- * human writing a `create-guren-app: patch` changeset and starting the release
- * over. This removes the recovery, not the refusal.
+ * any release moving one must republish the scaffolder (`assertCreateAppRepublishes`
+ * in `sync-template-deps.ts`). That refusal stays as the backstop for what cannot
+ * be predicted here, but only covers a release that rewrote a range; a drizzle pin
+ * is synced in the ordinary PR that moved it, so it is covered by neither half.
  *
- * The refusal stays as the backstop for what cannot be predicted here — a
- * hand-edited template, most of all. It is a narrower backstop than it looks:
- * `sync-template-deps` returns before asserting when it rewrote nothing, so it
- * only covers a release that moved a range. For `@guren/*` ranges that is always
- * the case, since they can only move at `changeset version`. A drizzle pin is
- * different: `audit:template-deps` forces it to be synced in the ordinary PR
- * that moved it, so by release time there is nothing left to rewrite and nothing
- * asserts. That case is covered by neither half and is out of scope here.
- *
- * Deliberately writes a changeset rather than editing a version: changesets
- * stays the one place a release is described, so the bump appears in the release
- * PR diff and in the changelog like any other.
- *
- * Failing here is safe — under-bumping only puts the release back in the state
- * above — so every path says out loud what it decided. A silent run is
- * indistinguishable from a script that never executed.
+ * Writes a changeset rather than editing a version, so the bump appears in the
+ * release PR diff and the changelog. Every path logs its decision: a silent run
+ * is indistinguishable from a script that never executed.
  */
 import { readFile, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -55,9 +41,8 @@ export type BumpDecision =
   | { bump: false; reason: 'no-release' | 'already-releasing' | 'templates-unaffected' }
 
 /**
- * Not every entry in the plan publishes something. Changesets lists a package it
- * pulled in but left alone as `type: "none"`, with its version unchanged, and
- * such an entry rewrites no range and uploads no tarball.
+ * Changesets lists a package it pulled in but left alone as `type: "none"` with
+ * its version unchanged; such an entry rewrites no range and uploads no tarball.
  */
 function publishes(release: PlannedRelease): boolean {
   return release.newVersion !== release.oldVersion
@@ -85,11 +70,9 @@ export async function packagesTemplatesDeclare(): Promise<Set<string>> {
 /**
  * Does this release move a version a template declares?
  *
- * The answer has to agree with whether `sync-template-deps` rewrites a range,
- * because a rewritten range is what makes the scaffolder's tarball stale. Hence
- * the shared `DEPENDENCY_GROUPS` and the version comparison rather than a bare
- * name match — the plan carries entries that publish nothing, and bumping the
- * scaffolder for one would upload a tarball identical to the last.
+ * Must agree with whether `sync-template-deps` rewrites a range, since that is
+ * what makes the scaffolder's tarball stale. Hence the shared `DEPENDENCY_GROUPS`
+ * and a version comparison rather than a bare name match.
  */
 export function planScaffolderBump(plan: ReleasePlan, declared: ReadonlySet<string>): BumpDecision {
   if (plan.releases.length === 0) {
@@ -130,11 +113,9 @@ export function renderChangeset(moving: readonly string[]): string {
 /**
  * Ask changesets what this release will publish.
  *
- * Spawns the workspace's own `changeset` rather than `bunx changeset`: the
- * plan's shape belongs to a particular `@changesets/cli`, and `bunx` will
- * quietly fetch a different one from the registry when the workspace is not
- * installed. A missing binary is a broken checkout, and saying so beats planning
- * a release against whatever npm happened to hand over.
+ * Spawns the workspace's own `changeset` rather than `bunx changeset`: the plan's
+ * shape belongs to a particular `@changesets/cli`, and `bunx` quietly fetches a
+ * different one from the registry when the workspace is not installed.
  */
 async function readReleasePlan(): Promise<ReleasePlan> {
   const bin = join(repoRoot, 'node_modules/.bin/changeset')
@@ -163,10 +144,8 @@ async function readReleasePlan(): Promise<ReleasePlan> {
 }
 
 async function main(): Promise<void> {
-  // Before the plan is read, so a bump left behind by an abandoned release is
-  // not mistaken for a maintainer's own decision to publish the scaffolder: it
-  // would put `create-guren-app` in the plan, this script would see it already
-  // there and stay silent, and the stale bump would ship.
+  // Before the plan is read: a bump left behind by an abandoned release would
+  // otherwise read as `already-releasing`, and ship stale.
   await unlink(join(repoRoot, MANAGED_CHANGESET)).catch(() => {})
 
   const decision = planScaffolderBump(await readReleasePlan(), await packagesTemplatesDeclare())

@@ -72,8 +72,8 @@ export class Post extends defineModel(posts) {}`,
         `export default class SendDigestCommand {\n  static signature = 'send-digest'\n}`,
         'utf8',
       )
-      // a helper module beside the commands is not a command — the listing
-      // shares the registration check's predicate, so the two cannot disagree
+      // The listing shares the registration check's predicate, so a helper
+      // module beside the commands cannot be a command in one and not the other.
       await writeFile(
         join(workspace.dir, 'app/Console/Commands/shared-config.ts'),
         `export const TABLES = ['users'] as const`,
@@ -95,10 +95,8 @@ export class Post extends defineModel(posts) {}`,
   })
 
   it('says the routes file could not be read, rather than reporting none', async () => {
-    // The shape #482 fixed for `guren context <Entity>`, in the project-wide
-    // map: an unloadable routes file used to render exactly what an app with
-    // no routes renders — `## Routes (0)` / `No routes loaded.`, exit 0 — so
-    // a reader could not tell a real answer from a failed one.
+    // An unloadable routes file rendering what an app with no routes renders
+    // (`No routes loaded.`, exit 0) hides a failure behind a real answer.
     const workspace = await createTempWorkspace('guren-cli-context-routes-broken-')
 
     try {
@@ -114,9 +112,8 @@ export class Post extends defineModel(posts) {}`,
 
       expect(ctx.routes).toEqual([])
       expect(ctx.routesError).toContain('package-that-is-not-installed')
-      // The renderer's three branches are mutually exclusive, so covering the
-      // `routesError` one here is enough — the other two are covered by the
-      // absent-file and named-typo cases below.
+      // The renderer's three branches are mutually exclusive; the other two are
+      // covered by the absent-file and named-typo cases below.
       expect(renderContextMarkdown(ctx)).toContain('Routes could not be read:')
     } finally {
       await workspace.cleanup()
@@ -124,12 +121,10 @@ export class Post extends defineModel(posts) {}`,
   })
 
   it('reports a routes path that cannot even be probed, rather than crashing', async () => {
-    // The absent-vs-unreadable split is a filesystem probe, and only ENOENT
-    // answers "absent". A `routes` that is a regular file makes the probe
-    // throw ENOTDIR (an unreadable parent throws EACCES); a probe that let
-    // that escape would crash `guren context --json` with a stack trace
-    // instead of the diagnostic, and one that read it as "absent" would print
-    // the confident "No routes loaded." the split exists to prevent.
+    // Only ENOENT answers "absent": a `routes` that is a regular file makes the
+    // probe throw ENOTDIR (an unreadable parent, EACCES). Letting that escape
+    // crashes `guren context --json`; reading it as absent prints the confident
+    // "No routes loaded." the split exists to prevent.
     const workspace = await createTempWorkspace('guren-cli-context-routes-notdir-')
 
     try {
@@ -180,12 +175,10 @@ export class Post extends defineModel(posts) {}`,
   })
 
   it('loads a routes file that imports @guren/core from this checkout', async () => {
-    // The positive control for the above: proving the error path works is
-    // worth nothing unless the success path is reached through the workspace.
-    // A fixture with no node_modules otherwise resolves `@guren/core` by
-    // Bun's auto-install fallback — the global cache, then npm — which is how
-    // a green test comes to be measuring the published package, or the
-    // registry, instead of this checkout.
+    // The positive control for the above. A fixture with no node_modules
+    // resolves `@guren/core` through Bun's auto-install fallback (global cache,
+    // then npm), which is how a green test comes to measure the published
+    // package instead of this checkout.
     const workspace = await createTempWorkspace('guren-cli-context-routes-linked-')
 
     try {
@@ -254,9 +247,8 @@ describe('renderContextMarkdown', () => {
 })
 
 describe('GUREN_API_DIGEST', () => {
-  // The rule files are the source of truth; the digest is a hand-written
-  // summary of them. Each token must appear in BOTH, so a one-sided edit
-  // — fixing a rule file without the digest, or vice versa — fails here.
+  // The digest is a hand-written summary of the rule files, so each token has
+  // to appear in both and a one-sided edit fails here.
   const tokensByRuleFile: Record<string, string[]> = {
     'orm-models.md': [
       '`=` `!=` `>` `<` `>=` `<=` `like` `in` `not in` `is null` `is not null`',

@@ -1,14 +1,9 @@
-// Preloaded into `bun test` to make working-directory leaks loud.
-//
-// Bun runs every test file in one shared process, so `process.cwd()` is global
-// state and the `make:*` generators resolve their output against it. A test
-// that chdir()s and does not restore relocates every test after it, and the
-// next generator call scaffolds into whatever directory was left behind.
-//
-// Two invariants, checked at the granularity each one needs:
+// Preloaded into `bun test` to make working-directory leaks loud. Bun shares
+// one process across test files, so `process.cwd()` is global state and the
+// `make:*` generators resolve their output against it. Two invariants:
 //   - after every test, cwd is the repo root or a temp directory;
-//   - a test file leaves cwd exactly where it found it, and creates none of
-//     the directories a scaffolded application owns inside the checkout.
+//   - a test file leaves cwd where it found it, and creates none of the
+//     directories a scaffolded application owns inside the checkout.
 
 import { afterAll, afterEach, beforeAll } from 'bun:test'
 import { existsSync, mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs'
@@ -25,10 +20,8 @@ const repoRoot = realpathSync(workspaceRoot)
 // realpath, so both spellings have to count as "a temp directory".
 const tempRoots = [...new Set([tmpdir(), realpathSync(tmpdir())])]
 
-// Where this test process began. `bun run test:bun` starts at the repo root,
-// but `bun test` inside a package starts there instead — both are legitimate,
-// so the invariant is "cwd is where the run started", not a fixed directory.
-// (Writes into the checkout are caught by the stray-output arm regardless.)
+// `bun test` inside a package legitimately starts there rather than at the repo
+// root, so the invariant is "cwd is where the run started", not a fixed path.
 const startCwd = realpathSync(process.cwd())
 
 /** Somewhere cwd is legitimate: where the run started, or a temp directory. */
@@ -37,11 +30,9 @@ export function isAllowed(cwd: string): boolean {
   return tempRoots.some((root) => cwd === root || cwd.startsWith(root + sep))
 }
 
-// Directories a scaffolded application owns. Inside this repository they are
-// generator output that resolved against the wrong directory — which is the
-// case the cwd invariant cannot see, because a generator called with no
-// explicit cwd while the process sits legitimately on the repo root never
-// moves cwd at all.
+// Directories a scaffolded application owns; inside this repository they are
+// generator output resolved against the wrong directory. The cwd invariant
+// cannot see that case — such a generator never moves cwd at all.
 const SCAFFOLD_DIRS = ['app', 'config', 'db', 'modules', 'resources', 'routes', 'lang', 'storage']
 
 // `src/` and `tests/` are scaffold output at the repo root, but every package
@@ -58,10 +49,8 @@ const watchedPaths: string[] = [
     .flatMap((entry) => SCAFFOLD_DIRS.map((dir) => join(repoRoot, 'packages', entry.name, dir))),
 ]
 
-// Anything already on disk before the tests ran is somebody's real work, and
-// these paths get deleted. Snapshotting means the watch list never has to be
-// an accurate inventory of what the repo does not contain — a package that
-// legitimately grows a `config/` is simply never reported.
+// These paths get deleted, so anything already on disk is exempt. Snapshotting
+// spares the watch list from being an accurate inventory of the repo.
 const preexisting = new Set(watchedPaths.filter((path) => existsSync(path)))
 
 /** Watched directories that this run created. */
@@ -69,9 +58,8 @@ export function strayScaffoldOutput(): string[] {
   return watchedPaths.filter((path) => !preexisting.has(path) && existsSync(path))
 }
 
-// Created only when something actually leaks. A leaked test is sent here
-// rather than back to the repo root: the repo root is the one directory a
-// stray `make:*` must not write into, and an empty throwaway is inert.
+// A leaked test is sent here rather than back to the repo root, which is the
+// one directory a stray `make:*` must not write into.
 let quarantine: string | undefined
 
 /** Where the most recent chdir() came from, for blaming a leak. */
@@ -79,8 +67,8 @@ let lastChdir: { target: string; error: Error } | undefined
 const originalChdir = process.chdir.bind(process)
 
 process.chdir = (directory: string): void => {
-  // The Error is constructed eagerly but never formatted unless a leak is
-  // reported — capturing the frame is far cheaper than stringifying it.
+  // Constructed eagerly, formatted only on a leak: capturing the frame is far
+  // cheaper than stringifying it.
   lastChdir = { target: directory, error: new Error() }
   originalChdir(directory)
 }
@@ -109,15 +97,13 @@ beforeAll(() => {
   fileStartCwd = process.cwd()
 })
 
-// Per test, because the test that leaves cwd somewhere unusable is the one
-// worth naming. Cheap: one cwd read and a string compare.
+// Per test, to name the one that left cwd unusable. One read and a compare.
 afterEach(() => {
   const cwd = process.cwd()
   if (isAllowed(cwd)) return
 
   quarantine ??= mkdtempSync(join(tmpdir(), 'guren-cwd-quarantine-'))
-  // Moved off the bad directory before reporting, so the next test is judged
-  // on its own behaviour instead of inheriting this one's.
+  // Off the bad directory before reporting, so the next test is judged on its own.
   originalChdir(quarantine)
 
   throw new Error(
@@ -131,11 +117,9 @@ afterEach(() => {
   )
 })
 
-// Per file. A stray directory is a persistent filesystem fact, so scanning
-// once per file rather than after each of ~3600 tests costs a fraction as much
-// and still names the file that produced it. The cwd comparison belongs here
-// too: a file that chdir()s into its own temp workspace is legitimate mid-file
-// but must not hand that directory to the next file.
+// Per file: a stray directory persists, so one scan per file still names the
+// culprit at a fraction of the cost. The cwd comparison belongs here too — a
+// file may chdir() into its own workspace, but must not hand it to the next.
 afterAll(() => {
   const problems: string[] = []
 

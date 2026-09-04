@@ -11,9 +11,8 @@ type AttachmentImageProps = {
   testId?: string
 }
 
-// The placeholder is interpolated into a CSS url(), so only accept the exact
-// shape the image pipeline emits — a base64 image data URL. Anything else
-// (a custom processor gone wrong, a tampered row) is dropped, not painted.
+// Interpolated into a CSS url(), so only the exact shape the image pipeline
+// emits — a base64 image data URL — is accepted; anything else is dropped.
 const BASE64_IMAGE_DATA_URL = /^data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+$/i
 
 function lqipStyle(placeholder: string | null): CSSProperties | undefined {
@@ -23,10 +22,7 @@ function lqipStyle(placeholder: string | null): CSSProperties | undefined {
   return { backgroundImage: `url("${placeholder}")`, backgroundSize: 'cover' }
 }
 
-/**
- * Renders an attachment with its ThumbHash LQIP painted behind the image
- * while the real bytes load.
- */
+/** Paints the attachment's ThumbHash LQIP behind the image while the bytes load. */
 export default function AttachmentImage({
   attachment,
   variant,

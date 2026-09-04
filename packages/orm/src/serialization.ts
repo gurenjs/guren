@@ -2,11 +2,7 @@ import type { AccessorDefinitions } from './attributes'
 import { applyAccessors } from './attributes'
 import type { PlainObject } from './Model'
 
-/**
- * Serialize a model record for API/JSON output.
- *
- * Applies hidden/visible filtering, casts, accessors, and appends.
- */
+/** Serializes a record for JSON output: appends, then visible/hidden filtering. */
 export function serializeRecord(
   record: PlainObject,
   options: {
@@ -18,7 +14,6 @@ export function serializeRecord(
 ): PlainObject {
   let result = { ...record }
 
-  // Apply accessors for appended virtual attributes
   if (options.appends && options.accessors) {
     for (const key of options.appends) {
       if (options.accessors[key]) {
@@ -27,7 +22,6 @@ export function serializeRecord(
     }
   }
 
-  // Apply visible whitelist
   if (options.visible && options.visible.length > 0) {
     const filtered: PlainObject = {}
     for (const key of options.visible) {
@@ -35,7 +29,6 @@ export function serializeRecord(
     }
     result = filtered
   } else if (options.hidden && options.hidden.length > 0) {
-    // Apply hidden blacklist
     for (const key of options.hidden) {
       delete result[key]
     }

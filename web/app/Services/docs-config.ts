@@ -1,6 +1,6 @@
 // Docs metadata shared by the runtime stores, DocsService, and the prerender
-// script. Keep this module dependency-free (no fs, no markdown/shiki) — it is
-// part of the request path on every deploy target.
+// script. Keep dependency-free (no fs, no markdown/shiki): it is on the request
+// path on every deploy target.
 
 export interface DocSummary {
   slug: string
@@ -289,10 +289,9 @@ export function buildDocSections(
 }
 
 /**
- * Prebuilt content is served in production, or when explicitly opted into
- * locally. Lives here rather than beside a store so callers that only need
- * the decision (the landing page's code samples) do not pull a generated
- * data module into their import graph.
+ * Prebuilt content is served in production, or when opted into locally. Here
+ * rather than beside a store, so a caller that needs only the decision does not
+ * pull a generated data module into its import graph.
  */
 export function shouldUsePrerendered(prerendered: boolean): boolean {
   return (

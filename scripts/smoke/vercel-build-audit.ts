@@ -1,13 +1,9 @@
 /**
  * Verifies that the Vercel plugin's build reads a *real* Vite manifest and
- * injects the asset paths the function needs.
- *
- * The plugin's own tests build against synthetic fixtures, which cannot
- * catch the failure that matters here: Vite changing where or how it writes
- * manifests. When that happens the build still succeeds and the function
- * still boots — it just loses its asset paths, and Inertia silently falls
- * back to client-side rendering. Only a manifest produced by an actual Vite
- * build can prove the lookup still works.
+ * injects the asset paths the function needs. The plugin's own synthetic
+ * fixtures cannot catch Vite changing where or how it writes manifests: the
+ * build still succeeds and the function still boots, it just loses its asset
+ * paths and Inertia silently falls back to client-side rendering.
  *
  * Usage: bun run ./scripts/smoke/vercel-build-audit.ts [appDir]
  * The app must already be built (`bun run --cwd <appDir> build`).
@@ -39,14 +35,12 @@ if (!existsSync(clientManifest)) {
 
 const outputDir = mkdtempSync(join(tmpdir(), 'guren-vercel-audit-'))
 
-// The app under audit need not carry a Vercel entrypoint, and the one it
-// would carry is not what this checks — manifest discovery reads the app
-// root, not the entry. A trivial handler keeps the bundling step honest
-// without asking every example app to adopt a deployment target.
+// Manifest discovery reads the app root, not the entry, so a trivial handler
+// keeps the bundling step honest without asking the app to adopt a target.
 const entrypoint = resolve(appDir, 'src/.vercel-audit-entry.ts')
 
-// Collected rather than exited on: `process.exit` inside the try would skip
-// the cleanup below and leave the throwaway entrypoint in the app's src/.
+// Collected rather than exited on: `process.exit` inside the try would leave
+// the throwaway entrypoint in the app's src/.
 const failures: string[] = []
 let summary: Record<string, string | undefined> = {}
 
@@ -64,8 +58,7 @@ try {
   const config = JSON.parse(readFileSync(configPath, 'utf8')) as FunctionConfig
   const env = config.environment ?? {}
 
-  // The entry is the one value the browser cannot recover on its own: with it
-  // empty, the page renders without ever loading the client bundle.
+  // With the entry empty the page renders without ever loading the client bundle.
   if (!env.GUREN_INERTIA_ENTRY?.startsWith('/assets/')) {
     failures.push(
       `GUREN_INERTIA_ENTRY should point at a built asset, got ${JSON.stringify(env.GUREN_INERTIA_ENTRY)}. ` +
@@ -78,8 +71,8 @@ try {
     failures.push(`GUREN_INERTIA_ENTRY names ${entryFile}, which does not exist in the build output.`)
   }
 
-  // The SSR entry comes from a second manifest, so it can go missing on its
-  // own — and without it the function renders nothing server-side.
+  // A second manifest, so it can go missing on its own, and then the function
+  // renders nothing server-side.
   if (existsSync(resolve(appDir, '.guren/ssr')) && !env.GUREN_INERTIA_SSR_ENTRY) {
     failures.push(
       'GUREN_INERTIA_SSR_ENTRY is unset even though the app has an SSR build — ' +

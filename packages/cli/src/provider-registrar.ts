@@ -6,11 +6,9 @@ import { insertImport, insertProvider, PATCH_REASONS, type PatchResult } from '.
 import { relativeImportPath } from './utils'
 
 /**
- * Entry files that may hold the app's `createApp({ ... })` call, in the order
- * they are probed. The default template ships `src/app.ts`; a flattened app
- * keeps `app.ts` at the root. One list for every command that patches the app
- * entry — two copies is how `guren add auth` came to find a root `app.ts`
- * while `guren add cache` warned that `src/app.ts` was missing.
+ * Entry files that may hold `createApp({ ... })`, in probe order. One list for every
+ * command that patches the app entry — two copies is how `guren add auth` came to find
+ * a root `app.ts` while `guren add cache` warned that `src/app.ts` was missing.
  */
 export const APP_ENTRY_CANDIDATES = ['src/app.ts', 'app.ts'] as const
 
@@ -25,19 +23,9 @@ export type ProviderWiring =
 
 /**
  * Registers `providerName` in `appPath`'s `providers: [...]` array and adds
- * `importStatement`, in **one write**.
- *
- * Both halves have to land together or neither may: an import whose
- * registration never happened is an unused binding that stops the app
- * compiling under `noUnusedLocals`, and a registration whose import never
- * happened is an unresolved identifier — worse, since it also throws at
- * runtime. Two sequenced file-level patches can produce either one; composing
- * the pure `insertProvider`/`insertImport` transforms and writing once cannot.
- * This is the shape `addRouteRegistrarCall` already uses for the same reason.
- *
- * Silent by design: callers with a reporting policy of their own (`guren
- * plugin` throws and collects structured messages) read the outcome instead of
- * the console.
+ * `importStatement`, in **one write**: a lone import breaks `noUnusedLocals`, a lone
+ * registration is an unresolved identifier, and two sequenced patches can leave either.
+ * Silent by design — callers with their own reporting read the outcome, not the console.
  */
 export async function addProviderRegistration(
   appPath: string,
@@ -127,10 +115,7 @@ function report(
   }
 }
 
-/**
- * `addProviderRegistration` against the app's entry file, reporting every
- * failure.
- */
+/** `addProviderRegistration` against the app's entry file, reporting every failure. */
 export async function wireProvider(
   providerName: string,
   importStatement: string,
@@ -148,9 +133,8 @@ export async function wireProvider(
 }
 
 /**
- * `wireProvider` for a provider scaffolded at `app/Providers/<Name>.ts` — the
- * one place that knows those are default exports, and that their import is
- * relative to whichever entry was found.
+ * `wireProvider` for a provider scaffolded at `app/Providers/<Name>.ts` — the one place
+ * that knows those are default exports, imported relative to whichever entry was found.
  */
 export async function wireAppProvider(providerName: string, options: WireProviderOptions = {}): Promise<void> {
   const appPath = options.appPath ?? (await resolveAppEntry())
@@ -174,24 +158,15 @@ export interface ProviderRegistration {
   importStatement?: string
 }
 
-/**
- * Wires several providers into the app entry, resolving that entry **once**.
- *
- * A blueprint installs Core's service provider alongside its own; resolving
- * per provider probes the filesystem twice for an answer that cannot change
- * mid-run, and reports the missing-entry warning once per provider rather than
- * once per command.
- */
+/** Wires several providers into the app entry, resolving that entry **once**. */
 export async function wireProviders(
   registrations: readonly ProviderRegistration[],
   options: WireProviderOptions = {},
 ): Promise<void> {
   const appPath = options.appPath ?? (await resolveAppEntry())
 
-  // Named one by one even with no entry to patch: a blueprint installs Core's
-  // provider *and* its own, and an app missing either one is missing the
-  // feature — so a single warning naming the pair would under-report the work
-  // left to the author.
+  // Warned one by one even with no entry to patch: an app missing any one of a
+  // blueprint's providers is missing the feature, so a single warning under-reports.
   for (const { name, importStatement } of registrations) {
     const statement = importStatement ?? scaffoldedProviderImport(appPath ?? APP_ENTRY_CANDIDATES[0], name)
 

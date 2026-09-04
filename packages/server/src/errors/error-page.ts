@@ -1,8 +1,3 @@
-/**
- * Generate a production-friendly HTML error page.
- * Shows status code, a generic message, and a link back to the home page.
- * No stack traces or internal details are exposed.
- */
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
@@ -12,6 +7,7 @@ function escapeHtml(value: string): string {
     .replace(/'/g, '&#39;')
 }
 
+/** Production error page: no stack traces or internal details are exposed. */
 export function renderErrorPage(statusCode: number, message?: string): string {
   const title = STATUS_TITLES[statusCode] ?? 'Error'
   const description = escapeHtml(

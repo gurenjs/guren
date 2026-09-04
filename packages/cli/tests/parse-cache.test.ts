@@ -5,9 +5,8 @@ import { ParseCache, parseSourceFile, parserPluginCandidates } from '../src/pars
 import { createTempWorkspace } from './helpers'
 
 describe('parserPluginCandidates', () => {
-  // The extension orders the attempts rather than deciding them — every
-  // candidate list covers both JSX settings and both decorator dialects, so a
-  // wrong guess costs a retry instead of silently dropping the file.
+  // The extension orders the attempts rather than deciding them, so a wrong
+  // guess costs a retry instead of silently dropping the file.
   it('tries the extension-preferred variant first, but keeps the other', () => {
     const ts = parserPluginCandidates('a.ts')
     expect(ts[0]).not.toContain('jsx')
@@ -26,11 +25,9 @@ describe('parserPluginCandidates', () => {
     }
   })
 
-  // The two decorator plugins can't be enabled together (Babel throws a config
-  // error), so whichever goes first is a real cost, not a free choice: legacy
-  // covers both the leading-decorator form and constructor parameter
-  // decorators, standard alone covers only the leading form. Legacy first
-  // makes the DI-flavoured case this fix targets cost one parse instead of two.
+  // Babel refuses both decorator plugins at once, so the order is a real cost:
+  // legacy covers the leading form *and* constructor parameter decorators,
+  // standard only the leading form.
   it('tries the legacy decorator dialect before the standard one', () => {
     for (const path of [undefined, 'a.ts', 'a.tsx']) {
       expect(parserPluginCandidates(path)[0]).toContain('decorators-legacy')
@@ -39,11 +36,8 @@ describe('parserPluginCandidates', () => {
 })
 
 describe('parseSourceFile', () => {
-  // Every one of these threw "This experimental syntax requires enabling one of
-  // the following parser plugin(s)" before the decorator plugins were enabled,
-  // which callers could not distinguish from a genuinely broken file. Note the
-  // last two need *different* Babel dialects, which is why a single plugin set
-  // could not fix this: `export @Dec class X` parses only under `decorators`,
+  // The last two need *different* Babel dialects, which is why no single plugin
+  // set covers them: `export @Dec class X` parses only under `decorators`,
   // parameter decorators only under `decorators-legacy`.
   const decoratorForms: Record<string, string> = {
     'decorator before export': '@Injectable()\nexport class A { m() { return 1 } }',
@@ -77,13 +71,9 @@ describe('parseSourceFile', () => {
     expect(parseSourceFile('class {{{{', 'a.ts')).toBeNull()
   })
 
-  // A known, permanent gap rather than a missing candidate: the two decorator
-  // plugins are mutually exclusive in Babel, so no plugin set can accept a
-  // file that mixes the one form only `decorators` parses (a trailing
-  // `export @Dec class X`) with the one form only `decorators-legacy` parses
-  // (a constructor parameter decorator). Documented in the DECORATOR_PLUGINS
-  // comment; this test exists so a future change to the candidate list
-  // doesn't accidentally "fix" this by asserting it should now succeed.
+  // A permanent gap, not a missing candidate: the two decorator plugins are
+  // mutually exclusive in Babel, so no plugin set accepts a file mixing forms
+  // only one of them parses. Pinned so nobody "fixes" it by asserting success.
   it('remains unparseable when a file mixes forms only different dialects accept', () => {
     const source = `declare function dec(...args: unknown[]): unknown
 
@@ -93,10 +83,9 @@ export @dec class Controller {
     expect(parseSourceFile(source, 'a.ts')).toBeNull()
   })
 
-  // errorRecovery makes the *first* candidate succeed where it would otherwise
-  // have thrown, so a param-decorated model is now recovered by the standard
-  // dialect rather than falling through to the legacy one. Audit reads static
-  // members off that AST, so they have to survive the recovery.
+  // errorRecovery makes the *first* candidate succeed, so a param-decorated
+  // model is recovered by the standard dialect rather than the legacy one, and
+  // the static members audit reads have to survive that recovery.
   it('keeps static members readable when recovery short-circuits the dialect ladder', () => {
     const source = [
       'export class User {',
@@ -162,11 +151,8 @@ describe('ParseCache', () => {
     }
   })
 
-  // source() delivers value for an unparsed file (that's the whole point of
-  // the regex-only scans it exists for), so a caller asking only for source
-  // was fully served — it must not show up in scan-coverage as "skipped and
-  // not checked" when nothing it needed went unmet. Only get() (which really
-  // did fail to produce what it was asked for) records the unparsed case.
+  // A caller asking only for source was fully served even on an unparsed file,
+  // so it must not count as skipped in scan coverage; only get() records that.
   it('does not record a file as skipped when source() delivers it despite a parse failure', async () => {
     const workspace = await createTempWorkspace('guren-cli-parse-cache-source-not-skipped-')
     try {
@@ -193,7 +179,6 @@ describe('ParseCache', () => {
       await writeFile(join(dir, 'broken.ts'), 'export class {{{{', 'utf8')
 
       const cache = new ParseCache()
-      // Nothing requested yet, so nothing to report.
       expect(cache.skippedFiles()).toEqual([])
 
       await cache.get(join(dir, 'good.ts'))

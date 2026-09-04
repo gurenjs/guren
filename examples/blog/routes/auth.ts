@@ -13,9 +13,8 @@ import { ForgotPasswordSchema } from '../app/Http/Validators/ForgotPasswordValid
 import { ResetPasswordSchema } from '../app/Http/Validators/ResetPasswordValidator.js'
 import { ProfileUpdateSchema } from '../app/Http/Validators/ProfileValidator.js'
 
-// Relies on the 'auth'/'guest' aliases the caller (routes/web.ts) registered
-// via aliasMiddleware(), which is why the parameter is typed Router<'auth' | 'guest'>
-// rather than Router — the alias names have to be in the type to be referenced here.
+// The parameter is typed Router<'auth' | 'guest'> rather than Router because an
+// alias name has to be in the type before it can be referenced here.
 export function registerAuthRoutes(router: Router<'auth' | 'guest'>): void {
   router.middleware('guest').group((guest) => {
     guest.get('/login', { name: 'login' }, [LoginController, 'show'])
@@ -49,8 +48,7 @@ export function registerAuthRoutes(router: Router<'auth' | 'guest'>): void {
   // Public: the OAuth provider redirects here directly, before any session exists.
   router.get('/auth/:provider/callback', { name: 'oauth.callback' }, [OAuthController, 'callback'])
 
-  // Public: confirm() validates the signed token itself and doesn't use the
-  // session — gating it behind auth would strand a user who opens the email
-  // link from a different device or after their session expired.
+  // Public: confirm() validates the signed token itself, so gating it behind
+  // auth would strand a user opening the link on another device.
   router.get('/verify-email/confirm', { name: 'verify-email.confirm' }, [VerifyEmailController, 'confirm'])
 }

@@ -5,15 +5,10 @@ import { dirname, join } from 'node:path'
 import { assertCreateAppRepublishes } from './sync-template-deps'
 
 /**
- * The create-guren-app republish refusal, against throwaway repositories.
- *
- * It only says anything against real commits — it compares the version
- * committed at `HEAD` against the one in the working tree — so each case here
- * builds a repository and points the refusal at it.
- *
- * The fixture carries the one file the refusal reads. Everything else in
- * `sync-template-deps.ts` runs against the real workspace and is covered by
- * `bun run audit:template-deps`.
+ * The create-guren-app republish refusal, against throwaway repositories: it
+ * compares the version committed at `HEAD` against the working tree's, so each
+ * case builds a repository carrying the one file it reads. The rest of
+ * `sync-template-deps.ts` is covered by `bun run audit:template-deps`.
  */
 describe('assertCreateAppRepublishes', () => {
   let scratch: string
@@ -27,11 +22,9 @@ describe('assertCreateAppRepublishes', () => {
   })
 
   /**
-   * Every git call is hardened against the machine it runs on: a global
-   * `core.hooksPath` reaches repositories created here, a global
-   * `commit.gpgsign` would make a commit *prompt* — and a hang in bun:test is
-   * charged to the following test, so it would not even look like this one —
-   * and a CI runner has no committer identity to inherit.
+   * Hardened against the machine: a global `core.hooksPath` reaches these
+   * repositories, `commit.gpgsign` would make a commit *prompt* (and bun:test
+   * charges a hang to the following test), and CI has no committer identity.
    */
   const HERMETIC = [
     '-c', 'core.hooksPath=',
@@ -81,10 +74,8 @@ describe('assertCreateAppRepublishes', () => {
     await expect(assertCreateAppRepublishes(repo)).rejects.toThrow(/create-guren-app is still 2\.7\.1/)
   })
 
-  // The rest is the same fact from both sides: a version nobody could read is
-  // not a version that moved. `undefined !== '2.8.0'` compares unequal, so
-  // every one of these cases used to *pass* the refusal and let a release ship
-  // rewritten template ranges inside no new tarball.
+  // The same fact from both sides: `undefined !== '2.8.0'` compares unequal, so
+  // an unreadable version used to *pass* the refusal.
 
   it('refuses a committed manifest with no version, rather than reading it as a bump', async () => {
     const repo = await repoAt(`${JSON.stringify({ name: 'create-guren-app' }, null, 2)}\n`)
@@ -101,9 +92,8 @@ describe('assertCreateAppRepublishes', () => {
   it('reports malformed committed JSON rather than throwing a raw SyntaxError', async () => {
     const repo = await repoAt('{ "name": "create-guren-app", oops\n')
     await put(repo, MANIFEST, manifest('2.8.0'))
-    // The message has to be this refusal's, not the JSON parser's: an
-    // unguarded parse aborts the release with no mention of which manifest or
-    // why the comparison mattered.
+    // This refusal's message, not the JSON parser's, which would name neither
+    // the manifest nor why the comparison mattered.
     await expect(assertCreateAppRepublishes(repo)).rejects.toThrow(/no readable version committed at HEAD/)
   })
 
@@ -123,9 +113,8 @@ describe('assertCreateAppRepublishes', () => {
   })
 
   it('skips, audibly, when there is no manifest at HEAD to compare against', async () => {
-    // A scaffolder not yet committed leaves nothing to compare — that is an
-    // absent comparison, not a broken one, so it warns and returns rather than
-    // failing a release for a file git never had.
+    // Nothing to compare is an absent comparison, not a broken one, so it warns
+    // rather than failing a release for a file git never had.
     const repo = join(scratch, `repo-${++repoCount}`)
     await mkdir(repo, { recursive: true })
     git(repo, 'init', '--quiet', '--initial-branch=main')

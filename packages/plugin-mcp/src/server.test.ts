@@ -20,9 +20,8 @@ function deriveFixtureTools(): DerivedAgentTool[] {
   router.post('/posts', handler).name('posts.store').agent({})
   router.get('/hidden', handler).name('hidden.index').agent({ expose: { mcp: false } })
   // These fixtures configure no approval queue, so this tool is refused
-  // fail-closed and is therefore unlisted — but still checkable, which is what
-  // the preflight cases below turn on. The configured half lives in
-  // `approval.test.ts`.
+  // fail-closed and unlisted — but still checkable, which is what the preflight
+  // cases below turn on. The configured half lives in `approval.test.ts`.
   router.post('/approvals', handler).name('approvals.store').agent({ approval: 'required' })
   return deriveAgentTools(router.definitions()).tools.filter((tool) => tool.expose.mcp)
 }
@@ -33,26 +32,19 @@ interface Recorded {
 }
 
 /**
- * The verdict header, by name.
- *
- * Written out rather than imported: the constant is internal to
- * `@guren/server` on purpose, and widening its export surface for a fixture
- * would be the wrong trade. Spelling it here is safe in the direction that
- * matters — the seam and `mapToolResponse` share the real constant, so a
- * rename moves both together and leaves this string classifying nothing,
- * which turns every case below red. It cannot quietly keep passing.
+ * The verdict header, by name. Written out rather than imported: the constant is
+ * internal to `@guren/server` on purpose. Safe in the direction that matters —
+ * a rename leaves this string classifying nothing, which turns every case below
+ * red rather than letting one quietly keep passing.
  */
 const VERDICT_HEADER = 'X-Guren-Agent-Preflight-Verdict'
 
 /**
- * What the router's preflight seam answers for an allowed rehearsal.
- *
- * Built by handing a real `Response` — carrying the real verdict header — to
- * the real `mapToolResponse`, rather than by writing the resulting outcome
- * out by hand. What marks an outcome as a verdict is a decision that module
- * owns, and a fixture that stated the answer itself would keep passing after
- * that decision changed. These cases are still about the companion tool's own
- * rules; the seam is driven end to end in `preflight.test.ts`.
+ * What the router's preflight seam answers for an allowed rehearsal. Built by
+ * handing a real `Response` to the real `mapToolResponse` rather than writing
+ * the outcome out by hand: what marks an outcome as a verdict is that module's
+ * decision, and a fixture stating the answer itself would keep passing after it
+ * changed. The seam is driven end to end in `preflight.test.ts`.
  */
 async function seamVerdict(
   tool: DerivedAgentTool,
@@ -170,10 +162,9 @@ describe('createAppMcpServer', () => {
 })
 
 /**
- * The companion tool's own rules (RFC 0016 §5.4): what it advertises, what it
- * is allowed to check, and what it records. The verdict it reports is
- * whatever the seam answered, stubbed here — `preflight.test.ts` drives the
- * real one.
+ * The companion tool's own rules (RFC 0016 §5.4): what it advertises, what it may
+ * check, and what it records. The verdict is whatever the seam answered, stubbed
+ * here — `preflight.test.ts` drives the real one.
  */
 describe('createAppMcpServer: guren.preflight', () => {
   async function connectPreflight(overrides: Partial<AppMcpServerOptions> = {}) {
@@ -290,8 +281,7 @@ describe('createAppMcpServer: guren.preflight', () => {
     expect(result.isError).toBe(true)
     // Recorded as the rehearsal it was, not as an attempted call to
     // `posts.store`: an operator reading the trail must not be shown a refused
-    // check where a refused write would be. The probed tool is still there, in
-    // the arguments.
+    // check where a refused write would be.
     expect(recorded.denied).toEqual([
       {
         tool: 'guren.preflight',
@@ -304,11 +294,10 @@ describe('createAppMcpServer: guren.preflight', () => {
   })
 
   test('should keep a route claiming the reserved name out of the catalogue', async () => {
-    // `guren check` fails an app that does this, but the endpoint must not
-    // depend on the check having been run: two tools sharing one name makes an
-    // MCP client reject the *entire* catalogue, so one bad route would take
-    // every other tool down with it. The runtime filter is the backstop, and
-    // without a case here it can be deleted with every test still green.
+    // `guren check` fails an app that does this, but the endpoint must not depend
+    // on the check having been run: two tools sharing one name makes an MCP
+    // client reject the *entire* catalogue. Without a case here the runtime
+    // filter could be deleted with every test still green.
     const router = new Router()
     router.get('/posts', () => new Response('ok')).name('posts.index').agent({})
     router.post('/impostor', () => new Response('ok')).name('guren.preflight').agent({})
@@ -342,9 +331,8 @@ describe('createAppMcpServer: guren.preflight', () => {
     expect((result.content as Array<{ text: string }>)[0]!.text).toContain('"tool" argument')
   })
 
-  // With no queue configured an approval-gated tool is uncallable and
-  // therefore unlisted, which is exactly the case where "would this be
-  // accepted?" is worth asking.
+  // With no queue configured an approval-gated tool is uncallable and unlisted,
+  // which is exactly the case where "would this be accepted?" is worth asking.
   test('should answer for a tool that requires approval', async () => {
     const { client, dispatched } = await connectPreflight()
     const { tools } = await client.listTools()
@@ -375,9 +363,8 @@ describe('createAppMcpServer: guren.preflight', () => {
     ])
   })
 
-  // A rehearsal that ran is not a rehearsal. Reporting the handler's own
-  // answer as `allowed: true` would describe a write that happened as one
-  // that did not.
+  // A rehearsal that ran is not a rehearsal: reporting the handler's own answer
+  // as `allowed: true` would describe a write that happened as one that did not.
   test('should error rather than report a verdict when the app ran the call', async () => {
     const { client } = await connectPreflight({
       dispatch: async () => ({ content: [{ type: 'text', text: '{"created":1}' }], status: 201 }),

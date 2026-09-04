@@ -1,13 +1,9 @@
 /**
  * Per-token rate limiting for the App MCP endpoint (RFC 0016 §5.3), on by
- * default with a stricter budget for non-read-only tools.
- *
- * A fixed window per key, in process memory. That is the honest scope of
- * this limiter: one long-running server enforces it exactly; a fleet or a
- * serverless deployment enforces it per instance, which still bounds abuse
- * per instance but is not a global budget. The config doc says so rather
- * than pretending otherwise — a distributed limiter needs a shared store and
- * belongs to the app's own rate-limit middleware.
+ * default with a stricter budget for non-read-only tools. A fixed window per
+ * key, in process memory: a fleet or serverless deployment enforces it per
+ * instance, not as a global budget — that needs a shared store and belongs to
+ * the app's own rate-limit middleware.
  */
 
 export interface RateLimitConfig {
@@ -55,9 +51,8 @@ export class AgentRateLimiter {
     if (options.write) window.writes += 1
     this.windows.set(key, window)
 
-    // An abandoned key's window is replaced on its next use and never read
-    // otherwise; sweep opportunistically so a token churn cannot grow the
-    // map without bound.
+    // An abandoned key's window is replaced on its next use; sweep
+    // opportunistically so token churn cannot grow the map without bound.
     if (this.windows.size > 10_000) {
       for (const [candidate, state] of this.windows) {
         if (now - state.startedAt >= this.windowMs) this.windows.delete(candidate)

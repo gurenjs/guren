@@ -271,9 +271,8 @@ const app = new Application()`
     })
 
     // Apps scaffolded before the dialect barrels import from the mixed
-    // `@guren/orm/drizzle` (or, for sqlite/mysql, `drizzle-orm/<dialect>-core`
-    // — the mechanism is identical). Names already in scope count as present;
-    // only genuinely new builders arrive via the barrel.
+    // `@guren/orm/drizzle`. Names already in scope count as present, so only
+    // genuinely new builders arrive via the barrel.
     it('should add only the missing builders for a pre-barrel app', () => {
       const legacy = `import { pgTable, serial, text, timestamp } from '@guren/orm/drizzle'\n\nexport const posts = pgTable('posts', {})\n`
       const result = ensurePgImports(legacy, ['pgTable', 'serial', 'text', 'timestamp', 'boolean'])
@@ -350,11 +349,9 @@ const app = new Application()`
       expect(result).toBe(content)
     })
 
-    // Documents that the merge is not module-scoped: a same-named builder
-    // already in scope from another module satisfies the requirement, so a
-    // pre-barrel app is left untouched when nothing is missing. Scoping the
-    // match per module would be an improvement — update this test rather than
-    // treating it as a regression.
+    // The merge is not module-scoped: a same-named builder in scope from any
+    // module satisfies the requirement. Scoping it per module would be an
+    // improvement — update this test rather than calling it a regression.
     it('should not re-import a name another module already brought into scope', () => {
       const mixed = `import { mysqlTable, int, varchar, timestamp } from '@guren/orm/drizzle'\n\nexport const users = mysqlTable('users', {})\n`
       const result = ensureMysqlImports(mixed, ['mysqlTable', 'int', 'varchar', 'timestamp'])

@@ -6,18 +6,12 @@ import { assertWorkspaceBuilt, checkTypes, TSC_TIMEOUT, type TsconfigCompilerOpt
 import { buildTranslationTypesContent } from '../src/i18n-types'
 
 /**
- * Compile-time gate for the generated `.guren/translations.gen.ts`: the text
- * assertions in i18n-codegen.test.ts cannot prove the emitted `declare module`
- * augmentations actually narrow `Controller.t()` / `useTranslation()` — the
- * interfaces they merge into are declared in `@guren/server` and only
- * re-exported by `@guren/core`, and that indirection is exactly where the
- * merge could silently stop applying.
- *
- * Module augmentation is program-wide, so the probe runs in its own tsc
- * program here rather than inside any package's typecheck. It resolves
- * `@guren/core` / `@guren/inertia-client` to their built `dist/index.d.ts` —
- * the same surface a real app imports — which is why this test, like the rest
- * of this package's suite, requires `bun run build` to have run first.
+ * Compile-time gate for the generated `.guren/translations.gen.ts`: only a
+ * real program proves the `declare module` augmentations narrow `t()` through
+ * the `@guren/server` → `@guren/core` re-export, where the merge could
+ * silently stop applying. Augmentation is program-wide, so this runs its own
+ * tsc program against the built `dist/index.d.ts` a real app imports — which
+ * is why it requires `bun run build` first.
  */
 
 const repoRoot = resolve(import.meta.dir, '../../..')
@@ -72,9 +66,8 @@ let serverProbeFile: string
 let clientProbeFile: string
 
 beforeAll(async () => {
-  // This test type-checks probe code against the built .d.ts, the surface real
-  // apps import — so an unbuilt checkout has to fail as itself, not as a
-  // probe that mysteriously stopped narrowing.
+  // An unbuilt checkout has to fail as itself, not as a probe that
+  // mysteriously stopped narrowing.
   assertWorkspaceBuilt([coreTypes, inertiaClientTypes])
 
   dir = await mkdtemp(join(tmpdir(), 'guren-i18n-compile-'))
@@ -103,9 +96,8 @@ function check(rootNames: string[]): string[] {
 
 describe('generated translation key augmentation', () => {
   test('narrows t()/tc() on both surfaces: valid keys pass, unknown keys are rejected', () => {
-    // Zero diagnostics means every valid-key call type-checked AND every
-    // bad-key probe errored (an accepted bad key surfaces as TS2578,
-    // "unused @ts-expect-error").
+    // Zero diagnostics proves both polarities: an accepted bad key would
+    // surface as TS2578, "unused @ts-expect-error".
     expect(check([generatedFile, serverProbeFile, clientProbeFile])).toEqual([])
   }, TSC_TIMEOUT)
 

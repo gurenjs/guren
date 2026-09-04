@@ -88,7 +88,6 @@ export type {
   ModelObserverConstructor,
   ScopeFunction,
 } from '@guren/orm'
-// Cross-package glue (server + orm)
 export { DatabaseApiTokenStore } from './api-token-store.js'
 export type { DatabaseApiTokenStoreOptions } from './api-token-store.js'
 export { DatabaseSessionStore } from './session-store.js'

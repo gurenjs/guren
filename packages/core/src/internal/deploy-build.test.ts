@@ -44,25 +44,23 @@ describe('assertOutputDirOutsideRoot', () => {
   })
 
   test('should reject a root inside out whose name begins with ..', () => {
-    // `relative` returns "..-source" here. Testing `startsWith('..')` reads
-    // that as an escape and lets the delete run over a directory that really
-    // is inside the output directory.
+    // `relative` returns "..-source"; `startsWith('..')` would read that as an
+    // escape and let the delete run over a directory inside the output dir.
     expect(() => assertOutputDirOutsideRoot('/tmp/app', '/tmp/app/..-source', 'Test build')).toThrow(
       /never the root itself or a parent of it/,
     )
   })
 
   test('should reject the filesystem root', () => {
-    // The reason this helper compares with `relative`: `out + sep` is "//"
-    // here, so a string-prefix containment test would accept it.
+    // `out + sep` is "//" here, so a string-prefix containment test accepts it.
     expect(() => assertOutputDirOutsideRoot('/', '/app', 'Test build')).toThrow(
       /never the root itself or a parent of it/,
     )
   })
 
   test('should reject an outputDir that reaches the app root through a symlink', () => {
-    // The delete follows symlinks, so a lexical comparison is not enough. On
-    // macOS /tmp is itself a symlink to /private/tmp, so this is ordinary.
+    // The delete follows symlinks, so a lexical comparison is not enough (on
+    // macOS /tmp is itself a symlink to /private/tmp).
     const base = realpathSync(mkdtempSync(join(tmpdir(), 'guren-symlink-')))
     try {
       mkdirSync(join(base, 'real/app'), { recursive: true })
@@ -108,10 +106,9 @@ describe('importSpecifier', () => {
   })
 
   test('should count .. segments from the real path when a symlink changes depth', () => {
-    // The bundler resolves the emitted import from the module's real path, so
-    // a specifier computed from the link path is short a `..` whenever the link
-    // and its target sit at different depths — what macOS does with /tmp ->
-    // /private/tmp and os.tmpdir() under /var -> /private/var.
+    // The bundler resolves the emitted import from the module's real path, so a
+    // specifier computed from the link path is short a `..` whenever link and
+    // target sit at different depths (macOS /tmp -> /private/tmp).
     const base = realpathSync(mkdtempSync(join(tmpdir(), 'guren-symlink-')))
     try {
       mkdirSync(join(base, 'nested/out'), { recursive: true })
@@ -178,17 +175,15 @@ describe('clientManifestJson', () => {
       JSON.stringify({ 'resources/css/app.css': { file: 'app-Abc123.css' } }, null, 2),
     )
 
-    // Re-serialized from the parsed object: the payload is compact JSON, not
-    // the pretty-printed bytes on disk.
+    // The payload is compact JSON, not the pretty-printed bytes on disk.
     expect(clientManifestJson(dir)).toBe(
       JSON.stringify({ 'resources/css/app.css': { file: 'app-Abc123.css' } }),
     )
   })
 
   test('should answer even when the manifest has no client entry', () => {
-    // resolveClientAssetEnv warns and returns {} for this app (no
-    // resources/js/app.tsx), but a content-page app's viteAsset() calls still
-    // need the manifest — the two helpers deliberately answer differently.
+    // resolveClientAssetEnv returns {} for this app (no resources/js/app.tsx),
+    // but a content-page app's viteAsset() calls still need the manifest.
     mkdirSync(join(dir, 'assets'), { recursive: true })
     writeFileSync(
       join(dir, 'assets/manifest.json'),
@@ -199,8 +194,8 @@ describe('clientManifestJson', () => {
   })
 
   test('should trim entries to the fields the runtime reads (file, css)', () => {
-    // The payload ships inside executable code, and a real manifest is
-    // dominated by per-chunk graph metadata nothing at runtime consumes.
+    // The payload ships inside executable code, and a real manifest is dominated
+    // by per-chunk graph metadata nothing at runtime consumes.
     mkdirSync(join(dir, 'assets'), { recursive: true })
     writeFileSync(
       join(dir, 'assets/manifest.json'),
@@ -226,8 +221,8 @@ describe('clientManifestJson', () => {
   })
 
   test('should report parseable-but-not-a-manifest JSON as no manifest at build time', () => {
-    // Baking `null` or an array in would only be rejected at first render,
-    // by injectedClientManifest() — the build is where the file is fixable.
+    // Baking `null` or an array in fails only at first render; the build is
+    // where the file is fixable.
     mkdirSync(join(dir, 'assets'), { recursive: true })
 
     writeFileSync(join(dir, 'assets/manifest.json'), 'null')
@@ -267,8 +262,8 @@ describe('ssrRuntimePaths', () => {
   })
 
   test('should name the manifest it actually parsed, not the first that exists', () => {
-    // A malformed .vite/manifest.json alongside a valid flat one: naming the
-    // file that merely exists publishes the path to the one that was skipped.
+    // A malformed .vite/manifest.json beside a valid flat one: naming the file
+    // that merely exists publishes the path to the skipped one.
     mkdirSync(join(dir, '.vite'), { recursive: true })
     writeFileSync(join(dir, '.vite/manifest.json'), '{ not json')
     writeFileSync(
@@ -310,7 +305,7 @@ describe('DEV_ONLY_MODULES', () => {
     )
 
     // A package-name alias does not cover subpaths, so a bare package entry
-    // would silently leave the real SDK in a Workers bundle.
+    // leaves the real SDK in a Workers bundle.
     expect(sdkEntries.length).toBeGreaterThan(0)
     for (const entry of sdkEntries) {
       expect(entry.specifier.startsWith(MCP_SDK_SUBPATH_PREFIX)).toBe(true)
@@ -318,8 +313,8 @@ describe('DEV_ONLY_MODULES', () => {
   })
 
   test('should carry the transport entry the App MCP endpoint needs', () => {
-    // `stubbableDevOnlyModules` drops this entry by specifier; renaming it
-    // upstream would silently drop nothing and leave the endpoint stubbed.
+    // Dropped by specifier: an upstream rename would drop nothing and leave the
+    // endpoint stubbed.
     expect(DEV_ONLY_MODULES.map((module) => module.specifier)).toContain(MCP_TRANSPORT_SPECIFIER)
   })
 })
@@ -346,9 +341,8 @@ describe('appUsesMcpPlugin', () => {
   })
 
   test('should not report the opt-in for a devDependency', () => {
-    // A devDependency never ships, so there is no endpoint in the deployed
-    // app for the transport to serve — keeping the SDK in the bundle of every
-    // app that merely develops against the plugin is the failure this avoids.
+    // A devDependency never ships, so the deployed app has no endpoint for the
+    // transport to serve.
     writeManifest({ name: 'app', devDependencies: { '@guren/plugin-mcp': '^0.2.0' } })
 
     expect(appUsesMcpPlugin(root)).toBe(false)
@@ -361,8 +355,7 @@ describe('appUsesMcpPlugin', () => {
   })
 
   test('should not report the opt-in when there is no manifest', () => {
-    // Absent evidence is not evidence of opt-in, and false is the safe
-    // direction: the transport stays stubbed, exactly as before RFC 0016.
+    // Absent evidence is not evidence of opt-in; false leaves it stubbed.
     expect(appUsesMcpPlugin(root)).toBe(false)
   })
 
@@ -388,9 +381,8 @@ describe('stubbableDevOnlyModules', () => {
         (specifier) => specifier !== MCP_TRANSPORT_SPECIFIER,
       ),
     )
-    // Spelled out as well as derived: the Dev MCP's McpServer generates files
-    // on disk and must stay compiled shut whatever the app depends on, and
-    // `@guren/cli` behind it drags Babel into the bundle.
+    // The Dev MCP's McpServer generates files on disk and must stay compiled
+    // shut whatever the app depends on; `@guren/cli` behind it drags in Babel.
     expect(specifiers).toContain('@modelcontextprotocol/sdk/server/mcp.js')
     expect(specifiers).toContain('@guren/cli')
     expect(specifiers).toContain('bun:sqlite')
@@ -401,21 +393,17 @@ describe('stubbableDevOnlyModules', () => {
 
 describe('the built artifact', () => {
   test('should import nothing but node builtins', () => {
-    // The module documents this, and the plugins rely on it: importing it must
-    // not drag the framework runtime into a developer's build. It holds today
-    // only because this entry happens to share no code with core's
-    // others — the day one does, ESM splitting emits a chunk and the property
-    // disappears with nothing else to notice.
+    // Importing it must not drag the framework runtime into a developer's build.
+    // That holds only while this entry shares no code with core's others: the
+    // day one does, ESM splitting emits a chunk and nothing else would notice.
     const built = join(import.meta.dir, '../../dist/internal/deploy-build.js')
     if (!existsSync(built)) {
       throw new Error(`Expected ${built}; run \`bun run build core\` before this test.`)
     }
 
-    // A real parse rather than regexes: the bundler keeps JSDoc blocks, and
-    // the module's own prose quotes `import pgClient from "postgres"` as the
-    // line a developer's bundle fails on. scanImports reports every form —
-    // static, side-effect, dynamic `import()` and `require()` — so a bundled
-    // chunk cannot slip past while the builtin imports keep the assertion green.
+    // A real parse, not regexes: the bundler keeps JSDoc blocks, and the
+    // module's own prose quotes `import pgClient from "postgres"`. scanImports
+    // reports every form, so a bundled chunk cannot slip past.
     const specifiers = new Bun.Transpiler({ loader: 'js' })
       .scanImports(readFileSync(built, 'utf8'))
       .map((entry) => entry.path)
@@ -431,10 +419,9 @@ describe('the module graph this list describes', () => {
   const repoRoot = join(import.meta.dir, '../../../..')
 
   /**
-   * Files that actually import `specifier`, matched on the import form rather
-   * than the bare string: `vite` alone also hits a `@vite-ignore` comment and
-   * an identifier, which would leave this green after the real import was
-   * deleted — the exact drift the check exists to catch.
+   * Matched on the import form, not the bare string: `vite` alone also hits a
+   * `@vite-ignore` comment and an identifier, leaving this green after the real
+   * import was deleted.
    */
   function importersOf(specifier: string): string {
     const escaped = specifier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -455,9 +442,7 @@ describe('the module graph this list describes', () => {
     return stdout.toString().trim()
   }
 
-  // Checked per entry, not as one alternation: a single matching entry would
-  // otherwise mask every stale one. A framework change that drops one of these
-  // imports should surface here rather than as dead weight in every plugin.
+  // Per entry, not one alternation: a single match would mask every stale one.
   test.each(DEV_ONLY_MODULES.map((module) => module.specifier))(
     'should still be imported by the framework: %s',
     (specifier) => {
@@ -466,9 +451,8 @@ describe('the module graph this list describes', () => {
   )
 
   test('should not match a specifier that is merely mentioned', () => {
-    // Guards the check above two ways: a grep that silently stopped working
-    // would let every case pass, and a substring match would accept a module
-    // the framework only names in a comment.
+    // Guards the check above: a grep that stopped working would pass every case,
+    // and a substring match would accept a module only named in a comment.
     expect(importersOf('@guren/not-a-real-dev-only-module')).toBe('')
     expect(importersOf('vit')).toBe('')
   })
@@ -479,8 +463,8 @@ describe('the module graph this list describes', () => {
       module.exportNames,
     ] as const),
   )('should name exports the importer actually destructures: %s', (specifier, exportNames) => {
-    // A wrong name here still renders a stub, and only fails at bundle time
-    // with "no matching export" — so check the names against the real importer.
+    // A wrong name still renders a stub and fails only at bundle time with "no
+    // matching export".
     const found = importersOf(specifier)
     expect(found).not.toBe('')
 
@@ -494,11 +478,9 @@ describe('the module graph this list describes', () => {
 })
 
 describe('renderDevOnlyStub', () => {
-  // The message lands in the file twice, and only the thrown copy is safe on
-  // its own: `JSON.stringify` escapes it, while the leading comment would end
-  // at the first line terminator and run whatever followed as code. Callers
-  // pass literals today — the escape exists because this is where the file is
-  // constructed, not because the strings are untrusted.
+  // The message lands in the file twice and only the thrown copy is safe on its
+  // own: the leading comment would end at the first line terminator and run
+  // whatever followed as code.
   const LINE_SEPARATOR = String.fromCharCode(0x2028)
   const PARAGRAPH_SEPARATOR = String.fromCharCode(0x2029)
 
@@ -522,9 +504,8 @@ describe('renderDevOnlyStub', () => {
     })
   }
 
-  // JSON and JavaScript disagree here: JSON leaves U+2028/U+2029 raw, and
-  // JavaScript below ES2019 reads them as line terminators — so a message
-  // carrying one would end the `throw` statement it was embedded in.
+  // JSON leaves U+2028/U+2029 raw while JavaScript below ES2019 reads them as
+  // line terminators, ending the `throw` statement they were embedded in.
   for (const [name, separator] of [
     ['line separator', LINE_SEPARATOR],
     ['paragraph separator', PARAGRAPH_SEPARATOR],
@@ -578,9 +559,8 @@ describe('detectDatabaseDialects', () => {
   })
 
   test('should report every dialect a config declares, not the first', () => {
-    // Real shape, not a hypothetical: an app picks its database at runtime,
-    // D1 when deployed and sqlite locally. Stopping at the first match stubs
-    // a client the app actually reaches for.
+    // An app picks its database at runtime, D1 deployed and sqlite locally;
+    // stopping at the first match stubs a client it actually reaches for.
     writeConfig(
       'config/database.ts',
       "import { createD1Database, createSqliteDatabase } from '@guren/core'\n"
@@ -604,9 +584,8 @@ describe('detectDatabaseDialects', () => {
   })
 
   test('should report no dialects when the config names no factory', () => {
-    // An indirection the scan cannot follow. Reporting "none" here would be
-    // read as "stub everything"; the caller has to be able to tell this apart
-    // from a positive answer.
+    // An indirection the scan cannot follow: reporting "none" would read as
+    // "stub everything".
     writeConfig('config/database.ts', "export * from './database/postgres'\n")
 
     expect(detectDatabaseDialects(root)).toEqual({ source: 'config/database.ts' })
@@ -657,9 +636,8 @@ describe('unusedSqlClients', () => {
 
     const specifiers = unusedSqlClients({ root, label: 'Test build' }).map(({ module }) => module.specifier)
 
-    // Both mysql2 entries, not just the one the factory names: drizzle reaches
-    // the client through `mysql2/promise` while the ORM's own type import
-    // names `mysql2`.
+    // Both mysql2 entries: drizzle reaches the client through `mysql2/promise`
+    // while the ORM's own type import names `mysql2`.
     expect(specifiers).not.toContain('mysql2')
     expect(specifiers).not.toContain('mysql2/promise')
     expect(specifiers).toContain('postgres')
@@ -675,8 +653,7 @@ describe('unusedSqlClients', () => {
   })
 
   test('should stub nothing and warn when the config declares no dialect', () => {
-    // Fail open. Under-stubbing leaves today's behaviour — a loud build
-    // failure naming a client the app never installed. Over-stubbing ships a
+    // Fail open: under-stubbing fails the build loudly, over-stubbing ships a
     // bundle that builds clean and cannot reach its own database.
     writeConfig("export * from './database/postgres'\n")
 
@@ -690,10 +667,8 @@ describe('unusedSqlClients', () => {
   })
 
   test('should reject an empty dialect list rather than read it as "declares nothing"', () => {
-    // An empty array is truthy, so a plain `input.dialects ?` test would take
-    // the override branch and stub *every* client — including postgres, which
-    // this app connects through. The bundle would build clean and the deployed
-    // function would throw on its first query.
+    // An empty array is truthy, so a plain `input.dialects ?` test takes the
+    // override branch and stubs *every* client, postgres included.
     writeConfig('export const db = createPostgresDatabase({})\n')
 
     expect(() => unusedSqlClients({ root, label: 'Test build', dialects: [] })).toThrow(
@@ -702,8 +677,7 @@ describe('unusedSqlClients', () => {
   })
 
   test('should reject a misspelled dialect rather than stub its client', () => {
-    // Same failure as the empty list, one letter at a time: a dialect the
-    // filter never sees is a dialect whose client it stubs.
+    // A dialect the filter never sees is one whose client it stubs.
     writeConfig('export const db = createPostgresDatabase({})\n')
 
     expect(() =>
@@ -740,8 +714,7 @@ describe('parseDatabaseDialects', () => {
   })
 
   test('should reject a name that is not a dialect', () => {
-    // Narrowing silently to nothing would stub every client — the exact
-    // failure the override exists to prevent.
+    // Narrowing silently to nothing would stub every client.
     expect(() => parseDatabaseDialects('postgres,mongo', 'Test build')).toThrow(/does not name a database/)
   })
 
@@ -752,11 +725,9 @@ describe('parseDatabaseDialects', () => {
 
 describe('DATABASE_FACTORIES', () => {
   test('should name exactly the database factories @guren/core exports', () => {
-    // Built from the public export surface, not from the ORM's implementation
-    // files: a list read off the implementation admits names that were never
-    // exported and misses the ones that were. A factory this map misspells
-    // (`createMysqlDatabase` for `createMySqlDatabase`) detects nothing and
-    // stubs nothing, and nothing else would notice.
+    // Built from the public export surface, not the ORM's implementation files.
+    // A factory this map misspells (`createMysqlDatabase`) detects nothing and
+    // stubs nothing, with nothing else to notice.
     const index = readFileSync(new URL('../index.ts', import.meta.url), 'utf8')
     const exported = [...index.matchAll(/^\s*(create\w*Database),$/gm)].map(([, name]) => name)
 

@@ -62,7 +62,6 @@ export class SessionGuard<User extends Authenticatable = Authenticatable> implem
     return sanitized
   }
 
-  /** Strip auth-internal fields before a record is cached or exposed. */
   private sanitizeUser(user: User): User {
     return sanitizeUser(this.provider, user)
   }

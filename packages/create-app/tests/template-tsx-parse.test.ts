@@ -3,11 +3,9 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 
 /**
- * Every blueprint .tsx must at least parse. The templates are excluded from
- * all typecheck projects (they resolve `@guren/*` from npm — see
- * common-pitfalls), and the blueprint tests assert selected strings, so
- * before this gate a syntax error in a template page only surfaced in the
- * multi-minute starter smokes.
+ * Every blueprint .tsx must at least parse. The templates are excluded from all
+ * typecheck projects (they resolve `@guren/*` from npm), so without this gate a
+ * syntax error surfaces only in the multi-minute starter smokes.
  */
 const templatesRoot = join(import.meta.dir, '../templates')
 

@@ -1,23 +1,10 @@
 /**
- * Translation catalog consistency checks (`guren check --i18n`).
- *
- * Content-activated: apps without a `lang/` directory contribute zero
- * results. Three rules over `lang/<locale>/*.json`:
- *
- * - **Invalid JSON** (`fail`): JsonLoader skips unparseable files with only
- *   a console warning, so every key in the file silently disappears at
- *   runtime.
- * - **Key parity** (`fail`): a key present in some locale but missing from
- *   another renders in the fallback language for that locale's users.
- * - **Placeholder parity** (`warn`): `:name`/`{name}` placeholders that
- *   differ between locales for the same key usually mean a lost or
- *   mistranslated variable — warn rather than fail because a locale can
- *   legitimately drop a placeholder (e.g. a plural-less phrasing).
- *
- * Usage scanning (`t('...')` call sites referencing unknown keys) is
- * deliberately out of scope: the generated `TranslationKey` union already
- * enforces that at compile time without the false positives of an AST
- * heuristic.
+ * Translation catalog consistency checks (`guren check --i18n`), over
+ * `lang/<locale>/*.json`. Content-activated: no `lang/` means no results.
+ * Invalid JSON and key parity fail (JsonLoader skips an unparseable file with
+ * only a warning, so its keys vanish at runtime); placeholder parity only
+ * warns, since a locale can legitimately drop one. Usage scanning of `t()`
+ * call sites is out of scope — the `TranslationKey` union covers it.
  */
 import { formatTruncatedList } from './discovery'
 import { DEFAULT_LANG_DIR, readTranslationCatalogs, type TranslationCatalog } from './i18n-types'
@@ -112,15 +99,11 @@ export async function runI18nCheck(options: RunI18nCheckOptions): Promise<CheckR
 }
 
 /**
- * Placeholders a message interpolates: `:name` and `{name}` forms. The
- * runtime accepts any replacement key, so this is deliberately narrower.
- * The colon form matches ASCII identifiers only — it has no closing
- * delimiter, so a wider class would swallow adjoining CJK text
- * (`:count個` must read as `count`), and times (`9:00`) must not read as
- * placeholders at all. The brace form is delimited and therefore accepts
- * Unicode names, dots, and dashes (`{名前}`, `{user.name}`). Grammar
- * shared with Translator.applyReplacements (server) and the client
- * mirror; keep in sync.
+ * Placeholders a message interpolates: `:name` and `{name}`. The colon form is
+ * ASCII-only because it has no closing delimiter — a wider class would swallow
+ * adjoining CJK (`:count個`) and read times (`9:00`) as placeholders. The brace
+ * form is delimited, so Unicode, dots and dashes are fine. Grammar shared with
+ * Translator.applyReplacements (server) and the client mirror; keep in sync.
  */
 export function extractPlaceholders(message: string): Set<string> {
   const placeholders = new Set<string>()

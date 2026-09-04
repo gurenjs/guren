@@ -6,7 +6,6 @@ import { AlertCircle } from 'lucide-react'
 import type { ApiRoutes } from '@/.guren/api-client.gen'
 import type { AttachmentData } from '@guren/core'
 
-// `cover` rides along as a multipart file next to the typed route body —
 // Inertia switches the request to FormData as soon as the data holds a File.
 export type PostFormValues = ApiRoutes['posts.store']['body'] & { cover?: File | null }
 
@@ -26,8 +25,8 @@ export default function PostForm({ form, onSubmit, onCancel, onDelete, mode, cur
 
   const [coverPreview, setCoverPreview] = React.useState<string | null>(null)
 
-  // The effect cleanup owns every revoke: it runs with the previous URL both
-  // when a new file is picked and on unmount.
+  // The effect cleanup owns every revoke: it runs with the previous URL on both
+  // a new pick and unmount.
   React.useEffect(() => {
     return () => {
       if (coverPreview) {
@@ -90,8 +89,8 @@ export default function PostForm({ form, onSubmit, onCancel, onDelete, mode, cur
     onSubmit(payload)
   }
 
-  // The submitted file comes from the form's own FormData in handleSubmit —
-  // form state never holds it, only the preview URL lives in React state.
+  // The submitted file comes from the form's own FormData; React state holds
+  // only the preview URL.
   const handleCoverChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] ?? null
     setCoverPreview(file ? URL.createObjectURL(file) : null)
@@ -138,7 +137,6 @@ export default function PostForm({ form, onSubmit, onCancel, onDelete, mode, cur
               </div>
             )}
 
-            {/* Title Field */}
             <div className="space-y-2">
               <label htmlFor="title" className="block text-sm font-medium text-stone-700">
                 Title
@@ -164,7 +162,6 @@ export default function PostForm({ form, onSubmit, onCancel, onDelete, mode, cur
               )}
             </div>
 
-            {/* Cover Field */}
             <div className="space-y-2">
               <label htmlFor="cover" className="block text-sm font-medium text-stone-700">
                 Cover image
@@ -207,7 +204,6 @@ export default function PostForm({ form, onSubmit, onCancel, onDelete, mode, cur
               )}
             </div>
 
-            {/* Excerpt Field */}
             <div className="space-y-2">
               <label htmlFor="excerpt" className="block text-sm font-medium text-stone-700">
                 Excerpt
@@ -233,7 +229,6 @@ export default function PostForm({ form, onSubmit, onCancel, onDelete, mode, cur
               )}
             </div>
 
-            {/* Body Field */}
             <div className="space-y-2">
               <label htmlFor="body" className="block text-sm font-medium text-stone-700">
                 Body
@@ -259,7 +254,6 @@ export default function PostForm({ form, onSubmit, onCancel, onDelete, mode, cur
               )}
             </div>
 
-            {/* Form Actions */}
             <div className="flex flex-col-reverse gap-3 border-t border-stone-100 pt-6 sm:flex-row sm:justify-end">
               {onDelete && (
                 <button

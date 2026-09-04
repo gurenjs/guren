@@ -1,27 +1,12 @@
 /**
  * `guren.preflight` — the preflight companion tool (RFC 0016 §5.4).
  *
- * Preflight cannot be an argument of the tool being checked on this protocol.
- * MCP forbids a tool from returning a different *shape* of success: one
- * advertising an `outputSchema` must answer with `structuredContent`
- * conforming to it unless the result is an error (the SDK client throws
- * `-32600` for a conforming-schema tool that returns plain content, `-32602`
- * for structured content of the wrong shape). A verdict conforms to no
- * route's output, and reporting "allowed" as an error would be worse than not
- * offering preflight at all.
- *
- * So the verdict gets a tool of its own, with its own output schema — and
- * exactly one for the whole catalogue, taking the target tool's name as an
- * argument. Per-tool companions were the obvious alternative and were
- * rejected: they double the catalogue, which collides with §5.5's own
- * catalogue-quality rule (tool-count threshold, description lint), and
- * clients reward small catalogues.
- *
- * Nothing here re-implements a check. The module owns two things only: the
- * tool's advertised schemas, and the translation of what the router's
- * preflight seam answered into a verdict. Scope is `gate.ts`'s, the checks
- * themselves are the application's, reached by dispatching the real request
- * with `BuildToolRequestOptions.preflight`.
+ * Preflight cannot be an argument of the tool being checked: MCP forbids a tool
+ * from returning a different *shape* of success (the SDK client throws `-32600`
+ * for a schema-declaring tool that returns plain content), so the verdict gets a
+ * tool of its own — one for the whole catalogue, since per-tool companions would
+ * double a catalogue §5.5 already wants small. This module owns only the
+ * advertised schemas and the translation of the seam's answer into a verdict.
  */
 import { PREFLIGHT_TOOL_NAME, type ToolCallOutcome } from '@guren/core'
 
@@ -29,12 +14,8 @@ import { PREFLIGHT_TOOL_NAME, type ToolCallOutcome } from '@guren/core'
 type McpObjectSchema = { type: 'object'; [key: string]: unknown }
 
 /**
- * What a preflight call takes: the tool to check, and the arguments the call
- * would have passed.
- *
  * `input` is an open object because it stands in for *another tool's* input
- * schema, which this one cannot know at advertisement time. The arguments are
- * not validated here either — they are handed to the route, whose own
+ * schema, and is not validated here: it is handed to the route, whose own
  * validation is the answer the caller asked for.
  */
 const PREFLIGHT_INPUT_SCHEMA: McpObjectSchema = {
@@ -55,19 +36,11 @@ const PREFLIGHT_INPUT_SCHEMA: McpObjectSchema = {
 }
 
 /**
- * The verdict.
- *
- * Two fields are deliberately *not* required, because the seam does not
- * always get to produce them. `validated` and `unverified` come from the seam
- * itself, which sits last in the chain: a call refused by the middleware in
- * front of it (401, 403) never reaches the seam, so there is nothing to
- * report about what a further check would have covered. Emitting `[]` there
- * would read as "nothing went unverified", which is a claim about checks that
- * were never reached.
- *
- * `additionalProperties` is deliberately unset: the SDK client validates
- * `structuredContent` against this schema, and a closed object would turn any
- * later field into a `-32602` for clients that pinned an older server.
+ * `validated` and `unverified` are not required: a call refused by middleware in
+ * front of the seam never reaches it, and `[]` would claim checks that were
+ * never reached. `additionalProperties` is deliberately unset — the SDK client
+ * validates `structuredContent` against this schema, and a closed object would
+ * turn any later field into a `-32602` for clients pinned to an older server.
  */
 const PREFLIGHT_OUTPUT_SCHEMA: McpObjectSchema = {
   type: 'object',
@@ -109,12 +82,8 @@ const PREFLIGHT_OUTPUT_SCHEMA: McpObjectSchema = {
 }
 
 /**
- * The tool as `tools/list` advertises it.
- *
- * The description says what the tool does *and* that it executes nothing —
- * an agent reading a catalogue decides from this line alone whether asking is
- * safe, and "preflight" is not self-explanatory to a client that has never
- * seen this framework.
+ * The tool as `tools/list` advertises it. The description says that it executes
+ * nothing: an agent decides from that line alone whether asking is safe.
  */
 export function describePreflightTool(): {
   name: string
@@ -144,13 +113,9 @@ export type PreflightRequest =
   | { error: string }
 
 /**
- * Read `{ tool, input }` off a raw call.
- *
- * The client already saw the input schema, but nothing obliges it to have
- * honoured one — the low-level `Server` hands arguments through unvalidated
- * (see `server.ts` on why that is deliberate), and this tool's arguments are
- * the one place on this surface where an unchecked value decides *which*
- * tool is addressed. So the two fields are checked here, and only these two.
+ * Read `{ tool, input }` off a raw call. The low-level `Server` hands arguments
+ * through unvalidated, and these are the one place on this surface where an
+ * unchecked value decides *which* tool is addressed.
  */
 export function readPreflightArguments(args: Record<string, unknown>): PreflightRequest {
   const name = args.tool
@@ -199,29 +164,14 @@ export type PreflightOutcome =
   | { executed: string }
 
 /**
- * Read the dispatched response as a verdict.
- *
- * The three branches are settled by where the seam sits, not by guesswork.
- * It is mounted last before the handler and answers unconditionally once the
- * header is present — a route with no schemas still answers 200 with
- * `validated: []`. So:
- *
- * - The verdict marker is an allowed verdict, and the handler did not run.
- *   The marker is `ToolCallOutcome.preflightVerdict`, which `mapToolResponse`
- *   set from the response header. Reading a `preflight` field out of the body
- *   instead would be a second, weaker copy of the same judgement, and the one
- *   that gets it wrong for a route whose own output carries that field.
- * - Any 4xx/5xx can only have come from a gate *in front of* the seam or from
- *   the seam's own contract validation, so it is a refusal and, either way,
- *   nothing ran. That is `allowed: false` — a successful answer to the
- *   question, which is why it is not an error result.
- * - Anything else (a 2xx that is not a verdict, a 204, a redirect) means the
- *   request reached a handler: only a route without the seam can produce one,
- *   and a controller can answer any of those. Reported as an error, never as
- *   a rehearsal — a redirect from an auth middleware and a redirect from a
- *   controller that just created a record are indistinguishable here, and
- *   calling the second one "not allowed" would describe a write that
- *   happened as a write that did not.
+ * Read the dispatched response as a verdict. The seam is mounted last before the
+ * handler and answers unconditionally, which settles the three branches: the
+ * `preflightVerdict` marker (set from the response header, never re-read from
+ * the body) means allowed and unrun; a 4xx/5xx can only come from a gate in
+ * front of the seam or the seam's own validation, so nothing ran and it is
+ * `allowed: false`; anything else means a handler ran, reported as an error
+ * rather than a rehearsal — a redirect from a controller that just created a
+ * record must not be described as a call that did not happen.
  */
 export function toPreflightVerdict(toolName: string, outcome: ToolCallOutcome): PreflightOutcome {
   const parsed = parseContent(outcome)
@@ -248,11 +198,9 @@ export function toPreflightVerdict(toolName: string, outcome: ToolCallOutcome): 
   }
 
   if (outcome.isError) {
-    // The application's own error body, as the exception handler wrote it:
-    // `{ message, errors? }` for an `HttpException`, which covers the 422 a
-    // contract failure produces and the 401/403 a guard does. Anything else
-    // (a plain-text body, an adapter refusal before HTTP) still has text, and
-    // that text is the message.
+    // The application's own error body as the exception handler wrote it:
+    // `{ message, errors? }` for an `HttpException`. Anything else still has
+    // text, and that text is the message.
     const message = isRecord(parsed) && typeof parsed.message === 'string'
       ? parsed.message
       : (outcome.content[0]?.text ?? `HTTP ${outcome.status}`)
@@ -287,9 +235,9 @@ function parseContent(outcome: ToolCallOutcome): unknown {
 }
 
 /**
- * A list of strings, or undefined for anything else. The seam is the only
- * producer, but the value crossed an HTTP boundary to get here, and a field
- * of the advertised output schema must not be filled with whatever arrived.
+ * A list of strings, or undefined for anything else: the value crossed an HTTP
+ * boundary, and a field of the advertised output schema must not be filled with
+ * whatever arrived.
  */
 function stringList(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined

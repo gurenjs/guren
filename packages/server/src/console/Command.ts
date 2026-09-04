@@ -4,85 +4,35 @@ import { Input } from './Input'
 import { Output } from './Output'
 import * as readline from 'readline'
 
-/**
- * Base command class for console commands.
- *
- * @example
- * ```typescript
- * export class CreateUserCommand extends Command {
- *   static signature = 'users:create {email} {--admin} {--role=user}'
- *   static description = 'Create a new user'
- *
- *   async handle(): Promise<void> {
- *     const email = this.argument('email')
- *     const isAdmin = this.hasOption('admin')
- *     const role = this.option('role', 'user')
- *
- *     const password = await this.secret('Enter password:')
- *     const confirm = await this.confirm(`Create user ${email}?`)
- *
- *     if (!confirm) {
- *       this.warn('Cancelled')
- *       return
- *     }
- *
- *     this.info(`Creating user: ${email}`)
- *     this.success('User created!')
- *   }
- * }
- * ```
- */
+/** Base class for console commands. */
 export abstract class Command implements CommandInstance {
   /**
-   * The command signature.
-   * Format: 'command:name {arg} {--option}'
-   * Tokens may carry a description: 'command:name {arg : What it is}'
-   * See `parseSignature` for the full grammar.
+   * Format: `command:name {arg} {--option}`, tokens optionally carrying a
+   * description (`{arg : What it is}`). See `parseSignature` for the grammar.
    */
   static signature: string
 
-  /**
-   * The command description.
-   */
   static description = ''
 
-  /**
-   * The command input.
-   */
   protected input!: Input
 
-  /**
-   * The command output.
-   */
   protected output!: OutputInterface
 
-  /**
-   * The service container.
-   */
   protected container?: Container
 
   constructor(container?: Container) {
     this.container = container
   }
 
-  /**
-   * Set the input for this command.
-   */
   setInput(argv: string[]): void {
     const ctor = this.constructor as typeof Command
     this.input = new Input(ctor.signature, argv)
   }
 
-  /**
-   * Set the output for this command.
-   */
   setOutput(output: OutputInterface): void {
     this.output = output
   }
 
-  /**
-   * Execute the command.
-   */
   async run(): Promise<number> {
     try {
       const result = await this.handle()
@@ -95,112 +45,57 @@ export abstract class Command implements CommandInstance {
     }
   }
 
-  /**
-   * Handle the command.
-   * Must be implemented by subclasses.
-   */
   abstract handle(): Promise<number | void>
 
-  // ==================
-  // Input Methods
-  // ==================
-
-  /**
-   * Get an argument value.
-   */
   argument<T = string>(name: string): T {
     return this.input.argument<T>(name)
   }
 
-  /**
-   * Get all arguments.
-   */
   arguments(): Record<string, string | string[]> {
     return this.input.arguments()
   }
 
-  /**
-   * Get an option value with optional default.
-   */
   option<T = string>(name: string, defaultValue?: T): T {
     const value = this.input.option<T>(name)
     return value !== undefined ? value : (defaultValue as T)
   }
 
-  /**
-   * Get all options.
-   */
   options(): Record<string, string | boolean | string[]> {
     return this.input.options()
   }
 
-  /**
-   * Check if an option was provided.
-   */
   hasOption(name: string): boolean {
     return this.input.hasOption(name)
   }
 
-  // ==================
-  // Output Methods
-  // ==================
-
-  /**
-   * Output an info message.
-   */
   info(message: string): void {
     this.output.info(message)
   }
 
-  /**
-   * Output an error message.
-   */
   error(message: string): void {
     this.output.error(message)
   }
 
-  /**
-   * Output a warning message.
-   */
   warn(message: string): void {
     this.output.warn(message)
   }
 
-  /**
-   * Output a success message.
-   */
   success(message: string): void {
     this.output.success(message)
   }
 
-  /**
-   * Output a plain line.
-   */
   line(message: string): void {
     this.output.line(message)
   }
 
-  /**
-   * Output new lines.
-   */
   newLine(count = 1): void {
     this.output.newLine(count)
   }
 
-  /**
-   * Output a table.
-   */
   table(headers: string[], rows: string[][]): void {
     this.output.table(headers, rows)
   }
 
-  // ==================
-  // Interactive Methods
-  // ==================
-
-  /**
-   * Ask a question and get user input.
-   */
   async ask(question: string, defaultValue?: string): Promise<string> {
     const rl = this.createReadline()
     const prompt = defaultValue ? `${question} [${defaultValue}]: ` : `${question}: `
@@ -213,9 +108,6 @@ export abstract class Command implements CommandInstance {
     })
   }
 
-  /**
-   * Ask for confirmation.
-   */
   async confirm(question: string, defaultValue = false): Promise<boolean> {
     const defaultStr = defaultValue ? 'Y/n' : 'y/N'
     const answer = await this.ask(`${question} [${defaultStr}]`)
@@ -227,9 +119,6 @@ export abstract class Command implements CommandInstance {
     return ['y', 'yes', 'true', '1'].includes(answer.toLowerCase())
   }
 
-  /**
-   * Present choices to the user.
-   */
   async choice<T extends string>(question: string, choices: T[], defaultValue?: T): Promise<T> {
     this.line(question)
     this.newLine()
@@ -254,8 +143,8 @@ export abstract class Command implements CommandInstance {
   /**
    * Ask for secret input (password).
    *
-   * On a TTY the typed characters are masked. The mask listener and raw mode
-   * are torn down on every exit path, so a later prompt starts clean.
+   * The mask listener and raw mode are torn down on every exit path, so a later
+   * prompt starts clean.
    */
   async secret(question: string): Promise<string> {
     const stdin = this.inputStream()
@@ -333,9 +222,6 @@ export abstract class Command implements CommandInstance {
     return process.stdout
   }
 
-  /**
-   * Create a readline interface.
-   */
   protected createReadline(): readline.Interface {
     return readline.createInterface({
       input: this.inputStream(),
@@ -343,13 +229,6 @@ export abstract class Command implements CommandInstance {
     })
   }
 
-  // ==================
-  // Progress Methods
-  // ==================
-
-  /**
-   * Process items with progress output.
-   */
   async withProgress<T>(items: T[], callback: (item: T, index: number) => Promise<void>): Promise<void> {
     const total = items.length
     const output = this.output as Output
@@ -357,7 +236,6 @@ export abstract class Command implements CommandInstance {
     for (let i = 0; i < items.length; i++) {
       await callback(items[i], i)
 
-      // Update progress
       const current = i + 1
       if (typeof output.clearLine === 'function') {
         output.clearLine()
@@ -371,25 +249,12 @@ export abstract class Command implements CommandInstance {
     this.success(`Processed ${total} items`)
   }
 
-  // ==================
-  // Command Calling
-  // ==================
-
-  /**
-   * Kernel reference for calling other commands.
-   */
   protected kernel?: { handle(argv: string[]): Promise<number> }
 
-  /**
-   * Set the kernel reference.
-   */
   setKernel(kernel: { handle(argv: string[]): Promise<number> }): void {
     this.kernel = kernel
   }
 
-  /**
-   * Call another command.
-   */
   async call(command: string, args: string[] = []): Promise<number> {
     if (!this.kernel) {
       throw new Error('Kernel not set. Cannot call other commands.')
@@ -397,13 +262,6 @@ export abstract class Command implements CommandInstance {
     return this.kernel.handle([command, ...args])
   }
 
-  // ==================
-  // Utility Methods
-  // ==================
-
-  /**
-   * Resolve a service from the container.
-   */
   protected resolve<T>(key: string): T {
     if (!this.container) {
       throw new Error('Container not available')
@@ -411,23 +269,14 @@ export abstract class Command implements CommandInstance {
     return this.container.make<T>(key)
   }
 
-  /**
-   * Get the command signature.
-   */
   getSignature(): string {
     return (this.constructor as typeof Command).signature
   }
 
-  /**
-   * Get the command description.
-   */
   getDescription(): string {
     return (this.constructor as typeof Command).description
   }
 
-  /**
-   * Get the command name.
-   */
   getName(): string {
     return this.input?.getCommandName() ?? (this.constructor as typeof Command).signature.split(/\s+/)[0]
   }

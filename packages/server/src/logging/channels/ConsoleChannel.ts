@@ -1,9 +1,6 @@
 import type { LogChannel, LogEntry, ConsoleChannelConfig, LogLevel } from '../types'
 import { LOG_LEVEL_PRIORITY } from '../types'
 
-/**
- * ANSI color codes for log levels.
- */
 const LEVEL_COLORS: Record<LogLevel, string> = {
   emergency: '\x1b[41m\x1b[37m', // White on red background
   alert: '\x1b[41m\x1b[37m', // White on red background
@@ -17,9 +14,7 @@ const LEVEL_COLORS: Record<LogLevel, string> = {
 
 const RESET = '\x1b[0m'
 
-/**
- * Console log channel.
- */
+/** Console log channel. */
 export class ConsoleChannel implements LogChannel {
   private readonly config: ConsoleChannelConfig
   private readonly minLevel: number
@@ -42,7 +37,6 @@ export class ConsoleChannel implements LogChannel {
 
     const output = this.format(entry)
 
-    // Use appropriate console method
     if (entryLevel <= LOG_LEVEL_PRIORITY.error) {
       console.error(output)
     } else if (entryLevel <= LOG_LEVEL_PRIORITY.warning) {
@@ -66,13 +60,11 @@ export class ConsoleChannel implements LogChannel {
 
     const parts: string[] = []
 
-    // Timestamp
     if (this.config.timestamps) {
       const time = entry.timestamp.toISOString()
       parts.push(this.config.colors ? `\x1b[90m[${time}]\x1b[0m` : `[${time}]`)
     }
 
-    // Level
     const levelStr = entry.level.toUpperCase().padEnd(9)
     if (this.config.colors) {
       parts.push(`${LEVEL_COLORS[entry.level]}${levelStr}${RESET}`)
@@ -80,10 +72,8 @@ export class ConsoleChannel implements LogChannel {
       parts.push(levelStr)
     }
 
-    // Message
     parts.push(entry.message)
 
-    // Context
     if (Object.keys(entry.context).length > 0) {
       const contextStr = JSON.stringify(entry.context)
       if (this.config.colors) {

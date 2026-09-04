@@ -294,8 +294,7 @@ verified:
     }
   })
 
-  // `Router` dispatches to a function-valued field exactly as to a method, so
-  // listing only methods dropped a real action out of the bundle silently.
+  // `Router` dispatches to a function-valued field exactly as to a method.
   it('lists class-field actions alongside methods, still excluding static and private members', async () => {
     const scoped = await createTempWorkspace('guren-cli-entity-field-actions-')
     try {
@@ -382,8 +381,7 @@ verified:
     const ctx = await generateEntityContext('Post', { cwd: workspace.dir })
     const md = renderEntityContextMarkdown(ctx)
 
-    // One of the entity's two routes declares agent metadata, so the section
-    // describes that route alone.
+    // Only one of the entity's two routes declares agent metadata.
     expect(md).toContain('## Agent Interfaces (1)')
     expect(md).toContain('### posts.index')
     expect(md).toContain('- Route: `GET /posts`')
@@ -471,9 +469,8 @@ describe('entity context (duplicated entity across locations)', () => {
   })
 })
 
-// `make:factory Categories` writes `CategoriesFactory.ts` — the command
-// appends its suffix without inflecting — so discovery has to accept the
-// inflected plural, not just a trailing `s`.
+// `make:factory Categories` appends its suffix without inflecting, so
+// discovery has to accept the inflected plural, not just a trailing `s`.
 describe('entity context (irregular plural db artifacts)', () => {
   let workspace: TempWorkspace
 
@@ -501,14 +498,12 @@ describe('entity context (irregular plural db artifacts)', () => {
       'export async function seed() {}\n',
       'utf8',
     )
-    // The naive `+s` plural a user may have typed into `make:factory`. Matched
-    // before the inflection rule existed, so it must keep matching.
+    // The naive `+s` plural a user may have typed into `make:factory`.
     await writeFile(
       join(dir, 'db/factories/CategorysFactory.ts'),
       'export default class CategorysFactory {}\n',
       'utf8',
     )
-    // Singular naming must keep working alongside all of it.
     await writeFile(
       join(dir, 'db/factories/BoxFactory.ts'),
       'export default class BoxFactory {}\n',

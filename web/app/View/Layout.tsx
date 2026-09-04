@@ -9,22 +9,11 @@ import { LIGHT_SURFACE_BODY_CLASS } from '../../config/theme.js'
 import { SITE_NAME, absoluteUrl } from '../../config/site.js'
 
 /**
- * Document skeleton for server-rendered content pages (`Controller.view()`,
- * RFC 0014). Mirrors what `setInertiaDocument()` assembles for Inertia pages
- * in `src/app.ts` — same critical CSS, prepaint script, favicons, and body
- * class, imported from the same `config/` modules so the two documents
- * cannot drift.
- *
- * The `<head>` carries only what pages never restate (hono's metadata
- * hoisting appends rather than replaces): charset, viewport, the theme
- * bootstrap, favicons, the site-wide RSS discovery link, and the stylesheet.
- * Page metadata (`<title>`, descriptions, canonical — see `Seo.tsx`) arrives
- * through the `head` slot: tags rendered literally inside `<head>` skip
- * hono's hoisting pass, which rescans the whole document per hoisted tag
- * (measured quadratic in tag count — ~1 ms per post view and growing with
- * article length when the metadata sat in the body). Hoisting still catches
- * tags emitted deeper in the tree; the slot is the fast path, not a
- * correctness requirement.
+ * Document skeleton for server-rendered content pages, from the same `config/`
+ * modules as `setInertiaDocument()` so the two cannot drift. The `<head>`
+ * carries only what pages never restate, since hono's metadata hoisting appends
+ * rather than replaces; page metadata arrives through the `head` slot, whose
+ * tags skip the hoisting pass (measured quadratic in tag count, ~1 ms per view).
  */
 export const Layout: FC<PropsWithChildren<{ head?: unknown }>> = ({ head, children }) => (
   <html lang="en">

@@ -78,14 +78,10 @@ declare global {
 let mermaidLoader: Promise<MermaidApi> | null = null
 
 /**
- * Load mermaid as a plain script rather than `import('mermaid')`.
- *
- * Bundling it is not an option here: the library cannot fit the repo's
- * 600 kB per-asset budget in any split (its cytoscape dependency alone is
- * ~870 kB), and the Vite plugin's catch-all `vendor` chunk collapses the
- * whole tree into one 3.2 MB file. Staged as a static asset instead, by
- * scripts/copy-docs-images.ts, and fetched only by the pages that have a
- * diagram — the same shape the framework's own `/_guren/docs` viewer uses.
+ * Loaded as a plain script, not `import('mermaid')`: the library cannot fit the
+ * 600 kB per-asset budget (cytoscape alone is ~870 kB) and the Vite plugin's vendor
+ * chunk would collapse it into one 3.2 MB file. Staged by scripts/copy-docs-images.ts
+ * and fetched only by pages that have a diagram.
  */
 function loadMermaid(): Promise<MermaidApi> {
   if (window.mermaid) return Promise.resolve(window.mermaid)
@@ -112,9 +108,8 @@ function loadMermaid(): Promise<MermaidApi> {
 }
 
 /**
- * A hash is whatever is in the address bar, not necessarily something this
- * page wrote: `#%` makes decodeURIComponent throw, and an exception here
- * would take the whole effect — and with it the router subscription — down.
+ * The hash comes from the address bar, not this page: `#%` makes decodeURIComponent
+ * throw, which would take the effect and the router subscription down.
  */
 function decodeFragment(hash: string): string {
   try {
@@ -219,15 +214,10 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
   const nav = buildPrevNext(categories, active, basePath)
   const toc = useTableOfContents(doc)
   const { isDark } = useColorMode()
-  // Load-bearing memo, not an optimisation. React 19 re-applies
-  // dangerouslySetInnerHTML on the *identity* of the `{ __html }` object and
-  // never compares the string (setProp in react-dom assigns innerHTML
-  // unconditionally; the `lastHtml !== nextHtml` guard React 18 had is gone).
-  // Written inline, the object is fresh on every render, so any unrelated
-  // setState -- the TOC filling in, a theme toggle, the sidebar opening --
-  // silently rebuilt this subtree and discarded everything the effects below
-  // had put into it: the copy buttons, the rendered diagrams, and the heading
-  // nodes the scroll-spy observer was watching.
+  // Load-bearing memo: React 19 re-applies dangerouslySetInnerHTML on the identity
+  // of the `{ __html }` object, never the string, so an inline object rebuilt on
+  // every unrelated setState would discard the copy buttons, diagrams, and heading
+  // nodes the effects below add.
   const docHtml = useMemo(() => ({ __html: doc?.html ?? '' }), [doc?.html])
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
@@ -235,11 +225,9 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
     setSidebarOpen(false)
   }, [active?.category, active?.slug])
 
-  // A browser scrolls to the fragment on a full page load; Inertia does not
-  // after a client-side visit, so a search result deep-linking to a heading
-  // would land at the top of the page instead. Keyed on the router event
-  // rather than on the doc, because two results in the same document differ
-  // only by their fragment.
+  // A browser scrolls to the fragment on a full load; Inertia does not after a
+  // client-side visit. Keyed on the router event, not the doc: two results in one
+  // document differ only by fragment.
   useEffect(() => {
     let pending: ReturnType<typeof setTimeout> | undefined
 
@@ -247,11 +235,9 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
       const id = decodeFragment(window.location.hash.slice(1))
       if (!id) return
 
-      // Inertia announces the navigation before React has necessarily
-      // committed the new document, so the heading may not exist yet. Retried
-      // on the macrotask queue rather than on an animation frame: a tab that
-      // is not visible never runs one, and a docs link opened in a background
-      // tab should still be at its heading when the reader gets there.
+      // Inertia announces the navigation before React has committed the document,
+      // so the heading may not exist yet. Retried on the macrotask queue: a
+      // background tab never runs an animation frame.
       let attempts = 0
       const attempt = () => {
         const target = document.getElementById(id)
@@ -274,10 +260,9 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
     }
   }, [])
 
-  // Mermaid diagrams: the build-time renderer leaves ```mermaid fences as
-  // <pre class="mermaid"> (shiki has no grammar for them), and the library
-  // is loaded here — lazily, client-only, and only on pages that have one.
-  // The bail-out below is what keeps the request off every other docs page.
+  // Mermaid: the build-time renderer leaves ```mermaid fences as <pre class="mermaid">
+  // (shiki has no grammar for them); the library loads lazily, client-only, and only
+  // on pages that have one.
   useEffect(() => {
     if (!doc) return
 
@@ -327,10 +312,8 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
         // being reinterpreted as markup by this component.
         await mermaid.run({ nodes: live })
       } catch (error) {
-        // run() reports one malformed fence by rejecting *after* processing
-        // the whole collection, so the diagrams it did render are marked
-        // below either way — otherwise one bad fence would leave every good
-        // one styled as a code block.
+        // run() rejects for one malformed fence only after processing the whole
+        // collection, so the diagrams it did render are marked below either way.
         console.error('Failed to render some mermaid diagrams', error)
       }
       if (cancelled) return
@@ -345,7 +328,6 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
     }
   }, [doc?.html, isDark])
 
-  // Copy button effect
   useEffect(() => {
     if (!doc) return
 
@@ -426,7 +408,6 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
       <Header variant="docs" basePath={basePath} locales={locales} />
 
       <main className={`docs-layout ${toc.items.length > 0 ? 'docs-layout--toc' : ''}`}>
-        {/* Sidebar */}
         <aside className="docs-sidebar">
           <DocSearch locale={locale} className="mb-6" />
           <button
@@ -472,7 +453,6 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
           </div>
         </aside>
 
-        {/* Article */}
         <article className="docs-article">
           {doc ? (
             <>
@@ -538,7 +518,6 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
           )}
         </article>
 
-        {/* Table of Contents */}
         {toc.items.length > 0 && (
           <aside className="docs-toc">
             <p className="docs-kicker mb-3 text-xs text-docs-text-secondary">

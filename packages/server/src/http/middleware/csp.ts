@@ -24,7 +24,6 @@ export interface CspDirectives {
 }
 
 export interface CspOptions {
-  /** CSP directives configuration. */
   directives?: CspDirectives
   /** Use Content-Security-Policy-Report-Only instead. Default: false */
   reportOnly?: boolean
@@ -36,10 +35,7 @@ export interface CspOptions {
 
 export const CSP_NONCE_KEY = 'csp-nonce'
 
-/**
- * Retrieve the CSP nonce for the current request.
- * Only available when `useNonce: true` is set.
- */
+/** Throws unless the middleware was configured with `useNonce: true`. */
 export function getCspNonce(ctx: Context): string {
   const nonce = ctx.get(CSP_NONCE_KEY as never) as string | undefined
   if (!nonce) {
@@ -48,26 +44,7 @@ export function getCspNonce(ctx: Context): string {
   return nonce
 }
 
-/**
- * Middleware that sets Content-Security-Policy headers.
- *
- * @example
- * ```ts
- * import { createCspMiddleware, getCspNonce } from '@guren/core'
- *
- * app.use('*', createCspMiddleware({
- *   directives: {
- *     defaultSrc: ["'self'"],
- *     scriptSrc: ["'self'", 'https://cdn.example.com'],
- *     styleSrc: ["'self'", "'unsafe-inline'"],
- *     imgSrc: ["'self'", 'data:', 'https:'],
- *     objectSrc: ["'none'"],
- *   },
- *   useNonce: true,
- *   reportUri: '/csp-report',
- * }))
- * ```
- */
+/** Middleware that sets Content-Security-Policy headers. */
 export function createCspMiddleware(options: CspOptions = {}): MiddlewareHandler {
   const {
     directives = {},
@@ -116,7 +93,6 @@ function buildCspHeader(
 
     const directiveName = camelToKebab(key)
 
-    // Boolean directives (e.g., upgrade-insecure-requests)
     if (typeof value === 'boolean') {
       if (value) {
         parts.push(directiveName)
@@ -124,10 +100,8 @@ function buildCspHeader(
       continue
     }
 
-    // Array directives
     const sources = [...value]
 
-    // Auto-append nonce to script-src and style-src
     if (nonce && (key === 'scriptSrc' || key === 'styleSrc')) {
       sources.push(`'nonce-${nonce}'`)
     }

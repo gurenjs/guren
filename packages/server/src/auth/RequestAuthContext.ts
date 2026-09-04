@@ -16,12 +16,11 @@ export class RequestAuthContext implements AuthContext {
   ) {}
 
   guard<T = unknown>(name?: string): Guard<T> {
-    // The cache key is the *effective* guard name, not the requested one:
-    // with header-based selection (AuthManager.resolveGuardName) an
-    // unqualified guard() may resolve to the token guard, and caching that
-    // under the default guard's name would hand it back to an explicit
-    // guard('web') call later in the same request. The resolved key is also
-    // what resolveGuard receives, so selection runs once per lookup.
+    // The cache key is the *effective* guard name, not the requested one: with
+    // header-based selection an unqualified guard() may resolve to the token
+    // guard, and caching that under the default guard's name would hand it to
+    // an explicit guard('web') call later in the same request. The resolved key
+    // is also what resolveGuard receives, so selection runs once per lookup.
     const key = this.resolveName(name)
     if (!this.guardCache.has(key)) {
       this.guardCache.set(key, this.resolveGuard(key))

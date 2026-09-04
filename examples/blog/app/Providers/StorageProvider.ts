@@ -6,18 +6,10 @@ export default class StorageProvider extends ServiceProvider {
       default: 'local',
       disks: {
         local: { driver: 'local', root: './storage/app' },
-        // Rooted inside public/ so the root asset server serves these files
-        // and disk.url() returns a URL that actually resolves.
-        //
-        // For assets this app writes itself, then. Never for bytes someone
-        // uploaded: anything on this disk is fetchable by URL with no
-        // signature, no expiry and no authorization check. The framework
-        // forces a download for document types served out of public/, so an
-        // uploaded .svg will not execute on this origin — but that is a
-        // backstop against one consequence, not access control, and
-        // inlineDocuments: true opts out of it. Attachments go on `local`
-        // above, handed out through the signed delivery route — see
-        // config/attachments.ts.
+        // Rooted inside public/ so the asset server serves these files and
+        // disk.url() resolves. For assets this app writes itself only: anything
+        // here is fetchable with no signature, expiry or authorization check.
+        // Uploaded bytes go on `local` above, behind the signed delivery route.
         public: { driver: 'local', root: './public/storage', url: '/storage', visibility: 'public' },
       },
     }))

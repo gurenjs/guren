@@ -39,11 +39,6 @@ function emptyResult(loadError?: string): LoadedAuditConfig {
  * Loads `config/audit.{ts,js,mjs}` (or an explicit `configFile`) and returns
  * its ignore entries split into valid/invalid. Returns an empty result
  * (no `loadError`) when no config file exists — ignore support is opt-in.
- *
- * Imported without cache-busting: unlike `load-routes.ts` (re-imported on
- * every file save under Vite's dev watcher), this only ever runs once per
- * `guren audit` CLI invocation, so there's no stale-module-cache risk to
- * guard against.
  */
 export async function loadAuditConfig(
   cwd: string,
@@ -91,8 +86,8 @@ export async function loadAuditConfig(
 }
 
 async function resolveConfigFile(cwd: string, configFile?: string): Promise<string | undefined> {
-  // An explicit path is always resolved and handed to the caller, even if it
-  // doesn't exist — the subsequent import() failure surfaces a clear error.
+  // An explicit path is handed back even if it doesn't exist — the subsequent
+  // import() failure surfaces a clear error.
   if (configFile) {
     return resolve(cwd, configFile)
   }

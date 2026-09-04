@@ -7,10 +7,9 @@ import { builtinSubCommands } from './commands'
 import { discoverPluginCommands, createPluginCommandProxy } from './plugin-commands'
 import { runCli, UsageError } from './run-cli'
 
-// CLI commands declared by installed plugins (gurenPlugin.commands).
-// Discovery only reads package.json files; a plugin's entry module is
-// imported lazily when one of its commands is invoked (or renders its own
-// usage), never for the root --help listing.
+// CLI commands declared by installed plugins (gurenPlugin.commands). Discovery
+// only reads package.json; a plugin's entry module is imported lazily when one
+// of its commands is invoked, never for the root --help listing.
 const pluginSubCommands: Record<string, CommandDef> = {}
 try {
   const discovered = await discoverPluginCommands(
@@ -25,19 +24,10 @@ try {
 }
 
 /**
- * This package's own version, for `guren --version`. Read from the manifest
- * rather than written here as a literal, which would drift at every
- * `changeset version`.
- *
- * `../package.json` is this package's root from either layout: built output
- * puts `bin.js` directly in `dist/`, and running from source puts `bin.ts`
- * directly in `src/` — the same idiom `agent-harness.ts` uses to find
- * `templates/`.
- *
- * Returns `undefined` rather than throwing: this module is evaluated for
- * every command, so an unreadable manifest must cost only `--version` (which
- * falls back to the usage-plus-error path in `runCli`) and not take
- * `make:model` down with it.
+ * This package's own version, for `guren --version`. `../package.json` is this
+ * package's root from either layout (`dist/bin.js`, `src/bin.ts`). Returns
+ * `undefined` rather than throwing: this module is evaluated for every command,
+ * so an unreadable manifest must cost only `--version`.
  */
 function readOwnVersion(): string | undefined {
   try {
@@ -72,12 +62,10 @@ const main = defineCommand({
       return
     }
 
-    // citty dispatches on the first non-flag argument, not on rawArgs[0], and
-    // calls this handler again once that subcommand returns. Read the name the
-    // same way so a flag in front of it (`guren --zzz model:list`) does not
-    // look like a command of its own. A name citty does not have never reaches
-    // here — it throws `Unknown command` before running anything — so the only
-    // state left to report is flags with no command at all.
+    // citty dispatches on the first non-flag argument, not rawArgs[0], and calls
+    // this handler again once that subcommand returns. An unknown name never
+    // reaches here (citty throws first), so the only state left to report is
+    // flags with no command at all.
     const commandName = ctx.rawArgs.find((arg) => !arg.startsWith('-'))
     const subCommands = ctx.cmd.subCommands ?? {}
     if (commandName && Object.prototype.hasOwnProperty.call(subCommands, commandName)) {

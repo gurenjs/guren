@@ -15,9 +15,7 @@ import { FileStore } from './stores/FileStore'
 import { TaggedCache } from './TaggedCache'
 import { claimHotDisposable, isHotReloadRuntime } from '../hot-reload/hot-disposables'
 
-/**
- * Taggable wrapper that adds tag support to any cache store.
- */
+/** Adds tag support to any cache store. */
 class TaggableCacheStoreWrapper implements TaggableCacheStore {
   constructor(private readonly store: CacheStore) {}
 
@@ -78,42 +76,16 @@ class TaggableCacheStoreWrapper implements TaggableCacheStore {
   }
 }
 
-/**
- * Cache manager for handling multiple cache stores.
- *
- * @example
- * ```ts
- * const cache = new CacheManager({
- *   default: 'redis',
- *   stores: {
- *     memory: { driver: 'memory' },
- *     redis: { driver: 'redis', client: redisClient },
- *     file: { driver: 'file', path: './storage/cache' },
- *   }
- * })
- *
- * // Use the default store
- * await cache.store().set('key', 'value', 3600)
- *
- * // Use a specific store
- * await cache.store('memory').set('key', 'value')
- *
- * // Use tagged cache
- * await cache.store().tags(['posts', 'user:1']).set('user:1:posts', posts)
- * await cache.store().tags(['user:1']).flush()
- * ```
- */
+/** Cache manager for handling multiple cache stores. */
 export class CacheManager {
   private readonly defaultStoreName: string
   private readonly storeFactories: Map<string, CacheStoreFactory> = new Map()
   private readonly resolvedStores: Map<string, TaggableCacheStore> = new Map()
   /**
    * Where this manager was built, for identifying its stores across hot reloads.
-   *
    * Captured here rather than in `store()` because stores resolve lazily, from
-   * whichever request first asks for one — a call site that says nothing about
-   * which manager owns the result. Skipped outside `--hot`, where it would be a
-   * formatted stack string held for the manager's lifetime and never read.
+   * whichever request first asks for one. Skipped outside `--hot`, where the
+   * stack string would be held for the manager's lifetime and never read.
    */
   private readonly builtAt: string | undefined
 
@@ -121,17 +93,14 @@ export class CacheManager {
     this.builtAt = isHotReloadRuntime() ? new Error().stack : undefined
     this.defaultStoreName = config.default ?? 'memory'
 
-    // Register built-in drivers
     this.registerBuiltinDrivers()
 
-    // Register stores from config
     if (config.stores) {
       for (const [name, storeConfig] of Object.entries(config.stores)) {
         this.registerStoreFromConfig(name, storeConfig)
       }
     }
 
-    // Register default memory store if no stores configured
     if (!this.storeFactories.has(this.defaultStoreName) && this.defaultStoreName === 'memory') {
       this.storeFactories.set('memory', () => new MemoryStore())
     }
@@ -139,29 +108,20 @@ export class CacheManager {
 
   private driverFactories: Map<string, (options: unknown) => CacheStore> = new Map()
 
-  /**
-   * Register built-in store drivers.
-   */
   private registerBuiltinDrivers(): void {
-    // Memory driver
     this.driverFactories.set('memory', (options: unknown) => {
       return new MemoryStore(options as MemoryStoreOptions)
     })
 
-    // Redis driver
     this.driverFactories.set('redis', (options: unknown) => {
       return new RedisStore(options as RedisStoreOptions)
     })
 
-    // File driver
     this.driverFactories.set('file', (options: unknown) => {
       return new FileStore(options as FileStoreOptions)
     })
   }
 
-  /**
-   * Register a store from configuration.
-   */
   private registerStoreFromConfig(
     name: string,
     config: StoreConfig
@@ -176,20 +136,15 @@ export class CacheManager {
     this.storeFactories.set(name, () => factory(options))
   }
 
-  /**
-   * Get a cache store by name.
-   * Returns the default store if no name is specified.
-   */
+  /** Returns the default store if no name is given. */
   store(name?: string): TaggableCacheStore {
     const storeName = name ?? this.defaultStoreName
 
-    // Return cached store if already resolved
     const cached = this.resolvedStores.get(storeName)
     if (cached) {
       return cached
     }
 
-    // Get factory and create store
     const factory = this.storeFactories.get(storeName)
     if (!factory) {
       throw new Error(`Cache store not found: ${storeName}`)
@@ -204,11 +159,10 @@ export class CacheManager {
   }
 
   /**
-   * Under `bun --hot`, stops the sweep timer held by the store this one replaces.
-   *
-   * Registered from here rather than from `MemoryStore` itself because this is
-   * where the store's name is known, and the name is what keeps two memory
-   * stores in one config from sharing a slot and cancelling each other's sweep.
+   * Under `bun --hot`, stops the sweep timer held by the store this one
+   * replaces. Registered from here because the store's name is known here, and
+   * that name keeps two memory stores in one config from cancelling each
+   * other's sweep.
    */
   private stopPreviousStore(storeName: string, store: CacheStore): void {
     const disposable = store as CacheStore & { destroy?: () => void }
@@ -218,47 +172,28 @@ export class CacheManager {
     }
   }
 
-  /**
-   * Register a custom store factory.
-   */
   registerStore(name: string, factory: CacheStoreFactory): void {
     this.storeFactories.set(name, factory)
-    // Clear cached instance if exists
     this.resolvedStores.delete(name)
   }
 
-  /**
-   * Register a custom driver.
-   */
   registerDriver(name: string, factory: (options: unknown) => CacheStore): void {
     this.driverFactories.set(name, factory)
   }
 
-  /**
-   * Check if a store is registered.
-   */
   hasStore(name: string): boolean {
     return this.storeFactories.has(name)
   }
 
-  /**
-   * Get the default store name.
-   */
   getDefaultStoreName(): string {
     return this.defaultStoreName
   }
 
-  /**
-   * Get all registered store names.
-   */
   getStoreNames(): string[] {
     return Array.from(this.storeFactories.keys())
   }
 }
 
-/**
- * Create a cache manager with configuration.
- */
 export function createCacheManager(config?: CacheConfig): CacheManager {
   return new CacheManager(config)
 }

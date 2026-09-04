@@ -35,7 +35,6 @@ describe('Sanitized<T>', () => {
     const admin: Sanitized<Admin | Customer> = { kind: 'admin', email: 'a@example.com' }
     const customer: Sanitized<Admin | Customer> = { kind: 'customer', phone: '555' }
 
-    // Member-specific safe fields survive after narrowing.
     if (admin.kind === 'admin') {
       expect(admin.email).toBe('a@example.com')
     }
@@ -62,7 +61,6 @@ describe('Sanitized<T>', () => {
       twoFactorSecret: 'otp-secret',
     } as never) as unknown as Record<string, unknown>
 
-    // The runtime result carries exactly the keys Sanitized<UserRecord, 'twoFactorSecret'> keeps.
     expect(Object.keys(sanitized).sort()).toEqual(['email', 'id'])
   })
 })

@@ -12,9 +12,8 @@ type AwsDataApiDrizzle = typeof import('drizzle-orm/aws-data-api/pg')
 type AwsDataApiPgDatabase = import('drizzle-orm/aws-data-api/pg').AwsDataApiPgDatabase
 type DrizzleConfig = Parameters<AwsDataApiDrizzle['drizzle']>[0]
 
-// The AWS driver packages are loaded lazily so importing @guren/orm does not
-// require `@aws-sdk/client-rds-data` to be installed (e.g. SQLite-only apps).
-// The drizzle driver itself imports the SDK at module scope, so a missing SDK
+// Lazy so importing @guren/orm does not require `@aws-sdk/client-rds-data`.
+// The drizzle driver imports the SDK at module scope, so a missing SDK
 // surfaces here as an import failure of the driver module.
 async function loadAwsDataApiModules(): Promise<{
   drizzle: AwsDataApiDrizzle['drizzle']
@@ -45,18 +44,17 @@ export interface AwsDataApiDatabaseOptions {
   /** Extra RDSDataClient configuration (region, credentials, ...). */
   clientOptions?: RDSDataClientConfig
   /**
-   * Run pending migrations on the first `getDatabase()` call, like the other
-   * database factories do. Off by default: on Lambda that check runs on every
-   * cold start and costs several serialized Data API round trips before the
-   * first query. Run migrations out of band instead — `db:migrate` locally,
-   * or the console handler (`{"command": "db:migrate"}`) once deployed.
+   * Run pending migrations on the first `getDatabase()` call. Off by default:
+   * on Lambda it costs several serialized Data API round trips on every cold
+   * start. Migrate out of band instead — `db:migrate`, or the console handler
+   * (`{"command": "db:migrate"}`) once deployed.
    */
   migrateOnStart?: boolean
   seedersFolder?: string | URL
   /**
-   * Drizzle relations for RQB v2 (`db.query.*`).
-   * Build with `defineRelations(schema, ...)` from `drizzle-orm`,
-   * or with `relations()` from `drizzle-orm/_relations` for the RQB v1 partial-upgrade path.
+   * Drizzle relations for RQB v2 (`db.query.*`): `defineRelations(schema, ...)`
+   * from `drizzle-orm`, or `relations()` from `drizzle-orm/_relations` for the
+   * RQB v1 partial-upgrade path.
    */
   relations?: Record<string, unknown>
 }
@@ -204,8 +202,7 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
     try {
       return await callback(adminDb)
     } finally {
-      // The Data API client is a stateless HTTP client; destroy() only
-      // releases the SDK's socket pool, so there is nothing to await.
+      // Stateless HTTP client: destroy() only releases the SDK's socket pool.
       adminDb.$client?.destroy?.()
     }
   }
@@ -219,10 +216,9 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
       await adminDb.execute(sql.raw('DROP SCHEMA IF EXISTS drizzle CASCADE'))
     })
 
-    // Drop the memo so the run below re-applies everything from scratch, then
-    // migrate: a reset ends on a migrated database, the same state `guren
-    // db:reset` leaves behind. A caller that migrates again — the documented
-    // reset-then-migrate pattern — hits the memo and no-ops.
+    // A reset ends on a migrated database, like `guren db:reset`. Dropping the
+    // memo re-applies from scratch; a caller that then migrates again hits the
+    // fresh memo and no-ops.
     migrations.reset()
     return migrations.get()
   }
@@ -241,8 +237,8 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
         return rows.map((row) => ({ name: row.name, appliedAt: null }))
       } catch (error) {
         // Only a missing tracker table means "nothing applied". Anything else
-        // (IAM denial, missing cluster, network) must surface — reporting it
-        // as all-pending could prompt a re-run of applied migrations.
+        // (IAM denial, network) must surface — reporting it as all-pending
+        // could prompt a re-run of applied migrations.
         if (isMissingTrackerTableError(error)) {
           return []
         }
@@ -264,12 +260,8 @@ export function createAwsDataApiDatabase(options: AwsDataApiDatabaseOptions): Aw
   }
 }
 
-/**
- * Whether a query failure means the drizzle tracker table (or its schema) has
- * not been created yet. The Data API surfaces Postgres errors as message text
- * (e.g. `relation "drizzle.__drizzle_migrations" does not exist`), so the
- * undefined-table condition is matched there.
- */
+// The Data API surfaces Postgres errors as message text rather than a code,
+// so the undefined-table condition has to be matched on the message.
 function isMissingTrackerTableError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error)
   return /does not exist/i.test(message) && /drizzle|__drizzle_migrations|schema/i.test(message)

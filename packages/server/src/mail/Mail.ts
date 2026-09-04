@@ -19,38 +19,7 @@ function errorMessage(error: unknown): string {
   return String(error)
 }
 
-/**
- * Fluent mail builder for composing and sending emails.
- *
- * @example
- * ```ts
- * import { mail, createMailManager } from '@guren/server/mail'
- *
- * const manager = createMailManager({ ... })
- *
- * // Send a simple email
- * await mail(manager)
- *   .to('user@example.com')
- *   .subject('Hello!')
- *   .text('Hello World!')
- *   .send()
- *
- * // Send an HTML email with template
- * await mail(manager)
- *   .to('user@example.com')
- *   .subject('Welcome!')
- *   .html('<h1>Welcome to our app!</h1>')
- *   .attach({ filename: 'guide.pdf', path: './guide.pdf' })
- *   .send()
- *
- * // Queue the email for async sending
- * await mail(manager)
- *   .to('user@example.com')
- *   .subject('Report')
- *   .html('<p>Your report is ready</p>')
- *   .queue('emails')
- * ```
- */
+/** Fluent mail builder for composing and sending emails. */
 export class Mail {
   private message: Partial<MailMessage> = {
     to: [],
@@ -61,32 +30,22 @@ export class Mail {
   private transportName?: string
 
   constructor(private readonly manager: MailManager) {
-    // Set default from address
     const defaultFrom = manager.getDefaultFrom()
     if (defaultFrom) {
       this.message.from = defaultFrom
     }
   }
 
-  /**
-   * Set the sender address.
-   */
   from(address: string | MailAddress): this {
     this.message.from = parseAddress(address)
     return this
   }
 
-  /**
-   * Add a recipient.
-   */
   to(address: string | MailAddress): this {
     this.message.to!.push(parseAddress(address))
     return this
   }
 
-  /**
-   * Add multiple recipients.
-   */
   toMany(addresses: (string | MailAddress)[]): this {
     for (const addr of addresses) {
       this.to(addr)
@@ -94,61 +53,37 @@ export class Mail {
     return this
   }
 
-  /**
-   * Add a CC recipient.
-   */
   cc(address: string | MailAddress): this {
     this.message.cc!.push(parseAddress(address))
     return this
   }
 
-  /**
-   * Add a BCC recipient.
-   */
   bcc(address: string | MailAddress): this {
     this.message.bcc!.push(parseAddress(address))
     return this
   }
 
-  /**
-   * Set the reply-to address.
-   */
   replyTo(address: string | MailAddress): this {
     this.message.replyTo = parseAddress(address)
     return this
   }
 
-  /**
-   * Set the subject.
-   */
   subject(subject: string): this {
     this.message.subject = subject
     return this
   }
 
-  /**
-   * Set the plain text body.
-   */
   text(content: string): this {
     this.message.text = content
     return this
   }
 
-  /**
-   * Set the HTML body.
-   */
   html(content: string): this {
     this.message.html = content
     return this
   }
 
-  /**
-   * Render a React component as HTML body.
-   * Requires @react-email/render to be installed.
-   *
-   * @param component - React component function
-   * @param props - Props to pass to the component
-   */
+  /** Render a React component as the HTML body; requires @react-email/render. */
   async template<P extends Record<string, unknown>>(
     component: (props: P) => unknown,
     props: P
@@ -185,18 +120,12 @@ export class Mail {
     return this
   }
 
-  /**
-   * Add an attachment.
-   */
   attach(attachment: MailAttachment): this {
     this.message.attachments!.push(attachment)
     return this
   }
 
-  /**
-   * Add a custom header.
-   * Rejects CR/LF characters to prevent SMTP header injection.
-   */
+  /** Add a custom header. Rejects CR/LF to prevent SMTP header injection. */
   header(key: string, value: string): this {
     if (/[\r\n]/.test(key) || /[\r\n]/.test(value)) {
       throw new Error('Mail: header names and values cannot contain newline characters.')
@@ -208,21 +137,15 @@ export class Mail {
     return this
   }
 
-  /**
-   * Specify which transport to use.
-   */
+  /** Specify which transport to use. */
   via(transport: string): this {
     this.transportName = transport
     return this
   }
 
   /**
-   * Build the final message.
-   */
-  /**
-   * Mailable subclasses define their content in build() (subject, body, ...).
-   * It runs automatically before sending, so `new WelcomeMail(manager).to(x).send()`
-   * works without a manual build() call.
+   * Mailable subclasses define their content here; it runs automatically before
+   * sending, so no manual build() call is needed.
    */
   protected build?(): this
 
@@ -252,18 +175,14 @@ export class Mail {
     return this.message as MailMessage
   }
 
-  /**
-   * Send the email immediately.
-   */
+  /** Send the email immediately. */
   async send(): Promise<SendResult> {
     const message = this.buildMessage()
     const transport = this.manager.transport(this.transportName)
     return transport.send(message)
   }
 
-  /**
-   * Queue the email for async sending.
-   */
+  /** Queue the email for async sending. */
   async queue(queueName: string = 'default'): Promise<string> {
     const driver = getQueueDriver()
     if (!driver) {
@@ -272,10 +191,8 @@ export class Mail {
 
     const message = this.buildMessage()
 
-    // Register the SendMailJob if not already registered
     registerJob(SendMailJob)
 
-    // Dispatch the job
     return SendMailJob.dispatch(
       {
         message,
@@ -286,36 +203,22 @@ export class Mail {
   }
 }
 
-/**
- * Job payload for sending emails.
- */
 interface SendMailJobPayload {
   message: MailMessage
   transport: string
 }
 
-/**
- * Global mail manager reference for the job.
- */
 let globalMailManager: MailManager | null = null
 
-/**
- * Set the global mail manager for queue jobs.
- */
+/** Set the global mail manager used by queue jobs. */
 export function setMailManager(manager: MailManager): void {
   globalMailManager = manager
 }
 
-/**
- * Get the global mail manager.
- */
 export function getMailManager(): MailManager | null {
   return globalMailManager
 }
 
-/**
- * Job for sending emails via the queue.
- */
 class SendMailJob extends Job<SendMailJobPayload> {
   static jobName = 'SendMailJob'
   static queue = 'default'
@@ -337,18 +240,7 @@ class SendMailJob extends Job<SendMailJobPayload> {
   }
 }
 
-/**
- * Create a new mail builder.
- *
- * @example
- * ```ts
- * await mail(manager)
- *   .to('user@example.com')
- *   .subject('Hello')
- *   .text('Hello World!')
- *   .send()
- * ```
- */
+/** Create a new mail builder. */
 export function mail(manager: MailManager): Mail {
   return new Mail(manager)
 }

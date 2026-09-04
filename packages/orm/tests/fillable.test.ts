@@ -2,8 +2,6 @@ import { describe, it, expect } from 'bun:test'
 import { Model, type PlainObject } from '../src/Model'
 import { MassAssignmentException } from '../src/MassAssignmentException'
 
-// Minimal concrete subclasses for testing filterFillable
-
 class DefaultModel extends Model<PlainObject> {
   static override table = {} as unknown
 }

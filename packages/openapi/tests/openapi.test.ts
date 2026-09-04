@@ -44,9 +44,8 @@ describe('@guren/openapi', () => {
     expect(document.info.title).toBe('Blog API')
     expect(document.paths['/posts/{id}']?.post?.summary).toBe('Create a post')
     expect(document.paths['/posts/{id}']?.post?.deprecated).toBe(true)
-    // The bounds a route validates with reach the document: a client (or an
-    // agent) reading `{ type: 'string' }` where the endpoint requires a
-    // non-empty string under 120 characters is told less than the app knows.
+    // The bounds a route validates with must reach the document, or a client
+    // reading `{ type: 'string' }` is told less than the app knows.
     expect(document.paths['/posts/{id}']?.post?.parameters).toEqual([
       { name: 'id', in: 'path', required: true, schema: { type: 'integer', exclusiveMinimum: 0 } },
       { name: 'preview', in: 'query', required: false, schema: { type: 'boolean' } },
@@ -105,17 +104,14 @@ describe('@guren/openapi', () => {
     })
 
     expect(warnings).toEqual([])
-    // OpenAPI path templates are RFC 6570 URI templates, where `{slug*}`
-    // already means "explode" — so the asterisk is dropped here, and the
-    // parameter name matches the template, as OpenAPI requires.
+    // `{slug*}` already means "explode" in an RFC 6570 template, so the
+    // asterisk is dropped and the parameter name matches the template.
     expect(Object.keys(document.paths)).toEqual(['/files/{slug}'])
     expect(document.paths['/files/{slug}']?.get?.parameters).toEqual([
       { name: 'slug', in: 'path', required: true, schema: { type: 'string' } },
     ])
-    // That is a *rendering* decision, not a second lexing rule: the shared
-    // lexer reports what Hono registers, and every other surface derived from
-    // this route (an agent tool's input, the router's own binding scan) asks
-    // for `slug*`. Two lexers is how those two answers drifted apart before.
+    // Rendering only: the shared lexer still reports what Hono registers, which
+    // is what every other surface derived from this route asks for.
     expect(extractPathParamNames('/files/:slug*')).toEqual(['slug*'])
   })
 
@@ -125,8 +121,7 @@ describe('@guren/openapi', () => {
         method: 'GET',
         path: '/files/:slug*',
         name: 'files.show',
-        // Keyed the way Hono registers it, which is the key the route's
-        // handler receives — and the only key an app can write.
+        // Keyed the way Hono registers it — the only key an app can write.
         schemas: { params: z.object({ 'slug*': z.coerce.number().int().positive() }) },
       },
     ]
@@ -138,8 +133,6 @@ describe('@guren/openapi', () => {
 
     expect(warnings).toEqual([])
     // Looked up by the raw label, rendered under the RFC 6570-safe name.
-    // Matching the two by the rendered name found nothing and fell back to a
-    // bare string, throwing away a declared contract.
     expect(document.paths['/files/{slug}']?.get?.parameters).toEqual([
       { name: 'slug', in: 'path', required: true, schema: { type: 'integer', exclusiveMinimum: 0 } },
     ])
@@ -257,9 +250,8 @@ describe('@guren/openapi', () => {
     ])
   })
 
-  // An app only learns the address it serves on after it binds, so a mounted
-  // document has to be able to pick the value up afterwards. Both fetches
-  // matter: one alone passes just as well against a list frozen at mount.
+  // Both fetches matter: one alone passes just as well against a list frozen
+  // at mount.
   it('re-resolves a servers function on every mounted request', async () => {
     let serverUrl = 'http://localhost:3334'
     const app = createApp({
@@ -290,9 +282,8 @@ describe('@guren/openapi', () => {
     expect(await readServers()).toEqual([{ url: 'http://127.0.0.1:52341' }])
   })
 
-  // The pattern the example API uses, end to end over a real socket: `port: 0`
-  // means nothing outside the app knows the port, so the document can only
-  // name it by reading the address back off the app that bound it.
+  // End to end over a real socket: under `port: 0` nothing outside the app
+  // knows the port, so the document can only read it back off the bound app.
   it('names the address the app bound when servers reads app.address', async () => {
     const unbound = 'http://localhost:3334'
     const app = createApp({
@@ -364,10 +355,9 @@ describe('@guren/openapi', () => {
     expect(document.paths['/posts/{id}']?.patch?.requestBody?.required).toBe(false)
   })
 
-  // zod 4 keeps an array's element in `_def.element` and the literal string
-  // `'array'` in `_def.type` — reading the wrong key still produces a
-  // document, just one with the element type missing. The zod 3 API, whose
-  // `_def.type` holds a schema instead, is refused up front.
+  // zod 4 keeps an array's element in `_def.element` and the type name in
+  // `_def.type`; the zod 3 API, whose `_def.type` holds a schema instead, is
+  // refused up front.
   describe('schema walking', () => {
     // `.pipe()` statically requires the target to accept the source's output,
     // but the walker reads whatever schema object it is handed at runtime.
@@ -396,11 +386,9 @@ describe('@guren/openapi', () => {
       return { parameters: operation?.parameters, warnings }
     }
 
-    // The walk itself is unit-tested in `@guren/core`'s own
-    // `zod-json-schema.test.ts`; what matters here is that the constraints
-    // survive the trip into every place a document carries a schema —
-    // request body, query parameter, and response — rather than only the one
-    // that happened to be exercised.
+    // The walk itself is unit-tested in `@guren/core`'s zod-json-schema.test.ts;
+    // what matters here is that constraints survive into all three places a
+    // document carries a schema: body, query parameter, response.
     it('carries zod checks into every schema the document emits', () => {
       const body = bodyDocument(z.object({
         slug: z.string().regex(/^[a-z-]+$/),
@@ -430,10 +418,8 @@ describe('@guren/openapi', () => {
       expect(warnings).toEqual([])
     })
 
-    // The zod 3 API is refused with a warning, not walked: on a v3 node
-    // `_def.type` holds a nested schema where v4 keeps the type name, so
-    // rendering it with v4 reads produces silently wrong output. `zod/v3`
-    // ships inside zod 4 itself, so this arrives from apps declaring zod 4.
+    // Refused rather than walked: v4 reads over a v3 node produce silently wrong
+    // output. `zod/v3` ships inside zod 4, so apps declaring zod 4 hit this.
     it('refuses a zod 3 schema with a warning naming the zod v3 API', () => {
       const asBody = bodyDocument(z3.object({ tags: z3.array(z3.string()) }))
       expect(asBody.schema).toBeUndefined()
@@ -445,9 +431,7 @@ describe('@guren/openapi', () => {
       expect(asQuery.warnings.some((w) => w.includes('zod v3 API'))).toBe(true)
     })
 
-    // A v3 node inside a v4 object passes the entry gate (the object is v4).
-    // Two things must hold: the walk refuses the nested node with the v3
-    // warning, and the document still generates — `safeParse` on such an
+    // A v3 node inside a v4 object passes the entry gate. `safeParse` on such an
     // object THROWS in zod 4 rather than returning a failure, so the
     // request-body required probe has to survive it.
     it('survives a v3 node nested inside a v4 body and names it in a warning', () => {
@@ -460,8 +444,8 @@ describe('@guren/openapi', () => {
       expect(warnings.some((w) => w.includes('body.legacy') && w.includes('zod v3 API'))).toBe(true)
     })
 
-    // A v4 wrapper around a v3 object also passes the entry gate; the
-    // recursive unwrap has to re-check, or the only diagnostic is the generic
+    // A v4 wrapper around a v3 object also passes the entry gate, so the
+    // recursive unwrap must re-check or the diagnostic degrades to the generic
     // "expected an object schema".
     it('names the zod v3 API when a wrapped query schema hides a v3 object', () => {
       const { warnings } = queryParameters(z.optional(z3.object({ page: z3.number() }) as never))
@@ -506,10 +490,8 @@ describe('@guren/openapi', () => {
     })
 
     // `nullable` is the one single-child wrapper the type walk must NOT look
-    // through: it renders as a union with null rather than passing its inner
-    // schema out unchanged. It shares a membership list with the wrappers that
-    // are looked through, so the exception has to be asserted separately —
-    // otherwise dropping it just silently emits the unwrapped schema.
+    // through, and it shares a membership list with the ones that are, so the
+    // exception needs its own assertion — dropping it emits silently unwrapped.
     it('renders a nullable property as a union with null rather than unwrapping it', () => {
       const { schema: document, warnings } = bodyDocument(z.object({ a: z.string().nullable() }))
 
@@ -566,9 +548,8 @@ describe('@guren/openapi', () => {
       expect(warnings).toEqual(['POST /posts body.a: the contents of a "lazy" schema could not be read, so it is omitted.'])
     })
 
-    // Finding the object behind a parameter schema is a third walk over the
-    // same wrappers, and one that reports nothing when it gives up: a wrapper
-    // it fails to look through drops every parameter from the document.
+    // A third walk over the same wrappers, and one that reports nothing when it
+    // gives up: a wrapper it misses drops every parameter from the document.
     it('expands parameters through a wrapped query schema', () => {
       for (const query of [
         z.object({ page: z.number() }).default({ page: 1 }),

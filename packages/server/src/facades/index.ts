@@ -2,20 +2,8 @@ import type { Container } from '../container/Container'
 import type { ServiceBindings } from '../container/bindings'
 
 /**
- * Create a proxy-based facade that lazily resolves a service from an application container.
- *
- * The returned proxy intercepts all property access and method calls,
- * resolving the underlying service from the container on each access.
- * This ensures that container fakes and flushes are respected.
- *
- * @example
- * ```typescript
- * import { createFacades } from '@guren/server/facades'
- *
- * const { Cache, Events } = createFacades(container)
- * await Cache.get('key')
- * Events.emit('user.created', payload)
- * ```
+ * A proxy that re-resolves `key` from the container on every access, so
+ * container fakes and flushes are respected.
  */
 export function createFacade<K extends keyof ServiceBindings>(
   container: Pick<Container, 'make'>,

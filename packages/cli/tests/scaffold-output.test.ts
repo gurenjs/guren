@@ -42,18 +42,12 @@ import { FIELD_TYPES, parseFieldsString } from '../src/fields'
 import { generatePageTypes } from '../src/pages-types'
 
 /**
- * The syntax gate for every generator: render representative outputs and
- * require each generated .ts/.tsx to parse. This is the check that covers the
- * flag-dependent builders too — the files under templates/scaffold/ get the
- * stronger `typecheck:templates` pass (tsconfig.templates.json), and
- * make:auth's rendered builder output gets its own compile gate in
- * scaffold-builder-typecheck.test.ts, but every other builder's output exists
- * only at generation time, so this is the one place its syntax can fail
- * before a user's editor does.
- *
- * The covered set is asserted against `builtinSubCommands`, so a new `make:*`
- * command fails here until it either joins the matrix or names its reason in
- * SKIPPED_GENERATORS.
+ * The syntax gate for every generator: render representative outputs and require
+ * each generated .ts/.tsx to parse. templates/scaffold/ gets the stronger
+ * `typecheck:templates` pass and make:auth's builders get
+ * scaffold-builder-typecheck.test.ts; every other builder's output exists only
+ * at generation time. The covered set derives from `builtinSubCommands`, so a
+ * new `make:*` fails here until it joins the matrix or names its reason.
  */
 
 /** Generators with no TypeScript output — nothing for a parse gate to check. */
@@ -87,8 +81,7 @@ async function relativeSourcePaths(root: string): Promise<string[]> {
 
 /**
  * Every .ts/.tsx in the workspace that fails to parse (empty = green).
- * `collectFiles` skips dotfiles and .d.ts — no generator in the matrix emits
- * either, so the delta from a full walk is deliberate.
+ * `collectFiles` skips dotfiles and .d.ts, which no generator here emits.
  */
 async function unparseableSources(dir: string): Promise<string[]> {
   const failures: string[] = []
@@ -194,8 +187,7 @@ describe('generated sources parse', () => {
   }
 
   // Runs after the combos above (bun executes a file's tests in declaration
-  // order): a template no combo writes is dead weight that still typechecks
-  // and ships, so it would otherwise read as live code forever.
+  // order): a template no combo writes is dead weight that still ships.
   it('every shipped auth template is written by some flag combination', async () => {
     const templatePaths = await relativeSourcePaths(AUTH_TEMPLATE_ROOT)
     expect(templatePaths.length).toBeGreaterThan(0)
@@ -238,9 +230,8 @@ describe('generated sources parse', () => {
 })
 
 describe('shipped templates reach published users', () => {
-  // Everything above imports make-auth from src, which resolves
-  // `../templates/scaffold` against the source tree — so none of it notices a
-  // template missing from the built or published package. These two do.
+  // Everything above imports make-auth from src, which resolves templates
+  // against the source tree; these two see a template missing from the build.
 
   it('the built CLI resolves templates from dist', async () => {
     assertWorkspaceBuilt([SERVER_DIST_ENTRY, CLI_DIST_BIN])
@@ -281,11 +272,9 @@ describe('shipped templates reach published users', () => {
 })
 
 describe('scaffold-typecheck fixture stays pinned to the builders', () => {
-  // tsconfig.templates.json typechecks templates/scaffold/auth against the
-  // companion sources in tests/fixtures/scaffold-typecheck/auth. Those
-  // companions are renders of make-auth's *builders* (plus the real codegen
-  // for pages.gen), so a builder change has to land in the fixture too — this
-  // is the test that says so, instead of the fixture silently drifting.
+  // The companions in tests/fixtures/scaffold-typecheck/auth are renders of
+  // make-auth's *builders*, so a builder change has to land in the fixture too —
+  // this is the test that says so.
   const fixtureRoot = join(SCAFFOLD_FIXTURE_ROOT, 'auth')
 
   it('User model, users table, and pages.gen match a --verify render', async () => {
@@ -315,12 +304,9 @@ describe('scaffold-typecheck fixture stays pinned to the builders', () => {
 })
 
 describe('attachments scaffold-typecheck fixture stays pinned to the builder', () => {
-  // tsconfig.templates-attachments.json typechecks templates/scaffold/attachments
-  // against tests/fixtures/scaffold-typecheck/attachments/db/schema.ts. That
-  // companion is a render of the blueprint's Postgres schema patch, so a
-  // change to ATTACHMENTS_TABLE_BLOCKS.pg has to land in the fixture too —
-  // otherwise the templates keep typechecking against a table the blueprint
-  // no longer writes.
+  // tests/fixtures/scaffold-typecheck/attachments/db/schema.ts is a render of
+  // the blueprint's Postgres schema patch, so a change to
+  // ATTACHMENTS_TABLE_BLOCKS.pg has to land in the fixture too.
   it('attachments table matches what the blueprint appends to a pg schema', async () => {
     const fixtureSchema = await readFile(join(SCAFFOLD_FIXTURE_ROOT, 'attachments/db/schema.ts'), 'utf8')
     const tableStart = fixtureSchema.indexOf('export const attachments')
@@ -335,15 +321,13 @@ describe('attachments scaffold-typecheck fixture stays pinned to the builder', (
 
       const rendered = await readFile(join(workspace.dir, 'db/schema.ts'), 'utf8')
       // The block is appended at end of file, so the tails must be *equal*:
-      // toContain would keep passing if the builder grew a suffix
-      // (.enableRLS(), a second index) the fixture never learned about.
+      // toContain would keep passing on a suffix the fixture never learned.
       const renderedStart = rendered.indexOf('export const attachments')
       expect(renderedStart).toBeGreaterThan(-1)
       expect(rendered.slice(renderedStart).trimEnd()).toBe(fixtureTable.trimEnd())
 
-      // The shared byte-identity gate below exempts attachments (its run
-      // installs the storage blueprint, which that workspace also runs), so
-      // its two templates get the same written-byte-identical guarantee here.
+      // The shared byte-identity gate below exempts attachments, so its two
+      // templates get that guarantee here instead.
       for (const path of ['config/attachments.ts', 'app/Providers/AttachmentsProvider.ts']) {
         expect(await readFile(join(workspace.dir, path), 'utf8'))
           .toBe(await readFile(join(SCAFFOLD_TEMPLATE_ROOT, 'attachments', path), 'utf8'))
@@ -355,16 +339,10 @@ describe('attachments scaffold-typecheck fixture stays pinned to the builder', (
 })
 
 describe('blueprint companion fixtures stay pinned to their builders', () => {
-  // tsconfig.templates.json typechecks the events/queue/broadcasting provider
-  // templates against the companions in tests/fixtures/scaffold-typecheck/
-  // <blueprint>/. Those companions are renders of the make:* builders each
-  // blueprint runs before writing its provider, so a builder change has to
-  // land in the fixture too — this is the test that says so, instead of the
-  // fixture silently drifting.
-  //
-  // Whole-file toBe, not toContain: a suffix the builder grows (a new method,
-  // a changed override) must fail here rather than leave the templates
-  // typechecking against a file the blueprint no longer writes.
+  // The companions in tests/fixtures/scaffold-typecheck/<blueprint>/ are renders
+  // of the make:* builders each blueprint runs, so a builder change has to land
+  // in the fixture too. Whole-file toBe, not toContain: a suffix the builder
+  // grows must fail here rather than typecheck against a stale file.
   const companionPins: Array<[string, string, () => Promise<unknown>]> = [
     ['events', 'app/Events/OrderPlaced.ts', () => makeEvent('OrderPlaced', {})],
     ['events', 'app/Listeners/SendOrderReceiptListener.ts', () => makeListener('SendOrderReceipt', { event: 'OrderPlaced' })],
@@ -387,9 +365,8 @@ describe('blueprint companion fixtures stay pinned to their builders', () => {
     })
   }
 
-  // The reverse direction: a fixture added for typechecking but pinned by
-  // nothing drifts silently the first time its builder changes. Exemptions
-  // carry their reason and must name fixtures that exist.
+  // The reverse direction: a fixture pinned by nothing drifts silently the first
+  // time its builder changes. Exemptions must name fixtures that exist.
   const PINNED_ELSEWHERE: Record<string, string> = {
     'auth/': 'pinned by the auth fixture pin above, plus real codegen for pages.gen',
     'attachments/db/schema.ts': 'pinned by the attachments fixture pin above',
@@ -411,11 +388,8 @@ describe('blueprint companion fixtures stay pinned to their builders', () => {
 
 describe('blueprint scaffold templates are written by their blueprints', () => {
   // Every file under templates/scaffold/<blueprint>/ must land in an app
-  // byte-identical when that blueprint runs — a template no blueprint writes
-  // is dead weight that still typechecks and ships, and a blueprint that
-  // post-processes what it loads has drifted from the tree the
-  // typecheck:templates gate certifies. Exemptions carry their reason,
-  // SKIPPED_GENERATORS-style, and must name template dirs that exist.
+  // byte-identical when that blueprint runs; otherwise it has drifted from the
+  // tree typecheck:templates certifies. Exemptions must name dirs that exist.
   const COVERED_ELSEWHERE: Record<string, string> = {
     auth: 'flag-dependent scaffold; every template is covered by the auth reachability gate above',
     attachments: 'its run installs the storage blueprint, which this shared workspace also runs; '

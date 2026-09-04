@@ -39,12 +39,10 @@ async function measureLatency(): Promise<LatencyResults> {
   const hono = bootedApp.hono
   const N = 200
 
-  // Warm up
   for (let i = 0; i < 20; i++) {
     await hono.request('/health')
   }
 
-  // Measure
   const durations: number[] = []
   for (let i = 0; i < N; i++) {
     const start = performance.now()
@@ -107,7 +105,6 @@ async function main() {
     memory,
   }
 
-  // Append to history
   const historyFile = resolve(ROOT, 'benchmark-history.json')
   let history: BenchmarkResults[] = []
   try {
@@ -125,13 +122,12 @@ async function main() {
 
   console.log('\nResults saved to benchmarks.json')
 
-  // Check thresholds
   const THRESHOLDS = {
-    startupMs: 3000,        // 3 seconds max startup
-    p95LatencyMs: 10,       // 10ms max p95 request latency
-    blogBuildKb: 800,       // 800KB max blog build
-    webBuildKb: 800,        // 800KB max web build
-    heapUsedMb: 256,        // 256MB max heap
+    startupMs: 3000,
+    p95LatencyMs: 10,
+    blogBuildKb: 800,
+    webBuildKb: 800,
+    heapUsedMb: 256,
   }
 
   let failed = false

@@ -1,8 +1,7 @@
 /**
- * Extracts TypeScript type literals from Zod 4 schema objects at runtime.
- * Every `_def` read the JSON Schema walker also performs goes through
- * `@guren/core/internal/zod-compat`, so the two cannot disagree about zod's
- * layout; rendering decisions live here.
+ * Extracts TypeScript type literals from Zod 4 schema objects at runtime. Every `_def`
+ * read goes through `@guren/core/internal/zod-compat`, so this and the JSON Schema walker
+ * cannot disagree about zod's layout; rendering decisions live here.
  */
 
 import {
@@ -33,11 +32,9 @@ interface SchemaTypeOptions {
 }
 
 /**
- * The wire types a coercing schema accepts, where they differ from the parsed
- * type; absent means the two sides are identical. Deliberately narrower than
- * what Zod would really coerce (`z.coerce.boolean()` takes anything at all) —
- * a generated type is one callers must *satisfy*, so it stays JSON-native and
- * usable, and `boolean` stays bare so it can still drive a checkbox.
+ * The wire types a coercing schema accepts, where they differ from the parsed type.
+ * Deliberately narrower than what Zod would really coerce: a generated type is one
+ * callers must *satisfy*, so it stays JSON-native (`boolean` stays bare for a checkbox).
  */
 const COERCED_INPUT_TYPES: Record<string, string> = {
   number: 'number | string',
@@ -55,9 +52,8 @@ function refuseZod3(): void {
 }
 
 /**
- * Convert a Zod 4 schema object to a TypeScript type string.
- * Returns `undefined` if the schema structure is unrecognizable — including a
- * zod v3 schema, which is refused loudly rather than rendered wrong.
+ * A Zod 4 schema as a TypeScript type string, or `undefined` when unrecognizable —
+ * including a zod v3 schema, which is refused loudly rather than rendered wrong.
  */
 export function schemaToTypeString(schema: unknown, options: SchemaTypeOptions): string | undefined {
   if (!schema || typeof schema !== 'object') return undefined
@@ -71,9 +67,8 @@ export function schemaToTypeString(schema: unknown, options: SchemaTypeOptions):
 }
 
 function zodToType(z: ZodSchemaLike, io: SchemaIo): string {
-  // Re-checked on every node, not just at entry: a v3 schema can sit *inside*
-  // a v4 object (nothing but the type system prevents it), and without this
-  // gate it would render as a silent `unknown` instead of being refused.
+  // Re-checked per node: a v3 schema can sit inside a v4 object, and would otherwise
+  // render as a silent `unknown` instead of being refused.
   if (isZod3Schema(z)) {
     refuseZod3()
     return 'unknown'
@@ -82,8 +77,8 @@ function zodToType(z: ZodSchemaLike, io: SchemaIo): string {
   const def = z._def ?? {}
   const t = typeOf(z)
 
-  // `.coerce` is recorded on the schema node itself, so this has to be
-  // checked before the plain type mapping below claims the parsed type.
+  // `.coerce` sits on the node itself, so check it before the plain type mapping below
+  // claims the parsed type.
   if (io === 'input' && def.coerce === true && t in COERCED_INPUT_TYPES) {
     return COERCED_INPUT_TYPES[t]
   }
@@ -125,8 +120,7 @@ function zodToType(z: ZodSchemaLike, io: SchemaIo): string {
       if (entries.length === 0) return '{}'
       const fields = entries.map(([key, val]) => {
         const opt = isOptional(val, io) ? '?' : ''
-        // Quoted when not a bare identifier — z.object({ 'user-id': ... })
-        // would otherwise emit invalid TypeScript.
+        // z.object({ 'user-id': ... }) would otherwise emit invalid TypeScript.
         return `${quoteObjectKey(key)}${opt}: ${zodToType(val, io)}`
       })
       return `{ ${fields.join('; ')} }`
@@ -173,9 +167,8 @@ function zodToType(z: ZodSchemaLike, io: SchemaIo): string {
     }
 
     case 'enum': {
-      // An enum with no members accepts nothing, so `never` is its type. The
-      // empty-array case used to fall through to `[].join()` and emit an empty
-      // string, which is not valid TypeScript in the position this lands in.
+      // An enum with no members accepts nothing; `[].join()` would emit an empty string,
+      // which is not valid TypeScript in the position this lands in.
       const vals = enumValues(z)
       return vals.length > 0 ? vals.map(literalType).join(' | ') : 'never'
     }
@@ -194,9 +187,8 @@ function zodToType(z: ZodSchemaLike, io: SchemaIo): string {
 }
 
 /**
- * Whether a field may be omitted — the presence half of the input/output split
- * that `zodToType` handles for types. What each wrapper *means* for presence is
- * this renderer's own policy; only the step that reaches the child is shared.
+ * Whether a field may be omitted — the presence half of the input/output split. What each
+ * wrapper *means* for presence is this renderer's policy; only reaching the child is shared.
  */
 function isOptional(z: ZodSchemaLike, io: SchemaIo): boolean {
   const t = typeOf(z)
@@ -206,8 +198,7 @@ function isOptional(z: ZodSchemaLike, io: SchemaIo): boolean {
   }
 
   if (TRANSPARENT_WRAPPERS.has(t)) {
-    // `.catch()` swallows any failure, so an omitted key is never rejected;
-    // on the way out it is absent only if what it wraps could be.
+    // `.catch()` swallows any failure, so an omitted key is never rejected on input.
     if (t === 'catch' && io === 'input') return true
     return child()
   }
@@ -215,8 +206,7 @@ function isOptional(z: ZodSchemaLike, io: SchemaIo): boolean {
   switch (t) {
     case 'optional':
       return true
-    // Both fill a missing value in: the field may be left out of a request but
-    // is always there once parsed.
+    // Both fill a missing value in, so the field is always there once parsed.
     case 'default':
     case 'prefault':
       return io === 'input'
@@ -224,11 +214,9 @@ function isOptional(z: ZodSchemaLike, io: SchemaIo): boolean {
       return false
     case 'nullable':
       return child()
-    // Read the side being rendered, so presence matches the type `zodToType`
-    // reports for this node. An approximation: a pipeline runs both stages, so
-    // `z.string().optional().pipe(z.string())` is reported omissible even
-    // though the second stage rejects a missing value. Deciding that properly
-    // means simulating a parse, not reading a `_def`.
+    // Reads the side being rendered, so presence matches the type reported for this node.
+    // An approximation: `z.string().optional().pipe(z.string())` reports omissible even
+    // though the second stage rejects a missing value.
     case 'pipe':
       return child()
     default:
@@ -241,9 +229,8 @@ function wrapComplex(type: string): string {
 }
 
 /**
- * A single literal value as a TypeScript type. `JSON.stringify` cannot render
- * `undefined` — it returns `undefined` rather than a string — so a
- * `z.literal(undefined)` would otherwise reach the output as an empty string.
+ * A single literal value as a TypeScript type. `JSON.stringify(undefined)` returns
+ * `undefined` rather than a string, so `z.literal(undefined)` would emit nothing.
  */
 function literalType(value: unknown): string {
   return value === undefined ? 'undefined' : JSON.stringify(value)

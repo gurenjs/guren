@@ -16,10 +16,8 @@ export interface TokenGuardOptions<User = unknown> {
   store: ApiTokenStore
   ctx: Context
   /**
-   * Resolves the token's userId to a full user record (sanitized through the
-   * provider's `sanitize` when present). Without a provider the guard still
-   * authenticates: `user()` resolves to a minimal `{ id }` record so
-   * Gate/policy evaluation (which keys on `id`) works out of the box.
+   * Resolves the token's userId to a full user record. Without one the guard
+   * still authenticates: `user()` resolves to a minimal `{ id }` record.
    */
   provider?: UserProvider<User>
   /** Update the token's lastUsedAt on successful verification. Default true. */
@@ -27,28 +25,10 @@ export interface TokenGuardOptions<User = unknown> {
 }
 
 /**
- * Bearer-token implementation of the Guard contract (RFC 0016 Phase 0).
- *
- * Reads `Authorization: Bearer <token>`, verifies it against the configured
- * ApiTokenStore, and exposes the result through the same Guard surface the
- * SessionGuard implements — so `requireAuthenticated()`, `Controller.auth`,
- * and Gate resolution treat session- and token-authenticated requests
- * identically. On successful verification the result is also written to
- * `ctx[API_TOKEN_KEY]`, keeping `getApiToken(ctx)` and `tokenCan*` working
- * exactly as they do behind `createBearerTokenMiddleware` — and when that
- * middleware already verified this request's token, the guard reuses its
- * result instead of paying a second store read and lastUsedAt write.
- *
- * Credential flows do not apply to bearer tokens: `attempt()`, `login()` and
- * `validate()` throw. `logout()` is not a no-op — it revokes the presented
- * token, the closest meaningful analogue to ending a session. On a request
- * that carries a session cookie *and* a Bearer header, only the token is
- * revoked; end the session explicitly via `auth.guard('web').logout()`.
- *
- * This guard answers authentication only. Token *abilities* are not
- * consulted here or by Gate/policies — enforce them where the operation is
- * dispatched (`tokenCan*`, `createBearerTokenMiddleware({ abilities })`, or
- * the RFC 0016 scope gate), per the RFC's scope-before-policy layering.
+ * Bearer-token Guard (RFC 0016 Phase 0). Credential flows (`attempt`,
+ * `login`, `validate`) throw; `logout()` revokes the presented token and
+ * leaves a co-present session alone. Answers authentication only — token
+ * abilities are enforced elsewhere (`tokenCan*`, the RFC 0016 scope gate).
  */
 export class TokenGuard<User = unknown> implements Guard<User> {
   private readonly ctx: Context
@@ -72,9 +52,8 @@ export class TokenGuard<User = unknown> implements Guard<User> {
         const plainTextToken = readBearerToken(this.ctx.req.header('Authorization'))
         if (!plainTextToken) return null
 
-        // createBearerTokenMiddleware may already have verified this request's
-        // token — reuse its result (matched by token id) rather than repeating
-        // the hash, the store read, and the lastUsedAt write.
+        // Reuse createBearerTokenMiddleware's result rather than repeating the
+        // hash, the store read, and the lastUsedAt write.
         const existing = this.ctx.get(API_TOKEN_KEY) as VerifiedApiToken | undefined
         if (existing && existing.token.id === parseApiToken(plainTextToken)?.id) {
           return existing
@@ -92,10 +71,8 @@ export class TokenGuard<User = unknown> implements Guard<User> {
     return this.verification
   }
 
-  // A valid token whose user no longer resolves (deleted/deactivated account
-  // with an unrevoked token) is NOT authenticated: without a provider user()
-  // is non-null exactly when verification succeeds, with one it also requires
-  // the account to exist.
+  // A valid token whose user no longer resolves (deleted account, unrevoked
+  // token) is NOT authenticated, so this goes through user(), not verify().
   async check(): Promise<boolean> {
     return (await this.user()) !== null
   }
@@ -146,8 +123,8 @@ export class TokenGuard<User = unknown> implements Guard<User> {
     }
     this.verification = Promise.resolve(null)
     this.resolvedUser = Promise.resolve(null)
-    // Clear the request-scoped verification result too, so getApiToken()/
-    // getApiTokenOrFail() cannot succeed after logout on the same request.
+    // So getApiToken()/getApiTokenOrFail() cannot succeed after logout on the
+    // same request.
     this.ctx.set(API_TOKEN_KEY, undefined)
   }
 

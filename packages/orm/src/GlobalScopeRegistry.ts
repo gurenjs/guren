@@ -1,15 +1,9 @@
 import type { QueryBuilder } from './QueryBuilder'
 import type { PlainObject } from './Model'
 
-/** A named global scope function. */
 export type ScopeFunction = (q: QueryBuilder<any>) => QueryBuilder<any> // eslint-disable-line @typescript-eslint/no-explicit-any
 
-/**
- * Registry for named global scopes on a model.
- *
- * Supports adding, removing, and applying multiple named scopes.
- * Used internally by Model to manage global query constraints.
- */
+/** Registry for the named global scopes applied to every query on a model. */
 export class GlobalScopeRegistry {
   private scopes = new Map<string, ScopeFunction>()
 
@@ -29,7 +23,6 @@ export class GlobalScopeRegistry {
     return Array.from(this.scopes.keys())
   }
 
-  /** Apply all scopes (or all except excluded) to a query builder. */
   apply<T extends PlainObject>(builder: QueryBuilder<T>, except?: string[]): QueryBuilder<T> {
     for (const [name, fn] of this.scopes) {
       if (except && except.includes(name)) continue
@@ -43,12 +36,10 @@ export class GlobalScopeRegistry {
   }
 
   /**
-   * Copy this registry's entries into a new one.
-   *
-   * A subclass that registers its own scope needs a registry of its own, but it
-   * must keep the ones it inherited: starting from empty is how a model that
-   * mixes in `SoftDeletes` and then adds a `tenant` scope silently loses the
-   * `softDelete` filter.
+   * A subclass registering its own scope needs a registry of its own, but must
+   * keep the inherited entries: starting from empty is how a model that mixes
+   * in `SoftDeletes` and then adds a `tenant` scope loses the `softDelete`
+   * filter.
    */
   clone(): GlobalScopeRegistry {
     const copy = new GlobalScopeRegistry()

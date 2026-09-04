@@ -7,9 +7,8 @@ import { flattenD1Migrations } from './build'
 // Opt-in end-to-end contract test: verifies wrangler applies drizzle-kit
 // generated SQL (tab indentation, backtick quoting, `--> statement-breakpoint`
 // separators, 0000_-prefixed filename ordering) against a local D1 database.
-// Requires network on first run (bunx downloads wrangler + workerd), so it is
-// gated behind GUREN_TEST_WRANGLER=1 rather than run on every PR. The nightly
-// canary sets the variable.
+// Gated behind GUREN_TEST_WRANGLER=1 because the first run downloads wrangler
+// and workerd; the nightly canary sets it.
 const enabled = process.env.GUREN_TEST_WRANGLER === '1'
 
 function wrangler(cwd: string, args: string[]): { exitCode: number; output: string } {

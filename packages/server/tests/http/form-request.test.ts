@@ -20,11 +20,8 @@ class StorePostRequest extends FormRequest<StorePostData> {
   }
 }
 
-/**
- * Builds a real Hono context, routing the auth context through
- * `attachAuthContext()` so the tests see whatever the framework actually
- * stores under that key.
- */
+// Routes the auth context through `attachAuthContext()` so the tests see
+// whatever the framework actually stores under that key.
 async function createContext(body: Record<string, unknown>, auth?: AuthContext): Promise<Context> {
   const app = new Hono()
   let captured: Context | undefined

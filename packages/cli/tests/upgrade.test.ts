@@ -173,9 +173,8 @@ describe('upgradeCanary', () => {
     })
   })
 
-  // The rule's own refusals are covered in drizzle-pins.test.ts. What only this
-  // layer can show is that one reaches the user, prefixed, instead of being
-  // swallowed between the planner and the console.
+  // The rule's own refusals are covered in drizzle-pins.test.ts; only this layer
+  // shows that one reaches the user instead of being swallowed.
   it('reports a pin it declined to move', async () => {
     await writeFile(
       packageJsonPath,
@@ -398,7 +397,6 @@ describe('checkVersionCompatibility', () => {
   it('returns compatible when no warnings', async () => {
     const result = await checkVersionCompatibility(workspace.dir, 'canary')
 
-    // On modern Bun (>= 1.0.0) this should be compatible
     if (process.versions?.bun) {
       const bunMajor = parseInt(process.versions.bun.split('.')[0], 10)
       if (bunMajor >= 1) {
@@ -478,8 +476,7 @@ describe('compareVersions', () => {
   })
 
   // Guren shipped its entire 1.0 line as 1.0.0-rc.N, so prerelease precedence is
-  // what the upgrade path actually compares. One ascending list covers every
-  // pair, including the transitive ones a case-by-case list would miss.
+  // what the upgrade path actually compares.
   it('orders prereleases below their release, and numerically among themselves', () => {
     const ascending = ['1.0.0-alpha', '1.0.0-rc.1', '1.0.0-rc.1.1', '1.0.0-rc.4', '1.0.0-rc.29', '1.0.0', '1.0.1']
 
@@ -533,21 +530,17 @@ describe('findApplicableCodemods', () => {
       },
     ]
 
-    // Temporarily add test codemods
     codemods.push(...testCodemods)
 
     try {
-      // Upgrading from 0.1.0 to 0.4.0 should include test-a but not test-b
       const result = findApplicableCodemods('0.1.0', '0.4.0')
       expect(result.some((c) => c.id === 'test-a')).toBe(true)
       expect(result.some((c) => c.id === 'test-b')).toBe(false)
 
-      // Upgrading from 0.1.0 to 1.0.0 should include both
       const resultAll = findApplicableCodemods('0.1.0', '1.0.0')
       expect(resultAll.some((c) => c.id === 'test-a')).toBe(true)
       expect(resultAll.some((c) => c.id === 'test-b')).toBe(true)
     } finally {
-      // Clean up: remove test codemods
       codemods.splice(codemods.indexOf(testCodemods[0]), 1)
       codemods.splice(codemods.indexOf(testCodemods[1]), 1)
     }
@@ -600,9 +593,8 @@ describe('checkDeprecations', () => {
       ])
     })
 
-    // The negative case is the one that rots silently: `defineSeeder` ends in
-    // the same six letters as `Seeder`, so a detector matching the specifier
-    // as a substring would report every correctly written seeder in the app.
+    // `defineSeeder` ends in the same six letters as `Seeder`, so a detector
+    // matching the specifier as a substring reports every correct seeder.
     it('does not report a seeder written with defineSeeder', async () => {
       await writeFileIn(
         'db/seeders/001_users.ts',

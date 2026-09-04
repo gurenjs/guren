@@ -37,9 +37,8 @@ describe('checkRouteContracts', () => {
       expect(results).toHaveLength(1)
       expect(results[0]?.status).toBe('fail')
       expect(results[0]?.message).toContain("'postId'")
-      // The status, because the message promises it: 422 whichever handler
-      // kind the route uses — pinned in
-      // packages/server/tests/route-contract-runtime.test.ts.
+      // The status, because the message promises it: 422 whichever handler kind
+      // the route uses (server/tests/route-contract-runtime.test.ts).
       expect(results[0]?.message).toContain('422')
       expect(results[0]?.suggestion).toContain("'id'")
     })
@@ -85,11 +84,9 @@ describe('checkRouteContracts', () => {
       expect(results.every((r) => r.status === 'pass')).toBe(true)
     })
 
-    // A pipeline runs both stages: the first accepts a missing value, the
-    // second rejects it, so the request really does 422. Reading only one
-    // side of the pipe — which the type renderer's presence walker does,
-    // because it is answering a different question — would file this as
-    // advice.
+    // A pipeline runs both stages: the first accepts a missing value, the second
+    // rejects it, so the request really does 422. The type renderer's presence
+    // walker reads only one side because it answers a different question.
     it('treats a piped key its second stage rejects as required', async () => {
       const results = await run([
         route({
@@ -113,10 +110,8 @@ describe('checkRouteContracts', () => {
       expect(results[0]?.status).toBe('fail')
     })
 
-    // `nullable` is in the shared wrapper vocabulary, so this walk must look
-    // through it for the same reason every sibling walker does: two walkers
-    // disagreeing about membership is how one silently reports a different
-    // set of keys than the other.
+    // `nullable` is in the shared wrapper vocabulary: two walkers disagreeing
+    // about membership is how one reports a different key set than the other.
     it('looks through a nullable wrapper rather than calling it unreadable', async () => {
       const results = await run([
         route({ path: '/posts/:id', schemas: { params: z.object({ postId: z.string() }).nullable() } }),
@@ -141,9 +136,8 @@ describe('checkRouteContracts', () => {
     })
 
     it('reports a skip for a zod v3 schema', async () => {
-      // Shaped like v3 rather than pulled from zod@3: `_def.typeName` is the
-      // marker `isZod3Schema` reads, and installing a second zod to produce
-      // one would test the installer, not this branch.
+    // Shaped like v3 rather than pulled from zod@3: `_def.typeName` is the marker
+    // `isZod3Schema` reads, and a second zod install would test the installer.
       const v3ish = { _def: { typeName: 'ZodObject' }, shape: { postId: {} } }
       const results = await run([
         route({ path: '/posts/:id', schemas: { params: v3ish as never } }),
@@ -175,12 +169,10 @@ describe('checkRouteContracts', () => {
     })
   })
 
-  // The linchpin: both facts this check depends on are properties of the real
-  // Router, not of hand-built definitions. `definitions()` reports the *joined*
-  // path, so a group prefix supplies parameters the call site's own path string
-  // does not; and route-level `bind` entries reach a definition without being
-  // filtered by path parameter, which is the only reason a stray one is
-  // visible here at all.
+  // Both facts this check depends on are properties of the real Router:
+  // `definitions()` reports the *joined* path, so a group prefix supplies
+  // parameters the call site's own path string does not, and route-level `bind`
+  // entries reach a definition unfiltered by path parameter.
   describe('against a real Router', () => {
     class Post {
       static findOrFail() {

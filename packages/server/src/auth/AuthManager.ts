@@ -107,9 +107,8 @@ export class AuthManager implements AuthManagerContract {
    * The guard name an unqualified `auth.guard()` / `auth.user()` call resolves
    * to for this request. Explicit names always win; otherwise a registered
    * token guard is selected when the request carries a Bearer Authorization
-   * header, falling back to the default (session) guard. This is the
-   * composite-guard rule from RFC 0016: session- and token-authenticated
-   * requests flow through the same auth surface without configuration.
+   * header, falling back to the default (session) guard — the composite-guard
+   * rule from RFC 0016.
    */
   resolveGuardName(ctx: Context, name?: string): string {
     if (name) return name
@@ -145,13 +144,11 @@ export class AuthManager implements AuthManagerContract {
   }
 
   /**
-   * Shorthand method to register a model-based authentication provider and session guard.
-   * This simplifies the common case of authenticating users via a database model.
+   * Register a model-based authentication provider and session guard — the
+   * common case of authenticating users via a database model.
    *
-   * @param model - The model class to use for user authentication
-   * @param options - Options for the ModelUserProvider (partial, with defaults)
-   * @param providerName - Name for the provider (defaults to 'users')
-   * @param guardName - Name for the guard (defaults to 'web')
+   * @param providerName - Defaults to 'users'
+   * @param guardName - Defaults to 'web'
    */
   useModel(
     model: typeof Model<PlainObject>,
@@ -182,11 +179,8 @@ export class AuthManager implements AuthManagerContract {
   /**
    * Register a bearer-token guard backed by an ApiTokenStore and enable
    * header-based guard selection: requests carrying `Authorization: Bearer`
-   * resolve to this guard, everything else keeps the default (session)
-   * guard. The default guard itself is unchanged — session apps keep
-   * working exactly as before.
+   * resolve to this guard, everything else keeps the default (session) guard.
    *
-   * @param store - Where issued tokens live (see createApiToken)
    * @param options.provider - Registered provider name used to load the full
    *   user record from the token's userId. Without it, `auth.user()` resolves
    *   to a minimal `{ id }` record (enough for Gate/policy evaluation).
@@ -199,9 +193,8 @@ export class AuthManager implements AuthManagerContract {
     const guardName = options.guardName ?? 'token'
 
     // Refuse to shadow an existing guard: silently replacing the default
-    // (session) guard would route Bearer-less requests through the token
-    // guard, breaking the "session apps keep working" contract. Re-calling
-    // useTokens with the same name stays legal (re-configuration).
+    // (session) guard would route Bearer-less requests through the token guard.
+    // Re-calling useTokens with the same name stays legal (re-configuration).
     if (this.guards.has(guardName) && this.tokenGuard !== guardName) {
       throw new Error(
         `AuthManager: guard "${guardName}" is already registered. ` +
@@ -228,34 +221,26 @@ export class AuthManager implements AuthManagerContract {
   }
 
   /**
-   * The options the last `useTokens()` call configured its guard with.
-   *
-   * Read by machinery that has to *replace* the store without changing
-   * anything else about how tokens authenticate — `guren tool:dev` installs an
-   * ephemeral store over the app's, and doing that with a bare `useTokens(store)`
+   * The options the last `useTokens()` call configured its guard with. Read by
+   * machinery that has to *replace* the store without changing anything else —
+   * `guren tool:dev` installs an ephemeral store, and a bare `useTokens(store)`
    * silently dropped the app's `provider`, so a token resolved to a bare
-   * `{ id }` instead of the real user record and every policy reading a user
-   * field behaved differently for no stated reason.
+   * `{ id }` and every policy reading a user field behaved differently.
    */
   getApiTokenOptions(): ApiTokenGuardOptions {
     return { ...this.apiTokenOptions }
   }
 
   /**
-   * The token store {@link useTokens} was configured with, or `undefined`
-   * when this app never called it.
+   * The token store {@link useTokens} was configured with, or `undefined` when
+   * this app never called it.
    *
-   * This is the one path by which out-of-request machinery — `guren
-   * token:issue`, the App MCP adapter's principal lookup — reaches the same
-   * store the guard verifies against. `useTokens` otherwise closes over
-   * `store` inside the guard factory, where nothing outside a live request
-   * can see it, so an issuance command could only write tokens into a store
-   * of its own making, which no running app would ever read.
-   *
-   * Deliberately on this class rather than on `AuthManagerContract`: the
-   * contract describes what a *request* needs from auth, and handing out the
-   * raw store is not part of that. Callers reach it through the concrete
-   * manager (`Application.auth`).
+   * The one path by which out-of-request machinery (`guren token:issue`, the
+   * App MCP adapter's principal lookup) reaches the same store the guard
+   * verifies against: `useTokens` otherwise closes over `store` inside the
+   * guard factory, so an issuance command could only write into a store no
+   * running app would read. Deliberately on this class rather than on
+   * `AuthManagerContract`, which describes what a *request* needs from auth.
    */
   getApiTokenStore(): ApiTokenStore | undefined {
     return this.apiTokenStore ?? undefined

@@ -36,6 +36,5 @@ async function main() {
 
 await main()
 
-// The booted app holds live handles (DB pool, scheduler), so the process
-// never exits on its own. Failures above still exit non-zero via the throw.
+// The booted app holds live handles (DB pool, scheduler), so it never exits alone.
 process.exit(0)

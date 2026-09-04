@@ -48,9 +48,8 @@ describe('FakeQueue', () => {
   it('reports the wire name when an assertion fails', () => {
     const queue = new FakeQueue()
 
-    // The failure message has to name the string the queue actually keys on.
-    // 'RenamedJob' appears nowhere in the driver, so reporting it would send
-    // whoever reads the failure looking for something that does not exist.
+    // The failure message has to name the string the queue keys on: 'RenamedJob'
+    // appears nowhere in the driver.
     expect(() => queue.assertPushed(RenamedJob)).toThrow(/StableTestJob/)
 
     queue.record(RenamedJob, { id: 4 })
@@ -63,9 +62,8 @@ describe('FakeQueue', () => {
     const queue = new FakeQueue()
     const now = new Date()
 
-    // A message as a real driver would have written it: it carries the wire
-    // name, and nothing links it back to the class. Looking it up by
-    // `RenamedJob.name` ('RenamedJob') would miss.
+    // A message as a real driver writes it: it carries the wire name, so a lookup by
+    // `RenamedJob.name` would miss.
     await queue.getDriver().push({
       id: 'external-1',
       name: 'StableTestJob',

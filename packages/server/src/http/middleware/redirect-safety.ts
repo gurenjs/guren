@@ -12,19 +12,7 @@ export interface RedirectSafetyOptions {
   fallbackUrl?: string
 }
 
-/**
- * Middleware that prevents open redirect attacks by validating
- * redirect destinations in 3xx responses.
- *
- * @example
- * ```ts
- * import { createRedirectSafetyMiddleware } from '@guren/core'
- *
- * app.use('*', createRedirectSafetyMiddleware({
- *   allowedHosts: ['accounts.google.com'],
- * }))
- * ```
- */
+/** Prevents open redirects by validating the `Location` of every 3xx response. */
 export function createRedirectSafetyMiddleware(options: RedirectSafetyOptions = {}): MiddlewareHandler {
   const { allowedHosts = [], fallbackUrl = '/' } = options
 
@@ -49,13 +37,7 @@ export function createRedirectSafetyMiddleware(options: RedirectSafetyOptions = 
   }
 }
 
-/**
- * Check whether a redirect URL is safe (same-origin or in the allowed list).
- *
- * @param url - The redirect target URL
- * @param requestUrl - The current request URL (used to determine the origin)
- * @param allowedHosts - Additional allowed external hosts
- */
+/** Safe means same-origin as `requestUrl`, or a host in `allowedHosts`. */
 export function isSafeRedirectUrl(
   url: string,
   requestUrl: string,
@@ -72,14 +54,12 @@ export function isSafeRedirectUrl(
     const target = new URL(normalized, requestUrl)
     const current = new URL(requestUrl)
 
-    // Same origin check
     if (target.host === current.host && target.protocol === current.protocol) {
       return true
     }
 
     return hostMatchesAllowlist(target, allowedHosts)
   } catch {
-    // Malformed URLs are not safe
     return false
   }
 }

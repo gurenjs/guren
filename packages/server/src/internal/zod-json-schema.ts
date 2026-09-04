@@ -1,41 +1,15 @@
 /**
- * The one Zod → JSON Schema rule, shared by every surface that has to describe
- * an application's contracts to something outside the process: `@guren/openapi`
- * renders it as OpenAPI 3.1 schema objects (which *are* JSON Schema 2020-12),
- * and RFC 0016's agent tools advertise it as MCP input/output schemas.
- *
- * Internal by the rules in `contributing/api-stability.md`: reachable only
- * through a deep import under `internal/`, never re-exported from
- * `@guren/server`'s or `@guren/core`'s index. No stability guarantee — it
- * exists so two derivations of the same schema cannot disagree, not as a
- * public extension point. That is the whole reason it was promoted out of
- * `@guren/openapi`: a second walker is how an agent tool comes to advertise a
- * schema the documented API contradicts.
- *
- * It lives in `@guren/server` rather than `@guren/core` (where RFC 0016 §2
- * first placed it) for a build-order reason, not a layering one. Core's index
- * is `export * from '@guren/server'`, so core builds *after* server and a
- * server module cannot import a core one — the edge would close a cycle, and
- * server's declaration build (`tsc -p tsconfig.build.json`, `paths: {}`)
- * would look for a core `dist/` that does not exist yet. `deriveAgentTools`
- * lives in `@guren/server`, so the walker had to move down to the package
- * both it and the OpenAPI generator can see. `@guren/core/internal/*`
- * re-exports this module, which keeps that the specifier every consumer
- * outside this package writes.
- *
- * Every `_def` read goes through `zod-compat.ts`, including the check reads
- * this module added. Reaching into `_def` here would put zod-layout knowledge
- * in two places, which is exactly the split `zod-compat` exists to prevent.
- *
- * Zod 4 only, and a v3 node is *refused* rather than walked — on v3 `_def.type`
- * holds a nested schema where v4 keeps the type name, so every read below would
- * misfire and produce a confidently wrong document. The refusal is re-checked
- * at each recursion, because a v3 node can hide inside a v4 wrapper.
- *
- * What this module does not decide: what a caller does with the warnings, and
- * how the result is embedded (a `requestBody` content map, an MCP `inputSchema`).
- * Warnings are appended to a caller-owned array so a document generator can
- * surface them per request and a codegen step can fail on them.
+ * The one Zod → JSON Schema rule, so two derivations of the same schema cannot
+ * disagree: `@guren/openapi` renders it as OpenAPI 3.1 schema objects, RFC
+ * 0016's agent tools advertise it as MCP input/output schemas.
+ * Internal per `contributing/api-stability.md`, with no stability guarantee.
+ * It sits in `@guren/server` rather than `@guren/core` for build order, not
+ * layering: core's index is `export * from '@guren/server'`, so a server module
+ * importing core would close a cycle; `@guren/core/internal/*` re-exports it.
+ * Every `_def` read goes through `zod-compat.ts`. Zod 4 only — a v3 node is
+ * refused rather than walked, re-checked at each recursion because one can hide
+ * inside a v4 wrapper. Warnings go to a caller-owned array, so a generator can
+ * surface them per request while a codegen step fails on them.
  */
 import {
   arrayElement,
@@ -93,10 +67,9 @@ export interface JsonSchemaObject {
 }
 
 /**
- * An object schema taken apart rather than rendered — the shape a caller needs
- * when the properties do not stay together in one schema object (OpenAPI
- * expands a `query` schema into one parameter per property, and RFC 0016 merges
- * `params` + `query` + `body` into a single tool input).
+ * An object schema taken apart rather than rendered, for callers whose
+ * properties do not stay together in one schema object: OpenAPI expands `query`
+ * into one parameter each, RFC 0016 merges params/query/body into one input.
  */
 export interface ObjectSchemaDetails {
   properties: Record<string, JsonSchemaObject>
@@ -104,23 +77,13 @@ export interface ObjectSchemaDetails {
 }
 
 /**
- * Zod's string formats mapped to the JSON Schema `format` names that mean the
- * same thing, matched against zod's own `z.toJSONSchema()` output so the two
- * cannot disagree about, say, whether `z.url()` is `"url"` or `"uri"`.
- *
- * The line is "registered by JSON Schema 2020-12", not "short". Zod carries
- * plenty of formats the spec has never registered (`cuid`, `nanoid`, `emoji`,
- * `ulid`, `jwt`, `base64`…), and emitting those verbatim advertises a
- * constraint no consumer can interpret — an agent reading `format: "cuid"`
- * learns nothing it can act on, while the `type: "string"` it already had stays
- * true. Unmapped formats are dropped, not warned about: the schema is still
- * correct, just less specific.
- *
- * `time` is the one registered format deliberately left out, and zod omits it
- * from its own output for the same reason: JSON Schema's `time` is an RFC 3339
- * `full-time`, which requires an offset, while `z.iso.time()` accepts a local
- * wall-clock time. Claiming the format would assert an offset the schema does
- * not require.
+ * Zod's string formats mapped to the JSON Schema names meaning the same thing,
+ * matched against zod's own `z.toJSONSchema()` output. The line is "registered
+ * by JSON Schema 2020-12": zod's unregistered formats (`cuid`, `nanoid`, `jwt`…)
+ * say nothing a consumer can act on, so they are dropped rather than warned
+ * about. `time` is the one registered format left out (as zod itself does):
+ * JSON Schema's is an RFC 3339 `full-time` requiring an offset, while
+ * `z.iso.time()` accepts a local wall-clock time.
  */
 const JSON_SCHEMA_STRING_FORMATS: Readonly<Record<string, string>> = {
   email: 'email',
@@ -135,44 +98,31 @@ const JSON_SCHEMA_STRING_FORMATS: Readonly<Record<string, string>> = {
 }
 
 /**
- * The `number_format` values that describe an integer. JSON Schema says this
- * with a *type*, not a format, so these change `type: "number"` to
- * `type: "integer"` — a `z.int()` that documents as `number` advertises a
- * contract admitting `3.14`, which the route then rejects.
- *
- * `float32` / `float64` are the other half of the same zod vocabulary and stay
- * plain numbers. The bounds each of these formats implies (zod's own emitter
- * adds `minimum: -2147483648` for `int32`, and the safe-integer range for
- * `safeint`) are deliberately not emitted: they are the representation's
- * limits rather than the application's contract, and they bury the constraints
- * an author actually wrote. `int64` / `uint64` need no entry — they sit on
- * `bigint` nodes, which this walker already renders as `integer`.
+ * The `number_format` values describing an integer. JSON Schema says this with a
+ * *type*, so these turn `type: "number"` into `"integer"` — a `z.int()`
+ * documented as `number` advertises a contract admitting `3.14`. The bounds
+ * these formats imply are deliberately not emitted: they are the
+ * representation's limits, and they bury the constraints an author wrote.
+ * `int64`/`uint64` need no entry; they sit on `bigint` nodes.
  */
 const INTEGER_NUMBER_FORMATS: ReadonlySet<string> = new Set(['safeint', 'int32', 'uint32'])
 
 /**
- * The string formats whose zod-supplied regex is worth carrying as `pattern` —
- * the ones a user *wrote as a pattern* (`.regex()`) or as a prefix/suffix/
- * substring test, which zod stores only as a compiled regex.
- *
- * The registered formats above are excluded on purpose even though zod exposes
- * a pattern for them too: their regexes run to hundreds of characters (the
- * `datetime` one alone is ~300), they are zod's parsing implementation rather
- * than the contract, and `format` already says the same thing in a word.
+ * The string formats whose zod-supplied regex is worth carrying as `pattern`:
+ * the ones a user wrote as a pattern or a prefix/suffix/substring test, which
+ * zod stores only as a compiled regex. The registered formats above are
+ * excluded even though zod exposes patterns for them — those run to hundreds of
+ * characters and are its parser, while `format` says the same in a word.
  */
 const PATTERN_BEARING_FORMATS: ReadonlySet<string> = new Set([
   'regex', 'starts_with', 'ends_with', 'includes',
 ])
 
 /**
- * Turn a Zod schema into a JSON Schema object, appending a line to `warnings`
- * for anything it cannot express. `label` names the schema in those warnings
- * (`"POST /posts body.title"`); `io` picks the side of coercing and piped
- * schemas to describe — `input` is what a caller sends, `output` what a parse
- * produces.
- *
- * Returns `undefined` when the node contributes nothing (a bare `z.undefined()`)
- * or could not be read; a caller treats that as "omit this property".
+ * Turn a Zod schema into a JSON Schema object, appending to `warnings` anything
+ * it cannot express. `label` names the schema there (`"POST /posts body.title"`);
+ * `io` picks the side of coercing and piped schemas to describe. `undefined`
+ * means the node contributes nothing, or could not be read — omit the property.
  */
 export function toJsonSchema(
   schema: unknown,
@@ -313,11 +263,9 @@ export function toJsonSchema(
 }
 
 /**
- * Take an object schema apart into its properties and the set of keys a caller
- * must supply, looking through any wrappers around it. Warns and returns
- * `undefined` when the schema is absent, not Zod, or not an object once
- * unwrapped — a caller that expands properties into something else (query
- * parameters, merged tool input) has nothing to expand otherwise.
+ * Take an object schema apart into its properties and the keys a caller must
+ * supply, looking through wrappers. Warns and returns `undefined` when the
+ * schema is absent, not Zod, or not an object once unwrapped.
  */
 export function readObjectSchema(
   schema: unknown,
@@ -356,9 +304,8 @@ export function isZodSchema(schema: unknown): schema is ZodSchemaLike {
 
 /**
  * Push the v3 refusal warning and report whether it fired. One helper so the
- * composed message cannot drift between the entry points, and so the recursive
- * walks re-check nested nodes — a v3 schema can sit inside a v4 object, and an
- * ungated recursion would document it wrong instead of refusing it.
+ * message cannot drift between entry points, and so recursive walks re-check
+ * nested nodes — a v3 schema can sit inside a v4 object.
  */
 function warnIfZod3(schema: unknown, warnings: string[], label: string): boolean {
   if (schema && typeof schema === 'object' && isZod3Schema(schema as ZodSchemaLike)) {
@@ -411,11 +358,8 @@ function readObjectSchemaDetails(
 
 /**
  * Whether a caller may leave this property out — the `required` half of an
- * object schema.
- *
- * Stays here rather than joining `unwrapSingleChild` in `zod-compat`: applying
- * the wrapper vocabulary is schema-reading, but what to *conclude* from a
- * wrapper is a policy each caller sets — see the `pipe` case.
+ * object schema. Stays here rather than in `zod-compat`: what to *conclude*
+ * from a wrapper is a policy each caller sets, as the `pipe` case shows.
  */
 function isOptional(schema: ZodSchemaLike, io: SchemaIo): boolean {
   switch (typeOf(schema)) {
@@ -476,11 +420,9 @@ function literalSchema(def: Record<string, unknown>): JsonSchemaObject {
 }
 
 /**
- * A check value that JSON Schema can carry. The guard is not ceremonial: the
- * same `greater_than` / `min_length` check kinds are attached to `z.date()` and
- * `z.bigint()`, where the bound is a `Date` or a `bigint` — emitting either
- * would produce a keyword whose value is not a JSON number (and, for bigint,
- * one that `JSON.stringify` throws on).
+ * A check value JSON Schema can carry. The guard is not ceremonial: the same
+ * check kinds sit on `z.date()` and `z.bigint()`, whose bounds are not JSON
+ * numbers — and a bigint is one `JSON.stringify` throws on.
  */
 function numeric(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined
@@ -538,17 +480,11 @@ function lengthConstraints(
 }
 
 /**
- * Every format this node declares, in the order a reader should prefer them.
- *
- * Two sources, because zod has two spellings: the top-level constructors
- * (`z.email()`, `z.int()`) record the format on the node, while the equivalent
- * methods (`z.string().email()`, `z.number().int()`) attach it as a check and
- * leave the node's own field empty. Reading one source loses half the formats
- * an app writes, so both are collected here once rather than in each caller.
- *
- * Takes the node's checks rather than re-reading them: every caller has already
- * walked `_def.checks` for something else, and this walker is on RFC 0016's
- * tool-derivation path as well as the document one.
+ * Every format this node declares, in preference order. Two sources, because
+ * zod has two spellings: the top-level constructors record the format on the
+ * node, the equivalent methods attach it as a check — reading one loses half
+ * the formats an app writes. Takes the checks rather than re-reading them,
+ * since every caller has already walked `_def.checks` for something else.
  */
 function declaredFormats(schema: ZodSchemaLike, checks: readonly ZodCheckDef[]): string[] {
   const onNode = schemaFormat(schema)
@@ -592,18 +528,11 @@ function stringConstraints(schema: ZodSchemaLike): JsonSchemaObject {
 
 /**
  * Put the first value under `keyword` and fold any remainder into `allOf`.
- *
- * JSON Schema allows one `pattern` and one `multipleOf` per schema object, so a
- * node carrying two of either (`z.string().regex(/^a/).startsWith('b')`,
- * `z.number().multipleOf(2).multipleOf(3)`) cannot state both in place. Keeping
- * only the first is not a lesser answer, it is a wrong one: the emitted schema
- * then *accepts values the route rejects*, which is the one direction a derived
- * contract must never be wrong in — an agent handed it will send input that
- * fails validation. `allOf` conjoins, so the surplus stays enforceable.
- *
- * The first value stays on the node rather than going into `allOf` with the
- * rest, so the overwhelmingly common single-constraint case emits flat.
- * (zod's own emitter drops the surplus `multipleOf` outright here.)
+ * JSON Schema allows one `pattern` and one `multipleOf` per schema object, and
+ * keeping only the first would emit a schema *accepting values the route
+ * rejects* — the one direction a derived contract must never be wrong in.
+ * `allOf` conjoins, so the surplus stays enforceable while the common
+ * single-constraint case still emits flat. (zod's own emitter drops it.)
  */
 function assignWithSurplus(
   constraints: JsonSchemaObject,

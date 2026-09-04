@@ -35,12 +35,10 @@ export async function discoverAttachmentsConfigFiles(appRoot: string): Promise<s
 const SCHEMA_SPECIFIER_PATTERN = /(^|\/)db\/schema(\.[jt]s)?$/
 
 /**
- * Which schema a `db/schema` import actually lands on: the root schema
- * (null) or a module's. Resolved from the importing file's location for
- * relative specifiers and from the app root for `@/` ones, because the
- * existence question is per schema module — a module config importing its
- * *own* schema must not pass on the strength of a table the root declares.
- * Returns undefined for a specifier that resolves outside both shapes.
+ * Which schema a `db/schema` import lands on: the root schema (null) or a
+ * module's. The existence question is per schema module — a module config
+ * importing its *own* schema must not pass on the strength of a table the root
+ * declares. Undefined for a specifier resolving outside both shapes.
  */
 function schemaModuleFor(cwd: string, filePath: string, specifier: string): string | null | undefined {
   let absolute: string
@@ -65,21 +63,17 @@ interface AttachmentsImportScan {
   coreNamespaces: string[]
   /**
    * Local binding -> { where it came from, the *exported* name it aliases }.
-   * The schema declares exported names, so an `import { attachments as att }`
-   * must be judged by 'attachments', never by 'att'. Default and namespace
-   * imports have no single exported name to judge against; recorded with an
-   * empty `imported` so provenance tests can skip them.
+   * The schema declares exported names, so `import { attachments as att }` must
+   * be judged by 'attachments'. Default and namespace imports have no single
+   * exported name; recorded with an empty `imported` so callers can skip them.
    */
   importsByLocal: Map<string, { source: string; imported: string }>
 }
 
 /**
- * One reading of a file's imports for every consumer in this file. The
- * scaffolder preflight, the `guren check` rules, and the table check all
- * judge "does this file wire the attachments layer" through this single
- * scan — a second copy is how the two would start disagreeing about the
- * same app (`guren check` green while `make:feature --attach` refuses, or
- * worse).
+ * One reading of a file's imports for every consumer in this file — the
+ * scaffolder preflight, the `guren check` rules, and the table check. A second
+ * copy is how `guren check` goes green while `make:feature --attach` refuses.
  */
 function scanAttachmentsImports(parsed: ParsedFile): AttachmentsImportScan {
   let configureLocal: string | null = null
@@ -112,9 +106,8 @@ function scanAttachmentsImports(parsed: ParsedFile): AttachmentsImportScan {
 /**
  * Whether the file makes a `configureAttachments()` call under its
  * `@guren/core` bindings — the named import (aliases included) or a
- * `core.configureAttachments()` member call on a namespace import. The
- * provenance rule of the table check below: a comment or a string merely
- * containing the name does not count.
+ * `core.configureAttachments()` member call on a namespace import. A comment or
+ * string merely containing the name does not count.
  */
 async function fileCallsConfigureAttachments(cache: ParseCache, filePath: string): Promise<boolean> {
   const source = await cache.source(filePath)
@@ -152,13 +145,9 @@ async function fileCallsConfigureAttachments(cache: ParseCache, filePath: string
  * `configureAttachments` imported from `@guren/core` that is actually called.
  *
  * For scaffolders (`make:feature --attach`) that would otherwise emit models
- * whose `Attachable` statics all throw at first use — the guidance to run
- * `guren add attachments` first has to come from the scaffold, not from the
- * app's first crashed request. Positive evidence only, like the checks below:
- * a file that cannot be read or parsed contributes nothing, so an app this
- * cannot see into is refused rather than scaffolded broken. Delegates to the
- * same per-file predicate `checkAttachableModels` uses, so the scaffolder
- * and `guren check` cannot disagree about the same app.
+ * whose `Attachable` statics all throw at first use. Positive evidence only: a
+ * file that cannot be read or parsed contributes nothing, so an app this cannot
+ * see into is refused rather than scaffolded broken.
  */
 export async function appConfiguresAttachments(appRoot: string, cache: ParseCache): Promise<boolean> {
   for (const filePath of await discoverAttachmentsConfigFiles(appRoot)) {
@@ -169,14 +158,11 @@ export async function appConfiguresAttachments(appRoot: string, cache: ParseCach
 
 /**
  * Flags models that mix in `Attachable(...)` in an app with no
- * `configureAttachments()` call anywhere (RFC 0013). The mixin's statics
- * resolve the configured layer lazily, at first use — so a model can build,
- * typecheck, and boot with no attachments config at all, and the miss only
- * surfaces as a runtime error on the first `attach()`.
+ * `configureAttachments()` call anywhere (RFC 0013). The mixin's statics resolve
+ * the configured layer lazily, so a model builds, typechecks and boots with no
+ * attachments config at all and only fails on the first `attach()`.
  *
- * Presence-only on purpose: which table the config binds is the
- * {@link checkAttachmentsConfig} rule above; this one asks the prior
- * question of whether a config exists to bind anything.
+ * Presence-only: which table the config binds is {@link checkAttachmentsConfig}.
  */
 export async function checkAttachableModels(options: {
   cwd: string
@@ -188,9 +174,7 @@ export async function checkAttachableModels(options: {
 }): Promise<CheckResult[]> {
   const { cwd, cache, files, configFiles } = options
 
-  // Same cheap pre-filter as the table check — only files naming the mixin
-  // are worth parsing — with the "is this model Attachable" question itself
-  // answered by the shared model projection rather than a second predicate.
+  // Only files naming the mixin are worth parsing.
   const sources = await Promise.all(files.map((file) => cache.source(file)))
   const attachableModels = files.flatMap((filePath, index) => {
     const source = sources[index]
@@ -231,18 +215,11 @@ export async function checkAttachableModels(options: {
 
 /**
  * Flags a `configureAttachments()` whose `table` is not a table the app's
- * `db/schema.ts` declares (RFC 0013 Part 3). The attachments layer takes the
- * table as `unknown` (the session-store convention), so nothing at typecheck
- * time notices a renamed or deleted schema export — the failure surfaces as
- * a runtime query error on the first attach.
- *
- * Judged conservatively, the way the other static checks are: the check
- * asserts only what it can positively read. A `table` that is not a plain
- * identifier, or one imported from somewhere other than a `db/schema`
- * module, is skipped rather than guessed at — a symbol this cannot trace is
- * not a missing one. Known limitation: a schema that renames on export
- * (`export { attachmentRows as attachments }`) is not resolved and reads as
- * missing — declare the table under its exported name instead.
+ * `db/schema.ts` declares (RFC 0013 Part 3). The layer takes the table as
+ * `unknown`, so a renamed export only fails on the first attach. Positive
+ * evidence only: a `table` that is not a plain identifier, or is imported from
+ * outside a `db/schema` module, is skipped. Known limitation: a schema renaming
+ * on export (`export { attachmentRows as attachments }`) reads as missing.
  */
 export async function checkAttachmentsConfig(options: {
   cwd: string
@@ -254,19 +231,14 @@ export async function checkAttachmentsConfig(options: {
   const results: CheckResult[] = []
 
   for (const filePath of files) {
-    // Cheap pre-filter: parsing every source file to find the one config
-    // call would make this check pay for the whole app on every run.
     const source = await cache.source(filePath)
     if (!source || !source.includes('configureAttachments')) continue
 
     const parsed = await cache.get(filePath)
     if (!parsed) continue
 
-    // The local name configureAttachments is bound to, and where each
-    // imported identifier came from — the table's provenance is what makes
-    // the check honest. Namespace-style configs
-    // (`core.configureAttachments(...)`) stay out of this check's sight;
-    // the presence checks above do see them.
+    // Namespace-style configs (`core.configureAttachments(...)`) stay out of
+    // this check's sight; the presence checks above do see them.
     const { configureLocal, importsByLocal } = scanAttachmentsImports(parsed)
     if (!configureLocal) continue
 
@@ -334,8 +306,7 @@ export async function checkAttachmentsConfig(options: {
 /**
  * Visit every `configureAttachments()` call in `files` whose options are an
  * inline object — the named import (aliases included) and the
- * `core.configureAttachments()` namespace form alike, so a config style the
- * presence checks accept is never invisible to the rules built on this.
+ * `core.configureAttachments()` namespace form alike.
  */
 async function forEachConfigureAttachmentsCall(
   cache: ParseCache,
@@ -438,11 +409,10 @@ async function scanAttachmentsDelivery(
 }
 
 /**
- * What a `disks` map declares about one disk. Each field is read
- * independently, and `null` means "this scan cannot say": absent, not a
- * string literal, or declared two different ways in two places. Kept
- * per-field rather than per-disk so that conflicting evidence about one
- * property never silently withdraws a rule that reads the other.
+ * What a `disks` map declares about one disk. `null` means "this scan cannot
+ * say": absent, not a string literal, or declared two different ways. Read
+ * per-field so conflicting evidence about one property never withdraws a rule
+ * that reads the other.
  */
 interface StorageDiskDeclaration {
   /** `driver: 'local' | 's3' | …` */
@@ -452,24 +422,19 @@ interface StorageDiskDeclaration {
 }
 
 /**
- * The storage disks the app's config declares, per disk name. Positive
- * evidence only, in both directions: a field counts when a `disks`
- * property carries (inline, or through a same-file `const` the property
- * references — the `StorageProvider` scaffold's shape) an object literal
- * with a string-literal value for it; two sources disagreeing about one
- * field makes that field unreadable (`null`) rather than first-match-wins.
- * The scan cannot prove a map reaches `createStorageManager()`, so the
- * candidate set must keep sweeping all of config/, src/, and app/ — a
- * discovery narrowed to attachments configs would silently blind the
- * redirect rule (the runCheck-level test pins this).
+ * The storage disks the app's config declares, per disk name. A field counts
+ * when a `disks` property carries an object literal (inline, or through a
+ * same-file `const`) with a string-literal value; two sources disagreeing makes
+ * it unreadable (`null`). The candidate set must keep sweeping all of config/,
+ * src/, and app/ — narrowing it blinds the redirect rule (a runCheck test pins
+ * this), since nothing proves a map reaches `createStorageManager()`.
  */
 async function scanStorageDisks(cache: ParseCache, files: string[]): Promise<Map<string, StorageDiskDeclaration>> {
   const disks = new Map<string, StorageDiskDeclaration>()
   const record = (disk: string, field: keyof StorageDiskDeclaration, value: string) => {
     const existing = disks.get(disk) ?? {}
-    // Never declared adopts the value; a second, disagreeing declaration
-    // makes the field unreadable — and stays that way, since a sticky `null`
-    // is never equal to a later value either.
+    // A disagreeing second declaration makes the field unreadable, and stays
+    // that way: a sticky `null` is never equal to a later value either.
     if (existing[field] === undefined) existing[field] = value
     else if (existing[field] !== value) existing[field] = null
     disks.set(disk, existing)
@@ -521,35 +486,11 @@ function isAtOrWithin(root: string, candidate: string): boolean {
 /**
  * Is the disk rooted at `root` reachable through the served `publicDir`?
  *
- * Two ways it can be, and the lexical test sees neither:
- *
- * 1. The disk root is itself a symlink into the served tree. Canonicalizing
- *    both sides catches this — and both sides, for the reason the runtime's
- *    `isRealPathWithin` gives: a project reached through a symlink is routine
- *    (workspace layouts, macOS `/var`), so canonicalizing one side alone
- *    misjudges those.
- *
- *    The plain lexical test stays first and is not subsumed by that one: a
- *    root that does not exist yet cannot be canonicalized, so the canonical
- *    comparison would weigh a resolved `publicDir` against an unresolved root
- *    (`/private/var/...` against `/var/...` on macOS) and answer false for the
- *    plain in-`public/` case. Deleting it silently breaks the base case.
- *
- * 2. The served tree contains a symlink pointing *out* at the disk root —
- *    which is exactly what `guren storage:link` creates (`public/storage` to
- *    `storage/app/public`). Nothing about the root's own path reveals this,
- *    so the served directory's entries have to be read.
- *
- * Case 2 is not hypothetical. The storage guide documents `local: { root:
- * './storage/app/public' }` and the attachments scaffold defaults `disk:
- * 'local'`, so an app that followed the documentation and ran a first-party
- * command has its uploads statically reachable while the root sits lexically
- * nowhere near `public/`.
- *
- * Scope, stated because it bounds the rule rather than the implementation:
- * only the immediate entries of `publicDir` are examined. That is where
- * `storage:link` puts its link, and it holds the check to one `readdir`; a
- * symlink hand-buried deeper goes unjudged rather than hunted for.
+ * Three tests, none subsuming the others: lexical (a root that does not exist
+ * yet cannot be canonicalized), canonical on *both* sides (a project reached
+ * through a symlink is routine), and the served tree's own entries (a link
+ * pointing out at the root, which `guren storage:link` creates). Only the
+ * immediate entries of `publicDir` are read; a deeper link goes unjudged.
  */
 async function isReachableFromPublicDir(publicDir: string, root: string): Promise<boolean> {
   if (isAtOrWithin(publicDir, root)) return true
@@ -557,47 +498,31 @@ async function isReachableFromPublicDir(publicDir: string, root: string): Promis
   const [realPublic, realRoot] = await Promise.all([canonicalize(publicDir), canonicalize(root)])
   if (isAtOrWithin(realPublic, realRoot)) return true
 
-  // ENOENT read directly rather than probed for: an existsSync-style
-  // pre-check turns a permissions error on the parent into "absent", which
-  // would fail this rule open exactly where the filesystem is unusual.
+  // ENOENT read directly rather than probed for: an existsSync-style pre-check
+  // turns a permissions error on the parent into "absent", failing this open.
   const entries = await readdir(publicDir, { withFileTypes: true }).catch(() => null)
   if (!entries) return false
 
   const links = entries.filter((entry) => entry.isSymbolicLink())
   const targets = await Promise.all(links.map((entry) => linkTarget(join(publicDir, entry.name))))
 
-  // Judged against the directory attachments are actually written to
-  // (`<root>/attachments`, the engine's object key prefix) rather than
-  // against the disk root. `storage:link` exposes `storage/app/public`,
-  // which is *inside* the scaffold's own root (`storage/app`) but does not
-  // contain `storage/app/attachments` — so asking whether the link and the
-  // root merely overlap would fail the default scaffold the moment anyone
-  // ran a first-party command.
-  //
-  // Both directions against that prefix, though: a link may expose a
-  // directory containing the uploads, or one *inside* them
-  // (`public/leak -> storage/app/attachments/<id>` exposes that id's files).
-  // Neither direction reintroduces the false positive above, because
-  // `storage/app/public` neither contains nor sits inside
-  // `storage/app/attachments`.
+  // Judged against `<root>/attachments` (the engine's object key prefix), not
+  // the disk root: `storage:link` exposes `storage/app/public`, inside the
+  // scaffold's own root, so a mere overlap test would fail the default scaffold.
+  // Both directions, since a link may expose a directory containing the uploads
+  // or one inside them (`public/leak -> storage/app/attachments/<id>`).
   const prefix = join(realRoot, 'attachments')
   return targets.some((target) => isAtOrWithin(target, prefix) || isAtOrWithin(prefix, target))
 }
 
 /**
- * `realpath` for a path that need not exist: the deepest ancestor that does
- * exist is resolved, and the remaining segments are appended unchanged.
+ * `realpath` for a path that need not exist: the deepest existing ancestor is
+ * resolved and the remaining segments appended unchanged.
  *
- * Plain `realpath`-or-fall-back-to-the-input is not enough, and the way it
- * fails is a false pass. These comparisons weigh a disk root against a
- * symlink target, and both routinely point at directories the app has not
- * created yet — a disk receives its first upload, a link is made before its
- * target exists. If one side resolves and the other does not, the two are
- * written in different vocabularies and never match: on macOS a temp dir is
- * `/var/folders/…` resolved and `/private/var/folders/…` unresolved, so the
- * comparison silently answers "unrelated" for two paths that are the same
- * directory. Resolving as far as each path allows puts both in the same
- * vocabulary whether or not the leaves exist.
+ * Falling back to the raw input instead is a false pass — one side resolved and
+ * the other not are written in different vocabularies and never match (on macOS
+ * `/var/folders/…` against `/private/var/folders/…`), and both sides here
+ * routinely name directories the app has not created yet.
  */
 async function canonicalize(path: string): Promise<string> {
   let current = path
@@ -618,13 +543,9 @@ async function canonicalize(path: string): Promise<string> {
  * Where a symlink points, canonicalized — falling back to the link's own
  * resolved target when the destination does not exist yet.
  *
- * `realpath` alone fails open here. A link created before its target
- * (`public/uploads` to `storage/app/attachments`, with no upload written yet)
- * cannot be resolved, so `canonicalize` would answer with the link's *own*
- * path — which lives under `public/` and so matches nothing — and the scan
- * would report safe. The first upload then creates the directory and every
- * attachment is served. Reading the link itself gives the intended
- * destination whether or not it exists.
+ * `realpath` alone fails open: a link created before its target resolves to the
+ * link's own path under `public/`, which matches nothing, and the first upload
+ * then creates the directory and serves every attachment.
  */
 async function linkTarget(path: string): Promise<string> {
   const target = await readlink(path).catch(() => null)
@@ -633,9 +554,8 @@ async function linkTarget(path: string): Promise<string> {
 }
 
 /**
- * The disk new attachments are written to, per config file — the `disk`
- * option, which is required and names one entry of the storage manager's
- * map.
+ * The disk new attachments are written to, per config file — the required
+ * `disk` option, naming one entry of the storage manager's map.
  */
 async function scanAttachmentsDefaultDisks(
   cwd: string,
@@ -655,33 +575,11 @@ async function scanAttachmentsDefaultDisks(
 }
 
 /**
- * `configureAttachments({ disk })` pointing at a local disk rooted inside
- * the app's public directory.
- *
- * Uploaded bytes then sit in the statically served tree, where they are
- * fetchable by URL with no signature, no expiry and no authorization check.
- * The delivery route exists to impose exactly those three things, and a disk
- * rooted under `public/` is reachable without ever going through it, so no
- * amount of delivery configuration repairs this shape — only moving the root
- * does.
- *
- * Deliberately *not* stated as stored XSS any more. The static mounts force
- * a download for document content types since the `static-documents` guard
- * landed, so an uploaded `.svg` no longer executes on the app's origin by
- * default — a build-failing rule must not assert something the framework
- * stopped doing. What survives is the access-control half, which the guard
- * never addressed, plus the XSS case returning wholesale under
- * `rootPublicAssets: { inlineDocuments: true }`.
- *
- * This is the rule that tells an app scaffolded before the default changed
- * that it is still in the old shape; nothing at runtime reports it, because
- * serving the file *is* the intended behaviour of the disk it was put on.
- *
- * Positive evidence only, and deliberately narrow — it fires when the
- * driver is literally `local` and the declared `root` is at or below
- * `<cwd>/public`. An app that relocated its public directory, or that
- * computes either value, is not judged rather than guessed at: this rule
- * fails a build, so a false positive costs more than the miss.
+ * `configureAttachments({ disk })` pointing at a local disk rooted inside the
+ * app's public directory: every upload is then fetchable by URL with no
+ * signature, expiry or authorization check, and no delivery configuration
+ * repairs it. Narrow on purpose (driver literally `local`, declared `root` at or
+ * below `<cwd>/public`) since this rule fails a build.
  */
 export async function checkAttachmentsPublicDisk(options: {
   cwd: string
@@ -694,8 +592,8 @@ export async function checkAttachmentsPublicDisk(options: {
   if (defaults.length === 0) return []
 
   const declarations = await scanStorageDisks(cache, files)
-  // The statically served directory, by convention and by the framework's own
-  // default (`publicPath` defaults to `../public` relative to the server module).
+  // The framework's own default: `publicPath` is `../public` relative to the
+  // server module.
   const publicDir = resolve(cwd, 'public')
   const results: CheckResult[] = []
 
@@ -740,13 +638,10 @@ export async function checkAttachmentsPublicDisk(options: {
 }
 
 /**
- * Twinned with `StorageDriverCapabilities.presignedGet` in @guren/server —
- * the runtime consults `disk.capabilities?.presignedGet === true`, which
- * `S3Driver` declares, `LocalDriver`/`MemoryDriver` never do, and
- * `R2Driver` declares only when `presign` credentials exist. A driver name
- * in neither set is a capability this scan cannot read: skipped, never
- * guessed in either direction (an unknown name passed off as green would
- * fail open; failed, it would false-flag every custom presigning driver).
+ * Twinned with `StorageDriverCapabilities.presignedGet` in @guren/server, which
+ * `S3Driver` declares, `LocalDriver`/`MemoryDriver` never do, and `R2Driver`
+ * declares only with `presign` credentials. A name in neither set is skipped,
+ * never guessed in either direction.
  */
 const KNOWN_NON_PRESIGNING_DRIVERS = new Set(['local', 'memory'])
 const KNOWN_PRESIGNING_DRIVERS = new Set(['s3'])
@@ -754,32 +649,19 @@ const KNOWN_PRESIGNING_DRIVERS = new Set(['s3'])
 /**
  * Drivers whose `root` is a filesystem path, so that "is this disk inside
  * public/?" is a question about it at all. Same never-guess policy as the
- * presigning sets above: a driver name outside this set is a disk this scan
- * cannot place, skipped rather than judged.
- *
- * Unlike those, this has no runtime twin to mirror — `root` is meaningful
- * only to `LocalDriver`, and nothing at serve time would read a capability
- * flag for it. A named set rather than a bare `!== 'local'` so that the
- * file's three driver judgements are found together.
+ * presigning sets above; no runtime twin, since `root` is meaningful only to
+ * `LocalDriver`.
  */
 const KNOWN_FILESYSTEM_DRIVERS = new Set(['local'])
 
 /**
  * The RFC 0015 delivery-route wiring rules:
  *
- * 1. `configureAttachments({ delivery })` with no route registered by
- *    `registerAttachmentRoutes()` reachable from the mounted registrar —
- *    private attachment URLs would be minted that 404, and the failure is
- *    a uniform 404 by design, so nothing at runtime names the cause.
- *    Judged on *loaded* definitions (the registered controller), not the
- *    routes file's AST, for the same reason the route-contract check is:
- *    the registrar may delegate through helpers the AST cannot follow.
- * 2. A delivery route name claimed by more than one loaded definition —
- *    `Router.name()` silently overwrites duplicates.
- * 3. `serve: 'redirect'` on a disk whose storage config declares a driver
- *    that can never presign — at serve time this downgrades to proxy with
- *    a warning (fail-closed), so this static gate is the only place the
- *    misconfiguration is visible before traffic.
+ * 1. `delivery` with no `registerAttachmentRoutes()` route in the *loaded*
+ *    definitions (not the AST, which cannot follow helpers) — URLs 404 mutely.
+ * 2. A delivery route name claimed twice — `Router.name()` silently overwrites.
+ * 3. `serve: 'redirect'` on a driver that cannot presign — at serve time it
+ *    downgrades to proxy with a warning, invisible before traffic.
  */
 export async function checkAttachmentsDelivery(options: {
   cwd: string
@@ -797,9 +679,7 @@ export async function checkAttachmentsDelivery(options: {
 
   if (scan.deliveryConfigs.length > 0) {
     // The app's own entry, not routes/web.ts: an API-only app mounts the
-    // delivery route in routes/api.ts, and judging it against a file it was
-    // never going to have reports the route as unmounted right after the
-    // scaffold mounted it.
+    // delivery route in routes/api.ts.
     const routesFile = options.routesFile ?? (await resolveRoutesEntry(cwd)) ?? DEFAULT_ROUTES_FILE
     let definitions = options.definitions
     let routesEntryMissing = false
@@ -808,9 +688,8 @@ export async function checkAttachmentsDelivery(options: {
         try {
           definitions = await loadRouteDefinitions(resolve(cwd, routesFile), cwd)
         } catch {
-          // An app whose routes cannot load is reported by the route
-          // checks; guessing about its delivery wiring on top would be
-          // noise. `definitions` stays undefined and the rule stays quiet.
+          // An app whose routes cannot load is reported by the route checks;
+          // `definitions` stays undefined and this rule stays quiet.
         }
       } else {
         // No routes entry at all is positive evidence: nothing can have

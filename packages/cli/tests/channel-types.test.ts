@@ -81,8 +81,7 @@ describe('generateChannelTypes', () => {
 
       const { channels, outputPath } = await generateChannelTypes({ appRoot: workspace.dir, force: true })
 
-      // A wrapped name used to read as no name at all, which drops the whole
-      // channel rather than degrading its payload to `unknown`.
+      // A wrapped name read as no name drops the whole channel, not just its payload.
       expect(channels).toContain('announcements')
       expect(await readFile(outputPath, 'utf8')).toContain("'NewPost': { id: number }")
     } finally {
@@ -108,8 +107,6 @@ describe('generateChannelTypes', () => {
       const { outputPath } = await generateChannelTypes({ appRoot: workspace.dir, force: true })
       const content = await readFile(outputPath, 'utf8')
 
-      // Wrapped payloads used to render as `unknown`, which types every
-      // listener's argument as unusable rather than as the shape it carries.
       expect(content).toContain("'NewPost': { id: number; tags: (string)[] }")
       expect(content).toContain("'Summary': string")
     } finally {
@@ -117,9 +114,8 @@ describe('generateChannelTypes', () => {
     }
   })
 
-  // Plugins used to be a fixed typescript+jsx pair for every extension. In a
-  // `.ts` file that makes `<Type>value` cast syntax parse as an unterminated
-  // JSX element, so the file silently contributed no channels at all.
+  // With the jsx plugin on, `<Type>value` in a `.ts` file parses as an
+  // unterminated JSX element and the file silently contributes no channels.
   it('collects channels from a .ts file using angle-bracket type assertions', async () => {
     const workspace = await createTempWorkspace('guren-cli-channel-types-cast-')
     try {

@@ -4,12 +4,9 @@ import { Controller } from '../../src/mvc/Controller'
 import { Router } from '../../src/mvc/Router'
 
 /**
- * A type-only fixture: none of these routers is ever mounted, and `bun run
- * typecheck` is the assertion. `Router.middleware()` and
- * `RouteBuilder.middleware()` used to accept registered alias names only, so
- * every call shape below failed with `Argument of type 'MiddlewareHandler' is
- * not assignable to parameter of type 'never'` — while four guides across both
- * doc languages documented exactly these shapes.
+ * A type-only fixture: nothing here is mounted and `bun run typecheck` is the
+ * assertion. `Router.middleware()` / `RouteBuilder.middleware()` once took
+ * registered alias names only, rejecting every shape below — all documented.
  */
 
 class DemoController extends Controller {
@@ -35,12 +32,10 @@ export const routerLevelInline = new Router().middleware(rateLimiter).group((gro
   group.get('/api/items', [DemoController, 'index'])
 })
 
-/** Chained onto a single route. */
 export const routeLevelInline = new Router()
   .post('/login', [DemoController, 'store'])
   .middleware(rateLimiter)
 
-/** Chained onto a route registered inside a named group. */
 export const groupScopedRouteInline = new Router()
   .aliasMiddleware('auth', auditLogger)
   .middleware('auth')
@@ -48,7 +43,6 @@ export const groupScopedRouteInline = new Router()
     group.get('/api/*', [DemoController, 'index']).middleware(rateLimiter)
   })
 
-/** Alias names and handlers in the same call, at both levels. */
 export const mixedNamedAndInline = new Router()
   .aliasMiddleware('auth', auditLogger)
   .middleware('auth', rateLimiter)
@@ -57,11 +51,9 @@ export const mixedNamedAndInline = new Router()
   })
 
 /**
- * Transcribed verbatim from the email-verification guide. `getUser` reads
- * `ctx` — impossible against the option's previous `(ctx: unknown)` signature,
- * a second reason that documented snippet did not compile. `ctx.get` is
- * generic (Hono's context idiom), so the type argument is inferred from the
- * expected return and the guide needs no cast.
+ * Transcribed verbatim from the email-verification guide: `getUser` reads
+ * `ctx`, impossible against the option's previous `(ctx: unknown)` signature.
+ * `ctx.get` is generic, so the return type is inferred and the guide needs no cast.
  */
 export const verifiedEmailGuard = new Router()
   .get('/profile', [DemoController, 'index'])

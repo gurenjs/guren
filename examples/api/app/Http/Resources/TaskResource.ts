@@ -35,7 +35,6 @@ export class TaskResource extends Resource<TaskRecord | TaskWithOwner, TaskResou
       },
       createdAt: task.createdAt.toISOString(),
       updatedAt: task.updatedAt.toISOString(),
-      // Conditionally include owner if loaded
       owner: this.whenLoaded('owner', () => ({
         id: (task as TaskWithOwner).owner?.id,
         name: (task as TaskWithOwner).owner?.name,
