@@ -970,7 +970,7 @@ describe('Console Integration', () => {
 })
 
 // ===================
-// Command.secret() Tests
+// Prompt Tests
 // ===================
 
 /** The escape sequence every masking write starts with: clear the line, return the cursor. */
@@ -1037,9 +1037,9 @@ function maskWrites(writes: string[]): string[] {
   return writes.filter((write) => write.startsWith(MASK_PREFIX))
 }
 
-class SecretCommand extends Command {
-  static signature = 'test:secret'
-  static description = 'Secret test'
+class PromptCommand extends Command {
+  static signature = 'test:prompt'
+  static description = 'Prompt test'
 
   readonly terminal = createFakeTerminal()
 
@@ -1050,13 +1050,15 @@ class SecretCommand extends Command {
   }
 }
 
+function createPromptCommand(): PromptCommand {
+  const command = new PromptCommand()
+  command.setInput([])
+  command.setOutput(command.terminal.output)
+  return command
+}
+
 describe('Command.secret', () => {
-  function createCommand(): SecretCommand {
-    const command = new SecretCommand()
-    command.setInput([])
-    command.setOutput(command.terminal.output)
-    return command
-  }
+  const createCommand = createPromptCommand
 
   test('a second prompt sees only its own input and leaves no extra listener behind', async () => {
     const command = createCommand()
@@ -1106,5 +1108,63 @@ describe('Command.secret', () => {
     await expect(settleWithin(pending, 1000)).rejects.toThrow('Password')
     expect(input.listenerCount('data')).toBeLessThan(listenersWhilePrompting)
     expect(rawModeCalls.at(-1)).toBe(false)
+  })
+})
+
+describe('Command.ask', () => {
+  test('resolves input that arrives without a trailing newline', async () => {
+    const command = createPromptCommand()
+
+    const pending = command.ask('Name')
+    type(command.terminal.input, 'ada')
+    ;(command.terminal.input as unknown as PassThrough).end()
+
+    expect(await settleWithin(pending, 1000)).toBe('ada')
+  })
+
+  test('falls back to the default when input closes with nothing typed', async () => {
+    const command = createPromptCommand()
+
+    const pending = command.ask('Name', 'anonymous')
+    ;(command.terminal.input as unknown as PassThrough).end()
+
+    expect(await settleWithin(pending, 1000)).toBe('anonymous')
+  })
+
+  test('resolves an empty string when input closes and there is no default', async () => {
+    const command = createPromptCommand()
+
+    const pending = command.ask('Name')
+    ;(command.terminal.input as unknown as PassThrough).end()
+
+    expect(await settleWithin(pending, 1000)).toBe('')
+  })
+
+  test('does not mask what is typed', async () => {
+    const command = createPromptCommand()
+
+    const pending = command.ask('Name')
+    type(command.terminal.input, 'ada\n')
+
+    expect(await settleWithin(pending, 1000)).toBe('ada')
+    expect(maskWrites(command.terminal.writes)).toEqual([])
+  })
+
+  test('confirm falls back to its default when input closes', async () => {
+    const command = createPromptCommand()
+
+    const pending = command.confirm('Proceed?', true)
+    ;(command.terminal.input as unknown as PassThrough).end()
+
+    expect(await settleWithin(pending, 1000)).toBe(true)
+  })
+
+  test('choice falls back to its default when input closes', async () => {
+    const command = createPromptCommand()
+
+    const pending = command.choice('Pick', ['red', 'green', 'blue'], 'green')
+    ;(command.terminal.input as unknown as PassThrough).end()
+
+    expect(await settleWithin(pending, 1000)).toBe('green')
   })
 })

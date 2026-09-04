@@ -16,10 +16,15 @@ not, both name the component, and both attach the original error as `cause`.
 removed it. A command prompting twice left the first prompt's listener attached,
 so the second prompt echoed the first prompt's label and its own character
 count, and raw mode was never restored. The listener is now removed and raw mode
-reset on every exit path, including the one where input ends before an answer
-arrives. That path previously never settled the promise at all; input ending
-with an unterminated line now resolves with what was typed, and input ending
-with nothing typed rejects instead of hanging.
+reset on every exit path.
+
+All four prompts — `ask()`, `confirm()`, `choice()` and `secret()` — now share
+one lifecycle and handle input ending before an answer arrives. Every one of
+them previously left the promise unsettled forever in that case, which is the
+unattended-command scenario the console guide tells you to guard against. Input
+ending with an unterminated line resolves with what was typed. Input ending with
+nothing typed resolves to the caller's default for `ask()`, `confirm()` and
+`choice()`, and rejects for `secret()`, where no default is safe.
 
 The mask writes to the same stream `createReadline()` echoes to, reached through
 the new overridable `inputStream()` / `outputStream()` accessors. `outputStream()`

@@ -120,6 +120,8 @@ const token = await this.secret('API token')
 
 These read from stdin, so guard them behind a `--force`-style option if the command also runs unattended (in CI or on a schedule).
 
+If stdin closes before a prompt is answered, `ask()`, `confirm()` and `choice()` return the default you gave them, and `secret()` throws — a password has no safe default. Input that ends without a trailing newline still counts as an answer.
+
 ## Registering Commands
 
 Nothing scans `app/Console/Commands` for you. A generated command is dead code until a kernel registers it — deliberately, so that deployments never depend on filesystem globbing.

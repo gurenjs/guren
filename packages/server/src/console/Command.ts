@@ -97,15 +97,12 @@ export abstract class Command implements CommandInstance {
   }
 
   async ask(question: string, defaultValue?: string): Promise<string> {
-    const rl = this.createReadline()
-    const prompt = defaultValue ? `${question} [${defaultValue}]: ` : `${question}: `
+    const answer = await this.prompt(
+      defaultValue ? `${question} [${defaultValue}]: ` : `${question}: `,
+      { mask: false }
+    )
 
-    return new Promise((resolve) => {
-      rl.question(prompt, (answer) => {
-        rl.close()
-        resolve(answer || defaultValue || '')
-      })
-    })
+    return answer || defaultValue || ''
   }
 
   async confirm(question: string, defaultValue = false): Promise<boolean> {
@@ -143,17 +140,34 @@ export abstract class Command implements CommandInstance {
   /**
    * Ask for secret input (password).
    *
-   * The mask listener and raw mode are torn down on every exit path, so a later
-   * prompt starts clean.
+   * Rejects when input ends with nothing typed: unlike the other prompts there
+   * is no safe default for a password.
    */
   async secret(question: string): Promise<string> {
+    const answer = await this.prompt(`${question}: `, { mask: true })
+
+    if (answer === null) {
+      throw new Error(`Input closed before "${question}" was answered`)
+    }
+
+    return answer
+  }
+
+  /**
+   * Run one readline prompt to completion. Settles exactly once, and tears the
+   * interface, the mask listener and raw mode down on every exit path, so a
+   * later prompt starts clean.
+   *
+   * Returns null when input ended with nothing typed. Callers decide what that
+   * means; leaving it unanswered would hang them forever.
+   */
+  private prompt(prompt: string, options: { mask: boolean }): Promise<string | null> {
     const stdin = this.inputStream()
     const stdout = this.outputStream()
     const rl = this.createReadline()
-    const prompt = `${question}: `
-    const hideInput = stdin.isTTY === true
+    const hideInput = options.mask && stdin.isTTY === true
 
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       let settled = false
 
       // Overwrites the line readline just echoed, so it has to target the same
@@ -185,14 +199,10 @@ export abstract class Command implements CommandInstance {
         if (settled) return
         const buffered = rl.line
         finish()
-        if (buffered) {
-          if (hideInput) {
-            this.newLine()
-          }
-          resolve(buffered)
-          return
+        if (hideInput && buffered) {
+          this.newLine()
         }
-        reject(new Error(`Input closed before "${question}" was answered`))
+        resolve(buffered || null)
       })
 
       rl.question(prompt, (answer) => {
