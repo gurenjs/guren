@@ -45,6 +45,8 @@ export interface OutputInterface {
   newLine(count?: number): void
   table(headers: string[], rows: string[][]): void
   write(message: string): void
+  /** The raw stream behind this output, for callers that need one (readline). */
+  stream?(): NodeJS.WriteStream
 }
 
 export interface InputInterface {

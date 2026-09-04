@@ -46,6 +46,10 @@ export class Output implements OutputInterface {
     this.stderr = options.stderr ?? process.stderr
   }
 
+  stream(): NodeJS.WriteStream {
+    return this.stdout
+  }
+
   protected color(text: string, ...codes: string[]): string {
     if (!this.useColors) {
       return text
