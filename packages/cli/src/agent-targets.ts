@@ -3,12 +3,23 @@ import { safePathSegments } from './utils'
 
 /**
  * The one rule for which files each agent target owns and how the canonical
- * harness content renders into them (RFC 0008), from the agent-neutral `core/`
- * plus per-target `targets/`. `agent-harness.ts` does the I/O and derives sync
- * detection from these same plans — a second mapping is how one rule file lands
- * in two locations with drifting content. Targets collapse onto shared
- * components: every non-Claude agent reads `AGENTS.md` + `.agents/` natively,
- * and cursor/copilot also get those rules re-rendered into native formats.
+ * harness content renders into them (RFC 0008).
+ *
+ * The template ships agent-neutral canonical content (`core/`: the entry
+ * document's shared intro/body, rules, skills) plus per-target statics
+ * (`targets/`). This module plans the app-relative files a target selection
+ * produces — paths, fully rendered content, and whether `agent:sync` owns
+ * the file. `agent-harness.ts` does the I/O and derives sync detection from
+ * the same plans; a scaffolder, detector, or sync path that invented its own
+ * mapping is how the same rule file ends up in two locations with drifting
+ * content.
+ *
+ * Targets collapse onto shared components: every non-Claude agent reads the
+ * `AGENTS.md` + `.agents/` family natively. On top of that, cursor and
+ * copilot get the canonical rules re-rendered into their native path-scoped
+ * formats (`.cursor/rules/*.mdc`, `.github/instructions/*.instructions.md`),
+ * and each tool gets its own user-owned extras (MCP client config; Codex
+ * also a command approval policy).
  */
 
 export const AGENT_TARGETS = ['claude', 'codex', 'cursor', 'copilot', 'opencode'] as const
@@ -22,8 +33,10 @@ export type HarnessComponent = (typeof COMPONENT_ORDER)[number]
 
 /**
  * Components whose managed files identify them on disk, letting `agent:sync`
- * re-plan them. codex/opencode are absent: their only distinct files are
- * user-owned extras sync must never re-plan or widen.
+ * re-plan them. codex/opencode are not here: their managed output is the
+ * shared `agents` family, and their only distinct files are user-owned
+ * extras sync must never re-plan (it cannot tell the two tools apart, and it
+ * never widens a user's config).
  */
 export const DETECTABLE_COMPONENTS = [
   'claude',
@@ -34,16 +47,37 @@ export const DETECTABLE_COMPONENTS = [
 
 export type DetectableComponent = (typeof DETECTABLE_COMPONENTS)[number]
 
-/** Marks an MCP client config as already carrying the Guren endpoint. */
+/**
+ * The substring that marks an MCP client config as already carrying the
+ * Guren endpoint. One spelling for every planned config; the endpoint URL
+ * itself lives in the `targets/*` MCP templates.
+ */
 const MCP_ENDPOINT_MARKER = '_guren/mcp'
 
 /**
- * A claim over files the planner owns: anything matching it that the plan does
- * not write is a leftover `agent:sync --prune` may delete. `files` claims named
- * files at a directory's top level, `pattern` only framework-named ones there,
- * `children` named subdirectories recursively. Never a whole root — the skills
- * roots also hold third-party skills (RFC 0011) and the rules roots a project's
- * own conventions, both of which a whole-root claim made prune candidates.
+ * A claim over files the planner owns outright: anything matching it that the
+ * current plan does not write is a leftover from an earlier harness version —
+ * a renamed or removed canonical rule or skill — and `agent:sync` may report
+ * it and, with `--prune`, delete it. Three shapes exist: a `files` claims
+ * named files at the top of a directory; a `pattern` claims only
+ * framework-named files at the top of a directory shared with user-authored
+ * files; a `children` claims named subdirectories of a root, each
+ * recursively, and nothing else beneath that root.
+ *
+ * Every shape claims by name, and none claims a whole root, because every
+ * root the harness writes into is shared with files the framework did not
+ * write. The skills roots take third-party skills from installers the
+ * framework does not control: `npx skills add` and the Agent Plugins clients
+ * copy them straight into `.agents/skills/` and `.claude/skills/`, flat and
+ * unnamespaced (RFC 0011). The rules roots are where a project is *told* to
+ * keep conventions of its own — the advice `agent:sync` itself prints. A
+ * whole-root claim in either place turned those files into prune candidates:
+ * for skills that included the framework's own catalog-distributed ones, and
+ * for rules it deleted the file holding a project's conventions, which is by
+ * definition the least likely to have been committed yet.
+ *
+ * So a claim names exactly what the framework has ever written: the planned
+ * rules and skills, plus `RETIRED_CANONICAL_RULES` / `RETIRED_CANONICAL_SKILLS`.
  */
 export type ManagedNamespace =
   | { kind: 'files'; dir: string; names: readonly string[] }
@@ -53,30 +87,46 @@ export type ManagedNamespace =
 type PatternNamespace = Extract<ManagedNamespace, { kind: 'pattern' }>
 
 /**
- * The one spelling of a family root's canonical directories: both the written
- * paths and the prune claims come from here, so a rename cannot leave the claim
- * pointing at the old location, where prune would eat the freshly written files.
+ * The one spelling of a family root's canonical directories. `planComponents`
+ * builds every written path from it and `managedNamespaces` claims the same
+ * value, so a renamed root cannot leave the claim pointing at the old
+ * location (where prune would then eat the freshly written files).
  */
 function canonicalDirs(root: '.claude' | '.agents'): { rules: string; skills: string } {
   return { rules: `${root}/rules`, skills: `${root}/skills` }
 }
 
 /**
- * Tombstones: canonical skill directories the harness once shipped and no
- * longer plans, which prune still owns. Removing a skill from `core/skills/`
- * means adding its old name here — a review obligation, not a testable one,
- * since the repository has no record of what it used to ship.
+ * Canonical skill directory names the harness shipped in an earlier version
+ * and no longer plans. Prune still owns these: a `children` claim over the
+ * current plan alone could never recognize a skill that left the set, and
+ * cleaning those up on `agent:sync --prune` is deliberate, tested behavior.
+ * Removing a skill from `core/skills/` means adding its old name here. No
+ * test can enforce that — the repository has no record of what it used to
+ * ship — so it is a review obligation on any PR that deletes a skill
+ * directory; the test only pins that a retired name never returns as a
+ * shipped one.
+ * Same device as the tombstones in `data-types.ts`: a dropped definition
+ * whose name must stay claimed.
  */
 export const RETIRED_CANONICAL_SKILLS: readonly string[] = []
 
 /**
- * The same discipline as `RETIRED_CANONICAL_SKILLS` for `core/rules/`. Names
- * include the extension as written into the canonical roots (`orm-models.md`);
- * the native `guren-*` re-renderings are claimed by their pattern instead.
+ * Canonical rule filenames the harness shipped in an earlier version and no
+ * longer plans, under the same discipline as `RETIRED_CANONICAL_SKILLS`: a
+ * `files` claim over the current plan alone cannot recognize a rule that left
+ * the set, so removing or renaming a file in `core/rules/` means adding its
+ * old filename here. A review obligation, not a testable one — the repository
+ * has no record of what it used to ship. Names include the extension, as
+ * written into the canonical roots (`orm-models.md`), and the native
+ * `guren-*` re-renderings are claimed by their pattern instead.
  */
 export const RETIRED_CANONICAL_RULES: readonly string[] = []
 
-/** Also the path rule `planComponents` writes with, so claim and names cannot drift. */
+/**
+ * The native-rule namespaces double as the path rule `planComponents` writes
+ * with, so the prune pattern and the written names cannot drift apart.
+ */
 const CURSOR_RULES_NAMESPACE: PatternNamespace = {
   kind: 'pattern',
   dir: '.cursor/rules',
@@ -96,11 +146,20 @@ function nativeRulePath(namespace: PatternNamespace, stem: string): string {
 }
 
 /**
- * A claimed name must be exactly one plain path segment: it is interpolated
- * into a directory the prune walker will `rm` under, so `..` would claim
- * outside the app. Traversal is `safePathSegments`' rule, never restated here;
- * this adds only the single-segment constraint on top of it. Checked here
- * because `claimFamily` is the sole producer of a `children` claim.
+ * A claimed name must be exactly one plain path segment. The claim is
+ * interpolated into a directory the prune walker will `rm` under, so a name
+ * like `..` would claim outside the app. What counts as a traversal rather
+ * than a name is `safePathSegments`' rule, not a second one written here —
+ * it already rejects `.`, `..`, a backslash (a separator on Windows) and a
+ * NUL (which truncates the path syscall-side). This adds the one constraint
+ * a claimed rule file or skill directory has on top of it: exactly one
+ * segment, so a legal nested name like `a/b` is still refused.
+ *
+ * Checked here, where the claim is built, because this is the only place a
+ * `children` claim is ever constructed: `claimFamily` below is the sole
+ * producer, and every name it takes passes through here. A second copy at the
+ * walk that joins the name — closer to the `rm` it protects — would be a
+ * guard no test could make fire.
  */
 function assertClaimName(name: string, label: 'rule' | 'skill'): void {
   if (safePathSegments(name, `${label} claim`).length !== 1) {
@@ -109,8 +168,10 @@ function assertClaimName(name: string, label: 'rule' | 'skill'): void {
 }
 
 /**
- * Every immediate child the plan writes into, plus the retired names. Derived
- * from the plan rather than listed, so a rename cannot leave the claim behind.
+ * The skill directory names a `children` claim over `skillsDir` covers: every
+ * immediate child the plan writes into, plus the retired names. Derived from
+ * the plan rather than listed, so a renamed or added canonical skill cannot
+ * leave the claim behind.
  */
 function claimedSkillNames(
   skillsDir: string,
@@ -136,8 +197,10 @@ function claimedSkillNames(
 }
 
 /**
- * Names a prune claim owns beyond the current plan. Defaults to the tombstone
- * constants; passed explicitly only by tests, since those constants are empty today.
+ * The names a prune claim owns beyond what the current plan writes: what the
+ * harness shipped under an earlier release. Defaults to the tombstone
+ * constants; passed explicitly only by tests, which is the only way to
+ * exercise a path whose constants are empty today.
  */
 export interface RetiredNames {
   rules?: readonly string[]
@@ -145,11 +208,15 @@ export interface RetiredNames {
 }
 
 /**
- * Every file the plan writes directly into `rulesDir`, plus the retired names,
- * derived from the plan so a rename cannot leave the claim behind. Planned names
- * stay in the claim even though the walk excludes planned paths: they catch a
- * leftover differing by case alone, which `findStaleManagedFiles` settles by
- * file identity.
+ * The rule filenames a `files` claim over `rulesDir` covers: every file the
+ * plan writes directly into it, plus the retired names. Derived from the plan
+ * rather than listed, so a renamed or added canonical rule cannot leave the
+ * claim behind.
+ *
+ * The planned names are in the claim even though the prune walk excludes
+ * planned paths anyway: what they reach is a leftover that differs from a
+ * planned name by case alone, which `findStaleManagedFiles` then settles by
+ * file identity rather than by name.
  */
 function claimedRuleNames(
   rulesDir: string,
@@ -165,6 +232,8 @@ function claimedRuleNames(
     if (!file.managed || !file.path.startsWith(prefix)) {
       continue
     }
+    // nested rules are refused when the plan is built; this is the claim's
+    // own guard on the same invariant, and on a retired name beside it
     const name = file.path.slice(prefix.length)
     assertClaimName(name, 'rule')
     names.add(name)
@@ -173,10 +242,14 @@ function claimedRuleNames(
 }
 
 /**
- * The namespaces the given components own — narrower than the managed file set.
- * `.claude/agents/` and `.claude/hooks/` ship managed files but are also the
- * conventional home for user-authored ones, which no name pattern can tell
- * apart, so stale copies there are left to the user rather than pruned.
+ * The namespaces the given components own. Deliberately narrower than the
+ * managed file set: `.claude/agents/` and `.claude/hooks/` ship managed files
+ * too, but those directories are the conventional home for user-authored
+ * subagents and hooks, and a name pattern cannot tell the two apart — so
+ * stale copies there are left to the user rather than claimed for pruning.
+ * The rules and skills roots are claimed by name for the same reason: the
+ * framework shares them with the project, so only the names it has itself
+ * written are its to remove.
  */
 export function managedNamespaces(
   components: Iterable<HarnessComponent>,
@@ -232,9 +305,12 @@ export interface PlannedFile {
 export type TemplateFiles = Map<string, string>
 
 /**
- * Template directories copied wholesale (consumed by iteration, not by name).
- * Everything else must be `get()`-consumed by `planComponents`; the completeness
- * test in `tests/agent-targets.test.ts` fails on a file reachable by neither.
+ * Template directories copied wholesale into a planned tree (consumed by
+ * iteration, not by name). Everything else must be `get()`-consumed by
+ * `planComponents`; the completeness test in `tests/agent-targets.test.ts`
+ * records the planner's actual reads over the real templates and fails on
+ * any file reachable by neither route, so a new template cannot be silently
+ * left uninstalled.
  */
 export const BULK_TEMPLATE_PREFIXES = [
   'core/rules/',
@@ -244,8 +320,9 @@ export const BULK_TEMPLATE_PREFIXES = [
 ] as const
 
 /**
- * Parse a `--target` value: comma-separated names, or `all`. Every entry is
- * validated before `all` expands, so a typo never silently installs anything.
+ * Parse a `--target` value: comma-separated target names, or `all`.
+ * Every entry is validated before `all` expands, so a typo never silently
+ * installs anything.
  */
 export function parseTargetList(raw: string): AgentTarget[] {
   const parts = raw
@@ -281,8 +358,9 @@ export function parseTargetList(raw: string): AgentTarget[] {
 /**
  * Order components and restore the install invariant: every non-Claude tool
  * implies the shared agents family. `agent:sync` funnels detected components
- * through this too, so a deleted `.agents/` tree is recreated rather than left
- * referenced by freshly refreshed native rules.
+ * through this too, so a cursor/copilot install whose `.agents/` tree was
+ * deleted gets it recreated instead of refreshing native rules that
+ * reference a directory that no longer exists.
  */
 export function normalizeComponents(components: Iterable<HarnessComponent>): HarnessComponent[] {
   const active = new Set<HarnessComponent>(components)
@@ -309,9 +387,11 @@ interface RuleDoc {
 }
 
 /**
- * The format is framework-authored, so validation is strict on purpose: an
- * unreadable rule must fail the install rather than ship to Cursor/Copilot with
- * an empty scope.
+ * Read a canonical rule file's frontmatter (`description` + `globs` list)
+ * via the shared docs-frontmatter parser. The format is framework-authored,
+ * so validation is strict on purpose: a rule this cannot read must fail the
+ * install (and the test suite) loudly, not ship to Cursor/Copilot with an
+ * empty scope.
  */
 function parseRuleDoc(name: string, content: string): RuleDoc {
   const parsed = parseDocFrontmatter(content)
@@ -373,9 +453,10 @@ export function planComponents(
   }
 
   /**
-   * The workflow fragment owns its own headings and ends with its target's
-   * lead-in to the catalog; catalog and body stay target-neutral apart from
-   * __RULES_DIR__.
+   * Entry document: shared intro + per-target workflow + shared rule catalog
+   * + shared body. The workflow fragment owns its own headings (or continues
+   * the intro's last section) and ends with its target's lead-in to the
+   * catalog; catalog and body stay target-neutral apart from __RULES_DIR__.
    */
   const entryDoc = (workflowPath: string, rulesDir: string): string =>
     render(
@@ -396,8 +477,12 @@ export function planComponents(
   const addCanonical = (root: '.claude' | '.agents'): void => {
     const dirs = canonicalDirs(root)
     for (const [rel, content] of under('core/rules/')) {
-      // Every claim scans a directory's top level only, so a nested rule would
-      // install fine and then be unprunable. Refused here, nowhere else.
+      // A rule has to be a flat file, and nothing else in the planner says so:
+      // the native projections fold the path into one filename
+      // (`guren-http/auth.mdc`), and both the pattern claim and the canonical
+      // roots' `files` claim scan a directory's top level only. A nested rule
+      // would install fine and then be unreachable by every claim that exists
+      // to clean it up — so it fails here instead, on the release that adds it.
       if (rel.includes('/')) {
         throw new Error(
           `Agent harness rule ${rel} must be a flat file — a nested rule cannot be claimed for pruning`,
@@ -411,8 +496,9 @@ export function planComponents(
   }
 
   if (components.includes('claude')) {
-    // Claude Code does not read AGENTS.md, so it always gets the full CLAUDE.md
-    // — even next to an AGENTS.md for other agents.
+    // Claude Code does not read AGENTS.md, so it always gets the full
+    // CLAUDE.md — even next to an AGENTS.md for other agents. Same intro and
+    // body; only the workflow section differs (hooks vs. manual loop).
     add({
       path: 'CLAUDE.md',
       content: entryDoc('targets/claude/workflow.md', canonicalDirs('.claude').rules),
@@ -442,8 +528,10 @@ export function planComponents(
     addCanonical('.agents')
   }
 
-  // Cursor and Copilot load path-scoped rules natively. Generated files carry a
-  // `guren-` prefix so ownership stays unambiguous beside user-authored rules.
+  // Cursor and Copilot load path-scoped rules natively; re-render the
+  // canonical rules into their formats. Generated files in these shared
+  // directories carry a `guren-` prefix so framework ownership stays
+  // unambiguous next to user-authored rules.
   const nativeRuleDocs: Array<[stem: string, doc: RuleDoc]> =
     components.includes('cursor') || components.includes('copilot')
       ? under('core/rules/').map(([rel, content]) => [
@@ -475,8 +563,9 @@ export function planComponents(
 
   if (components.includes('codex')) {
     addMcpConfig('.codex/config.toml', 'targets/codex/config.toml')
-    // Starlark shell-approval rules, not instruction rules: Codex's analogue of
-    // the .claude/settings.json allowlist. User-owned — sync never widens a policy.
+    // Codex's analogue of the .claude/settings.json permission allowlist:
+    // Starlark approval rules for shell commands, not instruction rules.
+    // User-owned like settings.json — sync never widens a policy file.
     add({
       path: '.codex/rules/guren.rules',
       content: get('targets/codex/rules/guren.rules'),

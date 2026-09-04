@@ -1,20 +1,33 @@
 /**
  * Render and audit the agent-catalog payload published to gurenjs/agent-skills
- * (RFC 0011). Sources live in `packages/cli/templates/agent-catalog/`; `--check`
- * renders them into a temporary directory (the payload is not committed here)
- * and asserts what the rendered text claims about the CLI:
+ * (RFC 0011).
  *
- * - every `guren <command>` a skill names, bare or after `bunx`, is registered,
- *   and every `--flag` on that line is declared — read from what the registry
- *   `packages/cli/src/commands.ts` exports, not from a hand-kept list.
+ * The payload is the on-ramp Guren ships into agent catalogs — the Claude
+ * Code plugin marketplace, the Agent Skills CLI, and Agent Plugins v1
+ * clients. Its sources live in `packages/cli/templates/agent-catalog/`; this
+ * script renders them into a directory and, in `--check` mode, asserts the
+ * facts the rendered text claims about the CLI:
+ *
+ * - every `guren <command>` a skill names — bare or after `bunx` — is a
+ *   command the CLI registers, and every `--flag` on that line is one the
+ *   command declares. Read from the registry `packages/cli/src/commands.ts`
+ *   exports, not from a hand-kept list.
  * - every agent target the skills offer is in `AGENT_TARGETS`.
  * - the minimum-CLI claim is not ahead of the workspace version.
- * - the root `plugin.json` conforms to the vendored Agent Plugins v1 schema.
+ * - the root `plugin.json` conforms to the vendored Agent Plugins v1 schema,
+ *   whose top-level field set is closed.
  *
- * `--check` also enforces the changeset gate: if any input changed against the
- * base ref, a changeset naming `@guren/cli` must be present, since the plugin's
- * version is the CLI's and a payload published under an unchanged version is one
- * every installed copy skips forever. A diff that moves the CLI version is exempt.
+ * The rendered payload is not committed to this repository (see the RFC for
+ * why); `--check` renders into a temporary directory and discards it. The
+ * publish step renders once, runs these same assertions, and pushes that
+ * same tree.
+ *
+ * `--check` also enforces the changeset gate: if any input this script reads
+ * changed relative to the base ref, a changeset naming `@guren/cli` must be
+ * present, because the plugin's version is the CLI's and a payload published
+ * under an unchanged version is one every installed copy skips forever. A
+ * diff that moves the CLI version itself is exempt — that is the release
+ * commit, and the harm the gate names cannot occur when the version moved.
  */
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -33,11 +46,14 @@ const LICENSE = 'LICENSE'
 
 /**
  * `core.hooksPath` pointed at nothing, on every git command that creates or
- * clones a repository: the repository is fresh but hooks are not, and a global
- * `core.hooksPath` (or an `init.templateDir`) runs before this code reads a
- * single file. The rest of the maintainer's configuration is left alone — the
- * credential helper and SSH setup are how any of this reaches a remote.
- * Exported because publish-agent-catalog needs the same rule.
+ * clones a repository. The repository is fresh, but hooks are not: a
+ * maintainer's global `core.hooksPath` (or an `init.templateDir` that installs
+ * into the new clone) applies to it, and the hook runs before this code has
+ * looked at a single file. The rest of the maintainer's configuration is
+ * deliberately left alone — their credential helper and SSH setup are how any
+ * of this reaches a remote at all. Exported because publish-agent-catalog
+ * needs the same rule at more moments, and two copies of it is how one of
+ * them comes to be forgotten.
  */
 export const NO_HOOKS = ['-c', 'core.hooksPath=']
 
@@ -51,8 +67,9 @@ const MIN_CLI_FOR_TARGETS = '2.5.0'
 const PORTABLE_SCHEMA_URL = 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json'
 
 /**
- * Everything the rendered payload derives from; the changeset gate watches this
- * same list, so it cannot drift from what the generator consumes.
+ * Everything the rendered payload derives from. The changeset gate watches
+ * exactly this list, read from here so it cannot drift from what the
+ * generator actually consumes.
  */
 export const CATALOG_INPUTS = [
   `${TEMPLATE_DIR}/`, // templates, skills, and the vendored plugin.schema.json
@@ -73,6 +90,10 @@ export interface RenderedFile {
   path: string
   content: string
 }
+
+// ---------------------------------------------------------------------------
+// Rendering
+// ---------------------------------------------------------------------------
 
 async function readContext(): Promise<RenderContext> {
   const cli = JSON.parse(await readFile(join(repoRoot, CLI_MANIFEST), 'utf8')) as { version?: string }
@@ -139,8 +160,9 @@ export async function renderCatalog(): Promise<RenderedFile[]> {
 }
 
 /**
- * `files` lets a caller that already rendered (`--check`) write that same array
- * rather than render a second time. Same tree either way.
+ * `files` lets a caller that has already rendered — `--check`, which audits
+ * the payload before writing it for the validator — write that same array
+ * instead of rendering a second one. Same tree either way; one render.
  */
 export async function writeCatalog(outDir: string, files?: readonly RenderedFile[]): Promise<readonly RenderedFile[]> {
   files ??= await renderCatalog()
@@ -152,10 +174,15 @@ export async function writeCatalog(outDir: string, files?: readonly RenderedFile
   return files
 }
 
+// ---------------------------------------------------------------------------
+// Assertions
+// ---------------------------------------------------------------------------
+
 /**
- * A `guren <command> [--flags…]` occurrence, bare or after `bunx`, fenced or
- * inline. Stops at the closing backtick of an inline span so following prose is
- * not mistaken for flags.
+ * A `guren <command> [--flags…]` occurrence: bare or after `bunx`, in a code
+ * fence or inline. Captures the command and the rest of the line, from which
+ * flags are read. Stops at the closing backtick of an inline span so prose
+ * after it is not mistaken for flags.
  */
 const GUREN_INVOCATION_RE = /\b(?:bunx\s+)?guren\s+(--version|[a-z][a-z0-9:-]*)([^\n`]*)/gu
 const FLAG_RE = /(?:^|\s)--([a-z][a-z0-9-]*)/gu
@@ -184,12 +211,13 @@ export async function assertCommandsAndFlags(files: readonly RenderedFile[]): Pr
     for (const match of file.content.matchAll(GUREN_INVOCATION_RE)) {
       const [, command, restRaw] = match
       if (command === undefined || command.startsWith('<')) continue
-      // the root command's own flag, always accepted; matched so the probe the
-      // harness skill relies on is spelled as something the CLI has
+      // `guren --version` is the root command's own flag, always accepted;
+      // it is matched so the probe the harness skill relies on is at least
+      // spelled as something the CLI has
       if (command === '--version') continue
-      // flags belong to this invocation only up to the next shell separator:
-      // `guren check && guren agent:init --target codex` must not hand --target
-      // to check
+      // flags belong to this invocation only up to the next shell separator;
+      // `guren check && guren agent:init --target codex` must not hand
+      // --target to check
       const rest = (restRaw ?? '').split(SHELL_SEPARATOR_RE)[0] ?? ''
       if (!registered.has(command)) {
         problems.push(`${file.path}: names \`guren ${command}\`, which the CLI does not register`)
@@ -231,9 +259,10 @@ export function assertTargets(files: readonly RenderedFile[]): string[] {
 
 export async function assertMinCli(): Promise<string[]> {
   const ctx = await readContext()
-  // `compareVersions` returns NaN for anything but an exact version (a
-  // prerelease *is* exact), and `NaN > 0` is false, so an impossible comparison
-  // would otherwise read as "not ahead" and pass.
+  // `compareVersions` returns NaN when either side is not an exact version —
+  // a range, a partial pin (a prerelease *is* exact, and orders normally).
+  // `NaN > 0` is false, so a comparison that could not be made would
+  // otherwise read as "not ahead" and pass the gate it exists to be.
   const order = compareVersions(ctx.minCli, ctx.cliVersion)
   if (Number.isNaN(order)) {
     return [`Cannot order MIN_CLI_FOR_TARGETS ${ctx.minCli} against the workspace @guren/cli ${ctx.cliVersion}`]
@@ -244,11 +273,19 @@ export async function assertMinCli(): Promise<string[]> {
 }
 
 /**
- * The JSON Schema subset the vendored Agent Plugins v1 schema uses, enforced
- * without a validator dependency and driven by the vendored file rather than a
- * hand-copied rule — so the name pattern is the spec's own, admitting `a-.b`
- * where a stricter hand-written regex would not, and a field added upstream
- * shows up as a diff rather than a silent pass.
+ * Agent Plugins v1 `plugin.json` conformance, against the vendored schema.
+ * The schema is small and closed, so it is enforced directly rather than via
+ * a validator dependency; the vendored copy is read so a field added upstream
+ * shows up as a diff here, not as a silent pass.
+ */
+/**
+ * A validator for exactly the JSON Schema subset the vendored Agent Plugins
+ * schema uses: `type`, `const`, `required`, `properties`, `additionalProperties`,
+ * `items`, `minLength`, `maxLength`, `pattern`. Small enough to enforce here
+ * without a dependency, and driven by the schema file rather than by a
+ * hand-copied rule — so the name pattern, for one, is the spec's own
+ * (`^(?!.*(?:--|\.\.))[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$`), which admits
+ * `a-.b` where a stricter hand-written regex would not.
  */
 type JsonSchema = {
   $id?: string
@@ -306,9 +343,12 @@ export function validateAgainstSchema(value: unknown, schema: JsonSchema, path =
 }
 
 /**
- * `{}` is itself a valid JSON Schema accepting every document, so a gutted or
- * truncated vendored copy would turn this rule green rather than red. The
- * constraints it leans on are asserted before it trusts any of them.
+ * Is the vendored file still the schema this rule thinks it is validating
+ * against? `{}` is itself a valid JSON Schema that accepts every document, so
+ * a gutted or truncated copy would turn this whole rule green rather than
+ * red. These are the constraints the rule leans on, asserted before it trusts
+ * any of them: the spec's own `$id`, the closed root, and the two required
+ * fields.
  */
 export function schemaIdentityProblems(schema: JsonSchema): string[] {
   const problems: string[] = []
@@ -348,32 +388,51 @@ export async function assertPortableManifest(files: readonly RenderedFile[]): Pr
 }
 
 /**
- * Does this changeset's frontmatter release `pkg`? Only the `---` block is read,
- * through `core-semver-audit.ts`'s parser rather than a second regex: two
- * readings of one file format is how the two gates come to disagree.
+ * Does this changeset's frontmatter release `pkg`? Only the `---`-delimited
+ * block is read, so a package-looking line in the Markdown body does not
+ * count; keys may be quoted or bare, as changesets accepts both.
  *
- * Throws on a changeset it cannot read rather than reporting "no release for
- * pkg", since an unparseable changeset is not evidence none was planned.
+ * The reading is `core-semver-audit.ts`'s, not a second one written here:
+ * that gate already had to be as permissive as `@changesets/parse` about
+ * comments, quoting and bump values, and two regexes for one file format is
+ * how the two gates come to disagree about what a release plan says.
+ * (The OKF frontmatter parser in packages/cli is a fixed-field subset that
+ * never sees package names, which is why it is not the one to reuse.)
+ *
+ * Throws on a changeset it cannot read, rather than reporting "no release
+ * for pkg" — the caller turns that into a reported problem, because a
+ * changeset nobody can parse is not evidence that a release was not planned.
  */
 export function changesetNames(source: string, pkg: string, file = 'changeset'): boolean {
   return parseChangeset(file, source).releases.has(pkg)
 }
 
 /**
- * Sources changed ⇒ a `@guren/cli` changeset is present, unless the CLI version
- * itself moved. Compared against `base` (a ref or SHA), which callers on shallow
- * checkouts must fetch first. `repo` is the checkout to run in: the gate is only
- * observable against real commits, so its tests build throwaway repositories.
+ * Sources changed ⇒ a `@guren/cli` changeset is present, unless the CLI
+ * version itself moved. Compared against `base` (a ref or SHA). Callers on
+ * shallow checkouts must fetch it first.
+ *
+ * `repo` is the checkout to run in; it is the function's subject, not a test
+ * hook. The gate is only observable against real commits, so its own tests
+ * build throwaway repositories and point it at those.
  */
 export async function assertChangesetGate(base: string, repo: string = repoRoot): Promise<string[]> {
-  // Merge-base is the precise left side, but a shallow CI checkout that fetched
-  // only the base SHA has none, so it falls back to the base tip. Resolved to one
-  // rev rather than two diff spellings, because the version comparison below must
-  // read the same side the file list came from: on a stale branch the base tip can
-  // carry a *newer* version than HEAD and exempt a run the merge base would gate.
-  // The fallback is safe for the two events CI passes a base for, both naming a
-  // specific commit. Empty output counts as a failure, not a rev: an empty left
-  // side makes `git diff ..HEAD` a diff of HEAD against itself, which reports no
+  // three-dot (merge-base..HEAD) is the precise diff on a full clone; it
+  // needs a merge base, which a shallow CI checkout that fetched only the
+  // base SHA does not have. Two-dot (base tip..HEAD) needs none and can only
+  // over-report on a stale branch, never under-report — so try precise, then
+  // safe. Resolved to one rev rather than written as two diff spellings,
+  // because the version comparison below has to read the same side of the
+  // diff the file list came from: on a stale branch `base`'s tip can carry a
+  // *newer* version than HEAD, which would exempt a run the merge base would
+  // have gated. The shallow fallback gives that precision up — it reads the
+  // base tip — which is safe for the two events CI passes a base for, because
+  // both name a specific commit rather than a moving branch: `push` sends the
+  // tip its own push replaced, and `pull_request` sends `base.sha`.
+  // Empty output counts as a failure, not as a rev. Today's git exits
+  // non-zero when there is no merge base, so this is belt-and-braces — but
+  // the failure it prevents is silent rather than loud: an empty left side
+  // makes `git diff ..HEAD` a diff of HEAD against itself, which reports no
   // files and passes this gate rather than reporting that it could not run.
   const mergeBase = Bun.spawnSync(['git', 'merge-base', base, 'HEAD'], { cwd: repo })
   const diffBase = (mergeBase.success && mergeBase.stdout.toString().trim()) || base
@@ -385,27 +444,47 @@ export async function assertChangesetGate(base: string, repo: string = repoRoot)
   const touched = changed.filter((f) => CATALOG_INPUTS.some((input) => (input.endsWith('/') ? f.startsWith(input) : f === input)))
   if (touched.length === 0) return []
 
-  // The version moved ⇒ exempt: the harm named here is a payload published under
-  // an *unchanged* version, so `changeset version`'s own commit is green whatever
-  // rides with it. Note the direction: an exemption keyed on the version, never a
-  // demand that a PR move one (RFC 0011 §5). A manifest edit that leaves the
-  // version alone is still gated.
+  // The version moved ⇒ exempt. The harm this gate names is a payload
+  // published under an *unchanged* version, and that cannot happen once the
+  // version string differs — so `changeset version`'s own commit is green
+  // whatever else rides with it, including a catalog template and the
+  // changeset that commit just consumed. Note the direction: an exemption
+  // keyed on the version, never a demand that a PR move one. Feature PRs do
+  // not bump versions in this repo, and a gate that asked them to would be
+  // asking for a number `changeset version` writes (RFC 0011 §5).
   //
-  // The head side is the working tree, so a `--check` run part-way through
-  // `changeset version` is judged on what a publish from that checkout would
-  // carry; the price is that a step rewriting the manifest without committing it
-  // could manufacture an exemption. Read off disk rather than through
-  // `readContext()`, so GUREN_CATALOG_VERSION_OVERRIDE cannot manufacture one.
+  // This replaced an exemption for a diff whose touched inputs were the CLI
+  // manifest alone. The two are not nested: this one is wider where it
+  // matters (a catalog template may ride in the same push or squash as the
+  // version commit, which the old rule turned into a false red) and narrower
+  // where the old one was too loose (a manifest edit that leaves the version
+  // alone is gated, because it republishes the payload under the version it
+  // already had). Do not re-add the old branch beside this one.
   //
-  // Compared as strings: `compareVersions` returns NaN for an inexact version and
-  // orders `1.0.0+build` equal to `1.0.0`, two spellings that publish as two
-  // different payload versions.
+  // The head side is the working tree, matching how `.changeset/` is read
+  // below and how `renderCatalog` reads the version it publishes — so a
+  // maintainer running `--check` part-way through `changeset version`, files
+  // written and not yet committed, is judged on what a publish from that
+  // checkout would carry. The cost is that this half of the comparison is
+  // only as trustworthy as the tree is clean: a step that rewrote the
+  // manifest without committing it could manufacture an exemption. CI has no
+  // such step, and its checkout is clean. Read off disk rather than through
+  // `readContext()`, which applies GUREN_CATALOG_VERSION_OVERRIDE — a stray
+  // env var must not be able to manufacture one either.
+  //
+  // Compared as strings, because the claim is literally "the same version
+  // string". `compareVersions` answers a different question: it returns NaN
+  // for anything that is not an exact version, and orders `1.0.0+build`
+  // equal to `1.0.0` — two spellings that publish as two different payload
+  // versions.
   const baseVersion = versionOf(manifestAtRev(diffBase, CLI_MANIFEST, repo))
   const headVersion = versionOf(await readFile(join(repo, CLI_MANIFEST), 'utf8').catch(() => undefined))
   if (baseVersion !== undefined && headVersion !== undefined && baseVersion !== headVersion) return []
-  // A side that could not be read is not an exemption; it falls through to the
-  // changeset check, so a PR that has one still passes and the reason is reported
-  // only when it does not.
+  // A side that could not be read is not an exemption — that would be a
+  // silent ungating living inside the audit, where the run still prints
+  // "passed" and no CI annotation covers it. It falls through to the
+  // changeset check instead, so a PR that has a changeset still passes, and
+  // the reason is reported only when one is missing.
 
   const changesetDir = join(repo, '.changeset')
   let names: string[] = []
@@ -436,10 +515,12 @@ export async function assertChangesetGate(base: string, repo: string = repoRoot)
 }
 
 /**
- * `claude plugin validate --strict`, the same check the community-marketplace
- * review pipeline runs; verified to need no authentication (2026-08-18). Keeps
- * `unavailable` (no `claude` on PATH) distinct from `fail`: the caller decides
- * whether to block, but it is never reported as pass.
+ * `claude plugin validate --strict` on the rendered plugin and marketplace —
+ * the same check the community-marketplace review pipeline runs. Verified to
+ * run without authentication (2026-08-18). Three outcomes, kept distinct:
+ * `pass`, `fail` (validation errors), and `unavailable` (no `claude` on PATH,
+ * or it could not be spawned). An unavailable check is not a green one; the
+ * caller decides whether to block on it, but it is never reported as pass.
  */
 export type ValidateOutcome = { kind: 'pass' } | { kind: 'fail'; output: string } | { kind: 'unavailable'; reason: string }
 
@@ -462,9 +543,14 @@ export async function claudePluginValidate(payloadDir: string): Promise<Validate
   return { kind: 'pass' }
 }
 
+// ---------------------------------------------------------------------------
+// CLI
+// ---------------------------------------------------------------------------
+
 /**
- * The derived-fact rules as one call, run by both `--check` and the publish
- * script over the tree they are about to trust, so the two cannot diverge.
+ * The derived-fact rules, as one call. `--check` and the publish script both
+ * run exactly this over exactly the tree they are about to trust — one
+ * implementation, so the two cannot audit different things.
  */
 export async function auditRenderedFiles(files: readonly RenderedFile[]): Promise<string[]> {
   return [
@@ -487,7 +573,8 @@ async function check(base: string | undefined, requireValidate: boolean): Promis
     return 1
   }
 
-  // write the tree that was just audited, not a second render of it
+  // write the tree that was just audited — not a second render of it — and
+  // validate that, then discard it. Provenance, and one render per run.
   const dir = await mkdtemp(join(tmpdir(), 'guren-agent-catalog-'))
   let outcome: ValidateOutcome
   try {
@@ -515,15 +602,17 @@ async function check(base: string | undefined, requireValidate: boolean): Promis
 
 /**
  * Is what gurenjs/agent-skills publishes the same tree this checkout renders?
- * Read-only, and the nightly drift job's only defense against a forgotten
- * publish. Exit 1 on drift with the file list; exit 2 if the public repo could
- * not be cloned, since unavailable is not green.
+ * Read-only: clones the public repo shallow, renders, and diffs. Backs the
+ * nightly drift job — the one defense a maintainer-run publish lacks is a
+ * reminder that it was forgotten, and this is it. Exit 1 on drift with the
+ * file list; exit 2 if the public repo could not be cloned (unavailable is
+ * not green). Never writes anywhere but a temp dir.
  */
 export async function diffPublished(remote: string): Promise<{ code: 0 | 1 | 2; report: string }> {
   const cloneDir = await mkdtemp(join(tmpdir(), 'guren-agent-catalog-published-'))
   try {
-    // NO_HOOKS: a post-checkout hook writing into the fresh clone would read back
-    // below as what the public repository publishes
+    // NO_HOOKS: a post-checkout hook writing into the fresh clone would be
+    // read back below as what the public repository publishes
     const clone = Bun.spawnSync(['git', ...NO_HOOKS, 'clone', '--quiet', '--depth', '1', remote, cloneDir])
     if (!clone.success) {
       return { code: 2, report: `could not clone ${remote}:\n${clone.stderr.toString().trim()}` }
