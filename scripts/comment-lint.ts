@@ -245,7 +245,7 @@ async function main(): Promise<number> {
 
   const findings = files.flatMap((f) => (all ? lintFileRatcheted(f, undefined) : lintFileRatcheted(f, rev)))
   if (findings.length === 0) {
-    console.log(`comment-lint passed (${files.length} file(s)${rev ? `, ratcheted against ${rev.slice(0, 12)}` : ''})`)
+    console.log(`comment-lint passed (${files.length} file(s)${rev ? `, ratcheted against ${/^[0-9a-f]{40}$/.test(rev) ? rev.slice(0, 12) : rev}` : ''})`)
     return 0
   }
   console.error(format(findings))
