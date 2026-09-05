@@ -371,6 +371,35 @@ would be the mocked-driver trap. Instead:
 - **Part 4**: email entry points, docs, guren.dev dogfooding, and the
   service-binding split topology if demand materializes.
 
+## Implementation notes
+
+**Part 1 shipped.** The pipeline lives in `@guren/server` (re-exported from
+`@guren/core`) as `createAgentInvocationPipeline`, `@guren/plugin-mcp` runs on
+it, the principal seam is in place, and `AgentSurface` carries `'durable'`.
+Three things worth recording, because each was a decision rather than a
+transcription:
+
+- **Open Question 1 is settled as one function with option hooks**, not a
+  middleware chain. A chain would have to publish an ordering vocabulary, and
+  the ordering is exactly the part that must not be negotiable: metering has to
+  happen before the approval gate, because that gate writes a record and pages a
+  human and deduplicates only on identical arguments, so a surface that
+  reordered them would amplify notifications with nothing failing. There is one
+  seam — an **interposition hook** between the scope gate and the approval gate
+  — and everything else is fixed. `@guren/plugin-mcp` puts its per-token rate
+  limit there; the durable client's budget goes in the same place.
+- **The fail-closed refusal takes its configuration line from the surface.** The
+  pipeline is protocol-neutral and cannot name `mcpPlugin({ approvals: … })` in
+  every refusal, so the surface passes a hint and the default is phrased in the
+  pipeline's own vocabulary. The MCP text is byte-identical to what it was.
+- **The seam's scope is narrower than "authenticated", and stated as such.** It
+  satisfies `requireAuthenticated()`, `Controller.auth` and `Gate`/policies. It
+  does **not** satisfy `createBearerTokenMiddleware` / `tokenCan*`, which judge
+  an issued `ApiToken`; synthesizing one would mint a credential the application
+  never granted. The same limit applies to the OAuth-fronted MCP surface, which
+  adopted the seam in this part — a route behind `requireAuthenticated()` now
+  executes as the OAuth caller, where it previously answered 401.
+
 ## Alternatives Considered
 
 - **A hand-rolled Durable Object base class, no Agents SDK.** Fewer

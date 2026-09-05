@@ -4,13 +4,12 @@ import {
   AgentToolInvoked,
   DEFAULT_AGENT_AUDIT_PATH,
   DEFAULT_AGENT_APPROVAL_TTL_MS,
-  buildToolRequest,
+  createAgentInvocationPipeline,
   createAuditEmitter,
   definePlugin,
-  describeBuildFailure,
   deriveAgentTools,
   isReservedAgentToolName,
-  mapToolResponse,
+  notifyApprovers,
   readBearerToken,
   redactAgentArguments,
   verifyApiToken,
@@ -25,12 +24,11 @@ import {
   type DerivedAgentTool,
   type EventManager,
   type ServiceProviderConstructor,
-  type ToolCallOutcome,
 } from '@guren/core'
 import type { Context } from 'hono'
 
 import { readExternalMcpAuth, type ExternalMcpAuth } from './external-auth'
-import { AgentRateLimiter, type RateLimitConfig } from './rate-limit'
+import { AgentRateLimiter, createRateLimitInterposition, type RateLimitConfig } from './rate-limit'
 import { createAppMcpServer } from './server'
 
 export interface McpPluginConfig {
@@ -53,10 +51,10 @@ export interface McpPluginConfig {
    */
   updateLastUsed?: boolean
   /**
-   * `'external'`: every request arrives verified by an authority in front of
-   * the app, handed in over the seam in `./external-auth` (never a header); no
-   * token store is consulted, and a request without the seam is refused 401
-   * rather than falling back to bearer. Unset, the seam is honoured when present.
+   * `'external'`: every request arrives verified by an authority in front of the
+   * app, over the seam in `./external-auth` (never a header); no token store is
+   * consulted, and a request without the seam is refused 401 rather than falling
+   * back to bearer. It authenticates *inside* the app too — see {@link fromExternalAuth}.
    * @default undefined — bearer tokens
    */
   auth?: 'external'
@@ -168,32 +166,74 @@ const factory = definePlugin<McpPluginConfig>({
         return resolved
       }
 
-      const { principal, abilities, rateKey, authorization } = resolved
+      const { principal, abilities, rateKey, credential } = resolved
+
+      // Rebuilt per request because the principal is: an approval is bound to
+      // who asked, and a context hoisted to boot would carry whichever caller
+      // arrived first. One object for both halves — the gate that files records
+      // and the status tool that reports on them — so the two cannot disagree
+      // about whether a queue exists; the server reads only three of its keys.
+      const approvals = config.approvals
+        ? {
+            store: config.approvals.store,
+            principal,
+            now: () => new Date(),
+            ttlMs: config.approvals.ttlMs ?? DEFAULT_AGENT_APPROVAL_TTL_MS,
+            // The route's own masking rules, the same walk the audit trail
+            // uses. A record a human reads and a store persists must not carry
+            // a field the route declared must never be written down.
+            redact: (tool: DerivedAgentTool, args: Record<string, unknown>) =>
+              redactAgentArguments(args, tool.redact),
+            notify: notifyApprovers(config.approvals.notify),
+          }
+        : undefined
+
+      const executionCtx = executionContext(c)
+
+      const pipeline = createAgentInvocationPipeline({
+        app,
+        principal,
+        abilities,
+        surface: 'mcp',
+        audit: emit,
+        ...(approvals ? { approvals } : {}),
+        // The pipeline is protocol-neutral, so both the configuration line in
+        // a fail-closed refusal and the subject of a scope refusal have to
+        // come from the surface. These two keep the text an MCP client reads
+        // exactly what it has always read.
+        approvalConfigureHint: 'mcpPlugin({ approvals: { store, notify } })',
+        // This surface really does authenticate by a token, so it says so. The
+        // pipeline's default is neutral, because a durable agent's principal
+        // is minted from its registration and holds no token to widen.
+        scopeSubject: "The token's scopes",
+        // The plugin's own metering, as the pipeline's one interposition hook —
+        // undefined when `rateLimit: false`, so the pipeline holds no hook at
+        // all rather than one that always allows.
+        interpose: createRateLimitInterposition(limiter, rateKey),
+        // The inbound request's own origin, so the re-entrant request carries
+        // the real Host the MCP client reached `/mcp` on. Defaulting to
+        // localhost (dispatch's fallback) makes host-authorization middleware
+        // — which RFC 0016's "in production" apps are encouraged to enable —
+        // reject every tool call with 403.
+        origin: new URL(c.req.url).origin,
+        // A forwarded credential or the principal seam, never both. See
+        // `ResolvedCaller.credential`.
+        ...credential,
+        // env and execution context are forwarded explicitly — omitting them
+        // silently loses D1/R2 bindings and waitUntil on Workers (RFC 0016
+        // §3.1).
+        env: c.env,
+        ...(executionCtx ? { executionCtx } : {}),
+      })
 
       const server = createAppMcpServer({
         tools: exposed,
         abilities,
-        // Rebuilt per request: an approval is bound to who asked for it, and a
-        // context hoisted to boot would carry whichever caller arrived first.
-        ...(config.approvals
-          ? {
-              approvals: {
-                store: config.approvals.store,
-                principal,
-                ttlMs: config.approvals.ttlMs ?? DEFAULT_AGENT_APPROVAL_TTL_MS,
-                now: () => new Date(),
-                // A record a human reads and a store persists must not carry a
-                // field the route declared must never be written down.
-                redact: (tool, args) => redactAgentArguments(args, tool.redact),
-                notify: notifyApprovers(config.approvals.notify),
-              },
-            }
-          : {}),
+        ...(approvals ? { approvals } : {}),
         serverInfo,
+        pipeline,
         limiter,
         rateKey,
-        dispatch: (tool, args, dispatchOptions) =>
-          dispatchThroughApp(app, c, tool, args, authorization, dispatchOptions?.preflight),
         onInvoked: (tool, args, status, durationMs) => {
           emit(
             new AgentToolInvoked(
@@ -233,23 +273,29 @@ interface ResolvedCaller {
   abilities: readonly string[]
   /** Never `undefined`: a missing key silently turns off the per-caller limiter. */
   rateKey: string
-  /** `Authorization` to forward, or `undefined` when the app cannot verify it. */
-  authorization: string | undefined
+  /**
+   * What the dispatched request answers "who is this" with, spread into the
+   * pipeline's options. A union, not two optional fields, because the two are
+   * alternatives: a caller presents a credential the app verifies
+   * (`{ authorization }`) or the framework hands over the identity it
+   * established (`{ handoff: 'seam' }`). The pipeline refuses both at once.
+   */
+  credential: { authorization: string } | { handoff: 'seam' }
 }
 
 /**
  * A caller the seam presented, verified by an authority in front of the app.
  * `rateKey` is per principal — no token to key on — coarser, so it can only
- * limit more. No `Authorization` is forwarded: the caller's bearer is the
- * *provider's*, which the app's token guard cannot verify, so a route behind
- * `requireApiToken` answers 401 on this surface (closing that is RFC 0017 §2).
+ * limit more. No `Authorization` is forwarded, the caller's bearer being the
+ * *provider's*; the principal is installed instead (RFC 0017 §2), so
+ * `requireAuthenticated()` passes and `tokenCan*` refuses for want of a token.
  */
 function fromExternalAuth(external: ExternalMcpAuth): ResolvedCaller {
   return {
     principal: external.principal,
     abilities: external.scopes,
     rateKey: `external:${external.principal.kind}:${String(external.principal.id)}`,
-    authorization: undefined,
+    credential: { handoff: 'seam' },
   }
 }
 
@@ -288,7 +334,10 @@ async function verifyBearer(
 
   const header = c.req.header('Authorization')
   const bearer = readBearerToken(header)
-  if (!bearer) {
+  // `bearer` cannot be present without `header`, but only the explicit check
+  // narrows it — and the header itself, not the parsed token, is what the
+  // resolved caller forwards verbatim.
+  if (!header || !bearer) {
     return unauthorized(c, 'A bearer token is required.')
   }
   const verified = await verifyApiToken(bearer, store, {
@@ -302,33 +351,8 @@ async function verifyBearer(
     principal: { kind: 'user', id: verified.userId, abilities: verified.abilities },
     abilities: verified.abilities,
     rateKey: verified.token.id,
-    authorization: header,
+    credential: { authorization: header },
   }
-}
-
-/**
- * Wrap the application's `notify` so a failure can neither fail the tool call
- * nor lose the record — it is already persisted — but is still warned about
- * with the request id: an approval nobody was told about looks exactly like one
- * nobody has answered yet. Both a synchronous throw and a rejection are covered.
- */
-export function notifyApprovers(
-  notify: (request: AgentApprovalRequest) => void | Promise<void>,
-): (request: AgentApprovalRequest) => void {
-  return (request) => {
-    try {
-      void Promise.resolve(notify(request)).catch((error) => warnNotifyFailure(request, error))
-    } catch (error) {
-      warnNotifyFailure(request, error)
-    }
-  }
-}
-
-function warnNotifyFailure(request: AgentApprovalRequest, error: unknown): void {
-  console.warn(
-    `[@guren/plugin-mcp] approval notification failed for request ${request.id} `
-    + `(${request.tool}); the request is recorded and pending, but nobody was told: ${String(error)}`,
-  )
 }
 
 /**
@@ -342,41 +366,6 @@ async function resolveAuditSink(
 
   const { createFileAuditSink } = await import('./audit-file')
   return createFileAuditSink(config.file ?? DEFAULT_AGENT_AUDIT_PATH, config.days)
-}
-
-async function dispatchThroughApp(
-  app: Application,
-  c: Context,
-  tool: DerivedAgentTool,
-  args: Record<string, unknown>,
-  authorization: string | undefined,
-  preflight?: boolean,
-): Promise<ToolCallOutcome> {
-  // `preflight` is not an argument of the tool being checked: it comes from the
-  // `guren.preflight` companion tool (RFC 0016 §5.4). MCP leaves no room for the
-  // argument form — a tool advertising an `outputSchema` must answer with
-  // conforming `structuredContent`, and a verdict conforms to no route's output.
-  const built = buildToolRequest(tool, args, {
-    // The real Host the MCP client reached `/mcp` on. Dispatch's localhost
-    // fallback makes host-authorization middleware 403 every tool call.
-    origin: new URL(c.req.url).origin,
-    // Not read off the inbound request: on the seam surface that header belongs
-    // to an authority the application cannot verify — see `fromExternalAuth`.
-    authorization,
-    preflight,
-  })
-  if (!('request' in built)) {
-    return badRequest(describeBuildFailure(built))
-  }
-
-  // env and execution context are forwarded explicitly — omitting them
-  // silently loses D1/R2 bindings and waitUntil on Workers (RFC 0016 §3.1).
-  return mapToolResponse(tool, await app.fetch(built.request, c.env, executionContext(c)))
-}
-
-/** A tool call the adapter rejected before HTTP — recorded as a 400 invocation. */
-function badRequest(text: string): ToolCallOutcome {
-  return { content: [{ type: 'text', text }], isError: true, status: 400 }
 }
 
 /** Hono throws on `executionCtx` outside Workers; absent is a normal answer here. */

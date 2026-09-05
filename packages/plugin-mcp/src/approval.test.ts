@@ -14,8 +14,9 @@ import {
   Router,
   agentApprovalFingerprint,
   agentApprovalPrincipalKey,
+  createAgentInvocationPipeline,
   deriveAgentTools,
-  mapToolResponse,
+  notifyApprovers,
   redactAgentArguments,
   type AgentApprovalMatch,
   type AgentApprovalRequest,
@@ -23,12 +24,9 @@ import {
   type AgentPrincipal,
   type AgentToolDenialReason,
   type DerivedAgentTool,
-  type ToolCallOutcome,
 } from '@guren/core'
 
-import { gateApproval } from './gate'
-import { notifyApprovers } from './plugin'
-import { AgentRateLimiter } from './rate-limit'
+import { AgentRateLimiter, createRateLimitInterposition } from './rate-limit'
 import { createAppMcpServer, type AppMcpServerOptions } from './server'
 
 const NOW = new Date('2026-09-01T12:00:00.000Z')
@@ -129,20 +127,48 @@ async function connect(
   const dispatched: Harness['dispatched'] = []
   const denied: Harness['denied'] = []
   const invoked: Harness['invoked'] = []
+  const rateKey = options.overrides?.rateKey ?? 'token-1'
 
-  const server = createAppMcpServer({
-    tools: fixtureTools(),
-    abilities: ['tools:*'],
-    serverInfo: { name: 'test-app', version: '0.0.0' },
-    rateKey: 'token-1',
-    ...(store
+  // The one configuration, read by both halves — the gate that files records
+  // and the status tool that reports on them — so the two cannot disagree
+  // about whether a queue exists.
+  const approvals = store
+    ? { store, principal: options.principal ?? USER, now: options.now ?? (() => NOW) }
+    : undefined
+
+  // Which call the pipeline is running, so the stubbed application can answer
+  // for it. The *recording* happens inside `fetch`, so `dispatched` is
+  // evidence the request really reached the application — which is what the
+  // `toEqual([])` cases below are asserting.
+  let inflight: { tool: DerivedAgentTool; args: Record<string, unknown>; preflight: boolean } | undefined
+
+  // The real pipeline over a stubbed application: the approval gate, its
+  // ordering behind the rate-limit interposition, the redaction and the audit
+  // records asserted below are the framework's own.
+  const inner = createAgentInvocationPipeline({
+    app: {
+      fetch: async (): Promise<Response> => {
+        const call = inflight!
+        dispatched.push({ tool: call.tool.toolName, args: call.args })
+        return call.preflight ? seamVerdict() : Response.json({ ok: true })
+      },
+    },
+    principal: options.principal ?? USER,
+    abilities: options.overrides?.abilities ?? ['tools:*'],
+    surface: 'mcp',
+    audit: (event) => {
+      if ('reason' in event) {
+        denied.push({ tool: event.tool, reason: event.reason })
+        return
+      }
+      invoked.push({ tool: event.tool, status: event.status })
+    },
+    ...(approvals
       ? {
           approvals: {
-            store,
-            principal: options.principal ?? USER,
-            now: options.now ?? (() => NOW),
+            ...approvals,
             redact: (tool, args) => redactAgentArguments(args, tool.redact),
-            // Through the plugin's own wrapper, not around it: the guarantee
+            // Through the framework's own wrapper, not around it: the guarantee
             // that a failed notification neither fails the call nor loses the
             // record lives in `notifyApprovers`.
             notify: notifyApprovers(
@@ -154,10 +180,21 @@ async function connect(
           },
         }
       : {}),
-    dispatch: async (tool, args, dispatchOptions): Promise<ToolCallOutcome> => {
-      dispatched.push({ tool: tool.toolName, args })
-      if (dispatchOptions?.preflight) return seamVerdict(tool)
-      return { content: [{ type: 'text', text: '{"ok":true}' }], status: 200 }
+    approvalConfigureHint: 'mcpPlugin({ approvals: { store, notify } })',
+    interpose: createRateLimitInterposition(options.overrides?.limiter, rateKey),
+  })
+
+  const server = createAppMcpServer({
+    tools: fixtureTools(),
+    abilities: ['tools:*'],
+    serverInfo: { name: 'test-app', version: '0.0.0' },
+    rateKey,
+    ...(approvals ? { approvals } : {}),
+    pipeline: {
+      invoke: (call) => {
+        inflight = { tool: call.tool, args: call.args, preflight: call.preflight === true }
+        return inner.invoke(call)
+      },
     },
     onInvoked: (tool, _args, status) => invoked.push({ tool: tool.toolName, status }),
     onDenied: (tool, _args, reason) => denied.push({ tool: tool.toolName, reason }),
@@ -178,12 +215,11 @@ async function connect(
 const VERDICT_HEADER = 'X-Guren-Agent-Preflight-Verdict'
 
 /** What the router's preflight seam answers for an allowed rehearsal. */
-async function seamVerdict(tool: DerivedAgentTool): Promise<ToolCallOutcome> {
-  const response = new Response(
+function seamVerdict(): Response {
+  return new Response(
     JSON.stringify({ preflight: true, allowed: true, validated: [], unverified: [] }),
     { status: 200, headers: { 'Content-Type': 'application/json', [VERDICT_HEADER]: '1' } },
   )
-  return mapToolResponse(tool, response)
 }
 
 /**
@@ -204,10 +240,17 @@ describe('the approval gate with no queue configured', () => {
     const result = await client.callTool({ name: 'posts.destroy', arguments: { id: 5 } })
 
     expect(result.isError).toBe(true)
+    // Exact, not a substring: the release notes promise this endpoint's refusal
+    // text byte for byte, and only equality holds anyone to that. The
+    // configuration line is the half that drifts first — the pipeline's own
+    // default names no plugin at all, so a surface that stopped passing its
+    // hint would still satisfy every `toContain` above but one.
     const text = (result.content as Array<{ text: string }>)[0]!.text
-    expect(text).toContain('no approval queue configured')
-    expect(text).toContain('mcpPlugin({ approvals: { store, notify } })')
-    expect(text).toContain('Nothing was executed')
+    expect(text).toBe(
+      'The tool "posts.destroy" requires server-side approval, and this server has no approval '
+      + 'queue configured. Nothing was executed. Configure one with '
+      + 'mcpPlugin({ approvals: { store, notify } }).',
+    )
     expect(denied).toEqual([{ tool: 'posts.destroy', reason: 'approval' }])
     expect(dispatched).toEqual([])
   })
@@ -331,29 +374,8 @@ describe('the approval gate with a queue', () => {
     expect(denied).toEqual([{ tool: 'posts.destroy', reason: 'approval' }])
   })
 
-  test('should refuse to bind an approval to a call with no identified caller', async () => {
-    // `agentApprovalPrincipalKey` answers 'anonymous' for every principal-less
-    // caller, so a record filed for one would be spendable — and readable
-    // through guren.approval_status — by any other. Driven directly: the plugin
-    // cannot produce this call.
-    const store = new MemoryApprovalStore()
-    const notified: AgentApprovalRequest[] = []
-
-    const destroy = fixtureTools().find((tool) => tool.toolName === 'posts.destroy')!
-    const verdict = await gateApproval(destroy, { id: 5 }, {
-      store,
-      principal: null,
-      now: () => NOW,
-      redact: (args) => args,
-      notify: (request) => {
-        notified.push(request)
-      },
-    })
-
-    expect(verdict.allowed).toBe(false)
-    expect(store.records).toEqual([])
-    expect(notified).toEqual([])
-  })
+  // The principal-less refusal is unreachable from this surface, so it is driven
+  // against the gate directly, in `packages/server/src/agent/gate.test.ts`.
 
   test('should meter the request before filing it or paging anyone', async () => {
     // The gate writes a record and sends mail, and deduplicates only on identical
