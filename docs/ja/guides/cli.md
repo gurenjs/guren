@@ -31,6 +31,7 @@ bunx guren add storage
 bunx guren add attachments
 bunx guren add broadcasting
 bunx guren add schedule
+bunx guren add lint
 ```
 > **Golden path:** まず `bunx guren add auth` と `bunx guren add resource` から始め、アプリの成長に応じて他の機能を追加してください。
 
@@ -41,6 +42,8 @@ bunx guren plugin @acme/guren-plugin-audit
 `plugin`（`add plugin` としても利用可能）は、依存が未インストールの場合に `bun add` でインストールし（`--no-install` でスキップ可能）、プラグインが宣言するGurenバージョン互換性を検証した上で（`--ignore-compatibility` で無視可能）、Providerを `src/app.ts` に自動登録します。プラグインが `gurenPlugin` マニフェストで宣言した設定スタブや環境変数キーも適用されます。`--force` は公開済みファイルの上書きに使います。
 
 これらのコマンドは `src/app.ts` を更新し、対応する provider/runtime ファイルを生成します。
+
+`add lint` だけはアプリのコードに触れません。`.oxlintrc.json`（`@guren/cli/oxlint` の Guren ルール付き oxlint。`guren/await-async-assertion` は error、`guren/comment-*` は warn）を書き、`lint` / `lint:fix` スクリプトを追加し、`oxlint` を devDependency に `~` レンジで追加します（パッチ更新のみ。oxlint の JS プラグイン API は alpha のため）。実行後に `bun install` してください。`bunx oxlint` は Bun 上で動くので Node は不要です。
 
 `bunx guren add admin` は次を生成します:
 

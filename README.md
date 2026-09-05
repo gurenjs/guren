@@ -43,6 +43,7 @@ bunx guren add storage         # File storage
 bunx guren add events          # Events & listeners
 bunx guren add broadcasting    # Real-time (SSE)
 bunx guren add schedule        # Cron scheduling
+bunx guren add lint            # oxlint with the Guren rules
 ```
 
 Run `bun run codegen` after adding features to regenerate types. When you are ready to ship, `bun run build` creates the production build.

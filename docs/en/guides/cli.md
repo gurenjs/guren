@@ -31,6 +31,7 @@ bunx guren add storage
 bunx guren add attachments
 bunx guren add broadcasting
 bunx guren add schedule
+bunx guren add lint
 ```
 
 > **Golden path:** Start with `bunx guren add auth` and `bunx guren add resource`, then add more features as your app grows.
@@ -43,6 +44,8 @@ bunx guren plugin @acme/guren-plugin-audit
 
 
 These commands patch `src/app.ts`, create the matching provider/runtime files, and keep the generated app aligned with the reference starter.
+
+`add lint` is the one that touches no application code: it writes `.oxlintrc.json` (oxlint with the Guren rules from `@guren/cli/oxlint`: `guren/await-async-assertion` as an error, the `guren/comment-*` rules as warnings), adds `lint` and `lint:fix` scripts, and adds `oxlint` as a dev dependency on a tilde range (patch updates only: oxlint's JS plugin API is alpha); run `bun install` afterwards. `bunx oxlint` runs under Bun, so no Node install is needed.
 
 `bunx guren add admin` scaffolds:
 

@@ -56,9 +56,51 @@ export async function writeInstalledPackage(
  * the machine rather than the workspace.
  */
 export async function linkWorkspaceCore(baseDir: string): Promise<void> {
-  const linkPath = join(baseDir, 'node_modules', '@guren', 'core')
+  await linkWorkspacePackage('core', baseDir)
+}
+
+/** Symlink `packages/<name>` into `baseDir/node_modules/@guren/<name>`, as a workspace install would. */
+export async function linkWorkspacePackage(name: string, baseDir: string): Promise<void> {
+  const linkPath = join(baseDir, 'node_modules', '@guren', name)
   await mkdir(dirname(linkPath), { recursive: true })
-  await symlink(join(repoRoot, 'packages', 'core'), linkPath, 'dir')
+  await symlink(join(repoRoot, 'packages', name), linkPath, 'dir')
+}
+
+/** The oxlint shim this workspace lints with, for tests that drive the real binary. */
+export const OXLINT_BIN = join(repoRoot, 'node_modules', '.bin', 'oxlint')
+
+/**
+ * Lint one fixture through the real oxlint: `.oxlintrc.json` carries `config`, and
+ * only the `rules` it names are enabled. Returns oxlint's `--format unix` stdout.
+ * Throws on stderr output, and on the message-less `file:0:0:` line oxlint prints
+ * when a plugin throws mid-file — otherwise a broken plugin reads as "no findings".
+ */
+export function lintFixture(options: {
+  config: { jsPlugins: string[]; rules: Record<string, string> }
+  file: string
+  source: string
+  cwd?: string
+}): string {
+  const dir = options.cwd ?? mkdtempSync(join(tmpdir(), 'guren-oxlint-'))
+  try {
+    writeFileSync(join(dir, '.oxlintrc.json'), JSON.stringify(options.config))
+    writeFileSync(join(dir, options.file), options.source)
+    const denies = Object.keys(options.config.rules).flatMap((rule) => ['-D', rule])
+    const result = Bun.spawnSync([OXLINT_BIN, '-c', '.oxlintrc.json', '-A', 'all', ...denies, '--format', 'unix', options.file], {
+      cwd: dir,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    const stdout = result.stdout.toString()
+    const stderr = result.stderr.toString()
+    if (stderr.trim() !== '') throw new Error(`oxlint wrote to stderr:\n${stderr}`)
+    if (stdout.split('\n').some((line) => line.startsWith(`${options.file}:0:0:`))) {
+      throw new Error(`the plugin threw while linting the fixture:\n${stdout}`)
+    }
+    return stdout
+  } finally {
+    if (options.cwd === undefined) rmSync(dir, { recursive: true, force: true })
+  }
 }
 
 /**

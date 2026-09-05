@@ -1,5 +1,6 @@
 import { consola } from 'consola'
 import { addAttachments, appBindsStorage } from './add-attachments'
+import { addLint } from './add-lint'
 import { assertNotApiOnly } from './app-surface'
 import { fileExists, readIfExists } from './discovery'
 import { makeAuth } from './make-auth'
@@ -60,6 +61,10 @@ const blueprintRegistry: Record<string, BlueprintDefinition> = {
       created.push(...(await addAttachments(writerOptions)))
       return created
     },
+  },
+  lint: {
+    description: 'Install oxlint with the Guren rules: .oxlintrc.json, lint scripts, and the oxlint dev dependency.',
+    run: async (options) => addLint({ force: Boolean(options.force) }),
   },
   admin: {
     description: 'Install a starter admin dashboard with dedicated routes and controller.',

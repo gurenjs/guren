@@ -65,6 +65,7 @@ const DEFAULT_BLUEPRINT_FEATURES: readonly (readonly string[])[] = [
   ['resource', 'photos', '--fields', 'title:string,caption:text?', '--attach', 'cover:one,images:many'],
   ['broadcasting'],
   ['schedule'],
+  ['lint'],
 ]
 
 /**
@@ -240,6 +241,10 @@ async function assertPackedArtifacts(packageTarballs: Map<string, string>, packR
         assert(distContents.includes('defineGeneratedPage'), '@guren/cli tarball is missing the generated page helper implementation.')
         assert(distContents.includes('PaginatedPageProps'), '@guren/cli tarball is missing paginated resource scaffold support.')
         assert(!distContents.includes("import { definePage } from '@guren/inertia-client'"), '@guren/cli tarball still emits definePage() runtime imports for generated pages.')
+        // The `./oxlint` subpath and the config `add lint` writes ship in the tarball; the
+        // workspace symlink the unit tests resolve through never crosses the `files` boundary.
+        assert(entries.includes('package/dist/oxlint/index.js'), '@guren/cli tarball is missing dist/oxlint/index.js, the @guren/cli/oxlint plugin entry.')
+        assert(entries.includes('package/templates/scaffold/lint/.oxlintrc.json'), '@guren/cli tarball is missing templates/scaffold/lint/.oxlintrc.json for guren add lint.')
       }
 
       if (packageName === 'create-guren-app') {
@@ -521,6 +526,9 @@ async function runPublishedDependencyDrift(
     await addDefaultBlueprintFeatures(appDir, runtimeEnv)
     await assertPublishedRanges('after scaffolding features')
     await run(['bun', 'install'], appDir, runtimeEnv)
+    // The lint config names @guren/cli/oxlint, which only the release after the
+    // subpath shipped publishes: the drift this mode exists to catch.
+    await run(['bun', 'run', 'lint'], appDir, runtimeEnv)
     // These keep the typecheck below from quietly shrinking back to a bare app.
     await assertCanonicalScaffolds(appDir)
     await assertFeatureScaffolds(appDir)
@@ -668,7 +676,8 @@ async function main(): Promise<void> {
 
     await run(['bun', 'install'], appDir, runtimeEnv)
 
-    if (blueprint === 'default') {
+    const scaffoldsFeatures = blueprint === 'default'
+    if (scaffoldsFeatures) {
       await addDefaultBlueprintFeatures(appDir, runtimeEnv)
       await assertCoreFirstStarter(appDir, { checkDependencies: false })
       await assertCanonicalScaffolds(appDir)
@@ -716,6 +725,16 @@ async function main(): Promise<void> {
     await run(['bun', 'test'], appDir, runtimeEnv)
     await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'check', '--ci', ...routesArgs], appDir, runtimeEnv)
     await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'audit', '--no-deps', ...routesArgs], appDir, runtimeEnv)
+
+    // `guren add lint` wires oxlint with the @guren/cli/oxlint plugin, resolved through
+    // the app's node_modules. A fresh app has to lint clean under that preset, or the
+    // first `bun run lint` a user sees is red. The binary is the checkout's: a second
+    // `bun install` against the vendored file: dependencies spins Bun 1.3.14 at 100%
+    // CPU indefinitely (three runs, 40 min each), and the peer-range test ties the versions.
+    if (!scaffoldsFeatures) {
+      await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'add', 'lint'], appDir, runtimeEnv)
+    }
+    await run(['bun', resolve(repoRoot, 'node_modules/oxlint/bin/oxlint')], appDir, runtimeEnv)
 
     console.log(`\nFresh app smoke passed (${blueprint}, ${installMode}): ${appDir}`)
   } finally {

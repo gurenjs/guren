@@ -2985,6 +2985,7 @@ const addCommand = defineCommand({
     broadcasting: createAddBlueprintCommand('broadcasting', 'Install broadcasting scaffolding with sample public and private channels.'),
     cache: createAddBlueprintCommand('cache', 'Install cache scaffolding and an example cache service.'),
     events: createAddBlueprintCommand('events', 'Install event scaffolding with a sample event and listener.'),
+    lint: createAddBlueprintCommand('lint', 'Install oxlint with the Guren rules: .oxlintrc.json, lint scripts, and the oxlint dev dependency.'),
     mail: createAddBlueprintCommand('mail', 'Install mail scaffolding with a sample mailable.'),
     notifications: createAddBlueprintCommand('notifications', 'Install notification scaffolding with sample channels and a sample notification.'),
     queue: createAddBlueprintCommand('queue', 'Install queue scaffolding with a sample job.'),

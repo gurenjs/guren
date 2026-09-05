@@ -79,6 +79,7 @@ describe('blueprints', () => {
       'broadcasting',
       'cache',
       'events',
+      'lint',
       'mail',
       'notifications',
       'oauth',

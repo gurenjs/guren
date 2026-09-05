@@ -1,43 +1,17 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { resolve } from 'node:path'
+import { lintFixture } from './helpers'
 
 // The rule is exercised through the real oxlint binary rather than by calling
 // `create()` with a hand-built AST: what has to hold is that the file the
 // config points at loads as a plugin and reports on the AST oxlint hands it.
 
-const repoRoot = resolve(import.meta.dir, '../../..')
-const oxlint = join(repoRoot, 'node_modules', '.bin', 'oxlint')
-const plugin = join(repoRoot, 'packages', 'cli', 'src', 'oxlint', 'await-async-assertion.js')
+const plugin = resolve(import.meta.dir, '../src/oxlint/await-async-assertion.js')
 
 /** Lines of `source` the rule reports, in the order oxlint prints them. */
 function reportedLines(source: string): number[] {
-  const dir = mkdtempSync(join(tmpdir(), 'guren-await-async-assertion-'))
-  try {
-    writeFileSync(
-      join(dir, '.oxlintrc.json'),
-      JSON.stringify({ jsPlugins: [plugin], rules: { 'guren/await-async-assertion': 'error' } }),
-    )
-    writeFileSync(join(dir, 'case.test.ts'), source)
-    const result = Bun.spawnSync(
-      [oxlint, '-c', '.oxlintrc.json', '-A', 'all', '-D', 'guren/await-async-assertion', '--format', 'unix', 'case.test.ts'],
-      { cwd: dir, stdout: 'pipe', stderr: 'pipe' },
-    )
-    const stdout = result.stdout.toString()
-    const stderr = result.stderr.toString()
-    if (stderr.trim() !== '') {
-      throw new Error(`oxlint wrote to stderr:\n${stderr}`)
-    }
-    // A plugin that throws mid-file is reported by oxlint as a message-less
-    // file-level warning at 0:0, not as a rule finding; surface it as a failure.
-    if (/^case\.test\.ts:0:0:/m.test(stdout)) {
-      throw new Error(`the plugin threw while linting the fixture:\n${stdout}`)
-    }
-    return [...stdout.matchAll(/^case\.test\.ts:(\d+):\d+: .*guren\(await-async-assertion\)/gm)].map((m) => Number(m[1]))
-  } finally {
-    rmSync(dir, { recursive: true, force: true })
-  }
+  const stdout = lintFixture({ config: { jsPlugins: [plugin], rules: { 'guren/await-async-assertion': 'error' } }, file: 'case.test.ts', source })
+  return [...stdout.matchAll(/^case\.test\.ts:(\d+):\d+: .*guren\(await-async-assertion\)/gm)].map((m) => Number(m[1]))
 }
 
 describe('guren/await-async-assertion', () => {
