@@ -83,11 +83,15 @@ export async function readDeclaredDependencyNames(cwd: string = process.cwd()): 
     const parsed = JSON.parse(packageJsonRaw) as {
       dependencies?: Record<string, string>
       devDependencies?: Record<string, string>
+      optionalDependencies?: Record<string, string>
     }
-    return [
+    // Deduped: npm lets one name sit in both `dependencies` and
+    // `optionalDependencies`, and a caller counting packages would see it twice.
+    return [...new Set([
       ...Object.keys(parsed.dependencies ?? {}),
       ...Object.keys(parsed.devDependencies ?? {}),
-    ]
+      ...Object.keys(parsed.optionalDependencies ?? {}),
+    ])]
   } catch {
     return []
   }

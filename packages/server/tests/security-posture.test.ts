@@ -253,3 +253,58 @@ describe('security posture: opt-in framework endpoints', () => {
     })
   })
 })
+
+describe('security posture: cookieless-auth CSRF exemptions', () => {
+  it('exempts nothing until something declares it', async () => {
+    const app = await bootDefaultApp()
+
+    expect(app.getCookielessAuthPaths().size).toBe(0)
+  })
+
+  it('reports every declaration, so a plugin cannot exempt a path unobserved', async () => {
+    const app = new Application()
+    app.declareCookielessAuthPath('/plugin-endpoint')
+    await app.boot()
+
+    expect([...app.getCookielessAuthPaths()]).toEqual(['/plugin-endpoint'])
+  })
+
+  /**
+   * Mounted after boot, like the endpoint a plugin mounts from its own boot
+   * hook: `AuthServiceProvider.register()` adds the CSRF middleware during
+   * boot, and Hono only applies middleware registered before the route.
+   */
+  async function bootWithDeclaredEndpoint(): Promise<Application> {
+    const app = new Application({ auth: {} })
+    await app.boot()
+    app.hono.post('/declared', () => new Response('ok'))
+    app.hono.post('/undeclared', () => new Response('ok'))
+    app.declareCookielessAuthPath('/declared')
+    return app
+  }
+
+  it('carries a declaration through to the CSRF middleware an auth app mounts', async () => {
+    const app = await bootWithDeclaredEndpoint()
+
+    const response = await app.fetch(new Request('http://example.com/declared', { method: 'POST' }))
+
+    expect(response.status).toBe(200)
+  })
+
+  it('leaves an undeclared neighbour verified, so the middleware really is mounted', async () => {
+    const app = await bootWithDeclaredEndpoint()
+
+    const response = await app.fetch(new Request('http://example.com/undeclared', { method: 'POST' }))
+
+    expect(response.status).toBe(403)
+  })
+
+  it('keeps a declaration that collides with an application route out of the set', async () => {
+    const app = new Application()
+    app.router.post('/collides', () => 'ok')
+    await app.mountRoutes()
+    app.declareCookielessAuthPath('/collides')
+
+    expect(app.getCookielessAuthPaths().size).toBe(0)
+  })
+})

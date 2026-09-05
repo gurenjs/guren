@@ -511,6 +511,15 @@ CSRF `403` that hides the real reason. Neither skip authenticates anything: both
 ways in are a bearer token and the in-process external-auth seam, and a browser
 can present neither.
 
+`bunx guren audit` reports that declaration, and any other package's, under
+**Plugin CSRF exemptions** — the audit's only view into an exemption made from
+inside `node_modules`. It names packages rather than paths: each path is an
+argument computed at boot from that package's own configuration. A declaration
+from a package outside the `@guren/` scope is a warning, since only this
+repository can vouch for its own. The packages it reads are the ones your
+`package.json` declares, so a plugin reached only through another dependency is
+outside its view.
+
 ### Configuration
 
 ```ts

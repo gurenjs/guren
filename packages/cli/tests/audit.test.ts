@@ -2423,3 +2423,43 @@ ${body}
     })
   })
 })
+
+describe('application CSRF exemptions', () => {
+  it('warns when application source calls declareCookielessAuthPath', async () => {
+    const workspace = await createTempWorkspace('guren-cli-audit-csrf-exemption-')
+
+    try {
+      await writeWorkspaceFiles(workspace.dir, {
+        'src/app.ts': `export function wire(app: any) {
+  app.declareCookielessAuthPath('/webhooks/acme')
+}`,
+      })
+
+      const report = await runAudit({ cwd: workspace.dir })
+      const finding = report.findings.find((f) => f.key.startsWith('csrf-exemption:app:'))
+
+      expect(finding?.status).toBe('warn')
+      expect(finding?.line).toBe(2)
+      expect(finding?.suggestion).toContain('csrfOptions.exclude')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('does not read the method named in a type position as a call', async () => {
+    const workspace = await createTempWorkspace('guren-cli-audit-csrf-exemption-type-')
+
+    try {
+      await writeWorkspaceFiles(workspace.dir, {
+        'src/app.ts': 'export type Declaring = { declareCookielessAuthPath(path: string): void }\n',
+      })
+
+      const report = await runAudit({ cwd: workspace.dir })
+
+      expect(report.findings.some((f) => f.key.startsWith('csrf-exemption:app:'))).toBe(false)
+      expect(report.findings.find((f) => f.key === 'csrf-exemption:app')?.status).toBe('pass')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+})
