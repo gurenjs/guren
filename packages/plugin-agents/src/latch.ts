@@ -15,6 +15,7 @@ import type {
 } from '@guren/core'
 
 import type { AgentBudgetConfig, AgentsApprovalsConfig } from './config'
+import type { LedgerCipher } from './ledger'
 
 /** What the plugin resolved for one registered agent at boot. */
 export interface AgentRegistration {
@@ -52,6 +53,14 @@ export interface AgentRuntime {
    */
   audit?: () => AgentAuditEmitter
   approvals?: AgentsApprovalsConfig
+  /**
+   * The app key's encryption, for the ledger's arguments (RFC 0017 §5).
+   *
+   * Absent, there is no ledger: a parked call is still returned with its
+   * `requestId`, but nothing is checkpointed, because the one bound on storing
+   * raw arguments is that they are ciphertext at rest.
+   */
+  cipher?: LedgerCipher
 }
 
 /**

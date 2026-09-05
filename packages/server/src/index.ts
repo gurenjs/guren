@@ -144,8 +144,14 @@ export {
   scopedShape,
 } from './agent/gate'
 export type { ApprovalGateContext, GateVerdict, ScopeGateOptions } from './agent/gate'
-export { createAgentApprovalContext, createAgentInvocationPipeline } from './agent/pipeline'
+export {
+  createAgentApprovalContext,
+  createAgentAuditRecorder,
+  createAgentInvocationPipeline,
+} from './agent/pipeline'
 export type {
+  AgentAuditRecorder,
+  AgentAuditRecorderOptions,
   AgentDispatchTarget,
   AgentInterposition,
   AgentInvocation,
@@ -156,6 +162,11 @@ export type {
   AuditedTool,
   InterposedAgentCall,
 } from './agent/pipeline'
+// Reading one approval record as an answer for the caller that asked. Shared by
+// `guren.approval_status` over MCP and the durable surface's own status check
+// (RFC 0017 §5): two readers, one rule for what a caller may be told.
+export { approvalStatusNotFoundMessage, toApprovalStatusReport } from './agent/approval-status'
+export type { ApprovalStatusOutcome, ApprovalStatusReport } from './agent/approval-status'
 export { ViewEngine } from './mvc/ViewEngine'
 export { inertia, setInertiaSsrRenderer, setInertiaDocument } from './mvc/inertia/InertiaEngine'
 export { setInertiaSharedProps, getInertiaSharedPropsResolver, shareInertiaProps } from './mvc/inertia/shared'

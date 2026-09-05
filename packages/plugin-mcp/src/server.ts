@@ -19,6 +19,7 @@ import {
   gateToolCall,
   isReservedAgentToolName,
   PREFLIGHT_TOOL_NAME,
+  toApprovalStatusReport,
   type AgentApprovalStore,
   type AgentInvocationDenial,
   type AgentInvocationPipeline,
@@ -28,11 +29,7 @@ import {
   type DerivedAgentTool,
 } from '@guren/core'
 
-import {
-  describeApprovalStatusTool,
-  readApprovalStatusArguments,
-  toApprovalStatusReport,
-} from './approval-status'
+import { describeApprovalStatusTool, readApprovalStatusArguments } from './approval-status'
 import { describePreflightTool, readPreflightArguments, toPreflightVerdict } from './preflight'
 import type { AgentRateLimiter } from './rate-limit'
 

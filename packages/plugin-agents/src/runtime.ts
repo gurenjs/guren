@@ -18,7 +18,14 @@ export {
 export type { AgentRegistration, AgentRuntime, AgentRuntimeResolver } from './latch'
 
 export { createAgentToolClient } from './tool-client'
+export { PendingCallLedger } from './ledger'
+export type { LedgerCipher, LedgerSql, LedgerSqlValue, PendingToolCall } from './ledger'
 export type {
+  AgentApprovalStatusFound,
+  AgentApprovalStatusMissing,
+  AgentApprovalStatusResult,
+  AgentApprovalStatusUnavailable,
+  AgentToolApprovalSettled,
   AgentToolCallDenied,
   AgentToolCallFailed,
   AgentToolCallOk,

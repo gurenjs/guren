@@ -103,6 +103,7 @@ describe('a scheduled callback that calls a tool', () => {
     expect(await runInDurableObject(stub, (agent) => agent.state)).toEqual({
       lastTitle: null,
       sweeps: 0,
+      settled: [],
     })
 
     // `runDurableObjectAlarm` fires the alarm *now*, and the SDK's handler then
@@ -118,7 +119,7 @@ describe('a scheduled callback that calls a tool', () => {
 
     // Checkpointed into state, not into a local: the call happened inside an
     // alarm, and nothing else survives the wake.
-    expect(state).toEqual({ lastTitle: 'Hello', sweeps: 1 })
+    expect(state).toEqual({ lastTitle: 'Hello', sweeps: 1, settled: [] })
   })
 })
 
