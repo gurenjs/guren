@@ -9,7 +9,10 @@ import {
   MemoryApiTokenStore,
   createApiToken,
   createApp,
+  AUTH_CONTEXT_KEY,
+  requireAuthenticated,
   type Application,
+  type AuthContext,
   type EventManager,
   type Router,
 } from '@guren/core'
@@ -187,6 +190,7 @@ describe('mcpPlugin external auth (no token store configured)', () => {
     expect(JSON.parse(content[0]!.text)).toEqual({ authorization: null })
   })
 
+
   /**
    * The limiter has no token id to key on over the seam, so the key comes from
    * the principal. Both properties need asserting: an absent key still limits
@@ -296,5 +300,47 @@ describe('mcpPlugin external auth (default config, token store present)', () => 
     await client.connect(transport)
 
     expect((await client.listTools()).tools.map((tool) => tool.name)).not.toContain('posts.store')
+  })
+})
+
+/**
+ * The principal handoff (RFC 0017 §2). This surface forwards no `Authorization`
+ * — the inbound bearer belongs to the OAuth provider, which the app's guards
+ * never see — so without the seam a route behind `requireAuthenticated()`
+ * answers 401 to a properly authorized caller. The pipeline installs the
+ * principal on the exact `Request` it dispatches, and the auth context answers.
+ */
+describe('mcpPlugin external auth: the principal reaches the application', () => {
+  // Its own app rather than the shared fixture, so the catalogue assertions
+  // above keep describing exactly the routes they were written for. The honest
+  // limit this cannot close: `createBearerTokenMiddleware` and `tokenCan*`
+  // judge an `ApiToken`, and there is none here.
+  let app: Application
+
+  beforeAll(async () => {
+    app = createApp({
+      routes: (router: Router) => {
+        router.middleware(requireAuthenticated()).group((guarded) => {
+          guarded
+            .get('/me', async (c) => {
+              const auth = c.get(AUTH_CONTEXT_KEY) as AuthContext | undefined
+              return Response.json({ user: (await auth?.user()) ?? null })
+            })
+            .name('echo.me')
+            .agent({ description: 'Report the authenticated user' })
+        })
+      },
+      providers: [mcpPlugin({ auth: 'external' })],
+    })
+    await app.boot()
+  })
+
+  test('should execute a route behind requireAuthenticated() as the external principal', async () => {
+    const client = await seamClient(app, seamAuth(['tools:*']))
+    const result = await client.callTool({ name: 'echo.me', arguments: {} })
+
+    expect(result.isError).toBeUndefined()
+    const content = result.content as Array<{ type: string; text: string }>
+    expect(JSON.parse(content[0]!.text)).toEqual({ user: { id: 'u_99' } })
   })
 })

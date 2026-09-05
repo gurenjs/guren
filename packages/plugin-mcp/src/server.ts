@@ -15,11 +15,17 @@ import {
 import {
   advertisesStructuredOutput,
   APPROVAL_STATUS_TOOL_NAME,
+  gatePreflight,
+  gateToolCall,
   isReservedAgentToolName,
   PREFLIGHT_TOOL_NAME,
+  type AgentApprovalStore,
+  type AgentInvocationDenial,
+  type AgentInvocationPipeline,
+  type AgentPrincipal,
   type AgentToolDenialReason,
+  type AuditedTool,
   type DerivedAgentTool,
-  type ToolCallOutcome,
 } from '@guren/core'
 
 import {
@@ -27,27 +33,10 @@ import {
   readApprovalStatusArguments,
   toApprovalStatusReport,
 } from './approval-status'
-import {
-  gateApproval,
-  gatePreflight,
-  gateToolCall,
-  type ApprovalGateContext,
-  type GateVerdict,
-} from './gate'
 import { describePreflightTool, readPreflightArguments, toPreflightVerdict } from './preflight'
 import type { AgentRateLimiter } from './rate-limit'
 
-/**
- * What the audit hooks need from a tool: its name, and the redaction rules its
- * arguments are recorded under. A `guren.preflight` invocation is recorded
- * under the meta-tool's name but with the *checked* tool's `redact` list —
- * under the meta-tool's own empty list it would publish to the audit trail
- * exactly the fields a route declared must never be written down.
- */
-export interface AuditedTool {
-  toolName: string
-  redact?: readonly string[]
-}
+export type { AuditedTool }
 
 export interface AppMcpServerOptions {
   /** Tools already filtered to `expose.mcp`. */
@@ -55,32 +44,41 @@ export interface AppMcpServerOptions {
   /** The verified token's abilities — the scope grammar's input. */
   abilities: readonly string[]
   serverInfo: { name: string; version: string }
-  /** Undefined disables rate limiting (config `rateLimit: false`). */
+  /**
+   * The pipeline every tool call and rehearsal runs through (RFC 0017 §1). This
+   * module contributes the *MCP* half — which tools are listed, how a verdict
+   * becomes a `CallToolResult` — and re-implements none of its steps, so a
+   * refusal here cannot disagree with one elsewhere. Rate limiting reaches it
+   * as the interposition hook, so its ordering is the pipeline's guarantee.
+   */
+  pipeline: AgentInvocationPipeline
+  /**
+   * Undefined disables rate limiting (config `rateLimit: false`). Consulted
+   * here only for `guren.approval_status`, which reads the store rather than a
+   * route and therefore never enters the pipeline; every other path is metered
+   * by the pipeline's hook.
+   */
   limiter?: AgentRateLimiter
   /** Rate-limit key — the token id, so budgets follow credentials, not IPs. */
   rateKey: string
   /**
-   * Execute one granted call. Errors it throws become error results, not
-   * protocol faults. `preflight` asks the route for a verdict instead: the
-   * request runs the middleware chain and validates the advertised contract,
-   * then stops before the handler (RFC 0016 §5.4).
-   */
-  dispatch(
-    tool: DerivedAgentTool,
-    args: Record<string, unknown>,
-    options?: { preflight?: boolean },
-  ): Promise<ToolCallOutcome>
-  /**
    * The approval queue, when the application configured one (RFC 0016 §5.4
-   * item 4). Absent, an `approval: 'required'` tool is refused fail-closed and
-   * is absent from the catalogue — an unconfigured queue must never look like
-   * a working one. `redact` takes the tool as well as the arguments so each
-   * record carries that route's masking rules; the gate gets a bound copy.
+   * item 4). Absent, an `approval: 'required'` tool is refused fail-closed by
+   * the pipeline and unlisted here. Narrower than the gate's own context: this
+   * module only reports on records (`guren.approval_status`) and decides the
+   * catalogue; creating them is configured on the pipeline, from one object.
    */
-  approvals?: Omit<ApprovalGateContext, 'redact'> & {
-    redact(tool: DerivedAgentTool, args: Record<string, unknown>): Record<string, unknown>
+  approvals?: {
+    store: AgentApprovalStore
+    principal: AgentPrincipal | null
+    now: () => Date
   }
-  /** Audit hooks — the emitter owns redaction and event construction. */
+  /**
+   * Audit hooks for the one path that does not go through the pipeline —
+   * `guren.approval_status`. The emitter owns redaction and event
+   * construction; every other record on this surface is written by the
+   * pipeline.
+   */
   onInvoked(tool: AuditedTool, args: Record<string, unknown>, status: number, durationMs: number): void
   onDenied(tool: AuditedTool, args: Record<string, unknown>, reason: AgentToolDenialReason): void
 }
@@ -150,62 +148,19 @@ export function createAppMcpServer(options: AppMcpServerOptions): Server {
       return errorResult(`Unknown tool "${name}".`)
     }
 
-    const verdict = gateToolCall(tool, options.abilities, { approvalsConfigured })
-    if (!verdict.allowed) {
-      options.onDenied(tool, args, verdict.reason)
-      return refusal(verdict.message, verdict.body)
-    }
+    // Every check a call passes happens in there. What is left here is the
+    // protocol: turning one of the pipeline's three results into the
+    // `CallToolResult` shape an MCP client reads.
+    const result = await options.pipeline.invoke({ tool, args })
 
-    // Metered before the approval gate: that gate writes a record and pages a
-    // human, and deduplicates only on *identical* arguments, so a caller
-    // varying one field files unbounded requests and notifications. A write
-    // tool spends the write budget whether it executes or queues — what is
-    // being limited is the request.
-    if (options.limiter && !options.limiter.take(options.rateKey, { write: !tool.annotations.readOnlyHint })) {
-      options.onDenied(tool, args, 'rate-limit')
-      return errorResult(
-        `Rate limit exceeded for this token${tool.annotations.readOnlyHint ? '' : ' (write budget)'}. Retry later.`,
-      )
-    }
+    if (result.status === 'denied') return denial(result.denial)
+    if (result.status === 'failed') return errorResult(result.message)
 
-    if (tool.approval === 'required' && options.approvals) {
-      const { approvals } = options
-      let approval: GateVerdict
-      try {
-        approval = await gateApproval(tool, args, {
-          ...approvals,
-          redact: (callArgs) => approvals.redact(tool, callArgs),
-        })
-      } catch (error) {
-        // Fail closed, and say which half broke: a gate that fell open on a
-        // storage error would run exactly the class of tool it exists to hold
-        // back, on a day the database is already having a bad time.
-        options.onDenied(tool, args, 'approval')
-        return errorResult(
-          `The approval queue could not be reached, so "${tool.toolName}" was not run and no request `
-          + `was recorded: ${error instanceof Error ? error.message : String(error)}`,
-        )
-      }
-      if (!approval.allowed) {
-        options.onDenied(tool, args, approval.reason)
-        return refusal(approval.message, approval.body)
-      }
-    }
-
-    const startedAt = performance.now()
-    try {
-      const outcome = await options.dispatch(tool, args)
-      options.onInvoked(tool, args, outcome.status, elapsed(startedAt))
-      const result: CallToolResult = { content: outcome.content }
-      if (outcome.structuredContent) result.structuredContent = outcome.structuredContent
-      if (outcome.isError) result.isError = true
-      return result
-    } catch (error) {
-      // The route's own failures came back as responses; reaching here means
-      // the dispatch itself broke — still an invocation, recorded as a 500.
-      options.onInvoked(tool, args, 500, elapsed(startedAt))
-      return errorResult(error instanceof Error ? error.message : String(error))
-    }
+    const { outcome } = result
+    const callResult: CallToolResult = { content: outcome.content }
+    if (outcome.structuredContent) callResult.structuredContent = outcome.structuredContent
+    if (outcome.isError) callResult.isError = true
+    return callResult
   })
 
   return server
@@ -233,46 +188,29 @@ async function handlePreflight(
     return errorResult(`Unknown tool "${request.name}".`)
   }
 
-  // The meta-tool's identity, the checked tool's redaction rules — see
-  // `AuditedTool`. `args` rather than `request.input`, so the record shows
-  // what the agent actually asked; the redaction walk descends into `input`.
-  const audited: AuditedTool = { toolName: PREFLIGHT_TOOL_NAME, redact: target.redact }
+  // The meta-tool's identity with the checked tool's redaction rules, and
+  // `auditedArguments` the outer `args`, so the record shows what the agent
+  // asked; the redaction walk descends into `input`. Recording the *checked*
+  // tool instead would make a refused rehearsal indistinguishable from a
+  // refused write, and the probed tool already rides in `args.tool`.
+  const result = await options.pipeline.invoke({
+    tool: target,
+    args: request.input,
+    preflight: true,
+    audited: { toolName: PREFLIGHT_TOOL_NAME, redact: target.redact },
+    auditedArguments: args,
+  })
 
-  const verdict = gatePreflight(target, options.abilities)
-  if (!verdict.allowed) {
-    // Recorded under `guren.preflight`, not the probed tool: naming the latter
-    // would make a refused rehearsal indistinguishable from a refused real call
-    // to a mutating tool. The probed tool rides in `args.tool`.
-    options.onDenied(audited, args, verdict.reason)
-    return errorResult(verdict.message)
-  }
+  // Both refusals come back as error results carrying only the message: the
+  // machine-readable bodies `denial()` renders on the call path come from the
+  // approval gate, which a rehearsal skips by construction.
+  if (result.status === 'denied') return errorResult(result.denial.message)
+  if (result.status === 'failed') return errorResult(result.message)
 
-  if (options.limiter && !options.limiter.take(options.rateKey, { write: false })) {
-    // Metered as a read: a preflight executes nothing, but it does re-enter
-    // the application with a real request.
-    options.onDenied(audited, args, 'rate-limit')
-    return errorResult('Rate limit exceeded for this token. Retry later.')
-  }
+  const mapped = toPreflightVerdict(target.toolName, result.outcome)
+  if ('executed' in mapped) return errorResult(mapped.executed)
 
-  const startedAt = performance.now()
-  try {
-    const outcome = await options.dispatch(target, request.input, { preflight: true })
-    options.onInvoked(audited, args, outcome.status, elapsed(startedAt))
-
-    const mapped = toPreflightVerdict(target.toolName, outcome)
-    if ('executed' in mapped) return errorResult(mapped.executed)
-
-    // `structuredContent` because the tool advertises an output schema and MCP
-    // requires a conforming one on success; the text beside it for a client
-    // that ignores structured results.
-    return {
-      content: [{ type: 'text', text: JSON.stringify(mapped.verdict) }],
-      structuredContent: mapped.verdict,
-    }
-  } catch (error) {
-    options.onInvoked(audited, args, 500, elapsed(startedAt))
-    return errorResult(error instanceof Error ? error.message : String(error))
-  }
+  return structuredResult(mapped.verdict)
 }
 
 /**
@@ -323,12 +261,7 @@ async function handleApprovalStatus(
     }
 
     options.onInvoked(audited, args, 200, elapsed(startedAt))
-    // `structuredContent` for the advertised output schema, text beside it for
-    // a client that reads only content.
-    return {
-      content: [{ type: 'text', text: JSON.stringify(outcome.report) }],
-      structuredContent: outcome.report,
-    }
+    return structuredResult(outcome.report)
   } catch (error) {
     options.onInvoked(audited, args, 500, elapsed(startedAt))
     return errorResult(error instanceof Error ? error.message : String(error))
@@ -361,13 +294,26 @@ function errorResult(text: string): CallToolResult {
 }
 
 /**
- * A refusal, carrying the gate's machine-readable body beside the message.
+ * A meta-tool's successful answer in both halves: `structuredContent` because
+ * `guren.preflight` and `guren.approval_status` advertise an output schema and
+ * MCP requires a conforming one on success, and the same value as text beside
+ * it for a client that ignores structured results.
+ */
+function structuredResult(value: Record<string, unknown>): CallToolResult {
+  return {
+    content: [{ type: 'text', text: JSON.stringify(value) }],
+    structuredContent: value,
+  }
+}
+
+/**
+ * A pipeline refusal, carrying its machine-readable body beside the message.
  * An `isError: true` result reaches the SDK client with its `content` intact
  * even for a tool declaring an `outputSchema`, so a pending-approval requestId
  * can ride in the refusal (RFC 0016 §5.4). It is a second content block, not
  * `structuredContent`, which MCP defines for *successful* results.
  */
-function refusal(message: string, body?: Record<string, unknown>): CallToolResult {
+function denial({ message, body }: AgentInvocationDenial): CallToolResult {
   if (!body) return errorResult(message)
   return {
     content: [

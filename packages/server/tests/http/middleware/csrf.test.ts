@@ -16,6 +16,7 @@ import {
   getSessionFromContext,
   MemorySessionStore,
 } from '../../../src/http/middleware/session'
+import { installAgentPrincipal } from '../../../src/internal/agent-principal'
 
 function createTestApp(csrfOptions?: Parameters<typeof createCsrfMiddleware>[0]) {
   const app = new Hono()
@@ -1083,5 +1084,93 @@ describe('cookie-less bearer requests (RFC 0016)', () => {
     })
 
     expect(post.status).toBe(403)
+  })
+})
+
+/**
+ * Requests the agent invocation pipeline installed a principal on (RFC 0017
+ * §2). Driven through `app.fetch` with a `Request` built here, never through
+ * `app.request(...)`: the seam is keyed on object identity, and Hono builds
+ * its own `Request` for the latter, keying the map on something the middleware
+ * never sees — every case below would then pass for the wrong reason.
+ */
+describe('seam-marked requests (RFC 0017)', () => {
+  function createSeamApp() {
+    const app = new Hono()
+    app.use(createSessionMiddleware({ store: new MemorySessionStore() }))
+    app.use(createCsrfMiddleware())
+    app.get('/read', (c) => c.text('ok'))
+    app.post('/submit', (c) => c.text('ok'))
+    return app
+  }
+
+  function seamRequest(path: string, init: RequestInit = {}): Request {
+    return installAgentPrincipal(new Request(`http://localhost${path}`, init), {
+      principal: { kind: 'service', id: 'agent:triager:1' },
+      abilities: ['tools:*'],
+    })
+  }
+
+  it('skips verification for a seam-marked mutating request', async () => {
+    const response = await createSeamApp().fetch(seamRequest('/submit', { method: 'POST' }))
+    expect(response.status).toBe(200)
+  })
+
+  /**
+   * The invariant, asserted rather than assumed. The pipeline builds these
+   * requests from scratch and never puts a `Cookie` on one; if a seam-marked
+   * request nevertheless carries the header, the premise the exemption rests
+   * on has been shown false, and the safe answer is to refuse rather than to
+   * widen a CSRF skip.
+   */
+  it('refuses a seam-marked request that carries any cookie', async () => {
+    const response = await createSeamApp().fetch(
+      seamRequest('/submit', { method: 'POST', headers: { Cookie: 'unrelated=1' } }),
+    )
+    expect(response.status).toBe(403)
+    expect(await response.text()).toContain('must not carry cookies')
+  })
+
+  /**
+   * An invariant that only held for POST would not be an invariant. A GET
+   * takes the safe-method branch, which skips verification anyway — so nothing
+   * but a check placed above every branch can catch this.
+   */
+  it('refuses a cookie-carrying seam-marked request on a safe method too', async () => {
+    const response = await createSeamApp().fetch(
+      seamRequest('/read', { headers: { Cookie: 'unrelated=1' } }),
+    )
+    expect(response.status).toBe(403)
+  })
+
+  it('leaves an ordinary cookie-carrying browser request alone', async () => {
+    const app = createSeamApp()
+    // No seam mark: a plain cookie-bearing POST with no token is still a 403
+    // for the ordinary reason, and a safe request still gets its token cookie.
+    const read = await app.request('/read')
+    expect(read.status).toBe(200)
+    expect(read.headers.get('Set-Cookie')).toContain('XSRF-TOKEN=')
+
+    const post = await app.request('/submit', {
+      method: 'POST',
+      headers: { Cookie: 'unrelated=1' },
+    })
+    expect(post.status).toBe(403)
+    expect(await post.text()).toContain('CSRF token mismatch')
+  })
+
+  it('still issues the XSRF cookie on a seam-marked request', async () => {
+    // The exemption is verification-only: issuance is untouched.
+    const response = await createSeamApp().fetch(seamRequest('/read'))
+    expect(response.status).toBe(200)
+    expect(response.headers.get('Set-Cookie')).toContain('XSRF-TOKEN=')
+  })
+
+  it('does not carry the mark onto a request rebuilt from a marked one', async () => {
+    const marked = seamRequest('/submit', { method: 'POST' })
+    const response = await createSeamApp().fetch(new Request(marked))
+    // A copy is exactly what a caller who has the bytes can construct, so it
+    // gets the ordinary answer: no token, no cookie, no exemption.
+    expect(response.status).toBe(403)
   })
 })

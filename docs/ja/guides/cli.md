@@ -558,7 +558,7 @@ bunx guren tool:log --json | jq 'select(.status >= 400)'
 | `--file` | `storage/logs/agent-audit.log` | 監査ログのベースパス。日付付きファイルはこの隣に置かれます |
 | `--tail`・`-f` | `false` | レコードの到着に追従する。日付が変わってファイルが切り替わっても追い続けます |
 | `--tool` | (すべてのツール) | 指定したツールのレコードのみ |
-| `--surface` | (すべてのサーフェス) | `mcp`・`dev-mcp`・`cli`・`webmcp` のいずれかのみ |
+| `--surface` | (すべてのサーフェス) | `mcp`・`dev-mcp`・`cli`・`webmcp`・`durable` のいずれかのみ |
 | `--denied` | `false` | 拒否のみ |
 | `--since` | (制限なし) | `30m`・`2h`・`7d` などより新しいレコードのみ |
 | `-n` | `50` | 表示件数 |

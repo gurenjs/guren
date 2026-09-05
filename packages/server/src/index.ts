@@ -128,6 +128,33 @@ export type {
   AgentApprovalStore,
 } from './agent/approval'
 export { AgentApprovalRequested } from './agent/AgentApprovalRequested'
+// The adapter-level gates a tool call passes before any HTTP is synthesized
+// (RFC 0016 §5) and the pipeline that runs them in order (RFC 0017 §1). Here
+// rather than in an adapter because `app.fetch` alone only *executes*, so a
+// surface dispatching without these bypasses scopes, approvals and the trail.
+// Absent from `@guren/server/agent`, the browser-safe half.
+export {
+  DEFAULT_APPROVAL_CONFIGURE_HINT,
+  DEFAULT_SCOPE_SUBJECT,
+  gateApproval,
+  gatePreflight,
+  gateToolCall,
+  notifyApprovers,
+  scopedShape,
+} from './agent/gate'
+export type { ApprovalGateContext, GateVerdict, ScopeGateOptions } from './agent/gate'
+export { createAgentInvocationPipeline } from './agent/pipeline'
+export type {
+  AgentDispatchTarget,
+  AgentInterposition,
+  AgentInvocation,
+  AgentInvocationDenial,
+  AgentInvocationOptions,
+  AgentInvocationPipeline,
+  AgentInvocationResult,
+  AuditedTool,
+  InterposedAgentCall,
+} from './agent/pipeline'
 export { ViewEngine } from './mvc/ViewEngine'
 export { inertia, setInertiaSsrRenderer, setInertiaDocument } from './mvc/inertia/InertiaEngine'
 export { setInertiaSharedProps, getInertiaSharedPropsResolver, shareInertiaProps } from './mvc/inertia/shared'

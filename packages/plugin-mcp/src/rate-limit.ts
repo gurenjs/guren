@@ -5,6 +5,7 @@
  * instance, not as a global budget — that needs a shared store and belongs to
  * the app's own rate-limit middleware.
  */
+import type { AgentInterposition } from '@guren/core'
 
 export interface RateLimitConfig {
   /** Calls allowed per window, per token. @default 60 */
@@ -60,5 +61,29 @@ export class AgentRateLimiter {
     }
 
     return true
+  }
+}
+
+/**
+ * The limiter as the pipeline's interposition hook (RFC 0017 §1), running after
+ * the scope gate and before the approval gate — the position this budget needs,
+ * since that gate deduplicates only on *identical* arguments. A write tool
+ * spends the write budget whether it executes or queues, and a rehearsal the
+ * read budget; `undefined` under `rateLimit: false`, so there is no hook.
+ */
+export function createRateLimitInterposition(
+  limiter: AgentRateLimiter | undefined,
+  rateKey: string,
+): AgentInterposition | undefined {
+  if (!limiter) return undefined
+
+  return ({ tool, preflight }) => {
+    const write = !preflight && !tool.annotations.readOnlyHint
+    if (limiter.take(rateKey, { write })) return undefined
+
+    return {
+      reason: 'rate-limit',
+      message: `Rate limit exceeded for this token${write ? ' (write budget)' : ''}. Retry later.`,
+    }
   }
 }

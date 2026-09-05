@@ -7,6 +7,7 @@ import { MessageSigner } from '../../encryption/MessageSigner'
 import { secureCompare } from '../../encryption/Hash'
 import { isMcpEndpointEnabled, MCP_ENDPOINT_PATH } from '../../mcp/endpoint'
 import { hasBearerHeader } from '../../auth/api-token'
+import { readAgentPrincipal } from '../../internal/agent-principal'
 
 export const CSRF_TOKEN_KEY = '_csrf_token'
 export const CSRF_HEADER_NAME = 'X-CSRF-TOKEN'
@@ -169,6 +170,17 @@ function isBearerRequestWithoutCookies(ctx: Context): boolean {
   return ctx.req.header('Cookie') === undefined
 }
 
+/**
+ * A request the pipeline installed an agent principal on (RFC 0017 §2), exempt
+ * on the cookie-less bearer terms above: it carries no cookies **by
+ * construction** and authenticates by an identity keyed on the object itself,
+ * which no browser or network caller can attach to a request it did not build.
+ * Verification-only, like every exemption here; issuance is unchanged.
+ */
+function isSeamPrincipalRequest(ctx: Context): boolean {
+  return readAgentPrincipal(ctx.req.raw) !== undefined
+}
+
 /** The token issued so far this request, and the mode it was issued for. */
 interface IssuedCsrfToken {
   token: string
@@ -291,11 +303,11 @@ async function getTokenFromRequest(ctx: Context): Promise<string | undefined> {
 }
 
 /**
- * Issues a signed `XSRF-TOKEN` on safe requests and verifies it on
- * state-changing ones (`_token` field, `X-CSRF-TOKEN` / `X-XSRF-TOKEN` header).
- * `cookie: false` suits session-authenticated flows only; guest tokens need the
- * cookie. **Mount directly inside the session middleware:** anything between
- * the two that mutates the session after its own `await next()` moves the id after this has committed.
+ * Issues a signed `XSRF-TOKEN` on safe requests and verifies it on state-changing
+ * ones (`_token`, `X-CSRF-TOKEN` / `X-XSRF-TOKEN`), skipping cookie-less bearer
+ * requests (RFC 0016) and seam-marked ones (RFC 0017). `cookie: false` suits
+ * session flows only. **Mount directly inside the session middleware:** anything
+ * between that mutates the session after `await next()` moves the id too late.
  */
 export function createCsrfMiddleware(
   options: CsrfOptions = {},
@@ -320,6 +332,21 @@ export function createCsrfMiddleware(
   }
 
   return async (ctx, next) => {
+    // The seam's no-cookie invariant, *asserted* above every branch below: one
+    // holding only for POST is not an invariant. A seam-marked request carrying
+    // a `Cookie` falsifies the exemption's premise, so it is refused rather than
+    // verified — verification could pass, and passing must not be available.
+    // Not through `onError`, which renders a mismatch and could be permissive.
+    if (isSeamPrincipalRequest(ctx) && ctx.req.header('Cookie') !== undefined) {
+      return jsonResponse(
+        {
+          message:
+            'A request carrying an installed agent principal must not carry cookies. Refused.',
+        },
+        403,
+      )
+    }
+
     const method = ctx.req.method.toUpperCase()
     const path = new URL(ctx.req.url).pathname
 
@@ -330,12 +357,14 @@ export function createCsrfMiddleware(
     }
 
     // Skips *verification*, not issuance: an exempt endpoint that logs a user
-    // in still has to hand back a bound token.
+    // in still has to hand back a bound token. Seam-marked requests skip on the
+    // cookie-less bearer terms, their no-cookie invariant asserted above.
     if (
       isExcluded(path, exclude)
       || isMcpEndpointRequest(path)
       || isCookielessAuthEndpoint(path, cookielessAuthEndpoints)
       || isBearerRequestWithoutCookies(ctx)
+      || isSeamPrincipalRequest(ctx)
     ) {
       await next()
       settleCookie(ctx)

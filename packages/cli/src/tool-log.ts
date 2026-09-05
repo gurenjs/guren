@@ -18,6 +18,7 @@ import {
   matchDailyFileDate,
   parseAuditRecord,
   type AgentAuditRecord,
+  type AgentSurface,
 } from '@guren/core'
 
 /** How many records `-n` shows when it is not given. */
@@ -29,9 +30,17 @@ const FOLLOW_INTERVAL_MS = 500
 /**
  * Surfaces `--surface` accepts, spelled out so a typo is refused by name: passing the
  * value straight into the filter would answer a misspelling with an empty list, which
- * reads here as "no agent calls".
+ * reads here as "no agent calls". Keys of a total map, not an array: `satisfies
+ * readonly AgentSurface[]` admits a short list, so a new surface would be refused as
+ * a typo while its records sat in the trail.
  */
-const SURFACES = ['mcp', 'dev-mcp', 'cli', 'webmcp'] as const
+const SURFACES = Object.keys({
+  'mcp': true,
+  'dev-mcp': true,
+  'cli': true,
+  'webmcp': true,
+  'durable': true,
+} satisfies Record<AgentSurface, true>) as readonly AgentSurface[]
 
 export interface ToolLogOptions {
   /** Base path of the trail; dated files sit beside it. */
