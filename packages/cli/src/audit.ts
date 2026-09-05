@@ -39,7 +39,7 @@ import {
 import { describeMethod } from './http-methods'
 import { parseSchemaTableColumns } from './schema-parser'
 import { loadAuditConfig, type AuditIgnoreEntry } from './audit-config'
-import { auditCsrfExemptions, type CsrfExemptionScan } from './csrf-exemption-audit'
+import { auditCsrfExemptions, DECLARE_CALL_PATTERN, type CsrfExemptionScan } from './csrf-exemption-audit'
 
 export type AuditStatus = 'pass' | 'warn' | 'fail' | 'ignored'
 
@@ -89,11 +89,6 @@ const GUEST_PATH_PATTERN = /(login|logout|register|signup|sign-up|password|forgo
 
 const WEBHOOK_PATH_PATTERN = /(webhook|callback)/i
 
-// A member call, so the method named in a type position is not one. Dotted,
-// optional-call and computed access; a receiver split across lines is missed,
-// like every other rule this line-based scan carries.
-const CSRF_EXEMPTION_PATTERN =
-  /(?:\.\s*declareCookielessAuthPath|\[\s*['"`]declareCookielessAuthPath['"`]\s*\])\s*(?:\?\.)?\s*\(/
 
 const AUTH_MIDDLEWARE_PATTERN = /auth/i
 
@@ -787,9 +782,8 @@ async function auditSourceFiles(cwd: string, findings: AuditFinding[]): Promise<
         )
       }
 
-      // The app's own lever is `csrfOptions.exclude`; this one exists for an
-      // endpoint whose code establishes that it never reads a session cookie.
-      if (CSRF_EXEMPTION_PATTERN.test(line)) {
+      // A receiver split across lines is missed, like every other rule here.
+      if (DECLARE_CALL_PATTERN.test(line)) {
         appExemptionCount++
         findings.push(
           finding(
@@ -968,11 +962,14 @@ export function renderAuditReport(report: AuditReport): void {
   if (report.dependencyScan?.status === 'skipped') {
     consola.info('Dependency scan skipped (--no-deps).')
   }
-  // Printed rather than left to the finding list, which hides passes: an
-  // exemption a package declares is the thing this scan exists to surface.
-  if (report.csrfExemptionScan.declaredBy.length > 0) {
+  // Only the first-party case needs this: the finding list hides passes, and a
+  // third-party declarer is already named by its own warn two lines down.
+  const quietDeclarers = report.findings.some((f) => f.key === 'csrf-exemption:plugin' && f.status === 'pass')
+    ? report.csrfExemptionScan.declaredBy
+    : []
+  if (quietDeclarers.length > 0) {
     consola.info(
-      `CSRF exemption declared by: ${report.csrfExemptionScan.declaredBy.join(', ')} `
+      `CSRF exemption declared by: ${quietDeclarers.join(', ')} `
       + '(path chosen at boot from each package\'s configuration).',
     )
   }

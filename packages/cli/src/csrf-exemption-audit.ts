@@ -1,5 +1,6 @@
 import { readdir, readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
+import { readIfExists } from './discovery'
 import { readDeclaredDependencyNames } from './plugin-manifest'
 import type { AuditFinding } from './audit'
 
@@ -18,17 +19,12 @@ import type { AuditFinding } from './audit'
  * survive a bundle (Guren forbids identifier mangling): dotted, optional-call,
  * and computed access.
  */
-const DECLARE_CALL_PATTERN =
+export const DECLARE_CALL_PATTERN =
   /(?:\.\s*declareCookielessAuthPath|\[\s*['"`]declareCookielessAuthPath['"`]\s*\])\s*(?:\?\.)?\s*\(/
 
-/** For the messages, which must not themselves be a call the scan would match. */
-const DECLARE_CALL = 'declareCookielessAuthPath'
+const DECLARE_METHOD_NAME = 'declareCookielessAuthPath'
 
-/**
- * npm reserves the scope, so a package published under it is this repo's, whose
- * own declaration is reviewed here. Read from the installed manifest rather
- * than the dependency key, which an `npm:` alias controls.
- */
+/** npm reserves the scope, so a package published under it is this repo's. */
 const FIRST_PARTY_SCOPE = '@guren/'
 
 const SCANNED_EXTENSIONS = ['.js', '.mjs', '.cjs']
@@ -51,7 +47,7 @@ export interface CsrfExemptionScan {
 interface PackageScan {
   packageName: string
   declares: boolean
-  /** The file cap cut the walk short, so the coverage is not what it looks like. */
+  /** The file cap cut the walk short, so `declares: false` proves nothing. */
   truncated: boolean
 }
 
@@ -101,17 +97,11 @@ async function collectPackageFiles(packageDir: string): Promise<{ files: string[
 }
 
 async function scanPackage(cwd: string, packageName: string): Promise<PackageScan | null> {
+  // Not installed is not a finding: the app declares it, `bun install` has not
+  // run yet or the dependency is optional. readIfExists rethrows the rest.
+  const manifestRaw = await readIfExists(cwd, join('node_modules', packageName, 'package.json'))
+  if (manifestRaw === null) return null
   const packageDir = resolve(cwd, 'node_modules', packageName)
-
-  let manifestRaw: string
-  try {
-    manifestRaw = await readFile(join(packageDir, 'package.json'), 'utf8')
-  } catch (error) {
-    // Not installed is not a finding: the app declares it, `bun install` has
-    // not run yet or the dependency is optional. Anything else is unreadable.
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
-    throw error
-  }
 
   // A manifest that will not parse leaves the package unclassified, which is
   // an unreadable package rather than one known to be irrelevant.
@@ -155,17 +145,17 @@ export async function auditCsrfExemptions(
     }),
   )
 
-  const unreadable = results.filter(
-    (result): result is { packageName: string; error: string } =>
-      result !== null && 'error' in result,
-  )
-  const scanned = results.filter((result): result is PackageScan =>
-    result !== null && 'declares' in result,
-  )
+  const unreadable: Array<{ packageName: string; error: string }> = []
+  const scanned: PackageScan[] = []
+  for (const result of results) {
+    if (result === null) continue
+    if ('error' in result) unreadable.push(result)
+    else scanned.push(result)
+  }
 
   for (const failure of unreadable) {
     findings.push({
-      key: `csrf-exemption:unreadable:${failure.packageName}`,
+      key: `csrf-scan:unreadable:${failure.packageName}`,
       title: `${failure.packageName} unreadable`,
       status: 'warn',
       message:
@@ -178,33 +168,33 @@ export async function auditCsrfExemptions(
   const truncatedPackages = scanned.filter((result) => result.truncated)
   for (const cut of truncatedPackages) {
     findings.push({
-      key: `csrf-exemption:truncated:${cut.packageName}`,
+      key: `csrf-scan:truncated:${cut.packageName}`,
       title: `${cut.packageName} partly scanned`,
       status: 'warn',
       message:
         `${cut.packageName} ships more than ${MAX_FILES_PER_PACKAGE} JavaScript files, so the scan `
         + 'stopped there and did not see every file it ships.',
-      suggestion: `Search the package by hand for a call to ${DECLARE_CALL}.`,
+      suggestion: `Search the package by hand for a call to ${DECLARE_METHOD_NAME}.`,
     })
   }
 
   const declaring = scanned.filter((result) => result.declares).map((result) => result.packageName)
   const thirdParty = declaring.filter((name) => !name.startsWith(FIRST_PARTY_SCOPE))
 
+  const plugin = { key: 'csrf-exemption:plugin', title: 'Plugin CSRF exemptions' } as const
+
   if (thirdParty.length > 0) {
     findings.push({
-      key: 'csrf-exemption:plugin',
-      title: 'Plugin CSRF exemptions',
+      ...plugin,
       status: 'warn',
       message:
-        `${thirdParty.join(', ')} calls ${DECLARE_CALL} to exempt a path from CSRF verification. `
+        `${thirdParty.join(', ')} calls ${DECLARE_METHOD_NAME} to exempt a path from CSRF verification. `
         + "The path is chosen at boot from the plugin's configuration, so it cannot be reported here.",
       suggestion: REVIEW_SUGGESTION,
     })
   } else {
     findings.push({
-      key: 'csrf-exemption:plugin',
-      title: 'Plugin CSRF exemptions',
+      ...plugin,
       status: 'pass',
       message:
         declaring.length > 0

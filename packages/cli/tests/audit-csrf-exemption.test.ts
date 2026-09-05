@@ -1,9 +1,10 @@
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'bun:test'
 import type { AuditFinding } from '../src/audit'
 import { auditCsrfExemptions } from '../src/csrf-exemption-audit'
+import { CAN_DENY_FILE_READS, writeInstalledPackage } from './helpers'
 
 const created: string[] = []
 
@@ -30,20 +31,15 @@ async function appWith(packages: Record<string, FakePackage>): Promise<string> {
   )
 
   for (const [name, pkg] of Object.entries(packages)) {
-    const dir = join(cwd, 'node_modules', name)
-    await mkdir(dir, { recursive: true })
-    await writeFile(join(dir, 'package.json'), JSON.stringify({ name, ...pkg.manifest }))
-    for (const [relative, source] of Object.entries(pkg.files ?? {})) {
-      await mkdir(join(dir, relative, '..'), { recursive: true })
-      await writeFile(join(dir, relative), source)
-    }
+    await writeInstalledPackage(name, pkg.manifest, pkg.files, cwd)
   }
 
   return cwd
 }
 
 const GUREN_FACING = { dependencies: { '@guren/core': '^2.0.0' } }
-const DECLARES = { 'dist/index.js': 'app.declareCookielessAuthPath(config.path);\n' }
+const DECLARING_SOURCE = 'app.declareCookielessAuthPath(config.path);\n'
+const DECLARES = { 'dist/index.js': DECLARING_SOURCE }
 
 function chunks(count: number): Record<string, string> {
   return Object.fromEntries(Array.from({ length: count }, (_, i) => [`dist/chunk-${i}.js`, 'export {}\n']))
@@ -92,7 +88,7 @@ describe('auditCsrfExemptions', () => {
     const cwd = await appWith({
       'acme-mcp': {
         manifest: GUREN_FACING,
-        files: { 'dist/index.js': "export * from './chunk.js'\n", 'dist/chunk.js': DECLARES['dist/index.js'] },
+        files: { 'dist/index.js': "export * from './chunk.js'\n", 'dist/chunk.js': DECLARING_SOURCE },
       },
     })
     const findings: AuditFinding[] = []
@@ -127,7 +123,7 @@ describe('auditCsrfExemptions', () => {
     const findings: AuditFinding[] = []
 
     expect((await auditCsrfExemptions(cwd, findings)).status).toBe('complete')
-    expect(findings.some((f) => f.key.startsWith('csrf-exemption:unreadable:'))).toBe(false)
+    expect(findings.some((f) => f.key.startsWith('csrf-scan:unreadable:'))).toBe(false)
   })
 
   it('reports a package too large to walk as partial coverage, not as declaring nothing', async () => {
@@ -138,7 +134,7 @@ describe('auditCsrfExemptions', () => {
 
     expect(scan.status).toBe('partial')
     expect(scan.declaredBy).toEqual([])
-    expect(findings.find((f) => f.key === 'csrf-exemption:truncated:acme-huge')?.status).toBe('warn')
+    expect(findings.find((f) => f.key === 'csrf-scan:truncated:acme-huge')?.status).toBe('warn')
   })
 
   it('does not call a package truncated when every file it ships was read', async () => {
@@ -146,7 +142,7 @@ describe('auditCsrfExemptions', () => {
     const findings: AuditFinding[] = []
 
     expect((await auditCsrfExemptions(cwd, findings)).status).toBe('complete')
-    expect(findings.some((f) => f.key.startsWith('csrf-exemption:truncated:'))).toBe(false)
+    expect(findings.some((f) => f.key.startsWith('csrf-scan:truncated:'))).toBe(false)
   })
 
   it('still reports partial when the package it truncated also declares one', async () => {
@@ -158,7 +154,7 @@ describe('auditCsrfExemptions', () => {
     const scan = await auditCsrfExemptions(cwd, findings)
 
     expect(scan.status).toBe('partial')
-    expect(findings.find((f) => f.key === 'csrf-exemption:truncated:acme-huge')?.status).toBe('warn')
+    expect(findings.find((f) => f.key === 'csrf-scan:truncated:acme-huge')?.status).toBe('warn')
   })
 
   it('does not read a mention of the method as a call', async () => {
@@ -216,6 +212,20 @@ describe('auditCsrfExemptions', () => {
     expect(findings.find((f) => f.key === 'csrf-exemption:plugin')?.status).toBe('warn')
   })
 
+  it('counts a package listed in two dependency fields once', async () => {
+    const cwd = await appWith({ 'acme-mcp': { manifest: GUREN_FACING, files: DECLARES } })
+    await writeFile(
+      join(cwd, 'package.json'),
+      JSON.stringify({ dependencies: { 'acme-mcp': '*' }, optionalDependencies: { 'acme-mcp': '*' } }),
+    )
+    const findings: AuditFinding[] = []
+
+    const scan = await auditCsrfExemptions(cwd, findings)
+
+    expect(scan.declaredBy).toEqual(['acme-mcp'])
+    expect(scan.packagesScanned).toBe(1)
+  })
+
   it('scans a plugin declared under optionalDependencies', async () => {
     const cwd = await appWith({ 'acme-mcp': { manifest: GUREN_FACING, files: DECLARES } })
     await writeFile(
@@ -235,10 +245,10 @@ describe('auditCsrfExemptions', () => {
     const scan = await auditCsrfExemptions(cwd, findings)
 
     expect(scan.status).toBe('partial')
-    expect(findings.find((f) => f.key === 'csrf-exemption:unreadable:acme-broken')?.status).toBe('warn')
+    expect(findings.find((f) => f.key === 'csrf-scan:unreadable:acme-broken')?.status).toBe('warn')
   })
 
-  it('reports an unreadable package as partial coverage rather than a clean scan', async () => {
+  it.skipIf(!CAN_DENY_FILE_READS)('reports an unreadable package as partial coverage rather than a clean scan', async () => {
     const cwd = await appWith({
       'acme-mcp': { manifest: GUREN_FACING, files: DECLARES },
     })
@@ -248,6 +258,6 @@ describe('auditCsrfExemptions', () => {
     const scan = await auditCsrfExemptions(cwd, findings)
 
     expect(scan.status).toBe('partial')
-    expect(findings.find((f) => f.key === 'csrf-exemption:unreadable:acme-mcp')?.status).toBe('warn')
+    expect(findings.find((f) => f.key === 'csrf-scan:unreadable:acme-mcp')?.status).toBe('warn')
   })
 })
