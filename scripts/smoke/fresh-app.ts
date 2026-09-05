@@ -241,6 +241,10 @@ async function assertPackedArtifacts(packageTarballs: Map<string, string>, packR
         assert(distContents.includes('defineGeneratedPage'), '@guren/cli tarball is missing the generated page helper implementation.')
         assert(distContents.includes('PaginatedPageProps'), '@guren/cli tarball is missing paginated resource scaffold support.')
         assert(!distContents.includes("import { definePage } from '@guren/inertia-client'"), '@guren/cli tarball still emits definePage() runtime imports for generated pages.')
+        // The `./oxlint` subpath and the config `add lint` writes ship in the tarball; the
+        // workspace symlink the unit tests resolve through never crosses the `files` boundary.
+        assert(entries.includes('package/dist/oxlint/index.js'), '@guren/cli tarball is missing dist/oxlint/index.js, the @guren/cli/oxlint plugin entry.')
+        assert(entries.includes('package/templates/scaffold/lint/.oxlintrc.json'), '@guren/cli tarball is missing templates/scaffold/lint/.oxlintrc.json for guren add lint.')
       }
 
       if (packageName === 'create-guren-app') {

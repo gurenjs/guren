@@ -52,6 +52,9 @@ export async function addLint(options: WriterOptions = {}): Promise<string[]> {
   if (missingScripts.length === 0 && installed !== undefined) return created
 
   manifest.scripts = { ...scripts, ...Object.fromEntries(missingScripts) }
+  if (installed !== undefined && installed !== oxlintRange()) {
+    consola.warn(`package.json already has oxlint ${installed}; @guren/cli/oxlint is tested against ${oxlintRange()}`)
+  }
   if (installed === undefined) {
     manifest.devDependencies = { ...manifest.devDependencies, oxlint: oxlintRange() }
   }
