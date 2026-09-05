@@ -81,11 +81,12 @@ export {
 // no dispatch, so a CLI, a codegen step and a protocol adapter share one rule.
 export {
   AGENT_TOOL_NAME_PATTERN,
+  classifyRegistrationScope,
   expandToolScopes,
   parseToolScope,
   scopesAllowTool,
 } from './agent/scopes'
-export type { ParsedToolScope, ScopedTool } from './agent/scopes'
+export type { ParsedToolScope, RegistrationScopeVerdict, ScopedTool } from './agent/scopes'
 export { AgentToolDenied, AgentToolInvoked } from './agent/events'
 export type { AgentPrincipal, AgentSurface, AgentToolDenialReason } from './agent/events'
 // `AGENT_REDACTED` only: a listener or a test asserting on a masked field
@@ -143,7 +144,7 @@ export {
   scopedShape,
 } from './agent/gate'
 export type { ApprovalGateContext, GateVerdict, ScopeGateOptions } from './agent/gate'
-export { createAgentInvocationPipeline } from './agent/pipeline'
+export { createAgentApprovalContext, createAgentInvocationPipeline } from './agent/pipeline'
 export type {
   AgentDispatchTarget,
   AgentInterposition,

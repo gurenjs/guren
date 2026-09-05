@@ -26,6 +26,7 @@ import { makeFactory } from './make-factory'
 import { makeJob } from './make-job'
 import { makeMail } from './make-mail'
 import { makeMiddleware } from './make-middleware'
+import { makeAgent } from './make-agent'
 import { makePolicy } from './make-policy'
 import { makeMigration } from './make-migration'
 import { makeModel } from './make-model'
@@ -520,6 +521,55 @@ const makeModuleCommand = defineCommand({
     consola.info(`  bunx guren make:controller Invoice --module ${args.name}`)
     consola.info(`  bunx guren make:model Invoice --module ${args.name}`)
     consola.info(`Module directory: ${moduleDir}`)
+  },
+})
+
+const makeAgentCommand = defineCommand({
+  meta: {
+    name: 'make:agent',
+    description: 'Scaffold a durable agent, register it in config/agents.ts, and pin its boundary.',
+  },
+  args: {
+    name: {
+      type: 'positional',
+      required: true,
+      description: 'Agent class name (e.g., Triager)',
+    },
+    force: {
+      type: 'boolean',
+      description: 'Overwrite existing files',
+      alias: 'f',
+    },
+    // Declared so the refusal is a documented argument rather than parser
+    // leniency: a user who passes it deserves `makeAgent`'s reason, not
+    // "unknown flag". The description is overridden because the shared one
+    // promises a placement this command always refuses.
+    module: {
+      ...MODULE_ARG,
+      description:
+        'Not supported for agents: the registry is one project-root config/agents.ts, '
+        + 'which guren cloudflare:build reads.',
+    },
+  },
+  async run({ args }) {
+    const { file, patches, notes } = await makeAgent(args.name, toWriterOptions(args))
+    consola.success(`Created ${file}`)
+
+    for (const patch of patches) {
+      if (patch.status === 'created') consola.success(`Created ${patch.file}`)
+      else if (patch.status === 'patched') consola.success(`Updated ${patch.file}`)
+      else if (patch.status === 'skipped') consola.info(`Left ${patch.file} alone: ${patch.reason}.`)
+      else {
+        // Never silent. A registration this could not write is an agent the
+        // Cloudflare build will not export, and the app would look wired.
+        consola.warn(`Could not update ${patch.file} — ${patch.reason}. Add this by hand:`)
+        consola.log(patch.snippet)
+      }
+    }
+
+    for (const note of notes) {
+      consola.info(note)
+    }
   },
 })
 
@@ -3203,6 +3253,7 @@ export const builtinSubCommands = {
   'spec:generate': specGenerateCommand,
   'docs:graph': docsGraphCommand,
   'make:auth': makeAuthCommand,
+  'make:agent': makeAgentCommand,
   'make:module': makeModuleCommand,
   'make:channel': makeChannelCommand,
   'make:command': makeConsoleCommandCommand,

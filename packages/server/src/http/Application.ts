@@ -667,6 +667,16 @@ export class Application {
     }
   }
 
+  /**
+   * Resolves when the boot that is running — or has already run — completes,
+   * and immediately when none was ever started. For a surface holding this
+   * application from *inside* `boot`, whose hook runs while later providers are
+   * unbooted. Never await it from a provider's own `boot`: it waits on itself.
+   */
+  async booted(): Promise<void> {
+    await this.bootPromise
+  }
+
   private async bootOnce(): Promise<void> {
     await this.providerManager.registerAll()
 

@@ -20,6 +20,14 @@ export interface CheckReport {
   passCount: number
   warnCount: number
   failCount: number
+  /**
+   * What each registered agent's scopes expand to against the loaded route
+   * graph (RFC 0017 Open Question 2, answered as a check-time computation).
+   *
+   * Absent when the app has no `config/agents.ts`, empty when it has one but
+   * the route graph was not loaded — two answers a consumer can tell apart.
+   */
+  agentScopes?: Array<{ agent: string; tools: string[] }>
 }
 
 export function check(

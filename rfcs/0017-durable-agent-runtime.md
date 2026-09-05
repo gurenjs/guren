@@ -147,7 +147,7 @@ of every app that doesn't opt in. `make:agent Triager` scaffolds
 `app/Agents/Triager.ts`:
 
 ```ts
-import { GurenAgent } from '@guren/plugin-agents'
+import { GurenAgent } from '@guren/plugin-agents/agent'
 
 interface TriagerState {
   lastRunAt: string | null
@@ -183,6 +183,13 @@ export default defineAgentsConfig({
   },
 })
 ```
+
+The import is the **`/agent` subpath**, not the package root, and that is a
+constraint rather than a style choice: `agents` statically imports
+`cloudflare:workers` and `cloudflare:email`, so evaluating it outside workerd
+throws — and the package root is what `src/app.ts` imports to register the
+plugin, on Bun, in `guren dev`. The root entry holds the config grammar, the
+plugin, the runtime latch and the tool client; only `/agent` holds the class.
 
 - `module` / `export` are explicit because the build's named-export injection
   (§6) cannot recover a source path from a runtime class value. The grammar
@@ -399,6 +406,147 @@ transcription:
   never granted. The same limit applies to the OAuth-fronted MCP surface, which
   adopted the seam in this part — a route behind `requireAuthenticated()` now
   executes as the OAuth caller, where it previously answered 401.
+
+**Part 2a shipped.** `@guren/plugin-agents` exists: `defineAgentsConfig`, the
+`agentsPlugin` provider, the `configureAgentRuntime` latch, `createAgentToolClient`,
+and `GurenAgent`; plus `make:agent` and the agent-registry check in
+`@guren/cli`, and `classifyRegistrationScope` in `@guren/server`. What is
+*not* here is §6 — named-export injection, `bootAndFetch`, bindings
+verification, and the `/agents/*` mount — which is Part 2b. Nine things worth
+recording, each a decision rather than a transcription:
+
+- **The package has two entries, and §3's snippet changed to say so.** `agents`
+  statically imports `cloudflare:workers` and `cloudflare:email` from a module
+  its root re-exports, with no lazy path and no alternative export condition —
+  so `import { Agent } from 'agents'` throws at module evaluation on Bun, for a
+  subclass that touches no Durable Object API. The package root is imported by
+  an app's `src/app.ts`, which `guren dev` evaluates on Bun. So `GurenAgent`
+  lives at `@guren/plugin-agents/agent` and nothing reachable from the root
+  imports `agents` at runtime. The practical consequence is the split this part
+  is built around: the tool client is a plain module with a `TestApp`-shaped
+  application behind it, covered on Bun, and the Durable Object shell is a thin
+  file covered by the workerd lane.
+- **`configureAgentRuntime` is the 2b seam, and it has two slots rather than
+  one.** An agent is woken by an alarm with a Worker `env`, not with an
+  `Application`, so it has to *find* the app booted in its isolate: the plugin's
+  `boot` publishes an `AgentRuntime` on a module-level latch and `GurenAgent`
+  reads it. 2b's generated worker registers the other slot — a *resolver*, "boot
+  the app on this env" — because an alarm can arrive before any Worker request
+  has booted anything. Two slots because one would make the plugin's publish
+  look like a replacement of the resolver that caused it, and a check that fires
+  on the successful path is a check nobody keeps. Each slot still refuses a
+  different value of its own kind, which is the rule that matters: two apps, or
+  two envs, in one isolate (§6). The resolver may return nothing, since the
+  ordinary way a runtime appears is the plugin publishing it — requiring a
+  return value would make 2b write a circular `return resolveAgentRuntime()`.
+- **The budget is `callsPerMinute` only; the pending-approvals cap moves to
+  Part 3.** §4 promises both meters in the same part as the client. Half of that
+  promise is kept literally: a sliding-window rate budget (60/minute by default)
+  sits at the pipeline's interposition seam, between the scope gate and the
+  approval gate, so an unattended loop cannot amplify approval notifications.
+  The other half cannot be kept honestly here — a cap on *outstanding* approvals
+  needs to know which of this instance's approvals are still alive, and that is
+  the ledger, which is Part 3 by the phasing. The rate budget alone already
+  bounds the amplification the cap was for; what it does not bound is the number
+  of distinct requests a slow, patient loop accumulates, and that gap closes
+  with the ledger. Two limits are stated rather than papered over: the budget
+  lives in the client instance, so an eviction resets it, and it is per instance,
+  not global — the floor an app's own rate-limit middleware over a shared store
+  cannot be on this surface.
+- **`env` and `executionCtx` are not forwarded into the pipeline yet.** The
+  pipeline takes both and `@guren/plugin-mcp` passes them, because omitting them
+  silently loses D1/R2 bindings and `waitUntil` on Workers (RFC 0016 §3.1). A
+  `GurenAgent` holds `this.env`, but the runtime it dispatches through is the
+  one the *application's* boot published, and settling which `env` a re-entrant
+  request carries is precisely `bootAndFetch`'s job — so the forwarding lands
+  with §6 in Part 2b, not before it.
+- **The runtime latch is last-publish-wins, and only the resolver refuses a
+  replacement.** The runtime slot first refused a second, different runtime, on
+  the §6 theory that two runtimes mean two applications in one isolate. That
+  check could not hold: `agentsPlugin`'s `boot` mints a fresh object every time,
+  so "the same object is a no-op" never applied to the one caller that matters,
+  and any process booting two apps — an application's own Bun suite standing up
+  a `TestApp` per file, the ordinary case — threw on the second boot. The
+  guarantee belongs to the boot wiring (the promise-latched resolver, which
+  boots once per `env`), not to a setter that cannot tell a second application
+  from the same one booting again. The resolver slot does still refuse a
+  different resolver: generated code registers it once at module scope, so a
+  second one is a build that wired the isolate twice. `resolveAgentRuntime` also
+  latches the resolution *in flight*, so an alarm and a request arriving
+  together share one boot; the latch is cleared on rejection, because a
+  transient failure must not become permanent for the life of the isolate.
+- **The audit emitter is resolved at first use, not at boot.**
+  `AGENT_AUDIT_BINDING` is published by another plugin's `boot` —
+  `mcpPlugin({ audit })` binds it from its own — so which plugin sees it is
+  decided by the order two lines appear in a `providers` array. Reading the
+  container in `agentsPlugin`'s `boot` made
+  `providers: [agentsPlugin(…), mcpPlugin({ audit })]` record nothing at all for
+  the durable surface, for the life of the process, with no error anywhere.
+  `AgentRuntime.audit` is therefore a resolver: every provider's `boot` has
+  completed before an agent makes its first tool call, so first use is the first
+  moment the answer is stable.
+- **The seam is a separate entry point, and the boundary is a discipline.**
+  `configureAgentRuntime` / `resolveAgentRuntime` / `createAgentToolClient` live
+  at `@guren/plugin-agents/runtime`, not on the package root, because each of
+  them either hands out an application to dispatch into or mints a principal to
+  dispatch as — an agent class that imported them could build itself a client
+  with scopes its registration never granted. `make:agent` names the subpath in
+  the arch rule's `disallowPackages`, so reaching for it fails
+  `guren check --arch`. Stated plainly: **this is not isolation.** In-process
+  application code shares the isolate and can import any module it likes; the
+  boundary is the arch rule plus the audit trail, and the arch checker sees only
+  *static* imports — a dynamic `import()` escapes it. What the split buys is
+  that crossing the boundary is visible in review rather than incidental. The
+  registry the runtime hands out is frozen (each registration, its `abilities`,
+  and a `ReadonlyMap`), and the gate and the audit principal share the *same*
+  array, so a widened scope cannot be authorized under a record that does not
+  show it.
+- **Principal ids are unambiguous by construction, and facets are refused.**
+  `agent:<name>:<instance>` is ambiguous if either half may contain a colon, so
+  the name half is constrained (`[A-Za-z0-9_-]+`, enforced by
+  `validateAgentsConfig` and `guren check`) and the instance half — which comes
+  from the Durable Object, not from a config this package validates — is
+  percent-encoded. The SDK's facets (sub-agents) reuse an instance name under a
+  different parent, so a facet's id would not be unique; `GurenAgent` refuses to
+  build a tool client inside one. `selfPath` / `parentPath` would disambiguate
+  them, but both are `@experimental` and what a facet's scopes and approvals
+  *should* be is undesigned — that is Part 3's question, not something to settle
+  by minting an id whose uniqueness this part cannot promise.
+- **Publication waits for boot, and the isolate is pinned to one `env`.**
+  `agentsPlugin`'s `boot` runs inside `bootAll()`, the application's last boot
+  step, so everything it publishes is published while later providers are still
+  unbooted. The runtime therefore dispatches through a wrapper that awaits
+  `Application.booted()` (added to `@guren/server` for this — the class already
+  tracked the promise), and `resolveAgentRuntime` joins an in-flight resolution
+  rather than returning the slot the instant it appears. A second, *different*
+  `env` object is the hard error §6 asks for, checked on identity.
+- **Open Question 2 is answered as a check-time computation.** `guren check`
+  expands each registration's `tools:read` against the loaded route graph and
+  reports it under `--json` (`agentScopes`); the runtime re-expands at boot.
+  Nothing is generated. Pinning the expansion into a committed artifact would
+  make an agent's authority a file that can be stale, and the value of the
+  expansion is precisely that it is recomputed — a route that stops being
+  read-only has to change what the agent may call on the next run, not on the
+  next regeneration.
+- **The registration grammar is one exported predicate.**
+  `classifyRegistrationScope` in `@guren/server` decides which scope forms a
+  registration may hold; `validateAgentsConfig` and `guren check` both call it,
+  and its refusal message is what both surfaces print. A check with its own copy
+  is how a build that passes comes to describe a runtime that refuses.
+- **The SDK is pinned at `agents` ^0.22.0, and several names in §3/§5 moved.**
+  Verified against the shipped `.d.ts` rather than release notes: `partyserver`
+  is gone from the server path, `Agent` gained a third generic (`Props`),
+  `setState` is synchronous, `onStateUpdate` is now `onStateChanged`,
+  `getSchedules`/`getSchedule` are deprecated in favour of
+  `listSchedules`/`getScheduleById`, and `alarm()` is framework-owned — a
+  subclass overrides `onAlarm()`. `schedule()` returns a `Schedule`, not an id.
+  Long-running work uses `keepAliveWhile`/`runFiber`, never `ctx.waitUntil`,
+  which the SDK's own docs list under "does not survive". On the test side the
+  Workers Vitest package was **renamed**: `@cloudflare/vitest-plugin` (1.x, a
+  Vite plugin named `cloudflareTest`) replaces
+  `@cloudflare/vitest-pool-workers`' `defineWorkersConfig`, and it peer-requires
+  vitest 4 — which resolves nested under this package while the rest of the
+  workspace stays on vitest 3.
 
 ## Alternatives Considered
 
