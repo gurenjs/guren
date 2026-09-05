@@ -18,8 +18,8 @@ describe('defineCommand', () => {
     const command = defineCommand({
       args: {
         json: { type: 'boolean' },
-        // Declared camelCase and spelled `--dry-run`, which is the spelling this
-        // CLI documents and the one citty never registers as a boolean.
+        // Declared camelCase on purpose: no command declares `dryRun` any more,
+        // and this pins the citty behaviour the coercion still backstops.
         dryRun: { type: 'boolean', alias: 'd' },
         name: { type: 'string' },
       },
@@ -112,6 +112,23 @@ describe('built-in commands', () => {
     }
     return found
   }
+
+  it('declare every arg with the spelling citty registers', async () => {
+    // A camelCase declaration makes `renderUsage` advertise `--dryRun` while the
+    // docs say `--dry-run`, and the documented spelling then arrives as the
+    // truthy string `"false"` instead of parsing. Aliases are exempt:
+    // `renderUsage` renders them single-dashed, so a kebab alias prints worse.
+    const camelCased: string[] = []
+    for (const [path, command] of await everyCommand(builtinSubCommands as Record<string, CommandDef<never>>)) {
+      for (const name of Object.keys((await resolveValue(command.args)) ?? {})) {
+        if (/[A-Z]/u.test(name)) camelCased.push(`${path} --${name}`)
+      }
+    }
+    // Frozen rather than empty so a new camelCase arg fails here. These three are
+    // known and milder than a boolean: citty's Proxy resolves the kebab spelling
+    // of a string either way, so only the usage line contradicts the docs.
+    expect(camelCased).toEqual(['routes:types --pagesOut', 'codegen --pagesOut', 'audit --auditConfig'])
+  })
 
   it('all define themselves through the wrapper, nested ones included', async () => {
     // A command importing `defineCommand` from `citty` instead reads raw arrays
