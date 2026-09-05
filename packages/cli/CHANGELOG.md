@@ -1,5 +1,114 @@
 # @guren/cli
 
+## 2.15.0
+
+### Minor Changes
+
+- ae5006a: Add `guren add lint`: writes an `.oxlintrc.json` that loads the Guren rules from `@guren/cli/oxlint` (`guren/await-async-assertion` as an error, the `guren/comment-*` rules as warnings), adds `lint` and `lint:fix` scripts, and adds `oxlint` as a dev dependency on a tilde range (oxlint's JS plugin API is alpha, so only patch updates are admitted). `bunx oxlint` runs under Bun, so an app needs no Node install for it.
+- 480144a: Publish the `guren` oxlint plugin as `@guren/cli/oxlint`: `guren/await-async-assertion` (a bare `expect(...).rejects` / `.resolves` statement that can never fail its test) and the `guren/comment-*` rules (block length, banners, step labels, change-history wording, `@param` tags that restate the name). Name it from an app's `.oxlintrc.json` as `"jsPlugins": ["@guren/cli/oxlint"]`.
+- 0030f77: Agent harness: a `comments.md` rule (what a comment may carry, the 5/8-line limits, the `oxlint-disable-next-line` escape), a Comments section in the `code-review` subagent's checklist, and a `check-after-edit` hook that also runs oxlint on the edited file when the app has an `.oxlintrc.json` (`bunx guren add lint`), reporting warnings as well as errors back to the agent. Refresh an installed harness with `bunx guren agent:sync`.
+
+### Patch Changes
+
+- 41bc2f4: Declare nine CLI flags with the kebab-case spelling the docs already use, so
+  `--help` and the docs agree and the documented spelling parses natively.
+
+  `db:migrate`, `db:seed`, `db:reset`, `db:fresh`, `queue:flush`, `upgrade`,
+  `agent:init` and `agent:sync` declared `dryRun`, and `upgrade` declared
+  `checkOnly`. citty registers only the _declared_ arg name, so `renderUsage`
+  advertised `-d, --dryRun` and `--checkOnly` while every guide documents
+  `--dry-run` and `--check-only` — and the documented spelling reached the
+  command as the truthy string `"false"` rather than a parsed boolean. They are
+  now declared `'dry-run'` and `'check-only'`, matching how `token:issue` already
+  declares `'read-only'` and `'allow-unmatched'`.
+
+  No flag is removed: the camelCase spellings still resolve through citty's
+  proxy, and the `-d` alias is unchanged. Aliases are deliberately not used for
+  this — `renderUsage` renders an alias single-dashed, so `alias: 'dry-run'` would
+  print `-dry-run, --dryRun`.
+
+  One user-visible behaviour changes for the better. Mixing two spellings of one
+  flag resolves to the declared name rather than to the last one typed, so
+  `--dryRun=false --dry-run=true` previously ran a real `db:reset` although the
+  user's last word asked for a dry run; the declared name is now the documented
+  one, so that invocation dry-runs. The reverse mix is still won by whichever
+  spelling is declared, not by argument order.
+
+  `upgrade --no-autofix` is untouched and already correct: it is declared as the
+  positive `autofix` arg, because citty's `--no-` branch claims `--no-autofix`
+  and writes the key `autofix` whatever the arg is called. A `'no-autofix'`
+  declaration would advertise a flag that is still ignored, so that flag is not
+  part of this rename.
+
+- ab9ea2e: Read a repeated CLI flag as its last value, on every command.
+
+  citty types a `boolean` arg as `boolean` and hands back an array when the flag
+  is passed twice, and every array is truthy. `Boolean(args.json)` reads as safe
+  and is not: `guren check --json=false --json=false` turned _off_ into _on_, and
+  `--json --json=false` ignored the half typed last. Only the `=value` spellings
+  can express a false, so a bare `--json --json` never showed it. A helper fixed
+  four commands — `tool:call`, `tool:log`, `token:issue` and `context` — and left
+  about fifty reading raw, including `db:migrate`, `db:seed`, `check`, `audit`,
+  `doctor`, `config:show` and `schedule:list`.
+
+  The rule now lives in the CLI's own `defineCommand()` wrapper, which normalizes
+  the parsed args before `setup` and `run`, so no command can bypass it and the
+  per-command helpers are gone. A test gates every built-in command on having
+  been defined through it.
+
+  The same pass also gives a declared boolean the type citty gave only its
+  declared spelling. citty registers the _declared_ name with its parser, so an
+  arg declared `dryRun` and spelled `--dry-run=false` arrived as the string
+  `"false"` — truthy. `guren db:migrate --dry-run=false`, `agent:sync
+--dry-run=false` and `upgrade --check-only=false` now mean what they say,
+  repeated or not.
+
+  Commands contributed by plugins keep citty's own parsing: a repeated flag is
+  citty's only multi-value channel, and a plugin may mean its array.
+
+- 8afc342: Trim comments in the agent-catalog inputs to the repository's comment rules. No behavior change; the catalog payload is republished under the new version because its inputs changed.
+- d3f190d: Compute `schedule:list` / `schedule:run` "next run" with the scheduler's own cron evaluator.
+
+  The CLI carried a second estimator that ignored the task's timezone, the
+  day-of-month / month / day-of-week fields, and any expression it had no branch
+  for: `* 3 * * *` fell through and reported "now". `getNextRunTime` now walks
+  `parseCron` + `matchesCron` (through `toTimezone` for a timezone-bearing task)
+  forward from the next minute, which is the same predicate `ScheduledTask.isDue()`
+  fires on, so the listed time is the one the scheduler will actually use. An
+  expression that cannot match, or a timezone `Intl` does not know, shows as "-".
+
+- fd6110e: Honor `--no-autofix` on `guren upgrade`.
+
+  The flag was declared as `noAutofix`, but citty's argument parser has a
+  dedicated `no-` branch that writes the key with the prefix _stripped_: passing
+  `--no-autofix` set `autofix: false` and never set `noAutofix` at all. The
+  command read `args.noAutofix`, which the args proxy resolved through `noAutofix`
+  then `no-autofix` — neither of which existed — so the flag read as `undefined`
+  and `guren upgrade` applied automatic fixes anyway, writing files the user had
+  asked it not to touch. Only the `--noAutofix` spelling worked.
+
+  The argument is now declared positively as `autofix` (defaulting to `true`), so
+  citty's negation lands on the key the command reads and usage advertises
+  `--no-autofix`. `--noAutofix` remains supported, because it is the spelling
+  `--help` advertised for as long as it was the only one that worked — treat it as
+  a documented alias, not as a shim to drop.
+
+- Updated dependencies [b15c329]
+- Updated dependencies [39d4fb2]
+- Updated dependencies [154d23b]
+- Updated dependencies [e135767]
+- Updated dependencies [976bd07]
+- Updated dependencies [d525672]
+- Updated dependencies [8f6ab47]
+- Updated dependencies [78f1a51]
+- Updated dependencies [526edd1]
+- Updated dependencies [78f1a51]
+- Updated dependencies [2b4b542]
+- Updated dependencies [3482012]
+  - @guren/server@2.16.0
+  - @guren/orm@2.6.3
+  - @guren/core@1.13.1
+
 ## 2.14.0
 
 ### Minor Changes
