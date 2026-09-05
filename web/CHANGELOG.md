@@ -1,5 +1,12 @@
 # web
 
+## 0.1.32
+
+### Patch Changes
+
+- Updated dependencies [866e773]
+  - @guren/cli@2.15.1
+
 ## 0.1.31
 
 ### Patch Changes
