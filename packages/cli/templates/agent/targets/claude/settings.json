@@ -4,6 +4,7 @@
       "Bash(bunx guren:*)",
       "Bash(bun run codegen:*)",
       "Bash(bun run typecheck:*)",
+      "Bash(bun run lint:*)",
       "Bash(bun test:*)"
     ]
   },

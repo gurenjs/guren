@@ -92,6 +92,13 @@ Review code changes and provide constructive, actionable feedback.
 - [ ] CSRF protection on state-changing routes
 - [ ] Rate limiting on public endpoints
 
+### Comments
+- [ ] Each comment carries what the code cannot show (a constraint, a pitfall, a unit, a sync obligation, a measured number, a reference) — not a restatement of the next line
+- [ ] No section banners, step labels, or change history (`used to`, `previously`, `no longer`)
+- [ ] No `@param`/`@returns` that only repeat the name and type
+- [ ] A block stays within 5 lines (module header 8), or carries an `oxlint-disable-next-line guren/comment-length -- <reason>`
+- [ ] Rules in `.claude/rules/comments.md`; with `.oxlintrc.json` present, `bun run lint` reports the mechanical half
+
 ### Testing
 - [ ] Tests added for new functionality
 - [ ] Edge cases covered

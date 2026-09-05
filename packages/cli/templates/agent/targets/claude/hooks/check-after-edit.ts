@@ -1,12 +1,14 @@
 #!/usr/bin/env bun
 /**
- * PostToolUse hook: after an agent edits routes, controllers, models, schema,
- * or pages, run `guren check` and feed failures back so they get fixed
+ * PostToolUse hook: after an agent edits a file, run `guren check` (for routes,
+ * controllers, models, schema, and pages) and oxlint (for any source file, when
+ * the app has an .oxlintrc.json) and feed findings back so they get fixed
  * immediately instead of surfacing later in CI.
  *
- * Exit codes: 0 = ok / not applicable, 2 = failures reported back to the agent.
+ * Exit codes: 0 = ok / not applicable, 2 = findings reported back to the agent.
  */
-import { relative } from 'node:path'
+import { existsSync, realpathSync } from 'node:fs'
+import { dirname, join, relative } from 'node:path'
 
 interface HookInput {
   tool_input?: {
@@ -22,6 +24,9 @@ const WATCHED_PATHS = [
   'db/schema.ts',
 ]
 
+const LINTABLE = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/u
+const UNLINTED_PREFIXES = ['.guren/', 'node_modules/', 'dist/', 'public/build/']
+
 let filePath = ''
 try {
   const input = JSON.parse(await Bun.stdin.text()) as HookInput
@@ -30,34 +35,74 @@ try {
   process.exit(0)
 }
 
-const relPath = relative(process.cwd(), filePath)
-if (!WATCHED_PATHS.some((prefix) => relPath.startsWith(prefix))) {
+/** Both sides resolved: on macOS `process.cwd()` is the real `/private/var/...` while the editor hands over `/var/...`. */
+function real(path: string): string {
+  try {
+    return realpathSync(path)
+  } catch {
+    return path
+  }
+}
+
+const relPath = relative(real(process.cwd()), real(filePath))
+if (relPath === '' || relPath.startsWith('..')) {
   process.exit(0)
 }
+
+const findings: string[] = []
 
 // Run the check in-process: this hook fires on every watched edit, and
 // spawning bunx + the CLI would cost a few hundred ms per edit. `changed:
 // true` restricts file-scanning checks (empty methods, architecture
 // boundaries) to what's actually changed, so this stays fast as the app
 // grows — it falls back to checking everything outside a git repo.
-let report
-try {
-  const { runCheck } = await import('@guren/cli')
-  report = await runCheck({ changed: true })
-} catch {
-  process.exit(0)
+if (WATCHED_PATHS.some((prefix) => relPath.startsWith(prefix))) {
+  try {
+    const { runCheck } = await import('@guren/cli')
+    const report = await runCheck({ changed: true })
+    if (report.failCount > 0) {
+      findings.push(`guren check found ${report.failCount} issue(s):`)
+      for (const check of report.checks.filter((check) => check.status === 'fail')) {
+        const location = check.filePath ? ` [${check.filePath}]` : ''
+        const suggestion = check.suggestion ? ` → ${check.suggestion}` : ''
+        findings.push(`- ${check.title}: ${check.message}${location}${suggestion}`)
+      }
+    }
+  } catch {
+    // no @guren/cli resolvable from here: nothing to check with
+  }
 }
 
-if (report.failCount > 0) {
-  const failures = report.checks.filter((check) => check.status === 'fail')
-  const lines = failures.map((check) => {
-    const location = check.filePath ? ` [${check.filePath}]` : ''
-    const suggestion = check.suggestion ? ` → ${check.suggestion}` : ''
-    return `- ${check.title}: ${check.message}${location}${suggestion}`
-  })
-  console.error(
-    `guren check found ${report.failCount} issue(s) after editing ${relPath}:\n${lines.join('\n')}`,
-  )
+/** The oxlint shim, wherever the install put it: a workspace may hoist it to an ancestor. */
+function resolveOxlint(): string | null {
+  for (let dir = process.cwd(); ; dir = dirname(dir)) {
+    const candidate = join(dir, 'node_modules', 'oxlint', 'bin', 'oxlint')
+    if (existsSync(candidate)) return candidate
+    if (dirname(dir) === dir) return null
+  }
+}
+
+// One file, through the shim under Bun (no Node needed). Warnings are reported
+// too: the comment rules are warnings so `bun run lint` stays green, and the
+// agent that just wrote the comment is the one who can fix it.
+const oxlint = LINTABLE.test(relPath) && !UNLINTED_PREFIXES.some((prefix) => relPath.startsWith(prefix)) && existsSync('.oxlintrc.json')
+  ? resolveOxlint()
+  : null
+if (oxlint !== null) {
+  const result = Bun.spawnSync([process.execPath, oxlint, '--format', 'unix', relPath], { stdout: 'pipe', stderr: 'pipe' })
+  const stdout = result.stdout.toString()
+  const lines = stdout.split('\n').filter((line) => line.startsWith(`${relPath}:`))
+  if (lines.length > 0) {
+    findings.push(`oxlint found ${lines.length} issue(s):`)
+    findings.push(...lines.map((line) => `- ${line}`))
+  } else if (result.exitCode !== 0) {
+    // A config or plugin-load failure has no file prefix; it must not read as clean.
+    findings.push(`oxlint exited ${result.exitCode} without linting ${relPath}:\n${stdout}${result.stderr.toString()}`.trimEnd())
+  }
+}
+
+if (findings.length > 0) {
+  console.error(`After editing ${relPath}:\n${findings.join('\n')}`)
   process.exit(2)
 }
 
