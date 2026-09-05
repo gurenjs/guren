@@ -33,6 +33,7 @@ export {
   XSRF_HEADER_NAME,
   XSRF_COOKIE_NAME,
   type CsrfOptions,
+  type CookielessAuthEndpoints,
 } from './csrf'
 export {
   validateRequest,

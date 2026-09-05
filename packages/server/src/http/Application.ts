@@ -490,6 +490,7 @@ export class Application {
    */
   private disposeBunTeardown?: () => void
   private autoSessionAttached = false
+  private readonly cookielessAuthPaths = new Set<string>()
   private routesRegistered = false
   private bootPromise?: Promise<void>
 
@@ -595,6 +596,22 @@ export class Application {
 
   hasAutoSessionAttached(): boolean {
     return this.autoSessionAttached
+  }
+
+  /**
+   * Asserts that `path` resolves its principal without ever reading a session
+   * cookie — a bearer token, or an authority in front of the app — so it
+   * refuses on its own terms and CSRF has no ambient authority to defend
+   * there. Only for an endpoint whose own code establishes that; an app
+   * exempting a path it chose wants `csrfOptions.exclude`.
+   */
+  declareCookielessAuthPath(path: string): void {
+    this.cookielessAuthPaths.add(path)
+  }
+
+  /** Matched by exact path — see {@link declareCookielessAuthPath}. */
+  getCookielessAuthPaths(): ReadonlySet<string> {
+    return this.cookielessAuthPaths
   }
 
   async mountRoutes(): Promise<void> {

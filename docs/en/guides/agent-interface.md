@@ -501,10 +501,15 @@ so the app must configure an [API token store](./api-tokens.md):
 - no token store configured at all → `500` naming `auth.useTokens(store)`, so a
   misconfiguration reads as a misconfiguration rather than a rejected token
 
-You do not need a CSRF exemption for it. A request that carries
+You do not need to write a CSRF exemption for it. A request carrying
 `Authorization: Bearer` and no `Cookie` header at all skips CSRF verification
-framework-wide — there is no ambient authority to defend, and the dispatcher
-synthesizes cookie-less bearer requests by construction.
+framework-wide, and the dispatcher synthesizes cookie-less bearer requests by
+construction. The plugin also declares its own configured path as authenticating
+without cookies, so a request that misses that rule — one with no bearer, or one
+a browser attached cookies to — is answered by the `401` above rather than by a
+CSRF `403` that hides the real reason. Neither skip authenticates anything: both
+ways in are a bearer token and the in-process external-auth seam, and a browser
+can present neither.
 
 ### Configuration
 

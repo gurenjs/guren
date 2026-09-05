@@ -36,12 +36,14 @@ export class AuthServiceProvider extends ServiceProvider {
       // Auto-register CSRF protection when session is enabled (secure by default)
       if (authOptions.autoCsrf !== false) {
         const csrfOptions = authOptions.csrfOptions ?? {}
+        // The endpoint registry stays out of the spread: inside it, an app's
+        // `csrfOptions` could name paths of its own or drop the declared ones.
         app.use('*', createCsrfMiddleware({
           cookieOptions: {
             secure: typeof process !== 'undefined' ? process.env.NODE_ENV === 'production' : true,
           },
           ...csrfOptions,
-        }))
+        }, () => app.getCookielessAuthPaths()))
       }
     }
 

@@ -154,6 +154,11 @@ const factory = definePlugin<McpPluginConfig>({
       container.instance(AGENT_AUDIT_BINDING, emit)
     }
 
+    // This endpoint resolves a principal only from a bearer token or the
+    // external-auth seam and refuses 401 otherwise, so CSRF verification here
+    // guards no ambient authority and would answer 403 in place of that 401.
+    app.declareCookielessAuthPath(path)
+
     app.hono.all(path, async (c) => {
       // Consulted first, on the raw request: a hit means an authority in front
       // of the app already verified this caller, so the bearer machinery below

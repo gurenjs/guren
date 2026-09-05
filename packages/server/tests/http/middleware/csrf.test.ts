@@ -372,6 +372,35 @@ describe('createCsrfMiddleware', () => {
     expect(otherRes.status).toBe(403)
   })
 
+  it('exempts a declared cookieless-auth path, and only by exact match', async () => {
+    const declared = new Set(['/mcp'])
+    const app = new Hono()
+    app.use(createSessionMiddleware())
+    app.use(createCsrfMiddleware(undefined, () => declared))
+    app.post('/mcp', (c) => c.text('jsonrpc'))
+    app.post('/mcp/tools', (c) => c.text('subpath'))
+    app.post('/comments', (c) => c.text('ordinary'))
+
+    expect((await app.request('/mcp', { method: 'POST' })).status).toBe(200)
+    // A declared path is one route, so no prefix or pattern is implied.
+    expect((await app.request('/mcp/tools', { method: 'POST' })).status).toBe(403)
+    expect((await app.request('/comments', { method: 'POST' })).status).toBe(403)
+  })
+
+  it('reads declared paths per request, not at middleware creation', async () => {
+    const declared = new Set<string>()
+    const app = new Hono()
+    app.use(createSessionMiddleware())
+    app.use(createCsrfMiddleware(undefined, () => declared))
+    app.post('/mcp', (c) => c.text('jsonrpc'))
+
+    expect((await app.request('/mcp', { method: 'POST' })).status).toBe(403)
+
+    // The declaring endpoint mounts at boot, after this middleware was created.
+    declared.add('/mcp')
+    expect((await app.request('/mcp', { method: 'POST' })).status).toBe(200)
+  })
+
   it('protects the MCP path when the endpoint is not mounted', async () => {
     delete process.env.GUREN_MCP
 
