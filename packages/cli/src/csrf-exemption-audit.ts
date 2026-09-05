@@ -11,13 +11,23 @@ import type { AuditFinding } from './audit'
  * at boot from the plugin's configuration, so no static read can know it.
  */
 
-/** The call as it survives a bundle: Guren forbids identifier mangling. */
+/**
+ * A member call, never a mention. `@guren/cli` ships this very scanner and
+ * `@guren/server` its JSDoc, so a package that only names the method — in a
+ * string, a comment, a type — is not a declarer. Matches the shapes that
+ * survive a bundle (Guren forbids identifier mangling): dotted, optional-call,
+ * and computed access.
+ */
+const DECLARE_CALL_PATTERN =
+  /(?:\.\s*declareCookielessAuthPath|\[\s*['"`]declareCookielessAuthPath['"`]\s*\])\s*(?:\?\.)?\s*\(/
+
+/** For the messages, which must not themselves be a call the scan would match. */
 const DECLARE_CALL = 'declareCookielessAuthPath'
 
 /**
- * npm reserves the scope, so a package under it is this repo's, whose own
- * declaration is reviewed here. Any other publisher's is the one a human
- * has to look at.
+ * npm reserves the scope, so a package published under it is this repo's, whose
+ * own declaration is reviewed here. Read from the installed manifest rather
+ * than the dependency key, which an `npm:` alias controls.
  */
 const FIRST_PARTY_SCOPE = '@guren/'
 
@@ -41,30 +51,26 @@ export interface CsrfExemptionScan {
 interface PackageScan {
   packageName: string
   declares: boolean
-  /** The file cap cut the walk short, so `declares: false` proves nothing. */
+  /** The file cap cut the walk short, so the coverage is not what it looks like. */
   truncated: boolean
 }
 
+interface PackageManifest {
+  name?: unknown
+  gurenPlugin?: unknown
+  dependencies?: Record<string, string>
+  peerDependencies?: Record<string, string>
+}
+
 /**
- * A dependency that could plausibly hold the call: it declares a `gurenPlugin`
+ * A package that could plausibly hold the call: it declares a `gurenPlugin`
  * manifest, or depends on the package the method lives on. Reading every
  * declared dependency instead would walk React and Vite for one string.
  */
-async function isGurenFacing(manifestRaw: string): Promise<boolean> {
-  let parsed: {
-    gurenPlugin?: unknown
-    dependencies?: Record<string, string>
-    peerDependencies?: Record<string, string>
-  }
-  try {
-    parsed = JSON.parse(manifestRaw)
-  } catch {
-    return false
-  }
+function isGurenFacing(manifest: PackageManifest): boolean {
+  if (manifest.gurenPlugin && typeof manifest.gurenPlugin === 'object') return true
 
-  if (parsed.gurenPlugin && typeof parsed.gurenPlugin === 'object') return true
-
-  const related = { ...parsed.dependencies, ...parsed.peerDependencies }
+  const related = { ...manifest.dependencies, ...manifest.peerDependencies }
   return '@guren/core' in related || '@guren/server' in related
 }
 
@@ -73,19 +79,25 @@ async function collectPackageFiles(packageDir: string): Promise<{ files: string[
   const files: string[] = []
   const queue = [packageDir]
 
-  while (queue.length > 0 && files.length < MAX_FILES_PER_PACKAGE) {
+  while (queue.length > 0) {
     const dir = queue.shift()!
-    const entries = await readdir(dir, { withFileTypes: true })
 
-    for (const entry of entries) {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
       if (entry.name === 'node_modules') continue
       const full = join(dir, entry.name)
-      if (entry.isDirectory()) queue.push(full)
-      else if (SCANNED_EXTENSIONS.some((extension) => entry.name.endsWith(extension))) files.push(full)
+
+      if (entry.isDirectory()) {
+        queue.push(full)
+      } else if (SCANNED_EXTENSIONS.some((extension) => entry.name.endsWith(extension))) {
+        // Refusing a file is what truncation means — a package holding exactly
+        // the cap was read in full and must not report partial coverage.
+        if (files.length === MAX_FILES_PER_PACKAGE) return { files, truncated: true }
+        files.push(full)
+      }
     }
   }
 
-  return { files, truncated: files.length >= MAX_FILES_PER_PACKAGE }
+  return { files, truncated: false }
 }
 
 async function scanPackage(cwd: string, packageName: string): Promise<PackageScan | null> {
@@ -101,13 +113,20 @@ async function scanPackage(cwd: string, packageName: string): Promise<PackageSca
     throw error
   }
 
-  if (!(await isGurenFacing(manifestRaw))) return null
+  // A manifest that will not parse leaves the package unclassified, which is
+  // an unreadable package rather than one known to be irrelevant.
+  const manifest = JSON.parse(manifestRaw) as PackageManifest
+  if (!isGurenFacing(manifest)) return null
 
   const { files, truncated } = await collectPackageFiles(packageDir)
   const sources = await Promise.all(files.map((file) => readFile(file, 'utf8')))
-  const declares = sources.some((source) => source.includes(DECLARE_CALL))
 
-  return { packageName, declares, truncated: truncated && !declares }
+  return {
+    // The published name, so an `npm:` alias cannot borrow the trusted scope.
+    packageName: typeof manifest.name === 'string' ? manifest.name : packageName,
+    declares: sources.some((source) => DECLARE_CALL_PATTERN.test(source)),
+    truncated,
+  }
 }
 
 const REVIEW_SUGGESTION =
@@ -152,19 +171,20 @@ export async function auditCsrfExemptions(
       message:
         `${failure.packageName} could not be read, so it was not checked for a CSRF exemption `
         + `(${failure.error}).`,
-      suggestion: `Reinstall dependencies and re-run: bunx guren audit`,
+      suggestion: 'Reinstall dependencies and re-run: bunx guren audit',
     })
   }
 
-  for (const cut of scanned.filter((result) => result.truncated)) {
+  const truncatedPackages = scanned.filter((result) => result.truncated)
+  for (const cut of truncatedPackages) {
     findings.push({
       key: `csrf-exemption:truncated:${cut.packageName}`,
       title: `${cut.packageName} partly scanned`,
       status: 'warn',
       message:
         `${cut.packageName} ships more than ${MAX_FILES_PER_PACKAGE} JavaScript files, so the scan `
-        + 'stopped there without finding a CSRF exemption — it may still declare one.',
-      suggestion: `Search the package for ${DECLARE_CALL}( by hand.`,
+        + 'stopped there and did not see every file it ships.',
+      suggestion: `Search the package by hand for a call to ${DECLARE_CALL}.`,
     })
   }
 
@@ -177,9 +197,8 @@ export async function auditCsrfExemptions(
       title: 'Plugin CSRF exemptions',
       status: 'warn',
       message:
-        `${thirdParty.join(', ')} exempts a path from CSRF verification via `
-        + `${DECLARE_CALL}(). The path is chosen at boot from the plugin's configuration, so it `
-        + 'cannot be reported here.',
+        `${thirdParty.join(', ')} calls ${DECLARE_CALL} to exempt a path from CSRF verification. `
+        + "The path is chosen at boot from the plugin's configuration, so it cannot be reported here.",
       suggestion: REVIEW_SUGGESTION,
     })
   } else {
@@ -196,7 +215,7 @@ export async function auditCsrfExemptions(
   }
 
   return {
-    status: unreadable.length > 0 || scanned.some((result) => result.truncated) ? 'partial' : 'complete',
+    status: unreadable.length > 0 || truncatedPackages.length > 0 ? 'partial' : 'complete',
     packagesScanned: scanned.length,
     declaredBy: declaring,
   }

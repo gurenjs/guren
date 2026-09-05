@@ -19,8 +19,10 @@ the CLI boots an application.
 - **Plugin CSRF exemptions** reads the JavaScript each Guren-facing dependency
   ships (one that declares a `gurenPlugin` manifest, or depends on
   `@guren/core`/`@guren/server`) and names every package that declares one.
-  A package outside the `@guren/` scope is a warning; first-party packages are
-  listed without one. It names packages, never paths — each path is an argument
+  A package whose published name is outside the `@guren/` scope is a warning;
+  first-party packages are listed without one. Detection is a member call, not
+  a mention, so a package that merely names the method in a string or a comment
+  is not a declarer. It names packages, never paths — each path is an argument
   computed at boot from that package's own configuration, so no static read can
   know it.
 

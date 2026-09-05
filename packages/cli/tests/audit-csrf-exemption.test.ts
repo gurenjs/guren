@@ -45,6 +45,10 @@ async function appWith(packages: Record<string, FakePackage>): Promise<string> {
 const GUREN_FACING = { dependencies: { '@guren/core': '^2.0.0' } }
 const DECLARES = { 'dist/index.js': 'app.declareCookielessAuthPath(config.path);\n' }
 
+function chunks(count: number): Record<string, string> {
+  return Object.fromEntries(Array.from({ length: count }, (_, i) => [`dist/chunk-${i}.js`, 'export {}\n']))
+}
+
 describe('auditCsrfExemptions', () => {
   it('passes when no Guren-facing package declares one', async () => {
     const cwd = await appWith({
@@ -127,14 +131,7 @@ describe('auditCsrfExemptions', () => {
   })
 
   it('reports a package too large to walk as partial coverage, not as declaring nothing', async () => {
-    const cwd = await appWith({
-      'acme-huge': {
-        manifest: GUREN_FACING,
-        files: Object.fromEntries(
-          Array.from({ length: 401 }, (_, i) => [`dist/chunk-${i}.js`, 'export {}\n']),
-        ),
-      },
-    })
+    const cwd = await appWith({ 'acme-huge': { manifest: GUREN_FACING, files: chunks(401) } })
     const findings: AuditFinding[] = []
 
     const scan = await auditCsrfExemptions(cwd, findings)
@@ -142,6 +139,103 @@ describe('auditCsrfExemptions', () => {
     expect(scan.status).toBe('partial')
     expect(scan.declaredBy).toEqual([])
     expect(findings.find((f) => f.key === 'csrf-exemption:truncated:acme-huge')?.status).toBe('warn')
+  })
+
+  it('does not call a package truncated when every file it ships was read', async () => {
+    const cwd = await appWith({ 'acme-exact': { manifest: GUREN_FACING, files: chunks(400) } })
+    const findings: AuditFinding[] = []
+
+    expect((await auditCsrfExemptions(cwd, findings)).status).toBe('complete')
+    expect(findings.some((f) => f.key.startsWith('csrf-exemption:truncated:'))).toBe(false)
+  })
+
+  it('still reports partial when the package it truncated also declares one', async () => {
+    const cwd = await appWith({
+      'acme-huge': { manifest: GUREN_FACING, files: { ...chunks(401), ...DECLARES } },
+    })
+    const findings: AuditFinding[] = []
+
+    const scan = await auditCsrfExemptions(cwd, findings)
+
+    expect(scan.status).toBe('partial')
+    expect(findings.find((f) => f.key === 'csrf-exemption:truncated:acme-huge')?.status).toBe('warn')
+  })
+
+  it('does not read a mention of the method as a call', async () => {
+    const cwd = await appWith({
+      // The shape @guren/cli itself ships: this scanner's own constant, plus a
+      // message naming the method. Neither is a call.
+      'acme-tooling': {
+        manifest: GUREN_FACING,
+        files: {
+          'dist/bin.js':
+            'const DECLARE_CALL = "declareCookielessAuthPath";\n'
+            + 'const msg = "exempts a path via declareCookielessAuthPath().";\n',
+        },
+      },
+    })
+    const findings: AuditFinding[] = []
+
+    const scan = await auditCsrfExemptions(cwd, findings)
+
+    expect(scan.packagesScanned).toBe(1)
+    expect(scan.declaredBy).toEqual([])
+  })
+
+  it('matches optional-call and computed access, which a bundle can emit', async () => {
+    const cwd = await appWith({
+      'acme-optional': {
+        manifest: GUREN_FACING,
+        files: { 'dist/index.js': 'app.declareCookielessAuthPath?.(p)\n' },
+      },
+      'acme-computed': {
+        manifest: GUREN_FACING,
+        files: { 'dist/index.js': 'app["declareCookielessAuthPath"](p)\n' },
+      },
+    })
+    const findings: AuditFinding[] = []
+
+    expect((await auditCsrfExemptions(cwd, findings)).declaredBy.sort()).toEqual([
+      'acme-computed',
+      'acme-optional',
+    ])
+  })
+
+  it('judges first-party by the published name, not by an npm: alias key', async () => {
+    const cwd = await appWith({
+      '@guren/plugin-mcp': {
+        manifest: { name: 'acme-impostor', ...GUREN_FACING },
+        files: DECLARES,
+      },
+    })
+    const findings: AuditFinding[] = []
+
+    const scan = await auditCsrfExemptions(cwd, findings)
+
+    expect(scan.declaredBy).toEqual(['acme-impostor'])
+    expect(findings.find((f) => f.key === 'csrf-exemption:plugin')?.status).toBe('warn')
+  })
+
+  it('scans a plugin declared under optionalDependencies', async () => {
+    const cwd = await appWith({ 'acme-mcp': { manifest: GUREN_FACING, files: DECLARES } })
+    await writeFile(
+      join(cwd, 'package.json'),
+      JSON.stringify({ optionalDependencies: { 'acme-mcp': '*' } }),
+    )
+    const findings: AuditFinding[] = []
+
+    expect((await auditCsrfExemptions(cwd, findings)).declaredBy).toEqual(['acme-mcp'])
+  })
+
+  it('treats a manifest that will not parse as unreadable, not as irrelevant', async () => {
+    const cwd = await appWith({ 'acme-broken': { manifest: GUREN_FACING } })
+    await writeFile(join(cwd, 'node_modules/acme-broken/package.json'), '{ not json')
+    const findings: AuditFinding[] = []
+
+    const scan = await auditCsrfExemptions(cwd, findings)
+
+    expect(scan.status).toBe('partial')
+    expect(findings.find((f) => f.key === 'csrf-exemption:unreadable:acme-broken')?.status).toBe('warn')
   })
 
   it('reports an unreadable package as partial coverage rather than a clean scan', async () => {

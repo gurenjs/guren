@@ -269,6 +269,36 @@ describe('security posture: cookieless-auth CSRF exemptions', () => {
     expect([...app.getCookielessAuthPaths()]).toEqual(['/plugin-endpoint'])
   })
 
+  /**
+   * Mounted after boot, like the endpoint a plugin mounts from its own boot
+   * hook: `AuthServiceProvider.register()` adds the CSRF middleware during
+   * boot, and Hono only applies middleware registered before the route.
+   */
+  async function bootWithDeclaredEndpoint(): Promise<Application> {
+    const app = new Application({ auth: {} })
+    await app.boot()
+    app.hono.post('/declared', () => new Response('ok'))
+    app.hono.post('/undeclared', () => new Response('ok'))
+    app.declareCookielessAuthPath('/declared')
+    return app
+  }
+
+  it('carries a declaration through to the CSRF middleware an auth app mounts', async () => {
+    const app = await bootWithDeclaredEndpoint()
+
+    const response = await app.fetch(new Request('http://example.com/declared', { method: 'POST' }))
+
+    expect(response.status).toBe(200)
+  })
+
+  it('leaves an undeclared neighbour verified, so the middleware really is mounted', async () => {
+    const app = await bootWithDeclaredEndpoint()
+
+    const response = await app.fetch(new Request('http://example.com/undeclared', { method: 'POST' }))
+
+    expect(response.status).toBe(403)
+  })
+
   it('keeps a declaration that collides with an application route out of the set', async () => {
     const app = new Application()
     app.router.post('/collides', () => 'ok')

@@ -89,8 +89,11 @@ const GUEST_PATH_PATTERN = /(login|logout|register|signup|sign-up|password|forgo
 
 const WEBHOOK_PATH_PATTERN = /(webhook|callback)/i
 
-// On a receiver, so the method named in a type position is not a call.
-const CSRF_EXEMPTION_PATTERN = /\.\s*declareCookielessAuthPath\s*\(/
+// A member call, so the method named in a type position is not one. Dotted,
+// optional-call and computed access; a receiver split across lines is missed,
+// like every other rule this line-based scan carries.
+const CSRF_EXEMPTION_PATTERN =
+  /(?:\.\s*declareCookielessAuthPath|\[\s*['"`]declareCookielessAuthPath['"`]\s*\])\s*(?:\?\.)?\s*\(/
 
 const AUTH_MIDDLEWARE_PATTERN = /auth/i
 
