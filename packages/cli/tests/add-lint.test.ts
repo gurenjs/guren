@@ -1,9 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
-import { consola } from 'consola'
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { existsSync } from 'node:fs'
 import { cp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
-import { assertWorkspaceBuilt, createTempWorkspace, linkWorkspacePackage, OXLINT_BIN, type TempWorkspace } from './helpers'
+import { assertWorkspaceBuilt, captureWarnings, createTempWorkspace, linkWorkspacePackage, OXLINT_BIN, type TempWorkspace } from './helpers'
 import { addLint, LINT_SCRIPTS, oxlintRange } from '../src/add-lint'
 import { runBlueprint } from '../src/blueprints'
 
@@ -46,20 +45,15 @@ describe('guren add lint', () => {
 
   it('keeps a lint script and an oxlint range the app already has', async () => {
     await writeFile('package.json', JSON.stringify({ ...MANIFEST, scripts: { lint: 'eslint .' }, devDependencies: { oxlint: '1.0.0' } }))
-    const warn = spyOn(consola, 'warn').mockImplementation(() => {})
 
-    try {
-      const created = await runBlueprint('lint')
+    const { result: created, warnings } = await captureWarnings(() => runBlueprint('lint'))
 
-      const manifest = await readManifest()
-      expect(manifest.scripts).toEqual({ lint: 'eslint .', 'lint:fix': LINT_SCRIPTS['lint:fix'] })
-      expect(manifest.devDependencies).toEqual({ oxlint: '1.0.0' })
-      expect(created).toContain(resolve('package.json'))
-      // A range the plugin was not tested against is kept, but said so.
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining('oxlint 1.0.0'))
-    } finally {
-      warn.mockRestore()
-    }
+    const manifest = await readManifest()
+    expect(manifest.scripts).toEqual({ lint: 'eslint .', 'lint:fix': LINT_SCRIPTS['lint:fix'] })
+    expect(manifest.devDependencies).toEqual({ oxlint: '1.0.0' })
+    expect(created).toContain(resolve('package.json'))
+    // A range the plugin was not tested against is kept, but said so.
+    expect(warnings.join('\n')).toContain('oxlint 1.0.0')
   })
 
   it('refuses to overwrite an existing config without --force', async () => {
