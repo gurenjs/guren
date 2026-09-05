@@ -8,8 +8,9 @@
  * An app imports the package root from `src/app.ts`, which `guren dev` runs on
  * Bun, so the root must never reach this file.
  */
-import { Agent } from 'agents'
+import { Agent, routeAgentRequest } from 'agents'
 
+import type { AgentsRoutingConfig } from './config'
 import { resolveAgentRuntime, type AgentRuntime } from './latch'
 import { createAgentToolClient, type AgentToolClient } from './tool-client'
 
@@ -100,6 +101,70 @@ export class GurenAgent<
       instanceId: this.name,
     })
   }
+}
+
+const UNCONFIGURED_ROUTING =
+  'This application hosts durable agents, but nothing says who may address one, so /agents/* is '
+  + 'refused. Declare an authorizer in config/agents.ts:\n'
+  + '  export default defineAgentsConfig({\n'
+  + '    agents: { … },\n'
+  + '    routing: { authorize: (request, target) => /* your check */ false },\n'
+  + '  })'
+
+const REFUSED_ROUTING = 'You may not address this agent instance.'
+
+/** `routeAgentRequest`'s default prefix, as a path — the SDK owns everything beneath it. */
+const AGENTS_PREFIX = '/agents/'
+
+/**
+ * Route `/agents/<binding>/<instance>` to its Durable Object behind the app's
+ * authorizer — RFC 0017 §6's default-deny mount. The authorizer sits in both
+ * pre-dispatch hooks (`onBeforeRequest`; `onBeforeConnect` for WebSocket
+ * upgrades), where a `Response` short-circuits before the Durable Object exists.
+ * @param bindings The bindings hosting *registered* agents; the SDK would route to every one in `env`.
+ */
+export async function routeGuardedAgentRequest(
+  request: Request,
+  env: unknown,
+  routing: AgentsRoutingConfig | undefined,
+  bindings: readonly string[],
+): Promise<Response | undefined> {
+  // A `typeof` test, not a truthiness one: the config is app-authored
+  // JavaScript, and `authorize: true` must refuse rather than throw.
+  const authorize = routing?.authorize
+  if (typeof authorize !== 'function') {
+    // Refused before the SDK sees it: the router answers 400 for an unknown
+    // binding *ahead of* either hook, which would let an anonymous caller tell
+    // bound names from unbound ones. Unconfigured, the whole prefix is one 403.
+    return new URL(request.url).pathname.startsWith(AGENTS_PREFIX)
+      ? refuse(UNCONFIGURED_ROUTING)
+      : undefined
+  }
+
+  const guard = async (incoming: Request, route: { className: string; name: string }) => {
+    // `className` is the SDK's name for the *binding* it resolved the URL segment
+    // to (`Extract<keyof Env, string>`), not the class and not the config key.
+    // Same 403 as a refusal, so the list cannot be probed.
+    if (!bindings.includes(route.className)) return refuse(REFUSED_ROUTING)
+    const verdict = await authorize(incoming, { agent: route.className, instance: route.name })
+    if (verdict instanceof Response) return verdict
+    return verdict === true ? undefined : refuse(REFUSED_ROUTING)
+  }
+
+  const routed = await routeAgentRequest(request, env, {
+    onBeforeRequest: guard,
+    onBeforeConnect: guard,
+  })
+  // The SDK answers `null` for a path it does not own; this surface answers
+  // `undefined`, so a caller writes `if (routed) return routed`.
+  return routed ?? undefined
+}
+
+function refuse(message: string): Response {
+  return new Response(JSON.stringify({ error: 'forbidden', message }), {
+    status: 403,
+    headers: { 'Content-Type': 'application/json' },
+  })
 }
 
 function describeRegistered(runtime: AgentRuntime): string {

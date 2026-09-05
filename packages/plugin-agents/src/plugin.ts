@@ -119,11 +119,12 @@ const factory = definePlugin<AgentsPluginConfig>({
 
     configureAgentRuntime({
       // Not `app` itself: this hook runs inside `bootAll()`, so every provider
-      // after it is still unbooted and a call dispatched now re-enters a half
-      // assembled app. Awaiting `booted()` is "published" vs "usable".
+      // after it is still unbooted. `boot()` rather than `booted()`: after a boot
+      // that *failed*, `booted()` resolves at once into the half-assembled app,
+      // where `boot()` retries it the way the next request would.
       app: {
         fetch: async (request, env, executionCtx) => {
-          await app.booted()
+          await app.boot()
           return app.fetch(request, env, executionCtx)
         },
       },

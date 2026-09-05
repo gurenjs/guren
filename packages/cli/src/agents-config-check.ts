@@ -11,6 +11,7 @@ import { resolve } from 'node:path'
 import type { ObjectExpression } from '@babel/types'
 import { classifyRegistrationScope, deriveAgentTools, expandToolScopes } from '@guren/core'
 import type { RouteDefinition, ScopedTool } from '@guren/core'
+import { AGENTS_CONFIG_FILE } from '@guren/core/internal/deploy-build'
 
 import {
   defaultExportConfigProperty,
@@ -22,9 +23,6 @@ import {
 import { check, type CheckResult } from './check-result'
 import { fileExists } from './discovery'
 import type { ParseCache } from './parse-cache'
-
-/** The one place the registry lives. `guren cloudflare:build` reads this path. */
-export const AGENTS_CONFIG_FILE = 'config/agents.ts'
 
 export interface AgentsConfigCheckOptions {
   cwd: string

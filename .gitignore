@@ -30,3 +30,6 @@ benchmarks.json
 benchmark-history.json
 # serena (MCP) tool-local state — regenerated on startup
 .serena/
+
+# The worker `tests/workers/build-fixture.ts` generates for the workerd lane.
+packages/plugin-agents/tests/workers/app/.cloudflare/

@@ -1,0 +1,38 @@
+{
+  "name": "guren-plugin-agents-fixture",
+  // The generated worker, not a hand-written one: the workerd suite runs the
+  // build wiring under review rather than a stand-in for it (RFC 0017 §7).
+  "main": ".cloudflare/worker.js",
+  "compatibility_date": "2026-08-01",
+  // Required by the agents SDK: `node:async_hooks` and
+  // `node:diagnostics_channel` are static imports in its module graph, so the
+  // graph cannot evaluate without Node compatibility.
+  "compatibility_flags": ["nodejs_compat"],
+  // Build-owned keys, carried so the generator has nothing to warn about. The
+  // stub files are written into .cloudflare/ on every build.
+  "alias": {
+    "bun:sqlite": "./.cloudflare/stub-bun-sqlite.js",
+    "vite": "./.cloudflare/stub-vite.js",
+    "@guren/cli": "./.cloudflare/stub-guren-cli.js",
+    "@modelcontextprotocol/sdk/server/mcp.js": "./.cloudflare/stub-mcp-server.js",
+    "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js": "./.cloudflare/stub-mcp-transport.js",
+    "postgres": "./.cloudflare/stub-postgres.js",
+    "mysql2": "./.cloudflare/stub-mysql2.js",
+    "mysql2/promise": "./.cloudflare/stub-mysql2-promise.js",
+    "@aws-sdk/client-rds-data": "./.cloudflare/stub-rds-data.js"
+  },
+  "define": {
+    "process.env.NODE_ENV": "\"production\"",
+    "import.meta.url": "\"file:///worker.js\""
+  },
+  "durable_objects": {
+    "bindings": [
+      { "name": "TEST_AGENT", "class_name": "TestAgent" },
+      { "name": "STRAY_AGENT", "class_name": "StrayAgent" }
+    ]
+  },
+  // `new_sqlite_classes`, not `new_classes`: the SDK stores state and all its
+  // bookkeeping in Durable Object SQLite, so the legacy KV storage backend
+  // cannot host an Agent. This is the form the scaffold emits.
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TestAgent", "StrayAgent"] }]
+}

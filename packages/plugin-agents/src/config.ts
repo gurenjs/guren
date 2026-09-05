@@ -54,6 +54,41 @@ export interface AgentsApprovalsConfig {
   ttlMs?: number
 }
 
+/** The instance a `/agents/<agent>/<instance>` request is addressed to. */
+export interface AgentRouteTarget {
+  /**
+   * The Durable Object **binding** name the URL segment resolved to, not the
+   * `config/agents.ts` key: the SDK builds its route table from `env`, and the
+   * path segment is that binding kebab-cased (`TRIAGER_AGENT` → `triager-agent`).
+   */
+  agent: string
+  /** The instance name — the second segment, passed to `idFromName`. */
+  instance: string
+}
+
+/**
+ * Who may address an agent instance.
+ *
+ * `true` lets the request reach the Durable Object; `false` refuses it with
+ * 403; a `Response` is returned as it is; a throw propagates. The Durable
+ * Object is constructed only on `true`, so a refusal costs no cold start.
+ */
+export type AgentRouteAuthorizer = (
+  request: Request,
+  target: AgentRouteTarget,
+) => boolean | Response | Promise<boolean | Response>
+
+/**
+ * The documented override of the scaffolded deny-all (RFC 0017 §6).
+ *
+ * Deliberately thin — a predicate, not a policy class — because Open Question 3
+ * (per-agent policy classes? `Gate` abilities?) is unsettled, and a richer
+ * surface published now would have to be kept.
+ */
+export interface AgentsRoutingConfig {
+  authorize: AgentRouteAuthorizer
+}
+
 export interface AgentsConfig {
   /**
    * Keyed by the agent's name — the half of its principal id that is not the
@@ -62,6 +97,11 @@ export interface AgentsConfig {
    */
   agents: Record<string, AgentRegistrationConfig>
   approvals?: AgentsApprovalsConfig
+  /**
+   * Who may reach `/agents/*` on the generated worker. Absent, every request to
+   * that prefix is refused and no Durable Object is constructed.
+   */
+  routing?: AgentsRoutingConfig
 }
 
 /** Calls per minute an agent instance gets when its registration names none. */

@@ -1,0 +1,8 @@
+{
+  "name": "guren-plugin-agents-fixture",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@guren/plugin-agents": "workspace:*"
+  }
+}

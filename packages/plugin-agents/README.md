@@ -4,9 +4,8 @@ Durable agents for Guren applications: long-lived, stateful processes that act
 *through* your application's own agent tools, hosted on Cloudflare Durable
 Objects via the [Cloudflare Agents SDK](https://www.npmjs.com/package/agents).
 
-> RFC 0017. Deploy integration (`guren cloudflare:build` generating the
-> worker's named exports and verifying the Durable Object bindings) lands in a
-> follow-up.
+> RFC 0017. The pending-approval ledger (a parked call retried once a human
+> approves it) is still to come; everything below ships today.
 
 ## Install
 
@@ -65,6 +64,73 @@ createApp({ providers: [agentsPlugin(agents)] })
 ```
 
 `bunx guren make:agent Triager` writes all three.
+
+## What `guren cloudflare:build` generates
+
+`config/agents.ts` is the file the deploy build reads. For each registration it
+appends a named export to the generated worker, so wrangler has a class to point
+a Durable Object binding at, and it wires the boot seam an alarm needs:
+
+```js
+// .cloudflare/worker.js — generated
+const handler = createWorkersHandler(app)
+configureAgentRuntime((env) => handler.boot(env))
+
+export { Triager } from '../app/Agents/Triager.ts'
+
+const agentBindings = ["TRIAGER"]
+
+const agentEntry = {
+  async fetch(request, env, ctx) {
+    await handler.boot(env)
+    const routed = await routeGuardedAgentRequest(request, env, agentsConfig.routing, agentBindings)
+    if (routed) return routed
+    return handler.fetch(request, env, ctx)
+  },
+}
+```
+
+One boot slot serves both entrypoints: an agent woken by an alarm before any
+request has arrived boots the application itself, and the request that follows
+joins that boot rather than starting a second.
+
+The build also checks the committed `wrangler.jsonc`. A registered class with no
+binding, or one that is not SQLite-backed, fails the build with the exact JSON
+to add — before the app build runs, not after minutes of Vite output. Both forms
+wrangler accepts are recognised (`migrations[].new_sqlite_classes` and the
+declarative `exports` map); a fresh scaffold gets the migrations form.
+
+## Who may address an agent instance
+
+Once agents are registered the generated worker reserves the whole `/agents/`
+prefix for the SDK's router — your own routes under it are unreachable. It is
+**deny-all**: every request beneath the prefix, and every WebSocket upgrade, is
+refused with 403 until the registry says otherwise, and the refusal happens
+before the Durable Object is constructed, so an unauthorized caller does not
+even cost a cold start. (With an authorizer configured, a binding the SDK cannot
+find answers its own 400.) Only the bindings `wrangler.jsonc` gives the
+*registered* classes are routable: the SDK would otherwise reach every Durable
+Object in `env`, so the generated worker carries that list and refuses the rest
+before the authorizer is asked.
+
+```ts
+// config/agents.ts
+export default defineAgentsConfig({
+  agents: { /* … */ },
+  routing: {
+    authorize(request, target) {
+      // target.agent is the Durable Object *binding* name the SDK resolved the
+      // URL segment to (the path carries it kebab-cased), not the key above.
+      return ownsInstance(request, target.instance)
+    },
+  },
+})
+```
+
+Return `true` to let the request through, `false` for a 403, or a `Response` of
+your own to answer it directly. `routeAgentRequest` is a router, not an auth
+layer — this is the layer. The shape is deliberately thin while RFC 0017's Open
+Question 3 (per-agent policy classes? `Gate` abilities?) is unsettled.
 
 ## What an agent cannot do
 

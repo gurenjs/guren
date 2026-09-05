@@ -13,6 +13,14 @@ import { fileURLToPath } from 'node:url'
 
 export type PathLike = string | URL
 
+/**
+ * The agent registry (RFC 0017 §3), at a path neither side may choose. Shared
+ * rather than spelled twice: `guren check` reads it as source and a deploy build
+ * reads it to generate the worker's Durable Object exports, so a second spelling
+ * is a deploy exporting no agents while the check calls them registered.
+ */
+export const AGENTS_CONFIG_FILE = 'config/agents.ts'
+
 export type ManifestEntry = {
   file?: string
   css?: string[]

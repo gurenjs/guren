@@ -2,6 +2,7 @@ import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statS
 import { relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
+  AGENTS_CONFIG_FILE,
   appUsesMcpPlugin,
   DEV_ONLY_MODULES,
   MCP_PLUGIN_PACKAGE,
@@ -111,6 +112,17 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
     assertOAuthKvBound(root)
   }
 
+  const hostsAgents = existsSync(resolve(root, AGENTS_CONFIG_FILE))
+  if (hostsAgents) {
+    // Before the registry is read, not after: reading it evaluates a file that
+    // imports the plugin, so an app that never installed it would fail with the
+    // module resolver's message instead of the one carrying the fix.
+    assertAgentsPluginUsable(root)
+  }
+  const agents = hostsAgents ? await readAgentRegistry(root) : NO_AGENTS
+  const agentBindings = assertAgentDurableObjects(root, agents.exports)
+  warnUnroutedAgents(agents)
+
   if (!options.skipAppBuild) {
     runAppBuild(root, packageJson.scripts ?? {})
   }
@@ -144,6 +156,9 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
       hasEnvModule: workerEnv !== undefined,
       mcpOAuth,
       mcpPath,
+      root,
+      agents: agents.exports,
+      agentBindings,
     }),
   )
 
@@ -155,7 +170,7 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
     scaffoldConsentFlow(root)
   }
 
-  scaffoldWranglerConfig(root, out, packageJson.name, mcpPlugin, mcpOAuth)
+  scaffoldWranglerConfig(root, out, packageJson.name, mcpPlugin, mcpOAuth, agents.exports)
 }
 
 const MCP_UNAVAILABLE = 'The MCP endpoint is unavailable on Cloudflare Workers — it generates files on disk.'
@@ -214,14 +229,8 @@ function assertMcpOAuthUsable(root: string, mcpPlugin: boolean): void {
  */
 function assertOAuthKvBound(root: string): void {
   const configPath = resolve(root, 'wrangler.jsonc')
-  if (!existsSync(configPath)) {
-    return
-  }
-
-  let config: Record<string, unknown>
-  try {
-    config = parseJsonc(readFileSync(configPath, 'utf8')) as Record<string, unknown>
-  } catch {
+  const config = readWranglerConfig(configPath)
+  if (!config) {
     return
   }
 
@@ -260,11 +269,9 @@ function oauthKvBinding(config: Record<string, unknown>): Record<string, unknown
   }
 
   return namespaces.find(
-    (entry) =>
-      typeof entry === 'object'
-      && entry !== null
-      && (entry as Record<string, unknown>).binding === OAUTH_KV_BINDING,
-  ) as Record<string, unknown> | undefined
+    (entry): entry is Record<string, unknown> =>
+      isRecord(entry) && entry.binding === OAUTH_KV_BINDING,
+  )
 }
 
 /** The binding entry, spelled once — the scaffold writes it, the guard quotes it. */
@@ -287,6 +294,392 @@ function appDependsOn(root: string, name: string): boolean {
   } catch {
     return false
   }
+}
+
+/** The package the generated worker imports the agent runtime and router from. */
+const AGENTS_PLUGIN_PACKAGE = '@guren/plugin-agents'
+
+/** Its two subpaths: the boot seam, and the workerd-only routing half. */
+const AGENTS_RUNTIME_SPECIFIER = `${AGENTS_PLUGIN_PACKAGE}/runtime`
+const AGENTS_ROUTER_SPECIFIER = `${AGENTS_PLUGIN_PACKAGE}/agent`
+
+/** One registered agent, as much of it as the generated worker needs. */
+interface AgentExport {
+  /** The `agents` key, named in refusals so the reader can find the entry. */
+  agent: string
+  /** Project-relative path to the module holding the class. */
+  module: string
+  /** The exported class name — a Durable Object's `class_name`. */
+  export: string
+}
+
+interface AgentRegistry {
+  exports: AgentExport[]
+  /** Whether `routing` is declared; without it `/agents/*` is deny-all. */
+  routing: boolean
+}
+
+const NO_AGENTS: AgentRegistry = { exports: [], routing: false }
+
+/**
+ * Read `config/agents.ts` by evaluating it, the way `guren dev` does. RFC 0017
+ * §3's static grammar is what makes that safe here: literal strings, nothing
+ * imported from `agents` or `cloudflare:workers`, so it evaluates on Bun.
+ * Duck-typed rather than typed against the plugin, which this package
+ * deliberately does not depend on.
+ */
+async function readAgentRegistry(root: string): Promise<AgentRegistry> {
+  const configPath = resolve(root, AGENTS_CONFIG_FILE)
+  let module: { default?: unknown }
+  try {
+    module = (await import(pathToFileURL(configPath).href)) as { default?: unknown }
+  } catch (error) {
+    throw new Error(
+      `Cloudflare build: could not evaluate ${AGENTS_CONFIG_FILE} on Bun: ${error instanceof Error ? error.message : String(error)}\n`
+      + 'The registry is evaluated outside workerd, so nothing it imports may exist only there (`agents`, `cloudflare:workers`). Keep the agent classes in their own modules and name them by path.',
+      { cause: error },
+    )
+  }
+  const config = module.default
+
+  if (!isRecord(config) || !isRecord(config.agents)) {
+    throw new Error(
+      `Cloudflare build: ${AGENTS_CONFIG_FILE} does not default-export a config with an "agents" object, so this build cannot tell which classes are Durable Objects. Write it as:\n`
+      + `  export default defineAgentsConfig({ agents: { triager: { module: 'app/Agents/Triager.ts', export: 'Triager', scopes: ['tools:read'] } } })`,
+    )
+  }
+
+  const exports: AgentExport[] = []
+  const claimed = new Map<string, string>()
+  const claimedBindings = new Map<string, string>()
+
+  for (const [agent, registration] of Object.entries(config.agents)) {
+    const fields: Record<string, unknown> = isRecord(registration) ? registration : {}
+    const modulePath = fields.module
+    const exportName = fields.export
+
+    if (typeof modulePath !== 'string' || modulePath.trim() === '') {
+      throw new Error(agentRegistrationError(agent, 'has no `module`', "module: 'app/Agents/Triager.ts'"))
+    }
+    // `default` is an identifier `export { default } from` accepts, and the
+    // worker already has a default export; a class cannot be named it anyway.
+    if (typeof exportName !== 'string' || !IDENTIFIER_PATTERN.test(exportName) || exportName === 'default') {
+      throw new Error(
+        agentRegistrationError(
+          agent,
+          `names the export ${JSON.stringify(exportName)}, which is not a usable class name — the generated worker writes it into an \`export { … }\` line`,
+          "export: 'Triager'",
+        ),
+      )
+    }
+
+    const file = resolve(root, modulePath)
+    if (!isInside(root, file) || !existsSync(file)) {
+      throw new Error(
+        agentRegistrationError(
+          agent,
+          `names the module "${modulePath}", which is not a file inside this app`,
+          "module: 'app/Agents/Triager.ts'",
+        ),
+      )
+    }
+
+    const claimedBy = claimed.get(exportName)
+    if (claimedBy !== undefined) {
+      throw new Error(
+        `Cloudflare build: ${AGENTS_CONFIG_FILE} registers the export "${exportName}" for both "${claimedBy}" and "${agent}". One class is one agent: the generated worker exports each name once, and a Durable Object binding names exactly one class.`,
+      )
+    }
+    claimed.set(exportName, agent)
+
+    // `HTTPAgent` and `HttpAgent` are two classes but one `HTTP_AGENT` binding;
+    // wrangler would see the duplicate only at deploy.
+    const binding = durableObjectBindingName(exportName)
+    const bindingClaimedBy = claimedBindings.get(binding)
+    if (bindingClaimedBy !== undefined) {
+      throw new Error(
+        `Cloudflare build: ${AGENTS_CONFIG_FILE} registers the exports "${bindingClaimedBy}" and "${exportName}", which both scaffold the Durable Object binding "${binding}". Rename one so each class gets a binding of its own.`,
+      )
+    }
+    claimedBindings.set(binding, exportName)
+
+    exports.push({ agent, module: modulePath, export: exportName })
+  }
+
+  return { exports, routing: hasRouting(config) }
+}
+
+/**
+ * `routing` is absent or an object with a callable `authorize`. Anything else
+ * (`routing: {}`, `authorize: true`) would be refused at request time as
+ * unconfigured while the build stayed silent — the one diagnostic this
+ * feature offers, defeated by a typo.
+ */
+function hasRouting(config: Record<string, unknown>): boolean {
+  const routing = config.routing
+  if (routing === undefined) {
+    return false
+  }
+  if (isRecord(routing) && typeof routing.authorize === 'function') {
+    return true
+  }
+
+  throw new Error(
+    `Cloudflare build: ${AGENTS_CONFIG_FILE} declares "routing" without a callable "authorize", so it neither opens /agents/* nor reads as the deny-all default. Write \`routing: { authorize: (request, target) => … }\`, or remove "routing" to keep every request refused.`,
+  )
+}
+
+/** What a JavaScript `export { … }` clause will accept as a name. */
+const IDENTIFIER_PATTERN = /^[A-Za-z_$][A-Za-z0-9_$]*$/
+
+function agentRegistrationError(agent: string, problem: string, fix: string): string {
+  return (
+    `Cloudflare build: the agent "${agent}" in ${AGENTS_CONFIG_FILE} ${problem}. `
+    + `The generated worker needs both a module and an export name to write \`export { Class } from '…'\`, or the Durable Object binding points at nothing. Fix: \`${fix}\`.`
+  )
+}
+
+/** Whether `target` is the directory `root` or something under it. */
+function isInside(root: string, target: string): boolean {
+  const rel = relative(root, target)
+  return rel !== '' && !rel.startsWith('..') && !rel.startsWith(`..${sep}`)
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/**
+ * Refuse an app hosting agents that did not install the plugin, before anything
+ * is built. Same shape as {@link assertMcpOAuthUsable}: wrangler resolves the
+ * generated worker's imports at deploy time, from a *production* install, so a
+ * devDependency does not answer.
+ */
+function assertAgentsPluginUsable(root: string): void {
+  if (appDependsOn(root, AGENTS_PLUGIN_PACKAGE)) {
+    return
+  }
+
+  throw new Error(
+    `Cloudflare build: ${AGENTS_CONFIG_FILE} registers durable agents, so the generated worker imports ${AGENTS_PLUGIN_PACKAGE} — which this app does not depend on. Install it:\n`
+    + `  bun add ${AGENTS_PLUGIN_PACKAGE}\n`
+    + `  # then add agentsPlugin(agents) to createApp({ providers })\n`
+    + `A devDependency will not do: wrangler resolves the import at deploy time, from a production install. Or delete ${AGENTS_CONFIG_FILE} to build a worker without agents.`,
+  )
+}
+
+/**
+ * Say once, at build time, that the mount the worker just gained refuses
+ * everything. Nothing else reports it: the deploy succeeds, the agents run on
+ * their alarms, and only an inbound request meets the 403.
+ */
+function warnUnroutedAgents(agents: AgentRegistry): void {
+  if (agents.exports.length === 0 || agents.routing) {
+    return
+  }
+
+  console.warn(
+    `Cloudflare build: ${AGENTS_CONFIG_FILE} declares no "routing", so /agents/* on the generated worker refuses every request with 403 and no Durable Object is constructed. That is the default on purpose (RFC 0017 §6). To let callers in, add:\n`
+    + '  routing: { authorize: (request, target) => /* your check */ false }',
+  )
+}
+
+/**
+ * Verify the committed config hosts every registered agent, before the app
+ * build, and return the binding names that host them — the generated worker's
+ * routing allowlist. Both halves are required: a class with no `durable_objects`
+ * binding is unreachable, and one that is not SQLite-backed cannot host an
+ * `Agent` (the SDK keeps state, schedules and bookkeeping in Durable Object SQLite).
+ */
+function assertAgentDurableObjects(root: string, agents: AgentExport[]): string[] {
+  if (agents.length === 0) {
+    return []
+  }
+  const configPath = resolve(root, 'wrangler.jsonc')
+  if (!existsSync(configPath)) {
+    // The scaffolded wrangler.jsonc binds exactly these.
+    return agents.map((agent) => durableObjectBindingName(agent.export))
+  }
+
+  const config = readWranglerConfig(configPath)
+  if (!config) {
+    console.warn(
+      `Cloudflare build: could not parse ${configPath}, so the Durable Object configuration for the registered agents went unchecked. An agent with no binding deploys and then answers nothing, and /agents/* will refuse every binding.`,
+    )
+    return []
+  }
+
+  const bindings = new Set<string>()
+  // `durable_objects` is not inherited by a named environment (wrangler's schema
+  // says so), so each one is verified on its own; `minify` and the storage
+  // declarations fall back to the top level the way wrangler inherits them.
+  for (const scope of configScopes(config)) {
+    assertAgentScopeHosts(configPath, scope, config, agents)
+    for (const binding of registeredBindings(scope.config, agents)) {
+      bindings.add(binding.name)
+    }
+  }
+
+  return [...bindings]
+}
+
+interface ConfigScope {
+  /** `""` for the top level, ` (env.<name>)` for a named environment. */
+  label: string
+  config: Record<string, unknown>
+}
+
+function configScopes(config: Record<string, unknown>): ConfigScope[] {
+  const scopes: ConfigScope[] = [{ label: '', config }]
+  if (isRecord(config.env)) {
+    for (const [name, environment] of Object.entries(config.env)) {
+      if (isRecord(environment)) scopes.push({ label: ` (env.${name})`, config: environment })
+    }
+  }
+  return scopes
+}
+
+/** One scope's verdict: mangling refused, every registered class bound and SQLite-backed. */
+function assertAgentScopeHosts(
+  configPath: string,
+  scope: ConfigScope,
+  topLevel: Record<string, unknown>,
+  agents: AgentExport[],
+): void {
+  const where = `${configPath}${scope.label}`
+
+  // An agent finds its registration by `this.constructor.name`, so wrangler's
+  // identifier mangling turns a clean deploy into "is not registered" on every
+  // tool call — the one Guren deploy target where the class-name rule fails at
+  // runtime rather than in a log line.
+  if ((scope.config.minify ?? topLevel.minify) === true) {
+    throw new Error(
+      `Cloudflare build: ${where} sets "minify": true, and this app hosts agents. wrangler's minifier renames identifiers, and an agent class is looked up by its runtime name — mangled, every tool call fails with "is not registered" after a deploy that looked fine. Remove "minify" from the config.`,
+    )
+  }
+
+  const bound = new Set(registeredBindings(scope.config, agents).map((binding) => binding.class_name))
+  const declaresStorage = Array.isArray(scope.config.migrations) || isRecord(scope.config.exports)
+  const sqlite = sqliteBackedClasses(declaresStorage ? scope.config : topLevel)
+  const unbound = agents.filter((agent) => !bound.has(agent.export))
+  const unbacked = agents.filter((agent) => !sqlite.has(agent.export))
+
+  if (unbound.length === 0 && unbacked.length === 0) {
+    return
+  }
+
+  const fixes: string[] = []
+  if (unbound.length > 0) {
+    const bindings = unbound.map((agent) => ({
+      name: durableObjectBindingName(agent.export),
+      class_name: agent.export,
+    }))
+    fixes.push(indentJson({ durable_objects: { bindings } }))
+  }
+  if (unbacked.length > 0) {
+    const classes = unbacked.map((agent) => agent.export)
+    fixes.push(indentJson({ migrations: [{ tag: nextMigrationTag(topLevel), new_sqlite_classes: classes }] }))
+  }
+
+  const names = [...new Set([...unbound, ...unbacked].map((agent) => agent.export))].join(', ')
+  throw new Error(
+    `Cloudflare build: ${where} does not host the registered agent(s) ${names} as SQLite-backed Durable Objects. Add these entries, alongside whatever the file already has under the same keys:\n`
+    + `${fixes.join('\n')}\n`
+    + 'The declarative form is accepted too — `"exports": { "Triager": { "type": "durable-object", "storage": "sqlite" } }` — but wrangler treats it as mutually exclusive with "migrations", so use one or the other.',
+  )
+}
+
+/** `Triager` → `TRIAGER`, `TriagerAgent` → `TRIAGER_AGENT`. */
+function durableObjectBindingName(exportName: string): string {
+  return exportName
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+    .toUpperCase()
+}
+
+function indentJson(value: unknown): string {
+  return `  ${JSON.stringify(value, null, 2).slice(1, -1).trim()}`.replace(/\n/g, '\n  ')
+}
+
+interface DurableObjectBinding {
+  name: string
+  class_name: string
+}
+
+/**
+ * The bindings in one scope whose class is a registered agent. A binding with a
+ * `script_name` points at another Worker's class, not at the export this build
+ * generates, so it is neither hosting nor routable here.
+ */
+function registeredBindings(config: Record<string, unknown>, agents: AgentExport[]): DurableObjectBinding[] {
+  const registered = new Set(agents.map((agent) => agent.export))
+  const durableObjects = config.durable_objects
+  const hosting: DurableObjectBinding[] = []
+
+  for (const entry of asArray(isRecord(durableObjects) ? durableObjects.bindings : undefined)) {
+    if (!isRecord(entry)) continue
+    const { name, class_name: className, script_name: scriptName } = entry
+    if (scriptName !== undefined) continue
+    if (typeof name !== 'string' || typeof className !== 'string') continue
+    if (!registered.has(className)) continue
+    hosting.push({ name, class_name: className })
+  }
+
+  return hosting
+}
+
+/**
+ * Classes wrangler will give a SQLite storage backend, in either form. The
+ * `migrations` list is *history*, folded in order: a class created in `v1` and
+ * deleted in `v2` is gone, a rename carries the backend to the new name. A
+ * declarative `exports` entry counts while it is live — `created` (the default)
+ * or `expecting-transfer` — and `deleted`/`renamed` declare the class gone.
+ */
+function sqliteBackedClasses(config: Record<string, unknown>): Set<string> {
+  const classes = new Set<string>()
+
+  for (const migration of asArray(config.migrations)) {
+    if (!isRecord(migration)) continue
+    for (const name of strings(migration.new_sqlite_classes)) classes.add(name)
+    for (const rename of asArray(migration.renamed_classes)) {
+      if (!isRecord(rename) || typeof rename.from !== 'string' || typeof rename.to !== 'string') continue
+      if (classes.delete(rename.from)) classes.add(rename.to)
+    }
+    for (const name of strings(migration.deleted_classes)) classes.delete(name)
+  }
+
+  const exported = config.exports
+  if (isRecord(exported)) {
+    for (const [name, entry] of Object.entries(exported)) {
+      if (!isRecord(entry)) continue
+      const live = entry.state === undefined || entry.state === 'created' || entry.state === 'expecting-transfer'
+      if (entry.type === 'durable-object' && entry.storage === 'sqlite' && live) classes.add(name)
+    }
+  }
+
+  return classes
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : []
+}
+
+function strings(value: unknown): string[] {
+  return asArray(value).filter((entry): entry is string => typeof entry === 'string')
+}
+
+/** The tag after the highest `v<n>` already in the file, or `v1`. */
+function nextMigrationTag(config: Record<string, unknown>): string {
+  const migrations = Array.isArray(config.migrations) ? config.migrations : []
+  let highest = 0
+
+  for (const migration of migrations) {
+    const tag = isRecord(migration) ? migration.tag : undefined
+    const match = typeof tag === 'string' ? /^v(\d+)$/.exec(tag) : null
+    if (match) highest = Math.max(highest, Number(match[1]))
+  }
+
+  return `v${highest + 1}`
 }
 
 /**
@@ -363,24 +756,18 @@ function devOnlyAliases(outRelative: string, mcpPlugin: boolean): Record<string,
  * either separator against `STUB_FILES`; `parseJsonc` keeps comments from matching.
  */
 function assertMcpTransportNotAliased(root: string, mcpPlugin: boolean): void {
+  if (!mcpPlugin) {
+    return
+  }
+
   const configPath = resolve(root, 'wrangler.jsonc')
-  if (!mcpPlugin || !existsSync(configPath)) {
+  const config = readWranglerConfig(configPath)
+  const alias = config?.alias
+  if (!isRecord(alias)) {
     return
   }
 
-  let config: Record<string, unknown>
-  try {
-    config = parseJsonc(readFileSync(configPath, 'utf8')) as Record<string, unknown>
-  } catch {
-    return
-  }
-
-  const alias = config.alias
-  if (typeof alias !== 'object' || alias === null) {
-    return
-  }
-
-  const target = (alias as Record<string, unknown>)[MCP_TRANSPORT_SPECIFIER]
+  const target = alias[MCP_TRANSPORT_SPECIFIER]
   if (typeof target !== 'string' || target.split(/[\\/]/).pop() !== STUB_FILES[MCP_TRANSPORT_SPECIFIER]) {
     return
   }
@@ -659,12 +1046,16 @@ function renderWorkerEnvModule(input: {
 
 function renderWorkerModule(input: {
   out: string
+  root: string
   appEntry: string
   ssrImport: SsrImport | undefined
   hasEnvModule: boolean
   mcpOAuth: boolean
   mcpPath: string
+  agents: AgentExport[]
+  agentBindings: readonly string[]
 }): string {
+  const hasAgents = input.agents.length > 0
   const lines: string[] = [
     '// Generated by `guren cloudflare:build`. Do not edit — regenerate instead.',
   ]
@@ -676,6 +1067,14 @@ function renderWorkerModule(input: {
 
   lines.push("import { createWorkersHandler } from '@guren/plugin-cloudflare'")
 
+  if (hasAgents) {
+    lines.push(
+      `import { configureAgentRuntime } from ${JSON.stringify(AGENTS_RUNTIME_SPECIFIER)}`,
+      `import { routeGuardedAgentRequest } from ${JSON.stringify(AGENTS_ROUTER_SPECIFIER)}`,
+      `import agentsConfig from ${quotedImport(input.out, resolve(input.root, AGENTS_CONFIG_FILE))}`,
+    )
+  }
+
   if (input.mcpOAuth) {
     lines.push(
       `import { OAuthProvider } from ${JSON.stringify(OAUTH_PROVIDER_PACKAGE)}`,
@@ -686,24 +1085,74 @@ function renderWorkerModule(input: {
   if (input.ssrImport) {
     lines.push(
       "import { setInertiaSsrRenderer } from '@guren/core'",
-      `import * as ssrModule from ${JSON.stringify(importSpecifier(input.out, input.ssrImport.file, 'Cloudflare build'))}`,
+      `import * as ssrModule from ${quotedImport(input.out, input.ssrImport.file)}`,
     )
   }
 
-  lines.push(`import app from ${JSON.stringify(importSpecifier(input.out, input.appEntry, 'Cloudflare build'))}`, '')
+  lines.push(`import app from ${quotedImport(input.out, input.appEntry)}`, '')
 
   if (input.ssrImport) {
     lines.push(`setInertiaSsrRenderer(ssrModule.${input.ssrImport.rendererExport})`, '')
   }
 
-  if (!input.mcpOAuth) {
+  if (!input.mcpOAuth && !hasAgents) {
     lines.push('export default createWorkersHandler(app)', '')
     return lines.join('\n')
   }
 
-  lines.push(renderOAuthWorker(input.mcpPath), '')
+  lines.push('const handler = createWorkersHandler(app)', '')
+
+  if (hasAgents) {
+    lines.push(renderAgentWiring(input.out, input.root, input.agents, input.agentBindings), '')
+  }
+
+  const entry = hasAgents ? 'agentEntry' : 'handler'
+  lines.push(input.mcpOAuth ? renderOAuthWorker(input.mcpPath, entry) : `export default ${entry}`, '')
 
   return lines.join('\n')
+}
+
+/** An import specifier for the generated worker, relative to it and quoted. */
+function quotedImport(out: string, target: string): string {
+  return JSON.stringify(importSpecifier(out, target, 'Cloudflare build'))
+}
+
+/**
+ * The agent half of the generated program: the boot seam, the Durable Object
+ * exports, and the guarded `/agents/*` mount. The resolver returns nothing on
+ * purpose — `agentsPlugin`'s own boot publishes the runtime, and returning it
+ * here would make the generated worker read its own latch back (RFC 0017 §6).
+ */
+function renderAgentWiring(
+  out: string,
+  root: string,
+  agents: AgentExport[],
+  bindings: readonly string[],
+): string {
+  const exports = agents
+    .map((agent) => `export { ${agent.export} } from ${quotedImport(out, resolve(root, agent.module))}`)
+    .join('\n')
+
+  return `// An alarm can wake an agent before any request has booted the app, so the
+// runtime latch is handed the boot rather than a runtime.
+configureAgentRuntime((env) => handler.boot(env))
+
+${exports}
+
+// The Durable Object bindings wrangler.jsonc gives the registered agents. The
+// SDK's router would otherwise reach every Durable Object in env.
+const agentBindings = ${JSON.stringify(bindings)}
+
+const agentEntry = {
+  async fetch(request, env, ctx) {
+    // Booted before routing, so an authorizer may read getWorkersEnv().
+    await handler.boot(env)
+    // /agents/* is deny-all until config/agents.ts declares routing.authorize.
+    const routed = await routeGuardedAgentRequest(request, env, agentsConfig.routing, agentBindings)
+    if (routed) return routed
+    return handler.fetch(request, env, ctx)
+  },
+}`
 }
 
 /**
@@ -762,21 +1211,16 @@ function wranglerConfigExists(path: string): boolean {
 const HTML_HANDLING = 'none'
 
 /**
- * The OAuth-fronted export: one `createWorkersHandler` threaded through both
- * halves of the provider (two would share the module-global env holder without
- * sharing the boot slot — see `handler.ts`). The grant travels through the seam,
- * not a header: `ctx.props` is what the provider decrypted from the access token
- * it validated, so it cannot be forged. `defaultHandler` is the same handler unwrapped.
+ * The OAuth-fronted export: the module's one handler threaded through both
+ * halves of the provider. The grant travels through the seam, not a header:
+ * `ctx.props` is what the provider decrypted from the access token it validated.
+ * @param defaultEntry What unprotected paths reach — the agent-routing entry
+ *   when this app hosts agents, so `/agents/*` stays mounted and guarded.
  */
-function renderOAuthWorker(mcpPath: string): string {
+function renderOAuthWorker(mcpPath: string, defaultEntry: string): string {
   // A template literal rather than a line array, so a reviewer can read the
   // generated program as one.
-  return `// One handler for both halves of the provider: it dedupes boot() per
-// handler while the Workers env holder is module-global, so a second one
-// would share the holder without sharing the boot slot.
-const handler = createWorkersHandler(app)
-
-export default new OAuthProvider({
+  return `export default new OAuthProvider({
   apiRoute: ${JSON.stringify(mcpPath)},
   apiHandler: {
     fetch(request, env, ctx) {
@@ -798,7 +1242,7 @@ export default new OAuthProvider({
       return handler.fetch(presentExternalMcpAuth(request, auth), env, ctx)
     },
   },
-  defaultHandler: handler,
+  defaultHandler: ${defaultEntry},
   authorizeEndpoint: ${JSON.stringify(OAUTH_ENDPOINTS.authorize)},
   tokenEndpoint: ${JSON.stringify(OAUTH_ENDPOINTS.token)},
   // Dynamic client registration (RFC 7591). Deprecated in the MCP
@@ -814,6 +1258,7 @@ function scaffoldWranglerConfig(
   packageName: string | undefined,
   mcpPlugin: boolean,
   mcpOAuth: boolean,
+  agents: AgentExport[],
 ): void {
   const configPath = resolve(root, 'wrangler.jsonc')
   const appName = (packageName ?? 'guren-app').replace(/^@[^/]+\//, '')
@@ -851,6 +1296,20 @@ function scaffoldWranglerConfig(
     // binding scaffolded "just in case" is a namespace someone has to create
     // before the config validates.
     ...(mcpOAuth ? { kv_namespaces: [oauthKvNamespace()] } : {}),
+    // The legacy `migrations` list rather than the declarative `exports` map:
+    // both are accepted by the verifier and by wrangler, and this is the form
+    // the agents SDK documents and the workerd test lane runs.
+    ...(agents.length > 0
+      ? {
+          durable_objects: {
+            bindings: agents.map((agent) => ({
+              name: durableObjectBindingName(agent.export),
+              class_name: agent.export,
+            })),
+          },
+          migrations: [{ tag: 'v1', new_sqlite_classes: agents.map((agent) => agent.export) }],
+        }
+      : {}),
     vars: { NODE_ENV: 'production' },
   }
 
@@ -910,6 +1369,19 @@ function scaffoldConsentFlow(root: string): void {
       + `    import { ${MCP_OAUTH_REGISTRAR} } from './mcp-oauth'\n`
       + `    ${MCP_OAUTH_REGISTRAR}(router)   // inside your registrar, with its router parameter`,
     )
+  }
+}
+
+/**
+ * The committed config, parsed — `undefined` when it is absent or malformed.
+ * Callers that must tell those apart check `existsSync` first; the rest treat
+ * both as nothing to read.
+ */
+function readWranglerConfig(configPath: string): Record<string, unknown> | undefined {
+  try {
+    return parseJsonc(readFileSync(configPath, 'utf8')) as Record<string, unknown>
+  } catch {
+    return undefined
   }
 }
 
@@ -991,10 +1463,8 @@ function warnMissingBuildOwnedKeys(
   mcpPlugin: boolean,
   mcpOAuth: boolean,
 ): void {
-  let config: Record<string, unknown>
-  try {
-    config = parseJsonc(readFileSync(configPath, 'utf8')) as Record<string, unknown>
-  } catch {
+  const config = readWranglerConfig(configPath)
+  if (!config) {
     // Past the comment and trailing-comma stripping, so the file is malformed by
     // wrangler's reckoning too; passing silently leaves the keys below unchecked.
     console.warn(
@@ -1006,10 +1476,7 @@ function warnMissingBuildOwnedKeys(
   const missing: string[] = []
   // A non-object `alias` is malformed rather than outdated, and `in` would throw
   // out of a function whose point is to warn. Treat it as holding no entries.
-  const configAlias = config.alias
-  const alias = (
-    typeof configAlias === 'object' && configAlias !== null ? configAlias : {}
-  ) as Record<string, string>
+  const alias = isRecord(config.alias) ? config.alias : {}
   for (const [specifier, target] of Object.entries(devOnlyAliases(outRelative, mcpPlugin))) {
     if (!(specifier in alias)) {
       missing.push(`${JSON.stringify(specifier)}: ${JSON.stringify(target)} (inside "alias")`)

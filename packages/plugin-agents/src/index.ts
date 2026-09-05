@@ -11,9 +11,12 @@ export { defineAgentsConfig, validateAgentsConfig, describeAgentsConfigProblems,
 export type {
   AgentBudgetConfig,
   AgentRegistrationConfig,
+  AgentRouteAuthorizer,
+  AgentRouteTarget,
   AgentsApprovalsConfig,
   AgentsConfig,
   AgentsConfigProblem,
+  AgentsRoutingConfig,
 } from './config'
 
 export { agentsPlugin } from './plugin'
