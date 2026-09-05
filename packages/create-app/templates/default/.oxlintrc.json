@@ -1,0 +1,20 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  // The guren rules ship with @guren/cli: await-async-assertion (a bare
+  // `expect(...).rejects` statement can never fail its test) and the comment rules.
+  "jsPlugins": ["@guren/cli/oxlint"],
+  "ignorePatterns": ["node_modules/**", ".guren/**", "dist/**", "public/build/**"],
+  "rules": {
+    "guren/await-async-assertion": "error",
+    // Comment hygiene is advisory: the agent harness feeds these back after every
+    // edit, while `bun run lint` stays green on them.
+    "guren/comment-length": "warn",
+    "guren/comment-banner": "warn",
+    "guren/comment-step-label": "warn",
+    "guren/comment-history": "warn",
+    "guren/comment-param-restates": "warn",
+    "no-unused-vars": ["warn", { "ignoreRestSiblings": true, "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }]
+  }
+  // Type-aware rules (typescript/no-floating-promises and friends) need
+  // `bun add -d oxlint-tsgolint` and `"options": { "typeAware": true }`.
+}

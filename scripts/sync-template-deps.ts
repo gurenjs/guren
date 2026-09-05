@@ -1,12 +1,11 @@
 /**
- * Keep the scaffold templates' dependency versions pointed at what this
- * repository publishes and depends on. A template's `package.json` is the one
- * manifest here that resolves against **npm** rather than the workspace.
- * - every `@guren/*` range follows the workspace version, so the write mode
- *   runs right after `changeset version` (see the `version-packages` script).
- * - `drizzle-orm` and `drizzle-kit` follow the exact pin `packages/orm`
- *   depends on, by the rule in `packages/cli/src/drizzle-pins.ts`.
- * `--check` asserts both without writing and backs `audit:template-deps`.
+ * Keep the scaffold templates' dependency versions pointed at what this repository
+ * publishes and depends on; a template's `package.json` resolves against **npm**.
+ * `@guren/*` ranges follow the workspace versions (write mode runs right after
+ * `changeset version`, see `version-packages`); `drizzle-orm` / `drizzle-kit` follow
+ * `packages/orm`'s exact pin via `packages/cli/src/drizzle-pins.ts`; `oxlint` follows
+ * the optional peer range `packages/cli` declares (what `@guren/cli/oxlint` is tested
+ * against and `guren add lint` writes). `--check` backs `audit:template-deps`.
  */
 import { readFile, writeFile } from 'node:fs/promises'
 import { join, relative } from 'node:path'
@@ -30,6 +29,7 @@ import { collectPackages, manifestAtRev, repoRoot, versionOf } from './workspace
 export const DEPENDENCY_GROUPS = ['dependencies', 'devDependencies', 'peerDependencies'] as const
 
 const ORM_MANIFEST = 'packages/orm/package.json'
+const CLI_MANIFEST = 'packages/cli/package.json'
 
 interface Mismatch {
   /** Repo-relative path of the template manifest. */
@@ -108,9 +108,20 @@ interface TemplateManifest {
 const BLOCKING_DECLINES = new Set<DrizzlePinDeclineReason>(['location-specifier', 'no-exact-pin'])
 
 /** Read every template manifest and diff its versions against this workspace. */
+/** The oxlint range the templates follow: `packages/cli`'s optional peer on it. */
+async function oxlintPeerRange(): Promise<string> {
+  const manifest = JSON.parse(await readFile(join(repoRoot, CLI_MANIFEST), 'utf8')) as DependencyManifest
+  const range = manifest.peerDependencies?.oxlint
+  if (range === undefined) {
+    throw new Error(`${CLI_MANIFEST} declares no oxlint peer range, which is where the templates' oxlint version comes from.`)
+  }
+  return range
+}
+
 async function collectMismatches(): Promise<TemplateManifest[]> {
   const ranges = await workspaceRanges()
   const orm = await ormManifest()
+  const oxlint = await oxlintPeerRange()
   const templates: TemplateManifest[] = []
   const blocked: string[] = []
 
@@ -126,6 +137,12 @@ async function collectMismatches(): Promise<TemplateManifest[]> {
       }
 
       for (const [dependency, declared] of Object.entries(dependencies)) {
+        if (dependency === 'oxlint') {
+          if (declared !== oxlint) {
+            mismatches.push({ file, group, dependency, declared, expected: oxlint, because: `${CLI_MANIFEST} declares the oxlint peer ${oxlint}` })
+          }
+          continue
+        }
         if (!dependency.startsWith('@guren/')) {
           continue
         }
