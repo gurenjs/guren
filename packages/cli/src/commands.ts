@@ -1046,7 +1046,7 @@ const routeTypesCommand = defineCommand({
       description: 'Frontend pages directory to scan for page contracts',
       valueHint: 'resources/js/pages',
     },
-    pagesOut: {
+    'pages-out': {
       type: 'string',
       description: 'Runtime page manifest module to write',
       valueHint: '.guren/pages.gen.ts',
@@ -1062,7 +1062,7 @@ const routeTypesCommand = defineCommand({
     const { outputPath: pagesOutputPath, plan: pagesPlan } = await generatePageTypes({
       appRoot: args.app,
       pagesDir: args.pages,
-      outputFile: args.pagesOut,
+      outputFile: args['pages-out'],
       ...writerOptions,
     })
     const { outputPath, runtimeOutputPath } = await generateRouteTypes({
@@ -1100,7 +1100,7 @@ const codegenCommand = defineCommand({
       generatePageTypes({
         appRoot: args.app,
         pagesDir: args.pages,
-        outputFile: args.pagesOut,
+        outputFile: args['pages-out'],
         extractProps: true,
         ...writerOptions,
       }),
@@ -2480,7 +2480,7 @@ const auditCommand = defineCommand({
       type: 'string',
       description: 'Application root directory.',
     },
-    auditConfig: {
+    'audit-config': {
       type: 'string',
       description: 'Path to the ignore config (defaults to config/audit.{ts,js,mjs}).',
     },
@@ -2494,7 +2494,7 @@ const auditCommand = defineCommand({
     const report = await runAudit({
       cwd: args.app,
       routesFile: args.routes,
-      auditConfigFile: args.auditConfig,
+      auditConfigFile: args['audit-config'],
       deps: args.deps,
     })
 
