@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "codegen": "bun run prerender:stub && cd .. && bun packages/cli/src/bin.ts codegen --app web --routes routes/web.ts --out types/generated/routes.d.ts --pages resources/js/pages --pagesOut .guren/pages.gen.ts --force",
+    "codegen": "bun run prerender:stub && cd .. && bun packages/cli/src/bin.ts codegen --app web --routes routes/web.ts --out types/generated/routes.d.ts --pages resources/js/pages --pages-out .guren/pages.gen.ts --force",
     "routes:types": "bun run codegen",
     "prerender": "bun scripts/copy-docs-images.ts && bun scripts/prerender-docs.ts && bun scripts/prerender-docs-viewer.ts",
     "prerender:stub": "bun scripts/copy-docs-images.ts && bun scripts/prerender-docs.ts --stub && bun scripts/build-search-index.ts --stub",
