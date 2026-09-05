@@ -828,7 +828,7 @@ const migrateCommand = defineCommand({
     description: 'Run all pending database migrations.',
   },
   args: {
-    dryRun: {
+    'dry-run': {
       type: 'boolean',
       alias: 'd',
       description: 'Show what would happen without executing',
@@ -839,7 +839,7 @@ const migrateCommand = defineCommand({
     },
   },
   async run({ args }) {
-    if (args.dryRun) {
+    if (args['dry-run']) {
       reportDryRun('db:migrate', 'Would run all pending database migrations.', Boolean(args.json))
       return
     }
@@ -866,7 +866,7 @@ const seedCommand = defineCommand({
       description: 'Run in production without confirmation',
       alias: 'f',
     },
-    dryRun: {
+    'dry-run': {
       type: 'boolean',
       alias: 'd',
       description: 'Show what would happen without executing',
@@ -881,7 +881,7 @@ const seedCommand = defineCommand({
       return
     }
 
-    if (args.dryRun) {
+    if (args['dry-run']) {
       reportDryRun('db:seed', 'Would execute database seeders.', Boolean(args.json))
       return
     }
@@ -905,7 +905,7 @@ const seedCommand = defineCommand({
 async function runResetCommand(
   action: 'db:reset' | 'db:fresh',
   doneVerb: 'reset' | 'refreshed',
-  args: { seed?: boolean; force?: boolean; json?: boolean; dryRun?: boolean },
+  args: { seed?: boolean; force?: boolean; json?: boolean; 'dry-run'?: boolean },
 ): Promise<void> {
   if (!ensureDestructiveCommandAllowed(args.force)) {
     return
@@ -914,7 +914,7 @@ async function runResetCommand(
   const seed = Boolean(args.seed)
   const json = Boolean(args.json)
 
-  if (args.dryRun) {
+  if (args['dry-run']) {
     const message = seed
       ? 'Would drop all tables, re-run all migrations, and run seeders.'
       : 'Would drop all tables and re-run all migrations.'
@@ -965,7 +965,7 @@ const resetCommand = defineCommand({
       type: 'boolean',
       description: 'Output result as JSON',
     },
-    dryRun: {
+    'dry-run': {
       type: 'boolean',
       alias: 'd',
       description: 'Show what would happen without executing',
@@ -996,7 +996,7 @@ const freshCommand = defineCommand({
       type: 'boolean',
       description: 'Output result as JSON',
     },
-    dryRun: {
+    'dry-run': {
       type: 'boolean',
       alias: 'd',
       description: 'Show what would happen without executing',
@@ -1421,7 +1421,7 @@ const queueFlushCommand = defineCommand({
       description: 'Run in production without confirmation',
       alias: 'f',
     },
-    dryRun: {
+    'dry-run': {
       type: 'boolean',
       alias: 'd',
       description: 'Show what would happen without executing',
@@ -1432,7 +1432,7 @@ const queueFlushCommand = defineCommand({
       return
     }
 
-    if (args.dryRun) {
+    if (args['dry-run']) {
       const queueFilter = args.queue ? ` on queue "${args.queue}"` : ''
       consola.info(`[dry-run] Would delete all failed jobs${queueFilter}.`)
       return
@@ -2611,7 +2611,7 @@ const AGENT_INIT_ARGS = {
     type: 'string',
     description: `${AGENT_TARGETS_HELP} Default: claude.`,
   },
-  dryRun: {
+  'dry-run': {
     type: 'boolean',
     description:
       'Report what the init would write or replace without changing any file — the preview for --force.',
@@ -2635,7 +2635,7 @@ const agentInitCommand = defineCommand({
       mode: 'init',
       force: Boolean(args.force),
       targets: args.target ? parseTargetArg(args.target) : undefined,
-      dryRun: Boolean(args.dryRun),
+      dryRun: Boolean(args['dry-run']),
     })
     reportAgentHarnessResult(result)
     consola.success(
@@ -2649,7 +2649,9 @@ const agentInitCommand = defineCommand({
 /**
  * The dry run's closing line, whose "run this to apply" hint carries the run's
  * own flags — the applied command must be the previewed one. Derived from the
- * declared arg spec so a future flag cannot fall out of the hint.
+ * declared arg spec so a future flag cannot fall out of the hint, and spelled
+ * verbatim: a declared name is the spelling citty registers, so rewriting its
+ * case here would print a flag the CLI does not parse.
  */
 function agentDryRunClosingLine(
   commandName: 'agent:init' | 'agent:sync',
@@ -2658,8 +2660,8 @@ function agentDryRunClosingLine(
 ): string {
   let suffix = ''
   for (const name of Object.keys(argsSpec)) {
-    if (name === 'dryRun') continue
-    const flag = `--${name.replaceAll(/[A-Z]/gu, (c) => `-${c.toLowerCase()}`)}`
+    if (name === 'dry-run') continue
+    const flag = `--${name}`
     const value = args[name]
     if (argsSpec[name]?.type === 'boolean') {
       if (value) suffix += ` ${flag}`
@@ -2680,7 +2682,7 @@ const AGENT_SYNC_ARGS = {
     description:
       'Delete files in framework-managed directories that are no longer part of the harness. Without this flag they are only reported.',
   },
-  dryRun: {
+  'dry-run': {
     type: 'boolean',
     description: 'Report what the sync would write, replace, or prune without changing any file.',
   },
@@ -2703,7 +2705,7 @@ const agentSyncCommand = defineCommand({
       mode: 'sync',
       targets: args.target ? parseTargetArg(args.target) : undefined,
       prune: Boolean(args.prune),
-      dryRun: Boolean(args.dryRun),
+      dryRun: Boolean(args['dry-run']),
     })
     reportAgentHarnessResult(result)
     consola.success(
@@ -3027,7 +3029,7 @@ const upgradeCommand = defineCommand({
       type: 'boolean',
       description: 'Run bun install after package.json is updated.',
     },
-    dryRun: {
+    'dry-run': {
       type: 'boolean',
       description: 'Print the dependency changes without modifying package.json.',
     },
@@ -3042,7 +3044,7 @@ const upgradeCommand = defineCommand({
       default: true,
       description: 'Only report fixable issues without applying automatic fixes.',
     },
-    checkOnly: {
+    'check-only': {
       type: 'boolean',
       description: 'Run compatibility and deprecation checks without modifying anything.',
     },
@@ -3052,9 +3054,9 @@ const upgradeCommand = defineCommand({
 
     const result = await upgradeCanary({
       install: Boolean(args.install),
-      dryRun: Boolean(args.dryRun),
+      dryRun: Boolean(args['dry-run']),
       noAutofix: readNoAutofix(args),
-      checkOnly: Boolean(args.checkOnly),
+      checkOnly: Boolean(args['check-only']),
       tag,
     })
 
@@ -3085,14 +3087,14 @@ const upgradeCommand = defineCommand({
     }
 
     if (result.codemodResults.length > 0) {
-      consola.box(args.dryRun ? 'Codemod preview' : 'Codemods')
+      consola.box(args['dry-run'] ? 'Codemod preview' : 'Codemods')
       for (const codemod of result.codemodResults) {
         const prefix = codemod.status === 'applied' ? '[applied]' : codemod.status === 'pending' ? '[pending]' : '[skipped]'
         consola.info(`${prefix} ${codemod.description} (${codemod.filesAffected} files)`)
       }
     }
 
-    if (args.checkOnly) {
+    if (args['check-only']) {
       consola.info('Check-only mode. No files were modified.')
       return
     }
@@ -3107,7 +3109,7 @@ const upgradeCommand = defineCommand({
     }
 
     if (result.autofixes.length > 0) {
-      consola.box(args.dryRun ? 'Autofix preview' : 'Autofixes applied')
+      consola.box(args['dry-run'] ? 'Autofix preview' : 'Autofixes applied')
       for (const autofix of result.autofixes) {
         const prefix = autofix.applied ? '[applied]' : '[preview]'
         consola.info(`${prefix} ${autofix.title}: ${autofix.summary}`)
@@ -3135,7 +3137,7 @@ const upgradeCommand = defineCommand({
       }
     }
 
-    if (args.dryRun) {
+    if (args['dry-run']) {
       consola.info('Dry run complete. Files were not modified.')
     } else if (result.updatedDependencies.length > 0 || result.autofixes.some((autofix) => autofix.applied)) {
       consola.info(`Updated ${result.packageJsonPath}`)

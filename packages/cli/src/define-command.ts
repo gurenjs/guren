@@ -4,9 +4,9 @@
  * citty arrays a repeated flag whatever its declared type, and every array is
  * truthy, so `Boolean(args.json)` reads `--json=false --json=false` as *on*.
  * Only the `=value` spellings can express a false, which is what lets that
- * survive casual testing. citty also registers only the *declared* arg name
- * with its parser, so `--dry-run=false` on an arg declared `dryRun` misses the
- * branch that types it and arrives as the truthy string `"false"`.
+ * survive casual testing. citty also registers only the *declared* arg name,
+ * so any other spelling arrives as the truthy string `"false"` — a backstop
+ * only, since commands declare the spelling they document.
  */
 import { defineCommand as defineCittyCommand } from 'citty'
 import type { ArgsDef, CommandContext, CommandDef } from 'citty'
@@ -16,7 +16,8 @@ import { resolveValue } from './run-cli'
  * Ordering is only recovered within one stored key. citty keys `--dryRun` and
  * `--dry-run` separately and its Proxy reads the declared name first, so mixing
  * two spellings of one flag resolves to that key, not to the last one typed.
- * Positionals live in `_` and are left alone.
+ * The documented spelling therefore wins such a mix only because it is the
+ * declared one. Positionals live in `_` and are left alone.
  */
 export function defineCommand<T extends ArgsDef = ArgsDef>(def: CommandDef<T>): CommandDef<T> {
   const { args, setup, run } = def
