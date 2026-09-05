@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
 import { defineCommand as defineCittyCommand, runCommand } from 'citty'
+import type { CommandDef } from 'citty'
 import { consola } from 'consola'
 import { builtinSubCommands } from '../src/commands'
-import { defineCommand, normalizeParsedArgs, normalizesRepeatedFlags } from '../src/define-command'
+import { defineCommand, normalizesRepeatedFlags } from '../src/define-command'
+import { resolveValue } from '../src/run-cli'
 
 /**
  * Driven through citty's parser rather than around it: the defect lives in the
@@ -10,28 +12,23 @@ import { defineCommand, normalizeParsedArgs, normalizesRepeatedFlags } from '../
  * not the command reads its flags safely.
  */
 describe('defineCommand', () => {
-  interface Seen {
-    json: unknown
-    dryRun: unknown
-    name: unknown
-    positional: string[]
-  }
-
-  function probe() {
-    const seen: Seen[] = []
+  /** One run of a probe command, read the way a command's own body reads it. */
+  async function parse(rawArgs: string[]): Promise<Record<string, unknown>> {
+    let seen!: Record<string, unknown>
     const command = defineCommand({
       args: {
         json: { type: 'boolean' },
-        // Declared camelCase and spelled `--dry-run`, which is the spelling
-        // this CLI documents and the one citty never registers as a boolean.
+        // Declared camelCase and spelled `--dry-run`, which is the spelling this
+        // CLI documents and the one citty never registers as a boolean.
         dryRun: { type: 'boolean', alias: 'd' },
         name: { type: 'string' },
       },
       run({ args }) {
-        seen.push({ json: args.json, dryRun: args.dryRun, name: args.name, positional: args._ })
+        seen = args as Record<string, unknown>
       },
     })
-    return { seen, run: (rawArgs: string[]) => runCommand(command, { rawArgs }) }
+    await runCommand(command, { rawArgs })
+    return seen
   }
 
   it('is needed: citty itself arrays a repeated flag, and every array is truthy', async () => {
@@ -50,39 +47,30 @@ describe('defineCommand', () => {
   })
 
   it('reads a repeated boolean as its last value in both directions', async () => {
-    const { seen, run } = probe()
-    await run(['--json=true', '--json=false'])
-    await run(['--json=false', '--json=true'])
-    await run(['--json', '--json=false'])
-    await run(['--json', '--json'])
-    expect(seen.map((s) => s.json)).toEqual([false, true, false, true])
-    // The read every command actually performs.
-    expect(seen.map((s) => Boolean(s.json))).toEqual([false, true, false, true])
+    expect((await parse(['--json=true', '--json=false'])).json).toBe(false)
+    expect((await parse(['--json=false', '--json=true'])).json).toBe(true)
+    expect((await parse(['--json', '--json=false'])).json).toBe(false)
+    expect((await parse(['--json', '--json'])).json).toBe(true)
   })
 
   it('holds for the kebab spelling of a camelCase boolean, which citty leaves a string', async () => {
-    const { seen, run } = probe()
-    await run(['--dry-run=true', '--dry-run=false'])
-    await run(['--dry-run=false', '--dry-run=true'])
+    expect((await parse(['--dry-run=true', '--dry-run=false'])).dryRun).toBe(false)
+    expect((await parse(['--dry-run=false', '--dry-run=true'])).dryRun).toBe(true)
     // Single, not repeated: citty stores `"false"` under `dry-run` because it
     // registered only `dryRun` as a boolean, and that string is truthy.
-    await run(['--dry-run=false'])
-    await run(['--dry-run'])
-    expect(seen.map((s) => s.dryRun)).toEqual([false, true, false, true])
-    expect(seen.map((s) => Boolean(s.dryRun))).toEqual([false, true, false, true])
+    expect((await parse(['--dry-run=false'])).dryRun).toBe(false)
+    // The alias citty stores under its own key and copies to the declared one.
+    expect((await parse(['-d=true', '-d=false'])).dryRun).toBe(false)
+    expect((await parse(['-d', '-d'])).dryRun).toBe(true)
   })
 
-  it('collapses an alias the same way, on the key citty stores it under', async () => {
-    const { seen, run } = probe()
-    await run(['-d=true', '-d=false'])
-    await run(['-d', '-d'])
-    expect(seen.map((s) => s.dryRun)).toEqual([false, true])
-  })
-
-  it('reads a repeated string as its last value and leaves positionals alone', async () => {
-    const { seen, run } = probe()
-    await run(['--name', 'a', '--name', 'b', 'first', 'second'])
-    expect(seen).toEqual([{ json: undefined, dryRun: undefined, name: 'b', positional: ['first', 'second'] }])
+  it('collapses a repeated string, keeps its text, and leaves positionals alone', async () => {
+    expect(await parse(['--name', 'a', '--name', 'b', 'first', 'second'])).toEqual({
+      _: ['first', 'second'],
+      name: 'b',
+    })
+    // Only declared booleans are typed: a string arg keeps the word.
+    expect((await parse(['--name=false', '--name=false'])).name).toBe('false')
   })
 
   it('normalizes before setup as well as before run', async () => {
@@ -103,18 +91,6 @@ describe('defineCommand', () => {
     ])
   })
 
-  it('leaves `_` and declared strings alone while collapsing arrays', () => {
-    const args: Record<string, unknown> = {
-      _: ['a', 'b'],
-      json: [true, false],
-      name: ['x', 'false'],
-      force: true,
-    }
-    normalizeParsedArgs(args, { json: { type: 'boolean' }, name: { type: 'string' } })
-    // `name` collapses but keeps its string: only declared booleans are typed.
-    expect(args).toEqual({ _: ['a', 'b'], json: false, name: 'false', force: true })
-  })
-
   it('marks what it defines, and nothing else', () => {
     expect(normalizesRepeatedFlags(defineCommand({ run() {} }))).toBe(true)
     expect(normalizesRepeatedFlags(defineCittyCommand({ run() {} }))).toBe(false)
@@ -122,13 +98,29 @@ describe('defineCommand', () => {
 })
 
 describe('built-in commands', () => {
-  it('all define themselves through the wrapper', () => {
-    // A command importing `defineCommand` from `citty` instead reads raw
-    // arrays again, with nothing else to say so — the reading sites look
-    // identical either way.
-    const bypassing = Object.entries(builtinSubCommands)
+  /** Every registered command, including those nested under `guren add`. */
+  async function everyCommand(
+    commands: Record<string, CommandDef<never>>,
+    prefix = '',
+  ): Promise<Array<[string, CommandDef<never>]>> {
+    const found: Array<[string, CommandDef<never>]> = []
+    for (const [name, command] of Object.entries(commands)) {
+      const path = prefix ? `${prefix} ${name}` : name
+      found.push([path, command])
+      const nested = await resolveValue(command.subCommands)
+      if (nested) found.push(...(await everyCommand(nested as Record<string, CommandDef<never>>, path)))
+    }
+    return found
+  }
+
+  it('all define themselves through the wrapper, nested ones included', async () => {
+    // A command importing `defineCommand` from `citty` instead reads raw arrays
+    // again, with nothing else to say so — the reading sites look identical
+    // either way. `guren add <blueprint>` is the reason this recurses: those 14
+    // declare their own `--force`, one level below the registry.
+    const bypassing = (await everyCommand(builtinSubCommands as Record<string, CommandDef<never>>))
       .filter(([, command]) => !normalizesRepeatedFlags(command))
-      .map(([name]) => name)
+      .map(([path]) => path)
     expect(bypassing).toEqual([])
   })
 })

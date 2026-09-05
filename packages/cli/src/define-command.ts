@@ -10,32 +10,30 @@
  */
 import { defineCommand as defineCittyCommand } from 'citty'
 import type { ArgsDef, CommandContext, CommandDef } from 'citty'
+import { resolveValue } from './run-cli'
 
-/** Positionals live in `_` and are left alone. */
+/**
+ * Ordering is only recovered within one stored key. citty keys `--dryRun` and
+ * `--dry-run` separately and its Proxy reads the declared name first, so mixing
+ * two spellings of one flag resolves to that key, not to the last one typed.
+ * Positionals live in `_` and are left alone.
+ */
 export function defineCommand<T extends ArgsDef = ArgsDef>(def: CommandDef<T>): CommandDef<T> {
   const { args, setup, run } = def
 
-  // citty awaits both hooks on one context object, so resolving a lazy `args`
-  // here is free and whichever hook a command declares first sees normalized
-  // flags. Both are wrapped: neither is required, and the pass is idempotent.
-  const normalize = async (context: CommandContext<T>): Promise<void> => {
-    const argsDef = (typeof args === 'function' ? await args() : await args) ?? {}
-    normalizeParsedArgs(context.args, argsDef as ArgsDef)
-  }
+  // citty awaits both hooks on one context object, so whichever a command
+  // declares first sees normalized flags. Both are wrapped: neither is
+  // required, and the pass is idempotent.
+  const normalizing =
+    (hook: NonNullable<CommandDef<T>['run']>) =>
+    async (context: CommandContext<T>): Promise<unknown> => {
+      normalizeParsedArgs(context.args, ((await resolveValue(args)) ?? {}) as ArgsDef)
+      return hook(context)
+    }
 
   const command: CommandDef<T> = { ...def }
-  if (setup) {
-    command.setup = async (context: CommandContext<T>) => {
-      await normalize(context)
-      return setup(context)
-    }
-  }
-  if (run) {
-    command.run = async (context: CommandContext<T>) => {
-      await normalize(context)
-      return run(context)
-    }
-  }
+  if (setup) command.setup = normalizing(setup)
+  if (run) command.run = normalizing(run)
 
   const defined = defineCittyCommand(command)
   Object.defineProperty(defined, LAST_FLAG_WINS, { value: true })
@@ -49,22 +47,13 @@ export function defineCommand<T extends ArgsDef = ArgsDef>(def: CommandDef<T>): 
  * Only `"true"` and `"false"` are coerced: citty's boolean branch also pushes an
  * unrecognized value onto `_`, and moving positionals is not this rule's job.
  */
-export function normalizeParsedArgs(args: Record<string, unknown>, argsDef: ArgsDef): void {
-  for (const key of Object.keys(args)) {
-    if (key === '_') continue
-    const value = args[key]
-    if (Array.isArray(value)) {
-      args[key] = value.at(-1)
-    }
-  }
-
+function normalizeParsedArgs(args: Record<string, unknown>, argsDef: ArgsDef): void {
   const booleanSpellings = new Set<string>()
   const otherSpellings = new Set<string>()
   for (const [name, arg] of Object.entries(argsDef)) {
     const target = arg.type === 'boolean' ? booleanSpellings : otherSpellings
-    target.add(spellingKey(name))
-    for (const alias of toArray((arg as { alias?: string | string[] }).alias)) {
-      target.add(spellingKey(alias))
+    for (const spelling of [name, ...toArray((arg as { alias?: string | string[] }).alias)]) {
+      target.add(spellingKey(spelling))
     }
   }
 
@@ -72,11 +61,11 @@ export function normalizeParsedArgs(args: Record<string, unknown>, argsDef: Args
   // yields a truthy string or a number there, not a false that reads as true.
   for (const key of Object.keys(args)) {
     if (key === '_') continue
+    const raw = args[key]
+    const value = Array.isArray(raw) ? raw.at(-1) : raw
     const spelling = spellingKey(key)
-    if (!booleanSpellings.has(spelling) || otherSpellings.has(spelling)) continue
-    const value = args[key]
-    if (value === 'true') args[key] = true
-    else if (value === 'false') args[key] = false
+    const declaredBoolean = booleanSpellings.has(spelling) && !otherSpellings.has(spelling)
+    args[key] = declaredBoolean && (value === 'true' || value === 'false') ? value === 'true' : value
   }
 }
 
@@ -100,8 +89,8 @@ const LAST_FLAG_WINS = Symbol('guren.cli.lastFlagWins')
 
 /**
  * Whether a command definition went through this module's `defineCommand`.
- * `tests/define-command.test.ts` asserts it for every entry of
- * `builtinSubCommands`, which is what makes importing citty's own
+ * `tests/define-command.test.ts` asserts it for `builtinSubCommands` and every
+ * command nested under it, which is what makes importing citty's own
  * `defineCommand` fail rather than silently opt a command out.
  */
 export function normalizesRepeatedFlags(command: object): boolean {

@@ -47,6 +47,36 @@
   },
   "overrides": [
     {
+      // The CLI reads a repeated flag as its last value through its own
+      // `defineCommand` wrapper; citty's opts a command out of that silently,
+      // and the reading sites look identical either way. The three files below
+      // legitimately reach for citty's: the wrapper, the plugin proxy (whose
+      // reason is at its import), and the wrapper's own test.
+      "files": ["packages/cli/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "citty",
+                "importNames": ["defineCommand"],
+                "message": "Import defineCommand from packages/cli/src/define-command instead, so a repeated flag keeps reading as its last value."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "packages/cli/src/define-command.ts",
+        "packages/cli/src/plugin-commands.ts",
+        "packages/cli/tests/define-command.test.ts"
+      ],
+      "rules": { "no-restricted-imports": "off" }
+    },
+    {
       // Scaffold templates are user-facing starter code whose comments guide the
       // reader, and audit:starter-template asserts their text literally; test
       // fixtures and stubs are inputs, not commentary.

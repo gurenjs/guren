@@ -8,6 +8,7 @@ import { consola } from 'consola'
 // multi-value channel, and a plugin may mean its array.
 import { defineCommand, runCommand as runCittyCommand } from 'citty'
 import type { ArgsDef, CommandDef } from 'citty'
+import { resolveValue } from './run-cli'
 import { packageContentRoot, readInstalledPluginManifests, resolveInside } from './plugin-manifest'
 
 /**
@@ -105,7 +106,7 @@ export function createPluginCommandProxy(discovered: DiscoveredPluginCommand): C
     // imports plugin code.
     args: async (): Promise<ArgsDef> => {
       const command = await loadPluginCommand(discovered)
-      return (typeof command.args === 'function' ? await command.args() : command.args) ?? {}
+      return (await resolveValue(command.args)) ?? {}
     },
     async run(context) {
       await runCittyCommand(await loadPluginCommand(discovered), { rawArgs: context.rawArgs })

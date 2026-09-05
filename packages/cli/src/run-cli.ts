@@ -4,7 +4,8 @@ import type { CommandDef } from 'citty'
 
 type AnyCommandDef = CommandDef<any>
 
-async function resolveValue<T>(input: T | (() => T | Promise<T>)): Promise<T> {
+/** citty's `Resolvable`, which citty does not export a resolver for. */
+export async function resolveValue<T>(input: T | (() => T | Promise<T>)): Promise<T> {
   return typeof input === 'function' ? await (input as () => T | Promise<T>)() : await input
 }
 
