@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, spyOn } from 'bun:test'
 import { mkdir, symlink, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { consola } from 'consola'
 import { createTempWorkspace, linkWorkspaceCore, type TempWorkspace } from './helpers'
 import { runToolDev } from '../src/tool-dev'
 
@@ -106,6 +107,7 @@ describe('tool:dev', () => {
   let workspace: TempWorkspace
   let appDir: string
   let logSpy: ReturnType<typeof spyOn>
+  let consolaSpy: ReturnType<typeof spyOn>
   const originalNodeEnv = process.env.NODE_ENV
 
   beforeEach(async () => {
@@ -116,10 +118,14 @@ describe('tool:dev', () => {
     await mkdir(join(appDir, 'src'), { recursive: true })
     await writeFile(join(appDir, 'routes/web.ts'), ROUTES)
     logSpy = spyOn(console, 'log').mockImplementation(() => {})
+    // consola.log bypasses console.log here, so the command's own output needs
+    // its own spy. LogFn carries a `raw` sibling, so a bare arrow is not one.
+    consolaSpy = spyOn(consola, 'log').mockImplementation(Object.assign(() => {}, { raw: () => {} }))
   })
 
   afterEach(async () => {
     logSpy.mockRestore()
+    consolaSpy.mockRestore()
     if (originalNodeEnv === undefined) delete process.env.NODE_ENV
     else process.env.NODE_ENV = originalNodeEnv
     await workspace.cleanup()
@@ -217,6 +223,25 @@ describe('tool:dev', () => {
       appStore: { size: number }
     }
     expect(module.appStore.size).toBe(0)
+  })
+
+  it('prints an Inspector invocation that works as printed', async () => {
+    await writeFile(join(appDir, 'src/main.ts'), MAIN_WITH_PLUGIN)
+    const session = await runToolDev({ appRoot: appDir, port: ANY_PORT })
+
+    // Line continuations rejoined: what has to be complete is the command, not
+    // any single printed line of it.
+    const printed = consolaSpy.mock.calls
+      .map((call: unknown[]) => String(call[0]))
+      .join('\n')
+      .replace(/\s*\\\n\s*/gu, ' ')
+
+    // `--cli` exits on "Method is required" without `--method`, and an unpinned
+    // spec runs whatever version the npx cache already happens to hold.
+    expect(printed).toContain(
+      `npx @modelcontextprotocol/inspector@latest --cli ${session.endpoint} --transport http `
+        + `--header "Authorization: Bearer ${session.token}" --method tools/list`,
+    )
   })
 
   it('says which user tool calls authenticate as', async () => {
