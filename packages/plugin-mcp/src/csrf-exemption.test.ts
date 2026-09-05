@@ -117,6 +117,37 @@ describe('mcpPlugin under session CSRF protection', () => {
     expect(res.status).toBe(401)
   })
 
+  test('does not disarm CSRF for an app route sitting on the declared path', async () => {
+    // The app's own route is registered first and answers there, so honouring
+    // the declaration would leave a cookie-authenticated handler unprotected.
+    const warnings: string[] = []
+    const warn = console.warn
+    console.warn = (...args: unknown[]) => void warnings.push(args.join(' '))
+
+    try {
+      const collided = createApp({
+        auth: {},
+        routes: (router: Router) => {
+          router.post('/mcp', () => Response.json({ appRoute: true })).name('app.mcp')
+        },
+        providers: [mcpPlugin({ path: '/mcp' })],
+      })
+      collided.auth.useTokens(store)
+      await collided.boot()
+
+      const res = await collided.hono.request('/mcp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: 'guren_session=whatever' },
+        body: JSON.stringify({ hi: 1 }),
+      })
+
+      expect(res.status).toBe(403)
+      expect(warnings.some((line) => line.includes('Refusing to exempt "/mcp"'))).toBe(true)
+    } finally {
+      console.warn = warn
+    }
+  })
+
   test('still rejects a token-less cookie-bearing POST to an ordinary route', async () => {
     const res = await app.hono.request('/comments', {
       method: 'POST',

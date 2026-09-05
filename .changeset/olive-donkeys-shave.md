@@ -15,3 +15,8 @@ supported, and the registry is a second argument to `createCsrfMiddleware()`
 rather than a `CsrfOptions` field, so it is framework wiring rather than a
 second `exclude` an app can fill in. Apps exempting a path they chose themselves
 still use `csrfOptions.exclude`.
+
+A declaration naming a path the app already routes is refused with a warning:
+the app's route is registered first and answers there, so honouring it would
+leave a cookie-authenticated handler serving the path with CSRF disarmed while
+the declaring endpoint sat unreachable behind it.
