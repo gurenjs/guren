@@ -1,4 +1,4 @@
-import type { Node, ObjectExpression } from '@babel/types'
+import type { File, Node, ObjectExpression } from '@babel/types'
 
 /**
  * A Babel AST node, typed loosely so a walker can reach children the
@@ -89,6 +89,60 @@ export function objectLiteral(node: Node | null | undefined): ObjectExpression |
   if (!node) return null
   const unwrapped = unwrapTypeAssertion(node)
   return unwrapped.type === 'ObjectExpression' ? unwrapped : null
+}
+
+/**
+ * The value node of one property of a `defineX({ … })` config's default export —
+ * `agents` in a `defineAgentsConfig` file, `rules` in a `defineArchRules` one.
+ *
+ * One walk, because `guren check` judges these files and the scaffolders patch
+ * them. `undefined` covers every spelling a static read cannot follow.
+ */
+export function defaultExportConfigProperty(
+  ast: File,
+  callee: string,
+  property: string,
+): Node | undefined {
+  let found: Node | undefined
+
+  walk(ast.program, (node) => {
+    if (found) return false
+    if (node.type !== 'ExportDefaultDeclaration') return
+
+    // Unwrapped before the shape test. `export default defineX({…}) satisfies T`
+    // — and the `as const` spelling beside it — are the same declaration to the
+    // runtime and to whatever build reads the file as source; a bare `.type`
+    // test reads them as "no config at all" and reports a fully static file as
+    // unreadable.
+    const call = unwrapTypeAssertion(node.declaration as never) as
+      | { type?: string; callee?: { type?: string; name?: string }; arguments?: unknown[] }
+      | undefined
+    if (
+      call?.type !== 'CallExpression'
+      || call.callee?.type !== 'Identifier'
+      || call.callee.name !== callee
+    ) {
+      return false
+    }
+
+    const config = objectLiteral(call.arguments?.[0] as never)
+    if (!config) return false
+
+    for (const member of config.properties) {
+      if (member.type !== 'ObjectProperty' || member.computed) continue
+      const key = member.key as { type?: string; name?: string }
+      if (key.type !== 'Identifier' || key.name !== property) continue
+      found = member.value
+      break
+    }
+
+    // The subtree is pruned whatever the outcome: a `defineX(…)` nested inside
+    // this declaration is not the file's config, and descending into one is how
+    // a scanner comes to patch the wrong object.
+    return false
+  })
+
+  return found
 }
 
 /**

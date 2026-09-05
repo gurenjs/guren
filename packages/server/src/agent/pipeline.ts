@@ -10,6 +10,11 @@
  */
 import type { ExecutionContext } from 'hono'
 
+import {
+  DEFAULT_AGENT_APPROVAL_TTL_MS,
+  type AgentApprovalRequest,
+  type AgentApprovalStore,
+} from './approval'
 import type { AgentAuditEmitter } from './audit-emitter'
 import type { DerivedAgentTool } from './derive'
 import {
@@ -29,6 +34,7 @@ import {
   gateApproval,
   gatePreflight,
   gateToolCall,
+  notifyApprovers,
   type ApprovalGateContext,
   type GateVerdict,
   type ScopeGateOptions,
@@ -180,6 +186,38 @@ export interface AgentInvocationOptions {
   env?: unknown
   /** Forwarded to `app.fetch` — `waitUntil` on Workers. */
   executionCtx?: ExecutionContext
+}
+
+/**
+ * Build {@link AgentInvocationOptions.approvals} for one caller.
+ *
+ * The TTL default, the redaction rules and the `notify` wrapping are invariants
+ * of an approval record rather than of a protocol. Per caller, because an
+ * approval binds to the principal that asked; `undefined` means no queue.
+ */
+export function createAgentApprovalContext(
+  config:
+    | {
+        store: AgentApprovalStore
+        notify: (request: AgentApprovalRequest) => void | Promise<void>
+        ttlMs?: number
+      }
+    | undefined,
+  principal: AgentPrincipal | null,
+): NonNullable<AgentInvocationOptions['approvals']> | undefined {
+  if (!config) return undefined
+
+  return {
+    store: config.store,
+    principal,
+    now: () => new Date(),
+    ttlMs: config.ttlMs ?? DEFAULT_AGENT_APPROVAL_TTL_MS,
+    // The route's own masking rules, the same walk the audit trail uses. A
+    // record a human reads and a store persists must not carry a field the
+    // route declared must never be written down.
+    redact: (tool, args) => redactAgentArguments(args, tool.redact),
+    notify: notifyApprovers(config.notify),
+  }
 }
 
 /** One call, as the pipeline is asked to run it. */

@@ -46,6 +46,7 @@ import {
   checkAttachmentsPublicDisk,
   discoverAttachmentsConfigFiles,
 } from './attachments-check'
+import { checkAgentsConfig, type AgentsConfigExpansion } from './agents-config-check'
 import { parseSchemaTables, schemaPathFor, type SchemaTable } from './schema-parser'
 import { ParseCache } from './parse-cache'
 import { extractInertiaPageRefs, resolveInertiaPageFile, expectedInertiaPagePath } from './inertia-pages'
@@ -246,6 +247,11 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
   const runs = (suite: 'core' | 'arch' | 'docs' | 'spec' | 'i18n'): boolean =>
     selected.size === 0 || (suite !== 'core' && selected.has(suite))
 
+  // Undefined until the agent-registry check runs and finds a registry, so a
+  // JSON consumer can tell "this app hosts no agents" from "it hosts agents
+  // whose scopes expand to nothing".
+  let agentScopeExpansions: AgentsConfigExpansion[] | undefined
+
   if (runs('core')) {
     // 1. Check controllers for empty methods
     const controllerFiles = filterChanged(await discoverControllerFiles(cwd))
@@ -397,6 +403,19 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
       )
     }
 
+    // 7.9. The agent registry (RFC 0017 §3), read as source because
+    // `guren cloudflare:build` reads it that way: a spread or a non-literal
+    // `module` is valid TypeScript that leaves the worker with no agents to
+    // export. Content-activated, and it reuses 7.7's definitions rather than
+    // importing an application for the tool-existence warning.
+    const registry = await checkAgentsConfig({
+      cwd,
+      cache,
+      ...(graph?.definitions ? { definitions: graph.definitions } : {}),
+    })
+    checks.push(...registry.checks)
+    agentScopeExpansions = registry.expansions
+
     // 8. Check Postgres timestamp columns carry a time zone. Content-activated
     // and dialect-gated. Not changed-filtered: the schema is a handful of files,
     // so narrowing would hide a column an unrelated edit never touched.
@@ -500,6 +519,7 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     passCount: checks.filter((c) => c.status === 'pass').length,
     warnCount: checks.filter((c) => c.status === 'warn').length,
     failCount: checks.filter((c) => c.status === 'fail').length,
+    ...(agentScopeExpansions ? { agentScopes: agentScopeExpansions } : {}),
   }
 
   return report
