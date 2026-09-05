@@ -23,6 +23,9 @@ jobs:
       - name: Type check
         run: bun run typecheck
 
+      - name: Lint
+        run: bun run lint
+
       - name: Integrity check
         run: bunx guren check --ci
 

@@ -65,7 +65,8 @@ const DEFAULT_BLUEPRINT_FEATURES: readonly (readonly string[])[] = [
   ['resource', 'photos', '--fields', 'title:string,caption:text?', '--attach', 'cover:one,images:many'],
   ['broadcasting'],
   ['schedule'],
-  ['lint'],
+  // The templates ship .oxlintrc.json, so this exercises the overwrite path.
+  ['lint', '--force'],
 ]
 
 /**
@@ -726,14 +727,11 @@ async function main(): Promise<void> {
     await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'check', '--ci', ...routesArgs], appDir, runtimeEnv)
     await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'audit', '--no-deps', ...routesArgs], appDir, runtimeEnv)
 
-    // `guren add lint` wires oxlint with the @guren/cli/oxlint plugin, resolved through
+    // The templates ship .oxlintrc.json with the @guren/cli/oxlint plugin, resolved through
     // the app's node_modules. A fresh app has to lint clean under that preset, or the
     // first `bun run lint` a user sees is red. The binary is the checkout's: a second
     // `bun install` against the vendored file: dependencies spins Bun 1.3.14 at 100%
-    // CPU indefinitely (three runs, 40 min each), and the peer-range test ties the versions.
-    if (!scaffoldsFeatures) {
-      await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'add', 'lint'], appDir, runtimeEnv)
-    }
+    // CPU indefinitely (three runs, 40 min each), and audit:template-deps ties the versions.
     await run(['bun', resolve(repoRoot, 'node_modules/oxlint/bin/oxlint')], appDir, runtimeEnv)
 
     console.log(`\nFresh app smoke passed (${blueprint}, ${installMode}): ${appDir}`)

@@ -83,11 +83,13 @@ describe('guren add lint', () => {
   })
 
   // Through the real binary, against the built dist: a fresh app must have no
-  // error-level finding, or the first `bun run lint` a user sees is red.
+  // error-level finding, or the first `bun run lint` a user sees is red. The
+  // templates ship the config; `add lint` is what an older app runs to get it.
   it.each(['default', 'api-only'])('lints the %s starter template with no errors', async (template) => {
     const appDir = join(workspace.dir, template)
     await cp(join(repoRoot, 'packages', 'create-app', 'templates', template), appDir, { recursive: true })
     await linkWorkspacePackage('cli', appDir)
+    await rm(join(appDir, '.oxlintrc.json'))
     await addLint({ cwd: appDir })
 
     const result = Bun.spawnSync([OXLINT_BIN, '--format', 'unix'], { cwd: appDir, stdout: 'pipe', stderr: 'pipe' })

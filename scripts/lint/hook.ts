@@ -15,7 +15,7 @@ if (!filePath) process.exit(0)
 const rel = relative(repoRoot, filePath)
 if (rel.startsWith('..') || !/\.(ts|tsx|js|jsx|mjs|cjs)$/.test(rel)) process.exit(0)
 
-const result = Bun.spawnSync([resolve(repoRoot, 'node_modules/.bin/oxlint'), '--deny-warnings', '--format', 'unix', rel], { cwd: repoRoot })
+const result = Bun.spawnSync([resolve(repoRoot, 'node_modules/.bin/oxlint'), '--deny-warnings', '--disable-nested-config', '--format', 'unix', rel], { cwd: repoRoot })
 const findings = result.stdout.toString().trim()
 if (result.success || findings === '') process.exit(0)
 console.error(`oxlint found issues in ${rel}:\n${findings}\nRules: .oxlintrc.json; comment rules are explained in .claude/rules/coding-standards.md (Comments).`)
