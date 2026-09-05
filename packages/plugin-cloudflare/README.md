@@ -20,7 +20,8 @@ bunx wrangler deploy
 
 ## API
 
-- **`createWorkersHandler(app)`** — wraps a Guren `Application` in a Workers module handler. Boot is lazy and deduplicated on the first request, because `boot()` performs I/O that workerd forbids in global scope. The handler deduplicates boot itself, so boot-once holds for anything matching `WorkersAppLike`, not only Guren's `Application`.
+- **`createWorkersHandler(app)`** — wraps a Guren `Application` in a Workers module handler. Boot is lazy and deduplicated on the first request, because `boot()` performs I/O that workerd forbids in global scope. The handler deduplicates boot itself, so boot-once holds for anything matching `WorkersAppLike`, not only Guren's `Application`. It also exposes `boot(env)`, for an entrypoint that holds `env` but no request — an agent Durable Object woken by an alarm. The latch behind both is `bootWorkersApp(app, env)` / `bootAndFetch(app, request, env, ctx)`, keyed on the app.
+- **Durable agents** — when the app has a `config/agents.ts` (see `@guren/plugin-agents`), `cloudflare:build` appends a named export per registered class to the generated worker, verifies the committed `wrangler.jsonc` hosts each one as a SQLite-backed Durable Object (failing with the exact JSON to add), and mounts `/agents/*` deny-all behind the registry's `routing.authorize`.
 - **`getWorkersEnv<Env>()`** — exposes the first request's bindings to boot-time config through a write-once holder. workerd can also expose bindings at module scope via `cloudflare:workers`, but importing that from shared config would break every other runtime (Bun, Lambda, Vercel) — the holder keeps `config/*.ts` portable. Use it to hand a D1 binding to the ORM:
 
   ```typescript

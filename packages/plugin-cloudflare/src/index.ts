@@ -23,7 +23,9 @@ export function cloudflarePlugin(config: CloudflarePluginConfig = {}): ServicePr
  */
 export { captureWorkersEnv, getWorkersEnv, resetWorkersEnv } from './env'
 export { createWorkersHandler } from './handler'
-export type { WorkersAppLike, WorkersExecutionContext, WorkersHandler } from './handler'
+export type { WorkersHandler } from './handler'
+export { bootAndFetch, bootWorkersApp } from './boot'
+export type { WorkersAppLike, WorkersExecutionContext } from './boot'
 export { buildCloudflareOutput, flattenD1Migrations } from './build'
 export type { BuildCloudflareOutputOptions } from './build'
 export { R2Driver } from './storage/R2Driver'

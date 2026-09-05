@@ -31,6 +31,10 @@ describe('captureWorkersEnv / getWorkersEnv / resetWorkersEnv', () => {
     captureWorkersEnv(first)
     captureWorkersEnv(second)
 
+    // Ignored rather than refused, and measured rather than assumed: on workerd
+    // a Worker entrypoint and a Durable Object of one deployment carry
+    // different `env` objects, so a throw here would break the two-entrypoint
+    // topology of RFC 0017 §6 instead of catching a second deployment.
     expect(getWorkersEnv<TestEnv>()).toBe(first)
   })
 

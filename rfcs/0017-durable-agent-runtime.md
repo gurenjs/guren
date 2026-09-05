@@ -548,6 +548,56 @@ recording, each a decision rather than a transcription:
   vitest 4 — which resolves nested under this package while the rest of the
   workspace stays on vitest 3.
 
+**Part 2b shipped.** `guren cloudflare:build` generates the Durable Object half
+of the worker for an app whose `config/agents.ts` registers agents, and the
+workerd suite in `@guren/plugin-agents` runs that generated worker rather than a
+stand-in (§7). Decisions, in the order §6 lists them:
+
+- **The registry is read by evaluating `config/agents.ts` on Bun**, the runtime
+  `guren dev` already evaluates it on, through the same dynamic import the SSR
+  entry uses. The static grammar of §3 is what makes this safe: literal strings,
+  and nothing imported from `agents` or `cloudflare:workers`. `guren check`
+  still reads the file as source and reports an entry it cannot read
+  statically; the build duck-types the evaluated default export and does not
+  depend on `@guren/plugin-agents` (the app must, under `dependencies`).
+- **The boot slot is per application, not per handler**, a `WeakMap` latch in
+  `@guren/plugin-cloudflare`: `bootWorkersApp(app, env)` and
+  `bootAndFetch(app, request, env, ctx)`, with `createWorkersHandler(app)` built
+  on them and exposing `boot(env)`. The generated worker registers
+  `configureAgentRuntime((env) => handler.boot(env))` at module scope, so an
+  alarm boots the app and a later request joins that boot.
+- **The env-identity hard error §6 asked for is not enforced.** Under the
+  Workers Vitest integration a Worker entrypoint and a Durable Object of the
+  same deployment are handed *different* `env` objects (two Durable Objects
+  share one), so identity is not a test for "another environment" and refusing
+  on it would break the very two-entrypoint topology §6 exists to support.
+  `captureWorkersEnv` stays first-capture-wins; the per-app latch is what keeps
+  one isolate on one application. The plugin-agents latch still pins the env it
+  resolved *for*, which only Durable Objects reach.
+- **Bindings verification accepts both wrangler forms** — the legacy
+  `migrations[].new_sqlite_classes` list and the declarative `exports` map
+  (`{ type: 'durable-object', storage: 'sqlite' }`, live state only), which
+  wrangler 4.129 declares mutually exclusive. The scaffold emits the legacy
+  form: it is what the agents SDK documents and what the workerd lane runs.
+- **`/agents/*` is deny-all** through `routeGuardedAgentRequest` in
+  `@guren/plugin-agents/agent`, which wires the app's authorizer into both
+  `onBeforeRequest` and `onBeforeConnect`. The override is
+  `routing.authorize(request, { agent, instance })` in `config/agents.ts`,
+  where `agent` is the Durable Object **binding** name the SDK resolved the URL
+  segment to (`AgentRouteMatch.className`), not the config key. A predicate
+  rather than a policy vocabulary: Open Question 3 stays open. The SDK's router
+  reaches every binding in `env` with an `idFromName`, so the generated worker
+  carries the bindings `wrangler.jsonc` gives the *registered* classes and the
+  guard refuses the rest before the authorizer is asked.
+- **The published runtime dispatches through `app.boot()`, not `booted()`.**
+  After a boot that failed in a provider booting after `agentsPlugin`, the
+  published runtime outlives the failure; `booted()` would resolve at once into
+  the half-assembled app, where `boot()` retries it the way the next request
+  does. `Application.booted()` stays for surfaces that hold the app from inside
+  `boot`.
+- **Deferred**: the service-binding split, `cloudflare:build --watch`, email
+  entry points, and the bundle-probe budget line for the agent entry.
+
 ## Alternatives Considered
 
 - **A hand-rolled Durable Object base class, no Agents SDK.** Fewer

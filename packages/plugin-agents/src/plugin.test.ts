@@ -83,6 +83,29 @@ afterEach(() => {
 })
 
 describe('agentsPlugin', () => {
+  test('should not dispatch into an application whose boot failed after the runtime was published', async () => {
+    const explode = definePlugin({
+      name: 'explode',
+      register(): void {},
+      async boot(): Promise<void> {
+        throw new Error('later provider failed')
+      },
+    })
+    const app = createApp({
+      routes: registerRoutes,
+      providers: [agentsPlugin({ agents: TRIAGER }), explode()],
+    })
+    await expect(app.boot()).rejects.toThrow('later provider failed')
+
+    // The runtime was published before the later provider threw and outlives
+    // the failure. A dispatch through it retries the boot — and fails the same
+    // way — rather than entering the half-assembled application.
+    const runtime = await resolveAgentRuntime()
+    await expect(runtime.app.fetch(new Request('http://agents.test/posts'))).rejects.toThrow(
+      'later provider failed',
+    )
+  })
+
   test('should publish a runtime whose registrations are keyed by export name', async () => {
     await boot({ agents: TRIAGER })
 

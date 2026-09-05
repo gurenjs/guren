@@ -219,3 +219,88 @@ describe('createWorkersHandler', () => {
     expect(getWorkersEnv<TestEnv>()).toBe(firstEnv)
   })
 })
+
+describe('WorkersHandler.boot', () => {
+  beforeEach(() => {
+    resetWorkersEnv()
+  })
+
+  function countingApp(counter: { boots: number }): WorkersAppLike {
+    return {
+      async boot() {
+        counter.boots += 1
+      },
+      fetch() {
+        return new Response('ok')
+      },
+    }
+  }
+
+  // The alarm-before-any-request topology (RFC 0017 §6): an agent Durable
+  // Object holds `env` but no request, and must reach a booted application.
+  // The two envs are deliberately different objects — measured on workerd, an
+  // entrypoint and a Durable Object of one deployment are handed exactly that.
+  test('should share one boot between a wake and a later request', async () => {
+    const counter = { boots: 0 }
+    const handler = createWorkersHandler(countingApp(counter))
+    const wakeEnv = { DB: 'the-db' }
+
+    await handler.boot(wakeEnv)
+    const response = await handler.fetch(
+      new Request('https://example.com/'),
+      { DB: 'the-db' },
+      createExecutionContext(),
+    )
+
+    expect(counter.boots).toBe(1)
+    expect(await response.text()).toBe('ok')
+    expect(getWorkersEnv<TestEnv>()).toBe(wakeEnv)
+  })
+
+  test('should share one boot between a request and a later wake', async () => {
+    const counter = { boots: 0 }
+    const handler = createWorkersHandler(countingApp(counter))
+
+    await handler.fetch(new Request('https://example.com/'), { DB: 'the-db' }, createExecutionContext())
+    await handler.boot({ DB: 'the-db' })
+
+    expect(counter.boots).toBe(1)
+  })
+
+  test('should give each app its own latch, so one process may boot several', async () => {
+    // Keyed on the app rather than on the module: a Bun suite stands up a
+    // TestApp per file, in one process.
+    const first = { boots: 0 }
+    const second = { boots: 0 }
+    const env = { DB: 'first-db' }
+
+    await createWorkersHandler(countingApp(first)).boot(env)
+    await createWorkersHandler(countingApp(second)).boot(env)
+
+    expect([first.boots, second.boots]).toEqual([1, 1])
+  })
+
+  test('should clear the latch and the env holder when a wake boot fails', async () => {
+    let bootCalls = 0
+    const app: WorkersAppLike = {
+      async boot() {
+        bootCalls += 1
+        if (bootCalls === 1) throw new Error('boot failed')
+      },
+      fetch() {
+        return new Response('ok')
+      },
+    }
+    const handler = createWorkersHandler(app)
+    const retryEnv = { DB: 'retry-db' }
+
+    await expect(handler.boot({ DB: 'failed-db' })).rejects.toThrow('boot failed')
+
+    // A different env is admissible only because the failure cleared the
+    // holder; without that reset this retry reports the env error instead.
+    await handler.boot(retryEnv)
+
+    expect(bootCalls).toBe(2)
+    expect(getWorkersEnv<TestEnv>()).toBe(retryEnv)
+  })
+})

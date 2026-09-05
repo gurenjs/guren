@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 /**
  * The minimum app on disk `buildCloudflareOutput` will assemble a worker from.
@@ -31,6 +31,10 @@ export interface ScaffoldAppOptions {
    * install has none, so this must not satisfy the guard.
    */
   oauthProviderAsDevDependency?: boolean
+  /** Declare `@guren/plugin-agents` under `dependencies` (RFC 0017 §6). */
+  agentsPlugin?: boolean
+  /** Declare it under `devDependencies` instead, which must not satisfy the guard. */
+  agentsPluginAsDevDependency?: boolean
 }
 
 export function scaffoldApp(root: string, options: ScaffoldAppOptions = {}): void {
@@ -40,6 +44,8 @@ export function scaffoldApp(root: string, options: ScaffoldAppOptions = {}): voi
     mcpPlugin = false,
     oauthProvider = false,
     oauthProviderAsDevDependency = false,
+    agentsPlugin = false,
+    agentsPluginAsDevDependency = false,
   } = options
 
   mkdirSync(join(root, 'src'), { recursive: true })
@@ -48,13 +54,16 @@ export function scaffoldApp(root: string, options: ScaffoldAppOptions = {}): voi
   const dependencies: Record<string, string> = {}
   if (mcpPlugin) dependencies['@guren/plugin-mcp'] = '^0.2.0'
   if (oauthProvider) dependencies['@cloudflare/workers-oauth-provider'] = '^0.10.3'
+  if (agentsPlugin) dependencies['@guren/plugin-agents'] = '^0.1.0'
+
+  const devDependencies: Record<string, string> = {}
+  if (oauthProviderAsDevDependency) devDependencies['@cloudflare/workers-oauth-provider'] = '^0.10.3'
+  if (agentsPluginAsDevDependency) devDependencies['@guren/plugin-agents'] = '^0.1.0'
 
   writeJson(join(root, 'package.json'), {
     name: '@acme/demo-app',
     ...(Object.keys(dependencies).length > 0 ? { dependencies } : {}),
-    ...(oauthProviderAsDevDependency
-      ? { devDependencies: { '@cloudflare/workers-oauth-provider': '^0.10.3' } }
-      : {}),
+    ...(Object.keys(devDependencies).length > 0 ? { devDependencies } : {}),
   })
 
   mkdirSync(join(root, 'public/assets/.vite'), { recursive: true })
@@ -69,6 +78,47 @@ export function scaffoldApp(root: string, options: ScaffoldAppOptions = {}): voi
       'resources/js/ssr.tsx': { file: 'ssr-Xyz789.js' },
     })
   }
+}
+
+/** One entry of the registry {@link writeAgentsConfig} writes. */
+export interface AgentFixtureRegistration {
+  module: string
+  export: string
+}
+
+/**
+ * Write `config/agents.ts` as a plain default export. A real registry calls
+ * `defineAgentsConfig`, an identity function; the build evaluates the module
+ * and duck-types what it finds, so a literal is the same input without needing
+ * `@guren/plugin-agents` resolvable from a temporary directory.
+ */
+export function writeAgentsConfig(
+  root: string,
+  agents: Record<string, AgentFixtureRegistration>,
+  options: { routing?: boolean | 'malformed' } = {},
+): void {
+  const registry = Object.fromEntries(
+    Object.entries(agents).map(([name, entry]) => [name, { ...entry, scopes: [] }]),
+  )
+  mkdirSync(join(root, 'config'), { recursive: true })
+  writeFileSync(
+    join(root, 'config/agents.ts'),
+    `export default { agents: ${JSON.stringify(registry)}${routingSource(options.routing)} }\n`,
+  )
+}
+
+/** The `routing` entry a case asks for, as source: declared, mistyped, or absent. */
+function routingSource(routing: boolean | 'malformed' | undefined): string {
+  if (routing === 'malformed') return ', routing: {}'
+  if (routing) return ', routing: { authorize: () => false }'
+  return ''
+}
+
+/** The module a registration names, exporting a class of that name. */
+export function writeAgentModule(root: string, modulePath: string, exportName: string): void {
+  const target = join(root, modulePath)
+  mkdirSync(dirname(target), { recursive: true })
+  writeFileSync(target, `export class ${exportName} {}\n`)
 }
 
 /** Collect everything a run wrote to `console.warn`, joined by newline. */
