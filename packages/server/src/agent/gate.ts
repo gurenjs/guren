@@ -14,15 +14,14 @@ import {
   agentApprovalPrincipalKey,
   agentApprovalStatusAt,
   agentApprovalUsableAt,
-  APPROVAL_STATUS_TOOL_NAME,
   buildAgentApprovalRequest,
-  scopesAllowTool,
   type AgentApprovalRequest,
   type AgentApprovalStore,
-  type AgentPrincipal,
-  type AgentToolDenialReason,
-  type DerivedAgentTool,
-} from '@guren/core'
+} from './approval'
+import type { DerivedAgentTool } from './derive'
+import type { AgentPrincipal, AgentToolDenialReason } from './events'
+import { APPROVAL_STATUS_TOOL_NAME } from './meta-tools'
+import { scopesAllowTool } from './scopes'
 
 export type GateVerdict =
   | { allowed: true }
@@ -40,6 +39,44 @@ export type GateVerdict =
       body?: Record<string, unknown>
     }
 
+/**
+ * How an unconfigured approval queue is described when no surface says it
+ * better. The pipeline cannot know whether it was reached over MCP, from a
+ * durable agent or from a test harness, and naming one surface's configuration
+ * call would send most readers to a package they do not install. A surface that
+ * knows says so through {@link ScopeGateOptions.configureHint}.
+ */
+export const DEFAULT_APPROVAL_CONFIGURE_HINT =
+  'an approval queue on the invocation pipeline (approvals: { store, notify })'
+
+/**
+ * Whose scopes a refusal names when no surface says it better. Neutral because
+ * a scope denial is not always about a token: a durable agent's principal is
+ * minted from its registration and holds no credential, so naming "the token's
+ * scopes" would send its operator looking for a token to widen.
+ */
+export const DEFAULT_SCOPE_SUBJECT = "The caller's scopes"
+
+/** What {@link gateToolCall} and {@link gatePreflight} need beyond the scopes. */
+export interface ScopeGateOptions {
+  /** Whether an approval queue exists to turn a gated call into a request. */
+  approvalsConfigured?: boolean
+  /**
+   * How *this* surface configures a queue, named in the fail-closed refusal —
+   * `'mcpPlugin({ approvals: { store, notify } })'` for the App MCP endpoint,
+   * else {@link DEFAULT_APPROVAL_CONFIGURE_HINT}. The trailing period belongs
+   * to the sentence: pass the expression, not a sentence.
+   */
+  configureHint?: string
+  /**
+   * What a scope refusal calls the thing whose scopes fell short — `"The
+   * token's scopes"` on a bearer surface, else {@link DEFAULT_SCOPE_SUBJECT}.
+   * The subject of a sentence completed with " do not grant the tool …", so
+   * pass a noun phrase and no trailing punctuation.
+   */
+  scopeSubject?: string
+}
+
 /** What {@link gateApproval} needs to answer for one call. */
 export interface ApprovalGateContext {
   store: AgentApprovalStore
@@ -55,8 +92,35 @@ export interface ApprovalGateContext {
   /**
    * Called once, only for a record this call created, and **never awaited**: a
    * channel that is down must not fail the call or lose the persisted record.
+   * Implementations report their own failures; see {@link notifyApprovers}.
    */
   notify(request: AgentApprovalRequest): void
+}
+
+/**
+ * Wrap the application's `notify` so a failure can neither fail the tool call nor
+ * lose the record: it is already persisted when this runs, so a dead channel costs
+ * an approver an email, not a request. The failure is warned about with the request
+ * id, which is what finds the record sitting there unannounced. Both shapes are
+ * caught — a synchronous throw and a rejected promise.
+ */
+export function notifyApprovers(
+  notify: (request: AgentApprovalRequest) => void | Promise<void>,
+): (request: AgentApprovalRequest) => void {
+  return (request) => {
+    try {
+      void Promise.resolve(notify(request)).catch((error) => warnNotifyFailure(request, error))
+    } catch (error) {
+      warnNotifyFailure(request, error)
+    }
+  }
+}
+
+function warnNotifyFailure(request: AgentApprovalRequest, error: unknown): void {
+  console.warn(
+    `[guren] approval notification failed for request ${request.id} `
+    + `(${request.tool}); the request is recorded and pending, but nobody was told: ${String(error)}`,
+  )
 }
 
 /**
@@ -69,9 +133,9 @@ export interface ApprovalGateContext {
 export function gateToolCall(
   tool: DerivedAgentTool,
   abilities: readonly string[],
-  options: { approvalsConfigured?: boolean } = {},
+  options: ScopeGateOptions = {},
 ): GateVerdict {
-  const scope = gatePreflight(tool, abilities)
+  const scope = gatePreflight(tool, abilities, options)
   if (!scope.allowed) return scope
 
   if (tool.approval === 'required' && !options.approvalsConfigured) {
@@ -83,7 +147,7 @@ export function gateToolCall(
       message:
         `The tool "${tool.toolName}" requires server-side approval, and this server has no `
         + 'approval queue configured. Nothing was executed. Configure one with '
-        + 'mcpPlugin({ approvals: { store, notify } }).',
+        + `${options.configureHint ?? DEFAULT_APPROVAL_CONFIGURE_HINT}.`,
     }
   }
 
@@ -247,12 +311,17 @@ function spentVerdict(tool: DerivedAgentTool, request: AgentApprovalRequest): Ga
  * applied: a rehearsal executes nothing, and approval gates an ability rather
  * than knowledge; never reaching {@link gateApproval}, it files and pages nothing.
  */
-export function gatePreflight(tool: DerivedAgentTool, abilities: readonly string[]): GateVerdict {
+export function gatePreflight(
+  tool: DerivedAgentTool,
+  abilities: readonly string[],
+  options: ScopeGateOptions = {},
+): GateVerdict {
   if (!scopesAllowTool(abilities, scopedShape(tool))) {
     return {
       allowed: false,
       reason: 'scope',
-      message: `The token's scopes do not grant the tool "${tool.toolName}".`,
+      message:
+        `${options.scopeSubject ?? DEFAULT_SCOPE_SUBJECT} do not grant the tool "${tool.toolName}".`,
     }
   }
 

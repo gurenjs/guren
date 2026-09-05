@@ -709,7 +709,7 @@ bunx guren tool:log --json | jq 'select(.status >= 400)'
 | `--file <path>` | 監査ログのベースパス(既定は `storage/logs/agent-audit.log`) |
 | `--tail`・`-f` | レコードの到着に追従する |
 | `--tool <name>` | 指定したツールのみ |
-| `--surface <s>` | `mcp`・`dev-mcp`・`cli`・`webmcp` のいずれかのみ |
+| `--surface <s>` | `mcp`・`dev-mcp`・`cli`・`webmcp`・`durable` のいずれかのみ |
 | `--denied` | 拒否のみ |
 | `--since <duration>` | `30m`・`2h`・`7d` などより新しいレコードのみ |
 | `-n <count>` | 表示件数(既定は 50) |

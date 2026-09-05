@@ -969,7 +969,7 @@ bunx guren tool:log --json | jq 'select(.status >= 400)'
 | `--file <path>` | Base path of the trail (default `storage/logs/agent-audit.log`) |
 | `--tail`, `-f` | Follow as records arrive |
 | `--tool <name>` | Only this tool |
-| `--surface <s>` | Only `mcp`, `dev-mcp`, `cli`, or `webmcp` |
+| `--surface <s>` | Only `mcp`, `dev-mcp`, `cli`, `webmcp`, or `durable` |
 | `--denied` | Only denials |
 | `--since <duration>` | Only records newer than `30m`, `2h`, `7d`… |
 | `-n <count>` | How many records (default 50) |

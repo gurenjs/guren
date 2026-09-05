@@ -1,6 +1,8 @@
 import type { Context } from 'hono'
 import type { Model, PlainObject } from '@guren/orm'
 import { getSessionFromContext } from '../http/middleware/session'
+import { readAgentPrincipal } from '../internal/agent-principal'
+import { AgentPrincipalGuard } from './AgentPrincipalGuard'
 import { RequestAuthContext } from './RequestAuthContext'
 import { ModelUserProvider, type ModelUserProviderOptions } from './providers/ModelUserProvider'
 import { SessionGuard } from './SessionGuard'
@@ -21,6 +23,15 @@ import type {
 } from './types'
 
 const DEFAULT_GUARD = 'web'
+
+/**
+ * The guard name an unqualified lookup resolves to on a request the pipeline
+ * installed a principal on (RFC 0017 §2). Deliberately **not** registered:
+ * registering it would publish a name an application could select, default to,
+ * or shadow. Namespaced so it cannot collide, and `createGuard` refuses it for
+ * a request carrying no principal, so naming it explicitly buys nothing.
+ */
+const AGENT_PRINCIPAL_GUARD = 'guren.agent-principal'
 
 /** How `useTokens()` configures the guard it registers. */
 export interface ApiTokenGuardOptions {
@@ -78,6 +89,27 @@ export class AuthManager implements AuthManagerContract {
   }
 
   createGuard<User>(name: string, context: GuardContext): Guard<User> {
+    if (name === AGENT_PRINCIPAL_GUARD) {
+      // Built here rather than registered, so the guard exists exactly for the
+      // requests that carry a principal and for no others. A request without
+      // one falls through to the registry, where this name is absent, and gets
+      // the ordinary "has not been registered" error.
+      const installed = readAgentPrincipal(context.ctx.req.raw)
+      if (installed) {
+        return new AgentPrincipalGuard<User>({
+          installed,
+          // The same provider rule `useTokens({ provider })` configures for
+          // the token guard: with one, the principal's id resolves to the real
+          // user record; without one, a minimal `{ id }`. Two rules here would
+          // mean a policy reading a user field behaved differently depending
+          // on which surface the call arrived on.
+          ...(this.apiTokenOptions.provider
+            ? { provider: this.getProvider<User>(this.apiTokenOptions.provider) }
+            : {}),
+        })
+      }
+    }
+
     const entry = this.guards.get(name)
 
     if (!entry) {
@@ -104,14 +136,15 @@ export class AuthManager implements AuthManagerContract {
   }
 
   /**
-   * The guard name an unqualified `auth.guard()` / `auth.user()` call resolves
-   * to for this request. Explicit names always win; otherwise a registered
-   * token guard is selected when the request carries a Bearer Authorization
-   * header, falling back to the default (session) guard — the composite-guard
-   * rule from RFC 0016.
+   * The guard an unqualified `auth.guard()` / `auth.user()` resolves to.
+   * Explicit names win; otherwise a principal the pipeline installed on this
+   * exact request answers first, then a token guard for a Bearer header, then
+   * the default — RFC 0016's composite rule with RFC 0017 §2's seam in front,
+   * so a header cannot win over an identity the framework itself established.
    */
   resolveGuardName(ctx: Context, name?: string): string {
     if (name) return name
+    if (readAgentPrincipal(ctx.req.raw)) return AGENT_PRINCIPAL_GUARD
     if (this.tokenGuard && hasBearerHeader(ctx)) return this.tokenGuard
     return this.defaultGuard
   }

@@ -560,7 +560,7 @@ bunx guren tool:log --json | jq 'select(.status >= 400)'
 | `--file` | `storage/logs/agent-audit.log` | Base path of the trail; dated files sit beside it |
 | `--tail`, `-f` | `false` | Follow the trail as records arrive, across the midnight rollover |
 | `--tool` | (all tools) | Only records for this tool |
-| `--surface` | (all surfaces) | Only `mcp`, `dev-mcp`, `cli`, or `webmcp` |
+| `--surface` | (all surfaces) | Only `mcp`, `dev-mcp`, `cli`, `webmcp`, or `durable` |
 | `--denied` | `false` | Only denials |
 | `--since` | (no cutoff) | Only records newer than a duration such as `30m`, `2h`, `7d` |
 | `-n` | `50` | How many records to show |

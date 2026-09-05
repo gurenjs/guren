@@ -91,6 +91,19 @@ describe('parseAuditRecord', () => {
     expect(parseAuditRecord('"a string"')).toBeNull()
   })
 
+  // The surface a durable agent records under (RFC 0017 §4). Nothing emits it
+  // yet — the client is Part 2 — but a trail written by that release has to be
+  // readable by a reader shipped in this one, or the first records the feature
+  // produces read as an empty log.
+  test('should read back a record from the durable surface', () => {
+    const record = toAuditRecord(
+      new AgentToolInvoked(PRINCIPAL, 'posts.index', {}, 200, 3, 'durable'),
+      NOW,
+    )
+
+    expect(parseAuditRecord(JSON.stringify(record))).toEqual(record)
+  })
+
   test('should refuse an unknown surface or denial reason', () => {
     const denied = toAuditRecord(new AgentToolDenied(PRINCIPAL, 'posts.store', {}, 'scope', 'mcp'), NOW)
 

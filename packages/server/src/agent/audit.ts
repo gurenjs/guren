@@ -64,6 +64,7 @@ const AGENT_SURFACES: Record<AgentSurface, true> = {
   'dev-mcp': true,
   'cli': true,
   'webmcp': true,
+  'durable': true,
 }
 
 /** Every denial reason, as a value, total over the union for the same reason. */

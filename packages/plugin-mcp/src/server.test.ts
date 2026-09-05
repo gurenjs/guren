@@ -3,14 +3,13 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import {
   Router,
+  createAgentInvocationPipeline,
   deriveAgentTools,
-  mapToolResponse,
   type AgentToolDenialReason,
   type DerivedAgentTool,
-  type ToolCallOutcome,
 } from '@guren/core'
 
-import { AgentRateLimiter } from './rate-limit'
+import { AgentRateLimiter, createRateLimitInterposition } from './rate-limit'
 import { createAppMcpServer, type AppMcpServerOptions } from './server'
 
 function deriveFixtureTools(): DerivedAgentTool[] {
@@ -46,11 +45,8 @@ const VERDICT_HEADER = 'X-Guren-Agent-Preflight-Verdict'
  * decision, and a fixture stating the answer itself would keep passing after it
  * changed. The seam is driven end to end in `preflight.test.ts`.
  */
-async function seamVerdict(
-  tool: DerivedAgentTool,
-  overrides: Record<string, unknown> = {},
-): Promise<ToolCallOutcome> {
-  const response = new Response(
+function seamVerdict(overrides: Record<string, unknown> = {}): Response {
+  return new Response(
     JSON.stringify({
       preflight: true,
       allowed: true,
@@ -62,29 +58,94 @@ async function seamVerdict(
     }),
     { status: 200, headers: { 'Content-Type': 'application/json', [VERDICT_HEADER]: '1' } },
   )
-  return mapToolResponse(tool, response)
 }
 
-async function connect(overrides: Partial<AppMcpServerOptions> = {}): Promise<{ client: Client; recorded: Recorded }> {
+/** What the stubbed application answers for one dispatched call. */
+type Respond = (
+  tool: DerivedAgentTool,
+  args: Record<string, unknown>,
+  preflight: boolean,
+) => Response | Promise<Response>
+
+interface Dispatched {
+  tool: string
+  args: Record<string, unknown>
+  preflight: boolean
+}
+
+/**
+ * The harness drives the **real** invocation pipeline over a stubbed
+ * application: the scope gate, rate-limit interposition, redaction and audit
+ * records these cases assert on are the framework's own, where a stubbed
+ * pipeline would leave each asserting the fixture. `respond` stubs one layer
+ * lower than a dispatch function — a real `Response`, so `mapToolResponse` runs.
+ */
+interface HarnessOptions extends Omit<Partial<AppMcpServerOptions>, 'pipeline'> {
+  respond?: Respond
+}
+
+async function connect(overrides: HarnessOptions = {}): Promise<{
+  client: Client
+  recorded: Recorded
+  dispatched: Dispatched[]
+}> {
+  const { respond, ...serverOverrides } = overrides
   const recorded: Recorded = { invoked: [], denied: [] }
+  const dispatched: Dispatched[] = []
+  const abilities = serverOverrides.abilities ?? ['tools:*']
+  const rateKey = serverOverrides.rateKey ?? 'token-1'
+
+  // Which call the pipeline is running, so the stubbed application can answer
+  // for it — a `Request` alone does not say which tool it was built from. The
+  // recording happens inside `fetch`, so `dispatched` is evidence the request
+  // really reached the application: a gate that refused and dispatched anyway
+  // shows up here, which is what the `toEqual([])` cases below assert on.
+  let inflight: { tool: DerivedAgentTool; args: Record<string, unknown>; preflight: boolean } | undefined
+
+  const inner = createAgentInvocationPipeline({
+    app: {
+      fetch: async (): Promise<Response> => {
+        const call = inflight!
+        dispatched.push({ tool: call.tool.toolName, args: call.args, preflight: call.preflight })
+        return respond ? respond(call.tool, call.args, call.preflight) : Response.json({ ok: true })
+      },
+    },
+    principal: null,
+    abilities,
+    surface: 'mcp',
+    audit: (event) => {
+      if ('reason' in event) {
+        recorded.denied.push({ tool: event.tool, reason: event.reason, args: event.arguments })
+        return
+      }
+      recorded.invoked.push({ tool: event.tool, status: event.status, args: event.arguments })
+    },
+    // The plugin's own rule, not a second one: what the endpoint meters and
+    // what it says when the budget is spent belong to `rate-limit.ts`.
+    interpose: createRateLimitInterposition(serverOverrides.limiter, rateKey),
+    approvalConfigureHint: 'mcpPlugin({ approvals: { store, notify } })',
+  })
+
   const server = createAppMcpServer({
     tools: deriveFixtureTools(),
-    abilities: ['tools:*'],
+    abilities,
     serverInfo: { name: 'test-app', version: '0.0.0' },
-    rateKey: 'token-1',
-    dispatch: async (): Promise<ToolCallOutcome> => ({
-      content: [{ type: 'text', text: '{"ok":true}' }],
-      status: 200,
-    }),
+    rateKey,
+    pipeline: {
+      invoke: (call) => {
+        inflight = { tool: call.tool, args: call.args, preflight: call.preflight === true }
+        return inner.invoke(call)
+      },
+    },
     onInvoked: (tool, args, status) => recorded.invoked.push({ tool: tool.toolName, status, args }),
     onDenied: (tool, args, reason) => recorded.denied.push({ tool: tool.toolName, reason, args }),
-    ...overrides,
+    ...serverOverrides,
   })
 
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
   const client = new Client({ name: 'test-client', version: '1.0.0' })
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)])
-  return { client, recorded }
+  return { client, recorded, dispatched }
 }
 
 describe('createAppMcpServer', () => {
@@ -151,7 +212,7 @@ describe('createAppMcpServer', () => {
 
   test('should convert a dispatch throw into an error result recorded as a 500', async () => {
     const { client, recorded } = await connect({
-      dispatch: async () => {
+      respond: () => {
         throw new Error('boom')
       },
     })
@@ -167,18 +228,12 @@ describe('createAppMcpServer', () => {
  * here — `preflight.test.ts` drives the real one.
  */
 describe('createAppMcpServer: guren.preflight', () => {
-  async function connectPreflight(overrides: Partial<AppMcpServerOptions> = {}) {
-    const dispatched: Array<{ tool: string; args: Record<string, unknown>; preflight: boolean }> = []
-    const connected = await connect({
-      dispatch: async (tool, args, options) => {
-        dispatched.push({ tool: tool.toolName, args, preflight: Boolean(options?.preflight) })
-        return options?.preflight
-          ? await seamVerdict(tool, { route: tool.toolName })
-          : { content: [{ type: 'text', text: '{"ok":true}' }], status: 200 }
-      },
+  async function connectPreflight(overrides: HarnessOptions = {}) {
+    return connect({
+      respond: (tool, _args, preflight) =>
+        preflight ? seamVerdict({ route: tool.toolName }) : Response.json({ ok: true }),
       ...overrides,
     })
-    return { ...connected, dispatched }
   }
 
   test('should advertise itself as read-only and non-destructive', async () => {
@@ -233,7 +288,7 @@ describe('createAppMcpServer: guren.preflight', () => {
   // and the companion must not lose that half of the answer.
   test('should carry the seam\'s unverified list through unchanged', async () => {
     const { client } = await connectPreflight({
-      dispatch: async (tool) => seamVerdict(tool, { unverified: [], validated: [] }),
+      respond: () => seamVerdict({ unverified: [], validated: [] }),
     })
     const result = await client.callTool({
       name: 'guren.preflight',
@@ -244,19 +299,11 @@ describe('createAppMcpServer: guren.preflight', () => {
 
   test('should report a refusal as a success result carrying the errors', async () => {
     const { client } = await connectPreflight({
-      dispatch: async () => ({
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify({
-              message: 'The given data was invalid.',
-              errors: { title: ['Required'] },
-            }),
-          },
-        ],
-        isError: true,
-        status: 422,
-      }),
+      respond: () =>
+        Response.json(
+          { message: 'The given data was invalid.', errors: { title: ['Required'] } },
+          { status: 422 },
+        ),
     })
     const result = await client.callTool({ name: 'guren.preflight', arguments: { tool: 'posts.store' } })
 
@@ -367,7 +414,7 @@ describe('createAppMcpServer: guren.preflight', () => {
   // as `allowed: true` would describe a write that happened as one that did not.
   test('should error rather than report a verdict when the app ran the call', async () => {
     const { client } = await connectPreflight({
-      dispatch: async () => ({ content: [{ type: 'text', text: '{"created":1}' }], status: 201 }),
+      respond: () => Response.json({ created: 1 }, { status: 201 }),
     })
     const result = await client.callTool({ name: 'guren.preflight', arguments: { tool: 'posts.store' } })
 
