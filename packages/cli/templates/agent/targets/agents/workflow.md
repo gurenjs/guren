@@ -8,7 +8,9 @@ so make them part of your loop:
    APIs — read it before writing any code. With the MCP server connected, the
    `guren_get_context` tool returns the same map.
 2. **After editing** routes, controllers, models, `db/schema.ts`, or pages,
-   run `bunx guren check` and fix what it reports before moving on.
+   run `bunx guren check` and fix what it reports before moving on. With an
+   `.oxlintrc.json` in the app (`bunx guren add lint`), run `bun run lint` on
+   what you edited as well; its warnings are for you to act on.
 3. Framework-managed files (`.agents/rules/`, `.agents/skills/`) can be
    refreshed anytime with `bunx guren agent:sync`.
 
