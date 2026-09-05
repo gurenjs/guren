@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { defineCommand } from 'citty'
+import { defineCommand } from './define-command'
 
 export type CommandRunner = (args: string[]) => Promise<void>
 

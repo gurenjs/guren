@@ -1,10 +1,11 @@
 #!/usr/bin/env bun
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { defineCommand, showUsage, type CommandDef } from 'citty'
+import { showUsage, type CommandDef } from 'citty'
 import { consola } from 'consola'
 import { builtinSubCommands } from './commands'
 import { discoverPluginCommands, createPluginCommandProxy } from './plugin-commands'
+import { defineCommand } from './define-command'
 import { runCli, UsageError } from './run-cli'
 
 // CLI commands declared by installed plugins (gurenPlugin.commands). Discovery

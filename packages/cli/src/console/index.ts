@@ -4,7 +4,7 @@ import { pathToFileURL } from 'node:url'
 import readline from 'node:readline'
 import { inspect } from 'node:util'
 import { consola } from 'consola'
-import { defineCommand } from 'citty'
+import { defineCommand } from '../define-command'
 import { parse } from '@babel/parser'
 import {
   bootstrapApplication,
