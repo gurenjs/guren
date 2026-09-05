@@ -101,12 +101,11 @@ export function createAppMcpServer(options: AppMcpServerOptions): Server {
 
   const approvalsConfigured = options.approvals !== undefined
 
-  // Listed only if `gateToolCall` would admit it: offering a tool the call
-  // then refuses maps the write surface to a read-only token, and clients read
-  // a listing as an invitation. With a queue an approval-gated tool is
-  // callable (the call queues), so it stays listed. Rate limits are runtime
-  // state, not capability. Resolving approvals here would page approvers on
-  // every connection, so only the synchronous, write-free gate runs.
+  // Listed only if `gateToolCall` would admit it: offering a tool the call then
+  // refuses maps the write surface to a read-only token. With a queue an
+  // approval-gated tool is callable (the call queues), so it stays listed; rate
+  // limits are runtime state, not capability. Resolving approvals here would
+  // page approvers on every connection, so only the synchronous gate runs.
   server.setRequestHandler(ListToolsRequestSchema, () => {
     const listed = tools
       .filter((tool) => gateToolCall(tool, options.abilities, { approvalsConfigured }).allowed)
@@ -119,12 +118,11 @@ export function createAppMcpServer(options: AppMcpServerOptions): Server {
     const preflightable = tools.some((tool) => gatePreflight(tool, options.abilities).allowed)
     if (!preflightable) return { tools: listed }
 
-    // `guren.approval_status` rides that same condition — a token that can
-    // call nothing has no request of its own to ask after — and one more: a
-    // The same condition plus one: a server with no queue holds no record any
-    // id could name, so advertising this there would be the unconfigured queue
-    // looking like a working one. `preflightable` is reused rather than
-    // recomputed so the two meta-tools cannot disagree about what a token grants.
+    // `guren.approval_status` rides that same condition — a token that can call
+    // nothing has no request of its own to ask after — plus one: a server with
+    // no queue holds no record any id could name, so advertising it there would
+    // be the unconfigured queue looking like a working one. `preflightable` is
+    // reused, not recomputed, so the two meta-tools cannot disagree.
     return {
       tools: approvalsConfigured
         ? [...listed, describePreflightTool(), describeApprovalStatusTool()]

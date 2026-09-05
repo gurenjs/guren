@@ -291,9 +291,9 @@ describe('createDebouncedDocSearch', () => {
   })
 
   it('retires a running request when a newer query is scheduled', async () => {
-    // Only the timer used to be cleared, so for the debounce interval the
-    // in-flight request still held the current token — long enough to deliver
-    // its rows into the loading state of a query the reader had moved on from.
+    // Clearing only the timer leaves the in-flight request holding the current
+    // token for the debounce interval — long enough to deliver its rows into
+    // the loading state of a query the reader had moved on from.
     vi.useFakeTimers()
     const spy = runnerSpy()
     const search = createDebouncedDocSearch({ runner: spy.runner, delayMs: 150 })

@@ -836,7 +836,6 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
    * Many-to-many through a pivot table. `foreignPivotKey`/`relatedPivotKey` are
    * both columns *on the pivot*, referencing this model and the related one;
    * `parentKey`/`relatedKey` are the local keys they point at.
-   *
    * @example
    * this.belongsToMany('roles', Role, userRoles, 'userId', 'roleId', 'id', 'id')
    */
@@ -871,7 +870,6 @@ export abstract class Model<TRecord extends PlainObject = PlainObject> {
    * Has-many-through: `firstKey` is on the intermediate model referencing this
    * one, `secondKey` on the related model referencing the intermediate;
    * `localKey` and `secondLocalKey` are the keys they point at.
-   *
    * @example
    * this.hasManyThrough('posts', Post, User, 'countryId', 'userId', 'id', 'id')
    */
@@ -2135,16 +2133,11 @@ type CreateShape<
   Required<Pick<InferModelInsert<TTable> & TCreateFor<TBase>, TRequire & keyof (InferModelInsert<TTable> & TCreateFor<TBase>)>>
 
 /**
- * A table-backed model base class. `recordType`/`createType` are inferred from
- * the table; `optionalOnCreate`/`requireOnCreate` reshape the inferred create
- * payload without a cast, for a model like `AuthenticatableModel` that hashes a
- * virtual `password` into `passwordHash`. Passing the allowlist statics as
- * options rather than declaring them checks every name against the table's
- * columns, so a typo is a compile error rather than a dead entry; a `static` on
- * the subclass shadows the option, as normal class semantics.
- *
- * @example
- * class User extends defineModel(users, { fillable: ['name', 'email'] }) {}
+ * A table-backed model base class: `recordType`/`createType` inferred from the
+ * table, `optionalOnCreate`/`requireOnCreate` reshaping the create payload without
+ * a cast (`AuthenticatableModel` hashes a virtual `password` into `passwordHash`).
+ * Allowlist statics passed as options are checked against the table's columns, so
+ * a typo is a compile error; a `static` on the subclass shadows the option.
  */
 export function defineModel<
   TTable extends TableShape,

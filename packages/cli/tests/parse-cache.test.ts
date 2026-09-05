@@ -54,8 +54,8 @@ describe('parseSourceFile', () => {
     })
   }
 
-  // Neither plugin set parses both, so whichever the extension rule guessed
-  // wrong used to be dropped. The retry covers both directions.
+  // Neither plugin set parses both, so the retry covers whichever the
+  // extension rule guessed wrong, in both directions.
   it('parses angle-bracket casts and JSX regardless of extension', () => {
     expect(parseSourceFile('const x = <string>y', 'a.ts')).not.toBeNull()
     expect(parseSourceFile('const x = <string>y', 'a.js')).not.toBeNull()

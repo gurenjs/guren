@@ -624,12 +624,10 @@ export type {
   RegisteredTranslationKey,
 } from './i18n'
 // Database (Seeder & Factory)
-// The seeder half is deprecated (`seeder-class-convention`, registered in
-// `packages/cli/src/deprecations.ts`): `BaseSeeder`/`Seeder`/
-// `resetCalledSeeders`/`SeederRunner`/`createSeederRunner` and the
-// `SeederClass`/`SeederInterface`/`SeederRunnerOptions` types below. Seeding
-// goes through `runSeeders()`/`defineSeeder`; removal is 3.0.0. The factory
-// half is live: `make:factory` scaffolds against it.
+// The seeder half is deprecated (`seeder-class-convention` in
+// `packages/cli/src/deprecations.ts`): `BaseSeeder`/`Seeder`/`resetCalledSeeders`/
+// `SeederRunner`/`createSeederRunner` and the `Seeder*` types below. Seeding goes
+// through `runSeeders()`/`defineSeeder`; removal is 3.0.0. The factory half is live.
 export {
   BaseSeeder,
   Seeder,

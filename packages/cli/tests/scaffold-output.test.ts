@@ -43,11 +43,10 @@ import { generatePageTypes } from '../src/pages-types'
 
 /**
  * The syntax gate for every generator: render representative outputs and require
- * each generated .ts/.tsx to parse. templates/scaffold/ gets the stronger
- * `typecheck:templates` pass and make:auth's builders get
- * scaffold-builder-typecheck.test.ts; every other builder's output exists only
- * at generation time. The covered set derives from `builtinSubCommands`, so a
- * new `make:*` fails here until it joins the matrix or names its reason.
+ * each generated .ts/.tsx to parse. templates/scaffold/ has `typecheck:templates`
+ * and make:auth's builders have scaffold-builder-typecheck.test.ts; every other
+ * builder's output exists only at generation time. The covered set derives from
+ * `builtinSubCommands`, so a new `make:*` fails here until it joins the matrix.
  */
 
 /** Generators with no TypeScript output — nothing for a parse gate to check. */

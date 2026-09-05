@@ -75,7 +75,7 @@ describe('assertCreateAppRepublishes', () => {
   })
 
   // The same fact from both sides: `undefined !== '2.8.0'` compares unequal, so
-  // an unreadable version used to *pass* the refusal.
+  // an unreadable version must not *pass* the refusal.
 
   it('refuses a committed manifest with no version, rather than reading it as a bump', async () => {
     const repo = await repoAt(`${JSON.stringify({ name: 'create-guren-app' }, null, 2)}\n`)

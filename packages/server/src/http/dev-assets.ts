@@ -44,13 +44,13 @@ export function resolveInertiaClientRoute(inertiaClientPath: string): {
 export interface DevAssetsOptions {
   /** Absolute path to the resources directory (e.g. `/app/resources`). */
   resourcesDir?: string
-  /** Base import meta used to resolve relative paths. */
+  /** Base import meta that relative paths resolve against. */
   importMeta?: ImportMeta
   /** Relative path from `importMeta` to the resources directory. Defaults to `../resources`. */
   resourcesPath?: string
   /** Path prefix to mount transpiled JS assets. Defaults to `/resources/js`. */
   prefix?: string
-  /** Route pattern used to serve raw CSS assets. Defaults to `/resources/css/*`. */
+  /** Route pattern serving raw CSS assets. Defaults to `/resources/css/*`. */
   cssRoute?: string
   /** Absolute path to the CSS directory. Defaults to `<resourcesDir>/../css`. */
   cssDir?: string

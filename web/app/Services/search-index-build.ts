@@ -75,12 +75,11 @@ export function collectRows(docs: DocsByLocale): IndexRow[] {
         for (const [position, section] of splitDocSections(doc.html).entries()) {
           const heading = tokenizeText(section.heading)
           const body = tokenizeText(section.body)
-          // The title is searchable on the doc's first section only — its h1,
-          // which is where a "this whole guide" hit should land. Repeating it
-          // on every section made a title match fan out across the document:
-          // searching `database` returned six sections of guides/database
-          // ahead of every other doc, led by whichever of them bm25 happened
-          // to favour, with snippets that had nothing to do with the query.
+          // The title is searchable on the doc's first section only (its h1,
+          // where a "this whole guide" hit should land). Repeated on every
+          // section, a title match fans out across the document: `database`
+          // returned six sections of guides/database ahead of every other doc,
+          // ordered by bm25's whim, with snippets unrelated to the query.
           rows.push({
             id: rows.length + 1,
             locale,
@@ -110,15 +109,11 @@ export function collectRows(docs: DocsByLocale): IndexRow[] {
 }
 
 /**
- * A pure function of what gets indexed, and of nothing else — no clock, no
- * git sha, no build counter.
- *
+ * A pure function of what gets indexed: no clock, git sha, or build counter.
  * The deploy workflow skips reindexing when the id it just built matches the
- * one already in D1, and then deploys a Worker naming tables suffixed with
- * that id. If anything outside the corpus could move the id, such a deploy
- * would bake a name for tables nobody ever created, and every search would
- * fail until the next docs change. This is the one invariant in the design
- * that turns into an outage when it breaks.
+ * one in D1, then deploys a Worker naming tables suffixed with that id. Anything
+ * outside the corpus moving the id would bake a name for tables nobody created,
+ * and every search would fail until the next docs change.
  */
 export function computeBuildId(rows: IndexRow[]): string {
   const hash = createHash('sha256')
@@ -155,11 +150,9 @@ export function searchTableName(buildId: string): string {
 
 /**
  * SQL string literal, quoted the way drizzle would quote it — checked against
- * its inliner over a few hundred hostile values in `tests/sqlite`.
- *
- * Only the quoting. A NUL would end the literal inside SQLite's parser rather
- * than fail, and it is dropped upstream by `withoutNul()`, where the build id
- * can see the same text this writes.
+ * its inliner over a few hundred hostile values in `tests/sqlite`. Only the
+ * quoting: a NUL would end the literal inside SQLite's parser rather than fail,
+ * and is dropped upstream by `withoutNul()`, where the build id sees the same text.
  */
 function quote(value: string): string {
   return `'${value.replace(/'/gu, "''")}'`
@@ -206,12 +199,10 @@ function batchInserts(prefix: string, tuples: string[]): string[] {
 
 /**
  * The whole index as one script: both tables created under this build's own
- * names, filled, and the state row updated.
- *
- * Nothing is dropped here except this build's own tables (so re-running is
- * safe). Retiring the *previous* build's tables is a post-deploy step: doing
- * it at the head of this file would mean a failed deploy leaves the live
- * Worker pointing at tables that no longer exist.
+ * names, filled, and the state row updated. Nothing is dropped except this
+ * build's own tables, so re-running is safe. Retiring the *previous* build's
+ * tables is a post-deploy step: done here, a failed deploy would leave the live
+ * Worker pointing at dropped tables.
  */
 export function renderIndexSql(rows: IndexRow[], buildId: string): string {
   const sections = sectionsTableName(buildId)

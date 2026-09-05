@@ -18,14 +18,11 @@ import {
 } from './agent-targets'
 
 /**
- * AI agent harness installer (RFC 0008): the I/O half of `agent-targets.ts`,
- * which owns every path, content, and classification decision.
- *
- * Managed files (rules, skills, subagents, hooks) are overwritten by
- * `agent:sync`, never silently — a differing file is reported in `replaced`, and
- * `dryRun` answers what a sync would touch first. User-owned files (CLAUDE.md,
- * AGENTS.md, settings, MCP configs) are written once and replaced only by
- * `agent:init --force`.
+ * AI agent harness installer (RFC 0008): the I/O half of `agent-targets.ts`, which
+ * owns every path, content, and classification decision. Managed files (rules, skills,
+ * subagents, hooks) are overwritten by `agent:sync`, never silently: a differing file
+ * is reported in `replaced`, and `dryRun` answers what a sync would touch. User-owned
+ * files (CLAUDE.md, AGENTS.md, settings, MCP configs) are replaced only by `agent:init --force`.
  */
 
 const templateDir = fileURLToPath(new URL('../templates/agent', import.meta.url))
@@ -71,8 +68,8 @@ export interface AgentHarnessResult {
   pruneRequested: boolean
   skipped: string[]
   /**
-   * Sync only: files inside `managedNamespaces` the current plan no longer
-   * writes. Deleted only with `prune`, because a project's own file can land
+   * Sync only: files inside `managedNamespaces` the current plan does not
+   * write. Deleted only with `prune`, because a project's own file can land
    * here under a name the framework itself ships.
    */
   stale: string[]

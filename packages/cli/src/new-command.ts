@@ -25,13 +25,11 @@ async function runBunCommand(args: string[]): Promise<void> {
 }
 
 /**
- * A thin forwarder to `create-guren-app`, so the transport is `ctx.rawArgs`
- * and the child parses with its own declarations. The `args` block below is
- * documentation for `guren new --help` only, kept in sync with
- * `packages/create-app/src/cli.ts` by hand. Do not reintroduce a parsed-arg
- * translation table: citty parses an undeclared string flag as boolean `true`
- * and leaks its value into `args._`, which is how `guren new app --db
- * postgres` silently scaffolded a SQLite app.
+ * A thin forwarder to `create-guren-app`: the transport is `ctx.rawArgs` and the
+ * child parses with its own declarations. The `args` block below is `--help`
+ * documentation only, kept in step with `packages/create-app/src/cli.ts` by hand.
+ * Do not add a parsed-arg translation table: citty parses an undeclared string
+ * flag as boolean `true` and leaks its value into `args._` (`--db postgres` → SQLite app).
  */
 export function createNewCommand(runCreateApp: CommandRunner = runBunCommand) {
   return defineCommand({

@@ -2334,7 +2334,7 @@ const contextCommand = defineCommand({
   args: {
     // Declared `string`, not `positional`, so both spellings reach the entity
     // path: citty drops a value passed as a flag to a positional and raises no
-    // unknown-flag error, so `guren context --entity User` used to print the
+    // unknown-flag error, so `guren context --entity User` would print the
     // whole-project map and exit 0. A `string` arg still leaves the bare
     // positional in `_`.
     entity: {

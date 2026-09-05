@@ -285,13 +285,9 @@ function registerProcessTeardown(onSignal: () => void, onExit: () => void): () =
   process.on('exit', onExit)
 
   return () => {
-    // Via the EventEmitter surface: bun-types 1.4.0 declares `off` on Process
-    // with only a "memoryPressure" overload, shadowing the generic `off`, so
-    // signal names stop compiling. `on`/`once` are unaffected.
-    const emitter: NodeJS.EventEmitter = process
-    emitter.off('SIGINT', onSignal)
-    emitter.off('SIGTERM', onSignal)
-    emitter.off('exit', onExit)
+    process.off('SIGINT', onSignal)
+    process.off('SIGTERM', onSignal)
+    process.off('exit', onExit)
   }
 }
 
@@ -575,10 +571,9 @@ export class Application {
 
     // Publish as the process-wide container: code outside a request (Job.make(),
     // the exported resolve()) reaches it only through the global. In the
-    // constructor rather than boot(), because `guren queue:work` and a job
-    // dispatched at module scope never boot the app. Last statement, so an
-    // application that throws while building leaves the previous container in
-    // place rather than publishing a half-built one.
+    // constructor, because `guren queue:work` and a job dispatched at module
+    // scope never boot the app. Last statement, so a constructor that throws
+    // leaves the previous container in place rather than a half-built one.
     setContainer(this.container)
   }
 
@@ -881,9 +876,9 @@ export class Application {
   /**
    * The address {@link Application.listen} bound — the same object it returned,
    * preferred over re-reading the live server, whose port `listen()` may have
-   * resolved through a fallback the socket no longer carries. Only stops that go
-   * through the framework clear it, so treat it as "where `listen()` put this
-   * app", not as a health check.
+   * resolved through a fallback the socket itself does not carry. Only stops
+   * that go through the framework clear it, so treat it as "where `listen()`
+   * put this app", not as a health check.
    */
   get address(): ListenAddress | undefined {
     // Both halves earn their place: without `bunServer` two `undefined`s would

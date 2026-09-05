@@ -1,14 +1,12 @@
 /**
  * Argument masking for the agent audit trail (RFC 0016 §5.2). Two sources,
  * unioned: a fixed list of sensitive key *fragments* every application gets,
- * and the route's own `.agent({ redact })`.
- *
- * A key matches when its lowercased name *contains* a fragment, declared
- * entries included — `redact: ['id']` also masks `userId`. Over-redaction is
- * the safe direction: a needless mask costs a debugging round trip, an unmasked
- * credential costs a rotation. The walk is total because it runs while
- * recording what happened, including a denial taken before validation: a cycle
- * and a payload nested past {@link MAX_DEPTH} both terminate with a marker.
+ * and the route's own `.agent({ redact })`. A key matches when its lowercased
+ * name *contains* a fragment, declared entries included — `redact: ['id']` also
+ * masks `userId`. Over-redaction is the safe direction: a needless mask costs a
+ * debugging round trip, an unmasked credential costs a rotation. The walk is
+ * total because it runs while recording a denial taken before validation: a
+ * cycle and a payload nested past {@link MAX_DEPTH} both terminate with a marker.
  */
 
 /**
@@ -75,17 +73,11 @@ function normalizeKeyText(text: string): string {
 }
 
 /**
- * Mask the sensitive fields of an agent tool's arguments.
- *
- * Returns a deep copy — but deep only through plain objects and arrays.
- * Anything else (a `Date`, a `Map`, a class instance) is carried across by the
- * same reference and never inspected, so a credential inside one is masked only
- * if the key holding it matches. Tool arguments arrive as parsed JSON on every
- * surface; only an in-process caller can hit that case.
- *
- * @param args The invocation arguments. Walked as a record whatever its
- *   prototype, so the return is always a fresh plain object.
- * @param redact Extra key fragments from the route's `.agent({ redact })`.
+ * Mask the sensitive fields of an agent tool's arguments; `redact` adds the
+ * route's `.agent({ redact })` fragments. Returns a fresh plain object (`args`
+ * is walked as a record whatever its prototype), deep only through plain objects
+ * and arrays: a `Date`, `Map` or class instance is carried by reference and
+ * never inspected, which only an in-process caller can hit (surfaces pass JSON).
  */
 export function redactAgentArguments(
   args: Record<string, unknown>,
@@ -117,14 +109,11 @@ function isSensitiveKey(key: string, fragments: readonly string[]): boolean {
 }
 
 /**
- * Copy one object's entries, masking sensitive keys.
- *
- * Accumulates on a null-prototype object: an argument named `__proto__`
- * survives `JSON.parse` as an own property, and assigning it on a plain `{}`
- * invokes the prototype setter — the value would vanish and a crafted payload
- * would reach the prototype chain from inside the logging path. Spread back
- * onto a normal object *defines* own properties; `Object.assign` would assign
- * them, putting the hazard straight back.
+ * Copy one object's entries, masking sensitive keys. Accumulates on a
+ * null-prototype object: an argument named `__proto__` survives `JSON.parse` as
+ * an own property, and assigning it on a plain `{}` invokes the prototype
+ * setter — the value would vanish and a crafted payload would reach the
+ * prototype chain. Spread back *defines* own properties; `Object.assign` would assign them.
  */
 function redactRecord(
   source: object,

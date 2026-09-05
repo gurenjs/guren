@@ -239,7 +239,7 @@ export const posts = pgTable('posts', {
 
       const tables = await parseSchemaTables(workspace.dir)
 
-      // The wrapped column map used to make the whole table invisible.
+      // A wrapped column map must not hide the whole table.
       expect(tables.map((t) => t.identifier)).toEqual(['posts'])
     } finally {
       await workspace.cleanup()
@@ -264,8 +264,8 @@ export const posts = pgTable('posts', {
       const [posts] = await parseSchemaTables(workspace.dir)
       const createdAt = posts.columns.find((c) => c.name === 'createdAt')!
 
-      // Wrapped options used to read as opaque, so a written `false` looked
-      // like an unknown and the timestamptz check skipped the column.
+      // Wrapped options must not read as opaque: a written `false` would look
+      // like an unknown and the timestamptz check would skip the column.
       expect(createdAt.opaqueOptions).toBeUndefined()
       expect(createdAt.withTimezone).toBe(false)
     } finally {

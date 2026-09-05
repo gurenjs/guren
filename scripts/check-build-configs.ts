@@ -1,14 +1,12 @@
 /**
- * Type-checks every package through the tsconfig its bundler reads.
+ * Type-checks every package through the tsconfig its bundler reads:
+ * `bun scripts/check-build-configs.ts`, after `bun run build` (or every sibling
+ * import reports TS2307). Covers packages with a `tsconfig.build.json`.
  *
- * tsdown emits declarations with `tsgo --noCheck`, so an unresolvable sibling
- * does not fail the build: it turns every type inferred from it into `any` in
- * the published .d.ts, and the root typecheck cannot see it because its path
- * mappings resolve siblings to their sources. Covers packages with a
- * `tsconfig.build.json`; run after `bun run build`, or every sibling import
- * reports TS2307.
- *
- * Usage: bun scripts/check-build-configs.ts
+ * tsdown emits declarations with `tsgo --noCheck`, so an unresolvable sibling does
+ * not fail the build: every type inferred from it becomes `any` in the published
+ * .d.ts, and the root typecheck cannot see it because its path mappings resolve
+ * siblings to their sources.
  */
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'

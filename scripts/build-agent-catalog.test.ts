@@ -91,12 +91,11 @@ describe('renderCatalog', () => {
 
 describe('the command registry is importable', () => {
   it('builds on import without running the CLI or touching the filesystem', () => {
-    // The audit imports `commands.ts`, which is only safe while importing it
-    // stays inert: a stray console line, prompt or warning in any of the ~50
-    // command modules would run on every audit and publish. What is pinned is
-    // output, not every side effect — a top-level `await` would still pass.
-    // GUREN_QUIET_DUPLICATE_ORM silences the one line this workspace prints by
-    // design, `src` and `dist` copies of @guren/orm coexisting here.
+    // The audit imports `commands.ts`, which is only safe while importing it stays
+    // inert: a stray console line, prompt or warning in any of the ~50 command
+    // modules would run on every audit and publish. What is pinned is output, not
+    // every side effect — a top-level `await` would still pass. GUREN_QUIET_DUPLICATE_ORM
+    // silences the one line this workspace prints by design (`src` and `dist` @guren/orm coexist).
     const probe = Bun.spawnSync([
       process.execPath,
       '-e',
@@ -238,7 +237,7 @@ describe('audit: Agent Plugins v1 manifest', () => {
   })
   it("accepts every valid name shape, including mixed separators the spec's pattern admits", async () => {
     // a-.b is valid per the schema (only -- and .. are forbidden); a stricter
-    // hand-written regex used to reject it
+    // hand-written regex rejects it
     for (const ok of ['my-plugin', 'acme.tools', 'lint3r', 'a', 'a-.b', 'a.-b']) {
       expect(await assertPortableManifest(rootManifest({ ...valid, name: ok }))).toEqual([])
     }

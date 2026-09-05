@@ -10,11 +10,10 @@ import {
 
 /**
  * `@guren/plugin-cloudflare/env` exists so application code can reach the
- * Workers env holder without the root entry's `buildCloudflareOutput` — and
- * `node:fs`, `node:path`, `node:url`, plus the deploy generator — coming with
- * it, on every `bun run dev` boot and in every wrangler bundle. Nothing else can
- * catch a regression: an import from the root typechecks, resolves and works,
- * and the only symptom is a slower boot and a fatter bundle.
+ * Workers env holder without the root entry's `buildCloudflareOutput` (and
+ * `node:fs`, `node:path`, `node:url`) coming with it on every `bun run dev` boot
+ * and in every wrangler bundle. Nothing else catches a regression: an import from
+ * the root typechecks and works; the only symptom is a slower boot and fatter bundle.
  */
 const packageDir = fileURLToPath(new URL('..', import.meta.url))
 const built = existsSync(`${packageDir}/dist/env.js`)

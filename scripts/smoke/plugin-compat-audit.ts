@@ -82,11 +82,10 @@ async function readManifest(pkg: WorkspacePackage): Promise<Manifest> {
 
 /**
  * The version `changeset version` will publish for a package, given what it
- * is on now and the loudest bump pending against it.
- *
- * Plain semver increment, which is what changesets applies to a >=1.0.0
- * package. Below 1.0.0 it can differ; left alone deliberately, since no
- * first-party package below 1.0.0 is depended on by another one.
+ * is on now and the loudest bump pending against it. Plain semver increment,
+ * which is what changesets applies to a >=1.0.0 package; below 1.0.0 it can
+ * differ, left alone since no first-party package below 1.0.0 is depended on
+ * by another one.
  */
 export function plannedVersion(current: string, bump: Bump): string | null {
   const match = /^(\d+)\.(\d+)\.(\d+)/.exec(current)

@@ -6,11 +6,10 @@ const repoRoot = join(import.meta.dir, '../../..')
 
 /**
  * Auth scaffold templates and the blog blueprint share files at two levels.
- * Byte-identical pairs are pinned in lockstep below — a maintained invariant
- * (#380 and #393 each moved both sides in one commit; #297 is the drift bug
- * class). Near-twins (AuthProvider.ts, Layout.tsx) differ deliberately and pin
- * only their shared snippet, via SHARE_INERTIA_AUTH_PROPS_SNIPPET in
- * make-auth.test.ts. Diverging a pair means moving it out of this list.
+ * Byte-identical pairs are pinned in lockstep below (#380 and #393 each moved
+ * both sides in one commit; #297 is the drift bug class). Near-twins
+ * (AuthProvider.ts, Layout.tsx) differ deliberately and pin only their shared
+ * snippet, via SHARE_INERTIA_AUTH_PROPS_SNIPPET in make-auth.test.ts.
  */
 const LOCKSTEP_PAIRS = [
   'app/Http/Controllers/DashboardController.ts',

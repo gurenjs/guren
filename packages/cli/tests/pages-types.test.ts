@@ -277,7 +277,7 @@ describe('generatePageTypes on an API-only app', () => {
   })
 
   // The skip has to be audible. A user whose app was misread as API-only sees
-  // this line where a "Page helpers generated at …" used to be.
+  // this line in place of "Page helpers generated at …".
   it('warns from the codegen command rather than skipping silently', async () => {
     const workspace = await createTempWorkspace('guren-cli-pages-api-only-cli-')
     try {

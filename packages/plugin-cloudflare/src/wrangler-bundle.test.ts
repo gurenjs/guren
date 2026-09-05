@@ -11,11 +11,8 @@ import {
 // Opt-in end-to-end contract test: proves wrangler can bundle a worker that
 // imports `@guren/orm` with only the stubs `cloudflare:build` scaffolds and no
 // database client installed. `@guren/orm` names every dialect's client in a
-// *literal* dynamic import, which a bundler follows whether or not the branch
-// can be taken — a D1 app failed on `Could not resolve "postgres"`.
-//
-// Gated behind GUREN_TEST_WRANGLER=1 because the first run downloads wrangler
-// and workerd; the nightly canary sets it.
+// *literal* dynamic import, which a bundler follows whether or not the branch can
+// be taken. Gated behind GUREN_TEST_WRANGLER=1 (downloads wrangler and workerd).
 const enabled = process.env.GUREN_TEST_WRANGLER === '1'
 
 /** Installed directories that would let wrangler resolve a client for real. */
@@ -199,14 +196,10 @@ function workspaceClosure(seed: string): Map<string, WorkspacePackage> {
 
 /**
  * Install a probe's third-party dependencies from npm and vendor this checkout's
- * `@guren/*` packages over them, flat. By *copy* rather than tarball: `bun add`
- * of a tarball leaves the packages' own `@guren/*` ranges to resolve, and npm
- * satisfies them with published copies nested under each vendored package —
- * measured, and a published `@guren/core` predating the change under test made
- * the bundle fail. `extra` adds dependencies no `@guren/*` manifest declares.
- * The two loops at the end are the assertion the probe rests on: a package
- * resolving *out* of it measures this monorepo, which has reported a real bundle
- * change as no change at all before.
+ * `@guren/*` packages over them, flat, by copy: `bun add` of a tarball leaves the
+ * packages' own `@guren/*` ranges to npm, which nests published copies under each
+ * vendored package (measured). `extra` adds dependencies no `@guren/*` manifest
+ * declares. The two loops at the end assert no package resolves *out* of the closure.
  */
 function vendorClosure(
   root: string,
@@ -356,12 +349,9 @@ describe.skipIf(!enabled)('wrangler bundles a worker importing @guren/plugin-mcp
 /**
  * The OAuth-fronted worker `cloudflare:build --mcp-oauth` generates, bundled for
  * real. Only this can answer whether `@guren/plugin-mcp/oauth` resolves from an
- * *installed* copy: that subpath is imported by code existing nowhere in this
- * repository, so an `exports` entry or `files` list publishing the wrong thing
- * is invisible until a deploy cannot resolve it. It also proves
+ * *installed* copy (nothing in this repository imports that subpath) and whether
  * `@cloudflare/workers-oauth-provider` is workerd-compatible, which the build
- * assumes and never checks. The worker source is the generator's own output: a
- * probe pinning a copy would keep passing after the generator changed.
+ * assumes. The worker source is the generator's own output, never a pinned copy.
  */
 describe.skipIf(!enabled)('wrangler bundles the --mcp-oauth worker', () => {
   let root: string
@@ -440,12 +430,10 @@ describe.skipIf(!enabled)('wrangler bundles the --mcp-oauth worker', () => {
         .join('\n')
 
       // No deploy generator in the deployed worker. `Cloudflare build:` prefixes
-      // every message `build.ts` emits and appears nowhere else, so its absence
-      // is the assertion. It does not prove the import graph is clean: the
-      // generated worker imports from the package root, which re-exports
-      // `buildCloudflareOutput`, and this passes only because wrangler
-      // tree-shakes it out. `tests/lean-env-subpath.test.ts` guards the dev
-      // path, where there is no bundler.
+      // every message `build.ts` emits and appears nowhere else, so its absence is
+      // the assertion. Not proof the import graph is clean: the worker imports the
+      // package root, which re-exports `buildCloudflareOutput`, and wrangler tree-
+      // shakes it out. `tests/lean-env-subpath.test.ts` guards the unbundled dev path.
       expect(bundle).not.toContain('Cloudflare build:')
       // Which means something only if there is a real bundle to look at.
       expect(bundle).toContain('OAuthProvider')

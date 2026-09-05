@@ -375,9 +375,8 @@ export async function createTempWorkspace(prefix: string): Promise<TempWorkspace
   // Bun's last resort for an unresolvable bare specifier is to *install* it,
   // from the global cache or npm, so an unlinked fixture silently binds the
   // *published* `@guren/*` (measured: `@guren/core@1.7.0`) instead of this
-  // checkout. Written here because bunfig lookup is cwd-only, and before the
-  // chdir: an await after it is a suspension point a timed-out test abandons
-  // with cwd moved and no `cleanup()` to move it back.
+  // checkout. Written before the chdir because bunfig lookup is cwd-only and an
+  // await after it is a suspension point a timed-out test abandons with cwd moved.
   await writeFile(join(dir, 'bunfig.toml'), '[install]\nauto = "disable"\n')
 
   const originalCwd = process.cwd()
@@ -457,7 +456,7 @@ const TSC_BIN = join(repoRoot, 'node_modules/typescript/bin/tsc')
 export function resolvedCompilerOptions(configPath: string): TsconfigCompilerOptions {
   const spawnOptions = { cwd: dirname(configPath), stdout: 'pipe', stderr: 'pipe' } as const
   // --showConfig exits 0 and prints whatever it could read, so a config that
-  // no longer parses would come back as weakened defaults: the diagnostics
+  // fails to parse would come back as weakened defaults: the diagnostics
   // come from a separate no-check run.
   const probe = Bun.spawnSync([process.execPath, TSC_BIN, '-p', configPath, '--listFilesOnly', '--pretty', 'false'], spawnOptions)
   if (probe.exitCode !== 0) {

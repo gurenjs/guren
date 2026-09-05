@@ -3,15 +3,10 @@ import type { OAuthStatePayload, OAuthStateStore } from '@guren/server'
 import { isExpired, toDate } from './store-utils.js'
 
 /**
- * Database-backed OAuth state store built on the Guren ORM. The default
- * `MemoryOAuthStateStore` breaks on serverless, where the authorize redirect
- * and the callback can land on different instances.
- *
- * Pass the Drizzle table for your `oauth_states` schema; column property names
- * must be `stateHash` (text primary key), `provider`, `redirectTo`,
- * `expiresAt`, and `binding`. Without `binding`, every `authorize({ bindTo })`
- * state comes back unbound.
- *
+ * Database-backed OAuth state store built on the Guren ORM, for serverless, where
+ * authorize and callback can land on different instances. Column property names
+ * of the `oauth_states` table must be `stateHash` (text primary key), `provider`,
+ * `redirectTo`, `expiresAt`, and `binding` (else `authorize({ bindTo })` states come back unbound).
  * @example `new DatabaseOAuthStateStore(oauthStates)`
  */
 export class DatabaseOAuthStateStore implements OAuthStateStore {
@@ -62,15 +57,10 @@ export class DatabaseOAuthStateStore implements OAuthStateStore {
 
   /**
    * Atomically fetch and delete a state, so exactly one concurrent caller for a
-   * hash receives the payload. Depends on the adapter's `delete()` reporting a
-   * match, which `DrizzleAdapter` always does (RETURNING row, or MySQL's
-   * `affectedRows`).
-   *
-   * `ORMAdapter.delete` also permits a bare `void`, which cannot attribute the
-   * deletion at all. `deleteRemovedRow` treats an unrecognized non-null result
-   * as removed — reopening the find-then-delete race for such adapters rather
-   * than rejecting every real login — and is fail-closed only for
-   * `null`/`undefined`, Drizzle's definitive "no rows matched".
+   * hash receives the payload. Relies on `delete()` reporting a match
+   * (`DrizzleAdapter`: RETURNING row, or MySQL `affectedRows`). An adapter
+   * returning bare `void` reopens the find-then-delete race: `deleteRemovedRow`
+   * fails closed only on `null`/`undefined`, Drizzle's definitive "no rows matched".
    */
   async consume(stateHash: string): Promise<OAuthStatePayload | null> {
     const record = await this.fetchLive(stateHash)

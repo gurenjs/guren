@@ -16,11 +16,10 @@ export const API_ONLY_EVIDENCE =
 
 /**
  * The one rule for "this app cannot render an Inertia page", for scaffolders that
- * emit a page, a controller importing `@/.guren/pages.gen`, or a `routes/web.ts`
- * route. **Positive evidence only — every "cannot tell" answers `false`**, since
- * wrongly accusing an app blocks a command that would have worked. Both signals
- * are required because each is individually ambiguous; the accepted blind spot is
- * an API-only app carrying a stale `routes/web.ts`.
+ * emit a page, import `@/.guren/pages.gen`, or wire a `routes/web.ts` route.
+ * **Positive evidence only — every "cannot tell" answers `false`**: a wrong
+ * accusation blocks a command that would have worked. Both signals are required
+ * since each alone is ambiguous; a stale `routes/web.ts` is the accepted blind spot.
  */
 export async function isConfirmedApiOnlyApp(cwd: string): Promise<boolean> {
   // `null` is "there was no manifest to ask", which is not evidence of anything.

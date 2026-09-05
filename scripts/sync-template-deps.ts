@@ -2,12 +2,10 @@
  * Keep the scaffold templates' dependency versions pointed at what this
  * repository publishes and depends on. A template's `package.json` is the one
  * manifest here that resolves against **npm** rather than the workspace.
- *
  * - every `@guren/*` range follows the workspace version, so the write mode
  *   runs right after `changeset version` (see the `version-packages` script).
  * - `drizzle-orm` and `drizzle-kit` follow the exact pin `packages/orm`
  *   depends on, by the rule in `packages/cli/src/drizzle-pins.ts`.
- *
  * `--check` asserts both without writing and backs `audit:template-deps`.
  */
 import { readFile, writeFile } from 'node:fs/promises'

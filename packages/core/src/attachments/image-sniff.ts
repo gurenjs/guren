@@ -4,8 +4,8 @@
  * decoder allocates from these numbers, so the check must precede decoding) and
  * the HEIC signature, so the default 415 needs no decode.
  *
- * Header dimensions are attacker-controlled metadata, only ever used to
- * *reject* — never as proof the file is a valid image.
+ * Header dimensions are attacker-controlled metadata, grounds only for
+ * *rejection* — never proof the file is a valid image.
  */
 
 export interface SniffedImage {

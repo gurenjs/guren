@@ -4,25 +4,19 @@ import { decodeJsonColumn, toDate, toOptionalExpiry } from './store-utils.js'
 
 export interface DatabaseApiTokenStoreOptions {
   /**
-   * How the `abilities` column stores the ability list.
-   *
-   * - `'json'` (default) passes the array straight through — use with a
-   *   JSON-capable column (pg `jsonb`/`json`, sqlite `text(..., { mode: 'json' })`).
-   * - `'text'` serializes to a JSON string for plain text columns.
-   *
-   * Reads always accept both representations.
+   * How the `abilities` column stores the ability list: `'json'` (default)
+   * passes the array through for a JSON-capable column (pg `jsonb`/`json`,
+   * sqlite `text(..., { mode: 'json' })`); `'text'` serializes to a JSON string.
+   * Reads accept both.
    * @default 'json'
    */
   abilitiesMode?: 'json' | 'text'
 }
 
 /**
- * Database-backed API token store built on the Guren ORM.
- *
- * Pass the Drizzle table for your `api_tokens` schema; its column property
- * names must match the {@link ApiToken} fields. The ORM must be configured
- * before the store is used.
- *
+ * Database-backed API token store built on the Guren ORM. Pass the Drizzle
+ * table for your `api_tokens` schema; column property names must match the
+ * {@link ApiToken} fields. Configure the ORM before use.
  * @example `new DatabaseApiTokenStore(apiTokens)`
  */
 export class DatabaseApiTokenStore implements ApiTokenStore {

@@ -825,7 +825,7 @@ export const posts = pgTable('posts', {
       expect(loginPage).toContain('Continue with GitHub')
       expect(loginPage).toContain('href="/auth/github"')
       // No password form left behind, and no "or" divider dangling above a
-      // form that no longer exists.
+      // form that is not there.
       expect(loginPage).not.toContain('type="password"')
       expect(loginPage).not.toContain("form.post('/login')")
       expect(loginPage).not.toContain('Or continue with')
@@ -834,7 +834,7 @@ export const posts = pgTable('posts', {
       // OAuthController still flashes ValidationException messages back here.
       expect(loginPage).toContain('errors.message')
 
-      // A password set from the profile form could never be used to sign in,
+      // A password set from the profile form could never sign anyone in,
       // and hashing it is the CPU cost --oauth-only exists to avoid.
       const profileValidator = await readFile(join(workspace.dir, 'app/Http/Validators/ProfileValidator.ts'), 'utf8')
       expect(profileValidator).not.toContain('password')

@@ -190,7 +190,7 @@ export async function runToolDev(options: ToolDevOptions = {}): Promise<ToolDevS
   const probe = await probeEndpoint(endpoint, plainTextToken)
   if (!probe.mounted) {
     // `runToolDev` is exported, so a caller catching this must not be left holding a live
-    // server whose real tokens no longer work.
+    // server whose real tokens are already unusable.
     await stopQuietly(app)
     const observed = probe.status === 0 ? 'the request failed' : `HTTP ${probe.status}`
     throw new Error(

@@ -94,8 +94,7 @@ let documentOptions: InertiaDocumentOptions | undefined;
  * call it at module scope in the app entry so every runtime picks it up.
  * Process-wide, not request-scoped: calling it mid-flight leaks the policy into
  * in-flight requests — use the {@link InertiaOptions} fields per response.
- * Values are emitted verbatim, so never pass user input. `undefined` clears
- * (test isolation).
+ * Values are emitted verbatim, so never pass user input. `undefined` clears.
  */
 export function setInertiaDocument(
   options: InertiaDocumentOptions | undefined

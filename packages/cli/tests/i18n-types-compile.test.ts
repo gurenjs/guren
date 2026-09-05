@@ -8,10 +8,9 @@ import { buildTranslationTypesContent } from '../src/i18n-types'
 /**
  * Compile-time gate for the generated `.guren/translations.gen.ts`: only a
  * real program proves the `declare module` augmentations narrow `t()` through
- * the `@guren/server` → `@guren/core` re-export, where the merge could
- * silently stop applying. Augmentation is program-wide, so this runs its own
- * tsc program against the built `dist/index.d.ts` a real app imports — which
- * is why it requires `bun run build` first.
+ * the `@guren/server` → `@guren/core` re-export, where the merge could silently
+ * stop applying. Augmentation is program-wide, so this runs its own tsc program
+ * against the built `dist/index.d.ts` a real app imports (needs `bun run build`).
  */
 
 const repoRoot = resolve(import.meta.dir, '../../..')

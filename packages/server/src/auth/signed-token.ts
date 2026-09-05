@@ -21,18 +21,20 @@ export async function readSignedTokenClaims(
   purpose: string,
   store: { delete(tokenId: string): Promise<void> },
 ): Promise<SignedTokenClaims | null> {
-  const payload = signer.verify<{ id?: string; email?: string }>(token, {
-    purpose,
-    allowExpired: true,
-  })
-  if (!payload?.id || !payload.email) {
-    return null
+  const claims = signer.verify<{ id?: string; email?: string }>(token, { purpose })
+  if (claims?.id && claims.email) {
+    return { id: claims.id, email: claims.email }
   }
 
-  if (typeof payload.exp === 'number' && payload.exp < Math.floor(Date.now() / 1000)) {
-    await store.delete(payload.id)
-    return null
+  // Ask again with only the expiry check off, rather than comparing `exp` here:
+  // a token the strict call rejected and this one accepts is expired, not
+  // forged, and the comparison stays the signer's (if it grows clock-skew
+  // leeway, the strict call accepts inside the window and this path never
+  // deletes a live token).
+  const expired = signer.verify<{ id?: string }>(token, { purpose, allowExpired: true })
+  if (expired?.id) {
+    await store.delete(expired.id)
   }
 
-  return { id: payload.id, email: payload.email }
+  return null
 }

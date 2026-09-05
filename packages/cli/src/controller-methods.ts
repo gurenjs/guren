@@ -13,15 +13,11 @@ import { ParseCache } from './parse-cache'
 import { memberKeyName, walk } from './ast-walk'
 
 /**
- * Controller action bodies, extracted once and judged by regex afterwards.
- *
- * Lives here rather than in `audit.ts` because `guren audit` and `guren check`'s
- * agent-route rules ask the same question of the same bodies, and importing
- * `./audit` would drag its dependency and ignore-config machinery into every
- * `guren check` run. The member vocabulary lives here too: only patterns
- * spelling a `Controller` member name from this module are pinned against
- * `Controller.ts` by `controller-surface.test.ts` — one defined elsewhere goes
- * stale on a rename with nothing failing.
+ * Controller action bodies, extracted once and judged by regex afterwards. Lives
+ * here rather than in `audit.ts` because `guren audit` and `guren check`'s agent-route
+ * rules ask the same question of the same bodies, and importing `./audit` would drag
+ * its dependency and ignore-config machinery into every `guren check` run. Only patterns
+ * spelling a `Controller` member name from this module are pinned by `controller-surface.test.ts`.
  */
 export interface ControllerMethodInfo {
   /** Method body source with comments and string contents blanked, offsets preserved. */
@@ -63,14 +59,11 @@ export const EMPTY_CONTROLLER_SCAN: ControllerMethodScan = {
 }
 
 /**
- * What request data each member of `Controller` hands an action.
- *
- * The keys must be the full public/protected surface of
- * `packages/server/src/mvc/Controller.ts`; `controller-surface.test.ts` fails
- * when the two diverge, so a new accessor cannot quietly default to
- * "harmless" here. Members this rule doesn't care about are enumerated for
- * that reason. The patterns below assume call syntax, so a body-reading
- * *getter* needs the pattern touched too, not just an entry here.
+ * What request data each member of `Controller` hands an action. The keys must be
+ * the full public/protected surface of `packages/server/src/mvc/Controller.ts`;
+ * `controller-surface.test.ts` fails when the two diverge, so a new accessor cannot
+ * quietly default to "harmless" here. The patterns below assume call syntax, so a
+ * body-reading *getter* needs the pattern touched too, not just an entry here.
  */
 export type ControllerMemberKind =
   /**
@@ -203,23 +196,19 @@ const UPDATE_CALL_PATTERN = modelCallPattern('update')
 
 /**
  * A write that bypasses mass-assignment protection, counted as state change by
- * the audit's force-write heuristic and the agent-route annotation rules.
- *
- * Looser than {@link modelCallPattern} — any receiver will do — because
- * `forceCreate`/`forceUpdate` are ORM names distinctive enough not to collide,
- * where `update` and `delete` plainly are. A receiver is still required: the
- * bare name also matched a *declaration* (`function forceUpdate() {}`).
+ * the audit's force-write heuristic and the agent-route annotation rules. Looser
+ * than {@link modelCallPattern} — any receiver will do — because `forceCreate`/`forceUpdate`
+ * are ORM names distinctive enough not to collide, where `update` and `delete` plainly
+ * are. A receiver is still required: the bare name also matches a *declaration*.
  */
 export const FORCE_WRITE_PATTERN = /\.\s*force(?:Create|Update)\s*\(/
 
 /**
- * Whether an action body shows it changes stored records.
- *
- * The one rule behind both annotation-honesty checks (`guren audit`'s
- * `destructiveHint: false` and `guren check`'s `readOnlyHint: true`), which
- * must not disagree about what counts as a mutation. Deliberately narrow: an
- * honesty rule accuses an author of a false declaration, so it fires only on
- * unambiguous shapes.
+ * Whether an action body shows it changes stored records. The one rule behind
+ * both annotation-honesty checks (`guren audit`'s `destructiveHint: false` and
+ * `guren check`'s `readOnlyHint: true`), which must not disagree about what counts
+ * as a mutation. Deliberately narrow: an honesty rule accuses an author of a false
+ * declaration, so it fires only on unambiguous shapes.
  */
 export function mutatesRecords(body: string): boolean {
   return (
@@ -232,10 +221,9 @@ export function mutatesRecords(body: string): boolean {
 /**
  * Blanks with spaces everything the body regexes must not read as live code:
  * comments, string/regex/JSX-text contents, template quasis, and whole
- * type-alias/interface declarations (TS allows them inside a function, and
- * their member signatures read exactly like a runtime call). Offsets are
- * preserved so body slices still line up with AST positions. Template
- * *expressions* are kept: they are live code.
+ * type-alias/interface declarations (TS allows them inside a function, and their
+ * member signatures read exactly like a runtime call). Offsets are preserved so
+ * body slices still line up with AST positions. Template *expressions* are live code, kept.
  */
 export function blankCommentsAndStrings(source: string, ast: File): string {
   const ranges: [number, number][] = []
@@ -271,13 +259,10 @@ export function blankCommentsAndStrings(source: string, ast: File): string {
 
 /**
  * Map of `ClassName.method` → method body source, for every controller in
- * app/Http/Controllers (module-aware — see discoverControllerFiles).
- *
- * Keyed by class name alone, because routes carry only `route.controller.name`.
- * Two modules can each scaffold a `PostController`, and then verdicts for BOTH
- * their routes come from whichever file was discovered last. Collisions are
- * returned rather than resolved, and every caller must say something about
- * them: dropping them silently is fail-open.
+ * app/Http/Controllers (module-aware — see discoverControllerFiles). Keyed by
+ * class name alone, because routes carry only `route.controller.name`: two modules
+ * can each scaffold a `PostController`, and then verdicts for BOTH come from whichever
+ * file was discovered last. Collisions are returned, not resolved; dropping them silently is fail-open.
  */
 export async function parseControllerMethods(
   cwd: string,
@@ -330,16 +315,11 @@ export async function parseControllerMethods(
 }
 
 /**
- * Every member of a controller class holding a function body, in both forms
- * `Router` dispatches to (`async destroy() {}` and `store = async () => {}`) —
- * a scan seeing only the method form reports class-field actions as absent.
- * The one home for that question: five scanners across three commands read it.
- *
- * Names come from `memberKeyName`, so a quoted key counts and a computed one
- * does not. One declaration is yielded per member, not per name, so a `get`/`set`
- * pair yields twice; note an instance field shadows a prototype method whatever
- * the source order. `constructor`, `static` and `private` members are yielded —
- * filtering is each caller's policy, not this iterator's.
+ * Class members holding a function body, in both forms `Router` dispatches to
+ * (`async destroy() {}` and `store = async () => {}`); a scan seeing only the method form
+ * reports class-field actions as absent. Names come from `memberKeyName` (quoted keys count,
+ * computed do not); one yield per member, so a `get`/`set` pair yields twice, and an instance
+ * field shadows a prototype method whatever the order. `constructor`/`static`/`private` are yielded: filtering is the caller's policy.
  */
 export interface ClassActionMember {
   /** The member node itself, for its source span, `accessibility`, and `static`. */
@@ -377,12 +357,11 @@ export function* classActionMembers(
 }
 
 /**
- * Controller actions declared with an empty body, per class in one file.
- *
- * The one rule behind `guren check`'s `empty-method:` warning and
- * `guren doctor --next`'s "Implement X()" step, which differ only in the record
- * they emit. `constructor` is filtered here rather than by the callers: this is
- * the rule, not the structural iterator above.
+ * Controller actions declared with an empty body, per class in one file. The one
+ * rule behind `guren check`'s `empty-method:` warning and `guren doctor --next`'s
+ * "Implement X()" step, which differ only in the record they emit. `constructor`
+ * is filtered here rather than by the callers: this is the rule, not the
+ * structural iterator above.
  */
 export interface EmptyAction {
   className: string

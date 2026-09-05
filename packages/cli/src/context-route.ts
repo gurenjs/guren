@@ -12,13 +12,11 @@ import { schemaToTypeString } from './schema-type-extractor'
 export const CONTEXT_ROUTE_FEATURES: readonly string[] = ['agent']
 
 /**
- * What a route's middleware chain authorizes, derived here from the stamped
- * `capabilities.authorization` (RFC 0007) — that shape is internal to
- * `@guren/server` and changeable, while `guren context --json` is a contract.
- * The derivability rule lives here and nowhere else: `mode: 'mixed'` or an
- * `abilityFor` callback means authorization is enforced but the ability is not
- * statically knowable, so consumers must say so rather than pick one out of
- * `abilities`.
+ * What a route's middleware chain authorizes, derived from the stamped
+ * `capabilities.authorization` (RFC 0007): that shape is internal to `@guren/server`,
+ * while `guren context --json` is a contract. The derivability rule lives only
+ * here: `mode: 'mixed'` or an `abilityFor` callback means authorization is enforced
+ * but the ability is not statically knowable, so consumers must say so.
  */
 export interface ContextRouteAuthorization {
   /** The one ability this route enforces, present only when derivable. */
@@ -117,13 +115,11 @@ export function escapeMarkdownTableCell(value: string): string {
 }
 
 /**
- * Every route as a `ContextRoute`, or `[]` when the routes file can't be
- * loaded (missing deps, mid-scaffold app) — context commands degrade to a
- * route-less view instead of failing. Pass `loadErrors` unless the caller has
- * nothing to render it into: a failed load and an app with no routes produce
- * the same empty list, so dropping the reason publishes a "no routes" nobody
- * can tell apart from a real one. A legitimately absent routes file carries no
- * reason — see `resolveRoutesFile()`.
+ * Every route as a `ContextRoute`, or `[]` when the routes file can't be loaded
+ * (missing deps, mid-scaffold app) so context commands degrade to a route-less view.
+ * Pass `loadErrors` unless there is nowhere to render it: a failed load and an app
+ * with no routes produce the same empty list. A legitimately absent routes file
+ * carries no reason — see `resolveRoutesFile()`.
  */
 export async function loadContextRoutes(
   cwd: string,

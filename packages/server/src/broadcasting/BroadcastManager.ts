@@ -50,12 +50,10 @@ export class BroadcastManager {
   protected wsClients: Map<string, WebSocketClient> = new Map()
 
   /**
-   * Driver-level unsubscribe functions, per client id and channel.
-   *
-   * `driver().subscribe()` hands back the only handle there is on the
-   * subscription it opened. Dropping it leaves the driver fanning out to a
-   * client that has already gone — and on Redis, keeps the SUBSCRIBE for
-   * that channel open for as long as the process lives.
+   * Driver-level unsubscribe functions, per client id and channel: the only
+   * handle on the subscription `driver().subscribe()` opened. Dropping it
+   * leaves the driver fanning out to a client that has already gone — and on
+   * Redis, keeps that channel's SUBSCRIBE open for as long as the process lives.
    */
   protected driverSubscriptions: Map<string, Map<string, () => void>> = new Map()
 

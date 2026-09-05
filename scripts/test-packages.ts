@@ -4,9 +4,8 @@
 //
 //   bun run ./scripts/test-packages.ts cli plugin-cloudflare -- -t "rate limit"
 //
-// Distrust forwarded `--changed`: it selects test files by git diff, but
-// packages/cli's tests load @guren/server through the workspace symlink's dist/,
-// which git cannot see — a change under packages/server/src silently skips them.
+// Distrust forwarded `--changed`: it selects test files by git diff, but packages/cli's
+// tests load @guren/server through the workspace symlink's dist/, which git cannot see.
 
 import { closeSync, mkdtempSync, openSync, readSync, rmSync, writeSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -91,11 +90,10 @@ const testArgs = [
 console.log(`[test] ${targets.map((pkg) => pkg.name).join(', ')}`)
 
 // On Linux the child's stdio goes to temp files, not inherited pipes. Under
-// `--isolate` Bun re-creates process.stderr per context as a WriteStream that
-// registers fd 2 with epoll; on a pipe (any CI runner) that intermittently dies
-// with an uncatchable "EEXIST: epoll_ctl", reported as "N tests failed:" naming
-// none, and touching process.stderr reifies the very stream that is the hazard
-// (Bun 1.3.14). A regular file is the one target epoll cannot register.
+// `--isolate` Bun 1.3.14 re-creates process.stderr per context as a WriteStream
+// registering fd 2 with epoll; on a pipe (any CI runner) that intermittently dies
+// with an uncatchable "EEXIST: epoll_ctl" ("N tests failed:" naming none), and
+// touching process.stderr reifies that stream. A regular file is what epoll cannot register.
 const redirectStdio = process.platform === 'linux'
 
 if (!redirectStdio) {

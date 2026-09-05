@@ -61,11 +61,10 @@ export interface ApprovalGateContext {
 
 /**
  * Scope and approval, in that order — a caller learns a tool needs approval only
- * once its token could invoke it at all, so an unauthorized probe cannot map
- * which tools are approval-gated. `approvalsConfigured` is asked synchronously
- * because `tools/list` asks it: with a queue an approval-gated tool *is*
- * callable (the call becomes a pending request) and belongs in the catalogue;
- * without one it is uncallable, and listing it invites a certain refusal.
+ * once its token could invoke it, so an unauthorized probe cannot map which
+ * tools are approval-gated. `approvalsConfigured` is synchronous because
+ * `tools/list` asks it: with a queue an approval-gated tool *is* callable (the
+ * call queues) and belongs in the catalogue; without one, listing it invites a refusal.
  */
 export function gateToolCall(
   tool: DerivedAgentTool,
@@ -92,15 +91,11 @@ export function gateToolCall(
 }
 
 /**
- * The approval half, for a tool declaring `approval: 'required'` on a server
- * with a queue (RFC 0016 §5.4 item 4). One lookup on tool + *raw* arguments'
- * fingerprint + principal decides it: a pending or rejected match refuses
- * without filing a second record or notification (an agent polling by
- * re-calling would otherwise page the approvers once per poll), and a rejection
- * blocks only while its record is live. Consumption happens *before* dispatch —
- * an approval is permission for one attempt, not one success, so consuming
- * after would let concurrent calls pass the same check and make a call that
- * crashed mid-flight replayable.
+ * The approval half (RFC 0016 §5.4 item 4). One lookup on tool + *raw* arguments'
+ * fingerprint + principal: a pending or rejected match refuses without a second
+ * record or notification (polling by re-calling would page approvers per poll);
+ * a rejection blocks only while its record is live. Consumed *before* dispatch,
+ * one attempt not one success: else concurrent calls pass and a crash is replayable.
  */
 export async function gateApproval(
   tool: DerivedAgentTool,
@@ -248,11 +243,9 @@ function spentVerdict(tool: DerivedAgentTool, request: AgentApprovalRequest): Ga
 /**
  * The scope half alone — what `guren.preflight` checks before rehearsing a call
  * (RFC 0016 §5.4). Checking requires the *same* scope as calling, or the
- * companion tool becomes a way to probe the authorization surface of tools the
- * token cannot call. The approval half is deliberately not applied: a rehearsal
- * executes nothing, and approval gates an ability the caller has rather than
- * knowledge that it exists. Preflight never reaches {@link gateApproval}, so it
- * creates no pending record and notifies nobody.
+ * companion becomes a probe of tools the token cannot call. Approval is not
+ * applied: a rehearsal executes nothing, and approval gates an ability rather
+ * than knowledge; never reaching {@link gateApproval}, it files and pages nothing.
  */
 export function gatePreflight(tool: DerivedAgentTool, abilities: readonly string[]): GateVerdict {
   if (!scopesAllowTool(abilities, scopedShape(tool))) {

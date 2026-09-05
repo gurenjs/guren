@@ -15,10 +15,8 @@ async function read(root: string, relativePath: string): Promise<string> {
 
 /**
  * `create-guren-app` publishes only the directories in its `files` field, so a
- * template the registry names but the tarball omits is invisible in-repo (how
- * the `blog` blueprint shipped broken). The registry is read from source, since
- * importing the packed bundle would run its `runMain()`.
- *
+ * template the registry names but the tarball omits is invisible in-repo. The
+ * registry is read from source: importing the packed bundle would run `runMain()`.
  * @param root The extracted `package/` directory of a create-guren-app tarball.
  */
 export async function auditBlueprintTemplates(root: string): Promise<void> {

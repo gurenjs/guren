@@ -2,20 +2,11 @@ import type { Redis } from 'ioredis'
 import { INCREMENT_SCRIPT, SLIDING_WINDOW_SCRIPT } from '../../src/redis/RedisRateLimitStore'
 
 /**
- * In-memory stand-in for the string/set/pipeline commands
- * RedisPasswordResetStore and RedisEmailVerificationStore use, plus the
- * sorted-set/expiry commands and the two Lua scripts the rate limit stores
- * run through `eval`. RedisOAuthStateStore.test.ts has its own fake for its
- * get+delete `eval` and RedisApiTokenStore.test.ts one for `hset`/`hgetall`.
- *
- * Atomicity is modelled, not just the results: `eval` applies a whole script
- * synchronously, the way Redis runs a script without letting other clients
- * in, while `pipeline().exec()` awaits between queued commands so two
- * concurrent callers interleave inside it — which is exactly what a pipeline
- * permits on a real server. A test that runs two callers against a store can
- * therefore tell the two apart. What this fake cannot prove is the Lua
- * itself; RedisStores.test.ts runs the scripts against a real Redis when
- * REDIS_URL is set.
+ * In-memory stand-in for the string/set/pipeline commands of the password-reset and
+ * email-verification stores, the sorted-set/expiry commands, and the two Lua scripts the
+ * rate limit stores `eval`. Atomicity is modelled: `eval` applies a script synchronously,
+ * `pipeline().exec()` awaits between queued commands so two callers interleave inside it,
+ * as real Redis permits. The Lua itself is proven only by RedisStores.test.ts (REDIS_URL).
  */
 export class FakeRedis {
   private readonly strings = new Map<string, string>()

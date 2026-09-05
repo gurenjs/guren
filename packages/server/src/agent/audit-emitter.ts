@@ -5,9 +5,8 @@
  * Here rather than in a protocol adapter because it has two readers —
  * `@guren/plugin-mcp` binds one into the container at boot, `guren tool:call`
  * resolves that binding for the `'cli'` surface. A second copy is how one
- * surface comes to swallow a sink failure the other warns about, leaving a
- * trail quietly missing a surface. Its own module so it can be exercised
- * without standing up an endpoint.
+ * surface comes to swallow a sink failure the other warns about. Its own module
+ * so it can be exercised without standing up an endpoint.
  */
 import type { AgentToolDenied, AgentToolInvoked } from './events'
 import type { EventManager } from '../events'
@@ -15,12 +14,10 @@ import { toAuditRecord, type AgentAuditRecord } from './audit'
 
 /**
  * The container service an application's audit emitter is published under
- * (`ServiceBindings['agent.audit']`).
- *
- * A constant because `@guren/plugin-mcp` binds it and `@guren/cli` resolves it,
- * and neither depends on the other. Two literals that drifted would break the
- * wiring *silently*: the CLI would record nothing, which reads exactly like an
- * application that configured no trail.
+ * (`ServiceBindings['agent.audit']`). A constant because `@guren/plugin-mcp`
+ * binds it and `@guren/cli` resolves it, and neither depends on the other; two
+ * drifted literals would break the wiring *silently* — the CLI recording
+ * nothing reads exactly like an application that configured no trail.
  */
 export const AGENT_AUDIT_BINDING = 'agent.audit'
 
@@ -34,16 +31,11 @@ export type AgentAuditSink = (record: AgentAuditRecord) => void | Promise<void>
 export type AgentAuditEmitter = (event: AgentToolInvoked | AgentToolDenied) => void
 
 /**
- * Build the function a surface calls for every invocation and denial.
- *
- * **The sink is called directly, not subscribed as a listener**, which is why
- * this exists rather than an `events.on(...)` pair: `EventManager.emit` awaits
- * listeners in priority order inside a bare `for` loop, so one unrelated
- * application listener throwing would silence the audit trail, with an empty
- * file as the only evidence. The events are still emitted for consumers that
- * legitimately are listeners (RFC 0016 §5.2). Neither half may fail the tool
- * call it records, so both are caught — the sink's failure warned rather than
- * swallowed.
+ * **The sink is called directly, not subscribed as a listener**:
+ * `EventManager.emit` awaits listeners in a bare `for` loop, so one unrelated
+ * application listener throwing would silence the trail. The events are still
+ * emitted for genuine listeners (RFC 0016 §5.2). Neither half may fail the call
+ * it records: both are caught, the sink's failure warned rather than swallowed.
  */
 export function createAuditEmitter(
   sink: AgentAuditSink | undefined,

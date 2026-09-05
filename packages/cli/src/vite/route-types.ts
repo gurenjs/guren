@@ -7,7 +7,7 @@ import { escapeRegExp } from '../utils'
 
 export interface RouteTypesPluginOptions {
   /**
-   * Application root used to resolve the command working directory. Defaults to Vite's resolved root.
+   * Application root the command's working directory resolves from. Defaults to Vite's resolved root.
    */
   appRoot?: string
   /**

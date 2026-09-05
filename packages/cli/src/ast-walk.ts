@@ -54,9 +54,7 @@ export function memberKeyName(member: {
 /**
  * The expression under any transparent TypeScript wrapping — `x as const`,
  * `x satisfies T`, `x!`, `<T>x`, `(x)`. The one rule for it: a scanner missing
- * a wrapper reports a fully static declaration as unreadable and says nothing,
- * so a second copy costs silence rather than a wrong answer.
- *
+ * a wrapper reports a fully static declaration as unreadable and says nothing.
  * `ParenthesizedExpression` cannot currently occur (`parseSourceFile` does not
  * enable `createParenthesizedExpressions`) and is kept for when it does.
  */
@@ -95,7 +93,6 @@ export function objectLiteral(node: Node | null | undefined): ObjectExpression |
 
 /**
  * The string a node spells statically, or `null` when it does not spell one.
- *
  * A no-substitution template literal counts: ``router.get(`/posts`, …)`` and
  * `router.get('/posts', …)` are the same route. Anything with an interpolation,
  * or a reference to a constant declared elsewhere, is `null` — these scanners

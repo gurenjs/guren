@@ -49,13 +49,11 @@ async function readEntrySource(cache: ParseCache, absPath: string): Promise<Entr
 }
 
 /**
- * Whether the file could put a console command in front of a kernel — what keeps
- * a helper module living next to the commands out of the registration check
- * (#479). Exclusion needs positive evidence of *absence*, so a class extending
- * anything or carrying a `signature`/`handle` member counts, as does a re-export
- * with a source or a default-exported identifier or call. The superclass name is
- * not matched against `Command`: apps subclass their own bases. Unlike
- * `app-surface.ts`, "cannot tell" stays in the check — the cost is only a warn.
+ * Whether the file could put a console command in front of a kernel, so a helper module
+ * beside the commands stays out of the registration check (#479). Exclusion needs positive
+ * evidence of *absence*: a class extending anything or with a `signature`/`handle` member
+ * counts, as does a sourced re-export or a default-exported identifier or call. The superclass
+ * is not matched against `Command` (apps subclass their own bases); "cannot tell" stays in.
  */
 function declaresCommand(ast: File): boolean {
   for (const node of ast.program.body) {
@@ -159,7 +157,6 @@ export function registersCommandsOf(body: string, bindings: string[]): boolean {
 /**
  * The command files the registration check covers and `guren context` lists —
  * the one rule for "this file holds a command", so the two cannot disagree.
- *
  * An unparsable file cannot be shown to declare no command, so it stays in. That
  * path goes through `cache.read()`, not `get()`: the file *is* checked, so a
  * parse failure must not be recorded as "skipped and not checked".
@@ -176,10 +173,9 @@ export async function discoverDeclaredCommandFiles(cwd: string, cache: ParseCach
 /**
  * Verifies every class under `app/Console/Commands` is referenced by the console
  * entrypoint that would register it — `src/console.ts` for a project command,
- * `modules/<name>/index.ts` for a module's, each checked only against its own.
- * Detection is a name reference outside the entry's imports, hence `warn`, never
- * `fail`. Not filtered by `--changed`: the outcome turns on the *entrypoint's*
- * content, so filtering by command file would miss the edit that breaks it.
+ * `modules/<name>/index.ts` for a module's. Detection is a name reference outside
+ * the entry's imports, hence `warn`, never `fail`. Not filtered by `--changed`: the
+ * outcome turns on the *entrypoint's* content, so filtering by command file would miss it.
  */
 export async function checkConsoleCommandRegistration(cwd: string, cache: ParseCache): Promise<CheckResult[]> {
   const commandFiles = await discoverDeclaredCommandFiles(cwd, cache)

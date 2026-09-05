@@ -190,9 +190,8 @@ export function parseApiToken(plainTextToken: string): { id: string; token: stri
  * Extract the bearer token from an Authorization header. The one parsing rule
  * shared by `createBearerTokenMiddleware`, `TokenGuard` and `hasBearerHeader`.
  * `\S` keeps the match linear — `\s+(.+)` backtracks quadratically when a
- * trailing newline makes `$` unreachable, on a header read before any
- * authentication — and makes an all-whitespace token "not a bearer request",
- * so CSRF is not skipped for it.
+ * trailing newline makes `$` unreachable, on a pre-authentication header — and
+ * makes an all-whitespace token "not a bearer request", so CSRF is not skipped.
  */
 export function readBearerToken(header: string | undefined | null): string | null {
   if (!header) return null
@@ -348,7 +347,6 @@ export interface BearerTokenMiddlewareOptions {
 
 /**
  * Create middleware that authenticates requests using Bearer tokens.
- *
  * @example
  * ```ts
  * app.use('/api/*', createBearerTokenMiddleware({ store, abilities: ['posts:delete'] }))

@@ -1,20 +1,11 @@
 // No workspace-internal code may invoke the CLI as `bunx guren` (or `bun x
-// guren` / `npx guren`): the `guren` package does not exist on npm, so
-// whenever the workspace link is missing the runner falls back to the
-// registry and dies on a 404. Run the source: `bun …/packages/cli/src/bin.ts`.
-//
-// Three scopes: package.json scripts (root manifest + every workspace member),
-// TypeScript under scripts/, and shell scripts under scripts/. A smoke's
-// `['bunx', 'guren', …]` argv is invisible to a manifest-only scan and passes
-// locally anyway, because the temp app it builds gets a `.bin/guren` from its
-// `file:` link to packages/cli — exactly the link CI cannot be trusted to
-// have. Template trees are none of the three, and `bunx guren` is *correct*
-// there: scaffolded apps install @guren/cli from npm and get a real bin.
-//
-// Deliberately not chased, since it would trade a bounded honest-mistake
-// detector for an unbounded obfuscation-resistant one: a runner reached
-// through an import alias or a local rebinding, and shell quoting inside a
-// command string. No script in this repo writes the CLI that way today.
+// guren` / `npx guren`): `guren` does not exist on npm, so a missing workspace
+// link makes the runner fall back to the registry and die on a 404. Run the
+// source: `bun …/packages/cli/src/bin.ts`. Scopes: package.json scripts (root +
+// every member), TypeScript and shell under scripts/. A smoke's `['bunx', 'guren']`
+// argv passes locally only because its temp app gets `.bin/guren` from a `file:`
+// link CI cannot be trusted to have. Templates are exempt (they install @guren/cli
+// from npm). Not chased: runners reached via an alias or rebinding, shell quoting.
 
 import { existsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
@@ -162,7 +153,7 @@ function position(node: t.Node): string {
 
 /**
  * Registry-resolving `guren` invocations in one TypeScript source, judged by
- * spawn shape. Exported for the test; `file` is only used to label findings.
+ * spawn shape. Exported for the test; `file` only labels findings.
  */
 export function collectSourceViolations(file: string, source: string): Violation[] {
   // A parse error throws: a source this scan cannot read is a source it

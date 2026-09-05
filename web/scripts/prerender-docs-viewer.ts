@@ -2,13 +2,11 @@
  * Publish a static snapshot of the docs viewer (RFC 0005) under
  * web/public/_guren/docs/. Usage: bun scripts/prerender-docs-viewer.ts
  *
- * The viewer never runs here: `DocsViewerServiceProvider` reads the bundle off
- * disk through @guren/cli per request, but this app deploys to Workers — no
- * filesystem, and wrangler.jsonc aliases @guren/cli to a stub. So the payload
- * and the shipped shell are emitted once as plain static assets.
- *
- * `isDocsViewerEnabled()` is deliberately untouched and still refuses to mount
- * in production; what this publishes is the blog example's public docs.
+ * `DocsViewerServiceProvider` reads the bundle off disk through @guren/cli per
+ * request, but this app deploys to Workers (no filesystem; wrangler.jsonc
+ * aliases @guren/cli to a stub), so the payload and shell are emitted once as
+ * static assets. `isDocsViewerEnabled()` still refuses to mount in production;
+ * what this publishes is the blog example's public docs.
  */
 import { mkdirSync, statSync, writeFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'

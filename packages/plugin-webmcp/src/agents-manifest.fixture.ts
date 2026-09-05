@@ -9,6 +9,7 @@
  * Produced by `buildAgentToolsContent()`; regenerate rather than hand-edit.
  */
 
+// oxlint-disable-next-line guren/comment-length -- generated text compared byte for byte by packages/cli/tests/agents-manifest-fixture.test.ts
 /**
  * Agent tools derived from the routes that declare `.agent()` metadata
  * (RFC 0016). Every field here comes from a contract the route already

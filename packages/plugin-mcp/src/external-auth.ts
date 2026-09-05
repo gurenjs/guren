@@ -2,12 +2,11 @@
  * The seam an *externally verified* principal reaches the App MCP endpoint
  * through (RFC 0016 §7, `cloudflare:build --mcp-oauth`): the OAuth provider in
  * front of the app validated its own access token and hands the grant's `props`
- * to the protected handler. Not a header — an `X-Guren-*` envelope is one
- * `curl` away from being asserted by a network caller — but a `WeakMap` keyed
- * on **object identity** of the `Request` handed to `app.fetch` (the RFC 0017
- * §2 pattern): nothing on the wire to forge, no `AsyncLocalStorage`, and a
- * `clone()` or `new Request(original)` carries no registration. One module, one
- * map — two copies of this file would be two maps that never hit.
+ * to the protected handler. Not a header — an `X-Guren-*` envelope is one `curl`
+ * away from a network caller — but a `WeakMap` keyed on **object identity** of
+ * the `Request` handed to `app.fetch` (RFC 0017 §2): nothing on the wire to
+ * forge, and a `clone()` or `new Request(original)` carries no registration.
+ * One module, one map — two copies of this file would be two maps that never hit.
  */
 import type { AgentPrincipal } from '@guren/core'
 
@@ -57,13 +56,11 @@ export interface McpOAuthProps {
 }
 
 /**
- * Map an OAuth grant's `props` onto an {@link ExternalMcpAuth}. They come from
- * the provider's own storage, but are still parsed data that crossed deploys
- * and consent-flow versions, so an unrecognized shape answers `null` rather
- * than a principal guessed out of a partial record. `userId` passes through
- * **unchanged**, string or number: coercing `'12'` to `12` here and nowhere
- * else is how a policy lookup silently misses. An empty `scopes` array is
- * valid — a grant that reaches no tool, which the scope gate denies per call.
+ * Map an OAuth grant's `props` onto an {@link ExternalMcpAuth}. They are parsed
+ * data that crossed deploys and consent-flow versions: an unrecognized shape
+ * answers `null`, never a guess from a partial record. `userId` passes through
+ * **unchanged**, string or number — coercing `'12'` to `12` here and nowhere else
+ * is how a policy lookup silently misses. Empty `scopes` is valid: the gate denies.
  */
 export function mcpOAuthPropsToAuth(props: unknown): ExternalMcpAuth | null {
   if (typeof props !== 'object' || props === null) return null

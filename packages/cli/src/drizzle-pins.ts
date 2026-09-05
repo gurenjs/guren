@@ -1,15 +1,12 @@
 /**
  * The one rule that keeps a manifest's `drizzle-orm` and `drizzle-kit` pins on
- * the copy `@guren/orm` brings with it.
- *
- * `@guren/orm` names an exact `drizzle-orm` version, so a manifest pinning a
- * different one installs a second nested copy: the app builds its table
- * descriptors against one while the adapter runs on the other. `drizzle-kit`
- * has no upstream declaration to read and has never shared numbers with
- * `drizzle-orm` on the stable lines, so the companion release is checked for
- * existence before its version is written. Two callers: `guren upgrade` against
- * the published ORM manifest, `scripts/sync-template-deps.ts` against this
- * repository's.
+ * the copy `@guren/orm` brings with it. `@guren/orm` names an exact `drizzle-orm`
+ * version, so a manifest pinning a different one installs a second nested copy:
+ * the app builds its table descriptors against one while the adapter runs on the
+ * other. `drizzle-kit` has no upstream declaration to read and has never shared
+ * numbers with `drizzle-orm` on the stable lines, so the companion release is
+ * checked for existence before its version is written. Two callers: `guren upgrade`
+ * against the published ORM manifest, `scripts/sync-template-deps.ts` against this repository's.
  */
 import { isExactVersion, isLocationSpecifier } from './codemods'
 

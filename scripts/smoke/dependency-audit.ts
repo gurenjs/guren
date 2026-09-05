@@ -1,16 +1,12 @@
 /**
- * Dependency vulnerability gate over `bun audit --json`.
- *
- * Fails on any advisory matching an installed package, unless listed in
- * IGNORED_ADVISORIES with a reason and what unblocks its removal. A stale entry
- * fails too, so the list cannot rot.
+ * Dependency vulnerability gate over `bun audit --json`. Fails on any advisory
+ * matching an installed package unless listed in IGNORED_ADVISORIES with a
+ * reason and what unblocks its removal; a stale entry fails too.
  *
  * Exit codes: 0 clean, 1 active advisories / stale or invalid ignores, 2 scan
- * unavailable (registry failure or unrecognized output) — an unavailable scan is
- * a failure, not a silent pass.
- *
- * `guren audit`'s app-facing scan (packages/cli/src/audit-deps.ts) implements the
- * same `bun audit` contract; an output-shape change needs both updated.
+ * unavailable (registry failure or unrecognized output) — never a silent pass.
+ * `guren audit` (packages/cli/src/audit-deps.ts) implements the same `bun audit`
+ * contract; an output-shape change needs both updated.
  */
 
 interface Advisory {

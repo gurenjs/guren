@@ -29,10 +29,9 @@ export interface DiscoveryResult {
 /**
  * Scans application directories for providers, listeners, jobs and events via
  * `Bun.Glob` and dynamic `import()`. Standalone by design: nothing in
- * `Application` runs it, so registration stays explicit — which is what
- * `guren check` verifies and what bundle-deploy targets (Workers, Vercel,
- * Lambda) require, a runtime directory scan finding nothing in a bundle. A
- * caller that wants discovery runs the scan and registers the results itself.
+ * `Application` runs it, so registration stays explicit — what `guren check`
+ * verifies and what bundle-deploy targets (Workers, Vercel, Lambda) require,
+ * since a runtime directory scan finds nothing in a bundle.
  */
 export class AutoDiscovery {
   private basePath: string

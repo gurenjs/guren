@@ -19,13 +19,11 @@ assertRequiredTables(tables)
 const tracker = await sql.unsafe(`SELECT count(*)::int AS c FROM drizzle."${MIGRATION_TRACKER}"`)
 assertTrackerNonEmpty(Number(tracker[0].c), `drizzle.${MIGRATION_TRACKER}`)
 
-// Every timestamp a scaffold emits must carry a time zone. An offset-less
-// column stores a bare wall clock and leaves its meaning to the reader: the
-// app itself stays self-consistent (drizzle parses the column as UTC), which
-// is why the smoke's later HTTP steps cannot catch this, but every other reader sees
-// a different instant and a `defaultNow()` column records the DB session's
-// local wall clock. Asked as "which columns are wrong" rather than against a
-// list of names, so a scaffold that grows a new timestamp is covered too.
+// Every timestamp a scaffold emits must carry a time zone. An offset-less column
+// stores a bare wall clock: the app stays self-consistent (drizzle parses it as
+// UTC), which is why the smoke's later HTTP steps cannot catch this, but every
+// other reader sees a different instant and `defaultNow()` records the DB session's
+// local wall clock. Asked as "which columns are wrong", so a new timestamp is covered too.
 const offsetlessColumns = await sql`
   SELECT table_name, column_name, data_type FROM information_schema.columns
   WHERE table_schema = 'public'

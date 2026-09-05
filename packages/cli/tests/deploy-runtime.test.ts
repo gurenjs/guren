@@ -274,7 +274,7 @@ describe('deploy-password-hashing check', () => {
 
   // A bare import is not usage: the check must see the hasher actually
   // constructed, or a leftover `import { ScryptHasher }` would raise a warning
-  // for a call site that no longer exists.
+  // for a call site that does not exist.
   it('does not warn when ScryptHasher is imported but never constructed', async () => {
     const files = {
       'app/Http/Controllers/LoginController.ts': PASSWORD_LOGIN_CONTROLLER,
@@ -666,7 +666,7 @@ const discovery = new AutoDiscovery({ basePath: 'app' })
     })
   })
 
-  // ApplicationOptions no longer declares `discover`, but an older app may
+  // ApplicationOptions does not declare `discover`, but an older app may
   // still carry the key: inert, so it must not read as discovery.
   it('does not warn on the inert discover: true option', async () => {
     const files = {

@@ -139,12 +139,11 @@ export function isMissingTrackerTable(error: unknown, dialect: TrackerDialect): 
 }
 
 /**
- * Names the actual problem behind a database failure. Drizzle's
- * DrizzleQueryError message is the SQL it was running — on a fresh database
- * the migrator's own `CREATE SCHEMA`, which blames a statement the user never
- * wrote; the real cause is on `cause` (postgres-js puts `ECONNREFUSED` there
- * with an empty message). `endpoint` is host:port only, never the connection
- * string, which carries credentials.
+ * Names the actual problem behind a database failure: DrizzleQueryError's
+ * message is the SQL it was running (on a fresh database the migrator's own
+ * `CREATE SCHEMA`), while the real cause sits on `cause` (postgres-js puts
+ * `ECONNREFUSED` there with an empty message). `endpoint` is host:port only,
+ * never the connection string, which carries credentials.
  */
 export function describeDatabaseFailure(error: unknown, endpoint?: string): string {
   const causes = collectCauses(error)

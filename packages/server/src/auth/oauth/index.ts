@@ -27,10 +27,9 @@ export interface OAuthProviderConfig {
   /**
    * Fallback used when the userinfo response carries no email — GitHub returns
    * `email: null` for a private address even with the `user:email` scope.
-   *
-   * `emailVerifiedKey` does not carry over to a fallback address: it was read
-   * against a response that had no email. A bare string therefore makes no
-   * verification claim; return `{ email, emailVerified: true }` to assert one.
+   * `emailVerifiedKey` does not carry over: it was read against a response that
+   * had no email. A bare string therefore makes no verification claim; return
+   * `{ email, emailVerified: true }` to assert one.
    */
   fetchFallbackEmail?: (token: OAuthTokenResult) => Promise<string | OAuthFallbackEmail | undefined>
 }
@@ -136,12 +135,11 @@ export interface OAuthAuthorizeOptions {
   state?: string
   extraParams?: Record<string, string>
   /**
-   * Session of the browser starting the flow — pass `this.auth.session()`.
-   *
-   * The manager mints a per-browser binding, keeps it here, and hashes it into
-   * the state; writing to the session is also what makes a brand-new session
-   * persist across the provider round trip. `undefined` leaves the state
-   * unbound — the flow works, and `authorize()` warns once about the exposure.
+   * Session of the browser starting the flow — pass `this.auth.session()`. The
+   * manager mints a per-browser binding, keeps it here, and hashes it into the
+   * state; writing to the session is also what makes a brand-new session persist
+   * across the provider round trip. `undefined` leaves the state unbound — the
+   * flow works, and `authorize()` warns once about the exposure.
    */
   session?: OAuthBindingSession
   /**

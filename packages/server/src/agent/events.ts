@@ -5,9 +5,8 @@
  *
  * Declarations only. Nothing here emits or redacts:
  * {@link AgentToolInvoked.arguments} is a *contract* that the emitter has
- * already run them through `redactAgentArguments`. Redacting on construction
- * would be a second, quieter rule beside the real one, and a listener cannot
- * tell a masked payload from an unmasked one.
+ * already run them through `redactAgentArguments`; redacting on construction
+ * would be a second, quieter rule beside the real one.
  */
 import { Event } from '../events/Event'
 
@@ -60,7 +59,6 @@ export class AgentToolInvoked extends Event {
 
 /**
  * Why a tool invocation was refused before it reached the route handler.
- *
  * Deliberately no `'policy'`: `Gate` policies evaluate *inside* the dispatched
  * request, so a policy denial is an execution that returned 403. These are
  * exactly the checks the adapter runs before synthesizing the request, which is

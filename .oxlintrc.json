@@ -4,7 +4,7 @@
   // type-aware linter that works on the `typescript` 7 this repo pins: the
   // package ships no JavaScript compiler API, so typescript-eslint cannot load.
   "options": { "typeAware": true },
-  "jsPlugins": ["./scripts/lint/await-async-assertion.js"],
+  "jsPlugins": ["./scripts/lint/guren.js"],
   "ignorePatterns": ["**/dist/**", "**/.guren/**", "**/.wrangler/**", ".claude/worktrees/**"],
   "rules": {
     "typescript/no-floating-promises": "error",
@@ -30,11 +30,34 @@
     // `.resolves`: bun-types declares those chains as returning `void`, so the
     // type-aware rule cannot see the promise. The header of the plugin has the details.
     "guren/await-async-assertion": "error",
+    // The machine-checkable half of .claude/rules/coding-standards.md (Comments):
+    // block length, banners, step labels, change-history wording, @param tags
+    // that restate the name. The rules live in scripts/lint/comments.js.
+    "guren/comment-length": "error",
+    "guren/comment-banner": "error",
+    "guren/comment-step-label": "error",
+    "guren/comment-history": "error",
+    "guren/comment-param-restates": "error",
     "no-unused-vars": ["warn", { "ignoreRestSiblings": true, "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }],
     // QueryBuilder, TestApp, and the agent test client are deliberately
     // awaitable builders: `then` on them is the API, not a mistake.
     "unicorn/no-thenable": "off",
     // The CLI and the docs renderer strip ANSI escapes, which are control characters by definition.
     "no-control-regex": "off"
-  }
+  },
+  "overrides": [
+    {
+      // Scaffold templates are user-facing starter code whose comments guide the
+      // reader, and audit:starter-template asserts their text literally; test
+      // fixtures and stubs are inputs, not commentary.
+      "files": ["packages/*/templates/**", "**/tests/fixtures/**", "**/stubs/**"],
+      "rules": {
+        "guren/comment-length": "off",
+        "guren/comment-banner": "off",
+        "guren/comment-step-label": "off",
+        "guren/comment-history": "off",
+        "guren/comment-param-restates": "off"
+      }
+    }
+  ]
 }

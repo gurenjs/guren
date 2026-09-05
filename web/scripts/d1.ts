@@ -1,17 +1,11 @@
 /**
  * The bit of wrangler the deploy scripts need: run SQL against the D1
- * database and get the rows back.
- *
- * Deliberately not shell. Each of these calls decides whether a deploy writes
- * to production, and the shell forms of that decision fail quietly: a command
- * substitution that dies under `set -e` before its own error message runs, a
- * `grep -q` that reports success because the pipe closed, a non-zero exit
- * swallowed by a pipeline. Here a failure is an exception carrying wrangler's
- * own stderr.
- *
- * Every script that uses this takes `--local`, which points the same sequence
- * at the wrangler dev database — the way to rehearse a deploy without writing
- * to production.
+ * database and get the rows back. Deliberately not shell: each call decides
+ * whether a deploy writes to production, and the shell forms fail quietly (a
+ * `$(...)` dying under `set -e` before its error message, a `grep -q` passing
+ * because the pipe closed, a non-zero exit swallowed by a pipeline). Here a
+ * failure is an exception carrying wrangler's own stderr. Every caller takes
+ * `--local`, which points the same sequence at the wrangler dev database.
  */
 const DATABASE = 'guren-web'
 

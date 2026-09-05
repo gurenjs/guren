@@ -123,7 +123,6 @@ export class FieldValidator {
 
 /**
  * Validator class for validating data against rules.
- *
  * @example
  * ```typescript
  * const result = await new Validator().field('email', required(), email()).validate(data)

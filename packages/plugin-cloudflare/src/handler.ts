@@ -37,12 +37,10 @@ export function createWorkersHandler(app: WorkersAppLike): WorkersHandler {
         await attempt
       } catch (error) {
         // Every waiter on a failed boot reaches here, but only the one whose attempt
-        // is still installed may clear: a retry can start between two waiters' catches
-        // and installs its boot promise and env before its first `await`, so clearing
-        // unconditionally would wipe a live retry. The same token settles the env
-        // holder (first-call-wins, reset nowhere else in production). The equivalence
-        // relies on the one-handler-per-module topology `buildCloudflareOutput`
-        // generates: the holder is module-global while this slot is per-handler.
+        // is still installed may clear: a retry can install its boot promise and env
+        // between two waiters' catches, before its first `await`. The same token
+        // settles the env holder (first-call-wins, reset nowhere else in production);
+        // that relies on `buildCloudflareOutput`'s one-handler-per-module topology.
         if (bootPromise === attempt) {
           bootPromise = undefined
           resetWorkersEnv()

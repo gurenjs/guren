@@ -53,40 +53,27 @@ export interface McpPluginConfig {
    */
   updateLastUsed?: boolean
   /**
-   * How a request to this endpoint is authenticated. `'external'` declares that
-   * every request arrives already verified by an authority in front of the app,
-   * handed in over the seam in `./external-auth` (never a header): no token
-   * store is consulted, and a request without the seam is refused 401 rather
-   * than falling back to bearer. Unset, the seam is still honoured when present
-   * and everything else takes the bearer path.
-   *
+   * `'external'`: every request arrives verified by an authority in front of
+   * the app, handed in over the seam in `./external-auth` (never a header); no
+   * token store is consulted, and a request without the seam is refused 401
+   * rather than falling back to bearer. Unset, the seam is honoured when present.
    * @default undefined — bearer tokens
    */
   auth?: 'external'
   /**
-   * Where the audit trail is written (RFC 0016 §5.2). Opt-in because Workers
-   * and Lambda filesystems are read-only or ephemeral; omitted, nothing is
-   * written and the events are still emitted. `file` is a *base* path — the
-   * trail lands in `agent-audit-YYYY-MM-DD.log` beside it, rotated daily. A
-   * `sink` is not awaited (write synchronously, or hand the write to
-   * `waitUntil`) and a throw is warned about rather than failing the call.
-   *
+   * Audit trail (RFC 0016 §5.2), opt-in because Workers and Lambda filesystems
+   * are read-only or ephemeral. `file` is a *base* path: the trail lands in
+   * `agent-audit-YYYY-MM-DD.log` beside it, rotated daily. A `sink` is not
+   * awaited (write synchronously, or hand it to `waitUntil`); a throw warns.
    * @default undefined — no sink; events are emitted, nothing is written
-   * @example mcpPlugin({ audit: { file: 'storage/logs/agent-audit.log', days: 30 } })
    */
   audit?: { file?: string; days?: number } | { sink: (record: AgentAuditRecord) => void | Promise<void> }
   /**
-   * The approval queue (RFC 0016 §5.4 item 4). A route declaring
-   * `agent({ approval: 'required' })` answers with a request id instead of
-   * executing; once approved, the same call with the same arguments performs it
-   * once. Unconfigured, such a tool is refused fail-closed and absent from
-   * `tools/list` — a memory-backed default would answer "approved" on Workers
-   * or Lambda for a record the next isolate never saw. `notify` runs after the
-   * record is persisted and is not awaited: a throw is warned about, never
-   * fatal, and never loses the record.
-   *
-   * @default undefined — no queue; approval-gated tools are refused fail-closed
-   * @example mcpPlugin({ approvals: { store, notify } })
+   * The approval queue (RFC 0016 §5.4 item 4): an `approval: 'required'` route
+   * answers with a request id; approved, the same call with the same arguments
+   * runs once. No memory-backed default — Workers or Lambda would answer "approved"
+   * for a record the next isolate never saw. `notify` is unawaited, post-persist.
+   * @default undefined — no queue; such tools are refused fail-closed and unlisted
    */
   approvals?: {
     store: AgentApprovalStore
@@ -97,13 +84,11 @@ export interface McpPluginConfig {
 }
 
 /**
- * The App MCP endpoint (RFC 0016 §7): routes declaring `.agent()` served over
- * the Model Context Protocol behind bearer tokens. Every tool call re-enters
- * the application through `app.fetch` as a real HTTP request (§3), so
- * validation, policies and middleware run once, in the app; the adapter owns
- * only what must precede HTTP — bearer verification, scopes, approval, rate
- * limits. The token store is read per request, because provider order does not
- * guarantee the app's auth configuration has run before this plugin boots.
+ * The App MCP endpoint (RFC 0016 §7). Every tool call re-enters the app through
+ * `app.fetch` as a real HTTP request (§3), so validation, policies and middleware
+ * run once, in the app; the adapter owns only what precedes HTTP — bearer
+ * verification, scopes, approval, rate limits. The token store is read per
+ * request: provider order does not guarantee the app's auth configured first.
  */
 const factory = definePlugin<McpPluginConfig>({
   name: 'mcp',
@@ -254,12 +239,10 @@ interface ResolvedCaller {
 
 /**
  * A caller the seam presented, verified by an authority in front of the app.
- * `rateKey` is per principal — there is no token to key on — which is coarser
- * and so can only limit more. No `Authorization` is forwarded: the caller's
- * bearer is the *provider's*, which the app's token guard cannot verify, so the
- * re-entrant request is unauthenticated to the app's own guards and a route
- * behind `requireApiToken` answers 401 on this surface (closing that is
- * RFC 0017 §2).
+ * `rateKey` is per principal — no token to key on — coarser, so it can only
+ * limit more. No `Authorization` is forwarded: the caller's bearer is the
+ * *provider's*, which the app's token guard cannot verify, so a route behind
+ * `requireApiToken` answers 401 on this surface (closing that is RFC 0017 §2).
  */
 function fromExternalAuth(external: ExternalMcpAuth): ResolvedCaller {
   return {

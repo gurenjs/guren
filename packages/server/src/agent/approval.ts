@@ -1,13 +1,10 @@
 /**
  * The agent approval queue (RFC 0016 §5.4 item 4): a tool declaring
- * `approval: 'required'` does not execute on request — the call becomes a
- * pending record, approvers are notified, and only a *human* decision turns it
- * into permission for one later call.
- *
- * Declarations and pure derivation only, like `audit.ts`: no database, no
- * clock, no notification. {@link AgentApprovalRequest.input} arrives already
- * through `redactAgentArguments` and must not be masked again; the
- * *fingerprint* is computed from the **raw** arguments instead, or approving
+ * `approval: 'required'` becomes a pending record, approvers are notified, and
+ * only a *human* decision turns it into permission for one later call.
+ * Declarations and pure derivation only, like `audit.ts`: no database, clock or
+ * notification. {@link AgentApprovalRequest.input} arrives already redacted;
+ * the *fingerprint* is computed from the **raw** arguments, or approving
  * `users.setPassword {id: 5, password: '…'}` would authorize the same call
  * with a different password.
  */
@@ -20,11 +17,10 @@ import type { AgentPrincipal } from './events'
 export const DEFAULT_AGENT_APPROVAL_TTL_MS = 60 * 60 * 1000
 
 /**
- * The configuration key an adapter reads the queue out of, as a value.
- *
- * `guren check` finds the `mcpPlugin({ … })` call by this key, and the CLI
- * cannot import `@guren/plugin-mcp` — restating the string would let a rename
- * leave the check passing every app silently. Same rule, two readers, as
+ * The configuration key an adapter reads the queue out of, as a value: `guren
+ * check` finds the `mcpPlugin({ … })` call by it and cannot import
+ * `@guren/plugin-mcp`, so a restated string would let a rename leave the check
+ * passing every app silently. Same rule, two readers, as
  * {@link file://./meta-tools.ts}.
  */
 export const AGENT_APPROVAL_CONFIG_KEY = 'approvals'
@@ -87,14 +83,10 @@ export interface AgentApprovalMatch {
 
 /**
  * Where pending approvals live. The application implements it; the framework
- * ships no default, because a queue that silently degraded to process memory on
- * Workers or Lambda would answer "approved" for a record the next isolate never
- * heard of. An unconfigured queue refuses visibly instead (`gateToolCall`'s
- * fail-closed refusal names the configuration line).
- *
- * Four methods, each one the gate actually reaches for. No `list`, `approve` or
- * `reject`: resolving a request is a human action taken through the
- * application's own interface, over its own storage.
+ * ships no default, because a queue degrading to process memory on Workers or
+ * Lambda would answer "approved" for a record the next isolate never heard of
+ * (`gateToolCall` fails closed instead). No `list`/`approve`/`reject`: resolving
+ * a request is a human action, through the application's own interface.
  */
 export interface AgentApprovalStore {
   /** Persist a new pending request. */
@@ -110,11 +102,10 @@ export interface AgentApprovalStore {
 
   /**
    * The **unconsumed** record matching this exact call, or `null`; the most
-   * recently requested when several match. Deliberately not "the approved one":
-   * the gate must see a *pending* match too, or an agent polling by re-calling
-   * the tool creates unbounded records and notifies approvers once per poll,
-   * and a *rejected* one for the same reason. Expiry is not filtered here
-   * either — see {@link agentApprovalUsableAt}.
+   * recently requested when several match. Not "the approved one": the gate
+   * must see a *pending* or *rejected* match too, or an agent polling by
+   * re-calling the tool creates unbounded records and notifies approvers once
+   * per poll. Expiry is not filtered here either — see {@link agentApprovalUsableAt}.
    */
   findMatch(match: AgentApprovalMatch): Promise<AgentApprovalRequest | null>
 
@@ -140,16 +131,11 @@ export function agentApprovalPrincipalKey(principal: AgentPrincipal | null): str
 }
 
 /**
- * The canonical text of one call's arguments — the *only* rule for deciding
- * that two calls are the same call. A second serialization is how approving
- * `posts.destroy {id: 5}` comes to authorize `{id: 9}`, and it would do it
- * silently, because both sides still produce *a* string.
- *
- * Normalizes object key order at every depth, and nothing else: types, array
- * order, and absent-vs-explicitly-null each distinguish genuinely different
- * calls. Total over JSON only — a value JSON cannot carry throws rather than
- * serializing to a placeholder that would collapse two distinct inputs, and the
- * gate turns the throw into a fail-closed refusal.
+ * The canonical text of one call's arguments — the *only* rule for "same
+ * call"; a second serialization is how approving `posts.destroy {id: 5}`
+ * silently comes to authorize `{id: 9}`. Normalizes object key order at every
+ * depth, nothing else: types, array order and absent-vs-null distinguish calls.
+ * A value JSON cannot carry throws; the gate turns that into a fail-closed refusal.
  */
 export function canonicalizeAgentApprovalInput(input: Record<string, unknown>): string {
   return canonicalize(input)
@@ -281,11 +267,10 @@ export function agentApprovalUsableAt(request: AgentApprovalRequest, now: Date):
 
 /**
  * Whether `principal` may be told anything at all about `request` — the scope
- * rule of `guren.approval_status` (RFC 0016 §5.4): a caller reads the status
- * only of a request it created. Without it an agent could walk ids and
- * enumerate other principals' pending actions. A record this returns `false`
- * for must be answered *exactly* as an unknown id is: any difference in
- * message, error shape or timing reintroduces the enumeration.
+ * rule of `guren.approval_status` (RFC 0016 §5.4): a caller reads only the
+ * status of a request it created, or an agent could walk ids and enumerate
+ * other principals' pending actions. A `false` here must be answered *exactly*
+ * as an unknown id is: any difference in message, shape or timing reintroduces it.
  */
 export function agentApprovalVisibleTo(
   request: AgentApprovalRequest,

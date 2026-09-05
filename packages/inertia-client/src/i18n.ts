@@ -2,14 +2,11 @@ import { useMemo } from 'react'
 import { usePage } from '@inertiajs/react'
 
 /**
- * Client-side translation for the `_i18n` shared prop injected by
- * `createApp({ i18n })` on the server.
- *
- * Semantics mirror the server's Translator so `useTranslation().t(...)` and a
- * controller's `this.t(...)` agree on every input; the parity suite in
- * `tests/i18n.test.ts` runs both against shared fixtures — extend it when
- * touching anything here. It covers the default configuration only: server-only
- * options are functions and cannot travel in the serialized `_i18n` payload.
+ * Client-side translation for the `_i18n` shared prop `createApp({ i18n })`
+ * injects. Semantics mirror the server's Translator so `useTranslation().t(...)`
+ * and a controller's `this.t(...)` agree; the parity suite in `tests/i18n.test.ts`
+ * runs both against shared fixtures, so extend it with any change here. Default
+ * configuration only: server-only options are functions and cannot be serialized.
  */
 
 export type TranslationMessages = {

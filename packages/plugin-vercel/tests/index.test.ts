@@ -195,9 +195,8 @@ describe('@guren/plugin-vercel', () => {
     })
 
     it('fails when the SSR manifest names a chunk that is not on disk, keeping the previous output', async () => {
-      // Previously written into the function environment unchecked, so a stale
-      // or partial SSR build deployed and fell back to CSR at request time.
-      // Cloudflare and Lambda already treated this as fatal.
+      // Unchecked, a stale or partial SSR build deploys and falls back to CSR at
+      // request time. Cloudflare and Lambda treat this as fatal too.
       const app = scaffoldApp(root, { entrypoint: 'src/vercel.ts' })
       mkdirSync(join(app.outputDir, 'functions'), { recursive: true })
       writeFileSync(join(app.outputDir, 'config.json'), '{ "previous": true }')

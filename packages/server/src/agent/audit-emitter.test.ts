@@ -7,13 +7,10 @@ import { EventManager } from '../events'
 
 /**
  * The audit sink, driven through {@link createAuditEmitter} rather than by
- * emitting an event — that *is* the design: `EventManager.emit` awaits
- * listeners in a bare `for` loop, so while the sink was a listener one
- * unrelated thrower above it took the trail with it.
- *
- * Imported relatively, never through `@guren/core`: inside `packages/server` a
- * `@guren/core` import resolves back through this package's own `dist`, so
- * these cases would exercise the last build rather than the source beside them.
+ * emitting an event: `EventManager.emit` awaits listeners in a bare `for`
+ * loop, so a sink that is a listener loses the trail to any thrower above it.
+ * Imported relatively, never through `@guren/core`, which inside
+ * `packages/server` resolves back through this package's own `dist`.
  */
 
 /** Future-seeded, like the server-side fixtures: a past epoch expires everything. */

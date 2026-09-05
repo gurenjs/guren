@@ -340,12 +340,11 @@ type ApprovalConfigEvidence =
   | { kind: 'absent'; relPath: string }
 
 /**
- * Whether this app configures an approval queue, judged from the `mcpPlugin({ …
- * })` call that mounts the endpoint. Positive evidence only (the rule
- * `app-surface.ts` states): anything unreadable answers `undefined`, since a
- * false positive would be unsuppressible. The key is `AGENT_APPROVAL_CONFIG_KEY`
- * from `@guren/core`, never the literal string — the CLI cannot import
- * `@guren/plugin-mcp`, so a restated option name would silently stop matching.
+ * Whether this app configures an approval queue, judged from the `mcpPlugin({ … })`
+ * call that mounts the endpoint. Positive evidence only (the `app-surface.ts` rule):
+ * anything unreadable answers `undefined`, since a false positive would be
+ * unsuppressible. The key is `AGENT_APPROVAL_CONFIG_KEY` from `@guren/core`, never the
+ * literal string: the CLI cannot import `@guren/plugin-mcp`, so a restated name rots silently.
  */
 async function scanApprovalConfig(
   cwd: string,

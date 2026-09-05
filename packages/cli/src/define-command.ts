@@ -1,41 +1,23 @@
+/**
+ * citty's `defineCommand`, wrapped so a repeated flag is worth its last value.
+ *
+ * citty arrays a repeated flag whatever its declared type, and every array is
+ * truthy, so `Boolean(args.json)` reads `--json=false --json=false` as *on*.
+ * Only the `=value` spellings can express a false, which is what lets that
+ * survive casual testing. citty also registers only the *declared* arg name
+ * with its parser, so `--dry-run=false` on an arg declared `dryRun` misses the
+ * branch that types it and arrives as the truthy string `"false"`.
+ */
 import { defineCommand as defineCittyCommand } from 'citty'
 import type { ArgsDef, CommandContext, CommandDef } from 'citty'
 
-/**
- * citty's `defineCommand`, with one rule added: a repeated flag is worth its
- * last value.
- *
- * citty types every `string` arg as `string` and every `boolean` arg as
- * `boolean`, then hands back an array when the flag is passed twice — a lie no
- * compiler catches, and one that surfaces differently at every place the value
- * is then read. Measured on this bin before the rule existed, three shapes
- * crashed: `make:migration --name a --name b` inside `makeMigration()` on
- * `options.name?.trim is not a function`, `context --entity User --entity User`
- * on `entityName.toLowerCase is not a function`, and `context --app . --app .`
- * inside `resolve()` on `The "paths[0]" property must be of type string, got
- * array`.
- *
- * The quiet ones are the reason the rule lives here rather than at each read:
- * `make:migration --schema a.ts --schema b.ts` comma-joined them into a path
- * nothing can open and still exited 0; `context --module app --module app`
- * exited 1 blaming a module named `app,app`; and for booleans, every array is
- * truthy, so `Boolean(args.json)` — which reads as safe — turned
- * `--json=false --json=false` into *on*. Only the `=value` spellings can
- * express a false, so a bare `--json --json` never showed it, which is what let
- * the defect survive casual testing. A per-command helper fixed four commands
- * and left the other fifty reading raw; this wrapper is what makes the rule
- * impossible to bypass, and `tests/define-command.test.ts` gates every built-in
- * command on having gone through it.
- *
- * Positionals live in `_` and are left alone.
- */
+/** Positionals live in `_` and are left alone. */
 export function defineCommand<T extends ArgsDef = ArgsDef>(def: CommandDef<T>): CommandDef<T> {
   const { args, setup, run } = def
 
-  // citty runs `setup` before `run` on the same context object, so whichever
-  // hook a command declares first sees normalized flags. Both are wrapped
-  // because neither is required and the normalization is idempotent. citty
-  // awaits both hooks, so resolving a lazy `args` here is free.
+  // citty awaits both hooks on one context object, so resolving a lazy `args`
+  // here is free and whichever hook a command declares first sees normalized
+  // flags. Both are wrapped: neither is required, and the pass is idempotent.
   const normalize = async (context: CommandContext<T>): Promise<void> => {
     const argsDef = (typeof args === 'function' ? await args() : await args) ?? {}
     normalizeParsedArgs(context.args, argsDef as ArgsDef)
@@ -61,30 +43,11 @@ export function defineCommand<T extends ArgsDef = ArgsDef>(def: CommandDef<T>): 
 }
 
 /**
- * Collapse every repeated flag on a parsed citty `args` object to its last
- * value, in place, and give declared booleans the type citty gave only their
- * declared spelling.
- *
- * citty hands `run` a Proxy whose `get` falls back from `dryRun` to `dry-run`
- * and back; it has no `set` or `ownKeys` trap, so the keys enumerated and the
- * assignments made here land on the underlying record — the one the Proxy
- * reads through.
- *
- * The second half exists because citty registers only the *declared* name as a
- * boolean with its parser (`parseOptions.boolean.push(arg.name)`). An arg
- * declared `dryRun` and spelled `--dry-run` therefore misses the branch that
- * turns `"false"` into `false`, and arrives as the *string* `"false"` — which
- * is truthy, so last-wins would not hold for the spelling this CLI actually
- * documents. Only the two literals are coerced: citty's own boolean branch
- * does more than that (it pushes an unrecognized value onto `_` and keeps the
- * flag `true`), and replicating that here would move positionals around rather
- * than fix a type.
- *
- * Declared *strings* are deliberately left as citty leaves them. The same
- * declared-name gap applies, but the values it produces are already truthy
- * strings or numbers rather than a false that reads as true, and every string
- * flag the CLI narrowed by hand before this wrapper is single-word or
- * kebab-declared, so citty types all of them natively.
+ * Collapse repeated flags to their last value and type declared booleans, in
+ * place. citty's `args` Proxy has no `set` or `ownKeys` trap, so the keys
+ * enumerated and the assignments made here land on the record it reads through.
+ * Only `"true"` and `"false"` are coerced: citty's boolean branch also pushes an
+ * unrecognized value onto `_`, and moving positionals is not this rule's job.
  */
 export function normalizeParsedArgs(args: Record<string, unknown>, argsDef: ArgsDef): void {
   for (const key of Object.keys(args)) {
@@ -105,6 +68,8 @@ export function normalizeParsedArgs(args: Record<string, unknown>, argsDef: Args
     }
   }
 
+  // Declared strings are left as citty leaves them: the same declared-name gap
+  // yields a truthy string or a number there, not a false that reads as true.
   for (const key of Object.keys(args)) {
     if (key === '_') continue
     const spelling = spellingKey(key)
@@ -116,15 +81,11 @@ export function normalizeParsedArgs(args: Record<string, unknown>, argsDef: Args
 }
 
 /**
- * The identity a stored key and a declared name share when they are two
- * spellings of one flag.
- *
- * citty's Proxy resolves a declared name through its own `camelCase` and
- * `kebabCase` (from `scule`), which this package does not depend on. Erasing
- * dashes and case instead is looser than reimplementing them and cannot miss a
- * spelling either of them would produce; the cost is that two args whose names
- * differ only in dashes and case would collide, which the caller above handles
- * by declining to coerce any spelling that is also declared as a non-boolean.
+ * The identity a stored key and a declared name share when they spell one flag.
+ * citty's Proxy resolves a name through `scule`'s camelCase/kebabCase, which this
+ * package does not depend on; erasing dashes and case is looser and cannot miss a
+ * spelling either produces. Two args differing only in dashes and case collide,
+ * which the caller handles by skipping any spelling also declared non-boolean.
  */
 function spellingKey(name: string): string {
   return name.replaceAll('-', '').toLowerCase()
@@ -139,9 +100,9 @@ const LAST_FLAG_WINS = Symbol('guren.cli.lastFlagWins')
 
 /**
  * Whether a command definition went through this module's `defineCommand`.
- * `tests/define-command.test.ts` asserts it for every built-in command, which
- * is what turns "import from `./define-command`, not from `citty`" from a
- * convention into a gate.
+ * `tests/define-command.test.ts` asserts it for every entry of
+ * `builtinSubCommands`, which is what makes importing citty's own
+ * `defineCommand` fail rather than silently opt a command out.
  */
 export function normalizesRepeatedFlags(command: object): boolean {
   return (command as Record<symbol, unknown>)[LAST_FLAG_WINS] === true

@@ -2,14 +2,11 @@ import { describe, test, expect } from 'bun:test'
 import { Hono } from 'hono'
 
 /**
- * The one upstream behaviour the scaffolded OAuth consent flow rests on: Hono
- * keys its body cache on the parse *options*, not on the request alone. The
- * consent controller reads repeated `scope` checkboxes with
- * `parseBody({ all: true })` after the CSRF middleware already called
- * `parseBody()` with none; were the cache keyed on the request, it would get the
- * collapsed result and grant one tool however many boxes were ticked, with no
- * error and no log line. The collapsed `first` is asserted too — without it the
- * two calls were never in conflict and this would pass under any rule.
+ * Hono keys its body cache on the parse *options*, not on the request alone: the
+ * scaffolded consent controller reads repeated `scope` checkboxes with
+ * `parseBody({ all: true })` after the CSRF middleware called `parseBody()` bare,
+ * and a request-keyed cache would silently grant one tool however many boxes were
+ * ticked. The collapsed `first` is asserted too, or the calls were never in conflict.
  */
 describe('hono parseBody caching (consent form prerequisite)', () => {
   test('should honour all: true on a request whose body was already parsed without it', async () => {

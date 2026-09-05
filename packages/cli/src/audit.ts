@@ -653,12 +653,11 @@ const RAW_SQL_PATTERN = /\bsql\.raw\s*\(\s*`[^`]*\$\{/
 const UNSAFE_SQL_PATTERN = /\.unsafe\s*\(\s*`[^`]*\$\{/
 
 /**
- * Absolute links that leave the app (password reset, email verification) must
- * not be derived from the request: the URL is reconstructed from the forgeable
- * `Host` header, so an attacker can have the app mail a victim a genuine
- * single-use token pointing at their own server. No `.origin`/`.host` read is
- * required (that missed `const url = new URL(req.url)` used a line later), and
- * the `[^)]` runs are bounded: 15,111ms unbounded against 0.02ms on one line.
+ * Absolute links that leave the app (password reset, email verification) must not
+ * be derived from the request: the URL is rebuilt from the forgeable `Host` header,
+ * so an attacker can have the app mail a victim a genuine token pointing at their
+ * server. No `.origin`/`.host` read is required (`const url = new URL(req.url)` is
+ * read a line later), and the `[^)]` runs are bounded: 15,111ms unbounded vs 0.02ms.
  */
 const REQUEST_ORIGIN_PATTERN =
   /new\s+URL\s*\([^)]{0,200}\b(?:req|request)\s*\.\s*url\b[^)]{0,200}\)(?!\s*\.\s*(?:pathname|searchParams|search|hash)\b)/
@@ -671,11 +670,10 @@ const HOST_HEADER_READ_PATTERN =
 const REQUEST_RECEIVER_PATTERN = /\b(?:req|request)\b/i
 
 /**
- * The framework's own outbound-link builders: their presence in a file is what
- * promotes a request-derived origin from "reads its own host" to "mails it to
- * someone else". Matched by bare name so an aliased import still counts.
- * `buildOAuthAuthorizeUrl` is deliberately absent — a request-derived
- * `redirect_uri` there is a different risk this finding would misdescribe. An
+ * The framework's own outbound-link builders: their presence in a file promotes a
+ * request-derived origin from "reads its own host" to "mails it to someone else".
+ * Matched by bare name so an aliased import still counts. `buildOAuthAuthorizeUrl`
+ * is deliberately absent: a request-derived `redirect_uri` is a different risk. An
  * audit test enumerates `@guren/core`'s `build*Url` exports against this list.
  */
 const LINK_BUILDER_NAMES = 'TokenUrl|PasswordResetUrl|VerificationUrl|OAuthRedirectUrl'

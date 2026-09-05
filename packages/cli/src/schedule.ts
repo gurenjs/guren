@@ -119,17 +119,11 @@ async function loadScheduleKernel(options: ScheduleOptions = {}): Promise<{ task
 const NEXT_RUN_HORIZON_MS = 4 * 366 * 24 * 60 * 60 * 1000
 
 /**
- * The next instant at which the scheduler would fire `expression`.
- *
- * Mirrors `ScheduledTask.isDue()`: a timezone-bearing task is matched against
- * its wall clock in that zone, the rest against local time. Walking the same
- * predicate forward is what keeps the listed "next run" honest — a second
- * estimator is how the CLI came to announce a local-time run for a task the
- * scheduler fires on Tokyo time.
- *
- * Steps a wall-clock hour at a time while the hour or day cannot match, then
- * a minute at a time. An hour step can only skip wall-clock minutes a DST gap
- * removed, so it never overshoots a real occurrence.
+ * The next instant at which the scheduler would fire `expression`. Mirrors
+ * `ScheduledTask.isDue()`: a timezone-bearing task is matched against its wall
+ * clock in that zone, the rest against local time — a second estimator lists a
+ * local-time run for a task fired on Tokyo time. Steps an hour while the hour or
+ * day cannot match, then a minute; an hour step only skips minutes a DST gap removed.
  */
 export function getNextRunTime(
   expression: string,

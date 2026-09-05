@@ -433,8 +433,8 @@ describe('insertImport — already-imported detection', () => {
   const STATEMENT = "import { registerAttachmentRoutes } from '@guren/core'"
 
   // A binding merged into a neighbouring import — what any formatter produces —
-  // used to read as absent, so a re-run appended a second one and the app
-  // stopped compiling on a duplicate binding.
+  // must read as present, or a re-run appends a second one and the app stops
+  // compiling on a duplicate binding.
   it('treats a binding merged into another import from the same module as present', () => {
     const merged = "import { Router, registerAttachmentRoutes, requireAuthenticated } from '@guren/core'\n"
     expect(insertImport(merged, STATEMENT)).toBeNull()

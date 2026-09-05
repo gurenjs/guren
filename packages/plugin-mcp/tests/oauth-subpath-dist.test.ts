@@ -4,12 +4,11 @@ import { fileURLToPath } from 'node:url'
 import { createApp, type Application, type Router } from '@guren/core'
 
 /**
- * The one-map invariant, asserted across the **built** entries rather than in
- * source. `@guren/plugin-mcp/oauth` writes the seam; `@guren/plugin-mcp` reads
- * it. In `dist/` they are two rolldown entries, and a bundler that inlined
- * `external-auth.ts` into each would produce two `WeakMap`s — after which every
- * request 401s with the whole source-level suite green. Skipped when `dist/` is
- * absent: a checkout that has not built has nothing to assert about.
+ * The one-map invariant, asserted across the **built** entries: `@guren/plugin-mcp/oauth`
+ * writes the seam, `@guren/plugin-mcp` reads it, and in `dist/` they are two
+ * rolldown entries. A bundler that inlined `external-auth.ts` into each would
+ * produce two `WeakMap`s — every request 401s with the source-level suite green.
+ * Skipped when `dist/` is absent.
  */
 const distDir = fileURLToPath(new URL('../dist', import.meta.url))
 const built = existsSync(`${distDir}/index.js`) && existsSync(`${distDir}/oauth.js`)
