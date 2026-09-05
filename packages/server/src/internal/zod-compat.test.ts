@@ -192,7 +192,7 @@ describe('wrapper vocabulary', () => {
 
   test('every wrapper in the vocabulary really is a single-child node in zod 4', () => {
     // Key equality both ways: a wrapper without a builder AND a stale builder
-    // for a name no longer in the set fail here, before the loop runs. Every
+    // for a name outside the set fail here, before the loop runs. Every
     // other test that iterates `WRAPPER_BUILDERS` inherits that guarantee.
     expect(Object.keys(WRAPPER_BUILDERS).sort()).toEqual([...SINGLE_CHILD_WRAPPERS].sort())
     for (const [name, make] of Object.entries(WRAPPER_BUILDERS)) {

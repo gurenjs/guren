@@ -71,7 +71,7 @@ export class TokenGuard<User = unknown> implements Guard<User> {
     return this.verification
   }
 
-  // A valid token whose user no longer resolves (deleted account, unrevoked
+  // A valid token whose user does not resolve (deleted account, unrevoked
   // token) is NOT authenticated, so this goes through user(), not verify().
   async check(): Promise<boolean> {
     return (await this.user()) !== null

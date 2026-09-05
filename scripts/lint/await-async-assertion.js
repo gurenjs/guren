@@ -1,40 +1,11 @@
-// oxlint plugin: a bare `expect(...).resolves` / `expect(...).rejects`
-// statement is an assertion that can never fail its test. The matcher returns
-// a promise; written without `await` (or `return`), the test callback finishes
-// first, and a promise that resolves when it should reject, or rejects with
-// the wrong message, is never observed. Twenty-two of these shipped before the
-// first one was noticed.
-//
-// Why a rule of our own, when two published ones exist for exactly this:
-//
-// - `typescript/no-floating-promises` decides by return type, and bun-types
-//   declares the `.resolves` / `.rejects` chains as returning `void`
-//   (`rejects: Matchers<unknown>`, `toThrow(): void`). The promise the matcher
-//   really returns is invisible to type-aware linting, so the rule stays quiet
-//   on every `bun:test` file. (Files importing from `vitest` are typed
-//   honestly and that rule does catch them.)
-// - oxlint's `jest/valid-expect` is syntactic, but only recognises `expect`
-//   imported from jest or vitest — `bun:test` is not on its list — and this
-//   repo's tests overwhelmingly import from `bun:test`.
-//
-// This rule is syntactic and import-agnostic. It reports an async assertion —
-// a call chain rooted at `expect` and passing through `.resolves` or
-// `.rejects` — wherever its promise is discarded:
-//
-// - as a statement of its own (`expect(p).rejects.toThrow()`),
-// - under `void`, which for an assertion is never what was meant,
-// - as the expression body of an arrow handed to `forEach`, which throws the
-//   return value away (`.map` inside `Promise.all` is fine and not reported).
-//
-// `expect` is recognised by name, through an import alias (`expect as verify`)
-// and as a member (`t.expect(...)` for a namespace import); an `await` on the
-// wrong node of the chain (`(await expect(p)).resolves.toBe(1)`) does not
-// count as consuming the matcher's promise. A file that declares its own
-// `expect` (a DSL that merely shares the name) is left alone.
-//
-// JavaScript rather than TypeScript: oxlint hands JS plugins to Node's module
-// loader, which does not take a `.ts` file. The tests live next door in
-// `await-async-assertion.test.ts`.
+// oxlint plugin: a bare `expect(...).resolves` / `expect(...).rejects` statement can
+// never fail its test: the matcher's promise is discarded, so the callback ends first.
+// Twenty-two shipped before one was noticed. Neither published rule catches it:
+// `typescript/no-floating-promises` decides by type and bun-types declares the chain
+// as returning `void`; `jest/valid-expect` only knows `expect` from jest or vitest.
+// Syntactic and import-agnostic: reports the chain as a bare statement, under `void`,
+// or as a `forEach` arrow body; recognises aliases (`expect as verify`) and
+// `t.expect`; a file declaring its own `expect` is left alone. Tests: the .test.ts next door.
 
 const ASYNC_MODIFIERS = new Set(['resolves', 'rejects'])
 

@@ -54,8 +54,7 @@ describe('Application.stop and the managed Vite dev server', () => {
 
     expect(vite.viteClose).toHaveBeenCalledTimes(1)
     expect(activeViteDevServer()).toBeUndefined()
-    // Leaving these set would point a later process at an asset server that is
-    // no longer running.
+    // Leaving these set would point a later process at a stopped asset server.
     expect(process.env.VITE_DEV_SERVER_URL).toBeUndefined()
     expect(process.env.GUREN_MANAGED_VITE_DEV_SERVER).toBeUndefined()
     expect(process.env.GUREN_INERTIA_ENTRY).toBeUndefined()

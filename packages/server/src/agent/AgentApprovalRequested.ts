@@ -2,12 +2,11 @@
  * The notification an application sends its approvers when an agent tool call
  * becomes a pending approval request (RFC 0016 §5.4 item 4).
  *
- * It takes a request and not a recipient: **who the approvers are is never the
- * framework's decision**. Kept in its own module and deliberately unimported by
- * `approval.ts`, so a runtime that never notifies does not pull the
- * notifications subsystem into its graph. Not queued (`shouldQueue` stays
- * false): an approval is answered within minutes or it expires, and a worker
- * that is behind or absent notifies after the window closed.
+ * Takes a request, not a recipient: who the approvers are is never the
+ * framework's decision. Deliberately unimported by `approval.ts`, so a runtime
+ * that never notifies does not pull the notifications subsystem into its graph.
+ * Not queued (`shouldQueue` stays false): an approval is answered within minutes
+ * or expires, and a worker that is behind notifies after the window closed.
  */
 import { Notification } from '../notifications/Notification'
 import type { Notifiable, NotificationMailMessage, SlackMessage } from '../notifications/types'

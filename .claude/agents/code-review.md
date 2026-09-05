@@ -39,6 +39,14 @@ Review code changes and provide constructive, actionable feedback.
 - [ ] DRY - no unnecessary duplication
 - [ ] Single responsibility principle
 
+### Comments (every comment added or changed in the diff)
+- [ ] Says something the code cannot: a constraint, pitfall, unit, sync obligation, measured number, RFC/issue reference
+- [ ] Not a restatement of the next line, the symbol's name, or its type; no section banners or step labels
+- [ ] No change history ("used to", "previously", "no longer"): that belongs in the commit message
+- [ ] Within the size limits `.claude/rules/coding-standards.md` sets, one fact per line; longer blocks are compressed, not kept
+- [ ] `@param`/`@returns`/`@example` carry something the signature does not
+- [ ] `bun run lint` passes; an `oxlint-disable-next-line guren/comment-*` marker names its reason
+
 ### Guren Patterns
 - [ ] Controllers extend `Controller` base class
 - [ ] Models use `Model<T>` pattern

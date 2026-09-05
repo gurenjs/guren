@@ -24,7 +24,7 @@ export interface DeployTargetProfile {
   /**
    * Whether `Bun.password` exists at runtime: only Workers (workerd) and
    * Lambda (Node.js) lose it, since Vercel functions run `runtime: 'bun1.x'`.
-   * `DefaultHasher` no longer depends on it (RFC 0003 §4); what breaks is an
+   * `DefaultHasher` does not depend on it (RFC 0003 §4); what breaks is an
    * explicit `new ScryptHasher()`, whose Argon2id cannot be read back.
    */
   hasBunRuntime: boolean
@@ -109,13 +109,11 @@ const DEPLOY_SCAN_DIRS = ['src', 'app', 'config', 'db', 'routes', 'modules', 'bi
 /** Test files are excluded from the scan — see readAppSources. */
 const TEST_FILE_PATTERN = /\.(test|spec)\.[cm]?[jt]sx?$/
 
-// Every signal name is resolved through the file's own `@guren/*` value
-// imports rather than matched bare, so `import { NodeHasher } from './my-own'`
-// cannot satisfy a remediation; aliases and namespace imports resolve to their
-// canonical exported names. Known limitations, both needing scope/dataflow
-// analysis this stops short of: a local binding shadowing an imported signal
-// name still counts, and an options object built elsewhere and passed into
-// createApp is not seen — though any key inside it is, wherever it lives.
+// Every signal name is resolved through the file's own `@guren/*` value imports rather
+// than matched bare, so `import { NodeHasher } from './my-own'` cannot satisfy a
+// remediation; aliases and namespace imports resolve to canonical names. Limitations
+// needing scope/dataflow analysis: a local binding shadowing an imported signal name
+// still counts, and an options object built elsewhere and passed to createApp is not seen (its keys are).
 
 type SignalKind =
   | 'passwordAuth'
@@ -137,15 +135,11 @@ interface ExtractedSignal {
 }
 
 /**
- * Classes whose *construction* is a signal. A bare import never counts: it
- * survives long after the app stops using the thing it names, and must neither
- * satisfy a remediation nor raise a warning.
- *
- * ScryptHasher is `bunOnlyHasher` because it pins the app to a format only
- * `Bun.password` can read; `DefaultHasher`/`Hash` are remediation because they
- * pick their delegate from the runtime and the stored hash. A `discover: true`
- * option in `createApp()` is deliberately not a signal — it never had an
- * effect, so a leftover in an older app is inert.
+ * Classes whose *construction* is a signal. A bare import never counts: it survives long
+ * after the app stops using the thing it names, and must neither satisfy a remediation nor
+ * raise a warning. ScryptHasher is `bunOnlyHasher` because it pins the app to a format only
+ * `Bun.password` can read; `DefaultHasher`/`Hash` are remediation because they pick their
+ * delegate from the runtime and the stored hash. `discover: true` in `createApp()` is inert, so not a signal.
  */
 const CONSTRUCTED_SIGNALS: Record<string, SignalKind> = {
   ScryptHasher: 'bunOnlyHasher',

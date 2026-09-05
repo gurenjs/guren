@@ -1,14 +1,12 @@
 /**
- * The WebMCP client (RFC 0016 §7, Phase 3) — **experimental**.
- *
- * Registers the tools an app's `.guren/agents.gen.ts` marks `expose.webMcp`
- * onto the browser's `modelContext` API: a tool call becomes the HTTP request
- * the route already validates, as the signed-in user. Imports from
- * `@guren/core/agent` and nothing else — `@guren/core` or `@guren/server`
- * would pull the container, Hono and the ORM into a browser bundle. WebMCP is
- * a W3C CG draft (the anchor moved from `navigator` to `document`,
- * `unregisterTool` has come and gone), so every feature detection here marks
- * something the draft already changed once.
+ * The WebMCP client (RFC 0016 §7, Phase 3) — **experimental**. Registers the
+ * tools `.guren/agents.gen.ts` marks `expose.webMcp` onto the browser's
+ * `modelContext` API: a tool call becomes the HTTP request the route already
+ * validates, as the signed-in user. Imports from `@guren/core/agent` and nothing
+ * else — `@guren/core` or `@guren/server` would pull the container, Hono and the
+ * ORM into a browser bundle. WebMCP is a W3C CG draft (anchor moved `navigator`
+ * → `document`, `unregisterTool` has come and gone): every feature detection
+ * here marks something the draft already changed once.
  */
 import {
   buildToolRequest,
@@ -33,13 +31,11 @@ const XSRF_HEADER_NAME = 'X-XSRF-TOKEN'
 const CSRF_SAFE_METHODS: ReadonlySet<string> = new Set(['GET', 'HEAD', 'OPTIONS'])
 
 /**
- * One entry of a generated `agentTools` manifest, structurally.
- *
- * Declared here rather than imported as `DerivedAgentTool` because the manifest
- * is emitted `as const`, and a `readonly string[]` is not assignable to the
- * `string[]` the derivation declares. The single cast back at the dispatch call
- * bridges them, sound because dispatch only ever reads the tool. The schemas
- * are `unknown` because this module never inspects them.
+ * One entry of a generated `agentTools` manifest, structurally. Not
+ * `DerivedAgentTool`: the manifest is emitted `as const`, and a `readonly
+ * string[]` is not assignable to the `string[]` the derivation declares. The
+ * single cast at the dispatch call bridges them, sound because dispatch only
+ * reads the tool. Schemas are `unknown` because this module never inspects them.
  */
 export interface WebMcpToolSource {
   readonly toolName: string
@@ -144,16 +140,11 @@ export interface WebMcpRegistration {
 }
 
 /**
- * Register an application's WebMCP-exposed agent tools on the page.
- *
- * A browser with no `modelContext` gets `{ supported: false }` and no
- * exception: this runs on every page load, and a missing experimental API is
- * the normal case. Registration failures are the opposite — see the loop below.
- *
- * @example
- * ```typescript
- * await registerAgentTools(agentTools)
- * ```
+ * Register an application's WebMCP-exposed agent tools on the page. A browser
+ * with no `modelContext` gets `{ supported: false }` and no exception: this
+ * runs on every page load, and a missing experimental API is the normal case.
+ * Registration failures are the opposite — see the loop below.
+ * @example await registerAgentTools(agentTools)
  */
 export async function registerAgentTools(
   tools: Readonly<Record<string, WebMcpToolSource>>,
@@ -324,10 +315,9 @@ async function executeTool(
 
   // `redirect: 'manual'` turns *any* redirect into an opaque response (type
   // `opaqueredirect`, status 0, no readable headers), which `mapToolResponse`
-  // would otherwise describe as something the route returned. A browser cannot
-  // read the Location, and following it is the hazard above — a parity gap with
-  // the App MCP surface. Not an error result: the route answered, and `isError`
-  // would make an agent retry a call that did exactly what it should.
+  // would describe as something the route returned. A browser cannot read the
+  // Location, and following it is the hazard above — a parity gap with App MCP.
+  // Not an error result: `isError` would make an agent retry a call that succeeded.
   if (response.type === 'opaqueredirect') {
     return {
       content: [

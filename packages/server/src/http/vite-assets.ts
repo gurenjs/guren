@@ -61,15 +61,13 @@ function manifestAssetUrl(manifest: ViteManifest, normalizedEntry: string): stri
   return `${PUBLIC_ASSETS_URL_PREFIX}${trimSlashes(file)}`
 }
 
+// oxlint-disable-next-line guren/comment-length -- public API JSDoc keeps its @example
 /**
- * Resolve the public URL of a Vite build input, for server-rendered content
- * pages (RFC 0014): the dev server URL in development, the hashed manifest
- * entry under `/public/assets/` in production. Throws with the paths tried
- * rather than returning an empty string. Production prefers a build-time
- * injected manifest (`GUREN_VITE_MANIFEST`) over the filesystem, so `view()`
- * pages work on serverless targets; an explicit `manifestPaths` still reads
- * exactly the named files. A CSS file bundled *through* a JS entry has no
- * manifest key of its own — declare it in `build.rollupOptions.input`.
+ * Public URL of a Vite build input for server-rendered content pages (RFC 0014):
+ * the dev server URL in development, the hashed `/public/assets/` manifest entry
+ * in production, where a build-time `GUREN_VITE_MANIFEST` wins over the filesystem
+ * (serverless) unless `manifestPaths` names files. Throws with the paths tried. A
+ * CSS file bundled *through* a JS entry has no manifest key — list it in `build.rollupOptions.input`.
  *
  * @example
  * ```tsx

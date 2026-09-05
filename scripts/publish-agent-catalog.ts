@@ -1,25 +1,12 @@
 /**
- * Publish the rendered agent-catalog payload to gurenjs/agent-skills
- * (RFC 0011 §5). Maintainer-run over their own git credentials, not a CI job:
- * it belongs at the end of the release procedure, after the npm publish.
- *
- * 1. Render into a temp directory and run the same derived-fact assertions
- *    `audit:agent-catalog` runs, over that same tree: what is audited is what
- *    is pushed, never a second render.
- * 2. Clone gurenjs/agent-skills shallow and compare the published plugin
- *    `version` with the rendered one. Equal → nothing to do, exit 0, since most
- *    releases do not move @guren/cli.
- * 3. Delete every tracked file, write the rendered tree in, and check that what
- *    git staged is that same tree, path set and bytes — a global excludesFile or
- *    clean filter sits between the two. Commit and push, appending to history:
- *    Claude Code keeps a local clone of a registered marketplace, so a rewritten
- *    history risks non-fast-forward failures for every registered user. The push
- *    is leased to the cloned tip, so a remote that moved (including a deliberate
- *    rollback a fast-forward would restore) is refused.
- *
- * `--dry-run` does everything except commit and push, and prints the diff.
- * `--yes` skips the confirmation prompt. `--skip-validate` publishes without
- * `claude plugin validate`; without it, a validator that cannot run refuses.
+ * Publish the rendered agent-catalog payload to gurenjs/agent-skills (RFC 0011 §5).
+ * Maintainer-run after the npm publish. Renders to a temp dir, runs the
+ * `audit:agent-catalog` assertions over that same tree, and exits 0 when the published
+ * plugin `version` equals the rendered one; else replaces every tracked file, checks
+ * git staged exactly that tree (a global excludesFile or clean filter sits between),
+ * and appends a commit: history is never rewritten, since Claude Code keeps a local
+ * clone of each registered marketplace, and the push is leased to the cloned tip.
+ * Flags: `--dry-run` (diff only), `--yes` (no prompt), `--skip-validate` (no `claude plugin validate`).
  */
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'

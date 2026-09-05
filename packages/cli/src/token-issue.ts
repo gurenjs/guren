@@ -1,13 +1,12 @@
 /**
  * `guren token:issue` — mint an API token scoped to this app's agent tools (RFC 0016 §5.1).
- *
- * The *issuer* half of the split `agent/scopes.ts` describes: that module judges an issued
- * token and grants less on anything it cannot parse, while here the same entry is a typo a
- * human is still looking at, so everything below fails at issuance rather than at dispatch.
- * A scope matching no current tool is rejected as a typo or a latent grant that would
- * activate without consent (`--allow-unmatched` overrides). `--read-only` stores concrete
- * `tool:<name>` entries, never the pattern, which is fail-closed. Scope expansion goes
- * through `expandToolScopes` alone, or an issuance screen lists tools the dispatcher denies.
+ * The *issuer* half of the split `agent/scopes.ts` describes: that module grants less on
+ * anything it cannot parse; here the same entry is a typo a human is still looking at, so
+ * everything fails at issuance rather than at dispatch. A scope matching no current tool is
+ * rejected as a typo or a latent grant activating without consent (`--allow-unmatched`
+ * overrides). `--read-only` stores concrete `tool:<name>` entries, never the pattern
+ * (fail-closed). Expansion goes through `expandToolScopes` alone, or an issuance screen
+ * lists tools the dispatcher denies.
  */
 import { consola } from 'consola'
 import {

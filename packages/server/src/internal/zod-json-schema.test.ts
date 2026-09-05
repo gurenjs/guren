@@ -62,9 +62,8 @@ describe('toJsonSchema', () => {
     })
   })
 
-  // The walker used to drop every check, so `z.string().min(1)` and
-  // `z.string()` produced the same schema — an agent handed the second learns
-  // nothing about what the endpoint will actually accept.
+  // `z.string().min(1)` and `z.string()` must not produce the same schema: an
+  // agent handed the second learns nothing about what the endpoint accepts.
   describe('string constraints', () => {
     test('carries min and max length', () => {
       expect(clean(z.string().min(2).max(5))).toEqual({ type: 'string', minLength: 2, maxLength: 5 })

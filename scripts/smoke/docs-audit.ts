@@ -335,8 +335,8 @@ async function auditJapaneseDocs(root: string): Promise<void> {
 
 }
 
-// The `@/` alias resolves from the project root; imports like `@/Http/...`
-// are leftovers from the old `@/*` -> `./app/*` mapping and no longer resolve.
+// The `@/` alias resolves from the project root; `@/Http/...` assumes an
+// `@/*` -> `./app/*` mapping that does not exist.
 const STALE_APP_ALIAS_PATTERN = /['"]@\/(?:Http|Models|Policies|Events|Jobs|Listeners|Mail|Notifications|Providers|Services|Validators|Console|Exceptions|utils)\//u
 
 // `aliasMiddleware()` returns a *new* Router type carrying the alias name, so a

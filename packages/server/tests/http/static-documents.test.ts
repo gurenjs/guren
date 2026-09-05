@@ -54,11 +54,9 @@ describe('rendersAsDocument', () => {
 /**
  * The deploy plugins cannot call `rendersAsDocument` — Cloudflare Static Assets and
  * Vercel's CDN answer for `public/` before the app runs — so each declares the same
- * policy by file extension in `@guren/core/internal/deploy-build`. This is the seam
- * where the two can drift, and the only place both halves are in scope.
- *
- * Reached by relative path: importing `@guren/core` would resolve through its
- * `exports` map and make this gate read a stale `dist/`.
+ * policy by file extension in `@guren/core/internal/deploy-build`; this is the seam
+ * where the two can drift. Reached by relative path: importing `@guren/core` would
+ * resolve through its `exports` map and make this gate read a stale `dist/`.
  */
 describe('the document extensions the deploy plugins declare', () => {
   it('matches what rendersAsDocument makes of Hono’s mime table', () => {
@@ -107,13 +105,11 @@ describe('the document extensions the deploy plugins declare', () => {
 })
 
 /**
- * The attachments scaffold roots its `public` storage disk inside `public/`, so a
- * file there can be an upload that kept the uploader's extension — served as
- * `text/html` or `image/svg+xml` from the app's origin, that is stored XSS.
- *
- * Both routes over the directory are asserted in both modes: the extension
- * allowlist skips `/public/` paths and serves `.svg` at the root, while the
- * `/public/*` mount has no allowlist and serves everything.
+ * The attachments scaffold roots its `public` storage disk inside `public/`, so a file
+ * there can be an upload that kept the uploader's extension — served as `text/html`
+ * or `image/svg+xml` from the app's origin, that is stored XSS. Both routes over the
+ * directory are asserted in both modes: the extension allowlist skips `/public/` paths
+ * and serves `.svg` at the root, while the `/public/*` mount has no allowlist.
  */
 describe('document types served out of public/', () => {
   const fixture = useAssetFixture('guren-static-documents-')

@@ -151,13 +151,10 @@ describe('parseRequestBody', () => {
 
 /**
  * `parseRequestUploads` backs `Controller.file()` / `files()` and `@guren/testing`'s
- * controller mock. Driven through a real `HonoRequest`, since both properties under
- * test live inside Hono's `parseBody()`.
- *
- * Measured: Bun 1.3.14 rejects `MULTIPART/FORM-DATA` out of `formData()`
- * (case-sensitive where Hono lowercases first) while Bun 1.4.0 accepts it; Node
- * always has. The host's behavior is context, not a contract — what is required is
- * that this function answers with the file either way.
+ * controller mock; driven through a real `HonoRequest`, since both properties under
+ * test live inside Hono's `parseBody()`. Measured: Bun 1.3.14 rejects
+ * `MULTIPART/FORM-DATA` out of `formData()` (case-sensitive where Hono lowercases
+ * first), Bun 1.4.0 and Node accept it; the contract is the file answered either way.
  */
 describe('parseRequestUploads', () => {
   const BOUNDARY = 'guren-uploads-boundary'

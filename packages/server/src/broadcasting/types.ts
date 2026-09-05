@@ -82,7 +82,7 @@ export interface SSEMiddlewareOptions {
   retry?: number
 
   /**
-   * Resolves the user from the request context, used to authorize channels
+   * Resolves the user from the request context, which authorizes channels
    * requested via the `?channels=` query parameter.
    */
   getUser?: (ctx: unknown) => unknown | Promise<unknown>

@@ -208,9 +208,9 @@ describe('Router resource response hint', () => {
     expect(router.definitions()[0]?.resource).toBeUndefined()
   })
 
-  // Nothing validates the hint at runtime: a string used to recurse forever
-  // (every character is itself a one-character string) and `null` threw out of
-  // `Object.entries`. Anything unusable is dropped whole, like an unnamed class.
+  // Nothing validates the hint at runtime: a string would recurse forever
+  // (every character is itself a one-character string) and `null` would throw out
+  // of `Object.entries`. Anything unusable is dropped whole, like an unnamed class.
   it.each([
     ['a bare string', 'PostResource'],
     ['null', null],

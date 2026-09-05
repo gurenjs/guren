@@ -52,12 +52,11 @@ function spawnPublish(remote: string, extraEnv: Record<string, string>, args: st
 }
 
 /**
- * Every git call this file makes, hardened against the machine it runs on: a
- * global `core.hooksPath` reaches repositories created here (fresh clones
- * included, whose `post-checkout` runs before any assertion), a global
- * `commit.gpgsign` would make a commit *prompt* and bun:test charges a hang to
- * the following test, and a CI runner has no committer identity to inherit.
- * The same four flags guard build-agent-catalog.test.ts.
+ * Every git call this file makes, hardened against the machine it runs on: a global
+ * `core.hooksPath` reaches repositories created here (a fresh clone's `post-checkout`
+ * runs before any assertion), a global `commit.gpgsign` would make a commit prompt and
+ * bun:test charges a hang to the following test, and a CI runner has no committer
+ * identity to inherit. The same four flags guard build-agent-catalog.test.ts.
  */
 const HERMETIC = [
   '-c', 'core.hooksPath=',

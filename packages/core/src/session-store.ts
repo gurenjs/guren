@@ -4,30 +4,21 @@ import { decodeJsonColumn, isExpired } from './store-utils.js'
 
 export interface DatabaseSessionStoreOptions {
   /**
-   * How the `data` column stores the serialized session.
-   *
-   * - `'json'` (default) passes the object straight through — use with a
-   *   JSON-capable column (pg `jsonb`/`json`, sqlite `text(..., { mode: 'json' })`).
-   * - `'text'` serializes to a JSON string for plain text columns.
-   *
-   * Reads always accept both representations.
+   * How the `data` column stores the serialized session: `'json'` (default)
+   * passes the object through for a JSON-capable column (pg `jsonb`/`json`,
+   * sqlite `text(..., { mode: 'json' })`); `'text'` serializes to a JSON string.
+   * Reads accept both.
    * @default 'json'
    */
   dataMode?: 'json' | 'text'
 }
 
 /**
- * Database-backed session store built on the Guren ORM — the serverless default:
- * no Redis on Lambda, Vercel, or Workers, and reads are strongly consistent.
- *
- * Pass the Drizzle table for your `sessions` schema; column property names must
- * be `id` (text primary key), `data`, and `expiresAt`.
- *
- * Session values must be JSON-serializable, unlike `MemorySessionStore` which
- * keeps live references: Dates come back as ISO strings, `undefined` properties
- * are dropped, and `bigint` fails to serialize.
- *
- * @example `new DatabaseSessionStore(sessions)`
+ * Database-backed session store built on the Guren ORM, the serverless default
+ * (no Redis on Lambda, Vercel, or Workers; reads are strongly consistent). Column
+ * property names of the `sessions` table must be `id` (text primary key), `data`,
+ * and `expiresAt`. Values must be JSON-serializable, unlike `MemorySessionStore`:
+ * Dates return as ISO strings, `undefined` properties drop, `bigint` throws.
  */
 export class DatabaseSessionStore implements SessionStore {
   private readonly model: typeof Model

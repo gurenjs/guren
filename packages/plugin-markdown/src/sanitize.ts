@@ -4,11 +4,10 @@ import { alertAllowedClasses } from './alerts'
 
 /**
  * Default allowlist applied to rendered HTML (RFC 0012). The output is commonly
- * injected with dangerouslySetInnerHTML, and escaping raw HTML in the markdown
- * source is not enough on its own: markdown syntax itself can carry
- * `javascript:`/`data:` URLs into href and src. Returned as a fresh object per
- * call so one renderer's `sanitize` callback can mutate its copy without
- * bleeding into other renderers.
+ * injected with dangerouslySetInnerHTML, and escaping raw HTML in the source is
+ * not enough: markdown syntax itself carries `javascript:`/`data:` URLs into
+ * href and src. A fresh object per call, so one renderer's `sanitize` callback
+ * can mutate its copy without bleeding into other renderers.
  */
 export function defaultSanitizeOptions(): sanitizeHtml.IOptions {
   return {

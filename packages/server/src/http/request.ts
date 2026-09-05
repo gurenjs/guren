@@ -20,11 +20,9 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 /**
  * Returns the parsed body as-is (a JSON array stays an array), for callers that
  * hand it to a schema. Any unparseable body falls back to `{}` so an all-optional
- * object schema still passes on an empty POST; the cost is that a non-object
- * schema then fails validation instead of receiving nothing. The fallback cannot
- * say whose fault it was — a client's malformed body and one already consumed
- * upstream both read as `{}`, since telling them apart means matching error
- * codes that differ on Bun, Node and Workers.
+ * object schema still passes on an empty POST; a non-object schema then fails
+ * validation instead of receiving nothing. A malformed body and one consumed
+ * upstream both read as `{}`: telling them apart means matching error codes that differ on Bun, Node and Workers.
  */
 export async function parseRequestBody(ctx: RequestBodyContext): Promise<unknown> {
   const contentType = ctx.req.header('content-type') ?? ''
@@ -64,15 +62,11 @@ export interface RequestUploadsContext {
 export type RequestUploads = Record<string, string | File | (string | File)[]>
 
 /**
- * The one multipart read behind `Controller.file()`/`files()`. `{ all: true }` is
- * the contract, so this is deliberately *not* routed through
- * {@link parseRequestBody}, which flattens a repeated field to its first value.
- * No media-type gate, deliberately: Hono lowercases it inside `parseBody()`, so
- * an uppercase `MULTIPART/FORM-DATA` body works here while a caller gating first
- * — or reading through `Request.formData()` — answers `null` (measured on Bun
- * 1.3.14; 1.4.0 and Node accept it). try/catch rather than `.catch()`, since
- * `parseBody` may throw synchronously; an undecodable or already-consumed body
- * therefore reads as no files rather than a 500.
+ * The one multipart read behind `Controller.file()`/`files()`; `{ all: true }` is
+ * the contract, which {@link parseRequestBody} (first value of a repeated field) breaks.
+ * No media-type gate: Hono lowercases it in `parseBody()`, so uppercase
+ * `MULTIPART/FORM-DATA` works here while `Request.formData()` answers `null`
+ * (Bun 1.3.14; 1.4.0 and Node accept it). try/catch as `parseBody` may throw synchronously: a bad or consumed body is no files, not a 500.
  */
 export async function parseRequestUploads(ctx: RequestUploadsContext): Promise<RequestUploads> {
   try {

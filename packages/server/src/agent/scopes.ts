@@ -1,21 +1,12 @@
 /**
  * The scope grammar an API token's `abilities` use to reach agent tools
- * (RFC 0016 §5.1). Four forms, and deliberately no more — a consent screen is
- * only useful if a human can read a scope and say which tools it grants:
- *
- * - `tool:<name>`      one tool, by exact name
- * - `tools:read`       every tool whose resolved `readOnlyHint` is true
- * - `tools:*`          every tool
- * - `tools:<prefix>.*` every tool named `<prefix>.…`
- *
- * **Only `tool:` / `tools:` entries are considered**, so a token issued before
- * agent tools existed — holding the store's default `['*']` — grants none of
- * them (default deny). A malformed entry is likewise ignored rather than
- * throwing: this module judges an already-issued token and must grant less,
- * never more; rejecting a bad scope belongs to the issuer, which runs
- * {@link parseToolScope} and refuses a `null`. Matching is case-sensitive and
- * entries are not trimmed — normalizing here would make the judge more
- * permissive than the issuer.
+ * (RFC 0016 §5.1). Four forms, so a human can read a scope on a consent screen:
+ * `tool:<name>`, `tools:read` (every tool whose resolved `readOnlyHint` is
+ * true), `tools:*`, `tools:<prefix>.*`. **Only `tool:` / `tools:` entries are
+ * considered**, so the store's default `['*']` grants no tool (default deny). A
+ * malformed entry is ignored, not thrown: this module judges an issued token and
+ * must grant less, never more; rejecting belongs to the issuer, which refuses a
+ * `null` from {@link parseToolScope}. Case-sensitive and untrimmed, for the same reason.
  */
 
 /**
@@ -61,16 +52,11 @@ const ALL_KEYWORD = '*'
 const PREFIX_SUFFIX = '.*'
 
 /**
- * Parse one `abilities` entry.
- *
- * @returns The scope it denotes, or `null` both for an entry that is not a tool
- *   scope and for a malformed one (`tools:`, `tools:.*`, `tools:*.store`, a
- *   prefix outside the tool-name grammar). Callers cannot tell those apart on
- *   purpose: both mean "grants no tool".
- *
- * The two reserved `tools:` words are matched before the wildcard form, so a
- * family named `read.…` is still reachable as `tools:read.*` while a tool named
- * exactly `read` is reachable only as `tool:read`.
+ * Parse one `abilities` entry. The two reserved `tools:` words are matched
+ * before the wildcard form, so a family named `read.…` is still reachable as
+ * `tools:read.*` while a tool named exactly `read` is only `tool:read`.
+ * @returns The scope, or `null` for both a non-tool entry and a malformed one
+ *   (`tools:`, `tools:.*`, `tools:*.store`): both mean "grants no tool", on purpose.
  */
 export function parseToolScope(entry: string): ParsedToolScope | null {
   if (entry.startsWith(SINGLE_PREFIX)) {
@@ -132,13 +118,9 @@ export function scopesAllowTool(abilities: readonly string[], tool: ScopedTool):
 /**
  * The concrete tool names a token's abilities grant, for the surfaces that show
  * a human what a scope means: the OAuth consent screen, the `token:issue`
- * confirmation, the issuance-time lint.
- *
- * Literally a filter over {@link scopesAllowTool}, and it must stay one: a
- * second matcher is how a consent screen comes to list a tool the dispatcher
- * then denies.
- *
- * @returns Names in the order the tools were given.
+ * confirmation, the issuance-time lint. Literally a filter over
+ * {@link scopesAllowTool}, and it must stay one: a second matcher is how a
+ * consent screen comes to list a tool the dispatcher then denies. Order of `tools`.
  */
 export function expandToolScopes(
   abilities: readonly string[],

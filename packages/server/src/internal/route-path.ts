@@ -11,11 +11,9 @@
 
 // A param starts only at a segment boundary (`/status/foo:bar` is a literal), an
 // attached regex constraint is consumed whole, and the `*` sits *inside* the
-// capture because Hono keeps it in the parameter's name; the `?` does not.
-// The constraint is spelled to one level of nesting rather than with a nested
-// quantifier so a scan stops at the next brace: the `\{[^}]*\}(?:[^/]*\})*`
-// shape it replaces was quadratic (CodeQL js/polynomial-redos; 2.9s for a
-// 16k-char path, vs 1.9ms here).
+// capture (Hono keeps it in the parameter's name); the `?` does not. The constraint
+// admits one nesting level rather than a nested quantifier, so a scan stops at the
+// next brace: `\{[^}]*\}(?:[^/]*\})*` is quadratic (CodeQL js/polynomial-redos; 2.9s vs 1.9ms at 16k chars).
 export const PATH_PARAM_PATTERN = /(^|\/):([A-Za-z0-9_-]+\*?)(?:\{[^{}]*\{[^{}]*\}[^{}]*\}|\{[^{}]*\})?\??/gu
 
 /**

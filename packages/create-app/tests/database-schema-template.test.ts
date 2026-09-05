@@ -12,12 +12,11 @@ import {
 import { createTempWorkspace } from './helpers'
 
 /**
- * The generic `db/schema.ts` ships per driver under
- * `templates/database/<driver>/db/schema.ts` and is copied into the app
- * verbatim. Pinned: each file parses, imports its own dialect's barrel, reaches
- * the app byte-for-byte, and is packed into the tarball. The last two cases
- * guard the fallback's branch — a template's own `db/schema.<driver>.ts` wins,
- * and one missing the selected driver's variant throws rather than scaffolding.
+ * The generic `db/schema.ts` ships per driver under `templates/database/<driver>/`
+ * and is copied into the app verbatim. Pinned: each file parses, imports its own
+ * dialect's barrel, reaches the app byte-for-byte, and is packed into the tarball.
+ * The last two cases guard the fallback's branch: a template's own
+ * `db/schema.<driver>.ts` wins, and one missing the selected driver's variant throws.
  */
 const EXPECTED_SCHEMA_MODULE = {
   postgres: '@guren/orm/drizzle/pg',

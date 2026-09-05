@@ -93,15 +93,11 @@ function headingBehindComment(body: string, from: number): number {
 }
 
 /**
- * The body without its first H1, and without the HTML comment that may precede
- * it — the panel header carries the title.
- *
- * Scanned rather than matched with `/^\s*(?:<!--[\s\S]*?-->\s*)?#\s+.*$/m`,
- * whose lazy comment body was re-scanned from every line start: a doc holding
- * many `<!--` took quadratic time. Two easily-lost invariants keep the visits
- * per character bounded: `headingBehindComment` resolves the heading *end* only
- * for the closer it settles on, and runs at most twice; and the line loop
- * resumes at `from`, not `lineStart`, so blank lines are not re-tested.
+ * The body without its first H1 and any HTML comment before it (the panel header carries
+ * the title). Scanned rather than matched with `/^\s*(?:<!--[\s\S]*?-->\s*)?#\s+.*$/m`, whose
+ * lazy comment body is re-scanned from every line start: quadratic on many `<!--`. Two
+ * invariants bound visits per character: `headingBehindComment` resolves the heading *end*
+ * only for the closer it settles on, at most twice; the line loop resumes at `from`, not `lineStart`.
  */
 function stripLeadingH1(body: string): string {
   let noHeadingBehindComments = false

@@ -383,15 +383,11 @@ export async function generateEntityContext(
 }
 
 /**
- * The `## Agent Interfaces` section (RFC 0016 §14): the entity's routes that
- * declare `.agent()` metadata, rendered as the tools they become.
- * Content-activated, so an entity exposing none contributes no section.
- *
- * Input lists the route's already-rendered schema strings *as parts*, since the
- * tool's real inputSchema is the merge the derivation layer builds.
- * Authorization is reported only where the chain makes it derivable, and says
- * so where it does not: a route resolving its ability at request time must not
- * be rendered as if it named one.
+ * The `## Agent Interfaces` section (RFC 0016 §14): the entity's `.agent()` routes
+ * rendered as the tools they become; content-activated, so an entity exposing none
+ * contributes no section. Input lists the route's rendered schema strings *as parts*,
+ * since the real inputSchema is the derivation layer's merge. Authorization is reported
+ * only where derivable, and says so otherwise: a request-time ability must not read as a named one.
  */
 function renderAgentInterfaces(routes: ContextRoute[]): string[] {
   const exposed = routes.filter((route) => route.agent)

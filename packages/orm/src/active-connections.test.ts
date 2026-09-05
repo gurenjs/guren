@@ -154,8 +154,8 @@ describe('describeCallerFile', () => {
   })
 
   test('should not take time superlinear in the length of a frame', () => {
-    // Both shapes previously backtracked polynomially, so a frame padded with
-    // whitespace or opening parens cost quadratic time. Nothing here is
+    // Both shapes backtrack polynomially under a naive pattern, so a frame padded
+    // with whitespace or opening parens costs quadratic time. Nothing here is
     // request-derived, but a stack embeds whatever a message put in it.
     const padded = (last: string) => describeCallerFile(`Error\n    at factory (/app/dist/index.js:1:1)\n${last}`)
     const started = performance.now()
@@ -169,7 +169,7 @@ describe('describeCallerFile', () => {
   test('should stay linear in the number of frames as well as their length', () => {
     // The fixtures above put the adversarial frame last, so the walk exits after
     // one. Cost has to track total stack size, not frame count times frame
-    // length, since here every frame carries the shapes that used to backtrack.
+    // length, since here every frame carries the backtracking-prone shapes.
     const stack = (count: number, width: number) =>
       ['Error', '    at factory (/app/dist/index.js:1:1)', ...Array(count).fill(`    at ${' '.repeat(width)}x`)].join(
         '\n',

@@ -1,12 +1,11 @@
 // Shared reading of the workspace's package manifests, so no script answers
 // either question twice:
 //
-// - which packages live under packages/, and in what order they depend on each
-//   other, so adding one never requires editing a hand-maintained list.
+// - which packages live under packages/ and in what dependency order, so adding
+//   one never requires editing a hand-maintained list.
 // - what a manifest said at a git rev, which is how the release gates tell a
 //   version that moved from one that did not. `versionOf` carries the rule that
-//   an unreadable version is *not* a version — a gate that reimplemented that
-//   locally read `undefined !== '2.8.0'` as "moved" and exempted itself.
+//   an unreadable version is *not* a version: `undefined !== '2.8.0'` reads as "moved".
 
 import { readdir, readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'

@@ -3,9 +3,9 @@
  * declarations (RFC 0013, RFC 0010 §2), for the surfaces that cannot see
  * `typeof Post.attachments` — pages, resources, upload clients, `guren check`.
  *
- * Apps with no Attachable model get no file, and a previously generated one is
- * removed — but on positive evidence only: a run that skipped a model with a
- * warning leaves the existing file alone, the rule `attachments:prune` follows.
+ * Apps with no Attachable model get no file, and a stale one is removed — but
+ * on positive evidence only: a run that skipped a model with a warning leaves
+ * the existing file alone, the rule `attachments:prune` follows.
  */
 import { readFile, rm } from 'node:fs/promises'
 import { resolve } from 'node:path'

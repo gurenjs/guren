@@ -1,15 +1,12 @@
 /**
  * The names a protocol adapter may add to an application's tool catalogue on
  * its own, and which an application route therefore may not claim (RFC 0016
- * §5.4).
- *
- * One rule, two readers: `@guren/plugin-mcp` adds `guren.preflight` to the
- * catalogue it serves, `guren check` fails a route whose tool name collides.
- * Restating either string is how they drift — and `tools/list` carrying two
- * tools with one name is rejected wholesale by an MCP client, so a collision
- * costs the *entire* catalogue. It lives beside the derivation because the CLI
- * cannot import the plugin. The `guren.` prefix is deliberately not reserved
- * wholesale: that would fail routes over collisions that do not exist.
+ * §5.4). One rule, two readers: `@guren/plugin-mcp` adds `guren.preflight` to
+ * the catalogue it serves, `guren check` fails a route whose tool name
+ * collides; the CLI cannot import the plugin, hence beside the derivation. A
+ * `tools/list` carrying two tools with one name is rejected wholesale by an MCP
+ * client, so a collision costs the *entire* catalogue. The `guren.` prefix is
+ * not reserved wholesale: that would fail routes over collisions that do not exist.
  */
 
 /**

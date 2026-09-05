@@ -56,7 +56,7 @@ export interface QueryBuilderOptions {
 }
 
 /**
- * A callback that further constrains the query used to fetch an eager-loaded
+ * A callback that further constrains the query that fetches an eager-loaded
  * relation. Registered through the object form of {@link QueryBuilder.with}.
  */
 export type EagerLoadConstraint = (q: QueryBuilder) => void
@@ -232,19 +232,11 @@ export class QueryBuilder<
   }
 
   /**
-   * Eager-load relationships: names, arrays, dot-notation paths, or an object
-   * of constraint callbacks. A callback runs after the foreign-key filter is
-   * on the query, and each key constrains exactly the level it names.
-   *
-   * Three that behave differently than they look:
-   * - `orWhere()` at a callback's top level *widens* the query, ORing against
-   *   the foreign-key filter; group it to keep it contained.
-   * - `select()` must include the relation's key column, or rows cannot be
-   *   matched back to their parent and the relation comes back empty.
-   * - `limit()` applies to the single batched query, not per parent record.
-   *
-   * @example
-   * await User.newQuery().with({ posts: (q) => q.where('published', true) }).get()
+   * Eager-load relationships by name, dot path, or an object of constraint
+   * callbacks, each run after the foreign-key filter on exactly the level its key
+   * names. Pitfalls: a top-level `orWhere()` ORs against the foreign-key filter
+   * (group it); `select()` must keep the relation's key column or the relation is
+   * empty; `limit()` applies to the one batched query, not per parent record.
    */
   with(...relations: (string | Record<string, EagerLoadConstraint>)[]): this {
     for (const rel of relations) {

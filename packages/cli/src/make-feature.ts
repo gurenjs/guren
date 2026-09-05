@@ -203,12 +203,11 @@ export async function makeFeature(name: string, options: MakeFeatureOptions = {}
 }
 
 /**
- * The route-registration block for a resource: printed by `make:feature`,
- * written into `routes/web.ts` by `guren add resource`, one builder so the two
- * cannot drift. It must compile verbatim inside `register*Routes(router:
- * Router)`, so the auth alias binds a *new* name rather than shadowing
- * `router` — capturing that return is what puts `'auth'` into the router's
- * type. `receiver` is what the group hangs off with no alias to bind.
+ * The route-registration block for a resource: printed by `make:feature`, written
+ * into `routes/web.ts` by `guren add resource`, one builder so the two cannot
+ * drift. It must compile verbatim inside `register*Routes(router: Router)`, so the
+ * auth alias binds a *new* name rather than shadowing `router` — capturing that
+ * return puts `'auth'` into the router's type. `receiver` is what the group hangs off with no alias.
  */
 export function buildRouteRegistrationHint(options: {
   singular: string
@@ -275,10 +274,9 @@ function tsFieldType(field: FieldDefinition): string {
 /**
  * How a resource reads one column off its record. No cast, since `$inferSelect`
  * already carries each column's type and `as string` on a column later made
- * nullable would swallow the `null`. `json` is the exception — every dialect
- * infers `unknown` without a pinned `$type` — so it is asserted, flattening an
- * author's own `$type`. A `date` goes through `new Date()`, which also takes
- * the string a hand-written `text` column yields.
+ * nullable would swallow the `null`. `json` is the exception — every dialect infers
+ * `unknown` without a pinned `$type` — so it is asserted, flattening an author's own
+ * `$type`. A `date` goes through `new Date()`, which also takes a hand-written `text` column's string.
  */
 function resourceFieldExpression(field: FieldDefinition): string {
   const access = `this.resource.${field.name}`
@@ -365,7 +363,7 @@ function generateController(
   const pagesBase = pagesAccessor(moduleName, routeVar)
   // Redirect targets are plain path strings, so unlike `pagesBase` above
   // nothing verifies them against the mounted path. Assumes `make:module`'s
-  // default `prefix: '/<name>'`; update them if the prefix was changed.
+  // default `prefix: '/<name>'`; a custom prefix needs them edited by hand.
   const redirectPrefix = moduleName ? `/${moduleName}` : ''
   const destroyGuard = withPolicy
     ? `    await this.authorize('delete', [${singular}, ${variableName}])\n`

@@ -23,11 +23,9 @@ type BunImageConstructor = new (
 /**
  * The default {@link ImageProcessor}, backed by `Bun.Image`. Resolved by feature
  * check, never by version: a Bun lane without the API gets no default processor
- * and variants are recorded as `unavailable`.
- *
- * Format support is decided by the OS codecs at call time, so the pipeline
- * branches on `error.code === 'ERR_IMAGE_FORMAT_UNSUPPORTED'` alone — measured
- * counterexamples exist for every hardcoded format×platform table.
+ * and variants are recorded as `unavailable`. Format support is an OS-codec
+ * property at call time, so the pipeline branches only on `error.code ===
+ * 'ERR_IMAGE_FORMAT_UNSUPPORTED'`, never on a format×platform table.
  */
 class BunImageProcessor implements ImageProcessor {
   constructor(

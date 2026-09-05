@@ -26,12 +26,11 @@ export async function readSignedTokenClaims(
     return { id: claims.id, email: claims.email }
   }
 
-  // Ask again without the expiry check rather than re-deriving the comparison
-  // here. The two calls differ only in that one branch, so a token the strict
-  // call rejected and this one accepts is expired rather than forged. It also
-  // keeps the comparison the signer's: were it to grow clock-skew leeway, the
-  // strict call would accept a token inside the window and this path would
-  // never delete it.
+  // Ask again with only the expiry check off, rather than comparing `exp` here:
+  // a token the strict call rejected and this one accepts is expired, not
+  // forged, and the comparison stays the signer's (if it grows clock-skew
+  // leeway, the strict call accepts inside the window and this path never
+  // deletes a live token).
   const expired = signer.verify<{ id?: string }>(token, { purpose, allowExpired: true })
   if (expired?.id) {
     await store.delete(expired.id)

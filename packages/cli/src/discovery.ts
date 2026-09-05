@@ -81,11 +81,10 @@ export function moduleNameFor(cwd: string, filePath: string): string | null {
 
 /**
  * Whether the path is *definitely* not there — for a loader that degrades a
- * missing file to an empty result. {@link fileExists} answers "can I read
- * this", which reads a broken configuration (`EACCES`, `ENOTDIR`, a dangling
- * symlink) as "you have none". Non-ENOENT outcomes answer `false` here, so the
- * caller attempts the load and the loader's own error gets reported. `lstat`,
- * not `access`: a dangling symlink belongs in the loader's hands too.
+ * missing file to an empty result. {@link fileExists} answers "can I read this",
+ * which reads a broken configuration (`EACCES`, `ENOTDIR`, a dangling symlink) as
+ * "you have none". Non-ENOENT outcomes answer `false` here, so the caller attempts
+ * the load and its own error is reported. `lstat`, not `access`: a dangling symlink goes to the loader too.
  */
 export async function isDefinitelyAbsent(cwd: string, relativePath: string): Promise<boolean> {
   try {
@@ -145,14 +144,11 @@ export async function readIfExists(cwd: string, relativePath: string): Promise<s
 }
 
 /**
- * Whether the app's `package.json` declares `packageName`, as a dependency or
- * a devDependency — `null` when the manifest cannot be read or parsed.
- *
- * Three-valued on purpose: "does not depend on this" and "no manifest to ask"
- * are different answers, and callers pick their own default for `null` because
- * which one is safe depends on what they do with it. Every failure mode
- * collapses to `null`, including the ones `readIfExists` rethrows, so an
- * `EACCES` cannot propagate out of a question the caller was prepared for.
+ * Whether the app's `package.json` declares `packageName`, as a dependency or a
+ * devDependency — `null` when the manifest cannot be read or parsed. Three-valued
+ * on purpose: "does not depend on this" and "no manifest to ask" are different
+ * answers, and callers pick their own default for `null`. Every failure mode collapses
+ * to `null`, including the ones `readIfExists` rethrows, so an `EACCES` cannot propagate.
  */
 export async function appDependsOn(cwd: string, packageName: string): Promise<boolean | null> {
   let parsed: { dependencies?: Record<string, string>; devDependencies?: Record<string, string> }
@@ -322,12 +318,11 @@ export function discoverPolicyFiles(appRoot: string): Promise<string[]> {
 }
 
 /**
- * Route files under `<appRoot>/routes/`, tests excluded.
- *
- * Scoped to the given root on purpose, unlike the `discover*Files` siblings
- * that fan out over `listAppRoots()`: a module mounts its routes through
- * `defineModule({ routes })` rather than the project's entry registrar, so the
- * two are not the same question. See {@link discoverModuleRoutesFiles}.
+ * Route files under `<appRoot>/routes/`, tests excluded. Scoped to the given root
+ * on purpose, unlike the `discover*Files` siblings that fan out over
+ * `listAppRoots()`: a module mounts its routes through `defineModule({ routes })`
+ * rather than the project's entry registrar, so the two are not the same question.
+ * See {@link discoverModuleRoutesFiles}.
  */
 export function discoverRoutesFiles(appRoot: string): Promise<string[]> {
   return collectFiles(resolve(appRoot, 'routes'), IMPORTABLE_EXTENSIONS).then((files) =>
@@ -395,13 +390,10 @@ export async function discoverTestFiles(appRoot: string): Promise<string[]> {
 
 /**
  * Paths — POSIX-relative to `cwd` — that would satisfy "this controller has a
- * test", in probe order. A controller inside `modules/<name>/` is only ever
- * paired with a test in the same module, since the boundary check forbids the
- * project-root `tests/` from importing module internals.
- *
- * Detection is by filename and nothing else: a match says a file is named after
- * the controller, not that it exercises it. Report a miss with
- * {@link describeControllerTestMiss} so that bound is stated where it surfaces.
+ * test", in probe order. A controller inside `modules/<name>/` is only ever paired
+ * with a test in the same module, since the boundary check forbids the project-root
+ * `tests/` from importing module internals. Detection is by filename only: a match
+ * says a file is named after the controller, not that it exercises it — see {@link describeControllerTestMiss}.
  */
 export function controllerTestCandidates(cwd: string, controllerPath: string): string[] {
   const name = classNameFromPath(controllerPath)
@@ -453,14 +445,11 @@ export const DB_ARTIFACT_DIRS = {
 export type DbArtifactKind = keyof typeof DB_ARTIFACT_DIRS
 
 /**
- * Matches the factory or seeder file names that belong to an entity.
- *
- * Tolerance, not derivation: `make:factory`/`make:seeder` append their suffix
- * to whatever the user typed without inflecting it, so the singular, the
- * inflected plural, and the naive `+s` plural are all accepted, and `(?:^|_)`
- * lets a numbered seeder (`002_PostsSeeder`) match. Over-tolerance costs a
- * stray file listed against an entity; under-tolerance silently misses a real
- * one. Contrast `inflect.ts`, which must produce exactly one name.
+ * Matches the factory or seeder file names that belong to an entity. Tolerance,
+ * not derivation: `make:factory`/`make:seeder` append their suffix to whatever the
+ * user typed without inflecting it, so the singular, the inflected plural, and the
+ * naive `+s` plural are all accepted, and `(?:^|_)` lets a numbered seeder
+ * (`002_PostsSeeder`) match. Over-tolerance costs a stray listing; under-tolerance silently misses. Contrast `inflect.ts`.
  */
 export function dbArtifactPattern(entity: string, kind: DbArtifactKind): RegExp {
   const forms = [...new Set([entity, `${entity}s`, collectionName(entity)])]

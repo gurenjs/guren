@@ -114,11 +114,10 @@ export async function buildVercelOutput(options: BuildVercelOutputOptions = {}):
         version: 3,
         routes: [
           // Built assets self-reference the Vite plugin's derived base,
-          // `/public/assets/`, while the files themselves are copied to the
-          // output root. Without this every chunk the entry imports falls
-          // through to the function and comes back as HTML. A `rewrites` entry
-          // in vercel.json only covers builds Vercel runs itself; a
-          // `--prebuilt` upload is routed by this file alone.
+          // `/public/assets/`, while the files are copied to the output root;
+          // without this every chunk the entry imports falls through to the
+          // function and comes back as HTML. A `rewrites` entry in vercel.json
+          // only covers builds Vercel runs; a `--prebuilt` upload is routed here alone.
           { src: '/public/(.*)', dest: '/$1' },
           { handle: 'filesystem' },
           { src: '/(.*)', dest: '/index' },
@@ -193,12 +192,11 @@ export async function buildVercelOutput(options: BuildVercelOutputOptions = {}):
 }
 
 /**
- * Matches a staged path whose extension a browser would render as a document.
- * The CDN serves `.vercel/output/static` ahead of the function, so the
- * framework's own guard never sees these files. Spelled with a character class
- * per letter because Vercel compiles `src` case-sensitively (a plain extension
- * would leave logo.SVG inline) and validates it by constructing a JavaScript
- * `RegExp`, which rules out an inline case-insensitive flag.
+ * Matches a staged path whose extension a browser would render as a document;
+ * the CDN serves `.vercel/output/static` ahead of the function, so the
+ * framework's own guard never sees these files. A character class per letter
+ * because Vercel compiles `src` case-sensitively (a plain extension leaves
+ * logo.SVG inline) and validates it as a JavaScript `RegExp`, so no inline flag.
  */
 function documentAssetPattern(): string {
   const alternatives = DOCUMENT_ASSET_EXTENSIONS.map((extension) =>
@@ -212,12 +210,11 @@ const MCP_UNAVAILABLE =
   'The MCP endpoint is unavailable on Vercel — it generates files on disk, and the function filesystem is read-only.'
 
 /**
- * Why each dev-only module cannot run here, or `null` for one that can.
- *
- * `sqlite` is the `null`: the function runs on Vercel's Bun runtime, so
- * `bun:sqlite` is a working database here, and stubbing it would break an app
- * that ships a read-only sqlite file beside its function. Keyed on every kind
- * `DEV_ONLY_MODULES` contains, so a kind added there is a compile error here.
+ * Why each dev-only module cannot run here, or `null` for one that can. `sqlite`
+ * is the `null`: the function runs on Vercel's Bun runtime, so `bun:sqlite` works
+ * and stubbing it would break an app shipping a read-only sqlite file beside its
+ * function. Keyed on every kind `DEV_ONLY_MODULES` contains, so a kind added
+ * there is a compile error here.
  */
 const UNAVAILABLE_ON_VERCEL: Record<(typeof DEV_ONLY_MODULES)[number]['kind'], string | null> = {
   sqlite: null,
@@ -226,13 +223,11 @@ const UNAVAILABLE_ON_VERCEL: Record<(typeof DEV_ONLY_MODULES)[number]['kind'], s
 }
 
 /**
- * Modules replaced with throwing stubs, in the order they are matched. Both
- * sets are one defect shape — a *literal* dynamic import of a package the app
- * never installed, which a bundler follows whether or not the branch can be
- * taken: the dev-only modules, and the SQL clients for dialects this app does
- * not use. An app declaring `@guren/plugin-mcp` serves the App MCP endpoint
- * from this function, so its transport must reach the bundle (RFC 0016 §7);
- * the *Dev* MCP's `McpServer` and the CLI behind it stay stubbed regardless.
+ * Modules replaced with throwing stubs, in match order. One defect shape — a
+ * *literal* dynamic import of a package the app never installed, followed by a
+ * bundler regardless of branch: dev-only modules, and SQL clients of unused
+ * dialects. An app declaring `@guren/plugin-mcp` serves the App MCP endpoint here,
+ * so its transport must reach the bundle (RFC 0016 §7); the *Dev* MCP stays stubbed.
  */
 function stubbedModules(
   root: string,
@@ -265,12 +260,11 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-// Derived from the stubs actually rendered, so it stays the only enumeration
-// of stubbed specifiers. The catch-all cannot be derived the same way: "include
-// it while any MCP SDK subpath is stubbed" holds always (`server/mcp.js` stays
-// stubbed for every app), so it would keep swallowing `server/index.js` and
-// `types.js` and undo RFC 0016 Phase 4a silently. It is gated on the same
-// `mcpPlugin` decision that produced the stubs instead.
+// Derived from the stubs actually rendered, so it stays the only enumeration of
+// stubbed specifiers. The catch-all cannot be derived the same way: "while any
+// MCP SDK subpath is stubbed" holds always (`server/mcp.js` is stubbed for every
+// app) and would swallow the `server/index.js` and `types.js` an MCP app imports
+// (RFC 0016 Phase 4a), so it follows the same `mcpPlugin` decision as the stubs.
 function stubFilter(stubs: Record<string, string>, mcpPlugin: boolean): RegExp {
   const terms = Object.keys(stubs).map(escapeRegExp)
   if (!mcpPlugin) {

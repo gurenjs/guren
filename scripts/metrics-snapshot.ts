@@ -1,12 +1,11 @@
 // Weekly adoption-metrics snapshot: npm downloads for every public workspace
-// package plus GitHub repository traffic, which the traffic API retains for
-// only 14 days. Run by .github/workflows/metrics-snapshot.yml, which uploads
-// the JSON to a private R2 bucket: the referrer list is admin-only data and
-// must not land anywhere in this public repository.
+// package plus GitHub repository traffic, which the traffic API retains for only
+// 14 days. Run by .github/workflows/metrics-snapshot.yml, which uploads the JSON
+// to a private R2 bucket: the referrer list is admin-only data and must not land
+// anywhere in this public repository.
 //
 // Usage: bun scripts/metrics-snapshot.ts [--out path.json]
-//   GITHUB_TOKEN   token with push access to the repo (traffic endpoints
-//                  need it; without one they are skipped with a warning)
+//   GITHUB_TOKEN   push-access token; without one the traffic endpoints are skipped with a warning
 
 import { readdir, readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'

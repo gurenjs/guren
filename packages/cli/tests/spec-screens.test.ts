@@ -369,8 +369,8 @@ export function registerInvoiceRoutes(router: Router): void {
 })
 
 /**
- * A page rendered from a class-field action used to land in the file-level
- * leftovers, so it appeared in screens.md joined to no route at all.
+ * A page rendered from a class-field action must not land in the file-level
+ * leftovers, where it would appear in screens.md joined to no route at all.
  */
 describe('screens spec (class-field actions)', () => {
   let workspace: TempWorkspace

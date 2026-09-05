@@ -3,12 +3,11 @@ import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
 /**
- * What an installed copy of this package contains, and what its `exports` map
- * points at. `@guren/plugin-mcp/oauth` is imported only by a worker `guren
- * cloudflare:build --mcp-oauth` generates, which no gate in this repository
- * runs — so an `exports` entry naming a file the build does not emit, or a
- * `files` list missing the chunk that entry imports, would surface only as a
- * resolution failure on someone's deploy. Skipped when unbuilt.
+ * What an installed copy contains, and what its `exports` map points at.
+ * `@guren/plugin-mcp/oauth` is imported only by a worker `guren cloudflare:build
+ * --mcp-oauth` generates, which no gate here runs — an `exports` entry naming a
+ * file the build does not emit, or a `files` list missing the chunk it imports,
+ * would surface only as a resolution failure on someone's deploy. Skipped when unbuilt.
  */
 const packageDir = fileURLToPath(new URL('..', import.meta.url))
 const built = existsSync(`${packageDir}/dist/index.js`)

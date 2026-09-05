@@ -362,10 +362,9 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
 
     // 7.5. Check every routes file's registrar is reached from the entry
     // registrar that would mount it — the app's for `routes/`, the one
-    // `defineModule({ routes })` names for `modules/<name>/routes/`. Otherwise
-    // the only symptom is a 404. Gated as a unit under --changed: see
-    // checkRouteRegistrarWiring for why filtering by changed *candidate* misses
-    // the edit that usually breaks the wiring.
+    // `defineModule({ routes })` names for `modules/<name>/routes/`; otherwise the
+    // only symptom is a 404. Gated as a unit under --changed: see
+    // checkRouteRegistrarWiring for why filtering by changed *candidate* misses the breaking edit.
     const routesChanged =
       !changedFiles || [...changedFiles].some((file) => affectsRouteWiring(file, options.routesFile))
     if (routesChanged) {
@@ -380,13 +379,11 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
       checks.push(...(await checkRoutePathParams({ cwd, cache, files: routePathFiles })))
     }
 
-    // 7.7. Check each route's `params` schema keys and `bind` keys against the
-    // parameters its path declares. Runs on loaded definitions, not the AST: the
-    // registered path is the joined one (group prefixes, resource expansions),
-    // and a params schema is usually imported from elsewhere. Outside 7.5's
-    // `routesChanged` gate because a params schema can live in any source file,
-    // so `--changed` gates on `sourceChanged` instead. A load failure was already
-    // reported at 5.5, so this contributes nothing for it.
+    // 7.7. Check each route's `params` schema keys and `bind` keys against the parameters
+    // its path declares. Runs on loaded definitions, not the AST: the registered path is
+    // the joined one (group prefixes, resource expansions), and a params schema is usually
+    // imported from elsewhere — any source file, so `--changed` gates on `sourceChanged`
+    // rather than 7.5's `routesChanged`. A load failure was already reported at 5.5.
     if (graph?.definitions) {
       const definitions = graph.definitions
       checks.push(...(await checkRouteContracts({ cwd, routesFile: routeGraphFile, definitions })))
@@ -525,11 +522,10 @@ function importedNameOf(body: Statement[], local: string): string | undefined {
 
 /**
  * Checks the model against what it actually binds — the identifier passed to
- * `defineModel(x)` or assigned to `static table` — with an aliased import
- * resolved back to the name the schema exports. An unreadable binding and a
- * schema declaring no tables both skip rather than warn (an unparsable schema is
- * parsed outside the `ParseCache`, so `scan-coverage` misses it too); the skip
- * is all-or-nothing, so a partly re-exporting schema still warns.
+ * `defineModel(x)` or assigned to `static table` — with an aliased import resolved
+ * back to the name the schema exports. An unreadable binding and a schema declaring
+ * no tables both skip rather than warn (an unparsable schema is parsed outside the
+ * `ParseCache`, so `scan-coverage` misses it too); a partly re-exporting schema still warns.
  */
 async function checkModelTableBinding(
   cache: ParseCache,
@@ -578,12 +574,10 @@ async function checkModelTableBinding(
 
 /**
  * Mass-assignment definition checks, AST-based so comments, access modifiers and
- * type annotations neither hide a declaration nor fake one.
- *
- * `guarded`/`strictFillable` no longer exist as Model API, and TypeScript
- * accepts the dead declaration silently, so declaring one is an error. A
- * fillable list naming a denied credential column is the other contradiction:
- * the field throws on every write regardless.
+ * type annotations neither hide a declaration nor fake one. `guarded` and
+ * `strictFillable` are not Model API, and TypeScript accepts the dead declaration
+ * silently, so declaring one is an error. A fillable list naming a denied credential
+ * column is the other contradiction: the field throws on every write regardless.
  */
 async function checkMassAssignmentConfig(
   cache: ParseCache,

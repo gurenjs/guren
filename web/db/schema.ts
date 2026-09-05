@@ -48,18 +48,11 @@ export const posts = sqliteTable('posts', {
 })
 
 /**
- * Which build of the docs search index is currently in D1 (RFC-less, see
- * web/scripts/build-search-index.ts). One row, by construction.
- *
- * `buildId` is a pure hash of the indexed docs corpus, and also names the
- * tables that build created (`doc_sections_<buildId>` / `doc_search_<buildId>`).
- * The deploy workflow compares it against the id of the build it just
- * produced and skips reindexing when they match — without that gate, a busy
- * day of deploys exceeds D1's free write budget on its own.
- *
- * It records what has been *loaded*, which is not always what is live: the
- * index goes in before `wrangler deploy`, so a deploy that fails after that
- * leaves this row ahead of the Worker. That is why two builds are kept.
+ * Which build of the docs search index is loaded in D1; one row. `buildId` is
+ * a pure hash of the indexed corpus and names its tables (`doc_sections_<id>`,
+ * `doc_search_<id>`); the deploy skips reindexing on a match, or a busy day of
+ * deploys exceeds D1's free write budget. Loaded is not live: the index goes in
+ * before `wrangler deploy`, so a failed deploy leaves this row ahead of the Worker.
  */
 export const searchIndexState = sqliteTable(
   'search_index_state',

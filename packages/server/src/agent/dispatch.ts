@@ -34,11 +34,10 @@ export interface BuildToolRequestOptions {
   preflight?: boolean
   /**
    * Which protocol surface the call arrived on, announced as
-   * `X-Guren-Agent-Surface`; defaults to `'mcp'`, so existing callers keep
-   * sending what they sent. Informational and write-only here — it borrows the
-   * audit trail's vocabulary ({@link AgentSurface}), but the trail's own
-   * `surface` comes from the adapter. Nothing may authorize on it: any client
-   * sets any header it likes.
+   * `X-Guren-Agent-Surface`; defaults to `'mcp'`. Informational and write-only
+   * here — it borrows the audit trail's vocabulary ({@link AgentSurface}), but
+   * the trail's own `surface` comes from the adapter. Nothing may authorize on
+   * it: any client sets any header it likes.
    */
   surface?: AgentSurface
 }
@@ -47,9 +46,8 @@ export interface BuildToolRequestOptions {
  * The argument-level spelling of a preflight request (RFC 0016 §5.4), for a
  * surface whose callers pass flat arguments rather than dispatch options. No
  * adapter accepts it today — every surface asks through
- * `BuildToolRequestOptions.preflight`. A surface that adopts this key owns the
- * stripping: it is an instruction to the adapter, not a field of any route's
- * contract, and forwarding it would fail the validation being rehearsed.
+ * `BuildToolRequestOptions.preflight`. A surface adopting it owns the stripping:
+ * it is an instruction to the adapter, not a field of any route's contract.
  */
 export const PREFLIGHT_ARGUMENT = '_preflight'
 
@@ -87,14 +85,11 @@ export function describeBuildFailure(failure: ToolRequestBuildFailure): string {
 }
 
 /**
- * Rebuild the HTTP request a tool call describes.
- *
- * The flat argument object is taken apart along `tool.inputSources`, so a POST
- * route's `query` keys land where `validateQuery` reads them. Keys the
- * derivation never advertised are forwarded anyway — the route's validator is
- * the one place that rejects them. GET and HEAD force everything into the query
- * string: `Request` refuses a body there, and a `body` schema on a GET route is
- * a contract defect this adapter cannot repair.
+ * Rebuild the HTTP request a tool call describes. The flat argument object is
+ * taken apart along `tool.inputSources`, so a POST route's `query` keys land
+ * where `validateQuery` reads them; unadvertised keys are forwarded for the
+ * route's validator to reject. GET and HEAD force everything into the query
+ * string: `Request` refuses a body there, and a GET `body` schema is a defect.
  */
 export function buildToolRequest(
   tool: DerivedAgentTool,
@@ -152,7 +147,6 @@ export function buildToolRequest(
   for (const [key, value] of Object.entries(args)) {
     if (pathOnly.has(key) || value === undefined) continue
     const source = sourceOf(tool, key)
-    // Query-bound: everything on a bodyless method; declared `query` keys; a
     // Query-bound: everything on a bodyless method; declared `query` keys; a
     // `params`/`path` key the path never declared (forwarded so the route's
     // validation reports the defect rather than it vanishing here); and, on a
@@ -275,21 +269,11 @@ export function advertisesStructuredOutput(tool: DerivedAgentTool): boolean {
 }
 
 /**
- * Map the application's response onto an MCP tool result (RFC 0016 §3.4).
- *
- * - 2xx JSON object → text, plus `structuredContent` when the tool advertises
- *   an object `outputSchema`.
- * - 2xx Inertia page JSON → unwrapped to `page.props`, only for a tool with no
- *   `outputSchema` (the two are mutually exclusive by derivation).
- * - 204 / 3xx → a status line naming the Location; not an error.
- * - 4xx / 5xx → `isError: true` with the exception handler's JSON body.
- * - non-JSON → capped text.
- *
- * One MCP invariant overrides the table: a non-error result for a tool
- * advertising an object `outputSchema` must carry `structuredContent`, or the
- * SDK client rejects it after the route has already run. A success that yields
- * no object becomes an `isError` result naming the mismatch, which the SDK
- * exempts, rather than a protocol fault.
+ * Map the application's response onto an MCP tool result (RFC 0016 §3.4): 2xx
+ * JSON → text (+ `structuredContent` for an object `outputSchema`); Inertia page
+ * JSON → `page.props`; 204/3xx → status line, not an error; 4xx/5xx → `isError`
+ * with the handler's body; other → capped text. An object-`outputSchema` success
+ * lacking an object becomes `isError`: the SDK client rejects it after the route ran.
  */
 export async function mapToolResponse(
   tool: DerivedAgentTool,

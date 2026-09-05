@@ -7,12 +7,10 @@ import { blankComments } from './source-scan'
 
 /**
  * The delivery route's default name is a cross-package contract: `guren check`
- * asks from @guren/cli whether it collides with an app route, and
- * `Router.name()` silently overwrites duplicates. A restated copy there would
- * stop matching when the default moves and report a real collision as fine.
- * These tests make the single source structural. `DEFAULT_DELIVERY_PREFIX` is
- * deliberately not exported alongside it: a name in core's allowlist is a
- * semver commitment, and nothing outside this package names a delivery URL.
+ * asks from @guren/cli whether it collides with an app route, and `Router.name()`
+ * silently overwrites duplicates; a restated copy there would stop matching when
+ * the default moves. `DEFAULT_DELIVERY_PREFIX` is deliberately not exported too:
+ * a core allowlist name is a semver commitment, and nothing outside names a URL.
  */
 describe('attachment delivery route name default', () => {
   it('is reachable from the @guren/core surface', () => {

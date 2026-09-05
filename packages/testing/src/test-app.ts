@@ -366,7 +366,6 @@ export class PendingTestResponse implements PromiseLike<TestResponse> {
 /**
  * Integrated HTTP test client wrapping the Application class. Uses `app.fetch()`
  * internally, so no running HTTP server is needed.
- *
  * @example
  * await app.get('/posts').assertOk().assertJsonCount(1)
  * await app.actingAs(user).get('/dashboard').assertOk()
@@ -444,21 +443,15 @@ export class TestApp {
     return app
   }
 
+  // oxlint-disable-next-line guren/comment-length -- public API whose @example is the documented entry point
   /**
-   * Create a TestApp from an existing Application instance — typically the one
-   * exported by `src/app.ts` — booting it if it has not booted yet.
-   *
-   * `fetch` is bound to the instance internally, so there is no need for the
-   * `TestApp.fromFetch((request) => app.fetch(request))` arrow wrapper: an
-   * unbound `app.fetch` reference throws because it reads instance state.
-   *
-   * Booting is left to the app, whose `boot()` is expected to be idempotent
-   * (@guren/server's Application reuses its first boot), so several test files
-   * may call this on the same instance.
-   *
+   * Create a TestApp from an existing Application instance (typically `src/app.ts`'s
+   * default export), booting it if it has not yet. `fetch` is bound internally, so no
+   * `TestApp.fromFetch((request) => app.fetch(request))` wrapper is needed; `boot()` must
+   * be idempotent (@guren/server's Application reuses its first boot), so several test
+   * files may share one instance.
    * @example
    * import app from '../src/app'
-   *
    * const http = await TestApp.fromApp(app)
    * await http.get('/').assertOk()
    */
@@ -543,10 +536,8 @@ export class TestApp {
   }
 
   /**
-   * The agent surface of this app (RFC 0016): the tools an MCP client would see, and
-   * a way to call them. A call goes through the framework's own dispatch contract and
-   * the same `fetch` as every other request here.
-   *
+   * The agent surface of this app (RFC 0016): the tools an MCP client would see, and a way
+   * to call them through the framework's own dispatch contract and this app's `fetch`.
    * @example
    * const result = await app.agent().call('posts.store', { title: 'x' }, { as: user })
    */

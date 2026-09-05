@@ -4,16 +4,11 @@ import { NodeHasher } from './NodeHasher'
 import { NODE_SCRYPT_PREFIX, looksLikePasswordHash } from './hash-format'
 
 /**
- * Runtime-detecting password hasher: `Bun.password` on Bun (Argon2id by
- * default, despite `ScryptHasher`'s name), Node's `crypto.scrypt` otherwise.
- * Behind the `Hash` export, and the default for `AuthenticatableModel` and
- * `ModelUserProvider`.
- *
- * **Verification routes on the stored hash, not on the runtime.** The two
- * delegates write formats neither can read, so choosing by runtime would 500 on
- * every login for a column written elsewhere. Bun implements `node:crypto`, so
- * a `$scrypt$` hash verifies on either runtime; an Argon2id or bcrypt hash
- * needs `Bun.password` and is reported as such rather than as a parse failure.
+ * Runtime-detecting password hasher behind `Hash`, the default for
+ * `AuthenticatableModel` and `ModelUserProvider`: `Bun.password` on Bun (Argon2id,
+ * despite `ScryptHasher`'s name), `crypto.scrypt` otherwise. **Verification routes
+ * on the stored hash, not the runtime**, or a column written elsewhere would 500 on
+ * every login; `$scrypt$` verifies anywhere, Argon2id/bcrypt needs `Bun.password`.
  */
 export class DefaultHasher implements PasswordHasher {
   private readonly bun: ScryptHasher | null

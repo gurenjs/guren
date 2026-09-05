@@ -1,33 +1,32 @@
+// oxlint-disable-next-line guren/comment-length -- every line is a measured `changeset version` result that .claude/rules/common-pitfalls.md sends readers here for
 /**
  * Keep `@guren/core`'s bump type honest about breaking changes it inherits.
  *
  * `packages/core/src/index.ts:1` is `export * from '@guren/server'`, so a symbol
- * server removes is a symbol core removes, but `changeset version` only rewrites
- * a dependent's range and never promotes its bump type. Server 2.0.0's RFC 0006
- * removals therefore shipped as core **1.5.0**, a minor, through every `^1.4.0`.
- * So a plan that majors `@guren/server` must major `@guren/core`, judged from the
- * pending `.changeset/*.md` at the head of `version-packages` — the last moment
- * before `changeset version` deletes them. (In pre mode they survive instead, so
- * the same scan keeps flagging on every `rc`; `pre.json` is never read.)
+ * server removes is a symbol core removes, but `changeset version` only rewrites a
+ * dependent's range and never promotes its bump type: server 2.0.0's RFC 0006
+ * removals shipped as core **1.5.0**, a minor, through every `^1.4.0`. So a plan that
+ * majors `@guren/server` must major `@guren/core`, judged from the pending
+ * `.changeset/*.md` at the head of `version-packages`, the last moment before
+ * `changeset version` deletes them. (In pre mode they survive, so the same scan keeps
+ * flagging on every `rc`; `pre.json` is never read.)
  *
- * Not `fixed: [["@guren/server", "@guren/core"]]`, measured by running
- * `changeset version` against this workspace: a core-only major drags server to
- * 3.0.0, and a server-only patch moves core 1.6.2 -> 2.7.1, because a fixed group
- * snaps to its highest member. That crosses core's major line inside a release
- * whose changelog reads "Patch Changes", silently unfollowing every `^1.x` and
- * tripping the plugins' `gurenPlugin.compatibility: ">=1.0.0 <2.0.0"`. `fixed` is
- * bidirectional; only one of its directions is true.
+ * Not `fixed: [["@guren/server", "@guren/core"]]`, measured by running `changeset
+ * version` against this workspace: a core-only major drags server to 3.0.0, and a
+ * server-only patch moves core 1.6.2 -> 2.7.1, because a fixed group snaps to its
+ * highest member. That crosses core's major line inside a release whose changelog
+ * reads "Patch Changes", silently unfollowing every `^1.x` and tripping the plugins'
+ * `gurenPlugin.compatibility: ">=1.0.0 <2.0.0"`. `fixed` is bidirectional; only one
+ * of its directions is true.
  *
  * No escape hatch: a server major confined to `/mcp` or to names outside the
- * `lambda.ts`/`redis.ts` allowlists still asks for a core major, since
- * over-bumping costs one deliberate revision and under-bumping is delivered
- * silently by a caret. `@guren/orm` is out of scope, being re-exported through an
- * explicit named allowlist.
+ * `lambda.ts`/`redis.ts` allowlists still asks for a core major; over-bumping costs one
+ * deliberate revision, under-bumping is delivered silently by a caret. `@guren/orm` is
+ * out of scope, being re-exported through an explicit named allowlist.
  *
- * Exit codes: 0 clean, 1 a release plan that under-bumps core, 2 the gate could
- * not run (an unparseable changeset, or a `.changeset/` it cannot read). As in
- * `plugin-compat-audit.ts` and `dependency-audit.ts`, an unavailable check is a
- * failure rather than a silent pass.
+ * Exit codes: 0 clean, 1 a plan that under-bumps core, 2 the gate could not run (an
+ * unparseable changeset, or a `.changeset/` it cannot read); as in
+ * `plugin-compat-audit.ts` and `dependency-audit.ts`, unavailable is a failure.
  */
 import { readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'

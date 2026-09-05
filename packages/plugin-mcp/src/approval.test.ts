@@ -374,13 +374,11 @@ describe('the approval gate with a queue', () => {
   })
 
   test('should refuse a lost consume race as spent, without filing a new request', async () => {
-    // The concurrent shape of "exactly once". Both calls read the same unconsumed
-    // record and pass the usability check; one wins `consume`. The loser holds a
-    // copy that still says approved, so falling through to the generic branch
-    // would open a fresh request — N concurrent calls producing N-1 records and
-    // N-1 pages to a human. Driven by a store whose `consume` always loses: a
-    // scheduler race is not a test, and the branch is "findMatch returned it,
-    // consume said no".
+    // Both calls read the same unconsumed record and pass the usability check;
+    // one wins `consume`. The loser's copy still says approved, so falling
+    // through to the generic branch would open a fresh request — N concurrent
+    // calls producing N-1 records and N-1 pages to a human. A store whose
+    // `consume` always loses drives it: a scheduler race is not a test.
     class ContendedStore extends MemoryApprovalStore {
       override async consume(): Promise<boolean> {
         return false

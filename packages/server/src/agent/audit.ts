@@ -1,14 +1,12 @@
 /**
  * The agent audit record (RFC 0016 §5.2): one invocation or one denial, in the
  * one shape a sink writes as a line and `guren tool:log` reads back.
- *
  * Declarations and pure derivation only — {@link toAuditRecord} takes the
  * instant as an argument — because this module is reachable from runtimes with
- * no filesystem, and a builder that timestamped itself could not be pinned by a
- * test. **Redaction is the emitter's contract:** `AgentToolInvoked.arguments`
- * arrives already through `redactAgentArguments` and is carried across
- * verbatim, or a second quieter masking rule would drift from the real one. A
- * sink wanting different masking changes the route's `.agent({ redact })`.
+ * no filesystem, and a self-timestamping builder cannot be pinned by a test.
+ * **Redaction is the emitter's contract:** `AgentToolInvoked.arguments` arrives
+ * already through `redactAgentArguments` and is carried verbatim; different
+ * masking belongs in the route's `.agent({ redact })`.
  */
 import type { AgentPrincipal, AgentSurface, AgentToolDenialReason, AgentToolDenied, AgentToolInvoked } from './events'
 
@@ -49,12 +47,10 @@ export interface AgentAuditDeniedRecord extends AgentAuditRecordBase {
 }
 
 /**
- * One line of the audit trail.
- *
- * A union rather than one interface with optional fields, so a record with a
- * `reason` *and* a `status` cannot be written down: the two outcomes disagree
- * about what happened, and a shape that admits both would let a sink emit that
- * contradiction and a reader believe it.
+ * One line of the audit trail. A union rather than one interface with optional
+ * fields, so a record with a `reason` *and* a `status` cannot be written down:
+ * the two outcomes disagree about what happened, and a shape admitting both
+ * would let a sink emit that contradiction and a reader believe it.
  */
 export type AgentAuditRecord = AgentAuditInvokedRecord | AgentAuditDeniedRecord
 
@@ -79,14 +75,11 @@ const DENIAL_REASONS: Record<AgentToolDenialReason, true> = {
 }
 
 /**
- * Derive the record for one audit event.
- *
- * `now` is a parameter because the sink writing the record also picks the dated
- * file it lands in, and two clock reads can disagree across midnight. The two
- * events are told apart structurally, not with `instanceof`: the event classes
- * cross a boundary this repo resolves twice (`dist` for the CLI and plugins,
- * `src` inside `packages/server`), so `instanceof` would mislabel a genuine
- * event rather than fail.
+ * Derive the record for one audit event. `now` is a parameter because the sink
+ * writing the record also picks the dated file it lands in, and two clock reads
+ * can disagree across midnight. The two events are told apart structurally, not
+ * with `instanceof`: the event classes cross a boundary this repo resolves twice
+ * (`dist` for the CLI and plugins, `src` inside `packages/server`).
  */
 export function toAuditRecord(event: AgentToolInvoked | AgentToolDenied, now: Date): AgentAuditRecord {
   const base = {
@@ -105,13 +98,9 @@ export function toAuditRecord(event: AgentToolInvoked | AgentToolDenied, now: Da
 /**
  * Read one line of an audit file back, or `null` if it is not a record. The one
  * parser on the read side; a second would fail silently, since a record it
- * stops recognising reads as an empty trail.
- *
- * `null` rather than a throw keeps the reader usable against a file being
- * appended to: its last line is routinely a partial record or a blank one, and
- * neither is corruption. Extra keys are ignored because the file sink writes
- * through `DailyFileChannel`, whose JSON format wraps the record in a log
- * envelope — tolerating it is what lets the sink reuse rotation and retention.
+ * stops recognising reads as an empty trail. `null` rather than a throw: a file
+ * being appended to routinely ends in a partial or blank line. Extra keys are
+ * ignored because `DailyFileChannel`'s JSON format wraps the record in a log envelope.
  */
 export function parseAuditRecord(line: string): AgentAuditRecord | null {
   if (line.trim() === '') return null

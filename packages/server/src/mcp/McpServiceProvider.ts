@@ -31,12 +31,11 @@ export class McpServiceProvider extends ServiceProvider {
       (import('@guren/cli') as Promise<GurenCliApi>),
     ])
 
-    // In a long-running dev server the CLI's route loading would answer every
-    // request from the module graph captured at the first one, and Bun cannot
-    // evict an ES module — so route-dependent context generation runs the CLI in
-    // a child process (guarded: an older @guren/cli lacks the helper).
-    // guren_codegen still runs in-process, writing route-derived artifacts from
-    // that first snapshot; Vite's routeTypesPlugin repairs them on the next save.
+    // Bun cannot evict an ES module, so in a long-running dev server the CLI's
+    // route loading would answer every request from the module graph captured at
+    // the first one; route-dependent context generation therefore runs the CLI in
+    // a child process (guarded: an older @guren/cli lacks the helper). guren_codegen
+    // still runs in-process from that first snapshot; Vite's routeTypesPlugin repairs it.
     const routeAwareCli: GurenCliApi = cli.createFreshContextApi
       ? { ...cli, ...cli.createFreshContextApi() }
       : cli

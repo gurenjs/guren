@@ -1,15 +1,12 @@
 /**
  * The one Zod → JSON Schema rule, so two derivations of the same schema cannot
  * disagree: `@guren/openapi` renders it as OpenAPI 3.1 schema objects, RFC
- * 0016's agent tools advertise it as MCP input/output schemas.
- * Internal per `contributing/api-stability.md`, with no stability guarantee.
- * It sits in `@guren/server` rather than `@guren/core` for build order, not
- * layering: core's index is `export * from '@guren/server'`, so a server module
- * importing core would close a cycle; `@guren/core/internal/*` re-exports it.
- * Every `_def` read goes through `zod-compat.ts`. Zod 4 only — a v3 node is
- * refused rather than walked, re-checked at each recursion because one can hide
- * inside a v4 wrapper. Warnings go to a caller-owned array, so a generator can
- * surface them per request while a codegen step fails on them.
+ * 0016's agent tools advertise it as MCP input/output schemas. Internal per
+ * `contributing/api-stability.md`. It sits in `@guren/server` for build order:
+ * core's index is `export * from '@guren/server'`, so a server module importing
+ * core would close a cycle; `@guren/core/internal/*` re-exports it. Every `_def`
+ * read goes through `zod-compat.ts`. Zod 4 only — a v3 node is refused at each
+ * recursion (one can hide inside a v4 wrapper). Warnings go to a caller-owned array.
  */
 import {
   arrayElement,
@@ -78,12 +75,10 @@ export interface ObjectSchemaDetails {
 
 /**
  * Zod's string formats mapped to the JSON Schema names meaning the same thing,
- * matched against zod's own `z.toJSONSchema()` output. The line is "registered
- * by JSON Schema 2020-12": zod's unregistered formats (`cuid`, `nanoid`, `jwt`…)
- * say nothing a consumer can act on, so they are dropped rather than warned
- * about. `time` is the one registered format left out (as zod itself does):
- * JSON Schema's is an RFC 3339 `full-time` requiring an offset, while
- * `z.iso.time()` accepts a local wall-clock time.
+ * matched against zod's own `z.toJSONSchema()` output. Formats JSON Schema
+ * 2020-12 does not register (`cuid`, `nanoid`, `jwt`…) say nothing a consumer
+ * can act on, so they are dropped silently. `time` is left out as zod does: JSON
+ * Schema's is an RFC 3339 `full-time` requiring an offset; `z.iso.time()` accepts local wall-clock.
  */
 const JSON_SCHEMA_STRING_FORMATS: Readonly<Record<string, string>> = {
   email: 'email',
@@ -99,10 +94,9 @@ const JSON_SCHEMA_STRING_FORMATS: Readonly<Record<string, string>> = {
 
 /**
  * The `number_format` values describing an integer. JSON Schema says this with a
- * *type*, so these turn `type: "number"` into `"integer"` — a `z.int()`
- * documented as `number` advertises a contract admitting `3.14`. The bounds
- * these formats imply are deliberately not emitted: they are the
- * representation's limits, and they bury the constraints an author wrote.
+ * *type*, so these turn `type: "number"` into `"integer"` — a `z.int()` documented
+ * as `number` admits `3.14`. The bounds these formats imply are not emitted: they
+ * are the representation's limits and bury the constraints an author wrote.
  * `int64`/`uint64` need no entry; they sit on `bigint` nodes.
  */
 const INTEGER_NUMBER_FORMATS: ReadonlySet<string> = new Set(['safeint', 'int32', 'uint32'])
@@ -529,10 +523,9 @@ function stringConstraints(schema: ZodSchemaLike): JsonSchemaObject {
 /**
  * Put the first value under `keyword` and fold any remainder into `allOf`.
  * JSON Schema allows one `pattern` and one `multipleOf` per schema object, and
- * keeping only the first would emit a schema *accepting values the route
- * rejects* — the one direction a derived contract must never be wrong in.
- * `allOf` conjoins, so the surplus stays enforceable while the common
- * single-constraint case still emits flat. (zod's own emitter drops it.)
+ * keeping only the first would emit a schema *accepting values the route rejects*
+ * — the one direction a derived contract must never be wrong in. `allOf` conjoins,
+ * so the surplus stays enforceable (zod's own emitter drops it); one constraint still emits flat.
  */
 function assignWithSurplus(
   constraints: JsonSchemaObject,

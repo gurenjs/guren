@@ -5,19 +5,11 @@ import { join } from 'node:path'
 import { DATABASE_DIALECTS, type DatabaseDialect } from '@guren/core/internal/deploy-build'
 import { buildLambdaOutput } from '../src/build'
 
-// Opt-in end-to-end contract test (GUREN_TEST_BUNDLE=1, needs the network; the
-// nightly canary sets it): proves `lambda:build` bundles an app importing
-// `@guren/orm` with only the client for the database it actually uses. The ORM
-// names every dialect's client in a *literal* dynamic import, which a bundler
-// follows whether or not the branch can be taken — a Postgres app failed on
-// `Could not resolve "mysql2"` — and inside this repository every client is
-// installed, so no unit test sees it.
-//
-// Over-stubbing is the direction that matters here and did not on Workers:
-// stubbing the client the app *does* use builds clean and cannot reach its own
-// database, so the postgres assertions are as load-bearing as the mysql2 ones.
-// Every assertion is about behaviour rather than the stub's text, which
-// resolution drops along with the branch it replaced.
+// Opt-in contract test (GUREN_TEST_BUNDLE=1, network; the nightly canary sets it):
+// `lambda:build` bundles an `@guren/orm` app with only its own database client.
+// The ORM's *literal* dynamic import of every dialect's client is followed by a
+// bundler regardless of branch. Postgres assertions matter as much as mysql2 —
+// over-stubbing builds clean and cannot reach its database. Assert behaviour only.
 const enabled = process.env.GUREN_TEST_BUNDLE === '1'
 
 /**

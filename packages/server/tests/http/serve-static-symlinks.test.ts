@@ -7,10 +7,8 @@ import { useAssetFixture } from './asset-fixture'
  * Guren's own asset handlers reject a target whose real location is outside the
  * configured root. `/public/*` and `/resources/css/*` are delegated to Hono's
  * `serveStatic`, which follows symlinks out of its root by design (as nginx and
- * `express.static` do), so the assertions are deliberately asymmetric: only what
- * Guren controls is asserted, and the delegated routes' symlink behaviour is
- * pinned in neither direction. Deployments that must not follow symlinks out of
- * `public/` should not rely on `/public/*`.
+ * `express.static` do), so only what Guren controls is asserted; the delegated
+ * routes are pinned in neither direction (a deployment needing containment should not rely on `/public/*`).
  */
 describe('symlink containment across the asset routes', () => {
   const fixture = useAssetFixture('guren-static-symlink-')

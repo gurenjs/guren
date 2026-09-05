@@ -70,16 +70,11 @@ function statusMessage(kind: Display['kind'], copy: (typeof COPY)[DocSearchLocal
 }
 
 /**
- * Whether this key belongs to the IME rather than to the dialog.
- *
- * Converting 「にんしょう」to 「認証」ends with Enter, and that Enter reaches
- * keydown like any other — so without this the dialog took it as "open the
- * selected result" and navigated away mid-word. The same applies to the arrow
- * keys, which move through conversion candidates, and to Escape, which
- * cancels the conversion.
- *
- * `keyCode === 229` is the older signal for the same thing, kept because it
- * costs one comparison and covers browsers that do not set `isComposing`.
+ * Whether this key belongs to the IME rather than to the dialog. Converting
+ * 「にんしょう」to 「認証」ends with an Enter that reaches keydown like any
+ * other; the arrow keys move through candidates and Escape cancels. Without
+ * this the dialog opens the selected result mid-word. `keyCode === 229` is
+ * the older signal, covering browsers that do not set `isComposing`.
  */
 function isImeKey(event: React.KeyboardEvent): boolean {
   return event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229
@@ -370,9 +365,8 @@ export function DocSearch({ locale, className = '' }: DocSearchProps) {
                       // A result inside the document already open is a
                       // same-URL visit, which Inertia treats as a replacement:
                       // it remounts the page, skips the navigate event, and
-                      // resets scroll afterwards — so the page's own fragment
-                      // effect cannot put the reader on the heading. Let the
-                      // browser do it instead.
+                      // resets scroll afterwards, so the page's own fragment
+                      // effect cannot reach the heading. Let the browser do it.
                       if (result.url.split('#')[0] === window.location.pathname) {
                         event.preventDefault()
                         window.location.hash = result.url.slice(result.url.indexOf('#') + 1)

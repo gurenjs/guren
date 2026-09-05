@@ -1,15 +1,11 @@
 // Split a rendered doc into the units the search index stores: one row per
 // heading, carrying the text under it.
 //
-// The input is the *rendered* HTML rather than the markdown source, and that
-// is the whole point. Heading ids come from `createSlugger()`, which numbers
-// repeated headings within a render (`setup`, `setup-1`, …) and slugs the
-// parsed *inline HTML* of the heading, not its markdown. Recomputing that
-// here would mean reimplementing marked's inline parser and its numbering,
-// and any drift would send `#anchor` deep links to the wrong place. Reading
-// the ids back out of the HTML makes them right by construction — and, as a
-// side effect, a `##` inside a fenced code block cannot be mistaken for a
-// heading, because by this point it is text inside a `<pre>`.
+// Reads the *rendered* HTML, not the markdown: heading ids come from
+// `createSlugger()`, which numbers repeats (`setup`, `setup-1`, …) and slugs
+// the parsed inline HTML, so recomputing them here would drift and send
+// `#anchor` deep links to the wrong place. A `##` inside a fenced code block
+// is already text inside a `<pre>` by this point.
 
 /** The renderer emits `<h2 id="slug">`; a hand-written one may order its attributes freely. */
 const HEADING_TAG = /^<h([1-3])\b/iu
@@ -136,12 +132,11 @@ export interface DocSectionText {
 }
 
 /**
- * Longest body stored in one row. Sections are prose under a single heading,
- * so almost none reach this; the cap exists because D1 refuses a SQL
- * statement over 100,000 bytes, and one row carries its body plus a token
- * stream several times its size. An oversized section becomes consecutive
- * rows sharing the same anchor — a phrase straddling the cut stops matching,
- * which is why the cut is deliberately far above the real distribution.
+ * Longest body stored in one row. D1 refuses a SQL statement over 100,000
+ * bytes, and one row carries its body plus a token stream several times its
+ * size. An oversized section becomes consecutive rows sharing the same anchor,
+ * so a phrase straddling the cut stops matching — hence a cut far above the
+ * real distribution of section lengths.
  */
 export const MAX_SECTION_BODY = 4000
 

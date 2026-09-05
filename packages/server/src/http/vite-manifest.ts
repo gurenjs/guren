@@ -42,12 +42,11 @@ export function normalizeDevServerUrl(value: string): string {
 }
 
 /**
- * Candidate client-manifest locations, `.vite/manifest.json` first because Vite
- * >= 5 writes it there and a flat `manifest.json` is likely a stale leftover.
- * The deploy plugins order the same pair through `@guren/core`'s deploy-build
+ * Candidate client-manifest locations, `.vite/manifest.json` first: Vite >= 5
+ * writes it there, so a flat `manifest.json` is likely a stale leftover. The
+ * deploy plugins order the same pair through `@guren/core`'s deploy-build
  * helpers and must agree, or an app with both layouts resolves different asset
  * versions after a serverless deploy; `tests/http/vite-manifest.test.ts` pins it.
- * `baseDir` defaults to the working directory.
  */
 export function clientManifestCandidates(baseDir?: string): string[] {
   const root = baseDir ?? process.cwd()

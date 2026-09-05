@@ -47,13 +47,11 @@ const SDK_SERVER_INDEX_MARKER = 'fake-sdk-server-index'
 const SDK_TRANSPORT_MARKER = 'fake-sdk-transport'
 
 /**
- * A stand-in for `@modelcontextprotocol/sdk` inside the scaffolded app.
- * Deliberately without an `exports` map: a slightly wrong subpath under one
- * fails to resolve and reads exactly like the stub still intercepting, the
- * verdict these tests exist to distinguish. Both subpaths matter —
- * `webStandardStreamableHttp.js` is the entry `stubbableDevOnlyModules`
- * releases, and `server/index.js` is one `DEV_ONLY_MODULES` never named, so only
- * the SDK-prefix catch-all can stub it.
+ * A stand-in for `@modelcontextprotocol/sdk` inside the scaffolded app, without
+ * an `exports` map on purpose: a slightly wrong subpath under one fails to
+ * resolve and reads exactly like the stub still intercepting, the verdict these
+ * tests distinguish. `webStandardStreamableHttp.js` is the entry
+ * `stubbableDevOnlyModules` releases; `server/index.js` only the SDK-prefix catch-all stubs.
  */
 function installFakeMcpSdk(root: string): void {
   const pkg = join(root, 'node_modules/@modelcontextprotocol/sdk')
@@ -72,11 +70,10 @@ function installFakeMcpSdk(root: string): void {
 
 /**
  * An entry importing both SDK subpaths and reporting what it got.
- * `server/index.js` comes in as a *namespace*: the catch-all stub for an
- * unlisted subpath is a bare `throw` with no exports, so a named import would
- * fail the bundle rather than the bundled module — making the stubbed and
- * unstubbed cases fail at different stages. A namespace import bundles either
- * way and throws on evaluation.
+ * `server/index.js` comes in as a *namespace*: the catch-all stub for an unlisted
+ * subpath is a bare `throw` with no exports, so a named import would fail the
+ * bundle rather than the bundled module, making the stubbed and unstubbed cases
+ * fail at different stages. A namespace import bundles either way and throws on evaluation.
  */
 const SDK_ENTRY: ScaffoldOptions['entry'] = {
   preamble: [
@@ -269,12 +266,11 @@ describe('buildLambdaOutput', () => {
   })
 
   test('should define import.meta.url so `new URL("../db/migrations", import.meta.url)` resolves against the function root', async () => {
-    // Regression test: config/database.ts and config/app.ts resolve their
-    // migrations/seeders folders via `new URL('../db/migrations',
-    // import.meta.url)` from one directory below the app root. Left undefined,
-    // every module in the single bundled output shares the deployed
-    // `file:///var/task/handler.js`, collapsing that to `/var/db/migrations` and
-    // silently skipping configureOrm()/seedDatabase() in production.
+    // config/database.ts and config/app.ts resolve their migrations/seeders
+    // folders via `new URL('../db/migrations', import.meta.url)` from one
+    // directory below the app root. Left undefined, every module in the single
+    // bundled output shares the deployed `file:///var/task/handler.js`, collapsing
+    // that to `/var/db/migrations` and silently skipping configureOrm()/seedDatabase().
     scaffoldApp(root, {
       entry: {
         preamble: ["const resolved = new URL('../db/migrations', import.meta.url)"],

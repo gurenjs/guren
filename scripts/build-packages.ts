@@ -1,15 +1,11 @@
-// Builds every workspace package under packages/ in dependency order, running
-// independent packages in parallel (bounded by the machine's core count). The
-// order is derived from each package.json, so adding a package (a plugin, for
-// example) needs no change here or in the root package.json scripts.
+// Builds every workspace package under packages/ in dependency order, independent
+// packages in parallel (bounded by the core count). The order is derived from each
+// package.json, so a new package (a plugin, say) needs no wiring here or in root scripts.
 //
-//   bun run ./scripts/build-packages.ts                  # build everything
-//   bun run ./scripts/build-packages.ts --clean          # wipe dist/ first
-//   bun run ./scripts/build-packages.ts --list           # print the order only
-//   bun run ./scripts/build-packages.ts --sequential     # one package at a time
-//   bun run ./scripts/build-packages.ts cli plugin-cloudflare
+//   bun run ./scripts/build-packages.ts [--clean] [--list] [--sequential] [cli plugin-cloudflare ...]
 //
-// Positionals select by directory or package name, preserving dependency order.
+// --clean wipes dist/ first, --list prints the order only, --sequential builds one at a
+// time; positionals select by directory or package name, preserving dependency order.
 
 import { rm } from 'node:fs/promises'
 import { availableParallelism } from 'node:os'

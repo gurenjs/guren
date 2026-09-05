@@ -129,20 +129,11 @@ export class DocSearchService {
     const sections = sql.identifier(this.#build.sectionsTable)
     const [titleLead, title, heading, body, localeWeight, unigram] = BM25_WEIGHTS[match.mode]
 
-    // A long section is stored as several rows sharing one anchor, and the
-    // reader should see that heading once, at its best-ranked chunk. Collapsed
-    // here rather than after the fact: fetching a fixed multiple of the limit
-    // and deduplicating in JS is only right while no section has more chunks
-    // than that multiple. One that did returned a single result for a query
-    // with twenty-six distinct matches. Partitioning by category too, because
-    // a slug is not unique across them — `guides/overview` and
-    // `tutorials/overview` both exist.
-    //
-    // FTS5 refuses a table alias on the left of MATCH ("no such column"), and
-    // bm25() only works in a query directly over the table, so the ranking
-    // subquery is separate from the one that windows over it. Both table names
-    // come from the generated module; everything else is bound, weights
-    // included.
+    // A long section is several rows sharing one anchor; its heading is shown once, at
+    // the best-ranked chunk. Deduplicating a fixed multiple of the limit in JS breaks
+    // once a section has more chunks than that (26 matches became one result), and a
+    // slug is not unique across categories, so the window partitions by category too.
+    // FTS5 refuses an alias left of MATCH and bm25() works only directly over the table.
     const database = (await this.#database()) as QueryableDatabase
     const rows = (await database.all(sql`
       SELECT category, slug, anchor, doc_title, heading, body FROM (

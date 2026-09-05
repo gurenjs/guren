@@ -14,13 +14,11 @@ setTestLifecycleHooks({ beforeEach, afterEach })
 const TEST_SCRYPT_COST = 1024
 
 /**
- * A working stand-in for `Bun.password`, which does not exist off Bun. A real hasher
- * rather than a throwing stub, which would force every password test to hand-write a
- * double — how a `verify(plain, hashed)` inversion once shipped with a green suite.
- *
- * Delegates to the framework's own scrypt so format, parameter parsing and malformed-
- * hash rejection cannot drift. The import is lazy because this module is also emitted
- * as CJS while `@guren/server` is ESM-only.
+ * A working stand-in for `Bun.password`, which does not exist off Bun. A real hasher, not
+ * a throwing stub that would force every password test to hand-write a double (how a
+ * `verify(plain, hashed)` inversion shipped with a green suite). Delegates to the
+ * framework's own scrypt so format, parameter parsing and malformed-hash rejection cannot
+ * drift; lazy import because this module is also emitted as CJS and `@guren/server` is ESM-only.
  */
 const testPasswordApi = {
   async hash(password: string): Promise<string> {

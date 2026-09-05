@@ -49,13 +49,11 @@ export interface ArchRuleSet {
 }
 
 /**
- * Identity function that gives `guren.arch.ts` type-checking and editor
- * autocomplete. Exported from the `@guren/cli/arch` subpath — not `@guren/core`
- * — because architecture rules are build-time only, with no runtime footprint.
- *
- * Rules analyse static `import`/`export ... from` declarations. Type-only
- * imports are skipped unless `includeTypeImports` is set; dynamic `import()`
- * is never followed.
+ * Identity function that gives `guren.arch.ts` type-checking and autocomplete.
+ * Exported from the `@guren/cli/arch` subpath, not `@guren/core`: architecture
+ * rules are build-time only. Rules analyse static `import`/`export ... from`
+ * declarations; type-only imports are skipped unless `includeTypeImports` is set,
+ * and dynamic `import()` is never followed.
  */
 export function defineArchRules(config: ArchRuleSet): ArchRuleSet {
   return config

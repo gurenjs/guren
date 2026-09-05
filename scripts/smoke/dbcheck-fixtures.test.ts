@@ -38,8 +38,8 @@ describe('dbcheck fixtures', () => {
   test('the smoke resolves the fixture by driver name, with its shared module alongside', async () => {
     const script = await readFile(smokeScript, 'utf8')
 
-    // The dispatch is what used to hold three inline copies. If it grows an
-    // `if [ "$SMOKE_DB" = ... ]` around dbcheck again, the copies are back.
+    // The dispatch is the one copy of the per-driver selection. If it grows an
+    // `if [ "$SMOKE_DB" = ... ]` around dbcheck, the inline copies are back.
     expect(script).toContain('dbcheck.$SMOKE_DB.ts')
     // A relative import only resolves if expected-tables.ts travels with the
     // fixture, so the copy has to be of the directory, not of one file.

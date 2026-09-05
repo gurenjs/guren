@@ -7,10 +7,8 @@ import { gurenGlobals, resetGurenGlobals } from './vite-dev-server-fixture'
  * `listen()` and `stop()` interleaving. Both await a server `stop()` before
  * touching the fields recording which server this process runs, so a resuming
  * call must not clear the *newer* server's bookkeeping: a socket with no instance
- * handle and no signal handlers stays bound for the process lifetime.
- *
- * `Bun.serve` is stubbed throughout, since these cases are about which references
- * survive; the sibling `application-stop.test.ts` binds real ones.
+ * handle and no signal handlers stays bound for the process lifetime. `Bun.serve`
+ * is stubbed (only references matter); `application-stop.test.ts` binds real ones.
  */
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 

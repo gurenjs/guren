@@ -234,9 +234,8 @@ export function deriveAgentTools(definitions: RouteDefinition[]): DeriveAgentToo
  * `params` + `query` + `body` as one object schema, which is what MCP requires
  * of a tool input; the namespaced `{ params, query, body }` alternative is
  * recorded in the RFC as rejected. Ordered params → path supplements → query →
- * body, a later source wins a collision with a warning rather than a throw, and
- * a path parameter is forced required afterwards — the URL cannot be built
- * without it, however the parameter came to be described.
+ * body; a later source wins a collision with a warning, and a path parameter is
+ * forced required afterwards — the URL cannot be built without it.
  */
 interface BuiltInput {
   schema: AgentToolSchema
@@ -270,11 +269,9 @@ function buildInputSchema(
 
   // Path parameters the `params` schema does not describe are still arguments
   // the caller has to supply — the same supplementation `@guren/openapi`
-  // applies, off the same lexer, so the two surfaces cannot disagree about what
-  // a path declares: `/files/:name*` is one parameter named `name*`. Known
-  // limitation shared on purpose: Hono's optional modifier (`:id?`) is lexed
-  // away, so such a parameter is advertised as required — relaxing that belongs
-  // in the shared lexer, for both surfaces.
+  // applies, off the same lexer, so both surfaces agree `/files/:name*` is one
+  // parameter named `name*`. Shared known limitation: Hono's optional modifier
+  // (`:id?`) is lexed away and advertised as required; fix it in the lexer.
   const supplements: Record<string, AgentToolSchema> = Object.create(null)
   const supplementRequired = new Set<string>()
   for (const name of pathParamNames) {
@@ -344,7 +341,7 @@ function buildInputSchema(
 /**
  * Fold one source's properties into the merge. A collision replaces both the
  * property *and* its required-ness — carrying a losing source's `required`
- * forward would demand a key the advertised schema no longer describes.
+ * forward would demand a key the advertised schema does not describe.
  */
 function mergeProperties(
   merged: MergedInput,

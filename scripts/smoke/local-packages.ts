@@ -2,12 +2,11 @@
  * The one rule for which `@guren/*` packages a smoke run resolves from this
  * checkout instead of npm, and the vendoring that applies it.
  *
- * The set is derived, never listed: a hand-kept list is how `@guren/testing`
- * went missing from two of three, leaving `smoke:starter` and
- * `smoke:golden-path` verifying the *published* copy. Seed from the `@guren/*`
- * the scaffold templates declare, then close over the workspace dependency
- * graph. `assertLocalGurenDependencies()` re-reads the rewritten manifest and
- * fails on any `@guren/*` still carrying a registry range.
+ * The set is derived, never listed: seed from the `@guren/*` the scaffold
+ * templates declare, then close over the workspace dependency graph. A hand-kept
+ * list left `@guren/testing` out of two of three smokes, which then verified the
+ * *published* copy. `assertLocalGurenDependencies()` re-reads the rewritten
+ * manifest and fails on any `@guren/*` still carrying a registry range.
  */
 import { cp, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join, relative, resolve } from 'node:path'

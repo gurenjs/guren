@@ -76,11 +76,10 @@ function resolveGurenModule(moduleExports: Record<string, unknown>): GurenModule
 
 /**
  * A plain `import()`, so a second `loadRouteDefinitions()` in one process sees
- * the route graph as it was on the first call. Bun keys `.ts` modules on the
- * resolved path and ignores the query string (verified on Bun 1.3.11 and
- * 1.3.14), so `?v=<timestamp>` busts nothing, and no runtime re-evaluates the
- * transitive imports anyway. Fine for one-shot commands; a long-lived caller
- * must spawn a fresh child process — see `createFreshContextApi()`.
+ * the first call's route graph. Bun keys `.ts` modules on the resolved path and
+ * ignores the query string (verified on Bun 1.3.11 and 1.3.14), so `?v=<ts>`
+ * busts nothing, and no runtime re-evaluates transitive imports anyway. Fine for
+ * one-shot commands; a long-lived caller spawns a child — see `createFreshContextApi()`.
  */
 function importUrl(file: string): string {
   return pathToFileURL(file).href
@@ -127,13 +126,11 @@ async function loadGurenModule(appRoot: string, moduleName: string, warnings?: s
 }
 
 /**
- * Every route in the app, module routes mounted through the shared
- * `mountModuleRoutes()` so the static analyses see exactly what will serve.
- * `appRoot` is required rather than derived: `--routes <file>` may point
- * anywhere. Discovery is directory-scan based, like `check --arch`, so a
- * module never passed to `createApp()` shows up here without mounting at
- * runtime. `moduleProvenance` receives one entry per returned definition in
- * the same order: the mounting module's name, or `null` for `routesFile`.
+ * Every app route, module routes mounted through the shared `mountModuleRoutes()`
+ * so static analyses see exactly what will serve. `appRoot` is required since
+ * `--routes <file>` may point anywhere. Discovery is a directory scan (like
+ * `check --arch`), so a module never passed to `createApp()` shows up here without
+ * mounting. `moduleProvenance` gets one entry per definition, in order: module name or `null`.
  */
 export async function loadRouteDefinitions(
   routesFile: string,

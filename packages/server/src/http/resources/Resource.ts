@@ -3,9 +3,8 @@ import type { ResourceData, ResourceClass } from './types'
 /**
  * Abstract base class for API resources: transforms model data into an API
  * response payload. `TData` names what `toArray()` builds, so `toJSON()` reports
- * it too (`class PostResource extends Resource<PostRecord, PostResourceData>`);
- * it defaults to `ResourceData` so `Resource<T>` and narrowing overrides keep
- * compiling. `TData` is a claim about `toArray()` only — `additional()` is
+ * it too; it defaults to `ResourceData` so `Resource<T>` and narrowing overrides
+ * keep compiling. `TData` is a claim about `toArray()` only — `additional()` is
  * spread *after* the payload, so a colliding key overwrites a typed field.
  */
 export abstract class Resource<T, TData extends ResourceData = ResourceData> {

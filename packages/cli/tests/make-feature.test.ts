@@ -425,8 +425,8 @@ describe('makeFeature', () => {
     }
   })
 
-  // Two fields differing only in punctuation used to generate one identifier —
-  // `_meta` and `meta` both became `setMetaInvalid`, a duplicate declaration.
+  // Two fields differing only in punctuation must not share one identifier —
+  // `_meta` and `meta` would both become `setMetaInvalid`, a duplicate declaration.
   it('keeps two similarly named json fields apart', async () => {
     const workspace = await createTempWorkspace('guren-cli-feature-json-names-')
 

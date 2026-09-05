@@ -1,22 +1,12 @@
 /**
- * Type-safe route-name-based Link and Form components for Guren + Inertia.
- *
- * These wrap Inertia's `<Link>` with route name resolution, providing
- * compile-time checking of route names and parameters.
- *
+ * Type-safe route-name-based Link and Form components for Guren + Inertia:
+ * Inertia's `<Link>` wrapped with route name resolution, so route names and
+ * params are checked at compile time.
  * @example
- * ```tsx
  * import { Link, Form } from '@guren/inertia-client/components'
- *
- * // ✅ Route name autocomplete, params type-checked
- * <Link route="posts.show" params={{ id: 1 }}>View post</Link>
- *
- * // ❌ Compile error: missing required param 'id'
- * <Link route="posts.show">View post</Link>
- *
- * // ✅ Form with typed route
+ * <Link route="posts.show" params={{ id: 1 }}>View post</Link> // params type-checked
+ * <Link route="posts.show">View post</Link> // compile error: missing required param 'id'
  * <Form route="posts.store" method="post">...</Form>
- * ```
  */
 import React from 'react'
 import { Link as InertiaLink, router } from '@inertiajs/react'
@@ -84,14 +74,10 @@ export type TypedLinkProps<
 
 /**
  * Create a typed Link component factory bound to your route manifest.
- *
  * @example
- * ```tsx
  * import { routeManifest } from '@/.guren/routes.gen'
  * const Link = createTypedLink(routeManifest)
- *
  * <Link route="posts.show" params={{ id: 1 }}>View</Link>
- * ```
  */
 export function createTypedLink<TManifest extends RouteManifestLike>(manifest: TManifest) {
   function TypedLink<TName extends keyof TManifest & string>(
