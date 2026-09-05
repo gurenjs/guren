@@ -24,6 +24,7 @@ the CLI boots an application.
   computed at boot from that package's own configuration, so no static read can
   know it.
 
-A dependency that is installed but unreadable is its own warning, and
-`csrfExemptionScan.status` in `--json` reports `partial`, so a directory that
-would not open never reads as a clean scan.
+A dependency that could not be read, or that ships more files than the walk
+covers, is its own warning and reports `csrfExemptionScan.status: 'partial'` in
+`--json` — a package the scan could not finish never reads as one that declares
+nothing.

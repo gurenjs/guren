@@ -24,14 +24,14 @@ const FIRST_PARTY_SCOPE = '@guren/'
 const SCANNED_EXTENSIONS = ['.js', '.mjs', '.cjs']
 
 /**
- * Bounds the walk of a dependency that is not a plugin at all. Reached only by
- * a package whose manifest points at Guren, so the cap is far above a real one
- * (`@guren/plugin-mcp` ships 4 files).
+ * Bounds the walk of a package that ships far more than a plugin does
+ * (`@guren/plugin-mcp` ships 4 files). Hitting it truncates the scan, which is
+ * reported rather than answered as "declares nothing".
  */
 const MAX_FILES_PER_PACKAGE = 400
 
 export interface CsrfExemptionScan {
-  /** 'partial' when a candidate package could not be read — never a pass. */
+  /** 'partial' when a candidate package was unreadable or only partly walked. */
   status: 'complete' | 'partial'
   packagesScanned: number
   /** Installed packages that declare one, first-party included. */
@@ -41,6 +41,8 @@ export interface CsrfExemptionScan {
 interface PackageScan {
   packageName: string
   declares: boolean
+  /** The file cap cut the walk short, so `declares: false` proves nothing. */
+  truncated: boolean
 }
 
 /**
@@ -67,7 +69,7 @@ async function isGurenFacing(manifestRaw: string): Promise<boolean> {
 }
 
 /** Files the package ships, nested `node_modules` excluded: a hoisted copy is its own dependency. */
-async function collectPackageFiles(packageDir: string): Promise<string[]> {
+async function collectPackageFiles(packageDir: string): Promise<{ files: string[]; truncated: boolean }> {
   const files: string[] = []
   const queue = [packageDir]
 
@@ -83,7 +85,7 @@ async function collectPackageFiles(packageDir: string): Promise<string[]> {
     }
   }
 
-  return files
+  return { files, truncated: files.length >= MAX_FILES_PER_PACKAGE }
 }
 
 async function scanPackage(cwd: string, packageName: string): Promise<PackageScan | null> {
@@ -101,10 +103,11 @@ async function scanPackage(cwd: string, packageName: string): Promise<PackageSca
 
   if (!(await isGurenFacing(manifestRaw))) return null
 
-  const files = await collectPackageFiles(packageDir)
+  const { files, truncated } = await collectPackageFiles(packageDir)
   const sources = await Promise.all(files.map((file) => readFile(file, 'utf8')))
+  const declares = sources.some((source) => source.includes(DECLARE_CALL))
 
-  return { packageName, declares: sources.some((source) => source.includes(DECLARE_CALL)) }
+  return { packageName, declares, truncated: truncated && !declares }
 }
 
 const REVIEW_SUGGESTION =
@@ -153,6 +156,18 @@ export async function auditCsrfExemptions(
     })
   }
 
+  for (const cut of scanned.filter((result) => result.truncated)) {
+    findings.push({
+      key: `csrf-exemption:truncated:${cut.packageName}`,
+      title: `${cut.packageName} partly scanned`,
+      status: 'warn',
+      message:
+        `${cut.packageName} ships more than ${MAX_FILES_PER_PACKAGE} JavaScript files, so the scan `
+        + 'stopped there without finding a CSRF exemption — it may still declare one.',
+      suggestion: `Search the package for ${DECLARE_CALL}( by hand.`,
+    })
+  }
+
   const declaring = scanned.filter((result) => result.declares).map((result) => result.packageName)
   const thirdParty = declaring.filter((name) => !name.startsWith(FIRST_PARTY_SCOPE))
 
@@ -181,7 +196,7 @@ export async function auditCsrfExemptions(
   }
 
   return {
-    status: unreadable.length > 0 ? 'partial' : 'complete',
+    status: unreadable.length > 0 || scanned.some((result) => result.truncated) ? 'partial' : 'complete',
     packagesScanned: scanned.length,
     declaredBy: declaring,
   }

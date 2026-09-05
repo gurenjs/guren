@@ -126,6 +126,24 @@ describe('auditCsrfExemptions', () => {
     expect(findings.some((f) => f.key.startsWith('csrf-exemption:unreadable:'))).toBe(false)
   })
 
+  it('reports a package too large to walk as partial coverage, not as declaring nothing', async () => {
+    const cwd = await appWith({
+      'acme-huge': {
+        manifest: GUREN_FACING,
+        files: Object.fromEntries(
+          Array.from({ length: 401 }, (_, i) => [`dist/chunk-${i}.js`, 'export {}\n']),
+        ),
+      },
+    })
+    const findings: AuditFinding[] = []
+
+    const scan = await auditCsrfExemptions(cwd, findings)
+
+    expect(scan.status).toBe('partial')
+    expect(scan.declaredBy).toEqual([])
+    expect(findings.find((f) => f.key === 'csrf-exemption:truncated:acme-huge')?.status).toBe('warn')
+  })
+
   it('reports an unreadable package as partial coverage rather than a clean scan', async () => {
     const cwd = await appWith({
       'acme-mcp': { manifest: GUREN_FACING, files: DECLARES },
