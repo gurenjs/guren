@@ -203,10 +203,21 @@ export async function runToolDev(options: ToolDevOptions = {}): Promise<ToolDevS
 
   consola.success(`App MCP endpoint is live at ${endpoint}`)
   consola.log('')
-  consola.log('Connect the MCP Inspector:')
+  consola.log('List the tools with the MCP Inspector:')
   consola.log('')
-  consola.log(`  npx @modelcontextprotocol/inspector --cli ${endpoint} \\`)
-  consola.log(`    --transport http --header "Authorization: Bearer ${plainTextToken}"`)
+  // `@latest` pins the resolution rather than accepting whatever the npx cache already holds.
+  // `--cli` mode requires `--method`; without it the Inspector exits on "Method is required".
+  // `--transport http` stays explicit because `--path` can move the endpoint off the `/mcp`
+  // the Inspector would otherwise auto-detect the transport from.
+  consola.log(`  npx @modelcontextprotocol/inspector@latest --cli ${endpoint} \\`)
+  consola.log(`    --transport http --header "Authorization: Bearer ${plainTextToken}" \\`)
+  consola.log('    --method tools/list')
+  consola.log('')
+  consola.log('Call one by swapping that last line, with a name from `guren tool:list`:')
+  consola.log('    --method tools/call --tool-name <name> --tool-arg key=value')
+  consola.log('')
+  consola.log('Or drop --cli for the browser Inspector UI, which takes the URL and token in')
+  consola.log('its own form and needs no --method.')
   consola.log('')
   consola.log('Or paste this into a client that takes a bearer token:')
   consola.log(`  URL:   ${endpoint}`)
