@@ -419,7 +419,7 @@ export const handler = createLambdaHandler(app)
 | `packages/cli/src/arch/index.ts` | `defineArchRules()` + types, published as the `@guren/cli/arch` subpath |
 | `packages/cli/src/changed-files.ts` | Git-diff-based file filtering shared by `check --changed` |
 | `packages/cli/src/audit.ts` | AI agent: security audit (validation, auth, raw SQL, secrets) |
-| `scripts/lint/await-async-assertion.js` | The lint rule for a bare `expect(...).rejects` / `.resolves` statement, an assertion that can never fail its test. `typescript/no-floating-promises` cannot see it on a `bun:test` file (bun-types declares the chain as returning `void`) and oxlint's jest plugin does not recognise `expect` imported from `bun:test`, so this syntactic, import-agnostic rule closes the gap. `.oxlintrc.json` wires it; the header has the details |
+| `packages/cli/src/oxlint/await-async-assertion.js` | The lint rule for a bare `expect(...).rejects` / `.resolves` statement, an assertion that can never fail its test. `typescript/no-floating-promises` cannot see it on a `bun:test` file (bun-types declares the chain as returning `void`) and oxlint's jest plugin does not recognise `expect` imported from `bun:test`, so this syntactic, import-agnostic rule closes the gap. `.oxlintrc.json` wires it; the header has the details |
 | `packages/cli/src/guidelines.ts` | AI agent: dynamic guidelines generation |
 | `packages/cli/src/model-list.ts` | AI agent: model introspection |
 | `packages/cli/src/model-parser.ts` | AI agent: Babel AST model parsing |

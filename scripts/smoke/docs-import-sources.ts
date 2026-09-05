@@ -94,9 +94,13 @@ async function isFile(path: string): Promise<boolean> {
   }
 }
 
-/** The source file an extensionless base path stands for: three spellings. */
+/**
+ * The source file an extensionless base path stands for. TypeScript first; a
+ * plain `.js` source is a module too (the oxlint plugin under packages/cli must
+ * be JavaScript, since oxlint hands plugins to a module loader, not a bundler).
+ */
 async function firstExistingSource(base: string): Promise<string | null> {
-  for (const candidate of [`${base}.ts`, `${base}.tsx`, join(base, 'index.ts')]) {
+  for (const candidate of [`${base}.ts`, `${base}.tsx`, join(base, 'index.ts'), `${base}.js`, join(base, 'index.js')]) {
     if (await isFile(candidate)) {
       return candidate
     }

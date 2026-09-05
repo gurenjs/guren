@@ -6,9 +6,9 @@ import { join, resolve } from 'node:path'
 // Exercised through the real oxlint binary, like await-async-assertion: what has
 // to hold is that the plugin loads and reports on the comments oxlint hands it.
 
-const repoRoot = resolve(import.meta.dir, '../..')
+const repoRoot = resolve(import.meta.dir, '../../..')
 const oxlint = join(repoRoot, 'node_modules', '.bin', 'oxlint')
-const plugin = join(repoRoot, 'scripts', 'lint', 'comments.js')
+const plugin = join(repoRoot, 'packages', 'cli', 'src', 'oxlint', 'comments.js')
 const RULES = ['comment-length', 'comment-banner', 'comment-step-label', 'comment-history', 'comment-param-restates']
 
 /** `rule@line` for every finding oxlint reports on `source`, in print order. */

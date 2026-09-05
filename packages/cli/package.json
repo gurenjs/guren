@@ -37,6 +37,9 @@
     "./arch": {
       "types": "./dist/arch/index.d.ts",
       "default": "./dist/arch/index.js"
+    },
+    "./oxlint": {
+      "default": "./dist/oxlint/index.js"
     }
   },
   "bin": {
