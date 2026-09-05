@@ -1,5 +1,227 @@
 # @guren/server
 
+## 2.16.0
+
+### Minor Changes
+
+- d525672: Drop the unused `config` parameter from `verifyPasswordResetToken`,
+  `completePasswordReset`, and `verifyEmailToken`, and decide one-time token
+  expiry from the signed token alone.
+
+  The three functions accepted a `PasswordResetConfig` / `EmailVerificationConfig`
+  and ignored it. The password-reset JSDoc even told callers it "must match" the
+  config passed to `createPasswordResetToken`, which was never true: expiry is
+  signed into the token at issuance as an `exp` claim, and the signing key comes
+  from `APP_KEY`, so nothing in the config object can change what a verify call
+  decides. This ships as a minor deliberately, on the same footing as the
+  `ApplicationOptions.discover` removal in 2.10.0: it is a type-surface bug fix
+  for an argument that never did anything. No caller in the framework, the
+  scaffolds, or the guides passed one; TypeScript code that did now gets a
+  compile error naming the truth instead of a silent no-op.
+
+  These functions are re-exported from `@guren/core`, which makes them Stable
+  under `contributing/api-stability.md`, so the two-minor deprecation period
+  that governed the seeder-class removal in 2.9.0 would normally apply. It does
+  not here, for the reason `ApplicationOptions.discover` did not need one: a
+  deprecation period exists to give callers time to migrate, and there is no
+  migration. The argument was read by nothing, so no program's behavior depends
+  on passing it or on stopping.
+
+  With that settled, the store's `expiresAt` is no longer a second source of
+  truth. `verifyEmailToken` and `completeEmailVerification` used to re-check the
+  stored record's `expiresAt` after the signed claim had already passed; the
+  password-reset path never did. Both now share one rule: the `exp` claim signed
+  into the token is the authority on expiry, and the store is asked only whether
+  the token id still exists (single use and revocation). A store may still drop
+  expired records for housekeeping — the in-memory and Redis stores do — but
+  verification does not rely on it, so a custom store that returns stale rows is
+  no longer a way to keep an expired link alive, and one that keeps them is not a
+  way to extend it either. The claim is the authority on what verification will
+  _accept_; a store that drops a row before that claim expires still ends the
+  link early, which is what `MemoryPasswordResetStore.find` does by design.
+
+- 78f1a51: Type the rate limiter's `statusCode` option as Hono's `ContentfulStatusCode`.
+
+  The option was `number`, and the default handler passed it to `ctx.json()`
+  through `statusCode as 429` — a cast asserting the value the caller chose is
+  the literal 429. So nothing checked a custom status, and the codes that
+  cannot carry a body (204, 205, 304) type-checked and then failed at runtime
+  when the limiter tried to send a JSON body with one.
+
+  `statusCode` now carries the type `ctx.json()` accepts, so those are compile
+  errors at the call site instead. `ContentfulStatusCode` is re-exported from
+  `@guren/core` beside the other rate limiting types.
+
+  This ships as a minor deliberately, on the reading v2.10.0 applied to
+  `ApplicationOptions.discover`: it is a type-surface fix rather than an API
+  change. Nothing about the runtime moved, every status the limiter could
+  actually send is still accepted, and a literal — which is how the option is
+  written in the guides and in every example — is unaffected. The narrow case
+  that now needs a change is a status arriving as a plain `number` (read from
+  config, say), which needs a narrowing or a cast at the call site.
+
+  Also makes the sliding-window store's `timestamps` a `const`; no branch
+  reassigned it.
+
+- 78f1a51: Export `DEFAULT_ROOT_PUBLIC_ASSET_EXTENSIONS` from `@guren/core/runtime`.
+
+  `rootPublicAssets.extensions` replaces the default list rather than extending
+  it, so an app that wanted one more extension had to restate the defaults —
+  and then silently missed every extension added to the framework afterwards.
+  Spread the export instead:
+
+  ```ts
+  rootPublicAssets: {
+    extensions: [...DEFAULT_ROOT_PUBLIC_ASSET_EXTENSIONS, ".js"];
+  }
+  ```
+
+  `RootPublicAssetsConfig` and `RootPublicAssetsOptions` are exported from the
+  same entry, so the option can be typed without reaching into the package.
+
+### Patch Changes
+
+- b15c329: Fix a quadratic-backtracking regex in `readBearerToken` (CodeQL `js/polynomial-redos`).
+
+  `/^Bearer\s+(.+)$/i` let the separator and the token both match a space, so the
+  two repetitions overlapped. On `Bearer` followed by a long run of spaces and a
+  newline — `.` never matches one, so `$` is unreachable — the engine retried
+  every split of that run, quadratic in the header's length: ~1.5s for a 50KB
+  header, and the header is parsed _before_ any authentication, by
+  `hasBearerHeader` on every request that carries one. Anchoring the capture with
+  `\S` removes the overlap; the same input now costs ~0.1ms.
+
+  The only input whose result changes is an all-whitespace token, which was never
+  a token: `Bearer` + spaces used to read as a bearer request carrying a space,
+  and now reads as not a bearer request at all. That reclassification is what the
+  change is, not just a different token value — `AuthManager.resolveGuardName` no
+  longer routes such a request to the token guard, and the CSRF middleware no
+  longer skips it. Net stricter: the request falls back to the session guard with
+  CSRF enforced, where it previously bypassed CSRF to reach a token lookup that
+  could only ever 401.
+
+- 39d4fb2: Release the broadcast driver subscription when a client leaves a channel or
+  disconnects.
+
+  `BroadcastManager.subscribeClient()` and `subscribeWebSocketClient()` called
+  `driver().subscribe()` and dropped the unsubscribe function it returned, so
+  `unsubscribeClient()`, `unsubscribeWebSocketClient()`, `removeWebSocketClient()`
+  and an SSE stream's teardown only cleared the client's own channel set. The
+  driver-level subscription stayed registered for the life of the process: the
+  memory driver kept fanning out to a callback whose guard always said no, and
+  the Redis driver never sent the `UNSUBSCRIBE` that closes the channel once its
+  last local subscriber is gone. Subscribing the same client to the same channel
+  twice also registered two callbacks and delivered every event twice.
+
+  The manager now keeps the unsubscribe function per client and channel, calls
+  it from every leave path, and ignores a repeat subscribe for a pair it already
+  holds.
+
+  `MemoryDriver` now caps the published-event record it keeps for tests at
+  `maxPublishedEvents` (default 1000, oldest dropped first; `0` disables
+  recording) instead of growing for as long as the process publishes. The
+  option is exported from `@guren/core` as `BroadcastMemoryDriverOptions`.
+  `RedisDriver` drops an `initialized` field nothing read.
+
+- 154d23b: Resolve deferred providers through `Container.make()`.
+
+  `make()` handed the key to the deferred-provider loader and then read a flag
+  set from the loader's `.then()`, which never runs before the surrounding
+  synchronous code finishes — so the flag was always false, the freshly bound
+  service was never re-read, and every deferred service failed with
+  `Service "..." not found in container` even though its provider had just
+  registered it. `ProviderManager.loadDeferredProvider()` worked, but the path
+  the plugin guide documents (`deferred: true` + `provides`, loaded on first
+  resolution) did not.
+
+  The loader now runs the provider's `register()` synchronously and `make()`
+  re-reads the bindings after it returns. A synchronous `register()` failure
+  surfaces from `make()` instead of becoming an unhandled rejection, and a
+  deferred `register()` that binds asynchronously gets an error saying so —
+  `make()` cannot await it. `boot()` may still be async; it runs after that
+  first resolution, and a later `loadDeferredProvider()` for the same service
+  resolves once that boot has finished.
+
+- e135767: Await and report promises the framework used to drop on the floor, found by
+  the new `typescript/no-floating-promises` lint gate.
+
+  - `Application` now awaits an async `register()` on the optional providers it
+    loads on demand (`mountDevEndpoint`), so `boot()` no longer runs
+    before such a provider has finished registering.
+  - `Logger` attaches its error reporter to async channels: a channel whose
+    `log()` rejects used to surface as an unhandled rejection, bypassing the
+    `try`/`catch` that exists to keep logging failures from cascading. The
+    check is duck-typed, so a promise from another realm counts too. A stack
+    channel now calls every member, handles each member's rejection as soon as
+    it is seen, and reports the failures once (an `AggregateError` when more
+    than one member failed).
+  - The session middleware no longer `return`s from inside `finally`, which
+    discarded whatever `next()` threw before the exception handler could see it.
+
+- 8f6ab47: Make `QueueManager.setDefaultDriver()` change the instance default, and
+  document that `SyncDriver` retries immediately.
+
+  `setDefaultDriver(name)` swapped the global driver `Job.dispatch()` uses but
+  never reassigned the manager's own default, so `driver()` with no argument and
+  `getDefaultDriverName()` kept answering with the driver from construction. The
+  method now updates both, and publishes a driver that was already resolved by
+  name as the global rather than leaving it off the global slot.
+
+  `SyncDriver.release()` re-runs a released job at once and ignores the retry
+  delay. That is deliberate: nothing waits in a sync queue, so honoring the
+  default exponential backoff would block the dispatching caller for the full
+  delay, and a detached timer would move the failure off the call that surfaces
+  it. The driver, the `QueueDriver.release()` contract, the worker's retry path
+  and the queue guide now say so.
+
+- 526edd1: Make the Redis counters atomic.
+
+  `RedisStore.increment()`/`decrement()` checked `EXISTS`, wrote `0`, then
+  ran `INCRBY` — three round trips during which two concurrent callers could
+  both see the key as missing, both write `0`, and lose an increment. Redis
+  already treats a missing key as `0` and keeps an existing key's TTL, so each
+  method is now the single `INCRBY`/`DECRBY`.
+
+  `RedisSlidingWindowRateLimitStore.increment()` sent its trim, insert, and
+  count through a pipeline, which batches commands but does not stop Redis
+  interleaving other clients between them, so concurrent callers could read the
+  same count. The three steps now run in one Lua script, matching the
+  fixed-window store, so every caller is handed a distinct count.
+
+- 2b4b542: Keep the cause of a failed `Mail.template()` render, and stop `Command.secret()`
+  from leaking its input listener between prompts.
+
+  `template()` caught every failure and threw a fixed "Make sure
+  @react-email/render is installed" message, discarding the error that actually
+  occurred. A template that threw while rendering, or a `render()` that failed for
+  its own reasons, reported a missing package. The two failures are now
+  distinguished: a failed module load keeps the install hint, a failed render does
+  not, both name the component, and both attach the original error as `cause`.
+
+  `secret()` registered a `data` listener to mask typed characters and never
+  removed it. A command prompting twice left the first prompt's listener attached,
+  so the second prompt echoed the first prompt's label and its own character
+  count, and raw mode was never restored. The listener is now removed and raw mode
+  reset on every exit path.
+
+  All four prompts — `ask()`, `confirm()`, `choice()` and `secret()` — now share
+  one lifecycle and handle input ending before an answer arrives. Every one of
+  them previously left the promise unsettled forever in that case, which is the
+  unattended-command scenario the console guide tells you to guard against. Input
+  ending with an unterminated line resolves with what was typed. Input ending with
+  nothing typed resolves to the caller's default for `ask()`, `confirm()` and
+  `choice()`, and rejects for `secret()`, where no default is safe.
+
+  The mask writes to the same stream `createReadline()` echoes to, reached through
+  the new overridable `inputStream()` / `outputStream()` accessors. `outputStream()`
+  derives from whatever output `setOutput()` installed, via a new optional
+  `stream()` on `OutputInterface` that `Output` implements, so redirecting a
+  command's output now redirects its prompts with it rather than leaving them
+  pinned to the real `process.stdout`.
+
+- Updated dependencies [976bd07]
+  - @guren/orm@2.6.3
+
 ## 2.15.0
 
 ### Minor Changes

@@ -1,5 +1,49 @@
 # @guren/core
 
+## 1.13.1
+
+### Patch Changes
+
+- 3482012: Stop the Vercel build from shipping the dev `index.html` shell.
+
+  The shell exists so Vite can serve the app in development, and the generated
+  `config.json` runs `{ handle: "filesystem" }` ahead of the catch-all to the
+  function — so a staged `index.html` answered `/` from the CDN and the app's own
+  root route never ran. Cloudflare and Lambda already dropped it, through the
+  shared `stageStaticAssets`; this build stages `public/` itself, having no
+  `/public/assets` mirror to build (its `config.json` carries a
+  `/public/(.*)` rewrite instead), and so never applied the rule.
+
+  The removal moves into `removeShadowingIndex` in `@guren/core`'s internal
+  deploy-build helpers, which `stageStaticAssets` now calls too. The rule is
+  stated once, for the platform whose layout differs as much as for the two that
+  share the staging function — the alternative, a second `rmSync` in the plugin
+  with a comment pointing back here, is how the two copies drift. The cost is
+  that this ships as a two-package release rather than a one-line plugin patch.
+
+- Updated dependencies [b15c329]
+- Updated dependencies [39d4fb2]
+- Updated dependencies [ae5006a]
+- Updated dependencies [41bc2f4]
+- Updated dependencies [ab9ea2e]
+- Updated dependencies [480144a]
+- Updated dependencies [8afc342]
+- Updated dependencies [154d23b]
+- Updated dependencies [0030f77]
+- Updated dependencies [e135767]
+- Updated dependencies [976bd07]
+- Updated dependencies [d525672]
+- Updated dependencies [8f6ab47]
+- Updated dependencies [78f1a51]
+- Updated dependencies [526edd1]
+- Updated dependencies [78f1a51]
+- Updated dependencies [d3f190d]
+- Updated dependencies [2b4b542]
+- Updated dependencies [fd6110e]
+  - @guren/server@2.16.0
+  - @guren/cli@2.15.0
+  - @guren/orm@2.6.3
+
 ## 1.13.0
 
 ### Minor Changes
