@@ -39,6 +39,7 @@ import {
 import { describeMethod } from './http-methods'
 import { parseSchemaTableColumns } from './schema-parser'
 import { loadAuditConfig, type AuditIgnoreEntry } from './audit-config'
+import { auditCsrfExemptions, type CsrfExemptionScan } from './csrf-exemption-audit'
 
 export type AuditStatus = 'pass' | 'warn' | 'fail' | 'ignored'
 
@@ -66,6 +67,8 @@ export interface AuditReport {
   routesAnalyzed: boolean
   /** Present when the dependency scan ran (or was skipped via options). */
   dependencyScan?: DependencyScan
+  /** Coverage of the installed-package scan for CSRF exemptions. */
+  csrfExemptionScan: CsrfExemptionScan
 }
 
 export interface RunAuditOptions {
@@ -85,6 +88,9 @@ export interface RunAuditOptions {
 const GUEST_PATH_PATTERN = /(login|logout|register|signup|sign-up|password|forgot|reset|verification|verify-email)/i
 
 const WEBHOOK_PATH_PATTERN = /(webhook|callback)/i
+
+// On a receiver, so the method named in a type position is not a call.
+const CSRF_EXEMPTION_PATTERN = /\.\s*declareCookielessAuthPath\s*\(/
 
 const AUTH_MIDDLEWARE_PATTERN = /auth/i
 
@@ -216,6 +222,7 @@ export async function runAudit(options: RunAuditOptions = {}): Promise<AuditRepo
   auditForceWrites(controllerMethods, findings)
   await auditSourceFiles(cwd, findings)
   await auditModels(cwd, findings)
+  const csrfExemptionScan = await auditCsrfExemptions(cwd, findings)
 
   const dependencyScan: DependencyScan = dependencyScanOutput
     ? dependencyFindingsFromOutput(await dependencyScanOutput, findings)
@@ -236,6 +243,7 @@ export async function runAudit(options: RunAuditOptions = {}): Promise<AuditRepo
     ignoredCount: findings.filter((f) => f.status === 'ignored').length,
     routesAnalyzed,
     dependencyScan,
+    csrfExemptionScan,
   }
 }
 
@@ -705,6 +713,7 @@ async function auditSourceFiles(cwd: string, findings: AuditFinding[]): Promise<
   let rawSqlCount = 0
   let toggleCount = 0
   let requestHostUrlCount = 0
+  let appExemptionCount = 0
 
   for (const filePath of files) {
     if (filePath.endsWith('.test.ts') || filePath.endsWith('.test.js')) continue
@@ -775,6 +784,25 @@ async function auditSourceFiles(cwd: string, findings: AuditFinding[]): Promise<
         )
       }
 
+      // The app's own lever is `csrfOptions.exclude`; this one exists for an
+      // endpoint whose code establishes that it never reads a session cookie.
+      if (CSRF_EXEMPTION_PATTERN.test(line)) {
+        appExemptionCount++
+        findings.push(
+          finding(
+            `csrf-exemption:app:${relPath}:${lineNumber}`,
+            `${relPath}:${lineNumber}`,
+            'warn',
+            'Application source exempts a path from CSRF verification via declareCookielessAuthPath().',
+            'Use csrfOptions.exclude, which is the app-facing lever and reads as a decision the app made. '
+            + 'Keep this call only if the endpoint resolves its principal without ever reading a session '
+            + 'cookie — otherwise the path is served with CSRF disarmed.',
+            relPath,
+            lineNumber,
+          ),
+        )
+      }
+
       // Phrased conditionally, like the force-write rule: co-occurrence in one
       // file is not proof the host reaches the link.
       if (
@@ -812,6 +840,9 @@ async function auditSourceFiles(cwd: string, findings: AuditFinding[]): Promise<
   }
   if (requestHostUrlCount === 0) {
     findings.push(finding('request-host-url:none', 'Request-derived link URLs', 'pass', 'No outbound links built from the request host.'))
+  }
+  if (appExemptionCount === 0) {
+    findings.push(finding('csrf-exemption:app', 'Application CSRF exemptions', 'pass', 'No application source exempts a path from CSRF verification.'))
   }
 }
 
@@ -933,6 +964,14 @@ export function renderAuditReport(report: AuditReport): void {
   }
   if (report.dependencyScan?.status === 'skipped') {
     consola.info('Dependency scan skipped (--no-deps).')
+  }
+  // Printed rather than left to the finding list, which hides passes: an
+  // exemption a package declares is the thing this scan exists to surface.
+  if (report.csrfExemptionScan.declaredBy.length > 0) {
+    consola.info(
+      `CSRF exemption declared by: ${report.csrfExemptionScan.declaredBy.join(', ')} `
+      + '(path chosen at boot from each package\'s configuration).',
+    )
   }
 
   for (const f of report.findings) {

@@ -123,7 +123,7 @@ bunx guren check --spec         # Spec drift checks only: docs/spec/ vs regenera
 bunx guren check --i18n         # Translation catalog checks only: lang/<locale> key parity + interpolation placeholders (exits non-zero on failures)
 bunx guren spec:generate        # Generate spec views (er/domain/screens/modules) into docs/spec/ — deterministic, committed, drift-gated
 bunx guren check --changed      # Restrict file-scanning checks to files changed vs. the merge base with main
-bunx guren audit                # Security audit: validation/auth on mutating routes, raw SQL, secrets, mass assignment; agent-exposed routes (RFC 0016) get the stricter treatment — an unverifiable body-validation warn becomes a fail, and destructiveHint: false on an action that deletes, updates, or force-writes warns
+bunx guren audit                # Security audit: validation/auth on mutating routes, raw SQL, secrets, mass assignment, CSRF exemptions (app source, plus a scan of installed Guren-facing packages — the only surface that sees a plugin's); agent-exposed routes (RFC 0016) get the stricter treatment — an unverifiable body-validation warn becomes a fail, and destructiveHint: false on an action that deletes, updates, or force-writes warns
 bunx guren audit --json         # Audit results as JSON (exits non-zero on failures)
 bunx guren doctor --next        # Doctor report + actionable next steps
 
@@ -419,6 +419,7 @@ export const handler = createLambdaHandler(app)
 | `packages/cli/src/arch/index.ts` | `defineArchRules()` + types, published as the `@guren/cli/arch` subpath |
 | `packages/cli/src/changed-files.ts` | Git-diff-based file filtering shared by `check --changed` |
 | `packages/cli/src/audit.ts` | AI agent: security audit (validation, auth, raw SQL, secrets) |
+| `packages/cli/src/csrf-exemption-audit.ts` | AI agent: who exempts a path from CSRF verification. `declareCookielessAuthPath()` is public on `Application`, so an installed package can call it from `node_modules` — where the source scan never looks and no CLI command can see it, because nothing in the CLI boots an app. So this reads the JS each Guren-facing dependency ships. It names packages, never paths: the path is an argument computed at boot. A package it cannot read is `partial` coverage and its own warning — reporting "no exemptions" for a directory that would not open is the one answer worse than none (part of `guren audit`) |
 | `packages/cli/src/oxlint/await-async-assertion.js` | The lint rule for a bare `expect(...).rejects` / `.resolves` statement, an assertion that can never fail its test. `typescript/no-floating-promises` cannot see it on a `bun:test` file (bun-types declares the chain as returning `void`) and oxlint's jest plugin does not recognise `expect` imported from `bun:test`, so this syntactic, import-agnostic rule closes the gap. `.oxlintrc.json` wires it; the header has the details |
 | `packages/cli/src/guidelines.ts` | AI agent: dynamic guidelines generation |
 | `packages/cli/src/model-list.ts` | AI agent: model introspection |

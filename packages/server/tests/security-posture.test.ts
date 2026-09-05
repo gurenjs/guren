@@ -253,3 +253,28 @@ describe('security posture: opt-in framework endpoints', () => {
     })
   })
 })
+
+describe('security posture: cookieless-auth CSRF exemptions', () => {
+  it('exempts nothing until something declares it', async () => {
+    const app = await bootDefaultApp()
+
+    expect(app.getCookielessAuthPaths().size).toBe(0)
+  })
+
+  it('reports every declaration, so a plugin cannot exempt a path unobserved', async () => {
+    const app = new Application()
+    app.declareCookielessAuthPath('/plugin-endpoint')
+    await app.boot()
+
+    expect([...app.getCookielessAuthPaths()]).toEqual(['/plugin-endpoint'])
+  })
+
+  it('keeps a declaration that collides with an application route out of the set', async () => {
+    const app = new Application()
+    app.router.post('/collides', () => 'ok')
+    await app.mountRoutes()
+    app.declareCookielessAuthPath('/collides')
+
+    expect(app.getCookielessAuthPaths().size).toBe(0)
+  })
+})

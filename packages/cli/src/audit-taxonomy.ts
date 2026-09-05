@@ -47,6 +47,10 @@ const RULE_CLASSIFICATIONS: Record<string, AuditClassification[]> = {
     owasp('A05', 'Security Misconfiguration'),
     cwe('CWE-693', 'Protection Mechanism Failure'),
   ],
+  'csrf-exemption': [
+    owasp('A01', 'Broken Access Control'),
+    cwe('CWE-352', 'Cross-Site Request Forgery'),
+  ],
   'mass-assignment': [
     owaspApi('API3', 'Broken Object Property Level Authorization'),
     cwe('CWE-915', 'Improperly Controlled Modification of Dynamically-Determined Object Attributes'),
