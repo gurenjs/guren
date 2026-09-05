@@ -490,6 +490,7 @@ export class Application {
    */
   private disposeBunTeardown?: () => void
   private autoSessionAttached = false
+  private readonly cookielessAuthPaths = new Set<string>()
   private routesRegistered = false
   private bootPromise?: Promise<void>
 
@@ -595,6 +596,36 @@ export class Application {
 
   hasAutoSessionAttached(): boolean {
     return this.autoSessionAttached
+  }
+
+  /**
+   * Asserts that `path` resolves its principal without ever reading a session
+   * cookie, so it refuses on its own terms and CSRF has no ambient authority to
+   * defend there. Only for an endpoint whose own code establishes that; an app
+   * exempting a path it chose wants `csrfOptions.exclude`. Call from `boot`,
+   * after `mountRoutes()` — at `register` the collision check sees no routes.
+   */
+  declareCookielessAuthPath(path: string): void {
+    // The app's route is registered first and answers there, so honouring a
+    // colliding declaration disarms CSRF for a handler that may read cookies.
+    const collision = this.router.definitions().find((route) => route.path === path)
+    if (collision) {
+      console.warn(
+        `[guren] Refusing to exempt "${path}" from CSRF verification: the application already `
+        + `routes ${collision.method} ${path}${collision.name ? ` (${collision.name})` : ''}, `
+        + 'which is registered first and answers there. Mount the declaring endpoint on a path of '
+        + 'its own — as it stands it is unreachable, and exempting the path would disarm CSRF for '
+        + 'the route that does answer.',
+      )
+      return
+    }
+
+    this.cookielessAuthPaths.add(path)
+  }
+
+  /** Matched by exact path — see {@link declareCookielessAuthPath}. */
+  getCookielessAuthPaths(): ReadonlySet<string> {
+    return this.cookielessAuthPaths
   }
 
   async mountRoutes(): Promise<void> {

@@ -132,6 +132,28 @@ function isMcpEndpointRequest(path: string): boolean {
 }
 
 /**
+ * Read per request, not snapshotted: this middleware is created in
+ * `AuthServiceProvider.register()`, while an endpoint that declares itself
+ * mounts at `boot`. A separate argument, not a {@link CsrfOptions} field: an
+ * app fills those in, and there this would be a second `exclude` carrying none
+ * of the review a declaring endpoint's own code is what supplies.
+ */
+export type CookielessAuthEndpoints = () => ReadonlySet<string>
+
+/**
+ * An endpoint that cannot authenticate from a session cookie has no ambient
+ * authority for CSRF to defend, and verifying there only masks its own 401.
+ * Exact path, never {@link matchesPattern}: a declaring endpoint mounts one
+ * literal route, and a pattern here would be an escape hatch.
+ */
+function isCookielessAuthEndpoint(
+  path: string,
+  declared: CookielessAuthEndpoints | undefined,
+): boolean {
+  return declared !== undefined && declared().has(path)
+}
+
+/**
  * A bearer request carrying no cookies at all (RFC 0016 §3). CSRF defends
  * cookie ambient authority, so the raw `Cookie` header's absence is proof
  * wherever this sits relative to the session mount; a session-based predicate
@@ -287,7 +309,10 @@ async function getTokenFromRequest(ctx: Context): Promise<string | undefined> {
  * session flows only. **Mount directly inside the session middleware:** anything
  * between that mutates the session after `await next()` moves the id too late.
  */
-export function createCsrfMiddleware(options: CsrfOptions = {}): MiddlewareHandler {
+export function createCsrfMiddleware(
+  options: CsrfOptions = {},
+  cookielessAuthEndpoints?: CookielessAuthEndpoints,
+): MiddlewareHandler {
   const {
     exclude = [],
     onError,
@@ -337,6 +362,7 @@ export function createCsrfMiddleware(options: CsrfOptions = {}): MiddlewareHandl
     if (
       isExcluded(path, exclude)
       || isMcpEndpointRequest(path)
+      || isCookielessAuthEndpoint(path, cookielessAuthEndpoints)
       || isBearerRequestWithoutCookies(ctx)
       || isSeamPrincipalRequest(ctx)
     ) {

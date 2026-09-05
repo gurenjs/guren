@@ -357,6 +357,7 @@ export type {
   AuthContext,
   RequireAuthOptions,
   CsrfOptions,
+  CookielessAuthEndpoints,
   ValidationSchema,
   ValidateRequestOptions,
   // Rate limiting types
