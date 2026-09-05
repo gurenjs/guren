@@ -1,36 +1,18 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { resolve } from 'node:path'
+import { lintFixture } from './helpers'
 
 // Exercised through the real oxlint binary, like await-async-assertion: what has
 // to hold is that the plugin loads and reports on the comments oxlint hands it.
 
-const repoRoot = resolve(import.meta.dir, '../../..')
-const oxlint = join(repoRoot, 'node_modules', '.bin', 'oxlint')
-const plugin = join(repoRoot, 'packages', 'cli', 'src', 'oxlint', 'comments.js')
+const plugin = resolve(import.meta.dir, '../src/oxlint/comments.js')
 const RULES = ['comment-length', 'comment-banner', 'comment-step-label', 'comment-history', 'comment-param-restates']
+const rules = Object.fromEntries(RULES.map((r) => [`guren-comments/${r}`, 'error']))
 
 /** `rule@line` for every finding oxlint reports on `source`, in print order. */
 function findings(source: string, file = 'case.ts'): string[] {
-  const dir = mkdtempSync(join(tmpdir(), 'guren-comment-rules-'))
-  try {
-    const rules = Object.fromEntries(RULES.map((r) => [`guren-comments/${r}`, 'error']))
-    writeFileSync(join(dir, '.oxlintrc.json'), JSON.stringify({ jsPlugins: [plugin], rules }))
-    writeFileSync(join(dir, file), source)
-    const result = Bun.spawnSync([oxlint, '-c', '.oxlintrc.json', '-A', 'all', ...RULES.flatMap((r) => ['-D', `guren-comments/${r}`]), '--format', 'unix', file], {
-      cwd: dir,
-      stdout: 'pipe',
-      stderr: 'pipe',
-    })
-    const stdout = result.stdout.toString()
-    const stderr = result.stderr.toString()
-    if (stderr.trim() !== '') throw new Error(`oxlint wrote to stderr:\n${stderr}`)
-    if (new RegExp(`^${file.replace('.', '\\.')}:0:0:`, 'm').test(stdout)) throw new Error(`the plugin threw while linting the fixture:\n${stdout}`)
-    return [...stdout.matchAll(/^case\.\w+:(\d+):\d+: .*guren-comments\((comment-[a-z-]+)\)/gm)].map((m) => `${m[2]}@${m[1]}`)
-  } finally {
-    rmSync(dir, { recursive: true, force: true })
-  }
+  const stdout = lintFixture({ config: { jsPlugins: [plugin], rules }, file, source })
+  return [...stdout.matchAll(/^case\.\w+:(\d+):\d+: .*guren-comments\((comment-[a-z-]+)\)/gm)].map((m) => `${m[2]}@${m[1]}`)
 }
 
 const LONG = '// l\n'.repeat(6)

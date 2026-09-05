@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import { cp, mkdir, readFile, symlink, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { cp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
-import { createTempWorkspace, type TempWorkspace } from './helpers'
-import { addLint, LINT_SCRIPTS, OXLINT_RANGE } from '../src/add-lint'
+import { assertWorkspaceBuilt, createTempWorkspace, linkWorkspacePackage, OXLINT_BIN, type TempWorkspace } from './helpers'
+import { addLint, LINT_SCRIPTS, oxlintRange } from '../src/add-lint'
 import { runBlueprint } from '../src/blueprints'
 
 const repoRoot = resolve(import.meta.dir, '../../..')
+assertWorkspaceBuilt([join(repoRoot, 'packages/cli/dist/oxlint/index.js')])
 
 const MANIFEST = {
   name: 'app',
@@ -13,7 +15,7 @@ const MANIFEST = {
   devDependencies: { typescript: '^5.4.0' },
 }
 
-async function readManifest(): Promise<typeof MANIFEST & { scripts: Record<string, string>; devDependencies: Record<string, string> }> {
+async function readManifest(): Promise<{ scripts: Record<string, string>; devDependencies: Record<string, string> }> {
   return JSON.parse(await readFile('package.json', 'utf8'))
 }
 
@@ -37,7 +39,7 @@ describe('guren add lint', () => {
     expect(await readFile('.oxlintrc.json', 'utf8')).toContain('"jsPlugins": ["@guren/cli/oxlint"]')
     const manifest = await readManifest()
     expect(manifest.scripts).toEqual({ typecheck: 'tsc --noEmit', ...LINT_SCRIPTS })
-    expect(manifest.devDependencies).toEqual({ typescript: '^5.4.0', oxlint: OXLINT_RANGE })
+    expect(manifest.devDependencies).toEqual({ typescript: '^5.4.0', oxlint: oxlintRange() })
     expect(await readFile('package.json', 'utf8')).toEndWith('}\n')
   })
 
@@ -56,15 +58,26 @@ describe('guren add lint', () => {
     await writeFile('.oxlintrc.json', '{}\n')
 
     await expect(runBlueprint('lint')).rejects.toThrow('already exists')
-    expect(await readManifest()).toEqual(MANIFEST as never)
+    expect(await readManifest()).toEqual(MANIFEST)
 
     await runBlueprint('lint', { force: true })
     expect(await readFile('.oxlintrc.json', 'utf8')).toContain('@guren/cli/oxlint')
   })
 
-  it('pins the same oxlint this repo lints with', async () => {
+  it('leaves nothing behind when package.json is missing or malformed', async () => {
+    await rm('package.json')
+    await expect(runBlueprint('lint')).rejects.toThrow('ENOENT')
+    expect(existsSync('.oxlintrc.json')).toBe(false)
+
+    await writeFile('package.json', '{ not json')
+    await expect(runBlueprint('lint')).rejects.toThrow()
+    expect(existsSync('.oxlintrc.json')).toBe(false)
+  })
+
+  it('installs the oxlint this repo lints with: the peer range admits the root pin', async () => {
     const root = JSON.parse(await readFile(join(repoRoot, 'package.json'), 'utf8')) as { devDependencies: Record<string, string> }
-    expect(OXLINT_RANGE).toBe(`~${root.devDependencies.oxlint}`)
+    expect(oxlintRange()).toStartWith('~')
+    expect(Bun.semver.satisfies(root.devDependencies.oxlint!, oxlintRange())).toBe(true)
   })
 
   // Through the real binary, against the built dist: a fresh app must have no
@@ -72,15 +85,10 @@ describe('guren add lint', () => {
   it.each(['default', 'api-only'])('lints the %s starter template with no errors', async (template) => {
     const appDir = join(workspace.dir, template)
     await cp(join(repoRoot, 'packages', 'create-app', 'templates', template), appDir, { recursive: true })
-    await mkdir(join(appDir, 'node_modules', '@guren'), { recursive: true })
-    await symlink(join(repoRoot, 'packages', 'cli'), join(appDir, 'node_modules', '@guren', 'cli'))
+    await linkWorkspacePackage('cli', appDir)
     await addLint({ cwd: appDir })
 
-    const result = Bun.spawnSync([join(repoRoot, 'node_modules', '.bin', 'oxlint'), '--format', 'unix'], {
-      cwd: appDir,
-      stdout: 'pipe',
-      stderr: 'pipe',
-    })
+    const result = Bun.spawnSync([OXLINT_BIN, '--format', 'unix'], { cwd: appDir, stdout: 'pipe', stderr: 'pipe' })
     const output = result.stdout.toString()
 
     expect(result.stderr.toString()).toBe('')

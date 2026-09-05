@@ -94,13 +94,9 @@ async function isFile(path: string): Promise<boolean> {
   }
 }
 
-/**
- * The source file an extensionless base path stands for. TypeScript first; a
- * plain `.js` source is a module too (the oxlint plugin under packages/cli must
- * be JavaScript, since oxlint hands plugins to a module loader, not a bundler).
- */
+/** TypeScript first; a plain `.js` source is a module too (the oxlint plugin must be JS). */
 async function firstExistingSource(base: string): Promise<string | null> {
-  for (const candidate of [`${base}.ts`, `${base}.tsx`, join(base, 'index.ts'), `${base}.js`, join(base, 'index.js')]) {
+  for (const candidate of [`${base}.ts`, `${base}.tsx`, join(base, 'index.ts'), `${base}.js`]) {
     if (await isFile(candidate)) {
       return candidate
     }
@@ -148,7 +144,7 @@ export async function collectEntryPoints(root: string): Promise<Map<string, Entr
 
     for (const [subpath, target] of Object.entries(manifest.exports)) {
       const specifier = subpath === '.' ? name : `${name}${subpath.slice(1)}`
-      // `./bin` declares only `default`; every other subpath carries `types`.
+      // `./bin` and `./oxlint` declare only `default`; every other subpath carries `types`.
       const resolvedTarget = typeof target === 'string' ? target : (target.types ?? target.default)
       if (typeof resolvedTarget !== 'string') {
         entryPoints.set(specifier, { specifier, packageDir, kind: 'unresolved', sourceFile: null, target: JSON.stringify(target) })
