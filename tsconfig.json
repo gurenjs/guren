@@ -89,6 +89,12 @@
     "types/**/*"
   ],
   "exclude": [
+    // Its program needs @cloudflare/workers-types (the `agents` SDK's own
+    // declarations are written against `Cloudflare.Env` and `DurableObject`),
+    // which this one does not carry. The package typechecks itself with both
+    // type packages via the root `typecheck:agents` script, which the
+    // `typecheck` chain runs.
+    "packages/plugin-agents",
     "packages/create-app/templates",
     "packages/cli/templates/scaffold",
     "packages/cli/tests/fixtures/scaffold-typecheck"

@@ -1,0 +1,25 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    // Both, because this package straddles the boundary its two entries are
+    // split along: `src/index.ts` and its Bun tests run on Bun, `src/agent.ts`
+    // and the workerd suite run on workerd. The Cloudflare types are what
+    // declare `Cloudflare.Env`, `DurableObject` and the `cloudflare:*` virtual
+    // modules the `agents` SDK's own declarations are written against.
+    "types": [
+      "bun-types",
+      "@cloudflare/workers-types"
+    ]
+  },
+  // Cleared, not extended. The root config *excludes this package* — its
+  // program carries only `bun-types` and would fail on every Workers global —
+  // and that exclusion is inherited here, which would leave this config with
+  // no inputs at all. The root's other exclusions name trees this package
+  // does not contain.
+  "exclude": [],
+  "include": [
+    "src/**/*",
+    "tests/**/*",
+    "vitest.config.ts"
+  ]
+}

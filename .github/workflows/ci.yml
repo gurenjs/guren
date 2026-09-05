@@ -315,6 +315,15 @@ jobs:
       - name: Testing package tests (vitest)
         run: bun run test:testing
 
+      # The durable agent runtime's workerd lane. Its own runner (vitest 4 +
+      # @cloudflare/vitest-plugin) and its own workerd process, because
+      # `import { Agent } from 'agents'` evaluates `cloudflare:workers` — Bun's
+      # runner cannot host a single case of it. Per PR rather than nightly: the
+      # pieces it covers (an alarm waking an agent, a Durable Object's identity
+      # as the principal) are exactly the ones a mock cannot exercise.
+      - name: Durable agent tests (workerd)
+        run: bun run test:agents
+
   # Scaffolding smokes, split from build-and-test so the unit-test critical
   # path doesn't wait ~2 minutes for them. They rebuild the packages
   # themselves and run in parallel with everything else.

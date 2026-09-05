@@ -82,6 +82,71 @@ export function parseToolScope(entry: string): ParsedToolScope | null {
   return { kind: 'prefix', prefix }
 }
 
+/**
+ * The scope forms a **registration** may declare (RFC 0017 §3): the narrower
+ * half of the grammar above, because a registration grants an *unattended*
+ * principal and is outlived by the route graph, so a set grant would acquire
+ * consent to tools that did not yet exist. One rule, shared with `guren check`.
+ */
+export type RegistrationScopeVerdict =
+  /** The entry is a legal registration scope. */
+  | { allowed: true; scope: Extract<ParsedToolScope, { kind: 'tool' } | { kind: 'read' }> }
+  /**
+   * The entry may not be registered. `message` states the reason and the fix,
+   * and is what both the plugin's throw and the check's finding say — so a
+   * developer reads the same sentence whichever surface catches it first.
+   */
+  | { allowed: false; reason: 'wildcard' | 'prefix' | 'not-a-tool-scope'; message: string }
+
+/**
+ * Judge one `scopes` entry of an agent registration.
+ *
+ * @param entry The scope as written in the config.
+ */
+export function classifyRegistrationScope(entry: string): RegistrationScopeVerdict {
+  const scope = parseToolScope(entry)
+
+  if (scope?.kind === 'tool' || scope?.kind === 'read') {
+    return { allowed: true, scope }
+  }
+
+  if (scope?.kind === 'all') {
+    return {
+      allowed: false,
+      reason: 'wildcard',
+      message:
+        `"${entry}" grants every tool the application has, including every tool it grows later. `
+        + 'An unattended agent must not acquire consent to tools that did not exist when this was '
+        + 'written. List the tools as tool:<name> entries, or use tools:read if the agent only reads.',
+    }
+  }
+
+  if (scope?.kind === 'prefix') {
+    return {
+      allowed: false,
+      reason: 'prefix',
+      message:
+        `"${entry}" grants every tool in the ${scope.prefix}.* family, including ones added later. `
+        + 'An unattended agent must not acquire consent to tools that did not exist when this was '
+        + 'written. List the tools it needs as tool:<name> entries.',
+    }
+  }
+
+  // A bare name is the mistake worth naming a fix for; a malformed `tool:`/
+  // `tools:` entry already knows it is trying to be a scope, and guessing a
+  // correction for it would as often be wrong as right.
+  const suggestion = AGENT_TOOL_NAME_PATTERN.test(entry) ? ` Did you mean "tool:${entry}"?` : ''
+
+  return {
+    allowed: false,
+    reason: 'not-a-tool-scope',
+    message:
+      `"${entry}" is not a tool scope, so it grants nothing. The registration grammar is `
+      + 'tool:<name> for one tool by exact name, or tools:read for every read-only tool.'
+      + suggestion,
+  }
+}
+
 /** Whether one parsed scope covers a given tool. */
 function scopeAllowsTool(scope: ParsedToolScope, tool: ScopedTool): boolean {
   switch (scope.kind) {

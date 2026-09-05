@@ -2,6 +2,7 @@ import { describe, test, expect } from 'bun:test'
 
 import {
   AGENT_TOOL_NAME_PATTERN,
+  classifyRegistrationScope,
   expandToolScopes,
   parseToolScope,
   scopesAllowTool,
@@ -193,5 +194,68 @@ describe('expandToolScopes', () => {
     for (const tool of tools) {
       expect(expanded.includes(tool.name)).toBe(scopesAllowTool(abilities, tool))
     }
+  })
+})
+
+/**
+ * The narrower half of the grammar, shared by `@guren/plugin-agents`'
+ * `validateAgentsConfig` and `guren check`'s agents-config check (RFC 0017
+ * §3). Both read this one function, so these cases are the only place the
+ * registration rule is pinned.
+ */
+describe('classifyRegistrationScope', () => {
+  test('should accept a single tool by exact name', () => {
+    expect(classifyRegistrationScope('tool:posts.index')).toEqual({
+      allowed: true,
+      scope: { kind: 'tool', name: 'posts.index' },
+    })
+  })
+
+  test('should accept tools:read, the one promise about tools rather than a list of them', () => {
+    expect(classifyRegistrationScope('tools:read')).toEqual({
+      allowed: true,
+      scope: { kind: 'read' },
+    })
+  })
+
+  test('should reject tools:* even though the token grammar understands it', () => {
+    // The whole point of the narrower rule: `parseToolScope` reads this fine,
+    // and a registration still may not carry it.
+    expect(parseToolScope('tools:*')).toEqual({ kind: 'all' })
+
+    const verdict = classifyRegistrationScope('tools:*')
+    expect(verdict.allowed).toBe(false)
+    if (verdict.allowed) return
+    expect(verdict.reason).toBe('wildcard')
+    expect(verdict.message).toContain('tools:*')
+    expect(verdict.message).toContain('did not exist when this was written')
+  })
+
+  test('should reject a prefix grant and name the family it would have granted', () => {
+    const verdict = classifyRegistrationScope('tools:posts.*')
+    expect(verdict.allowed).toBe(false)
+    if (verdict.allowed) return
+    expect(verdict.reason).toBe('prefix')
+    expect(verdict.message).toContain('posts.* family')
+  })
+
+  test('should reject a bare tool name and suggest the tool: spelling', () => {
+    const verdict = classifyRegistrationScope('posts.index')
+    expect(verdict.allowed).toBe(false)
+    if (verdict.allowed) return
+    expect(verdict.reason).toBe('not-a-tool-scope')
+    expect(verdict.message).toContain('Did you mean "tool:posts.index"?')
+  })
+
+  test('should not suggest a spelling for an entry that already tried to be a scope', () => {
+    const verdict = classifyRegistrationScope('tool:posts.*')
+    expect(verdict.allowed).toBe(false)
+    if (verdict.allowed) return
+    expect(verdict.reason).toBe('not-a-tool-scope')
+    expect(verdict.message).not.toContain('Did you mean')
+  })
+
+  test('should reject the store default ability, which grants no tool at all', () => {
+    expect(classifyRegistrationScope('*').allowed).toBe(false)
   })
 })

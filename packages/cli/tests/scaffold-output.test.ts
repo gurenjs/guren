@@ -30,6 +30,7 @@ import { makeMiddleware } from '../src/make-middleware'
 import { makeModel } from '../src/make-model'
 import { makeModule } from '../src/make-module'
 import { makeNotification } from '../src/make-notification'
+import { makeAgent } from '../src/make-agent'
 import { makePolicy } from '../src/make-policy'
 import { makeProvider } from '../src/make-provider'
 import { makeResource } from '../src/make-resource'
@@ -119,6 +120,9 @@ const authCombos: Array<[string, MakeAuthOptions]> = [
 ]
 
 const singleFileCases: Array<[string, () => Promise<unknown>]> = [
+  // Writes three files: the class, config/agents.ts, and guren.arch.ts. All
+  // three land in the workspace, so the parse gate below covers each.
+  ['make:agent', () => makeAgent('Triager')],
   ['make:channel', () => makeChannel('Orders')],
   ['make:command', () => makeCommand('SendDigest')],
   ['make:event', () => makeEvent('OrderShipped')],

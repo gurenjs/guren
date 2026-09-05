@@ -3,13 +3,12 @@ import {
   AgentToolDenied,
   AgentToolInvoked,
   DEFAULT_AGENT_AUDIT_PATH,
-  DEFAULT_AGENT_APPROVAL_TTL_MS,
+  createAgentApprovalContext,
   createAgentInvocationPipeline,
   createAuditEmitter,
   definePlugin,
   deriveAgentTools,
   isReservedAgentToolName,
-  notifyApprovers,
   readBearerToken,
   redactAgentArguments,
   verifyApiToken,
@@ -21,7 +20,6 @@ import {
   type AgentToolDenialReason,
   type Application,
   type AuthManager,
-  type DerivedAgentTool,
   type EventManager,
   type ServiceProviderConstructor,
 } from '@guren/core'
@@ -76,7 +74,7 @@ export interface McpPluginConfig {
   approvals?: {
     store: AgentApprovalStore
     notify: (request: AgentApprovalRequest) => void | Promise<void>
-    /** @default 1 hour ({@link DEFAULT_AGENT_APPROVAL_TTL_MS}) */
+    /** @default 1 hour (`DEFAULT_AGENT_APPROVAL_TTL_MS`) */
     ttlMs?: number
   }
 }
@@ -173,20 +171,7 @@ const factory = definePlugin<McpPluginConfig>({
       // arrived first. One object for both halves — the gate that files records
       // and the status tool that reports on them — so the two cannot disagree
       // about whether a queue exists; the server reads only three of its keys.
-      const approvals = config.approvals
-        ? {
-            store: config.approvals.store,
-            principal,
-            now: () => new Date(),
-            ttlMs: config.approvals.ttlMs ?? DEFAULT_AGENT_APPROVAL_TTL_MS,
-            // The route's own masking rules, the same walk the audit trail
-            // uses. A record a human reads and a store persists must not carry
-            // a field the route declared must never be written down.
-            redact: (tool: DerivedAgentTool, args: Record<string, unknown>) =>
-              redactAgentArguments(args, tool.redact),
-            notify: notifyApprovers(config.approvals.notify),
-          }
-        : undefined
+      const approvals = createAgentApprovalContext(config.approvals, principal)
 
       const executionCtx = executionContext(c)
 
