@@ -5,7 +5,7 @@
 // as returning `void`; `jest/valid-expect` only knows `expect` from jest or vitest.
 // Syntactic and import-agnostic: reports the chain as a bare statement, under `void`,
 // or as a `forEach` arrow body; recognises aliases (`expect as verify`) and
-// `t.expect`; a file declaring its own `expect` is left alone. Tests: the .test.ts next door.
+// `t.expect`; a file declaring its own `expect` is left alone. Tests: `tests/oxlint-await-async-assertion.test.ts`.
 
 const ASYNC_MODIFIERS = new Set(['resolves', 'rejects'])
 

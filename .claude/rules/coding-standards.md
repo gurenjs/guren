@@ -131,7 +131,7 @@ tags the framework reads (`@docs`, `@deprecated`, `guren-audit-ignore`), comment
 test reads as source text, and comments inside template literals (they are
 generated output, not commentary).
 
-The `guren/comment-*` oxlint rules (`scripts/lint/comments.js`; `bun run lint`, and
+The `guren/comment-*` oxlint rules (`packages/cli/src/oxlint/comments.js`; `bun run lint`, and
 the PostToolUse hook after every edit) enforce the mechanical half. A block that
 genuinely must exceed the limit (a test pins its text, or every line is a measured
 fact) carries, on the line above it, `// oxlint-disable-next-line guren/comment-length -- <reason>`.

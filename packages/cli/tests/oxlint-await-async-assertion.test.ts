@@ -7,9 +7,9 @@ import { join, resolve } from 'node:path'
 // `create()` with a hand-built AST: what has to hold is that the file the
 // config points at loads as a plugin and reports on the AST oxlint hands it.
 
-const repoRoot = resolve(import.meta.dir, '../..')
+const repoRoot = resolve(import.meta.dir, '../../..')
 const oxlint = join(repoRoot, 'node_modules', '.bin', 'oxlint')
-const plugin = join(repoRoot, 'scripts', 'lint', 'await-async-assertion.js')
+const plugin = join(repoRoot, 'packages', 'cli', 'src', 'oxlint', 'await-async-assertion.js')
 
 /** Lines of `source` the rule reports, in the order oxlint prints them. */
 function reportedLines(source: string): number[] {

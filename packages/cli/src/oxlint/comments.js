@@ -4,7 +4,7 @@
 // comment narrates the code stays a review judgment. Comments come from
 // oxlint's own parse, so template-literal contents are never inspected.
 // JavaScript, not TypeScript: oxlint hands JS plugins to Node's module loader.
-// Exercised through the real binary in `comments.test.ts`, like the sibling rule.
+// Exercised through the real binary in `tests/oxlint-comments.test.ts`, like the sibling rule.
 
 export const LIMITS = { body: 5, moduleHeader: 8 }
 

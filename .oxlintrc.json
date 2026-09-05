@@ -4,7 +4,7 @@
   // type-aware linter that works on the `typescript` 7 this repo pins: the
   // package ships no JavaScript compiler API, so typescript-eslint cannot load.
   "options": { "typeAware": true },
-  "jsPlugins": ["./scripts/lint/guren.js"],
+  "jsPlugins": ["./packages/cli/src/oxlint/index.js"],
   "ignorePatterns": ["**/dist/**", "**/.guren/**", "**/.wrangler/**", ".claude/worktrees/**"],
   "rules": {
     "typescript/no-floating-promises": "error",
@@ -32,7 +32,7 @@
     "guren/await-async-assertion": "error",
     // The machine-checkable half of .claude/rules/coding-standards.md (Comments):
     // block length, banners, step labels, change-history wording, @param tags
-    // that restate the name. The rules live in scripts/lint/comments.js.
+    // that restate the name. The rules live in packages/cli/src/oxlint/comments.js.
     "guren/comment-length": "error",
     "guren/comment-banner": "error",
     "guren/comment-step-label": "error",
