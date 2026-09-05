@@ -717,6 +717,12 @@ async function main(): Promise<void> {
     await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'check', '--ci', ...routesArgs], appDir, runtimeEnv)
     await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'audit', '--no-deps', ...routesArgs], appDir, runtimeEnv)
 
+    // `guren add lint` wires oxlint with the @guren/cli/oxlint plugin. A fresh app has
+    // to lint clean under that preset, or the first `bun run lint` a user sees is red.
+    await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'add', 'lint'], appDir, runtimeEnv)
+    await run(['bun', 'install'], appDir, runtimeEnv)
+    await run(['bun', 'run', 'lint'], appDir, runtimeEnv)
+
     console.log(`\nFresh app smoke passed (${blueprint}, ${installMode}): ${appDir}`)
   } finally {
     if (keepTemp) {
