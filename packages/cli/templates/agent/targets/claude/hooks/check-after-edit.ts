@@ -8,7 +8,7 @@
  * Exit codes: 0 = ok / not applicable, 2 = findings reported back to the agent.
  */
 import { existsSync, realpathSync } from 'node:fs'
-import { dirname, join, relative } from 'node:path'
+import { dirname, isAbsolute, join, relative, sep } from 'node:path'
 
 interface HookInput {
   tool_input?: {
@@ -44,8 +44,10 @@ function real(path: string): string {
   }
 }
 
-const relPath = relative(real(process.cwd()), real(filePath))
-if (relPath === '' || relPath.startsWith('..')) {
+// POSIX separators so the prefix lists below match on Windows too; `relative()`
+// yields an absolute path across drives there, which is outside the project.
+const relPath = relative(real(process.cwd()), real(filePath)).split(sep).join('/')
+if (relPath === '' || isAbsolute(relPath) || relPath === '..' || relPath.startsWith('../')) {
   process.exit(0)
 }
 
@@ -85,11 +87,14 @@ function resolveOxlint(): string | null {
 // One file, through the shim under Bun (no Node needed). Warnings are reported
 // too: the comment rules are warnings so `bun run lint` stays green, and the
 // agent that just wrote the comment is the one who can fix it.
-const oxlint = LINTABLE.test(relPath) && !UNLINTED_PREFIXES.some((prefix) => relPath.startsWith(prefix)) && existsSync('.oxlintrc.json')
-  ? resolveOxlint()
-  : null
+const lintable = LINTABLE.test(relPath) && !UNLINTED_PREFIXES.some((prefix) => relPath.startsWith(prefix)) && existsSync('.oxlintrc.json')
+const oxlint = lintable ? resolveOxlint() : null
+if (lintable && oxlint === null) {
+  findings.push('.oxlintrc.json is present but oxlint is not installed: run `bun install`')
+}
 if (oxlint !== null) {
-  const result = Bun.spawnSync([process.execPath, oxlint, '--format', 'unix', relPath], { stdout: 'pipe', stderr: 'pipe' })
+  // A file the config ignores is "no files to lint", not a failure.
+  const result = Bun.spawnSync([process.execPath, oxlint, '--no-error-on-unmatched-pattern', '--format', 'unix', relPath], { stdout: 'pipe', stderr: 'pipe' })
   const stdout = result.stdout.toString()
   const lines = stdout.split('\n').filter((line) => line.startsWith(`${relPath}:`))
   if (lines.length > 0) {

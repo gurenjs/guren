@@ -5,6 +5,8 @@ globs:
   - "**/*.tsx"
   - "**/*.js"
   - "**/*.jsx"
+  - "**/*.mjs"
+  - "**/*.cjs"
 ---
 
 # Comments

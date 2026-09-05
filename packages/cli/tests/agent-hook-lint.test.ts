@@ -12,11 +12,13 @@ const hook = join(repoRoot, 'packages/cli/templates/agent/targets/claude/hooks/c
 // A built-in rule keeps the test independent of which plugin the app configures.
 const CONFIG = JSON.stringify({ rules: { 'no-debugger': 'warn' } })
 
-function runHook(app: (dir: string) => void, editedFile: string): { exitCode: number; stderr: string } {
+function runHook(app: (dir: string) => void, editedFile: string, options: { installed?: boolean } = {}): { exitCode: number; stderr: string } {
   const dir = mkdtempSync(join(tmpdir(), 'guren-hook-lint-'))
   try {
-    mkdirSync(join(dir, 'node_modules'), { recursive: true })
-    symlinkSync(join(repoRoot, 'node_modules', 'oxlint'), join(dir, 'node_modules', 'oxlint'), 'dir')
+    if (options.installed !== false) {
+      mkdirSync(join(dir, 'node_modules'), { recursive: true })
+      symlinkSync(join(repoRoot, 'node_modules', 'oxlint'), join(dir, 'node_modules', 'oxlint'), 'dir')
+    }
     app(dir)
     const result = Bun.spawnSync([process.execPath, hook], {
       cwd: dir,
@@ -63,6 +65,26 @@ describe('check-after-edit hook: oxlint', () => {
 
     expect(result.exitCode).toBe(2)
     expect(result.stderr).toContain('without linting lib.ts')
+  })
+
+  test('a file the config ignores is not a failure', () => {
+    expect(
+      runHook((dir) => {
+        writeFileSync(join(dir, '.oxlintrc.json'), JSON.stringify({ ignorePatterns: ['gen/**'], rules: { 'no-debugger': 'warn' } }))
+        mkdirSync(join(dir, 'gen'))
+        writeFileSync(join(dir, 'gen', 'x.ts'), FLAGGED_FILE)
+      }, 'gen/x.ts').exitCode,
+    ).toBe(0)
+  })
+
+  test('a config without an installed oxlint asks for bun install', () => {
+    const result = runHook((dir) => {
+      writeFileSync(join(dir, '.oxlintrc.json'), CONFIG)
+      writeFileSync(join(dir, 'lib.ts'), FLAGGED_FILE)
+    }, 'lib.ts', { installed: false })
+
+    expect(result.exitCode).toBe(2)
+    expect(result.stderr).toContain('run `bun install`')
   })
 
   test('skips generated and non-source paths', () => {
