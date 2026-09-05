@@ -3027,6 +3027,16 @@ const addCommand = defineCommand({
   },
 })
 
+/**
+ * citty's `--no-` branch writes the key with the prefix *stripped*, so
+ * `--no-autofix` arrives as `autofix: false` and never sets `noAutofix`;
+ * `--noAutofix` is the camel spelling usage printed while only it worked, still
+ * honored so a script written against it keeps suppressing fixes.
+ */
+export function readNoAutofix(args: { autofix?: boolean; noAutofix?: boolean }): boolean {
+  return args.autofix === false || Boolean(args.noAutofix)
+}
+
 const upgradeCommand = defineCommand({
   meta: {
     name: 'upgrade',
@@ -3053,8 +3063,11 @@ const upgradeCommand = defineCommand({
       type: 'boolean',
       description: 'Print the upgrade report as JSON.',
     },
-    noAutofix: {
+    // Positive on purpose, so citty's negation lands on the key `readNoAutofix`
+    // reads. `default: true` is also what makes usage print `--no-autofix`.
+    autofix: {
       type: 'boolean',
+      default: true,
       description: 'Only report fixable issues without applying automatic fixes.',
     },
     checkOnly: {
@@ -3068,7 +3081,7 @@ const upgradeCommand = defineCommand({
     const result = await upgradeCanary({
       install: Boolean(args.install),
       dryRun: Boolean(args.dryRun),
-      noAutofix: Boolean(args.noAutofix),
+      noAutofix: readNoAutofix(args),
       checkOnly: Boolean(args.checkOnly),
       tag,
     })
