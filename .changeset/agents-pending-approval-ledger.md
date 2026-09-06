@@ -36,6 +36,13 @@ export class Ops extends GurenAgent<Env, OpsState> {
   `unknown` for a request the queue no longer has); `result` is the retry's own
   answer, which can itself be a refusal when another caller spent the approval
   first.
+- **A lapsed row is asked about once before it goes.** A human can answer
+  between the last check and the wake that finds the row past its expiry, and
+  pruning it unread would report that answer as `expired` — an application that
+  remembers only rejections then puts the same question to the same person on
+  its next sweep. The sweep now settles such a row as `rejected` when the queue
+  says so, and as `expired` otherwise: an approval past `expiresAt` is unusable,
+  so there is nothing left to retry either way.
 - **Nothing is held in memory.** State and schedules are both durable, so an
   eviction between the request and the approval loses nothing.
 - **No encrypter, no ledger.** Ledger rows are encrypted with the app key at

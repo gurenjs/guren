@@ -9,6 +9,8 @@ interface SettledRecord {
   status: string
   /** The retry's own answer: `true` executed, `false` refused, `null` no retry. */
   retried: boolean | null
+  /** The parked call's arguments, absent for an `'unreadable'` row. */
+  args?: Record<string, unknown>
 }
 
 interface TestAgentState {
@@ -51,6 +53,7 @@ export class TestAgent extends GurenAgent<Cloudflare.Env, TestAgentState> {
           tool: event.tool,
           status: event.status,
           retried: event.result ? event.result.ok === true : null,
+          ...(event.args ? { args: event.args } : {}),
         },
       ],
     })

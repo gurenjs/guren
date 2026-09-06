@@ -1,0 +1,61 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": [
+      "bun-types",
+      "@cloudflare/workers-types"
+    ],
+    "paths": {
+      "@/*": [
+        "./*"
+      ],
+      "@guren/cli": [
+        "../../packages/cli/src/index.ts"
+      ],
+      "@guren/cli/*": [
+        "../../packages/cli/src/*"
+      ],
+      "@guren/core": [
+        "../../packages/core/src/index.ts"
+      ],
+      "@guren/core/*": [
+        "../../packages/core/src/*"
+      ],
+      "@guren/server": [
+        "../../packages/server/src/index.ts"
+      ],
+      "@guren/server/*": [
+        "../../packages/server/src/*"
+      ],
+      "@guren/orm": [
+        "../../packages/orm/src/index.ts"
+      ],
+      "@guren/orm/*": [
+        "../../packages/orm/src/*"
+      ],
+      "@guren/plugin-agents": [
+        "../../packages/plugin-agents/src/index.ts"
+      ],
+      "@guren/plugin-agents/*": [
+        "../../packages/plugin-agents/src/*"
+      ],
+      "@guren/plugin-cloudflare": [
+        "../../packages/plugin-cloudflare/src/index.ts"
+      ],
+      "@guren/plugin-cloudflare/*": [
+        "../../packages/plugin-cloudflare/src/*"
+      ]
+    }
+  },
+  "include": [
+    "src/**/*",
+    "app/**/*",
+    "routes/**/*",
+    "config/**/*",
+    "tests/**/*",
+    "db/**/*",
+    "guren.arch.ts"
+  ],
+  "exclude": []
+}

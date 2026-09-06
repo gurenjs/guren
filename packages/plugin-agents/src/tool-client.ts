@@ -137,6 +137,13 @@ export interface AgentToolApprovalSettled {
    */
   status: 'approved' | 'rejected' | 'expired' | 'unknown' | 'unreadable'
   /**
+   * The arguments the parked call was made with, from the ledger. Absent only
+   * for `'unreadable'`, where they are what could not be decrypted. The queue
+   * keeps no reversible copy, so this is the one place an application learns
+   * *which* call settled.
+   */
+  args?: Record<string, unknown>
+  /**
    * The retry's own answer, which can itself be a refusal. Present only for
    * `'approved'`, and **absent even then** when the approval was found already
    * spent — an earlier sweep ran the call and was interrupted before it could

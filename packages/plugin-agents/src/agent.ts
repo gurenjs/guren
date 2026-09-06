@@ -14,6 +14,7 @@ import type { AgentsRoutingConfig } from './config'
 import { resolveAgentRuntime, type AgentRuntime } from './latch'
 import {
   firesSooner,
+  hasExpired,
   PendingCallLedger,
   type LedgerSql,
   type PendingToolCall,
@@ -98,24 +99,37 @@ export class GurenAgent<
     const { client, ledger } = await this.#load()
     if (!ledger) return
 
+    // One clock for the whole sweep: per-row instants would classify rows
+    // parked together against different nows.
+    const now = new Date()
     try {
       for (const call of ledger.pruneUnreadable()) await this.#settle(call, 'unreadable')
 
-      for (const call of ledger.pruneExpired(new Date())) await this.#settle(call, 'expired')
-
       for (const call of ledger.all()) {
+        const expired = hasExpired(call.expiresAt, now)
         // Per row, so one unanswerable request cannot strand the others: a tool
         // a deploy removed throws out of `client.call`, and without this the
         // whole sweep would die on it, every wake, until the rows expired.
         try {
-          await this.#settleOne(client, ledger, call)
+          await this.#settleOne(client, ledger, call, expired)
         } catch (error) {
+          // A row past its expiry cannot be retried whatever the queue later
+          // says, and `nextDelaySeconds` floors an elapsed expiry at one
+          // second — keeping it would be a one-second alarm loop on the same
+          // throw. Only a live row is worth another check.
           console.warn(
             `[@guren/plugin-agents] Could not settle the approval for "${call.tool}" `
-            + `(request ${call.requestId}): ${describe(error)}. The row is kept and will be `
-            + 'checked again until it expires.',
+            + `(request ${call.requestId}): ${describe(error)}. `
+            + (expired
+              ? 'The row is past its expiry, so it is dropped.'
+              : 'The row is kept and will be checked again until it expires.'),
           )
-          ledger.bumpChecks(call.requestId)
+          if (expired) {
+            ledger.remove(call.requestId)
+            await this.#settle(call, 'expired')
+          } else {
+            ledger.bumpChecks(call.requestId)
+          }
         }
       }
     } finally {
@@ -125,21 +139,33 @@ export class GurenAgent<
     }
   }
 
-  /** One row's verdict. Every ledger write lands before the hook is called. */
+  /**
+   * One row's verdict. Every ledger write lands before the hook is called.
+   * @param expired Whether the row is past the expiry it copied from the queue.
+   *   Such a row is still asked about once rather than pruned unread, so a
+   *   human who answered between the last check and this wake is reported as
+   *   their answer and not as a lapse.
+   */
   async #settleOne(
     client: AgentToolClient,
     ledger: PendingCallLedger,
     call: PendingToolCall,
+    expired: boolean,
   ): Promise<void> {
     const answer = await client.status(call.requestId)
 
     // Unanswerable, not answered: keeping the row is the whole reason that
-    // variant exists. Purging here would drop the arguments an approval granted
-    // an hour later needs, and nothing would report it. Still counted —
-    // `checks` is the backoff's clock, so a spent budget has to back off rather
-    // than re-ask at the same cadence until the request expires.
+    // variant exists. Purging would drop the arguments an approval granted an
+    // hour later needs — but past the expiry there is no such hour left. Still
+    // counted while it is live: `checks` is the backoff's clock, so a spent
+    // budget backs off rather than re-asking at one cadence.
     if (answer.unavailable) {
-      ledger.bumpChecks(call.requestId)
+      if (!expired) {
+        ledger.bumpChecks(call.requestId)
+        return
+      }
+      ledger.remove(call.requestId)
+      await this.#settle(call, 'expired')
       return
     }
 
@@ -150,41 +176,45 @@ export class GurenAgent<
     }
 
     const { status, consumedAt } = answer.report
-    if (status === 'pending') {
-      ledger.bumpChecks(call.requestId)
-      return
-    }
 
-    if (status === 'approved') {
-      await this.#settleApproved(client, ledger, call, consumedAt !== undefined)
-      return
-    }
-
-    ledger.remove(call.requestId)
-    await this.#settle(call, status === 'rejected' ? 'rejected' : 'expired')
-  }
-
-  /**
-   * An approved row: repeat the call unless the approval is already spent.
-   * Every ledger write lands before the hook is called.
-   */
-  async #settleApproved(
-    client: AgentToolClient,
-    ledger: PendingCallLedger,
-    call: PendingToolCall,
-    spent: boolean,
-  ): Promise<void> {
-    if (spent) {
+    if (status === 'approved' && consumedAt !== undefined) {
       // Approvals bind to this principal and this exact fingerprint, so nobody
       // else could have spent it: a previous sweep ran the call and was
       // interrupted before clearing the row. Re-calling would find no
       // unconsumed match, file a *new* request, page a human, and run the side
-      // effect a second time on approval.
+      // effect a second time on approval. That holds past the expiry too.
       ledger.remove(call.requestId)
       await this.#settle(call, 'approved')
       return
     }
 
+    if (!expired) {
+      if (status === 'pending') {
+        ledger.bumpChecks(call.requestId)
+        return
+      }
+      if (status === 'approved') {
+        await this.#retryApproved(client, ledger, call)
+        return
+      }
+    }
+
+    // Past its expiry only a human's "no" survives as itself: an approval is
+    // unusable once `expiresAt` passes (`agentApprovalUsableAt`), so retrying
+    // an unspent one would file a fresh request and page a human again.
+    ledger.remove(call.requestId)
+    await this.#settle(call, status === 'rejected' ? 'rejected' : 'expired')
+  }
+
+  /**
+   * An approved, unspent row: repeat the original call.
+   * Every ledger write lands before the hook is called.
+   */
+  async #retryApproved(
+    client: AgentToolClient,
+    ledger: PendingCallLedger,
+    call: PendingToolCall,
+  ): Promise<void> {
     // The original call, with the stored arguments: the queue's consume-on-use
     // and fingerprint match make this spend exactly the approval that was
     // granted, and nothing else.
@@ -223,7 +253,7 @@ export class GurenAgent<
    * re-running calls that were settled correctly.
    */
   async #settle(
-    call: { requestId: string; tool: string },
+    call: { requestId: string; tool: string; args?: Record<string, unknown> },
     status: AgentToolApprovalSettled['status'],
     result?: AgentToolCallResult,
   ): Promise<void> {
@@ -232,6 +262,7 @@ export class GurenAgent<
         requestId: call.requestId,
         tool: call.tool,
         status,
+        ...(call.args ? { args: call.args } : {}),
         ...(result ? { result } : {}),
       })
     } catch (error) {

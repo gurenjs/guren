@@ -17,6 +17,26 @@
         "zod": "^4.5.4",
       },
     },
+    "examples/agents": {
+      "name": "@guren/example-agents",
+      "version": "0.1.0",
+      "dependencies": {
+        "@guren/cli": "workspace:*",
+        "@guren/core": "workspace:*",
+        "@guren/orm": "workspace:*",
+        "@guren/plugin-agents": "workspace:*",
+        "@guren/plugin-cloudflare": "workspace:*",
+        "@guren/testing": "workspace:*",
+        "drizzle-orm": "1.0.0-rc.4",
+        "zod": "^4.5.0",
+      },
+      "devDependencies": {
+        "@cloudflare/workers-types": "^4.20260702.1",
+        "drizzle-kit": "1.0.0-rc.4",
+        "typescript": "^7.0.2",
+        "wrangler": "^4.118.0",
+      },
+    },
     "examples/api": {
       "name": "@guren/example-api",
       "version": "0.1.32",
@@ -657,6 +677,8 @@
     "@guren/cli": ["@guren/cli@workspace:packages/cli"],
 
     "@guren/core": ["@guren/core@workspace:packages/core"],
+
+    "@guren/example-agents": ["@guren/example-agents@workspace:examples/agents"],
 
     "@guren/example-api": ["@guren/example-api@workspace:examples/api"],
 
