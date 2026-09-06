@@ -4,19 +4,13 @@
  * inside `guren check`, `gate`, or a hook; `--live` is the only entry point
  * and it degrades to a reason string rather than an exit code.
  */
-import { spawn } from 'node:child_process'
 import { runGit } from './changed-files'
+import { REPO_SEGMENT } from './issue-refs'
+import { runCaptured, type CapturedExec, type CapturedRun } from './subprocess'
 
-const REPO_SEGMENT = '[A-Za-z0-9_.-]+'
-const REPO_SLUG_RE = new RegExp(`^${REPO_SEGMENT}/${REPO_SEGMENT}$`)
 const REMOTE_RE = new RegExp(
   `^(?:https?://(?:[^@/]+@)?github\\.com/|(?:ssh://)?git@github\\.com[:/])(${REPO_SEGMENT}/${REPO_SEGMENT})$`,
 )
-
-/** Whether `value` is an `owner/name` slug, the form `--repo` takes. */
-export function isRepoSlug(value: string): boolean {
-  return REPO_SLUG_RE.test(value)
-}
 
 /** `owner/repo` from a GitHub remote URL (https, ssh, scp-like), or null for any other remote. */
 export function repoFromRemoteUrl(remote: string): string | null {
@@ -41,76 +35,30 @@ export async function resolveOriginRepo(cwd: string): Promise<string | null> {
  */
 export type GhResult = { ok: true; stdout: string } | { ok: false; reason: string; stdout: string }
 
-/** How `gh` is invoked; tests substitute a stub so no network is ever needed. */
-export type GhRunner = (args: string[], cwd: string) => Promise<GhResult>
-
 export const GH_TIMEOUT_MS = 5_000
-/** How long a timed-out `gh` gets to honour SIGTERM before SIGKILL. */
-const KILL_GRACE_MS = 1_000
 
 /**
  * Run `gh` and hand back stdout, or the one line that explains why not: a
  * missing binary, a timeout, or the first stderr line of a failed exit (`gh`
- * puts its "not logged in" and rate-limit messages there). A timeout settles
- * the promise at once and still reaps the child: SIGTERM, then SIGKILL after
- * the grace period, since the CLI's own exit would otherwise orphan it.
+ * puts its "not logged in" and rate-limit messages there).
  */
-export function runGh(
+export async function runGh(
   args: string[],
   cwd: string,
+  exec: CapturedExec = runCaptured,
   timeoutMs = GH_TIMEOUT_MS,
-  killGraceMs = KILL_GRACE_MS,
 ): Promise<GhResult> {
-  return new Promise((settle) => {
-    let child: ReturnType<typeof spawn>
-    try {
-      child = spawn('gh', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] })
-    } catch (error) {
-      settle({ ok: false, reason: `gh could not start: ${(error as Error).message}`, stdout: '' })
-      return
-    }
-
-    let stdout = ''
-    let stderr = ''
-    let done = false
-    const finish = (result: GhResult): void => {
-      if (done) return
-      done = true
-      clearTimeout(timer)
-      settle(result)
-    }
-    const timer = setTimeout(() => {
-      child.kill('SIGTERM')
-      const escalate = setTimeout(() => child.kill('SIGKILL'), killGraceMs)
-      escalate.unref()
-      child.once('exit', () => clearTimeout(escalate))
-      child.stdout?.destroy()
-      child.stderr?.destroy()
-      finish({ ok: false, reason: `gh timed out after ${timeoutMs}ms`, stdout })
-    }, timeoutMs)
-
-    child.stdout?.on('data', (chunk: Buffer) => {
-      stdout += chunk.toString('utf-8')
-    })
-    child.stderr?.on('data', (chunk: Buffer) => {
-      stderr += chunk.toString('utf-8')
-    })
-    child.on('error', (error: NodeJS.ErrnoException) => {
-      finish({
-        ok: false,
-        reason: error.code === 'ENOENT' ? 'gh not found on PATH' : `gh could not start: ${error.message}`,
-        stdout,
-      })
-    })
-    child.on('close', (code) => {
-      if (code === 0) {
-        finish({ ok: true, stdout })
-        return
-      }
-      const detail = stderr.split(/\r?\n/).find((line) => line.trim() !== '')
-      finish({ ok: false, reason: `gh exited ${code}${detail ? `: ${detail.trim()}` : ''}`, stdout })
-    })
-  })
+  let run: CapturedRun
+  try {
+    run = await exec(['gh', ...args], cwd, { timeoutMs })
+  } catch (error) {
+    const { code, message } = error as NodeJS.ErrnoException
+    return { ok: false, reason: code === 'ENOENT' ? 'gh not found on PATH' : `gh could not start: ${message}`, stdout: '' }
+  }
+  if (run.timedOut) return { ok: false, reason: `gh timed out after ${timeoutMs}ms`, stdout: run.stdout }
+  if (run.exitCode === 0) return { ok: true, stdout: run.stdout }
+  const detail = run.stderr.split(/\r?\n/).find((line) => line.trim() !== '')
+  return { ok: false, reason: `gh exited ${run.exitCode}${detail ? `: ${detail.trim()}` : ''}`, stdout: run.stdout }
 }
 
 /** What GitHub currently says about an issue or pull request; never its body. */
@@ -179,28 +127,40 @@ function cleanText(value: string): string {
     .slice(0, TEXT_LIMIT)
 }
 
+function cleanStrings(values: unknown[]): string[] {
+  return values
+    .filter((value): value is string => typeof value === 'string')
+    .map(cleanText)
+    .filter((value) => value !== '')
+}
+
 function toLiveIssue(node: GraphqlIssue): LiveIssue | null {
   if (typeof node.title !== 'string' || typeof node.state !== 'string') return null
-  const names = (nodes: Array<Record<string, unknown>> | undefined, key: string): string[] =>
-    (nodes ?? [])
-      .map((entry) => entry[key])
-      .filter((value): value is string => typeof value === 'string')
-      .map(cleanText)
-      .filter((value) => value !== '')
   return {
     title: cleanText(node.title),
     state: node.state.toLowerCase() as LiveIssue['state'],
-    assignees: names(node.assignees?.nodes, 'login'),
-    labels: names(node.labels?.nodes, 'name'),
+    assignees: cleanStrings((node.assignees?.nodes ?? []).map((entry) => entry.login)),
+    labels: cleanStrings((node.labels?.nodes ?? []).map((entry) => entry.name)),
     updatedAt: typeof node.updatedAt === 'string' ? node.updatedAt : '',
   }
 }
 
-/** The `repository` object in a GraphQL body, whatever the exit code was; null when there is none. */
-function repositoryData(stdout: string): Record<string, GraphqlIssue | null> | null {
+interface GraphqlBody {
+  repository: Record<string, GraphqlIssue | null> | null
+  /** GraphQL's own signal; the exit code only says that this list is non-empty. */
+  errors: Array<{ type?: unknown; message?: unknown }>
+}
+
+/** The GraphQL body, whatever the exit code was; null when it is not one. */
+function graphqlBody(stdout: string): GraphqlBody | null {
   try {
-    const repository = (JSON.parse(stdout) as { data?: { repository?: unknown } }).data?.repository
-    return repository !== null && typeof repository === 'object' ? (repository as Record<string, GraphqlIssue | null>) : null
+    const parsed = JSON.parse(stdout) as { data?: { repository?: unknown }; errors?: unknown }
+    const repository = parsed.data?.repository
+    return {
+      repository:
+        repository !== null && typeof repository === 'object' ? (repository as GraphqlBody['repository']) : null,
+      errors: Array.isArray(parsed.errors) ? (parsed.errors as GraphqlBody['errors']) : [],
+    }
   } catch {
     return null
   }
@@ -210,12 +170,13 @@ function repositoryData(stdout: string): Record<string, GraphqlIssue | null> | n
  * Current state for the given issues, one query per repository; only numbers
  * travel to GitHub. A body with no `repository` object (not logged in, rate
  * limited, no access) stops the lookup with the run's reason. With one present,
- * stderr is dropped and each alias stands alone: an unknown number is just absent.
+ * `errors[]` decides: NOT_FOUND on an alias is an unknown number and leaves
+ * that entry absent; any other error stops the lookup, keeping what resolved.
  */
 export async function fetchLiveIssues(
   targets: IssueTarget[],
   cwd: string,
-  run: GhRunner = runGh,
+  exec: CapturedExec = runCaptured,
 ): Promise<LiveIssueLookup> {
   const byRepo = new Map<string, number[]>()
   for (const { repo, number } of targets) {
@@ -227,18 +188,24 @@ export async function fetchLiveIssues(
   const live = new Map<string, LiveIssue>()
   for (const [repo, numbers] of byRepo) {
     const [owner, name] = repo.split('/')
-    const result = await run(
+    const result = await runGh(
       ['api', 'graphql', '-f', `query=${liveIssueQuery(numbers)}`, '-f', `owner=${owner}`, '-f', `name=${name}`],
       cwd,
+      exec,
     )
-    const repository = repositoryData(result.stdout)
-    if (repository === null) {
+    const body = graphqlBody(result.stdout)
+    if (body === null || body.repository === null) {
       return { live, error: result.ok ? `gh returned no data for ${repo}` : result.reason }
     }
     for (const number of numbers) {
-      const node = repository[`i${number}`]
+      const node = body.repository[`i${number}`]
       const issue = node ? toLiveIssue(node) : null
       if (issue) live.set(`${repo}#${number}`, issue)
+    }
+    const failure = body.errors.find((entry) => entry.type !== 'NOT_FOUND')
+    if (failure) {
+      const message = typeof failure.message === 'string' ? cleanText(failure.message) : 'unspecified error'
+      return { live, error: `GitHub answered for ${repo} with an error: ${message}` }
     }
   }
   return { live }

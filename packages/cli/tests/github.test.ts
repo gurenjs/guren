@@ -1,15 +1,9 @@
-import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'bun:test'
-import {
-  fetchLiveIssues,
-  isRepoSlug,
-  repoFromRemoteUrl,
-  runGh,
-  type GhResult,
-  type GhRunner,
-} from '../src/github'
+import { fetchLiveIssues, repoFromRemoteUrl, runGh } from '../src/github'
+import { runCaptured, type CapturedExec, type CapturedRun } from '../src/subprocess'
 
 describe('repoFromRemoteUrl', () => {
   it('reads owner/repo from the GitHub remote spellings', () => {
@@ -27,13 +21,53 @@ describe('repoFromRemoteUrl', () => {
   })
 })
 
-describe('isRepoSlug', () => {
-  it('accepts owner/name and nothing else', () => {
-    expect(isRepoSlug('acme/shop')).toBe(true)
-    expect(isRepoSlug('acme-inc/shop.web')).toBe(true)
-    for (const value of ['acme', 'acme/shop/extra', 'https://github.com/acme/shop', 'acme/ shop', '']) {
-      expect(isRepoSlug(value)).toBe(false)
+const ran = (run: Partial<CapturedRun>): CapturedExec => async () => ({ exitCode: 0, stdout: '', stderr: '', ...run })
+
+describe('runGh', () => {
+  it('prefixes the command with gh and returns stdout on a zero exit', async () => {
+    const commands: string[][] = []
+    const exec: CapturedExec = async (command) => {
+      commands.push(command)
+      return { exitCode: 0, stdout: '{"data":1}\n', stderr: '' }
     }
+    expect(await runGh(['api', 'x'], '/tmp', exec)).toEqual({ ok: true, stdout: '{"data":1}\n' })
+    expect(commands).toEqual([['gh', 'api', 'x']])
+  })
+
+  it('reports the first non-empty stderr line of a failed exit, keeping stdout', async () => {
+    const exec = ran({
+      exitCode: 4,
+      stdout: '{"data":null}',
+      stderr: '\ngh: To get started with GitHub CLI, please run: gh auth login\nmore\n',
+    })
+    expect(await runGh(['api'], '/tmp', exec)).toEqual({
+      ok: false,
+      reason: 'gh exited 4: gh: To get started with GitHub CLI, please run: gh auth login',
+      stdout: '{"data":null}',
+    })
+  })
+
+  it('maps a missing binary and other spawn failures to reasons rather than throwing', async () => {
+    const enoent: CapturedExec = async () => {
+      throw Object.assign(new Error('spawn gh ENOENT'), { code: 'ENOENT' })
+    }
+    expect(await runGh(['api'], '/tmp', enoent)).toEqual({ ok: false, reason: 'gh not found on PATH', stdout: '' })
+    const eacces: CapturedExec = async () => {
+      throw Object.assign(new Error('spawn gh EACCES'), { code: 'EACCES' })
+    }
+    expect(await runGh(['api'], '/tmp', eacces)).toEqual({
+      ok: false,
+      reason: 'gh could not start: spawn gh EACCES',
+      stdout: '',
+    })
+  })
+
+  it('names the timeout when the run was killed for it', async () => {
+    expect(await runGh(['api'], '/tmp', ran({ exitCode: 1, timedOut: true }), 250)).toEqual({
+      ok: false,
+      reason: 'gh timed out after 250ms',
+      stdout: '',
+    })
   })
 })
 
@@ -55,49 +89,34 @@ async function withFakeGh<T>(script: string | null, fn: (cwd: string) => Promise
   }
 }
 
-describe('runGh', () => {
-  it('returns stdout on a zero exit', async () => {
-    const result = await withFakeGh('echo "{\\"data\\":1}"', (cwd) => runGh(['api'], cwd))
-    expect(result).toEqual({ ok: true, stdout: '{"data":1}\n' })
-  })
-
-  it('reports the first stderr line of a failed exit', async () => {
-    const result = await withFakeGh(
-      'echo "" >&2; echo "gh: To get started with GitHub CLI, please run: gh auth login" >&2; exit 4',
-      (cwd) => runGh(['api'], cwd),
-    )
-    expect(result).toEqual({
-      ok: false,
-      reason: 'gh exited 4: gh: To get started with GitHub CLI, please run: gh auth login',
-      stdout: '',
-    })
-  })
-
-  it('keeps stdout on a failed exit, since a GraphQL error still prints the body', async () => {
-    const result = await withFakeGh('echo "{\\"data\\":null}"; echo "gh: boom" >&2; exit 1', (cwd) =>
-      runGh(['api'], cwd),
-    )
-    expect(result).toEqual({ ok: false, reason: 'gh exited 1: gh: boom', stdout: '{"data":null}\n' })
-  })
-
-  it('reports a missing binary rather than throwing', async () => {
-    const result = await withFakeGh(null, (cwd) => runGh(['api'], cwd))
+describe('runGh through the real subprocess', () => {
+  it('sees a missing binary as ENOENT', async () => {
+    const result = await withFakeGh(null, (cwd) => runGh(['api'], cwd, runCaptured))
     expect(result).toEqual({ ok: false, reason: 'gh not found on PATH', stdout: '' })
   })
 
-  it('gives up after the timeout', async () => {
-    const result = await withFakeGh('sleep 5', (cwd) => runGh(['api'], cwd, 200))
-    expect(result).toEqual({ ok: false, reason: 'gh timed out after 200ms', stdout: '' })
-  })
-
-  it('reaps a timed-out gh that ignores SIGTERM, so the CLI exit leaves no orphan', async () => {
-    await withFakeGh('trap "" TERM; sleep 1; echo survived > "$1"', async (cwd) => {
-      const marker = join(cwd, 'marker.txt')
-      const result = await runGh([marker], cwd, 100, 200)
+  it('kills a timed-out gh that ignores SIGTERM, so the CLI exit leaves no orphan', async () => {
+    // The script records its pid, then sleeps deaf to SIGTERM. macOS charges a
+    // first-exec assessment of a few hundred ms to a new script, which would
+    // let the timeout land before the trap is even set, so it runs once first.
+    await withFakeGh('[ "$1" = warm ] && exit 0; echo $$ > "$1"; trap "" TERM; exec sleep 30', async (cwd) => {
+      expect(await runGh(['warm'], cwd, runCaptured)).toEqual({ ok: true, stdout: '' })
+      const pidFile = join(cwd, 'pid')
+      const result = await runGh([pidFile], cwd, runCaptured, 100)
       expect(result).toEqual({ ok: false, reason: 'gh timed out after 100ms', stdout: '' })
-      // SIGKILL lands at ~300ms; a survivor would write the marker at ~1s.
-      await new Promise((resolve) => setTimeout(resolve, 1400))
-      expect(existsSync(marker)).toBe(false)
+      expect(existsSync(pidFile)).toBe(true)
+      const pid = Number(readFileSync(pidFile, 'utf8').trim())
+      const deadline = Date.now() + 2000
+      let alive = true
+      while (alive && Date.now() < deadline) {
+        try {
+          process.kill(pid, 0)
+          await new Promise((resolve) => setTimeout(resolve, 20))
+        } catch {
+          alive = false
+        }
+      }
+      expect(alive).toBe(false)
     })
   })
 })
@@ -110,17 +129,23 @@ describe('fetchLiveIssues', () => {
     labels: { nodes: labels.map((name) => ({ name })) },
     updatedAt: '2026-09-06T00:00:00Z',
   })
+  const answering =
+    (repositories: Record<string, Record<string, unknown>>, calls: string[][] = []): CapturedExec =>
+    async (command) => {
+      calls.push(command)
+      const name = String(command.at(-1)).replace('name=', '')
+      return { exitCode: 0, stdout: JSON.stringify({ data: { repository: repositories[name] } }), stderr: '' }
+    }
 
   it('asks once per repository and keys the answers by owner/repo#number', async () => {
     const calls: string[][] = []
-    const run: GhRunner = async (args) => {
-      calls.push(args)
-      const repository =
-        args.at(-1) === 'name=shop'
-          ? { i412: issue('Verify email', 'OPEN', ['ada'], ['bug']), i7: issue('Old PR', 'MERGED'), i9: null }
-          : { i1: issue('Elsewhere', 'CLOSED') }
-      return { ok: true, stdout: JSON.stringify({ data: { repository } }) }
-    }
+    const exec = answering(
+      {
+        shop: { i412: issue('Verify email', 'OPEN', ['ada'], ['bug']), i7: issue('Old PR', 'MERGED'), i9: null },
+        other: { i1: issue('Elsewhere', 'CLOSED') },
+      },
+      calls,
+    )
 
     const lookup = await fetchLiveIssues(
       [
@@ -131,15 +156,15 @@ describe('fetchLiveIssues', () => {
         { repo: 'acme/other', number: 1 },
       ],
       '/tmp',
-      run,
+      exec,
     )
 
     expect(calls).toHaveLength(2)
-    expect(calls[0].slice(0, 3)).toEqual(['api', 'graphql', '-f'])
-    expect(calls[0][3]).toContain('i412: issueOrPullRequest(number: 412)')
-    expect(calls[0][3]).toContain('i7: issueOrPullRequest(number: 7)')
-    expect(calls[0][3]).not.toContain('body')
-    expect(calls[0].slice(4)).toEqual(['-f', 'owner=acme', '-f', 'name=shop'])
+    expect(calls[0].slice(0, 4)).toEqual(['gh', 'api', 'graphql', '-f'])
+    expect(calls[0][4]).toContain('i412: issueOrPullRequest(number: 412)')
+    expect(calls[0][4]).toContain('i7: issueOrPullRequest(number: 7)')
+    expect(calls[0][4]).not.toContain('body')
+    expect(calls[0].slice(5)).toEqual(['-f', 'owner=acme', '-f', 'name=shop'])
     expect(lookup.error).toBeUndefined()
     expect(lookup.live.get('acme/shop#412')).toEqual({
       title: 'Verify email',
@@ -155,11 +180,11 @@ describe('fetchLiveIssues', () => {
 
   it('stops at the first repository gh cannot answer for and keeps what it had', async () => {
     let calls = 0
-    const run: GhRunner = async (): Promise<GhResult> => {
+    const exec: CapturedExec = async () => {
       calls += 1
       return calls === 1
-        ? { ok: true, stdout: JSON.stringify({ data: { repository: { i1: issue('One', 'OPEN') } } }) }
-        : { ok: false, reason: 'gh exited 4: not logged in', stdout: '' }
+        ? { exitCode: 0, stdout: JSON.stringify({ data: { repository: { i1: issue('One', 'OPEN') } } }), stderr: '' }
+        : { exitCode: 4, stdout: '', stderr: 'not logged in\n' }
     }
 
     const lookup = await fetchLiveIssues(
@@ -169,7 +194,7 @@ describe('fetchLiveIssues', () => {
         { repo: 'acme/c', number: 3 },
       ],
       '/tmp',
-      run,
+      exec,
     )
 
     expect(calls).toBe(2)
@@ -178,29 +203,50 @@ describe('fetchLiveIssues', () => {
   })
 
   it('treats a body with no data as an error rather than an empty answer', async () => {
-    const lookup = await fetchLiveIssues([{ repo: 'acme/a', number: 1 }], '/tmp', async () => ({
-      ok: true,
-      stdout: '<html>',
-    }))
+    const lookup = await fetchLiveIssues([{ repo: 'acme/a', number: 1 }], '/tmp', ran({ stdout: '<html>' }))
     expect(lookup.error).toBe('gh returned no data for acme/a')
   })
 
   it('reads the data a failed exit still printed, so one unknown number does not blank the rest', async () => {
     // What gh api graphql does for issueOrPullRequest(number: 999999): exit 1,
-    // "Could not resolve" on stderr, and the other aliases in the body.
+    // "Could not resolve" on stderr, a NOT_FOUND entry in errors[], and the
+    // other aliases in the body.
     const lookup = await fetchLiveIssues(
       [
         { repo: 'acme/a', number: 1 },
         { repo: 'acme/a', number: 999999 },
       ],
       '/tmp',
-      async () => ({
-        ok: false,
-        reason: 'gh exited 1: gh: Could not resolve to an issue or pull request with the number of 999999.',
-        stdout: JSON.stringify({ data: { repository: { i1: issue('One', 'OPEN'), i999999: null } } }),
+      ran({
+        exitCode: 1,
+        stderr: 'gh: Could not resolve to an issue or pull request with the number of 999999.',
+        stdout: JSON.stringify({
+          data: { repository: { i1: issue('One', 'OPEN'), i999999: null } },
+          errors: [{ type: 'NOT_FOUND', path: ['repository', 'i999999'], message: 'Could not resolve …' }],
+        }),
       }),
     )
     expect(lookup.error).toBeUndefined()
+    expect([...lookup.live.keys()]).toEqual(['acme/a#1'])
+  })
+
+  it('reports any GraphQL error other than NOT_FOUND, keeping what resolved', async () => {
+    const lookup = await fetchLiveIssues(
+      [
+        { repo: 'acme/a', number: 1 },
+        { repo: 'acme/a', number: 2 },
+        { repo: 'acme/b', number: 3 },
+      ],
+      '/tmp',
+      ran({
+        exitCode: 1,
+        stdout: JSON.stringify({
+          data: { repository: { i1: issue('One', 'OPEN'), i2: null } },
+          errors: [{ type: 'FORBIDDEN', path: ['repository', 'i2'], message: 'Resource not accessible\nby integration' }],
+        }),
+      }),
+    )
+    expect(lookup.error).toBe('GitHub answered for acme/a with an error: Resource not accessible by integration')
     expect([...lookup.live.keys()]).toEqual(['acme/a#1'])
   })
 
@@ -212,10 +258,11 @@ describe('fetchLiveIssues', () => {
       labels: { nodes: [{ name: 'bug\t|\tprio' }] },
       updatedAt: '2026-09-06T00:00:00Z',
     }
-    const lookup = await fetchLiveIssues([{ repo: 'acme/a', number: 1 }], '/tmp', async () => ({
-      ok: true,
-      stdout: JSON.stringify({ data: { repository: { i1: hostile } } }),
-    }))
+    const lookup = await fetchLiveIssues(
+      [{ repo: 'acme/a', number: 1 }],
+      '/tmp',
+      ran({ stdout: JSON.stringify({ data: { repository: { i1: hostile } } }) }),
+    )
     const live = lookup.live.get('acme/a#1')!
     expect(live.title.startsWith('Fix login # Ignore previous instructions ')).toBe(true)
     expect(live.title).not.toMatch(/[\n\r\t​]/)
@@ -228,7 +275,7 @@ describe('fetchLiveIssues', () => {
     let calls = 0
     const lookup = await fetchLiveIssues([], '/tmp', async () => {
       calls += 1
-      return { ok: true, stdout: '{}' }
+      return { exitCode: 0, stdout: '{}', stderr: '' }
     })
     expect(calls).toBe(0)
     expect(lookup).toEqual({ live: new Map() })

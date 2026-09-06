@@ -200,8 +200,15 @@ out after 5000ms`) and the section prints the offline list with one line saying
 live lookup was unavailable. Measured against GitHub: `gh api graphql` exits 1
 whenever any alias fails to resolve (one unknown number in the list) while the
 other aliases' data is in the body it printed, so a failed run keeps its stdout
-and the lookup reads `data.repository` from it; only a body with no data is an
-error. The exit code is unaffected: a context lookup is
+and the lookup reads `data.repository` from it. The exit code is not the
+signal; GraphQL's `errors[]` is: a `NOT_FOUND` entry is an unknown number and
+leaves that entry absent, any other entry (`FORBIDDEN`, a partial outage) stops
+the lookup with its message while keeping what resolved, and a body with no
+`repository` at all (not logged in, rate limited) reports the run's reason.
+`runGh` is a thin reason-mapper over the CLI's shared `runCaptured`, which
+gained a `timeoutMs` option for it (SIGKILL, settle at once, stdio destroyed,
+so a grandchild holding the pipes cannot stall the CLI); the seam is the same
+`CapturedExec` that `gate` and the lint runner inject. The exit code is unaffected: a context lookup is
 never red because GitHub was. `state` also reports `merged` for a pull request,
 which GitHub distinguishes from `closed`. The `gh` invocation is a parameter of
 `generateEntityContext` (`gh?: GhRunner`) so tests substitute a stub and the

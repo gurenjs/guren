@@ -32,8 +32,9 @@ import {
 } from './context-route'
 import { extractInertiaPageRefs, describeInertiaPage } from './inertia-pages'
 import { scanDocs, extractDocsTags, buildEntityDocIndex, type DocRef } from './docs-index'
-import { describeIssue, type IssueLink } from './issue-refs'
-import { fetchLiveIssues, isRepoSlug, resolveOriginRepo, type GhRunner, type LiveIssue } from './github'
+import { describeIssue, isRepoSlug, type IssueLink } from './issue-refs'
+import { fetchLiveIssues, resolveOriginRepo, type LiveIssue } from './github'
+import type { CapturedExec } from './subprocess'
 import { parseSchemaTableColumns } from './schema-parser'
 
 export interface EntityPage {
@@ -137,8 +138,8 @@ export interface EntityContextOptions {
   live?: boolean
   /** `owner/name` to resolve bare issue numbers against, instead of the `origin` remote. */
   repo?: string
-  /** The `gh` invocation `live` uses; tests pass a stub. */
-  gh?: GhRunner
+  /** How `live` runs `gh`; tests pass a stub, like `gate`'s `exec`. */
+  gh?: CapturedExec
 }
 
 /**
@@ -228,6 +229,10 @@ export async function generateEntityContext(
   options: EntityContextOptions = {},
 ): Promise<EntityContext> {
   const cwd = resolve(options.cwd ?? process.cwd())
+  // Before any scan: a mistyped --repo should not cost the whole bundle first.
+  if (options.repo !== undefined && !isRepoSlug(options.repo)) {
+    throw new Error(`Invalid --repo "${options.repo}" — write it as owner/name.`)
+  }
 
   const models = await discoverParsedModels(cwd)
   const lower = entityName.toLowerCase()
@@ -421,13 +426,10 @@ async function collectEntityIssues(
   refs: DocRef[],
   options: Pick<EntityContextOptions, 'live' | 'repo' | 'gh'>,
 ): Promise<Pick<EntityContext, 'issues' | 'issuesLiveRequested' | 'issuesLiveError'>> {
-  if (options.repo !== undefined && !isRepoSlug(options.repo)) {
-    throw new Error(`Invalid --repo "${options.repo}" — write it as owner/name.`)
-  }
   // The git spawn happens only for an entity whose docs declare something,
   // and not at all when the caller named the repository.
-  const requested = options.live ? { issuesLiveRequested: true } : {}
-  if (!refs.some((ref) => ref.issues.length > 0)) return { issues: [], ...requested }
+  const issuesLiveRequested = options.live || undefined
+  if (!refs.some((ref) => ref.issues.length > 0)) return { issues: [], issuesLiveRequested }
 
   const originRepo = options.repo ?? (await resolveOriginRepo(cwd))
   const byLabel = new Map<string, EntityIssue>()
@@ -466,9 +468,7 @@ async function collectEntityIssues(
     const live = lookup.live.get(issue.label)
     if (live) issue.live = live
   }
-  return lookup.error === undefined
-    ? { issues, ...requested }
-    : { issues, ...requested, issuesLiveError: lookup.error }
+  return { issues, issuesLiveRequested, issuesLiveError: lookup.error }
 }
 
 /**

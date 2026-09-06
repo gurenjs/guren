@@ -30,7 +30,14 @@ export interface IssueLink {
 export const ISSUE_REF_FORMS =
   '412, "#412", owner/repo#412, or an issue/PR URL (no spaces, quotes, commas or backslashes)'
 
-const REPO_SEGMENT = '[A-Za-z0-9_.-]+'
+/** One `owner` or `name` segment of a GitHub repository, the alphabet every repo rule shares. */
+export const REPO_SEGMENT = '[A-Za-z0-9_.-]+'
+const REPO_SLUG_RE = new RegExp(`^${REPO_SEGMENT}/${REPO_SEGMENT}$`)
+
+/** Whether `value` is an `owner/name` slug, the form `--repo` takes. */
+export function isRepoSlug(value: string): boolean {
+  return REPO_SLUG_RE.test(value)
+}
 // A URL character set that survives every place a reference travels: the
 // comma-split `--issue` list, the double-quoted YAML scalar make:adr writes,
 // and the inline-list frontmatter the scanner splits on unquoted commas.

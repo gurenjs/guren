@@ -12,7 +12,8 @@ import { runDocsCheck } from '../src/docs-check'
 import { generateEntityContext, renderEntityContextMarkdown } from '../src/entity-context'
 import { buildDocsViewerData } from '../src/docs-viewer'
 import { makeAdr } from '../src/make-adr'
-import { resolveOriginRepo, type GhRunner } from '../src/github'
+import { resolveOriginRepo } from '../src/github'
+import type { CapturedExec } from '../src/subprocess'
 import { createTempWorkspace, writeWorkspaceFiles } from './helpers'
 
 const ADR_WITH_ISSUES = `---
@@ -173,9 +174,10 @@ describe('guren context <Entity> linked issues', () => {
 })
 
 describe('guren context --live and --repo', () => {
-  const graphqlAnswer = (repository: Record<string, unknown>): GhRunner => async () => ({
-    ok: true,
+  const graphqlAnswer = (repository: Record<string, unknown>): CapturedExec => async () => ({
+    exitCode: 0,
     stdout: JSON.stringify({ data: { repository } }),
+    stderr: '',
   })
   const openIssue = {
     title: 'Users verify email before posting',
@@ -190,17 +192,17 @@ describe('guren context --live and --repo', () => {
     try {
       await writeApp(workspace.dir)
       const calls: string[][] = []
-      const gh: GhRunner = async (args, cwd) => {
-        calls.push(args)
+      const gh: CapturedExec = async (command, cwd) => {
+        calls.push(command)
         expect(cwd).toBe(workspace.dir)
-        return graphqlAnswer({ i412: openIssue, i398: null })(args, cwd)
+        return { exitCode: 0, stdout: JSON.stringify({ data: { repository: { i412: openIssue, i398: null } } }), stderr: '' }
       }
 
       const ctx = await generateEntityContext('Post', { cwd: workspace.dir, live: true, repo: 'acme/shop', gh })
 
       // One call per repository: acme/shop carries every number here.
       expect(calls).toHaveLength(1)
-      expect(calls[0][3]).toContain('i412: issueOrPullRequest(number: 412)')
+      expect(calls[0][4]).toContain('i412: issueOrPullRequest(number: 412)')
       expect(ctx.issuesLiveError).toBeUndefined()
       const byLabel = new Map(ctx.issues.map((issue) => [issue.label, issue]))
       expect(byLabel.get('acme/shop#412')?.live).toEqual({
@@ -227,7 +229,9 @@ describe('guren context --live and --repo', () => {
     const workspace = await createTempWorkspace('guren-cli-docs-issues-live-error-')
     try {
       await writeApp(workspace.dir)
-      const gh: GhRunner = async () => ({ ok: false, reason: 'gh not found on PATH', stdout: '' })
+      const gh: CapturedExec = async () => {
+        throw Object.assign(new Error('spawn gh ENOENT'), { code: 'ENOENT' })
+      }
 
       const ctx = await generateEntityContext('Post', { cwd: workspace.dir, live: true, repo: 'acme/shop', gh })
 
@@ -250,9 +254,9 @@ describe('guren context --live and --repo', () => {
     try {
       await writeApp(workspace.dir)
       let calls = 0
-      const gh: GhRunner = async () => {
+      const gh: CapturedExec = async () => {
         calls += 1
-        return { ok: true, stdout: '{}' }
+        return { exitCode: 0, stdout: '{}', stderr: '' }
       }
 
       await generateEntityContext('Post', { cwd: workspace.dir, gh })
@@ -275,9 +279,9 @@ describe('guren context --live and --repo', () => {
         'docs/adr/0001-x.md': '---\ntype: adr\nentities: [Post]\nissues: [https://gitlab.example.com/i/5]\n---\n# X\n',
       })
       let calls = 0
-      const gh: GhRunner = async () => {
+      const gh: CapturedExec = async () => {
         calls += 1
-        return { ok: true, stdout: '{}' }
+        return { exitCode: 0, stdout: '{}', stderr: '' }
       }
 
       const ctx = await generateEntityContext('Post', { cwd: workspace.dir, live: true, gh })

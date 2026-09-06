@@ -34,7 +34,7 @@ import { makeModule } from './make-module'
 import { makeNotification } from './make-notification'
 import { makeProvider } from './make-provider'
 import { makeAdr } from './make-adr'
-import { ISSUE_REF_FORMS, splitIssueList } from './issue-refs'
+import { ISSUE_REF_FORMS, isRepoSlug, splitIssueList } from './issue-refs'
 import { writeSpecArtifacts } from './spec-generate'
 import { buildDocsGraphReport, renderDocsGraphMarkdown } from './docs-graph'
 import { makeResource } from './make-resource'
@@ -2427,6 +2427,9 @@ const contextCommand = defineCommand({
     const routesFile = args.routes
     const json = Boolean(args.json)
     const entity = args.entity ?? args._[0]
+    if (args.repo !== undefined && !isRepoSlug(args.repo)) {
+      throw new UsageError(`--repo must be owner/name, got "${args.repo}".`)
+    }
 
     if (entity) {
       await displayEntityContext(entity, {
@@ -2434,7 +2437,7 @@ const contextCommand = defineCommand({
         json,
         routesFile,
         module: args.module,
-        live: Boolean(args.live),
+        live: args.live,
         repo: args.repo,
       })
       return
