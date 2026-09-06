@@ -2674,7 +2674,7 @@ function reportAgentHarnessResult(result: AgentHarnessResult): void {
       )
     }
   }
-  for (const hint of result.mcpMergeHints) {
+  for (const hint of result.mergeHints) {
     consola.info(
       `${hint.path} already exists, so it was left alone. Add ${hint.what} to it yourself:\n${hint.snippet}`,
     )

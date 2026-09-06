@@ -18,8 +18,9 @@ so make them part of your loop:
    you touched. Cursor and Codex run it for you from a stop hook
    (`.cursor/hooks.json`, `.codex/hooks.json`) when a turn ends with
    uncommitted changes, feeding the findings back into the turn (Codex asks
-   you to trust the hook once, via `/hooks`); Copilot and OpenCode have no
-   such hook, so run it yourself.
+   you to trust the hook once, via `/hooks`; Cursor reads the config from the
+   workspace root, so open the app as its own workspace); Copilot and
+   OpenCode have no such hook, so run it yourself.
 4. Framework-managed files (`.agents/rules/`, `.agents/skills/`) can be
    refreshed anytime with `bunx guren agent:sync`.
 

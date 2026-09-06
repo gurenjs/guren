@@ -5,9 +5,10 @@ import { linkOxlint, runAgentHook } from './helpers'
 
 // The oxlint half of the edit hook (see runAgentHook for how it is driven). The
 // edited files sit outside the watched paths, so `guren check` never runs here;
-// it is covered by its own tests.
+// it is covered by its own tests. The hook is handed the path the editor reports,
+// which is absolute.
 
-const hook = resolve(import.meta.dir, '../templates/agent/targets/claude/hooks/check-after-edit.ts')
+const template = resolve(import.meta.dir, '../templates/agent/targets/claude/hooks/check-after-edit.ts')
 // A built-in rule keeps the test independent of which plugin the app configures.
 const CONFIG = JSON.stringify({ rules: { 'no-debugger': 'warn' } })
 
@@ -16,7 +17,7 @@ function runHook(
   editedFile: string,
   options: { installed?: boolean } = {},
 ): Promise<{ exitCode: number; stderr: string }> {
-  return runAgentHook(hook, { tool_input: { file_path: editedFile } }, async (dir) => {
+  return runAgentHook(template, '.claude/hooks/check-after-edit.ts', { tool_input: { file_path: editedFile } }, async (dir) => {
     if (options.installed !== false) await linkOxlint(dir)
     app(dir)
   })

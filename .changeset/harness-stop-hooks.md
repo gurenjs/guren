@@ -10,10 +10,16 @@ and `.codex/hooks/gate-on-stop.ts`. Both run `guren gate` when a turn ends
 with uncommitted changes and feed a failing stage's findings back into the
 turn: Cursor as an automatic follow-up message (bounded by `loop_limit`),
 Codex by blocking the stop once, the same contract as the Claude Code hook
-(Codex resolves the script from the git root, since it runs hooks in the
-session cwd, and runs a project hook only after `/hooks` trusts it). When
-Cursor loads `.claude/settings.json` hooks through its third-party setting,
-the Claude hook steps aside so the gate runs once.
+(Codex runs hooks in the session cwd, so its config finds the app's `.codex/`
+upward from there, and runs a project hook only after `/hooks` trusts it).
+Every hook gates the app it is installed in, which a monorepo app makes
+distinct from the git root. A host that loads `.claude/settings.json` without
+speaking its contract (Cursor's third-party setting) is left to its own hook,
+so the gate runs once. `agent:sync` now detects a Codex install by its managed
+hook and refreshes it.
+
+`.claude/settings.json` is merge-hinted like the MCP configs: an app whose
+settings predate the stop hook is shown the snippet to add.
 The hook configs are user-owned like the MCP configs: an existing file is
 left alone and the snippet to merge is printed. Copilot and OpenCode have no
 turn-end hook that can feed output back, so they stay on the `AGENTS.md`

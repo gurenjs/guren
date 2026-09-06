@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import { describeGateFailures, GATE_STAGES, runGate, type GateExec, type GateExecResult, type GateReport } from '../src/gate'
-import { createTempWorkspace, gateAppFiles, linkOxlint, writeWorkspaceFiles } from './helpers'
+import { createTempWorkspace, gateAppFiles, initGitRepo, linkOxlint, writeWorkspaceFiles } from './helpers'
 
 const SCRIPTS = { codegen: 'guren codegen', typecheck: 'tsc --noEmit', test: 'bun test' }
 
@@ -175,8 +175,7 @@ describe('runGate', () => {
   it('--changed narrows lint to changed lintable files and skips when there are none', async () => {
     const files = { ...gateAppFiles(SCRIPTS), '.oxlintrc.json': '{}', 'lib.ts': 'export const a = 1\n', '.guren/x.ts': 'debugger\n', 'README.md': 'x' }
     await withApp('changed', files, async (dir) => {
-      // Untracked files in a fresh repository are the changed set.
-      Bun.spawnSync(['git', 'init', '-q'], { cwd: dir })
+      initGitRepo(dir)
       const { exec, calls } = fakeExec()
 
       const report = await runGate({ cwd: dir, changed: true, exec })

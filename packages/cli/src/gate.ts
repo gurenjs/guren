@@ -13,7 +13,7 @@ import { readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { consola } from 'consola'
 import { runAudit } from './audit'
-import { getChangedFiles } from './changed-files'
+import { getChangedFiles, runGit } from './changed-files'
 import { runCheck } from './check'
 import { formatFinding, gatingResults } from './check-result'
 import { cliEntry } from './cli-entry'
@@ -244,14 +244,15 @@ export async function runGate(options: RunGateOptions = {}): Promise<GateReport>
 }
 
 /**
- * The stop-hook verdict for an agent ending a turn in `cwd`: `null` when the
- * working tree is clean or the gate passes, else the failures as text to feed
- * back. Outside a git repository the tree cannot be judged clean, so the gate
+ * The stop-hook verdict for an agent ending a turn in the app at `cwd`: `null` when
+ * the app's working tree is clean or the gate passes, else the failures as text to
+ * feed back. Outside a git repository the tree cannot be judged clean, so the gate
  * runs. Shared by every agent's stop hook; only the stdin/stdout contract differs.
  */
 export async function stopGateFindings(cwd = process.cwd()): Promise<string | null> {
-  const tree = await runCaptured(['git', 'status', '--porcelain'], cwd).catch(() => null)
-  if (tree?.exitCode === 0 && tree.stdout.trim() === '') return null
+  // Scoped to the app: a monorepo app is not the git root.
+  const tree = await runGit(cwd, ['status', '--porcelain', '--', '.'])
+  if (tree?.length === 0) return null
   // `--changed`: check and lint on what this session touched; typecheck, audit,
   // and the tests answer for the whole app either way.
   const report = await runGate({ cwd, changed: true })
@@ -259,7 +260,7 @@ export async function stopGateFindings(cwd = process.cwd()): Promise<string | nu
   return `${describeGateFailures(report)}\nRun \`bunx guren gate\` to see every stage.`
 }
 
-/** The failing stages as plain text: what a hook feeds back to the agent. */
+/** The failing stages as plain text, one line per finding. */
 export function describeGateFailures(report: GateReport): string {
   const lines: string[] = []
   for (const stage of report.stages) {

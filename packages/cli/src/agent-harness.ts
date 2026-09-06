@@ -86,7 +86,7 @@ export interface AgentHarnessResult {
    * Guren entry. They routinely carry unrelated user configuration, so the installer
    * never merges into them — it reports the snippet to add by hand, and `what` it adds.
    */
-  mcpMergeHints: Array<{ path: string; snippet: string; what: string }>
+  mergeHints: Array<{ path: string; snippet: string; what: string }>
 }
 
 /** `\r\n` → `\n`, for the up-to-date comparison in the write loop. */
@@ -316,7 +316,7 @@ export async function installAgentHarness(options: AgentHarnessOptions = {}): Pr
   const replaced: string[] = []
   const unchanged: string[] = []
   const skipped: string[] = []
-  const mcpMergeHints: AgentHarnessResult['mcpMergeHints'] = []
+  const mergeHints: AgentHarnessResult['mergeHints'] = []
 
   const plan = planComponents(components, templates, appTitle)
   for (const file of plan) {
@@ -330,10 +330,10 @@ export async function installAgentHarness(options: AgentHarnessOptions = {}): Pr
       skipped.push(file.path)
       // Onboarding guidance, not a recurring nag: sync stays quiet about a
       // config the user has decided to keep without the Guren endpoint.
-      if (file.mergeMarker && mode === 'init') {
+      if (file.merge && mode === 'init') {
         const current = (await readIfExists(cwd, file.path)) ?? ''
-        if (!current.includes(file.mergeMarker)) {
-          mcpMergeHints.push({ path: file.path, snippet: file.content, what: file.mergeHint ?? 'the Guren entry' })
+        if (!current.includes(file.merge.marker)) {
+          mergeHints.push({ path: file.path, snippet: file.content, what: file.merge.hint })
         }
       }
       continue
@@ -396,6 +396,6 @@ export async function installAgentHarness(options: AgentHarnessOptions = {}): Pr
     stale,
     pruned,
     mcpEndpointNotEnabled: !(await scriptsEnableMcp(cwd)),
-    mcpMergeHints,
+    mergeHints,
   }
 }

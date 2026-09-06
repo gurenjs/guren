@@ -1,21 +1,24 @@
 #!/usr/bin/env bun
 /**
- * Cursor `stop` hook: when the agent ends a turn with uncommitted changes, run
- * `guren gate` (the CI stages: codegen, typecheck, lint, check, audit, test) and
- * hand the findings back as a `followup_message`, which Cursor submits as the
- * next user message, so the fix happens in this conversation rather than in CI.
+ * Cursor `stop` hook: when a completed turn ends with uncommitted changes in this
+ * app, run `guren gate` (the CI stages: codegen, typecheck, lint, check, audit,
+ * test) and hand the findings back as a `followup_message`, which Cursor submits
+ * as the next user message, so the fix happens in this conversation rather than
+ * in CI. A clean tree is not gated, so a turn that ends by committing is not
+ * gated here: run `guren gate` before committing.
  *
- * Bounded by `loop_limit` in .cursor/hooks.json (Cursor counts the follow-ups
- * this hook triggers per conversation). A clean working tree is not gated,
- * which also means a turn that ends by committing is not gated here: run
- * `guren gate` before committing. Only a completed turn is gated.
+ * Bounded twice: `loop_count` here (Cursor counts this hook's follow-ups per
+ * conversation) and `loop_limit` in .cursor/hooks.json, which is user-owned.
+ * The app root is this script's grandparent (`<app>/.cursor/hooks/`).
  */
+import { resolve } from 'node:path'
 
-// A module, so the top-level awaits below typecheck.
-export {}
+/** Follow-ups this hook may trigger per conversation. */
+const MAX_FOLLOW_UPS = 3
 
 interface HookInput {
   status?: 'completed' | 'aborted' | 'error'
+  loop_count?: number
 }
 
 function followUp(message: string): never {
@@ -29,7 +32,7 @@ try {
 } catch {
   process.exit(0)
 }
-if (input.status !== 'completed') {
+if (input.status !== 'completed' || (input.loop_count ?? 0) >= MAX_FOLLOW_UPS) {
   process.exit(0)
 }
 
@@ -41,8 +44,8 @@ try {
   followUp('guren gate could not run: @guren/cli is not resolvable from this app (run `bun install`).')
 }
 
-const findings = await cli.stopGateFindings()
+const findings = await cli.stopGateFindings(resolve(import.meta.dir, '../..'))
 if (findings === null) {
   process.exit(0)
 }
-followUp(`${findings}\nFix these, then run \`bunx guren gate\` until it exits 0.`)
+followUp(findings)
