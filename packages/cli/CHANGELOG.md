@@ -1,5 +1,169 @@
 # @guren/cli
 
+## 2.16.0
+
+### Minor Changes
+
+- 20c2bc7: `make:agent`, and `guren check` now reads the agent registry
+
+  `bunx guren make:agent Triager` scaffolds a durable agent — and, more
+  importantly, the two things that make it real: it registers the class in
+  `config/agents.ts`, and it extends `guren.arch.ts` with the boundary that keeps
+  agent code off your models, `db/`, and `@guren/orm`. An agent acts through the
+  tool surface or not at all, and that is now enforced by the existing
+  `guren check --arch` gate rather than left to review.
+
+  Both edits go through the AST, and anything it cannot patch is reported with
+  the exact text to paste rather than skipped — a class that looks registered and
+  is not would deploy as an agent that never runs.
+
+  `guren check` gains an agent-registry check, content-activated so an app
+  without `config/agents.ts` is unaffected. It fails on a registry the Cloudflare
+  build cannot read statically (a spread, a computed key, a `module` assembled
+  from a variable — all valid TypeScript that would leave the deploy with no
+  agents mounted), on a `module` that does not exist or does not export the class
+  it names, and on a scope a registration may not hold. It warns when an agent is
+  scoped to a tool no route declares. Under `--json` the report carries what each
+  agent's scopes expand to, recomputed from the route graph on every run.
+
+- 7543926: Link docs to the GitHub issues they belong to (RFC 0018 Part 1)
+
+  A concept document under `docs/` may now declare `issues:` alongside
+  `entities:` and `related:`: `issues: [412, "acme/shop#398", https://github.com/acme/shop/pull/9]`.
+  The task list, progress and assignee stay on the issue; the document carries
+  the decision and this one link, so nothing describing a change is committed to
+  the corpus that describes the system.
+
+  - `guren check --docs` warns on an entry in no accepted form. It checks shape
+    only and never asks GitHub whether an issue exists, so the gate stays
+    deterministic and offline.
+  - `guren context <Entity>` ends with a **Linked issues** section (and an
+    `issues` array in `--json`): every issue the entity's linked docs declare,
+    de-duplicated, each naming the docs that declared it. Read from the
+    frontmatter alone; a bare number resolves to the `origin` remote's
+    repository when there is one.
+  - `make:adr --issue <ref>` (repeatable, or comma-separated) prefills
+    `issues:`; a malformed reference fails before anything is written.
+  - The docs viewer's detail panel shows the issues as outlinks. They are not
+    graph nodes and carry no live state.
+
+- 3ab8169: `guren gate`: one exit-coded verdict on a change
+
+  `bunx guren gate` runs the stages the scaffolded CI runs — codegen, typecheck, lint, `check`
+  (the `--ci` rule), `audit`, and the test suite — reports every
+  stage, and exits non-zero if any fails. A stage that cannot run (no oxlint
+  behind an `.oxlintrc.json`, no `typecheck` script, routes that will not load)
+  fails rather than skips; only an app with no `.oxlintrc.json` skips lint.
+  `--changed` narrows `check` and lint to the files changed against `main`,
+  `--deps` adds the dependency scan to the audit stage, and `--json` returns the
+  report. `runGate` and `describeGateFailures` are exported for hooks and tools.
+
+  The Claude Code harness gains a `Stop` hook (`.claude/hooks/gate-on-stop.ts`)
+  that runs the gate when a turn ends with uncommitted changes and blocks the stop
+  once with the findings, so the fix happens in the same turn rather than in CI.
+  `.claude/settings.json` is user-owned, so existing apps add the hook entry by
+  hand (or rerun `agent:init --force`); `agent:sync` delivers the hook file. The
+  `AGENTS.md` workflow for other agents now ends with the same command.
+
+  The edit hook's `guren check` step now applies the `check --ci` rule (warns
+  count, advisory checks do not) instead of reporting failures only, so the three
+  places that judge a change — the edit hook, the gate, and CI — agree. The hook
+  now reaches its oxlint run through `@guren/cli` as well, and reports a CLI it
+  cannot resolve rather than staying silent.
+
+  `guren audit` probes the app's routes entry the way `check` does, so an
+  API-only app (`routes/api.ts`, no `routes/web.ts`) is audited without
+  `--routes`; the flag still overrides.
+
+- 8d54caf: Stop hooks for Cursor and Codex, and `stopGateFindings`
+
+  `agent:init --target cursor` writes `.cursor/hooks.json` and
+  `.cursor/hooks/gate-on-stop.ts`; `--target codex` writes `.codex/hooks.json`
+  and `.codex/hooks/gate-on-stop.ts`. Both run `guren gate` when a turn ends
+  with uncommitted changes and feed a failing stage's findings back into the
+  turn: Cursor as an automatic follow-up message (bounded by `loop_limit`),
+  Codex by blocking the stop once, the same contract as the Claude Code hook
+  (Codex runs hooks in the session cwd, so its config finds the app's `.codex/`
+  upward from there, and runs a project hook only after `/hooks` trusts it).
+  Every hook gates the app it is installed in, which a monorepo app makes
+  distinct from the git root. A host that loads `.claude/settings.json` without
+  speaking its contract (Cursor's third-party setting) is left to its own hook,
+  so the gate runs once. `agent:sync` now detects a Codex install by its managed
+  hook and refreshes it.
+
+  `.claude/settings.json` is merge-hinted like the MCP configs: an app whose
+  settings predate the stop hook is shown the snippet to add.
+  The hook configs are user-owned like the MCP configs: an existing file is
+  left alone and the snippet to merge is printed. Copilot and OpenCode have no
+  turn-end hook that can feed output back, so they stay on the `AGENTS.md`
+  instruction to run the gate themselves.
+
+  `stopGateFindings(cwd)` is the shared verdict behind every stop hook: `null`
+  when the tree is clean or the gate passes, else the failures as text.
+
+- 634bcda: Report CSRF exemptions in `guren audit`
+
+  `Application.declareCookielessAuthPath()` exempts a path from CSRF
+  verification. It is public, so any installed package can call it — and a call
+  made from `node_modules` is invisible to review: the audit's source scan never
+  reads there, and no CLI command can observe the runtime set, because nothing in
+  the CLI boots an application.
+
+  `guren audit` now reports both sides.
+
+  - **Application CSRF exemptions** warns on a call in the app's own source. An
+    app author's lever is `csrfOptions.exclude`, which reads as a decision the app
+    made; suppress with `// guren-audit-ignore` where the framework method is
+    genuinely right.
+  - **Plugin CSRF exemptions** reads the JavaScript each Guren-facing _declared_
+    dependency ships (one that declares a `gurenPlugin` manifest, or depends on
+    `@guren/core`/`@guren/server`) and names every package that declares one. A
+    plugin reached only transitively is outside the scan, which reports how many
+    packages it covered (`csrfExemptionScan.packagesScanned`) so the scope is
+    visible rather than implied.
+    A package whose published name is outside the `@guren/` scope is a warning;
+    first-party packages are listed without one. Detection is a member call, not
+    a mention, so a package that merely names the method in a string or a comment
+    is not a declarer. It names packages, never paths — each path is an argument
+    computed at boot from that package's own configuration, so no static read can
+    know it.
+
+  A dependency that could not be read, or that ships more files than the walk
+  covers, is its own warning and reports `csrfExemptionScan.status: 'partial'` in
+  `--json` — a package the scan could not finish never reads as one that declares
+  nothing. Those coverage warnings carry no security classification, matching how
+  the audit already reports its own infrastructure failures.
+
+  `optionalDependencies` now count as declared dependencies wherever the CLI asks
+  that question, so `guren plugin`, `guren doctor`'s plugin report and deploy
+  target detection see a package declared there too.
+
+### Patch Changes
+
+- 923a3ee: `guren check` reads the agent registry path (`config/agents.ts`) from
+  `@guren/core/internal/deploy-build` instead of spelling it itself, so the check
+  and `guren cloudflare:build` cannot drift to two different files (RFC 0017 Part 2b).
+- 05dfef2: The harness entry document lists the `guren_gate` MCP tool.
+- 7fafa9f: Trim the comment `make:agent` writes into `config/agents.ts` to the length the shipped `guren/comment-length` lint rule allows. A scaffolded app installs those rules, so `guren make:agent` followed by `bun run lint` failed on the scaffolder's own output.
+- 7fe6749: Print an MCP Inspector invocation `tool:dev` users can actually run
+
+  The command printed `npx @modelcontextprotocol/inspector --cli <endpoint> --transport http --header "Authorization: Bearer <token>"`, which exits on `Method is required` because `--cli` mode has no default method. It now prints `--method tools/list`, pins the spec with `@latest` so the resolution does not fall to whatever version the npx cache already holds, shows the `tools/call` tail, and mentions that dropping `--cli` opens the browser Inspector UI.
+
+- 55137f7: `guren tool:log --surface durable` is now accepted
+
+  `durable` is the surface an agent an application hosts itself records under.
+  The flag previously refused it as a typo, which would have made a trail written
+  by that surface unreadable through this command.
+
+- Updated dependencies [e94645b]
+- Updated dependencies [55137f7]
+- Updated dependencies [923a3ee]
+- Updated dependencies [05dfef2]
+- Updated dependencies [59347c1]
+- Updated dependencies [20c2bc7]
+  - @guren/server@2.17.0
+  - @guren/core@1.14.0
+
 ## 2.15.1
 
 ### Patch Changes

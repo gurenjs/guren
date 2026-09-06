@@ -1,5 +1,176 @@
 # @guren/core
 
+## 1.14.0
+
+### Minor Changes
+
+- e94645b: Share the approval-status rule and the audit recorder across agent surfaces
+
+  `toApprovalStatusReport`, `approvalStatusNotFoundMessage` and the
+  `ApprovalStatusReport` / `ApprovalStatusOutcome` types move out of
+  `@guren/plugin-mcp` and into the framework, so every surface that answers "what
+  became of this approval request" answers it the same way — including the part
+  that is a _refusal_ to distinguish: an unknown request id and another
+  principal's request id produce one message, byte for byte, because any
+  difference between them turns the check into a way to enumerate other
+  principals' pending actions. The found/not-found distinction stays in the audit
+  trail, where the operator can see it.
+
+  `ApprovalStatusReport` also gains **`consumedAt`**, present once an approval has
+  been spent (MCP advertises it as an additive output property). "Approved" alone
+  does not say whether the one call it permitted has already run, and a caller that
+  repeats a spent approval finds no unconsumed match, files a fresh request, pages
+  a human again, and performs the action a second time. The field is what lets a
+  caller tell "approved, go ahead" from "approved, and already used".
+
+  `createAgentAuditRecorder(options)` is extracted from the invocation pipeline
+  and exported alongside it. A surface that reaches the approval store without
+  dispatching a tool still has to write a record under the same principal, the
+  same `surface`, and the same argument masking; a second copy of that is how one
+  surface comes to record a field the other redacts.
+
+  No behavior changes for existing callers. `@guren/plugin-mcp` imports the moved
+  helpers and keeps its own MCP schema and tool description.
+
+- 55137f7: Add the agent invocation pipeline and the principal seam (RFC 0017 Part 1)
+
+  The steps that make an agent tool call trustworthy — scope gate, approval gate,
+  dispatch, redaction, audit — now live in the framework instead of in the App MCP
+  plugin, so every surface that invokes a tool passes the same checks in the same
+  order. `app.fetch` on its own only executes the HTTP request; a caller that
+  dispatched through it directly would bypass scopes, approvals and the audit
+  trail while looking exactly like a gated call.
+
+  - **`createAgentInvocationPipeline(options)`** runs, in order: the scope gate, a
+    single **interposition hook**, the approval gate, dispatch, redaction and
+    audit. It is protocol-neutral — it knows nothing about MCP — and returns a
+    discriminated result an adapter maps onto its own shapes. The hook's position
+    is fixed rather than configurable: it sits between scope and approval, because
+    the approval gate writes a record and notifies humans, so a meter behind it
+    would guard the execution while the amplification happened in front of it.
+  - **Fail-closed approvals.** A tool declaring `approval: 'required'` with no
+    approval queue configured is refused, nothing is dispatched, and the denial is
+    audited. The refusal names the configuration line of the surface that was
+    reached, through the new `configureHint` option.
+  - **`gateToolCall`, `gatePreflight`, `gateApproval`, `notifyApprovers`** and
+    their types are now exported from `@guren/core` (they were internal to
+    `@guren/plugin-mcp`).
+  - **The principal seam.** A pipeline call made with `handoff: 'seam'` installs
+    its principal on the exact `Request` handed to the application, keyed on
+    object identity — no header, nothing on the wire to forge, and a copied or
+    rebuilt request carries nothing. The auth context consults it before any
+    header-based guard, so `requireAuthenticated()`, `Controller.auth` and
+    `Gate`/policies all answer for the caller. It is not a token:
+    `createBearerTokenMiddleware` and `tokenCan*` judge an `ApiToken`, and there
+    is none, so routes behind those still refuse.
+  - **CSRF.** A seam-marked request skips verification on the same terms as a
+    cookie-less bearer request, and the middleware _asserts_ that premise: a
+    seam-marked request carrying any `Cookie` header is refused with 403 whatever
+    its method, so the exemption cannot be widened by a bug elsewhere. Issuance of
+    the `XSRF-TOKEN` cookie is unchanged.
+  - **`AgentSurface` gains `'durable'`**, for agents an application hosts itself.
+    Nothing emits it yet; `parseAuditRecord` and `guren tool:log` accept it, so a
+    trail written by a later release is readable by this one.
+
+- 59347c1: Let an endpoint declare that it authenticates without cookies, so CSRF does not
+  answer in place of its own 401
+
+  `Application.declareCookielessAuthPath(path)` records a path whose principal can
+  only come from a bearer token or an authority in front of the app. The CSRF
+  middleware reads the registry per request — it is created in
+  `AuthServiceProvider.register()`, long before such an endpoint mounts at boot —
+  and skips verification for an exact path match. Patterns are deliberately not
+  supported, and the registry is a second argument to `createCsrfMiddleware()`
+  rather than a `CsrfOptions` field, so it is framework wiring rather than a
+  second `exclude` an app can fill in. Apps exempting a path they chose themselves
+  still use `csrfOptions.exclude`.
+
+  A declaration naming a path the app already routes is refused with a warning:
+  the app's route is registered first and answers there, so honouring it would
+  leave a cookie-authenticated handler serving the path with CSRF disarmed while
+  the declaring endpoint sat unreachable behind it.
+
+- 20c2bc7: Add `classifyRegistrationScope`, the narrower scope rule for unattended principals
+
+  Agent tool scopes have always had four forms: `tool:<name>`, `tools:read`,
+  `tools:*`, and `tools:<prefix>.*`. An API token may hold any of them — someone
+  issued it and is watching it.
+
+  A _registration_ is different: it grants an agent that runs unattended, and it
+  is written once and then outlived by the route graph. `classifyRegistrationScope`
+  is the rule for that narrower case — `tool:<name>` and `tools:read` only, with
+  set grants refused by name and with the reason, because an unattended principal
+  must not acquire consent to tools that did not exist when a human read the
+  config.
+
+  One exported rule rather than two implementations: `guren check` and the agent
+  runtime both read it, so a check that passes cannot describe a runtime that
+  refuses.
+
+  Also adds `createAgentApprovalContext`, which builds the invocation pipeline's
+  approval context — the TTL default, the route's redaction rules, and the
+  fire-and-forget notification wrapping — from a surface's own `approvals` option
+  and the caller it is answering for. Those three are invariants of an approval
+  record rather than of a protocol, so every surface that offers a queue now
+  shares one of them instead of restating it.
+
+  Adds `Application.booted()`, which resolves when the boot that is running — or
+  has already run — completes. A service provider's `boot` hook runs during the
+  application's own boot, so anything it publishes is published while later
+  providers are still unbooted; awaiting this first is what turns "published" into
+  "usable".
+
+### Patch Changes
+
+- 923a3ee: Guard `/agents/*` with an app-declared authorizer (RFC 0017 Part 2b)
+
+  - **`routing.authorize` in `config/agents.ts`.** An `AgentRouteAuthorizer` is
+    called with the request and `{ agent, instance }`; `true` lets the request
+    reach the Durable Object, `false` refuses it with 403, and a `Response` is
+    returned as it is. `agent` is the Durable Object **binding** name the SDK
+    resolved the URL segment to — the path carries that binding kebab-cased, not
+    the `config/agents.ts` key. The vocabulary is deliberately thin: RFC 0017 Open
+    Question 3 is still open, and a richer surface published now would have to be
+    kept.
+  - **`routeGuardedAgentRequest(request, env, routing, bindings)`** is the
+    workerd-only mount, exported from `@guren/plugin-agents/agent`. It wires the
+    authorizer into both of the SDK's pre-dispatch hooks — `onBeforeRequest` and
+    `onBeforeConnect` — so a WebSocket upgrade is refused on the same terms as a
+    request, and answers `undefined` off the `/agents/` prefix. `bindings` names
+    the Durable Object bindings that host registered agents: the SDK routes to
+    every binding in `env` with an `idFromName`, so without the list an authorizer
+    would open the app's unrelated Durable Objects too. Anything off the list is
+    refused with the same 403 before the authorizer is asked.
+  - The runtime the plugin publishes now awaits `app.boot()` rather than
+    `app.booted()` before dispatching: after a boot that failed in a later
+    provider, `booted()` resolved at once into the half-assembled application,
+    while `boot()` retries it the way the next request would. With no `routing`
+    declared it refuses the whole prefix with one 403 — before the SDK's router,
+    whose own 400 for an unknown binding would otherwise let an anonymous caller
+    tell bound names from unbound ones — and names the configuration that would
+    let callers in. Registering agents reserves `/agents/*` for the router: an
+    app's own routes under that prefix become unreachable.
+  - `AGENTS_CONFIG_FILE` moves into `@guren/core/internal/deploy-build`, so
+    `guren check` and the deploy builds read one spelling of the registry path.
+
+- Updated dependencies [e94645b]
+- Updated dependencies [55137f7]
+- Updated dependencies [923a3ee]
+- Updated dependencies [20c2bc7]
+- Updated dependencies [7543926]
+- Updated dependencies [3ab8169]
+- Updated dependencies [05dfef2]
+- Updated dependencies [8d54caf]
+- Updated dependencies [7fafa9f]
+- Updated dependencies [05dfef2]
+- Updated dependencies [59347c1]
+- Updated dependencies [634bcda]
+- Updated dependencies [20c2bc7]
+- Updated dependencies [7fe6749]
+- Updated dependencies [55137f7]
+  - @guren/server@2.17.0
+  - @guren/cli@2.16.0
+
 ## 1.13.1
 
 ### Patch Changes
