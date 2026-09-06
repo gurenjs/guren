@@ -16,6 +16,8 @@ bun run vercel:build
 vercel deploy --prebuilt
 ```
 
+Before writing any output, `vercel:build` runs the deploy-runtime checks `guren doctor` reports and warns, without failing, on an in-memory session or OAuth store, a `ScryptHasher`, or filesystem provider discovery — each works locally and breaks across function invocations.
+
 ## API
 
 - **`createVercelHandler(app)`** — boots a Guren `Application` and returns a `fetch` handler for the serverless function.

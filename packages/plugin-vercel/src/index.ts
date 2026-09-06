@@ -21,6 +21,7 @@ import {
   type DatabaseDialect,
   type PathLike,
 } from '@guren/core/internal/deploy-build'
+import { reportDeployRuntimeHazards } from '@guren/core/internal/deploy-check'
 
 /** Prefixes every diagnostic this build emits. */
 const LABEL = 'Vercel build'
@@ -99,6 +100,10 @@ export async function buildVercelOutput(options: BuildVercelOutputOptions = {}):
       `${LABEL}: entrypoint not found at ${entrypoint}. Run \`bunx guren plugin @guren/plugin-vercel\` to scaffold src/vercel.ts, or pass "entrypoint".`,
     )
   }
+
+  // Before anything is written, so an in-memory store default on Vercel is
+  // reported where the developer is still reading (RFC 0020 Part 0).
+  await reportDeployRuntimeHazards({ root, label: LABEL })
 
   const env = buildVercelEnvironment(publicDir, ssrDir)
 

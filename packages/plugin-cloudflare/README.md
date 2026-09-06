@@ -18,6 +18,8 @@ bunx wrangler deploy
 
 `cloudflare:build` runs your app's `build` script, then assembles a `.cloudflare/` directory containing the worker entry, static assets for Workers Static Assets, and flattened D1 migrations. It is generated output — add it to `.gitignore` and rebuild before every deploy.
 
+Before the app build it runs the deploy-runtime checks `guren doctor` reports and warns, without failing, when sessions or OAuth state would sit in process memory, a `ScryptHasher` is constructed, or providers are discovered from the filesystem. Each works locally and breaks on Workers, and the warning prints where you are still reading rather than after the Vite output.
+
 ## API
 
 - **`createWorkersHandler(app)`** — wraps a Guren `Application` in a Workers module handler. Boot is lazy and deduplicated on the first request, because `boot()` performs I/O that workerd forbids in global scope. The handler deduplicates boot itself, so boot-once holds for anything matching `WorkersAppLike`, not only Guren's `Application`. It also exposes `boot(env)`, for an entrypoint that holds `env` but no request — an agent Durable Object woken by an alarm. The latch behind both is `bootWorkersApp(app, env)` / `bootAndFetch(app, request, env, ctx)`, keyed on the app.

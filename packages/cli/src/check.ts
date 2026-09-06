@@ -29,6 +29,7 @@ import { checkRoutePathParams, discoverRoutePathFiles } from './route-path-check
 import { affectsRouteWiring, checkRouteRegistrarWiring } from './routes-check'
 import { checkRouteContracts } from './route-contract-check'
 import { checkAgentRoutes } from './agent-route-check'
+import { checkDeployRuntime } from './deploy-runtime'
 import { loadRouteDefinitions } from './load-routes'
 import { routesEntryOrDefault } from './route-registrar'
 import type { RouteDefinition } from '@guren/core'
@@ -494,6 +495,23 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
   if (runs('arch')) {
     const archResults = await runArchCheck({ cwd, cache, changedFiles })
     checks.push(...archResults)
+  }
+
+  // 12. Deploy runtime (RFC 0020 Part 0): doctor's three verdicts, for an app
+  // declaring a deploy plugin or the Lambda adapter; every other app adds nothing.
+  // Advisory: the scan reads constructions, not intent (a custom `SessionStore`
+  // passed as `store:` reads as unbacked), and a false positive must not fail a gate.
+  // Runs whenever package.json or any source could have moved: the verdict joins the two.
+  if (runs('core')) {
+    const manifestChanged = !changedFiles || changedFiles.has('package.json')
+    if (sourceChanged || manifestChanged) {
+      for (const verdict of await checkDeployRuntime(cwd)) {
+        checks.push({
+          ...check(verdict.key, verdict.title, verdict.status, verdict.message, verdict.fix),
+          advisory: true,
+        })
+      }
+    }
   }
 
   // Every checker treats an unparsable file as contributing nothing, which is

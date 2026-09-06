@@ -34,6 +34,8 @@ bunx wrangler deploy
 > [!IMPORTANT]
 > `.cloudflare/` is generated output — add it to `.gitignore` and rebuild before every deploy. Nothing else reads from it, so a stale directory silently ships old code.
 
+Before the app build it runs the deploy-runtime checks `guren doctor` reports and warns, without failing, when sessions or OAuth state would sit in process memory, a `ScryptHasher` is constructed, or providers are discovered from the filesystem. Each works locally and breaks on Workers, and the warning prints where you are still reading rather than after the Vite output.
+
 ## Database (D1)
 
 Create the database and record its id in `wrangler.jsonc`:

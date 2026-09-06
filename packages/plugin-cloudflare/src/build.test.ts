@@ -834,3 +834,46 @@ describe('buildCloudflareOutput with a stale committed wrangler.jsonc', () => {
     expect(warning).toContain('could not parse')
   })
 })
+
+describe('buildCloudflareOutput deploy-runtime warnings (RFC 0020 Part 0)', () => {
+  let root: string
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'guren-cf-deploy-check-'))
+  })
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  test('should warn when the app keeps sessions in memory', async () => {
+    scaffoldApp(root)
+    writeJson(join(root, 'package.json'), {
+      name: '@acme/demo-app',
+      dependencies: { '@guren/plugin-cloudflare': '^0.7.0' },
+    })
+    writeFileSync(
+      join(root, 'src/app.ts'),
+      "import { createApp } from '@guren/core'\nexport default createApp({ auth: { autoSession: true } })\n",
+    )
+
+    const warnings = await captureWarnings(() => buildCloudflareOutput({ rootDir: root, skipAppBuild: true }))
+
+    expect(warnings).toContain('Cloudflare build: Cloudflare Workers shares no memory')
+    expect(warnings).toContain('DatabaseSessionStore')
+    // The build still completes: the verdict is advice, not a gate.
+    expect(existsSync(join(root, '.cloudflare/worker.js'))).toBe(true)
+  })
+
+  test('should stay quiet for an app that never enables sessions', async () => {
+    scaffoldApp(root)
+    writeJson(join(root, 'package.json'), {
+      name: '@acme/demo-app',
+      dependencies: { '@guren/plugin-cloudflare': '^0.7.0' },
+    })
+
+    const warnings = await captureWarnings(() => buildCloudflareOutput({ rootDir: root, skipAppBuild: true }))
+
+    expect(warnings).not.toContain('shares no memory')
+  })
+})

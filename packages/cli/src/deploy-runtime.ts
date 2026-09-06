@@ -555,3 +555,185 @@ export function formatSignals(signals: SourceSignal[]): string {
     .map((signal) => `${signal.symbol} (${signal.filePath}:${signal.line})`)
     .join(', ')
 }
+
+export type DeployRuntimeVerdictStatus = 'pass' | 'warn'
+
+/**
+ * One deploy-runtime verdict, shaped for every consumer: `guren doctor` maps it
+ * onto a DoctorCheck, `guren check` onto an advisory CheckResult, and the
+ * deploy builds print it (RFC 0020 Part 0). A passing verdict carries no `fix`.
+ */
+export interface DeployRuntimeVerdict {
+  key: 'deploy-password-hashing' | 'deploy-runtime-stores' | 'deploy-provider-discovery'
+  title: string
+  status: DeployRuntimeVerdictStatus
+  message: string
+  fix?: string
+}
+
+function verdict(
+  key: DeployRuntimeVerdict['key'],
+  title: string,
+  status: DeployRuntimeVerdictStatus,
+  message: string,
+  fix?: string,
+): DeployRuntimeVerdict {
+  return status === 'pass' ? { key, title, status, message } : { key, title, status, message, fix }
+}
+
+const BUN_ONLY_HASHER_FIX = 'Replace `new ScryptHasher()` with `new Hash()`, which hashes with `node:crypto` scrypt off Bun. Rows already written under Bun stay unreadable on this runtime, so existing passwords must still be rehashed.'
+
+/**
+ * `DefaultHasher` falls back to `node:crypto` scrypt off Bun, which workerd's
+ * `nodejs_compat` implements in full (RFC 0003 §4), so password auth alone no
+ * longer breaks on a Bun-less target. What breaks is an *explicit*
+ * `new ScryptHasher()`, whose Argon2id/bcrypt cannot be read back without
+ * `Bun.password` — usually written by a seeder that ran under Bun locally.
+ */
+function judgePasswordHashing(analysis: DeployRuntimeAnalysis): DeployRuntimeVerdict {
+  const key = 'deploy-password-hashing'
+  const title = 'Deploy Password Hashing'
+
+  const bunless = bunlessTargets(analysis)
+  // Every verdict carries the parse caveat, target-only ones included: the
+  // Lambda adapter is detected from source, so a skipped file can turn a real
+  // warning into "no deploy target detected".
+  const caveat = formatParseCaveat(analysis)
+
+  if (bunless.length === 0) {
+    return verdict(
+      key,
+      title,
+      'pass',
+      analysis.targets.length > 0
+        ? `${formatTargetLabels(analysis.targets)} runs on Bun, so every built-in hasher applies.${caveat}`
+        : `No deploy plugin or Lambda adapter detected.${caveat}`,
+    )
+  }
+
+  const labels = formatTargetLabels(bunless)
+
+  if (analysis.bunOnlyHasherSignals.length > 0) {
+    return verdict(
+      key,
+      title,
+      'warn',
+      `${labels} detected, but ScryptHasher is constructed directly (${formatSignals(analysis.bunOnlyHasherSignals)}). It hashes through Bun.password, so the rows it writes cannot be verified on this runtime.${caveat}`,
+      BUN_ONLY_HASHER_FIX,
+    )
+  }
+
+  if (analysis.passwordAuthSignals.length === 0) {
+    return verdict(key, title, 'pass', `${labels} detected, and no password authentication was found.${caveat}`)
+  }
+
+  return verdict(
+    key,
+    title,
+    'pass',
+    `${labels} detected with password authentication (${formatSignals(analysis.passwordAuthSignals)}), and no Bun-only hasher is constructed. The default hasher uses node:crypto scrypt here.${caveat}`,
+  )
+}
+
+const BACKED_STORE_FIX = 'Use DatabaseSessionStore and DatabaseOAuthStateStore from `@guren/core`, or the Redis equivalents from `@guren/core/redis`, and a Redis-backed cache/queue driver.'
+
+/**
+ * Serverless targets share no memory between invocations, so in-memory stores
+ * drop every session, cache entry, queued job, and OAuth state in production
+ * while working perfectly in local development.
+ */
+function judgeRuntimeStores(analysis: DeployRuntimeAnalysis): DeployRuntimeVerdict {
+  const key = 'deploy-runtime-stores'
+  const title = 'Deploy Runtime Stores'
+
+  const caveat = formatParseCaveat(analysis)
+
+  if (analysis.targets.length === 0) {
+    return verdict(key, title, 'pass', `No deploy plugin or Lambda adapter detected.${caveat}`)
+  }
+
+  const labels = formatTargetLabels(analysis.targets)
+  const issues: string[] = []
+
+  if (analysis.memoryStoreSignals.length > 0) {
+    issues.push(`in-memory stores are constructed explicitly (${formatSignals(analysis.memoryStoreSignals)})`)
+  }
+
+  if (
+    analysis.sessionSignals.length > 0 &&
+    analysis.backedSessionSignals.length === 0 &&
+    analysis.sessionDisabledSignals.length === 0
+  ) {
+    issues.push(
+      `sessions are enabled (${formatSignals(analysis.sessionSignals)}) with no DatabaseSessionStore or RedisSessionStore`,
+    )
+  }
+
+  if (analysis.oauthSignals.length > 0 && analysis.backedOAuthSignals.length === 0) {
+    issues.push(
+      `OAuth is configured (${formatSignals(analysis.oauthSignals)}) with no DatabaseOAuthStateStore or RedisOAuthStateStore`,
+    )
+  }
+
+  if (issues.length === 0) {
+    return verdict(key, title, 'pass', `${labels} detected, and no in-memory store defaults were found.${caveat}`)
+  }
+
+  return verdict(
+    key,
+    title,
+    'warn',
+    `${labels} shares no memory between requests, but ${issues.join('; ')}.${caveat}`,
+    BACKED_STORE_FIX,
+  )
+}
+
+const EXPLICIT_PROVIDERS_FIX = 'List providers explicitly in `createApp({ providers: [...] })` instead of discovering them from the filesystem.'
+
+/**
+ * `AutoDiscovery` scans directories with `Bun.Glob` and imports what it finds.
+ * Every deploy target breaks that, either by having no Bun runtime or by
+ * shipping a bundle with no source tree to scan.
+ */
+function judgeProviderDiscovery(analysis: DeployRuntimeAnalysis): DeployRuntimeVerdict {
+  const key = 'deploy-provider-discovery'
+  const title = 'Deploy Provider Discovery'
+
+  const caveat = formatParseCaveat(analysis)
+
+  if (analysis.targets.length === 0) {
+    return verdict(key, title, 'pass', `No deploy plugin or Lambda adapter detected.${caveat}`)
+  }
+
+  const labels = formatTargetLabels(analysis.targets)
+
+  if (analysis.discoverySignals.length === 0) {
+    return verdict(key, title, 'pass', `${labels} detected, and provider discovery is not used.${caveat}`)
+  }
+
+  const blockers = analysis.targets.map((target) => `${target.profile.label}: ${target.profile.discoveryBlocker}`)
+
+  return verdict(
+    key,
+    title,
+    'warn',
+    `${labels} detected, but the app uses filesystem provider discovery (${formatSignals(analysis.discoverySignals)}). ${blockers.join(' ')}${caveat}`,
+    EXPLICIT_PROVIDERS_FIX,
+  )
+}
+
+/** The three deploy-runtime verdicts over one analysis, in report order. */
+export function judgeDeployRuntime(analysis: DeployRuntimeAnalysis): DeployRuntimeVerdict[] {
+  return [judgePasswordHashing(analysis), judgeRuntimeStores(analysis), judgeProviderDiscovery(analysis)]
+}
+
+/**
+ * Scan and judge in one call: what a deploy build runs before the app build.
+ * Empty when the app declares no deploy target, so a caller prints nothing
+ * for an app this cannot apply to; every verdict is present otherwise, passing
+ * ones included, since the build may want to say what it verified.
+ */
+export async function checkDeployRuntime(cwd: string): Promise<DeployRuntimeVerdict[]> {
+  const analysis = await analyzeDeployRuntime(cwd)
+  return analysis.targets.length === 0 ? [] : judgeDeployRuntime(analysis)
+}

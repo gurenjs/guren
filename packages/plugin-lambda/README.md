@@ -15,7 +15,7 @@ Installing registers a `lambda:build` command and scaffolds `src/lambda.ts` — 
 bunx guren lambda:build
 ```
 
-`lambda:build` runs your app's `build` script, then assembles a `.lambda/` directory:
+`lambda:build` runs the deploy-runtime checks `guren doctor` reports (a warning, never a failure, on an in-memory session or OAuth store, a `ScryptHasher`, or filesystem provider discovery), then your app's `build` script, then assembles a `.lambda/` directory:
 
 | Path | Contents |
 |------|----------|

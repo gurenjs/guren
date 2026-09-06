@@ -146,6 +146,8 @@ bun run vercel:build
 vercel deploy --prebuilt
 ```
 
+Before writing any output, `vercel:build` runs the deploy-runtime checks `guren doctor` reports and warns, without failing, on an in-memory session or OAuth store, a `ScryptHasher`, or filesystem provider discovery — each works locally and breaks across function invocations.
+
 > [!NOTE]
 > The plugin targets SSR apps only. It reads Vite manifests to inject the correct `GUREN_INERTIA_*` environment variables into the serverless function. API-only apps should use Docker or Lambda instead.
 

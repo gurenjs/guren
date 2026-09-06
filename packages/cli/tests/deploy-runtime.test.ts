@@ -1,7 +1,9 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
-import { analyzeDeployRuntime } from '../src/deploy-runtime'
+import { analyzeDeployRuntime, checkDeployRuntime } from '../src/deploy-runtime'
+import { runCheck } from '../src/check'
+import { gatingResults } from '../src/check-result'
 import { buildJsonOutput, getDoctorRuleEvaluations, runDoctor } from '../src/doctor'
 import type { DoctorCheck, DoctorStatus } from '../src/doctor'
 import { createTempWorkspace } from './helpers'
@@ -1158,5 +1160,95 @@ describe('analyzeDeployRuntime', () => {
 
       expect(analysis.memoryStoreSignals).toEqual([])
     })
+  })
+})
+
+// The same verdicts `guren doctor` reports, reached from `guren check` and
+// the deploy builds (RFC 0020 Part 0).
+describe('checkDeployRuntime', () => {
+  it('returns nothing for an app with no deploy target', async () => {
+    await withApp('guren-deploy-check-plain-', { 'src/app.ts': SESSION_APP }, {}, async (dir) => {
+      expect(await checkDeployRuntime(dir)).toEqual([])
+    })
+  })
+
+  it('returns every verdict, passing ones included, for a deploy target', async () => {
+    await withApp(
+      'guren-deploy-check-cf-',
+      { 'src/app.ts': SESSION_APP },
+      { '@guren/plugin-cloudflare': '^0.2.0' },
+      async (dir) => {
+        const verdicts = await checkDeployRuntime(dir)
+
+        expect(verdicts.map((verdict) => verdict.key)).toEqual([...DEPLOY_CHECK_KEYS])
+        const stores = verdicts.find((verdict) => verdict.key === 'deploy-runtime-stores')!
+        expect(stores.status).toBe('warn')
+        expect(stores.fix).toContain('DatabaseSessionStore')
+        const hashing = verdicts.find((verdict) => verdict.key === 'deploy-password-hashing')!
+        expect(hashing.status).toBe('pass')
+        expect(hashing.fix).toBeUndefined()
+      },
+    )
+  })
+
+  it('matches what guren doctor reports for the same app', async () => {
+    await withApp(
+      'guren-deploy-check-parity-',
+      { 'src/app.ts': SESSION_APP },
+      { '@guren/plugin-cloudflare': '^0.2.0' },
+      async (dir) => {
+        const doctor = await deployChecks(dir)
+        for (const verdict of await checkDeployRuntime(dir)) {
+          // Doctor's side is the wider status type, so it is the subject.
+          expect(doctor[verdict.key].status).toBe(verdict.status)
+          expect(doctor[verdict.key].message).toBe(verdict.message)
+          expect(doctor[verdict.key].fix).toBe(verdict.fix)
+        }
+      },
+    )
+  })
+})
+
+describe('guren check deploy-runtime verdicts', () => {
+  it('reports the stores verdict as an advisory warn that no gate counts', async () => {
+    await withApp(
+      'guren-check-deploy-cf-',
+      { 'src/app.ts': SESSION_APP },
+      { '@guren/plugin-cloudflare': '^0.2.0' },
+      async (dir) => {
+        const report = await runCheck({ cwd: dir })
+        const stores = report.checks.find((result) => result.key === 'deploy-runtime-stores')
+
+        expect(stores).toBeDefined()
+        expect(stores!.status).toBe('warn')
+        expect(stores!.advisory).toBe(true)
+        expect(stores!.message).toContain('sessions are enabled')
+        expect(stores!.suggestion).toContain('DatabaseSessionStore')
+        expect(gatingResults(report).map((result) => result.key)).not.toContain('deploy-runtime-stores')
+      },
+    )
+  })
+
+  it('emits no deploy verdict for an app with no deploy target', async () => {
+    await withApp('guren-check-deploy-plain-', { 'src/app.ts': SESSION_APP }, {}, async (dir) => {
+      const report = await runCheck({ cwd: dir })
+
+      expect(report.checks.filter((result) => result.key.startsWith('deploy-'))).toEqual([])
+    })
+  })
+
+  it('runs under --changed when only package.json moved, and not when nothing relevant did', async () => {
+    await withApp(
+      'guren-check-deploy-changed-',
+      { 'src/app.ts': SESSION_APP },
+      { '@guren/plugin-cloudflare': '^0.2.0' },
+      async (dir) => {
+        const manifestOnly = await runCheck({ cwd: dir, changedFiles: new Set(['package.json']) })
+        expect(manifestOnly.checks.some((result) => result.key === 'deploy-runtime-stores')).toBe(true)
+
+        const unrelated = await runCheck({ cwd: dir, changedFiles: new Set(['README.md']) })
+        expect(unrelated.checks.some((result) => result.key.startsWith('deploy-'))).toBe(false)
+      },
+    )
   })
 })

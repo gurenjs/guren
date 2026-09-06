@@ -20,6 +20,7 @@ import {
   type DatabaseDialect,
   type PathLike,
 } from '@guren/core/internal/deploy-build'
+import { reportDeployRuntimeHazards } from '@guren/core/internal/deploy-check'
 import { LAMBDA_HANDLER_EXPORTS, LAMBDA_HANDLER_MODULE } from './handlers'
 
 export interface BuildLambdaOutputOptions {
@@ -150,6 +151,10 @@ export async function buildLambdaOutput(options: BuildLambdaOutputOptions = {}):
   // Validated up front so a bad option fails before the app build, but the
   // delete waits: a failed build must not take the previous output with it.
   assertOutputDirOutsideRoot(out, root, 'Lambda build')
+
+  // Before the app build, so an in-memory store default on Lambda is reported
+  // where the developer is still reading (RFC 0020 Part 0).
+  await reportDeployRuntimeHazards({ root, label: 'Lambda build' })
 
   if (!options.skipAppBuild) {
     runAppBuild(root)
