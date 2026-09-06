@@ -374,7 +374,7 @@ would be the mocked-driver trap. Instead:
   integration (named exports, `bootAndFetch`, bindings verification,
   default-deny routing). First end-to-end agent on Workers, tested per PR via
   the Workers Vitest integration.
-- **Part 3**: pending-approval ledger + retry + `onToolApprovalSettled`.
+- **Part 3**: pending-approval ledger + retry + `onToolApprovalSettled`. *(shipped)*
 - **Part 4**: email entry points, docs, guren.dev dogfooding, and the
   service-binding split topology if demand materializes.
 
@@ -597,6 +597,116 @@ stand-in (§7). Decisions, in the order §6 lists them:
   `boot`.
 - **Deferred**: the service-binding split, `cloudflare:build --watch`, email
   entry points, and the bundle-probe budget line for the agent entry.
+
+**Part 3 shipped.** The pending-approval ledger, the retry, and
+`onToolApprovalSettled` (§5). Decisions worth recording:
+
+- **The status rule moved down to `@guren/server` before it gained a second
+  reader.** `toApprovalStatusReport` / `approvalStatusNotFoundMessage` were
+  `@guren/plugin-mcp`'s; they are now `@guren/core`'s, and the plugin imports
+  them while keeping its MCP schema and description. A durable agent asking
+  "what became of this request" must get the answer `guren.approval_status`
+  gives, including the part that is a *refusal to distinguish*: an unknown id
+  and another principal's id are one message, and a second copy of that rule is
+  how one surface comes to leak what the other hides. `createAgentAuditRecorder`
+  moved out of the pipeline for the same reason — the status check reaches the
+  store without dispatching a tool, so it audits *beside* the pipeline, and the
+  principal, surface and redaction it records under are now one function's.
+- **The ledger's answer has three outcomes, not two.** `found: true`,
+  `found: false`, and `unavailable`. The third is not a nicety: with two, a
+  budget exhausted mid-sweep reads as "the queue has no such request", every
+  remaining row is purged, and the arguments an approval granted an hour later
+  needs are gone with nothing failing anywhere. "Unknown" and "unasked" have
+  opposite correct handling — purge and keep — so the discriminator has to
+  exist. A store that throws and an unconfigured queue answer `unavailable` too.
+- **`guren_pending_tool_calls` is the framework's own table**, created with
+  `CREATE TABLE IF NOT EXISTS` in the agent's Durable Object SQLite. Open
+  Question 5 asks how *application* schemas migrate across deploys and stays
+  open; a six-column bookkeeping table the framework owns end to end is not the
+  case that question is about.
+- **The backoff follows the least-checked row.** 30 seconds doubling per check,
+  floored at 1 second and capped three ways: by the earliest `expires_at` plus a
+  small grace (so the final wake sees the expiry and prunes it rather than
+  landing on the instant it lapses), and by the approval TTL. One wake asks
+  about every row, so the cadence has to serve the newest parked call rather
+  than inherit the oldest row's stretched backoff.
+- **Exactly one check schedule, held two different ways.** `ScheduleCriteria`
+  filters on id, type and time — not on the callback — so the callback name is
+  matched over `listSchedules({ type: 'delayed' })`. On the record path a
+  schedule is created only if none exists; at the end of a sweep the existing
+  ones are *cancelled* and one is created, because that is the only way a
+  lengthening backoff takes effect, and cancel-then-create is correct whether or
+  not the SDK has already retired the row that just fired.
+- **`checks` is the backoff's clock, not a count of answers.** An unanswerable
+  check — a spent budget, a store that threw — keeps the row *and* counts it, or
+  a queue that stays down is re-asked at one fixed cadence until the request
+  expires, and a low `callsPerMinute` never gets past its first rows. The
+  converse: re-parking a call under an id the gate returned again resets the
+  count, so an agent re-calling a parked tool restarts its own backoff. That is
+  deliberate — a fresh call is fresh interest — and stated because "doubling per
+  check" alone does not imply it.
+- **The sweep may not throw, and that shaped its structure.** The SDK retries a
+  failed delayed callback three times (`DEFAULT_RETRY.maxAttempts`) and then
+  deletes the one-shot row and logs — verified in `scheduler-*.js`, where only
+  code-update, transient-platform and memory-limit errors preserve the row. So a
+  throw replays the whole method against a half-updated ledger *and* strands
+  every surviving row with no schedule. Each row is therefore handled inside its
+  own `try`, every ledger write lands before the hook is called, the hook (app
+  code) is called through a wrapper that reports and swallows, and the
+  end-of-sweep reschedule sits in a `finally`.
+- **An approval found already spent is settled, never retried.** This is the
+  sharpest consequence of the replay rule. `consume` sets only `consumedAt`, so
+  a sweep interrupted between the executed retry and `ledger.remove` would, on
+  replay, read the record as approved, find no *unconsumed* match, file a **new**
+  request, page a human again, and perform the side effect twice on approval.
+  `ApprovalStatusReport` therefore carries `consumedAt` (and MCP advertises it),
+  and the sweep treats approved-and-spent as "a previous wake ran this": remove
+  the row, settle with `status: 'approved'` and **no `result`**. Approvals bind
+  to this principal and this exact fingerprint, so nobody else could have spent
+  it.
+- **A retry refused for want of budget keeps its row.** The retry spends the same
+  per-instance budget the status check just spent, so an exhausted window comes
+  back `denied` with `reason: 'rate-limit'`. Reporting that as the approval's
+  outcome would drop the row, and a human's approval would be spent by nobody
+  and never retried — it is treated like an unanswerable check instead.
+- **A row nothing can decrypt is pruned, not thrown over.** An app key rotated
+  past its `previousKeys` used to take down `all()`, which backs the *record*
+  path too — so one bad row denied a caller the `pending` result of a call that
+  parked perfectly well. `all()` now skips such rows and `pruneUnreadable()`
+  clears and reports them as `status: 'unreadable'`, following the precedent
+  `agentApprovalExpiredAt` set for an unparseable date.
+- **A stale schedule is replaced when the new row needs an earlier one.** The
+  record path used to keep any existing check, so a row expiring in five minutes
+  could be left to a check twenty minutes out. `Schedule.time` is Unix seconds
+  for every schedule type; `firesSooner` is the pure comparison, unit-tested on
+  Bun rather than inferred from a Durable Object's behaviour.
+- **A retry that comes back pending replaces its row rather than dropping it.**
+  Another caller can spend the approval between the status read and the retry,
+  and the gate then files a fresh request; following the id it reports keeps the
+  arguments the new request will need. A retry pending under the *same* id is a
+  race, not a new request, and only counts a check.
+- **`onToolApprovalSettled` receives the approval's outcome and the retry's
+  answer separately.** `status` is what the queue said; `result` is what the
+  repeated call returned, and it can itself be a refusal — an approval spent by
+  someone else arrives as `approved` carrying a denial. `'unknown'` is the
+  status for a request the queue no longer has a record of.
+- **No encrypter, no ledger, and the warning is at boot.** §5 makes ciphertext
+  at rest the bound on holding raw arguments at all, so `agentsPlugin` publishes
+  a cipher from the container's `encrypter` binding or publishes none and says
+  so. Without one a parked call is still returned with its `requestId`; nothing
+  is checkpointed and nothing is retried. Read at boot rather than at first use,
+  unlike the audit emitter: the binding comes from `register()`, which has run
+  for every provider before any `boot` does, and a warning is only useful while
+  an author is reading boot output.
+- **The workerd lane covers the alarm path, and eviction.**
+  `@cloudflare/vitest-plugin` ships `evictDurableObject`, so "the retry survives
+  eviction" is a real assertion rather than a claim. `APP_KEY` reaches
+  `getAppKeyringFromEnv` under workerd by assigning `process.env.APP_KEY` at the
+  top of the fixture's app module — the same trick the Bun suite uses, and it
+  does not depend on how a compatibility date maps wrangler `vars` into
+  `process.env`. One reach into SDK internals: the ledger's first backoff is 30
+  seconds, so a test that wants a due alarm pulls `cf_agents_schedules.time`
+  back rather than waiting.
 
 ## Alternatives Considered
 

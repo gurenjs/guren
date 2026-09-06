@@ -8,13 +8,20 @@
  * Nothing here imports `agents`: this half runs on Bun, and the Durable Object
  * shell lives in `./agent`.
  */
-import { createAgentApprovalContext, createAgentInvocationPipeline } from '@guren/core'
+import {
+  APPROVAL_STATUS_TOOL_NAME,
+  createAgentApprovalContext,
+  createAgentAuditRecorder,
+  createAgentInvocationPipeline,
+  toApprovalStatusReport,
+} from '@guren/core'
 import type {
   AgentAuditEmitter,
   AgentInvocationDenial,
   AgentInvocationPipeline,
   AgentPrincipal,
   AgentToolDenialReason,
+  ApprovalStatusReport,
   ToolCallOutcome,
 } from '@guren/core'
 
@@ -33,14 +40,17 @@ export interface AgentToolCallOk {
 /**
  * The tool needs a human, and one has been asked.
  *
- * Nothing executed. Part 3 adds the ledger that checkpoints
- * `{ requestId, tool, args }` and retries once the approval settles; in this
- * part the agent gets the id and decides for itself what to do with it.
+ * Nothing executed. A `GurenAgent` checkpoints `{ requestId, tool, args }` into
+ * its ledger and retries once the approval settles; a client driven directly
+ * gets the id and decides for itself what to do with it.
  */
 export interface AgentToolCallPending {
   pending: true
   requestId: string
   tool: string
+  /** ISO 8601, from the queue's record. */
+  requestedAt?: string
+  /** ISO 8601, from the queue's record — the ledger never extends it. */
   expiresAt?: string
   message: string
   ok?: undefined
@@ -80,9 +90,72 @@ export type AgentToolCallResult =
   | AgentToolCallDenied
   | AgentToolCallFailed
 
+/** The queue answered with this caller's record. */
+export interface AgentApprovalStatusFound {
+  found: true
+  report: ApprovalStatusReport
+  message?: undefined
+  unavailable?: undefined
+}
+
+/** The queue answered: no such request, or not this caller's. */
+export interface AgentApprovalStatusMissing {
+  found: false
+  message: string
+  report?: undefined
+  unavailable?: undefined
+}
+
+/**
+ * The question could not be put to the queue — budget spent, no queue, or a
+ * store that threw. Its own variant because "unknown" and "unasked" have
+ * opposite correct handling: a caller purging its retry material on an
+ * unanswerable check would drop arguments a later approval needs.
+ */
+export interface AgentApprovalStatusUnavailable {
+  unavailable: true
+  message: string
+  found?: undefined
+  report?: undefined
+}
+
+/** One status check's answer. */
+export type AgentApprovalStatusResult =
+  | AgentApprovalStatusFound
+  | AgentApprovalStatusMissing
+  | AgentApprovalStatusUnavailable
+
+/** What became of one parked call, as `onToolApprovalSettled` receives it. */
+export interface AgentToolApprovalSettled {
+  requestId: string
+  /** The tool the parked call addressed. */
+  tool: string
+  /**
+   * `'unknown'`: the queue holds no record of this request. `'unreadable'`: the
+   * ledger row could not be decrypted, so the request may still be pending in
+   * the queue but its arguments are gone and nothing can retry it.
+   */
+  status: 'approved' | 'rejected' | 'expired' | 'unknown' | 'unreadable'
+  /**
+   * The retry's own answer, which can itself be a refusal. Present only for
+   * `'approved'`, and **absent even then** when the approval was found already
+   * spent — an earlier sweep ran the call and was interrupted before it could
+   * clear the row, so nothing was called this time.
+   */
+  result?: AgentToolCallResult
+}
+
 export interface AgentToolClient {
   /** Call a tool by name. */
   call(name: string, args?: Record<string, unknown>): Promise<AgentToolCallResult>
+  /**
+   * What became of an approval request this agent created (RFC 0016 §5.4).
+   *
+   * The same answer `guren.approval_status` gives an MCP client, derived by the
+   * same rule and audited under the same tool name: a status check reaches the
+   * application's storage, so it spends the budget and leaves a record.
+   */
+  status(requestId: string): Promise<AgentApprovalStatusResult>
   /**
    * Ask the route for a verdict instead of an execution (RFC 0016 §5.4).
    *
@@ -207,11 +280,78 @@ export function createAgentToolClient(options: AgentToolClientOptions): AgentToo
     return fromDenial(result.denial, tool.toolName)
   }
 
+  // The same recorder the pipeline writes through, so a status check and a tool
+  // call cannot come to describe their principal, surface or masking differently.
+  const record = createAgentAuditRecorder({
+    ...(audit ? { audit } : {}),
+    principal,
+    surface: 'durable',
+  })
+
+  const status = async (requestId: string): Promise<AgentApprovalStatusResult> => {
+    if (!approvals) {
+      return {
+        unavailable: true,
+        message:
+          'This application has no approval queue, so no request can be looked up. Configure one '
+          + 'with agentsPlugin({ approvals: { store, notify } }).',
+      }
+    }
+
+    const audited = { toolName: APPROVAL_STATUS_TOOL_NAME }
+    const args = { requestId }
+
+    // Metered as a read, the way `guren.approval_status` is: a status check
+    // reaches the application's storage, so an unmetered one is a hole in the
+    // per-instance budget an agent can poll through.
+    const overBudget = budget.consume()
+    if (overBudget) {
+      record.denied(audited, args, overBudget.reason)
+      return { unavailable: true, message: overBudget.message }
+    }
+
+    const startedAt = performance.now()
+    try {
+      const outcome = toApprovalStatusReport(
+        requestId,
+        await approvals.store.find(requestId),
+        principal,
+        approvals.now(),
+      )
+
+      if ('notFound' in outcome) {
+        // 404 to the caller either way; 403 in the trail when the record exists
+        // and belongs to someone else. The caller must not be able to tell the
+        // two apart, and the operator must.
+        record.invoked(audited, args, outcome.foreign ? 403 : 404, elapsed(startedAt))
+        return { found: false, message: outcome.notFound }
+      }
+
+      record.invoked(audited, args, 200, elapsed(startedAt))
+      return { found: true, report: outcome.report }
+    } catch (error) {
+      record.invoked(audited, args, 500, elapsed(startedAt))
+      return {
+        unavailable: true,
+        message: `The approval queue could not be reached: ${describe(error)}`,
+      }
+    }
+  }
+
   return {
     call: (name, args = {}) => invoke(name, args, false),
     preflight: (name, args = {}) => invoke(name, args, true),
+    status,
     allowed: abilities.map((ability) => ability.slice('tool:'.length)),
   }
+}
+
+function describe(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function elapsed(startedAt: number): number {
+  return Math.round(performance.now() - startedAt)
 }
 
 /**
@@ -228,6 +368,7 @@ function fromDenial(denial: AgentInvocationDenial, toolName: string): AgentToolC
       pending: true,
       requestId: body.requestId,
       tool: typeof body.tool === 'string' ? body.tool : toolName,
+      ...(typeof body.requestedAt === 'string' ? { requestedAt: body.requestedAt } : {}),
       ...(typeof body.expiresAt === 'string' ? { expiresAt: body.expiresAt } : {}),
       message: denial.message,
     }

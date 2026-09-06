@@ -9,6 +9,7 @@ import {
   AgentToolDenied,
   AgentToolInvoked,
   EventServiceProvider,
+  approvalStatusNotFoundMessage,
   createApp,
   createCsrfMiddleware,
   requireAuthenticated,
@@ -384,6 +385,144 @@ describe('createAgentToolClient: the per-instance budget', () => {
       expect((await triager.call('posts.index', {})).ok).toBe(true)
     }
     expect((await triager.call('posts.index', {})).denied).toBe(true)
+  })
+})
+
+describe('createAgentToolClient: the approval status check', () => {
+  /** Park a call so there is a record, and answer with its id. */
+  async function park(instanceId: string, id: number): Promise<string> {
+    const result = await client('triager', instanceId).call('posts.publish', { id })
+    if (!result.pending) throw new Error('the fixture tool did not park')
+    return result.requestId
+  }
+
+  test('should report a request this instance created', async () => {
+    const requestId = await park('status-1', 101)
+
+    const answer = await client('triager', 'status-1').status(requestId)
+
+    expect(answer.found).toBe(true)
+    if (!answer.found) return
+    expect(answer.report).toMatchObject({
+      requestId,
+      status: 'pending',
+      tool: 'posts.publish',
+      executed: false,
+    })
+  })
+
+  test('should audit a report under the meta-tool name and the durable surface', async () => {
+    const requestId = await park('status-2', 102)
+    records.length = 0
+
+    await client('triager', 'status-2').status(requestId)
+    await drainEvents()
+
+    const invoked = records.filter((event): event is AgentToolInvoked => event instanceof AgentToolInvoked)
+    expect(invoked).toHaveLength(1)
+    expect(invoked[0]!.tool).toBe('guren.approval_status')
+    expect(invoked[0]!.status).toBe(200)
+    expect(invoked[0]!.surface).toBe('durable')
+    expect(invoked[0]!.principal?.id).toBe('agent:triager:status-2')
+  })
+
+  test('should answer not found for an id no request carries, audited as a 404', async () => {
+    records.length = 0
+
+    const answer = await client('triager', 'status-3').status('no-such-request')
+    await drainEvents()
+
+    expect(answer.found).toBe(false)
+    expect(answer.unavailable).toBeUndefined()
+    const invoked = records.filter((event): event is AgentToolInvoked => event instanceof AgentToolInvoked)
+    expect(invoked[0]!.status).toBe(404)
+  })
+
+  test('should hide another instance request behind the same answer, audited as a 403', async () => {
+    const requestId = await park('status-owner', 104)
+    records.length = 0
+
+    // Two instances of one agent are two principals, and approvals are isolated
+    // by that id: a caller must not be able to enumerate another's pending
+    // actions by walking ids.
+    const answer = await client('triager', 'status-stranger').status(requestId)
+    await drainEvents()
+
+    expect(answer.found).toBe(false)
+    const invoked = records.filter((event): event is AgentToolInvoked => event instanceof AgentToolInvoked)
+    expect(invoked[0]!.status).toBe(403)
+  })
+
+  test('should answer an unknown id and a foreign one identically', async () => {
+    const requestId = await park('status-owner-2', 105)
+    const stranger = client('triager', 'status-stranger-2')
+
+    const foreign = await stranger.status(requestId)
+    const unknown = await stranger.status('no-such-request')
+
+    // One message for both branches, echoing only the id the caller supplied.
+    // Any difference beyond that is the enumeration the 403/404 split in the
+    // trail exists to keep out of the caller's reach.
+    expect(foreign.message).toBe(approvalStatusNotFoundMessage(requestId))
+    expect(unknown.message).toBe(approvalStatusNotFoundMessage('no-such-request'))
+  })
+
+  test('should spend the per-instance budget', async () => {
+    // A status check reaches the application's storage, so an unmetered one is
+    // a hole in the budget an agent can poll through.
+    let clock = 6_000_000
+    const thrifty = client('thrifty', 't-status', () => clock)
+
+    expect((await thrifty.status('a')).found).toBe(false)
+    expect((await thrifty.status('b')).found).toBe(false)
+
+    const spent = await thrifty.status('c')
+    expect(spent.unavailable).toBe(true)
+    expect(spent.message).toContain('callsPerMinute')
+  })
+
+  test('should keep the check unavailable rather than missing with no queue', async () => {
+    // The two are handled oppositely by the ledger: a row is purged on a
+    // missing record and kept on an unanswerable check.
+    const unqueued: AgentRuntime = { ...runtime }
+    delete unqueued.approvals
+
+    const answer = await createAgentToolClient({
+      runtime: unqueued,
+      agentName: 'triager',
+      instanceId: 'status-4',
+    }).status('any')
+
+    expect(answer.unavailable).toBe(true)
+    expect(answer.message).toContain('agentsPlugin({ approvals: { store, notify } })')
+  })
+
+  test('should report a store that threw as unavailable, audited as a 500', async () => {
+    const broken: AgentRuntime = {
+      ...runtime,
+      approvals: {
+        store: {
+          create: () => Promise.resolve(),
+          find: () => Promise.reject(new Error('the queue is down')),
+          findMatch: () => Promise.resolve(null),
+          consume: () => Promise.resolve(false),
+        },
+        notify: () => {},
+      },
+    }
+    records.length = 0
+
+    const answer = await createAgentToolClient({
+      runtime: broken,
+      agentName: 'triager',
+      instanceId: 'status-5',
+    }).status('any')
+    await drainEvents()
+
+    expect(answer.unavailable).toBe(true)
+    expect(answer.message).toContain('the queue is down')
+    const invoked = records.filter((event): event is AgentToolInvoked => event instanceof AgentToolInvoked)
+    expect(invoked[0]!.status).toBe(500)
   })
 })
 

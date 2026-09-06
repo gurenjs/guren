@@ -19,6 +19,7 @@ import {
 import type {
   AgentAuditEmitter,
   Application,
+  Encrypter,
   EventManager,
   ScopedTool,
   ServiceProviderConstructor,
@@ -30,6 +31,10 @@ import {
   type AgentsConfig,
 } from './config'
 import { configureAgentRuntime, freezeAgentRegistrations, type AgentRegistration } from './latch'
+import type { LedgerCipher } from './ledger'
+
+/** The container key `EncryptionServiceProvider` binds the app-key cipher under. */
+const ENCRYPTER_BINDING = 'encrypter'
 
 export type AgentsPluginConfig = AgentsConfig
 
@@ -117,6 +122,28 @@ const factory = definePlugin<AgentsPluginConfig>({
       )
     }
 
+    // Read here rather than at first use, unlike the audit emitter: the
+    // encrypter is bound by `register()`, which every provider has run before
+    // any `boot` does, and the warning is only useful while an author is
+    // reading boot output. The string half, not the `Encrypter` itself: its
+    // `encrypt` JSON-serialises, and the ledger hands it a JSON string already.
+    const encrypter = container.has(ENCRYPTER_BINDING)
+      ? container.make<Encrypter>(ENCRYPTER_BINDING)
+      : undefined
+    if (!encrypter) {
+      console.warn(
+        '[@guren/plugin-agents] No encrypter is bound, so the pending-approval ledger is disabled: '
+        + 'a call awaiting approval is reported to the agent but never retried automatically. '
+        + 'Add EncryptionServiceProvider to `providers` and set APP_KEY to enable it.',
+      )
+    }
+    const cipher: LedgerCipher | undefined = encrypter
+      ? {
+          encrypt: (text) => encrypter.encryptString(text),
+          decrypt: (text) => encrypter.decryptString(text),
+        }
+      : undefined
+
     configureAgentRuntime({
       // Not `app` itself: this hook runs inside `bootAll()`, so every provider
       // after it is still unbooted. `boot()` rather than `booted()`: after a boot
@@ -135,6 +162,7 @@ const factory = definePlugin<AgentsPluginConfig>({
       registrations: freezeAgentRegistrations(registrations),
       audit,
       ...(config.approvals ? { approvals: config.approvals } : {}),
+      ...(cipher ? { cipher } : {}),
     })
   },
 })

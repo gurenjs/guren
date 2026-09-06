@@ -23,6 +23,25 @@ export { agentsPlugin } from './plugin'
 export type { AgentsPluginConfig } from './plugin'
 
 /**
+ * The human-in-the-loop vocabulary (RFC 0017 §5). Types only, so an agent class
+ * types its `onToolApprovalSettled` override without importing `agents` — the
+ * root stays Bun-safe.
+ */
+export type {
+  AgentApprovalStatusFound,
+  AgentApprovalStatusMissing,
+  AgentApprovalStatusResult,
+  AgentApprovalStatusUnavailable,
+  AgentToolApprovalSettled,
+  AgentToolCallDenied,
+  AgentToolCallFailed,
+  AgentToolCallOk,
+  AgentToolCallPending,
+  AgentToolCallResult,
+} from './tool-client'
+export type { LedgerCipher, PendingToolCall } from './ledger'
+
+/**
  * The runtime seam — `configureAgentRuntime`, `resolveAgentRuntime`,
  * `createAgentToolClient` and their types — is **not** re-exported here. It
  * lives at `@guren/plugin-agents/runtime`, so that agent code reaching for it

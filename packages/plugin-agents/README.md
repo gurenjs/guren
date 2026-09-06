@@ -132,6 +132,58 @@ your own to answer it directly. `routeAgentRequest` is a router, not an auth
 layer — this is the layer. The shape is deliberately thin while RFC 0017's Open
 Question 3 (per-agent policy classes? `Gate` abilities?) is unsettled.
 
+## Human-in-the-loop
+
+A tool declaring `approval: 'required'` refuses the first call and files a
+request for a human. The agent gets the id and stops:
+
+```ts
+export class Ops extends GurenAgent<Env, OpsState> {
+  async retire(id: number) {
+    const result = await this.tools.call('posts.destroy', { id })
+    if (result.pending) return   // parked; the retry is scheduled for you
+  }
+
+  onToolApprovalSettled(event: AgentToolApprovalSettled) {
+    if (event.status === 'approved') { /* event.result holds the retry's answer */ }
+  }
+}
+```
+
+Behind `return`, `this.tools` checkpoints `{ requestId, tool, args }` into a
+private table in the agent's own Durable Object SQLite and schedules
+`checkPendingApprovals` — 30 seconds, doubling per check, capped at the request's
+expiry. On each wake it asks the queue about every parked call. `approved`
+repeats the original call with the stored arguments (the queue's consume-on-use
+and fingerprint match make that spend exactly the approval a human granted);
+`rejected` and `expired` rows are pruned. Every outcome reaches
+`onToolApprovalSettled`, which is a no-op unless you override it.
+
+The sweep is written not to throw. The SDK retries a failed scheduled callback
+three times and then drops the schedule, so one bad row — an approval hook of
+yours that throws, a row naming a route a deploy removed, a row no current key
+can decrypt — would otherwise replay the whole sweep and then leave every
+surviving row with no wake at all. Each row is handled on its own, a throwing
+hook is reported and swallowed, and a retry refused for want of budget keeps its
+row rather than spending a human's approval on a refusal.
+
+One case is worth knowing about because it is the reason `status` and `result`
+are separate. If a sweep is interrupted *after* the retry ran but before the row
+was cleared, the next sweep finds the approval already spent — it settles with
+`status: 'approved'` and **no `result`**, and calls nothing. Repeating the call
+there would find no unconsumed approval, file a fresh request, page a human
+again, and perform the action twice.
+
+Nothing is held in memory: an eviction between the request and the approval
+loses nothing, because the state and the schedule are both durable.
+
+**No encrypter, no ledger.** The approval queue stores only redacted input and a
+non-reversible fingerprint, so the arguments have to live on the agent's side —
+and the bound on that is that they are ciphertext at rest, under the app key. An
+application without `EncryptionServiceProvider` and `APP_KEY` gets a warning at
+boot and no ledger: a parked call is still reported to the agent with its
+`requestId`, it is simply never retried for you.
+
 ## What an agent cannot do
 
 `this.tools.call(name, args)` is the only way an agent reaches the application,

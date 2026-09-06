@@ -28,11 +28,12 @@
   "durable_objects": {
     "bindings": [
       { "name": "TEST_AGENT", "class_name": "TestAgent" },
-      { "name": "STRAY_AGENT", "class_name": "StrayAgent" }
+      { "name": "STRAY_AGENT", "class_name": "StrayAgent" },
+      { "name": "THRIFTY_AGENT", "class_name": "ThriftyAgent" }
     ]
   },
   // `new_sqlite_classes`, not `new_classes`: the SDK stores state and all its
   // bookkeeping in Durable Object SQLite, so the legacy KV storage backend
   // cannot host an Agent. This is the form the scaffold emits.
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TestAgent", "StrayAgent"] }]
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TestAgent", "StrayAgent", "ThriftyAgent"] }]
 }

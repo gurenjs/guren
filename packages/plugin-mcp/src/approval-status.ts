@@ -4,17 +4,11 @@
  * a request id; this is what the id is for. A meta-tool for the same protocol
  * reason `guren.preflight` is one: a status is not the gated route's output, and
  * MCP forbids a schema-declaring tool from answering with a different shape of
- * success. It owns no rule — expiry is `agentApprovalStatusAt` and visibility
- * `agentApprovalVisibleTo`, the same two the gate reads, so a record this tool
- * calls "approved" cannot be one the gate refuses.
+ * success. It owns no rule — the answer itself is `toApprovalStatusReport` in
+ * `@guren/core`, shared with the durable surface, so a record this tool calls
+ * "approved" cannot be one the gate refuses.
  */
-import {
-  agentApprovalStatusAt,
-  agentApprovalVisibleTo,
-  APPROVAL_STATUS_TOOL_NAME,
-  type AgentApprovalRequest,
-  type AgentPrincipal,
-} from '@guren/core'
+import { APPROVAL_STATUS_TOOL_NAME } from '@guren/core'
 
 /** A JSON Schema object as MCP advertises it. */
 type McpObjectSchema = { type: 'object'; [key: string]: unknown }
@@ -68,6 +62,13 @@ const APPROVAL_STATUS_OUTPUT_SCHEMA: McpObjectSchema = {
         'Always false. Reading a status never performs the call — an approved request still has to '
         + 'be called again.',
     },
+    consumedAt: {
+      type: 'string',
+      description:
+        'ISO 8601 instant the approval was spent. Approved and already spent: the one call it '
+        + 'permitted has run — do not repeat the call. Absent while an approval is still available '
+        + 'to use.',
+    },
   },
   required: ['requestId', 'status', 'tool', 'requestedAt', 'expiresAt', 'executed'],
 }
@@ -116,66 +117,4 @@ export function readApprovalStatusArguments(
     }
   }
   return { requestId }
-}
-
-/** One answer, as it rides in `structuredContent`. */
-export interface ApprovalStatusReport {
-  [key: string]: unknown
-  requestId: string
-  status: string
-  tool: string
-  requestedAt: string
-  expiresAt: string
-  executed: false
-  resolvedAt?: string
-  resolvedBy?: string
-}
-
-/**
- * The one message for "there is no such request *for you*". One function for
- * both branches because an unknown id and another principal's id must be the
- * same answer byte for byte: any difference turns the tool into a way to
- * enumerate other principals' pending actions. The audit trail is where the
- * distinction is kept, for the operator.
- */
-export function approvalStatusNotFoundMessage(requestId: string): string {
-  return `No approval request with id "${requestId}" was made by this caller.`
-}
-
-export type ApprovalStatusOutcome =
-  | { report: ApprovalStatusReport }
-  /**
-   * Unknown, or not this caller's — one answer to the caller. `foreign` is the
-   * half the *operator* gets: it rides beside the message, for the audit event,
-   * and must never reach the result.
-   */
-  | { notFound: string; foreign: boolean }
-
-/**
- * Read a stored record as an answer for `principal` at `now`. `record === null`
- * and "not visible to this principal" converge here rather than at two call
- * sites, so their sameness is structural.
- */
-export function toApprovalStatusReport(
-  requestId: string,
-  record: AgentApprovalRequest | null,
-  principal: AgentPrincipal | null,
-  now: Date,
-): ApprovalStatusOutcome {
-  if (!record || !agentApprovalVisibleTo(record, principal)) {
-    return { notFound: approvalStatusNotFoundMessage(requestId), foreign: record !== null }
-  }
-
-  return {
-    report: {
-      requestId: record.id,
-      status: agentApprovalStatusAt(record, now),
-      tool: record.tool,
-      requestedAt: record.requestedAt,
-      expiresAt: record.expiresAt,
-      executed: false,
-      ...(record.resolvedAt ? { resolvedAt: record.resolvedAt } : {}),
-      ...(record.resolvedBy ? { resolvedBy: record.resolvedBy } : {}),
-    },
-  }
 }

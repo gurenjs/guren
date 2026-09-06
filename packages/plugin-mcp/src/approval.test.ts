@@ -546,6 +546,38 @@ describe('guren.approval_status', () => {
     })
   })
 
+  test('should report a spent approval as consumed, so a caller does not repeat it', async () => {
+    const store = new MemoryApprovalStore()
+    const spent = await seedApproved(store, { id: 5 }, { consumedAt: NOW.toISOString() })
+    const { client } = await connect({ store })
+
+    const result = await client.callTool({
+      name: 'guren.approval_status',
+      arguments: { requestId: spent.id },
+    })
+
+    // Still "approved" — the human said yes — but the one call it permitted has
+    // run. A caller that repeated it would file a fresh request and, on
+    // approval, perform the action a second time.
+    expect(result.structuredContent).toMatchObject({
+      status: 'approved',
+      consumedAt: NOW.toISOString(),
+    })
+  })
+
+  test('should omit consumedAt while an approval is still available', async () => {
+    const store = new MemoryApprovalStore()
+    const approved = await seedApproved(store, { id: 5 })
+    const { client } = await connect({ store })
+
+    const result = await client.callTool({
+      name: 'guren.approval_status',
+      arguments: { requestId: approved.id },
+    })
+
+    expect(result.structuredContent).not.toHaveProperty('consumedAt')
+  })
+
   test('should report an approved request with its resolution', async () => {
     const store = new MemoryApprovalStore()
     const approved = await seedApproved(store, { id: 5 })

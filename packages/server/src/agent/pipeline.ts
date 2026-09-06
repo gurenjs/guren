@@ -220,6 +220,63 @@ export function createAgentApprovalContext(
   }
 }
 
+/** What {@link createAgentAuditRecorder} needs, settled once per caller. */
+export interface AgentAuditRecorderOptions {
+  audit?: AgentAuditEmitter
+  principal: AgentPrincipal | null
+  surface: AgentSurface
+}
+
+/** The two records a surface writes. See {@link createAgentAuditRecorder}. */
+export interface AgentAuditRecorder {
+  invoked(
+    audited: AuditedTool,
+    args: Record<string, unknown>,
+    status: number,
+    durationMs: number,
+  ): void
+  denied(
+    audited: AuditedTool,
+    args: Record<string, unknown>,
+    reason: AgentToolDenialReason,
+  ): void
+}
+
+/**
+ * How a call is written down: principal, surface, and argument masking.
+ *
+ * Exported because a durable agent's approval-status check reaches the store
+ * without dispatching a tool (RFC 0017 §5), and a second copy of this rule is
+ * how one surface records an argument the other masks.
+ */
+export function createAgentAuditRecorder(options: AgentAuditRecorderOptions): AgentAuditRecorder {
+  return {
+    invoked(audited, args, status, durationMs): void {
+      options.audit?.(
+        new AgentToolInvoked(
+          options.principal,
+          audited.toolName,
+          redactAgentArguments(args, audited.redact),
+          status,
+          durationMs,
+          options.surface,
+        ),
+      )
+    },
+    denied(audited, args, reason): void {
+      options.audit?.(
+        new AgentToolDenied(
+          options.principal,
+          audited.toolName,
+          redactAgentArguments(args, audited.redact),
+          reason,
+          options.surface,
+        ),
+      )
+    },
+  }
+}
+
 /** One call, as the pipeline is asked to run it. */
 export interface AgentInvocation {
   /** The tool the request is built from. */
@@ -288,31 +345,11 @@ export function createAgentInvocationPipeline(
     ...(options.scopeSubject !== undefined ? { scopeSubject: options.scopeSubject } : {}),
   }
 
-  const record = {
-    invoked(audited: AuditedTool, args: Record<string, unknown>, status: number, durationMs: number): void {
-      options.audit?.(
-        new AgentToolInvoked(
-          options.principal,
-          audited.toolName,
-          redactAgentArguments(args, audited.redact),
-          status,
-          durationMs,
-          options.surface,
-        ),
-      )
-    },
-    denied(audited: AuditedTool, args: Record<string, unknown>, reason: AgentToolDenialReason): void {
-      options.audit?.(
-        new AgentToolDenied(
-          options.principal,
-          audited.toolName,
-          redactAgentArguments(args, audited.redact),
-          reason,
-          options.surface,
-        ),
-      )
-    },
-  }
+  const record = createAgentAuditRecorder({
+    ...(options.audit ? { audit: options.audit } : {}),
+    principal: options.principal,
+    surface: options.surface,
+  })
 
   return {
     async invoke(call: AgentInvocation): Promise<AgentInvocationResult> {

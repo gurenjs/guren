@@ -3,6 +3,7 @@ import { z } from 'zod'
 import {
   AGENT_AUDIT_BINDING,
   AgentToolInvoked,
+  EncryptionServiceProvider,
   EventServiceProvider,
   createApp,
   definePlugin,
@@ -263,5 +264,33 @@ describe('agentsPlugin', () => {
       .call('posts.index', {})
 
     expect(recorded).toEqual([`${AgentToolInvoked.name}:posts.index`])
+  })
+})
+
+describe('agentsPlugin: the ledger cipher', () => {
+  test('should publish the app key cipher when the encryption provider is registered', async () => {
+    process.env.APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+    await boot({ agents: TRIAGER }, [EncryptionServiceProvider])
+
+    const cipher = (await resolveAgentRuntime()).cipher
+    expect(cipher).toBeDefined()
+    // The binding is the container's `encrypter`, so the round trip is the
+    // whole claim: a ledger row is ciphertext the same key opens.
+    const sealed = cipher!.encrypt('the-arguments')
+    expect(sealed).not.toContain('the-arguments')
+    expect(cipher!.decrypt(sealed)).toBe('the-arguments')
+  })
+
+  test('should disable the ledger and say so when nothing is bound', async () => {
+    const warnings = await captureWarnings(async () => {
+      await boot({ agents: TRIAGER })
+    })
+
+    expect((await resolveAgentRuntime()).cipher).toBeUndefined()
+    // Named in the warning because there is no other signal: a pending call is
+    // still reported, it is simply never retried.
+    const warning = warnings.find((line) => line.includes('pending-approval ledger is disabled'))
+    expect(warning).toContain('EncryptionServiceProvider')
+    expect(warning).toContain('APP_KEY')
   })
 })
