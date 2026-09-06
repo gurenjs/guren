@@ -95,6 +95,18 @@ function toWriterOptions(args: ForceableArgs): WriterOptions {
   }
 }
 
+/**
+ * A flag given more than once arrives from citty as an array despite its
+ * `string` type; a comma-separated single value is the other spelling.
+ */
+function parseRepeatableArg(value: string | string[] | undefined): string[] {
+  if (value === undefined) return []
+  return (Array.isArray(value) ? value : [value])
+    .flatMap((entry) => String(entry).split(','))
+    .map((entry) => entry.trim())
+    .filter((entry) => entry !== '')
+}
+
 const MODULE_ARG = {
   type: 'string' as const,
   description: 'Scaffold inside modules/<name>/ instead of the project root.',
@@ -242,6 +254,11 @@ const makeAdrCommand = defineCommand({
       description:
         'OKF actor for generated.by (human:<id>, process:<id>, or <producer>/<version>). Defaults to the git author.',
     },
+    issue: {
+      type: 'string',
+      description:
+        'GitHub issue or PR to prefill issues: with (412, owner/repo#412, or a URL). Repeat or comma-separate for several.',
+    },
     force: { type: 'boolean', description: 'Overwrite existing files', alias: 'f' },
     module: MODULE_ARG,
   },
@@ -250,6 +267,7 @@ const makeAdrCommand = defineCommand({
       ...toWriterOptions(args),
       entity: args.entity,
       by: args.by,
+      issues: parseRepeatableArg(args.issue),
     })
     consola.success(`ADR created at ${file}`)
   },

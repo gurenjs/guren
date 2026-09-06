@@ -129,7 +129,7 @@ table to.
 | `make:middleware <Name>` | Generates a middleware file in `app/Http/Middleware` | `bunx guren make:middleware Auth` |
 | `make:policy <Name>` | Generates an authorization policy in `app/Policies` with owner-based defaults | `bunx guren make:policy Post` |
 | `make:validator <Name>` | Generates Zod validation schemas (route params, list query, payload) in `app/Http/Validators`; `--fields` uses the same syntax as `make:feature` | `bunx guren make:validator Post --fields "title:string,body:text"` |
-| `make:adr "<Title>"` | Records an architecture decision as a numbered file under `docs/adr/` with linkable frontmatter; `--entity <Model>` prefills the `entities:`/`related:` links | `bunx guren make:adr "Billing cycle is end-of-month" --entity Invoice` |
+| `make:adr "<Title>"` | Records an architecture decision as a numbered file under `docs/adr/` with linkable frontmatter; `--entity <Model>` prefills the `entities:`/`related:` links, `--issue <ref>` (repeatable) the `issues:` link to a GitHub issue or PR | `bunx guren make:adr "Billing cycle is end-of-month" --entity Invoice --issue 412` |
 | `make:seeder <Name>` | Generates a database seeder file | `bunx guren make:seeder UserSeeder` |
 | `make:job <Name>` | Generates a queueable job class | `bunx guren make:job SendEmail` |
 | `make:event <Name>` | Generates an event class | `bunx guren make:event UserRegistered` |

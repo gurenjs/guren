@@ -1,0 +1,245 @@
+// The `issues:` frontmatter field end to end (RFC 0018 Part 1): scan, check,
+// entity context, viewer payload, and the make:adr prefill. Everything here is
+// offline; a network call from any of these paths is a bug these tests cannot
+// see, which is why the fetch guard is preloaded on the suite.
+import { existsSync, readFileSync } from 'node:fs'
+import { mkdir, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { spawnSync } from 'node:child_process'
+import { describe, expect, it } from 'bun:test'
+import { scanDocs } from '../src/docs-index'
+import { runDocsCheck } from '../src/docs-check'
+import { generateEntityContext, renderEntityContextMarkdown } from '../src/entity-context'
+import { buildDocsViewerData } from '../src/docs-viewer'
+import { makeAdr } from '../src/make-adr'
+import { resolveOriginRepo } from '../src/issue-refs'
+import { createTempWorkspace } from './helpers'
+
+const ADR_WITH_ISSUES = `---
+type: adr
+status: draft
+entities: [Post]
+issues: [412, "#398", "acme/shop#7", https://github.com/acme/shop/pull/9, next-sprint]
+---
+
+# Posts need moderation
+`
+
+async function writeApp(dir: string): Promise<void> {
+  await mkdir(join(dir, 'docs/adr'), { recursive: true })
+  await mkdir(join(dir, 'app/Models'), { recursive: true })
+  await writeFile(join(dir, 'package.json'), '{}', 'utf8')
+  await writeFile(join(dir, 'app/Models/Post.ts'), 'export class Post {}\n', 'utf8')
+}
+
+function gitWithOrigin(dir: string, remote: string): boolean {
+  const init = spawnSync('git', ['init', '-q'], { cwd: dir, stdio: 'ignore' })
+  if (init.status !== 0) return false
+  return spawnSync('git', ['remote', 'add', 'origin', remote], { cwd: dir, stdio: 'ignore' }).status === 0
+}
+
+describe('issues: frontmatter', () => {
+  it('scans every accepted form and keeps the rest for the checker', async () => {
+    const workspace = await createTempWorkspace('guren-cli-docs-issues-scan-')
+    try {
+      await writeApp(workspace.dir)
+      await writeFile(join(workspace.dir, 'docs/adr/0001-moderation.md'), ADR_WITH_ISSUES, 'utf8')
+
+      const [ref] = await scanDocs(workspace.dir)
+
+      expect(ref.issues).toEqual([
+        { kind: 'github', raw: '412', repo: null, number: 412 },
+        { kind: 'github', raw: '#398', repo: null, number: 398 },
+        { kind: 'github', raw: 'acme/shop#7', repo: 'acme/shop', number: 7 },
+        { kind: 'github', raw: 'https://github.com/acme/shop/pull/9', repo: 'acme/shop', number: 9 },
+      ])
+      expect(ref.malformedIssues).toEqual(['next-sprint'])
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('loses the list to an unquoted #number, which YAML reads as a comment, and warns on the remainder', async () => {
+    const workspace = await createTempWorkspace('guren-cli-docs-issues-comment-')
+    try {
+      await writeApp(workspace.dir)
+      await writeFile(
+        join(workspace.dir, 'docs/adr/0001-x.md'),
+        '---\ntype: adr\nissues: [412, #398]\n---\n# X\n',
+        'utf8',
+      )
+
+      const [ref] = await scanDocs(workspace.dir)
+
+      // The comment swallows the closing bracket too, so nothing parses as a
+      // list; the leftover scalar is what the checker reports.
+      expect(ref.issues).toEqual([])
+      expect(ref.malformedIssues).toHaveLength(1)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('warns once per malformed entry and stays silent for well-formed ones', async () => {
+    const workspace = await createTempWorkspace('guren-cli-docs-issues-check-')
+    try {
+      await writeApp(workspace.dir)
+      await writeFile(join(workspace.dir, 'docs/adr/0001-moderation.md'), ADR_WITH_ISSUES, 'utf8')
+
+      const results = await runDocsCheck({ cwd: workspace.dir })
+      const issueResults = results.filter((r) => r.key.startsWith('docs-issues:'))
+
+      expect(issueResults).toHaveLength(1)
+      expect(issueResults[0].key).toBe('docs-issues:docs/adr/0001-moderation.md:next-sprint')
+      expect(issueResults[0].status).toBe('warn')
+      expect(issueResults[0].suggestion).toContain('owner/repo#412')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+})
+
+describe('guren context <Entity> linked issues', () => {
+  it('lists each distinct issue once, naming every doc that declared it', async () => {
+    const workspace = await createTempWorkspace('guren-cli-docs-issues-context-')
+    try {
+      await writeApp(workspace.dir)
+      await mkdir(join(workspace.dir, 'docs/context'), { recursive: true })
+      await writeFile(join(workspace.dir, 'docs/adr/0001-moderation.md'), ADR_WITH_ISSUES, 'utf8')
+      await writeFile(
+        join(workspace.dir, 'docs/context/posts.md'),
+        '---\ntype: context\nentities: [Post]\nissues: ["#412", https://gitlab.example.com/i/5]\n---\n# Posts\n',
+        'utf8',
+      )
+
+      const ctx = await generateEntityContext('Post', { cwd: workspace.dir })
+
+      // No git remote in the fixture: bare numbers get a label but no URL.
+      expect(ctx.issues).toEqual([
+        { label: '#398', number: 398, docs: ['docs/adr/0001-moderation.md'] },
+        { label: '#412', number: 412, docs: ['docs/adr/0001-moderation.md', 'docs/context/posts.md'] },
+        {
+          label: 'acme/shop#7',
+          repo: 'acme/shop',
+          number: 7,
+          url: 'https://github.com/acme/shop/issues/7',
+          docs: ['docs/adr/0001-moderation.md'],
+        },
+        {
+          label: 'acme/shop#9',
+          repo: 'acme/shop',
+          number: 9,
+          url: 'https://github.com/acme/shop/issues/9',
+          docs: ['docs/adr/0001-moderation.md'],
+        },
+        { label: 'https://gitlab.example.com/i/5', url: 'https://gitlab.example.com/i/5', docs: ['docs/context/posts.md'] },
+      ])
+
+      const markdown = renderEntityContextMarkdown(ctx)
+      expect(markdown).toContain('## Linked issues (5)')
+      expect(markdown).toContain('- #412 — docs/adr/0001-moderation.md, docs/context/posts.md')
+      expect(markdown).toContain('- acme/shop#7 — docs/adr/0001-moderation.md')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('omits the section when no linked doc declares issues', async () => {
+    const workspace = await createTempWorkspace('guren-cli-docs-issues-none-')
+    try {
+      await writeApp(workspace.dir)
+      await writeFile(join(workspace.dir, 'docs/adr/0001-x.md'), '---\ntype: adr\nentities: [Post]\n---\n# X\n', 'utf8')
+
+      const ctx = await generateEntityContext('Post', { cwd: workspace.dir })
+
+      expect(ctx.issues).toEqual([])
+      expect(renderEntityContextMarkdown(ctx)).not.toContain('## Linked issues')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('resolves bare numbers against the origin remote when the app is a GitHub checkout', async () => {
+    const workspace = await createTempWorkspace('guren-cli-docs-issues-origin-')
+    try {
+      await writeApp(workspace.dir)
+      if (!gitWithOrigin(workspace.dir, 'git@github.com:acme/shop.git')) return
+      await writeFile(join(workspace.dir, 'docs/adr/0001-x.md'), '---\ntype: adr\nentities: [Post]\nissues: [412]\n---\n# X\n', 'utf8')
+
+      expect(await resolveOriginRepo(workspace.dir)).toBe('acme/shop')
+      const ctx = await generateEntityContext('Post', { cwd: workspace.dir })
+
+      expect(ctx.issues).toEqual([
+        { label: 'acme/shop#412', repo: 'acme/shop', number: 412, url: 'https://github.com/acme/shop/issues/412', docs: ['docs/adr/0001-x.md'] },
+      ])
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+})
+
+describe('docs viewer issue outlinks', () => {
+  it('carries a label for every issue and a URL only where the repository is known', async () => {
+    const workspace = await createTempWorkspace('guren-cli-docs-issues-viewer-')
+    try {
+      await writeApp(workspace.dir)
+      await writeFile(join(workspace.dir, 'docs/adr/0001-moderation.md'), ADR_WITH_ISSUES, 'utf8')
+
+      const data = await buildDocsViewerData(workspace.dir)
+      const [doc] = data.docs
+
+      expect(doc.issues).toEqual([
+        { label: '#412' },
+        { label: '#398' },
+        { label: 'acme/shop#7', url: 'https://github.com/acme/shop/issues/7' },
+        { label: 'acme/shop#9', url: 'https://github.com/acme/shop/issues/9' },
+      ])
+      expect(data.nodes.some((node) => node.id.includes('412'))).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+})
+
+describe('make:adr --issue', () => {
+  it('prefills issues: with bare numbers unquoted and every other form quoted', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-adr-issues-')
+    try {
+      const file = await makeAdr('Posts need moderation', {
+        issues: ['412', 'acme/shop#7', 'https://github.com/acme/shop/pull/9'],
+      })
+      const content = readFileSync(file, 'utf8')
+
+      expect(content).toContain('issues: [412, "acme/shop#7", "https://github.com/acme/shop/pull/9"]')
+      // The written file round-trips through the scanner without warnings.
+      await writeFile(join(workspace.dir, 'package.json'), '{}', 'utf8')
+      const [ref] = await scanDocs(workspace.dir)
+      expect(ref.issues.map((issue) => issue.raw)).toEqual(['412', 'acme/shop#7', 'https://github.com/acme/shop/pull/9'])
+      expect(ref.malformedIssues).toEqual([])
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('writes no issues: line when none is given', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-adr-no-issues-')
+    try {
+      const file = await makeAdr('Plain decision', { issues: [] })
+      expect(readFileSync(file, 'utf8')).not.toContain('issues:')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('rejects a malformed reference before writing anything', async () => {
+    const workspace = await createTempWorkspace('guren-cli-make-adr-bad-issue-')
+    try {
+      await expect(makeAdr('Bad reference', { issues: ['412', 'next-sprint'] })).rejects.toThrow(
+        'Invalid issue reference "next-sprint"',
+      )
+      expect(existsSync(join(workspace.dir, 'docs/adr'))).toBe(false)
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+})

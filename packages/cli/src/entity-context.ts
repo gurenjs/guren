@@ -31,7 +31,8 @@ import {
   type ContextRoute,
 } from './context-route'
 import { extractInertiaPageRefs, describeInertiaPage } from './inertia-pages'
-import { scanDocs, extractDocsTags, buildEntityDocIndex } from './docs-index'
+import { scanDocs, extractDocsTags, buildEntityDocIndex, type DocRef } from './docs-index'
+import { issueKey, issueLabel, issueUrl, resolveOriginRepo } from './issue-refs'
 import { parseSchemaTableColumns } from './schema-parser'
 
 export interface EntityPage {
@@ -74,6 +75,21 @@ export interface EntityDoc {
   verifiedAt?: string
 }
 
+/**
+ * A GitHub issue/PR the entity's linked docs declare (RFC 0018). Offline by
+ * construction: what the frontmatter says, never what GitHub says.
+ */
+export interface EntityIssue {
+  /** `owner/repo#412`, `#412` when no repository is known, or the URL. */
+  label: string
+  /** `owner/repo`, declared or resolved from the `origin` remote. */
+  repo?: string
+  number?: number
+  url?: string
+  /** Docs that declared it. */
+  docs: string[]
+}
+
 export interface EntityContext {
   entity: string
   /** Module the model lives in (RFC 0002), or undefined for the app root. */
@@ -104,6 +120,8 @@ export interface EntityContext {
   tests: string[]
   /** Docs linked via frontmatter `entities:` or code-side `@docs` tags. */
   docs: EntityDoc[]
+  /** Issues those docs declare, de-duplicated across docs (RFC 0018). */
+  issues: EntityIssue[]
 }
 
 export interface EntityContextOptions {
@@ -379,7 +397,40 @@ export async function generateEntityContext(
     seeders,
     tests,
     docs,
+    issues: await collectEntityIssues(cwd, docs.map((doc) => docRefByPath.get(doc.path))),
   }
+}
+
+/** One entry per distinct issue, each naming every doc that declared it. */
+async function collectEntityIssues(
+  cwd: string,
+  refs: Array<DocRef | undefined>,
+): Promise<EntityIssue[]> {
+  const declared = refs.filter((ref): ref is DocRef => ref !== undefined && ref.issues.length > 0)
+  if (declared.length === 0) return []
+
+  const originRepo = await resolveOriginRepo(cwd)
+  const byKey = new Map<string, EntityIssue>()
+  for (const ref of declared) {
+    for (const issue of ref.issues) {
+      const key = issueKey(issue, originRepo)
+      const existing = byKey.get(key)
+      if (existing) {
+        if (!existing.docs.includes(ref.path)) existing.docs.push(ref.path)
+        continue
+      }
+      const url = issueUrl(issue, originRepo)
+      const repo = issue.kind === 'github' ? (issue.repo ?? originRepo ?? undefined) : undefined
+      byKey.set(key, {
+        label: issueLabel(issue, originRepo),
+        ...(repo === undefined ? {} : { repo }),
+        ...(issue.kind === 'github' ? { number: issue.number } : {}),
+        ...(url === undefined ? {} : { url }),
+        docs: [ref.path],
+      })
+    }
+  }
+  return [...byKey.values()].sort((a, b) => a.label.localeCompare(b.label))
 }
 
 /**
@@ -545,6 +596,15 @@ export function renderEntityContextMarkdown(ctx: EntityContext): string {
         .filter(Boolean)
         .join(', ')
       lines.push(`- ${doc.path}${doc.title ? ` — ${doc.title}` : ''}${meta ? ` (${meta})` : ''}`)
+    }
+    lines.push('')
+  }
+
+  if (ctx.issues.length > 0) {
+    lines.push(`## Linked issues (${ctx.issues.length})`)
+    lines.push('Declared by the docs above; state and assignees live on GitHub.')
+    for (const issue of ctx.issues) {
+      lines.push(`- ${issue.label} — ${issue.docs.join(', ')}`)
     }
     lines.push('')
   }

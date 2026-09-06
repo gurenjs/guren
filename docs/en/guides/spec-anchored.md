@@ -106,18 +106,31 @@ verified: { by: human:grace, at: 2026-07-26T09:00:00Z }
   provenance is what makes a document trustable.
 - Models and controllers can link back with a JSDoc tag:
   `/** @docs docs/adr/0001-billing.md */` (tags in other files aren't scanned).
+- `issues` names the GitHub issues or pull requests the document belongs
+  to: `issues: [412, "acme/shop#398", https://github.com/acme/shop/pull/9]`.
+  A bare number means the app's own repository (read from the `origin`
+  remote); quote the `#412` spelling, since an unquoted `#` starts a YAML
+  comment and swallows the rest of the line. The task list, progress and
+  assignee stay on the issue; the document carries the decision and this
+  link. `guren check` warns on an entry it cannot read and never asks
+  GitHub anything, so the gate stays offline.
 
 Record decisions with the generator:
 
 ```bash
-bunx guren make:adr "Billing cycle is end-of-month" --entity Invoice
+bunx guren make:adr "Billing cycle is end-of-month" --entity Invoice --issue 412
 ```
 
 It numbers the file under `docs/adr/`, prefills the frontmatter, and
 `--entity` fills `entities:` and `related:` from what already exists
 (`--by` overrides the `generated.by` actor, which defaults to the git
-author). Every new Guren app ships with a seed ADR explaining the
-convention.
+author; `--issue`, repeatable, fills `issues:`). Every new Guren app
+ships with a seed ADR explaining the convention.
+
+`bunx guren context Invoice` then ends with a **Linked issues** section
+listing every issue the linked docs declare, so whoever picks up the
+model next sees the work already attached to it. The section is read from
+the frontmatter alone; state and assignees are one `gh issue view` away.
 
 ## Browsing: the docs viewer
 

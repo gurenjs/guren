@@ -15,6 +15,7 @@ import {
 } from './discovery'
 import { discoverParsedModels } from './model-parser'
 import { runGit } from './changed-files'
+import { ISSUE_REF_FORMS, parseIssueRef, type DocIssueRef } from './issue-refs'
 
 const ADR_DIR = 'docs/adr'
 
@@ -36,6 +37,18 @@ export interface MakeAdrOptions extends WriterOptions {
    * scaffold omits `generated` entirely, which is still conformant.
    */
   by?: string
+  /** GitHub issue/PR references to prefill `issues:` with (RFC 0018); shape-validated, never fetched. */
+  issues?: string[]
+}
+
+function resolveIssueRefs(entries: string[]): DocIssueRef[] {
+  return entries.map((entry) => {
+    const ref = parseIssueRef(entry)
+    if (ref === null) {
+      throw new Error(`Invalid issue reference "${entry}" — write it as one of: ${ISSUE_REF_FORMS}.`)
+    }
+    return ref
+  })
 }
 
 interface AdrPrefill {
@@ -138,7 +151,13 @@ async function resolveActor(by?: string): Promise<string | null> {
   return gitAuthorActor()
 }
 
-function adrTemplate(title: string, actor: string | null, generatedAt: string, prefill: AdrPrefill): string {
+function adrTemplate(
+  title: string,
+  actor: string | null,
+  generatedAt: string,
+  prefill: AdrPrefill,
+  issueRefs: DocIssueRef[],
+): string {
   const entities =
     prefill.entities.length > 0 ? `entities: [${prefill.entities.join(', ')}]` : 'entities: []'
   const related =
@@ -150,11 +169,18 @@ function adrTemplate(title: string, actor: string | null, generatedAt: string, p
   // YAML. ACTOR_RE already excludes quotes, so no escaping is needed.
   const generated = actor === null ? '' : `\ngenerated: { by: "${actor}", at: ${generatedAt} }`
 
+  // Bare numbers stay bare; every other form is quoted, since `#` opens a
+  // YAML comment and `owner/repo#412` would be cut at the `#`.
+  const issues =
+    issueRefs.length > 0
+      ? `\nissues: [${issueRefs.map((ref) => (ref.kind === 'github' && ref.repo === null ? String(ref.number) : `"${ref.raw}"`)).join(', ')}]`
+      : ''
+
   return `---
 type: adr
 status: draft
 ${entities}
-${related}${generated}
+${related}${issues}${generated}
 ---
 
 # ${title}
@@ -202,6 +228,8 @@ export async function makeAdr(title: string, options: MakeAdrOptions = {}): Prom
   assertCwdUnsupported(options, 'make:adr')
   const moduleName = options.root ? safeModuleName(options.root) : undefined
   const dir = moduleName ? `modules/${moduleName}/${ADR_DIR}` : ADR_DIR
+  // Validated before any discovery: a bad reference fails fast, not after a scan.
+  const issueRefs = resolveIssueRefs(options.issues ?? [])
   const [prefill, actor] = await Promise.all([
     options.entity ? resolveAdrPrefill(options.entity, moduleName) : EMPTY_PREFILL,
     resolveActor(options.by),
@@ -210,7 +238,7 @@ export async function makeAdr(title: string, options: MakeAdrOptions = {}): Prom
 
   return writeScaffoldFile(
     `${dir}/${sequence}-${adrSlug(title)}.md`,
-    adrTemplate(title.trim(), actor, new Date().toISOString(), prefill),
+    adrTemplate(title.trim(), actor, new Date().toISOString(), prefill, issueRefs),
     options,
   )
 }

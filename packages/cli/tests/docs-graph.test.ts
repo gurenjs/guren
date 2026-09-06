@@ -14,6 +14,8 @@ function doc(path: string, overrides: Partial<DocRef> = {}): DocRef {
     entities: [],
     related: [],
     verified: [],
+    issues: [],
+    malformedIssues: [],
     links: [],
     hasFrontmatter: true,
     ...overrides,

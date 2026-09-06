@@ -11,6 +11,7 @@ import {
 import { matchesGlob } from './glob-match'
 import { parseModelFile } from './model-parser'
 import { scanDocs, extractDocsTags, buildEntityDocIndex, type DocRef } from './docs-index'
+import { ISSUE_REF_FORMS } from './issue-refs'
 import type { ParseCache } from './parse-cache'
 import { check, type CheckResult } from './check-result'
 
@@ -145,6 +146,7 @@ export async function runDocsCheck(options: DocsCheckOptions): Promise<CheckResu
     results.push(...checkRequiredType(ref))
     results.push(...(await checkDocRelations(ref, modelNames, probes)))
     results.push(...checkProvenanceFields(ref))
+    results.push(...checkIssueRefs(ref))
   }
 
   results.push(...checkConformance(refs, docsWithFrontmatter.length > 0, changedFiles ?? null))
@@ -435,6 +437,24 @@ function checkProvenanceFields(ref: DocRef): CheckResult[] {
   }
 
   return results
+}
+
+/**
+ * `issues:` (RFC 0018) is shape-checked only: a malformed entry loses nothing
+ * but the link, so it warns, and existence is never asked of GitHub because
+ * this runs inside a gate.
+ */
+function checkIssueRefs(ref: DocRef): CheckResult[] {
+  return ref.malformedIssues.map((entry) =>
+    check(
+      `docs-issues:${ref.path}:${entry}`,
+      `${ref.path} issues`,
+      'warn',
+      `issues entry '${entry}' is not an issue reference, so nothing links this doc to that work item.`,
+      `Write it in ${ref.path} as one of: ${ISSUE_REF_FORMS}.`,
+      ref.path,
+    ),
+  )
 }
 
 /**

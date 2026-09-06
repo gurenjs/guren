@@ -628,6 +628,23 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
   function metaRow(grid, key, value) {
     grid.append(el('div', 'meta-key', key), el('div', 'meta-value', value))
   }
+  // Outlinks only: issue state lives on GitHub, and the viewer never fetches (RFC 0018).
+  function issueRow(grid, issues) {
+    const cell = el('div', 'meta-value')
+    issues.forEach((issue, index) => {
+      if (index > 0) cell.append(', ')
+      if (!issue.url) {
+        cell.append(issue.label)
+        return
+      }
+      const link = el('a', 'issue-link', issue.label)
+      link.href = issue.url
+      link.target = '_blank'
+      link.rel = 'noopener noreferrer'
+      cell.append(link)
+    })
+    grid.append(el('div', 'meta-key', 'issues'), cell)
+  }
   const actorLine = (event) =>
     (event.by || '—') + (event.at ? ' · ' + event.at : '')
 
@@ -664,6 +681,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     metaRow(grid, 'verified', doc.verified.length > 0 ? doc.verified.map(actorLine).join('\n') : '—')
     if (doc.staleAfter) metaRow(grid, 'stale_after', doc.staleAfter)
     if (doc.tags.length > 0) metaRow(grid, 'tags', doc.tags.join(', '))
+    if (doc.issues.length > 0) issueRow(grid, doc.issues)
     front.append(grid)
 
     front.append(el('p', 'panel-label panel-label-spaced', 'Relations'))
