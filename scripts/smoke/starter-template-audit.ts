@@ -43,8 +43,8 @@ export async function auditBlueprintTemplates(root: string): Promise<void> {
   for (const template of ['default', 'api-only']) {
     const contents = await read(root, `templates/${template}/.github/workflows/ci.yml`).catch(() => '')
     assert(
-      contents.includes('guren check --ci'),
-      `templates/${template}/.github/workflows/ci.yml is missing from the create-guren-app tarball (or lost its check gate).`,
+      contents.includes('guren gate --deps'),
+      `templates/${template}/.github/workflows/ci.yml is missing from the create-guren-app tarball (or lost its gate step).`,
     )
   }
 }

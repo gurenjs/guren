@@ -17,22 +17,9 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Generate types
-        run: bun run codegen
-
-      - name: Type check
-        run: bun run typecheck
-
-      - name: Lint
-        run: bun run lint
-
-      - name: Integrity check
-        run: bunx guren check --ci --routes routes/api.ts
-
-      # Exits non-zero on failing findings. Scans dependencies too; pass
-      # --no-deps if this runner cannot reach the npm registry.
-      - name: Security audit
-        run: bunx guren audit --json --routes routes/api.ts
-
-      - name: Tests
-        run: bun test
+      # Every verification stage in one exit code: codegen, typecheck, lint,
+      # check, audit, test. --deps scans dependencies too; drop it if this
+      # runner cannot reach the npm registry. `bunx guren gate` runs the same
+      # stages locally.
+      - name: Gate
+        run: bunx guren gate --deps

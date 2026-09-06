@@ -59,6 +59,15 @@ function createMockCli(overrides: Partial<GurenCliApi> = {}, calls?: CodegenCall
       warnCount: 1,
       failCount: 0,
     }),
+    runGate: async (opts) => ({
+      cwd: opts.cwd,
+      ok: !opts.deps,
+      changed: opts.changed ?? false,
+      stages: [
+        { name: 'codegen', status: 'pass', durationMs: 1, findings: [] },
+        { name: 'audit', status: opts.deps ? 'fail' : 'pass', durationMs: 1, findings: opts.deps ? ['Dependency: lodash <4.17.21'] : [] },
+      ],
+    }),
     listModels: async () => [
       {
         className: 'Post',
@@ -142,6 +151,7 @@ describe('Guren MCP Server', () => {
     expect(names).toContain('guren_get_context')
     expect(names).toContain('guren_entity_context')
     expect(names).toContain('guren_check')
+    expect(names).toContain('guren_gate')
     expect(names).toContain('guren_list_models')
     expect(names).toContain('guren_generate_guidelines')
     expect(names).toContain('guren_doctor')
@@ -149,7 +159,7 @@ describe('Guren MCP Server', () => {
     expect(names).toContain('guren_make_component')
     expect(names).toContain('guren_codegen')
     expect(names).toContain('guren_agent_surface')
-    expect(tools).toHaveLength(10)
+    expect(tools).toHaveLength(11)
   })
 
   test('guren_docs_graph registers only when the CLI provides it', async () => {
@@ -438,6 +448,29 @@ describe('Guren MCP Server', () => {
     expect(report.warnCount).toBe(1)
     expect(report.failCount).toBe(0)
     expect(report.checks).toHaveLength(2)
+  })
+
+  test('guren_gate returns the per-stage report and flags a failed gate as an error', async () => {
+    const client = await createTestClient()
+    const passed = await client.callTool({ name: 'guren_gate', arguments: { changed: true } })
+    const passedReport = JSON.parse((passed.content as Array<{ type: string; text: string }>)[0].text)
+    expect(passed.isError).toBeFalsy()
+    expect(passedReport.ok).toBe(true)
+    expect(passedReport.changed).toBe(true)
+    expect(passedReport.stages.map((s: { name: string }) => s.name)).toEqual(['codegen', 'audit'])
+
+    const failed = await client.callTool({ name: 'guren_gate', arguments: { deps: true } })
+    const failedReport = JSON.parse((failed.content as Array<{ type: string; text: string }>)[0].text)
+    expect(failed.isError).toBe(true)
+    expect(failedReport.ok).toBe(false)
+    expect(failedReport.stages[1].findings).toEqual(['Dependency: lodash <4.17.21'])
+  })
+
+  test('guren_gate on a CLI without runGate says so instead of throwing', async () => {
+    const client = await createTestClient({ runGate: undefined })
+    const result = await client.callTool({ name: 'guren_gate', arguments: {} })
+    expect(result.isError).toBe(true)
+    expect((result.content as Array<{ type: string; text: string }>)[0].text).toContain('guren gate')
   })
 
   test('guren_list_models returns model info', async () => {

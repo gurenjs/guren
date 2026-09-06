@@ -61,6 +61,13 @@ export interface GurenCliApi {
     warnCount: number
     failCount: number
   }>
+  /** Absent on a @guren/cli older than `guren gate`; the tool says so instead of throwing. */
+  runGate?(opts: { cwd: string; changed?: boolean; deps?: boolean }): Promise<{
+    cwd: string
+    ok: boolean
+    changed: boolean
+    stages: Array<{ name: string; status: string; durationMs: number; findings: string[]; reason?: string }>
+  }>
   listModels(opts: { appRoot: string }): Promise<
     Array<{
       className: string
@@ -340,6 +347,25 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServer {
     async () => {
       const report = await cli.runCheck({ cwd })
       return { content: [{ type: 'text', text: JSON.stringify(report, null, 2) }] }
+    },
+  )
+
+  server.tool(
+    'guren_gate',
+    'Run every verification stage the scaffolded CI runs (codegen, typecheck, lint, check, audit, test) and report each; `ok` is the one verdict on whether the change is done. A stage that cannot run fails rather than skips.',
+    {
+      changed: z.boolean().default(false).describe('Narrow check and lint to files changed vs. the merge base with main'),
+      deps: z.boolean().default(false).describe('Scan dependencies in the audit stage (needs registry access)'),
+    },
+    async ({ changed, deps }) => {
+      if (!cli.runGate) {
+        return {
+          content: [{ type: 'text', text: 'guren_gate needs a @guren/cli that ships `guren gate`; upgrade the app (bunx guren upgrade).' }],
+          isError: true,
+        }
+      }
+      const report = await cli.runGate({ cwd, changed, deps })
+      return { content: [{ type: 'text', text: JSON.stringify(report, null, 2) }], isError: !report.ok }
     },
   )
 

@@ -715,24 +715,12 @@ async function main(): Promise<void> {
       await run(['bun', resolve(repoRoot, 'scripts/smoke/build-budget.ts'), '--max-kb', '600', appDir], repoRoot, runtimeEnv)
     }
 
-    // Templates advertise a starter test suite and a CI workflow gating on
-    // `check --ci` and `guren audit`; exercise all three so they cannot drift
-    // from the framework. The api blueprint needs its codegen manifests first.
-    // --no-deps keeps the audit off the network; older CLI releases ignore it.
-    if (blueprint === 'api') {
-      await run(['bun', 'run', 'codegen'], appDir, runtimeEnv)
-    }
-    const routesArgs = blueprint === 'api' ? ['--routes', 'routes/api.ts'] : []
-    await run(['bun', 'test'], appDir, runtimeEnv)
-    await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'check', '--ci', ...routesArgs], appDir, runtimeEnv)
-    await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'audit', '--no-deps', ...routesArgs], appDir, runtimeEnv)
-
-    // The templates ship .oxlintrc.json with the @guren/cli/oxlint plugin, resolved through
-    // the app's node_modules. A fresh app has to lint clean under that preset, or the
-    // first `bun run lint` a user sees is red. The binary is the checkout's: a second
-    // `bun install` against the vendored file: dependencies spins Bun 1.3.14 at 100%
-    // CPU indefinitely (three runs, 40 min each), and audit:template-deps ties the versions.
-    await run(['bun', resolve(repoRoot, 'node_modules/oxlint/bin/oxlint')], appDir, runtimeEnv)
+    // The templates' CI workflow is one `guren gate --deps` step; run the same gate
+    // (without the dependency scan, which needs the registry) so the starter test
+    // suite, `check --ci`, `audit`, and the shipped .oxlintrc.json preset cannot
+    // drift from the framework. A fresh app has to pass every stage, or the first
+    // CI run a user sees is red. The gate finds the app's routes entry itself.
+    await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'gate'], appDir, runtimeEnv)
 
     console.log(`\nFresh app smoke passed (${blueprint}, ${installMode}): ${appDir}`)
   } finally {

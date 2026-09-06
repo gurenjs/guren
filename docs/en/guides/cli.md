@@ -155,8 +155,9 @@ Validate your app before shipping — these commands are also designed for AI co
 | `spec:generate` | Regenerates the derived spec views in `docs/spec/` (ER diagram, domain model, screens, module map) — see [Spec-Anchored Development](./spec-anchored.md) | `bunx guren spec:generate` |
 
 `audit` exits with a non-zero status when it finds failures. Plain
-`check` is informational — its suite flags are the CI gates, each
-exiting non-zero on failures in that suite:
+`check` is informational — its suite flags each exit non-zero on
+failures in that suite, and `gate` (below) is what the scaffolded CI
+workflow runs:
 
 ```bash
 bunx guren audit
@@ -185,8 +186,10 @@ bunx guren gate --deps     # add the dependency scan to the audit stage
 bunx guren gate --json     # the per-stage report, for tools
 ```
 
-The Claude Code harness runs it from a `Stop` hook (see
-[AI Agent Harness](#ai-agent-harness)); `AGENTS.md` tells other agents
+The scaffolded `.github/workflows/ci.yml` is one `bunx guren gate --deps`
+step, so a change that passes the gate locally passes CI. The Claude Code
+harness runs it from a `Stop` hook (see [AI Agent Harness](#ai-agent-harness)),
+the MCP server exposes it as `guren_gate`, and `AGENTS.md` tells other agents
 to run it before declaring a change done.
 
 Routes wrapped in named middleware (for example `router.middleware('auth').group(...)`) are recognized as protected. Guest flows such as `/login` and `/register` are excluded from authentication checks.
