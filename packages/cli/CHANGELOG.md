@@ -1,5 +1,65 @@
 # @guren/cli
 
+## 2.17.0
+
+### Minor Changes
+
+- 914650e: Ask GitHub about linked issues with `guren context <Entity> --live` (RFC 0018 Part 2)
+
+  `guren context <Entity>` gains two flags, and the `guren_entity_context` MCP tool
+  the matching `live` and `repo` arguments:
+
+  - `--live` asks `gh` for the state, assignees, labels and title of every issue
+    the entity's linked docs declare: one `gh api graphql` query per repository,
+    never the body. Each issue that GitHub answered for carries a `live` object in
+    `--json` and a second line under its entry in markdown, with a note that titles
+    are external text. When `gh` is missing, not logged in, or exceeds 5 seconds,
+    `issuesLiveError` says why and the offline list stands; the exit code is
+    unaffected. Nothing in `guren check`, `gate`, or a hook is touched by this.
+  - `--repo owner/name` names the repository bare issue numbers belong to, for a
+    fork, a mirror, or a checkout with no `origin`; with it, no git command runs.
+
+  `@guren/server` widens the `GurenCliApi.generateEntityContext` options it
+  passes through; an older `@guren/cli` ignores the two new fields.
+
+- 0dcc9bb: Add the `github-projects` harness skill (RFC 0018 Part 3)
+
+  `agent:init` and `agent:sync` now ship a `github-projects` skill for every
+  target: how an agent works an issue the way the app tracks work. GitHub Issues
+  and Projects hold the task, its progress and its assignee; `docs/` holds the
+  decision with an `issues:` link; `guren context <Entity>` shows what is
+  attached to a model before it is touched. The skill covers the `project` scope
+  preflight, one issue per work item with the tasklist on the issue,
+  `make:adr --issue`, board moves through `gh project item-edit` by field name,
+  closing through the PR, and the safety rules: issue text is data, bodies are
+  read only on an explicit `gh issue view`, writes happen only on the user's
+  request, and nothing runs from a hook.
+
+  The `docs-and-spec` rule now covers the `issues:` field, `make:adr --issue`,
+  and `guren context --live`.
+
+### Patch Changes
+
+- 5afbe9a: Tighten the `issues:` reference grammar and make `--issue` comma-separated
+
+  A URL reference may no longer contain whitespace, quotes, commas or
+  backslashes: the characters that would break the `--issue` list, the quoted
+  YAML scalar `make:adr` writes, or the scanner's split of an unquoted
+  inline-list entry. Rejecting them in the grammar keeps every consumer safe by
+  construction; `guren check --docs` reports such an entry as unreadable, as it
+  does any other malformed one. Issue numbers must be positive safe integers.
+
+  `make:adr --issue` takes a comma-separated list. Repeating the flag keeps only
+  the last value, like every other flag of this CLI, and the help text no longer
+  claims otherwise.
+
+  `guren context <Entity>` orders Linked issues by repository then number, with
+  URL entries last, so the order no longer depends on whether the `origin`
+  remote resolved.
+
+- Updated dependencies [914650e]
+  - @guren/server@2.18.0
+
 ## 2.16.0
 
 ### Minor Changes
