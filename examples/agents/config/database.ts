@@ -13,7 +13,7 @@ const database = isWorkersRuntime()
       seedersFolder: new URL('../db/seeders', import.meta.url),
       // Not DATABASE_URL: that name carries a Postgres URI in existing
       // environments, which the sqlite factory would read as a file path.
-      filename: () => process.env.SQLITE_DATABASE_PATH ?? './data/agents.db',
+      filename: () => process.env.SQLITE_DATABASE_PATH || './data/agents.db',
     })
 
 export const { getDatabase, migrateDatabase, closeDatabase, configureOrm, seedDatabase } = database

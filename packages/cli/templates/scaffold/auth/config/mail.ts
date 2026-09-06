@@ -9,7 +9,7 @@ export const mailConfig: MailConfig = {
   default: process.env.MAIL_DRIVER || 'log',
   from: {
     email: process.env.MAIL_FROM_ADDRESS || 'noreply@example.com',
-    // `??` here: an empty display name is a choice, not a missing value.
+    // oxlint-disable-next-line guren/no-nullish-env-default -- an empty display name is a choice, not a missing value
     name: process.env.MAIL_FROM_NAME ?? 'Guren',
   },
   transports: {

@@ -7,9 +7,9 @@ import { createSqliteDatabase, type SqliteSeederContext } from '@guren/orm'
 // shard parallel CI runs); DATABASE_URL is still authoritative outside tests.
 function resolveDatabaseFilename(): string {
   if (process.env.NODE_ENV === 'test') {
-    return process.env.TEST_DATABASE_URL ?? './data/guren.test.db'
+    return process.env.TEST_DATABASE_URL || './data/guren.test.db'
   }
-  return process.env.DATABASE_URL ?? './data/guren.db'
+  return process.env.DATABASE_URL || './data/guren.db'
 }
 
 const database = createSqliteDatabase({

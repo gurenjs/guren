@@ -1,6 +1,6 @@
 import { defineConfig } from 'drizzle-kit'
 
-const filename = process.env.DATABASE_URL ?? './data/guren.db'
+const filename = process.env.DATABASE_URL || './data/guren.db'
 
 /**
  * DATABASE_URL is read by two different SQLite implementations that disagree

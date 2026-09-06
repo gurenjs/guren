@@ -296,7 +296,7 @@ function renderRequestSection(request: Request): string {
 
 function renderEnvironmentSection(): string {
   const nodeEnv =
-    typeof process !== 'undefined' ? process.env.NODE_ENV ?? 'undefined' : 'undefined'
+    typeof process !== 'undefined' ? process.env.NODE_ENV || 'undefined' : 'undefined'
   const bunVersion =
     typeof process !== 'undefined' ? process.versions?.bun ?? 'N/A' : 'N/A'
   const platform =

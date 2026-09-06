@@ -214,7 +214,7 @@ async function renderDocument(
   options: InertiaOptions
 ): Promise<string> {
   const defaultEntry =
-    process.env.GUREN_INERTIA_ENTRY ?? "/resources/js/app.tsx";
+    process.env.GUREN_INERTIA_ENTRY || "/resources/js/app.tsx";
   const entry = options.entry ?? defaultEntry;
   const title = escapeHtml(options.title ?? DEFAULT_TITLE);
   const isProduction = process.env.NODE_ENV === "production";
