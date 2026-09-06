@@ -487,11 +487,17 @@ const makeAuthCommand = defineCommand({
       type: 'boolean',
       description: 'Make OAuth the only sign-in method: skip password login, registration, and password reset (requires --oauth)',
     },
+    session: {
+      type: 'boolean',
+      default: true,
+      description: 'Also scaffold database-backed sessions (--no-session leaves them on the in-memory default)',
+    },
   },
   async run({ args }) {
     const files = await makeAuth({
       ...toWriterOptions(args),
       install: Boolean(args.install),
+      session: args.session,
       minimal: Boolean(args.minimal),
       verify: Boolean(args.verify),
       oauth: args.oauth,

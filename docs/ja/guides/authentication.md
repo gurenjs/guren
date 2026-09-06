@@ -218,7 +218,7 @@ app.use('*', createSessionMiddleware())
 
 ### `SessionManager` でストアを選ぶ
 
-`bunx guren add session` は以下をすべて生成します: `sessions` テーブルとそのマイグレーション、`config/session.ts`、`SessionProvider`、`.env.example` の `SESSION_DRIVER`、そして `sessions:prune` コマンド。`guren add auth` はこれを内部で実行するので、生成直後のアプリは最初からデータベース永続化されています。以下は手で配線する場合のために、その生成物を説明したものです。
+`bunx guren add session` は次を生成します: `sessions` テーブルとそのマイグレーション、`database` ストアを宣言した `config/session.ts`、`SessionProvider`、`.env` と `.env.example` の `SESSION_DRIVER`、`sessions:prune` コマンド。下の `redis` ストアだけは手で足す部分です。`@guren/core/redis` を import すると ioredis が全バンドルに入るので、必要になるまで scaffold は出しません。`guren add auth` はこれを内部で実行するので、生成直後のアプリは最初からデータベース永続化されています。以下は手で配線する場合のために、その生成物を説明したものです。
 
 候補となるストアが複数あるなら、一度宣言して環境ごとに選びます。プロバイダの `register()` で `session` キーに `SessionManager` を bind すると、`AuthServiceProvider` は起動時にそれを組み込んだセッションミドルウェアを構築し、ストア自体は最初のリクエストで解決します:
 

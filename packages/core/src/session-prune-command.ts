@@ -1,4 +1,4 @@
-import { Command, getContainer, type SessionManager } from '@guren/server'
+import { Command, type SessionManager } from '@guren/server'
 
 /**
  * Console sweeper for session stores (RFC 0020 §2). `read()` already treats an
@@ -12,7 +12,7 @@ export class SessionsPruneCommand extends Command {
   static override description = 'Delete expired sessions from the configured session stores'
 
   async handle(): Promise<void> {
-    const manager = getContainer().makeOptional<SessionManager>('session')
+    const manager = this.resolveOptional<SessionManager>('session')
     // Thrown, not reported: a sweep that found no store to sweep must not
     // exit 0 on a schedule nobody reads.
     if (!manager) {

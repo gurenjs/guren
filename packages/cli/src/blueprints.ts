@@ -64,8 +64,8 @@ const blueprintRegistry: Record<string, BlueprintDefinition> = {
     },
   },
   session: {
-    description: 'Install database-backed sessions: schema table, config, provider, and the prune command.',
-    run: async (options) => addSession({ force: Boolean(options.force) }),
+    description: 'Install database-backed sessions: the schema table and migration, config/session.ts, SessionProvider, and sessions:prune.',
+    run: async (options) => (await addSession({ force: Boolean(options.force) })).files,
   },
   lint: {
     description: 'Install oxlint with the Guren rules: .oxlintrc.json, lint scripts, and the oxlint dev dependency.',

@@ -18,7 +18,7 @@ import { readIfExists } from './discovery'
 import { APP_ENTRY_CANDIDATES, resolveAppEntry, wireAppProvider, wireProvider } from './provider-registrar'
 import { wireRouteRegistrar } from './route-registrar'
 import { addSession, appConfiguresSessions } from './add-session'
-import { makeMigration } from './make-migration'
+import { generateSchemaMigration } from './make-migration'
 import { ensureGurenUiTokens, FIELD_LABEL_CLASS, FORM_INPUT_CLASS, PRIMARY_SUBMIT_CLASS } from './guren-css'
 import { scaffoldTemplateFile } from './scaffold-templates'
 
@@ -1308,24 +1308,6 @@ async function updateSchema({ includeVerify, includePassword, oauthProviders }: 
   consola.info(`Updated db/schema.ts with authentication columns (${dialect}).`)
 }
 
-async function generateUsersMigration(name: string): Promise<boolean> {
-  const { existsSync } = await import('node:fs')
-  if (!existsSync(resolve(process.cwd(), 'node_modules', 'drizzle-kit'))) {
-    consola.info('drizzle-kit is not installed — run `bun run db:make` after `bun install` to generate the users migration.')
-    return false
-  }
-
-  try {
-    await makeMigration({ name })
-    consola.success(`Generated the ${name} migration via drizzle-kit.`)
-    return true
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error)
-    consola.warn(`Could not generate the users migration automatically (${reason}).`)
-    consola.info('Run `bun run db:make` (drizzle-kit generate) to create it from db/schema.ts.')
-    return false
-  }
-}
 
 /**
  * Every file only the password experience needs. Re-running with
@@ -1571,19 +1553,21 @@ export async function makeAuth(options: MakeAuthOptions = {}): Promise<string[]>
 
   await updateSchema(features)
 
-  // Before the migration, so one drizzle-kit run covers both tables. Sessions
-  // are enabled by the `auth: {}` option below, and their default store is
-  // process memory, which drops every login on Workers, Lambda and Vercel
-  // (RFC 0020) — so the scaffold picks a database-backed one up front.
-  const sessionScaffold = options.session === false || (await appConfiguresSessions())
-    ? []
-    : await addSession({ force: options.force, migration: false })
-  created.push(...sessionScaffold)
+  // Before the migration, so one drizzle-kit run covers both tables. The
+  // `auth: {}` option below enables sessions, whose default store is process
+  // memory — every login lost on Workers, Lambda and Vercel (RFC 0020).
+  // Wiring follows `install`, which is this command's own contract.
+  const includeSessions = options.session !== false && !(await appConfiguresSessions())
+  const sessions = includeSessions
+    ? await addSession({ force: options.force, migration: false, wire: options.install })
+    : { files: [], schemaChanged: false }
+  created.push(...sessions.files)
   if (!includePassword) {
     await warnAboutStalePasswordScaffold()
   }
-  const migrationGenerated = await generateUsersMigration(
-    sessionScaffold.length > 0 ? 'create_users_and_sessions_tables' : 'create_users_table',
+  const migrationGenerated = await generateSchemaMigration(
+    sessions.schemaChanged ? 'create_users_and_sessions_tables' : 'create_users_table',
+    'users',
   )
 
   if (options.install) {
