@@ -221,28 +221,36 @@ app.use('*', createSessionMiddleware())
 For more than one candidate store, declare them once and pick by environment. Bind a `SessionManager` under the `session` key from a provider's `register()` and `AuthServiceProvider` builds the session middleware around it at boot, resolving the store itself on the first request:
 
 ```ts
-import { ServiceProvider, SessionManager, type SessionConfig } from '@guren/core'
+import { createSessionManager, ServiceProvider, type SessionConfig } from '@guren/core'
 import { createRedisClient } from '@guren/core/redis'
+import { sessions } from '@/db/schema'
 
 const sessionConfig: SessionConfig = {
-  default: process.env.SESSION_DRIVER ?? 'memory',
+  default: process.env.SESSION_DRIVER ?? 'database',
   ttlSeconds: 60 * 60 * 2,
   stores: {
-    memory: { driver: 'memory' },
+    // Survives restarts, isolates and cold starts, over the connection
+    // `configureOrm()` already established — Postgres, MySQL, SQLite or D1.
+    database: { driver: 'database', table: sessions },
     // `client` may be a function: it runs when this store is first used, so a
     // store that is declared but not selected opens no connection.
     redis: { driver: 'redis', client: () => createRedisClient({ url: process.env.REDIS_URL }) },
+    memory: { driver: 'memory' },
   },
 }
 
 export default class SessionProvider extends ServiceProvider {
   register(): void {
-    this.container.instance('session', new SessionManager(sessionConfig))
+    this.container.instance('session', createSessionManager(sessionConfig))
   }
 }
 ```
 
-Cookie and TTL settings on the manager are the base; `auth.sessionOptions` overrides them field by field. Setting `auth.sessionOptions.store` *and* binding a manager fails the boot rather than picking one silently, as does a `default` store whose driver nobody registered; an unknown `default` name fails at construction. Either way a typo in `SESSION_DRIVER` stops the boot instead of the first login. `memory` is always declared, so `SESSION_DRIVER=memory` works without an entry. Bind the manager in `register()`, not `boot()`: `AuthServiceProvider` boots before your providers do (a deferred provider is the exception; it is activated on the first request). A plugin adds a driver by augmenting the `SessionDrivers` interface and calling `manager.registerDriver(name, factory)`; resolution is lazy, so the plugin's `register()` may run after the config was declared. The `database` driver over your ORM tables and the `guren add session` scaffold that writes this file for you are the next parts of RFC 0020.
+`createSessionManager()` is `new SessionManager()` plus the `database` driver, which only `@guren/core` can supply: the store wraps your table in an ORM model, and the HTTP layer underneath does not depend on the ORM. Use it whenever a `database` store is declared; `registerDatabaseSessionDriver(manager)` adds the driver to a manager you built some other way.
+
+The `database` driver needs a `sessions` table in `db/schema.ts` and a migration. It has three columns — `id` (text primary key), `data`, and `expiresAt` — and the dialect-specific shape is in the [Cloudflare guide](./cloudflare.md#sessions-and-oauth-state-must-be-database-backed). Sweep expired rows on a schedule with `manager.pruneExpired()`; `read()` already treats them as missing.
+
+Cookie and TTL settings on the manager are the base; `auth.sessionOptions` overrides them field by field. Setting `auth.sessionOptions.store` *and* binding a manager fails the boot rather than picking one silently, as does a `default` store whose driver nobody registered; an unknown `default` name fails at construction. Either way a typo in `SESSION_DRIVER` stops the boot instead of the first login. `memory` is always declared, so `SESSION_DRIVER=memory` works without an entry. Bind the manager in `register()`, not `boot()`: `AuthServiceProvider` boots before your providers do (a deferred provider is the exception; it is activated on the first request). A plugin adds a driver by augmenting the `SessionDrivers` interface and calling `manager.registerDriver(name, factory)`; resolution is lazy, so the plugin's `register()` may run after the config was declared.
 
 > [!WARNING]
 > On Cloudflare Workers, AWS Lambda, or Vercel, requests share no memory, so the default `MemorySessionStore` loses a login on the very next request. The middleware warns once per process when it finds itself in that position; `guren check` and the deploy builds warn ahead of time.

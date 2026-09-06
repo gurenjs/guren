@@ -92,6 +92,9 @@ export { DatabaseApiTokenStore } from './api-token-store.js'
 export type { DatabaseApiTokenStoreOptions } from './api-token-store.js'
 export { DatabaseSessionStore } from './session-store.js'
 export type { DatabaseSessionStoreOptions } from './session-store.js'
+// Importing this module is what augments `SessionDrivers` with `database`.
+export { createSessionManager, registerDatabaseSessionDriver } from './session-manager.js'
+export type { DatabaseSessionDriverOptions } from './session-manager.js'
 export { DatabaseOAuthStateStore } from './oauth-state-store.js'
 // Attachments (RFC 0013) — core-native exports; no bare `Attachment` (it
 // would collide with the mail/notification/Slack attachment vocabulary).

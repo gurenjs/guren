@@ -157,7 +157,8 @@ export class SessionManager {
     const factory = this.driverFactories.get(driver)
     if (!factory) {
       throw new Error(
-        `Unknown session driver: ${driver} (session store "${storeName}"). Register it with registerDriver(), or install the plugin that provides it.`,
+        `Unknown session driver: ${driver} (session store "${storeName}"). Registered: ${[...this.driverFactories.keys()].join(', ')}. `
+        + 'Register it with registerDriver(), or build the manager with the factory that provides it.',
       )
     }
     return { factory, options }
