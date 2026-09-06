@@ -532,15 +532,33 @@ export function formatTruncatedList(items: string[], limit = 3): string {
  * binds the service without that file, and installing a second manager over it
  * would shadow the app's own.
  */
-export async function appBindsService(key: string): Promise<boolean> {
-  const roots = await listAppRoots(process.cwd())
+export async function appBindsService(key: string, appRoot: string): Promise<string[]> {
+  const roots = await listAppRoots(appRoot)
   const groups = await Promise.all(
     roots.flatMap((root) => ['app', 'src'].map((dir) => collectFiles(resolve(root.dir, dir)))),
   )
   const bindingPattern = new RegExp(`\\b(?:instance|singleton|bind)\\(\\s*['"]${escapeRegExp(key)}['"]`)
+  const binding: string[] = []
   for (const filePath of groups.flat()) {
-    const source = await readIfExists(process.cwd(), filePath)
-    if (source && bindingPattern.test(source)) return true
+    const source = await readIfExists(appRoot, filePath)
+    if (source && bindingPattern.test(source)) binding.push(filePath)
   }
-  return false
+  return binding
 }
+
+/**
+ * Where a `configureAttachments()` call can live: the documented home is
+ * `config/attachments.ts`, but nothing enforces the filename, so every
+ * config/, src/, and app/ source of the app and its modules is scanned (the
+ * string pre-filter below keeps that cheap).
+ */
+export async function discoverAppConfigFiles(appRoot: string): Promise<string[]> {
+  const roots = await listAppRoots(appRoot)
+  const groups = await Promise.all(
+    roots.flatMap((root) =>
+      ['config', 'src', 'app'].map((dir) => collectFiles(resolve(root.dir, dir))),
+    ),
+  )
+  return groups.flat().filter((file) => !/\.test\.[jt]sx?$/.test(file))
+}
+

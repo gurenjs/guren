@@ -158,6 +158,6 @@ async function patchSchema(): Promise<void> {
  * that file, and installing a second manager would shadow it.
  */
 export async function appBindsStorage(): Promise<boolean> {
-  return appBindsService('storage')
+  return (await appBindsService('storage', process.cwd())).length > 0
 }
 

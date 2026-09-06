@@ -312,6 +312,8 @@ export {
   createSessionMiddleware,
   MemorySessionStore,
   SessionManager,
+  DEFAULT_SESSION_STORE_NAME,
+  PER_PROCESS_SESSION_DRIVERS,
   getSessionFromContext,
   requireAuthenticated,
   requireGuest,

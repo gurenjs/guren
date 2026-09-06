@@ -73,7 +73,8 @@ export interface AddSessionResult {
  * provider leaves sessions on the in-memory default.
  */
 export async function appConfiguresSessions(): Promise<boolean> {
-  return (await fileExists(process.cwd(), 'config/session.ts')) || appBindsService('session')
+  return (await fileExists(process.cwd(), 'config/session.ts'))
+    || (await appBindsService('session', process.cwd())).length > 0
 }
 
 /**

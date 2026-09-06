@@ -152,6 +152,19 @@ export function defaultExportConfigProperty(
  * or a reference to a constant declared elsewhere, is `null` — these scanners
  * miss rather than invent.
  */
+/**
+ * The value of an object literal's non-computed `name` property, through the
+ * one key-name rule; undefined when the object has no such property.
+ */
+export function propertyValue(object: ObjectExpression | null | undefined, name: string): Node | undefined {
+  for (const property of object?.properties ?? []) {
+    if (property.type !== 'ObjectProperty') continue
+    if (memberKeyName({ computed: Boolean(property.computed), key: property.key }) !== name) continue
+    return property.value as Node
+  }
+  return undefined
+}
+
 export function literalString(value: unknown): string | null {
   if (!value || typeof value !== 'object') return null
   // Unwrapped here rather than at each caller because the miss is silent: a
