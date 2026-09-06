@@ -121,10 +121,10 @@ await User.with('posts.comments')              // nested, dot notation
 await User.where('active', true).with('posts').get()  // QueryBuilder
 await User.findWith(1, 'posts')                // single record + relations
 await User.withCount('posts')                  // users[0].postsCount: number (no rows loaded)
-await Post.withPaginate({ page: 1 }, 'author') // paginated + relations
+await Post.withPaginate('author', { page: 1 }) // paginated + relations
 ```
 
-Also available: `hasOne`, `belongsToMany(pivotTable, ...)`, `hasManyThrough`, `morphMany`/`morphTo`. Full guide: `docs/en/guides/database.md` (Relationships section).
+Also available: `hasOne`, `belongsToMany(name, related, pivotTable, foreignPivotKey, relatedPivotKey, parentKey?, relatedKey?)`, `hasManyThrough`, `morphMany`/`morphTo`. Full guide: `docs/en/guides/database.md` (Relationships section).
 
 ### Routes
 Source: `packages/server/src/mvc/Router.ts`

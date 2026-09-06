@@ -316,10 +316,14 @@ Post.belongsTo('author', () => import('./User.js').then((m) => m.User), 'authorI
 ### Other relationship types
 
 ```ts
+import { userRoles } from '@/db/schema'
+
 User.hasOne('profile', Profile, 'userId', 'id')
-User.belongsToMany('roles', Role, 'user_roles', 'userId', 'roleId')
+User.belongsToMany('roles', Role, userRoles, 'userId', 'roleId')
 Country.hasManyThrough('posts', Post, User, 'countryId', 'authorId')
 ```
+
+`belongsToMany(name, RelatedModel, pivotTable, foreignPivotKey, relatedPivotKey, parentKey?, relatedKey?)` takes `pivotTable` as the Drizzle table object exported from `@/db/schema`, not the table's name. `foreignPivotKey` and `relatedPivotKey` are both columns *on the pivot*, referencing this model and the related one; `parentKey` and `relatedKey` are the local keys they point at, and both default to `'id'`.
 
 ### Polymorphic Relationships
 
