@@ -19,6 +19,20 @@ export interface SessionStore {
    * session that does not exist must be a no-op, not a resurrection.
    */
   touch?(id: string, ttlSeconds: number): Promise<void>
+  /**
+   * Present on stores that keep the session *inside* the cookie (RFC 0020 §3).
+   * The middleware then writes `encode()`'s value as the cookie instead of a
+   * signed id and reads the next request's back through `decode()`, so
+   * `read`/`write`/`destroy` are never called: there is no keyed store behind it.
+   */
+  inline?: SessionInlineCodec
+}
+
+export interface SessionInlineCodec {
+  /** Throws when the session cannot fit the cookie, rather than emitting one a browser drops. */
+  encode(id: string, data: SessionData, ttlSeconds: number): string
+  /** Null for a missing, expired, tampered, or undecryptable cookie. */
+  decode(cookieValue: string | undefined): { id: string; data: SessionData } | null
 }
 
 export class MemorySessionStore implements SessionStore {
@@ -421,15 +435,23 @@ export function createSessionMiddleware(options: CreateSessionMiddlewareOptions 
   return async (ctx, next) => {
     // Every request, not memoized: the factory is the authority on which store
     // is current (a SessionManager rebuilds one when its driver is re-registered).
-    const store = typeof storeOrFactory === 'function' ? storeOrFactory() : storeOrFactory
+    const store: SessionStore = typeof storeOrFactory === 'function' ? storeOrFactory() : storeOrFactory
     if (!checkedStore) {
       checkedStore = true
       warnAboutMemoryStore(store)
     }
-    const existingId = signer.verify(getCookie(ctx, cookieName))
+    // An inline store carries the session in the cookie, so the id and the data
+    // arrive together and there is nothing to look up.
+    const inline = store.inline
+    const decoded = inline ? inline.decode(getCookie(ctx, cookieName)) : null
+    const cookieValueFor = (id: string, data: SessionData): string =>
+      inline ? inline.encode(id, data, ttlSeconds) : signer.sign(id)
+    const existingId = inline ? decoded?.id ?? null : signer.verify(getCookie(ctx, cookieName))
     const sessionId = existingId ?? globalThis.crypto.randomUUID()
     const isNew = !existingId
-    const storedData = existingId ? (await store.read(existingId)) ?? {} : {}
+    const storedData = inline
+      ? decoded?.data ?? {}
+      : existingId ? (await store.read(existingId)) ?? {} : {}
     const testingData = resolveTestingSession(ctx)
     const initialData = testingData ? { ...storedData, ...testingData } : storedData
     const session = new SessionImpl(sessionId, initialData, isNew)
@@ -443,7 +465,9 @@ export function createSessionMiddleware(options: CreateSessionMiddlewareOptions 
       // No `return` in here: returning from a `finally` discards whatever
       // `next()` threw, and the exception handler would never see it.
       if (session.wasDestroyed()) {
-        await store.destroy(session.originalSessionId())
+        // Nothing server-side holds an inline session, so clearing the cookie
+        // is the whole of it — on this client only, which the docs state.
+        if (!inline) await store.destroy(session.originalSessionId())
         deleteCookie(ctx, cookieName, {
           path: cookiePath,
           domain: cookieDomain,
@@ -454,14 +478,17 @@ export function createSessionMiddleware(options: CreateSessionMiddlewareOptions 
       } else if (!session.shouldPersist()) {
         if (existingId) {
           // Rolling expiry for an unchanged session: a TTL refresh, not a
-          // full rewrite, when the store supports it.
-          if (store.touch) {
-            await store.touch(existingId, ttlSeconds)
-          } else {
-            await store.write(existingId, session.snapshot(), ttlSeconds)
+          // full rewrite, when the store supports it. An inline session's
+          // expiry lives in the cookie, so re-encoding *is* the refresh.
+          if (!inline) {
+            if (store.touch) {
+              await store.touch(existingId, ttlSeconds)
+            } else {
+              await store.write(existingId, session.snapshot(), ttlSeconds)
+            }
           }
 
-          setCookie(ctx, cookieName, signer.sign(existingId), {
+          setCookie(ctx, cookieName, cookieValueFor(existingId, session.snapshot()), {
             path: cookiePath,
             domain: cookieDomain,
             secure: cookieSecure,
@@ -472,14 +499,17 @@ export function createSessionMiddleware(options: CreateSessionMiddlewareOptions 
         }
       } else {
         const nextId = session.id
-        await store.write(nextId, session.snapshot(), ttlSeconds)
-        // A concurrent request on the old cookie can re-persist the old id after
-        // this destroy; see `regenerate()` for why that does not escalate.
-        if (session.wasRegenerated() && session.originalSessionId() !== nextId) {
-          await store.destroy(session.originalSessionId())
+        const snapshot = session.snapshot()
+        if (!inline) {
+          await store.write(nextId, snapshot, ttlSeconds)
+          // A concurrent request on the old cookie can re-persist the old id after
+          // this destroy; see `regenerate()` for why that does not escalate.
+          if (session.wasRegenerated() && session.originalSessionId() !== nextId) {
+            await store.destroy(session.originalSessionId())
+          }
         }
 
-        setCookie(ctx, cookieName, signer.sign(nextId), {
+        setCookie(ctx, cookieName, cookieValueFor(nextId, snapshot), {
           path: cookiePath,
           domain: cookieDomain,
           secure: cookieSecure,

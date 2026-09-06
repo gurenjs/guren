@@ -250,6 +250,24 @@ export default class SessionProvider extends ServiceProvider {
 
 `createSessionManager()` は `new SessionManager()` に `database` ドライバを登録したものです。このドライバはテーブルを ORM のモデルで包むので、ORM に依存しない HTTP 層ではなく `@guren/core` だけが提供できます。`database` ストアを宣言するなら常にこちらを使ってください。別の方法で組み立てたマネージャには `registerDatabaseSessionDriver(manager)` でドライバを足せます。
 
+#### `cookie` ストア
+
+`{ driver: 'cookie' }` はセッション全体を cookie の中に置き、`APP_KEY` で暗号化します(AES-256-GCM。`APP_PREVIOUS_KEYS` も復号に使うので、鍵をローテーションしても全員がログアウトすることはありません)。**サーバ側のリソースを一切必要としない**唯一のストアです。テーブルもマイグレーションも Redis も Workers のバインディングも要りません:
+
+```ts
+stores: {
+  cookie: { driver: 'cookie' },
+}
+```
+
+できないことが3つあります。意識して選んでください:
+
+- **セッションの中身がすべて cookie に載る**ので 4KB 上限があります。超えるとサイズを示してエラーになります(ブラウザが黙って捨てる cookie を出すよりも)。レコードはデータベースに置き、セッションにはその id だけを入れてください
+- **ログアウトしても、クライアントが既に複製した cookie は失効できません**。`invalidate()` はそのクライアントの cookie を消すだけで、複製は期限まで有効です。失効させる必要があるものはデータベースに置いてください
+- **「全端末からログアウト」もセッション一覧もできません**。サーバ側に列挙できるものが無いためです
+
+`ttlSeconds` は意識して設定してください。サーバ側から cookie を早期に失効させる手段が無いので、暗号化ペイロード自身の期限が唯一の上限になります。
+
 `database` ドライバは `db/schema.ts` の `sessions` テーブルとマイグレーションを必要とします。列は `id`(text 主キー)・`data`・`expiresAt` の3つで、方言ごとの定義は [Cloudflare ガイド](./cloudflare.md#sessions-and-oauth-state-must-be-database-backed) にあります。期限切れ行は `manager.pruneExpired()` をスケジュール実行して掃除してください(`read()` は既に期限切れを不在として扱います)。
 
 マネージャ側の cookie と TTL 設定が基本で、`auth.sessionOptions` がフィールド単位で上書きします。`auth.sessionOptions.store` とマネージャの両方を設定すると、どちらかを黙って選ぶのではなく起動時にエラーになります。`default` ストアのドライバが未登録の場合も同様に起動で失敗し、未宣言の `default` 名は構築時に失敗します。いずれの場合も `SESSION_DRIVER` の typo は最初のログインではなく起動で止まります。`memory` は常に宣言済みなので、`SESSION_DRIVER=memory` はエントリなしで動きます。マネージャは `boot()` ではなく `register()` で bind してください。`AuthServiceProvider` はアプリのプロバイダより先に boot します(deferred provider は例外で、最初のリクエストで起動されます)。プラグインは `SessionDrivers` インターフェースを augmentation で拡張し、`manager.registerDriver(name, factory)` を呼ぶことでドライバを追加できます。解決は遅延なので、プラグインの `register()` が設定の宣言より後に走っても構いません。

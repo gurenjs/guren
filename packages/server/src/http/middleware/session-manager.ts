@@ -1,4 +1,5 @@
 import { resolveLazyRedisClient } from '../../redis/lazy-client'
+import { CookieSessionStore, type CookieSessionStoreOptions } from './cookie-session-store'
 import { RedisSessionStore } from '../../redis/RedisSessionStore'
 import { MemorySessionStore, type SessionCookieOptions, type SessionStore } from './session'
 
@@ -28,7 +29,10 @@ export interface RedisSessionDriverOptions {
 export interface SessionDrivers {
   memory: MemorySessionDriverOptions
   redis: RedisSessionDriverOptions
+  cookie: CookieSessionDriverOptions
 }
+
+export interface CookieSessionDriverOptions extends CookieSessionStoreOptions {}
 
 export type SessionStoreConfig = {
   [K in keyof SessionDrivers]: { driver: K } & SessionDrivers[K]
@@ -79,6 +83,7 @@ export class SessionManager {
     this.defaultStoreName = defaultName
 
     this.registerDriver('memory', ({ now }) => new MemorySessionStore(now))
+    this.registerDriver('cookie', (options) => new CookieSessionStore(options))
     this.registerDriver('redis', ({ client, prefix }) => {
       const redis = resolveLazyRedisClient(client, 'Session store "redis"')
       return new RedisSessionStore(redis as ConstructorParameters<typeof RedisSessionStore>[0], { prefix })

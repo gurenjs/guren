@@ -250,6 +250,24 @@ export default class SessionProvider extends ServiceProvider {
 
 `createSessionManager()` is `new SessionManager()` plus the `database` driver, which only `@guren/core` can supply: the store wraps your table in an ORM model, and the HTTP layer underneath does not depend on the ORM. Use it whenever a `database` store is declared; `registerDatabaseSessionDriver(manager)` adds the driver to a manager you built some other way.
 
+#### The `cookie` store
+
+`{ driver: 'cookie' }` keeps the whole session inside the cookie, encrypted under your `APP_KEY` (AES-256-GCM, with `APP_PREVIOUS_KEYS` accepted so a key rotation does not log everyone out). It is the one store that needs **no server-side resource at all** — no table, no migration, no Redis, no Workers binding:
+
+```ts
+stores: {
+  cookie: { driver: 'cookie' },
+}
+```
+
+Three things it cannot do, and you should decide against them deliberately:
+
+- **Everything in the session travels in the cookie**, so it is capped at 4 KB. Going over throws, naming the size, rather than emitting a cookie the browser silently drops. Keep records in the database and only their ids in the session.
+- **A logout cannot revoke a cookie the client already copied.** `invalidate()` clears it on that client; the copy stays valid until it expires. Anything that must be revocable belongs in the database.
+- **No "log out everywhere", and no session listing** — there is nothing server-side to enumerate.
+
+Set `ttlSeconds` deliberately: nothing server-side can expire the cookie early, so the encrypted payload's own expiry is the only limit.
+
 The `database` driver needs a `sessions` table in `db/schema.ts` and a migration. It has three columns — `id` (text primary key), `data`, and `expiresAt` — and the dialect-specific shape is in the [Cloudflare guide](./cloudflare.md#sessions-and-oauth-state-must-be-database-backed). Sweep expired rows on a schedule with `manager.pruneExpired()`; `read()` already treats them as missing.
 
 Cookie and TTL settings on the manager are the base; `auth.sessionOptions` overrides them field by field. Setting `auth.sessionOptions.store` *and* binding a manager fails the boot rather than picking one silently, as does a `default` store whose driver nobody registered; an unknown `default` name fails at construction. Either way a typo in `SESSION_DRIVER` stops the boot instead of the first login. `memory` is always declared, so `SESSION_DRIVER=memory` works without an entry. Bind the manager in `register()`, not `boot()`: `AuthServiceProvider` boots before your providers do (a deferred provider is the exception; it is activated on the first request). A plugin adds a driver by augmenting the `SessionDrivers` interface and calling `manager.registerDriver(name, factory)`; resolution is lazy, so the plugin's `register()` may run after the config was declared.
