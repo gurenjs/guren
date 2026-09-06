@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test'
+import { CacheManager } from '../../src/cache/CacheManager'
 import { RedisStore } from '../../src/cache/stores/RedisStore'
 
 /**
@@ -62,5 +63,39 @@ describe('RedisStore counters', () => {
 
     expect(await store.increment('hits')).toBe(6)
     expect(await store.decrement('hits', 4)).toBe(2)
+  })
+})
+
+describe('RedisStore client factory', () => {
+  it('calls a client function and uses what it returns', async () => {
+    const redis = new RecordingRedis()
+    const store = new RedisStore({ client: () => redis })
+
+    expect(await store.increment('hits')).toBe(1)
+    expect(redis.commands).toEqual([['incrby', 'cache:hits', 1]])
+  })
+
+  it('refuses a client factory that returns a Promise, naming the cause', () => {
+    expect(() => new RedisStore({ client: async () => new RecordingRedis() })).toThrow(
+      '`client` returned a Promise',
+    )
+  })
+
+  it('leaves a declared but unselected redis store unbuilt', () => {
+    let built = 0
+    const manager = new CacheManager({
+      default: 'memory',
+      stores: {
+        memory: { driver: 'memory', checkPeriod: 0 },
+        redis: { driver: 'redis', client: () => { built += 1; return new RecordingRedis() } },
+      },
+    })
+
+    manager.store()
+    expect(built).toBe(0)
+
+    manager.store('redis')
+    manager.store('redis')
+    expect(built).toBe(1)
   })
 })

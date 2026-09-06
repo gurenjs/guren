@@ -106,8 +106,6 @@ Configure multiple cache backends in your application:
 import { CacheManager } from '@guren/core'
 import { createRedisClient } from '@guren/core'
 
-const redis = createRedisClient({ url: process.env.REDIS_URL })
-
 const cache = new CacheManager({
   default: 'redis',
   stores: {
@@ -118,7 +116,9 @@ const cache = new CacheManager({
     },
     redis: {
       driver: 'redis',
-      client: redis,
+      // `client` may be a function: it runs when this store is first used, so a
+      // store that is declared but not selected opens no connection.
+      client: () => createRedisClient({ url: process.env.REDIS_URL }),
       prefix: 'myapp:cache:', // Key prefix (default: 'cache:')
     },
     file: {
@@ -149,7 +149,7 @@ await cache.store('file').set('persistent', 'data')
 **Redis Store:**
 | Option | Default | Description |
 |--------|---------|-------------|
-| `client` | required | Redis client instance |
+| `client` | required | An ioredis client, or a function returning one synchronously (called when the store is first used) |
 | `prefix` | `'cache:'` | Key prefix for all cache keys |
 
 **File Store:**

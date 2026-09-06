@@ -31,10 +31,12 @@ describe('guren add cache', () => {
     const provider = await readFile(resolve('app/Providers/CacheProvider.ts'), 'utf8')
     expect(provider).toContain("default: process.env.CACHE_STORE ?? 'memory'")
     expect(provider).toContain("memory: { driver: 'memory' }")
-    // A `stores` entry would build the client with the config object; ioredis
-    // dials on construction, so the redis store has to stay a factory.
-    expect(provider).toContain("cache.registerStore('redis', () => new RedisCacheStore({")
-    expect(provider).not.toMatch(/stores:[\s\S]*driver: 'redis'/)
+    // Both stores are declared once; `client` is a function because an entry's
+    // options are evaluated with the config object and ioredis dials on
+    // construction, so an unselected redis store would connect on every boot.
+    expect(provider).toMatch(/stores:[\s\S]*driver: 'redis'/)
+    expect(provider).toContain("client: () => createRedisClient({ url: process.env.REDIS_URL })")
+    expect(provider).not.toContain('registerStore')
 
     const app = await readFile(resolve('src/app.ts'), 'utf8')
     expect(app).toContain('CacheProvider')
