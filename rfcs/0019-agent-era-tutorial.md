@@ -2,7 +2,14 @@
 
 **Author:** Urata Daiki (@7nohe)
 **Date:** 2026-09-06
-**Status:** Draft
+**Status:** Accepted (2026-09-07)
+
+> The standard two-week discussion window was shortened by maintainer decision
+> (solo-maintained project). Open Question 1 is decided and recorded in place;
+> the recommendations in 3 to 7 were followed while the course was built, and
+> Open Question 2 (a scheduled run against a real agent) stays open by design.
+> All fifteen chapters shipped in one PR referencing this document, and the
+> deviations that building them revealed are amended in place below.
 
 > Why an RFC for documentation: the course below is a multi-month, multi-PR
 > project that restructures `docs/*/tutorials/`, adds a CI gate that executes
@@ -152,6 +159,10 @@ chapter and the one exception to the four beats.
 
 Recorded here rather than rewritten above, so the original design stays
 readable beside what shipped.
+
+The course shipped complete: chapters 0 to 14 in English and Japanese, the
+block grammar and its two gates, the section restructure and the redirects for
+the series it absorbed.
 
 - **Chapter 9's delegated slice** is the whole tags feature (schema, `Tag` and
   `PostTag` models, validator normalisation, resource, controller and pages),
