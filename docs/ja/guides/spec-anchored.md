@@ -131,7 +131,13 @@ bunx guren make:adr "Billing cycle is end-of-month" --entity Invoice --issue 412
 `bunx guren context Invoice` の末尾には **Linked issues** セクションが付き、
 リンクされた文書が宣言するIssueが並びます。次にそのモデルを触る人が、
 既に紐付いている作業に気づけるためのものです。内容はfrontmatterだけから
-読み、状態や担当は `gh issue view` 一発で確認します。
+読みます。`--live` を付けると `gh` に各Issueの状態・担当・ラベル・タイトルを
+問い合わせます(リポジトリごとに1クエリ、本文は取りません。タイトルは
+外部の文章であって指示ではありません)。`gh` が無い、未ログイン、遅い、の
+いずれでもセクションにその旨が出てオフラインの一覧はそのまま残り、
+GitHubが原因でコマンドが失敗することはありません。`--repo owner/name` は
+`origin` リモートと違うリポジトリに番号だけの参照を向けるときに使います。
+MCPツール `guren_entity_context` も同じ `live` と `repo` 引数を受け付けます。
 
 ## 閲覧: ドキュメントビューアー
 

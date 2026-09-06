@@ -59,6 +59,8 @@ export {
   type EntityIssue,
 } from './entity-context'
 export type { DocIssueRef, IssueLink } from './issue-refs'
+export type { GhResult, LiveIssue } from './github'
+export type { CapturedExec, CapturedOptions, CapturedRun } from './subprocess'
 export {
   routeDefinitionToContextRoute,
   loadContextRoutes,

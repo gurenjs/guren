@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { describeIssue, parseIssueRef, repoFromRemoteUrl, splitIssueList } from '../src/issue-refs'
+import { describeIssue, parseIssueRef, splitIssueList } from '../src/issue-refs'
 
 describe('parseIssueRef', () => {
   it('accepts a bare number as the app-repository form', () => {
@@ -71,22 +71,6 @@ describe('splitIssueList', () => {
     expect(splitIssueList(undefined)).toEqual([])
     expect(splitIssueList('412')).toEqual(['412'])
     expect(splitIssueList(' 412, acme/shop#7 ,, ')).toEqual(['412', 'acme/shop#7'])
-  })
-})
-
-describe('repoFromRemoteUrl', () => {
-  it('reads owner/repo from the GitHub remote spellings', () => {
-    expect(repoFromRemoteUrl('https://github.com/acme/shop.git')).toBe('acme/shop')
-    expect(repoFromRemoteUrl('https://github.com/acme/shop')).toBe('acme/shop')
-    expect(repoFromRemoteUrl('https://7nohe@github.com/acme/shop.git')).toBe('acme/shop')
-    expect(repoFromRemoteUrl('git@github.com:acme/shop.git')).toBe('acme/shop')
-    expect(repoFromRemoteUrl('ssh://git@github.com/acme/shop.git\n')).toBe('acme/shop')
-  })
-
-  it('returns null for remotes on other hosts', () => {
-    expect(repoFromRemoteUrl('git@gitlab.com:acme/shop.git')).toBeNull()
-    expect(repoFromRemoteUrl('https://github.com/acme')).toBeNull()
-    expect(repoFromRemoteUrl('')).toBeNull()
   })
 })
 

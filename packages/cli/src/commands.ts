@@ -34,7 +34,7 @@ import { makeModule } from './make-module'
 import { makeNotification } from './make-notification'
 import { makeProvider } from './make-provider'
 import { makeAdr } from './make-adr'
-import { ISSUE_REF_FORMS, splitIssueList } from './issue-refs'
+import { ISSUE_REF_FORMS, isRepoSlug, splitIssueList } from './issue-refs'
 import { writeSpecArtifacts } from './spec-generate'
 import { buildDocsGraphReport, renderDocsGraphMarkdown } from './docs-graph'
 import { makeResource } from './make-resource'
@@ -2411,12 +2411,25 @@ const contextCommand = defineCommand({
       type: 'string',
       description: 'Module name to disambiguate same-named models; "app" selects the application root (entity mode only).',
     },
+    live: {
+      type: 'boolean',
+      description:
+        'Ask gh for the state, assignees and labels of each linked issue (entity mode only). Off by default; the bundle never needs the network.',
+    },
+    repo: {
+      type: 'string',
+      valueHint: 'owner/name',
+      description: 'Repository bare issue numbers belong to, instead of the origin remote (entity mode only).',
+    },
   },
   async run({ args }) {
     const cwd = args.app
     const routesFile = args.routes
     const json = Boolean(args.json)
     const entity = args.entity ?? args._[0]
+    if (args.repo !== undefined && !isRepoSlug(args.repo)) {
+      throw new UsageError(`--repo must be owner/name, got "${args.repo}".`)
+    }
 
     if (entity) {
       await displayEntityContext(entity, {
@@ -2424,6 +2437,8 @@ const contextCommand = defineCommand({
         json,
         routesFile,
         module: args.module,
+        live: args.live,
+        repo: args.repo,
       })
       return
     }

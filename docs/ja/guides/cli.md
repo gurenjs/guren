@@ -149,7 +149,7 @@ JSON(`this.json(...)`)を返すため、そのまま型検査を通り、`routes
 | `audit` | セキュリティ監査: 変更系ルートのバリデーション/認証の欠如、文字列補間付き生SQL、ハードコードされた認証情報、無効化されたセキュリティ既定値、mass assignment 設定、`hidden` 未登録の機微カラム、リクエストのホストから組み立てられたメール内リンク、アプリまたはインストール済みパッケージが宣言した CSRF 除外を検査 | `bunx guren audit --json` |
 | `gate` | scaffold された CI が回す検証ステージ(codegen・typecheck・lint・`--ci` 規則の `check`・`audit`・テスト)をまとめて実行し、いずれかが失敗すれば非ゼロ exit。実行できないステージは skip ではなく失敗 | `bunx guren gate --changed` |
 | `doctor` | プロジェクトの健全性レポート(環境変数・設定・生成ファイル)と次のアクション | `bunx guren doctor --next` |
-| `context [Entity]` | プロジェクトコンテキストマップ。エンティティ名を渡すと1モデルのすべて — テーブル・リレーション・スキーマ付きルート・Props付きページ・Resource・Policy・紐付きdocs — を出力(同名モデルは `--module` で解決、`"app"` はプロジェクトルート) | `bunx guren context User --json` |
+| `context [Entity]` | プロジェクトコンテキストマップ。エンティティ名を渡すと1モデルのすべて — テーブル・リレーション・スキーマ付きルート・Props付きページ・Resource・Policy・紐付きdocsとIssue — を出力(同名モデルは `--module` で解決、`"app"` はプロジェクトルート。`--live` で `gh` にIssueの状態を問い合わせ、`--repo owner/name` でoriginリモートを上書き) | `bunx guren context User --json` |
 | `docs:graph` | OKF docsのリレーショングラフ。文書・エンティティ・コードパスがノード、検証済みリレーションがエッジ。`--entity <Model>` / `--path <file>` で近傍に絞り、リネーム前に「これを統べるdocsはどれか」を照会 | `bunx guren docs:graph --path app/Http/Controllers/PostController.ts` |
 | `spec:generate` | `docs/spec/` の導出スペックビュー(ER図・ドメインモデル・画面一覧・モジュールマップ)を再生成 — 詳細は[スペックアンカード開発](./spec-anchored.md) | `bunx guren spec:generate` |
 

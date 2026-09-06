@@ -4,7 +4,6 @@
  * label and a URL. Everything here is offline: shape is validated, existence
  * never is, so `guren check` stays a deterministic gate.
  */
-import { runGit } from './changed-files'
 import { splitCommaList } from './utils'
 
 export type DocIssueRef =
@@ -31,7 +30,14 @@ export interface IssueLink {
 export const ISSUE_REF_FORMS =
   '412, "#412", owner/repo#412, or an issue/PR URL (no spaces, quotes, commas or backslashes)'
 
-const REPO_SEGMENT = '[A-Za-z0-9_.-]+'
+/** One `owner` or `name` segment of a GitHub repository, the alphabet every repo rule shares. */
+export const REPO_SEGMENT = '[A-Za-z0-9_.-]+'
+const REPO_SLUG_RE = new RegExp(`^${REPO_SEGMENT}/${REPO_SEGMENT}$`)
+
+/** Whether `value` is an `owner/name` slug, the form `--repo` takes. */
+export function isRepoSlug(value: string): boolean {
+  return REPO_SLUG_RE.test(value)
+}
 // A URL character set that survives every place a reference travels: the
 // comma-split `--issue` list, the double-quoted YAML scalar make:adr writes,
 // and the inline-list frontmatter the scanner splits on unquoted commas.
@@ -64,26 +70,6 @@ export function parseIssueRef(raw: string): DocIssueRef | null {
 /** The `--issue` flag's value as entries: comma-separated, blanks dropped. */
 export function splitIssueList(value: string | undefined): string[] {
   return value === undefined ? [] : splitCommaList(value)
-}
-
-const REMOTE_RE = new RegExp(
-  `^(?:https?://(?:[^@/]+@)?github\\.com/|(?:ssh://)?git@github\\.com[:/])(${REPO_SEGMENT}/${REPO_SEGMENT})$`,
-)
-
-/** `owner/repo` from a GitHub remote URL (https, ssh, scp-like), or null for any other remote. */
-export function repoFromRemoteUrl(remote: string): string | null {
-  const match = REMOTE_RE.exec(remote.trim().replace(/\.git$/, '').replace(/\/$/, ''))
-  return match ? match[1] : null
-}
-
-/**
- * The app's own repository as `owner/repo`, read from the `origin` remote.
- * Null when there is no git, no remote, or a remote on another host, so a
- * bare `412` still renders as a label with no link.
- */
-export async function resolveOriginRepo(cwd: string): Promise<string | null> {
-  const [url] = (await runGit(cwd, ['remote', 'get-url', 'origin'])) ?? []
-  return url === undefined ? null : repoFromRemoteUrl(url)
 }
 
 /**
