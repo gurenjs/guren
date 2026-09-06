@@ -10,8 +10,7 @@ const SWEEP_COUNTS = ['stale', 'asked', 'closed', 'refused', 'deferred'] as cons
 
 const PANEL_CLASS = 'rounded-g-card border border-g-line bg-g-panel p-5 shadow-g-card'
 const PANEL_HEADING_CLASS = 'mb-3 font-mono text-xs tracking-[0.14em] uppercase text-g-text-2'
-const OUTLINE_BUTTON_CLASS =
-  'rounded-g-ctl border border-g-line-strong px-3 py-1.5 text-sm font-bold text-g-text transition hover:border-g-muted disabled:cursor-not-allowed disabled:opacity-45'
+const DISABLED_CLASS = 'disabled:cursor-not-allowed disabled:opacity-45'
 const CHIP_CLASS = 'shrink-0 rounded-full border px-2.5 py-0.5 font-mono text-[11px] uppercase'
 const META_CLASS = 'block text-xs break-words text-g-text-2'
 const EMPTY_CLASS = 'py-1.5 text-sm text-g-muted italic'
@@ -24,6 +23,11 @@ const CHIP_TONES: Record<string, string> = {
   rejected: 'border-g-danger-chip bg-g-danger-tint text-g-danger',
 }
 const NEUTRAL_CHIP_TONE = 'border-g-line-strong text-g-muted'
+
+const ALERT_TONES = {
+  danger: 'border-g-danger-chip bg-g-danger-tint text-g-danger',
+  warn: 'border-g-warn-chip bg-g-warn-tint text-g-warn',
+}
 
 interface Props {
   operator: string
@@ -44,17 +48,24 @@ function subject(approval: ApprovalView): string {
   return typeof id === 'number' || typeof id === 'string' ? `ticket #${id}` : 'no subject'
 }
 
+function ApprovalTitle({ approval }: { approval: ApprovalView }) {
+  return (
+    <>
+      <code className="font-mono text-sm">{approval.tool}</code> —{' '}
+      <span className="font-mono text-sm">{subject(approval)}</span>
+    </>
+  )
+}
+
 function Chip({ status }: { status: string }) {
   return <span className={`${CHIP_CLASS} ${CHIP_TONES[status] ?? NEUTRAL_CHIP_TONE}`}>{status}</span>
 }
 
 function Alert({ tone = 'danger', children }: { tone?: 'danger' | 'warn'; children: ReactNode }) {
-  const tones = {
-    danger: 'border-g-danger-chip bg-g-danger-tint text-g-danger',
-    warn: 'border-g-warn-chip bg-g-warn-tint text-g-warn',
-  }
   return (
-    <div className={`mb-4 rounded-g-ctl border px-4 py-2.5 text-sm ${tones[tone]}`}>{children}</div>
+    <div className={`mb-4 rounded-g-ctl border px-4 py-2.5 text-sm ${ALERT_TONES[tone]}`}>
+      {children}
+    </div>
   )
 }
 
@@ -123,14 +134,14 @@ export default function Console({
           </span>
           <span className="grow" />
           <button
-            className="rounded-g-ctl bg-g-accent px-4 py-1.5 text-sm font-bold text-g-on-accent transition hover:bg-g-accent-down disabled:cursor-not-allowed disabled:opacity-45"
+            className={`rounded-g-ctl bg-g-accent px-4 py-1.5 text-sm font-bold text-g-on-accent transition hover:bg-g-accent-down ${DISABLED_CLASS}`}
             disabled={busy !== null || agentNote !== null}
             onClick={() => send('sweep', '/console/sweep')}
           >
             {busy === 'sweep' ? 'Sweeping…' : 'Run sweep'}
           </button>
           <button
-            className={OUTLINE_BUTTON_CLASS}
+            className={`rounded-g-ctl border border-g-line-strong px-3 py-1.5 text-sm font-bold text-g-text transition hover:border-g-muted ${DISABLED_CLASS}`}
             disabled={busy !== null}
             onClick={() => send('logout', '/logout')}
           >
@@ -151,12 +162,7 @@ export default function Console({
               approvals.pending.map((approval) => (
                 <Row
                   key={approval.id}
-                  title={
-                    <>
-                      <code className="font-mono text-sm">{approval.tool}</code> —{' '}
-                      <span className="font-mono text-sm">{subject(approval)}</span>
-                    </>
-                  }
+                  title={<ApprovalTitle approval={approval} />}
                   meta={
                     <>
                       asked by {approval.principal} · expires {clock(approval.expiresAt)}
@@ -164,14 +170,14 @@ export default function Console({
                   }
                 >
                   <button
-                    className="rounded-g-ctl border border-g-ok-chip px-3 py-1.5 text-sm font-bold text-g-ok transition hover:bg-g-ok-tint disabled:cursor-not-allowed disabled:opacity-45"
+                    className={`rounded-g-ctl border border-g-ok-chip px-3 py-1.5 text-sm font-bold text-g-ok transition hover:bg-g-ok-tint ${DISABLED_CLASS}`}
                     disabled={busy !== null}
                     onClick={() => send(approval.id, `/console/approvals/${approval.id}/approve`)}
                   >
                     Approve
                   </button>
                   <button
-                    className="rounded-g-ctl border border-g-danger-chip px-3 py-1.5 text-sm font-bold text-g-danger transition hover:bg-g-danger-tint disabled:cursor-not-allowed disabled:opacity-45"
+                    className={`rounded-g-ctl border border-g-danger-chip px-3 py-1.5 text-sm font-bold text-g-danger transition hover:bg-g-danger-tint ${DISABLED_CLASS}`}
                     disabled={busy !== null}
                     onClick={() => send(approval.id, `/console/approvals/${approval.id}/reject`)}
                   >
@@ -276,12 +282,7 @@ export default function Console({
                 <Row
                   key={approval.id}
                   inline
-                  title={
-                    <>
-                      <code className="font-mono text-sm">{approval.tool}</code> —{' '}
-                      <span className="font-mono text-sm">{subject(approval)}</span>
-                    </>
-                  }
+                  title={<ApprovalTitle approval={approval} />}
                   meta={
                     <>
                       {approval.resolvedBy ?? 'unknown'} · {clock(approval.resolvedAt)} ·{' '}
