@@ -90,7 +90,7 @@ bun run db:up
 - `APP_URL`: Inertia に伝えるベース URL（デフォルト `http://localhost:3333`）。
 - `DATABASE_URL`: 接続文字列 — SQLite ではファイルパス、Postgres / MySQL では URL。
 - `PORT`: 開発サーバーの HTTP ポート（デフォルト `3333`）。
-- `SESSION_DRIVER`、`CACHE_STORE`、`QUEUE_CONNECTION`: デフォルトはインメモリ／同期実行。マルチプロセスでデプロイする場合は `redis` に切り替えます。
+- `CACHE_STORE`、`QUEUE_CONNECTION`、`MAIL_MAILER`: `guren add cache` / `guren add queue` / `guren add mail` が生成するプロバイダが読みます。値はそのプロバイダが宣言しているストア名である必要があります。`SESSION_DRIVER` はまだ読まれていないため、セッションはプロセスメモリ上にあります。
 
 > [!CAUTION]
 > `.env` はバージョン管理に含めないでください。もしコミットに認証情報が漏れてしまった場合は、データベースユーザーをローテーションし、ファイル内で参照している API キーをすべて再生成してください。
