@@ -173,6 +173,12 @@ jobs:
       - name: Docs audit
         run: bun run audit:docs
 
+      # The tutorial chapters are executed by smoke:tutorial; this is the fast
+      # half: fence grammar, and the Japanese mirror's code blocks byte-identical
+      # to the English ones (RFC 0019).
+      - name: Tutorial block audit
+        run: bun run audit:tutorial-blocks
+
       # The agent-catalog payload (RFC 0011) is generated, not committed, and
       # published to gurenjs/agent-skills. Render it here and assert the facts
       # it claims about the CLI: every `guren` command and flag a skill names is
@@ -391,6 +397,11 @@ jobs:
 
       - name: Golden path smoke test
         run: bun run smoke:golden-path
+
+      # docs/en/tutorials/NN-*.md run as a script, chapter by chapter, each
+      # ending in guren gate and a build (RFC 0019).
+      - name: Tutorial smoke
+        run: bun run smoke:tutorial
 
       - name: Golden path smoke test (postgres)
         run: bun run smoke:golden-path:postgres
