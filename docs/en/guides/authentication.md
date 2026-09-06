@@ -262,7 +262,7 @@ stores: {
 
 Three things it cannot do, and you should decide against them deliberately:
 
-- **Everything in the session travels in the cookie**, so it is capped at 4 KB. Going over throws, naming the size, rather than emitting a cookie the browser silently drops. Keep records in the database and only their ids in the session.
+- **Everything in the session travels in the cookie**, so it is capped. The middleware measures the whole `Set-Cookie` it is about to send — name and attributes included — against `maxCookieBytes` (4096 by default, what browsers keep) and throws rather than emitting one the browser silently drops. That leaves roughly 2.9 KB for the session itself. Keep records in the database and only their ids in the session.
 - **A logout cannot revoke a cookie the client already copied.** `invalidate()` clears it on that client; the copy stays valid until it expires. Anything that must be revocable belongs in the database.
 - **No "log out everywhere", and no session listing** — there is nothing server-side to enumerate.
 

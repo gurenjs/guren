@@ -16,9 +16,19 @@ A store that has it keeps the session in the cookie: the middleware writes
 through `decode()`, so `read`/`write`/`destroy` are never called. Every other
 store is unaffected.
 
-The limits are enforced, not just documented: encoding past 4 KB throws with
-the size rather than emitting a cookie the browser silently drops, and `decode`
-refuses an expired, tampered, or foreign payload — which is what makes
+The limits are enforced, not just documented. `SessionOptions.maxCookieBytes`
+(4096 by default, what browsers keep) is measured against the whole `Set-Cookie`
+the middleware is about to send — name and attributes included — so a session
+cannot pass its own check and then be dropped in transit; `decode` refuses an
+expired, tampered, foreign, or unreadably-shaped payload, which is what makes
 `ttlSeconds` real when nothing server-side can expire a cookie early. A logout
 still cannot revoke a copy the client already has, so anything revocable
 belongs in the database with only its id in the session.
+
+`CookieSessionStore` packs its payload as `base64url(iv ‖ tag ‖ ciphertext)`
+rather than reusing `Encrypter`'s JSON envelope, which base64s the ciphertext
+into JSON and base64s that again: measured 1.4–2.0x the plaintext against
+1.8–2.3x, which is a third more session inside the same cookie and fewer bytes
+uploaded on every request. Its `read`/`write`/`destroy` throw rather than
+answering emptily — there is no keyed store behind a cookie session, and
+`SessionManager.store()` is public.

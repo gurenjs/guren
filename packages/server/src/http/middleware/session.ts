@@ -86,6 +86,12 @@ export interface SessionCookieOptions {
 
 export interface SessionOptions extends SessionCookieOptions {
   /**
+   * Bytes the whole `Set-Cookie` may occupy before the middleware refuses it.
+   * Browsers drop a larger one, and a dropped session cookie is a silent logout.
+   * @default 4096
+   */
+  maxCookieBytes?: number
+  /**
    * The store, or a function returning it, called on every request and never
    * at construction: a Workers binding does not exist before the first request
    * (RFC 0020 §1). `SessionManager.store()` memoizes; a hand-written factory
@@ -96,6 +102,8 @@ export interface SessionOptions extends SessionCookieOptions {
 
 const DEFAULT_COOKIE_NAME = 'guren.session'
 const DEFAULT_TTL_SECONDS = 60 * 60 * 2 // 2 hours
+/** What browsers keep per cookie; a larger one is dropped, which reads as a logout. */
+const DEFAULT_MAX_COOKIE_BYTES = 4096
 
 /**
  * Read when a middleware is built, not when this module loads: an app that
@@ -417,6 +425,89 @@ function warnAboutMemoryStore(store: SessionStore): void {
   )
 }
 
+/**
+ * How a session reaches the client: as a signed id over a keyed store, or
+ * carried whole inside the cookie. Chosen once per request, so the persistence
+ * block below never asks which one it has.
+ */
+interface SessionTransport {
+  load(cookieValue: string | undefined): Promise<{ id: string; data: SessionData } | null>
+  /** The cookie value for an unchanged session, whose expiry still rolls forward. */
+  refresh(id: string, session: SessionImpl): Promise<string>
+  persist(id: string, data: SessionData, context: { regeneratedFrom: string | null }): Promise<string>
+  discard(id: string): Promise<void>
+}
+
+function keyedTransport(store: SessionStore, signer: SessionCookieSigner, ttlSeconds: number): SessionTransport {
+  return {
+    async load(cookieValue) {
+      const id = signer.verify(cookieValue)
+      return id === null ? null : { id, data: (await store.read(id)) ?? {} }
+    },
+    async refresh(id, session) {
+      // A TTL refresh rather than a full rewrite, when the store supports it.
+      if (store.touch) {
+        await store.touch(id, ttlSeconds)
+      } else {
+        await store.write(id, session.snapshot(), ttlSeconds)
+      }
+      return signer.sign(id)
+    },
+    async persist(id, data, { regeneratedFrom }) {
+      await store.write(id, data, ttlSeconds)
+      // A concurrent request on the old cookie can re-persist the old id after
+      // this destroy; see `regenerate()` for why that does not escalate.
+      if (regeneratedFrom !== null && regeneratedFrom !== id) {
+        await store.destroy(regeneratedFrom)
+      }
+      return signer.sign(id)
+    },
+    async discard(id) {
+      await store.destroy(id)
+    },
+  }
+}
+
+function inlineTransport(codec: SessionInlineCodec, ttlSeconds: number): SessionTransport {
+  return {
+    async load(cookieValue) {
+      return codec.decode(cookieValue)
+    },
+    async refresh(id, session) {
+      // The expiry lives in the cookie, so re-encoding *is* the refresh.
+      return codec.encode(id, session.snapshot(), ttlSeconds)
+    },
+    async persist(id, data) {
+      // Nothing server-side holds the old session, so a regeneration leaves
+      // nothing to destroy: the previous cookie simply stops being sent.
+      return codec.encode(id, data, ttlSeconds)
+    },
+    async discard() {},
+  }
+}
+
+/**
+ * What the `Set-Cookie` header will cost, name and attributes included. The
+ * browser limit applies to the whole thing, so measuring only the value is how
+ * a session passes its own check and is then dropped without a word.
+ */
+function assembledCookieBytes(
+  name: string,
+  value: string,
+  options: { path?: string; domain?: string; secure?: boolean; sameSite?: string; httpOnly?: boolean },
+  maxAge: number,
+): number {
+  const attributes = [
+    options.path ? `; Path=${options.path}` : '',
+    options.domain ? `; Domain=${options.domain}` : '',
+    `; Max-Age=${maxAge}`,
+    options.httpOnly ? '; HttpOnly' : '',
+    options.secure ? '; Secure' : '',
+    options.sameSite ? `; SameSite=${options.sameSite}` : '',
+  ].join('')
+  return Buffer.byteLength(`${name}=${encodeURIComponent(value)}${attributes}`, 'utf8')
+}
+
 export function createSessionMiddleware(options: CreateSessionMiddlewareOptions = {}): MiddlewareHandler {
   const {
     cookieName = DEFAULT_COOKIE_NAME,
@@ -427,6 +518,7 @@ export function createSessionMiddleware(options: CreateSessionMiddlewareOptions 
     cookieHttpOnly = true,
     cookieMaxAgeSeconds,
     ttlSeconds = DEFAULT_TTL_SECONDS,
+    maxCookieBytes = DEFAULT_MAX_COOKIE_BYTES,
     store: storeOrFactory = new MemorySessionStore(),
   } = options
   const signer = createCookieSigner(cookieName, cookiePath)
@@ -440,18 +532,15 @@ export function createSessionMiddleware(options: CreateSessionMiddlewareOptions 
       checkedStore = true
       warnAboutMemoryStore(store)
     }
-    // An inline store carries the session in the cookie, so the id and the data
-    // arrive together and there is nothing to look up.
-    const inline = store.inline
-    const decoded = inline ? inline.decode(getCookie(ctx, cookieName)) : null
-    const cookieValueFor = (id: string, data: SessionData): string =>
-      inline ? inline.encode(id, data, ttlSeconds) : signer.sign(id)
-    const existingId = inline ? decoded?.id ?? null : signer.verify(getCookie(ctx, cookieName))
+    // Which transport carries the session is decided once; nothing below asks again.
+    const transport = store.inline
+      ? inlineTransport(store.inline, ttlSeconds)
+      : keyedTransport(store, signer, ttlSeconds)
+    const loaded = await transport.load(getCookie(ctx, cookieName))
+    const existingId = loaded?.id ?? null
     const sessionId = existingId ?? globalThis.crypto.randomUUID()
     const isNew = !existingId
-    const storedData = inline
-      ? decoded?.data ?? {}
-      : existingId ? (await store.read(existingId)) ?? {} : {}
+    const storedData = loaded?.data ?? {}
     const testingData = resolveTestingSession(ctx)
     const initialData = testingData ? { ...storedData, ...testingData } : storedData
     const session = new SessionImpl(sessionId, initialData, isNew)
@@ -459,66 +548,66 @@ export function createSessionMiddleware(options: CreateSessionMiddlewareOptions 
 
     ctx.set(SESSION_CONTEXT_KEY, session)
 
-    try {
-      await next()
-    } finally {
-      // No `return` in here: returning from a `finally` discards whatever
-      // `next()` threw, and the exception handler would never see it.
-      if (session.wasDestroyed()) {
-        // Nothing server-side holds an inline session, so clearing the cookie
-        // is the whole of it — on this client only, which the docs state.
-        if (!inline) await store.destroy(session.originalSessionId())
-        deleteCookie(ctx, cookieName, {
-          path: cookiePath,
-          domain: cookieDomain,
-          secure: cookieSecure,
-          sameSite: cookieSameSite,
-          httpOnly: cookieHttpOnly,
-        })
-      } else if (!session.shouldPersist()) {
-        if (existingId) {
-          // Rolling expiry for an unchanged session: a TTL refresh, not a
-          // full rewrite, when the store supports it. An inline session's
-          // expiry lives in the cookie, so re-encoding *is* the refresh.
-          if (!inline) {
-            if (store.touch) {
-              await store.touch(existingId, ttlSeconds)
-            } else {
-              await store.write(existingId, session.snapshot(), ttlSeconds)
-            }
-          }
+    // Measured against hono 4.13: `await next()` never throws — a handler's or
+    // a downstream middleware's error is settled at dispatch — so there is no
+    // in-flight exception here to preserve, and none to lose.
+    await next()
 
-          setCookie(ctx, cookieName, cookieValueFor(existingId, session.snapshot()), {
-            path: cookiePath,
-            domain: cookieDomain,
-            secure: cookieSecure,
-            sameSite: cookieSameSite,
-            httpOnly: cookieHttpOnly,
+    const cookieOptions = {
+      path: cookiePath,
+      domain: cookieDomain,
+      secure: cookieSecure,
+      sameSite: cookieSameSite,
+      httpOnly: cookieHttpOnly,
+    }
+
+    const persistSession = async (): Promise<void> => {
+      if (session.wasDestroyed()) {
+        await transport.discard(session.originalSessionId())
+        deleteCookie(ctx, cookieName, cookieOptions)
+        return
+      }
+
+      if (!session.shouldPersist()) {
+        // An untouched session still rolls its expiry forward, and only one
+        // that already exists has a cookie to refresh.
+        if (existingId) {
+          setCookie(ctx, cookieName, await write(transport.refresh(existingId, session)), {
+            ...cookieOptions,
             maxAge: cookieMaxAgeSeconds ?? ttlSeconds,
           })
         }
-      } else {
-        const nextId = session.id
-        const snapshot = session.snapshot()
-        if (!inline) {
-          await store.write(nextId, snapshot, ttlSeconds)
-          // A concurrent request on the old cookie can re-persist the old id after
-          // this destroy; see `regenerate()` for why that does not escalate.
-          if (session.wasRegenerated() && session.originalSessionId() !== nextId) {
-            await store.destroy(session.originalSessionId())
-          }
-        }
-
-        setCookie(ctx, cookieName, cookieValueFor(nextId, snapshot), {
-          path: cookiePath,
-          domain: cookieDomain,
-          secure: cookieSecure,
-          sameSite: cookieSameSite,
-          httpOnly: cookieHttpOnly,
-          maxAge: cookieMaxAgeSeconds ?? ttlSeconds,
-        })
+        return
       }
+
+      const nextId = session.id
+      const value = await transport.persist(nextId, session.snapshot(), {
+        regeneratedFrom: session.wasRegenerated() ? session.originalSessionId() : null,
+      })
+      setCookie(ctx, cookieName, await write(value), {
+        ...cookieOptions,
+        maxAge: cookieMaxAgeSeconds ?? ttlSeconds,
+      })
     }
+
+    /** Refuses a value whose `Set-Cookie` would exceed what a browser keeps. */
+    const write = async (value: string | Promise<string>): Promise<string> => {
+      const resolved = await value
+      const bytes = assembledCookieBytes(cookieName, resolved, cookieOptions, cookieMaxAgeSeconds ?? ttlSeconds)
+      if (bytes > maxCookieBytes) {
+        throw new Error(
+          `The session cookie would be ${bytes} bytes, over the ${maxCookieBytes}-byte limit browsers keep. `
+          + 'A cookie session carries the whole session — keep large or revocable values in the database and only '
+          + 'their ids in the session, or raise `maxCookieBytes`.',
+        )
+      }
+      return resolved
+    }
+
+    // Thrown, not swallowed: a session the client will not keep must not look
+    // stored. Every store's write can fail this way; the cookie transport just
+    // fails more predictably.
+    await persistSession()
   }
 }
 
