@@ -25,6 +25,7 @@ import {
   type SqlClientSpecifier,
   type PathLike,
 } from '@guren/core/internal/deploy-build'
+import { reportDeployRuntimeHazards } from '@guren/core/internal/deploy-check'
 
 import {
   MCP_OAUTH_REGISTRAR,
@@ -122,6 +123,11 @@ export async function buildCloudflareOutput(options: BuildCloudflareOutputOption
   const agents = hostsAgents ? await readAgentRegistry(root) : NO_AGENTS
   const agentBindings = assertAgentDurableObjects(root, agents.exports)
   warnUnroutedAgents(agents)
+
+  // Same placement as the checks above: an in-memory session store on Workers
+  // drops every login after deploy, and the warning belongs where the
+  // developer is still reading (RFC 0020 Part 0).
+  await reportDeployRuntimeHazards({ root, label: 'Cloudflare build' })
 
   if (!options.skipAppBuild) {
     runAppBuild(root, packageJson.scripts ?? {})

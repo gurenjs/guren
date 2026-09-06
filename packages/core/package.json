@@ -53,6 +53,10 @@
       "types": "./dist/internal/deploy-build.d.ts",
       "default": "./dist/internal/deploy-build.js"
     },
+    "./internal/deploy-check": {
+      "types": "./dist/internal/deploy-check.d.ts",
+      "default": "./dist/internal/deploy-check.js"
+    },
     "./internal/route-path": {
       "types": "./dist/internal/route-path.d.ts",
       "default": "./dist/internal/route-path.js"

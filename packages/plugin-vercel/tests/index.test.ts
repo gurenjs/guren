@@ -420,3 +420,44 @@ describe('@guren/plugin-vercel', () => {
     })
   })
 })
+
+describe('buildVercelOutput deploy-runtime warnings (RFC 0020 Part 0)', () => {
+  let root: string
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'guren-vercel-deploy-check-'))
+  })
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('should warn before writing output when the app keeps sessions in memory', async () => {
+    const app = scaffoldApp(root)
+    writeFileSync(
+      join(root, 'package.json'),
+      JSON.stringify({ name: 'demo-app', dependencies: { '@guren/plugin-vercel': '^0.6.0' } }),
+      'utf8',
+    )
+    mkdirSync(join(root, 'src'), { recursive: true })
+    writeFileSync(
+      join(root, 'src/app.ts'),
+      "import { createApp } from '@guren/core'\nexport default createApp({ auth: { autoSession: true } })\n",
+      'utf8',
+    )
+
+    const warnings: string[] = []
+    const original = console.warn
+    console.warn = (message: string) => warnings.push(message)
+    try {
+      await buildVercelOutput(app)
+    } finally {
+      console.warn = original
+    }
+
+    const hazard = warnings.find((line) => line.startsWith('Vercel build: Vercel shares no memory'))
+    expect(hazard).toBeDefined()
+    expect(hazard).toContain('DatabaseSessionStore')
+    expect(existsSync(join(root, '.vercel/output/config.json'))).toBe(true)
+  })
+})

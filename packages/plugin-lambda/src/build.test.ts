@@ -487,3 +487,41 @@ describe('buildLambdaOutput', () => {
     expect(bundle).not.toContain('fake-sdk-mcp-server')
   })
 })
+
+describe('buildLambdaOutput deploy-runtime warnings (RFC 0020 Part 0)', () => {
+  let root: string
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'guren-lambda-deploy-check-'))
+  })
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  test('should warn before assembling when the app keeps sessions in memory', async () => {
+    scaffoldApp(root)
+    writeJson(join(root, 'package.json'), {
+      name: '@acme/demo-app',
+      dependencies: { '@guren/plugin-lambda': '^0.5.0' },
+    })
+    writeFileSync(
+      join(root, 'src/app.ts'),
+      "import { createApp } from '@guren/core'\nexport default createApp({ auth: { autoSession: true } })\n",
+    )
+
+    const warnings: string[] = []
+    const original = console.warn
+    console.warn = (message: string) => warnings.push(message)
+    try {
+      await buildLambdaOutput({ rootDir: root, skipAppBuild: true })
+    } finally {
+      console.warn = original
+    }
+
+    const hazard = warnings.find((line) => line.startsWith('Lambda build: AWS Lambda shares no memory'))
+    expect(hazard).toBeDefined()
+    expect(hazard).toContain('DatabaseSessionStore')
+    expect(existsSync(join(root, '.lambda'))).toBe(true)
+  })
+})

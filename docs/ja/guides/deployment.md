@@ -144,6 +144,8 @@ bun run vercel:build
 vercel deploy --prebuilt
 ```
 
+出力を書き出す前に、`vercel:build` は `guren doctor` と同じデプロイランタイムチェックを走らせ、インメモリのセッション/OAuth ストア、`ScryptHasher`、ファイルシステムからのプロバイダ探索に当たると警告します(ビルドは止めません)。どれもローカルでは動き、関数の呼び出しをまたぐと壊れるものです。
+
 > [!NOTE]
 > このプラグインは SSR アプリ専用です。Vite マニフェストを読み取り、サーバーレス関数に正しい `GUREN_INERTIA_*` 環境変数を注入します。API-only アプリは Docker や Lambda を使ってください。
 

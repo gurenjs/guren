@@ -34,7 +34,7 @@ export const queue = createSqsHandler()
 bunx guren lambda:build
 ```
 
-このコマンドはアプリの `build` スクリプトを実行した後、`.lambda/` ディレクトリを組み立てます:
+このコマンドはまず `guren doctor` と同じデプロイランタイムチェックを走らせ(インメモリのセッション/OAuth ストア、`ScryptHasher`、ファイルシステムからのプロバイダ探索に当たると警告します。ビルドは止めません。どれもローカルでは動き、Lambda では壊れるものです)、次にアプリの `build` スクリプトを実行し、`.lambda/` ディレクトリを組み立てます:
 
 | パス | 内容 |
 |------|------|
