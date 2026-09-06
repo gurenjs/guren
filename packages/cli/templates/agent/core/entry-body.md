@@ -98,6 +98,7 @@ are rejected with 403.
 | `guren_get_context` | Project structure map (models, routes, pages, controllers, …) |
 | `guren_entity_context` | Entity-centric context bundle (model, routes, pages, linked docs) |
 | `guren_check` | Validate route ↔ controller ↔ page consistency, doc links, spec freshness |
+| `guren_gate` | Every CI stage (codegen, typecheck, lint, check, audit, test) in one verdict; `ok` = the change is done |
 | `guren_docs_graph` | OKF docs relation graph (narrow with entity/path) — impact query before renames |
 | `guren_list_models` | List models (relations, soft deletes, auth trait) |
 | `guren_generate_guidelines` | Generate project-specific coding guidelines |

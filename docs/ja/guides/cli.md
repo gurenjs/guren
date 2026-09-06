@@ -153,8 +153,8 @@ JSON(`this.json(...)`)を返すため、そのまま型検査を通り、`routes
 | `spec:generate` | `docs/spec/` の導出スペックビュー(ER図・ドメインモデル・画面一覧・モジュールマップ)を再生成 — 詳細は[スペックアンカード開発](./spec-anchored.md) | `bunx guren spec:generate` |
 
 `audit` は失敗(fail)を検出すると非ゼロの終了コードを返します。
-プレーンな `check` は情報提供で、CIをゲートするのは各スイートフラグです
-(それぞれのスイートの失敗で非ゼロexit):
+プレーンな `check` は情報提供で、各スイートフラグはそのスイートの失敗で
+非ゼロ exit します。scaffold された CI ワークフローが回すのは後述の `gate` です:
 
 ```bash
 bunx guren audit
@@ -182,9 +182,11 @@ bunx guren gate --deps     # audit ステージに依存関係スキャンを追
 bunx guren gate --json     # ステージごとのレポート(ツール向け)
 ```
 
-Claude Code のハーネスはこれを `Stop` hook から実行します
-([AIエージェントハーネス](#aiエージェントハーネス)参照)。その他のエージェントには
-変更完了を宣言する前に実行するよう `AGENTS.md` が指示します。
+scaffold される `.github/workflows/ci.yml` は `bunx guren gate --deps` の 1 step
+なので、ローカルで gate を通した変更は CI も通ります。Claude Code のハーネスはこれを
+`Stop` hook から実行し([AIエージェントハーネス](#aiエージェントハーネス)参照)、MCP
+サーバは `guren_gate` ツールとして公開し、その他のエージェントには変更完了を宣言する
+前に実行するよう `AGENTS.md` が指示します。
 
 名前付きミドルウェアで保護されたルート(例: `router.middleware('auth').group(...)`)は保護済みと認識されます。`/login` や `/register` などのゲストフローは認証チェックの対象外です。
 
