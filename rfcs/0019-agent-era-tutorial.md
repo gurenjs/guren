@@ -146,7 +146,7 @@ chapter and the one exception to the four beats.
 | 11 | Events and mail | "Author is notified of a comment": event, listener, queued job and mailable | `fakeQueue()`, `fakeMail()` | Mail every commenter when a post is published (amended, see below) | `add events`/`queue`/`mail` | A project rule for the job registration nothing checks (amended, see below) |
 | 12 | Your app as an agent's tool | One `.agent()` contract, `tool:list`, `tool:inspect` | `TestAgent` | The remaining contracts; install `@guren/plugin-mcp` and connect Claude Code to the running app | RFC 0016; `check` failing on a tool without authorization | The `agent-interface` skill; app MCP vs dev MCP |
 | 13 | The system, documented | One ADR, `spec:generate`, `check --docs --spec` | The drift gate as the test | An issue-driven change via the RFC 0018 harness skill | OKF docs, Docs Graph, `docs:graph` | The harness reading `docs/` before an entity change |
-| 14 | Production | Postgres switch, database-backed sessions, rate limiting, `add lint`; read the CI the scaffold gave you | CI green on the reader's fork | — | `NODE_ENV`, deploy targets | `agent:sync` after a framework upgrade; the harness on CI |
+| 14 | Production | Database-backed sessions, rate limiting, production mode; read the CI the scaffold gave you (amended, see below) | CI green on the reader's fork | — | `NODE_ENV`, deploy targets | `agent:sync` after a framework upgrade; the harness on CI |
 
 ### Amendments during implementation
 
@@ -175,6 +175,13 @@ readable beside what shipped.
   ~~the `guren-api` skill~~. `guren check` emits nothing at all about
   `app/Jobs/`, which makes the rule the only thing standing between the agent
   and a job that compiles and never runs.
+- **Chapter 14 does not switch to Postgres.** The switch needs a running
+  database, which the reader may not have and the smoke's environment must not
+  assume, and the sqlite-authored migrations cannot be replayed on another
+  dialect anyway. The chapter therefore keeps sqlite on the executed path and
+  carries the switch as a checklist row with the real diff. `add lint` is gone
+  from the chapter too: the scaffold already ships `.oxlintrc.json`, so the
+  command needs `--force` and then does nothing.
 - **Open Question 1 is decided.** Chapter 1 ends with a container image
   (`guren deploy --target docker`, then `docker build`/`docker run` shown but
   not executed); the hosted deploy belongs to chapter 14. Every chapter in
