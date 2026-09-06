@@ -141,12 +141,44 @@ chapter and the one exception to the four beats.
 | 6 | Protecting routes | `requireAuthenticated`, author FK as nullable → backfill → not null | 401 redirects | `add auth` on a branch; diff password reset and email verification | Migrations you can run on real data | The `db-manage` skill and its safety checks |
 | 7 | Authorization, and what the gate cannot see | A policy (`make:policy`), author-only edit | The 403 test | "Add publish/unpublish" (prompt omits authorization) | `authorize()`, why `audit` warns instead of failing | The `test-writer` subagent, and why it cannot replace beat 2 |
 | 8 | Teach the agent your project | A project rule (`.claude/rules/policies.md`: every mutation has a policy and a 403 test), a skill (`resource-with-policy`), a subagent brief | The rule's own test: delegate a fourth resource and assert the policy and test exist | A fourth resource under the new rule (`add resource` + `make:policy`) | `guren guidelines`, `agent:sync`, rules vs skills vs subagents, the dev MCP endpoint (`GUREN_MCP=1`, `.mcp.json`) | Authoring, not using |
-| 9 | Relationships | Comments: `hasMany`/`belongsTo`, eager loading; the tags pivot table | Relationship assertions | Tag UI (`file=`) | Relations, `with()`, `belongsToMany` | The `orm-models.md` rule and the API-signature digest in the context map |
+| 9 | Relationships | Comments: `hasMany`/`belongsTo`, eager loading; the tags pivot table | Relationship assertions | Tags end to end, not only the UI (amended, see below) | Relations, `with()`, `belongsToMany` | The `orm-models.md` rule and the API-signature digest in the context map |
 | 10 | Files | After `add attachments`: declare the cover on `Post`, the upload form, one signed delivery route | Attachment assertions | Gallery (`many`) | RFC 0013 / RFC 0015 | `guren check` catching attachment wiring the agent got wrong |
-| 11 | Events and mail | "Author is notified of a comment": event and listener, then the queued mail | `fakeQueue()`, `fakeMail()` | Notification channel (`add notifications`; `add mail --force` because `add auth` already wrote `MailProvider`) | `add events`/`queue`/`mail` | The `guren-api` skill: where the agent looks up a subsystem |
+| 11 | Events and mail | "Author is notified of a comment": event, listener, queued job and mailable | `fakeQueue()`, `fakeMail()` | Mail every commenter when a post is published (amended, see below) | `add events`/`queue`/`mail` | A project rule for the job registration nothing checks (amended, see below) |
 | 12 | Your app as an agent's tool | One `.agent()` contract, `tool:list`, `tool:inspect` | `TestAgent` | The remaining contracts; install `@guren/plugin-mcp` and connect Claude Code to the running app | RFC 0016; `check` failing on a tool without authorization | The `agent-interface` skill; app MCP vs dev MCP |
 | 13 | The system, documented | One ADR, `spec:generate`, `check --docs --spec` | The drift gate as the test | An issue-driven change via the RFC 0018 harness skill | OKF docs, Docs Graph, `docs:graph` | The harness reading `docs/` before an entity change |
 | 14 | Production | Postgres switch, database-backed sessions, rate limiting, `add lint`; read the CI the scaffold gave you | CI green on the reader's fork | — | `NODE_ENV`, deploy targets | `agent:sync` after a framework upgrade; the harness on CI |
+
+### Amendments during implementation
+
+Recorded here rather than rewritten above, so the original design stays
+readable beside what shipped.
+
+- **Chapter 9's delegated slice** is the whole tags feature (schema, `Tag` and
+  `PostTag` models, validator normalisation, resource, controller and pages),
+  ~~the tag UI~~. A UI-only slice would not have exercised the pivot, which is
+  the concept the chapter teaches.
+- **Chapter 9 does not run `spec:generate`.** One run commits `docs/spec/`, and
+  from that moment every later chapter's `guren gate` fails on drift until the
+  reader regenerates. The views therefore arrive in chapter 13, which owns
+  them; chapter 9 only says that relations feed them.
+- **Chapter 11's delegated slice** is mailing every commenter when a post is
+  published, ~~a notification channel~~. The `database` channel keeps
+  notifications in a process-memory array with no table behind it, so a
+  notifications feature would teach a store the reader has not built.
+- **Chapter 11 needs no `add mail --force`.** The claim above assumed the
+  course reaches chapter 11 having run `add auth`, which writes
+  `app/Providers/MailProvider.ts` and `config/mail.ts`. The course hand-writes
+  the auth provider in chapter 5 instead, so nothing is in the way and
+  `add mail` installs its own provider cleanly.
+- **Chapter 11's harness lever** is a project rule
+  (`.claude/rules/background-work.md`) carrying the `registerJob` invariant,
+  ~~the `guren-api` skill~~. `guren check` emits nothing at all about
+  `app/Jobs/`, which makes the rule the only thing standing between the agent
+  and a job that compiles and never runs.
+- **Open Question 1 is decided.** Chapter 1 ends with a container image
+  (`guren deploy --target docker`, then `docker build`/`docker run` shown but
+  not executed); the hosted deploy belongs to chapter 14. Every chapter in
+  between ends with `guren gate` and `bun run build`.
 
 Rails Tutorial equivalents, for orientation: chapters 1–2 ≈ Hartl 1–3,
 chapters 5–6 ≈ Hartl 6–9 (the by-hand auth core), chapter 9 ≈ Hartl 13–14.
@@ -317,7 +349,9 @@ chapter shape and the block grammar.
 
 ## Open Questions
 
-1. **Deploy target for "every chapter ends deployed".** It must be free for
+1. **Deploy target for "every chapter ends deployed".** *Decided while
+   building chapter 1: a container image there, the hosted deploy in chapter
+   14; see the amendments above.* It must be free for
    the reader and support password login. That rules out Cloudflare Workers'
    free plan for this course (`docs/en/guides/cloudflare.md`: the 10 ms CPU
    budget rules out password hashing; sessions must be database-backed).
