@@ -1,4 +1,5 @@
 import { readFile, writeFile } from 'node:fs/promises'
+import { consola } from 'consola'
 import { readIfExists } from './discovery'
 import { parseSourceFile } from './parse-cache'
 import { resolve } from 'node:path'
@@ -426,35 +427,48 @@ export async function addToArrayArgument(
     return { modified: false, reason: PATCH_REASONS.fileNotFound }
   }
 
+  const updatedContent = insertArrayArgument(content, methodName, valueSource)
+
+  if (updatedContent === null) {
+    return { modified: false, reason: `Could not find a ${methodName}([ ... ]) call` }
+  }
+
+  if (updatedContent === content) {
+    return { modified: false, reason: PATCH_REASONS.alreadyPresent }
+  }
+
+  await writeFile(absolutePath, updatedContent, 'utf8')
+  return { modified: true }
+}
+
+/**
+ * The pure half of {@link addToArrayArgument}: `null` when the call is not
+ * there or its array cannot be parsed, the content unchanged when the value
+ * already is. Callers applying more than one patch write once from here.
+ */
+export function insertArrayArgument(content: string, methodName: string, valueSource: string): string | null {
   // The leading lookbehind is what keeps `unregisterMany([])` from matching
   // on its `registerMany` suffix when the optional receiver group is absent.
   const callPattern = new RegExp(
     `(?<![\\w$])(?:[\\w$]+(?:\\.[\\w$]+)*\\.)?${escapeRegExp(methodName)}\\s*\\(\\s*\\[`,
   )
   const match = matchInCode(content, callPattern)
-
   if (!match) {
-    return { modified: false, reason: `Could not find a ${methodName}([ ... ]) call` }
+    return null
   }
 
   const open = match.index + match[0].length - 1
   const close = findClosingDelimiter(content, open, '[', ']')
-
   if (close === -1) {
-    return { modified: false, reason: `Could not parse the ${methodName}() array` }
+    return null
   }
 
   const interior = content.slice(open + 1, close)
-
   if (parseArrayEntries(interior).some((entry) => entry === valueSource)) {
-    return { modified: false, reason: PATCH_REASONS.alreadyPresent }
+    return content
   }
 
-  const updatedContent
-    = content.slice(0, open + 1) + appendArrayEntry(interior, valueSource) + content.slice(close)
-
-  await writeFile(absolutePath, updatedContent, 'utf8')
-  return { modified: true }
+  return content.slice(0, open + 1) + appendArrayEntry(interior, valueSource) + content.slice(close)
 }
 
 /** Whether the exact import statement already exists in a file. */
@@ -623,4 +637,54 @@ export async function addCreateAppOption(
 
   await writeFile(absolutePath, updated, 'utf8')
   return { modified: true }
+}
+
+export interface AppendSchemaTableOptions {
+  /** The exported binding, e.g. `sessions`. Also what the already-declared guard looks for. */
+  name: string
+  blocks: Record<SchemaDialect, string>
+  imports: Record<SchemaDialect, (content: string) => string>
+  /** A non-builder import the block needs, inserted only when absent. */
+  extraImport?: string
+  /** What to tell a user whose app has no db/schema.ts. */
+  manualGuidance: string
+}
+
+export type AppendSchemaTableResult = 'appended' | 'already-declared' | 'no-schema'
+
+/**
+ * Append a table to `db/schema.ts` in the app's own dialect. Any *exported*
+ * binding of that name counts as one the app already has: builder spellings
+ * vary, and appending a second is a compile error at best and a second
+ * physical table at worst.
+ */
+export async function appendSchemaTable(options: AppendSchemaTableOptions): Promise<AppendSchemaTableResult> {
+  const { name, blocks, imports, extraImport, manualGuidance } = options
+  const schemaFile = 'db/schema.ts'
+  const existing = await readIfExists(process.cwd(), schemaFile)
+
+  if (existing === null) {
+    consola.warn(`No ${schemaFile} found — ${manualGuidance}`)
+    return 'no-schema'
+  }
+
+  const declared = new RegExp(
+    `\\bexport\\s+(?:const|let)\\s+${escapeRegExp(name)}\\b|\\bexport\\s*\\{[^}]*\\b${escapeRegExp(name)}\\b`,
+  )
+  if (declared.test(existing)) {
+    consola.info(`${schemaFile} already declares a ${name} table — left unchanged.`)
+    return 'already-declared'
+  }
+
+  const dialect = detectSchemaDialect(existing)
+  let content = imports[dialect](existing)
+  // Identifier-guarded: insertImport() recognizes only the exact statement, so a
+  // schema already importing the name among others would get a duplicate binding.
+  if (extraImport && !content.includes(extraImport.slice(extraImport.indexOf('{') + 1, extraImport.indexOf('}')).trim())) {
+    content = insertImport(content, extraImport) ?? content
+  }
+
+  await writeFile(resolve(process.cwd(), schemaFile), `${content.trimEnd()}\n\n${blocks[dialect]}`, 'utf8')
+  consola.info(`Added the ${name} table to ${schemaFile} (${dialect}).`)
+  return 'appended'
 }
