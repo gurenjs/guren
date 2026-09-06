@@ -369,8 +369,9 @@ async function assertBlogScaffold(appDir: string): Promise<void> {
   assert(/<Link[^>]*method="post"/su.test(layout), 'Blog blueprint must log out through an Inertia Link.')
 
   const post = await readFile(join(appDir, 'app/Models/Post.ts'), 'utf8')
-  assert(post.includes('static fillable'), 'Blog Post model must declare fillable fields.')
-  assert(!/fillable\s*=\s*\[[^\]]*authorId/su.test(post), 'Blog Post model must not accept authorId as mass-assignable input.')
+  // Both spellings: the typed `defineModel` option and a `static` on the class.
+  assert(/fillable\s*[:=]\s*\[/su.test(post), 'Blog Post model must declare fillable fields.')
+  assert(!/fillable\s*[:=]\s*\[[^\]]*authorId/su.test(post), 'Blog Post model must not accept authorId as mass-assignable input.')
 
   const postController = await readFile(join(appDir, 'app/Http/Controllers/PostController.ts'), 'utf8')
   for (const ability of ["'create'", "'update'", "'delete'"]) {

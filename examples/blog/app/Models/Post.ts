@@ -7,14 +7,17 @@ export type PostRecord = typeof posts.$inferSelect
 export type NewPostRecord = typeof posts.$inferInsert
 export type PostAuthorSummary = Pick<UserRecord, 'id' | 'name'>
 
-export class Post extends Attachable(defineModel(posts), {
-  cover: hasOneAttached({
-    image: 'require',
-    variants: { thumb: { width: 320 } },
+export class Post extends Attachable(
+  defineModel(posts, {
+    fillable: ['title', 'excerpt', 'body', 'authorId'],
   }),
-}) {
-  static fillable = ['title', 'excerpt', 'body', 'authorId']
-
+  {
+    cover: hasOneAttached({
+      image: 'require',
+      variants: { thumb: { width: 320 } },
+    }),
+  },
+) {
   static override relationTypes: { author: BelongsToRecord<PostAuthorSummary> } = {
     author: null,
   }
