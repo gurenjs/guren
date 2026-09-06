@@ -48,9 +48,8 @@ async function patchEnvExample(): Promise<void> {
 
   const entry = [
     '',
-    '# Which store CacheProvider uses. `redis` needs REDIS_URL.',
+    '# Which store CacheProvider uses. Declare it there before naming it here.',
     'CACHE_STORE=memory',
-    '# CACHE_STORE=redis',
     '',
   ].join('\n')
 

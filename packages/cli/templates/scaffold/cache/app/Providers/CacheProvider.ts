@@ -1,18 +1,20 @@
-import { ServiceProvider, createCacheManager, createRedisClient } from '@guren/core'
+import { ServiceProvider, createCacheManager } from '@guren/core'
 
+// CACHE_STORE picks the store. `memory` is per-process: correct on one
+// long-lived server, wrong on Workers, Lambda and Vercel, where two requests
+// can land in different instances.
+//
+// For Redis, add `createRedisClient` from '@guren/core/redis' and a
+// `redis: { driver: 'redis', client: () => createRedisClient({ url: process.env.REDIS_URL }) }`
+// entry — imported here only when you use it, since that module pulls in
+// ioredis. The function runs when the store is first resolved, so declaring it
+// beside `memory` opens no connection until CACHE_STORE selects it.
 export default class CacheProvider extends ServiceProvider {
   register(): void {
     this.container.singleton('cache', () => createCacheManager({
-      // CACHE_STORE=memory is per-process: correct on one long-lived server,
-      // wrong on Workers, Lambda and Vercel, where two requests can land in
-      // different instances. `redis` needs REDIS_URL.
       default: process.env.CACHE_STORE ?? 'memory',
       stores: {
         memory: { driver: 'memory' },
-        // `client` is a function so the client is constructed only when
-        // CACHE_STORE selects this store: an entry's options are evaluated
-        // with the object around them, and ioredis dials on construction.
-        redis: { driver: 'redis', client: () => createRedisClient({ url: process.env.REDIS_URL }) },
       },
     }))
   }
