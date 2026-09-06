@@ -324,7 +324,7 @@ Declare every disk once and pick one with an environment variable, the way `bunx
 
 ```ts
 const storage = createStorageManager({
-  default: process.env.STORAGE_DISK ?? 'local',
+  default: process.env.STORAGE_DISK || 'local',
   disks: {
     // Not served by anything. Uploads belong here — see the note below.
     local: { driver: 'local', root: './storage/app' },

@@ -37,9 +37,9 @@ export function initializeEventSystem(): EventManager {
   mailManager = mailManager ?? createMailManager({
     // Defaults to `log`, not `memory`: development needs the verification and
     // password-reset links printed, and `memory` discards them silently.
-    default: process.env.MAIL_MAILER ?? 'log',
+    default: process.env.MAIL_MAILER || 'log',
     from: {
-      email: process.env.MAIL_FROM_ADDRESS ?? 'noreply@blog.example.com',
+      email: process.env.MAIL_FROM_ADDRESS || 'noreply@blog.example.com',
       name: process.env.MAIL_FROM_NAME ?? 'Guren Blog',
     },
     transports: {

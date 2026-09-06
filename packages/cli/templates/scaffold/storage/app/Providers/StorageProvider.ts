@@ -25,7 +25,8 @@ const disks = {
   public: { driver: 'local', root: './public/storage', url: '/storage', visibility: 'public' },
 } as const
 
-const selected = process.env.STORAGE_DISK ?? 'local'
+// `||`, not `??`: a blanked `STORAGE_DISK=` is '', which names no disk.
+const selected = process.env.STORAGE_DISK || 'local'
 
 export default class StorageProvider extends ServiceProvider {
   register(): void {

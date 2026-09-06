@@ -60,7 +60,9 @@ describe('guren add session', () => {
     // Only as a comment: a real import puts ioredis in every bundle, including
     // one whose SESSION_DRIVER is `database`.
     expect(config).not.toMatch(/^import .*@guren\/core\/redis/m)
-    expect(config).toContain("default: process.env.SESSION_DRIVER ?? 'database'")
+    // `||`, not `??`: a blanked `SESSION_DRIVER=` is '', which names no store.
+    expect(config).toContain("default: process.env.SESSION_DRIVER || 'database'")
+    expect(config).not.toContain('process.env.SESSION_DRIVER ??')
     expect(config).toContain("database: { driver: 'database', table: sessions }")
 
     const provider = await readFile(resolve('app/Providers/SessionProvider.ts'), 'utf8')

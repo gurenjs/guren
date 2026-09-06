@@ -199,7 +199,9 @@ export function registerWebRoutes(router: Router): void {
       expect(resetController).toContain('User.update(')
 
       const mailConfig = await readFile(join(workspace.dir, 'config/mail.ts'), 'utf8')
-      expect(mailConfig).toContain("process.env.MAIL_DRIVER ?? 'log'")
+      // `||`, not `??`: a blank value names no transport, and `Number('')` is 0.
+      expect(mailConfig).toContain("process.env.MAIL_DRIVER || 'log'")
+      expect(mailConfig).toContain('Number(process.env.SMTP_PORT || 587)')
 
       const mailProvider = await readFile(join(workspace.dir, 'app/Providers/MailProvider.ts'), 'utf8')
       expect(mailProvider).toContain("this.container.singleton('mail'")

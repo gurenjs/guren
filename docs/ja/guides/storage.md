@@ -324,7 +324,7 @@ const url = await disk.temporaryUrl('private/document.pdf', expiration)
 
 ```ts
 const storage = createStorageManager({
-  default: process.env.STORAGE_DISK ?? 'local',
+  default: process.env.STORAGE_DISK || 'local',
   disks: {
     // 何からも配信されません。アップロードはこちらへ（下の注記を参照）。
     local: { driver: 'local', root: './storage/app' },
