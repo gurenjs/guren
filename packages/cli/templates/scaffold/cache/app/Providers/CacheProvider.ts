@@ -7,8 +7,8 @@ import { ServiceProvider, createCacheManager } from '@guren/core'
 // For Redis, add `createRedisClient` from '@guren/core/redis' and a
 // `redis: { driver: 'redis', client: () => createRedisClient({ url: process.env.REDIS_URL }) }`
 // entry — imported here only when you use it, since that module pulls in
-// ioredis. The function runs when the store is first resolved, so declaring it
-// beside `memory` opens no connection until CACHE_STORE selects it.
+// ioredis. The function runs when the store is first resolved, so a store
+// declared beside `memory` opens no connection until CACHE_STORE selects it.
 export default class CacheProvider extends ServiceProvider {
   register(): void {
     this.container.singleton('cache', () => createCacheManager({

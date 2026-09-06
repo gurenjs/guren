@@ -1,8 +1,7 @@
 import { consola } from 'consola'
-import { writeFile } from 'node:fs/promises'
-import { resolve } from 'node:path'
 import { registerConsoleCommand } from './console-registrar'
-import { appBindsService, fileExists, readIfExists } from './discovery'
+import { appendEnvEntry } from './env-registrar'
+import { appBindsService, fileExists } from './discovery'
 import { generateSchemaMigration } from './make-migration'
 import {
   appendSchemaTable,
@@ -14,8 +13,6 @@ import {
 import { wireProviders } from './provider-registrar'
 import { scaffoldTemplateFile } from './scaffold-templates'
 import { writeScaffoldFiles, type WriterOptions } from './utils'
-
-const ENV_FILES = ['.env.example', '.env'] as const
 
 /**
  * The `sessions` table per dialect, matching what DatabaseSessionStore reads:
@@ -108,7 +105,14 @@ export async function addSession(options: AddSessionOptions = {}): Promise<AddSe
     await wireProviders([{ name: 'SessionProvider' }])
     await registerConsoleCommand('SessionsPruneCommand')
   }
-  await patchEnvFiles()
+
+  // The `SESSION_DRIVER` entry config/session.ts reads.
+  await appendEnvEntry('SESSION_DRIVER', `
+# Which store config/session.ts uses. \`database\` needs the sessions table
+# and its migration.
+SESSION_DRIVER=database
+# SESSION_DRIVER=memory
+`)
 
   const migrationPending = options.migration !== false
     && !(await generateSchemaMigration('create_sessions_table', 'sessions'))
@@ -124,30 +128,3 @@ export async function addSession(options: AddSessionOptions = {}): Promise<AddSe
   return { files, schemaChanged: schema === 'appended' }
 }
 
-/**
- * The `SESSION_DRIVER` entry config/session.ts reads, in both env files: the
- * scaffolder copies `.env.example` to `.env` at create time, so writing only
- * the example leaves the file the app actually reads without the key.
- */
-async function patchEnvFiles(): Promise<void> {
-  const entry = `
-# Which store config/session.ts uses. \`database\` needs the sessions table
-# and its migration.
-SESSION_DRIVER=database
-# SESSION_DRIVER=memory
-`
-
-  for (const file of ENV_FILES) {
-    const existing = await readIfExists(process.cwd(), file)
-    // A missing .env is normal (it is gitignored); a missing .env.example is not
-    // worth creating, since the app reads neither by this blueprint's doing.
-    if (existing === null) continue
-    if (/^\s*#?\s*SESSION_DRIVER=/m.test(existing)) {
-      consola.info(`${file} already mentions SESSION_DRIVER — left unchanged.`)
-      continue
-    }
-
-    await writeFile(resolve(process.cwd(), file), `${existing.trimEnd()}\n${entry}`, 'utf8')
-    consola.info(`Added SESSION_DRIVER to ${file}.`)
-  }
-}

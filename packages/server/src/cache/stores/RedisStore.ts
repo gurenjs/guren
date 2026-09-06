@@ -1,4 +1,4 @@
-import { isPromiseLike } from '../../logging/Logger'
+import { resolveLazyRedisClient } from '../../redis/lazy-client'
 import type { CacheStore, RedisStoreOptions } from '../types'
 
 /** ioredis-compatible client surface. */
@@ -23,29 +23,13 @@ interface RedisPipeline {
   exec(): Promise<unknown>
 }
 
-/**
- * A `client` function runs here rather than where the config was declared, so
- * a `stores` entry that is never selected never constructs its client.
- */
-function resolveClient(client: unknown): RedisClient {
-  const resolved = typeof client === 'function' ? (client as () => unknown)() : client
-
-  if (isPromiseLike(resolved)) {
-    throw new Error(
-      'Redis cache store: `client` returned a Promise. Return the ioredis client synchronously; it connects lazily on first use.',
-    )
-  }
-
-  return resolved as RedisClient
-}
-
 /** Redis-backed cache store. */
 export class RedisStore implements CacheStore {
   private readonly client: RedisClient
   private readonly prefix: string
 
   constructor(options: RedisStoreOptions) {
-    this.client = resolveClient(options.client)
+    this.client = resolveLazyRedisClient(options.client, 'Redis cache store') as RedisClient
     this.prefix = options.prefix ?? 'cache:'
   }
 
