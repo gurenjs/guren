@@ -124,7 +124,7 @@ Open `http://localhost:3333` and you have a running Guren app.
 Follow this path, in order:
 
 1. **[Quickstart](./getting-started.md)** — scaffold a project and see it running in about five minutes.
-2. **[Tutorial: Build a Mini Blog](../tutorials/overview.md)** — **recommended for newcomers.** A hands-on three-part course: create a posts CRUD, add authentication, then wire up comments with relationships. When you finish, you have touched every core concept with working code to show for it.
+2. **[The Guren Tutorial](../tutorials/00-overview.md)** — **recommended for newcomers.** A hands-on fourteen-chapter course that builds a blog from an empty directory to a deployed app. Every chapter hands one slice to a coding agent and judges the result with a test and `guren gate`, so you finish having touched every core concept and knowing how to delegate the next one.
 3. **Topic guides** — deep dives once you know your way around:
    - [Routing](./routing.md) — route groups, middleware, and resource routes.
    - [Controllers](./controllers.md) — request handling, input helpers, and validation.
