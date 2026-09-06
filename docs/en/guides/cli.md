@@ -137,7 +137,7 @@ table to.
 | `make:notification <Name>` | Generates a notification class | `bunx guren make:notification InvoicePaid` |
 | `make:mail <Name>` | Generates a mailable class | `bunx guren make:mail WelcomeEmail` |
 | `make:command <Name>` | Generates a console command in `app/Console/Commands`; `--command <name>` sets the invocation name. Register it in `src/console.ts` — see the [console commands guide](./console.md) | `bunx guren make:command SendDigest --command reports:digest` |
-| `make:agent <Name>` | Scaffolds a durable agent in `app/Agents`, registers it in `config/agents.ts`, and adds the `guren.arch.ts` rule that keeps it off your models and ORM — see [Durable Agents](./durable-agents.md) | `bunx guren make:agent Triager` |
+| `make:agent <Name>` | Scaffolds a durable agent in `app/Agents`, registers it in `config/agents.ts`, adds the `guren.arch.ts` rule that keeps it off your models and ORM, and writes the `config/env.ts` and tsconfig `types` entry its class needs — see [Durable Agents](./durable-agents.md) | `bunx guren make:agent Triager` |
 
 > **Note:** `make:*` commands avoid overwriting existing files. Use `--force` if you need to replace them.
 
@@ -517,7 +517,7 @@ bunx guren tool:dev --as 42 --port 4000
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--routes` | `routes/web.ts` | Path to the routes entry file |
+| `--routes` | The app's routes entry: `routes/web.ts`, else `routes/api.ts` — the same probe `check` and `audit` use | Path to the routes entry file |
 | `--app` | Current directory | Application root directory |
 | `--json` | `false` | Output the derived tools as JSON |
 

@@ -3,7 +3,7 @@ import { pathToFileURL } from 'node:url'
 import { consola } from 'consola'
 import { Router, mountModuleRoutes, type GurenModule, type RouteDefinition } from '@guren/core'
 import { isDefinitelyAbsent, listModuleNames } from './discovery'
-import { DEFAULT_ROUTES_FILE, REGISTRAR_EXPORT_NAMES, REGISTRAR_PATTERN } from './route-registrar'
+import { DEFAULT_ROUTES_FILE, REGISTRAR_EXPORT_NAMES, REGISTRAR_PATTERN, routesEntryOrDefault } from './route-registrar'
 
 type RouteRegistrar = (router: Router) => void | Promise<void>
 
@@ -170,13 +170,15 @@ export async function loadRouteDefinitions(
 /**
  * The preamble every `route:list`-shaped command shares, so they cannot
  * disagree about which app they describe: `--app` defaults to cwd, `--routes`
- * resolves against it, and a load failure is re-thrown naming the file.
+ * resolves against it — else the same entry probe `check` and `audit` use, so
+ * an API-only app's `routes/api.ts` is found — and a load failure is re-thrown
+ * naming the file.
  */
 export async function loadAppRouteDefinitions(
   options: { appRoot?: string; routesFile?: string } = {},
 ): Promise<{ appRoot: string; routesFile: string; definitions: RouteDefinition[] }> {
   const appRoot = options.appRoot ? resolve(options.appRoot) : process.cwd()
-  const routesFile = resolve(appRoot, options.routesFile ?? DEFAULT_ROUTES_FILE)
+  const routesFile = resolve(appRoot, await routesEntryOrDefault(appRoot, options.routesFile))
 
   try {
     return { appRoot, routesFile, definitions: await loadRouteDefinitions(routesFile, appRoot) }

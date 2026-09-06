@@ -55,50 +55,36 @@ export default app
 bunx guren make:agent Triager
 ```
 
-3つのものを書き出します。クラス以外の2つこそが要点です。エージェントクラスだけでは何も読み込まず、何の境界も持たず、デプロイビルドからも見つからないため、動きようがありません。
+クラスと、新規アプリに欠けているものすべてを書き出します。エージェントクラスだけでは何も読み込まず、何の境界も持たず、デプロイビルドからも見つからず、どのアプリにも定義されていない型を参照するため、動きようがありません。
 
 | ファイル | 内容 |
 |---|---|
 | `app/Agents/Triager.ts` | クラス本体: state の形、cron スケジュール、ツール呼び出し1つ |
 | `config/agents.ts` | 登録エントリ。ファイルがなければ作成し、あればパッチします |
 | `guren.arch.ts` | `app/Agents/**` から `app/Models/**`・`db/**`・`@guren/orm`・`@guren/plugin-agents/runtime` への import を禁じるルール |
+| `config/env.ts` | クラスが import する `Env`: D1 バインディングと、エージェントの Durable Object namespace 用のコメントアウトされたスロット。なければ作成し、すでに `Env` を export していればそのままにします |
+| `tsconfig.json` | `compilerOptions.types` に `@cloudflare/workers-types` を追記します。`Cloudflare.Env` と `DurableObject` はここから来ます |
 
-新しいクラス以外はすべて AST 経由でパッチされ、当てられなかったパッチは貼り付け用のテキストとともに報告されます。黙って飛ばすと、登録されているように見えて実際はされていないアプリが残るからです。
+既存ファイルはすべてその場でパッチされ、当てられなかったパッチは飛ばされるのではなく貼り付け用のテキストとともに報告されます。登録されているように見えて実際はされていないアプリが残るほうが、メッセージ1つより悪いからです。tsconfig のパッチにはそういうケースが2つあります。`types` 配列がないファイル(新しく作ると自動の `@types` 探索が切れるので `bun-types` も並べる必要があり、コマンドはそれを勝手に決めずに追加すべき行を表示します)と、コメントを含むファイル(strict JSON ではありません)です。
 
-このコマンドが**やらない**ことが2つあります。どちらも最初の typecheck の前に知っておく価値があります。
+自分でやることが2つ残ります。どちらも最初の typecheck の前に知っておく価値があります。
 
 - **`src/app.ts` には触れません。** 上記のとおり `agentsPlugin(agents)` は自分で `createApp({ providers })` に追加してください。
-- **生成されたクラスは `Env` 型を参照し、Workers の型定義を必要とします。** `GurenAgent<Env, TriagerState>` の `Env` は新規アプリのどこにも定義されておらず、基底クラスは tsconfig に `@cloudflare/workers-types` を要求します。どちらも自分で用意します。
+- **依存関係。** アプリに `@cloudflare/workers-types` がなければ `bun add -d @cloudflare/workers-types` を実行します。その場合はコマンドがそう伝えます。
+
+`config/env.ts` が `wrangler types` による生成ではなく手書きなのは、この型を `tsc` と Bun のテスト実行の両方が読むためで、どちらも「先に wrangler を実行してあること」に依存できません。`@cloudflare/workers-types` が宣言するのは `Cloudflare.Env` であって素の `Env` ではないので、クラスはアプリ自身のものを import します。バインディングが増えたら広げてください。
 
 ```ts
 // config/env.ts
 export interface Env {
-  /** D1 バインディング。読むのは ORM だけなので `unknown`。 */
+  /** D1 バインディング。ORM しか読まないので `unknown` */
   DB: unknown
-  /** wrangler がこのクラスに割り当てる Durable Object 名前空間。Bun では存在しない。 */
+  /** wrangler がこのクラスにバインドする Durable Object namespace。Bun では存在しない */
   TRIAGER?: {
     idFromName(name: string): unknown
     get(id: unknown): { sweep(): Promise<unknown> }
   }
 }
-```
-
-```jsonc
-// tsconfig.json
-{
-  "compilerOptions": {
-    "types": ["bun-types", "@cloudflare/workers-types"]
-  }
-}
-```
-
-あわせて `bun add -d @cloudflare/workers-types` を実行します。生成ではなく手書きなのは、この型を `tsc` と Bun のテスト実行の両方が読むためで、どちらも「先に wrangler を実行してあること」に依存できません。
-
-そのうえで、コマンドが生成したクラスにこの型を import します。scaffold は `Env` を参照するだけで import しておらず、`@cloudflare/workers-types` が宣言するのは `Cloudflare.Env` であって素の `Env` ではありません。
-
-```ts
-// app/Agents/Triager.ts
-import type { Env } from '@/config/env'
 ```
 
 ## レジストリ
@@ -427,12 +413,6 @@ const MAX_ASKS_PER_SWEEP = 10
 `bunx guren check --arch` は、スキャフォールドが書いた境界を強制します。`app/Agents/**` のファイルが `app/Models/**`・`db/**`・`@guren/orm`・`@guren/plugin-agents/runtime` を import していれば failure です。はっきり言っておくと、**これはサンドボックスではなく規律です。** プロセス内のアプリケーションコードは isolate を共有していて何でも import できますし、チェッカーが見るのは静的な import だけで、動的な `import()` はすり抜けます。この境界が買っているのは、越境が偶発ではなくレビューで見えるということであり、もう半分は監査ログです。
 
 エージェントが呼ぶルートは通常のエージェントルールでチェックされます。ここで最も重要なのは、read-only でないツールには認証だけでなく**認可**が必要だという点です。[認証は認可ではありません](./agent-interface.md#認証は認可ではありません)を参照してください。
-
-API 専用アプリで知っておくべき隙間が1つあります。`guren check` と `guren audit` は `routes/api.ts` を探しますが、`guren tool:list` は依然として `routes/web.ts` を既定にするため、フラグが要ります。
-
-```bash
-bunx guren tool:list --routes routes/api.ts
-```
 
 ## 関連
 
