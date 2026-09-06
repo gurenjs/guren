@@ -133,6 +133,7 @@ JSON(`this.json(...)`)を返すため、そのまま型検査を通り、`routes
 | `make:mail <Name>` | メールクラスを生成 | `bunx guren make:mail WelcomeEmail` |
 | `make:command <Name>` | `app/Console/Commands` にコンソールコマンドを生成。`--command <name>` で呼び出し名を指定。`src/console.ts` への登録が必要（[コンソールコマンドガイド](./console.md)参照） | `bunx guren make:command SendDigest --command reports:digest` |
 | `make:policy <Name>` | 所有者ベースのデフォルトを備えた認可ポリシーを `app/Policies` に生成 | `bunx guren make:policy Post` |
+| `make:agent <Name>` | 永続エージェントを `app/Agents` に生成し、`config/agents.ts` に登録し、モデルや ORM から遠ざける `guren.arch.ts` のルールを追加([永続エージェント](./durable-agents.md)参照) | `bunx guren make:agent Triager` |
 | `make:validator <Name>` | Zodバリデーションスキーマ(ルートパラメータ・一覧クエリ・ペイロード)を `app/Http/Validators` に生成。`--fields` は `make:feature` と同じ構文 | `bunx guren make:validator Post --fields "title:string,body:text"` |
 | `make:adr "<Title>"` | アーキテクチャ意思決定を採番付きファイルとして `docs/adr/` に記録(リンク可能なfrontmatter付き)。`--entity <Model>` で `entities:`/`related:` を自動補完、`--issue <ref>`(複数可)でGitHubのIssue/PRへの `issues:` リンクを記入 | `bunx guren make:adr "Billing cycle is end-of-month" --entity Invoice --issue 412` |
 
@@ -144,7 +145,7 @@ JSON(`this.json(...)`)を返すため、そのまま型検査を通り、`routes
 
 | コマンド | 説明 | 例 |
 |---------|------|-----|
-| `check` | ルート・コントローラ・ページ・モデル間の整合性（`routes/` 配下の各ファイルがエントリのレジストラから、モジュールの `routes/` 配下は各モジュール自身のレジストラから実際に呼ばれているかを含む）に加え、docリンク・スペックビューの鮮度・アーキテクチャ境界を検証 | `bunx guren check --json` |
+| `check` | ルート・コントローラ・ページ・モデル間の整合性（`routes/` 配下の各ファイルがエントリのレジストラから、モジュールの `routes/` 配下は各モジュール自身のレジストラから実際に呼ばれているかを含む）に加え、`config/agents.ts` の永続エージェントレジストリ・docリンク・スペックビューの鮮度・アーキテクチャ境界を検証 | `bunx guren check --json` |
 | `audit` | セキュリティ監査: 変更系ルートのバリデーション/認証の欠如、文字列補間付き生SQL、ハードコードされた認証情報、無効化されたセキュリティ既定値、mass assignment 設定、`hidden` 未登録の機微カラム、リクエストのホストから組み立てられたメール内リンク、アプリまたはインストール済みパッケージが宣言した CSRF 除外を検査 | `bunx guren audit --json` |
 | `gate` | scaffold された CI が回す検証ステージ(codegen・typecheck・lint・`--ci` 規則の `check`・`audit`・テスト)をまとめて実行し、いずれかが失敗すれば非ゼロ exit。実行できないステージは skip ではなく失敗 | `bunx guren gate --changed` |
 | `doctor` | プロジェクトの健全性レポート(環境変数・設定・生成ファイル)と次のアクション | `bunx guren doctor --next` |

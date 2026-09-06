@@ -268,6 +268,14 @@ Everything under `public/` is staged into `.cloudflare/assets/` and served by Wo
 
 If your app deliberately serves pretty-URL HTML out of `public/`, set `"html_handling"` yourself in `wrangler.jsonc`; the build leaves any value you name alone, and the `.html` rule is weaker for it.
 
+## Durable Agents
+
+Workers is also the substrate for agents your application hosts itself: Durable Objects give a long-lived agent durable identity, durable state and alarm-backed schedules. `@guren/plugin-agents` puts them behind the same agent tools your routes already declare.
+
+When the app has a `config/agents.ts`, `cloudflare:build` does three extra things: it appends a named export per registered class to the generated worker, it verifies that the committed `wrangler.jsonc` hosts each one as a SQLite-backed Durable Object — failing with the exact JSON to add rather than deploying an agent with no binding — and it mounts `/agents/*` deny-all behind the registry's own authorizer. Do not hand-write the `durable_objects` and `migrations` entries; run the build and paste what it prints.
+
+The Free-plan measurements for a deployed agent, the D1 query budget a sweep has to fit in, and everything else about writing one are in [Durable Agents](./durable-agents.md).
+
 ## Upgrading an Existing App
 
 `wrangler.jsonc` is scaffolded once and never overwritten, so an app created before a plugin update keeps its original config. The build prints exactly which entries are missing when it finds an outdated one — add them and rebuild.

@@ -743,12 +743,11 @@ copy-pasteable JSON). Four things it found:
   guren.dev and this example hand-wrote the same three lines, and
   `@guren/plugin-cloudflare`'s own README used the name with no import. Fixed:
   exported from `@guren/plugin-cloudflare/env`.
-- **`guren audit` and `guren tool:list` do not find `routes/api.ts`.**
-  `guren check` probes for the API-only entry; those two default to
-  `routes/web.ts`, and `audit` then *warns and skips every route-level check* —
-  including the stricter agent-route treatment — while still reporting zero
-  failures. Not fixed here: it changes a security gate's verdict for every
-  API-only app and wants its own change with tests.
+- **`guren tool:list` does not find `routes/api.ts`.** `guren check` probes
+  for the API-only entry and, since #690, so does `guren audit`; `tool:list`
+  still defaults to `routes/web.ts`. (The dogfood run observed `audit` skipping
+  every route-level check on a base that predated #690; the guide describes the
+  merged behaviour.) Not fixed here.
 
 The same app was then deployed to a Workers **Free** plan account (its own
 Worker and D1) and the walkthrough repeated against it: the alarm fired 30 s
@@ -775,6 +774,13 @@ needing `@cloudflare/workers-types` in the app's tsconfig, and says neither;
 snippets when it writes two, leaving the `agentsPlugin` registration to the
 reader; and `defineSeeder` defaults its database type to Postgres, which no
 sqlite/D1 app can use.
+
+**Part 4b: the docs shipped.** `docs/{en,ja}/guides/durable-agents.md` is the
+user-facing guide, wired into the site's AI-Native Development section beside the
+Agent Interface guide. It records the two rough edges Part 4a found and did not
+fix: `make:agent` writes neither the `agentsPlugin(...)` registration nor the
+`Env` type and `@cloudflare/workers-types` its scaffold needs, and `guren tool:list`
+needs `--routes routes/api.ts` on an API-only app.
 
 ## Alternatives Considered
 

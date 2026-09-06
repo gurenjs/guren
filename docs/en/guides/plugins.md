@@ -250,6 +250,8 @@ The `plugin` command installs the package with `bun add` when missing (pass `--n
 
 > **Note:** Automatic registration covers class-based provider exports and the official zero-config factory plugins (`@guren/plugin-vercel`, `@guren/plugin-cloudflare`), which are registered as `providers: [vercelPlugin()]`-style calls. Third-party plugins built with `definePlugin()` export a factory that must be called with its configuration, so register them manually in `createApp({ providers })` as shown below.
 
+The same applies to first-party factory plugins that take configuration. `@guren/plugin-agents` is one: `agentsPlugin(agents)` takes the durable-agent registry from `config/agents.ts`, so `guren plugin` installs it and checks its compatibility range while the registration stays yours to write — see [Durable Agents](./durable-agents.md).
+
 ## Usage in a Guren Application
 
 Once published, users install and register the plugin:

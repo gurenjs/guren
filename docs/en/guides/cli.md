@@ -137,6 +137,7 @@ table to.
 | `make:notification <Name>` | Generates a notification class | `bunx guren make:notification InvoicePaid` |
 | `make:mail <Name>` | Generates a mailable class | `bunx guren make:mail WelcomeEmail` |
 | `make:command <Name>` | Generates a console command in `app/Console/Commands`; `--command <name>` sets the invocation name. Register it in `src/console.ts` — see the [console commands guide](./console.md) | `bunx guren make:command SendDigest --command reports:digest` |
+| `make:agent <Name>` | Scaffolds a durable agent in `app/Agents`, registers it in `config/agents.ts`, and adds the `guren.arch.ts` rule that keeps it off your models and ORM — see [Durable Agents](./durable-agents.md) | `bunx guren make:agent Triager` |
 
 > **Note:** `make:*` commands avoid overwriting existing files. Use `--force` if you need to replace them.
 
@@ -146,7 +147,7 @@ Validate your app before shipping — these commands are also designed for AI co
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `check` | Validate integrity across routes, controllers, pages, and models — including whether every file in `routes/` is actually reached from your entry registrar (and every file in a module's `routes/` from that module's own registrar) — plus doc links, spec-view freshness, and architecture boundaries | `bunx guren check --json` |
+| `check` | Validate integrity across routes, controllers, pages, and models — including whether every file in `routes/` is actually reached from your entry registrar (and every file in a module's `routes/` from that module's own registrar) — plus the durable-agent registry in `config/agents.ts`, doc links, spec-view freshness, and architecture boundaries | `bunx guren check --json` |
 | `audit` | Security audit: missing input validation or authentication on mutating routes, raw SQL with interpolation, hardcoded credentials, disabled security defaults, mass-assignment configuration, sensitive columns not listed in `hidden`, emailed links built from the request host, CSRF exemptions declared by the app or by an installed package | `bunx guren audit --json` |
 | `gate` | Every verification stage the scaffolded CI runs — codegen, typecheck, lint, `check` (the `--ci` rule), `audit`, tests — reported together; exits non-zero if any stage fails, and a stage that cannot run fails rather than skips | `bunx guren gate --changed` |
 | `doctor` | Project health report (env, config, generated files) with actionable next steps | `bunx guren doctor --next` |
