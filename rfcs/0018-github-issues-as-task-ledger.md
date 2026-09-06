@@ -151,7 +151,7 @@ export interface EntityIssue {
   /** Present only with `--live`. */
   live?: {
     title: string
-    state: 'open' | 'closed'
+    state: 'open' | 'closed' | 'merged'
     assignees: string[]
     labels: string[]
     updatedAt: string
@@ -186,14 +186,26 @@ the network, so `bunx guren context User` in the `SessionStart` hook is as fast
 and as offline-safe as it is today.
 
 `--live` runs one `gh api graphql` query per distinct repository fetching the
-declared numbers (`gh issue list` cannot filter by number; the per-issue
-fallback is `gh issue view <n> --repo <r> --json number,title,state,assignees,labels,updatedAt,url`),
-through a `runGh` sibling of `runGit`: a 5 s timeout, stdout captured, stderr
-discarded, `null` on any failure. When it fails, `issuesLiveError` names the
-reason (`gh not found`, `gh auth status: not logged in`, timeout) and the
-section prints the offline list with one line saying live lookup was
-unavailable. The exit code is unaffected: a context lookup is never red because
-GitHub was.
+declared numbers (`gh issue list` cannot filter by number; ~~the per-issue
+fallback is `gh issue view <n> --repo <r> --json number,title,state,assignees,labels,updatedAt,url`~~
+**Amended in implementation:** no per-issue fallback; `issueOrPullRequest`
+answers for both kinds in the one query, so a second code path bought
+nothing), through a `runGh` sibling of `runGit`: a 5 s timeout, stdout
+captured, ~~stderr discarded, `null` on any failure~~ **Amended in
+implementation:** the first non-empty stderr line is kept as the reason, since
+that is where `gh` reports "not logged in" and rate limits; the result is
+`{ ok, stdout } | { ok: false, reason }`. When it fails, `issuesLiveError` names
+the reason (`gh not found on PATH`, `gh exited 4: … gh auth login`, `gh timed
+out after 5000ms`) and the section prints the offline list with one line saying
+live lookup was unavailable. Measured against GitHub: `gh api graphql` exits 1
+whenever any alias fails to resolve (one unknown number in the list) while the
+other aliases' data is in the body it printed, so a failed run keeps its stdout
+and the lookup reads `data.repository` from it; only a body with no data is an
+error. The exit code is unaffected: a context lookup is
+never red because GitHub was. `state` also reports `merged` for a pull request,
+which GitHub distinguishes from `closed`. The `gh` invocation is a parameter of
+`generateEntityContext` (`gh?: GhRunner`) so tests substitute a stub and the
+suite never needs the binary or the network.
 
 What `--live` deliberately does **not** fetch: issue bodies and comments. An
 issue body is text written by whoever can open an issue on the repository, and

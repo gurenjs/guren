@@ -232,6 +232,27 @@ describe('Guren MCP Server', () => {
     expect(parsed.routes[0].controller.name).toBe('PostController')
   })
 
+  test('guren_entity_context passes live and repo through, live defaulting to false', async () => {
+    const seen: Array<{ cwd: string; module?: string; live?: boolean; repo?: string }> = []
+    const client = await createTestClient({
+      generateEntityContext: async (_entity, opts) => {
+        seen.push(opts)
+        return { entity: 'Post' }
+      },
+    })
+
+    await client.callTool({ name: 'guren_entity_context', arguments: { entity: 'Post' } })
+    await client.callTool({
+      name: 'guren_entity_context',
+      arguments: { entity: 'Post', live: true, repo: 'acme/shop' },
+    })
+
+    expect(seen).toEqual([
+      { cwd: testDir, module: undefined, live: false, repo: undefined },
+      { cwd: testDir, module: undefined, live: true, repo: 'acme/shop' },
+    ])
+  })
+
   test('guren_entity_context surfaces resolution errors as isError', async () => {
     const client = await createTestClient()
     const result = await client.callTool({

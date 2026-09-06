@@ -114,7 +114,7 @@ export function createFreshContextApi(): {
   generateContext(options: { cwd: string }): Promise<ProjectContext>
   generateEntityContext(
     entity: string,
-    options: { cwd: string; module?: string },
+    options: { cwd: string; module?: string; live?: boolean; repo?: string },
   ): Promise<EntityContext>
   loadContextRoutes(
     cwd: string,
@@ -125,9 +125,15 @@ export function createFreshContextApi(): {
   return {
     generateContext: ({ cwd }) => runCliJson<ProjectContext>(['context'], cwd),
 
-    generateEntityContext: (entity, { cwd, module }) =>
+    generateEntityContext: (entity, { cwd, module, live, repo }) =>
       runCliJson<EntityContext>(
-        module ? ['context', entity, '--module', module] : ['context', entity],
+        [
+          'context',
+          entity,
+          ...(module ? ['--module', module] : []),
+          ...(live ? ['--live'] : []),
+          ...(repo ? ['--repo', repo] : []),
+        ],
         cwd,
       ),
 

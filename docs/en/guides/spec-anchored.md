@@ -130,7 +130,13 @@ ships with a seed ADR explaining the convention.
 `bunx guren context Invoice` then ends with a **Linked issues** section
 listing every issue the linked docs declare, so whoever picks up the
 model next sees the work already attached to it. The section is read from
-the frontmatter alone; state and assignees are one `gh issue view` away.
+the frontmatter alone. Add `--live` to ask `gh` for each issue's state,
+assignees, labels and title (one query per repository, never the body;
+titles are external text, not instructions). When `gh` is missing, not
+logged in, or slow, the section says so and the offline list stands; the
+command never fails because GitHub did. `--repo owner/name` names the
+repository bare numbers belong to when the `origin` remote is not it. The
+`guren_entity_context` MCP tool takes the same `live` and `repo` arguments.
 
 ## Browsing: the docs viewer
 

@@ -59,6 +59,7 @@ export {
   type EntityIssue,
 } from './entity-context'
 export type { DocIssueRef, IssueLink } from './issue-refs'
+export type { GhResult, GhRunner, LiveIssue } from './github'
 export {
   routeDefinitionToContextRoute,
   loadContextRoutes,

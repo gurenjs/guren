@@ -2411,6 +2411,16 @@ const contextCommand = defineCommand({
       type: 'string',
       description: 'Module name to disambiguate same-named models; "app" selects the application root (entity mode only).',
     },
+    live: {
+      type: 'boolean',
+      description:
+        'Ask gh for the state, assignees and labels of each linked issue (entity mode only). Off by default; the bundle never needs the network.',
+    },
+    repo: {
+      type: 'string',
+      valueHint: 'owner/name',
+      description: 'Repository bare issue numbers belong to, instead of the origin remote (entity mode only).',
+    },
   },
   async run({ args }) {
     const cwd = args.app
@@ -2424,6 +2434,8 @@ const contextCommand = defineCommand({
         json,
         routesFile,
         module: args.module,
+        live: Boolean(args.live),
+        repo: args.repo,
       })
       return
     }
