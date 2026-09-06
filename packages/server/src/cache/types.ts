@@ -65,7 +65,11 @@ export interface MemoryStoreOptions {
 }
 
 export interface RedisStoreOptions {
-  /** Redis client instance (ioredis). */
+  /**
+   * An ioredis client, or a function returning one *synchronously* (ioredis
+   * connects lazily on its own). A function runs when the store is first
+   * built, so a store declared in `stores` but never selected opens no socket.
+   */
   client: unknown
 
   /** @default 'cache:' */

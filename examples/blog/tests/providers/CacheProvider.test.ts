@@ -53,8 +53,8 @@ describe('Blog CacheProvider', () => {
 
     expect(cache.getDefaultStoreName()).toBe('memory')
     expect(cache.hasStore('redis')).toBe(true)
-    // The point of registering redis as a factory rather than a `stores` entry:
-    // the client is only built once something selects the store.
+    // The point of passing `client` as a function: the client is built only
+    // once something selects the store.
     expect(createRedisClient).not.toHaveBeenCalled()
   })
 

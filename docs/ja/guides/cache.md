@@ -106,8 +106,6 @@ const settings = await cache.store().rememberForever('app:settings', async () =>
 import { CacheManager } from '@guren/core'
 import { createRedisClient } from '@guren/core'
 
-const redis = createRedisClient({ url: process.env.REDIS_URL })
-
 const cache = new CacheManager({
   default: 'redis',
   stores: {
@@ -118,7 +116,9 @@ const cache = new CacheManager({
     },
     redis: {
       driver: 'redis',
-      client: redis,
+      // `client` には関数も渡せます。最初にこのストアが使われたときに実行されるため、
+      // 宣言だけして選ばれなかったストアは接続を開きません。
+      client: () => createRedisClient({ url: process.env.REDIS_URL }),
       prefix: 'myapp:cache:', // キープレフィックス（デフォルト: 'cache:'）
     },
     file: {
@@ -149,7 +149,7 @@ await cache.store('file').set('persistent', 'data')
 **Redis Store:**
 | オプション | デフォルト | 説明 |
 |-----------|-----------|------|
-| `client` | 必須 | Redisクライアントインスタンス |
+| `client` | 必須 | ioredis クライアント、または同期的にそれを返す関数（ストアが最初に使われたときに実行されます） |
 | `prefix` | `'cache:'` | 全キャッシュキーのプレフィックス |
 
 **File Store:**
@@ -266,7 +266,7 @@ export async function checkRateLimit(ip: string, limit: number): Promise<boolean
 const cache = new CacheManager({
   default: 'redis',
   stores: {
-    redis: { driver: 'redis', client: redis },
+    redis: { driver: 'redis', client: () => createRedisClient({ url: process.env.REDIS_URL }) },
   },
 })
 

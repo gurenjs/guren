@@ -1,3 +1,4 @@
+import { resolveLazyRedisClient } from '../../redis/lazy-client'
 import type { CacheStore, RedisStoreOptions } from '../types'
 
 /** ioredis-compatible client surface. */
@@ -28,7 +29,7 @@ export class RedisStore implements CacheStore {
   private readonly prefix: string
 
   constructor(options: RedisStoreOptions) {
-    this.client = options.client as RedisClient
+    this.client = resolveLazyRedisClient(options.client, 'Redis cache store') as RedisClient
     this.prefix = options.prefix ?? 'cache:'
   }
 

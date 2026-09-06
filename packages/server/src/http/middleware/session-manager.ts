@@ -1,4 +1,4 @@
-import { isPromiseLike } from '../../logging/Logger'
+import { resolveLazyRedisClient } from '../../redis/lazy-client'
 import { RedisSessionStore } from '../../redis/RedisSessionStore'
 import { MemorySessionStore, type SessionCookieOptions, type SessionStore } from './session'
 
@@ -80,12 +80,7 @@ export class SessionManager {
 
     this.registerDriver('memory', ({ now }) => new MemorySessionStore(now))
     this.registerDriver('redis', ({ client, prefix }) => {
-      const redis = typeof client === 'function' ? client() : client
-      if (isPromiseLike(redis)) {
-        throw new Error(
-          'Session store "redis": `client` returned a Promise. Return the ioredis client synchronously; it connects lazily on first use.',
-        )
-      }
+      const redis = resolveLazyRedisClient(client, 'Session store "redis"')
       return new RedisSessionStore(redis as ConstructorParameters<typeof RedisSessionStore>[0], { prefix })
     })
 
