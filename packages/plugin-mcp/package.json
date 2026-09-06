@@ -1,6 +1,6 @@
 {
   "name": "@guren/plugin-mcp",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -39,7 +39,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@guren/core": "^1.13.0",
+    "@guren/core": "^1.14.0",
     "@modelcontextprotocol/sdk": "^1.30.0"
   },
   "devDependencies": {
