@@ -7,7 +7,7 @@
  * `@guren/*` ranges rewritten to local builds, the same vendoring
  * `smoke:starter` uses. Everything else runs as written.
  */
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import process from 'node:process'
@@ -85,6 +85,12 @@ async function scaffold(session: Session, target: string, flags: string[]): Prom
   // placed beside the app finds nothing above it.
   const vendorDir = join(appDir, '.guren-vendor')
   const roots = await vendorLocalPackages(vendorDir)
+  // The vendoring copies dist/ only; the published @guren/cli also ships
+  // templates/ (its package.json `files`), which agent:sync and agent:init read.
+  const cliRoot = roots.get('@guren/cli')
+  if (cliRoot) {
+    await cp(resolve(repoRoot, 'packages/cli/templates'), join(cliRoot, 'templates'), { recursive: true })
+  }
   await rewriteAppDependencies(appDir, roots, 'The tutorial app')
   await run(['bun', 'install'], appDir, session.env)
   await ensureGurenBin(appDir)

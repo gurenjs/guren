@@ -855,4 +855,4 @@ git commit -m "feat: complete the posts CRUD with pagination"
 
 ## 次へ
 
-第 5 章「ユーザーとパスワード」(準備中)では、users テーブルにモデルを与え、パスワードをハッシュし、登録・ログイン・ログアウトを手で組みます。
+[第 5 章: ユーザーとパスワード](./05-users-and-passwords.md) では、users テーブルにモデルを与え、パスワードをハッシュし、登録・ログイン・ログアウトを手で組みます。
