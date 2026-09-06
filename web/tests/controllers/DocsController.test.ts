@@ -171,4 +171,41 @@ describe('DocsController', () => {
     expect(payload.props.doc).toBeNull()
     expect(payload.props.active).toEqual({ category: 'guides', slug: 'missing' })
   })
+
+  it('sends a retired tutorial slug to the chapter that absorbed it', async () => {
+    const controller = new DocsController()
+    const ctx = createDocsContext('http://guren.dev/docs/tutorials/authentication')
+    controller.setContext(ctx)
+
+    const response = await controller.show()
+
+    expect(response.status).toBe(301)
+    expect(response.headers.get('Location')).toBe('/docs/tutorials/05-users-and-passwords')
+  })
+
+  it('keeps the raw-markdown suffix and the locale when redirecting', async () => {
+    const controller = new DocsController()
+    // The helper reads the params out of `/docs/<category>/<slug>`; the locale
+    // comes from the action, not the path.
+    const ctx = createDocsContext('http://guren.dev/docs/tutorials/relationships.md')
+    controller.setContext(ctx)
+
+    const response = await controller.showJa()
+
+    expect(response.status).toBe(301)
+    expect(response.headers.get('Location')).toBe('/docs/ja/tutorials/09-relationships.md')
+  })
+
+  it('leaves a live slug alone', async () => {
+    vi.spyOn(docsService, 'listDocs').mockResolvedValue([])
+    vi.spyOn(docsService, 'getDoc').mockResolvedValue(null)
+
+    const controller = new DocsController()
+    const ctx = createDocsContext('http://guren.dev/docs/tutorials/09-relationships')
+    controller.setContext(ctx)
+
+    const response = await controller.show()
+
+    expect(response.status).toBe(404)
+  })
 })

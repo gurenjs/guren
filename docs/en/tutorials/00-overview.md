@@ -62,8 +62,6 @@ Each chapter starts where the previous one ended. Follow them in order.
 | 13 | [Documentation That Cannot Go Stale](./13-documented.md) | 60 min |
 | 14 | [Production](./14-production.md) | 45 min |
 
-Chapters are published as they are finished. The shorter [Build a Mini Blog](./overview.md) series stays available in the meantime and covers the same ground as chapters 3–9 in the generator-first style.
-
 ## Prerequisites
 
 - **[Bun](https://bun.sh) 1.1 or later.** That is the only hard requirement; the scaffold defaults to SQLite, so there is no database server to install.

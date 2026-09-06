@@ -21,7 +21,7 @@ export const Header: FC = () => (
       <div class="flex flex-wrap items-center gap-5">
         <nav class="hidden items-center gap-6 text-[0.95rem] font-medium md:flex">
           <a href="/docs" class="text-docs-text no-underline transition hover:text-docs-accent">Guides</a>
-          <a href="/docs/tutorials/overview" class="text-docs-text no-underline transition hover:text-docs-accent">Tutorials</a>
+          <a href="/docs/tutorials/00-overview" class="text-docs-text no-underline transition hover:text-docs-accent">Tutorials</a>
           <a
             href={GITHUB_URL}
             target="_blank"
@@ -51,7 +51,7 @@ export const Header: FC = () => (
           <nav class="absolute right-0 mt-3 flex w-48 flex-col gap-1 rounded-xl border border-docs-border bg-docs-panel p-3 text-[0.95rem] font-medium shadow-lg">
             <a href="/" class="rounded-md px-3 py-2 text-docs-text no-underline transition hover:text-docs-accent">Home</a>
             <a href="/docs" class="rounded-md px-3 py-2 text-docs-text no-underline transition hover:text-docs-accent">Guides</a>
-            <a href="/docs/tutorials/overview" class="rounded-md px-3 py-2 text-docs-text no-underline transition hover:text-docs-accent">Tutorials</a>
+            <a href="/docs/tutorials/00-overview" class="rounded-md px-3 py-2 text-docs-text no-underline transition hover:text-docs-accent">Tutorials</a>
             <a
               href={GITHUB_URL}
               target="_blank"

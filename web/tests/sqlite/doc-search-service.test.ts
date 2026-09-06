@@ -152,9 +152,8 @@ describe('DocSearchService', () => {
   })
 
   test('keeps two categories that share a slug and an anchor apart', async () => {
-    // `guides/overview` and `tutorials/overview` both exist in the real docs,
-    // and their h1 anchors are identical — a key without the category shows
-    // one of them and silently drops the other.
+    // Two categories can hold the same slug with identical h1 anchors, and a
+    // key without the category shows one of them and silently drops the other.
     const results = await service.search('step by step', 'en')
 
     expect(results.map((result) => result.category).sort()).toEqual(['guides', 'tutorials'])

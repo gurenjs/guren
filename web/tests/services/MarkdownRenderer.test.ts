@@ -120,7 +120,7 @@ describe('rewriteDocLink', () => {
   })
 
   it('resolves cross-category links', () => {
-    expect(rewriteDocLink('../tutorials/overview.md', ja)).toBe('/docs/ja/tutorials/overview')
+    expect(rewriteDocLink('../tutorials/00-overview.md', ja)).toBe('/docs/ja/tutorials/00-overview')
     expect(rewriteDocLink('../guides/database.md', { locale: 'en', category: 'tutorials' })).toBe(
       '/docs/guides/database',
     )
