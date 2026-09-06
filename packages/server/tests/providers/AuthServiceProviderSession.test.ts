@@ -84,6 +84,43 @@ describe('AuthServiceProvider session resolution (RFC 0020)', () => {
     expect(store.writes).toHaveLength(1)
   })
 
+  it('should find a manager a deferred provider binds', async () => {
+    const store = recordingStore()
+    const manager = new SessionManager({ default: 'custom', stores: { custom: { driver: 'custom' } as never } })
+    manager.registerDriver('custom', () => store)
+    class DeferredSessionProvider extends ServiceProvider {
+      static deferred = true
+      static provides = ['session']
+      register(): void {
+        this.container.instance('session', manager)
+      }
+    }
+    const app = createApp({ routes, auth: {}, providers: [DeferredSessionProvider] })
+    await app.boot()
+
+    await app.fetch(new Request('http://localhost/touch'))
+
+    expect(store.writes).toHaveLength(1)
+  })
+
+  it('should fail the boot when the default store names a driver nobody registered', async () => {
+    const manager = new SessionManager({ default: 'redis', stores: { redis: { driver: 'redsi' } as never } })
+    const app = createApp({ routes, auth: {}, providers: [sessionProvider(manager)] })
+
+    await expect(app.boot()).rejects.toThrow('Unknown session driver: redsi (session store "redis")')
+  })
+
+  it('should fail the boot, not the first request, on a missing APP_KEY', async () => {
+    const key = process.env.APP_KEY
+    delete process.env.APP_KEY
+    try {
+      const app = createApp({ routes, auth: {} })
+      await expect(app.boot()).rejects.toThrow('APP_KEY')
+    } finally {
+      process.env.APP_KEY = key
+    }
+  })
+
   it('should not build the manager store before the first request', async () => {
     let built = 0
     const manager = new SessionManager({ default: 'lazy', stores: { lazy: { driver: 'lazy' } as never } })

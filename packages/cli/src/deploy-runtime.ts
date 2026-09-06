@@ -32,7 +32,9 @@ export interface DeployTargetProfile {
   discoveryBlocker: string
 }
 
-const DEPLOY_TARGET_PROFILES: Record<DeployTargetId, DeployTargetProfile> = {
+// Labels must match `SERVERLESS_RUNTIME_LABELS` in @guren/server (runtime/serverless.ts):
+// the session middleware's runtime warning names the same target as these verdicts.
+export const DEPLOY_TARGET_PROFILES: Record<DeployTargetId, DeployTargetProfile> = {
   cloudflare: {
     label: 'Cloudflare Workers',
     hasBunRuntime: false,

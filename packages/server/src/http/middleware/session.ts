@@ -2,6 +2,7 @@ import { getCookie, setCookie, deleteCookie } from 'hono/cookie'
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import type { MiddlewareHandler } from 'hono'
 import { deriveAppKeyring, getAppKeyringFromEnv } from '../../encryption/app-key'
+import { detectServerlessRuntime } from '../../runtime/serverless'
 
 export type SessionData = Record<string, unknown>
 
@@ -57,7 +58,8 @@ export class MemorySessionStore implements SessionStore {
   }
 }
 
-export interface SessionOptions {
+/** Everything about the cookie and its lifetime; the store is a separate concern. */
+export interface SessionCookieOptions {
   cookieName?: string
   cookiePath?: string
   cookieDomain?: string
@@ -66,18 +68,20 @@ export interface SessionOptions {
   cookieHttpOnly?: boolean
   cookieMaxAgeSeconds?: number
   ttlSeconds?: number
+}
+
+export interface SessionOptions extends SessionCookieOptions {
   /**
-   * The store, or a factory for it, called once on the first request and never
-   * at construction: a Workers binding does not exist before the first request,
-   * and a Redis client should not open a socket at boot (RFC 0020 §1).
+   * The store, or a function returning it, called on every request and never
+   * at construction: a Workers binding does not exist before the first request
+   * (RFC 0020 §1). `SessionManager.store()` memoizes; a hand-written factory
+   * that builds something expensive should memoize too.
    */
   store?: SessionStore | (() => SessionStore)
 }
 
 export const DEFAULT_SESSION_COOKIE_NAME = 'guren.session'
 export const DEFAULT_SESSION_TTL_SECONDS = 60 * 60 * 2 // 2 hours
-const DEFAULT_COOKIE_NAME = DEFAULT_SESSION_COOKIE_NAME
-const DEFAULT_TTL_SECONDS = DEFAULT_SESSION_TTL_SECONDS
 const DEFAULT_COOKIE_SECURE = typeof process !== 'undefined'
   ? process.env.NODE_ENV === 'production'
   : true
@@ -371,84 +375,49 @@ function createCookieSigner(cookieName: string, cookiePath: string): SessionCook
 }
 
 /**
- * Runtimes where requests share no memory, named as the deploy targets the CLI
- * checks report them. The Workers check mirrors `isWorkersRuntime()` in
- * @guren/plugin-cloudflare, which server cannot import.
- */
-function serverlessRuntimeLabel(): string | undefined {
-  if (typeof navigator !== 'undefined' && navigator.userAgent === 'Cloudflare-Workers') {
-    return 'Cloudflare Workers'
-  }
-  if (typeof process === 'undefined') {
-    return undefined
-  }
-  if (process.env.AWS_LAMBDA_FUNCTION_NAME) {
-    return 'AWS Lambda'
-  }
-  if (process.env.VERCEL) {
-    return 'Vercel'
-  }
-  return undefined
-}
-
-let warnedAboutMemoryStore = false
-
-/** Tests only: the warning fires once per process, and a suite runs many apps. */
-export function resetMemorySessionStoreWarning(): void {
-  warnedAboutMemoryStore = false
-}
-
-/**
  * The static checks can be skipped; this runs in the deploy log of exactly the
- * app they would have warned about (RFC 0020 §1). Once per process: the store
- * does not change between requests, and the message is the same every time.
+ * app they would have warned about (RFC 0020 §1). Decided once per middleware,
+ * on its first request: the runtime does not change, and a local emulator
+ * (`sam local`, `vercel dev`) has the platform's env without its isolation.
  */
-function warnOnceAboutMemoryStore(store: SessionStore): void {
-  if (warnedAboutMemoryStore || !(store instanceof MemorySessionStore)) {
+function warnAboutMemoryStore(store: SessionStore): void {
+  if (!(store instanceof MemorySessionStore)) {
     return
   }
-  const runtime = serverlessRuntimeLabel()
-  if (!runtime) {
+  const runtime = detectServerlessRuntime()
+  if (!runtime || runtime.local) {
     return
   }
-  warnedAboutMemoryStore = true
   console.warn(
-    `[guren] Sessions use MemorySessionStore on ${runtime}, which shares no memory between requests, `
+    `[guren] Sessions use MemorySessionStore on ${runtime.label}, which shares no memory between requests, `
     + 'so a login is lost on the very next request. Configure a persistent store: DatabaseSessionStore '
     + 'from @guren/core, or a SessionManager whose default store is database- or Redis-backed.',
   )
 }
 
-/** Resolve a store once, on first use; a factory that throws is retried on the next request. */
-function memoizeStore(store: SessionStore | (() => SessionStore)): () => SessionStore {
-  if (typeof store !== 'function') {
-    return () => store
-  }
-  let resolved: SessionStore | undefined
-  return () => {
-    resolved ??= store()
-    return resolved
-  }
-}
-
 export function createSessionMiddleware(options: CreateSessionMiddlewareOptions = {}): MiddlewareHandler {
   const {
-    cookieName = DEFAULT_COOKIE_NAME,
+    cookieName = DEFAULT_SESSION_COOKIE_NAME,
     cookiePath = '/',
     cookieDomain,
     cookieSecure = DEFAULT_COOKIE_SECURE,
     cookieSameSite = 'Lax',
     cookieHttpOnly = true,
     cookieMaxAgeSeconds,
-    ttlSeconds = DEFAULT_TTL_SECONDS,
+    ttlSeconds = DEFAULT_SESSION_TTL_SECONDS,
     store: storeOrFactory = new MemorySessionStore(),
   } = options
   const signer = createCookieSigner(cookieName, cookiePath)
-  const resolveStore = memoizeStore(storeOrFactory)
+  let checkedStore = false
 
   return async (ctx, next) => {
-    const store = resolveStore()
-    warnOnceAboutMemoryStore(store)
+    // Every request, not memoized: the factory is the authority on which store
+    // is current (a SessionManager rebuilds one when its driver is re-registered).
+    const store = typeof storeOrFactory === 'function' ? storeOrFactory() : storeOrFactory
+    if (!checkedStore) {
+      checkedStore = true
+      warnAboutMemoryStore(store)
+    }
     const existingId = signer.verify(getCookie(ctx, cookieName))
     const sessionId = existingId ?? globalThis.crypto.randomUUID()
     const isNew = !existingId

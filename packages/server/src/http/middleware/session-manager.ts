@@ -1,11 +1,5 @@
 import { RedisSessionStore } from '../../redis/RedisSessionStore'
-import {
-  DEFAULT_SESSION_COOKIE_NAME,
-  DEFAULT_SESSION_TTL_SECONDS,
-  MemorySessionStore,
-  type SessionOptions,
-  type SessionStore,
-} from './session'
+import { MemorySessionStore, type SessionCookieOptions, type SessionStore } from './session'
 
 export interface MemorySessionDriverOptions {
   /** Clock for expiry, injectable for tests. @default Date.now */
@@ -14,9 +8,9 @@ export interface MemorySessionDriverOptions {
 
 export interface RedisSessionDriverOptions {
   /**
-   * An ioredis client, or a function returning one. A function is called on
-   * the first request, never at construction, so a declared-but-unselected
-   * store opens no socket.
+   * An ioredis client, or a function returning one *synchronously* (ioredis
+   * connects lazily on its own). A function runs when the store is first
+   * built, so a declared-but-unselected store opens no socket.
    */
   client: unknown
   /** @default 'session:' */
@@ -40,18 +34,14 @@ export type SessionStoreConfig = {
 }[keyof SessionDrivers]
 
 /** Cookie and TTL settings plus the named stores one of which is the default. */
-export interface SessionConfig extends Omit<SessionOptions, 'store'> {
+export interface SessionConfig extends SessionCookieOptions {
   /** @default 'memory' */
   default?: string
   stores?: Record<string, SessionStoreConfig>
 }
 
-export interface SessionDriverContext {
-  readonly ttlSeconds: number
-  readonly cookieName: string
-}
-
-export type SessionDriverFactory<O = unknown> = (options: O, context: SessionDriverContext) => SessionStore
+/** Receives the store's config minus `driver`. Per-write TTLs arrive through `SessionStore.write`. */
+export type SessionDriverFactory<O = unknown> = (options: O) => SessionStore
 
 /** A store that can sweep expired rows; `pruneExpired()` calls it where present. */
 interface PrunableSessionStore extends SessionStore {
@@ -62,16 +52,20 @@ function isPrunable(store: SessionStore): store is PrunableSessionStore {
   return typeof (store as Partial<PrunableSessionStore>).deleteExpired === 'function'
 }
 
+function isThenable(value: unknown): boolean {
+  return typeof (value as { then?: unknown } | null)?.then === 'function'
+}
+
 /**
  * Resolves session stores by name from declared configs and registered drivers.
  * Lazy and memoized: a driver registered after construction (a plugin's
  * `register()`) still serves a store declared first, and nothing connects
- * until a request asks. Only the default store's *name* is checked here, so a
- * `SESSION_DRIVER` typo fails the boot rather than the first login.
+ * until a request asks. Only the default store's *name* is checked here;
+ * `assertDriverRegistered()` is the boot-time check for its driver.
  */
 export class SessionManager {
-  /** Cookie and TTL settings for the middleware; `store` is resolved through {@link store}. */
-  readonly options: Omit<SessionOptions, 'store'>
+  /** Cookie and TTL settings for the middleware; the store is resolved through {@link store}. */
+  readonly options: SessionCookieOptions
 
   private readonly defaultStoreName: string
   private readonly configs = new Map<string, SessionStoreConfig>()
@@ -90,24 +84,22 @@ export class SessionManager {
     this.driverFactories.set('redis', (raw) => {
       const { client, prefix } = raw as RedisSessionDriverOptions
       const redis = typeof client === 'function' ? client() : client
+      if (isThenable(redis)) {
+        throw new Error(
+          'Session store "redis": `client` returned a Promise. Return the ioredis client synchronously; it connects lazily on first use.',
+        )
+      }
       return new RedisSessionStore(redis as ConstructorParameters<typeof RedisSessionStore>[0], { prefix })
     })
 
+    // `memory` is always declared, so a declared one only overrides its options.
+    this.configs.set('memory', { driver: 'memory' })
     for (const [name, storeConfig] of Object.entries(stores)) {
       this.configs.set(name, storeConfig)
     }
 
-    // Like CacheManager, an undeclared default named `memory` is implied;
-    // any other undeclared default is the SESSION_DRIVER typo this guards.
     if (!this.configs.has(defaultName)) {
-      if (defaultName !== 'memory') {
-        throw new Error(
-          `Session store "${defaultName}" is not declared. Declare it under \`stores\` or use one of: ${
-            this.storeNames().join(', ') || '(none declared)'
-          }.`,
-        )
-      }
-      this.configs.set('memory', { driver: 'memory' })
+      throw new Error(`Session store not found: ${defaultName} (declared: ${this.getStoreNames().join(', ')})`)
     }
   }
 
@@ -120,25 +112,28 @@ export class SessionManager {
       return cached
     }
 
-    const config = this.configs.get(storeName)
-    if (!config) {
-      throw new Error(`Session store "${storeName}" is not declared. Declared stores: ${this.storeNames().join(', ')}.`)
-    }
-
-    const { driver, ...driverOptions } = config
+    const { driver, ...driverOptions } = this.configOf(storeName)
     const factory = this.driverFactories.get(driver)
     if (!factory) {
-      throw new Error(
-        `Unknown session driver "${driver}" for store "${storeName}". Register it with registerDriver(), or install the plugin that provides it.`,
-      )
+      throw new Error(this.unknownDriverMessage(driver, storeName))
     }
 
-    const store = factory(driverOptions, {
-      ttlSeconds: this.options.ttlSeconds ?? DEFAULT_SESSION_TTL_SECONDS,
-      cookieName: this.options.cookieName ?? DEFAULT_SESSION_COOKIE_NAME,
-    })
+    const store = factory(driverOptions)
     this.resolved.set(storeName, store)
     return store
+  }
+
+  /**
+   * Fail now, with `store()`'s own message, if the store's driver is missing,
+   * without building the store: what a boot hook can afford where a Redis
+   * socket or a Workers binding cannot.
+   */
+  assertDriverRegistered(name?: string): void {
+    const storeName = name ?? this.defaultStoreName
+    const { driver } = this.configOf(storeName)
+    if (!this.driverFactories.has(driver)) {
+      throw new Error(this.unknownDriverMessage(driver, storeName))
+    }
   }
 
   registerDriver<K extends keyof SessionDrivers>(name: K, factory: SessionDriverFactory<SessionDrivers[K]>): void
@@ -161,7 +156,7 @@ export class SessionManager {
     return this.defaultStoreName
   }
 
-  storeNames(): string[] {
+  getStoreNames(): string[] {
     return Array.from(this.configs.keys())
   }
 
@@ -173,15 +168,18 @@ export class SessionManager {
    */
   async pruneExpired(now: Date = new Date()): Promise<void> {
     const stores = new Set<SessionStore>([this.store(), ...this.resolved.values()])
-    for (const store of stores) {
-      if (isPrunable(store)) {
-        await store.deleteExpired(now)
-      }
-    }
+    await Promise.all([...stores].filter(isPrunable).map((store) => store.deleteExpired(now)))
   }
 
-  /** What `createSessionMiddleware` needs: the cookie/TTL settings and a lazy default store. */
-  middlewareOptions(): SessionOptions {
-    return { ...this.options, store: () => this.store() }
+  private configOf(storeName: string): SessionStoreConfig {
+    const config = this.configs.get(storeName)
+    if (!config) {
+      throw new Error(`Session store not found: ${storeName} (declared: ${this.getStoreNames().join(', ')})`)
+    }
+    return config
+  }
+
+  private unknownDriverMessage(driver: string, storeName: string): string {
+    return `Unknown session driver: ${driver} (session store "${storeName}"). Register it with registerDriver(), or install the plugin that provides it.`
   }
 }

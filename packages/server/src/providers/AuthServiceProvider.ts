@@ -1,8 +1,8 @@
+import type { MiddlewareHandler } from 'hono'
 import { ServiceProvider } from '../container/ServiceProvider'
 import { attachAuthContext } from '../http/middleware/auth'
 import { createSessionMiddleware, type CreateSessionMiddlewareOptions } from '../http/middleware/session'
 import type { SessionManager } from '../http/middleware/session-manager'
-import type { MiddlewareHandler } from 'hono'
 import { createCsrfMiddleware } from '../http/middleware/csrf'
 import { SessionGuard } from '../auth/SessionGuard'
 import type { GuardFactory } from '../auth/types'
@@ -16,13 +16,15 @@ const DOUBLE_SESSION_CONFIG =
   'Sessions are configured twice: `auth.sessionOptions.store` in createApp() and a "session" '
   + 'container binding (SessionProvider). Keep one — the manager, or the explicit store.'
 
-function defaultCookieSecure(): boolean {
-  return typeof process !== 'undefined' ? process.env.NODE_ENV === 'production' : true
-}
-
-/** Sets up authentication guards, session middleware, and auth context. */
+/**
+ * Sets up authentication guards, session middleware, and auth context. The
+ * session store may come from a `session` container binding (RFC 0020 §1),
+ * which an app's SessionProvider must make in `register()`: the middleware is
+ * built in `boot()`, before any user provider's own boot runs.
+ */
 export class AuthServiceProvider extends ServiceProvider {
   private attachedSession = false
+  private sessionMiddleware: MiddlewareHandler | undefined
 
   register(): void {
     const app = this.container.make<Application>('app')
@@ -37,16 +39,10 @@ export class AuthServiceProvider extends ServiceProvider {
     const shouldAttachSession = authOptions.autoSession !== false && !app.hasAutoSessionAttached()
 
     if (shouldAttachSession) {
-      // Built on the first request, not here: an app's SessionProvider binds
-      // `session` in its own register(), which runs after this one, and the
-      // stores it declares may need a Workers binding no request has carried
-      // yet (RFC 0020 §1). The wrapper keeps the middleware's place in the
-      // chain, ahead of CSRF, which reads the session it attaches.
-      let middleware: MiddlewareHandler | undefined
-      app.use('*', (ctx, next) => {
-        middleware ??= createSessionMiddleware(this.sessionMiddlewareOptions())
-        return middleware(ctx, next)
-      })
+      // A placeholder keeps the middleware's place in the chain, ahead of CSRF,
+      // which reads the session it attaches; boot() fills it in once the app's
+      // SessionProvider has registered. The `??=` covers an app that never boots.
+      app.use('*', (ctx, next) => (this.sessionMiddleware ??= this.buildSessionMiddleware())(ctx, next))
       app.markAutoSessionAttached()
       this.attachedSession = true
 
@@ -71,36 +67,43 @@ export class AuthServiceProvider extends ServiceProvider {
   }
 
   /**
-   * Every provider has registered by now, so this is the earliest point the
-   * double configuration is knowable; failing the boot beats a 500 on the
-   * first request.
+   * Every provider has registered, so the manager, a double configuration, a
+   * missing driver, and a bad APP_KEY (the cookie signer) all fail here, not
+   * on the first request. Only the store itself stays lazy. A *deferred*
+   * SessionProvider activates on a make() after boot, so that one shape keeps
+   * the first-request build.
    */
   boot(): void {
-    if (this.attachedSession) {
-      this.sessionMiddlewareOptions()
+    if (!this.attachedSession) {
+      return
     }
+    const app = this.container.make<Application>('app')
+    if (app.isDeferredService('session')) {
+      return
+    }
+    this.sessionMiddleware = this.buildSessionMiddleware()
   }
 
-  /**
-   * The manager's cookie/TTL settings are the base and `auth.sessionOptions`
-   * overrides them field by field, which is where existing apps already put
-   * `cookieSecure`. The store comes from exactly one of the two.
-   */
-  private sessionMiddlewareOptions(): CreateSessionMiddlewareOptions {
+  private buildSessionMiddleware(): MiddlewareHandler {
     const app = this.container.make<Application>('app')
     const explicit: CreateSessionMiddlewareOptions = app.authOptions?.sessionOptions ?? {}
-    const manager = this.container.has('session') ? this.container.make<SessionManager>('session') : undefined
+    const manager = this.container.makeOptional<SessionManager>('session')
 
     if (manager && explicit.store) {
       throw new Error(DOUBLE_SESSION_CONFIG)
     }
+    manager?.assertDriverRegistered()
 
-    return {
-      cookieSecure: defaultCookieSecure(),
+    // The manager's cookie/TTL settings are the base; `auth.sessionOptions`
+    // overrides them field by field, which is where existing apps already put
+    // `cookieSecure`. That default is read here, at boot, not at the middleware
+    // module's load: a NODE_ENV set between the two must still make the cookie Secure.
+    return createSessionMiddleware({
+      cookieSecure: typeof process !== 'undefined' ? process.env.NODE_ENV === 'production' : true,
       ...manager?.options,
       ...explicit,
-      ...(manager && !explicit.store ? { store: () => manager.store() } : {}),
-    }
+      ...(manager ? { store: () => manager.store() } : {}),
+    })
   }
 }
 

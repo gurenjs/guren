@@ -19,11 +19,11 @@ export type {
   SessionConfig,
   SessionDrivers,
   SessionStoreConfig,
-  SessionDriverContext,
   SessionDriverFactory,
   MemorySessionDriverOptions,
   RedisSessionDriverOptions,
 } from './session-manager'
+export type { SessionCookieOptions, SessionOptions } from './session'
 export type { Session, SessionData, SessionStore } from './session'
 export {
   requireAuthenticated,

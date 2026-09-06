@@ -1,7 +1,8 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
-import { analyzeDeployRuntime, checkDeployRuntime } from '../src/deploy-runtime'
+import { SERVERLESS_RUNTIME_LABELS } from '@guren/core'
+import { analyzeDeployRuntime, checkDeployRuntime, DEPLOY_TARGET_PROFILES } from '../src/deploy-runtime'
 import { runCheck } from '../src/check'
 import { gatingResults } from '../src/check-result'
 import { buildJsonOutput, getDoctorRuleEvaluations, runDoctor } from '../src/doctor'
@@ -1250,5 +1251,13 @@ describe('guren check deploy-runtime verdicts', () => {
         expect(unrelated.checks.some((result) => result.key.startsWith('deploy-'))).toBe(false)
       },
     )
+  })
+})
+
+describe('deploy target labels', () => {
+  it('match the labels the server runtime warning uses', () => {
+    for (const [id, label] of Object.entries(SERVERLESS_RUNTIME_LABELS)) {
+      expect(DEPLOY_TARGET_PROFILES[id as keyof typeof DEPLOY_TARGET_PROFILES].label).toBe(label)
+    }
   })
 })

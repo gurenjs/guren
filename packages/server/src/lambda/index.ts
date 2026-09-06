@@ -4,6 +4,7 @@ import type { Application } from '../http/Application'
 import type { Scheduler } from '../scheduling/Scheduler'
 import type { ConsoleKernel } from '../console/ConsoleKernel'
 import { getJob } from '../queue/Job'
+import { detectServerlessRuntime } from '../runtime/serverless'
 
 export type { APIGatewayProxyResult, LambdaEvent } from 'hono/aws-lambda'
 
@@ -124,7 +125,7 @@ export function createConsoleHandler(
  * `AWS_LAMBDA_FUNCTION_NAME` variable AWS sets in every Lambda runtime.
  */
 export function isLambda(): boolean {
-  return typeof process !== 'undefined' && !!process.env?.AWS_LAMBDA_FUNCTION_NAME
+  return detectServerlessRuntime()?.id === 'lambda'
 }
 
 /** Get Lambda environment metadata, or null if not running on Lambda. */

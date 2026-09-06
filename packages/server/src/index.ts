@@ -369,8 +369,9 @@ export type {
   SessionConfig,
   SessionDrivers,
   SessionStoreConfig,
-  SessionDriverContext,
   SessionDriverFactory,
+  SessionCookieOptions,
+  SessionOptions,
   MemorySessionDriverOptions,
   RedisSessionDriverOptions,
   AuthContext,
@@ -1016,3 +1017,5 @@ export { createRedisClient } from './redis/client'
 // @modelcontextprotocol/sdk's types into every app's root import.
 // Docs viewer (RFC 0005): dev-only, loopback-guarded OKF bundle UI. Internal for
 // the same reason; `Application` mounts it by dynamic relative import.
+export { detectServerlessRuntime, SERVERLESS_RUNTIME_LABELS } from './runtime/serverless'
+export type { ServerlessRuntime, ServerlessRuntimeId } from './runtime/serverless'

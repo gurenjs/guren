@@ -1,10 +1,9 @@
-import { afterEach, describe, expect, it, spyOn, type Mock } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, it, spyOn, type Mock } from 'bun:test'
 import { Hono } from 'hono'
 import {
   createSessionMiddleware,
   getSessionFromContext,
   MemorySessionStore,
-  resetMemorySessionStoreWarning,
   type Session,
   type SessionStore,
 } from '../../../src/http/middleware/session'
@@ -730,48 +729,68 @@ describe('willPersist agrees with what the next request finds', () => {
 })
 
 describe('store resolution (RFC 0020)', () => {
-  it('calls a store factory on the first request only, and never at construction', async () => {
-    let built = 0
+  it('asks a store factory on every request, never at construction', async () => {
+    let calls = 0
     const store = new MemorySessionStore()
     const app = new Hono()
-    app.use('*', createSessionMiddleware({ store: () => { built += 1; return store } }))
+    app.use('*', createSessionMiddleware({ store: () => { calls += 1; return store } }))
     app.get('/', (c) => {
       getSessionFromContext(c)!.set('n', 1)
       return c.text('ok')
     })
 
-    expect(built).toBe(0)
+    expect(calls).toBe(0)
     await app.request('/')
     await app.request('/')
-    expect(built).toBe(1)
+    expect(calls).toBe(2)
   })
 
-  it('retries a factory that threw on the next request rather than caching the failure', async () => {
-    let attempts = 0
+  it('follows the factory when it starts returning a different store', async () => {
+    const first = new MemorySessionStore()
+    const second = new MemorySessionStore()
+    let current = first
     const app = new Hono()
-    app.use('*', createSessionMiddleware({
-      store: () => {
-        attempts += 1
-        if (attempts === 1) throw new Error('binding not ready')
-        return new MemorySessionStore()
-      },
-    }))
-    app.get('/', (c) => c.text('ok'))
-    app.onError((error, c) => c.text(error.message, 500))
+    app.use('*', createSessionMiddleware({ store: () => current }))
+    app.get('/', (c) => {
+      getSessionFromContext(c)!.set('n', 1)
+      return c.text('ok')
+    })
 
-    expect((await app.request('/')).status).toBe(500)
-    expect((await app.request('/')).status).toBe(200)
-    expect(attempts).toBe(2)
+    const response = await app.request('/')
+    current = second
+    await app.request('/', { headers: { cookie: response.headers.get('set-cookie')!.split(';')[0] } })
+
+    const firstIds = await first.read((await readSessionId(response)))
+    expect(firstIds).toEqual({ n: 1 })
+    expect(await second.read(await readSessionId(response))).toEqual({ n: 1 })
   })
 })
 
+/** The session id a response's cookie carries, decoded from the signed value. */
+async function readSessionId(response: Response): Promise<string> {
+  const cookie = response.headers.get('set-cookie')!.split(';')[0].split('=')[1]
+  return Buffer.from(cookie.split('.')[0], 'base64url').toString('utf8')
+}
+
 describe('memory store warning on a serverless runtime (RFC 0020)', () => {
+  const RUNTIME_ENV = ['AWS_LAMBDA_FUNCTION_NAME', 'AWS_SAM_LOCAL', 'VERCEL', 'VERCEL_ENV'] as const
+  const saved: Partial<Record<(typeof RUNTIME_ENV)[number], string | undefined>> = {}
   let warn: Mock<typeof console.warn>
 
+  beforeEach(() => {
+    for (const key of RUNTIME_ENV) {
+      saved[key] = process.env[key]
+      delete process.env[key]
+    }
+    warn = spyOn(console, 'warn').mockImplementation(() => {})
+  })
+
   afterEach(() => {
-    warn?.mockRestore()
-    delete process.env.AWS_LAMBDA_FUNCTION_NAME
-    resetMemorySessionStoreWarning()
+    warn.mockRestore()
+    for (const key of RUNTIME_ENV) {
+      if (saved[key] === undefined) delete process.env[key]
+      else process.env[key] = saved[key]
+    }
   })
 
   async function serve(options: Parameters<typeof createSessionMiddleware>[0]): Promise<void> {
@@ -782,10 +801,8 @@ describe('memory store warning on a serverless runtime (RFC 0020)', () => {
     await app.request('/')
   }
 
-  it('warns once per process when the default memory store runs on Lambda', async () => {
+  it('warns once per middleware when the default memory store runs on Lambda', async () => {
     process.env.AWS_LAMBDA_FUNCTION_NAME = 'app'
-    resetMemorySessionStoreWarning()
-    warn = spyOn(console, 'warn').mockImplementation(() => {})
 
     await serve({})
 
@@ -794,17 +811,32 @@ describe('memory store warning on a serverless runtime (RFC 0020)', () => {
     expect(warn.mock.calls[0][0]).toContain('DatabaseSessionStore')
   })
 
+  it('names Vercel, but stays quiet under vercel dev and sam local', async () => {
+    process.env.VERCEL = '1'
+    await serve({})
+    expect(warn.mock.calls[0][0]).toContain('MemorySessionStore on Vercel')
+
+    warn.mockClear()
+    process.env.VERCEL_ENV = 'development'
+    await serve({})
+    expect(warn).not.toHaveBeenCalled()
+
+    delete process.env.VERCEL
+    delete process.env.VERCEL_ENV
+    process.env.AWS_LAMBDA_FUNCTION_NAME = 'app'
+    process.env.AWS_SAM_LOCAL = 'true'
+    await serve({})
+    expect(warn).not.toHaveBeenCalled()
+  })
+
   it('stays quiet for a persistent store, and off serverless', async () => {
     process.env.AWS_LAMBDA_FUNCTION_NAME = 'app'
-    resetMemorySessionStoreWarning()
-    warn = spyOn(console, 'warn').mockImplementation(() => {})
     const persistent: SessionStore = { read: async () => undefined, write: async () => {}, destroy: async () => {} }
 
     await serve({ store: persistent })
     expect(warn).not.toHaveBeenCalled()
 
     delete process.env.AWS_LAMBDA_FUNCTION_NAME
-    resetMemorySessionStoreWarning()
     await serve({})
     expect(warn).not.toHaveBeenCalled()
   })

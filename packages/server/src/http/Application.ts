@@ -594,6 +594,11 @@ export class Application {
     this.autoSessionAttached = true
   }
 
+  /** Whether `key` is supplied by a deferred provider, which only activates on a `make()` after boot. */
+  isDeferredService(key: string): boolean {
+    return this.providerManager.isDeferredService(key)
+  }
+
   hasAutoSessionAttached(): boolean {
     return this.autoSessionAttached
   }

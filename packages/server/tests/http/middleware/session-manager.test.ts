@@ -15,17 +15,24 @@ function fakeRedis() {
 }
 
 describe('SessionManager', () => {
-  it('should default to an implied memory store when nothing is declared', () => {
+  it('should default to memory, which is always declared', () => {
     const manager = new SessionManager()
 
     expect(manager.getDefaultStoreName()).toBe('memory')
-    expect(manager.storeNames()).toEqual(['memory'])
+    expect(manager.getStoreNames()).toEqual(['memory'])
     expect(manager.store()).toBeInstanceOf(MemorySessionStore)
+  })
+
+  it('should keep memory declared beside the stores an app adds', () => {
+    const manager = new SessionManager({ default: 'redis', stores: { redis: { driver: 'redis', client: fakeRedis() } } })
+
+    expect(manager.getStoreNames()).toEqual(['memory', 'redis'])
+    expect(manager.store('memory')).toBeInstanceOf(MemorySessionStore)
   })
 
   it('should refuse an undeclared default at construction, naming the declared stores', () => {
     expect(() => new SessionManager({ default: 'databse', stores: { database: { driver: 'memory' } } })).toThrow(
-      'Session store "databse" is not declared. Declare it under `stores` or use one of: database.',
+      'Session store not found: databse (declared: memory, database)',
     )
   })
 
@@ -40,7 +47,7 @@ describe('SessionManager', () => {
     let built = 0
     const manager = new SessionManager({
       default: 'redis',
-      stores: { redis: { driver: 'redis', client: () => { built += 1; return fakeRedis() } }, memory: { driver: 'memory' } },
+      stores: { redis: { driver: 'redis', client: () => { built += 1; return fakeRedis() } } },
     })
 
     expect(built).toBe(0)
@@ -62,37 +69,47 @@ describe('SessionManager', () => {
     expect(redis.calls).toEqual(['setex sess:abc', 'get sess:abc'])
   })
 
+  it('should refuse a redis client factory that returns a Promise, naming the cause', () => {
+    const manager = new SessionManager({
+      default: 'redis',
+      stores: { redis: { driver: 'redis', client: async () => fakeRedis() } },
+    })
+
+    expect(() => manager.store()).toThrow('`client` returned a Promise')
+  })
+
   it('should resolve a driver registered after construction, so plugin order does not matter', () => {
     const manager = new SessionManager({
       default: 'dynamodb',
       stores: { dynamodb: { driver: 'dynamodb', table: 'sessions' } as never },
     })
 
-    expect(() => manager.store()).toThrow('Unknown session driver "dynamodb" for store "dynamodb"')
+    expect(() => manager.store()).toThrow('Unknown session driver: dynamodb (session store "dynamodb")')
 
     const built: unknown[] = []
-    const factory: SessionDriverFactory = (options, context) => {
-      built.push({ options, context })
+    const factory: SessionDriverFactory = (options) => {
+      built.push(options)
       return new MemorySessionStore()
     }
     manager.registerDriver('dynamodb', factory)
 
     expect(manager.store()).toBeInstanceOf(MemorySessionStore)
-    expect(built).toEqual([{ options: { table: 'sessions' }, context: { ttlSeconds: 7200, cookieName: 'guren.session' } }])
+    expect(built).toEqual([{ table: 'sessions' }])
   })
 
-  it('should hand a driver the configured ttl and cookie name', () => {
+  it('should report a missing driver without building the store', () => {
+    let built = 0
     const manager = new SessionManager({
-      ttlSeconds: 30,
-      cookieName: 'app.sid',
-      default: 'custom',
-      stores: { custom: { driver: 'custom' } as never },
+      default: 'later',
+      stores: { later: { driver: 'later' } as never, redis: { driver: 'redis', client: () => { built += 1; return fakeRedis() } } },
     })
-    let seen: unknown
-    manager.registerDriver('custom', (_options, context) => { seen = context; return new MemorySessionStore() })
 
-    manager.store()
-    expect(seen).toEqual({ ttlSeconds: 30, cookieName: 'app.sid' })
+    expect(() => manager.assertDriverRegistered()).toThrow('Unknown session driver: later (session store "later")')
+    expect(() => manager.assertDriverRegistered('redis')).not.toThrow()
+    expect(built).toBe(0)
+
+    manager.registerDriver('later', () => new MemorySessionStore())
+    expect(() => manager.assertDriverRegistered()).not.toThrow()
   })
 
   it('should rebuild stores of a driver that gets re-registered', () => {
@@ -106,7 +123,7 @@ describe('SessionManager', () => {
   it('should reject an unknown store name at resolution', () => {
     const manager = new SessionManager({ stores: { memory: { driver: 'memory' } } })
 
-    expect(() => manager.store('redis')).toThrow('Session store "redis" is not declared. Declared stores: memory.')
+    expect(() => manager.store('redis')).toThrow('Session store not found: redis (declared: memory)')
   })
 
   it('should prune the default and already-built stores, and leave unselected ones unbuilt', async () => {
@@ -136,13 +153,9 @@ describe('SessionManager', () => {
     expect(othersBuilt).toBe(0)
   })
 
-  it('should expose the cookie settings and a lazy store for the middleware', () => {
-    const manager = new SessionManager({ cookieName: 'x', ttlSeconds: 5, stores: { memory: { driver: 'memory' } } })
+  it('should expose the cookie settings without the store', () => {
+    const manager = new SessionManager({ cookieName: 'x', ttlSeconds: 5, default: 'memory' })
 
-    const options = manager.middlewareOptions()
-    expect(options.cookieName).toBe('x')
-    expect(options.ttlSeconds).toBe(5)
-    expect(typeof options.store).toBe('function')
-    expect((options.store as () => SessionStore)()).toBe(manager.store())
+    expect(manager.options).toEqual({ cookieName: 'x', ttlSeconds: 5 })
   })
 })

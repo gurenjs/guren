@@ -145,7 +145,7 @@ app.use('*', createSessionMiddleware())
 
 Each request exposes the session through `ctx.get('guren:session')` or the helper `getSessionFromContext(ctx)`.
 
-`store` accepts a `SessionStore` or a function returning one; the function runs on the first request, so a store that needs a runtime binding (Workers) or a connection (Redis) is not built at boot. To declare several stores and pick one by environment, see `SessionManager` in the [Authentication](./authentication.md#selecting-a-store-with-sessionmanager) guide.
+`store` accepts a `SessionStore` or a function returning one; the function is called on every request (memoize it yourself if building is expensive; a `SessionManager` does), so a store that needs a runtime binding (Workers) or a connection (Redis) is not built at boot. To declare several stores and pick one by environment, see `SessionManager` in the [Authentication](./authentication.md#selecting-a-store-with-sessionmanager) guide.
 
 ### Auth Guards
 

@@ -147,6 +147,25 @@ export class Container {
     return this.bindings.has(resolvedKey)
   }
 
+  /**
+   * `make()` for a service that may be absent: undefined when nothing provides
+   * it. Unlike `has()`, a fake counts and a deferred provider is activated, so
+   * an optional dependency bound either way is found rather than skipped.
+   */
+  makeOptional<K extends keyof ServiceBindings>(key: K): ServiceBindings[K] | undefined
+  makeOptional<T>(key: string): T | undefined
+  makeOptional(key: string): unknown {
+    const resolvedKey = this.resolveAlias(key)
+    if (this.fakes.has(key) || this.fakes.has(resolvedKey)) {
+      return this.make(key)
+    }
+    if (!this.bindings.has(resolvedKey)) {
+      // Same contract as make(): register() has run when this returns; boot() rides the promise.
+      void this.deferredProviderLoader?.(resolvedKey)
+    }
+    return this.bindings.has(resolvedKey) ? this.make(key) : undefined
+  }
+
   alias(alias: string, key: string): this {
     if (alias === key) {
       throw new Error('Alias cannot be the same as the key')
