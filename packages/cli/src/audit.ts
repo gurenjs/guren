@@ -8,6 +8,7 @@ import {
   listModuleNames,
 } from './discovery'
 import { loadRouteDefinitions } from './load-routes'
+import { routesEntryOrDefault } from './route-registrar'
 import type { RouteDefinition } from '@guren/core'
 import {
   classifyFindingKey,
@@ -408,7 +409,7 @@ async function auditRoutes(
   controllerMethods: Map<string, ControllerMethodInfo>,
   findings: AuditFinding[],
 ): Promise<boolean> {
-  const resolvedRoutesFile = resolve(cwd, routesFile ?? 'routes/web.ts')
+  const resolvedRoutesFile = resolve(cwd, await routesEntryOrDefault(cwd, routesFile))
 
   let definitions
   const moduleWarnings: string[] = []
@@ -421,7 +422,7 @@ async function auditRoutes(
         'Route analysis',
         'warn',
         `Could not load routes (${error instanceof Error ? error.message : String(error)}). Route-level checks skipped.`,
-        'Ensure routes/web.ts is importable, or pass --routes <file>.',
+        'Ensure the routes entry (routes/web.ts or routes/api.ts) is importable, or pass --routes <file>.',
       ),
     )
     return false

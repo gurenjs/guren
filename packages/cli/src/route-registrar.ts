@@ -60,6 +60,14 @@ export async function resolveRoutesEntry(cwd: string): Promise<string | null> {
   return findFirstExisting(cwd, ROUTES_ENTRY_CANDIDATES)
 }
 
+/**
+ * The routes file a loading command uses: the caller's `--routes`, else the app's
+ * entry, else {@link DEFAULT_ROUTES_FILE} so the load error names a file.
+ */
+export async function routesEntryOrDefault(cwd: string, override?: string): Promise<string> {
+  return override ?? (await resolveRoutesEntry(cwd)) ?? DEFAULT_ROUTES_FILE
+}
+
 export interface RouteRegistrar {
   /** The registrar's router parameter name — `router`, or `baseRouter` in the blog template. */
   parameterName: string

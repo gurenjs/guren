@@ -84,11 +84,14 @@ yourself:
 2. **After editing** routes, controllers, models, `db/schema.ts`, or pages:
    `bunx guren check`, and `bunx guren check --changed` to scope it to your
    diff. Fix what it reports before moving on.
-3. **Before shipping**: `bunx guren audit` for validation and auth gaps on
-   mutating routes, raw SQL, and secrets.
+3. **When the change is complete**: `bunx guren gate`, and fix what it
+   reports until it exits 0. It runs the stages CI runs — codegen, typecheck,
+   lint, `check`, `audit` (validation and auth gaps on mutating routes, raw
+   SQL, secrets), and the test suite — and a change is not done while any of
+   them fails.
 
 Once installed, the entry document describes the same loop for the app; the
-Claude harness automates steps 1 and 2 with hooks, the others say so in
-`AGENTS.md`. Read the installed rules in `.claude/rules/` or `.agents/rules/`
+Claude harness automates all three steps with hooks (the gate runs when a
+turn ends with uncommitted changes), the others say so in `AGENTS.md`. Read the installed rules in `.claude/rules/` or `.agents/rules/`
 — each file's `globs` frontmatter says which paths it covers — before
 editing those paths.

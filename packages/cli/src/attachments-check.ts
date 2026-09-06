@@ -5,8 +5,8 @@ import { AttachmentDeliveryController, DEFAULT_DELIVERY_ROUTE_NAME, type RouteDe
 import { literalString, memberKeyName, objectLiteral, unwrapTypeAssertion, walk } from './ast-walk'
 import { check, type CheckResult } from './check-result'
 import { collectFiles, fileExists, listAppRoots } from './discovery'
-import { DEFAULT_ROUTES_FILE, loadRouteDefinitions } from './load-routes'
-import { resolveRoutesEntry } from './route-registrar'
+import { loadRouteDefinitions } from './load-routes'
+import { routesEntryOrDefault } from './route-registrar'
 import { parseModelSource } from './model-parser'
 import type { ParseCache, ParsedFile } from './parse-cache'
 import { schemaPathFor, type SchemaTable } from './schema-parser'
@@ -668,7 +668,7 @@ export async function checkAttachmentsDelivery(options: {
   if (scan.deliveryConfigs.length > 0) {
     // The app's own entry, not routes/web.ts: an API-only app mounts the
     // delivery route in routes/api.ts.
-    const routesFile = options.routesFile ?? (await resolveRoutesEntry(cwd)) ?? DEFAULT_ROUTES_FILE
+    const routesFile = await routesEntryOrDefault(cwd, options.routesFile)
     let definitions = options.definitions
     let routesEntryMissing = false
     if (!definitions) {
