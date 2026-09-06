@@ -22,7 +22,8 @@ describe('template lint setup', () => {
     expect(manifest.scripts['lint:fix']).toBe('bunx oxlint --fix')
     // The range itself is audit:template-deps' business (it follows @guren/cli's peer).
     expect(manifest.devDependencies.oxlint).toMatch(/^~\d/)
+    // CI lints through the gate, whose lint stage runs the same oxlint config.
     const ci = await readFile(join(repoRoot, 'packages/create-app/templates', template, '.github/workflows/ci.yml'), 'utf8')
-    expect(ci).toContain('run: bun run lint')
+    expect(ci).toContain('run: bunx guren gate --deps')
   })
 })
