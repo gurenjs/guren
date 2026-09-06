@@ -669,6 +669,16 @@ stand-in (§7). Decisions, in the order §6 lists them:
   back `denied` with `reason: 'rate-limit'`. Reporting that as the approval's
   outcome would drop the row, and a human's approval would be spent by nobody
   and never retried — it is treated like an unanswerable check instead.
+- **A row past its expiry is asked about once, not pruned unread.** The sweep
+  originally dropped lapsed rows before it reached the queue, so a human who
+  answered between the last check and the final wake was reported as `expired` —
+  and an application that remembers only rejections asks the same person again.
+  The question now goes to the queue first: `rejected` settles as itself and
+  everything else as `expired`, because `agentApprovalUsableAt` refuses an
+  approval past `expiresAt` and there is nothing left to retry. Approved-and-
+  spent still settles as `approved`. The row goes whatever the answer, including
+  when the queue cannot be reached: `nextDelaySeconds` floors an elapsed expiry
+  at one second, so keeping an unanswerable lapsed row is a one-second alarm loop.
 - **A row nothing can decrypt is pruned, not thrown over.** An app key rotated
   past its `previousKeys` used to take down `all()`, which backs the *record*
   path too — so one bad row denied a caller the `pending` result of a call that
@@ -707,6 +717,64 @@ stand-in (§7). Decisions, in the order §6 lists them:
   `process.env`. One reach into SDK internals: the ledger's first backoff is 30
   seconds, so a test that wants a due alarm pulls `cf_agents_schedules.time`
   back rather than waiting.
+
+**Part 4a: `examples/agents` dogfood.** A standalone demo app in the monorepo —
+one `Triager` agent, two `.agent()` routes, a `DrizzleApprovalStore`, an operator
+API — driven end to end under `wrangler dev --local`: sweep, park, approve,
+reject, the ledger's alarm firing thirty seconds later with no request touching
+the worker, and the retry closing the ticket. It exercised the whole of Parts
+1–3 and the Part 2b build wiring (named export, `configureAgentRuntime`,
+`agentBindings`, the guarded `/agents/*` mount, and the bindings verifier's
+copy-pasteable JSON). Four things it found:
+
+- **`onToolApprovalSettled` did not carry the parked call's arguments.** The
+  queue holds no reversible copy by design and the hook reported only
+  `requestId` and `tool`, so an application that wanted to know *which* call a
+  human answered had to keep a second `requestId` → arguments map beside the
+  ledger's own — a caller-side workaround for something the ledger already
+  decrypts to perform the retry. Fixed: the event carries `args`, absent only
+  for an `'unreadable'` row.
+- **A late rejection was reported as a lapse.** The demo remembers only the
+  tickets a human refused, which is what made the pruning order visible: an
+  answer landing between the last check and the final wake arrived as
+  `'expired'`, and the next sweep asked the same person the same question.
+  Fixed in the sweep, above.
+- **`isWorkersRuntime()` was in every app and in no package.** Both docs guides,
+  guren.dev and this example hand-wrote the same three lines, and
+  `@guren/plugin-cloudflare`'s own README used the name with no import. Fixed:
+  exported from `@guren/plugin-cloudflare/env`.
+- **`guren audit` and `guren tool:list` do not find `routes/api.ts`.**
+  `guren check` probes for the API-only entry; those two default to
+  `routes/web.ts`, and `audit` then *warns and skips every route-level check* —
+  including the stricter agent-route treatment — while still reporting zero
+  failures. Not fixed here: it changes a security gate's verdict for every
+  API-only app and wants its own change with tests.
+
+The same app was then deployed to a Workers **Free** plan account (its own
+Worker and D1) and the walkthrough repeated against it: the alarm fired 30 s
+after the calls parked and the retry closed the ticket. `wrangler tail` put the
+Durable Object's sweep at 47 ms CPU and the ledger alarm at 14 ms; Worker
+requests measured 4 ms warm and 20–30 ms when they booted the application in a
+cold isolate — above the Free plan's stated 10 ms per invocation, tolerated in
+this run but the one number to watch on that plan. The example's README carries
+the table.
+
+- **A Durable Object's state does not migrate with the code.** The SDK applies
+  `initialState` to a *new* instance only; the deployed `Triager` kept the state
+  shape of the previous deploy, and the first sweep after a field was added
+  threw on `Object.entries(undefined)`. The demo now layers `initialState` under
+  `this.state` on every read. This is the runtime half of Open Question 5
+  (schema migration for agent state); a framework answer — a versioned
+  `migrateState` hook on `GurenAgent`, or `GurenAgent` applying `initialState`
+  defaults itself — is recorded here rather than shipped.
+
+Smaller friction, recorded rather than fixed: `make:agent` scaffolds
+`GurenAgent<Env, …>` with an `Env` that exists in no fresh app and a base class
+needing `@cloudflare/workers-types` in the app's tsconfig, and says neither;
+`@guren/plugin-agents`' README says the command "writes all three" of its
+snippets when it writes two, leaving the `agentsPlugin` registration to the
+reader; and `defineSeeder` defaults its database type to Postgres, which no
+sqlite/D1 app can use.
 
 ## Alternatives Considered
 

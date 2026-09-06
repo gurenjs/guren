@@ -1,7 +1,13 @@
 import { Database } from 'bun:sqlite'
 import { describe, test, expect, beforeEach } from 'bun:test'
 
-import { firesSooner, PendingCallLedger, type LedgerCipher, type LedgerSql } from './ledger'
+import {
+  firesSooner,
+  hasExpired,
+  PendingCallLedger,
+  type LedgerCipher,
+  type LedgerSql,
+} from './ledger'
 
 /**
  * The ledger against real SQLite (RFC 0017 §5).
@@ -107,30 +113,20 @@ describe('PendingCallLedger: rows', () => {
   })
 })
 
-describe('PendingCallLedger: pruning', () => {
-  test('should drop and report rows past their expiry', () => {
-    park('gone', { expiresAt: at(-1) })
-    park('alive', { expiresAt: at(60_000) })
-
-    const pruned = ledger.pruneExpired(NOW)
-
-    expect(pruned.map((call) => call.requestId)).toEqual(['gone'])
-    expect(ledger.all().map((call) => call.requestId)).toEqual(['alive'])
+describe('hasExpired', () => {
+  test('should separate a lapsed expiry from a live one', () => {
+    expect(hasExpired(at(-1), NOW)).toBe(true)
+    expect(hasExpired(at(60_000), NOW)).toBe(false)
   })
 
-  test('should drop a row whose expiry cannot be read', () => {
+  test('should call an unreadable expiry expired', () => {
     // The direction `agentApprovalExpiredAt` fails in: a date the framework
     // cannot parse is expired, never "not expired yet".
-    park('unreadable', { expiresAt: 'not a date' })
-
-    expect(ledger.pruneExpired(NOW).map((call) => call.requestId)).toEqual(['unreadable'])
-    expect(ledger.all()).toEqual([])
+    expect(hasExpired('not a date', NOW)).toBe(true)
   })
 
-  test('should keep a row expiring exactly at now out of the future', () => {
-    park('boundary', { expiresAt: NOW.toISOString() })
-
-    expect(ledger.pruneExpired(NOW)).toHaveLength(1)
+  test('should keep an expiry landing exactly on now out of the future', () => {
+    expect(hasExpired(NOW.toISOString(), NOW)).toBe(true)
   })
 })
 

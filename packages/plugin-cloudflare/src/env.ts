@@ -43,3 +43,12 @@ export function getWorkersEnv<E = unknown>(): E {
 export function resetWorkersEnv(): void {
   holder = undefined
 }
+
+/**
+ * Whether this code is running on workerd, which identifies itself through the
+ * standard navigator user agent. The switch an app's `config/database.ts` needs
+ * to pick D1 over a local driver, and to keep filesystem work out of the Worker.
+ */
+export function isWorkersRuntime(): boolean {
+  return typeof navigator !== 'undefined' && navigator.userAgent === 'Cloudflare-Workers'
+}

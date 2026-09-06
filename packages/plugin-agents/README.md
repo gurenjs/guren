@@ -4,8 +4,8 @@ Durable agents for Guren applications: long-lived, stateful processes that act
 *through* your application's own agent tools, hosted on Cloudflare Durable
 Objects via the [Cloudflare Agents SDK](https://www.npmjs.com/package/agents).
 
-> RFC 0017. The pending-approval ledger (a parked call retried once a human
-> approves it) is still to come; everything below ships today.
+> RFC 0017. Everything below ships today, including the pending-approval
+> ledger: a call parked on a human is checkpointed and retried once approved.
 
 ## Install
 
@@ -54,6 +54,12 @@ export class Triager extends GurenAgent<Env, TriagerState> {
   }
 }
 ```
+
+`result.ok` says the route **dispatched**, not that it succeeded: the
+application's own verdict is `result.outcome.isError`, with the HTTP status in
+`result.outcome.status`. The other three answers are `pending` (parked on a
+human), `denied` (a gate refused before any HTTP happened) and `failed` (the
+dispatch itself threw).
 
 ```ts
 // src/app.ts
@@ -156,8 +162,10 @@ private table in the agent's own Durable Object SQLite and schedules
 expiry. On each wake it asks the queue about every parked call. `approved`
 repeats the original call with the stored arguments (the queue's consume-on-use
 and fingerprint match make that spend exactly the approval a human granted);
-`rejected` and `expired` rows are pruned. Every outcome reaches
-`onToolApprovalSettled`, which is a no-op unless you override it.
+`rejected` and `expired` rows are pruned. A row whose own expiry has passed is
+asked about once more before it goes, so a rejection that landed at the last
+minute is reported as one. Every outcome reaches `onToolApprovalSettled`, which
+is a no-op unless you override it.
 
 The sweep is written not to throw. The SDK retries a failed scheduled callback
 three times and then drops the schedule, so one bad row — an approval hook of

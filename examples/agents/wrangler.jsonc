@@ -1,0 +1,58 @@
+{
+  "name": "guren-example-agents",
+  "main": ".cloudflare/worker.js",
+  "compatibility_date": "2026-09-06",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "alias": {
+    "bun:sqlite": "./.cloudflare/stub-bun-sqlite.js",
+    "vite": "./.cloudflare/stub-vite.js",
+    "@guren/cli": "./.cloudflare/stub-guren-cli.js",
+    "@modelcontextprotocol/sdk/server/mcp.js": "./.cloudflare/stub-mcp-server.js",
+    "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js": "./.cloudflare/stub-mcp-transport.js",
+    "postgres": "./.cloudflare/stub-postgres.js",
+    "mysql2": "./.cloudflare/stub-mysql2.js",
+    "mysql2/promise": "./.cloudflare/stub-mysql2-promise.js",
+    "@aws-sdk/client-rds-data": "./.cloudflare/stub-rds-data.js"
+  },
+  "define": {
+    "process.env.NODE_ENV": "\"production\"",
+    "import.meta.url": "\"file:///worker.js\""
+  },
+  "assets": {
+    "directory": ".cloudflare/assets",
+    "html_handling": "none"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "guren-example-agents",
+      // The id `wrangler d1 create guren-example-agents` printed for the demo
+      // deployment; `wrangler dev --local` ignores it and keeps its own store.
+      "database_id": "e902bc31-46b4-47dc-9d46-194d0b86148c",
+      "migrations_dir": ".cloudflare/d1-migrations"
+    }
+  ],
+  // Added from the exact JSON `guren cloudflare:build` printed when it found
+  // config/agents.ts registering a class this file did not host.
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "TRIAGER",
+        "class_name": "Triager"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "Triager"
+      ]
+    }
+  ],
+  "vars": {
+    "NODE_ENV": "production"
+  }
+}

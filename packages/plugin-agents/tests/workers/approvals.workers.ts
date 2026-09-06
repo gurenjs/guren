@@ -176,7 +176,7 @@ describe('the scheduled check', () => {
 
     expect(await ledgerRows(stub)).toEqual([])
     expect(await settled(stub)).toEqual([
-      { requestId, tool: 'posts.destroy', status: 'approved', retried: true },
+      { requestId, tool: 'posts.destroy', status: 'approved', retried: true, args: { id: 7 } },
     ])
     // Nothing left to wait for, so nothing is scheduled.
     expect(await checkSchedules(stub)).toEqual([])
@@ -192,7 +192,7 @@ describe('the scheduled check', () => {
     expect((await probe()).destroyed).toEqual([])
     expect(await ledgerRows(stub)).toEqual([])
     expect(await settled(stub)).toEqual([
-      { requestId, tool: 'posts.destroy', status: 'rejected', retried: null },
+      { requestId, tool: 'posts.destroy', status: 'rejected', retried: null, args: { id: 8 } },
     ])
   })
 
@@ -206,7 +206,50 @@ describe('the scheduled check', () => {
     expect((await probe()).destroyed).toEqual([])
     expect(await ledgerRows(stub)).toEqual([])
     expect(await settled(stub)).toEqual([
-      { requestId, tool: 'posts.destroy', status: 'expired', retried: null },
+      { requestId, tool: 'posts.destroy', status: 'expired', retried: null, args: { id: 9 } },
+    ])
+  })
+
+  it('should report a rejection that landed after the row lapsed', async () => {
+    const stub = freshAgent()
+    const requestId = await park(stub, 14)
+    await resolve(requestId, 'rejected')
+
+    // The row's own expiry passes between the last check and this wake.
+    // Dropping it unread would report `expired`, and an application that
+    // remembers only rejections would put the same question to the same human
+    // on its next sweep.
+    await runInDurableObject(stub, (agent) => {
+      void agent.sql`UPDATE guren_pending_tool_calls SET expires_at = '2020-01-01T00:00:00.000Z'
+        WHERE request_id = ${requestId}`
+    })
+    await runInDurableObject(stub, (agent) => agent.checkPendingApprovals())
+
+    expect((await probe()).destroyed).toEqual([])
+    expect(await ledgerRows(stub)).toEqual([])
+    expect(await settled(stub)).toEqual([
+      { requestId, tool: 'posts.destroy', status: 'rejected', retried: null, args: { id: 14 } },
+    ])
+  })
+
+  it('should not retry an approval its row outlived', async () => {
+    const stub = freshAgent()
+    const requestId = await park(stub, 15)
+    await resolve(requestId, 'approved')
+
+    // Approved, but past `expiresAt`: `agentApprovalUsableAt` refuses it, so a
+    // retry would find no usable match, file a fresh request and page a human
+    // for a call nobody asked about again.
+    await runInDurableObject(stub, (agent) => {
+      void agent.sql`UPDATE guren_pending_tool_calls SET expires_at = '2020-01-01T00:00:00.000Z'
+        WHERE request_id = ${requestId}`
+    })
+    await runInDurableObject(stub, (agent) => agent.checkPendingApprovals())
+
+    expect((await probe()).destroyed).toEqual([])
+    expect(await ledgerRows(stub)).toEqual([])
+    expect(await settled(stub)).toEqual([
+      { requestId, tool: 'posts.destroy', status: 'expired', retried: null, args: { id: 15 } },
     ])
   })
 
@@ -247,6 +290,25 @@ describe('a check the queue cannot answer', () => {
     expect(await settled(stub)).toEqual([])
   })
 
+  it('should drop a lapsed row it cannot ask about, rather than keep it forever', async () => {
+    const stub = freshAgent()
+    const requestId = await park(stub, 16)
+    await runInDurableObject(stub, (agent) => {
+      void agent.sql`UPDATE guren_pending_tool_calls SET expires_at = '2020-01-01T00:00:00.000Z'
+        WHERE request_id = ${requestId}`
+    })
+
+    await breakQueue(1)
+    await runInDurableObject(stub, (agent) => agent.checkPendingApprovals())
+
+    // Nothing can retry it whatever the queue later says, and an elapsed
+    // expiry floors the next wake at one second — keeping it is an alarm loop.
+    expect(await ledgerRows(stub)).toEqual([])
+    expect(await settled(stub)).toEqual([
+      { requestId, tool: 'posts.destroy', status: 'expired', retried: null, args: { id: 16 } },
+    ])
+  })
+
   it('should still retry once the queue comes back', async () => {
     const stub = freshAgent()
     const requestId = await park(stub, 13)
@@ -284,7 +346,7 @@ describe('a sweep interrupted after the call already ran', () => {
     expect(await ledgerRows(stub)).toEqual([])
     // No `result`: nothing was called this time round.
     expect(await settled(stub)).toEqual([
-      { requestId, tool: 'posts.destroy', status: 'approved', retried: null },
+      { requestId, tool: 'posts.destroy', status: 'approved', retried: null, args: { id: 30 } },
     ])
   })
 })
@@ -294,17 +356,16 @@ describe('a hook that throws', () => {
     const stub = freshAgent()
     const lapsing = await park(stub, 20)
     await park(stub, 21)
-    // The row's own expiry, not the queue record's: `pruneExpired` reads what
-    // was copied at park time, and resolving the queue side never writes back.
+    // The row's own expiry, not the queue record's: the sweep reads what was
+    // copied at park time, and resolving the queue side never writes back.
     await runInDurableObject(stub, (agent) => {
       void agent.sql`UPDATE guren_pending_tool_calls SET expires_at = '2020-01-01T00:00:00.000Z'
         WHERE request_id = ${lapsing}`
     })
 
     await setHookThrows(true)
-    // Pruning runs before the per-row handlers, so nothing else would catch
-    // this. A throw escaping here is retried three times by the SDK and then
-    // leaves every surviving row with no schedule at all.
+    // A throw escaping here is retried three times by the SDK and then leaves
+    // every surviving row with no schedule at all.
     await runInDurableObject(stub, (agent) => agent.checkPendingApprovals())
 
     const rows = await ledgerRows(stub)
@@ -380,7 +441,7 @@ describe('the retry across an eviction', () => {
     expect((await probe()).destroyed).toEqual([11])
     expect(await ledgerRows(stub)).toEqual([])
     expect(await settled(stub)).toEqual([
-      { requestId, tool: 'posts.destroy', status: 'approved', retried: true },
+      { requestId, tool: 'posts.destroy', status: 'approved', retried: true, args: { id: 11 } },
     ])
   })
 })

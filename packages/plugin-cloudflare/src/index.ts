@@ -21,7 +21,7 @@ export function cloudflarePlugin(config: CloudflarePluginConfig = {}): ServicePr
  * `@guren/plugin-cloudflare/env`**: this entry also exports `buildCloudflareOutput`,
  * which drags the deploy generator and its node builtins in behind it.
  */
-export { captureWorkersEnv, getWorkersEnv, resetWorkersEnv } from './env'
+export { captureWorkersEnv, getWorkersEnv, isWorkersRuntime, resetWorkersEnv } from './env'
 export { createWorkersHandler } from './handler'
 export type { WorkersHandler } from './handler'
 export { bootAndFetch, bootWorkersApp } from './boot'

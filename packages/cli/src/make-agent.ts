@@ -102,15 +102,11 @@ function configTemplate(agentName: string, className: string): string {
   return `import { defineAgentsConfig } from '${PLUGIN_PACKAGE}'
 
 /**
- * The agent registry. \`module\` and \`export\` are literal strings because
- * \`guren cloudflare:build\` reads this file as source to append the worker's
- * named exports — a spread, a computed key, or a non-literal value makes it
- * unreadable, and \`guren check\` fails over exactly those forms.
- *
- * Scopes use the registration grammar: \`tool:<name>\` for one tool by exact
- * name, or \`tools:read\` for every read-only tool. Set grants
- * (\`tools:*\`, \`tools:<prefix>.*\`) are refused — an unattended agent must not
- * acquire consent to tools that do not exist yet.
+ * \`module\` and \`export\` are literal strings: \`guren cloudflare:build\` reads
+ * this file as source for the worker's named exports, and \`guren check\` fails
+ * a spread, a computed key, or any non-literal value.
+ * Scopes are \`tool:<name>\` or \`tools:read\`; set grants (\`tools:*\`, prefixes)
+ * are refused, so an unattended agent cannot consent to tools not yet written.
  */
 export default defineAgentsConfig({
   agents: {

@@ -144,20 +144,6 @@ export class PendingCallLedger {
   }
 
   /**
-   * Drop every row past its expiry, returning them so the caller can report
-   * each one. An unparseable `expires_at` counts as expired, the direction
-   * `agentApprovalExpiredAt` fails in.
-   */
-  pruneExpired(now: Date): PendingToolCall[] {
-    const expired = this.all().filter((call) => {
-      const at = Date.parse(call.expiresAt)
-      return Number.isNaN(at) || at <= now.getTime()
-    })
-    for (const call of expired) this.remove(call.requestId)
-    return expired
-  }
-
-  /**
    * When to wake next, in seconds, or `undefined` when nothing is waiting.
    *
    * Exponential from the **least-checked** row: one wake asks about every row,
@@ -203,6 +189,18 @@ export class PendingCallLedger {
     )`
     this.#created = true
   }
+}
+
+/**
+ * Whether a row's copied `expires_at` has passed.
+ *
+ * An unparseable date counts as expired, the direction `agentApprovalExpiredAt`
+ * fails in. A row past this can never be retried — `agentApprovalUsableAt`
+ * refuses an expired approval — so the sweep asks about it once and drops it.
+ */
+export function hasExpired(expiresAt: string, now: Date): boolean {
+  const at = Date.parse(expiresAt)
+  return Number.isNaN(at) || at <= now.getTime()
 }
 
 /**
