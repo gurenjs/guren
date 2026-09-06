@@ -235,10 +235,10 @@ Worker, and the retry closed the ticket. Three Free-plan facts to keep in view:
 - `guren check` warns that `POST /tickets/:id/close` carries no `body` schema.
   The action validates only route params, so there is nothing to declare;
   `guren audit`, which reads the controller body, passes the same route.
-- `guren audit` and `guren tool:list` default to `routes/web.ts` and do not
-  probe for `routes/api.ts` the way `guren check` does, so both need
-  `--routes routes/api.ts` here. Without it `audit` skips *every* route-level
-  check and still reports zero failures.
+- `guren tool:list` defaults to `routes/web.ts` and does not probe for
+  `routes/api.ts` the way `guren check` and `guren audit` do, so it needs
+  `--routes routes/api.ts` here (the `audit` script keeps the flag too; it is
+  redundant, not required).
 - `guren check` reports "no test file named after TicketController" and the
   other two: the detection is filename-only, and `tests/` covers those routes
   through `TestApp` rather than through a file named for the controller.

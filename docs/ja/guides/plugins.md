@@ -250,6 +250,8 @@ bunx guren plugin @guren/plugin-vercel
 
 > **注意:** 自動登録が対応しているのは、クラスベースのプロバイダーエクスポートと、公式のゼロ設定ファクトリプラグイン(`@guren/plugin-vercel`・`@guren/plugin-cloudflare`。`providers: [vercelPlugin()]`形式の呼び出しで登録されます)です。サードパーティの`definePlugin()`プラグインは設定を渡してファクトリを呼び出す必要があるため、下記のように`createApp({ providers })`へ手動で登録してください。
 
+設定を取る公式のファクトリプラグインも同じです。`@guren/plugin-agents` がそれにあたります。`agentsPlugin(agents)` は `config/agents.ts` の永続エージェントレジストリを引数に取るため、`guren plugin` はインストールと互換性レンジの検証までを行い、登録自体は自分で書くことになります([永続エージェント](./durable-agents.md)を参照)。
+
 ## Gurenアプリケーションでの使用方法
 
 公開後、ユーザーはプラグインをインストールして登録します:

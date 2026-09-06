@@ -69,6 +69,11 @@ async function auditEnglishDocs(root: string): Promise<void> {
   assert(specAnchored.includes('bunx guren make:adr'), 'Spec-anchored guide must document make:adr.')
   assert(specAnchored.includes('bunx guren check --docs'), 'Spec-anchored guide must document the doc-link gate.')
 
+  const durableAgents = await read(root, 'docs/en/guides/durable-agents.md')
+  assert(durableAgents.includes('bunx guren make:agent'), 'Durable agents guide must document the make:agent scaffold.')
+  assert(durableAgents.includes('agentsPlugin('), 'Durable agents guide must show the plugin registration — make:agent does not write it.')
+  assert(durableAgents.includes('bunx guren cloudflare:build'), 'Durable agents guide must document the build that generates the Durable Object wiring.')
+
   const overview = await read(root, 'docs/en/guides/overview.md')
   assert(overview.includes("import { Controller, paginate, type PaginatedPageProps } from '@guren/core'"), 'Overview must show the canonical controller import path.')
   assert(overview.includes('await this.validateBody(CreateTaskSchema)'), 'Overview must show validateBody() in the controller example.')

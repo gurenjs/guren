@@ -77,7 +77,7 @@ const GUIDE_SECTIONS: readonly DocSectionConfig[] = [
   },
   {
     title: { en: 'AI-Native Development', ja: 'AIネイティブ開発' },
-    slugs: ['spec-anchored', 'agent-interface'],
+    slugs: ['spec-anchored', 'agent-interface', 'durable-agents'],
   },
   {
     title: { en: 'Reference', ja: 'リファレンス' },

@@ -642,7 +642,9 @@ approvers are notified, and the agent is handed the request id:
 ```
 
 Once a human approves the record, the agent repeats **the same call with the
-same arguments** and it goes through — once.
+same arguments** and it goes through — once. Repeating it is the caller's job
+here; an agent your own application hosts retries automatically from a durable
+ledger of its own — see [Durable Agents](./durable-agents.md).
 
 ### Configuring the queue
 
@@ -1083,3 +1085,4 @@ The full finding-key tables are in
 - [Authorization](./authorization.md) — the policies that decide what a principal may do
 - [Events](./events.md) — listener registration and the event manager
 - [CLI](./cli.md) — `tool:list`, `tool:inspect`, and the check/audit finding keys
+- [Durable Agents](./durable-agents.md) — hosting an agent of your own that calls this surface
