@@ -498,4 +498,4 @@ git commit -m "feat: add the blogroll"
 
 ## 次へ
 
-第 9 章「リレーションシップ」(準備中)では、手作りの著者検索を `belongsTo` と `hasMany` に置き換え、コメントを追加し、多対多のタグをエージェントに委ねます。
+[第 9 章: リレーションシップ](./09-relationships.md) では、手作りの著者検索を `belongsTo` と `hasMany` に置き換え、コメントを追加し、多対多のタグをエージェントに委ねます。
