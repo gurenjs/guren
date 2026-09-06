@@ -31,6 +31,7 @@ interface Background {
   block: RunBlock
   proc: ReturnType<typeof Bun.spawn>
   logPath: string
+  port: number
 }
 
 interface Session {
@@ -143,19 +144,26 @@ async function runShell(session: Session, block: RunBlock): Promise<void> {
 /**
  * Start the block and wait for the app to say which port it bound (the
  * banner's `Bound address` line, read rather than assumed: bin/serve.ts walks
- * past a busy port and only warns). `PORT=0` asks for any free port so two
- * smokes on one machine cannot answer each other's probe; `HOST` pins the
- * bind to the literal the probe addresses.
+ * past a busy port and only warns). The port is reserved here so two smokes
+ * on one machine cannot answer each other's probe; `HOST` pins the bind to
+ * the literal the probe addresses.
  */
-async function startBackground(session: Session, block: RunBlock): Promise<void> {
-  const logPath = join(session.tempRoot, `background-${block.line}.log`)
+async function startBackground(session: Session, block: RunBlock, chapter: string): Promise<void> {
+  // Named per chapter: two chapters with a `bun run dev` on the same line
+  // would otherwise share a log, and the newest banner in it could be the
+  // other chapter's server.
+  const logPath = join(session.tempRoot, `background-${chapter.replace(/\.md$/u, '')}-${block.line}.log`)
   const logFile = Bun.file(logPath)
   const writer = logFile.writer()
   console.log(`\n$ (${relativeToTemp(session.cwd)}, background) ${block.body}`)
+  // A reserved port rather than PORT=0. Measured: under PORT=0 `bun run dev`
+  // rebound six times in 30 s (a new port each time) and no probe caught a
+  // live listener; on a fixed port it bound once and stayed up.
+  const port = await freePort()
   const proc = Bun.spawn({
     cmd: ['bash', '-euo', 'pipefail', '-c', block.body],
     cwd: session.cwd,
-    env: { ...session.env, PORT: '0', HOST: '127.0.0.1', GUREN_DEV_BANNER: '1' },
+    env: { ...session.env, PORT: String(port), HOST: '127.0.0.1', GUREN_STRICT_PORT: '1', GUREN_DEV_BANNER: '1' },
     stdout: 'pipe',
     stderr: 'pipe',
   })
@@ -168,36 +176,66 @@ async function startBackground(session: Session, block: RunBlock): Promise<void>
   }
   void pump(proc.stdout as ReadableStream<Uint8Array>)
   void pump(proc.stderr as ReadableStream<Uint8Array>)
-  session.background.push({ block, proc, logPath })
+  session.background.push({ block, proc, logPath, port })
 
   const deadline = Date.now() + BANNER_TIMEOUT_MS
-  let port: string | null = null
+  let bound: string | null = null
   while (Date.now() < deadline) {
     if (proc.exitCode !== null) break
-    port = boundPort(await readFile(logPath, 'utf8').catch(() => ''))
-    if (port) break
+    bound = boundPort(await readFile(logPath, 'utf8').catch(() => ''))
+    if (bound) break
     await Bun.sleep(500)
   }
-  if (!port) {
+  if (!bound) {
     console.error(await readFile(logPath, 'utf8').catch(() => ''))
     throw new Error(`background block at line ${block.line} did not report a bound port within ${BANNER_TIMEOUT_MS / 1000}s`)
   }
-  const url = `http://127.0.0.1:${port}/`
-  const response = await fetch(url).catch((error: unknown) => {
-    throw new Error(`probe of ${url} failed: ${String(error)}`)
-  })
-  if (response.status !== 200) throw new Error(`probe of ${url} answered ${response.status}`)
-  console.log(`background block answered 200 at ${url}`)
+  // Still read the port the app reports rather than the one it was handed
+  // (smoke-golden-path.sh's rule), and retry: a `bun --hot` reload closes the
+  // listener for a moment.
+  const probeDeadline = Date.now() + 30_000
+  let lastError = ''
+  while (Date.now() < probeDeadline) {
+    bound = boundPort(await readFile(logPath, 'utf8').catch(() => '')) ?? bound
+    const url = `http://127.0.0.1:${bound}/`
+    try {
+      const response = await fetch(url)
+      if (response.status === 200) {
+        console.log(`background block answered 200 at ${url}`)
+        return
+      }
+      lastError = `answered ${response.status}`
+    } catch (error) {
+      lastError = String(error)
+    }
+    await Bun.sleep(500)
+  }
+  console.error(await readFile(logPath, 'utf8').catch(() => ''))
+  throw new Error(`background block at line ${block.line} never answered 200 on its reported port (${lastError})`)
 }
 
-/** Last `:<digits>` on the banner's `Bound address` line, the same rule as smoke-golden-path.sh. */
+/** Last `:<digits>` on the newest `Bound address` banner line, the same rule as smoke-golden-path.sh. */
 function boundPort(logText: string): string | null {
+  let found: string | null = null
   for (const line of logText.split('\n')) {
     if (!line.includes('Bound address')) continue
     const ports = [...line.matchAll(/:(\d+)/gu)].map((match) => match[1])
-    if (ports.length > 0) return ports[ports.length - 1]
+    if (ports.length > 0) found = ports[ports.length - 1]
   }
-  return null
+  return found
+}
+
+async function freePort(): Promise<number> {
+  const { createServer } = await import('node:net')
+  return new Promise((resolvePort, reject) => {
+    const server = createServer()
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address()
+      const port = typeof address === 'object' && address ? address.port : 0
+      server.close(() => (port ? resolvePort(port) : reject(new Error('could not reserve a port'))))
+    })
+  })
 }
 
 async function descendants(pid: number): Promise<number[]> {
@@ -209,30 +247,52 @@ async function descendants(pid: number): Promise<number[]> {
   return [...children, ...nested.flat()]
 }
 
-/** `bun run dev` is a tree (bun → shell → bun --hot); killing the root alone leaves the listener up. */
-async function stopBackground(session: Session): Promise<void> {
-  for (const bg of session.background.splice(0)) {
-    const pids = [...(await descendants(bg.proc.pid)), bg.proc.pid]
-    for (const pid of pids) {
-      try {
-        process.kill(pid, 'SIGTERM')
-      } catch {
-        // already gone
-      }
+/** Processes listening on a TCP port, by `lsof`; empty when nothing does or lsof is absent. */
+async function listeners(port: number): Promise<number[]> {
+  let proc: ReturnType<typeof Bun.spawn>
+  try {
+    proc = Bun.spawn({ cmd: ['lsof', '-ti', `tcp:${port}`, '-sTCP:LISTEN'], stdout: 'pipe', stderr: 'ignore' })
+  } catch {
+    return []
+  }
+  const output = await new Response(proc.stdout as ReadableStream<Uint8Array>).text()
+  await proc.exited
+  return output.split('\n').map((line) => Number.parseInt(line, 10)).filter(Number.isInteger)
+}
+
+function signal(pids: readonly number[], name: 'SIGTERM' | 'SIGKILL'): void {
+  for (const pid of pids) {
+    try {
+      process.kill(pid, name)
+    } catch {
+      // already gone
     }
-    await Promise.race([bg.proc.exited, Bun.sleep(5_000)])
-    for (const pid of pids) {
-      try {
-        process.kill(pid, 'SIGKILL')
-      } catch {
-        // already gone
-      }
-    }
-    console.log(`stopped background block from line ${bg.block.line} (log: ${relativeToTemp(bg.logPath)})`)
   }
 }
 
-async function applyBlock(session: Session, block: ExecutableBlock): Promise<void> {
+/**
+ * `bun run dev` is a tree (bun run → bun run → bun --hot), and the tree walk
+ * alone left a `bun --hot` listener behind, still reloading on every file the
+ * next chapter wrote. So the port's listener is killed by name as well, and
+ * the stop is not done until nothing listens there: a leaked server would
+ * answer a later chapter's probe with the wrong app.
+ */
+async function stopBackground(session: Session): Promise<void> {
+  for (const bg of session.background.splice(0)) {
+    const pids = new Set([...(await descendants(bg.proc.pid)), bg.proc.pid, ...(await listeners(bg.port))])
+    signal([...pids], 'SIGTERM')
+    await Promise.race([bg.proc.exited, Bun.sleep(5_000)])
+    signal([...pids, ...(await listeners(bg.port))], 'SIGKILL')
+    const deadline = Date.now() + 10_000
+    while ((await listeners(bg.port)).length > 0) {
+      if (Date.now() > deadline) throw new Error(`a process still listens on port ${bg.port} after stopping the background block from line ${bg.block.line}`)
+      await Bun.sleep(250)
+    }
+    console.log(`stopped background block from line ${bg.block.line}; port ${bg.port} is free (log: ${relativeToTemp(bg.logPath)})`)
+  }
+}
+
+async function applyBlock(session: Session, block: ExecutableBlock, chapter: string): Promise<void> {
   switch (block.kind) {
     case 'manual':
       console.log(`\n(manual, not executed) ${block.body.split('\n')[0]}`)
@@ -255,7 +315,7 @@ async function applyBlock(session: Session, block: ExecutableBlock): Promise<voi
         return
       }
       if (block.mode === 'background') {
-        await startBackground(session, block)
+        await startBackground(session, block, chapter)
         return
       }
       await runShell(session, block)
@@ -273,7 +333,7 @@ async function runChapter(session: Session, name: string): Promise<void> {
   log(`Chapter ${name}: ${blocks.length} executable block(s)`)
   try {
     for (const block of blocks) {
-      await applyBlock(session, block)
+      await applyBlock(session, block, name)
     }
   } finally {
     await stopBackground(session)
