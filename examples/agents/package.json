@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit",
     "check": "bun ../../packages/cli/src/bin.ts check",
     "audit": "bun ../../packages/cli/src/bin.ts audit --routes routes/api.ts",
-    "tool:list": "bun ../../packages/cli/src/bin.ts tool:list --routes routes/api.ts",
+    "tool:list": "bun ../../packages/cli/src/bin.ts tool:list",
     "db:make": "bun ../../packages/cli/src/bin.ts make:migration",
     "db:migrate": "bun ../../packages/cli/src/bin.ts db:migrate",
     "db:seed": "bun ../../packages/cli/src/bin.ts db:seed",

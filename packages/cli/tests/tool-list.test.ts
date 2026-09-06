@@ -87,6 +87,49 @@ describe('tool-list', () => {
     })
   })
 
+  describe('an API-only app', () => {
+    // The api-only template ships `routes/api.ts` and no `routes/web.ts`; the
+    // same probe `guren check` and `guren audit` use has to find it here, or the
+    // command reports a freshly scaffolded API app as exposing nothing.
+    beforeEach(async () => {
+      await rm(join(tempDir, 'routes/web.ts'))
+      await writeFile(join(tempDir, 'routes/api.ts'), ROUTES.replaceAll('registerWebRoutes', 'registerApiRoutes'))
+    })
+
+    it('finds routes/api.ts without --routes', async () => {
+      const { tools } = await listTools({ appRoot: tempDir })
+
+      expect(tools.map((tool) => tool.toolName).sort()).toEqual(['posts.index', 'posts.publish'])
+    })
+
+    it('still lets --routes name another file', async () => {
+      await writeFile(
+        join(tempDir, 'routes/internal.ts'),
+        `import { Router } from '@guren/core'
+
+export function registerInternalRoutes(router: Router): void {
+  router.get('/metrics', { name: 'metrics.show' }, () => 'ok').agent({ description: 'Metrics.' })
+}
+`,
+      )
+
+      const { tools } = await listTools({ appRoot: tempDir, routesFile: 'routes/internal.ts' })
+
+      expect(tools.map((tool) => tool.toolName)).toEqual(['metrics.show'])
+    })
+
+    it('inspects a tool from routes/api.ts without --routes', async () => {
+      const spy = captureStdout()
+      try {
+        await displayToolInspection('posts.index', { appRoot: tempDir })
+      } finally {
+        spy.mockRestore()
+      }
+
+      expect(output.join('\n')).toContain('GET /posts')
+    })
+  })
+
   describe('displayTools', () => {
     it('prints a row per tool with exposure, ability and annotations', async () => {
       const spy = captureStdout()

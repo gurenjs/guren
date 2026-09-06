@@ -11,7 +11,7 @@ It is deliberately small. The point is the wiring, not the product.
 
 - **`.agent()` routes as an agent's whole vocabulary.** `GET /tickets` is a
   read-only tool; `POST /tickets/:id/close` is a mutating one declaring
-  `approval: 'required'`. `bunx guren tool:list --routes routes/api.ts` prints
+  `approval: 'required'`. `bunx guren tool:list` prints
   what the agent can see.
 - **One authentication story for two callers.** Both tool routes sit behind
   `requireAuthenticated()`. An operator satisfies it with a bearer token; the
@@ -235,14 +235,6 @@ Worker, and the retry closed the ticket. Three Free-plan facts to keep in view:
 - `guren check` warns that `POST /tickets/:id/close` carries no `body` schema.
   The action validates only route params, so there is nothing to declare;
   `guren audit`, which reads the controller body, passes the same route.
-- `guren tool:list` defaults to `routes/web.ts` and does not probe for
-  `routes/api.ts` the way `guren check` and `guren audit` do, so it needs
-  `--routes routes/api.ts` here (the `audit` script keeps the flag too; it is
-  redundant, not required).
 - `guren check` reports "no test file named after TicketController" and the
   other two: the detection is filename-only, and `tests/` covers those routes
   through `TestApp` rather than through a file named for the controller.
-- `app/Agents/Triager.ts` names an `Env` that `make:agent` leaves undefined, and
-  `GurenAgent` needs `@cloudflare/workers-types` in `tsconfig.json`. Both are
-  supplied here (`config/env.ts` and the `types` array); a freshly scaffolded
-  app has neither and does not typecheck until it adds them.

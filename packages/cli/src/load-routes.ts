@@ -3,7 +3,7 @@ import { pathToFileURL } from 'node:url'
 import { consola } from 'consola'
 import { Router, mountModuleRoutes, type GurenModule, type RouteDefinition } from '@guren/core'
 import { isDefinitelyAbsent, listModuleNames } from './discovery'
-import { DEFAULT_ROUTES_FILE, REGISTRAR_EXPORT_NAMES, REGISTRAR_PATTERN } from './route-registrar'
+import { REGISTRAR_EXPORT_NAMES, REGISTRAR_PATTERN, routesEntryOrDefault } from './route-registrar'
 
 type RouteRegistrar = (router: Router) => void | Promise<void>
 
@@ -19,17 +19,17 @@ export interface RoutesFileTarget {
 }
 
 /**
- * Which routes file to load, and whether its absence is an answer or a
- * failure. Missing is legitimate for an unnamed default (api-only,
- * mid-scaffold) and a typo or wrong app root for a path the caller *named*
- * (#482). An empty value names nothing, so `--routes=` is the default path.
+ * Which routes file to load, and whether its absence is an answer or a failure.
+ * Unnamed means the app's entry by the probe `check` shares, and missing is then
+ * legitimate (no routes yet); a path the caller *named* is a typo or a wrong app
+ * root when missing (#482). An empty value names nothing, so `--routes=` probes.
  * Every degrading caller asks here, so `context` and `spec:generate` agree.
  */
 export async function resolveRoutesFile(
   cwd: string,
   routesFile?: string,
 ): Promise<RoutesFileTarget> {
-  const path = routesFile || DEFAULT_ROUTES_FILE
+  const path = await routesEntryOrDefault(cwd, routesFile || undefined)
 
   return { path, silentlyAbsent: !routesFile && (await isDefinitelyAbsent(cwd, path)) }
 }
@@ -170,13 +170,15 @@ export async function loadRouteDefinitions(
 /**
  * The preamble every `route:list`-shaped command shares, so they cannot
  * disagree about which app they describe: `--app` defaults to cwd, `--routes`
- * resolves against it, and a load failure is re-thrown naming the file.
+ * resolves against it — else the same entry probe `check` and `audit` use, so
+ * an API-only app's `routes/api.ts` is found — and a load failure is re-thrown
+ * naming the file.
  */
 export async function loadAppRouteDefinitions(
   options: { appRoot?: string; routesFile?: string } = {},
 ): Promise<{ appRoot: string; routesFile: string; definitions: RouteDefinition[] }> {
   const appRoot = options.appRoot ? resolve(options.appRoot) : process.cwd()
-  const routesFile = resolve(appRoot, options.routesFile ?? DEFAULT_ROUTES_FILE)
+  const routesFile = resolve(appRoot, await routesEntryOrDefault(appRoot, options.routesFile))
 
   try {
     return { appRoot, routesFile, definitions: await loadRouteDefinitions(routesFile, appRoot) }

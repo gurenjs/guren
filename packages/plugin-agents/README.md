@@ -69,7 +69,11 @@ import { agentsPlugin } from '@guren/plugin-agents'
 createApp({ providers: [agentsPlugin(agents)] })
 ```
 
-`bunx guren make:agent Triager` writes all three.
+`bunx guren make:agent Triager` writes the first two — the class and
+`config/agents.ts` — along with the `guren.arch.ts` boundary rule, the
+`config/env.ts` the class imports its `Env` from, and the
+`@cloudflare/workers-types` entry in your tsconfig `types`. It does not touch
+`src/app.ts`: the `agentsPlugin(agents)` registration is yours to add.
 
 ## What `guren cloudflare:build` generates
 

@@ -133,7 +133,7 @@ JSON(`this.json(...)`)を返すため、そのまま型検査を通り、`routes
 | `make:mail <Name>` | メールクラスを生成 | `bunx guren make:mail WelcomeEmail` |
 | `make:command <Name>` | `app/Console/Commands` にコンソールコマンドを生成。`--command <name>` で呼び出し名を指定。`src/console.ts` への登録が必要（[コンソールコマンドガイド](./console.md)参照） | `bunx guren make:command SendDigest --command reports:digest` |
 | `make:policy <Name>` | 所有者ベースのデフォルトを備えた認可ポリシーを `app/Policies` に生成 | `bunx guren make:policy Post` |
-| `make:agent <Name>` | 永続エージェントを `app/Agents` に生成し、`config/agents.ts` に登録し、モデルや ORM から遠ざける `guren.arch.ts` のルールを追加([永続エージェント](./durable-agents.md)参照) | `bunx guren make:agent Triager` |
+| `make:agent <Name>` | 永続エージェントを `app/Agents` に生成し、`config/agents.ts` に登録し、モデルや ORM から遠ざける `guren.arch.ts` のルールを追加し、クラスが必要とする `config/env.ts` と tsconfig の `types` エントリも書き出す([永続エージェント](./durable-agents.md)参照) | `bunx guren make:agent Triager` |
 | `make:validator <Name>` | Zodバリデーションスキーマ(ルートパラメータ・一覧クエリ・ペイロード)を `app/Http/Validators` に生成。`--fields` は `make:feature` と同じ構文 | `bunx guren make:validator Post --fields "title:string,body:text"` |
 | `make:adr "<Title>"` | アーキテクチャ意思決定を採番付きファイルとして `docs/adr/` に記録(リンク可能なfrontmatter付き)。`--entity <Model>` で `entities:`/`related:` を自動補完、`--issue <ref>`(カンマ区切りで複数可)でGitHubのIssue/PRへの `issues:` リンクを記入 | `bunx guren make:adr "Billing cycle is end-of-month" --entity Invoice --issue 412` |
 
@@ -513,7 +513,7 @@ bunx guren tool:dev --as 42 --port 4000
 
 | オプション | デフォルト | 説明 |
 |-----------|-----------|------|
-| `--routes` | `routes/web.ts` | ルートエントリファイルのパス |
+| `--routes` | アプリのルートエントリ: `routes/web.ts`、なければ `routes/api.ts`(`check`・`audit` と同じ探索) | ルートエントリファイルのパス |
 | `--app` | カレントディレクトリ | アプリケーションルートディレクトリ |
 | `--json` | `false` | 導出結果を JSON で出力 |
 

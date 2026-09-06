@@ -745,9 +745,10 @@ copy-pasteable JSON). Four things it found:
   exported from `@guren/plugin-cloudflare/env`.
 - **`guren tool:list` does not find `routes/api.ts`.** `guren check` probes
   for the API-only entry and, since #690, so does `guren audit`; `tool:list`
-  still defaults to `routes/web.ts`. (The dogfood run observed `audit` skipping
+  still defaulted to `routes/web.ts`. (The dogfood run observed `audit` skipping
   every route-level check on a base that predated #690; the guide describes the
-  merged behaviour.) Not fixed here.
+  merged behaviour.) Fixed in #703: the loader `tool:list`, `tool:inspect` and
+  `route:list` share resolves the entry through the same probe.
 
 The same app was then deployed to a Workers **Free** plan account (its own
 Worker and D1) and the walkthrough repeated against it: the alarm fired 30 s
@@ -767,20 +768,24 @@ the table.
   `migrateState` hook on `GurenAgent`, or `GurenAgent` applying `initialState`
   defaults itself — is recorded here rather than shipped.
 
-Smaller friction, recorded rather than fixed: `make:agent` scaffolds
-`GurenAgent<Env, …>` with an `Env` that exists in no fresh app and a base class
-needing `@cloudflare/workers-types` in the app's tsconfig, and says neither;
-`@guren/plugin-agents`' README says the command "writes all three" of its
+Smaller friction, recorded here: `make:agent` scaffolded
+`GurenAgent<Env, …>` with an `Env` that existed in no fresh app and a base class
+needing `@cloudflare/workers-types` in the app's tsconfig, and said neither —
+fixed in #703, which writes `config/env.ts`, imports it from the class, patches
+the tsconfig `types` array and names the missing dependency; the
+`@guren/plugin-agents` README said the command "writes all three" of its
 snippets when it writes two, leaving the `agentsPlugin` registration to the
-reader; and `defineSeeder` defaults its database type to Postgres, which no
-sqlite/D1 app can use.
+reader — corrected in #703; and `defineSeeder` defaults its database type to
+Postgres, which no sqlite/D1 app can use — still open.
 
 **Part 4b: the docs shipped.** `docs/{en,ja}/guides/durable-agents.md` is the
 user-facing guide, wired into the site's AI-Native Development section beside the
-Agent Interface guide. It records the two rough edges Part 4a found and did not
-fix: `make:agent` writes neither the `agentsPlugin(...)` registration nor the
-`Env` type and `@cloudflare/workers-types` its scaffold needs, and `guren tool:list`
-needs `--routes routes/api.ts` on an API-only app.
+Agent Interface guide. It recorded the two rough edges Part 4a found and did not
+fix — `make:agent` wrote neither the `Env` type nor the `@cloudflare/workers-types`
+entry its scaffold needs, and `guren tool:list` needed `--routes routes/api.ts`
+on an API-only app — both closed by #703, after which the guide describes what
+the command writes. The `agentsPlugin(...)` registration in `src/app.ts` remains
+the one step it leaves to the reader.
 
 ## Alternatives Considered
 
