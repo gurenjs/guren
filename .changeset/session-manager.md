@@ -24,8 +24,13 @@
 - `Container.makeOptional(key)`: `make()` for a service that may be absent,
   honouring fakes and activating deferred providers where `has()` does not.
 - `detectServerlessRuntime()` (and `SERVERLESS_RUNTIME_LABELS`): the one
-  place server decides which serverless runtime it is on; `isLambda()` now
-  reads it.
+  place server decides which serverless runtime it is on; `isLambda()` and the
+  CLI's deploy-target labels read it.
+- The session and XSRF cookies' `Secure` default (`NODE_ENV === 'production'`)
+  is read when the cookie is set, not when the middleware module loads, so an
+  app that sets `NODE_ENV` after importing the framework still gets a Secure
+  cookie through `createSessionMiddleware()` / `createCsrfMiddleware()` directly,
+  not only through `AuthServiceProvider`. `defaultCookieSecure()` is exported.
 - On Cloudflare Workers, AWS Lambda, or Vercel, the middleware warns once per
   process when it ends up on `MemorySessionStore`, the store that loses every
   login there.

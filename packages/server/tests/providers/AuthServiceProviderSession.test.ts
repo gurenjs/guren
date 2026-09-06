@@ -1,22 +1,17 @@
-import { describe, expect, it } from 'bun:test'
-import { createApp } from '../../src/http/Application'
+import { describe, expect, it, spyOn } from 'bun:test'
+import { createApp, type Application } from '../../src/http/Application'
 import { ServiceProvider } from '../../src/container/ServiceProvider'
-import { MemorySessionStore, type SessionStore } from '../../src/http/middleware/session'
+import { getSessionFromContext, MemorySessionStore } from '../../src/http/middleware/session'
 import { SessionManager } from '../../src/http/middleware/session-manager'
-import { getSessionFromContext } from '../../src/http/middleware/session'
 import type { Router } from '../../src/mvc/Router'
 
 process.env.APP_KEY ??= 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
 
-/** A store that records every write, so a test can see which one the app used. */
-function recordingStore(): SessionStore & { writes: string[] } {
-  const data = new Map<string, Record<string, unknown>>()
-  return {
-    writes: [],
-    async read(id) { return data.get(id) },
-    async write(id, value) { this.writes.push(id); data.set(id, value) },
-    async destroy(id) { data.delete(id) },
-  }
+/** A manager whose default store is `store`, through a driver registered after construction. */
+function managerFor(store: MemorySessionStore, options: { cookieName?: string; ttlSeconds?: number } = {}): SessionManager {
+  const manager = new SessionManager({ ...options, default: 'custom', stores: { custom: { driver: 'custom' } as never } })
+  manager.registerDriver('custom', () => store)
+  return manager
 }
 
 function sessionProvider(manager: SessionManager) {
@@ -34,31 +29,34 @@ function routes(router: Router): void {
   })
 }
 
+/** Boot, then hit the one route that writes to the session. */
+async function touch(app: Application): Promise<Response> {
+  await app.boot()
+  return app.fetch(new Request('http://localhost/touch'))
+}
+
 describe('AuthServiceProvider session resolution (RFC 0020)', () => {
   it('should write sessions through the store a bound SessionManager selects', async () => {
-    const store = recordingStore()
-    const manager = new SessionManager({ default: 'custom', stores: { custom: { driver: 'custom' } as never } })
-    manager.registerDriver('custom', () => store)
-    const app = createApp({ routes, auth: {}, providers: [sessionProvider(manager)] })
-    await app.boot()
+    const store = new MemorySessionStore()
+    const write = spyOn(store, 'write')
+    const app = createApp({ routes, auth: {}, providers: [sessionProvider(managerFor(store))] })
 
-    const response = await app.fetch(new Request('http://localhost/touch'))
+    const response = await touch(app)
 
     expect(response.status).toBe(200)
-    expect(store.writes).toHaveLength(1)
+    expect(write).toHaveBeenCalledTimes(1)
     expect(response.headers.get('set-cookie')).toContain('guren.session=')
   })
 
   it('should take cookie settings from the manager, with auth.sessionOptions overriding field by field', async () => {
-    const manager = new SessionManager({ cookieName: 'from-manager', ttlSeconds: 10, stores: { memory: { driver: 'memory' } } })
+    const manager = managerFor(new MemorySessionStore(), { cookieName: 'from-manager', ttlSeconds: 10 })
     const app = createApp({
       routes,
       auth: { sessionOptions: { cookieName: 'from-auth' } },
       providers: [sessionProvider(manager)],
     })
-    await app.boot()
 
-    const response = await app.fetch(new Request('http://localhost/touch'))
+    const response = await touch(app)
 
     expect(response.headers.get('set-cookie')).toContain('from-auth=')
     expect(response.headers.get('set-cookie')).toContain('Max-Age=10')
@@ -75,32 +73,30 @@ describe('AuthServiceProvider session resolution (RFC 0020)', () => {
   })
 
   it('should keep an explicit store working with no manager bound', async () => {
-    const store = recordingStore()
+    const store = new MemorySessionStore()
+    const write = spyOn(store, 'write')
     const app = createApp({ routes, auth: { sessionOptions: { store } } })
-    await app.boot()
 
-    await app.fetch(new Request('http://localhost/touch'))
+    await touch(app)
 
-    expect(store.writes).toHaveLength(1)
+    expect(write).toHaveBeenCalledTimes(1)
   })
 
   it('should find a manager a deferred provider binds', async () => {
-    const store = recordingStore()
-    const manager = new SessionManager({ default: 'custom', stores: { custom: { driver: 'custom' } as never } })
-    manager.registerDriver('custom', () => store)
+    const store = new MemorySessionStore()
+    const write = spyOn(store, 'write')
     class DeferredSessionProvider extends ServiceProvider {
       static deferred = true
       static provides = ['session']
       register(): void {
-        this.container.instance('session', manager)
+        this.container.instance('session', managerFor(store))
       }
     }
     const app = createApp({ routes, auth: {}, providers: [DeferredSessionProvider] })
-    await app.boot()
 
-    await app.fetch(new Request('http://localhost/touch'))
+    await touch(app)
 
-    expect(store.writes).toHaveLength(1)
+    expect(write).toHaveBeenCalledTimes(1)
   })
 
   it('should fail the boot when the default store names a driver nobody registered', async () => {

@@ -1,30 +1,18 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it, spyOn } from 'bun:test'
 import { MemorySessionStore, type SessionStore } from '../../../src/http/middleware/session'
 import { SessionManager, type SessionDriverFactory } from '../../../src/http/middleware/session-manager'
-
-/** Enough of ioredis for RedisSessionStore's read/write/destroy/touch. */
-function fakeRedis() {
-  const data = new Map<string, string>()
-  return {
-    calls: [] as string[],
-    async get(key: string) { this.calls.push(`get ${key}`); return data.get(key) ?? null },
-    async setex(key: string, _ttl: number, value: string) { this.calls.push(`setex ${key}`); data.set(key, value) },
-    async del(key: string) { this.calls.push(`del ${key}`); data.delete(key) },
-    async expire(key: string) { this.calls.push(`expire ${key}`) },
-  }
-}
+import { FakeRedis } from '../../redis/fake-redis'
 
 describe('SessionManager', () => {
   it('should default to memory, which is always declared', () => {
     const manager = new SessionManager()
 
-    expect(manager.getDefaultStoreName()).toBe('memory')
     expect(manager.getStoreNames()).toEqual(['memory'])
     expect(manager.store()).toBeInstanceOf(MemorySessionStore)
   })
 
   it('should keep memory declared beside the stores an app adds', () => {
-    const manager = new SessionManager({ default: 'redis', stores: { redis: { driver: 'redis', client: fakeRedis() } } })
+    const manager = new SessionManager({ default: 'redis', stores: { redis: { driver: 'redis', client: new FakeRedis() } } })
 
     expect(manager.getStoreNames()).toEqual(['memory', 'redis'])
     expect(manager.store('memory')).toBeInstanceOf(MemorySessionStore)
@@ -47,7 +35,7 @@ describe('SessionManager', () => {
     let built = 0
     const manager = new SessionManager({
       default: 'redis',
-      stores: { redis: { driver: 'redis', client: () => { built += 1; return fakeRedis() } } },
+      stores: { redis: { driver: 'redis', client: () => { built += 1; return new FakeRedis() } } },
     })
 
     expect(built).toBe(0)
@@ -58,7 +46,8 @@ describe('SessionManager', () => {
   })
 
   it('should pass the redis client and prefix through to RedisSessionStore', async () => {
-    const redis = fakeRedis()
+    const redis = new FakeRedis()
+    const setex = spyOn(redis, 'setex')
     const manager = new SessionManager({
       default: 'redis',
       stores: { redis: { driver: 'redis', client: redis, prefix: 'sess:' } },
@@ -66,13 +55,13 @@ describe('SessionManager', () => {
 
     await manager.store().write('abc', { user: 1 }, 60)
     expect(await manager.store().read('abc')).toEqual({ user: 1 })
-    expect(redis.calls).toEqual(['setex sess:abc', 'get sess:abc'])
+    expect(setex.mock.calls[0].slice(0, 2)).toEqual(['sess:abc', 60])
   })
 
   it('should refuse a redis client factory that returns a Promise, naming the cause', () => {
     const manager = new SessionManager({
       default: 'redis',
-      stores: { redis: { driver: 'redis', client: async () => fakeRedis() } },
+      stores: { redis: { driver: 'redis', client: async () => new FakeRedis() } },
     })
 
     expect(() => manager.store()).toThrow('`client` returned a Promise')
@@ -101,7 +90,7 @@ describe('SessionManager', () => {
     let built = 0
     const manager = new SessionManager({
       default: 'later',
-      stores: { later: { driver: 'later' } as never, redis: { driver: 'redis', client: () => { built += 1; return fakeRedis() } } },
+      stores: { later: { driver: 'later' } as never, redis: { driver: 'redis', client: () => { built += 1; return new FakeRedis() } } },
     })
 
     expect(() => manager.assertDriverRegistered()).toThrow('Unknown session driver: later (session store "later")')

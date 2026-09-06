@@ -2,7 +2,7 @@ import { getCookie, setCookie, deleteCookie } from 'hono/cookie'
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import type { MiddlewareHandler } from 'hono'
 import { deriveAppKeyring, getAppKeyringFromEnv } from '../../encryption/app-key'
-import { detectServerlessRuntime } from '../../runtime/serverless'
+import { detectServerlessRuntime, SERVERLESS_RUNTIME_LABELS } from '../../runtime/serverless'
 
 export type SessionData = Record<string, unknown>
 
@@ -80,11 +80,18 @@ export interface SessionOptions extends SessionCookieOptions {
   store?: SessionStore | (() => SessionStore)
 }
 
-export const DEFAULT_SESSION_COOKIE_NAME = 'guren.session'
-export const DEFAULT_SESSION_TTL_SECONDS = 60 * 60 * 2 // 2 hours
-const DEFAULT_COOKIE_SECURE = typeof process !== 'undefined'
-  ? process.env.NODE_ENV === 'production'
-  : true
+const DEFAULT_COOKIE_NAME = 'guren.session'
+const DEFAULT_TTL_SECONDS = 60 * 60 * 2 // 2 hours
+
+/**
+ * Read when a middleware is built, not when this module loads: an app that
+ * sets NODE_ENV after importing the framework (tests, some serverless
+ * bootstraps) must still get a Secure cookie. Spelled `process.env.NODE_ENV`
+ * exactly, so the deploy plugins' `--define` settles it at bundle time.
+ */
+export function defaultCookieSecure(): boolean {
+  return typeof process !== 'undefined' ? process.env.NODE_ENV === 'production' : true
+}
 
 const SESSION_CONTEXT_KEY = 'guren:session'
 
@@ -377,19 +384,20 @@ function createCookieSigner(cookieName: string, cookiePath: string): SessionCook
 /**
  * The static checks can be skipped; this runs in the deploy log of exactly the
  * app they would have warned about (RFC 0020 §1). Decided once per middleware,
- * on its first request: the runtime does not change, and a local emulator
- * (`sam local`, `vercel dev`) has the platform's env without its isolation.
+ * on its first request. `vercel dev` is one process, so there the warning
+ * would be noise; `sam local` starts a container per invocation by default,
+ * so there it is true.
  */
 function warnAboutMemoryStore(store: SessionStore): void {
   if (!(store instanceof MemorySessionStore)) {
     return
   }
   const runtime = detectServerlessRuntime()
-  if (!runtime || runtime.local) {
+  if (!runtime || runtime.emulator === 'vercel-dev') {
     return
   }
   console.warn(
-    `[guren] Sessions use MemorySessionStore on ${runtime.label}, which shares no memory between requests, `
+    `[guren] Sessions use MemorySessionStore on ${SERVERLESS_RUNTIME_LABELS[runtime.id]}, which shares no memory between requests, `
     + 'so a login is lost on the very next request. Configure a persistent store: DatabaseSessionStore '
     + 'from @guren/core, or a SessionManager whose default store is database- or Redis-backed.',
   )
@@ -397,14 +405,14 @@ function warnAboutMemoryStore(store: SessionStore): void {
 
 export function createSessionMiddleware(options: CreateSessionMiddlewareOptions = {}): MiddlewareHandler {
   const {
-    cookieName = DEFAULT_SESSION_COOKIE_NAME,
+    cookieName = DEFAULT_COOKIE_NAME,
     cookiePath = '/',
     cookieDomain,
-    cookieSecure = DEFAULT_COOKIE_SECURE,
+    cookieSecure = defaultCookieSecure(),
     cookieSameSite = 'Lax',
     cookieHttpOnly = true,
     cookieMaxAgeSeconds,
-    ttlSeconds = DEFAULT_SESSION_TTL_SECONDS,
+    ttlSeconds = DEFAULT_TTL_SECONDS,
     store: storeOrFactory = new MemorySessionStore(),
   } = options
   const signer = createCookieSigner(cookieName, cookiePath)

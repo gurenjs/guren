@@ -371,7 +371,6 @@ export type {
   SessionStoreConfig,
   SessionDriverFactory,
   SessionCookieOptions,
-  SessionOptions,
   MemorySessionDriverOptions,
   RedisSessionDriverOptions,
   AuthContext,

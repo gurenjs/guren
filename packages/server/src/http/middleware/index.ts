@@ -23,7 +23,8 @@ export type {
   MemorySessionDriverOptions,
   RedisSessionDriverOptions,
 } from './session-manager'
-export type { SessionCookieOptions, SessionOptions } from './session'
+export type { SessionCookieOptions } from './session'
+export { defaultCookieSecure } from './session'
 export type { Session, SessionData, SessionStore } from './session'
 export {
   requireAuthenticated,

@@ -23,11 +23,13 @@ const DOUBLE_SESSION_CONFIG =
  * built in `boot()`, before any user provider's own boot runs.
  */
 export class AuthServiceProvider extends ServiceProvider {
+  private app!: Application
   private attachedSession = false
   private sessionMiddleware: MiddlewareHandler | undefined
 
   register(): void {
     const app = this.container.make<Application>('app')
+    this.app = app
     const auth = this.container.make<AuthManager>('auth')
 
     if (!auth.guardNames().length) {
@@ -51,12 +53,7 @@ export class AuthServiceProvider extends ServiceProvider {
         const csrfOptions = authOptions.csrfOptions ?? {}
         // The endpoint registry stays out of the spread: inside it, an app's
         // `csrfOptions` could name paths of its own or drop the declared ones.
-        app.use('*', createCsrfMiddleware({
-          cookieOptions: {
-            secure: typeof process !== 'undefined' ? process.env.NODE_ENV === 'production' : true,
-          },
-          ...csrfOptions,
-        }, () => app.getCookielessAuthPaths()))
+        app.use('*', createCsrfMiddleware(csrfOptions, () => app.getCookielessAuthPaths()))
       }
     }
 
@@ -74,19 +71,14 @@ export class AuthServiceProvider extends ServiceProvider {
    * the first-request build.
    */
   boot(): void {
-    if (!this.attachedSession) {
-      return
-    }
-    const app = this.container.make<Application>('app')
-    if (app.isDeferredService('session')) {
+    if (!this.attachedSession || this.app.isDeferredService('session')) {
       return
     }
     this.sessionMiddleware = this.buildSessionMiddleware()
   }
 
   private buildSessionMiddleware(): MiddlewareHandler {
-    const app = this.container.make<Application>('app')
-    const explicit: CreateSessionMiddlewareOptions = app.authOptions?.sessionOptions ?? {}
+    const explicit: CreateSessionMiddlewareOptions = this.app.authOptions?.sessionOptions ?? {}
     const manager = this.container.makeOptional<SessionManager>('session')
 
     if (manager && explicit.store) {
@@ -95,14 +87,11 @@ export class AuthServiceProvider extends ServiceProvider {
     manager?.assertDriverRegistered()
 
     // The manager's cookie/TTL settings are the base; `auth.sessionOptions`
-    // overrides them field by field, which is where existing apps already put
-    // `cookieSecure`. That default is read here, at boot, not at the middleware
-    // module's load: a NODE_ENV set between the two must still make the cookie Secure.
+    // overrides them field by field. The middleware supplies every other default.
     return createSessionMiddleware({
-      cookieSecure: typeof process !== 'undefined' ? process.env.NODE_ENV === 'production' : true,
       ...manager?.options,
       ...explicit,
-      ...(manager ? { store: () => manager.store() } : {}),
+      ...(manager && { store: () => manager.store() }),
     })
   }
 }

@@ -1,3 +1,4 @@
+import { isPromiseLike } from '../../logging/Logger'
 import { RedisSessionStore } from '../../redis/RedisSessionStore'
 import { MemorySessionStore, type SessionCookieOptions, type SessionStore } from './session'
 
@@ -52,10 +53,6 @@ function isPrunable(store: SessionStore): store is PrunableSessionStore {
   return typeof (store as Partial<PrunableSessionStore>).deleteExpired === 'function'
 }
 
-function isThenable(value: unknown): boolean {
-  return typeof (value as { then?: unknown } | null)?.then === 'function'
-}
-
 /**
  * Resolves session stores by name from declared configs and registered drivers.
  * Lazy and memoized: a driver registered after construction (a plugin's
@@ -77,14 +74,10 @@ export class SessionManager {
     this.options = options
     this.defaultStoreName = defaultName
 
-    this.driverFactories.set('memory', (raw) => {
-      const { now } = raw as MemorySessionDriverOptions
-      return new MemorySessionStore(now)
-    })
-    this.driverFactories.set('redis', (raw) => {
-      const { client, prefix } = raw as RedisSessionDriverOptions
+    this.registerDriver('memory', ({ now }) => new MemorySessionStore(now))
+    this.registerDriver('redis', ({ client, prefix }) => {
       const redis = typeof client === 'function' ? client() : client
-      if (isThenable(redis)) {
+      if (isPromiseLike(redis)) {
         throw new Error(
           'Session store "redis": `client` returned a Promise. Return the ioredis client synchronously; it connects lazily on first use.',
         )
@@ -92,7 +85,8 @@ export class SessionManager {
       return new RedisSessionStore(redis as ConstructorParameters<typeof RedisSessionStore>[0], { prefix })
     })
 
-    // `memory` is always declared, so a declared one only overrides its options.
+    // Unlike cache/storage, `memory` is declared even when it is not the
+    // default: `SESSION_DRIVER=memory` needs no entry, and it is the fallback.
     this.configs.set('memory', { driver: 'memory' })
     for (const [name, storeConfig] of Object.entries(stores)) {
       this.configs.set(name, storeConfig)
@@ -112,13 +106,8 @@ export class SessionManager {
       return cached
     }
 
-    const { driver, ...driverOptions } = this.configOf(storeName)
-    const factory = this.driverFactories.get(driver)
-    if (!factory) {
-      throw new Error(this.unknownDriverMessage(driver, storeName))
-    }
-
-    const store = factory(driverOptions)
+    const { factory, options } = this.resolve(storeName)
+    const store = factory(options)
     this.resolved.set(storeName, store)
     return store
   }
@@ -129,11 +118,7 @@ export class SessionManager {
    * socket or a Workers binding cannot.
    */
   assertDriverRegistered(name?: string): void {
-    const storeName = name ?? this.defaultStoreName
-    const { driver } = this.configOf(storeName)
-    if (!this.driverFactories.has(driver)) {
-      throw new Error(this.unknownDriverMessage(driver, storeName))
-    }
+    this.resolve(name ?? this.defaultStoreName)
   }
 
   registerDriver<K extends keyof SessionDrivers>(name: K, factory: SessionDriverFactory<SessionDrivers[K]>): void
@@ -148,14 +133,6 @@ export class SessionManager {
     }
   }
 
-  hasDriver(name: string): boolean {
-    return this.driverFactories.has(name)
-  }
-
-  getDefaultStoreName(): string {
-    return this.defaultStoreName
-  }
-
   getStoreNames(): string[] {
     return Array.from(this.configs.keys())
   }
@@ -167,19 +144,22 @@ export class SessionManager {
    * environment does not use opens no connection here.
    */
   async pruneExpired(now: Date = new Date()): Promise<void> {
-    const stores = new Set<SessionStore>([this.store(), ...this.resolved.values()])
-    await Promise.all([...stores].filter(isPrunable).map((store) => store.deleteExpired(now)))
+    this.store()
+    await Promise.all([...this.resolved.values()].filter(isPrunable).map((store) => store.deleteExpired(now)))
   }
 
-  private configOf(storeName: string): SessionStoreConfig {
+  private resolve(storeName: string): { factory: SessionDriverFactory; options: Record<string, unknown> } {
     const config = this.configs.get(storeName)
     if (!config) {
       throw new Error(`Session store not found: ${storeName} (declared: ${this.getStoreNames().join(', ')})`)
     }
-    return config
-  }
-
-  private unknownDriverMessage(driver: string, storeName: string): string {
-    return `Unknown session driver: ${driver} (session store "${storeName}"). Register it with registerDriver(), or install the plugin that provides it.`
+    const { driver, ...options } = config
+    const factory = this.driverFactories.get(driver)
+    if (!factory) {
+      throw new Error(
+        `Unknown session driver: ${driver} (session store "${storeName}"). Register it with registerDriver(), or install the plugin that provides it.`,
+      )
+    }
+    return { factory, options }
   }
 }
