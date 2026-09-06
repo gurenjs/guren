@@ -59,7 +59,7 @@ Each chapter starts where the previous one ended. Follow them in order.
 | 10 | [Files](./10-files.md) | 60 min |
 | 11 | [Events and Mail](./11-events-and-mail.md) | 75 min |
 | 12 | [Your App as an Agent's Tool](./12-agent-tools.md) | 75 min |
-| 13 | The System, Documented | coming |
+| 13 | [Documentation That Cannot Go Stale](./13-documented.md) | 60 min |
 | 14 | Production | coming |
 
 Chapters are published as they are finished. The shorter [Build a Mini Blog](./overview.md) series stays available in the meantime and covers the same ground as chapters 3–9 in the generator-first style.
