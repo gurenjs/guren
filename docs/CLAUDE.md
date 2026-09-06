@@ -42,6 +42,30 @@
 - One image can back several docs (`grep -rn '<name>.png' docs/`), so
   recapturing one means rechecking every page that references it
 
+## The Guren Tutorial (`tutorials/NN-*.md`)
+
+- Chapter files are `NN-<slug>.md` in course order; the mini-blog series
+  (`overview.md` and friends) is the older set and follows none of this
+- Every chapter after 1 keeps the four beats of RFC 0019: build the chapter's
+  one concept by hand, specify the next slice with a failing test, delegate
+  that slice (prompt verbatim, plus a deterministic fallback), verify with a
+  rubric, `bunx guren gate`, `bun run build`, and a commit
+- Never show "the code the agent will write"; the hand-written version is the
+  reference and the test, rubric and gate judge the agent's
+- Fences carry attributes after the language, and `smoke:tutorial` executes
+  them in order: `bash run`, `bash run expect-fail` (the red step; a zero exit
+  fails the smoke), `bash run background` (a server; the smoke reads the port
+  from its banner), `<lang> file=<app-relative path>` (the complete file, never
+  an excerpt), `<lang> manual` (shown, never run; any language). Add `fallback` to a `run` or
+  `file=` block that stands in for an agent beat. A `run` block that is exactly
+  `cd <dir>` moves the app root; `bunx create-guren-app …` is the one command
+  the smoke swaps for the checkout's scaffolder, flags passed through
+- Code is identical in both locales, test names and UI strings inside `file=`
+  blocks included; `audit:tutorial-blocks` compares the executable blocks of
+  `docs/ja/tutorials/` to the English ones byte for byte
+- `bun run audit:tutorial-blocks` after editing; `GUREN_TUTORIAL_THROUGH=01
+  bun run smoke:tutorial` to execute the chapters up to one
+
 ## Maintenance Checklist
 - After editing, run `rg` on `docs/` for disallowed terms (`packages/core`, `citty`, `consola`, etc.)
 - Keep Quick Start and Getting Started aligned whenever the scaffold workflow changes

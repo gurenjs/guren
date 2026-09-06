@@ -96,12 +96,53 @@ const GUIDE_SECTIONS: readonly DocSectionConfig[] = [
   },
 ]
 
+// The Guren Tutorial (RFC 0019). Chapter files are `NN-<slug>.md`, grouped into
+// the arcs the course moves through rather than listed as fifteen siblings.
 const TUTORIAL_SECTIONS: readonly DocSectionConfig[] = [
   {
-    title: { en: 'Build a Mini Blog', ja: 'ミニブログを作る' },
-    slugs: ['overview', 'create-blog-post-app', 'authentication', 'relationships'],
+    title: { en: 'Start here', ja: 'はじめに' },
+    slugs: ['00-overview'],
+  },
+  {
+    title: { en: 'Foundations', ja: '基礎' },
+    slugs: ['01-zero-to-deployed', '02-one-request-by-hand', '03-the-posts-table', '04-validation-and-resources'],
+  },
+  {
+    title: { en: 'Users', ja: 'ユーザー' },
+    slugs: ['05-users-and-passwords', '06-protecting-routes', '07-authorization'],
+  },
+  {
+    title: { en: 'Your harness', ja: 'あなたのハーネス' },
+    slugs: ['08-teach-the-agent'],
+  },
+  {
+    title: { en: 'Data', ja: 'データ' },
+    slugs: ['09-relationships', '10-files', '11-events-and-mail'],
+  },
+  {
+    title: { en: 'Agents', ja: 'エージェント' },
+    slugs: ['12-agent-tools', '13-documented'],
+  },
+  {
+    title: { en: 'Production', ja: '本番' },
+    slugs: ['14-production'],
   },
 ]
+
+/**
+ * Slugs the course absorbed, and the chapter that now covers each. `DocsService`
+ * has no memory of a retired file, so without this a bookmark 404s; the site
+ * answers a 301 instead. Keyed by category, since a slug is only unique inside one.
+ */
+export const DOC_REDIRECTS: Readonly<Record<DocCategory, Readonly<Record<string, string>>>> = {
+  guides: {},
+  tutorials: {
+    overview: '00-overview',
+    'create-blog-post-app': '03-the-posts-table',
+    authentication: '05-users-and-passwords',
+    relationships: '09-relationships',
+  },
+}
 
 const OTHER_SECTION_TITLE: Record<DocLocale, string> = { en: 'Other', ja: 'その他' }
 

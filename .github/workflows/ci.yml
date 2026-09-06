@@ -173,6 +173,12 @@ jobs:
       - name: Docs audit
         run: bun run audit:docs
 
+      # The tutorial chapters are executed by smoke:tutorial; this is the fast
+      # half: fence grammar, and the Japanese mirror's code blocks byte-identical
+      # to the English ones (RFC 0019).
+      - name: Tutorial block audit
+        run: bun run audit:tutorial-blocks
+
       # The agent-catalog payload (RFC 0011) is generated, not committed, and
       # published to gurenjs/agent-skills. Render it here and assert the facts
       # it claims about the CLI: every `guren` command and flag a skill names is
@@ -329,9 +335,10 @@ jobs:
   # themselves and run in parallel with everything else.
   starter-smokes:
     runs-on: ubuntu-latest
-    # Measured max 4m0s: it rebuilds the packages and runs eight scaffold
-    # smokes.
-    timeout-minutes: 20
+    # Measured max 16m29s at eleven tutorial chapters: it rebuilds the packages,
+    # runs eight scaffold smokes, and executes every chapter of the tutorial in
+    # order. The tutorial grows, so the cap has headroom over the measurement.
+    timeout-minutes: 40
     services:
       postgres:
         image: postgres:16-alpine
@@ -391,6 +398,11 @@ jobs:
 
       - name: Golden path smoke test
         run: bun run smoke:golden-path
+
+      # docs/en/tutorials/NN-*.md run as a script, chapter by chapter, each
+      # ending in guren gate and a build (RFC 0019).
+      - name: Tutorial smoke
+        run: bun run smoke:tutorial
 
       - name: Golden path smoke test (postgres)
         run: bun run smoke:golden-path:postgres

@@ -60,11 +60,12 @@ const TYPESCRIPT_FENCE = /^(ts|tsx|typescript|js|jsx|javascript)\b/
 
 /**
  * An import statement, keyword through closing quote. `from` is optional so a
- * side-effect `import 'x'` is seen too, or `crossCheckExtraction()`'s whole-list
- * comparison reports a phantom mismatch. Excluding `;` and a backtick from the
- * span keeps a match from running past the end of its own statement.
+ * side-effect `import 'x'` is seen too, or `crossCheckExtraction()` reports a
+ * phantom mismatch. The span before `from` excludes `;`, a backtick and both
+ * quotes: with quotes allowed, `import 'x'` followed by a named import matched
+ * as one statement and the side-effect import went unseen.
  */
-const IMPORT_STATEMENT = /^[ \t]*import\b(?:[^;`]*?from)?[ \t]*(['"])([^'"\n]+)\1/gm
+const IMPORT_STATEMENT = /^[ \t]*import\b(?:[^;`'"]*?from)?[ \t]*(['"])([^'"\n]+)\1/gm
 
 interface EntryPoint {
   readonly specifier: string

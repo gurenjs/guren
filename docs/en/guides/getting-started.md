@@ -59,7 +59,7 @@ The viewer is read-only, enabled by `GUREN_DOCS=1` in the scaffold's `dev` scrip
 
 ### Add your first feature
 
-You have a running app — now build something with it. The **[Build a Mini Blog tutorial](../tutorials/overview.md)** is the recommended next step: a three-part course that adds a posts CRUD, authentication, and comments with relationships to the app you just created.
+You have a running app — now build something with it. **[The Guren Tutorial](../tutorials/00-overview.md)** is the recommended next step: a fourteen-chapter course that turns it into a blog, and hands one slice of every chapter to a coding agent.
 
 ## Part B: Full Setup
 
@@ -145,7 +145,7 @@ bun run preview
 
 ## Where to go next
 
-- **[Build a Mini Blog tutorial](../tutorials/overview.md)** — the recommended hands-on course for newcomers: posts CRUD, authentication, then comments and relationships.
+- **[The Guren Tutorial](../tutorials/00-overview.md)** — the recommended hands-on course for newcomers: a blog with users, authorization, relationships, uploads, mail and agent tools.
 - **[First Steps](./first-steps.md)** — a ten-minute tour of how one request flows through the framework.
 
 Then continue through the guides in this order:
