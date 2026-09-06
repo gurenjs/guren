@@ -241,7 +241,7 @@ mirrors, and checkouts with no remote (Open Question 2).
 
 ```bash
 bunx guren make:adr "Users verify email before posting" --entity User --issue 412
-bunx guren make:adr "Rename billing plans" --issue acme/shop#398 --issue 401
+bunx guren make:adr "Rename billing plans" --issue acme/shop#398,401
 ```
 
 `--issue` is ~~repeatable~~ **Amended in implementation:** comma-separated
