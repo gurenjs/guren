@@ -32,7 +32,7 @@ export async function discoverAttachmentsConfigFiles(appRoot: string): Promise<s
  * specifier's tail so `@/db/schema`, `../db/schema`, `../../db/schema.js`,
  * and a module's `@/modules/billing/db/schema` all count.
  */
-const SCHEMA_SPECIFIER_PATTERN = /(^|\/)db\/schema(\.[jt]s)?$/
+export const SCHEMA_SPECIFIER_PATTERN = /(^|\/)db\/schema(\.[jt]s)?$/
 
 /**
  * Which schema a `db/schema` import lands on: the root schema (null) or a
@@ -40,7 +40,7 @@ const SCHEMA_SPECIFIER_PATTERN = /(^|\/)db\/schema(\.[jt]s)?$/
  * importing its *own* schema must not pass on the strength of a table the root
  * declares. Undefined for a specifier resolving outside both shapes.
  */
-function schemaModuleFor(cwd: string, filePath: string, specifier: string): string | null | undefined {
+export function schemaModuleFor(cwd: string, filePath: string, specifier: string): string | null | undefined {
   let absolute: string
   if (specifier.startsWith('@/')) {
     absolute = resolve(cwd, specifier.slice(2))

@@ -29,6 +29,7 @@ import { checkRoutePathParams, discoverRoutePathFiles } from './route-path-check
 import { affectsRouteWiring, checkRouteRegistrarWiring } from './routes-check'
 import { checkRouteContracts } from './route-contract-check'
 import { checkAgentRoutes } from './agent-route-check'
+import { checkSessionsConfig } from './sessions-check'
 import { checkDeployRuntime } from './deploy-runtime'
 import { loadRouteDefinitions } from './load-routes'
 import { routesEntryOrDefault } from './route-registrar'
@@ -438,6 +439,14 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     // no configureAttachments() call at all. Same runtime-only failure as 8.5.
     checks.push(
       ...(await checkAttachableModels({ cwd, cache, files: allModelFiles, configFiles: attachmentsFiles })),
+    )
+
+    // 8.6b. Session wiring (RFC 0020 §2): a `database` store bound to a table
+    // the schema does not export, and a session config no provider binds. Over
+    // the same config/src/app scan the attachments rules use. Not
+    // changed-filtered: the config and its provider are different files.
+    checks.push(
+      ...(await checkSessionsConfig({ cwd, cache, files: attachmentsFiles, schemaTables })),
     )
 
     // 8.65. The attachments disk rooted inside the statically served public/

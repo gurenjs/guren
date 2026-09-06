@@ -358,7 +358,7 @@ describe('deploy-runtime-stores check', () => {
         expect(check.status).toBe('warn')
         expect(check.message).toContain('sessions are enabled')
         expect(check.message).toContain('DatabaseSessionStore')
-        expect(check.fix).toContain('DatabaseSessionStore')
+        expect(check.fix).toContain('guren add session')
       },
     )
   })
@@ -751,7 +751,7 @@ describe('runDoctor integration', () => {
       const stores = byKey.get('deploy-runtime-stores')
       expect(stores?.status).toBe('warn')
       expect(stores?.canAutofix).toBe(false)
-      expect(stores?.manualFix).toContain('DatabaseSessionStore')
+      expect(stores?.manualFix).toContain('guren add session')
 
       expect(report.hasWarnings).toBe(true)
       expect(report.manualChecks.map((check) => check.key)).toContain('deploy-runtime-stores')
@@ -1165,6 +1165,120 @@ describe('analyzeDeployRuntime', () => {
 
 // The same verdicts `guren doctor` reports, reached from `guren check` and
 // the deploy builds (RFC 0020 Part 0).
+const SESSION_PROVIDER = `import { createSessionManager, ServiceProvider } from '@guren/core'
+import { sessionConfig } from '../../config/session'
+
+export default class SessionProvider extends ServiceProvider {
+  register(): void {
+    this.container.instance('session', createSessionManager(sessionConfig))
+  }
+}
+`
+
+/** A `config/session.ts` in the shape `guren add session` writes. */
+function sessionConfigSource(stores: string, selected = "process.env.SESSION_DRIVER ?? 'database'"): string {
+  return `import { type SessionConfig } from '@guren/core'
+import { sessions } from '../db/schema'
+
+export const sessionConfig: SessionConfig = {
+  default: ${selected},
+  stores: { ${stores} },
+}
+`
+}
+
+describe('session config driver reading (RFC 0020)', () => {
+  const cloudflare = { '@guren/plugin-cloudflare': '^0.8.0' }
+
+  it('reads a scaffolded config as a backed store, so the blueprint does not warn', async () => {
+    const files = {
+      'src/app.ts': SESSION_APP,
+      'app/Providers/SessionProvider.ts': SESSION_PROVIDER,
+      'config/session.ts': sessionConfigSource("database: { driver: 'database', table: sessions }"),
+    }
+
+    await withApp('guren-session-config-backed-', files, cloudflare, async (dir) => {
+      const analysis = await analyzeDeployRuntime(dir)
+      expect(analysis.backedSessionSignals.map((signal) => signal.symbol)).toEqual(["SessionConfig default: 'database'"])
+
+      const check = (await deployChecks(dir))['deploy-runtime-stores']
+      expect(check.status).toBe('pass')
+    })
+  })
+
+  it('warns when the config selects the memory store', async () => {
+    const files = {
+      'src/app.ts': SESSION_APP,
+      'config/session.ts': sessionConfigSource(
+        "database: { driver: 'database', table: sessions }, memory: { driver: 'memory' }",
+        "process.env.SESSION_DRIVER ?? 'memory'",
+      ),
+    }
+
+    await withApp('guren-session-config-memory-', files, cloudflare, async (dir) => {
+      const check = (await deployChecks(dir))['deploy-runtime-stores']
+
+      expect(check.status).toBe('warn')
+      expect(check.message).toContain('selects the per-process `memory` store')
+      // The generic "no persistent store" line would be a second, redundant issue.
+      expect(check.message).not.toContain('no persistent store')
+    })
+  })
+
+  it('accepts an unreadable default when every declared store is persistent', async () => {
+    const files = {
+      'src/app.ts': SESSION_APP,
+      'config/session.ts': sessionConfigSource(
+        "database: { driver: 'database', table: sessions }, redis: { driver: 'redis', client: {} }",
+        'process.env.SESSION_DRIVER!',
+      ),
+    }
+
+    await withApp('guren-session-config-unreadable-', files, cloudflare, async (dir) => {
+      const analysis = await analyzeDeployRuntime(dir)
+      expect(analysis.backedSessionSignals.map((signal) => signal.symbol)).toEqual([
+        'SessionConfig stores: database, redis',
+      ])
+    })
+  })
+
+  it('leaves an unreadable default unsatisfied when a declared store is per-process', async () => {
+    const files = {
+      'src/app.ts': SESSION_APP,
+      'config/session.ts': sessionConfigSource(
+        "database: { driver: 'database', table: sessions }, memory: { driver: 'memory' }",
+        'process.env.SESSION_DRIVER!',
+      ),
+    }
+
+    await withApp('guren-session-config-ambiguous-', files, cloudflare, async (dir) => {
+      const analysis = await analyzeDeployRuntime(dir)
+      expect(analysis.backedSessionSignals).toEqual([])
+      expect((await deployChecks(dir))['deploy-runtime-stores'].status).toBe('warn')
+    })
+  })
+
+  it('ignores a cache config, which keys `stores` the same way', async () => {
+    const files = {
+      'src/app.ts': SESSION_APP,
+      'config/cache.ts': `import { type CacheConfig } from '@guren/core'
+
+export const cacheConfig: CacheConfig = {
+  default: 'redis',
+  stores: { redis: { driver: 'redis', client: {} } },
+}
+`,
+    }
+
+    await withApp('guren-session-config-cache-', files, cloudflare, async (dir) => {
+      const analysis = await analyzeDeployRuntime(dir)
+
+      expect(analysis.backedSessionSignals).toEqual([])
+      expect((await deployChecks(dir))['deploy-runtime-stores'].message).toContain('no persistent store')
+    })
+  })
+})
+
 describe('checkDeployRuntime', () => {
   it('returns nothing for an app with no deploy target', async () => {
     await withApp('guren-deploy-check-plain-', { 'src/app.ts': SESSION_APP }, {}, async (dir) => {
@@ -1183,7 +1297,7 @@ describe('checkDeployRuntime', () => {
         expect(verdicts.map((verdict) => verdict.key)).toEqual([...DEPLOY_CHECK_KEYS])
         const stores = verdicts.find((verdict) => verdict.key === 'deploy-runtime-stores')!
         expect(stores.status).toBe('warn')
-        expect(stores.fix).toContain('DatabaseSessionStore')
+        expect(stores.fix).toContain('guren add session')
         const hashing = verdicts.find((verdict) => verdict.key === 'deploy-password-hashing')!
         expect(hashing.status).toBe('pass')
         expect(hashing.fix).toBeUndefined()
@@ -1223,7 +1337,7 @@ describe('guren check deploy-runtime verdicts', () => {
         expect(stores!.status).toBe('warn')
         expect(stores!.advisory).toBe(true)
         expect(stores!.message).toContain('sessions are enabled')
-        expect(stores!.suggestion).toContain('DatabaseSessionStore')
+        expect(stores!.suggestion).toContain('guren add session')
         expect(gatingResults(report).map((result) => result.key)).not.toContain('deploy-runtime-stores')
       },
     )

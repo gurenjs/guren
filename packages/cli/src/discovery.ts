@@ -532,14 +532,14 @@ export function formatTruncatedList(items: string[], limit = 3): string {
  * binds the service without that file, and installing a second manager over it
  * would shadow the app's own.
  */
-export async function appBindsService(key: string): Promise<boolean> {
-  const roots = await listAppRoots(process.cwd())
+export async function appBindsService(key: string, appRoot: string = process.cwd()): Promise<boolean> {
+  const roots = await listAppRoots(appRoot)
   const groups = await Promise.all(
     roots.flatMap((root) => ['app', 'src'].map((dir) => collectFiles(resolve(root.dir, dir)))),
   )
   const bindingPattern = new RegExp(`\\b(?:instance|singleton|bind)\\(\\s*['"]${escapeRegExp(key)}['"]`)
   for (const filePath of groups.flat()) {
-    const source = await readIfExists(process.cwd(), filePath)
+    const source = await readIfExists(appRoot, filePath)
     if (source && bindingPattern.test(source)) return true
   }
   return false
