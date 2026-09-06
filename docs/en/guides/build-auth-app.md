@@ -33,7 +33,7 @@ This scaffolds:
 - Inertia pages under `resources/js/pages/Auth/`
 - `AuthProvider` registered in your application providers
 - Session middleware with development-friendly defaults
-- Auth routes wired into `routes/web.ts`
+- `routes/auth.ts`, wired into your `routes/web.ts` registrar
 
 ## 3. Start the Database
 
@@ -67,56 +67,65 @@ Visit `http://localhost:3333/register` to create an account, then `http://localh
 
 ### LoginController
 
-The generated controller validates credentials with Zod and delegates to the auth guard:
+The generated controller validates credentials with `LoginSchema` (generated alongside it in `app/Http/Validators/LoginValidator.ts`) and delegates to the auth guard:
 
 ```typescript
-import { Controller } from '@guren/core'
-import { z } from 'zod'
+import { Controller, ValidationException } from '@guren/core'
+import { LoginSchema } from '../../Validators/LoginValidator.js'
 import { pages } from '@/.guren/pages.gen'
 
-const LoginSchema = z.object({
-  email: z.email(),
-  password: z.string().min(1),
-  remember: z.boolean().optional(),
-})
-
-export class LoginController extends Controller {
-  async show() {
-    return this.inertia(pages.auth.Login)
+export default class LoginController extends Controller {
+  async show(): Promise<Response> {
+    const email = this.request.query('email') ?? ''
+    return this.inertia(pages.auth.Login, { email }, { title: 'Login' })
   }
 
-  async login() {
+  async store(): Promise<Response> {
     const { email, password, remember } = await this.validateBody(LoginSchema)
-    const ok = await this.auth.attempt({ email, password }, remember)
 
-    if (!ok) {
-      return this.back().withErrors({ email: 'Invalid credentials.' })
+    this.auth.session()?.regenerate()
+
+    const authenticated = await this.auth.attempt({ email, password }, remember)
+
+    if (!authenticated) {
+      throw ValidationException.withMessages({ message: 'Invalid credentials.' })
     }
 
     return this.redirect('/dashboard')
   }
 
-  async logout() {
+  async destroy(): Promise<Response> {
     await this.auth.logout()
-    return this.redirect('/login')
+    this.auth.session()?.invalidate()
+    return this.redirect('/')
   }
 }
 ```
 
+A failed attempt throws `ValidationException.withMessages()`, which the framework renders as a 422 carrying an `errors` payload; the generated login page shows `errors.message`. Use a field name as the key (`{ email: '...' }`) to attach the message to a single input instead.
+
 ### Auth Middleware
 
-Protect any route group with the `auth` alias that the generator registers:
+The generator writes `routes/auth.ts` and calls it from your route registrar. Each route carries its own guard:
 
 ```typescript
-import { Router } from '@guren/core'
+import { Router, requireAuthenticated, requireGuest } from '@guren/core'
 
-export function registerWebRoutes(router: Router): void {
-  // Public routes
-  router.get('/login', [LoginController, 'show']).name('login.show')
-  router.post('/login', [LoginController, 'login']).name('login')
-  router.post('/logout', [LoginController, 'logout']).name('logout')
+export function registerAuthRoutes(router: Router): void {
+  router.get('/login', [LoginController, 'show'], requireGuest({ redirectTo: '/dashboard' })).name('login')
+  router.post('/login', [LoginController, 'store'], requireGuest({ redirectTo: '/dashboard' })).name('login.store')
+  router.post('/logout', [LoginController, 'destroy'], requireAuthenticated({ redirectTo: '/login' })).name('logout')
 
-  // Protected routes
+  router.get('/dashboard', [DashboardController, 'index'], requireAuthenticated({ redirectTo: '/login' })).name('dashboard')
+}
+```
+
+To guard a whole group under a short name instead, register the alias yourself first. `aliasMiddleware()` returns a router carrying the alias in its type, so capture the return value:
+
+```typescript
+export function registerWebRoutes(baseRouter: Router): void {
+  const router = baseRouter.aliasMiddleware('auth', requireAuthenticated({ redirectTo: '/login' }))
+
   router.middleware('auth').group((auth) => {
     auth.get('/dashboard', [DashboardController, 'index']).name('dashboard')
   })
@@ -128,13 +137,22 @@ export function registerWebRoutes(router: Router): void {
 Inside a protected controller, access the current user via `this.auth`:
 
 ```typescript
-export class DashboardController extends Controller {
-  async index() {
-    const user = await this.auth.userOrFail()
-    return this.inertia(pages.dashboard.Index, { user })
+import { Controller } from '@guren/core'
+import type { UserRecord } from '../../Models/User.js'
+import { pages } from '@/.guren/pages.gen'
+
+export default class DashboardController extends Controller {
+  async index(): Promise<Response> {
+    const currentUser = await this.auth.user<UserRecord | null>()
+    const user = currentUser
+      ? { id: currentUser.id, name: currentUser.name, email: currentUser.email }
+      : null
+    return this.inertia(pages.dashboard.Index, { user }, { title: 'Dashboard' })
   }
 }
 ```
+
+`this.auth.user<T>()` returns `null` for a guest. Use `this.auth.userOrFail<T>()` when you want a 401 instead of a null branch.
 
 ## 7. Verify the Flow
 
