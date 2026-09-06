@@ -1199,9 +1199,10 @@ describe('checkDeployRuntime', () => {
       async (dir) => {
         const doctor = await deployChecks(dir)
         for (const verdict of await checkDeployRuntime(dir)) {
-          expect(verdict.status).toBe(doctor[verdict.key].status)
-          expect(verdict.message).toBe(doctor[verdict.key].message)
-          expect(verdict.fix).toBe(doctor[verdict.key].fix)
+          // Doctor's side is the wider status type, so it is the subject.
+          expect(doctor[verdict.key].status).toBe(verdict.status)
+          expect(doctor[verdict.key].message).toBe(verdict.message)
+          expect(doctor[verdict.key].fix).toBe(verdict.fix)
         }
       },
     )
