@@ -1,5 +1,6 @@
 import { consola } from 'consola'
 import { addAttachments, appBindsStorage } from './add-attachments'
+import { addSession } from './add-session'
 import { addLint } from './add-lint'
 import { assertNotApiOnly } from './app-surface'
 import { fileExists, readIfExists } from './discovery'
@@ -61,6 +62,10 @@ const blueprintRegistry: Record<string, BlueprintDefinition> = {
       created.push(...(await addAttachments(writerOptions)))
       return created
     },
+  },
+  session: {
+    description: 'Install database-backed sessions: schema table, config, provider, and the prune command.',
+    run: async (options) => addSession({ force: Boolean(options.force) }),
   },
   lint: {
     description: 'Install oxlint with the Guren rules: .oxlintrc.json, lint scripts, and the oxlint dev dependency.',

@@ -218,6 +218,8 @@ app.use('*', createSessionMiddleware())
 
 ### Selecting a store with `SessionManager`
 
+`bunx guren add session` writes everything below — the `sessions` table and its migration, `config/session.ts`, a `SessionProvider`, the `SESSION_DRIVER` entry in `.env.example`, and the `sessions:prune` command. `guren add auth` runs it for you, so a scaffolded app is database-backed from the start. The rest of this section is what it produces, for an app wiring it by hand.
+
 For more than one candidate store, declare them once and pick by environment. Bind a `SessionManager` under the `session` key from a provider's `register()` and `AuthServiceProvider` builds the session middleware around it at boot, resolving the store itself on the first request:
 
 ```ts

@@ -341,6 +341,34 @@ describe('attachments scaffold-typecheck fixture stays pinned to the builder', (
   })
 })
 
+describe('session scaffold-typecheck fixture stays pinned to the builder', () => {
+  // tests/fixtures/scaffold-typecheck/session/db/schema.ts is a render of the
+  // blueprint's Postgres schema patch, so a change to SESSIONS_TABLE_BLOCKS.pg
+  // has to land in the fixture too.
+  it('sessions table matches what the blueprint appends to a pg schema', async () => {
+    const fixtureSchema = await readFile(join(SCAFFOLD_FIXTURE_ROOT, 'session/db/schema.ts'), 'utf8')
+    const tableStart = fixtureSchema.indexOf('export const sessions')
+    expect(tableStart).toBeGreaterThan(-1)
+    const fixtureTable = fixtureSchema.slice(tableStart)
+
+    const workspace = await createTempWorkspace('guren-session-fixture-pin-')
+    try {
+      await mkdir(join(workspace.dir, 'db'), { recursive: true })
+      await writeFile(join(workspace.dir, 'db/schema.ts'), PG_SCHEMA_FIXTURE)
+      await runBlueprint('session', {})
+
+      const rendered = await readFile(join(workspace.dir, 'db/schema.ts'), 'utf8')
+      // Appended at end of file, so the tails must be *equal*: toContain would
+      // keep passing on a suffix the fixture never learned.
+      const renderedStart = rendered.indexOf('export const sessions')
+      expect(renderedStart).toBeGreaterThan(-1)
+      expect(rendered.slice(renderedStart).trimEnd()).toBe(fixtureTable.trimEnd())
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+})
+
 describe('blueprint companion fixtures stay pinned to their builders', () => {
   // The companions in tests/fixtures/scaffold-typecheck/<blueprint>/ are renders
   // of the make:* builders each blueprint runs, so a builder change has to land
@@ -373,6 +401,7 @@ describe('blueprint companion fixtures stay pinned to their builders', () => {
   const PINNED_ELSEWHERE: Record<string, string> = {
     'auth/': 'pinned by the auth fixture pin above, plus real codegen for pages.gen',
     'attachments/db/schema.ts': 'pinned by the attachments fixture pin above',
+    'session/db/schema.ts': 'pinned by the session fixture pin above',
   }
 
   it('every companion fixture is pinned to a builder, or names why not', async () => {
