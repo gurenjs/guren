@@ -214,7 +214,38 @@ app.use('*', createSessionMiddleware())
   - `cookieHttpOnly`（デフォルト `true`）
   - `cookieMaxAgeSeconds`（任意。指定がなければ `ttlSeconds` を使用）
   - `ttlSeconds`（デフォルト 2 時間）
-  - `store`（デフォルトはメモリストア。複数インスタンス構成では独自実装に差し替えてください）
+  - `store`（デフォルトはメモリストア。複数インスタンス構成では独自実装に差し替えてください）。ストアそのものか、ストアを返す関数を受け取ります。関数は起動時ではなく最初のリクエストで実行されます。
+
+### `SessionManager` でストアを選ぶ
+
+候補となるストアが複数あるなら、一度宣言して環境ごとに選びます。プロバイダで `session` キーに `SessionManager` を bind すると、`AuthServiceProvider` は最初のリクエストでそこからデフォルトストアを解決します:
+
+```ts
+import { ServiceProvider, SessionManager, type SessionConfig } from '@guren/core'
+import { createRedisClient } from '@guren/core/redis'
+
+const sessionConfig: SessionConfig = {
+  default: process.env.SESSION_DRIVER ?? 'memory',
+  ttlSeconds: 60 * 60 * 2,
+  stores: {
+    memory: { driver: 'memory' },
+    // `client` は関数でも構いません。このストアが最初に使われたときに実行されるので、
+    // 宣言しただけで選ばれていないストアは接続を開きません。
+    redis: { driver: 'redis', client: () => createRedisClient({ url: process.env.REDIS_URL }) },
+  },
+}
+
+export default class SessionProvider extends ServiceProvider {
+  register(): void {
+    this.container.instance('session', new SessionManager(sessionConfig))
+  }
+}
+```
+
+マネージャ側の cookie と TTL 設定が基本で、`auth.sessionOptions` がフィールド単位で上書きします。`auth.sessionOptions.store` とマネージャの両方を設定すると、どちらかを黙って選ぶのではなく起動時にエラーになります。未宣言の `default` 名は構築時に失敗するので、`SESSION_DRIVER` の typo は最初のログインではなく起動で止まります。プラグインは `SessionDrivers` インターフェースを augmentation で拡張し、`manager.registerDriver(name, factory)` を呼ぶことでドライバを追加できます。解決は遅延なので、プラグインの `register()` が設定の宣言より後に走っても構いません。ORM のテーブルを使う `database` ドライバと、このファイルを生成する `guren add session` は RFC 0020 の次のパートです。
+
+> [!WARNING]
+> Cloudflare Workers、AWS Lambda、Vercel ではリクエスト間でメモリを共有しないため、デフォルトの `MemorySessionStore` はログイン直後のリクエストでセッションを失います。ミドルウェアはその状況を検出するとプロセスごとに一度警告し、`guren check` とデプロイビルドは事前に警告します。
 
 ## プロバイダーとガードの設定
 

@@ -145,6 +145,8 @@ app.use('*', createSessionMiddleware())
 
 Each request exposes the session through `ctx.get('guren:session')` or the helper `getSessionFromContext(ctx)`.
 
+`store` accepts a `SessionStore` or a function returning one; the function runs on the first request, so a store that needs a runtime binding (Workers) or a connection (Redis) is not built at boot. To declare several stores and pick one by environment, see `SessionManager` in the [Authentication](./authentication.md#selecting-a-store-with-sessionmanager) guide.
+
 ### Auth Guards
 
 `requireAuthenticated` and `requireGuest` are thin wrappers that expect an auth context to be attached earlier in the pipeline. Pair them with `attachAuthContext`, which stores your guard implementation on the request.

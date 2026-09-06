@@ -4,6 +4,7 @@ import {
   createSessionMiddleware,
   getSessionFromContext,
   MemorySessionStore,
+  resetMemorySessionStoreWarning,
   type Session,
   type SessionStore,
 } from '../../../src/http/middleware/session'
@@ -725,5 +726,86 @@ describe('willPersist agrees with what the next request finds', () => {
 
     expect(claimed).toBe(true)
     expect(await store.read(claimedId!)).toBeDefined()
+  })
+})
+
+describe('store resolution (RFC 0020)', () => {
+  it('calls a store factory on the first request only, and never at construction', async () => {
+    let built = 0
+    const store = new MemorySessionStore()
+    const app = new Hono()
+    app.use('*', createSessionMiddleware({ store: () => { built += 1; return store } }))
+    app.get('/', (c) => {
+      getSessionFromContext(c)!.set('n', 1)
+      return c.text('ok')
+    })
+
+    expect(built).toBe(0)
+    await app.request('/')
+    await app.request('/')
+    expect(built).toBe(1)
+  })
+
+  it('retries a factory that threw on the next request rather than caching the failure', async () => {
+    let attempts = 0
+    const app = new Hono()
+    app.use('*', createSessionMiddleware({
+      store: () => {
+        attempts += 1
+        if (attempts === 1) throw new Error('binding not ready')
+        return new MemorySessionStore()
+      },
+    }))
+    app.get('/', (c) => c.text('ok'))
+    app.onError((error, c) => c.text(error.message, 500))
+
+    expect((await app.request('/')).status).toBe(500)
+    expect((await app.request('/')).status).toBe(200)
+    expect(attempts).toBe(2)
+  })
+})
+
+describe('memory store warning on a serverless runtime (RFC 0020)', () => {
+  let warn: Mock<typeof console.warn>
+
+  afterEach(() => {
+    warn?.mockRestore()
+    delete process.env.AWS_LAMBDA_FUNCTION_NAME
+    resetMemorySessionStoreWarning()
+  })
+
+  async function serve(options: Parameters<typeof createSessionMiddleware>[0]): Promise<void> {
+    const app = new Hono()
+    app.use('*', createSessionMiddleware(options))
+    app.get('/', (c) => c.text('ok'))
+    await app.request('/')
+    await app.request('/')
+  }
+
+  it('warns once per process when the default memory store runs on Lambda', async () => {
+    process.env.AWS_LAMBDA_FUNCTION_NAME = 'app'
+    resetMemorySessionStoreWarning()
+    warn = spyOn(console, 'warn').mockImplementation(() => {})
+
+    await serve({})
+
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn.mock.calls[0][0]).toContain('MemorySessionStore on AWS Lambda')
+    expect(warn.mock.calls[0][0]).toContain('DatabaseSessionStore')
+  })
+
+  it('stays quiet for a persistent store, and off serverless', async () => {
+    process.env.AWS_LAMBDA_FUNCTION_NAME = 'app'
+    resetMemorySessionStoreWarning()
+    warn = spyOn(console, 'warn').mockImplementation(() => {})
+    const persistent: SessionStore = { read: async () => undefined, write: async () => {}, destroy: async () => {} }
+
+    await serve({ store: persistent })
+    expect(warn).not.toHaveBeenCalled()
+
+    delete process.env.AWS_LAMBDA_FUNCTION_NAME
+    resetMemorySessionStoreWarning()
+    await serve({})
+    expect(warn).not.toHaveBeenCalled()
   })
 })
