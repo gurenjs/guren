@@ -39,6 +39,19 @@ export function gatingResults(report: CheckReport): CheckResult[] {
   return report.checks.filter((result) => !result.advisory && result.status !== 'pass')
 }
 
+/** One finding as the line a gate or hook feeds back: `title: message [file:line] -> suggestion`. */
+export function formatFinding(finding: {
+  title: string
+  message: string
+  filePath?: string
+  line?: number
+  suggestion?: string
+}): string {
+  const location = finding.filePath ? ` [${finding.filePath}${finding.line ? `:${finding.line}` : ''}]` : ''
+  const suggestion = finding.suggestion ? ` -> ${finding.suggestion}` : ''
+  return `${finding.title}: ${finding.message}${location}${suggestion}`
+}
+
 export function check(
   key: string,
   title: string,

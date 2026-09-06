@@ -148,7 +148,7 @@ Validate your app before shipping — these commands are also designed for AI co
 |---------|-------------|---------|
 | `check` | Validate integrity across routes, controllers, pages, and models — including whether every file in `routes/` is actually reached from your entry registrar (and every file in a module's `routes/` from that module's own registrar) — plus doc links, spec-view freshness, and architecture boundaries | `bunx guren check --json` |
 | `audit` | Security audit: missing input validation or authentication on mutating routes, raw SQL with interpolation, hardcoded credentials, disabled security defaults, mass-assignment configuration, sensitive columns not listed in `hidden`, emailed links built from the request host, CSRF exemptions declared by the app or by an installed package | `bunx guren audit --json` |
-| `gate` | Every verification stage the scaffolded CI runs — codegen, `check` (the `--ci` rule), lint, typecheck, `audit`, tests — reported together; exits non-zero if any stage fails, and a stage that cannot run fails rather than skips | `bunx guren gate --changed` |
+| `gate` | Every verification stage the scaffolded CI runs — codegen, typecheck, lint, `check` (the `--ci` rule), `audit`, tests — reported together; exits non-zero if any stage fails, and a stage that cannot run fails rather than skips | `bunx guren gate --changed` |
 | `doctor` | Project health report (env, config, generated files) with actionable next steps | `bunx guren doctor --next` |
 | `context [Entity]` | Project context map — or, with an entity name, everything about one model: table, relationships, routes with schemas, pages with Props, resource, policy, linked docs (`--module` disambiguates, `"app"` = project root) | `bunx guren context User --json` |
 | `docs:graph` | The OKF docs relation graph: documents, entities, and code paths as nodes, verified relations as edges. `--entity <Model>` or `--path <file>` narrows to a neighborhood — ask "what governs this?" before renaming | `bunx guren docs:graph --path app/Http/Controllers/PostController.ts` |
@@ -170,8 +170,8 @@ them to files changed against the merge base with `main` — the fast
 path the agent-harness edit hook uses.
 
 `gate` is the one command that answers "is this change done?". It runs
-codegen, `check` under the `--ci` rule, lint (when the app has an
-`.oxlintrc.json`), typecheck, `audit`, and the test suite — the stages
+codegen, typecheck, lint (when the app has an `.oxlintrc.json`),
+`check` under the `--ci` rule, `audit`, and the test suite — the stages
 the scaffolded CI workflow runs — reports every stage, and exits
 non-zero if any failed. A stage that *cannot* run is a failure, not a
 skip: an `.oxlintrc.json` with no oxlint installed, a missing

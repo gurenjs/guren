@@ -1,12 +1,13 @@
 #!/usr/bin/env bun
 /**
  * Stop hook: when the agent ends a turn with uncommitted changes, run `guren gate`
- * (the CI stages: codegen, check, lint, typecheck, audit, test) and block the stop
+ * (the CI stages: codegen, typecheck, lint, check, audit, test) and block the stop
  * with the findings, so the fix happens in this turn rather than in CI.
  *
  * Two guards keep it from blocking forever: `stop_hook_active` (Claude Code sets
  * it when a Stop hook already blocked this stop, so the gate fires once per stop)
- * and a clean working tree. Exit codes: 0 = allow the stop, 2 = block with findings.
+ * and a clean working tree, which also means a turn that ends by committing is not
+ * gated here: run `guren gate` before committing. Exit codes: 0 = allow, 2 = block.
  */
 
 // A module, so the top-level awaits below typecheck.
@@ -16,7 +17,7 @@ interface HookInput {
   stop_hook_active?: boolean
 }
 
-let input: HookInput = {}
+let input: HookInput
 try {
   input = JSON.parse(await Bun.stdin.text()) as HookInput
 } catch {

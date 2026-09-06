@@ -29,8 +29,8 @@ import { checkRoutePathParams, discoverRoutePathFiles } from './route-path-check
 import { affectsRouteWiring, checkRouteRegistrarWiring } from './routes-check'
 import { checkRouteContracts } from './route-contract-check'
 import { checkAgentRoutes } from './agent-route-check'
-import { DEFAULT_ROUTES_FILE, loadRouteDefinitions } from './load-routes'
-import { resolveRoutesEntry } from './route-registrar'
+import { loadRouteDefinitions } from './load-routes'
+import { routesEntryOrDefault } from './route-registrar'
 import type { RouteDefinition } from '@guren/core'
 
 /**
@@ -77,6 +77,8 @@ export interface RunCheckOptions {
    * question, so `--changed` gates each as a unit rather than filtering inputs.
    */
   changed?: boolean
+  /** The changed set a caller already computed (`null` = don't filter); takes precedence over `changed`. */
+  changedFiles?: Set<string> | null
   /** Run doc-link checks only (docs/ frontmatter + @docs tags). */
   docs?: boolean
   /** Run spec drift checks only (docs/spec/ vs regenerated views). */
@@ -229,7 +231,7 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
   const checks: CheckResult[] = []
   const cache = new ParseCache()
 
-  const changedFiles = options.changed ? await getChangedFiles(cwd) : null
+  const changedFiles = options.changedFiles !== undefined ? options.changedFiles : options.changed ? await getChangedFiles(cwd) : null
   const filterChanged = (files: string[]): string[] =>
     changedFiles ? files.filter((f) => changedFiles.has(toPosixRelative(cwd, f))) : files
   // Whether any changed file could affect what the app's modules evaluate to:
@@ -335,7 +337,7 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     // The graph is loaded once here for 5.5, 7.7, 7.8 and 8.7 — two loads could
     // resolve different routes entries and disagree about what the app mounted.
     // The entry is probed: the API-only template ships routes/api.ts only.
-    const routeGraphFile = options.routesFile ?? (await resolveRoutesEntry(cwd)) ?? DEFAULT_ROUTES_FILE
+    const routeGraphFile = await routesEntryOrDefault(cwd, options.routesFile)
     let graph: Awaited<ReturnType<typeof loadRouteGraph>> | undefined
     if (sourceChanged) {
       graph = await loadRouteGraph(cwd, routeGraphFile)

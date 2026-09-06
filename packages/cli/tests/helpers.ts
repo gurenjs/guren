@@ -617,3 +617,62 @@ export function createConsolaStub(extra: Record<string, unknown> = {}): typeof r
     ...extra,
   })
 }
+
+/**
+ * The one spelling of an app `check` and `audit` pass on with nothing linked
+ * (measured): a registrar, its controller, and the two manifests `check` expects.
+ * The gate and hook tests spread a `package.json` over it.
+ */
+export const GATE_APP_FILES: Record<string, string> = {
+  'routes/web.ts': `class HomeController {
+  async index() { return null }
+}
+export default function registerRoutes(router: any) {
+  router.get('/', [HomeController, 'index'])
+}
+`,
+  'app/Http/Controllers/HomeController.ts': `export class HomeController {
+  async index() { return this.json({ ok: true }) }
+}
+`,
+  '.guren/routes.gen.ts': 'export {}\n',
+  '.guren/data.gen.ts': 'export {}\n',
+}
+
+export function gateAppFiles(scripts: Record<string, string>): Record<string, string> {
+  return { ...GATE_APP_FILES, 'package.json': JSON.stringify({ name: 'gate-fixture', scripts }) }
+}
+
+/** Make the workspace's oxlint resolvable from `baseDir`, as an app install would. */
+export async function linkOxlint(baseDir: string): Promise<void> {
+  await mkdir(join(baseDir, 'node_modules'), { recursive: true })
+  await symlink(join(repoRoot, 'node_modules', 'oxlint'), join(baseDir, 'node_modules', 'oxlint'), 'dir')
+}
+
+/**
+ * A shipped Claude Code hook, run the way Claude Code runs it: `bun <hook>` with
+ * the hook input on stdin, from a temp app root `setup` populates. Bun resolves the
+ * hook's `@guren/cli` import from the hook file's own location (this checkout), so
+ * the real CLI runs against the temp app.
+ */
+export async function runClaudeHook(
+  hook: string,
+  input: unknown,
+  setup: (dir: string) => void | Promise<void>,
+): Promise<{ exitCode: number; stderr: string }> {
+  const dir = await mkdtemp(join(tmpdir(), 'guren-hook-'))
+  try {
+    // Bun would otherwise auto-install an unresolvable bare specifier from the registry.
+    await writeFile(join(dir, 'bunfig.toml'), '[install]\nauto = "disable"\n')
+    await setup(dir)
+    const result = Bun.spawnSync([process.execPath, hook], {
+      cwd: dir,
+      stdin: Buffer.from(JSON.stringify(input)),
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    return { exitCode: result.exitCode, stderr: result.stderr.toString() }
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+}

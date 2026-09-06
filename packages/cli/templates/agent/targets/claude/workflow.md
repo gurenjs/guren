@@ -5,7 +5,7 @@ after edits to routes, controllers, models, schema, or pages, and runs oxlint on
 the edited file when the app has an `.oxlintrc.json` (`bunx guren add lint`
 writes one; warnings are reported too), feeding findings back immediately. A
 `Stop` hook (`.claude/hooks/gate-on-stop.ts`) runs `guren gate` when you finish a
-turn with uncommitted changes: codegen, `check`, lint, typecheck, `audit`, and
+turn with uncommitted changes: codegen, typecheck, lint, `check`, `audit`, and
 the test suite, the same stages CI runs. If any stage fails, the stop is blocked
 once and the findings come back to you — fix them in the same turn rather than
 leaving them for CI. Run `bunx guren gate` yourself before declaring a change

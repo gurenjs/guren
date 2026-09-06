@@ -1,26 +1,26 @@
 /**
  * `guren gate`: one exit-coded verdict on a change, composed from the checks the
- * scaffolded CI runs (codegen, check --ci, lint, typecheck, audit, test), so an
- * agent's "done", a pre-commit run, and CI judge by the same rule. Every stage runs
- * and reports. A stage that *cannot* run (tool missing, routes unloadable) fails
- * rather than skips: an unavailable check is not a green one. Only an app-declared
- * opt-out (no `.oxlintrc.json`) skips. Subprocess stages go through `exec`, the seam
- * tests fake.
+ * scaffolded CI runs, in its order (codegen, typecheck, lint, check --ci, audit,
+ * test), so an agent's "done", a pre-commit run, and CI judge by the same rule.
+ * Every stage runs and reports. A stage that *cannot* run (tool missing, routes
+ * unloadable) fails rather than skips: an unavailable check is not a green one.
+ * Only an app-declared opt-out (no `.oxlintrc.json`) skips. Subprocess stages go
+ * through `exec`, the seam tests fake.
  */
 
-import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
-import { dirname, join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { join, resolve } from 'node:path'
 import { consola } from 'consola'
 import { runAudit } from './audit'
 import { getChangedFiles } from './changed-files'
 import { runCheck } from './check'
-import { gatingResults } from './check-result'
-import { resolveRoutesEntry } from './route-registrar'
+import { formatFinding, gatingResults } from './check-result'
+import { cliEntry } from './cli-entry'
+import { isLintable, runOxlint } from './lint-run'
+import { bunExecutable, runCaptured, type CapturedExec, type CapturedRun } from './subprocess'
 
-export const GATE_STAGES = ['codegen', 'check', 'lint', 'typecheck', 'audit', 'test'] as const
+export const GATE_STAGES = ['codegen', 'typecheck', 'lint', 'check', 'audit', 'test'] as const
 
 export type GateStageName = (typeof GATE_STAGES)[number]
 
@@ -44,14 +44,8 @@ export interface GateReport {
   stages: GateStageResult[]
 }
 
-export interface GateExecResult {
-  exitCode: number
-  stdout: string
-  stderr: string
-}
-
-/** A subprocess run to completion. `command[0]` is the executable. */
-export type GateExec = (command: string[], cwd: string) => Promise<GateExecResult>
+export type GateExec = CapturedExec
+export type GateExecResult = CapturedRun
 
 export interface RunGateOptions {
   cwd?: string
@@ -60,71 +54,22 @@ export interface RunGateOptions {
    * typecheck, audit, and test answer a whole-app question and always run in full.
    */
   changed?: boolean
-  /** Scan dependencies in the audit stage (`bun audit`, needs registry access). Off so the gate stays hermetic. */
+  /**
+   * Scan dependencies in the audit stage (`bun audit`, needs registry access). Off so
+   * the gate stays hermetic; the scaffolded CI's `audit` step scans, so a CI that
+   * runs the gate instead passes `--deps`.
+   */
   deps?: boolean
   routesFile?: string
-  /** Runs codegen, lint, typecheck, and test. Defaults to a real subprocess. */
+  /** Defaults to a real subprocess. */
   exec?: GateExec
 }
 
 type StageOutcome = Omit<GateStageResult, 'name' | 'durationMs'>
 
-const LINTABLE = /\.(?:ts|tsx|js|jsx|mjs|cjs)$/u
-const UNLINTED_PREFIXES = ['.guren/', 'node_modules/', 'dist/', 'public/build/']
 /** Findings a stage may report before the rest collapses into one "and N more" line. */
 const MAX_FINDINGS = 40
 const OUTPUT_TAIL_LINES = 20
-
-function bunExecutable(): string {
-  return process.versions.bun ? process.execPath : 'bun'
-}
-
-export const defaultGateExec: GateExec = (command, cwd) =>
-  new Promise((resolvePromise, rejectPromise) => {
-    const [executable, ...args] = command
-    if (!executable) {
-      rejectPromise(new Error('empty command'))
-      return
-    }
-    // Colour codes would end up inside findings the agent reads back.
-    const child = spawn(executable, args, {
-      cwd,
-      env: { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0' },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
-    let stdout = ''
-    let stderr = ''
-    child.stdout.on('data', (chunk: Buffer | string) => {
-      stdout += chunk.toString()
-    })
-    child.stderr.on('data', (chunk: Buffer | string) => {
-      stderr += chunk.toString()
-    })
-    child.on('error', rejectPromise)
-    child.on('close', (code) => resolvePromise({ exitCode: code ?? 1, stdout, stderr }))
-  })
-
-/**
- * The CLI entry next to this module: `dist/bin.js` in a build, `src/bin.ts` from
- * source. Only reached when the app has no `codegen` script of its own.
- */
-function cliBin(): string {
-  const here = dirname(fileURLToPath(import.meta.url))
-  for (const name of ['bin.js', 'bin.ts']) {
-    const candidate = join(here, name)
-    if (existsSync(candidate)) return candidate
-  }
-  return fileURLToPath(import.meta.resolve('@guren/cli/bin'))
-}
-
-/** The oxlint shim, wherever the install put it: a workspace may hoist it to an ancestor. */
-function resolveOxlint(cwd: string): string | null {
-  for (let dir = cwd; ; dir = dirname(dir)) {
-    const candidate = join(dir, 'node_modules', 'oxlint', 'bin', 'oxlint')
-    if (existsSync(candidate)) return candidate
-    if (dirname(dir) === dir) return null
-  }
-}
 
 async function readScripts(cwd: string): Promise<Record<string, string>> {
   try {
@@ -144,32 +89,9 @@ function nonEmptyLines(text: string): string[] {
     .filter((line) => line.trim() !== '')
 }
 
-function outputTail(result: GateExecResult): string[] {
-  return nonEmptyLines(`${result.stdout}\n${result.stderr}`).slice(-OUTPUT_TAIL_LINES)
-}
-
 function capFindings(findings: string[]): string[] {
   if (findings.length <= MAX_FINDINGS) return findings
   return [...findings.slice(0, MAX_FINDINGS), `... and ${findings.length - MAX_FINDINGS} more`]
-}
-
-function isLintable(relPath: string): boolean {
-  return LINTABLE.test(relPath) && !UNLINTED_PREFIXES.some((prefix) => relPath.startsWith(prefix))
-}
-
-/** Findings from a subprocess: the lines matching `pattern`, or the output tail when none do. */
-function subprocessOutcome(
-  label: string,
-  result: GateExecResult,
-  pattern: RegExp,
-): StageOutcome {
-  if (result.exitCode === 0) return { status: 'pass', findings: [] }
-  const matched = nonEmptyLines(`${result.stdout}\n${result.stderr}`).filter((line) => pattern.test(line))
-  return {
-    status: 'fail',
-    reason: `\`${label}\` exited ${result.exitCode}`,
-    findings: capFindings(matched.length > 0 ? matched : outputTail(result)),
-  }
 }
 
 interface StageContext {
@@ -181,31 +103,39 @@ interface StageContext {
   deps: boolean
 }
 
-async function codegenStage(ctx: StageContext): Promise<StageOutcome> {
-  const bun = bunExecutable()
-  const [label, command] = ctx.scripts.codegen
-    ? ['bun run codegen', [bun, 'run', 'codegen']]
-    : ['guren codegen', [bun, cliBin(), 'codegen']]
-  return subprocessOutcome(label, await ctx.exec(command, ctx.cwd), /error|Error|failed/u)
-}
-
-async function checkStage(ctx: StageContext): Promise<StageOutcome> {
-  const report = await runCheck({
-    cwd: ctx.cwd,
-    routesFile: ctx.routesFile,
-    changed: ctx.changedFiles !== null,
-    json: true,
-  })
-  const failing = gatingResults(report)
+/**
+ * A stage backed by the app's own package.json script, else `fallback`, else a
+ * failure. Findings are the output lines matching `pattern`, or its tail when
+ * none do.
+ */
+async function scriptStage(
+  ctx: StageContext,
+  script: string,
+  fallback: [label: string, command: string[]] | null,
+  pattern: RegExp,
+): Promise<StageOutcome> {
+  let label: string
+  let command: string[]
+  if (ctx.scripts[script]) {
+    label = `bun run ${script}`
+    command = [bunExecutable(), 'run', script]
+  } else if (fallback) {
+    ;[label, command] = fallback
+  } else {
+    return {
+      status: 'fail',
+      findings: [],
+      reason: `no "${script}" script in package.json (\`bunx guren doctor\` can write it)`,
+    }
+  }
+  const result = await ctx.exec(command, ctx.cwd)
+  if (result.exitCode === 0) return { status: 'pass', findings: [] }
+  const lines = nonEmptyLines(`${result.stdout}\n${result.stderr}`)
+  const matched = lines.filter((line) => pattern.test(line))
   return {
-    status: failing.length > 0 ? 'fail' : 'pass',
-    findings: capFindings(
-      failing.map((check) => {
-        const location = check.filePath ? ` [${check.filePath}]` : ''
-        const suggestion = check.suggestion ? ` -> ${check.suggestion}` : ''
-        return `${check.title}: ${check.message}${location}${suggestion}`
-      }),
-    ),
+    status: 'fail',
+    reason: `\`${label}\` exited ${result.exitCode}`,
+    findings: capFindings(matched.length > 0 ? matched : lines.slice(-OUTPUT_TAIL_LINES)),
   }
 }
 
@@ -213,111 +143,86 @@ async function lintStage(ctx: StageContext): Promise<StageOutcome> {
   if (!existsSync(join(ctx.cwd, '.oxlintrc.json'))) {
     return { status: 'skip', findings: [], reason: 'no .oxlintrc.json (`bunx guren add lint` opts in)' }
   }
-  const shim = resolveOxlint(ctx.cwd)
-  if (shim === null) {
+  let files: string[] = []
+  if (ctx.changedFiles !== null) {
+    files = [...ctx.changedFiles].filter(isLintable).sort()
+    if (files.length === 0) return { status: 'skip', findings: [], reason: 'no changed lintable files' }
+  }
+  const run = await runOxlint(ctx.cwd, files, ctx.exec)
+  if (run.kind === 'not-installed') {
     return {
       status: 'fail',
       findings: [],
       reason: '.oxlintrc.json is present but oxlint is not installed: run `bun install`',
     }
   }
-  let files: string[] = []
-  if (ctx.changedFiles !== null) {
-    files = [...ctx.changedFiles].filter(isLintable).sort()
-    if (files.length === 0) return { status: 'skip', findings: [], reason: 'no changed lintable files' }
-  }
-  // The shim under Bun needs no Node. A file the config ignores is "no files to lint", not a failure.
-  const result = await ctx.exec(
-    [bunExecutable(), shim, '--no-error-on-unmatched-pattern', '--format', 'unix', ...files],
-    ctx.cwd,
-  )
-  const findings = nonEmptyLines(result.stdout).filter((line) => /^[^\s:]+:\d+:\d+:/u.test(line))
-  if (result.exitCode !== 0 && findings.length === 0) {
-    // A config or plugin-load failure has no file prefix; it must not read as clean.
+  if (run.exitCode !== 0 && run.findings.length === 0) {
     return {
       status: 'fail',
-      reason: `oxlint exited ${result.exitCode} without linting`,
-      findings: outputTail(result),
+      reason: `oxlint exited ${run.exitCode} without linting`,
+      findings: nonEmptyLines(run.output).slice(-OUTPUT_TAIL_LINES),
     }
   }
   // Warnings do not fail (the CI `bun run lint` rule) but are reported: the
   // agent that just wrote the code is the one who can act on them.
-  return { status: result.exitCode === 0 ? 'pass' : 'fail', findings: capFindings(findings) }
+  return { status: run.exitCode === 0 ? 'pass' : 'fail', findings: capFindings(run.findings) }
 }
 
-async function typecheckStage(ctx: StageContext): Promise<StageOutcome> {
-  if (!ctx.scripts.typecheck) {
-    return {
-      status: 'fail',
-      findings: [],
-      reason: 'no "typecheck" script in package.json: add "typecheck": "tsc --noEmit" (`bunx guren doctor` can write it)',
-    }
-  }
-  return subprocessOutcome(
-    'bun run typecheck',
-    await ctx.exec([bunExecutable(), 'run', 'typecheck'], ctx.cwd),
-    /error TS\d+/u,
-  )
+async function checkStage(ctx: StageContext): Promise<StageOutcome> {
+  const report = await runCheck({
+    cwd: ctx.cwd,
+    routesFile: ctx.routesFile,
+    changedFiles: ctx.changedFiles,
+    json: true,
+  })
+  const failing = gatingResults(report)
+  return { status: failing.length > 0 ? 'fail' : 'pass', findings: capFindings(failing.map(formatFinding)) }
 }
 
 async function auditStage(ctx: StageContext): Promise<StageOutcome> {
   const report = await runAudit({ cwd: ctx.cwd, routesFile: ctx.routesFile, deps: ctx.deps })
   const failing = report.findings.filter((finding) => finding.status === 'fail')
-  const findings = capFindings(
-    failing.map((finding) => {
-      const location = finding.filePath
-        ? ` [${finding.filePath}${finding.line ? `:${finding.line}` : ''}]`
-        : ''
-      const suggestion = finding.suggestion ? ` -> ${finding.suggestion}` : ''
-      return `${finding.title}: ${finding.message}${location}${suggestion}`
-    }),
-  )
+  const findings = capFindings(failing.map(formatFinding))
   // The `audit` command only warns here; a gate that passed with the
   // route-level rules never having run would be a vacuous green.
   if (!report.routesAnalyzed) {
     return {
       status: 'fail',
       findings,
-      reason: 'route-level checks did not run (routes could not be loaded; pass --routes if the entry is not routes/web.ts)',
+      reason: 'route-level checks did not run (routes could not be loaded; pass --routes if the entry is elsewhere)',
     }
   }
   return { status: failing.length > 0 ? 'fail' : 'pass', findings }
 }
 
-async function testStage(ctx: StageContext): Promise<StageOutcome> {
-  const bun = bunExecutable()
-  const [label, command] = ctx.scripts.test ? ['bun run test', [bun, 'run', 'test']] : ['bun test', [bun, 'test']]
-  return subprocessOutcome(label, await ctx.exec(command, ctx.cwd), /^\(fail\)|^error:|^\s*\d+ fail\b/u)
-}
-
 const STAGE_RUNNERS: Record<GateStageName, (ctx: StageContext) => Promise<StageOutcome>> = {
-  codegen: codegenStage,
-  check: checkStage,
+  codegen: (ctx) => scriptStage(ctx, 'codegen', ['guren codegen', [bunExecutable(), cliEntry(), 'codegen']], /error|Error|failed/u),
+  typecheck: (ctx) => scriptStage(ctx, 'typecheck', null, /error TS\d+/u),
   lint: lintStage,
-  typecheck: typecheckStage,
+  check: checkStage,
   audit: auditStage,
-  test: testStage,
+  test: (ctx) => scriptStage(ctx, 'test', ['bun test', [bunExecutable(), 'test']], /^\(fail\)|^error:|^\s*\d+ fail\b/u),
 }
 
 export async function runGate(options: RunGateOptions = {}): Promise<GateReport> {
   const cwd = resolve(options.cwd ?? process.cwd())
   // Outside a git repo there is nothing to narrow to, so the gate runs in full.
-  const changedFiles = options.changed ? await getChangedFiles(cwd) : null
-  // `check` probes the routes entry itself; `audit` defaults to routes/web.ts, so an
-  // API-only app (routes/api.ts) would report its routes as unloadable. Probe once here.
-  const routesFile = options.routesFile ?? (await resolveRoutesEntry(cwd)) ?? undefined
+  const [changedFiles, scripts] = await Promise.all([
+    options.changed ? getChangedFiles(cwd) : null,
+    readScripts(cwd),
+  ])
   const ctx: StageContext = {
     cwd,
-    exec: options.exec ?? defaultGateExec,
-    scripts: await readScripts(cwd),
+    exec: options.exec ?? runCaptured,
+    scripts,
     changedFiles,
-    routesFile,
+    routesFile: options.routesFile,
     deps: options.deps ?? false,
   }
 
   const stages: GateStageResult[] = []
-  // Sequential on purpose: codegen must precede typecheck, and the stages
-  // compete for the same cores.
+  // Sequential on purpose: codegen must precede typecheck, check, and test (they
+  // read `.guren/`), and the stages compete for the same cores.
   for (const name of GATE_STAGES) {
     const started = performance.now()
     let outcome: StageOutcome
@@ -349,14 +254,18 @@ export function describeGateFailures(report: GateReport): string {
   return lines.join('\n')
 }
 
+const STAGE_STYLE: Record<GateStageStatus, { label: string; log: (message: string) => void }> = {
+  pass: { label: '[ok]', log: (message) => consola.success(message) },
+  fail: { label: '[fail]', log: (message) => consola.error(message) },
+  skip: { label: '[skip]', log: (message) => consola.info(message) },
+}
+
 export function renderGateReport(report: GateReport): void {
   consola.box(`Guren gate for ${report.cwd}${report.changed ? ' (check and lint narrowed to changed files)' : ''}`)
 
   for (const stage of report.stages) {
-    const prefix = stage.status === 'pass' ? '[ok]' : stage.status === 'fail' ? '[fail]' : '[skip]'
-    const log = stage.status === 'pass' ? consola.success : stage.status === 'fail' ? consola.error : consola.info
-    const reason = stage.reason ? `: ${stage.reason}` : ''
-    log(`${prefix} ${stage.name} (${stage.durationMs}ms)${reason}`)
+    const { label, log } = STAGE_STYLE[stage.status]
+    log(`${label} ${stage.name} (${stage.durationMs}ms)${stage.reason ? `: ${stage.reason}` : ''}`)
     for (const finding of stage.findings) {
       consola.info(`       - ${finding}`)
     }

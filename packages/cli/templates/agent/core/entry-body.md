@@ -67,7 +67,7 @@ bun run db:seed                    # run seeders
 # Build & test
 bun run build
 bun run test
-bunx guren gate                    # every CI stage (codegen, check, lint, typecheck, audit, test); exit 0 = done
+bunx guren gate                    # every CI stage (codegen, typecheck, lint, check, audit, test); exit 0 = done
 ```
 
 ## MCP Server (AI Agent Integration)

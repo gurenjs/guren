@@ -4,8 +4,8 @@
 
 `guren gate`: one exit-coded verdict on a change
 
-`bunx guren gate` runs the stages the scaffolded CI runs — codegen, `check`
-(the `--ci` rule), lint, typecheck, `audit`, and the test suite — reports every
+`bunx guren gate` runs the stages the scaffolded CI runs — codegen, typecheck, lint, `check`
+(the `--ci` rule), `audit`, and the test suite — reports every
 stage, and exits non-zero if any fails. A stage that cannot run (no oxlint
 behind an `.oxlintrc.json`, no `typecheck` script, routes that will not load)
 fails rather than skips; only an app with no `.oxlintrc.json` skips lint.
@@ -22,4 +22,10 @@ hand (or rerun `agent:init --force`); `agent:sync` delivers the hook file. The
 
 The edit hook's `guren check` step now applies the `check --ci` rule (warns
 count, advisory checks do not) instead of reporting failures only, so the three
-places that judge a change — the edit hook, the gate, and CI — agree.
+places that judge a change — the edit hook, the gate, and CI — agree. The hook
+now reaches its oxlint run through `@guren/cli` as well, and reports a CLI it
+cannot resolve rather than staying silent.
+
+`guren audit` probes the app's routes entry the way `check` does, so an
+API-only app (`routes/api.ts`, no `routes/web.ts`) is audited without
+`--routes`; the flag still overrides.

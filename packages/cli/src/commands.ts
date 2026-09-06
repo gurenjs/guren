@@ -2505,9 +2505,6 @@ const checkCommand = defineCommand({
     if ((args.arch || args.docs || args.spec || args.i18n) && report.failCount > 0) {
       process.exitCode = 1
     }
-    // --ci also gates on warns: most integrity problems report as 'warn', so a
-    // fail-only gate would wave nearly everything through. Advisory checks are
-    // exempt, and the flag lives on the result so JSON consumers see the rule.
     if (args.ci && gatingResults(report).length > 0) {
       process.exitCode = 1
     }
@@ -2518,7 +2515,7 @@ const gateCommand = defineCommand({
   meta: {
     name: 'gate',
     description:
-      'Run every verification stage the CI runs (codegen, check, lint, typecheck, audit, test) and exit non-zero if any fails.',
+      'Run every verification stage the CI runs (codegen, typecheck, lint, check, audit, test) and exit non-zero if any fails.',
   },
   args: {
     json: {
@@ -2531,7 +2528,6 @@ const gateCommand = defineCommand({
     },
     deps: {
       type: 'boolean',
-      default: false,
       description: 'Scan dependencies in the audit stage via bun audit (requires registry access).',
     },
     routes: {
@@ -2546,7 +2542,7 @@ const gateCommand = defineCommand({
   async run({ args }) {
     const report = await runGate({
       cwd: args.app,
-      changed: Boolean(args.changed),
+      changed: args.changed,
       deps: args.deps,
       routesFile: args.routes,
     })

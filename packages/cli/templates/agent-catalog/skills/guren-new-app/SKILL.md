@@ -25,7 +25,7 @@ integrity commands you can run instead of guessing — `guren context` (project
 map + API signature digest), `guren check` (route ↔ controller ↔ page
 consistency, doc links, spec freshness), `guren audit` (validation and auth
 on mutating routes, raw SQL, secrets), and `guren gate` (every CI stage in one
-exit code: codegen, check, lint, typecheck, audit, tests). Those live in the
+exit code: codegen, typecheck, lint, check, audit, tests). Those live in the
 app's `@guren/cli` dependency, so they exist only once an app does.
 
 ## Before you run anything

@@ -85,8 +85,8 @@ yourself:
    `bunx guren check`, and `bunx guren check --changed` to scope it to your
    diff. Fix what it reports before moving on.
 3. **When the change is complete**: `bunx guren gate`, and fix what it
-   reports until it exits 0. It runs the stages CI runs — codegen, `check`,
-   lint, typecheck, `audit` (validation and auth gaps on mutating routes, raw
+   reports until it exits 0. It runs the stages CI runs — codegen, typecheck,
+   lint, `check`, `audit` (validation and auth gaps on mutating routes, raw
    SQL, secrets), and the test suite — and a change is not done while any of
    them fails.
 

@@ -1,9 +1,9 @@
 import { spawn } from 'node:child_process'
 import { resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import type { HmrContext, Logger, Plugin, ResolvedConfig, ViteDevServer } from 'vite'
 import { MODELS_DIR, RESOURCES_DIR, toPosixRelative } from '../discovery'
 import { escapeRegExp } from '../utils'
+import { cliEntry } from '../cli-entry'
 
 export interface RouteTypesPluginOptions {
   /**
@@ -62,16 +62,6 @@ function resolvePathOptions(options: RouteTypesPluginOptions) {
     pagesDir: options.pagesDir ?? DEFAULT_PAGES_DIR,
     resourcesDir: options.resourcesDir ?? RESOURCES_DIR,
   }
-}
-
-let cachedCliEntry: string | undefined
-
-// Self-resolving the package name needs no linked `.bin/guren` (`bun x guren`
-// hits the npm registry, where the package does not exist). Lazy so consumers
-// overriding `args` never resolve, and failures surface as generation errors.
-function cliEntry(): string {
-  cachedCliEntry ??= fileURLToPath(import.meta.resolve('@guren/cli/bin'))
-  return cachedCliEntry
 }
 
 export function resolveCodegenCommand(options: RouteTypesPluginOptions): {
