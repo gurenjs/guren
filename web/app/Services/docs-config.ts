@@ -101,7 +101,7 @@ const TUTORIAL_SECTIONS: readonly DocSectionConfig[] = [
   // as they ship. The mini-blog series stays until the chapters absorbing it land.
   {
     title: { en: 'The Guren Tutorial', ja: 'Guren チュートリアル' },
-    slugs: ['00-overview', '01-zero-to-deployed', '02-one-request-by-hand', '03-the-posts-table', '04-validation-and-resources', '05-users-and-passwords', '06-protecting-routes', '07-authorization', '08-teach-the-agent'],
+    slugs: ['00-overview', '01-zero-to-deployed', '02-one-request-by-hand', '03-the-posts-table', '04-validation-and-resources', '05-users-and-passwords', '06-protecting-routes', '07-authorization', '08-teach-the-agent', '09-relationships', '10-files', '11-events-and-mail'],
   },
   {
     title: { en: 'Build a Mini Blog', ja: 'ミニブログを作る' },

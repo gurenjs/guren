@@ -57,7 +57,7 @@ Each chapter starts where the previous one ended. Follow them in order.
 | 8 | [Teach the Agent Your Project](./08-teach-the-agent.md) | 60 min |
 | 9 | [Relationships](./09-relationships.md) | 90 min |
 | 10 | [Files](./10-files.md) | 60 min |
-| 11 | Events and Mail | coming |
+| 11 | [Events and Mail](./11-events-and-mail.md) | 75 min |
 | 12 | Your App as an Agent's Tool | coming |
 | 13 | The System, Documented | coming |
 | 14 | Production | coming |
