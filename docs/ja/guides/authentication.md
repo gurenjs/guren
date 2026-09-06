@@ -221,28 +221,36 @@ app.use('*', createSessionMiddleware())
 候補となるストアが複数あるなら、一度宣言して環境ごとに選びます。プロバイダの `register()` で `session` キーに `SessionManager` を bind すると、`AuthServiceProvider` は起動時にそれを組み込んだセッションミドルウェアを構築し、ストア自体は最初のリクエストで解決します:
 
 ```ts
-import { ServiceProvider, SessionManager, type SessionConfig } from '@guren/core'
+import { createSessionManager, ServiceProvider, type SessionConfig } from '@guren/core'
 import { createRedisClient } from '@guren/core/redis'
+import { sessions } from '@/db/schema'
 
 const sessionConfig: SessionConfig = {
-  default: process.env.SESSION_DRIVER ?? 'memory',
+  default: process.env.SESSION_DRIVER ?? 'database',
   ttlSeconds: 60 * 60 * 2,
   stores: {
-    memory: { driver: 'memory' },
+    // 再起動・isolate・コールドスタートをまたいで残ります。接続は
+    // `configureOrm()` が確立済みのもの(Postgres / MySQL / SQLite / D1)を使います。
+    database: { driver: 'database', table: sessions },
     // `client` は関数でも構いません。このストアが最初に使われたときに実行されるので、
     // 宣言しただけで選ばれていないストアは接続を開きません。
     redis: { driver: 'redis', client: () => createRedisClient({ url: process.env.REDIS_URL }) },
+    memory: { driver: 'memory' },
   },
 }
 
 export default class SessionProvider extends ServiceProvider {
   register(): void {
-    this.container.instance('session', new SessionManager(sessionConfig))
+    this.container.instance('session', createSessionManager(sessionConfig))
   }
 }
 ```
 
-マネージャ側の cookie と TTL 設定が基本で、`auth.sessionOptions` がフィールド単位で上書きします。`auth.sessionOptions.store` とマネージャの両方を設定すると、どちらかを黙って選ぶのではなく起動時にエラーになります。`default` ストアのドライバが未登録の場合も同様に起動で失敗し、未宣言の `default` 名は構築時に失敗します。いずれの場合も `SESSION_DRIVER` の typo は最初のログインではなく起動で止まります。`memory` は常に宣言済みなので、`SESSION_DRIVER=memory` はエントリなしで動きます。マネージャは `boot()` ではなく `register()` で bind してください。`AuthServiceProvider` はアプリのプロバイダより先に boot します(deferred provider は例外で、最初のリクエストで起動されます)。プラグインは `SessionDrivers` インターフェースを augmentation で拡張し、`manager.registerDriver(name, factory)` を呼ぶことでドライバを追加できます。解決は遅延なので、プラグインの `register()` が設定の宣言より後に走っても構いません。ORM のテーブルを使う `database` ドライバと、このファイルを生成する `guren add session` は RFC 0020 の次のパートです。
+`createSessionManager()` は `new SessionManager()` に `database` ドライバを登録したものです。このドライバはテーブルを ORM のモデルで包むので、ORM に依存しない HTTP 層ではなく `@guren/core` だけが提供できます。`database` ストアを宣言するなら常にこちらを使ってください。別の方法で組み立てたマネージャには `registerDatabaseSessionDriver(manager)` でドライバを足せます。
+
+`database` ドライバは `db/schema.ts` の `sessions` テーブルとマイグレーションを必要とします。列は `id`(text 主キー)・`data`・`expiresAt` の3つで、方言ごとの定義は [Cloudflare ガイド](./cloudflare.md#sessions-and-oauth-state-must-be-database-backed) にあります。期限切れ行は `manager.pruneExpired()` をスケジュール実行して掃除してください(`read()` は既に期限切れを不在として扱います)。
+
+マネージャ側の cookie と TTL 設定が基本で、`auth.sessionOptions` がフィールド単位で上書きします。`auth.sessionOptions.store` とマネージャの両方を設定すると、どちらかを黙って選ぶのではなく起動時にエラーになります。`default` ストアのドライバが未登録の場合も同様に起動で失敗し、未宣言の `default` 名は構築時に失敗します。いずれの場合も `SESSION_DRIVER` の typo は最初のログインではなく起動で止まります。`memory` は常に宣言済みなので、`SESSION_DRIVER=memory` はエントリなしで動きます。マネージャは `boot()` ではなく `register()` で bind してください。`AuthServiceProvider` はアプリのプロバイダより先に boot します(deferred provider は例外で、最初のリクエストで起動されます)。プラグインは `SessionDrivers` インターフェースを augmentation で拡張し、`manager.registerDriver(name, factory)` を呼ぶことでドライバを追加できます。解決は遅延なので、プラグインの `register()` が設定の宣言より後に走っても構いません。
 
 > [!WARNING]
 > Cloudflare Workers、AWS Lambda、Vercel ではリクエスト間でメモリを共有しないため、デフォルトの `MemorySessionStore` はログイン直後のリクエストでセッションを失います。ミドルウェアはその状況を検出するとプロセスごとに一度警告し、`guren check` とデプロイビルドは事前に警告します。
