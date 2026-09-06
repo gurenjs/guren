@@ -107,18 +107,31 @@ verified: { by: human:grace, at: 2026-07-26T09:00:00Z }
   信頼可能にします。
 - モデルとコントローラからは JSDoc タグで逆リンクを張れます:
   `/** @docs docs/adr/0001-billing.md */`(それ以外のファイルのタグは走査されません)
+- `issues` は、その文書が属するGitHubのIssueやPull Requestを指します:
+  `issues: [412, "acme/shop#398", https://github.com/acme/shop/pull/9]`。
+  番号だけならアプリ自身のリポジトリ(`origin` リモートから解決)です。
+  `#412` の書き方は引用符で囲んでください。引用符のない `#` はYAMLの
+  コメント開始で、行の残りを飲み込みます。タスク一覧・進捗・担当は
+  Issue側に置き、文書は意思決定とこのリンクだけを持ちます。`guren check`
+  は読めない項目を警告しますが、GitHubには一切問い合わせないので
+  ゲートはオフラインのままです。
 
 意思決定はジェネレータで記録します:
 
 ```bash
-bunx guren make:adr "Billing cycle is end-of-month" --entity Invoice
+bunx guren make:adr "Billing cycle is end-of-month" --entity Invoice --issue 412
 ```
 
 `docs/adr/` 配下に採番されたファイルを作り、frontmatterを記入済みに
 します。`--entity` は既存のコードから `entities:` と `related:` を
 自動補完し、`--by` は `generated.by` のactor(既定はgitの作者)を
-上書きします。新規Gurenアプリには、この規約を説明するシードADRが
-最初から同梱されています。
+上書きします。`--issue`(複数指定可)は `issues:` を埋めます。
+新規Gurenアプリには、この規約を説明するシードADRが最初から同梱されています。
+
+`bunx guren context Invoice` の末尾には **Linked issues** セクションが付き、
+リンクされた文書が宣言するIssueが並びます。次にそのモデルを触る人が、
+既に紐付いている作業に気づけるためのものです。内容はfrontmatterだけから
+読み、状態や担当は `gh issue view` 一発で確認します。
 
 ## 閲覧: ドキュメントビューアー
 

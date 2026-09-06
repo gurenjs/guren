@@ -134,7 +134,7 @@ JSON(`this.json(...)`)を返すため、そのまま型検査を通り、`routes
 | `make:command <Name>` | `app/Console/Commands` にコンソールコマンドを生成。`--command <name>` で呼び出し名を指定。`src/console.ts` への登録が必要（[コンソールコマンドガイド](./console.md)参照） | `bunx guren make:command SendDigest --command reports:digest` |
 | `make:policy <Name>` | 所有者ベースのデフォルトを備えた認可ポリシーを `app/Policies` に生成 | `bunx guren make:policy Post` |
 | `make:validator <Name>` | Zodバリデーションスキーマ(ルートパラメータ・一覧クエリ・ペイロード)を `app/Http/Validators` に生成。`--fields` は `make:feature` と同じ構文 | `bunx guren make:validator Post --fields "title:string,body:text"` |
-| `make:adr "<Title>"` | アーキテクチャ意思決定を採番付きファイルとして `docs/adr/` に記録(リンク可能なfrontmatter付き)。`--entity <Model>` で `entities:`/`related:` を自動補完 | `bunx guren make:adr "Billing cycle is end-of-month" --entity Invoice` |
+| `make:adr "<Title>"` | アーキテクチャ意思決定を採番付きファイルとして `docs/adr/` に記録(リンク可能なfrontmatter付き)。`--entity <Model>` で `entities:`/`related:` を自動補完、`--issue <ref>`(複数可)でGitHubのIssue/PRへの `issues:` リンクを記入 | `bunx guren make:adr "Billing cycle is end-of-month" --entity Invoice --issue 412` |
 
 > **Note:** `make:*` は既存ファイルを上書きしません。必要なら `--force` を付けてください。
 

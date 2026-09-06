@@ -5,6 +5,7 @@ import {
   type DocFrontmatterValue,
 } from './docs-frontmatter'
 import { extractMarkdownLinks } from './docs-links'
+import { parseIssueRef, type DocIssueRef } from './issue-refs'
 import {
   collectFiles,
   listAppRoots,
@@ -62,6 +63,10 @@ export interface DocRef {
   verified: DocActorEvent[]
   /** OKF `stale_after` (YYYY-MM-DD) — content is stale on/after this day. */
   staleAfter?: string
+  /** GitHub issues/PRs this document belongs to (frontmatter `issues`, RFC 0018). */
+  issues: DocIssueRef[]
+  /** `issues` entries in no accepted form, for the checker to report. */
+  malformedIssues: string[]
   /**
    * Local markdown link targets in the body — OKF's relation mechanism.
    * External links, bare anchors and links inside code are excluded.
@@ -122,6 +127,7 @@ export async function scanDocs(cwd: string): Promise<DocRef[]> {
             const parsed = parseDocFrontmatter(source)
             const body = parsed?.body ?? source
             const data = parsed?.data ?? {}
+            const issueEntries = toStringList(data.issues).map((raw) => ({ raw, ref: parseIssueRef(raw) }))
             return {
               path: toPosixRelative(cwd, file),
               module: root.module,
@@ -139,6 +145,8 @@ export async function scanDocs(cwd: string): Promise<DocRef[]> {
               // rather than read it as absent.
               staleAfter:
                 'stale_after' in data ? (toScalar(data.stale_after) ?? '') : undefined,
+              issues: issueEntries.flatMap(({ ref }) => (ref ? [ref] : [])),
+              malformedIssues: issueEntries.flatMap(({ raw, ref }) => (ref ? [] : [raw])),
               links: parsed ? extractMarkdownLinks(body) : [],
               hasFrontmatter: parsed !== null,
             }
