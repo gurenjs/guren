@@ -1,5 +1,117 @@
 # @guren/cli
 
+## 2.18.0
+
+### Minor Changes
+
+- 52a23b1: `guren add session`: database-backed sessions in one command (RFC 0020 Part 2b)
+
+  A scaffolded app that added authentication kept its sessions in process
+  memory. That is correct on one long-lived Bun server and drops every login on
+  Cloudflare Workers, Lambda, or Vercel, where requests share no memory — and it
+  only reproduces after deploying.
+
+  - **`bunx guren add session`** writes the `sessions` table into `db/schema.ts`
+    (per dialect, with an `expires_at` index), generates its migration,
+    scaffolds `config/session.ts` and `app/Providers/SessionProvider.ts`, wires
+    the provider into `createApp()`, registers `sessions:prune` in
+    `src/console.ts`, and appends `SESSION_DRIVER` to `.env.example` and `.env`.
+    An existing `sessions` table or session config is left alone, and an app with
+    no `db/schema.ts` gets guidance rather than a config it cannot compile.
+  - **`guren add auth` (and `make:auth`) runs it**, before generating its own
+    migration, so one drizzle-kit run covers users and sessions. `make:auth
+--no-session` opts out, and an app that already binds a `session` manager is
+    left alone. Without `--install`, `make:auth` writes the files and leaves
+    `src/app.ts` and `src/console.ts` for you, as it always has.
+  - **`SessionsPruneCommand`** (`sessions:prune`, from `@guren/core`) sweeps
+    expired rows through the bound manager; it fails rather than exiting 0 when
+    no manager is bound.
+  - The scaffolded `.env.example` no longer ships a `SESSION_DRIVER` line that
+    nothing read; the blueprint adds it when it adds the config that reads it.
+  - `Command.resolveOptional()` (`@guren/server`): `resolve()` for a service a
+    command tolerates being absent, so one does not have to reach past its own
+    injected container to a process global.
+
+- 2894c60: Run the deploy-runtime checks where builds run, not only in `guren doctor` (RFC 0020 Part 0)
+
+  An app that keeps sessions in `MemorySessionStore` works on one Bun server and
+  loses every login on Cloudflare Workers, Lambda, or Vercel, where requests share
+  no memory. `guren doctor` has reported that, along with a Bun-only
+  `ScryptHasher` and filesystem provider discovery, but nothing in the path to a
+  deploy ran `doctor`.
+
+  - `guren check` now reports the same three verdicts for an app that declares a
+    deploy plugin or the Lambda adapter, as advisory results: they print in the
+    report and in `--json`, and `check --ci` and `guren gate` never fail on them,
+    because the scan reads constructions rather than intent (a custom
+    `SessionStore` passed as `store:` reads as unbacked). Apps with no deploy
+    target see nothing new.
+  - `cloudflare:build`, `lambda:build`, and `vercel:build` print the failing
+    verdicts before the app build, prefixed with the build's label, and go on to
+    build. A scan that cannot run says so in one line rather than staying silent.
+  - `@guren/cli` exports `analyzeDeployRuntime`, `judgeDeployRuntime`, and
+    `checkDeployRuntime`; `@guren/core/internal/deploy-check` exports
+    `reportDeployRuntimeHazards`, the helper the three builds share. `doctor`'s
+    output is unchanged: it maps the same verdicts onto its checks.
+
+- 65e5a14: `make:agent` output typechecks in a fresh app, and `tool:list` finds `routes/api.ts`
+
+  `make:agent` now writes what its class needs and never had: `config/env.ts`
+  with the `Env` interface the scaffold imports (a D1 binding and a commented
+  slot for the agent's Durable Object namespace — created when absent, left alone
+  when the file already exports `Env`), the `import type { Env } from
+'@/config/env'` line in the class, and `@cloudflare/workers-types` appended in
+  place to `compilerOptions.types` in `tsconfig.json`. A tsconfig it cannot patch
+  — no `types` array, comments, none at all — gets the line to paste, and an app
+  missing the dependency is told to `bun add -d @cloudflare/workers-types`.
+
+  `guren tool:list`, `tool:inspect` and `route:list` resolve the routes entry
+  through the same probe `check` and `audit` use, so an API-only app whose routes
+  live in `routes/api.ts` works without `--routes`; the flag still overrides. The
+  degrading loader behind `guren context <Entity>`, `context --route` and
+  `spec:generate` probes the same way, so those no longer describe an API-only
+  app as having no routes.
+
+  `@guren/plugin-agents`' README no longer says `make:agent` "writes all three"
+  of its snippets — the `src/app.ts` registration is the one it leaves to you.
+
+- 8585eef: Read the session config's driver, and check its wiring (RFC 0020 Part 2c)
+
+  The deploy-runtime verdict keyed "backed session" on a constructed
+  `DatabaseSessionStore`, so an app that selects its store through a
+  `SessionManager` — everything `guren add session` scaffolds — was reported as
+  having no persistent store.
+
+  - `guren check`, `guren doctor` and the deploy builds now read a
+    `SessionConfig`-annotated object's `stores` and `default`, resolving
+    `process.env.SESSION_DRIVER ?? 'database'` through its literal fallback. A
+    persistent selection satisfies the session remediation; selecting `memory`
+    is its own warning; an unreadable `default` still counts as backed when every
+    declared store is. The type annotation is the anchor, since a cache config
+    keys `stores` identically.
+  - `guren check` gains two session rules: a `database` store bound to a table no
+    schema module exports (which throws on the first session write), and a
+    session config no provider binds as `session` (which leaves sessions on the
+    in-memory default while looking configured). Apps with no session config
+    contribute nothing.
+  - `appBindsService()` takes the app root it should scan (no `process.cwd()`
+    default) and returns the files that bind, so `runCheck({ cwd })` — the entry
+    point the MCP server uses — judges the app under check, and the session rule
+    can name the provider it found.
+  - `@guren/server` exports `DEFAULT_SESSION_STORE_NAME` and
+    `PER_PROCESS_SESSION_DRIVERS`, the two facts about `SessionManager` the
+    checks were restating.
+
+### Patch Changes
+
+- Updated dependencies [52a23b1]
+- Updated dependencies [68aa3d7]
+- Updated dependencies [2894c60]
+- Updated dependencies [8174e92]
+- Updated dependencies [8585eef]
+  - @guren/core@1.15.0
+  - @guren/server@2.19.0
+
 ## 2.17.0
 
 ### Minor Changes
