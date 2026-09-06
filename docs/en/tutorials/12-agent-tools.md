@@ -926,4 +926,4 @@ Do not confuse it with the endpoint your editor already talks to. `GUREN_MCP=1` 
 
 ## Next
 
-Chapter 13, *The System, Documented* (coming), makes the app describe itself: generated ER and domain views, docs an agent reads before it touches an entity, and a gate that fails when either drifts from the code.
+[Chapter 13: Documentation That Cannot Go Stale](./13-documented.md) makes the app describe itself: generated ER and domain views, docs an agent reads before it touches an entity, and a gate that fails when either drifts from the code.
