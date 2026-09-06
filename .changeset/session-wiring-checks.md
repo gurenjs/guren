@@ -1,5 +1,6 @@
 ---
 '@guren/cli': minor
+'@guren/server': minor
 ---
 
 Read the session config's driver, and check its wiring (RFC 0020 Part 2c)
@@ -21,6 +22,10 @@ having no persistent store.
   session config no provider binds as `session` (which leaves sessions on the
   in-memory default while looking configured). Apps with no session config
   contribute nothing.
-- `appBindsService()` scans the app root it is given rather than the process
-  working directory, so `runCheck({ cwd })` — the entry point the MCP server
-  uses — judges the app under check.
+- `appBindsService()` takes the app root it should scan (no `process.cwd()`
+  default) and returns the files that bind, so `runCheck({ cwd })` — the entry
+  point the MCP server uses — judges the app under check, and the session rule
+  can name the provider it found.
+- `@guren/server` exports `DEFAULT_SESSION_STORE_NAME` and
+  `PER_PROCESS_SESSION_DRIVERS`, the two facts about `SessionManager` the
+  checks were restating.

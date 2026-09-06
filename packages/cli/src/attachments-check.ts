@@ -4,57 +4,15 @@ import type { CallExpression, ObjectExpression, ObjectProperty } from '@babel/ty
 import { AttachmentDeliveryController, DEFAULT_DELIVERY_ROUTE_NAME, type RouteDefinition } from '@guren/core'
 import { literalString, memberKeyName, objectLiteral, unwrapTypeAssertion, walk } from './ast-walk'
 import { check, type CheckResult } from './check-result'
-import { collectFiles, fileExists, listAppRoots } from './discovery'
+import { SCHEMA_SPECIFIER_PATTERN, schemaModuleFor } from './schema-binding'
+import { discoverAppConfigFiles, fileExists } from './discovery'
 import { loadRouteDefinitions } from './load-routes'
 import { routesEntryOrDefault } from './route-registrar'
 import { parseModelSource } from './model-parser'
 import type { ParseCache, ParsedFile } from './parse-cache'
 import { schemaPathFor, type SchemaTable } from './schema-parser'
 
-/**
- * Where a `configureAttachments()` call can live: the documented home is
- * `config/attachments.ts`, but nothing enforces the filename, so every
- * config/, src/, and app/ source of the app and its modules is scanned (the
- * string pre-filter below keeps that cheap).
- */
-export async function discoverAttachmentsConfigFiles(appRoot: string): Promise<string[]> {
-  const roots = await listAppRoots(appRoot)
-  const groups = await Promise.all(
-    roots.flatMap((root) =>
-      ['config', 'src', 'app'].map((dir) => collectFiles(resolve(root.dir, dir))),
-    ),
-  )
-  return groups.flat().filter((file) => !/\.test\.[jt]sx?$/.test(file))
-}
 
-/**
- * The import paths that mean "the app's Drizzle schema". Matched on the
- * specifier's tail so `@/db/schema`, `../db/schema`, `../../db/schema.js`,
- * and a module's `@/modules/billing/db/schema` all count.
- */
-export const SCHEMA_SPECIFIER_PATTERN = /(^|\/)db\/schema(\.[jt]s)?$/
-
-/**
- * Which schema a `db/schema` import lands on: the root schema (null) or a
- * module's. The existence question is per schema module — a module config
- * importing its *own* schema must not pass on the strength of a table the root
- * declares. Undefined for a specifier resolving outside both shapes.
- */
-export function schemaModuleFor(cwd: string, filePath: string, specifier: string): string | null | undefined {
-  let absolute: string
-  if (specifier.startsWith('@/')) {
-    absolute = resolve(cwd, specifier.slice(2))
-  } else if (specifier.startsWith('.')) {
-    absolute = resolve(dirname(filePath), specifier)
-  } else {
-    return undefined
-  }
-  const rel = relative(cwd, absolute).replace(/\\/g, '/').replace(/\.[jt]s$/, '')
-  if (rel === 'db/schema') return null
-  const moduleMatch = /^modules\/([^/]+)\/db\/schema$/.exec(rel)
-  if (moduleMatch) return moduleMatch[1]!
-  return undefined
-}
 
 interface AttachmentsImportScan {
   /** The local binding `configureAttachments` (from `@guren/core`) is bound to, or null. */
@@ -148,7 +106,7 @@ async function fileCallsConfigureAttachments(cache: ParseCache, filePath: string
  * cannot be read or parsed contributes nothing, so an opaque app is refused, not scaffolded broken.
  */
 export async function appConfiguresAttachments(appRoot: string, cache: ParseCache): Promise<boolean> {
-  for (const filePath of await discoverAttachmentsConfigFiles(appRoot)) {
+  for (const filePath of await discoverAppConfigFiles(appRoot)) {
     if (await fileCallsConfigureAttachments(cache, filePath)) return true
   }
   return false
@@ -166,7 +124,7 @@ export async function checkAttachableModels(options: {
   cache: ParseCache
   /** Model files, discovered once by the caller like the config `files` below. */
   files: string[]
-  /** Candidate config files, from {@link discoverAttachmentsConfigFiles}. */
+  /** Candidate config files, from {@link discoverAppConfigFiles}. */
   configFiles: string[]
 }): Promise<CheckResult[]> {
   const { cwd, cache, files, configFiles } = options
@@ -574,7 +532,7 @@ async function scanAttachmentsDefaultDisks(
 export async function checkAttachmentsPublicDisk(options: {
   cwd: string
   cache: ParseCache
-  /** Candidate config files, from {@link discoverAttachmentsConfigFiles}. */
+  /** Candidate config files, from {@link discoverAppConfigFiles}. */
   files: string[]
 }): Promise<CheckResult[]> {
   const { cwd, cache, files } = options
@@ -654,7 +612,7 @@ const KNOWN_FILESYSTEM_DRIVERS = new Set(['local'])
 export async function checkAttachmentsDelivery(options: {
   cwd: string
   cache: ParseCache
-  /** Candidate config files, from {@link discoverAttachmentsConfigFiles}. */
+  /** Candidate config files, from {@link discoverAppConfigFiles}. */
   files: string[]
   /** Routes entry file, POSIX-relative to `cwd`. */
   routesFile?: string

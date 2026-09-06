@@ -2,6 +2,7 @@ import { readFile, readdir } from 'node:fs/promises'
 import { extname, join, resolve } from 'node:path'
 import type { File, Node, ObjectExpression } from '@babel/types'
 import { memberKeyName, objectLiteral, walk, type BabelNode } from './ast-walk'
+import { DEFAULT_SESSION_STORE_NAME, PER_PROCESS_SESSION_DRIVERS, readSessionConfig, sessionConfigsIn } from './session-config'
 import {
   collectFiles,
   toPosixRelative,
@@ -167,13 +168,6 @@ const CONSTRUCTED_SIGNALS: Record<string, SignalKind> = {
   AutoDiscovery: 'discovery',
 }
 
-/**
- * The one driver name that shares no state between requests. Everything else,
- * a plugin's included, is presumed persistent: a driver nobody here knows is
- * far likelier to be database-backed than to be a second in-memory one.
- */
-const PER_PROCESS_SESSION_DRIVER = 'memory'
-
 /** Framework functions whose call is a signal. */
 const CALLED_SIGNALS: Record<string, SignalKind> = {
   createSessionMiddleware: 'session',
@@ -238,26 +232,6 @@ function propertyKeyName(property: BabelNode): string | null {
   return memberKeyName({ computed: Boolean(property.computed), key }) ?? null
 }
 
-/** A string literal, or the literal fallback of `a ?? 'b'` / `a || 'b'`. */
-function stringLiteralValue(node: BabelNode | undefined): string | undefined {
-  if (!node) return undefined
-  if (node.type === 'StringLiteral') return node.value as string
-  if (node.type === 'LogicalExpression' && (node.operator === '??' || node.operator === '||')) {
-    return stringLiteralValue(node.right as BabelNode)
-  }
-  return undefined
-}
-
-/** The `driver` of a `{ driver: 'x', ... }` store entry. */
-function driverOf(store: ObjectExpression): string | undefined {
-  for (const property of store.properties as unknown as BabelNode[]) {
-    if (property.type !== 'ObjectProperty') continue
-    if (propertyKeyName(property) !== 'driver') continue
-    return stringLiteralValue(property.value as BabelNode)
-  }
-  return undefined
-}
-
 function extractSignals(ast: File): ExtractedSignal[] {
   // Local name → canonical exported name, for value imports from `@guren/*`
   // only, so a same-named export from another package resolves to nothing.
@@ -267,24 +241,17 @@ function extractSignals(ast: File): ExtractedSignal[] {
   // than through a binding — `auth.attempt()` and the session option keys —
   // use this to stay inside Guren code.
   let importsGuren = false
-  // Type-only names, kept apart from `gurenNames`: a type import must never
-  // make a construction signal, but a `SessionConfig` annotation is the one
-  // anchor that tells a session config from a cache one (both key `stores`).
-  const gurenTypeNames = new Map<string, string>()
   for (const statement of ast.program.body) {
     if (statement.type !== 'ImportDeclaration') continue
     if (!statement.source.value.startsWith(GUREN_PACKAGE_PREFIX)) continue
     importsGuren = true
-    const typeOnlyImport = statement.importKind === 'type'
+    if (statement.importKind === 'type') continue
     for (const specifier of statement.specifiers) {
       if (specifier.type === 'ImportSpecifier') {
+        if (specifier.importKind === 'type') continue
         const imported = specifier.imported
-        const name = imported.type === 'Identifier' ? imported.name : imported.value
-        gurenTypeNames.set(specifier.local.name, name)
-        if (typeOnlyImport || specifier.importKind === 'type') continue
-        gurenNames.set(specifier.local.name, name)
+        gurenNames.set(specifier.local.name, imported.type === 'Identifier' ? imported.name : imported.value)
       } else if (specifier.type === 'ImportNamespaceSpecifier') {
-        if (typeOnlyImport) continue
         gurenNamespaces.add(specifier.local.name)
       }
     }
@@ -321,55 +288,42 @@ function extractSignals(ast: File): ExtractedSignal[] {
   }
 
   /**
-   * Which store a `SessionConfig` selects, and whether that store shares state
-   * between requests. `default` is read through `??`/`||` so the scaffold's
-   * `process.env.SESSION_DRIVER ?? 'database'` resolves to its fallback; an
-   * environment that overrides it at runtime is beyond a static read.
+   * Whether the store a `SessionConfig` selects shares state between requests.
+   * The candidates are the one `default` names, or — when `default` is written
+   * but unreadable — every declared store, since the environment cannot select
+   * what is not declared. An unreadable *driver* is a candidate nothing can
+   * vouch for, so it blocks that shortcut.
    */
   const emitSessionConfig = (config: ObjectExpression, line: number): void => {
-    const drivers = new Map<string, string>()
-    let selected: string | undefined
+    const { declaresDefault, selected, stores } = readSessionConfig(config)
 
-    for (const property of config.properties as unknown as BabelNode[]) {
-      if (property.type !== 'ObjectProperty') continue
-      const key = propertyKeyName(property)
-      if (key === 'default') {
-        selected = stringLiteralValue(property.value as BabelNode)
-      } else if (key === 'stores') {
-        const stores = objectLiteral(property.value as Node)
-        for (const entry of (stores?.properties ?? []) as unknown as BabelNode[]) {
-          if (entry.type !== 'ObjectProperty') continue
-          const name = propertyKeyName(entry)
-          const store = objectLiteral(entry.value as Node)
-          const driver = store && driverOf(store)
-          if (name && driver) drivers.set(name, driver)
-        }
-      }
+    // An absent `default` is not an unknown one: SessionManager resolves it to
+    // the per-process store, so the config selects memory without saying so.
+    const chosen = declaresDefault ? selected : DEFAULT_SESSION_STORE_NAME
+    let candidates: Array<string | undefined>
+    let label: string
+
+    if (chosen !== undefined) {
+      // `memory` is declared by SessionManager whether or not the config lists
+      // it, so a default naming it is a selection even with no matching entry.
+      candidates = [stores.has(chosen) ? stores.get(chosen) : chosen]
+      label = declaresDefault ? `SessionConfig default: '${chosen}'` : 'SessionConfig with no default'
+    } else {
+      candidates = [...stores.values()]
+      label = `SessionConfig stores: ${[...stores.keys()].join(', ')}`
     }
 
-    // `memory` is declared by SessionManager whether or not the config lists
-    // it, so a default naming it is a selection even with no matching entry.
-    const driver = selected === undefined
-      ? undefined
-      : drivers.get(selected) ?? (selected === PER_PROCESS_SESSION_DRIVER ? PER_PROCESS_SESSION_DRIVER : undefined)
-
-    if (driver === PER_PROCESS_SESSION_DRIVER) {
-      emit('memorySessionDefault', `SessionConfig default: '${selected}'`, line)
-      return
-    }
-
-    if (driver !== undefined) {
-      emit('backedSession', `SessionConfig default: '${selected}'`, line)
-      return
-    }
-
-    // An unreadable `default` (no literal fallback) is still backed when every
-    // store it could name is: the environment cannot select what is not declared.
-    const declared = [...drivers.values()]
-    if (declared.length > 0 && declared.every((name) => name !== PER_PROCESS_SESSION_DRIVER)) {
-      emit('backedSession', `SessionConfig stores: ${declared.join(', ')}`, line)
+    if (candidates.length === 0) return
+    if (candidates.every((driver) => driver !== undefined && !PER_PROCESS_SESSION_DRIVERS.has(driver))) {
+      emit('backedSession', label, line)
+    } else if (candidates.every((driver) => driver !== undefined && PER_PROCESS_SESSION_DRIVERS.has(driver))) {
+      emit('memorySessionDefault', label, line)
     }
   }
+
+  // Found through the shared reader rather than the walk below: the anchor is
+  // a type annotation, and the walk skips type-only nodes by design.
+  for (const { config, line } of sessionConfigsIn(ast)) emitSessionConfig(config, line)
 
   walk(ast.program, (node) => {
     if (TYPE_ONLY_NODES.has(node.type)) return false
@@ -448,23 +402,6 @@ function extractSignals(ast: File): ExtractedSignal[] {
           const first = (node.arguments as BabelNode[])[0]
           if (first?.type === 'StringLiteral' && LAMBDA_IMPORT_SOURCES.has(first.value as string)) {
             emit('lambda', first.value as string, lineOf(node))
-          }
-        }
-        return
-      }
-
-      case 'VariableDeclarator': {
-        // A `SessionConfig`-annotated object is the shape `guren add session`
-        // writes and the docs teach. Read here rather than at the
-        // createSessionManager() call: the scaffold passes the config by name
-        // from another module, so the call site carries no literal.
-        const id = node.id as BabelNode
-        const annotation = (id?.typeAnnotation as BabelNode | undefined)?.typeAnnotation as BabelNode | undefined
-        if (annotation?.type === 'TSTypeReference') {
-          const typeName = annotation.typeName as BabelNode
-          if (typeName?.type === 'Identifier' && gurenTypeNames.get(typeName.name as string) === 'SessionConfig') {
-            const config = objectLiteral(node.init as Node | undefined)
-            if (config) emitSessionConfig(config, lineOf(node))
           }
         }
         return
@@ -768,7 +705,7 @@ function judgeRuntimeStores(analysis: DeployRuntimeAnalysis): DeployRuntimeVerdi
     issues.push(`in-memory stores are constructed explicitly (${formatSignals(analysis.memoryStoreSignals)})`)
   }
 
-  if (analysis.memorySessionDefaultSignals.length > 0) {
+  if (analysis.memorySessionDefaultSignals.length > 0 && analysis.sessionDisabledSignals.length === 0) {
     issues.push(
       `the session config selects the per-process \`memory\` store (${formatSignals(analysis.memorySessionDefaultSignals)})`,
     )

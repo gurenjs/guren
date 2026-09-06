@@ -2,6 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
 import { analyzeDeployRuntime, checkDeployRuntime } from '../src/deploy-runtime'
+import { SESSION_PROVIDER, sessionConfigSource } from './helpers'
 import { runCheck } from '../src/check'
 import { gatingResults } from '../src/check-result'
 import { buildJsonOutput, getDoctorRuleEvaluations, runDoctor } from '../src/doctor'
@@ -1165,28 +1166,6 @@ describe('analyzeDeployRuntime', () => {
 
 // The same verdicts `guren doctor` reports, reached from `guren check` and
 // the deploy builds (RFC 0020 Part 0).
-const SESSION_PROVIDER = `import { createSessionManager, ServiceProvider } from '@guren/core'
-import { sessionConfig } from '../../config/session'
-
-export default class SessionProvider extends ServiceProvider {
-  register(): void {
-    this.container.instance('session', createSessionManager(sessionConfig))
-  }
-}
-`
-
-/** A `config/session.ts` in the shape `guren add session` writes. */
-function sessionConfigSource(stores: string, selected = "process.env.SESSION_DRIVER ?? 'database'"): string {
-  return `import { type SessionConfig } from '@guren/core'
-import { sessions } from '../db/schema'
-
-export const sessionConfig: SessionConfig = {
-  default: ${selected},
-  stores: { ${stores} },
-}
-`
-}
-
 describe('session config driver reading (RFC 0020)', () => {
   const cloudflare = { '@guren/plugin-cloudflare': '^0.8.0' }
 
@@ -1255,6 +1234,70 @@ describe('session config driver reading (RFC 0020)', () => {
       const analysis = await analyzeDeployRuntime(dir)
       expect(analysis.backedSessionSignals).toEqual([])
       expect((await deployChecks(dir))['deploy-runtime-stores'].status).toBe('warn')
+    })
+  })
+
+  it('reads a config with no default as selecting the per-process store', async () => {
+    const files = {
+      'src/app.ts': SESSION_APP,
+      // SessionManager resolves an absent `default` to 'memory', so this
+      // config runs in process memory without saying so.
+      'config/session.ts': `import { type SessionConfig } from '@guren/core'
+import { sessions } from '../db/schema'
+
+export const sessionConfig: SessionConfig = {
+  stores: { database: { driver: 'database', table: sessions } },
+}
+`,
+    }
+
+    await withApp('guren-session-config-no-default-', files, cloudflare, async (dir) => {
+      const analysis = await analyzeDeployRuntime(dir)
+      expect(analysis.backedSessionSignals).toEqual([])
+
+      const check = (await deployChecks(dir))['deploy-runtime-stores']
+      expect(check.status).toBe('warn')
+      expect(check.message).toContain('selects the per-process `memory` store')
+    })
+  })
+
+  it('does not vouch for an unreadable default when a store driver is not a literal', async () => {
+    const files = {
+      'src/app.ts': SESSION_APP,
+      'config/session.ts': `import { type SessionConfig } from '@guren/core'
+import { sessions } from '../db/schema'
+import { DRIVERS } from './drivers'
+
+export const sessionConfig: SessionConfig = {
+  default: process.env.SESSION_DRIVER!,
+  stores: {
+    database: { driver: 'database', table: sessions },
+    other: { driver: DRIVERS.other },
+  },
+}
+`,
+    }
+
+    await withApp('guren-session-config-opaque-', files, cloudflare, async (dir) => {
+      const analysis = await analyzeDeployRuntime(dir)
+
+      expect(analysis.backedSessionSignals).toEqual([])
+      expect((await deployChecks(dir))['deploy-runtime-stores'].status).toBe('warn')
+    })
+  })
+
+  it('stays quiet about a memory default when autoSession is off', async () => {
+    const files = {
+      'src/app.ts': `import { createApp } from '@guren/core'
+export const app = createApp({ auth: { autoSession: false } })
+`,
+      'config/session.ts': sessionConfigSource("memory: { driver: 'memory' }", "'memory'"),
+    }
+
+    await withApp('guren-session-config-optout-', files, cloudflare, async (dir) => {
+      const check = (await deployChecks(dir))['deploy-runtime-stores']
+
+      expect(check.status).toBe('pass')
     })
   })
 

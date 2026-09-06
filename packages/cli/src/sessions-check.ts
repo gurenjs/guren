@@ -1,68 +1,38 @@
 /**
  * Session wiring checks (RFC 0020 §2). Both failures are invisible until
- * runtime: a config nothing binds leaves sessions on the in-memory default,
- * which works locally and drops every login on a serverless target; a
- * `database` store whose table the schema does not export throws on the first
- * write. Content-activated — an app with no session config contributes nothing.
+ * runtime: a config no registered provider binds leaves sessions on the
+ * in-memory default, which works locally and drops every login on a serverless
+ * target; a `database` store whose table the schema does not export throws on
+ * the first write. Content-activated — an app with no session config
+ * contributes nothing.
  */
 import { relative } from 'node:path'
 import type { ObjectExpression } from '@babel/types'
-import { objectLiteral, walk, type BabelNode } from './ast-walk'
-import { SCHEMA_SPECIFIER_PATTERN, schemaModuleFor } from './attachments-check'
+import { objectLiteral, propertyValue, type BabelNode } from './ast-walk'
+import { resolveSchemaTableBinding } from './schema-binding'
 import { check, type CheckResult } from './check-result'
-import { appBindsService } from './discovery'
+import { appBindsService, readIfExists } from './discovery'
 import type { ParseCache, ParsedFile } from './parse-cache'
+import { resolveAppEntry } from './provider-registrar'
 import type { SchemaTable } from './schema-parser'
+import { readSessionConfig, sessionConfigsIn, storeTableIdentifier } from './session-config'
 
-const SESSION_CONFIG_TYPE = 'SessionConfig'
-const GUREN_PACKAGE_PREFIX = '@guren/'
+/**
+ * Whether a provider that binds `session` is one `createApp()` registers. The
+ * binding alone is not enough: a provider file left out of `providers: [...]`
+ * never runs, which is the inert-config case this rule exists for. Judged by
+ * the entry naming the class, since the array holds identifiers whose import
+ * this does not resolve.
+ */
+async function bindingProviderIsRegistered(cwd: string, providerFiles: string[]): Promise<boolean> {
+  const appPath = await resolveAppEntry(cwd)
+  const entry = appPath === null ? null : await readIfExists(cwd, appPath)
+  if (entry === null) return false
 
-/** Local binding → the exported name it aliases, for value and type imports alike. */
-function importsByLocal(parsed: ParsedFile): Map<string, { source: string; imported: string }> {
-  const imports = new Map<string, { source: string; imported: string }>()
-  for (const statement of parsed.ast.program.body) {
-    if (statement.type !== 'ImportDeclaration') continue
-    for (const specifier of statement.specifiers) {
-      if (specifier.type !== 'ImportSpecifier') continue
-      const imported = specifier.imported
-      imports.set(specifier.local.name, {
-        source: statement.source.value,
-        imported: imported.type === 'Identifier' ? imported.name : imported.value,
-      })
-    }
-  }
-  return imports
-}
-
-function propertyValue(object: ObjectExpression, name: string): BabelNode | undefined {
-  for (const property of object.properties as unknown as BabelNode[]) {
-    if (property.type !== 'ObjectProperty' || property.computed) continue
-    const key = property.key as BabelNode
-    const keyName = key?.type === 'Identifier' ? key.name : key?.type === 'StringLiteral' ? key.value : undefined
-    if (keyName === name) return property.value as BabelNode
-  }
-  return undefined
-}
-
-/** Every `SessionConfig`-annotated object in a file, with the line it starts on. */
-function sessionConfigs(parsed: ParsedFile): Array<{ config: ObjectExpression; line: number }> {
-  const locals = importsByLocal(parsed)
-  const found: Array<{ config: ObjectExpression; line: number }> = []
-
-  walk(parsed.ast.program, (node) => {
-    if (node.type !== 'VariableDeclarator') return
-    const id = node.id as BabelNode
-    const annotation = (id?.typeAnnotation as BabelNode | undefined)?.typeAnnotation as BabelNode | undefined
-    if (annotation?.type !== 'TSTypeReference') return
-    const typeName = annotation.typeName as BabelNode
-    if (typeName?.type !== 'Identifier') return
-    const entry = locals.get(typeName.name as string)
-    if (!entry || entry.imported !== SESSION_CONFIG_TYPE || !entry.source.startsWith(GUREN_PACKAGE_PREFIX)) return
-    const config = objectLiteral(node.init as never)
-    if (config) found.push({ config, line: node.loc?.start.line ?? 0 })
+  return providerFiles.some((filePath) => {
+    const className = filePath.replace(/\\/g, '/').split('/').pop()?.replace(/\.[jt]sx?$/, '')
+    return Boolean(className) && new RegExp(`\\b${className}\\b`).test(entry)
   })
-
-  return found
 }
 
 export async function checkSessionsConfig(options: {
@@ -77,85 +47,117 @@ export async function checkSessionsConfig(options: {
 
   for (const filePath of files) {
     const source = await cache.source(filePath)
-    if (!source || !source.includes(SESSION_CONFIG_TYPE)) continue
+    if (!source?.includes('SessionConfig')) continue
 
     const parsed = await cache.get(filePath)
     if (!parsed) continue
 
-    const configs = sessionConfigs(parsed)
+    const configs = sessionConfigsIn(parsed.ast)
     if (configs.length === 0) continue
     sawConfig = true
 
     const relPath = relative(cwd, filePath)
-    const locals = importsByLocal(parsed)
-
     for (const { config } of configs) {
-      const stores = objectLiteral(propertyValue(config, 'stores') as never)
-      for (const entry of (stores?.properties ?? []) as unknown as BabelNode[]) {
-        if (entry.type !== 'ObjectProperty') continue
-        const store = objectLiteral(entry.value as never)
-        if (!store) continue
-
-        const driver = propertyValue(store, 'driver')
-        if (driver?.type !== 'StringLiteral' || driver.value !== 'database') continue
-
-        const table = propertyValue(store, 'table')
-        // Only a named import from a db/schema module can be judged against the
-        // parsed schema; a table built inline or imported elsewhere is out of sight.
-        if (table?.type !== 'Identifier') continue
-        const importEntry = locals.get(table.name as string)
-        if (!importEntry || !SCHEMA_SPECIFIER_PATTERN.test(importEntry.source)) continue
-
-        const schemaModule = schemaModuleFor(cwd, filePath, importEntry.source)
-        if (schemaModule === undefined) continue
-
-        const tableName = importEntry.imported
-        const declared = schemaTables.some(
-          (candidate) => candidate.identifier === tableName && candidate.module === schemaModule,
-        )
-        const key = `sessions-config:${relPath}:${tableName}`
-        const title = 'Session store table'
-        if (declared) {
-          results.push(check(key, title, 'pass', `The database session store binds schema table '${tableName}'.`))
-          continue
-        }
-        results.push(
-          check(
-            key,
-            title,
-            'fail',
-            `${relPath} binds the database session store to '${tableName}' from ${importEntry.source}, but no schema `
-              + `module declares a table with that export. The store takes the table untyped, so this only fails at `
-              + `runtime, on the first request that writes a session.`,
-            `Run \`bunx guren add session\` to add the sessions table, or point the store at the table your schema does export.`,
-            relPath,
-          ),
-        )
-      }
+      results.push(...checkStoreTables(config, { cwd, filePath, relPath, parsed, schemaTables }))
     }
   }
 
-  if (!sawConfig) {
-    return results
-  }
+  if (!sawConfig) return results
+  return [...results, await checkBinding(cwd)]
+}
 
-  // The config is inert without it: AuthServiceProvider reads the manager from
-  // the container, and finds the in-memory default when nothing bound one.
-  if (await appBindsService('session', cwd)) {
-    results.push(check('sessions-binding', 'Session manager binding', 'pass', "A provider binds 'session'."))
-  } else {
+function checkStoreTables(
+  config: ObjectExpression,
+  context: {
+    cwd: string
+    filePath: string
+    relPath: string
+    parsed: ParsedFile
+    schemaTables: SchemaTable[]
+  },
+): CheckResult[] {
+  const { cwd, filePath, relPath, parsed, schemaTables } = context
+  const results: CheckResult[] = []
+  const stores = objectLiteral(propertyValue(config, 'stores'))
+
+  for (const entry of (stores?.properties ?? []) as unknown as BabelNode[]) {
+    if (entry.type !== 'ObjectProperty') continue
+    const store = objectLiteral(entry.value as never)
+    if (!store) continue
+    // Only the database driver binds a table; every other store's options are
+    // its own business.
+    if (readSessionConfig(config).stores.get(nameOf(entry) ?? '') !== 'database') continue
+
+    const identifier = storeTableIdentifier(store)
+    if (!identifier) continue
+
+    const binding = resolveSchemaTableBinding({
+      cwd,
+      filePath,
+      body: parsed.ast.program.body,
+      identifier,
+      schemaTables,
+    })
+    if (!binding) continue
+
+    const key = `sessions-config:${relPath}:${binding.tableName}`
+    const title = 'Session store table'
+    if (binding.declared) {
+      results.push(check(key, title, 'pass', `The database session store binds schema table '${binding.tableName}'.`))
+      continue
+    }
     results.push(
       check(
-        'sessions-binding',
-        'Session manager binding',
-        'warn',
-        "A session config exists, but no provider binds 'session', so the config is never read and sessions stay "
-          + 'on the in-memory default — every login lost between requests on Workers, Lambda and Vercel.',
-        "Register a provider whose register() calls container.instance('session', createSessionManager(sessionConfig)), "
-          + 'and list it in createApp({ providers }). `bunx guren add session` writes one.',
+        key,
+        title,
+        'fail',
+        `${relPath} binds the database session store to '${binding.tableName}' from ${binding.source}, but no schema `
+          + `module declares a table with that export. The store takes the table untyped, so this only fails at `
+          + `runtime, on the first request that writes a session.`,
+        'Run `bunx guren add session` to add the sessions table, or point the store at the table your schema does export.',
+        relPath,
       ),
     )
   }
 
   return results
+}
+
+async function checkBinding(cwd: string): Promise<CheckResult> {
+  const key = 'sessions-binding'
+  const title = 'Session manager binding'
+  const providers = await appBindsService('session', cwd)
+
+  if (providers.length === 0) {
+    return check(
+      key,
+      title,
+      'warn',
+      "A session config exists, but no provider binds 'session', so the config is never read and sessions stay "
+        + 'on the in-memory default — every login lost between requests on Workers, Lambda and Vercel.',
+      "Register a provider whose register() calls container.instance('session', createSessionManager(sessionConfig)), "
+        + 'and list it in createApp({ providers }). `bunx guren add session` writes one.',
+    )
+  }
+
+  if (await bindingProviderIsRegistered(cwd, providers)) {
+    return check(key, title, 'pass', "A registered provider binds 'session'.")
+  }
+
+  return check(
+    key,
+    title,
+    'warn',
+    `A provider binds 'session' (${providers.map((file) => relative(cwd, file)).join(', ')}), but createApp() does not `
+      + 'register it, so it never runs and sessions stay on the in-memory default.',
+    'Add the provider to createApp({ providers: [...] }); `bunx guren add session` wires it for you.',
+  )
+}
+
+function nameOf(entry: BabelNode): string | undefined {
+  const key = entry.key as BabelNode
+  if (entry.computed) return undefined
+  if (key?.type === 'Identifier') return key.name as string
+  if (key?.type === 'StringLiteral') return key.value as string
+  return undefined
 }

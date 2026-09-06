@@ -701,3 +701,27 @@ export function initGitRepo(dir: string): void {
   const result = Bun.spawnSync(['git', 'init', '-q'], { cwd: dir, stdout: 'pipe', stderr: 'pipe' })
   if (result.exitCode !== 0) throw new Error(`git init failed: ${result.stderr.toString()}`)
 }
+
+/** The provider `guren add session` scaffolds. */
+export const SESSION_PROVIDER = `import { createSessionManager, ServiceProvider } from '@guren/core'
+import { sessionConfig } from '../../config/session'
+
+export default class SessionProvider extends ServiceProvider {
+  register(): void {
+    this.container.instance('session', createSessionManager(sessionConfig))
+  }
+}
+`
+
+/** A `config/session.ts` in the shape `guren add session` writes. */
+export function sessionConfigSource(stores: string, selected = "process.env.SESSION_DRIVER ?? 'database'"): string {
+  return `import { type SessionConfig } from '@guren/core'
+import { sessions } from '../db/schema'
+
+export const sessionConfig: SessionConfig = {
+  default: ${selected},
+  stores: { ${stores} },
+}
+`
+}
+

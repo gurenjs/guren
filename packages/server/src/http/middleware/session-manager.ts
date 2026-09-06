@@ -34,6 +34,10 @@ export type SessionStoreConfig = {
   [K in keyof SessionDrivers]: { driver: K } & SessionDrivers[K]
 }[keyof SessionDrivers]
 
+/** The store `SessionConfig.default` names when it names none, and the one driver that shares no state between requests. */
+export const DEFAULT_SESSION_STORE_NAME = 'memory'
+export const PER_PROCESS_SESSION_DRIVERS: ReadonlySet<string> = new Set([DEFAULT_SESSION_STORE_NAME])
+
 /** Cookie and TTL settings plus the named stores one of which is the default. */
 export interface SessionConfig extends SessionCookieOptions {
   /** @default 'memory' */
@@ -70,7 +74,7 @@ export class SessionManager {
   private readonly resolved = new Map<string, SessionStore>()
 
   constructor(config: SessionConfig = {}) {
-    const { default: defaultName = 'memory', stores = {}, ...options } = config
+    const { default: defaultName = DEFAULT_SESSION_STORE_NAME, stores = {}, ...options } = config
     this.options = options
     this.defaultStoreName = defaultName
 
@@ -87,7 +91,7 @@ export class SessionManager {
 
     // Unlike cache/storage, `memory` is declared even when it is not the
     // default: `SESSION_DRIVER=memory` needs no entry, and it is the fallback.
-    this.configs.set('memory', { driver: 'memory' })
+    this.configs.set(DEFAULT_SESSION_STORE_NAME, { driver: 'memory' })
     for (const [name, storeConfig] of Object.entries(stores)) {
       this.configs.set(name, storeConfig)
     }
