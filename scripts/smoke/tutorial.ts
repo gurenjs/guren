@@ -193,8 +193,14 @@ async function startBackground(session: Session, block: RunBlock, chapter: strin
     await Bun.sleep(500)
   }
   if (!bound) {
-    console.error(await readFile(logPath, 'utf8').catch(() => ''))
-    throw new Error(`background block at line ${block.line} did not report a bound port within ${BANNER_TIMEOUT_MS / 1000}s`)
+    // A production-mode server (`NODE_ENV=production bun bin/serve.ts`) prints no
+    // banner, so there is nothing to read. `GUREN_STRICT_PORT=1` above forbids the
+    // walk, which is what makes the port it was handed the only one it can hold.
+    if (proc.exitCode !== null) {
+      console.error(await readFile(logPath, 'utf8').catch(() => ''))
+      throw new Error(`background block at line ${block.line} exited before answering (code ${proc.exitCode})`)
+    }
+    bound = String(port)
   }
   // Still read the port the app reports rather than the one it was handed
   // (smoke-golden-path.sh's rule), and retry: a `bun --hot` reload closes the
@@ -203,7 +209,10 @@ async function startBackground(session: Session, block: RunBlock, chapter: strin
   let lastError = ''
   while (Date.now() < probeDeadline) {
     bound = boundPort(await readFile(logPath, 'utf8').catch(() => '')) ?? bound
-    const url = `http://127.0.0.1:${bound}/`
+    // `/health`, not `/`: it is the one path the scaffold excludes from host
+    // authorization, and a production-mode server answers every other path with
+    // 403 unless the probe's Host matches APP_URL.
+    const url = `http://127.0.0.1:${bound}/health`
     try {
       const response = await fetch(url)
       if (response.status === 200) {
