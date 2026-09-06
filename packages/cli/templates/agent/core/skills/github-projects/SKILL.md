@@ -51,7 +51,9 @@ bunx guren context User            # ends with "Linked issues" when docs declare
 bunx guren context User --live     # adds state, assignees, labels and title from GitHub
 ```
 
-If Linked issues names an **open** issue you are not working, say so before
+The offline form lists which issues are attached; only `--live` says which
+are open and who holds them, so run `--live` before taking work on the
+model. If it shows an **open** issue held by someone else, say so before
 proceeding: another session may be on it. `--live` is the only `guren`
 command that touches the network; it never fails when `gh` is missing.
 
@@ -61,7 +63,7 @@ are writes, so both wait for the user to ask:
 ```bash
 gh issue list --search "verify email" --state open
 gh issue create --title "Users verify email before posting" --body-file /tmp/issue-412.md
-gh issue edit 412 --add-assignee @me      # when the user hands you the issue
+gh issue edit 412 --add-assignee @me      # when the user hands you the issue; or the login they name
 ```
 
 The body carries the task breakdown as a GitHub tasklist, and that is the

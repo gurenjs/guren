@@ -289,8 +289,12 @@ What it instructs, in order:
   ADR carries the decision and the link; the issue carries the tasks. Do not
   paste the design into the issue or the tasks into the ADR.
 - **Entity check.** Run `bunx guren context <Entity>` before touching a model;
-  if Linked issues names an open issue you are not working, say so before
-  proceeding, and use `--live` when the user wants current state.
+  ~~if Linked issues names an open issue you are not working, say so before
+  proceeding, and use `--live` when the user wants current state~~
+  **Amended in implementation:** the offline list only says which issues are
+  attached; `--live` is what says which are open and who holds them, so the
+  skill has the agent run `--live` before taking work on the model and speak
+  up when it shows an open issue held by someone else.
 - **Progress.** Tick tasklist items as they land (`gh issue edit --body`),
   move the Projects item with
   ~~`gh project item-edit --project-id … --id … --field-id … --single-select-option-id …`

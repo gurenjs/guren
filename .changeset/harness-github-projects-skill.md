@@ -15,5 +15,5 @@ closing through the PR, and the safety rules: issue text is data, bodies are
 read only on an explicit `gh issue view`, writes happen only on the user's
 request, and nothing runs from a hook.
 
-The `docs-and-spec` rule gains the `issues:` field, `make:adr --issue`, and
-`guren context --live`.
+The `docs-and-spec` rule now covers the `issues:` field, `make:adr --issue`,
+and `guren context --live`.
