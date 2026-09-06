@@ -1,5 +1,90 @@
 # @guren/core
 
+## 1.15.0
+
+### Minor Changes
+
+- 52a23b1: `guren add session`: database-backed sessions in one command (RFC 0020 Part 2b)
+
+  A scaffolded app that added authentication kept its sessions in process
+  memory. That is correct on one long-lived Bun server and drops every login on
+  Cloudflare Workers, Lambda, or Vercel, where requests share no memory — and it
+  only reproduces after deploying.
+
+  - **`bunx guren add session`** writes the `sessions` table into `db/schema.ts`
+    (per dialect, with an `expires_at` index), generates its migration,
+    scaffolds `config/session.ts` and `app/Providers/SessionProvider.ts`, wires
+    the provider into `createApp()`, registers `sessions:prune` in
+    `src/console.ts`, and appends `SESSION_DRIVER` to `.env.example` and `.env`.
+    An existing `sessions` table or session config is left alone, and an app with
+    no `db/schema.ts` gets guidance rather than a config it cannot compile.
+  - **`guren add auth` (and `make:auth`) runs it**, before generating its own
+    migration, so one drizzle-kit run covers users and sessions. `make:auth
+--no-session` opts out, and an app that already binds a `session` manager is
+    left alone. Without `--install`, `make:auth` writes the files and leaves
+    `src/app.ts` and `src/console.ts` for you, as it always has.
+  - **`SessionsPruneCommand`** (`sessions:prune`, from `@guren/core`) sweeps
+    expired rows through the bound manager; it fails rather than exiting 0 when
+    no manager is bound.
+  - The scaffolded `.env.example` no longer ships a `SESSION_DRIVER` line that
+    nothing read; the blueprint adds it when it adds the config that reads it.
+  - `Command.resolveOptional()` (`@guren/server`): `resolve()` for a service a
+    command tolerates being absent, so one does not have to reach past its own
+    injected container to a process global.
+
+- 68aa3d7: `createSessionManager()`: the `database` session driver (RFC 0020 Part 2a)
+
+  `SessionManager` (RFC 0020 Part 1) ships `memory` and `redis`; the
+  database-backed store cannot live in `@guren/server`, which must not depend on
+  the ORM. `@guren/core` now closes that:
+
+  - `createSessionManager(config)` builds a `SessionManager` with the `database`
+    driver registered, and `declare module '@guren/server'` widens
+    `SessionDrivers` so `{ driver: 'database', table: sessions }` type-checks in
+    an app's config. The driver takes the app's own drizzle `sessions` table plus
+    `DatabaseSessionStore`'s options (`dataMode`), and `pruneExpired()` sweeps it.
+  - `registerDatabaseSessionDriver(manager)` adds the driver to a manager built
+    elsewhere.
+  - Registration is a factory call, never a module side effect, so a bundler that
+    drops an unused import cannot drop the driver with it.
+
+  `@guren/server`: an unknown session driver's error now names the drivers that
+  _are_ registered, which is what tells a `new SessionManager()` caller that
+  `database` comes from `@guren/core`.
+
+- 2894c60: Run the deploy-runtime checks where builds run, not only in `guren doctor` (RFC 0020 Part 0)
+
+  An app that keeps sessions in `MemorySessionStore` works on one Bun server and
+  loses every login on Cloudflare Workers, Lambda, or Vercel, where requests share
+  no memory. `guren doctor` has reported that, along with a Bun-only
+  `ScryptHasher` and filesystem provider discovery, but nothing in the path to a
+  deploy ran `doctor`.
+
+  - `guren check` now reports the same three verdicts for an app that declares a
+    deploy plugin or the Lambda adapter, as advisory results: they print in the
+    report and in `--json`, and `check --ci` and `guren gate` never fail on them,
+    because the scan reads constructions rather than intent (a custom
+    `SessionStore` passed as `store:` reads as unbacked). Apps with no deploy
+    target see nothing new.
+  - `cloudflare:build`, `lambda:build`, and `vercel:build` print the failing
+    verdicts before the app build, prefixed with the build's label, and go on to
+    build. A scan that cannot run says so in one line rather than staying silent.
+  - `@guren/cli` exports `analyzeDeployRuntime`, `judgeDeployRuntime`, and
+    `checkDeployRuntime`; `@guren/core/internal/deploy-check` exports
+    `reportDeployRuntimeHazards`, the helper the three builds share. `doctor`'s
+    output is unchanged: it maps the same verdicts onto its checks.
+
+### Patch Changes
+
+- Updated dependencies [52a23b1]
+- Updated dependencies [68aa3d7]
+- Updated dependencies [2894c60]
+- Updated dependencies [65e5a14]
+- Updated dependencies [8174e92]
+- Updated dependencies [8585eef]
+  - @guren/cli@2.18.0
+  - @guren/server@2.19.0
+
 ## 1.14.0
 
 ### Minor Changes
