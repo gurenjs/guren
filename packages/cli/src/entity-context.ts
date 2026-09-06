@@ -122,6 +122,8 @@ export interface EntityContext {
   docs: EntityDoc[]
   /** Issues those docs declare, de-duplicated across docs (RFC 0018). */
   issues: EntityIssue[]
+  /** True when `live` was asked for, so a run that had nothing to look up is still told apart from one that never asked. */
+  issuesLiveRequested?: boolean
   /** Why `live` produced nothing, when it was requested and could not run. */
   issuesLiveError?: string
 }
@@ -418,13 +420,14 @@ async function collectEntityIssues(
   cwd: string,
   refs: DocRef[],
   options: Pick<EntityContextOptions, 'live' | 'repo' | 'gh'>,
-): Promise<Pick<EntityContext, 'issues' | 'issuesLiveError'>> {
+): Promise<Pick<EntityContext, 'issues' | 'issuesLiveRequested' | 'issuesLiveError'>> {
   if (options.repo !== undefined && !isRepoSlug(options.repo)) {
     throw new Error(`Invalid --repo "${options.repo}" — write it as owner/name.`)
   }
   // The git spawn happens only for an entity whose docs declare something,
   // and not at all when the caller named the repository.
-  if (!refs.some((ref) => ref.issues.length > 0)) return { issues: [] }
+  const requested = options.live ? { issuesLiveRequested: true } : {}
+  if (!refs.some((ref) => ref.issues.length > 0)) return { issues: [], ...requested }
 
   const originRepo = options.repo ?? (await resolveOriginRepo(cwd))
   const byLabel = new Map<string, EntityIssue>()
@@ -463,7 +466,9 @@ async function collectEntityIssues(
     const live = lookup.live.get(issue.label)
     if (live) issue.live = live
   }
-  return lookup.error === undefined ? { issues } : { issues, issuesLiveError: lookup.error }
+  return lookup.error === undefined
+    ? { issues, ...requested }
+    : { issues, ...requested, issuesLiveError: lookup.error }
 }
 
 /**
@@ -642,6 +647,9 @@ export function renderEntityContextMarkdown(ctx: EntityContext): string {
         : 'Declared by the docs above; state and assignees live on GitHub.',
     )
     if (ctx.issuesLiveError) lines.push(`Live lookup unavailable: ${ctx.issuesLiveError}.`)
+    else if (ctx.issuesLiveRequested && !anyLive) {
+      lines.push('Live lookup found nothing to report: no linked issue resolved to a GitHub repository and number.')
+    }
     for (const issue of ctx.issues) {
       lines.push(`- ${issue.label} — ${issue.docs.join(', ')}`)
       if (!issue.live) continue

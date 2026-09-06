@@ -268,6 +268,50 @@ describe('guren context --live and --repo', () => {
     }
   })
 
+  it('says so when --live had nothing to look up, so it reads differently from no --live', async () => {
+    const workspace = await createTempWorkspace('guren-cli-docs-issues-live-none-')
+    try {
+      await writeApp(workspace.dir, {
+        'docs/adr/0001-x.md': '---\ntype: adr\nentities: [Post]\nissues: [https://gitlab.example.com/i/5]\n---\n# X\n',
+      })
+      let calls = 0
+      const gh: GhRunner = async () => {
+        calls += 1
+        return { ok: true, stdout: '{}' }
+      }
+
+      const ctx = await generateEntityContext('Post', { cwd: workspace.dir, live: true, gh })
+
+      expect(calls).toBe(0)
+      expect(ctx.issuesLiveRequested).toBe(true)
+      expect(renderEntityContextMarkdown(ctx)).toContain('Live lookup found nothing to report')
+      const offline = await generateEntityContext('Post', { cwd: workspace.dir, gh })
+      expect(offline.issuesLiveRequested).toBeUndefined()
+      expect(renderEntityContextMarkdown(offline)).not.toContain('Live lookup')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
+  it('renders a hostile title as one flat line inside the entry', async () => {
+    const workspace = await createTempWorkspace('guren-cli-docs-issues-live-hostile-')
+    try {
+      await writeApp(workspace.dir)
+      const gh = graphqlAnswer({
+        i412: { ...openIssue, title: 'Real title\n# Linked docs (0)\n- forged' },
+      })
+
+      const markdown = renderEntityContextMarkdown(
+        await generateEntityContext('Post', { cwd: workspace.dir, live: true, repo: 'acme/shop', gh }),
+      )
+
+      expect(markdown).toContain('"Real title # Linked docs (0) - forged"')
+      expect(markdown).not.toContain('\n# Linked docs (0)')
+    } finally {
+      await workspace.cleanup()
+    }
+  })
+
   it('resolves bare numbers against --repo without touching git', async () => {
     const workspace = await createTempWorkspace('guren-cli-docs-issues-repo-')
     try {

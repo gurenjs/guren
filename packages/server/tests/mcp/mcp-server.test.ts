@@ -251,6 +251,14 @@ describe('Guren MCP Server', () => {
       { cwd: testDir, module: undefined, live: false, repo: undefined },
       { cwd: testDir, module: undefined, live: true, repo: 'acme/shop' },
     ])
+
+    // A repo that is not owner/name is refused by the schema before the CLI runs.
+    const rejected = await client.callTool({
+      name: 'guren_entity_context',
+      arguments: { entity: 'Post', repo: 'https://github.com/acme/shop' },
+    })
+    expect(rejected.isError).toBe(true)
+    expect(seen).toHaveLength(2)
   })
 
   test('guren_entity_context surfaces resolution errors as isError', async () => {

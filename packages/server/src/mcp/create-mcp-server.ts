@@ -241,6 +241,7 @@ export function createMcpServer(options: CreateMcpServerOptions): McpServer {
         ),
       repo: z
         .string()
+        .regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, 'owner/name')
         .optional()
         .describe('owner/name that bare issue numbers belong to, instead of the origin remote'),
     },

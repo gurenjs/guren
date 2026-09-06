@@ -45,13 +45,22 @@ export type GhResult = { ok: true; stdout: string } | { ok: false; reason: strin
 export type GhRunner = (args: string[], cwd: string) => Promise<GhResult>
 
 export const GH_TIMEOUT_MS = 5_000
+/** How long a timed-out `gh` gets to honour SIGTERM before SIGKILL. */
+const KILL_GRACE_MS = 1_000
 
 /**
  * Run `gh` and hand back stdout, or the one line that explains why not: a
  * missing binary, a timeout, or the first stderr line of a failed exit (`gh`
- * puts its "not logged in" and rate-limit messages there).
+ * puts its "not logged in" and rate-limit messages there). A timeout settles
+ * the promise at once and still reaps the child: SIGTERM, then SIGKILL after
+ * the grace period, since the CLI's own exit would otherwise orphan it.
  */
-export function runGh(args: string[], cwd: string, timeoutMs = GH_TIMEOUT_MS): Promise<GhResult> {
+export function runGh(
+  args: string[],
+  cwd: string,
+  timeoutMs = GH_TIMEOUT_MS,
+  killGraceMs = KILL_GRACE_MS,
+): Promise<GhResult> {
   return new Promise((settle) => {
     let child: ReturnType<typeof spawn>
     try {
@@ -71,7 +80,12 @@ export function runGh(args: string[], cwd: string, timeoutMs = GH_TIMEOUT_MS): P
       settle(result)
     }
     const timer = setTimeout(() => {
-      child.kill()
+      child.kill('SIGTERM')
+      const escalate = setTimeout(() => child.kill('SIGKILL'), killGraceMs)
+      escalate.unref()
+      child.once('exit', () => clearTimeout(escalate))
+      child.stdout?.destroy()
+      child.stderr?.destroy()
       finish({ ok: false, reason: `gh timed out after ${timeoutMs}ms`, stdout })
     }, timeoutMs)
 
@@ -148,12 +162,33 @@ interface GraphqlIssue {
   updatedAt?: unknown
 }
 
+/** Longest title kept; GitHub allows 256 characters, the context line does not need them all. */
+const TEXT_LIMIT = 200
+
+/**
+ * The one funnel external text passes through on its way into an agent's
+ * context: control and format characters (newlines, tabs, zero-width marks,
+ * bidi overrides) become spaces so a value cannot break out of its line or
+ * fake a heading, and the length is capped.
+ */
+function cleanText(value: string): string {
+  return value
+    .replace(/[\p{Cc}\p{Cf}]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, TEXT_LIMIT)
+}
+
 function toLiveIssue(node: GraphqlIssue): LiveIssue | null {
   if (typeof node.title !== 'string' || typeof node.state !== 'string') return null
   const names = (nodes: Array<Record<string, unknown>> | undefined, key: string): string[] =>
-    (nodes ?? []).map((entry) => entry[key]).filter((value): value is string => typeof value === 'string')
+    (nodes ?? [])
+      .map((entry) => entry[key])
+      .filter((value): value is string => typeof value === 'string')
+      .map(cleanText)
+      .filter((value) => value !== '')
   return {
-    title: node.title,
+    title: cleanText(node.title),
     state: node.state.toLowerCase() as LiveIssue['state'],
     assignees: names(node.assignees?.nodes, 'login'),
     labels: names(node.labels?.nodes, 'name'),
@@ -172,10 +207,10 @@ function repositoryData(stdout: string): Record<string, GraphqlIssue | null> | n
 }
 
 /**
- * Current state for the given issues, grouped by repository. A repository
- * whose body carries no data (not logged in, rate limited, unreachable) stops
- * the lookup and reports why; an unknown number only leaves its own entry
- * absent. The numbers, not the bodies, are what travels to GitHub.
+ * Current state for the given issues, one query per repository; only numbers
+ * travel to GitHub. A body with no `repository` object (not logged in, rate
+ * limited, no access) stops the lookup with the run's reason. With one present,
+ * stderr is dropped and each alias stands alone: an unknown number is just absent.
  */
 export async function fetchLiveIssues(
   targets: IssueTarget[],

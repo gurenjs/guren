@@ -213,7 +213,13 @@ issue body is text written by whoever can open an issue on the repository, and
 Numbers, state, assignees, labels and titles are what an agent needs to decide
 whether to touch the entity; reading the body is an explicit `gh issue view`
 the agent runs itself, on the harness skill's instructions. Titles are still
-external text; the section header says so.
+external text; the section header says so. **Amended in implementation:**
+titles, labels and logins pass through one funnel that turns control and
+format characters (newlines, tabs, zero-width and bidi marks) into spaces and
+caps a title at 200 characters, so a value cannot break out of its line or
+fake a heading in the injected context; and a `--live` run that had nothing to
+look up says so (`issuesLiveRequested` in JSON), rather than reading like a
+run that never asked.
 
 The `guren_entity_context` MCP tool gains an optional `live` boolean, default
 false, with the same `runGh` path and the same failure reporting. The MCP
