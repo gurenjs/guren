@@ -855,4 +855,4 @@ git commit -m "feat: complete the posts CRUD with pagination"
 
 ## Next
 
-Chapter 5, *Users and Passwords* (coming), gives the users table a model, hashes passwords, and builds registration, login and logout by hand.
+[Chapter 5: Users and Passwords](./05-users-and-passwords.md) gives the users table a model, hashes passwords, and builds registration, login and logout by hand.

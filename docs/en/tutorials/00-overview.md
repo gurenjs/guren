@@ -51,10 +51,10 @@ Each chapter starts where the previous one ended. Follow them in order.
 | 2 | [One Request, by Hand](./02-one-request-by-hand.md) | 45 min |
 | 3 | [The Posts Table](./03-the-posts-table.md) | 60 min |
 | 4 | [Validation and Resources](./04-validation-and-resources.md) | 60 min |
-| 5 | Users and Passwords | coming |
-| 6 | Protecting Routes | coming |
-| 7 | Authorization, and What the Gate Cannot See | coming |
-| 8 | Teach the Agent Your Project | coming |
+| 5 | [Users and Passwords](./05-users-and-passwords.md) | 75 min |
+| 6 | [Protecting Routes](./06-protecting-routes.md) | 60 min |
+| 7 | [Authorization, and What the Gate Cannot See](./07-authorization.md) | 60 min |
+| 8 | [Teach the Agent Your Project](./08-teach-the-agent.md) | 60 min |
 | 9 | Relationships | coming |
 | 10 | Files | coming |
 | 11 | Events and Mail | coming |
