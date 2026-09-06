@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "hooks": {
+    "stop": [
+      {
+        "command": "bun .cursor/hooks/gate-on-stop.ts",
+        "timeout": 300,
+        "loop_limit": 3
+      }
+    ]
+  }
+}

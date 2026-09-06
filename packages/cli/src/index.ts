@@ -104,7 +104,7 @@ export {
 export { runSpecCheck } from './spec-check'
 export { parseSchemaTables, parseSchemaTableColumns, type SchemaTable, type SchemaColumn } from './schema-parser'
 export { runCheck, renderCheckReport } from './check'
-export { runGate, renderGateReport, describeGateFailures, GATE_STAGES } from './gate'
+export { runGate, renderGateReport, describeGateFailures, stopGateFindings, GATE_STAGES } from './gate'
 export { gatingResults, formatFinding } from './check-result'
 export { isLintable, resolveOxlint, runOxlint, type OxlintRun } from './lint-run'
 export { generateGuidelines } from './guidelines'

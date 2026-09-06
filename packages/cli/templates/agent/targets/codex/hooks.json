@@ -1,0 +1,17 @@
+{
+  "description": "Guren agent harness: run `guren gate` when a turn ends with uncommitted changes. The command looks for the app's .codex/ upward from the session cwd, which may be a subdirectory of the app.",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "d=\"$PWD\"; while [ ! -f \"$d/.codex/hooks/gate-on-stop.ts\" ] && [ \"$d\" != / ]; do d=$(dirname \"$d\"); done; bun \"$d/.codex/hooks/gate-on-stop.ts\"",
+            "timeout": 300,
+            "statusMessage": "guren gate"
+          }
+        ]
+      }
+    ]
+  }
+}

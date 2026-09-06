@@ -2,6 +2,7 @@ import { describe, it, expect } from 'bun:test'
 import {
   AGENT_TARGETS,
   BULK_TEMPLATE_PREFIXES,
+  DETECTABLE_COMPONENTS,
   componentsForTargets,
   managedNamespaces,
   parseTargetList,
@@ -80,16 +81,20 @@ function fakeTemplates(): TemplateFiles {
     ['core/rules/testing.md', FAKE_RULE],
     ['core/skills/scaffold/SKILL.md', 'rules live in `__RULES_DIR__/`'],
     ['targets/claude/workflow.md', 'claude hooks workflow\n'],
-    ['targets/claude/mcp.json', '{}'],
-    ['targets/claude/settings.json', '{}'],
+    ['targets/claude/mcp.json', '{"mcpServers":{"guren":{"url":"http://localhost:3333/_guren/mcp"}}}'],
+    ['targets/claude/settings.json', '{"hooks":{"Stop":[{"hooks":[{"command":"bun .claude/hooks/gate-on-stop.ts"}]}]}}'],
     ['targets/claude/agents/code-review.md', 'agent'],
     ['targets/claude/hooks/check-after-edit.ts', 'hook'],
+    ['core/hooks/gate-on-stop.ts', 'stop hook'],
+    ['targets/cursor/hooks/gate-on-stop.ts', 'cursor stop hook'],
+    ['targets/cursor/hooks.json', '{"hooks":{"stop":[{"command":"bun .cursor/hooks/gate-on-stop.ts"}]}}'],
+    ['targets/codex/hooks.json', '{"hooks":{"Stop":[{"hooks":[{"command":"bun .codex/hooks/gate-on-stop.ts"}]}]}}'],
     ['targets/agents/workflow.md', 'manual workflow for __RULES_DIR__\n'],
-    ['targets/codex/config.toml', '[mcp_servers.guren]'],
+    ['targets/codex/config.toml', '[mcp_servers.guren]\nurl = "http://localhost:3333/_guren/mcp"'],
     ['targets/codex/rules/guren.rules', 'prefix_rule(...)'],
-    ['targets/cursor/mcp.json', '{"mcpServers":{}}'],
-    ['targets/copilot/mcp.json', '{"servers":{}}'],
-    ['targets/opencode/opencode.json', '{"mcp":{}}'],
+    ['targets/cursor/mcp.json', '{"mcpServers":{"guren":{"url":"http://localhost:3333/_guren/mcp"}}}'],
+    ['targets/copilot/mcp.json', '{"servers":{"guren":{"url":"http://localhost:3333/_guren/mcp"}}}'],
+    ['targets/opencode/opencode.json', '{"mcp":{"guren":{"url":"http://localhost:3333/_guren/mcp"}}}'],
   ])
 }
 
@@ -138,7 +143,46 @@ describe('planComponents', () => {
       '.codex/config.toml',
       'opencode.json',
     ]) {
-      expect(byPath.get(path)).toMatchObject({ managed: false, mergeMarker: '_guren/mcp' })
+      expect(byPath.get(path)?.managed).toBe(false)
+      expect(byPath.get(path)?.merge?.marker).toBe('_guren/mcp')
+    }
+  })
+
+  it('plans the stop hook for the agents that can act on it, with a user-owned config', () => {
+    const byPath = planByPath(['claude', 'agents', 'cursor', 'copilot', 'codex', 'opencode'])
+
+    // Copilot and OpenCode have no turn-end hook that can feed output back, so nothing lands for them.
+    expect([...byPath.keys()].filter((path) => path.includes('hooks'))).toEqual([
+      '.claude/hooks/check-after-edit.ts',
+      '.claude/hooks/gate-on-stop.ts',
+      '.codex/hooks.json',
+      '.codex/hooks/gate-on-stop.ts',
+      '.cursor/hooks.json',
+      '.cursor/hooks/gate-on-stop.ts',
+    ].sort())
+    // One script and contract for Claude Code and Codex; Cursor's own for its followup_message contract.
+    expect(byPath.get('.claude/hooks/gate-on-stop.ts')).toMatchObject({ content: 'stop hook', managed: true })
+    expect(byPath.get('.codex/hooks/gate-on-stop.ts')).toMatchObject({ content: 'stop hook', managed: true })
+    expect(byPath.get('.cursor/hooks/gate-on-stop.ts')).toMatchObject({ content: 'cursor stop hook', managed: true })
+    for (const path of ['.claude/settings.json', '.cursor/hooks.json', '.codex/hooks.json']) {
+      expect(byPath.get(path)?.managed).toBe(false)
+      expect(byPath.get(path)?.merge?.marker).toBe('hooks/gate-on-stop.ts')
+      expect(byPath.get(path)?.merge?.hint).toContain('stop hook')
+    }
+  })
+
+  it('refuses a user-config template that lacks its own merge marker', () => {
+    const templates = fakeTemplates()
+    templates.set('targets/cursor/mcp.json', '{"mcpServers":{}}')
+
+    expect(() => planComponents(['agents', 'cursor'], templates, 'My App')).toThrow('merge marker')
+  })
+
+  it('a component outside DETECTABLE_COMPONENTS plans no managed file', () => {
+    for (const component of ALL_COMPONENTS) {
+      if ((DETECTABLE_COMPONENTS as readonly string[]).includes(component)) continue
+      const managed = planComponents([component], fakeTemplates(), 'My App').filter((file) => file.managed)
+      expect(managed.map((file) => file.path)).toEqual([])
     }
   })
 
@@ -146,7 +190,7 @@ describe('planComponents', () => {
     const byPath = planByPath(['agents', 'codex'])
 
     expect(byPath.get('.codex/rules/guren.rules')).toMatchObject({ managed: false })
-    expect(byPath.get('.codex/rules/guren.rules')?.mergeMarker).toBeUndefined()
+    expect(byPath.get('.codex/rules/guren.rules')?.merge).toBeUndefined()
   })
 
   it('renders cursor rules as guren-prefixed .mdc with comma-joined globs', () => {
@@ -199,7 +243,7 @@ describe('planComponents', () => {
 
   it('throws when a template token survives rendering', () => {
     const templates = fakeTemplates()
-    templates.set('targets/claude/mcp.json', '{"oops": "__RULES_DIR__"}')
+    templates.set('targets/claude/mcp.json', '{"oops": "__RULES_DIR__", "url": "_guren/mcp"}')
     expect(() => planComponents(['claude'], templates, 'My App')).toThrow(
       'Agent harness left __RULES_DIR__ unrendered in .mcp.json',
     )

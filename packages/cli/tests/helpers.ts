@@ -650,29 +650,54 @@ export async function linkOxlint(baseDir: string): Promise<void> {
 }
 
 /**
- * A shipped Claude Code hook, run the way Claude Code runs it: `bun <hook>` with
- * the hook input on stdin, from a temp app root `setup` populates. Bun resolves the
- * hook's `@guren/cli` import from the hook file's own location (this checkout), so
- * the real CLI runs against the temp app.
+ * Make `@guren/cli` resolvable from `baseDir` as this checkout's *source* (an
+ * installed app resolves it through node_modules): a shim package whose entry
+ * re-exports `packages/cli/src`, so a hook under test runs the current code
+ * rather than whatever `dist/` was last built.
  */
-export async function runClaudeHook(
-  hook: string,
+export async function linkWorkspaceCliSource(baseDir: string): Promise<void> {
+  const shim = join(baseDir, 'node_modules', '@guren', 'cli')
+  await mkdir(shim, { recursive: true })
+  await writeFile(join(shim, 'package.json'), JSON.stringify({ name: '@guren/cli', type: 'module', exports: './index.ts' }))
+  await writeFile(join(shim, 'index.ts'), `export * from '${join(repoRoot, 'packages/cli/src/index.ts')}'\n`)
+}
+
+/**
+ * A shipped agent hook, run the way the agent runs it: the template installed
+ * into a temp app at `installPath` (the hooks locate the app from their own
+ * directory), then `argv` (default `bun <hook>`) with the hook input on stdin,
+ * from the app root or `subdir`. `setup` populates the app first.
+ */
+export async function runAgentHook(
+  template: string,
+  installPath: string,
   input: unknown,
   setup: (dir: string) => void | Promise<void>,
-): Promise<{ exitCode: number; stderr: string }> {
+  options: { subdir?: string; argv?: string[] } = {},
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   const dir = await mkdtemp(join(tmpdir(), 'guren-hook-'))
   try {
     // Bun would otherwise auto-install an unresolvable bare specifier from the registry.
     await writeFile(join(dir, 'bunfig.toml'), '[install]\nauto = "disable"\n')
+    await linkWorkspaceCliSource(dir)
+    const hook = join(dir, installPath)
+    await mkdir(dirname(hook), { recursive: true })
+    await writeFile(hook, await readFile(template, 'utf8'))
     await setup(dir)
-    const result = Bun.spawnSync([process.execPath, hook], {
-      cwd: dir,
+    const result = Bun.spawnSync(options.argv ?? [process.execPath, hook], {
+      cwd: options.subdir ? join(dir, options.subdir) : dir,
       stdin: Buffer.from(JSON.stringify(input)),
       stdout: 'pipe',
       stderr: 'pipe',
     })
-    return { exitCode: result.exitCode, stderr: result.stderr.toString() }
+    return { exitCode: result.exitCode, stdout: result.stdout.toString(), stderr: result.stderr.toString() }
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
+}
+
+/** `git init` in `dir`, so untracked files are its changed set. */
+export function initGitRepo(dir: string): void {
+  const result = Bun.spawnSync(['git', 'init', '-q'], { cwd: dir, stdout: 'pipe', stderr: 'pipe' })
+  if (result.exitCode !== 0) throw new Error(`git init failed: ${result.stderr.toString()}`)
 }

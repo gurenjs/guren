@@ -190,6 +190,28 @@ describe('installAgentHarness', () => {
     await access(join(tempDir, '.mcp.json'))
   })
 
+  it('init reports the stop hook snippet for a settings.json that predates it', async () => {
+    await mkdir(join(tempDir, '.claude'), { recursive: true })
+    await writeFile(join(tempDir, '.claude/settings.json'), '{"permissions":{"allow":[]}}\n', 'utf8')
+
+    const result = await installAgentHarness({ cwd: tempDir, mode: 'init' })
+
+    expect(result.skipped).toContain('.claude/settings.json')
+    expect(result.mergeHints.map((hint) => hint.path)).toEqual(['.claude/settings.json'])
+    expect(result.mergeHints[0]?.what).toContain('stop hook')
+    expect(result.mergeHints[0]?.snippet).toContain('gate-on-stop.ts')
+  })
+
+  it('sync detects a codex install by its managed stop hook and refreshes it', async () => {
+    await installAgentHarness({ cwd: tempDir, mode: 'init', targets: ['codex'] })
+    await writeFile(join(tempDir, '.codex/hooks/gate-on-stop.ts'), 'stale\n', 'utf8')
+
+    const result = await installAgentHarness({ cwd: tempDir, mode: 'sync' })
+
+    expect(result.replaced).toContain('.codex/hooks/gate-on-stop.ts')
+    expect(result.written).not.toContain('CLAUDE.md')
+  })
+
   it('init --target codex writes the agents family without any claude files', async () => {
     const result = await installAgentHarness({ cwd: tempDir, mode: 'init', targets: ['codex'] })
 
@@ -198,6 +220,8 @@ describe('installAgentHarness', () => {
     expect(result.written).toContain('.agents/skills/dev-workflow/SKILL.md')
     expect(result.written).toContain('.codex/config.toml')
     expect(result.written).toContain('.codex/rules/guren.rules')
+    expect(result.written).toContain('.codex/hooks.json')
+    expect(result.written).toContain('.codex/hooks/gate-on-stop.ts')
     expect(result.written).not.toContain('CLAUDE.md')
     expect(result.written.some((path) => path.startsWith('.claude/'))).toBe(false)
 
@@ -239,6 +263,8 @@ describe('installAgentHarness', () => {
     expect(result.written).toContain('AGENTS.md')
     expect(result.written).toContain('.cursor/rules/guren-testing.mdc')
     expect(result.written).toContain('.cursor/mcp.json')
+    expect(result.written).toContain('.cursor/hooks.json')
+    expect(result.written).toContain('.cursor/hooks/gate-on-stop.ts')
 
     const rule = await readFile(join(tempDir, '.cursor/rules/guren-testing.mdc'), 'utf8')
     expect(rule).toContain('globs: tests/**')
@@ -313,9 +339,9 @@ describe('installAgentHarness', () => {
 
     expect(result.skipped).toContain('opencode.json')
     expect(await readFile(join(tempDir, 'opencode.json'), 'utf8')).toBe('{"theme":"dark"}\n')
-    expect(result.mcpMergeHints).toHaveLength(1)
-    expect(result.mcpMergeHints[0]?.path).toBe('opencode.json')
-    expect(result.mcpMergeHints[0]?.snippet).toContain('_guren/mcp')
+    expect(result.mergeHints).toHaveLength(1)
+    expect(result.mergeHints[0]?.path).toBe('opencode.json')
+    expect(result.mergeHints[0]?.snippet).toContain('_guren/mcp')
   })
 
   it('stays quiet about an existing MCP config that already has the endpoint', async () => {
@@ -329,7 +355,7 @@ describe('installAgentHarness', () => {
     const result = await installAgentHarness({ cwd: tempDir, mode: 'init', targets: ['codex'] })
 
     expect(result.skipped).toContain('.codex/config.toml')
-    expect(result.mcpMergeHints).toEqual([])
+    expect(result.mergeHints).toEqual([])
   })
 
   it('sync refreshes the installed family without inventing the other one', async () => {

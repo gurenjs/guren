@@ -2,11 +2,11 @@ import { parseDocFrontmatter } from './docs-frontmatter'
 import { safePathSegments } from './utils'
 
 /**
- * The one rule for which files each agent target owns and how the canonical harness
- * content renders into them (RFC 0008): the app-relative files a target selection
- * produces, their rendered content, and whether `agent:sync` owns each. `agent-harness.ts`
- * does the I/O and derives sync detection from the same plans. Every non-Claude agent reads
- * the `AGENTS.md` + `.agents/` family natively; cursor and copilot also get the rules re-rendered into native path-scoped formats.
+ * The one rule for which files each agent target owns and how the canonical harness content
+ * renders into them (RFC 0008): the app-relative files a target selection produces, their content,
+ * and whether `agent:sync` owns each; `agent-harness.ts` does the I/O and derives sync detection
+ * from the same plans. Non-Claude agents read the `AGENTS.md` + `.agents/` family (cursor/copilot also
+ * get native rules); stop hooks go only to agents whose hook output reaches the turn (claude, codex, cursor).
  */
 
 export const AGENT_TARGETS = ['claude', 'codex', 'cursor', 'copilot', 'opencode'] as const
@@ -20,16 +20,17 @@ export type HarnessComponent = (typeof COMPONENT_ORDER)[number]
 
 /**
  * Components whose managed files identify them on disk, letting `agent:sync`
- * re-plan them. codex/opencode are not here: their managed output is the
- * shared `agents` family, and their only distinct files are user-owned
- * extras sync must never re-plan (it cannot tell the two tools apart, and it
- * never widens a user's config).
+ * re-plan them. opencode is not here: its managed output is the shared `agents`
+ * family, and its only distinct file is a user-owned MCP config sync must never
+ * re-plan (it never widens a user's config). The test suite pins the converse:
+ * a component outside this list plans no managed file.
  */
 export const DETECTABLE_COMPONENTS = [
   'claude',
   'agents',
   'cursor',
   'copilot',
+  'codex',
 ] as const satisfies readonly HarnessComponent[]
 
 export type DetectableComponent = (typeof DETECTABLE_COMPONENTS)[number]
@@ -40,6 +41,9 @@ export type DetectableComponent = (typeof DETECTABLE_COMPONENTS)[number]
  * itself lives in the `targets/*` MCP templates.
  */
 const MCP_ENDPOINT_MARKER = '_guren/mcp'
+
+/** Same role for the hook configs: the script path every hooks config the harness writes points at. */
+const STOP_HOOK_MARKER = 'hooks/gate-on-stop.ts'
 
 /**
  * A claim over files the planner owns outright: a match the current plan does not write is
@@ -190,9 +194,9 @@ function claimedRuleNames(
 
 /**
  * The namespaces the given components own. Deliberately narrower than the managed
- * file set: `.claude/agents/` and `.claude/hooks/` ship managed files too, but those
- * directories are the conventional home for user-authored subagents and hooks, and a
- * name pattern cannot tell the two apart, so stale copies there are left to the user.
+ * file set: `.claude/agents/` and the hooks directories (`.claude/`, `.codex/`, `.cursor/`)
+ * ship managed files too, but those are the conventional home for user-authored subagents
+ * and hooks, and a name pattern cannot tell the two apart, so stale copies are left to the user.
  * The rules and skills roots are shared with the project too, hence claimed by name only.
  */
 export function managedNamespaces(
@@ -242,7 +246,11 @@ export interface PlannedFile {
    * marker, `agent:init` reports the content as a snippet to merge by hand
    * instead of touching a config that may carry unrelated settings.
    */
-  mergeMarker?: string
+  merge?: {
+    marker: string
+    /** What the snippet adds, for the merge-by-hand message. */
+    hint: string
+  }
 }
 
 /** Template-relative POSIX path → raw content. */
@@ -258,8 +266,10 @@ export type TemplateFiles = Map<string, string>
 export const BULK_TEMPLATE_PREFIXES = [
   'core/rules/',
   'core/skills/',
+  'core/hooks/',
   'targets/claude/agents/',
   'targets/claude/hooks/',
+  'targets/cursor/hooks/',
 ] as const
 
 /**
@@ -407,14 +417,25 @@ export function planComponents(
       rulesDir,
     )
 
-  /** Every MCP client config is user-owned and merge-hinted the same way. */
+  /** A user-owned config the harness only seeds: merge-hinted when it already exists without `marker`. */
+  const addUserConfig = (path: string, templatePath: string, marker: string, hint: string): void => {
+    const content = get(templatePath)
+    // A seed without its own marker would turn every merge hint for it into a no-op.
+    if (!content.includes(marker)) {
+      throw new Error(`Agent harness template ${templatePath} does not contain its merge marker "${marker}"`)
+    }
+    add({ path, content, managed: false, merge: { marker, hint } })
+  }
   const addMcpConfig = (path: string, templatePath: string): void =>
-    add({
-      path,
-      content: get(templatePath),
-      managed: false,
-      mergeMarker: MCP_ENDPOINT_MARKER,
-    })
+    addUserConfig(path, templatePath, MCP_ENDPOINT_MARKER, 'the Guren MCP server')
+  const addStopHookConfig = (path: string, templatePath: string): void =>
+    addUserConfig(path, templatePath, STOP_HOOK_MARKER, 'the `guren gate` stop hook')
+  /** A template subtree copied as managed files under `dir`. */
+  const addTree = (prefix: string, dir: string): void => {
+    for (const [rel, content] of under(prefix)) {
+      add({ path: `${dir}/${rel}`, content: render(content), managed: true })
+    }
+  }
 
   /** The canonical rules + skills trees, rendered for one root directory. */
   const addCanonical = (root: '.claude' | '.agents'): void => {
@@ -447,17 +468,16 @@ export function planComponents(
       managed: false,
     })
     addMcpConfig('.mcp.json', 'targets/claude/mcp.json')
-    add({
-      path: '.claude/settings.json',
-      content: get('targets/claude/settings.json'),
-      managed: false,
-    })
-    for (const [rel, content] of under('targets/claude/agents/')) {
-      add({ path: `.claude/agents/${rel}`, content: render(content), managed: true })
-    }
-    for (const [rel, content] of under('targets/claude/hooks/')) {
-      add({ path: `.claude/hooks/${rel}`, content: render(content), managed: true })
-    }
+    addUserConfig(
+      '.claude/settings.json',
+      'targets/claude/settings.json',
+      STOP_HOOK_MARKER,
+      'the Guren hooks (the edit check and the `guren gate` stop hook)',
+    )
+    addTree('targets/claude/agents/', '.claude/agents')
+    addTree('targets/claude/hooks/', '.claude/hooks')
+    // The Claude Code / Codex stop hook: one script, one stdin/exit-code contract.
+    addTree('core/hooks/', '.claude/hooks')
     addCanonical('.claude')
   }
 
@@ -491,6 +511,8 @@ export function planComponents(
       })
     }
     addMcpConfig('.cursor/mcp.json', 'targets/cursor/mcp.json')
+    addTree('targets/cursor/hooks/', '.cursor/hooks')
+    addStopHookConfig('.cursor/hooks.json', 'targets/cursor/hooks.json')
   }
   if (components.includes('copilot')) {
     for (const [stem, doc] of nativeRuleDocs) {
@@ -513,6 +535,8 @@ export function planComponents(
       content: get('targets/codex/rules/guren.rules'),
       managed: false,
     })
+    addTree('core/hooks/', '.codex/hooks')
+    addStopHookConfig('.codex/hooks.json', 'targets/codex/hooks.json')
   }
   if (components.includes('opencode')) {
     addMcpConfig('opencode.json', 'targets/opencode/opencode.json')

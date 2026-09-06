@@ -15,7 +15,12 @@ so make them part of your loop:
    reports until it exits 0. It runs the stages CI runs — codegen, typecheck,
    lint, `check`, `audit`, and the test suite — and a change is not done
    while any of them fails. `--changed` narrows `check` and lint to the files
-   you touched.
+   you touched. Cursor and Codex run it for you from a stop hook
+   (`.cursor/hooks.json`, `.codex/hooks.json`) when a turn ends with
+   uncommitted changes, feeding the findings back into the turn (Codex asks
+   you to trust the hook once, via `/hooks`; Cursor reads the config from the
+   workspace root, so open the app as its own workspace); Copilot and
+   OpenCode have no such hook, so run it yourself.
 4. Framework-managed files (`.agents/rules/`, `.agents/skills/`) can be
    refreshed anytime with `bunx guren agent:sync`.
 
