@@ -48,9 +48,9 @@ Each chapter starts where the previous one ended. Follow them in order.
 | # | Chapter | Time |
 |---|---|---|
 | 1 | [Zero to a Shipped App](./01-zero-to-deployed.md) | 40 min |
-| 2 | One Request, by Hand | coming |
-| 3 | The Posts Table | coming |
-| 4 | Validation and Resources | coming |
+| 2 | [One Request, by Hand](./02-one-request-by-hand.md) | 45 min |
+| 3 | [The Posts Table](./03-the-posts-table.md) | 60 min |
+| 4 | [Validation and Resources](./04-validation-and-resources.md) | 60 min |
 | 5 | Users and Passwords | coming |
 | 6 | Protecting Routes | coming |
 | 7 | Authorization, and What the Gate Cannot See | coming |

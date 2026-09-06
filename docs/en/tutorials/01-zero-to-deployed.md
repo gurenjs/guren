@@ -458,4 +458,4 @@ git commit -m "chore: add the Docker recipe"
 
 ## Next
 
-Chapter 2, *One Request, by Hand* (coming), builds a route, a controller and a page from blank files, with a test in front, and then hands the second page to the agent.
+[Chapter 2: One Request, by Hand](./02-one-request-by-hand.md) builds a route, a controller and a page from blank files, with a test in front, and then hands the second page to the agent.
