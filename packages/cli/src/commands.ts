@@ -34,6 +34,7 @@ import { makeModule } from './make-module'
 import { makeNotification } from './make-notification'
 import { makeProvider } from './make-provider'
 import { makeAdr } from './make-adr'
+import { ISSUE_REF_FORMS, splitIssueList } from './issue-refs'
 import { writeSpecArtifacts } from './spec-generate'
 import { buildDocsGraphReport, renderDocsGraphMarkdown } from './docs-graph'
 import { makeResource } from './make-resource'
@@ -93,18 +94,6 @@ function toWriterOptions(args: ForceableArgs): WriterOptions {
     force: Boolean(args.force),
     root: args.module,
   }
-}
-
-/**
- * A flag given more than once arrives from citty as an array despite its
- * `string` type; a comma-separated single value is the other spelling.
- */
-function parseRepeatableArg(value: string | string[] | undefined): string[] {
-  if (value === undefined) return []
-  return (Array.isArray(value) ? value : [value])
-    .flatMap((entry) => String(entry).split(','))
-    .map((entry) => entry.trim())
-    .filter((entry) => entry !== '')
 }
 
 const MODULE_ARG = {
@@ -256,8 +245,7 @@ const makeAdrCommand = defineCommand({
     },
     issue: {
       type: 'string',
-      description:
-        'GitHub issue or PR to prefill issues: with (412, owner/repo#412, or a URL). Repeat or comma-separate for several.',
+      description: `GitHub issues or PRs to prefill issues: with, comma-separated for several. Each: ${ISSUE_REF_FORMS}.`,
     },
     force: { type: 'boolean', description: 'Overwrite existing files', alias: 'f' },
     module: MODULE_ARG,
@@ -267,7 +255,7 @@ const makeAdrCommand = defineCommand({
       ...toWriterOptions(args),
       entity: args.entity,
       by: args.by,
-      issues: parseRepeatableArg(args.issue),
+      issues: splitIssueList(args.issue),
     })
     consola.success(`ADR created at ${file}`)
   },

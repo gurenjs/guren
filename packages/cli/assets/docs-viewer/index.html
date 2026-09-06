@@ -633,15 +633,11 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
     const cell = el('div', 'meta-value')
     issues.forEach((issue, index) => {
       if (index > 0) cell.append(', ')
-      if (!issue.url) {
-        cell.append(issue.label)
-        return
-      }
-      const link = el('a', 'issue-link', issue.label)
-      link.href = issue.url
-      link.target = '_blank'
-      link.rel = 'noopener noreferrer'
-      cell.append(link)
+      cell.append(
+        issue.url
+          ? Object.assign(el('a', 'issue-link', issue.label), { href: issue.url, target: '_blank', rel: 'noopener noreferrer' })
+          : issue.label,
+      )
     })
     grid.append(el('div', 'meta-key', 'issues'), cell)
   }

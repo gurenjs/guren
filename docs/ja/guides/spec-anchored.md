@@ -125,7 +125,7 @@ bunx guren make:adr "Billing cycle is end-of-month" --entity Invoice --issue 412
 `docs/adr/` 配下に採番されたファイルを作り、frontmatterを記入済みに
 します。`--entity` は既存のコードから `entities:` と `related:` を
 自動補完し、`--by` は `generated.by` のactor(既定はgitの作者)を
-上書きします。`--issue`(複数指定可)は `issues:` を埋めます。
+上書きします。`--issue`(カンマ区切りで複数可)は `issues:` を埋めます。
 新規Gurenアプリには、この規約を説明するシードADRが最初から同梱されています。
 
 `bunx guren context Invoice` の末尾には **Linked issues** セクションが付き、

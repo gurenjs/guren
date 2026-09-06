@@ -11,7 +11,7 @@ import { resolve } from 'node:path'
 import { parseDocFrontmatter } from './docs-frontmatter'
 import { localLinkTarget } from './docs-links'
 import type { DocActorEvent, DocRef } from './docs-index'
-import { issueLabel, issueUrl, resolveOriginRepo } from './issue-refs'
+import { describeIssue, resolveOriginRepo, type IssueLink } from './issue-refs'
 import { resolveDocLink } from './docs-check'
 import { loadDocsGraph, type DocsGraphEdge, type DocsGraphNode } from './docs-graph'
 import { renderDocHtml } from './docs-render'
@@ -47,8 +47,8 @@ export interface DocsViewerDoc {
    */
   stale: boolean
   trustTier: DocTrustTier
-  /** Outlinks for `issues:` (RFC 0018); `url` is absent when the repository cannot be resolved. */
-  issues: Array<{ label: string; url?: string }>
+  /** Outlinks for `issues:` (RFC 0018). */
+  issues: IssueLink[]
   /** Rendered body; the leading H1 is dropped (the panel header carries the title). */
   html: string
 }
@@ -145,7 +145,8 @@ export async function buildDocsViewerData(cwd: string): Promise<DocsViewerData> 
   const staleDocs = new Set(
     checks.filter((check) => check.key.startsWith('docs-stale:')).map((check) => check.filePath),
   )
-  const originRepo = await resolveOriginRepo(cwd)
+  // The git spawn happens only for a bundle that declares something.
+  const originRepo = refs.some((ref) => ref.issues.length > 0) ? await resolveOriginRepo(cwd) : null
 
   const docs = await Promise.all(
     refs.map(async (ref): Promise<DocsViewerDoc> => {
@@ -167,12 +168,7 @@ export async function buildDocsViewerData(cwd: string): Promise<DocsViewerData> 
         staleAfter: ref.staleAfter,
         stale: staleDocs.has(ref.path),
         trustTier: docTrustTier(ref),
-        issues: ref.issues.map((issue) => {
-          const url = issueUrl(issue, originRepo)
-          return url === undefined
-            ? { label: issueLabel(issue, originRepo) }
-            : { label: issueLabel(issue, originRepo), url }
-        }),
+        issues: ref.issues.map((issue) => describeIssue(issue, originRepo)),
         // Links carry the app-root path they resolve to, so the viewer
         // navigates by map lookup instead of re-deriving the rules client-side.
         html: renderDocHtml(body, { resolveLink: (target) => resolveViewerLink(ref.path, target) }),

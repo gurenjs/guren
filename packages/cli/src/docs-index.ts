@@ -127,7 +127,13 @@ export async function scanDocs(cwd: string): Promise<DocRef[]> {
             const parsed = parseDocFrontmatter(source)
             const body = parsed?.body ?? source
             const data = parsed?.data ?? {}
-            const issueEntries = toStringList(data.issues).map((raw) => ({ raw, ref: parseIssueRef(raw) }))
+            const issues: DocIssueRef[] = []
+            const malformedIssues: string[] = []
+            for (const entry of toStringList(data.issues)) {
+              const ref = parseIssueRef(entry)
+              if (ref) issues.push(ref)
+              else malformedIssues.push(entry)
+            }
             return {
               path: toPosixRelative(cwd, file),
               module: root.module,
@@ -145,8 +151,8 @@ export async function scanDocs(cwd: string): Promise<DocRef[]> {
               // rather than read it as absent.
               staleAfter:
                 'stale_after' in data ? (toScalar(data.stale_after) ?? '') : undefined,
-              issues: issueEntries.flatMap(({ ref }) => (ref ? [ref] : [])),
-              malformedIssues: issueEntries.flatMap(({ raw, ref }) => (ref ? [] : [raw])),
+              issues,
+              malformedIssues,
               links: parsed ? extractMarkdownLinks(body) : [],
               hasFrontmatter: parsed !== null,
             }

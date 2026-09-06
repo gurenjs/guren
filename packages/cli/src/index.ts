@@ -58,12 +58,7 @@ export {
   type EntityContextOptions,
   type EntityIssue,
 } from './entity-context'
-export {
-  parseIssueRef,
-  resolveOriginRepo,
-  ISSUE_REF_FORMS,
-  type DocIssueRef,
-} from './issue-refs'
+export type { DocIssueRef, IssueLink } from './issue-refs'
 export {
   routeDefinitionToContextRoute,
   loadContextRoutes,

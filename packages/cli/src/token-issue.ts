@@ -18,6 +18,7 @@ import {
   type ScopedTool,
 } from '@guren/core'
 import { listTools } from './tool-list'
+import { splitCommaList } from './utils'
 import { loadBootedApplication } from './runtime'
 
 /** `tool:` scope prefix, including the separator. */
@@ -115,13 +116,6 @@ export interface TokenIssuePlan {
   warnings: string[]
 }
 
-/** Split, trim, and drop empties — `--tools 'a, b,'` names two scopes. */
-function splitToolEntries(raw: string): string[] {
-  return raw
-    .split(',')
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0)
-}
 
 /**
  * Decide what a token would carry, without minting anything. Throws on every refusal in a
@@ -130,7 +124,7 @@ function splitToolEntries(raw: string): string[] {
  * `tools` is injected rather than derived so the rules stay testable with no route graph.
  */
 export function planTokenIssue(input: TokenIssueInput, tools: readonly ScopedTool[]): TokenIssuePlan {
-  const entries = splitToolEntries(input.tools)
+  const entries = splitCommaList(input.tools)
   if (entries.length === 0) {
     throw new Error('--tools requires at least one scope (for example: tools:read, posts.*, posts.store).')
   }
