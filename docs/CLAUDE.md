@@ -56,7 +56,7 @@
   them in order: `bash run`, `bash run expect-fail` (the red step; a zero exit
   fails the smoke), `bash run background` (a server; the smoke reads the port
   from its banner), `<lang> file=<app-relative path>` (the complete file, never
-  an excerpt), `bash manual` (shown, never run). Add `fallback` to a `run` or
+  an excerpt), `<lang> manual` (shown, never run; any language). Add `fallback` to a `run` or
   `file=` block that stands in for an agent beat. A `run` block that is exactly
   `cd <dir>` moves the app root; `bunx create-guren-app …` is the one command
   the smoke swaps for the checkout's scaffolder, flags passed through
