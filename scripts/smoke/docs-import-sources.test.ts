@@ -90,8 +90,8 @@ describe('extraction', () => {
   })
 
   test('reads a side-effect import that precedes a named one as its own statement', () => {
-    // The scaffold's src/app.ts opens with `import 'zod/compile'`; the span
-    // before `from` used to run through that quote and swallow the statement.
+    // The scaffold's src/app.ts opens with `import 'zod/compile'`, so the span
+    // the scanner reads before `from` must stop at that quote.
     const code = [
       "import 'zod/compile'",
       "import { createApp } from '@guren/core'",
