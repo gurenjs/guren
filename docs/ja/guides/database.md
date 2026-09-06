@@ -823,10 +823,14 @@ User.hasOne('profile', Profile, 'userId', 'id')
 ### belongsToMany
 
 ```ts
+import { userRoles, postTags } from '@/db/schema'
+
 // ピボットテーブルを介した多対多
-User.belongsToMany('roles', Role, 'user_roles', 'userId', 'roleId')
-Post.belongsToMany('tags', Tag, 'post_tags', 'postId', 'tagId')
+User.belongsToMany('roles', Role, userRoles, 'userId', 'roleId')
+Post.belongsToMany('tags', Tag, postTags, 'postId', 'tagId')
 ```
+
+`pivotTable` に渡すのは `@/db/schema` からエクスポートした Drizzle のテーブルオブジェクトで、テーブル名の文字列ではありません。
 
 ### hasManyThrough
 
@@ -838,7 +842,7 @@ Country.hasManyThrough('posts', Post, User, 'countryId', 'authorId')
 - `hasMany(name, RelatedModel, foreignKey, localKey)`: 関連モデルの外部キーと親側のローカルキー（通常 `id`）を指定します。
 - `belongsTo(name, RelatedModel, foreignKey, ownerKey)`: 現在のモデルの外部キーと関連モデルの所有キーを結びつけます。
 - `hasOne(name, RelatedModel, foreignKey, localKey)`: `hasMany` と同じように動作しますが、単一のレコードまたは `null` を返します。
-- `belongsToMany(name, RelatedModel, pivotTable, foreignPivotKey, relatedPivotKey)`: ピボットテーブルを通じた多対多を処理します。
+- `belongsToMany(name, RelatedModel, pivotTable, foreignPivotKey, relatedPivotKey, parentKey?, relatedKey?)`: ピボットテーブルを通じた多対多を処理します。`pivotTable` は Drizzle のテーブルオブジェクトです。`foreignPivotKey` と `relatedPivotKey` はどちらもピボット側の列で、それぞれ自モデルと関連モデルを参照します。`parentKey` と `relatedKey` はそれらが指すローカルキーで、既定値はどちらも `'id'` です。
 - `hasManyThrough(name, RelatedModel, ThroughModel, firstKey, secondKey)`: 中間モデルを経由してリモートリレーションにアクセスします。
 - `morphMany(name, RelatedModel, morphName, localKey)`: 1対多のポリモーフィックリレーション。
 - `morphTo(name, morphName)`: ポリモーフィックリレーションの逆方向。
