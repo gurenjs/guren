@@ -462,10 +462,20 @@ export interface SessionStore {
 }
 ```
 
-`CookieSessionStore` implements `inline` with the existing `Encrypter`
-(AES-256-GCM under the app key, previous keys accepted for rotation, which
+`CookieSessionStore` implements `inline` with ~~the existing `Encrypter`~~
+**Amended in implementation:** AES-256-GCM directly, packed as
+`base64url(iv ‖ tag ‖ ciphertext)`. `Encrypter`'s envelope base64s the
+ciphertext into JSON and base64s that again — measured 1.8–2.3x the plaintext
+against 1.4–2.0x packed — and a cookie's byte budget is this store's whole
+constraint. Same primitives and the same key ring (AES-256-GCM under the app
+key, previous keys accepted for rotation, which
 `createCookieSigner` already does for the signed-id cookie) and
-`read`/`write`/`destroy` as no-ops over a per-request slot. The payload
+~~`read`/`write`/`destroy` as no-ops over a per-request slot~~
+**Amended in implementation:** `read`/`write`/`destroy` *throw*. The middleware
+resolves the transport once and never calls them on an inline store, and
+`SessionManager.store()` is public — a caller that reaches them has a wrong
+idea of where the session lives, and an empty answer is indistinguishable from
+an expired session. The payload
 carries `id`, `data`, and `expiresAt`; `decode` refuses an expired or
 undecryptable payload, which makes `ttlSeconds` real even though nothing
 server-side can expire the cookie early. `regenerate()` stays meaningful for
@@ -474,7 +484,11 @@ CSRF binding (the token is bound to the id) and harmless otherwise.
 Behaviour the docs state outright, in Rails' words where possible:
 
 - Everything in the session travels in the cookie: **4 KB** cap, enforced by
-  refusing to encode a payload over the limit with an error naming the size.
+  refusing ~~to encode a payload over the limit~~ **Amended in implementation:**
+  to send a `Set-Cookie` over the limit, measured with the cookie's name and
+  attributes included. The store cannot see either, so a value-only check
+  passes a session that is then dropped in transit; the middleware owns the
+  header and so owns the budget (`SessionOptions.maxCookieBytes`).
 - A logout cannot revoke a cookie the client already copied; it is valid
   until `expiresAt`. Keep ids in the session, keep anything revocable in the
   database. `invalidate()` clears the cookie on this client only.

@@ -1,4 +1,5 @@
 import { resolveLazyRedisClient } from '../../redis/lazy-client'
+import { CookieSessionStore } from './cookie-session-store'
 import { RedisSessionStore } from '../../redis/RedisSessionStore'
 import { MemorySessionStore, type SessionCookieOptions, type SessionStore } from './session'
 
@@ -28,7 +29,16 @@ export interface RedisSessionDriverOptions {
 export interface SessionDrivers {
   memory: MemorySessionDriverOptions
   redis: RedisSessionDriverOptions
+  cookie: CookieSessionDriverOptions
 }
+
+/**
+ * The cookie driver takes no app-facing options: its key comes from `APP_KEY`
+ * and its size budget from the middleware. `keyring` and `now` stay on
+ * {@link CookieSessionStoreOptions}, for direct construction in tests — a
+ * committed `config/session.ts` is the wrong home for key material.
+ */
+export interface CookieSessionDriverOptions {}
 
 export type SessionStoreConfig = {
   [K in keyof SessionDrivers]: { driver: K } & SessionDrivers[K]
@@ -79,6 +89,7 @@ export class SessionManager {
     this.defaultStoreName = defaultName
 
     this.registerDriver('memory', ({ now }) => new MemorySessionStore(now))
+    this.registerDriver('cookie', () => new CookieSessionStore())
     this.registerDriver('redis', ({ client, prefix }) => {
       const redis = resolveLazyRedisClient(client, 'Session store "redis"')
       return new RedisSessionStore(redis as ConstructorParameters<typeof RedisSessionStore>[0], { prefix })

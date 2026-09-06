@@ -15,7 +15,10 @@ export function jsonResponse(data: unknown, status = 200): Response {
 
 export { createSessionMiddleware, MemorySessionStore, getSessionFromContext } from './session'
 export { DEFAULT_SESSION_STORE_NAME, PER_PROCESS_SESSION_DRIVERS, SessionManager } from './session-manager'
+export { CookieSessionStore } from './cookie-session-store'
+export type { CookieSessionStoreOptions } from './cookie-session-store'
 export type {
+  CookieSessionDriverOptions,
   SessionConfig,
   SessionDrivers,
   SessionStoreConfig,
@@ -23,7 +26,7 @@ export type {
   MemorySessionDriverOptions,
   RedisSessionDriverOptions,
 } from './session-manager'
-export type { SessionCookieOptions } from './session'
+export type { SessionCookieOptions, SessionInlineCodec } from './session'
 export { defaultCookieSecure } from './session'
 export type { Session, SessionData, SessionStore } from './session'
 export {
