@@ -40,7 +40,7 @@ interface SweepSummary {
   error?: string
 }
 
-interface TriagerState {
+export interface TriagerState {
   lastRunAt: string | null
   lastSweep: SweepSummary | null
   declined: number[]

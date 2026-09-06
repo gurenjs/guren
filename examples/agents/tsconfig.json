@@ -1,10 +1,12 @@
 {
   "extends": "../../tsconfig.json",
   "compilerOptions": {
+    "jsx": "react-jsx",
     "noEmit": true,
     "types": [
       "bun-types",
-      "@cloudflare/workers-types"
+      "@cloudflare/workers-types",
+      "vite/client"
     ],
     "paths": {
       "@/*": [
@@ -45,17 +47,27 @@
       ],
       "@guren/plugin-cloudflare/*": [
         "../../packages/plugin-cloudflare/src/*"
+      ],
+      "@guren/inertia-client": [
+        "../../packages/inertia-client/src/index.ts"
+      ],
+      "@guren/inertia-client/*": [
+        "../../packages/inertia-client/src/*"
       ]
     }
   },
   "include": [
+    ".guren/**/*",
     "src/**/*",
     "app/**/*",
+    "bin/**/*",
     "routes/**/*",
     "config/**/*",
     "tests/**/*",
     "db/**/*",
-    "guren.arch.ts"
+    "resources/js/**/*",
+    "guren.arch.ts",
+    "vite.config.ts"
   ],
   "exclude": []
 }

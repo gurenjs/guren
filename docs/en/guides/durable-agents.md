@@ -263,13 +263,16 @@ The sweep is written not to throw, because the SDK gives a failed scheduled call
 
 ### The store and the operator side are yours
 
-There is no default approval store, for the same reason the audit sink has no default: one degrading to process memory would answer "approved" for a record the next isolate never heard of. Implement `AgentApprovalStore` — the four methods and the two guarantees are in [Configuring the queue](./agent-interface.md#configuring-the-queue) — and resolve requests through your own routes. [`examples/agents`](https://github.com/gurenjs/guren/tree/main/examples/agents) carries a Drizzle implementation and a small operator API to copy from.
+There is no default approval store, for the same reason the audit sink has no default: one degrading to process memory would answer "approved" for a record the next isolate never heard of. Implement `AgentApprovalStore` — the four methods and the two guarantees are in [Configuring the queue](./agent-interface.md#configuring-the-queue) — and resolve requests through your own routes. [`examples/agents`](https://github.com/gurenjs/guren/tree/main/examples/agents) carries a Drizzle implementation and two operator surfaces over it: a JSON API an operator drives with `curl`, and a browser console showing the tickets, the pending approvals, and the agent's own report on one page. Copy whichever shape your deployment needs — they are the same rules either way.
 
-Three things that operator API taught, worth repeating in yours:
+Four things those operator surfaces taught, worth repeating in yours:
 
 - **Derive the status; never read the column.** A request whose window has closed still reads `pending` in SQL. Drop it from the answerable listing rather than offering it.
 - **Answer a re-answer with 409.** A request someone already resolved, and one whose window closed, are both un-answerable now; a `404` should mean only that no request has that id.
 - **Retention is a policy question.** A settled request is your record of what an agent was allowed to do. Deleting old ones is worth a route an operator calls, not a schedule that decides on your behalf.
+- **One rule, however many surfaces.** The example's console and JSON API answer approvals through a single shared module, because a second copy of "which rows are answerable" is the copy that hands the agent a grant a human gave once. Only the *presentation* differs: the console redirects back and flashes the refusal, the API returns it as a status code.
+
+A browser console alongside the bearer API needs less wiring than it looks. CSRF is mounted over the whole app by `createApp({ auth })`, and the tool routes stay exempt on their own terms — a bearer request that carries no cookies, and a request carrying the principal the pipeline installed, are both skipped — so nothing has to be excluded by hand. Two things do need care: the session store must be database-backed, since on Workers the login redirect and the page it lands on are answered by different isolates, and the routes carrying `.agent()` metadata must keep returning JSON. `guren check` warns about an agent route that answers with an Inertia response, because a rendered page is not a tool result.
 
 A durable agent's own status check gets exactly the answer `guren.approval_status` gives an MCP client, by the same rule and audited under the same tool name — including the part that is a refusal to distinguish: an unknown id and another principal's id are one message, so neither surface can be used to enumerate what your colleagues are waiting on.
 
@@ -422,4 +425,4 @@ The routes an agent calls are checked by the ordinary agent-route rules, and the
 - [Encryption](./encryption.md) — `APP_KEY` and the encrypter the ledger needs
 - [CLI](./cli.md) — `make:agent`, `check`, `audit`, `tool:list`
 - [RFC 0017 — Durable Agent Runtime](https://github.com/gurenjs/guren/blob/main/rfcs/0017-durable-agent-runtime.md) — the design, and every place the shipped behaviour deviates from it
-- [`examples/agents`](https://github.com/gurenjs/guren/tree/main/examples/agents) — a working triager, its approval store, its operator API, and the Free-plan measurements
+- [`examples/agents`](https://github.com/gurenjs/guren/tree/main/examples/agents) — a working triager, its approval store, its operator API and browser console, and the Free-plan measurements
