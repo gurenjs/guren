@@ -2,7 +2,9 @@
 
 **Author:** 7nohe
 **Date:** 2026-09-06
-**Status:** Draft
+**Status:** Accepted (2026-09-06 — the standard two-week discussion window
+was shortened by the deciding maintainer for this solo-driven change; Part 0
+was implemented against the draft the same day, PR #704)
 
 ## Problem
 
