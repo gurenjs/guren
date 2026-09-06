@@ -89,6 +89,17 @@ describe('extraction', () => {
     ])
   })
 
+  test('reads a side-effect import that precedes a named one as its own statement', () => {
+    // The scaffold's src/app.ts opens with `import 'zod/compile'`; the span
+    // before `from` used to run through that quote and swallow the statement.
+    const code = [
+      "import 'zod/compile'",
+      "import { createApp } from '@guren/core'",
+    ].join('\n')
+
+    expect(extractImports(code).map((entry) => entry.specifier)).toEqual(['zod/compile', '@guren/core'])
+  })
+
   test('only TypeScript fences are scanned', () => {
     const markdown = ['```bash', "import { X } from '@guren/core'", '```', '', '```ts', 'const a = 1', '```'].join('\n')
 
