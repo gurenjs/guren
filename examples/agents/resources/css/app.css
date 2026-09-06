@@ -1,0 +1,141 @@
+:root {
+  --bg: #14110f;
+  --panel: #1c1917;
+  --line: #302a26;
+  --ink: #f5f1ee;
+  --muted: #a29890;
+  --accent: #ff5c3c;
+  --ok: #5fbf7f;
+  --warn: #e6b155;
+  --bad: #e2685a;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 14px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+a { color: var(--accent); }
+
+.shell { max-width: 1140px; margin: 0 auto; padding: 32px 24px 64px; }
+
+.topbar {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 16px;
+  margin-bottom: 24px;
+}
+.topbar h1 { font-size: 18px; margin: 0; letter-spacing: -0.01em; }
+.topbar .who { color: var(--muted); font-size: 13px; }
+.topbar .spacer { flex: 1; }
+
+.grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 16px 18px;
+}
+.panel h2 {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin: 0 0 12px;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  padding: 9px 0;
+  border-top: 1px solid var(--line);
+}
+.row:first-of-type { border-top: 0; }
+/* `min-width: 0` or the principal key — one unbroken token — sets the column's
+   floor and pushes the buttons out of the panel. */
+.row .grow { flex: 1 1 100%; min-width: 0; }
+.row .title { display: block; overflow-wrap: anywhere; }
+.meta { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+
+.row .grow.inline { flex: 1 1 auto; }
+
+.tag {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 9px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.tag.open { color: var(--warn); border-color: #4a3a1e; }
+.tag.closed { color: var(--ok); border-color: #24422e; }
+.tag.approved { color: var(--ok); border-color: #24422e; }
+.tag.rejected { color: var(--bad); border-color: #4a2622; }
+.tag.expired { color: var(--muted); }
+
+button {
+  font: inherit;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: #26211d;
+  color: var(--ink);
+  padding: 6px 13px;
+  cursor: pointer;
+}
+button:hover:not(:disabled) { border-color: var(--muted); }
+button:disabled { opacity: 0.5; cursor: default; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #180d09; font-weight: 600; }
+button.approve { color: var(--ok); }
+button.reject { color: var(--bad); }
+
+/* A grid, not a flex row: the five sweep counts belong on one line, and wrapping
+   one of them away reads as a sixth section rather than a fifth number. */
+.counts { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 4px; }
+.counts .n { font-size: 22px; font-variant-numeric: tabular-nums; }
+.counts .k { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
+
+.empty { color: var(--muted); font-style: italic; padding: 6px 0; }
+
+.alert {
+  border: 1px solid #4a2622;
+  background: #2a1b18;
+  color: #f0c4bd;
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+}
+.alert.note { border-color: #4a3a1e; background: #292117; color: #efd7ab; }
+
+.login { max-width: 460px; margin: 12vh auto; padding: 0 24px; }
+.login p { color: var(--muted); }
+.login input {
+  width: 100%;
+  font: inherit;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: #14110f;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--ink);
+  padding: 10px 12px;
+  margin: 6px 0 4px;
+}
+.login input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.login .field-error { color: var(--bad); font-size: 13px; min-height: 20px; }

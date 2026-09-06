@@ -1,30 +1,12 @@
 import { Controller } from '@guren/core'
 
 import { Ticket } from '../../Models/Ticket'
+import { presentTicket, type TicketRow } from '../../Services/tickets'
 import {
   CreateTicketSchema,
   ListTicketsQuerySchema,
   TicketIdParamSchema,
 } from '../Validators/TicketValidator'
-
-interface TicketRow {
-  id: number
-  title: string
-  status: 'open' | 'closed'
-  createdAt: Date
-  updatedAt: Date
-}
-
-/** ISO 8601 strings, because the agent reads this over the tool surface. */
-function present(row: TicketRow) {
-  return {
-    id: row.id,
-    title: row.title,
-    status: row.status,
-    createdAt: row.createdAt.toISOString(),
-    updatedAt: row.updatedAt.toISOString(),
-  }
-}
 
 export default class TicketController extends Controller {
   async index(): Promise<Response> {
@@ -32,7 +14,7 @@ export default class TicketController extends Controller {
     const query = status ? Ticket.where('status', status) : Ticket.newQuery()
     const rows = (await query.orderBy('id', 'asc').get()) as TicketRow[]
 
-    return this.json({ tickets: rows.map(present) })
+    return this.json({ tickets: rows.map(presentTicket) })
   }
 
   async store(): Promise<Response> {
@@ -45,7 +27,7 @@ export default class TicketController extends Controller {
       updatedAt: at,
     })) as TicketRow
 
-    return this.json({ ticket: present(ticket) }, { status: 201 })
+    return this.json({ ticket: presentTicket(ticket) }, { status: 201 })
   }
 
   async close(): Promise<Response> {
@@ -56,6 +38,6 @@ export default class TicketController extends Controller {
       updatedAt: new Date(),
     })) as TicketRow
 
-    return this.json({ ticket: present(updated) })
+    return this.json({ ticket: presentTicket(updated) })
   }
 }

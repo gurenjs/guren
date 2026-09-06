@@ -1,6 +1,7 @@
 import { ServiceProvider, defineGate } from '@guren/core'
 import type { AuthManager, AuthUser } from '@guren/core'
 
+import { User } from '../Models/User'
 import { apiTokenStore } from '../Services/DrizzleApiTokenStore'
 
 /**
@@ -17,6 +18,12 @@ function isOperator(user: AuthUser | null): boolean {
 
 export default class AuthProvider extends ServiceProvider {
   register(): void {
+    // The browser console's guard, and the default: a request with neither a
+    // bearer header nor an installed principal resolves here. Only
+    // `retrieveById` is ever exercised — the console signs in by spending an
+    // API token, and `users` carries no password column to `attempt()` against.
+    this.container.make<AuthManager>('auth').useModel(User)
+
     // One auth story for both callers. The bearer header selects this guard;
     // a principal the agent pipeline installed on the request selects the
     // seam's guard ahead of it, so `requireAuthenticated()` answers for both.
