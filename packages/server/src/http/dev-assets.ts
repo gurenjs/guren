@@ -129,7 +129,7 @@ export function registerDevAssets(app: Application, options: DevAssetsOptions): 
     jsxFactory: 'React.createElement',
     jsxFragment: 'React.Fragment',
     define: {
-      'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV ?? 'development'),
+      'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV || 'development'),
     },
   }
 
@@ -354,7 +354,7 @@ function createJsxRuntimeShim(helpers: Set<string>, runtimeUrl: string): string 
 }
 
 function isDev(): boolean {
-  return (process.env.NODE_ENV ?? 'development') !== 'production'
+  return (process.env.NODE_ENV || 'development') !== 'production'
 }
 
 function deriveCssRoute(prefix: string): string {

@@ -30,6 +30,7 @@
     // `.resolves`: bun-types declares those chains as returning `void`, so the
     // type-aware rule cannot see the promise. The header of the plugin has the details.
     "guren/await-async-assertion": "error",
+    "guren/no-nullish-env-default": "error",
     // The machine-checkable half of .claude/rules/coding-standards.md (Comments):
     // block length, banners, step labels, change-history wording, @param tags
     // that restate the name. The rules live in packages/cli/src/oxlint/comments.js.

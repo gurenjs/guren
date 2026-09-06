@@ -6,7 +6,7 @@ const DB_FILE = './data/guren.db'
 
 // An empty table list usually means db:migrate wrote somewhere else rather than
 // that it silently executed nothing, so every failure here names both databases.
-const WHERE = 'Checked sqlite file: ' + DB_FILE + ' (DATABASE_URL=' + (process.env.DATABASE_URL ?? '<unset>') + ')'
+const WHERE = 'Checked sqlite file: ' + DB_FILE + ' (DATABASE_URL=' + (process.env.DATABASE_URL || '<unset>') + ')'
 
 const db = new Database(DB_FILE)
 const tables = db

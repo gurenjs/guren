@@ -134,9 +134,9 @@ export function getLambdaContext(): LambdaRuntimeContext | null {
 
   return {
     functionName: process.env.AWS_LAMBDA_FUNCTION_NAME!,
-    functionVersion: process.env.AWS_LAMBDA_FUNCTION_VERSION ?? '$LATEST',
-    memorySize: parseInt(process.env.AWS_LAMBDA_FUNCTION_MEMORY_SIZE ?? '128', 10),
-    region: process.env.AWS_REGION ?? process.env.AWS_DEFAULT_REGION ?? 'us-east-1',
+    functionVersion: process.env.AWS_LAMBDA_FUNCTION_VERSION || '$LATEST',
+    memorySize: parseInt(process.env.AWS_LAMBDA_FUNCTION_MEMORY_SIZE || '128', 10),
+    region: process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || 'us-east-1',
     logGroup: process.env.AWS_LAMBDA_LOG_GROUP_NAME,
     logStream: process.env.AWS_LAMBDA_LOG_STREAM_NAME,
     tmpDir: '/tmp',
