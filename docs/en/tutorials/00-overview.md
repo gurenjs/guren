@@ -39,7 +39,7 @@ A blog, and everything a real one needs:
 | 5–8 | Users with passwords and sessions, protected routes, author-only editing, and a harness you have shaped to your project |
 | 9–11 | Comments, tags, cover images and a gallery, and email when someone comments on your post |
 | 12–13 | Your app exposed as tools an agent can call, and an architecture that documents itself |
-| 14 | The same app on Postgres, with database-backed sessions and rate limiting, deployed behind the CI gate |
+| 14 | The same app with database-backed sessions and rate limiting, running in production mode behind the CI gate it was given in chapter 1 |
 
 ## The chapters
 
@@ -60,7 +60,7 @@ Each chapter starts where the previous one ended. Follow them in order.
 | 11 | [Events and Mail](./11-events-and-mail.md) | 75 min |
 | 12 | [Your App as an Agent's Tool](./12-agent-tools.md) | 75 min |
 | 13 | [Documentation That Cannot Go Stale](./13-documented.md) | 60 min |
-| 14 | Production | coming |
+| 14 | [Production](./14-production.md) | 45 min |
 
 Chapters are published as they are finished. The shorter [Build a Mini Blog](./overview.md) series stays available in the meantime and covers the same ground as chapters 3–9 in the generator-first style.
 

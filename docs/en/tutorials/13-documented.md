@@ -447,4 +447,4 @@ Watch the YAML, because this one bites: `issues: [412, #398]` loses everything a
 
 ## Next
 
-Chapter 14, *Production* (coming), takes the blog off SQLite and off your machine: a real database, sessions that survive a restart, rate limiting, and the CI the scaffold has been running for you since chapter 1.
+[Chapter 14: Production](./14-production.md) is the last one: sessions that survive a restart, rate limiting, what `NODE_ENV=production` changes for you, and an honest list of what this app still is not ready for.
