@@ -55,8 +55,8 @@ Each chapter starts where the previous one ended. Follow them in order.
 | 6 | [Protecting Routes](./06-protecting-routes.md) | 60 min |
 | 7 | [Authorization, and What the Gate Cannot See](./07-authorization.md) | 60 min |
 | 8 | [Teach the Agent Your Project](./08-teach-the-agent.md) | 60 min |
-| 9 | Relationships | coming |
-| 10 | Files | coming |
+| 9 | [Relationships](./09-relationships.md) | 90 min |
+| 10 | [Files](./10-files.md) | 60 min |
 | 11 | Events and Mail | coming |
 | 12 | Your App as an Agent's Tool | coming |
 | 13 | The System, Documented | coming |

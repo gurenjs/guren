@@ -498,4 +498,4 @@ git commit -m "feat: add the blogroll"
 
 ## Next
 
-Chapter 9, *Relationships* (coming), replaces the hand-rolled author lookup with `belongsTo` and `hasMany`, adds comments, and hands the agent a many-to-many: tags.
+[Chapter 9: Relationships](./09-relationships.md) replaces the hand-rolled author lookup with `belongsTo` and `hasMany`, adds comments, and hands the agent a many-to-many: tags.
