@@ -335,9 +335,10 @@ jobs:
   # themselves and run in parallel with everything else.
   starter-smokes:
     runs-on: ubuntu-latest
-    # Measured max 4m0s: it rebuilds the packages and runs eight scaffold
-    # smokes.
-    timeout-minutes: 20
+    # Measured max 16m29s at eleven tutorial chapters: it rebuilds the packages,
+    # runs eight scaffold smokes, and executes every chapter of the tutorial in
+    # order. The tutorial grows, so the cap has headroom over the measurement.
+    timeout-minutes: 40
     services:
       postgres:
         image: postgres:16-alpine
