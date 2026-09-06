@@ -472,8 +472,10 @@ Available AI-powered skills that Claude can use automatically:
 | Skill | Trigger Words | Purpose |
 |-------|---------------|---------|
 | `dev-workflow` | "build", "test", "typecheck", "pr check", "e2e", "dev server" | Build, test (smart/full), type check, pre-PR validation, E2E tests, dev server |
-| `scaffold` | "create a controller", "make a job", "new event" | Generate individual components using `bunx guren make:*` |
-| `feature` | "full feature", "CRUD", "everything for" | Generate complete CRUD feature with all components at once |
-| `db-manage` | "database", "migration", "reset", "rollback" | Database operations (migrate, rollback, seed, reset) with safety checks |
-| `guren-api` | "how to", "example of", "what is" | API documentation for all subsystems (auth, cache, queue, mail, events, etc.) |
-| `plugin-authoring` | "install a plugin", "create a plugin", "guren plugin" | Install a Guren plugin via `guren plugin <pkg>`, or author a new plugin package (`definePlugin()`, `gurenPlugin` manifest, CLI commands) |
+| `rfc-authoring` | "write an RFC", "propose a breaking change" | Draft an RFC per `contributing/rfc-process.md` |
+
+Only these two. The application-facing skills (`guren-api`, `scaffold`,
+`feature`, `db-manage`, `plugin-authoring`) live in the harness template under
+`packages/cli/templates/agent/core/skills/` and ship to scaffolded apps, where
+`bunx guren` resolves and framework sources do not. For framework API questions
+here, read `docs/en/guides/` and `packages/*/src` directly.
