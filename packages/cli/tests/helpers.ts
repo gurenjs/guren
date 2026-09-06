@@ -659,14 +659,15 @@ export async function runAgentHook(
   hook: string,
   input: unknown,
   setup: (dir: string) => void | Promise<void>,
+  options: { args?: (dir: string) => string[]; cwd?: (dir: string) => string } = {},
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   const dir = await mkdtemp(join(tmpdir(), 'guren-hook-'))
   try {
     // Bun would otherwise auto-install an unresolvable bare specifier from the registry.
     await writeFile(join(dir, 'bunfig.toml'), '[install]\nauto = "disable"\n')
     await setup(dir)
-    const result = Bun.spawnSync([process.execPath, hook], {
-      cwd: dir,
+    const result = Bun.spawnSync([process.execPath, hook, ...(options.args?.(dir) ?? [])], {
+      cwd: options.cwd?.(dir) ?? dir,
       stdin: Buffer.from(JSON.stringify(input)),
       stdout: 'pipe',
       stderr: 'pipe',

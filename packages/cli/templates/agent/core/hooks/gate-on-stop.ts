@@ -9,6 +9,9 @@
  * hook already blocked this stop, so the gate fires once per stop) and a clean
  * working tree, which also means a turn that ends by committing is not gated
  * here: run `guren gate` before committing. Exit codes: 0 = allow, 2 = block.
+ *
+ * The app root is the first argument when given (Codex runs hooks in the session
+ * cwd, which may be a subdirectory, so its hooks.json passes the git root), else cwd.
  */
 
 // A module, so the top-level awaits below typecheck.
@@ -16,6 +19,8 @@ export {}
 
 interface HookInput {
   stop_hook_active?: boolean
+  /** Present when Cursor runs this hook through its Claude Code compatibility. */
+  cursor_version?: string
 }
 
 let input: HookInput
@@ -25,6 +30,12 @@ try {
   process.exit(0)
 }
 if (input.stop_hook_active) {
+  process.exit(0)
+}
+// Cursor can load .claude/settings.json hooks too (an opt-in setting). It never
+// sets stop_hook_active, so this script would gate every stop; its own hook in
+// .cursor/hooks.json owns the turn there.
+if (input.cursor_version) {
   process.exit(0)
 }
 
@@ -37,7 +48,7 @@ try {
   process.exit(2)
 }
 
-const findings = await cli.stopGateFindings()
+const findings = await cli.stopGateFindings(process.argv[2] || process.cwd())
 if (findings === null) {
   process.exit(0)
 }

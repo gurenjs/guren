@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun .codex/hooks/gate-on-stop.ts",
+            "command": "bun \"$(git rev-parse --show-toplevel)/.codex/hooks/gate-on-stop.ts\" \"$(git rev-parse --show-toplevel)\"",
             "timeout": 300,
             "statusMessage": "guren gate"
           }

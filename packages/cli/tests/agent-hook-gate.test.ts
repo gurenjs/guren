@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { gateAppFiles, runAgentHook, writeWorkspaceFiles } from './helpers'
 
@@ -13,8 +13,11 @@ function git(dir: string, ...args: string[]): void {
   if (result.exitCode !== 0) throw new Error(`git ${args.join(' ')} failed: ${result.stderr.toString()}`)
 }
 
-const runHook = (setup: (dir: string) => void | Promise<void>, input: Record<string, unknown> = {}) =>
-  runAgentHook(hook, input, setup)
+const runHook = (
+  setup: (dir: string) => void | Promise<void>,
+  input: Record<string, unknown> = {},
+  options: Parameters<typeof runAgentHook>[3] = {},
+) => runAgentHook(hook, input, setup, options)
 
 describe('gate-on-stop hook (Claude Code / Codex contract)', () => {
   test('lets a stop through once a Stop hook has already blocked it', async () => {
@@ -22,6 +25,28 @@ describe('gate-on-stop hook (Claude Code / Codex contract)', () => {
 
     expect(result.exitCode).toBe(0)
     expect(result.stderr).toBe('')
+  })
+
+  test('leaves the turn to the Cursor hook when Cursor runs it through Claude Code compatibility', async () => {
+    const result = await runHook((dir) => writeFileSync(join(dir, 'lib.ts'), 'export const a = 1\n'), { status: 'completed', cursor_version: '2.4.0' })
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stderr).toBe('')
+  })
+
+  test('gates the app root given as its argument when run from a subdirectory (the Codex shape)', async () => {
+    const result = await runHook(
+      async (dir) => {
+        git(dir, 'init', '-q')
+        await writeWorkspaceFiles(dir, gateAppFiles({ codegen: 'true', typecheck: 'false', test: 'true' }))
+        mkdirSync(join(dir, 'app', 'Models'), { recursive: true })
+      },
+      {},
+      { args: (dir) => [dir], cwd: (dir) => join(dir, 'app', 'Models') },
+    )
+
+    expect(result.exitCode).toBe(2)
+    expect(result.stderr).toContain('guren gate: typecheck failed')
   })
 
   test('does not gate a clean working tree', async () => {
