@@ -6,10 +6,10 @@ export type PostRecord = typeof posts.$inferSelect
 export type NewPostRecord = typeof posts.$inferInsert
 export type PostAuthorSummary = Pick<UserRecord, 'id' | 'name'>
 
-export class Post extends defineModel(posts) {
+export class Post extends defineModel(posts, {
   // `authorId` is set from the signed-in user, never from request input.
-  static fillable = ['title', 'excerpt', 'body']
-
+  fillable: ['title', 'excerpt', 'body'],
+}) {
   static override relationTypes: { author: BelongsToRecord<PostAuthorSummary> } = {
     author: null,
   }

@@ -6,9 +6,9 @@ export type TaskRecord = typeof tasks.$inferSelect
 export type NewTaskRecord = typeof tasks.$inferInsert
 export type TaskOwnerSummary = Pick<UserRecord, 'id' | 'name'>
 
-export class Task extends defineModel(tasks) {
-  static fillable = ['title', 'description', 'completed', 'userId']
-
+export class Task extends defineModel(tasks, {
+  fillable: ['title', 'description', 'completed', 'userId'],
+}) {
   static override relationTypes: { owner: BelongsToRecord<TaskOwnerSummary> } = {
     owner: null,
   }
