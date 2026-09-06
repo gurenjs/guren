@@ -18,10 +18,7 @@ the corpus that describes the system.
   de-duplicated, each naming the docs that declared it. Read from the
   frontmatter alone; a bare number resolves to the `origin` remote's
   repository when there is one.
-- `make:adr --issue <ref>` (comma-separated for several) prefills
-  `issues:`; a malformed reference fails before anything is written. A URL
-  reference may not contain whitespace, quotes, commas or backslashes: the
-  characters that would break the flag's list, the quoted YAML scalar the
-  scaffold writes, or the scanner's inline-list split.
+- `make:adr --issue <ref>` (repeatable, or comma-separated) prefills
+  `issues:`; a malformed reference fails before anything is written.
 - The docs viewer's detail panel shows the issues as outlinks. They are not
   graph nodes and carry no live state.

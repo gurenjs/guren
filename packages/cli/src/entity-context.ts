@@ -32,7 +32,7 @@ import {
 } from './context-route'
 import { extractInertiaPageRefs, describeInertiaPage } from './inertia-pages'
 import { scanDocs, extractDocsTags, buildEntityDocIndex, type DocRef } from './docs-index'
-import { issueKey, issueLabel, issueUrl, resolveOriginRepo } from './issue-refs'
+import { describeIssue, resolveOriginRepo, type IssueLink } from './issue-refs'
 import { parseSchemaTableColumns } from './schema-parser'
 
 export interface EntityPage {
@@ -79,13 +79,10 @@ export interface EntityDoc {
  * A GitHub issue/PR the entity's linked docs declare (RFC 0018). Offline by
  * construction: what the frontmatter says, never what GitHub says.
  */
-export interface EntityIssue {
-  /** `owner/repo#412`, `#412` when no repository is known, or the URL. */
-  label: string
-  /** `owner/repo`, declared or resolved from the `origin` remote. */
+export interface EntityIssue extends IssueLink {
+  /** `owner/repo`, declared or resolved from the `origin` remote; absent for a URL entry. */
   repo?: string
   number?: number
-  url?: string
   /** Docs that declared it. */
   docs: string[]
 }
@@ -397,42 +394,36 @@ export async function generateEntityContext(
     seeders,
     tests,
     docs,
-    issues: await collectEntityIssues(cwd, docs.map((doc) => docRefByPath.get(doc.path))),
+    issues: await collectEntityIssues(cwd, docs.flatMap((doc) => docRefByPath.get(doc.path) ?? [])),
   }
 }
 
 /** One entry per distinct issue, each naming every doc that declared it. */
-async function collectEntityIssues(
-  cwd: string,
-  refs: Array<DocRef | undefined>,
-): Promise<EntityIssue[]> {
-  const declared = refs.filter((ref): ref is DocRef => ref !== undefined && ref.issues.length > 0)
-  if (declared.length === 0) return []
+async function collectEntityIssues(cwd: string, refs: DocRef[]): Promise<EntityIssue[]> {
+  // The git spawn happens only for an entity whose docs declare something.
+  if (!refs.some((ref) => ref.issues.length > 0)) return []
 
   const originRepo = await resolveOriginRepo(cwd)
-  const byKey = new Map<string, EntityIssue>()
-  for (const ref of declared) {
+  const byLabel = new Map<string, EntityIssue>()
+  for (const ref of refs) {
     for (const issue of ref.issues) {
-      const key = issueKey(issue, originRepo)
-      const existing = byKey.get(key)
+      const link = describeIssue(issue, originRepo)
+      const existing = byLabel.get(link.label)
       if (existing) {
         if (!existing.docs.includes(ref.path)) existing.docs.push(ref.path)
         continue
       }
-      const url = issueUrl(issue, originRepo)
-      const repo = issue.kind === 'github' ? (issue.repo ?? originRepo ?? undefined) : undefined
-      byKey.set(key, {
-        label: issueLabel(issue, originRepo),
-        ...(repo === undefined ? {} : { repo }),
-        ...(issue.kind === 'github' ? { number: issue.number } : {}),
-        ...(url === undefined ? {} : { url }),
+      byLabel.set(link.label, {
+        ...link,
+        repo: issue.kind === 'github' ? (issue.repo ?? originRepo ?? undefined) : undefined,
+        number: issue.kind === 'github' ? issue.number : undefined,
         docs: [ref.path],
       })
     }
   }
   // By repository then number, so the order does not change with whether
   // `origin` resolved, and #7 precedes #412; URL entries follow, by label.
-  return [...byKey.values()].sort(
+  return [...byLabel.values()].sort(
     (a, b) =>
       Number(a.number === undefined) - Number(b.number === undefined)
       || (a.repo ?? '').localeCompare(b.repo ?? '')

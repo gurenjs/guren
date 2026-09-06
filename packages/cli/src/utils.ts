@@ -243,6 +243,14 @@ export function pascalCase(value: string): string {
  * adversarial input). A twin lives in `@guren/server` (`src/support/trim-slashes.ts`);
  * the packages share no dependency edge, so the six lines are duplicated by convention.
  */
+/** Split, trim, and drop empties: `'a, b,'` names two entries. */
+export function splitCommaList(value: string): string[] {
+  return value
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry !== '')
+}
+
 export function trimSlashes(value: string): string {
   let start = 0
   let end = value.length

@@ -15,7 +15,7 @@ import {
 } from './discovery'
 import { discoverParsedModels } from './model-parser'
 import { runGit } from './changed-files'
-import { ISSUE_REF_FORMS, parseIssueRef, type DocIssueRef } from './issue-refs'
+import { ISSUE_REF_FORMS, parseIssueRef } from './issue-refs'
 
 const ADR_DIR = 'docs/adr'
 
@@ -41,13 +41,18 @@ export interface MakeAdrOptions extends WriterOptions {
   issues?: string[]
 }
 
-function resolveIssueRefs(entries: string[]): DocIssueRef[] {
+/**
+ * Each entry as the YAML list item make:adr writes. Bare numbers stay bare;
+ * every other form is quoted, since `#` opens a YAML comment. The quoting
+ * needs no escaping because the grammar admits neither `"` nor `\`.
+ */
+function issueYamlEntries(entries: string[]): string[] {
   return entries.map((entry) => {
     const ref = parseIssueRef(entry)
     if (ref === null) {
       throw new Error(`Invalid issue reference "${entry}" — write it as one of: ${ISSUE_REF_FORMS}.`)
     }
-    return ref
+    return ref.kind === 'github' && ref.repo === null ? String(ref.number) : `"${entry.trim()}"`
   })
 }
 
@@ -156,7 +161,7 @@ function adrTemplate(
   actor: string | null,
   generatedAt: string,
   prefill: AdrPrefill,
-  issueRefs: DocIssueRef[],
+  issueEntries: string[],
 ): string {
   const entities =
     prefill.entities.length > 0 ? `entities: [${prefill.entities.join(', ')}]` : 'entities: []'
@@ -169,12 +174,7 @@ function adrTemplate(
   // YAML. ACTOR_RE already excludes quotes, so no escaping is needed.
   const generated = actor === null ? '' : `\ngenerated: { by: "${actor}", at: ${generatedAt} }`
 
-  // Bare numbers stay bare; every other form is quoted, since `#` opens a
-  // YAML comment and `owner/repo#412` would be cut at the `#`.
-  const issues =
-    issueRefs.length > 0
-      ? `\nissues: [${issueRefs.map((ref) => (ref.kind === 'github' && ref.repo === null ? String(ref.number) : `"${ref.raw}"`)).join(', ')}]`
-      : ''
+  const issues = issueEntries.length > 0 ? `\nissues: [${issueEntries.join(', ')}]` : ''
 
   return `---
 type: adr
@@ -229,7 +229,7 @@ export async function makeAdr(title: string, options: MakeAdrOptions = {}): Prom
   const moduleName = options.root ? safeModuleName(options.root) : undefined
   const dir = moduleName ? `modules/${moduleName}/${ADR_DIR}` : ADR_DIR
   // Validated before any discovery: a bad reference fails fast, not after a scan.
-  const issueRefs = resolveIssueRefs(options.issues ?? [])
+  const issueEntries = issueYamlEntries(options.issues ?? [])
   const [prefill, actor] = await Promise.all([
     options.entity ? resolveAdrPrefill(options.entity, moduleName) : EMPTY_PREFILL,
     resolveActor(options.by),
@@ -238,7 +238,7 @@ export async function makeAdr(title: string, options: MakeAdrOptions = {}): Prom
 
   return writeScaffoldFile(
     `${dir}/${sequence}-${adrSlug(title)}.md`,
-    adrTemplate(title.trim(), actor, new Date().toISOString(), prefill, issueRefs),
+    adrTemplate(title.trim(), actor, new Date().toISOString(), prefill, issueEntries),
     options,
   )
 }

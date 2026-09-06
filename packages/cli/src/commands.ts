@@ -34,7 +34,7 @@ import { makeModule } from './make-module'
 import { makeNotification } from './make-notification'
 import { makeProvider } from './make-provider'
 import { makeAdr } from './make-adr'
-import { splitIssueList } from './issue-refs'
+import { ISSUE_REF_FORMS, splitIssueList } from './issue-refs'
 import { writeSpecArtifacts } from './spec-generate'
 import { buildDocsGraphReport, renderDocsGraphMarkdown } from './docs-graph'
 import { makeResource } from './make-resource'
@@ -95,6 +95,7 @@ function toWriterOptions(args: ForceableArgs): WriterOptions {
     root: args.module,
   }
 }
+
 const MODULE_ARG = {
   type: 'string' as const,
   description: 'Scaffold inside modules/<name>/ instead of the project root.',
@@ -244,8 +245,7 @@ const makeAdrCommand = defineCommand({
     },
     issue: {
       type: 'string',
-      description:
-        'GitHub issues or PRs to prefill issues: with (412, owner/repo#412, or a URL), comma-separated for several.',
+      description: `GitHub issues or PRs to prefill issues: with, comma-separated for several. Each: ${ISSUE_REF_FORMS}.`,
     },
     force: { type: 'boolean', description: 'Overwrite existing files', alias: 'f' },
     module: MODULE_ARG,

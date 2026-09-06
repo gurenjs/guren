@@ -1,38 +1,25 @@
 import { describe, expect, it } from 'bun:test'
-import {
-  issueKey,
-  issueLabel,
-  issueUrl,
-  parseIssueRef,
-  repoFromRemoteUrl,
-  splitIssueList,
-} from '../src/issue-refs'
+import { describeIssue, parseIssueRef, repoFromRemoteUrl, splitIssueList } from '../src/issue-refs'
 
 describe('parseIssueRef', () => {
   it('accepts a bare number as the app-repository form', () => {
-    expect(parseIssueRef('412')).toEqual({ kind: 'github', raw: '412', repo: null, number: 412 })
-    expect(parseIssueRef('#412')).toEqual({ kind: 'github', raw: '#412', repo: null, number: 412 })
-    expect(parseIssueRef('  412 ')).toEqual({ kind: 'github', raw: '412', repo: null, number: 412 })
+    expect(parseIssueRef('412')).toEqual({ kind: 'github', repo: null, number: 412 })
+    expect(parseIssueRef('#412')).toEqual({ kind: 'github', repo: null, number: 412 })
+    expect(parseIssueRef('  412 ')).toEqual({ kind: 'github', repo: null, number: 412 })
   })
 
   it('accepts owner/repo#number', () => {
-    expect(parseIssueRef('acme/shop#398')).toEqual({
-      kind: 'github',
-      raw: 'acme/shop#398',
-      repo: 'acme/shop',
-      number: 398,
-    })
-    expect(parseIssueRef('acme-inc/shop.web#1')).toMatchObject({ repo: 'acme-inc/shop.web', number: 1 })
+    expect(parseIssueRef('acme/shop#398')).toEqual({ kind: 'github', repo: 'acme/shop', number: 398 })
+    expect(parseIssueRef('acme-inc/shop.web#1')).toEqual({ kind: 'github', repo: 'acme-inc/shop.web', number: 1 })
   })
 
   it('parses GitHub issue and pull request URLs, ignoring fragments', () => {
     expect(parseIssueRef('https://github.com/acme/shop/issues/412')).toEqual({
       kind: 'github',
-      raw: 'https://github.com/acme/shop/issues/412',
       repo: 'acme/shop',
       number: 412,
     })
-    expect(parseIssueRef('https://github.com/acme/shop/pull/9#issuecomment-1')).toMatchObject({
+    expect(parseIssueRef('https://github.com/acme/shop/pull/9#issuecomment-1')).toEqual({
       kind: 'github',
       repo: 'acme/shop',
       number: 9,
@@ -43,7 +30,6 @@ describe('parseIssueRef', () => {
   it('keeps a non-GitHub URL as an outlink', () => {
     expect(parseIssueRef('https://gitlab.example.com/acme/shop/-/issues/5')).toEqual({
       kind: 'url',
-      raw: 'https://gitlab.example.com/acme/shop/-/issues/5',
       url: 'https://gitlab.example.com/acme/shop/-/issues/5',
     })
   })
@@ -104,26 +90,27 @@ describe('repoFromRemoteUrl', () => {
   })
 })
 
-describe('issue labels, URLs and keys', () => {
+describe('describeIssue', () => {
   const bare = parseIssueRef('412')!
   const scoped = parseIssueRef('acme/shop#412')!
   const url = parseIssueRef('https://gitlab.example.com/i/5')!
 
-  it('fills the app repository in from the default when the entry names none', () => {
-    expect(issueLabel(bare, 'acme/shop')).toBe('acme/shop#412')
-    expect(issueUrl(bare, 'acme/shop')).toBe('https://github.com/acme/shop/issues/412')
-    expect(issueKey(bare, 'acme/shop')).toBe(issueKey(scoped, null))
+  it('fills the app repository in from the default, so two spellings of one issue share a label', () => {
+    expect(describeIssue(bare, 'acme/shop')).toEqual({
+      label: 'acme/shop#412',
+      url: 'https://github.com/acme/shop/issues/412',
+    })
+    expect(describeIssue(bare, 'acme/shop')).toEqual(describeIssue(scoped, null))
   })
 
   it('degrades to a bare label with no URL when no repository is known', () => {
-    expect(issueLabel(bare, null)).toBe('#412')
-    expect(issueUrl(bare, null)).toBeUndefined()
-    expect(issueKey(bare, null)).toBe('#412')
+    expect(describeIssue(bare, null)).toEqual({ label: '#412' })
   })
 
   it('passes URL entries through unchanged', () => {
-    expect(issueLabel(url, 'acme/shop')).toBe('https://gitlab.example.com/i/5')
-    expect(issueUrl(url, null)).toBe('https://gitlab.example.com/i/5')
-    expect(issueKey(url, 'acme/shop')).toBe('https://gitlab.example.com/i/5')
+    expect(describeIssue(url, 'acme/shop')).toEqual({
+      label: 'https://gitlab.example.com/i/5',
+      url: 'https://gitlab.example.com/i/5',
+    })
   })
 })

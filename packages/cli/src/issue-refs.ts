@@ -5,12 +5,11 @@
  * never is, so `guren check` stays a deterministic gate.
  */
 import { runGit } from './changed-files'
+import { splitCommaList } from './utils'
 
 export type DocIssueRef =
   | {
       kind: 'github'
-      /** The entry as written, for messages. */
-      raw: string
       /** `owner/repo`, or null when the entry names the app's own repository. */
       repo: string | null
       number: number
@@ -18,55 +17,53 @@ export type DocIssueRef =
   | {
       /** An http(s) URL on some other host: an outlink the viewer can render, nothing more. */
       kind: 'url'
-      raw: string
       url: string
     }
+
+/** What a consumer shows for one reference; `url` is absent when no repository is known. */
+export interface IssueLink {
+  /** `owner/repo#412`, `#412` when no repository is known, or the URL. */
+  label: string
+  url?: string
+}
 
 /** The accepted spellings, in the order the fix text lists them. */
 export const ISSUE_REF_FORMS =
   '412, "#412", owner/repo#412, or an issue/PR URL (no spaces, quotes, commas or backslashes)'
 
-const NUMBER_RE = /^#?(\d+)$/
 const REPO_SEGMENT = '[A-Za-z0-9_.-]+'
-const REPO_NUMBER_RE = new RegExp(`^(${REPO_SEGMENT}/${REPO_SEGMENT})#(\\d+)$`)
 // A URL character set that survives every place a reference travels: the
 // comma-split `--issue` list, the double-quoted YAML scalar make:adr writes,
 // and the inline-list frontmatter the scanner splits on unquoted commas.
 const URL_CHARS = '[^\\s",\\\\]'
-const GITHUB_URL_RE = new RegExp(
-  `^https?://(?:www\\.)?github\\.com/(${REPO_SEGMENT}/${REPO_SEGMENT})/(?:issues|pull)/(\\d+)(?:[/?#]${URL_CHARS}*)?$`,
-)
+const GITHUB_FORMS = [
+  /^#?(?<number>\d+)$/,
+  new RegExp(`^(?<repo>${REPO_SEGMENT}/${REPO_SEGMENT})#(?<number>\\d+)$`),
+  new RegExp(
+    `^https?://(?:www\\.)?github\\.com/(?<repo>${REPO_SEGMENT}/${REPO_SEGMENT})/(?:issues|pull)/(?<number>\\d+)(?:[/?#]${URL_CHARS}*)?$`,
+  ),
+]
 const URL_RE = new RegExp(`^https?://${URL_CHARS}+$`)
-
-function issueNumber(digits: string): number | null {
-  const value = Number(digits)
-  return Number.isSafeInteger(value) && value > 0 ? value : null
-}
 
 /** Parse one `issues:` entry, or null when it matches no accepted form. */
 export function parseIssueRef(raw: string): DocIssueRef | null {
   const entry = raw.trim()
-  if (entry === '') return null
 
-  const github = NUMBER_RE.exec(entry) ?? REPO_NUMBER_RE.exec(entry) ?? GITHUB_URL_RE.exec(entry)
-  if (github) {
-    const [repo, digits] = github.length === 2 ? [null, github[1]] : [github[1], github[2]]
-    const number = issueNumber(digits)
-    return number === null ? null : { kind: 'github', raw: entry, repo, number }
+  for (const form of GITHUB_FORMS) {
+    const groups = form.exec(entry)?.groups
+    if (!groups) continue
+    const number = Number(groups.number)
+    return Number.isSafeInteger(number) && number > 0
+      ? { kind: 'github', repo: groups.repo ?? null, number }
+      : null
   }
 
-  if (URL_RE.test(entry)) return { kind: 'url', raw: entry, url: entry }
-
-  return null
+  return URL_RE.test(entry) ? { kind: 'url', url: entry } : null
 }
 
 /** The `--issue` flag's value as entries: comma-separated, blanks dropped. */
 export function splitIssueList(value: string | undefined): string[] {
-  if (value === undefined) return []
-  return value
-    .split(',')
-    .map((entry) => entry.trim())
-    .filter((entry) => entry !== '')
+  return value === undefined ? [] : splitCommaList(value)
 }
 
 const REMOTE_RE = new RegExp(
@@ -89,22 +86,15 @@ export async function resolveOriginRepo(cwd: string): Promise<string | null> {
   return url === undefined ? null : repoFromRemoteUrl(url)
 }
 
-/** `owner/repo#412`, or `#412` when no repository is known. */
-export function issueLabel(ref: DocIssueRef, defaultRepo: string | null): string {
-  if (ref.kind === 'url') return ref.url
+/**
+ * Label and URL for one reference. The label doubles as the identity across
+ * docs: `412` and `acme/shop#412` in a checkout whose origin is acme/shop
+ * describe one issue and get one label.
+ */
+export function describeIssue(ref: DocIssueRef, defaultRepo: string | null): IssueLink {
+  if (ref.kind === 'url') return { label: ref.url, url: ref.url }
   const repo = ref.repo ?? defaultRepo
-  return repo ? `${repo}#${ref.number}` : `#${ref.number}`
-}
-
-/** The issue's URL, or undefined when the repository cannot be resolved. */
-export function issueUrl(ref: DocIssueRef, defaultRepo: string | null): string | undefined {
-  if (ref.kind === 'url') return ref.url
-  const repo = ref.repo ?? defaultRepo
-  return repo ? `https://github.com/${repo}/issues/${ref.number}` : undefined
-}
-
-/** Identity for de-duplication across docs: the same issue named two ways is one issue. */
-export function issueKey(ref: DocIssueRef, defaultRepo: string | null): string {
-  if (ref.kind === 'url') return ref.url
-  return `${ref.repo ?? defaultRepo ?? ''}#${ref.number}`
+  return repo
+    ? { label: `${repo}#${ref.number}`, url: `https://github.com/${repo}/issues/${ref.number}` }
+    : { label: `#${ref.number}` }
 }
