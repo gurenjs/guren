@@ -266,7 +266,7 @@ export async function checkRateLimit(ip: string, limit: number): Promise<boolean
 const cache = new CacheManager({
   default: 'redis',
   stores: {
-    redis: { driver: 'redis', client: redis },
+    redis: { driver: 'redis', client: () => createRedisClient({ url: process.env.REDIS_URL }) },
   },
 })
 
