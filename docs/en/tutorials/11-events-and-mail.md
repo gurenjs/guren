@@ -806,4 +806,4 @@ git commit -m "feat: mail commenters when a post is published"
 
 ## Next
 
-Chapter 12, *The Agent Interface* (coming), turns the routes you already have into tools an agent can call, and shows the same authorization gap from chapter 7 becoming a hard failure instead of a passing audit.
+[Chapter 12: Your App as an Agent's Tool](./12-agent-tools.md) turns the routes you already have into tools an agent can call, and shows the same authorization gap from chapter 7 becoming a hard failure instead of a passing audit.

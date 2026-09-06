@@ -58,7 +58,7 @@ Each chapter starts where the previous one ended. Follow them in order.
 | 9 | [Relationships](./09-relationships.md) | 90 min |
 | 10 | [Files](./10-files.md) | 60 min |
 | 11 | [Events and Mail](./11-events-and-mail.md) | 75 min |
-| 12 | Your App as an Agent's Tool | coming |
+| 12 | [Your App as an Agent's Tool](./12-agent-tools.md) | 75 min |
 | 13 | The System, Documented | coming |
 | 14 | Production | coming |
 

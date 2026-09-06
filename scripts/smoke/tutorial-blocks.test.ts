@@ -24,6 +24,7 @@ describe('parseTutorialBlocks', () => {
       fence('ts file=app/Models/Post.ts', 'export class Post {}'),
       fence('json file=lang/en/messages.json fallback', '{}'),
       fence('bash manual', 'fly deploy'),
+      fence('ts manual', 'const a = 1'),
       fence('bash', 'ls'),
       fence('ts', 'const x = 1'),
     ].join('\n\n')
@@ -32,7 +33,7 @@ describe('parseTutorialBlocks', () => {
 
     expect(issues).toEqual([])
     expect(blocks.map((block) => block.kind)).toEqual([
-      'run', 'run', 'run', 'run', 'file', 'file', 'manual', 'illustrative', 'illustrative',
+      'run', 'run', 'run', 'run', 'file', 'file', 'manual', 'manual', 'illustrative', 'illustrative',
     ])
     expect(blocks[1]).toMatchObject({ kind: 'run', mode: 'expect-fail', fallback: false })
     expect(blocks[2]).toMatchObject({ kind: 'run', mode: 'background' })
@@ -40,6 +41,7 @@ describe('parseTutorialBlocks', () => {
     expect(blocks[4]).toMatchObject({ kind: 'file', path: 'app/Models/Post.ts', fallback: false, lang: 'ts' })
     expect(blocks[5]).toMatchObject({ kind: 'file', path: 'lang/en/messages.json', fallback: true })
     expect(blocks[6]).toMatchObject({ kind: 'manual', body: 'fly deploy' })
+    expect(blocks[7]).toMatchObject({ kind: 'manual', lang: 'ts', body: 'const a = 1' })
     expect(blocks[0].line).toBe(1)
   })
 

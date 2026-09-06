@@ -107,7 +107,6 @@ function classify(lang: string, attrs: string[], base: BlockBase, file: string):
   if (set.has('manual')) {
     set.delete('manual')
     if (set.size > 0 || fallback) return issue(`manual takes no other attribute, got: ${attrs.join(' ')}`)
-    if (lang !== 'bash') return issue(`manual blocks are bash, got: ${lang}`)
     return { block: { ...base, kind: 'manual' } }
   }
 
