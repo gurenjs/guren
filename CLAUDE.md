@@ -147,6 +147,7 @@ bunx guren make:adr "Billing cycle is end-of-month"  # Numbered ADR under docs/a
 
 # Application modules (RFC 0002) — self-contained modules/<name>/ directories
 bunx guren make:module Billing              # Scaffold modules/billing/{index.ts,routes.ts,db/schema.ts}, wire into src/app.ts
+bunx guren add session                      # Database-backed sessions: schema table + migration, config/session.ts, SessionProvider, sessions:prune (RFC 0020; `guren add auth` runs it)
 bunx guren make:controller Invoice --module billing  # Most make:* commands accept --module to scaffold inside a module instead of the project root
 ```
 
@@ -377,6 +378,7 @@ export const handler = createLambdaHandler(app)
 | Path | Purpose |
 |------|---------|
 | `packages/server/src/http/Application.ts` | Main server class |
+| `packages/cli/src/add-session.ts` | The `guren add session` blueprint (RFC 0020 §2): the per-dialect `sessions` table, `config/session.ts` + `SessionProvider`, the `SESSION_DRIVER` env entry, and `sessions:prune`. `make:auth` runs it before generating its migration, so one drizzle-kit run covers users and sessions — which is why `addSession({ migration: false })` exists |
 | `packages/core/src/session-manager.ts` | `createSessionManager()` and the `database` session driver (RFC 0020 §1). The one place `SessionDrivers` gains `database`: the store wraps a drizzle table in an ORM `Model`, which `@guren/server` cannot do. Registered by a factory call rather than a module side effect, so a bundler dropping an unused import cannot drop the driver; `packages/core/tests/session-manager.test.ts` pins the augmentation surviving into the bundled `.d.ts`, which nothing else would notice losing |
 | `packages/server/src/http/middleware/session-manager.ts` | `SessionManager` and the augmentable `SessionDrivers` registry (RFC 0020 §1): named stores, one default, lazy memoized resolution so a plugin's `registerDriver()` and a Workers binding may both arrive after construction. Bound under the container key `session`; `AuthServiceProvider` builds the session middleware on the first request from `manager.options` + `auth.sessionOptions`, and fails the boot when both name a store. Server ships `memory` and `redis`; `database` is core's to add, since server must not depend on the ORM |
 | `packages/server/src/mvc/Controller.ts` | Base controller (validateBody/Query/Params) |

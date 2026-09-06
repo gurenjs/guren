@@ -1,3 +1,4 @@
+import { consola } from 'consola'
 import { existsSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -287,5 +288,28 @@ export async function makeMigration(options: MakeMigrationOptions = {}): Promise
     schemaPath: useConfig ? configured.schema : readPath(schema),
     droppedConfigFields,
     configUnreadable,
+  }
+}
+
+/**
+ * Generate a migration for a schema a scaffolder just patched, degrading to a
+ * hint when drizzle-kit is not installed yet. Returns whether one was written,
+ * which is what a caller's "run db:make" next step hangs on.
+ */
+export async function generateSchemaMigration(name: string, subject: string): Promise<boolean> {
+  if (!existsSync(resolve(process.cwd(), 'node_modules', 'drizzle-kit'))) {
+    consola.info(`drizzle-kit is not installed — run \`bun run db:make\` after \`bun install\` to generate the ${subject} migration.`)
+    return false
+  }
+
+  try {
+    await makeMigration({ name })
+    consola.success(`Generated the ${name} migration via drizzle-kit.`)
+    return true
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error)
+    consola.warn(`Could not generate the ${subject} migration automatically (${reason}).`)
+    consola.info('Run `bun run db:make` (drizzle-kit generate) to create it from db/schema.ts.')
+    return false
   }
 }

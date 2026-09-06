@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, relative, resolve, sep as pathSep } from 'node:path'
+import { consola } from 'consola'
 
 export interface WriterOptions {
   force?: boolean
@@ -200,9 +201,25 @@ export interface ScaffoldFileEntry {
 }
 
 /** `writeScaffoldFile` over a batch — every path is checked before any write. */
+/** Local to avoid a cycle: discovery.ts imports from this module. */
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path)
+    return true
+  } catch {
+    return false
+  }
+}
+
 export async function writeScaffoldFiles(
   entries: ScaffoldFileEntry[],
-  options: WriterOptions = {},
+  options: WriterOptions & {
+    /**
+     * Report and skip a file that exists instead of throwing, so a blueprint
+     * re-run repairs whatever is missing. Ignored under `force`.
+     */
+    skipExisting?: boolean
+  } = {},
 ): Promise<string[]> {
   const cwd = writeRoot(options)
 
@@ -210,9 +227,18 @@ export async function writeScaffoldFiles(
     assertScaffoldPath(entry.path, cwd)
   }
 
+  const pending: ScaffoldFileEntry[] = []
+  for (const entry of entries) {
+    if (options.skipExisting && !options.force && (await pathExists(resolve(cwd, entry.path)))) {
+      consola.info(`${entry.path} already exists — left unchanged (use --force to overwrite).`)
+    } else {
+      pending.push(entry)
+    }
+  }
+
   const created: string[] = []
 
-  for (const entry of entries) {
+  for (const entry of pending) {
     created.push(await writeFileSafe(entry.path, entry.contents, { ...options, cwd }))
   }
 

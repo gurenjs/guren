@@ -86,6 +86,7 @@ describe('blueprints', () => {
       'queue',
       'resource',
       'schedule',
+      'session',
       'storage',
     ])
   })

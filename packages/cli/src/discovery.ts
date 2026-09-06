@@ -525,3 +525,22 @@ export function formatTruncatedList(items: string[], limit = 3): string {
   const more = items.length > limit ? ` and ${items.length - limit} more` : ''
   return `${shown}${more}`
 }
+
+/**
+ * Whether the app already binds `key` in the container. The conventional
+ * provider file name answers this in neither direction: a custom provider
+ * binds the service without that file, and installing a second manager over it
+ * would shadow the app's own.
+ */
+export async function appBindsService(key: string): Promise<boolean> {
+  const roots = await listAppRoots(process.cwd())
+  const groups = await Promise.all(
+    roots.flatMap((root) => ['app', 'src'].map((dir) => collectFiles(resolve(root.dir, dir)))),
+  )
+  const bindingPattern = new RegExp(`\\b(?:instance|singleton|bind)\\(\\s*['"]${escapeRegExp(key)}['"]`)
+  for (const filePath of groups.flat()) {
+    const source = await readIfExists(process.cwd(), filePath)
+    if (source && bindingPattern.test(source)) return true
+  }
+  return false
+}
