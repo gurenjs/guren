@@ -14,6 +14,17 @@ export function jsonResponse(data: unknown, status = 200): Response {
 }
 
 export { createSessionMiddleware, MemorySessionStore, getSessionFromContext } from './session'
+export { SessionManager } from './session-manager'
+export type {
+  SessionConfig,
+  SessionDrivers,
+  SessionStoreConfig,
+  SessionDriverFactory,
+  MemorySessionDriverOptions,
+  RedisSessionDriverOptions,
+} from './session-manager'
+export type { SessionCookieOptions } from './session'
+export { defaultCookieSecure } from './session'
 export type { Session, SessionData, SessionStore } from './session'
 export {
   requireAuthenticated,

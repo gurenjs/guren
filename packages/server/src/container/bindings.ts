@@ -19,6 +19,7 @@ import type { Gate } from '../authorization/Gate'
 import type { ExceptionHandler } from '../errors'
 import type { SharedInertiaPropsRegistry } from '../mvc/inertia/shared'
 import type { AgentAuditEmitter } from '../agent/audit-emitter'
+import type { SessionManager } from '../http/middleware/session-manager'
 
 /** Maps service keys to their concrete types, for `container.make('key')`. */
 export interface ServiceBindings {
@@ -35,6 +36,8 @@ export interface ServiceBindings {
   encrypter: Encrypter
   'app.keyring': AppKeyring
   auth: AuthManager
+  /** Bound by an app's SessionProvider; AuthServiceProvider resolves the store through it (RFC 0020). */
+  session: SessionManager
   oauth: OAuthManager
   storage: StorageManager
   health: HealthManager

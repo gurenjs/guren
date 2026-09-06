@@ -71,18 +71,7 @@ export class Container {
     // make() is synchronous, so it only sees what the provider's register() bound
     // before the loader returned; an async register() binds too late and is
     // reported rather than surfacing as a bare "not found".
-    let binding = this.bindings.get(resolvedKey)
-    if (!binding && this.deferredProviderLoader) {
-      const loading = this.deferredProviderLoader(resolvedKey)
-      binding = this.bindings.get(resolvedKey)
-      if (loading && !binding) {
-        throw new Error(
-          `Deferred provider for "${key}" did not bind "${resolvedKey}" synchronously in register(). ` +
-          'Container.make() cannot await an async register(); bind the service synchronously, ' +
-          'or await ProviderManager.loadDeferredProvider() before resolving it.',
-        )
-      }
-    }
+    const binding = this.bindings.get(resolvedKey) ?? this.loadDeferred(key, resolvedKey)
     if (!binding) {
       throw new Error(`Service "${key}" not found in container`)
     }
@@ -145,6 +134,39 @@ export class Container {
   has(key: string): boolean {
     const resolvedKey = this.resolveAlias(key)
     return this.bindings.has(resolvedKey)
+  }
+
+  /**
+   * `make()` for a service that may be absent: undefined when nothing provides
+   * it. Unlike `has()`, a fake counts and a deferred provider is activated, so
+   * an optional dependency bound either way is found rather than skipped.
+   */
+  makeOptional<K extends keyof ServiceBindings>(key: K): ServiceBindings[K] | undefined
+  makeOptional<T>(key: string): T | undefined
+  makeOptional(key: string): unknown {
+    const resolvedKey = this.resolveAlias(key)
+    if (this.fakes.has(key) || this.fakes.has(resolvedKey)) {
+      return this.make(key)
+    }
+    const binding = this.bindings.get(resolvedKey) ?? this.loadDeferred(key, resolvedKey)
+    return binding ? this.make(key) : undefined
+  }
+
+  /** The binding a deferred provider makes for `resolvedKey`, once its register() has run; undefined when none provides it. */
+  private loadDeferred(key: string, resolvedKey: string): ServiceBinding | undefined {
+    if (!this.deferredProviderLoader) {
+      return undefined
+    }
+    const loading = this.deferredProviderLoader(resolvedKey)
+    const binding = this.bindings.get(resolvedKey)
+    if (loading && !binding) {
+      throw new Error(
+        `Deferred provider for "${key}" did not bind "${resolvedKey}" synchronously in register(). ` +
+        'Container.make() cannot await an async register(); bind the service synchronously, ' +
+        'or await ProviderManager.loadDeferredProvider() before resolving it.',
+      )
+    }
+    return binding
   }
 
   alias(alias: string, key: string): this {

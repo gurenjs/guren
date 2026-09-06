@@ -30,6 +30,14 @@ export class FakeRedis {
     return 'OK'
   }
 
+  async setex(key: string, ttlSeconds: number, value: string): Promise<'OK'> {
+    return this.psetex(key, ttlSeconds * 1000, value)
+  }
+
+  async expire(key: string, ttlSeconds: number): Promise<number> {
+    return this.pexpireSync(key, ttlSeconds * 1000)
+  }
+
   async del(...keys: string[]): Promise<number> {
     let removed = 0
     for (const key of keys) {

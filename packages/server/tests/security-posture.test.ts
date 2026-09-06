@@ -1,6 +1,7 @@
 process.env.APP_KEY = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
 
 import { describe, expect, it } from 'bun:test'
+import { withEnv } from './support/env'
 import { Application, requireAuthenticated } from '../src'
 import { getSessionFromContext } from '../src/http/middleware/session'
 import { MCP_ENDPOINT_PATH } from '../src/mcp/endpoint'
@@ -16,25 +17,6 @@ async function bootDefaultApp(): Promise<Application> {
   app.router.get('/probe', () => 'ok')
   await app.boot()
   return app
-}
-
-async function withEnv<T>(
-  overrides: Record<string, string | undefined>,
-  run: () => Promise<T>,
-): Promise<T> {
-  const saved = new Map(Object.keys(overrides).map((key) => [key, process.env[key]]))
-  for (const [key, value] of Object.entries(overrides)) {
-    if (value === undefined) delete process.env[key]
-    else process.env[key] = value
-  }
-  try {
-    return await run()
-  } finally {
-    for (const [key, value] of saved) {
-      if (value === undefined) delete process.env[key]
-      else process.env[key] = value
-    }
-  }
 }
 
 describe('security posture: default response headers', () => {

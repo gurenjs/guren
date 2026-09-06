@@ -377,6 +377,7 @@ export const handler = createLambdaHandler(app)
 | Path | Purpose |
 |------|---------|
 | `packages/server/src/http/Application.ts` | Main server class |
+| `packages/server/src/http/middleware/session-manager.ts` | `SessionManager` and the augmentable `SessionDrivers` registry (RFC 0020 §1): named stores, one default, lazy memoized resolution so a plugin's `registerDriver()` and a Workers binding may both arrive after construction. Bound under the container key `session`; `AuthServiceProvider` builds the session middleware on the first request from `manager.options` + `auth.sessionOptions`, and fails the boot when both name a store. Server ships `memory` and `redis`; `database` is core's to add, since server must not depend on the ORM |
 | `packages/server/src/mvc/Controller.ts` | Base controller (validateBody/Query/Params) |
 | `packages/server/src/mvc/Router.ts` | Instance-based route registry |
 | `packages/server/src/errors/ExceptionHandler.ts` | Exception handler (duck-type statusCode) |

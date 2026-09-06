@@ -1,7 +1,7 @@
 import type { Context, MiddlewareHandler } from 'hono'
 import { getCookie } from 'hono/cookie'
 import { jsonResponse } from './index'
-import { getSessionFromContext, type Session } from './session'
+import { defaultCookieSecure, getSessionFromContext, type Session } from './session'
 import { deriveAppKeyring, getAppKeyringFromEnv } from '../../encryption/app-key'
 import { MessageSigner } from '../../encryption/MessageSigner'
 import { secureCompare } from '../../encryption/Hash'
@@ -39,10 +39,6 @@ export interface CsrfOptions {
 }
 
 const DEFAULT_PROTECTED_METHODS = ['POST', 'PUT', 'PATCH', 'DELETE']
-
-const DEFAULT_COOKIE_SECURE = typeof process !== 'undefined'
-  ? process.env.NODE_ENV === 'production'
-  : true
 
 const CSRF_CONTEXT_KEY = 'guren:csrf-token'
 const CSRF_PURPOSE = 'csrf'
@@ -392,7 +388,7 @@ function setXsrfCookie(
   token: string,
   options: CsrfOptions['cookieOptions'] = {},
 ): void {
-  const { path = '/', secure = DEFAULT_COOKIE_SECURE, sameSite = 'Lax' } = options
+  const { path = '/', secure = defaultCookieSecure(), sameSite = 'Lax' } = options
   // httpOnly must be false so JavaScript (Axios) can read the cookie.
   // Must append: setting Set-Cookie wholesale on the finalized response
   // wipes cookies added by inner middleware and handlers.

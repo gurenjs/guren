@@ -214,7 +214,38 @@ app.use('*', createSessionMiddleware())
   - `cookieHttpOnly` (default `true`)
   - `cookieMaxAgeSeconds` (optional; falls back to `ttlSeconds`)
   - `ttlSeconds` (default 2 hours)
-  - `store` (default in-memory; swap for your own implementation for multi-instance deployments)
+  - `store` (default in-memory; swap for your own implementation for multi-instance deployments). Accepts a store or a function returning one; the function is called on every request (a `SessionManager` memoizes), never at boot.
+
+### Selecting a store with `SessionManager`
+
+For more than one candidate store, declare them once and pick by environment. Bind a `SessionManager` under the `session` key from a provider's `register()` and `AuthServiceProvider` builds the session middleware around it at boot, resolving the store itself on the first request:
+
+```ts
+import { ServiceProvider, SessionManager, type SessionConfig } from '@guren/core'
+import { createRedisClient } from '@guren/core/redis'
+
+const sessionConfig: SessionConfig = {
+  default: process.env.SESSION_DRIVER ?? 'memory',
+  ttlSeconds: 60 * 60 * 2,
+  stores: {
+    memory: { driver: 'memory' },
+    // `client` may be a function: it runs when this store is first used, so a
+    // store that is declared but not selected opens no connection.
+    redis: { driver: 'redis', client: () => createRedisClient({ url: process.env.REDIS_URL }) },
+  },
+}
+
+export default class SessionProvider extends ServiceProvider {
+  register(): void {
+    this.container.instance('session', new SessionManager(sessionConfig))
+  }
+}
+```
+
+Cookie and TTL settings on the manager are the base; `auth.sessionOptions` overrides them field by field. Setting `auth.sessionOptions.store` *and* binding a manager fails the boot rather than picking one silently, as does a `default` store whose driver nobody registered; an unknown `default` name fails at construction. Either way a typo in `SESSION_DRIVER` stops the boot instead of the first login. `memory` is always declared, so `SESSION_DRIVER=memory` works without an entry. Bind the manager in `register()`, not `boot()`: `AuthServiceProvider` boots before your providers do (a deferred provider is the exception; it is activated on the first request). A plugin adds a driver by augmenting the `SessionDrivers` interface and calling `manager.registerDriver(name, factory)`; resolution is lazy, so the plugin's `register()` may run after the config was declared. The `database` driver over your ORM tables and the `guren add session` scaffold that writes this file for you are the next parts of RFC 0020.
+
+> [!WARNING]
+> On Cloudflare Workers, AWS Lambda, or Vercel, requests share no memory, so the default `MemorySessionStore` loses a login on the very next request. The middleware warns once per process when it finds itself in that position; `guren check` and the deploy builds warn ahead of time.
 
 ## Configuring Providers & Guards
 

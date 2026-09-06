@@ -644,3 +644,31 @@ describe('ProviderManager', () => {
     expect(bootCount).toBe(1)
   })
 })
+
+describe('makeOptional', () => {
+  it('should return undefined for an unbound service and the instance for a bound one', () => {
+    const container = new Container()
+
+    expect(container.makeOptional('missing')).toBeUndefined()
+    container.instance('present', { ok: true })
+    expect(container.makeOptional<{ ok: boolean }>('present')).toEqual({ ok: true })
+  })
+
+  it('should honour a fake and activate a deferred provider, which has() does not', () => {
+    const container = new Container()
+    using _ = container.fake('faked', 'fake-value')
+    expect(container.has('faked')).toBe(false)
+    expect(container.makeOptional<string>('faked')).toBe('fake-value')
+
+    let activated = 0
+    container.deferredProviderLoader = (service) => {
+      if (service !== 'deferred') return undefined
+      activated += 1
+      container.instance('deferred', 'from-deferred')
+      return undefined
+    }
+    expect(container.has('deferred')).toBe(false)
+    expect(container.makeOptional<string>('deferred')).toBe('from-deferred')
+    expect(activated).toBe(1)
+  })
+})

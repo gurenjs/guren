@@ -11,6 +11,8 @@ import {
 } from './discovery'
 import { parseSourceFile } from './parse-cache'
 import { readDeclaredDependencyNames } from './plugin-manifest'
+// The runtime warning in the session middleware names the target by the same label.
+import { SERVERLESS_RUNTIME_LABELS } from '@guren/core'
 
 /**
  * Deploy targets whose runtime invalidates one or more of Guren's Bun-first
@@ -34,17 +36,17 @@ export interface DeployTargetProfile {
 
 const DEPLOY_TARGET_PROFILES: Record<DeployTargetId, DeployTargetProfile> = {
   cloudflare: {
-    label: 'Cloudflare Workers',
+    label: SERVERLESS_RUNTIME_LABELS.cloudflare,
     hasBunRuntime: false,
     discoveryBlocker: 'Workers has no filesystem and no Bun runtime, so `Bun.Glob` scanning finds nothing.',
   },
   vercel: {
-    label: 'Vercel',
+    label: SERVERLESS_RUNTIME_LABELS.vercel,
     hasBunRuntime: true,
     discoveryBlocker: 'The Vercel function is a `bun build` bundle that ships no `app/` directory to scan.',
   },
   lambda: {
-    label: 'AWS Lambda',
+    label: SERVERLESS_RUNTIME_LABELS.lambda,
     hasBunRuntime: false,
     discoveryBlocker: 'Lambda runs Node.js, where `Bun.Glob` is unavailable.',
   },
