@@ -97,6 +97,12 @@ const GUIDE_SECTIONS: readonly DocSectionConfig[] = [
 ]
 
 const TUTORIAL_SECTIONS: readonly DocSectionConfig[] = [
+  // The Guren Tutorial (RFC 0019): chapter files are `NN-<slug>.md`, listed here
+  // as they ship. The mini-blog series stays until the chapters absorbing it land.
+  {
+    title: { en: 'The Guren Tutorial', ja: 'Guren チュートリアル' },
+    slugs: ['00-overview', '01-zero-to-deployed'],
+  },
   {
     title: { en: 'Build a Mini Blog', ja: 'ミニブログを作る' },
     slugs: ['overview', 'create-blog-post-app', 'authentication', 'relationships'],
