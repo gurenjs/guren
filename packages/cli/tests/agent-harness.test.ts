@@ -198,6 +198,8 @@ describe('installAgentHarness', () => {
     expect(result.written).toContain('.agents/skills/dev-workflow/SKILL.md')
     expect(result.written).toContain('.codex/config.toml')
     expect(result.written).toContain('.codex/rules/guren.rules')
+    expect(result.written).toContain('.codex/hooks.json')
+    expect(result.written).toContain('.codex/hooks/gate-on-stop.ts')
     expect(result.written).not.toContain('CLAUDE.md')
     expect(result.written.some((path) => path.startsWith('.claude/'))).toBe(false)
 
@@ -239,6 +241,8 @@ describe('installAgentHarness', () => {
     expect(result.written).toContain('AGENTS.md')
     expect(result.written).toContain('.cursor/rules/guren-testing.mdc')
     expect(result.written).toContain('.cursor/mcp.json')
+    expect(result.written).toContain('.cursor/hooks.json')
+    expect(result.written).toContain('.cursor/hooks/gate-on-stop.ts')
 
     const rule = await readFile(join(tempDir, '.cursor/rules/guren-testing.mdc'), 'utf8')
     expect(rule).toContain('globs: tests/**')

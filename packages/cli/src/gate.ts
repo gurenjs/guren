@@ -243,6 +243,22 @@ export async function runGate(options: RunGateOptions = {}): Promise<GateReport>
   }
 }
 
+/**
+ * The stop-hook verdict for an agent ending a turn in `cwd`: `null` when the
+ * working tree is clean or the gate passes, else the failures as text to feed
+ * back. Outside a git repository the tree cannot be judged clean, so the gate
+ * runs. Shared by every agent's stop hook; only the stdin/stdout contract differs.
+ */
+export async function stopGateFindings(cwd = process.cwd()): Promise<string | null> {
+  const tree = await runCaptured(['git', 'status', '--porcelain'], cwd).catch(() => null)
+  if (tree?.exitCode === 0 && tree.stdout.trim() === '') return null
+  // `--changed`: check and lint on what this session touched; typecheck, audit,
+  // and the tests answer for the whole app either way.
+  const report = await runGate({ cwd, changed: true })
+  if (report.ok) return null
+  return `${describeGateFailures(report)}\nRun \`bunx guren gate\` to see every stage.`
+}
+
 /** The failing stages as plain text: what a hook feeds back to the agent. */
 export function describeGateFailures(report: GateReport): string {
   const lines: string[] = []

@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { linkOxlint, runClaudeHook } from './helpers'
+import { linkOxlint, runAgentHook } from './helpers'
 
-// The oxlint half of the edit hook (see runClaudeHook for how it is driven). The
+// The oxlint half of the edit hook (see runAgentHook for how it is driven). The
 // edited files sit outside the watched paths, so `guren check` never runs here;
 // it is covered by its own tests.
 
@@ -16,7 +16,7 @@ function runHook(
   editedFile: string,
   options: { installed?: boolean } = {},
 ): Promise<{ exitCode: number; stderr: string }> {
-  return runClaudeHook(hook, { tool_input: { file_path: editedFile } }, async (dir) => {
+  return runAgentHook(hook, { tool_input: { file_path: editedFile } }, async (dir) => {
     if (options.installed !== false) await linkOxlint(dir)
     app(dir)
   })

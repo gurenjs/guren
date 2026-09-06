@@ -2676,7 +2676,7 @@ function reportAgentHarnessResult(result: AgentHarnessResult): void {
   }
   for (const hint of result.mcpMergeHints) {
     consola.info(
-      `${hint.path} already exists, so it was left alone. Add the Guren MCP server to it yourself:\n${hint.snippet}`,
+      `${hint.path} already exists, so it was left alone. Add ${hint.what} to it yourself:\n${hint.snippet}`,
     )
   }
   if (result.mcpEndpointNotEnabled) {

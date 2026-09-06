@@ -650,16 +650,16 @@ export async function linkOxlint(baseDir: string): Promise<void> {
 }
 
 /**
- * A shipped Claude Code hook, run the way Claude Code runs it: `bun <hook>` with
- * the hook input on stdin, from a temp app root `setup` populates. Bun resolves the
- * hook's `@guren/cli` import from the hook file's own location (this checkout), so
- * the real CLI runs against the temp app.
+ * A shipped agent hook, run the way the agent runs it: `bun <hook>` with the hook
+ * input on stdin, from a temp app root `setup` populates. Bun resolves the hook's
+ * `@guren/cli` import from the hook file's own location (this checkout), so the
+ * real CLI runs against the temp app.
  */
-export async function runClaudeHook(
+export async function runAgentHook(
   hook: string,
   input: unknown,
   setup: (dir: string) => void | Promise<void>,
-): Promise<{ exitCode: number; stderr: string }> {
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   const dir = await mkdtemp(join(tmpdir(), 'guren-hook-'))
   try {
     // Bun would otherwise auto-install an unresolvable bare specifier from the registry.
@@ -671,7 +671,7 @@ export async function runClaudeHook(
       stdout: 'pipe',
       stderr: 'pipe',
     })
-    return { exitCode: result.exitCode, stderr: result.stderr.toString() }
+    return { exitCode: result.exitCode, stdout: result.stdout.toString(), stderr: result.stderr.toString() }
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

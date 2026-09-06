@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test'
 import { writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { gateAppFiles, runClaudeHook, writeWorkspaceFiles } from './helpers'
+import { gateAppFiles, runAgentHook, writeWorkspaceFiles } from './helpers'
 
-// The real gate runs against the temp app (see runClaudeHook); its stage rules
+// The real gate runs against the temp app (see runAgentHook); its stage rules
 // are covered by gate.test.ts. `true`/`false` stand in for the subprocess stages.
 
-const hook = resolve(import.meta.dir, '../templates/agent/targets/claude/hooks/gate-on-stop.ts')
+const hook = resolve(import.meta.dir, '../templates/agent/core/hooks/gate-on-stop.ts')
 
 function git(dir: string, ...args: string[]): void {
   const result = Bun.spawnSync(['git', '-c', 'user.name=t', '-c', 'user.email=t@example.com', ...args], { cwd: dir, stdout: 'pipe', stderr: 'pipe' })
@@ -14,9 +14,9 @@ function git(dir: string, ...args: string[]): void {
 }
 
 const runHook = (setup: (dir: string) => void | Promise<void>, input: Record<string, unknown> = {}) =>
-  runClaudeHook(hook, input, setup)
+  runAgentHook(hook, input, setup)
 
-describe('gate-on-stop hook', () => {
+describe('gate-on-stop hook (Claude Code / Codex contract)', () => {
   test('lets a stop through once a Stop hook has already blocked it', async () => {
     const result = await runHook((dir) => writeFileSync(join(dir, 'lib.ts'), 'export const a = 1\n'), { stop_hook_active: true })
 

@@ -82,11 +82,11 @@ export interface AgentHarnessResult {
    */
   mcpEndpointNotEnabled: boolean
   /**
-   * MCP client configs that already existed without the Guren endpoint. They
-   * routinely carry unrelated user configuration, so the installer never merges
-   * into them — it reports the snippet to add by hand.
+   * User-owned configs (MCP clients, stop hooks) that already existed without the
+   * Guren entry. They routinely carry unrelated user configuration, so the installer
+   * never merges into them — it reports the snippet to add by hand, and `what` it adds.
    */
-  mcpMergeHints: Array<{ path: string; snippet: string }>
+  mcpMergeHints: Array<{ path: string; snippet: string; what: string }>
 }
 
 /** `\r\n` → `\n`, for the up-to-date comparison in the write loop. */
@@ -333,7 +333,7 @@ export async function installAgentHarness(options: AgentHarnessOptions = {}): Pr
       if (file.mergeMarker && mode === 'init') {
         const current = (await readIfExists(cwd, file.path)) ?? ''
         if (!current.includes(file.mergeMarker)) {
-          mcpMergeHints.push({ path: file.path, snippet: file.content })
+          mcpMergeHints.push({ path: file.path, snippet: file.content, what: file.mergeHint ?? 'the Guren entry' })
         }
       }
       continue

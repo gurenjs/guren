@@ -1,0 +1,17 @@
+{
+  "description": "Guren agent harness: run `guren gate` when a turn ends with uncommitted changes.",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun .codex/hooks/gate-on-stop.ts",
+            "timeout": 300,
+            "statusMessage": "guren gate"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -92,6 +92,7 @@ yourself:
 
 Once installed, the entry document describes the same loop for the app; the
 Claude harness automates all three steps with hooks (the gate runs when a
-turn ends with uncommitted changes), the others say so in `AGENTS.md`. Read the installed rules in `.claude/rules/` or `.agents/rules/`
+turn ends with uncommitted changes), Cursor and Codex get the same stop hook,
+and the others are told in `AGENTS.md` to run the gate themselves. Read the installed rules in `.claude/rules/` or `.agents/rules/`
 — each file's `globs` frontmatter says which paths it covers — before
 editing those paths.

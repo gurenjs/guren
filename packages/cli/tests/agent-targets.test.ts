@@ -84,6 +84,10 @@ function fakeTemplates(): TemplateFiles {
     ['targets/claude/settings.json', '{}'],
     ['targets/claude/agents/code-review.md', 'agent'],
     ['targets/claude/hooks/check-after-edit.ts', 'hook'],
+    ['core/hooks/gate-on-stop.ts', 'stop hook'],
+    ['targets/cursor/hooks/gate-on-stop.ts', 'cursor stop hook'],
+    ['targets/cursor/hooks.json', '{"hooks":{"stop":[{"command":"bun .cursor/hooks/gate-on-stop.ts"}]}}'],
+    ['targets/codex/hooks.json', '{"hooks":{"Stop":[{"hooks":[{"command":"bun .codex/hooks/gate-on-stop.ts"}]}]}}'],
     ['targets/agents/workflow.md', 'manual workflow for __RULES_DIR__\n'],
     ['targets/codex/config.toml', '[mcp_servers.guren]'],
     ['targets/codex/rules/guren.rules', 'prefix_rule(...)'],
@@ -140,6 +144,22 @@ describe('planComponents', () => {
     ]) {
       expect(byPath.get(path)).toMatchObject({ managed: false, mergeMarker: '_guren/mcp' })
     }
+  })
+
+  it('plans the stop hook for the agents that can act on it, with a user-owned config', () => {
+    const byPath = planByPath(['claude', 'agents', 'cursor', 'copilot', 'codex', 'opencode'])
+
+    // One script and contract for Claude Code and Codex; Cursor's own for its followup_message contract.
+    expect(byPath.get('.claude/hooks/gate-on-stop.ts')).toMatchObject({ content: 'stop hook', managed: true })
+    expect(byPath.get('.codex/hooks/gate-on-stop.ts')).toMatchObject({ content: 'stop hook', managed: true })
+    expect(byPath.get('.cursor/hooks/gate-on-stop.ts')).toMatchObject({ content: 'cursor stop hook', managed: true })
+    for (const path of ['.cursor/hooks.json', '.codex/hooks.json']) {
+      expect(byPath.get(path)).toMatchObject({ managed: false, mergeMarker: 'gate-on-stop', mergeHint: expect.stringContaining('stop hook') })
+    }
+    // Copilot and OpenCode have no turn-end hook that can feed output back.
+    expect([...byPath.keys()].filter((path) => path.includes('hooks'))).toEqual(
+      expect.not.arrayContaining(['.github/hooks/guren.json', '.opencode/plugins/guren.ts']),
+    )
   })
 
   it('ships the codex command approval policy as plain user-owned (no merge marker)', () => {
