@@ -7,8 +7,10 @@ declare — it imports no model and holds no database handle.
 
 The human's half is a browser console: one page showing the tickets, the
 approvals waiting on an answer, and what the agent did with the answers it got.
-The JSON API underneath it is unchanged, and is still how the agent and any
-script reach the same application.
+It is styled with the Guren UI tokens a scaffolded app ships with —
+`resources/css/guren.css` is the same sheet `create-guren-app` writes — so it
+follows the reader's light or dark preference. The JSON API underneath it is
+unchanged, and is still how the agent and any script reach the same application.
 
 It is deliberately small. The point is the wiring, not the product.
 
@@ -131,8 +133,9 @@ declined, both requests settled](./console.png)
 
 The console is one surface over the application; the tool routes are the other,
 and they are what the agent itself speaks. Nothing below needs the console to
-have run. With `TOKEN` set to what the seed printed and
-`A="Authorization: Bearer $TOKEN"`:
+have run — this transcript is its own recorded run, and it approves ticket 1
+where the screenshot above approves ticket 2, so the ids are mirrored. With
+`TOKEN` set to what the seed printed and `A="Authorization: Bearer $TOKEN"`:
 
 ```console
 $ curl -s -H "$A" 'http://127.0.0.1:8799/tickets?status=open'

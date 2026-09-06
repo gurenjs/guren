@@ -2,6 +2,7 @@ import { routeTypesPlugin } from '@guren/cli/vite'
 import guren from '@guren/core/vite'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig(({ command }) => ({
   publicDir: false,
@@ -12,5 +13,6 @@ export default defineConfig(({ command }) => ({
     ...(command === 'serve' ? [routeTypesPlugin({ args: ['run', 'codegen'] })] : []),
     guren(),
     react(),
+    tailwindcss(),
   ],
 }))
