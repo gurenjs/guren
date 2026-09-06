@@ -5,6 +5,7 @@ import {
   issueUrl,
   parseIssueRef,
   repoFromRemoteUrl,
+  splitIssueList,
 } from '../src/issue-refs'
 
 describe('parseIssueRef', () => {
@@ -51,6 +52,39 @@ describe('parseIssueRef', () => {
     for (const raw of ['', 'next-sprint', 'shop#12', 'acme/shop#', 'acme/shop/12', '12a', 'ftp://x/1', 'https://x y']) {
       expect(parseIssueRef(raw)).toBeNull()
     }
+  })
+
+  it('rejects the characters that would break a quoted YAML scalar or a comma list', () => {
+    for (const raw of [
+      'https://github.com/acme/shop/issues/412?", evil: true',
+      'https://github.com/acme/shop/issues/412?a=1,2',
+      'https://github.com/acme/shop/issues/412#\\x',
+      'https://gitlab.example.com/i/5?q="x"',
+      'https://gitlab.example.com/i/5,6',
+    ]) {
+      expect(parseIssueRef(raw)).toBeNull()
+    }
+  })
+
+  it('never yields a non-http(s) URL, which is what keeps viewer hrefs safe', () => {
+    expect(parseIssueRef('javascript:alert(1)')).toBeNull()
+    expect(parseIssueRef('data:text/html,x')).toBeNull()
+  })
+
+  it('rejects zero and numbers beyond the safe-integer range', () => {
+    expect(parseIssueRef('0')).toBeNull()
+    expect(parseIssueRef('#0')).toBeNull()
+    expect(parseIssueRef('acme/shop#0')).toBeNull()
+    expect(parseIssueRef('99999999999999999999')).toBeNull()
+    expect(parseIssueRef('0412')).toMatchObject({ number: 412 })
+  })
+})
+
+describe('splitIssueList', () => {
+  it('splits the --issue value on commas and drops blanks', () => {
+    expect(splitIssueList(undefined)).toEqual([])
+    expect(splitIssueList('412')).toEqual(['412'])
+    expect(splitIssueList(' 412, acme/shop#7 ,, ')).toEqual(['412', 'acme/shop#7'])
   })
 })
 

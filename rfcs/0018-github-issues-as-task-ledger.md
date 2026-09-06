@@ -89,6 +89,13 @@ Accepted forms, each one list entry:
 Pull requests share the number space and are accepted in every form; the
 field keeps the name `issues`, and the guide says so (Open Question 3).
 
+A URL form may not contain whitespace, `"`, `,` or `\`. Those are the
+characters that would break one of the places a reference travels: the
+comma-separated `--issue` list, the double-quoted YAML scalar `make:adr`
+writes, and the scanner's inline-list split on unquoted commas. Rejecting
+them in the grammar keeps every consumer safe by construction rather than
+by escaping at each sink.
+
 "The app's own repository" is resolved from the `origin` remote
 (`git remote get-url origin`, through the existing `runGit` helper in
 `changed-files.ts`) only when a consumer needs a full URL. Validation never
@@ -113,6 +120,10 @@ export interface DocRef {
   malformedIssues: string[]
 }
 ```
+
+**Amended in implementation:** `DocIssueRef` shipped as a discriminated union,
+`{ kind: 'github', raw, repo, number } | { kind: 'url', raw, url }`, because
+the non-GitHub URL form §6 admits has no `repo`/`number` to carry.
 
 `docs-check.ts` adds one rule, `docs-issues:<path>`: a **warn** per malformed
 entry (`issues: [next-sprint]`, an unparsable URL), with the accepted forms in
@@ -154,6 +165,13 @@ export interface EntityContext {
   issuesLiveError?: string
 }
 ```
+
+**Amended in implementation:** `EntityIssue` shipped with a required `label`
+(`owner/repo#412`, `#412` when no repository is known, or the URL) and
+optional `repo`, `number` and `url`, so a URL-form entry and a bare number in
+a checkout with no `origin` both have a shape; entries sort by repository then
+number, with URL entries last, so the order does not depend on whether
+`origin` resolved. `live` is unchanged and lands in Part 2.
 
 Markdown output adds a section after Linked docs:
 
@@ -201,7 +219,10 @@ bunx guren make:adr "Users verify email before posting" --entity User --issue 41
 bunx guren make:adr "Rename billing plans" --issue acme/shop#398 --issue 401
 ```
 
-`--issue` is repeatable and accepts the same forms as the field. It prefills
+`--issue` is ~~repeatable~~ **Amended in implementation:** comma-separated
+for several; the CLI collapses a repeated flag to its last value by design
+(`packages/cli/src/define-command.ts`), and a comma cannot appear in a
+reference (§1). It accepts the same forms as the field and prefills
 `issues:` and nothing else: no title fetch, no network. `MakeAdrOptions` gains
 `issues?: string[]`, validated by the same parser the index uses, so a
 malformed value fails the command with the accepted forms rather than writing

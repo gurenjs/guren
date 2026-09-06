@@ -124,7 +124,7 @@ bunx guren make:adr "Billing cycle is end-of-month" --entity Invoice --issue 412
 It numbers the file under `docs/adr/`, prefills the frontmatter, and
 `--entity` fills `entities:` and `related:` from what already exists
 (`--by` overrides the `generated.by` actor, which defaults to the git
-author; `--issue`, repeatable, fills `issues:`). Every new Guren app
+author; `--issue`, comma-separated for several, fills `issues:`). Every new Guren app
 ships with a seed ADR explaining the convention.
 
 `bunx guren context Invoice` then ends with a **Linked issues** section

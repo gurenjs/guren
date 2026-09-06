@@ -60,6 +60,7 @@ export {
 } from './entity-context'
 export {
   parseIssueRef,
+  splitIssueList,
   resolveOriginRepo,
   ISSUE_REF_FORMS,
   type DocIssueRef,

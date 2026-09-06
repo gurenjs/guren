@@ -23,32 +23,50 @@ export type DocIssueRef =
     }
 
 /** The accepted spellings, in the order the fix text lists them. */
-export const ISSUE_REF_FORMS = '412, "#412", owner/repo#412, or an issue/PR URL'
+export const ISSUE_REF_FORMS =
+  '412, "#412", owner/repo#412, or an issue/PR URL (no spaces, quotes, commas or backslashes)'
 
 const NUMBER_RE = /^#?(\d+)$/
 const REPO_SEGMENT = '[A-Za-z0-9_.-]+'
 const REPO_NUMBER_RE = new RegExp(`^(${REPO_SEGMENT}/${REPO_SEGMENT})#(\\d+)$`)
+// A URL character set that survives every place a reference travels: the
+// comma-split `--issue` list, the double-quoted YAML scalar make:adr writes,
+// and the inline-list frontmatter the scanner splits on unquoted commas.
+const URL_CHARS = '[^\\s",\\\\]'
 const GITHUB_URL_RE = new RegExp(
-  `^https?://(?:www\\.)?github\\.com/(${REPO_SEGMENT}/${REPO_SEGMENT})/(?:issues|pull)/(\\d+)(?:[/?#].*)?$`,
+  `^https?://(?:www\\.)?github\\.com/(${REPO_SEGMENT}/${REPO_SEGMENT})/(?:issues|pull)/(\\d+)(?:[/?#]${URL_CHARS}*)?$`,
 )
+const URL_RE = new RegExp(`^https?://${URL_CHARS}+$`)
+
+function issueNumber(digits: string): number | null {
+  const value = Number(digits)
+  return Number.isSafeInteger(value) && value > 0 ? value : null
+}
 
 /** Parse one `issues:` entry, or null when it matches no accepted form. */
 export function parseIssueRef(raw: string): DocIssueRef | null {
   const entry = raw.trim()
   if (entry === '') return null
 
-  const bare = NUMBER_RE.exec(entry)
-  if (bare) return { kind: 'github', raw: entry, repo: null, number: Number(bare[1]) }
+  const github = NUMBER_RE.exec(entry) ?? REPO_NUMBER_RE.exec(entry) ?? GITHUB_URL_RE.exec(entry)
+  if (github) {
+    const [repo, digits] = github.length === 2 ? [null, github[1]] : [github[1], github[2]]
+    const number = issueNumber(digits)
+    return number === null ? null : { kind: 'github', raw: entry, repo, number }
+  }
 
-  const scoped = REPO_NUMBER_RE.exec(entry)
-  if (scoped) return { kind: 'github', raw: entry, repo: scoped[1], number: Number(scoped[2]) }
-
-  const github = GITHUB_URL_RE.exec(entry)
-  if (github) return { kind: 'github', raw: entry, repo: github[1], number: Number(github[2]) }
-
-  if (/^https?:\/\/\S+$/.test(entry)) return { kind: 'url', raw: entry, url: entry }
+  if (URL_RE.test(entry)) return { kind: 'url', raw: entry, url: entry }
 
   return null
+}
+
+/** The `--issue` flag's value as entries: comma-separated, blanks dropped. */
+export function splitIssueList(value: string | undefined): string[] {
+  if (value === undefined) return []
+  return value
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry !== '')
 }
 
 const REMOTE_RE = new RegExp(

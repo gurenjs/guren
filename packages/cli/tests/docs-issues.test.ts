@@ -237,6 +237,11 @@ describe('make:adr --issue', () => {
       await expect(makeAdr('Bad reference', { issues: ['412', 'next-sprint'] })).rejects.toThrow(
         'Invalid issue reference "next-sprint"',
       )
+      // A quote would end the scalar the scaffold writes early; the grammar
+      // refuses it, so nothing reaches the file.
+      await expect(
+        makeAdr('Quote injection', { issues: ['https://github.com/acme/shop/issues/412?", evil: true'] }),
+      ).rejects.toThrow('Invalid issue reference')
       expect(existsSync(join(workspace.dir, 'docs/adr'))).toBe(false)
     } finally {
       await workspace.cleanup()

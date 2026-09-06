@@ -430,7 +430,15 @@ async function collectEntityIssues(
       })
     }
   }
-  return [...byKey.values()].sort((a, b) => a.label.localeCompare(b.label))
+  // By repository then number, so the order does not change with whether
+  // `origin` resolved, and #7 precedes #412; URL entries follow, by label.
+  return [...byKey.values()].sort(
+    (a, b) =>
+      Number(a.number === undefined) - Number(b.number === undefined)
+      || (a.repo ?? '').localeCompare(b.repo ?? '')
+      || (a.number ?? 0) - (b.number ?? 0)
+      || a.label.localeCompare(b.label),
+  )
 }
 
 /**
