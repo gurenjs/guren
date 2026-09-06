@@ -29,6 +29,17 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun .claude/hooks/gate-on-stop.ts",
+            "timeout": 300
+          }
+        ]
+      }
     ]
   }
 }

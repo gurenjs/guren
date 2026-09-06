@@ -148,6 +148,7 @@ Validate your app before shipping — these commands are also designed for AI co
 |---------|-------------|---------|
 | `check` | Validate integrity across routes, controllers, pages, and models — including whether every file in `routes/` is actually reached from your entry registrar (and every file in a module's `routes/` from that module's own registrar) — plus doc links, spec-view freshness, and architecture boundaries | `bunx guren check --json` |
 | `audit` | Security audit: missing input validation or authentication on mutating routes, raw SQL with interpolation, hardcoded credentials, disabled security defaults, mass-assignment configuration, sensitive columns not listed in `hidden`, emailed links built from the request host, CSRF exemptions declared by the app or by an installed package | `bunx guren audit --json` |
+| `gate` | Every verification stage the scaffolded CI runs — codegen, `check` (the `--ci` rule), lint, typecheck, `audit`, tests — reported together; exits non-zero if any stage fails, and a stage that cannot run fails rather than skips | `bunx guren gate --changed` |
 | `doctor` | Project health report (env, config, generated files) with actionable next steps | `bunx guren doctor --next` |
 | `context [Entity]` | Project context map — or, with an entity name, everything about one model: table, relationships, routes with schemas, pages with Props, resource, policy, linked docs (`--module` disambiguates, `"app"` = project root) | `bunx guren context User --json` |
 | `docs:graph` | The OKF docs relation graph: documents, entities, and code paths as nodes, verified relations as edges. `--entity <Model>` or `--path <file>` narrows to a neighborhood — ask "what governs this?" before renaming | `bunx guren docs:graph --path app/Http/Controllers/PostController.ts` |
@@ -167,6 +168,26 @@ bunx guren check --spec    # docs/spec/ views match a fresh regeneration
 Combining suite flags runs their union. `--changed` restricts any of
 them to files changed against the merge base with `main` — the fast
 path the agent-harness edit hook uses.
+
+`gate` is the one command that answers "is this change done?". It runs
+codegen, `check` under the `--ci` rule, lint (when the app has an
+`.oxlintrc.json`), typecheck, `audit`, and the test suite — the stages
+the scaffolded CI workflow runs — reports every stage, and exits
+non-zero if any failed. A stage that *cannot* run is a failure, not a
+skip: an `.oxlintrc.json` with no oxlint installed, a missing
+`typecheck` script, a routes entry that will not load. Only an app with
+no `.oxlintrc.json` skips lint.
+
+```bash
+bunx guren gate            # every stage, in full
+bunx guren gate --changed  # check and lint on changed files only; typecheck, audit, tests still in full
+bunx guren gate --deps     # add the dependency scan to the audit stage
+bunx guren gate --json     # the per-stage report, for tools
+```
+
+The Claude Code harness runs it from a `Stop` hook (see
+[AI Agent Harness](#ai-agent-harness)); `AGENTS.md` tells other agents
+to run it before declaring a change done.
 
 Routes wrapped in named middleware (for example `router.middleware('auth').group(...)`) are recognized as protected. Guest flows such as `/login` and `/register` are excluded from authentication checks.
 
@@ -311,8 +332,8 @@ Apps scaffolded with `create-guren-app` include an AI agent harness out of the b
 
 What each selection writes:
 
-- **Claude Code**: a `CLAUDE.md` project guide, verified API rules, skills, and subagents under `.claude/`, an `.mcp.json` pointing at the dev server's MCP endpoint (the scaffolded `dev` script enables it via `GUREN_MCP=1`), and hooks that close the feedback loop — the `guren context` project map loads at session start, and `guren check` re-runs automatically after edits to routes, controllers, models, schema, or pages, reporting failures straight back to the coding agent.
-- **Codex, Cursor, GitHub Copilot, OpenCode**: an `AGENTS.md` project guide plus the same rules and skills under `.agents/rules/` and `.agents/skills/` (skills follow the cross-agent SKILL.md standard). Cursor additionally gets the rules in its native format (`.cursor/rules/guren-*.mdc`), Copilot as path-scoped instructions (`.github/instructions/guren-*.instructions.md`), and Codex a command-approval allowlist for the harness's own commands (`.codex/rules/guren.rules`). MCP client configs land where each tool looks: `.codex/config.toml`, `.cursor/mcp.json`, `.vscode/mcp.json`, or the `mcp` entry in `opencode.json`. These agents do not run the harness's hooks, so `AGENTS.md` instructs them to run `guren context` at session start and `guren check` after edits.
+- **Claude Code**: a `CLAUDE.md` project guide, verified API rules, skills, and subagents under `.claude/`, an `.mcp.json` pointing at the dev server's MCP endpoint (the scaffolded `dev` script enables it via `GUREN_MCP=1`), and hooks that close the feedback loop — the `guren context` project map loads at session start, `guren check` re-runs automatically after edits to routes, controllers, models, schema, or pages, reporting failures straight back to the coding agent, and `guren gate` runs from a `Stop` hook when a turn ends with uncommitted changes, blocking the stop once with the findings of any failing stage so the fix lands in the same turn rather than in CI.
+- **Codex, Cursor, GitHub Copilot, OpenCode**: an `AGENTS.md` project guide plus the same rules and skills under `.agents/rules/` and `.agents/skills/` (skills follow the cross-agent SKILL.md standard). Cursor additionally gets the rules in its native format (`.cursor/rules/guren-*.mdc`), Copilot as path-scoped instructions (`.github/instructions/guren-*.instructions.md`), and Codex a command-approval allowlist for the harness's own commands (`.codex/rules/guren.rules`). MCP client configs land where each tool looks: `.codex/config.toml`, `.cursor/mcp.json`, `.vscode/mcp.json`, or the `mcp` entry in `opencode.json`. These agents do not run the harness's hooks, so `AGENTS.md` instructs them to run `guren context` at session start, `guren check` after edits, and `guren gate` before declaring a change done.
 
 ### Before you have an app: install the Guren skills from a catalog
 

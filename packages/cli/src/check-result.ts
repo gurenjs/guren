@@ -30,6 +30,15 @@ export interface CheckReport {
   agentScopes?: Array<{ agent: string; tools: string[] }>
 }
 
+/**
+ * The results an exit-code gate counts (`check --ci`, `guren gate`, the edit hook):
+ * warns included, since most integrity problems report as 'warn' and a fail-only
+ * gate would wave nearly everything through; advisory checks exempt.
+ */
+export function gatingResults(report: CheckReport): CheckResult[] {
+  return report.checks.filter((result) => !result.advisory && result.status !== 'pass')
+}
+
 export function check(
   key: string,
   title: string,

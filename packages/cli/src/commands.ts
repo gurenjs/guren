@@ -76,7 +76,9 @@ import { displayModels } from './model-list'
 import { displayContext } from './context'
 import { displayEntityContext } from './entity-context'
 import { runCheck, renderCheckReport } from './check'
+import { gatingResults } from './check-result'
 import { runAudit, renderAuditReport } from './audit'
+import { runGate, renderGateReport } from './gate'
 import { generateGuidelines } from './guidelines'
 import { installAgentHarness, type AgentHarnessResult } from './agent-harness'
 import { AGENT_TARGETS, parseTargetList, type AgentTarget } from './agent-targets'
@@ -2506,7 +2508,56 @@ const checkCommand = defineCommand({
     // --ci also gates on warns: most integrity problems report as 'warn', so a
     // fail-only gate would wave nearly everything through. Advisory checks are
     // exempt, and the flag lives on the result so JSON consumers see the rule.
-    if (args.ci && report.checks.some((c) => !c.advisory && c.status !== 'pass')) {
+    if (args.ci && gatingResults(report).length > 0) {
+      process.exitCode = 1
+    }
+  },
+})
+
+const gateCommand = defineCommand({
+  meta: {
+    name: 'gate',
+    description:
+      'Run every verification stage the CI runs (codegen, check, lint, typecheck, audit, test) and exit non-zero if any fails.',
+  },
+  args: {
+    json: {
+      type: 'boolean',
+      description: 'Output as JSON.',
+    },
+    changed: {
+      type: 'boolean',
+      description: 'Narrow check and lint to files changed vs. the merge base with main (typecheck, audit, and test still run in full).',
+    },
+    deps: {
+      type: 'boolean',
+      default: false,
+      description: 'Scan dependencies in the audit stage via bun audit (requires registry access).',
+    },
+    routes: {
+      type: 'string',
+      description: 'Path to routes entry file.',
+    },
+    app: {
+      type: 'string',
+      description: 'Application root directory.',
+    },
+  },
+  async run({ args }) {
+    const report = await runGate({
+      cwd: args.app,
+      changed: Boolean(args.changed),
+      deps: args.deps,
+      routesFile: args.routes,
+    })
+
+    if (args.json) {
+      console.log(JSON.stringify(report, null, 2))
+    } else {
+      renderGateReport(report)
+    }
+
+    if (!report.ok) {
       process.exitCode = 1
     }
   },
@@ -3306,6 +3357,7 @@ export const builtinSubCommands = {
   context: contextCommand,
   check: checkCommand,
   audit: auditCommand,
+  gate: gateCommand,
   guidelines: guidelinesCommand,
   'make:feature': makeFeatureCommand,
   'agent:init': agentInitCommand,

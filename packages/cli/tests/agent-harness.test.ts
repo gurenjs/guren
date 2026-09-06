@@ -42,6 +42,7 @@ describe('installAgentHarness', () => {
     expect(result.written).toContain('.mcp.json')
     expect(result.written).toContain('.claude/settings.json')
     expect(result.written).toContain('.claude/hooks/check-after-edit.ts')
+    expect(result.written).toContain('.claude/hooks/gate-on-stop.ts')
     expect(result.written).toContain('.claude/rules/orm-models.md')
     expect(result.written).toContain('.claude/rules/docs-and-spec.md')
     expect(result.written).toContain('.claude/skills/dev-workflow/SKILL.md')
@@ -56,6 +57,8 @@ describe('installAgentHarness', () => {
     }
     expect(settings.hooks?.SessionStart).toBeDefined()
     expect(settings.hooks?.PostToolUse).toBeDefined()
+    // The Stop hook is what feeds `guren gate` failures back into the same turn.
+    expect(JSON.stringify(settings.hooks?.Stop)).toContain('gate-on-stop.ts')
   })
 
   it('init derives the title from the directory name without package.json', async () => {

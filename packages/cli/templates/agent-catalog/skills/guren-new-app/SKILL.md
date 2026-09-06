@@ -24,8 +24,9 @@ What makes it different for an agent: the framework ships introspection and
 integrity commands you can run instead of guessing — `guren context` (project
 map + API signature digest), `guren check` (route ↔ controller ↔ page
 consistency, doc links, spec freshness), `guren audit` (validation and auth
-on mutating routes, raw SQL, secrets). Those live in the app's `@guren/cli`
-dependency, so they exist only once an app does.
+on mutating routes, raw SQL, secrets), and `guren gate` (every CI stage in one
+exit code: codegen, check, lint, typecheck, audit, tests). Those live in the
+app's `@guren/cli` dependency, so they exist only once an app does.
 
 ## Before you run anything
 
@@ -72,6 +73,7 @@ From here, work inside the app and follow its harness:
   at the end of its output before writing code.
 - After editing routes, controllers, models, `db/schema.ts`, or pages, run
   `bunx guren check` and fix what it reports.
-- Before shipping, run `bunx guren audit`.
+- When the change is complete, run `bunx guren gate` and fix what it reports
+  until it exits 0.
 
 This skill has nothing further to add once the app is scaffolded.

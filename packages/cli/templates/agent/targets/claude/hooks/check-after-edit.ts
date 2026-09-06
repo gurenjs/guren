@@ -60,11 +60,12 @@ const findings: string[] = []
 // grows — it falls back to checking everything outside a git repo.
 if (WATCHED_PATHS.some((prefix) => relPath.startsWith(prefix))) {
   try {
-    const { runCheck } = await import('@guren/cli')
-    const report = await runCheck({ changed: true })
-    if (report.failCount > 0) {
-      findings.push(`guren check found ${report.failCount} issue(s):`)
-      for (const check of report.checks.filter((check) => check.status === 'fail')) {
+    const { runCheck, gatingResults } = await import('@guren/cli')
+    // Same rule as `check --ci` and `guren gate`: warns count, advisory checks do not.
+    const gating = gatingResults(await runCheck({ changed: true }))
+    if (gating.length > 0) {
+      findings.push(`guren check found ${gating.length} issue(s):`)
+      for (const check of gating) {
         const location = check.filePath ? ` [${check.filePath}]` : ''
         const suggestion = check.suggestion ? ` → ${check.suggestion}` : ''
         findings.push(`- ${check.title}: ${check.message}${location}${suggestion}`)

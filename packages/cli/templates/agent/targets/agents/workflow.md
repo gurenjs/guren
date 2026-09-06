@@ -11,7 +11,12 @@ so make them part of your loop:
    run `bunx guren check` and fix what it reports before moving on. With an
    `.oxlintrc.json` in the app (`bunx guren add lint`), run `bun run lint` on
    what you edited as well; its warnings are for you to act on.
-3. Framework-managed files (`.agents/rules/`, `.agents/skills/`) can be
+3. **When the change is complete**, run `bunx guren gate` and fix what it
+   reports until it exits 0. It runs the stages CI runs — codegen, `check`,
+   lint, typecheck, `audit`, and the test suite — and a change is not done
+   while any of them fails. `--changed` narrows `check` and lint to the files
+   you touched.
+4. Framework-managed files (`.agents/rules/`, `.agents/skills/`) can be
    refreshed anytime with `bunx guren agent:sync`.
 
 Reusable skills (SKILL.md, the Agent Skills format) live in

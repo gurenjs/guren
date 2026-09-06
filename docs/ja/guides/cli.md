@@ -146,6 +146,7 @@ JSON(`this.json(...)`)を返すため、そのまま型検査を通り、`routes
 |---------|------|-----|
 | `check` | ルート・コントローラ・ページ・モデル間の整合性（`routes/` 配下の各ファイルがエントリのレジストラから、モジュールの `routes/` 配下は各モジュール自身のレジストラから実際に呼ばれているかを含む）に加え、docリンク・スペックビューの鮮度・アーキテクチャ境界を検証 | `bunx guren check --json` |
 | `audit` | セキュリティ監査: 変更系ルートのバリデーション/認証の欠如、文字列補間付き生SQL、ハードコードされた認証情報、無効化されたセキュリティ既定値、mass assignment 設定、`hidden` 未登録の機微カラム、リクエストのホストから組み立てられたメール内リンク、アプリまたはインストール済みパッケージが宣言した CSRF 除外を検査 | `bunx guren audit --json` |
+| `gate` | scaffold された CI が回す検証ステージ(codegen・`--ci` 規則の `check`・lint・typecheck・`audit`・テスト)をまとめて実行し、いずれかが失敗すれば非ゼロ exit。実行できないステージは skip ではなく失敗 | `bunx guren gate --changed` |
 | `doctor` | プロジェクトの健全性レポート(環境変数・設定・生成ファイル)と次のアクション | `bunx guren doctor --next` |
 | `context [Entity]` | プロジェクトコンテキストマップ。エンティティ名を渡すと1モデルのすべて — テーブル・リレーション・スキーマ付きルート・Props付きページ・Resource・Policy・紐付きdocs — を出力(同名モデルは `--module` で解決、`"app"` はプロジェクトルート) | `bunx guren context User --json` |
 | `docs:graph` | OKF docsのリレーショングラフ。文書・エンティティ・コードパスがノード、検証済みリレーションがエッジ。`--entity <Model>` / `--path <file>` で近傍に絞り、リネーム前に「これを統べるdocsはどれか」を照会 | `bunx guren docs:graph --path app/Http/Controllers/PostController.ts` |
@@ -165,6 +166,25 @@ bunx guren check --spec    # docs/spec/ が再生成結果と一致するか
 スイートフラグは併用すると和集合で実行されます。`--changed` はいずれの
 スイートも main とのマージベースからの変更ファイルに限定します —
 エージェントハーネスのedit hookが使う高速パスです。
+
+`gate` は「この変更は完了か」に一つの exit code で答えるコマンドです。
+codegen、`--ci` 規則の `check`、lint(アプリに `.oxlintrc.json` がある場合)、
+typecheck、`audit`、テストスイート、つまり scaffold された CI ワークフローが
+回すステージをすべて実行し、各ステージを報告し、いずれかが失敗すれば非ゼロで
+終了します。実行*できない*ステージは skip ではなく失敗です: `.oxlintrc.json`
+があるのに oxlint が入っていない、`typecheck` スクリプトが無い、routes エントリ
+が読み込めない。lint を skip するのは `.oxlintrc.json` の無いアプリだけです。
+
+```bash
+bunx guren gate            # 全ステージをフルで
+bunx guren gate --changed  # check と lint を変更ファイルに限定(typecheck・audit・テストはフルのまま)
+bunx guren gate --deps     # audit ステージに依存関係スキャンを追加
+bunx guren gate --json     # ステージごとのレポート(ツール向け)
+```
+
+Claude Code のハーネスはこれを `Stop` hook から実行します
+([AIエージェントハーネス](#aiエージェントハーネス)参照)。その他のエージェントには
+変更完了を宣言する前に実行するよう `AGENTS.md` が指示します。
 
 名前付きミドルウェアで保護されたルート(例: `router.middleware('auth').group(...)`)は保護済みと認識されます。`/login` や `/register` などのゲストフローは認証チェックの対象外です。
 
@@ -309,8 +329,8 @@ Inertiaのページは `modules/<name>/` 配下にコロケーションされま
 
 選択ごとに生成されるもの:
 
-- **Claude Code**: プロジェクトガイドの `CLAUDE.md`、`.claude/` 配下の検証済みAPIルール・スキル・サブエージェント、開発サーバーの MCP エンドポイントを指す `.mcp.json`（エンドポイント自体は scaffold された `dev` スクリプトの `GUREN_MCP=1` で有効になります）、そしてフィードバックループを構成する hooks です。セッション開始時に `guren context` のプロジェクトマップが読み込まれ、ルート・コントローラ・モデル・スキーマ・ページの編集後には `guren check` が自動で再実行され、失敗があればその場でコーディングエージェントに報告されます。
-- **Codex・Cursor・GitHub Copilot・OpenCode**: プロジェクトガイドの `AGENTS.md` と、`.agents/rules/`・`.agents/skills/` 配下の同じルール・スキル(スキルはエージェント横断の SKILL.md 標準形式)。加えて、Cursor にはネイティブ形式のルール(`.cursor/rules/guren-*.mdc`)、Copilot にはパススコープ付き instructions(`.github/instructions/guren-*.instructions.md`)、Codex にはハーネス自身のコマンドを承認不要にする許可リスト(`.codex/rules/guren.rules`)が生成されます。MCP クライアント設定は各ツールが参照する場所(`.codex/config.toml`・`.cursor/mcp.json`・`.vscode/mcp.json`・`opencode.json` の `mcp` エントリ)に書き出されます。これらのエージェントはハーネスの hooks を実行しないため、セッション開始時の `guren context` 実行と編集後の `guren check` 実行を `AGENTS.md` が指示します。
+- **Claude Code**: プロジェクトガイドの `CLAUDE.md`、`.claude/` 配下の検証済みAPIルール・スキル・サブエージェント、開発サーバーの MCP エンドポイントを指す `.mcp.json`（エンドポイント自体は scaffold された `dev` スクリプトの `GUREN_MCP=1` で有効になります）、そしてフィードバックループを構成する hooks です。セッション開始時に `guren context` のプロジェクトマップが読み込まれ、ルート・コントローラ・モデル・スキーマ・ページの編集後には `guren check` が自動で再実行され、失敗があればその場でコーディングエージェントに報告されます。さらに、未コミットの変更を残したままターンが終わると `Stop` hook が `guren gate` を実行し、失敗したステージの指摘を添えて停止を一度だけブロックするので、修正は CI ではなく同じターンで行われます。
+- **Codex・Cursor・GitHub Copilot・OpenCode**: プロジェクトガイドの `AGENTS.md` と、`.agents/rules/`・`.agents/skills/` 配下の同じルール・スキル(スキルはエージェント横断の SKILL.md 標準形式)。加えて、Cursor にはネイティブ形式のルール(`.cursor/rules/guren-*.mdc`)、Copilot にはパススコープ付き instructions(`.github/instructions/guren-*.instructions.md`)、Codex にはハーネス自身のコマンドを承認不要にする許可リスト(`.codex/rules/guren.rules`)が生成されます。MCP クライアント設定は各ツールが参照する場所(`.codex/config.toml`・`.cursor/mcp.json`・`.vscode/mcp.json`・`opencode.json` の `mcp` エントリ)に書き出されます。これらのエージェントはハーネスの hooks を実行しないため、セッション開始時の `guren context` 実行、編集後の `guren check` 実行、そして変更完了を宣言する前の `guren gate` 実行を `AGENTS.md` が指示します。
 
 ### アプリを作る前に: カタログから Guren のスキルを入れる
 
