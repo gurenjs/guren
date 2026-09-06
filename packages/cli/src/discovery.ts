@@ -135,6 +135,29 @@ export async function findFirstLoadable(cwd: string, candidates: readonly string
   return index === -1 ? null : candidates[index]
 }
 
+export type JsonReadResult<T> =
+  | { exists: false; raw: null; value: null; parseError: null }
+  | { exists: true; raw: string; value: T; parseError: null }
+  | { exists: true; raw: string; value: null; parseError: Error }
+
+/**
+ * A JSON file's three states — absent, parsed, present-but-unparseable — kept
+ * apart so a caller can tell "you have none" from "yours is broken". `raw` is
+ * returned beside `value` for patchers that edit the text in place.
+ */
+export async function readJsonIfExists<T>(cwd: string, relativePath: string): Promise<JsonReadResult<T>> {
+  const raw = await readIfExists(cwd, relativePath)
+  if (raw === null) {
+    return { exists: false, raw: null, value: null, parseError: null }
+  }
+
+  try {
+    return { exists: true, raw, value: JSON.parse(raw) as T, parseError: null }
+  } catch (error) {
+    return { exists: true, raw, value: null, parseError: error as Error }
+  }
+}
+
 export async function readIfExists(cwd: string, relativePath: string): Promise<string | null> {
   if (!(await fileExists(cwd, relativePath))) {
     return null

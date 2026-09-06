@@ -16,7 +16,10 @@ missing the dependency is told to `bun add -d @cloudflare/workers-types`.
 
 `guren tool:list`, `tool:inspect` and `route:list` resolve the routes entry
 through the same probe `check` and `audit` use, so an API-only app whose routes
-live in `routes/api.ts` works without `--routes`; the flag still overrides.
+live in `routes/api.ts` works without `--routes`; the flag still overrides. The
+degrading loader behind `guren context <Entity>`, `context --route` and
+`spec:generate` probes the same way, so those no longer describe an API-only
+app as having no routes.
 
 `@guren/plugin-agents`' README no longer says `make:agent` "writes all three"
 of its snippets — the `src/app.ts` registration is the one it leaves to you.

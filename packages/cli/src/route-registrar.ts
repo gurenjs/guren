@@ -3,7 +3,7 @@ import { writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import type { ArrowFunctionExpression, File, FunctionDeclaration, FunctionExpression, Statement } from '@babel/types'
 import { walk } from './ast-walk'
-import { findFirstExisting, readIfExists } from './discovery'
+import { findFirstExisting, findFirstLoadable, readIfExists } from './discovery'
 import { parseSourceFile } from './parse-cache'
 import { insertImport, PATCH_REASONS, type PatchResult } from './patch-helpers'
 
@@ -62,10 +62,12 @@ export async function resolveRoutesEntry(cwd: string): Promise<string | null> {
 
 /**
  * The routes file a loading command uses: the caller's `--routes`, else the app's
- * entry, else {@link DEFAULT_ROUTES_FILE} so the load error names a file.
+ * entry, else {@link DEFAULT_ROUTES_FILE} so the load error names a file. Probed
+ * with loader semantics: a `routes` that is a regular file, or an unreadable one,
+ * reaches the import and is diagnosed there rather than escaping as ENOTDIR here.
  */
 export async function routesEntryOrDefault(cwd: string, override?: string): Promise<string> {
-  return override ?? (await resolveRoutesEntry(cwd)) ?? DEFAULT_ROUTES_FILE
+  return override ?? (await findFirstLoadable(cwd, ROUTES_ENTRY_CANDIDATES)) ?? DEFAULT_ROUTES_FILE
 }
 
 export interface RouteRegistrar {

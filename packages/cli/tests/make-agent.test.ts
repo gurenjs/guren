@@ -2,6 +2,8 @@ import { describe, it, expect } from 'bun:test'
 import { readFile, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 
+import { readApiOnlyTemplateFile } from './helpers'
+
 import { makeAgent } from '../src/make-agent'
 import { parseSourceFile } from '../src/parse-cache'
 import {
@@ -23,25 +25,9 @@ import {
 const repoRoot = resolve(import.meta.dir, '../../..')
 const pluginAgentsDir = join(repoRoot, 'packages/plugin-agents')
 
-/** The tsconfig shape `create-guren-app` writes: a multi-line `types` array, two-space indent. */
-const TEMPLATE_TSCONFIG = `{
-  "compilerOptions": {
-    "strict": true,
-    "types": [
-      "bun-types",
-      "vite/client"
-    ],
-    "paths": {
-      "@/*": [
-        "./*"
-      ]
-    }
-  },
-  "include": [
-    "app/**/*"
-  ]
-}
-`
+/** The default starter's tsconfig as `create-guren-app` ships it — the multi-line `types` spelling. */
+const readDefaultTemplateTsconfig = (): Promise<string> =>
+  readFile(join(repoRoot, 'packages/create-app/templates/default/tsconfig.json'), 'utf8')
 
 async function inWorkspace<T>(run: (dir: string) => Promise<T>): Promise<T> {
   const workspace = await createTempWorkspace('guren-make-agent-')
@@ -293,32 +279,25 @@ describe('makeAgent', () => {
     })
   })
 
-  it('leaves an existing config/env.ts alone when it exports Env', async () => {
-    await inWorkspace(async (dir) => {
-      const handWritten = 'export interface Env {\n  DB: unknown\n  QUEUE: unknown\n}\n'
-      await writeWorkspaceFiles(dir, { 'config/env.ts': handWritten })
+  for (const [label, handWritten] of [
+    ['declares Env', 'export interface Env {\n  DB: unknown\n  QUEUE: unknown\n}\n'],
+    ['re-exports Env', "export type { Env } from './bindings'\n"],
+  ] as Array<[string, string]>) {
+    it(`leaves an existing config/env.ts alone when it ${label}`, async () => {
+      await inWorkspace(async (dir) => {
+        await writeWorkspaceFiles(dir, { 'config/env.ts': handWritten })
 
-      const result = await makeAgent('Triager', { cwd: dir })
+        const result = await makeAgent('Triager', { cwd: dir })
 
-      expect(result.patches).toContainEqual({
-        file: 'config/env.ts',
-        status: 'skipped',
-        reason: 'it already exports `Env`',
+        expect(result.patches).toContainEqual({
+          file: 'config/env.ts',
+          status: 'skipped',
+          reason: 'it already exports `Env`',
+        })
+        expect(await read(dir, 'config/env.ts')).toBe(handWritten)
       })
-      expect(await read(dir, 'config/env.ts')).toBe(handWritten)
     })
-  })
-
-  it('accepts a config/env.ts that re-exports Env', async () => {
-    await inWorkspace(async (dir) => {
-      await writeWorkspaceFiles(dir, { 'config/env.ts': "export type { Env } from './bindings'\n" })
-
-      const result = await makeAgent('Triager', { cwd: dir })
-      const patch = result.patches.find((entry) => entry.file === 'config/env.ts')
-
-      expect(patch?.status).toBe('skipped')
-    })
-  })
+  }
 
   it('refuses a config/env.ts that exports no Env and hands back the interface', async () => {
     await inWorkspace(async (dir) => {
@@ -336,51 +315,41 @@ describe('makeAgent', () => {
     })
   })
 
-  it('appends the Workers types to a multi-line types array and leaves the rest byte-identical', async () => {
-    await inWorkspace(async (dir) => {
-      await writeWorkspaceFiles(dir, { 'tsconfig.json': TEMPLATE_TSCONFIG })
+  for (const [label, readTemplate, from, to] of [
+    [
+      'the default starter’s multi-line types array',
+      readDefaultTemplateTsconfig,
+      '      "vite/client"\n',
+      '      "vite/client",\n      "@cloudflare/workers-types"\n',
+    ],
+    [
+      'the api-only starter’s single-line types array',
+      () => readApiOnlyTemplateFile('tsconfig.json'),
+      '"types": ["bun-types"]',
+      '"types": ["bun-types", "@cloudflare/workers-types"]',
+    ],
+    [
+      'the compilerOptions types array, not a types key under paths',
+      async () => '{\n  "compilerOptions": {\n    "paths": { "types": ["./types"] },\n    "types": ["bun-types"]\n  }\n}\n',
+      '"types": ["bun-types"]',
+      '"types": ["bun-types", "@cloudflare/workers-types"]',
+    ],
+  ] as Array<[string, () => Promise<string>, string, string]>) {
+    it(`appends the Workers types to ${label} and leaves the rest byte-identical`, async () => {
+      await inWorkspace(async (dir) => {
+        const before = await readTemplate()
+        // The fixture has to carry the spelling the case is about, or the
+        // replace below is a no-op and the assertion passes on an untouched file.
+        expect(before).toContain(from)
+        await writeWorkspaceFiles(dir, { 'tsconfig.json': before })
 
-      const result = await makeAgent('Triager', { cwd: dir })
-      const tsconfig = await read(dir, 'tsconfig.json')
+        const result = await makeAgent('Triager', { cwd: dir })
 
-      expect(result.patches).toContainEqual({ file: 'tsconfig.json', status: 'patched' })
-      expect(tsconfig).toBe(TEMPLATE_TSCONFIG.replace(
-        '      "vite/client"\n',
-        '      "vite/client",\n      "@cloudflare/workers-types"\n',
-      ))
-    })
-  })
-
-  it('appends to a single-line types array in that style', async () => {
-    await inWorkspace(async (dir) => {
-      // The api-only template's spelling.
-      await writeWorkspaceFiles(dir, {
-        'tsconfig.json': '{\n  "compilerOptions": {\n    "types": ["bun-types"],\n    "strict": true\n  }\n}\n',
+        expect(result.patches).toContainEqual({ file: 'tsconfig.json', status: 'patched' })
+        expect(await read(dir, 'tsconfig.json')).toBe(before.replace(from, to))
       })
-
-      await makeAgent('Triager', { cwd: dir })
-
-      expect(await read(dir, 'tsconfig.json')).toBe(
-        '{\n  "compilerOptions": {\n    "types": ["bun-types", "@cloudflare/workers-types"],\n    "strict": true\n  }\n}\n',
-      )
     })
-  })
-
-  it('patches the compilerOptions types array, not a types key under paths', async () => {
-    await inWorkspace(async (dir) => {
-      const before = '{\n  "compilerOptions": {\n    "paths": { "types": ["./types"] },\n    "types": ["bun-types"]\n  }\n}\n'
-      await writeWorkspaceFiles(dir, { 'tsconfig.json': before })
-
-      const result = await makeAgent('Triager', { cwd: dir })
-      const tsconfig = JSON.parse(await read(dir, 'tsconfig.json')) as {
-        compilerOptions: { paths: Record<string, string[]>; types: string[] }
-      }
-
-      expect(result.patches).toContainEqual({ file: 'tsconfig.json', status: 'patched' })
-      expect(tsconfig.compilerOptions.paths).toEqual({ types: ['./types'] })
-      expect(tsconfig.compilerOptions.types).toEqual(['bun-types', '@cloudflare/workers-types'])
-    })
-  })
+  }
 
   it('skips a tsconfig whose types already name the Workers types', async () => {
     await inWorkspace(async (dir) => {
@@ -427,6 +396,18 @@ describe('makeAgent', () => {
       if (patch?.status !== 'refused') return
       expect(patch.reason).toContain('none at the project root')
     })
+  })
+
+  it('spells the Durable Object binding name the way guren cloudflare:build does', async () => {
+    // Two copies on purpose: `@guren/cli` does not depend on
+    // `@guren/plugin-cloudflare`, and the rule feeds only a commented slot here,
+    // so nothing typechecks the two against each other. Pinned as source text.
+    const body = /function durableObjectBindingName\([^)]*\): string \{\n([\s\S]*?)\n\}/u
+    const here = body.exec(await readFile(join(repoRoot, 'packages/cli/src/make-agent.ts'), 'utf8'))
+    const there = body.exec(await readFile(join(repoRoot, 'packages/plugin-cloudflare/src/build.ts'), 'utf8'))
+
+    expect(here?.[1]).toBeDefined()
+    expect(here?.[1]).toBe(there?.[1] as string)
   })
 
   it(

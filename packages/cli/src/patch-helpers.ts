@@ -82,7 +82,7 @@ function matchInCode(content: string, pattern: RegExp): RegExpExecArray | null {
  * Counts depth over the masked source, so nesting is respected and a bracket
  * inside a string or comment does not shift the result.
  */
-function findClosingDelimiter(content: string, openIndex: number, open: string, close: string): number {
+export function findClosingDelimiter(content: string, openIndex: number, open: string, close: string): number {
   const masked = maskNonCode(content)
   let depth = 0
 

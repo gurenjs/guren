@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
 import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { loadRouteDefinitions } from '../src/load-routes'
+import { loadRouteDefinitions, resolveRoutesFile } from '../src/load-routes'
 
 // Module fixtures export a plain object shaped like a GurenModule rather than
 // calling `defineModule()` — `resolveGurenModule()` duck-types either — so
@@ -197,5 +197,41 @@ export const billingModule = {
     const names = definitions.map((d) => d.name).sort()
 
     expect(names).toEqual(['home', 'invoices.index'])
+  })
+})
+
+describe('resolveRoutesFile', () => {
+  let tempDir: string
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'guren-cli-resolve-routes-'))
+    await mkdir(join(tempDir, 'routes'), { recursive: true })
+  })
+
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true, force: true })
+  })
+
+  it('finds an api-only app’s routes/api.ts when no file is named', async () => {
+    await writeFile(join(tempDir, 'routes/api.ts'), 'export function registerApiRoutes() {}\n')
+
+    expect(await resolveRoutesFile(tempDir)).toEqual({ path: 'routes/api.ts', silentlyAbsent: false })
+  })
+
+  it('degrades silently to the default when the app has no entry at all', async () => {
+    expect(await resolveRoutesFile(tempDir)).toEqual({ path: 'routes/web.ts', silentlyAbsent: true })
+  })
+
+  it('never degrades silently for a file the caller named', async () => {
+    expect(await resolveRoutesFile(tempDir, 'routes/missing.ts')).toEqual({
+      path: 'routes/missing.ts',
+      silentlyAbsent: false,
+    })
+  })
+
+  it('treats an empty name as unnamed', async () => {
+    await writeFile(join(tempDir, 'routes/api.ts'), 'export function registerApiRoutes() {}\n')
+
+    expect((await resolveRoutesFile(tempDir, '')).path).toBe('routes/api.ts')
   })
 })

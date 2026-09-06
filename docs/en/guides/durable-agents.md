@@ -65,7 +65,7 @@ It writes the class and everything a fresh app lacks for it — an agent class a
 | `config/env.ts` | the `Env` the class imports: the D1 binding and a commented slot for the agent's Durable Object namespace — created if absent, left alone if it already exports `Env` |
 | `tsconfig.json` | `@cloudflare/workers-types` appended to `compilerOptions.types`, which is where `Cloudflare.Env` and `DurableObject` come from |
 
-Every existing file is patched in place, and any patch the command cannot make is reported with the text to paste rather than skipped — an app whose agent looks registered and is not would be worse than a message. The tsconfig patch has two such cases: a file with no `types` array (a new one switches off the automatic `@types` walk, so it has to name `bun-types` too, and the command prints the line rather than deciding that for you), and a file with comments, which is not strict JSON.
+Every existing file is patched in place, and any patch the command cannot make is reported with the text to paste rather than skipped — an app whose agent looks registered and is not would be worse than a message. A tsconfig with no `types` array, or one carrying comments, gets the line to paste instead.
 
 Two things remain yours, both worth knowing before your first typecheck:
 

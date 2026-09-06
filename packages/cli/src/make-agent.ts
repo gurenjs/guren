@@ -20,8 +20,9 @@ import {
   objectLiteral,
   unwrapTypeAssertion,
 } from './ast-walk'
-import { appDependsOn, readIfExists } from './discovery'
+import { appDependsOn, readIfExists, readJsonIfExists } from './discovery'
 import { parseSourceFile } from './parse-cache'
+import { findClosingDelimiter } from './patch-helpers'
 import { specifierName } from './route-registrar'
 import { resourceName, writeRoot, writeScaffoldFile, type WriterOptions } from './utils'
 
@@ -132,19 +133,14 @@ function registrationEntry(agentName: string, className: string): string {
 }
 
 /** `Triager` → `TRIAGER`, `TriagerAgent` → `TRIAGER_AGENT` — the same rule `guren cloudflare:build` binds with. */
-function durableObjectBindingName(className: string): string {
-  return className
+function durableObjectBindingName(exportName: string): string {
+  return exportName
     .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
     .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
     .toUpperCase()
 }
 
-/**
- * The `config/env.ts` a project gets when it has none: the `Env` every agent
- * class names. Hand-written rather than `wrangler types` output because `tsc`
- * and the Bun test run both read it, and neither can depend on a wrangler
- * invocation having happened first.
- */
+/** The `config/env.ts` a project gets when it has none: the `Env` every agent class names. */
 function envTemplate(className: string): string {
   return `/**
  * The Worker bindings this app expects. \`Env\` is named by every class under
@@ -497,11 +493,6 @@ function exportsEnv(ast: File): boolean {
   return false
 }
 
-interface TsconfigShape {
-  compilerOptions?: { types?: unknown; [option: string]: unknown }
-  [key: string]: unknown
-}
-
 /**
  * Add `@cloudflare/workers-types` to `compilerOptions.types`: a text insertion
  * verified by re-parsing, so the rest of the file's formatting survives rather
@@ -511,22 +502,14 @@ interface TsconfigShape {
 async function addWorkersTypes(cwd: string): Promise<MakeAgentPatch> {
   const snippet = `"types": ["bun-types", "${WORKERS_TYPES_PACKAGE}"]`
   const refuse = (reason: string): MakeAgentPatch => ({ file: TSCONFIG_FILE, status: 'refused', reason, snippet })
-  const existing = await readIfExists(cwd, TSCONFIG_FILE)
+  const tsconfig = await readJsonIfExists<{ compilerOptions?: { types?: unknown } } | null>(cwd, TSCONFIG_FILE)
 
-  if (existing === null) return refuse('there is none at the project root')
-
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(existing)
-  } catch {
+  if (!tsconfig.exists) return refuse('there is none at the project root')
+  if (tsconfig.parseError) {
     return refuse('it is not strict JSON (comments or trailing commas), which is all this command edits')
   }
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    return refuse('it is not a JSON object')
-  }
-  const config = parsed as TsconfigShape
 
-  const types = config.compilerOptions?.types
+  const types = tsconfig.value?.compilerOptions?.types
   if (!Array.isArray(types)) {
     // A new `types` array switches off the automatic @types walk, so it has to
     // name bun-types too — a decision for the reader, not this command.
@@ -536,10 +519,7 @@ async function addWorkersTypes(cwd: string): Promise<MakeAgentPatch> {
     return { file: TSCONFIG_FILE, status: 'skipped', reason: `its \`types\` already names ${WORKERS_TYPES_PACKAGE}` }
   }
 
-  const expected = structuredClone(config)
-  expected.compilerOptions!.types = [...types, WORKERS_TYPES_PACKAGE]
-
-  const patched = appendToTypesArray(existing, expected)
+  const patched = appendToTypesArray(tsconfig.raw, [...types, WORKERS_TYPES_PACKAGE])
   if (patched === null) return refuse('its compilerOptions.types array could not be located in the text')
 
   await writeFile(resolve(cwd, TSCONFIG_FILE), patched, 'utf8')
@@ -547,21 +527,22 @@ async function addWorkersTypes(cwd: string): Promise<MakeAgentPatch> {
 }
 
 /**
- * The text with the package appended to its `types` array, or `null`. Every
- * `"types": [` in the file is tried, and the first whose result parses to
- * `expected` wins — so a `types` key under `paths` or in a string cannot be
- * patched by mistake.
+ * The text with the last entry of `expected` appended to its `types` array, or
+ * `null`. Every `"types": [` in the file is tried, and the first whose
+ * `compilerOptions.types` re-parses to `expected` wins — so a `types` key under
+ * `paths` or inside a string cannot be patched by mistake.
  */
-function appendToTypesArray(text: string, expected: TsconfigShape): string | null {
+function appendToTypesArray(text: string, expected: readonly unknown[]): string | null {
+  const entry = `"${expected.at(-1)}"`
+
   for (const match of text.matchAll(/"types"\s*:\s*\[/g)) {
     const open = match.index + match[0].length
-    const close = text.indexOf(']', open)
+    const close = findClosingDelimiter(text, open - 1, '[', ']')
     if (close === -1) continue
 
     const inner = text.slice(open, close)
     const body = inner.trimEnd()
     const trailing = inner.slice(body.length)
-    const entry = `"${WORKERS_TYPES_PACKAGE}"`
     let replaced: string
     if (body.trim() === '') {
       replaced = `${entry}${trailing}`
@@ -574,7 +555,8 @@ function appendToTypesArray(text: string, expected: TsconfigShape): string | nul
 
     const candidate = `${text.slice(0, open)}${replaced}${text.slice(close)}`
     try {
-      if (isDeepStrictEqual(JSON.parse(candidate), expected)) return candidate
+      const parsed = JSON.parse(candidate) as { compilerOptions?: { types?: unknown } } | null
+      if (isDeepStrictEqual(parsed?.compilerOptions?.types, expected)) return candidate
     } catch {
       continue
     }

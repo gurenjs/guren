@@ -14,6 +14,7 @@ import {
   moduleFlagFor,
   moduleNameFor,
   readIfExists,
+  readJsonIfExists,
   classNameFromPath,
 } from './discovery'
 import { checkPluginCompatibility, readCoreVersion, readInstalledPluginManifests } from './plugin-manifest'
@@ -131,11 +132,6 @@ interface DoctorRule {
   autofix?: (context: DoctorRuleContext, check: DoctorCheck) => Promise<DoctorAutofix | null>
 }
 
-type JsonReadResult<T> =
-  | { exists: false; raw: null; value: null; parseError: null }
-  | { exists: true; raw: string; value: T; parseError: null }
-  | { exists: true; raw: string; value: null; parseError: Error }
-
 const APP_ENTRY_CANDIDATES = ['src/main.ts', 'src/main.mts', 'src/main.js', 'src/main.mjs']
 const PAGE_CONTRACT_CANDIDATES = [PAGES_MANIFEST_FILE]
 const GENERATED_FILES = [
@@ -249,29 +245,6 @@ type TsconfigShape = {
   compilerOptions?: {
     baseUrl?: string
     paths?: Record<string, string[]>
-  }
-}
-
-async function readJsonIfExists<T>(cwd: string, relativePath: string): Promise<JsonReadResult<T>> {
-  const raw = await readIfExists(cwd, relativePath)
-  if (raw === null) {
-    return { exists: false, raw: null, value: null, parseError: null }
-  }
-
-  try {
-    return {
-      exists: true,
-      raw,
-      value: JSON.parse(raw) as T,
-      parseError: null,
-    }
-  } catch (error) {
-    return {
-      exists: true,
-      raw,
-      value: null,
-      parseError: error as Error,
-    }
   }
 }
 
