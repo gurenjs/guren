@@ -75,7 +75,7 @@ const database = isWorkersRuntime()
   ? createD1Database({ binding: () => getWorkersEnv<WorkersEnv>().DB })
   : createSqliteDatabase({
       migrationsFolder: new URL('../db/migrations', import.meta.url),
-      filename: () => process.env.SQLITE_DATABASE_PATH ?? './data/guren.db',
+      filename: () => process.env.SQLITE_DATABASE_PATH || './data/guren.db',
     })
 
 export const { getDatabase, configureOrm, seedDatabase } = database

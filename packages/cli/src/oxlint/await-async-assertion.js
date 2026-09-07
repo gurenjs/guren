@@ -7,26 +7,12 @@
 // or as a `forEach` arrow body; recognises aliases (`expect as verify`) and
 // `t.expect`; a file declaring its own `expect` is left alone. Tests: `tests/oxlint-await-async-assertion.test.ts`.
 
+import { AWAIT, unwrap as unwrapNode } from './ast.js'
+
 const ASYNC_MODIFIERS = new Set(['resolves', 'rejects'])
 
 /** Strip the wrappers that do not change what the chain ultimately calls. */
-function unwrap(node) {
-  for (;;) {
-    switch (node.type) {
-      case 'AwaitExpression':
-        node = node.argument
-        break
-      case 'ChainExpression':
-      case 'TSNonNullExpression':
-      case 'TSAsExpression':
-      case 'ParenthesizedExpression':
-        node = node.expression
-        break
-      default:
-        return node
-    }
-  }
-}
+const unwrap = (node) => unwrapNode(node, AWAIT)
 
 /**
  * Walk the callee chain of a call down to its root. True when the root is

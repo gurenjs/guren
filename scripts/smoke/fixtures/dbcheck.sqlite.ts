@@ -6,6 +6,7 @@ const DB_FILE = './data/guren.db'
 
 // An empty table list usually means db:migrate wrote somewhere else rather than
 // that it silently executed nothing, so every failure here names both databases.
+// oxlint-disable-next-line guren/no-nullish-env-default -- a blank DATABASE_URL is a cause this message must not report as unset
 const WHERE = 'Checked sqlite file: ' + DB_FILE + ' (DATABASE_URL=' + (process.env.DATABASE_URL ?? '<unset>') + ')'
 
 const db = new Database(DB_FILE)
