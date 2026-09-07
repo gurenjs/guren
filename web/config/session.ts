@@ -5,7 +5,7 @@ import { sessions } from '../db/schema.js'
 // because this app runs on Workers, where per-isolate memory does not survive
 // between the login redirect and the next read.
 export const sessionConfig: SessionConfig = {
-  default: process.env.SESSION_DRIVER ?? 'database',
+  default: process.env.SESSION_DRIVER || 'database',
   stores: {
     database: { driver: 'database', table: sessions },
     // No table, no binding — the fallback when D1 is unreachable. Everything
