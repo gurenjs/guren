@@ -90,7 +90,7 @@
     "@babel/parser": "^7.24.7",
     "@babel/types": "^7.29.0",
     "@changesets/cli": "^2.31.1",
-    "bun-types": "^1.4.1",
+    "bun-types": "^1.4.2",
     "oxlint": "1.81.0",
     "oxlint-tsgolint": "7.0.2001",
     "typescript": "^7.0.2",
