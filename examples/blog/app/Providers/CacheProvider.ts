@@ -12,7 +12,7 @@ function createBlogCacheManager(): CacheManager {
     // CACHE_STORE=memory is per-process: correct on one long-lived server,
     // wrong on Workers, Lambda and Vercel, where two requests can land in
     // different instances. `redis` needs REDIS_URL.
-    default: process.env.CACHE_STORE ?? 'memory',
+    default: process.env.CACHE_STORE || 'memory',
     stores: {
       memory: { driver: 'memory' },
       // `client` is a function so the client is constructed only when

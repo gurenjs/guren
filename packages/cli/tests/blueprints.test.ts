@@ -566,6 +566,12 @@ export const users = pgTable('users', {
     expect(scheduleFiles.some((file) => file.endsWith('app/Console/Kernel.ts'))).toBe(true)
     expect(notificationFiles.some((file) => file.endsWith('app/Providers/NotificationProvider.ts'))).toBe(true)
     expect(storageFiles.some((file) => file.endsWith('app/Providers/StorageProvider.ts'))).toBe(true)
+
+    // `||`, not `??`: a blanked `STORAGE_DISK=` is '', which names no disk and
+    // trips the provider's own guard at boot instead of falling back to local.
+    const storageProviderSource = await readFile('app/Providers/StorageProvider.ts', 'utf8')
+    expect(storageProviderSource).toContain("process.env.STORAGE_DISK || 'local'")
+    expect(storageProviderSource).not.toContain('process.env.STORAGE_DISK ??')
     expect(broadcastingFiles.some((file) => file.endsWith('app/Providers/BroadcastProvider.ts'))).toBe(true)
 
     // Registered with the channel's own check, not an allow-all: otherwise

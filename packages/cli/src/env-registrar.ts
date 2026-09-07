@@ -13,6 +13,12 @@ const ENV_FILES = ['.env.example', '.env'] as const
  * file is left uncreated, since the app reads neither by a blueprint's doing.
  */
 export async function appendEnvEntry(key: string, entry: string): Promise<void> {
+  // An entry not assigning `key` never satisfies the probe, so every run would
+  // append it again; `key` reaches a regex, so callers pass a literal name.
+  if (!new RegExp(`^\\s*${key}=`, 'm').test(entry)) {
+    throw new Error(`The env entry for ${key} does not assign ${key}=.`)
+  }
+
   const declared = new RegExp(`^\\s*#?\\s*${key}=`, 'm')
 
   for (const file of ENV_FILES) {

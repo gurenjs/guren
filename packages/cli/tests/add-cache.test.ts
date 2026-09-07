@@ -31,7 +31,9 @@ describe('guren add cache', () => {
     await runBlueprint('cache', {})
 
     const provider = await readFile(resolve('app/Providers/CacheProvider.ts'), 'utf8')
-    expect(provider).toContain("default: process.env.CACHE_STORE ?? 'memory'")
+    // `||`, not `??`: a blanked `CACHE_STORE=` is '', which names no store.
+    expect(provider).toContain("default: process.env.CACHE_STORE || 'memory'")
+    expect(provider).not.toContain('process.env.CACHE_STORE ??')
     expect(provider).toContain("memory: { driver: 'memory' }")
     // The redis store is documented in a comment rather than declared:
     // importing createRedisClient pulls ioredis into every bundle, on a runtime

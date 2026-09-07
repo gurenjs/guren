@@ -714,7 +714,7 @@ export default class SessionProvider extends ServiceProvider {
 `
 
 /** A `config/session.ts` in the shape `guren add session` writes. */
-export function sessionConfigSource(stores: string, selected = "process.env.SESSION_DRIVER ?? 'database'"): string {
+export function sessionConfigSource(stores: string, selected = "process.env.SESSION_DRIVER || 'database'"): string {
   return `import { type SessionConfig } from '@guren/core'
 import { sessions } from '../db/schema'
 

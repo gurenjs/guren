@@ -12,7 +12,8 @@ import { ServiceProvider, createCacheManager } from '@guren/core'
 export default class CacheProvider extends ServiceProvider {
   register(): void {
     this.container.singleton('cache', () => createCacheManager({
-      default: process.env.CACHE_STORE ?? 'memory',
+      // `||`, not `??`: a blanked `CACHE_STORE=` is '', which names no store.
+      default: process.env.CACHE_STORE || 'memory',
       stores: {
         memory: { driver: 'memory' },
       },

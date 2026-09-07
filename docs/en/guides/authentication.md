@@ -228,7 +228,7 @@ import { createRedisClient } from '@guren/core/redis'
 import { sessions } from '@/db/schema'
 
 const sessionConfig: SessionConfig = {
-  default: process.env.SESSION_DRIVER ?? 'database',
+  default: process.env.SESSION_DRIVER || 'database',
   ttlSeconds: 60 * 60 * 2,
   stores: {
     // Survives restarts, isolates and cold starts, over the connection

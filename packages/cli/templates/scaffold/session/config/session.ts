@@ -13,7 +13,8 @@ import { sessions } from '../db/schema'
 // `redis: { driver: 'redis', client: () => createRedisClient({ url: process.env.REDIS_URL }) }`
 // entry — imported here only when you use it, since that module pulls in ioredis.
 export const sessionConfig: SessionConfig = {
-  default: process.env.SESSION_DRIVER ?? 'database',
+  // `||`, not `??`: a blanked `SESSION_DRIVER=` is '', which names no store.
+  default: process.env.SESSION_DRIVER || 'database',
   ttlSeconds: 60 * 60 * 2,
   stores: {
     // Over the connection configureOrm() already established. The `sessions`
