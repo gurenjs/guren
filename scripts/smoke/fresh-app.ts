@@ -5,6 +5,7 @@ import process from 'node:process'
 import { FIELD_TYPES } from '../../packages/cli/src/fields'
 import { DATABASE_DRIVERS } from '../../packages/create-app/src/blueprints'
 import { fileExists } from '../../packages/create-app/src/utils'
+import { assertSessionDrivers } from './session-drivers'
 import { auditBlueprintTemplates, auditConsoleWiring, auditStarterTemplate } from './starter-template-audit'
 import {
   collectLocalPackages,
@@ -726,6 +727,22 @@ async function main(): Promise<void> {
     // drift from the framework. A fresh app has to pass every stage, or the first
     // CI run a user sees is red. The gate finds the app's routes entry itself.
     await run(['bun', resolve(repoRoot, 'packages/cli/src/bin.ts'), 'gate'], appDir, runtimeEnv)
+
+    // After the gate, whose test stage runs under NODE_ENV=test and so never
+    // touches the development database this probe reads.
+    if (scaffoldsFeatures) {
+      await assertSessionDrivers({
+        appDir,
+        cliBin: resolve(repoRoot, 'packages/cli/src/bin.ts'),
+        env: runtimeEnv,
+        run,
+      })
+    } else {
+      console.log(
+        `\nSession driver probe skipped (${blueprint}): only the default blueprint scaffolds the session `
+        + 'feature, so this app has no config/session.ts, no sessions table and no SESSION_DRIVER.',
+      )
+    }
 
     console.log(`\nFresh app smoke passed (${blueprint}, ${installMode}): ${appDir}`)
   } finally {
