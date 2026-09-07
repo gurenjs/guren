@@ -17,6 +17,8 @@ import { collectPackages, parseArgs, repoRoot, selectPackages } from './workspac
 // survives a `test` script being reworded; a regex over it would not.
 const nonBunTestPackages = new Set(['@guren/testing'])
 
+// `bun <file>` (unlike `bun run`) swallows one *leading* `--` before argv, so a
+// direct invocation needs two: `bun scripts/test-packages.ts -- -- --parallel`.
 const { flags, positionals: selectors, forwarded } = parseArgs(
   process.argv.slice(2),
   ['list'],
