@@ -8,11 +8,21 @@
  * same latch. Keyed per app (a Bun test suite boots many); the env holder stays
  * module-global, since `getWorkersEnv()` has no app to key on — one per isolate.
  */
+import type { Scheduler } from '@guren/core'
+
 import { captureWorkersEnv, resetWorkersEnv } from './env'
 
 export interface WorkersExecutionContext {
   waitUntil(promise: Promise<unknown>): void
   passThroughOnException?(): void
+}
+
+/** The `ScheduledEvent` a cron trigger delivers, structural like `WorkersExecutionContext`. */
+export interface WorkersScheduledEvent {
+  /** The `triggers.crons` entry that fired. */
+  cron?: string
+  /** Epoch ms of the minute the trigger was *meant* for; workerd may deliver it late. */
+  scheduledTime?: number
 }
 
 /**
@@ -22,6 +32,8 @@ export interface WorkersExecutionContext {
 export interface WorkersAppLike {
   boot(): Promise<void>
   fetch(request: Request, env?: unknown, executionCtx?: unknown): Response | Promise<Response>
+  /** Only the cron entrypoint reads it, so an app-like that never receives one still satisfies boot/fetch. */
+  container?: { makeOptional<T>(key: string): T | undefined }
 }
 
 const latches = new WeakMap<WorkersAppLike, Promise<void>>()
@@ -71,4 +83,28 @@ export async function bootAndFetch(
 ): Promise<Response> {
   await bootWorkersApp(app, env)
   return app.fetch(request, env, ctx)
+}
+
+/**
+ * Boot, then run every task whose cron matches the trigger's minute.
+ *
+ * `scheduledTime` rather than the wall clock: workerd may deliver a trigger late.
+ * @throws When no provider bound a `scheduler` — a cron that swept nothing must
+ *   not report success on a schedule nobody reads.
+ */
+export async function bootAndRunDueTasks(
+  app: WorkersAppLike,
+  event: WorkersScheduledEvent,
+  env: unknown,
+): Promise<void> {
+  await bootWorkersApp(app, env)
+
+  const scheduler = app.container?.makeOptional<Scheduler>('scheduler')
+  if (!scheduler) {
+    throw new Error(
+      'A Cloudflare cron trigger fired, but this app binds no `scheduler`. Register a provider that binds createScheduler() as `scheduler` and defines the tasks, or remove "triggers.crons" from wrangler.jsonc.',
+    )
+  }
+
+  await scheduler.runDueTasks(event.scheduledTime ? new Date(event.scheduledTime) : new Date())
 }

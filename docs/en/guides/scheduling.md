@@ -58,6 +58,15 @@ process.on('SIGTERM', () => {
 })
 ```
 
+### On Serverless Runtimes
+
+`scheduler.start()` needs a long-lived process, which neither Cloudflare Workers nor AWS Lambda has. There the platform's own scheduler supplies the tick and the app only registers tasks:
+
+- **Cloudflare Workers** — the worker `guren cloudflare:build` generates exports a `scheduled` handler; a `triggers.crons` entry in `wrangler.jsonc` drives it. See [Cloudflare Workers Deployment](./cloudflare.md#scheduled-tasks).
+- **AWS Lambda** — `createScheduleHandler(scheduler)` from `@guren/core/lambda`, wired to an EventBridge rule. See [Serverless](./serverless.md).
+
+Each firing runs only the tasks due at that moment, so the platform trigger must be at least as frequent as your finest task. `preventOverlapping()` and `onOneServer()` are in-memory flags on the task, so neither carries across firings on a runtime that does not keep the process alive. `schedule.command()` shells out through `node:child_process` and does not work on Workers — use `schedule.call()` or `schedule.job()` there.
+
 ## Defining Schedules
 
 ### Callbacks

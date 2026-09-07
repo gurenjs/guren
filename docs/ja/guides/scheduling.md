@@ -58,6 +58,15 @@ process.on('SIGTERM', () => {
 })
 ```
 
+### サーバーレスランタイムでの実行
+
+`scheduler.start()` は常駐プロセスを前提にしますが、Cloudflare Workers にも AWS Lambda にもそれはありません。これらの環境では、プラットフォーム側のスケジューラが時計を刻み、アプリはタスクの登録だけを行います。
+
+- **Cloudflare Workers**: `guren cloudflare:build` が生成するワーカーが `scheduled` ハンドラを export し、`wrangler.jsonc` の `triggers.crons` がそれを駆動します。[Cloudflare Workers へのデプロイ](./cloudflare.md#スケジュールタスク)を参照してください。
+- **AWS Lambda**: `@guren/core/lambda` の `createScheduleHandler(scheduler)` を EventBridge ルールに接続します。[サーバーレス](./serverless.md)を参照してください。
+
+起動のたびに、その時点で該当するタスクだけが実行されます。そのためプラットフォームのトリガーは、最も細かいタスクと同じかそれより細かい頻度である必要があります。また `preventOverlapping()` と `onOneServer()` はタスク上のメモリ内フラグなので、プロセスが常駐しないランタイムでは起動をまたいで効きません。`schedule.command()` は `node:child_process` 経由でシェルに委ねるため Workers では動きません。そこでは `schedule.call()` または `schedule.job()` を使ってください。
+
 ## スケジュールの定義
 
 ### コールバック

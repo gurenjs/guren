@@ -12,6 +12,17 @@ function createExecutionContext(): WorkersExecutionContext {
   }
 }
 
+function countingApp(counter: { boots: number }): WorkersAppLike {
+  return {
+    async boot() {
+      counter.boots += 1
+    },
+    fetch() {
+      return new Response('ok')
+    },
+  }
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void
   let reject!: (reason: unknown) => void
@@ -225,17 +236,6 @@ describe('WorkersHandler.boot', () => {
     resetWorkersEnv()
   })
 
-  function countingApp(counter: { boots: number }): WorkersAppLike {
-    return {
-      async boot() {
-        counter.boots += 1
-      },
-      fetch() {
-        return new Response('ok')
-      },
-    }
-  }
-
   // The alarm-before-any-request topology (RFC 0017 §6): an agent Durable
   // Object holds `env` but no request, and must reach a booted application.
   // The two envs are deliberately different objects — measured on workerd, an
@@ -302,5 +302,90 @@ describe('WorkersHandler.boot', () => {
 
     expect(bootCalls).toBe(2)
     expect(getWorkersEnv<TestEnv>()).toBe(retryEnv)
+  })
+})
+
+describe('createWorkersHandler scheduled', () => {
+  beforeEach(() => {
+    resetWorkersEnv()
+  })
+
+  function schedulerApp(runs: Date[], counter = { boots: 0 }): WorkersAppLike {
+    return {
+      ...countingApp(counter),
+      container: {
+        makeOptional<T>(key: string): T | undefined {
+          if (key !== 'scheduler') {
+            return undefined
+          }
+          return {
+            async runDueTasks(date: Date) {
+              runs.push(date)
+            },
+          } as T
+        },
+      },
+    }
+  }
+
+  test('should run the due tasks for the minute the trigger was scheduled for', async () => {
+    const runs: Date[] = []
+    const handler = createWorkersHandler(schedulerApp(runs))
+    const scheduledTime = Date.parse('2026-09-07T04:05:00.000Z')
+
+    await handler.scheduled({ cron: '* * * * *', scheduledTime }, {}, createExecutionContext())
+
+    expect(runs).toHaveLength(1)
+    expect(runs[0].getTime()).toBe(scheduledTime)
+  })
+
+  test('should boot before dispatching, sharing the fetch entrypoint boot slot', async () => {
+    const counter = { boots: 0 }
+    const handler = createWorkersHandler(schedulerApp([], counter))
+
+    await handler.scheduled({ cron: '* * * * *', scheduledTime: Date.now() }, { DB: 'd1' }, createExecutionContext())
+    await handler.fetch(new Request('https://example.com/'), { DB: 'd1' }, createExecutionContext())
+
+    expect(counter.boots).toBe(1)
+    expect(getWorkersEnv<TestEnv>().DB).toBe('d1')
+  })
+
+  test('should fall back to the wall clock when the event carries no scheduledTime', async () => {
+    const runs: Date[] = []
+    const handler = createWorkersHandler(schedulerApp(runs))
+    const before = Date.now()
+
+    await handler.scheduled({ cron: '* * * * *' }, {}, createExecutionContext())
+
+    expect(runs[0]).toBeInstanceOf(Date)
+    expect(runs[0].getTime()).toBeGreaterThanOrEqual(before)
+  })
+
+  test('should throw when no provider bound a scheduler, rather than sweeping nothing quietly', async () => {
+    const app: WorkersAppLike = {
+      async boot() {},
+      fetch() {
+        return new Response('ok')
+      },
+      container: { makeOptional: () => undefined },
+    }
+    const handler = createWorkersHandler(app)
+
+    await expect(
+      handler.scheduled({ cron: '* * * * *' }, {}, createExecutionContext()),
+    ).rejects.toThrow(/binds no `scheduler`/)
+  })
+
+  test('should throw for an app exposing no container at all', async () => {
+    const handler = createWorkersHandler({
+      async boot() {},
+      fetch() {
+        return new Response('ok')
+      },
+    })
+
+    await expect(
+      handler.scheduled({ cron: '* * * * *' }, {}, createExecutionContext()),
+    ).rejects.toThrow(/binds no `scheduler`/)
   })
 })
