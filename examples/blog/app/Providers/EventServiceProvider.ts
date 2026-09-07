@@ -40,6 +40,7 @@ export function initializeEventSystem(): EventManager {
     default: process.env.MAIL_MAILER || 'log',
     from: {
       email: process.env.MAIL_FROM_ADDRESS || 'noreply@blog.example.com',
+      // oxlint-disable-next-line guren/no-nullish-env-default -- an empty display name is a choice, not a missing value
       name: process.env.MAIL_FROM_NAME ?? 'Guren Blog',
     },
     transports: {

@@ -1,11 +1,13 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   // The guren rules ship with @guren/cli: await-async-assertion (a bare
-  // `expect(...).rejects` statement can never fail its test) and the comment rules.
+  // `expect(...).rejects` statement can never fail its test), no-nullish-env-default
+  // (`process.env.FOO ?? 'x'` keeps a blank `FOO=` as ''), and the comment rules.
   "jsPlugins": ["@guren/cli/oxlint"],
   "ignorePatterns": ["node_modules/**", ".guren/**", "dist/**", "public/build/**"],
   "rules": {
     "guren/await-async-assertion": "error",
+    "guren/no-nullish-env-default": "error",
     // Comment hygiene is advisory: the agent harness feeds these back after every
     // edit, while `bun run lint` stays green on them.
     "guren/comment-length": "warn",

@@ -580,7 +580,7 @@ async function main(): Promise<void> {
     return
   }
   if (args.includes('--diff-published')) {
-    const remote = process.env.GUREN_AGENT_SKILLS_REMOTE ?? 'https://github.com/gurenjs/agent-skills.git'
+    const remote = process.env.GUREN_AGENT_SKILLS_REMOTE || 'https://github.com/gurenjs/agent-skills.git'
     const result = await diffPublished(remote)
     ;(result.code === 0 ? console.log : console.error)(result.report)
     process.exitCode = result.code

@@ -68,10 +68,10 @@ const SHARED_DRIZZLE_FIELDS = ["schema: './db/schema.ts',", "out: './db/migratio
  * file passes.
  */
 const EXPECTED_URL_SITES = {
-  postgres: (url: string) => [`url: process.env.DATABASE_URL ?? '${url}',`],
-  mysql: (url: string) => [`url: process.env.DATABASE_URL ?? '${url}',`],
+  postgres: (url: string) => [`url: process.env.DATABASE_URL || '${url}',`],
+  mysql: (url: string) => [`url: process.env.DATABASE_URL || '${url}',`],
   sqlite: (url: string) => [
-    `const filename = process.env.DATABASE_URL ?? '${url}'`,
+    `const filename = process.env.DATABASE_URL || '${url}'`,
     `'Point it at a file such as ${url}, or use ":memory:".'`,
   ],
 } as const satisfies Record<DatabaseDriver, (url: string) => string[]>

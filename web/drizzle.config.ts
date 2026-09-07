@@ -5,7 +5,7 @@ import { defineConfig } from 'drizzle-kit'
  * name carries a Postgres URI in existing environments, which would point
  * drizzle-kit at a different database than the app opens.
  */
-const filename = process.env.SQLITE_DATABASE_PATH ?? './data/guren.db'
+const filename = process.env.SQLITE_DATABASE_PATH || './data/guren.db'
 
 /**
  * Two SQLite implementations read this and disagree about URI filenames:

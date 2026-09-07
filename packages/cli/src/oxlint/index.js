@@ -4,5 +4,6 @@
 // plugin files cannot both be `guren`.
 import asyncAssertion from './await-async-assertion.js'
 import { rules as commentRules } from './comments.js'
+import { rules as envRules } from './nullish-env-default.js'
 
-export default { meta: { name: 'guren' }, rules: { ...asyncAssertion.rules, ...commentRules } }
+export default { meta: { name: 'guren' }, rules: { ...asyncAssertion.rules, ...commentRules, ...envRules } }

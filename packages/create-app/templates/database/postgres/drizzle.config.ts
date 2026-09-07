@@ -10,6 +10,6 @@ export default defineConfig({
   out: './db/migrations',
   dialect: 'postgresql',
   dbCredentials: {
-    url: process.env.DATABASE_URL ?? 'postgres://guren:guren@localhost:54322/guren',
+    url: process.env.DATABASE_URL || 'postgres://guren:guren@localhost:54322/guren',
   },
 })
