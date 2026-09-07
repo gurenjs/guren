@@ -71,6 +71,15 @@ const EXPECTED_SESSION_ROWS: Record<string, 'written' | 'none'> = {
  */
 const REQUIRED_SESSION_STORES = ['memory', 'database']
 
+/**
+ * Separates a cookie-borne session from an id, which no row count can. Every
+ * keyed store signs the same UUID, so a fallback is a fixed 92 characters —
+ * ratio 1.00 exactly. The cookie store floors at base64url(12-byte IV +
+ * 16-byte tag + smallest JSON) ≈ 146, or 1.59x; measured 167. The threshold
+ * is their geometric midpoint, under that floor to allow a smaller session.
+ */
+const COOKIE_STATE_LENGTH_FACTOR = 1.25
+
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
     throw new Error(message)
@@ -343,10 +352,12 @@ async function requestInSession(
 
 /**
  * Register a user and read back a page only an authenticated session reaches.
- * `RegisterController.store()` regenerates the session and logs in, which is
- * the one flow in a scaffolded app that writes to the session store.
+ * `RegisterController.store()` regenerates the session and logs in, the one
+ * flow in a scaffolded app that writes to the session store. Returns the
+ * session cookie's length, taken at the same point for every driver; every
+ * store's value is base64url, so the jar's decode leaves that length intact.
  */
-async function authenticate(url: string, driver: string, email: string): Promise<void> {
+async function authenticate(url: string, driver: string, email: string): Promise<number> {
   const jar = new CookieJar()
 
   await requestInSession(`SESSION_DRIVER=${driver}: GET /register`, `${url}/register`, jar, 200)
@@ -371,8 +382,9 @@ async function authenticate(url: string, driver: string, email: string): Promise
     }),
   })
 
+  const session = jar.get(SESSION_COOKIE)
   assert(
-    jar.get(SESSION_COOKIE) !== undefined,
+    session !== undefined,
     `SESSION_DRIVER=${driver}: logging in set no ${SESSION_COOKIE} cookie, so no session was persisted.`,
   )
 
@@ -382,6 +394,8 @@ async function authenticate(url: string, driver: string, email: string): Promise
     jar,
     200,
   )
+
+  return session.length
 }
 
 /** The dev-mode SQLite file `config/database.ts` opens, which is what NODE_ENV=development above pins. */
@@ -456,12 +470,13 @@ export async function assertSessionDrivers(options: SessionDriverProbeOptions): 
     console.log(`  skipped: SESSION_DRIVER=${name} — this scaffold declares no such store, so it cannot boot one`)
   }
 
+  const cookieLengths = new Map<string, number>()
   for (const driver of exercised) {
     const expectation = EXPECTED_SESSION_ROWS[driver]
     const before = countSessionRows(databaseFile)
     const app = await bootApp(options, driver)
     try {
-      await authenticate(app.url, driver, `session-probe-${driver}-${runId}@example.com`)
+      cookieLengths.set(driver, await authenticate(app.url, driver, `session-probe-${driver}-${runId}@example.com`))
     } catch (error) {
       await app.drained()
       console.error(`\n--- server log (SESSION_DRIVER=${driver}) ---\n${app.output()}`)
@@ -487,7 +502,25 @@ export async function assertSessionDrivers(options: SessionDriverProbeOptions): 
     console.log(`  OK: SESSION_DRIVER=${driver} — session round-trip, ${written} sessions row(s) written`)
   }
 
-  const noRow = exercised.filter((name) => EXPECTED_SESSION_ROWS[name] === 'none')
+  // Relative, so no constant here can go stale: both lengths come from the same
+  // app and the same round-trip in this run.
+  const carried = cookieLengths.get('cookie')
+  const identifier = cookieLengths.get('memory')
+  const compared = carried !== undefined && identifier !== undefined
+  if (compared) {
+    assert(
+      carried >= identifier * COOKIE_STATE_LENGTH_FACTOR,
+      `SESSION_DRIVER=cookie set a ${carried}-character session cookie against SESSION_DRIVER=memory's `
+        + `${identifier}, short of the ${COOKIE_STATE_LENGTH_FACTOR}x this probe requires. Every keyed store `
+        + 'signs the same UUID, so a server-side fallback matches memory exactly, while a session carried in '
+        + 'the cookie floors near 1.6x it — the threshold sits below that floor only to leave room for a '
+        + 'session holding less. So `cookie` resolved to a server-side store.',
+    )
+    console.log(`  OK: SESSION_DRIVER=cookie set a ${carried}-character session cookie against memory's ${identifier}`)
+  } else {
+    console.log('  skipped: the cookie-length comparison needs cookie and memory both exercised in one run')
+  }
+
   console.log([
     '',
     'Session driver probe passed (RFC 0020 Part 5).',
@@ -496,9 +529,18 @@ export async function assertSessionDrivers(options: SessionDriverProbeOptions): 
     ...exercised.map((driver) =>
       `  ${driver.padEnd(20)} authenticated; the sessions table gained `
       + (EXPECTED_SESSION_ROWS[driver] === 'written' ? 'a row' : 'none, so the name is not the database store')),
-    `  no row               is all an outside observer can tell apart: a no-row pass (${noRow.join(', ')})`,
-    '                       proves the name is not the database store, never which store it is; where',
-    '                       each keeps its state is visible neither over HTTP nor in the database',
+    ...(compared
+      ? [
+        `  cookie vs memory     the cookie driver's session cookie carried ${carried} characters against`,
+        `                       memory's ${identifier}, so cookie keeps the session state in the cookie while`,
+        '                       memory keeps it server-side: two no-row passes that are not the same store',
+      ]
+      : [
+        '  cookie vs memory     NOT compared: both have to run in one job. Without it a no-row pass proves',
+        '                       only that the name is not the database store, never which store it is',
+      ]),
+    '  still unproven       that the cookie payload is encrypted, and that an oversize session is refused',
+    '                       rather than emitted: neither is visible from outside one round-trip',
     ...unadopted.map((name) =>
       `  ${name.padEnd(20)} NOT exercised: this scaffold declares no ${name} store, so `
       + `SESSION_DRIVER=${name} cannot boot a scaffolded app`),
