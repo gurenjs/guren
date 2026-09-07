@@ -254,7 +254,7 @@ import { ServiceProvider, shareInertiaProps } from '@guren/core'
 export default class AppInfoProvider extends ServiceProvider {
   boot(): void {
     shareInertiaProps(() => ({
-      appVersion: process.env.APP_VERSION ?? 'dev',
+      appVersion: process.env.APP_VERSION || 'dev',
     }), this.container)
   }
 }

@@ -2281,7 +2281,7 @@ const devCommand = defineCommand({
     // `PORT=0` means "any free port", so this tests for a number, not truthiness.
     const parsedPort = Number.parseInt(process.env.PORT ?? '', 10)
     const port = Number.isInteger(parsedPort) ? parsedPort : 3333
-    const hostname = process.env.HOST ?? '0.0.0.0'
+    const hostname = process.env.HOST || '0.0.0.0'
 
     let address: { url?: string } | undefined
     try {

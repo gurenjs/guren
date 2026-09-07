@@ -624,7 +624,7 @@ async function main(): Promise<void> {
   await ensureBuiltPackages()
   await assertCoversEveryBlueprint()
 
-  const blueprint = process.env.GUREN_SMOKE_BLUEPRINT ?? 'default'
+  const blueprint = process.env.GUREN_SMOKE_BLUEPRINT || 'default'
   const tempRoot = await mkdtemp(join(tmpdir(), `guren-fresh-app-${blueprint}-`))
   const appDir = join(tempRoot, 'app')
   const runtimeTempDir = join(tempRoot, '.tmp')
