@@ -77,12 +77,10 @@
 - `bun run audit:tutorial-blocks` after editing; `GUREN_TUTORIAL_THROUGH=01
   bun run smoke:tutorial` to execute the chapters up to one
 - A chapter that passes its gate is tagged `chapter-NN` in the app's own git
-  history, so `GUREN_KEEP_SMOKE_DIR=1` leaves a reference a reader can diff
-  against. `bun run smoke:tutorial:checkpoints <workspace>` pushes those tags to
-  the companion repository named by `TUTORIAL_APP_REMOTE` (`--dry-run` reports
-  without pushing). The tag step also fails a chapter that ends with an
-  uncommitted file: every chapter ends with a commit, and a checkpoint carrying
-  files the text never wrote would describe an app no reader can reach
+  history, so a run kept with `GUREN_KEEP_SMOKE_DIR=1` is navigable: `git diff
+  chapter-06 chapter-07` is what that chapter changed. The tag step also fails a
+  chapter that ends with an uncommitted file, which is the only check that the
+  course's "every chapter ends with a commit" is true
 
 ## Maintenance Checklist
 - After editing, run `rg` on `docs/` for disallowed terms (`packages/core`, `citty`, `consola`, etc.)
