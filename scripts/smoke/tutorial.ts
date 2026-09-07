@@ -59,6 +59,14 @@ async function run(cmd: string[], cwd: string, env: Record<string, string>): Pro
   if (code !== 0) throw new Error(`Command failed with exit code ${code}: ${cmd.join(' ')}`)
 }
 
+/** `run` for a command whose stdout is the answer rather than something to show. */
+async function capture(cmd: string[], cwd: string, env: Record<string, string>): Promise<string> {
+  const proc = Bun.spawn({ cmd, cwd, env, stdout: 'pipe', stderr: 'pipe' })
+  const [out, code] = await Promise.all([new Response(proc.stdout).text(), proc.exited])
+  if (code !== 0) throw new Error(`Command failed with exit code ${code}: ${cmd.join(' ')}`)
+  return out
+}
+
 let tempRootForLog = ''
 function relativeToTemp(path: string): string {
   return tempRootForLog && path.startsWith(tempRootForLog) ? relative(tempRootForLog, path) || '.' : path
@@ -360,6 +368,23 @@ async function runChapter(session: Session, name: string): Promise<void> {
   log(`Chapter ${name}: gate and build`)
   await run(['bun', CLI_BIN, 'gate'], session.appDir, session.env)
   await run(['bun', 'run', 'build'], session.appDir, session.env)
+  await tagChapter(session, name)
+}
+
+/**
+ * A `chapter-NN` tag once the chapter's gate is green, so a kept workspace is a
+ * reference a reader can diff against chapter by chapter. Uncommitted work here
+ * is the chapter's own bug and fails: a tag carrying files the text never wrote
+ * would describe an app no reader can reach.
+ */
+async function tagChapter(session: Session, name: string): Promise<void> {
+  if (!session.appDir) return
+  const status = await capture(['git', 'status', '--porcelain'], session.appDir, session.env)
+  if (status.trim().length > 0) {
+    throw new Error(`Chapter ${name} left uncommitted changes; every chapter ends with a commit:\n${status}`)
+  }
+  const tag = `chapter-${name.slice(0, 2)}`
+  await run(['git', 'tag', '-f', tag, '-m', `The app at the end of ${name}`], session.appDir, session.env)
 }
 
 async function main(): Promise<void> {
