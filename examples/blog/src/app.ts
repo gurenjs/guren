@@ -27,6 +27,7 @@ import AttachmentsProvider from '../app/Providers/AttachmentsProvider.js'
 import BroadcastProvider from '../app/Providers/BroadcastProvider.js'
 import { registerWebRoutes } from '../routes/web.js'
 import '../config/inertia.js'
+import SessionProvider from '../app/Providers/SessionProvider.js'
 
 const secureCookies = process.env.NODE_ENV === 'production' && !process.env.CI
 
@@ -55,25 +56,7 @@ function hostAuthorization() {
 
 const app = createApp({
   routes: registerWebRoutes,
-  providers: [
-    ErrorServiceProvider,
-    InertiaServiceProvider,
-    CoreAuthServiceProvider,
-    DatabaseProvider,
-    AuthProvider,
-    CoreOAuthServiceProvider,
-    OAuthProvider,
-    CacheProvider,
-    CoreNotificationServiceProvider,
-    NotificationProvider,
-    CoreStorageServiceProvider,
-    StorageProvider,
-    AttachmentsProvider,
-    CoreBroadcastServiceProvider,
-    BroadcastProvider,
-    EventServiceProvider,
-    SchedulingProvider,
-  ],
+  providers: [ErrorServiceProvider, InertiaServiceProvider, CoreAuthServiceProvider, DatabaseProvider, AuthProvider, CoreOAuthServiceProvider, OAuthProvider, CacheProvider, CoreNotificationServiceProvider, NotificationProvider, CoreStorageServiceProvider, StorageProvider, AttachmentsProvider, CoreBroadcastServiceProvider, BroadcastProvider, EventServiceProvider, SchedulingProvider, SessionProvider],
   i18n: {
     supported: ['en', 'ja'],
     // Monorepo artifact: tests boot this app with cwd = repo root, so anchor to

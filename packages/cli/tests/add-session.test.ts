@@ -9,6 +9,7 @@ import {
   createTempWorkspace,
   type TempWorkspace,
 } from './helpers'
+import { consola } from 'consola'
 import { runBlueprint } from '../src/blueprints'
 import { addSession, appConfiguresSessions } from '../src/add-session'
 
@@ -150,6 +151,24 @@ describe('guren add session', () => {
 
     const env = await readFile(resolve('.env.example'), 'utf8')
     expect(env.match(/SESSION_DRIVER/g)).toHaveLength(1)
+  })
+
+  it('leaves an existing SESSION_DRIVER alone, and says when it names another store', async () => {
+    await seedApp(PG_SCHEMA_FIXTURE, { env: 'APP_KEY=\nSESSION_DRIVER=memory\n' })
+    const warnings: string[] = []
+    const original = consola.warn
+    consola.warn = ((message: string) => { warnings.push(String(message)) }) as typeof consola.warn
+
+    try {
+      await runBlueprint('session', {})
+    } finally {
+      consola.warn = original
+    }
+
+    // Kept, because the app chose it — but the table this just installed is
+    // then one nothing writes to, which is worth a line.
+    expect(await readFile(resolve('.env.example'), 'utf8')).toContain('SESSION_DRIVER=memory')
+    expect(warnings.join('\n')).toContain('already sets SESSION_DRIVER=memory')
   })
 
   it('writes SESSION_DRIVER into .env too, which is the file the app reads', async () => {

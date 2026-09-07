@@ -9,4 +9,10 @@ export function registerBlogSchedules(scheduler: Scheduler): void {
       .hourly()
       .name('blog:warm-post-cache')
   })
+
+  // `read()` already treats an expired session as missing, so this only keeps
+  // the table from growing (RFC 0020 §2).
+  scheduler.schedule((schedule) => {
+    schedule.command('sessions:prune').dailyAt('03:00').name('sessions:prune')
+  })
 }
