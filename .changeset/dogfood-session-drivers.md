@@ -17,3 +17,9 @@ Also from the same run: `config/session.ts`'s scaffolded comment was an
 11-line block, and scaffolded apps lint with `guren/comment-length` — so
 framework-generated code warned in the user's own lint. It is now three blocks
 inside the limit.
+
+The scaffolded `stores` map now declares `cookie` beside `database`.
+`SessionManager` resolves a store from that map rather than from the driver
+registry, so `SESSION_DRIVER=cookie` threw `Session store not found: cookie`
+on an app that had the driver compiled in. Declaring it costs no import: the
+driver is built into `@guren/server`.

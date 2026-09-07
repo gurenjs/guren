@@ -20,5 +20,9 @@ export const sessionConfig: SessionConfig = {
     // Over the connection configureOrm() already established. The `sessions`
     // table is in db/schema.ts; run the migration before the first login.
     database: { driver: 'database', table: sessions },
+    // No table and no binding: the session travels in the cookie, encrypted
+    // under APP_KEY. Capped at ~2.9 KB, and a logout cannot revoke a copy the
+    // client already has — keep only ids in the session.
+    cookie: { driver: 'cookie' },
   },
 }
