@@ -52,14 +52,24 @@ export interface SessionDriverProbeOptions {
 }
 
 /**
- * What each store the scaffold offers must look like from outside. Checked
- * against the store list the app itself reports, so a scaffold that grows one
- * fails here instead of leaving it unexercised.
+ * What each store the scaffold may offer must look like from outside. Every
+ * store the app declares needs an entry here, but an entry with no declaration
+ * is only a store this scaffold has not adopted yet.
  */
 const EXPECTED_SESSION_ROWS: Record<string, 'written' | 'none'> = {
   database: 'written',
   memory: 'none',
+  // The session travels in the cookie itself, so it reaches no sessions table.
+  cookie: 'none',
 }
+
+/**
+ * What a session-scaffolded app always declares: `database` from
+ * config/session.ts, `memory` from SessionManager itself. Driving the loop from
+ * the declared list is what turns an unadopted store into a skip; without this,
+ * a dropped store would shrink the loop to nothing just as quietly.
+ */
+const REQUIRED_SESSION_STORES = ['memory', 'database']
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
@@ -432,7 +442,22 @@ export async function assertSessionDrivers(options: SessionDriverProbeOptions): 
       + "the sessions table, 'none' otherwise).",
   )
 
-  for (const [driver, expectation] of Object.entries(EXPECTED_SESSION_ROWS)) {
+  const missing = REQUIRED_SESSION_STORES.filter((name) => !declared.includes(name))
+  assert(
+    missing.length === 0,
+    `The app no longer declares ${missing.join(', ')}. The loop below exercises the stores the app `
+      + 'declares, so a dropped store would leave this gate green while proving less than it did.',
+  )
+
+  // The app's own order, so the log reads like its declaration.
+  const exercised = declared.filter((name) => name in EXPECTED_SESSION_ROWS)
+  const unadopted = Object.keys(EXPECTED_SESSION_ROWS).filter((name) => !declared.includes(name))
+  for (const name of unadopted) {
+    console.log(`  skipped: SESSION_DRIVER=${name} — this scaffold declares no such store, so it cannot boot one`)
+  }
+
+  for (const driver of exercised) {
+    const expectation = EXPECTED_SESSION_ROWS[driver]
     const before = countSessionRows(databaseFile)
     const app = await bootApp(options, driver)
     try {
@@ -462,17 +487,20 @@ export async function assertSessionDrivers(options: SessionDriverProbeOptions): 
     console.log(`  OK: SESSION_DRIVER=${driver} — session round-trip, ${written} sessions row(s) written`)
   }
 
+  const noRow = exercised.filter((name) => EXPECTED_SESSION_ROWS[name] === 'none')
   console.log([
     '',
     'Session driver probe passed (RFC 0020 Part 5).',
     `  declared stores      ${declared.join(', ')}`,
     '  not-a-real-driver    refused at boot, so a silent fallback cannot make the rows below vacuous',
-    ...Object.entries(EXPECTED_SESSION_ROWS).map(([driver, expectation]) =>
+    ...exercised.map((driver) =>
       `  ${driver.padEnd(20)} authenticated; the sessions table gained `
-      + (expectation === 'written' ? 'a row' : 'none, so the name is not the database store')),
-    '  a no-row driver      is all an outside observer can tell apart; that `memory` keeps its state',
-    '                       per-process is not visible over HTTP or in the database',
-    '  cookie               NOT exercised: RFC 0020 §3 asks for it, but the session scaffold declares',
-    '                       no cookie store, so SESSION_DRIVER=cookie cannot boot a scaffolded app',
+      + (EXPECTED_SESSION_ROWS[driver] === 'written' ? 'a row' : 'none, so the name is not the database store')),
+    `  no row               is all an outside observer can tell apart: a no-row pass (${noRow.join(', ')})`,
+    '                       proves the name is not the database store, never which store it is; where',
+    '                       each keeps its state is visible neither over HTTP nor in the database',
+    ...unadopted.map((name) =>
+      `  ${name.padEnd(20)} NOT exercised: this scaffold declares no ${name} store, so `
+      + `SESSION_DRIVER=${name} cannot boot a scaffolded app`),
   ].join('\n'))
 }
