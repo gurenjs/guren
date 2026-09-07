@@ -1,4 +1,5 @@
-import { isPromiseLike } from '../../logging/Logger'
+import { resolveLazyRedisClient } from '../../redis/lazy-client'
+import { CookieSessionStore } from './cookie-session-store'
 import { RedisSessionStore } from '../../redis/RedisSessionStore'
 import { MemorySessionStore, type SessionCookieOptions, type SessionStore } from './session'
 
@@ -28,11 +29,24 @@ export interface RedisSessionDriverOptions {
 export interface SessionDrivers {
   memory: MemorySessionDriverOptions
   redis: RedisSessionDriverOptions
+  cookie: CookieSessionDriverOptions
 }
+
+/**
+ * The cookie driver takes no app-facing options: its key comes from `APP_KEY`
+ * and its size budget from the middleware. `keyring` and `now` stay on
+ * {@link CookieSessionStoreOptions}, for direct construction in tests — a
+ * committed `config/session.ts` is the wrong home for key material.
+ */
+export interface CookieSessionDriverOptions {}
 
 export type SessionStoreConfig = {
   [K in keyof SessionDrivers]: { driver: K } & SessionDrivers[K]
 }[keyof SessionDrivers]
+
+/** The store `SessionConfig.default` names when it names none, and the one driver that shares no state between requests. */
+export const DEFAULT_SESSION_STORE_NAME = 'memory'
+export const PER_PROCESS_SESSION_DRIVERS: ReadonlySet<string> = new Set([DEFAULT_SESSION_STORE_NAME])
 
 /** Cookie and TTL settings plus the named stores one of which is the default. */
 export interface SessionConfig extends SessionCookieOptions {
@@ -70,24 +84,20 @@ export class SessionManager {
   private readonly resolved = new Map<string, SessionStore>()
 
   constructor(config: SessionConfig = {}) {
-    const { default: defaultName = 'memory', stores = {}, ...options } = config
+    const { default: defaultName = DEFAULT_SESSION_STORE_NAME, stores = {}, ...options } = config
     this.options = options
     this.defaultStoreName = defaultName
 
     this.registerDriver('memory', ({ now }) => new MemorySessionStore(now))
+    this.registerDriver('cookie', () => new CookieSessionStore())
     this.registerDriver('redis', ({ client, prefix }) => {
-      const redis = typeof client === 'function' ? client() : client
-      if (isPromiseLike(redis)) {
-        throw new Error(
-          'Session store "redis": `client` returned a Promise. Return the ioredis client synchronously; it connects lazily on first use.',
-        )
-      }
+      const redis = resolveLazyRedisClient(client, 'Session store "redis"')
       return new RedisSessionStore(redis as ConstructorParameters<typeof RedisSessionStore>[0], { prefix })
     })
 
     // Unlike cache/storage, `memory` is declared even when it is not the
     // default: `SESSION_DRIVER=memory` needs no entry, and it is the fallback.
-    this.configs.set('memory', { driver: 'memory' })
+    this.configs.set(DEFAULT_SESSION_STORE_NAME, { driver: 'memory' })
     for (const [name, storeConfig] of Object.entries(stores)) {
       this.configs.set(name, storeConfig)
     }

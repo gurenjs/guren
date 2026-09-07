@@ -47,6 +47,10 @@ const RESOURCE_FIELDS = FIELD_TYPES.flatMap((type) => [
 // admin and oauth follow auth for its sign-in page; `--force` on mail
 // supersedes the MailProvider auth wrote.
 const DEFAULT_BLUEPRINT_FEATURES: readonly (readonly string[])[] = [
+  // Before auth, which runs the session blueprint itself when the app has no
+  // session config: this way the templates land here and auth exercises its
+  // already-configured path.
+  ['session'],
   ['auth'],
   ['admin'],
   ['oauth'],

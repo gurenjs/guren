@@ -218,6 +218,8 @@ app.use('*', createSessionMiddleware())
 
 ### `SessionManager` でストアを選ぶ
 
+`bunx guren add session` は次を生成します: `sessions` テーブルとそのマイグレーション、`database` ストアを宣言した `config/session.ts`、`SessionProvider`、`.env` と `.env.example` の `SESSION_DRIVER`、`sessions:prune` コマンド。下の `redis` ストアだけは手で足す部分です。`@guren/core/redis` を import すると ioredis が全バンドルに入るので、必要になるまで scaffold は出しません。`guren add auth` はこれを内部で実行するので、生成直後のアプリは最初からデータベース永続化されています。以下は手で配線する場合のために、その生成物を説明したものです。
+
 候補となるストアが複数あるなら、一度宣言して環境ごとに選びます。プロバイダの `register()` で `session` キーに `SessionManager` を bind すると、`AuthServiceProvider` は起動時にそれを組み込んだセッションミドルウェアを構築し、ストア自体は最初のリクエストで解決します:
 
 ```ts
@@ -247,6 +249,24 @@ export default class SessionProvider extends ServiceProvider {
 ```
 
 `createSessionManager()` は `new SessionManager()` に `database` ドライバを登録したものです。このドライバはテーブルを ORM のモデルで包むので、ORM に依存しない HTTP 層ではなく `@guren/core` だけが提供できます。`database` ストアを宣言するなら常にこちらを使ってください。別の方法で組み立てたマネージャには `registerDatabaseSessionDriver(manager)` でドライバを足せます。
+
+#### `cookie` ストア
+
+`{ driver: 'cookie' }` はセッション全体を cookie の中に置き、`APP_KEY` で暗号化します(AES-256-GCM。`APP_PREVIOUS_KEYS` も復号に使うので、鍵をローテーションしても全員がログアウトすることはありません)。**サーバ側のリソースを一切必要としない**唯一のストアです。テーブルもマイグレーションも Redis も Workers のバインディングも要りません:
+
+```ts
+stores: {
+  cookie: { driver: 'cookie' },
+}
+```
+
+できないことが3つあります。意識して選んでください:
+
+- **セッションの中身がすべて cookie に載る**ので上限があります。ミドルウェアは送出する `Set-Cookie` 全体(名前と属性を含む)を測り、`maxCookieBytes`(既定 4096、ブラウザが保持する値)を超えるとエラーにします。ブラウザが黙って捨てる cookie を出すよりも、です。セッション本体に使えるのは約2.9KBです。レコードはデータベースに置き、セッションにはその id だけを入れてください
+- **ログアウトしても、クライアントが既に複製した cookie は失効できません**。`invalidate()` はそのクライアントの cookie を消すだけで、複製は期限まで有効です。失効させる必要があるものはデータベースに置いてください
+- **「全端末からログアウト」もセッション一覧もできません**。サーバ側に列挙できるものが無いためです
+
+`ttlSeconds` は意識して設定してください。サーバ側から cookie を早期に失効させる手段が無いので、暗号化ペイロード自身の期限が唯一の上限になります。
 
 `database` ドライバは `db/schema.ts` の `sessions` テーブルとマイグレーションを必要とします。列は `id`(text 主キー)・`data`・`expiresAt` の3つで、方言ごとの定義は [Cloudflare ガイド](./cloudflare.md#sessions-and-oauth-state-must-be-database-backed) にあります。期限切れ行は `manager.pruneExpired()` をスケジュール実行して掃除してください(`read()` は既に期限切れを不在として扱います)。
 

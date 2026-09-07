@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { consola } from 'consola'
 import type { Statement } from '@babel/types'
 import {
+  discoverAppConfigFiles,
   discoverControllerFiles,
   discoverModelFiles,
   fileExists,
@@ -29,6 +30,7 @@ import { checkRoutePathParams, discoverRoutePathFiles } from './route-path-check
 import { affectsRouteWiring, checkRouteRegistrarWiring } from './routes-check'
 import { checkRouteContracts } from './route-contract-check'
 import { checkAgentRoutes } from './agent-route-check'
+import { checkSessionsConfig } from './sessions-check'
 import { checkDeployRuntime } from './deploy-runtime'
 import { loadRouteDefinitions } from './load-routes'
 import { routesEntryOrDefault } from './route-registrar'
@@ -45,7 +47,6 @@ import {
   checkAttachmentsConfig,
   checkAttachmentsDelivery,
   checkAttachmentsPublicDisk,
-  discoverAttachmentsConfigFiles,
 } from './attachments-check'
 import { checkAgentsConfig, type AgentsConfigExpansion } from './agents-config-check'
 import { parseSchemaTables, schemaPathFor, type SchemaTable } from './schema-parser'
@@ -429,15 +430,23 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     // 0013); the layer takes it untyped, so a renamed export only fails on the
     // first attach. Not changed-filtered: the failure originates in db/schema.ts,
     // so filtering by the config file would hide the rename this exists for.
-    const attachmentsFiles = await discoverAttachmentsConfigFiles(cwd)
+    const appConfigFiles = await discoverAppConfigFiles(cwd)
     checks.push(
-      ...(await checkAttachmentsConfig({ cwd, cache, files: attachmentsFiles, schemaTables })),
+      ...(await checkAttachmentsConfig({ cwd, cache, files: appConfigFiles, schemaTables })),
     )
 
     // 8.6. The prior question: a model mixing in Attachable(...) in an app with
     // no configureAttachments() call at all. Same runtime-only failure as 8.5.
     checks.push(
-      ...(await checkAttachableModels({ cwd, cache, files: allModelFiles, configFiles: attachmentsFiles })),
+      ...(await checkAttachableModels({ cwd, cache, files: allModelFiles, configFiles: appConfigFiles })),
+    )
+
+    // 8.6b. Session wiring (RFC 0020 §2): a `database` store bound to a table
+    // the schema does not export, and a session config no provider binds. Over
+    // the same config/src/app scan the attachments rules use. Not
+    // changed-filtered: the config and its provider are different files.
+    checks.push(
+      ...(await checkSessionsConfig({ cwd, cache, files: appConfigFiles, schemaTables })),
     )
 
     // 8.65. The attachments disk rooted inside the statically served public/
@@ -445,7 +454,7 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
     // changed-filtered: the two halves of the finding live in different files
     // (the config names the disk, the storage provider roots it).
     checks.push(
-      ...(await checkAttachmentsPublicDisk({ cwd, cache, files: attachmentsFiles })),
+      ...(await checkAttachmentsPublicDisk({ cwd, cache, files: appConfigFiles })),
     )
 
     // 8.7. Delivery-route wiring (RFC 0015): a `delivery` config with no
@@ -458,7 +467,7 @@ export async function runCheck(options: RunCheckOptions = {}): Promise<CheckRepo
         ...(await checkAttachmentsDelivery({
           cwd,
           cache,
-          files: attachmentsFiles,
+          files: appConfigFiles,
           routesFile: routeGraphFile,
           definitions: graph?.definitions,
         })),

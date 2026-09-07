@@ -29,6 +29,7 @@ bunx guren add cache
 bunx guren add notifications
 bunx guren add storage
 bunx guren add attachments
+bunx guren add session
 bunx guren add broadcasting
 bunx guren add schedule
 bunx guren add lint

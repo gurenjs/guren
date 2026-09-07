@@ -274,6 +274,11 @@ export abstract class Command implements CommandInstance {
     return this.container.make<T>(key)
   }
 
+  /** `resolve()` for a service a command tolerates being absent; fakes and deferred providers count. */
+  protected resolveOptional<T>(key: string): T | undefined {
+    return this.container?.makeOptional<T>(key)
+  }
+
   getSignature(): string {
     return (this.constructor as typeof Command).signature
   }

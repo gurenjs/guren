@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "rootDirs": [
+      "templates/scaffold/session",
+      "tests/fixtures/scaffold-typecheck/session"
+    ]
+  },
+  "include": [
+    "templates/scaffold/session/**/*",
+    "tests/fixtures/scaffold-typecheck/session/**/*"
+  ],
+  "exclude": []
+}

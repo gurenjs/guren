@@ -1,6 +1,8 @@
 import { consola } from 'consola'
 import { addAttachments, appBindsStorage } from './add-attachments'
+import { addCache } from './add-cache'
 import { addLint } from './add-lint'
+import { addSession } from './add-session'
 import { assertNotApiOnly } from './app-surface'
 import { fileExists, readIfExists } from './discovery'
 import { makeAuth } from './make-auth'
@@ -61,6 +63,10 @@ const blueprintRegistry: Record<string, BlueprintDefinition> = {
       created.push(...(await addAttachments(writerOptions)))
       return created
     },
+  },
+  session: {
+    description: 'Install database-backed sessions: the schema table and migration, config/session.ts, SessionProvider, and sessions:prune.',
+    run: async (options) => (await addSession({ force: Boolean(options.force) })).files,
   },
   lint: {
     description: 'Install oxlint with the Guren rules: .oxlintrc.json, lint scripts, and the oxlint dev dependency.',
@@ -158,21 +164,8 @@ export default registerAdminRoutes
     },
   },
   cache: {
-    description: 'Install the default cache provider and an example cache service.',
-    run: async (options) => {
-      const writerOptions: WriterOptions = { force: Boolean(options.force) }
-      const created = await writeScaffoldFiles([
-        scaffoldTemplateFile('cache', 'app/Providers/CacheProvider.ts'),
-        scaffoldTemplateFile('cache', 'app/Services/ApplicationCache.ts'),
-      ], writerOptions)
-
-      await wireProviders([
-        { name: 'CoreCacheServiceProvider', importStatement: "import { CacheServiceProvider as CoreCacheServiceProvider } from '@guren/core'" },
-        { name: 'CacheProvider' },
-      ])
-
-      return created
-    },
+    description: 'Install the default cache provider, an example cache service, and the CACHE_STORE env entry.',
+    run: async (options) => addCache({ force: Boolean(options.force) }),
   },
   events: {
     description: 'Install event infrastructure with a sample event and listener.',

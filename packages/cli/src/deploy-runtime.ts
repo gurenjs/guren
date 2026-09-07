@@ -1,7 +1,8 @@
 import { readFile, readdir } from 'node:fs/promises'
 import { extname, join, resolve } from 'node:path'
-import type { File, Node } from '@babel/types'
+import type { File, Node, ObjectExpression } from '@babel/types'
 import { memberKeyName, objectLiteral, walk, type BabelNode } from './ast-walk'
+import { DEFAULT_SESSION_STORE_NAME, PER_PROCESS_SESSION_DRIVERS, readSessionConfig, sessionConfigsIn } from './session-config'
 import {
   collectFiles,
   toPosixRelative,
@@ -95,6 +96,8 @@ export interface DeployRuntimeAnalysis {
   backedOAuthSignals: SourceSignal[]
   /** Explicit `new Memory*Store()` / `new MemoryDriver()` constructions. */
   memoryStoreSignals: SourceSignal[]
+  /** A session config that selects the per-process `memory` store. */
+  memorySessionDefaultSignals: SourceSignal[]
   /** Explicit use of filesystem-scanning provider discovery. */
   discoverySignals: SourceSignal[]
   /**
@@ -129,6 +132,8 @@ type SignalKind =
   | 'memoryStore'
   | 'discovery'
   | 'lambda'
+  /** A session config whose selected store is the per-process `memory` driver. */
+  | 'memorySessionDefault'
 
 interface ExtractedSignal {
   kind: SignalKind
@@ -281,6 +286,44 @@ function extractSignals(ast: File): ExtractedSignal[] {
     seen.add(key)
     signals.push({ kind, symbol, line })
   }
+
+  /**
+   * Whether the store a `SessionConfig` selects shares state between requests.
+   * The candidates are the one `default` names, or — when `default` is written
+   * but unreadable — every declared store, since the environment cannot select
+   * what is not declared. An unreadable *driver* is a candidate nothing can
+   * vouch for, so it blocks that shortcut.
+   */
+  const emitSessionConfig = (config: ObjectExpression, line: number): void => {
+    const { declaresDefault, selected, stores } = readSessionConfig(config)
+
+    // An absent `default` is not an unknown one: SessionManager resolves it to
+    // the per-process store, so the config selects memory without saying so.
+    const chosen = declaresDefault ? selected : DEFAULT_SESSION_STORE_NAME
+    let candidates: Array<string | undefined>
+    let label: string
+
+    if (chosen !== undefined) {
+      // `memory` is declared by SessionManager whether or not the config lists
+      // it, so a default naming it is a selection even with no matching entry.
+      candidates = [stores.has(chosen) ? stores.get(chosen) : chosen]
+      label = declaresDefault ? `SessionConfig default: '${chosen}'` : 'SessionConfig with no default'
+    } else {
+      candidates = [...stores.values()]
+      label = `SessionConfig stores: ${[...stores.keys()].join(', ')}`
+    }
+
+    if (candidates.length === 0) return
+    if (candidates.every((driver) => driver !== undefined && !PER_PROCESS_SESSION_DRIVERS.has(driver))) {
+      emit('backedSession', label, line)
+    } else if (candidates.every((driver) => driver !== undefined && PER_PROCESS_SESSION_DRIVERS.has(driver))) {
+      emit('memorySessionDefault', label, line)
+    }
+  }
+
+  // Found through the shared reader rather than the walk below: the anchor is
+  // a type annotation, and the walk skips type-only nodes by design.
+  for (const { config, line } of sessionConfigsIn(ast)) emitSessionConfig(config, line)
 
   walk(ast.program, (node) => {
     if (TYPE_ONLY_NODES.has(node.type)) return false
@@ -522,6 +565,7 @@ export async function analyzeDeployRuntime(cwd: string): Promise<DeployRuntimeAn
     backedSessionSignals: collect('backedSession'),
     backedOAuthSignals: collect('backedOAuth'),
     memoryStoreSignals: collect('memoryStore'),
+    memorySessionDefaultSignals: collect('memorySessionDefault'),
     discoverySignals: collect('discovery'),
     unparsedFiles: unparsed,
   }
@@ -637,7 +681,7 @@ function judgePasswordHashing(analysis: DeployRuntimeAnalysis): DeployRuntimeVer
   )
 }
 
-const BACKED_STORE_FIX = 'Use DatabaseSessionStore and DatabaseOAuthStateStore from `@guren/core`, or the Redis equivalents from `@guren/core/redis`, and a Redis-backed cache/queue driver.'
+const BACKED_STORE_FIX = 'Run `bunx guren add session` for a database-backed session store, use DatabaseOAuthStateStore from `@guren/core` (or the Redis equivalent from `@guren/core/redis`) for OAuth state, and a Redis-backed cache/queue driver.'
 
 /**
  * Serverless targets share no memory between invocations, so in-memory stores
@@ -661,13 +705,20 @@ function judgeRuntimeStores(analysis: DeployRuntimeAnalysis): DeployRuntimeVerdi
     issues.push(`in-memory stores are constructed explicitly (${formatSignals(analysis.memoryStoreSignals)})`)
   }
 
+  if (analysis.memorySessionDefaultSignals.length > 0 && analysis.sessionDisabledSignals.length === 0) {
+    issues.push(
+      `the session config selects the per-process \`memory\` store (${formatSignals(analysis.memorySessionDefaultSignals)})`,
+    )
+  }
+
   if (
     analysis.sessionSignals.length > 0 &&
     analysis.backedSessionSignals.length === 0 &&
+    analysis.memorySessionDefaultSignals.length === 0 &&
     analysis.sessionDisabledSignals.length === 0
   ) {
     issues.push(
-      `sessions are enabled (${formatSignals(analysis.sessionSignals)}) with no DatabaseSessionStore or RedisSessionStore`,
+      `sessions are enabled (${formatSignals(analysis.sessionSignals)}) with no persistent store: no SessionConfig selects one, and no DatabaseSessionStore or RedisSessionStore is constructed`,
     )
   }
 

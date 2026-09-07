@@ -1,6 +1,6 @@
 {
   "name": "@guren/plugin-agents",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "description": "Durable agents for Guren applications: hosts Cloudflare Agents SDK Durable Objects that call the app's own agent tools through the RFC 0017 invocation pipeline.",
   "license": "MIT",
@@ -45,7 +45,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@guren/core": "^1.14.0",
+    "@guren/core": "^1.15.0",
     "agents": "^0.22.0"
   },
   "devDependencies": {

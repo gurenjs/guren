@@ -218,6 +218,8 @@ app.use('*', createSessionMiddleware())
 
 ### Selecting a store with `SessionManager`
 
+`bunx guren add session` writes the `sessions` table and its migration, `config/session.ts` (declaring the `database` store), a `SessionProvider`, the `SESSION_DRIVER` entry in `.env` and `.env.example`, and the `sessions:prune` command. The `redis` store below is the one addition you make by hand — importing `@guren/core/redis` pulls ioredis into every bundle, so the scaffold leaves it out until you want it. `guren add auth` runs it for you, so a scaffolded app is database-backed from the start. The rest of this section is what it produces, for an app wiring it by hand.
+
 For more than one candidate store, declare them once and pick by environment. Bind a `SessionManager` under the `session` key from a provider's `register()` and `AuthServiceProvider` builds the session middleware around it at boot, resolving the store itself on the first request:
 
 ```ts
@@ -247,6 +249,24 @@ export default class SessionProvider extends ServiceProvider {
 ```
 
 `createSessionManager()` is `new SessionManager()` plus the `database` driver, which only `@guren/core` can supply: the store wraps your table in an ORM model, and the HTTP layer underneath does not depend on the ORM. Use it whenever a `database` store is declared; `registerDatabaseSessionDriver(manager)` adds the driver to a manager you built some other way.
+
+#### The `cookie` store
+
+`{ driver: 'cookie' }` keeps the whole session inside the cookie, encrypted under your `APP_KEY` (AES-256-GCM, with `APP_PREVIOUS_KEYS` accepted so a key rotation does not log everyone out). It is the one store that needs **no server-side resource at all** — no table, no migration, no Redis, no Workers binding:
+
+```ts
+stores: {
+  cookie: { driver: 'cookie' },
+}
+```
+
+Three things it cannot do, and you should decide against them deliberately:
+
+- **Everything in the session travels in the cookie**, so it is capped. The middleware measures the whole `Set-Cookie` it is about to send — name and attributes included — against `maxCookieBytes` (4096 by default, what browsers keep) and throws rather than emitting one the browser silently drops. That leaves roughly 2.9 KB for the session itself. Keep records in the database and only their ids in the session.
+- **A logout cannot revoke a cookie the client already copied.** `invalidate()` clears it on that client; the copy stays valid until it expires. Anything that must be revocable belongs in the database.
+- **No "log out everywhere", and no session listing** — there is nothing server-side to enumerate.
+
+Set `ttlSeconds` deliberately: nothing server-side can expire the cookie early, so the encrypted payload's own expiry is the only limit.
 
 The `database` driver needs a `sessions` table in `db/schema.ts` and a migration. It has three columns — `id` (text primary key), `data`, and `expiresAt` — and the dialect-specific shape is in the [Cloudflare guide](./cloudflare.md#sessions-and-oauth-state-must-be-database-backed). Sweep expired rows on a schedule with `manager.pruneExpired()`; `read()` already treats them as missing.
 

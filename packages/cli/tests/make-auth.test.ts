@@ -66,7 +66,8 @@ export function registerWebRoutes(router: Router): void {
 
       const created = await makeAuth({ install: true, force: true })
 
-      expect(created).toHaveLength(27)
+      // 27 auth files plus the session blueprint's config and provider.
+      expect(created).toHaveLength(29)
       expect(created).toEqual(expect.arrayContaining([
         expect.stringContaining('AppUrl.ts'),
         expect.stringContaining('LoginController.ts'),
@@ -106,7 +107,7 @@ export function registerWebRoutes(router: Router): void {
       // CoreMailServiceProvider must be wired before MailProvider, or
       // container.singleton('mail') resolves to Core's empty-config default.
       expect(appContent).toContain("import { MailServiceProvider as CoreMailServiceProvider } from '@guren/core'")
-      expect(appContent).toContain('providers: [DatabaseProvider, AuthProvider, CoreMailServiceProvider, MailProvider]')
+      expect(appContent).toContain('providers: [DatabaseProvider, SessionProvider, AuthProvider, CoreMailServiceProvider, MailProvider]')
       expect(appContent).toContain('auth: {}')
 
       const routesContent = await readFile(join(workspace.dir, 'routes/web.ts'), 'utf8')
@@ -215,7 +216,8 @@ export function registerWebRoutes(router: Router): void {
 
       const created = await makeAuth({ force: true, minimal: true })
 
-      expect(created).toHaveLength(13)
+      // 13 auth files plus the session blueprint's config and provider.
+      expect(created).toHaveLength(15)
       expect(created).not.toEqual(expect.arrayContaining([
         expect.stringContaining('RegisterController.ts'),
         expect.stringContaining('RegisterValidator.ts'),
@@ -777,7 +779,8 @@ export const posts = pgTable('posts', {
 
       // Pinned so a new scaffold file cannot slip into the passwordless
       // variant: the negative assertions below cover only known files.
-      expect(created).toHaveLength(13)
+      // 13 auth files plus the session blueprint's config and provider.
+      expect(created).toHaveLength(15)
       expect(created).toEqual(expect.arrayContaining([
         expect.stringContaining('LoginController.ts'),
         expect.stringContaining('OAuthController.ts'),
@@ -1077,7 +1080,7 @@ export function registerWebRoutes(router: Router): void {
       const appContent = await readFile(join(workspace.dir, 'src/app.ts'), 'utf8')
       expect(appContent).toContain("import { OAuthServiceProvider as CoreOAuthServiceProvider } from '@guren/core'")
       expect(appContent).toContain("import OAuthProvider from '../app/Providers/OAuthProvider.js'")
-      expect(appContent).toContain('providers: [DatabaseProvider, AuthProvider, CoreOAuthServiceProvider, OAuthProvider]')
+      expect(appContent).toContain('providers: [DatabaseProvider, SessionProvider, AuthProvider, CoreOAuthServiceProvider, OAuthProvider]')
     } finally {
       await workspace.cleanup()
     }
@@ -1154,7 +1157,8 @@ export default app
       const appContent = await readFile(join(workspace.dir, 'app.ts'), 'utf8')
       // Relative to the entry that was actually found, not to src/app.ts.
       expect(appContent).toContain("import AuthProvider from './app/Providers/AuthProvider.js'")
-      expect(appContent).toContain('providers: [AuthProvider]')
+      expect(appContent).toContain("import SessionProvider from './app/Providers/SessionProvider.js'")
+      expect(appContent).toContain('providers: [SessionProvider, AuthProvider]')
       expect(appContent).toContain('auth: {}')
     } finally {
       await workspace.cleanup()

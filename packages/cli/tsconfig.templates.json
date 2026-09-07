@@ -29,6 +29,8 @@
   ],
   "exclude": [
     "templates/scaffold/attachments",
-    "tests/fixtures/scaffold-typecheck/attachments"
+    "tests/fixtures/scaffold-typecheck/attachments",
+    "templates/scaffold/session",
+    "tests/fixtures/scaffold-typecheck/session"
   ]
 }

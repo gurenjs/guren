@@ -15,13 +15,10 @@ concurrency:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
-    # Trial lanes report but never block a PR: the parallel runner they trial
-    # can lose a spawnSync child's exit (oven-sh/bun#34069's race, observed on
-    # this suite as a burst of exactly-at-timeout failures in the git-heavy
-    # files, roughly 1 run in 2 on macOS and far rarer here) — data worth
-    # collecting, not worth gating merges on. The flag lives on the matrix
-    # entry, not on a version literal, so promoting a trial version to primary
-    # cannot silently flip which lane gates.
+    # Trial lanes report but never block a PR: they soak the next Bun line, and
+    # a red one is data rather than a merge decision. `trial: true` lives on the
+    # matrix entry, not on a version literal, so promoting a trial version to
+    # primary cannot silently flip which lane gates.
     continue-on-error: ${{ matrix.trial == true }}
     # Measured ceiling for a healthy lane is 5m00s (1.3.14) / 4m42s (1.4.0)
     # across 30 runs, cache misses included, so this is an anti-wedge
@@ -36,39 +33,19 @@ jobs:
         # (scripts/workflow-bun-version.test.ts enforces that); later entries
         # are trial lanes for the next Bun line — promote one to first once it
         # has soaked.
-        bun-version: ['1.3.14', '1.4.1']
+        bun-version: ['1.3.14', '1.4.2']
         include:
           - bun-version: '1.3.14'
             redis: true
-          # The trial lane also trials `bun test --parallel` (1.4-only flag):
-          # forwarded through test-packages.ts, workers = the runner's 4
-          # cores. The timeout raise absorbs the tests that spawn real
-          # subprocesses (git choreography, tsc gates) running 4-wide on 4
-          # cores, where 5s is only enough for an idle machine.
-          #
-          # The flag was expected to be safe on Linux: macOS ARM64 trips
-          # oven-sh/bun#34069 on this suite (spawnSync loses a child exit; a
-          # worker spins at 100% CPU forever) in ~2 of 5 runs, and that spin
-          # lives in the kqueue path, which epoll does not share. Measured on
-          # this runner, that reasoning does not hold. The lane went from ~91%
-          # green over the 25 runs before the flag (20 success / 2 failure) to
-          # ~36% over the 11 after it (4 success / 4 failure / 3 hangs). Every
-          # failure is the same file, scripts/publish-agent-catalog.test.ts,
-          # at exactly 30000ms; the hangs are the wedge itself. So the flag is
-          # applied on pushes only — see the `Run tests` step, which is where
-          # that condition lives and why.
-          #
-          # Two dashes because `bun <file>` swallows one *leading* `--` before
-          # argv reaches the script; the survivor is the separator
-          # test-packages.ts forwards the rest after. Going through
-          # `bun run test:bun` instead stacks a second swallowing layer (the
-          # script is itself `bun run ./scripts/test-packages.ts`), which is
-          # how the first version of this lane fed the harness a bare
-          # `--parallel` and died on "Unknown flag".
-          - bun-version: '1.4.1'
+          # Do not hand this lane `bun test --parallel`: it wedges this suite
+          # on the Linux runners as well as on macOS ARM64 — 2 green in 15
+          # pushes, the reds either publish-agent-catalog.test.ts at exactly
+          # the timeout or `Run tests` hanging to its cap. oven-sh/bun#34069
+          # (spawnSync loses a child exit, a worker then spins at 100% CPU) is
+          # open as of 1.4.2.
+          - bun-version: '1.4.2'
             redis: true
             trial: true
-            test-bun-flags: '-- -- --parallel --timeout 30000'
     services:
       redis:
         image: redis:7-alpine
@@ -273,44 +250,16 @@ jobs:
       - name: Bundle budget audit
         run: bun run audit:bundle-budgets
 
-      # `bun run test` inlined so the trial lane's flags reach the package
-      # suites only; the example apps keep their own per-app runs either way.
-      # The harness is invoked directly (not via `bun run test:bun`) so the
-      # flag string crosses exactly one `--`-swallowing layer — see the
-      # matrix comment above.
-      #
-      # The flags are applied on pushes only. `--parallel` costs the lane most
-      # of its green (numbers on the matrix entry above), and a lane that is
-      # red on two runs in three is one everybody learns to scroll past —
-      # which would also cost the 1.4 promotion soak, the other thing this
-      # lane is for and the half that passes. On a pull request it therefore
-      # runs plain, and `--parallel` keeps collecting on main at 11-12 runs a
-      # day, off everyone's PR checks. The consequence is worth stating: for
-      # this lane a green PR no longer predicts a green push. It gates neither.
-      #
-      # The condition lives here rather than on the matrix entry because
-      # `matrix` is not available in a job-level `if`, so the lane cannot be
-      # skipped per entry; and while the context tables say `github` is
-      # available inside `strategy`, a `run:` is somewhere both are
-      # unambiguously available, which is worth more than the tidier spelling.
-      # Delete the condition and keep `matrix.test-bun-flags` once bun#34069
-      # closes.
-      #
-      # The step is capped as well as the job because this is the step that
-      # hangs: oven-sh/bun#34069 wedged the trial lane here on four runs in
-      # one day (32489029613, 32492123122, 32494964369, 32496297560), each
-      # sitting in_progress for 11-57 minutes until cancelled by hand. A
-      # *step* timeout fails the step, which the job's continue-on-error then
-      # masks on the trial lane — the documented path. Whether a *job*
-      # timeout is reported as a failure (masked) or a cancellation (not) is
-      # not something the documentation settles, so the trial lane's
-      # non-blocking promise deliberately does not rest on it.
+      # Capped as well as the job because this is the step a wedged runner
+      # hangs in: oven-sh/bun#34069 held it in_progress for 11-57 minutes on
+      # four runs in one day. A *step* timeout fails the step, which the job's
+      # continue-on-error then masks on a trial lane — the documented path;
+      # whether a *job* timeout is reported as a failure or a cancellation is
+      # not something the documentation settles.
       # Measured 2m16s at worst against a 15m cap.
       - name: Run tests
         timeout-minutes: 15
-        run: |
-          bun scripts/test-packages.ts ${{ github.event_name == 'push' && matrix.test-bun-flags || '' }}
-          bun run test:examples
+        run: bun run test
 
       - name: Testing package tests (vitest)
         run: bun run test:testing

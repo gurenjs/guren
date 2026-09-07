@@ -147,7 +147,7 @@ export class CacheManager {
 
     const factory = this.storeFactories.get(storeName)
     if (!factory) {
-      throw new Error(`Cache store not found: ${storeName}`)
+      throw new Error(`Cache store not found: ${storeName} (declared: ${this.getStoreNames().join(', ')})`)
     }
 
     const raw = factory()

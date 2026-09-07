@@ -1,5 +1,119 @@
 # @guren/server
 
+## 2.19.0
+
+### Minor Changes
+
+- 52a23b1: `guren add session`: database-backed sessions in one command (RFC 0020 Part 2b)
+
+  A scaffolded app that added authentication kept its sessions in process
+  memory. That is correct on one long-lived Bun server and drops every login on
+  Cloudflare Workers, Lambda, or Vercel, where requests share no memory — and it
+  only reproduces after deploying.
+
+  - **`bunx guren add session`** writes the `sessions` table into `db/schema.ts`
+    (per dialect, with an `expires_at` index), generates its migration,
+    scaffolds `config/session.ts` and `app/Providers/SessionProvider.ts`, wires
+    the provider into `createApp()`, registers `sessions:prune` in
+    `src/console.ts`, and appends `SESSION_DRIVER` to `.env.example` and `.env`.
+    An existing `sessions` table or session config is left alone, and an app with
+    no `db/schema.ts` gets guidance rather than a config it cannot compile.
+  - **`guren add auth` (and `make:auth`) runs it**, before generating its own
+    migration, so one drizzle-kit run covers users and sessions. `make:auth
+--no-session` opts out, and an app that already binds a `session` manager is
+    left alone. Without `--install`, `make:auth` writes the files and leaves
+    `src/app.ts` and `src/console.ts` for you, as it always has.
+  - **`SessionsPruneCommand`** (`sessions:prune`, from `@guren/core`) sweeps
+    expired rows through the bound manager; it fails rather than exiting 0 when
+    no manager is bound.
+  - The scaffolded `.env.example` no longer ships a `SESSION_DRIVER` line that
+    nothing read; the blueprint adds it when it adds the config that reads it.
+  - `Command.resolveOptional()` (`@guren/server`): `resolve()` for a service a
+    command tolerates being absent, so one does not have to reach past its own
+    injected container to a process global.
+
+- 8174e92: `SessionManager`: named session stores with lazy, plugin-extensible resolution (RFC 0020 Part 1)
+
+  - `SessionManager` (from `@guren/core`) takes a `SessionConfig`: cookie/TTL
+    settings plus `stores`, a map of named `{ driver, ...options }` entries, and
+    `default`, the one the middleware uses. `memory` and `redis` ship in server;
+    a plugin adds a driver by augmenting the `SessionDrivers` interface and
+    calling `registerDriver()`. Stores are built on first use and memoized, so a
+    driver registered after construction still serves a store declared before it,
+    and a declared-but-unselected `redis` entry opens no socket. An undeclared
+    `default` fails at construction. `pruneExpired()` sweeps the default and any
+    built store that supports it.
+  - Bind a manager under the container key `session` from a provider's
+    `register()` and `AuthServiceProvider` builds the session middleware around
+    it at boot, with `auth.sessionOptions` overriding the manager's cookie/TTL
+    settings field by field; the store itself is resolved on the first request.
+    Binding a manager _and_ setting `auth.sessionOptions.store`, or a default
+    store whose driver nobody registered, fails the boot.
+  - `createSessionMiddleware({ store })` accepts a function returning the store,
+    called on every request.
+  - `Container.makeOptional(key)`: `make()` for a service that may be absent,
+    honouring fakes and activating deferred providers where `has()` does not.
+  - `detectServerlessRuntime()` (and `SERVERLESS_RUNTIME_LABELS`): the one
+    place server decides which serverless runtime it is on; `isLambda()` and the
+    CLI's deploy-target labels read it.
+  - The session and XSRF cookies' `Secure` default (`NODE_ENV === 'production'`)
+    is read when the cookie is set, not when the middleware module loads, so an
+    app that sets `NODE_ENV` after importing the framework still gets a Secure
+    cookie through `createSessionMiddleware()` / `createCsrfMiddleware()` directly,
+    not only through `AuthServiceProvider`. `defaultCookieSecure()` is exported.
+  - On Cloudflare Workers, AWS Lambda, or Vercel, the middleware warns once per
+    process when it ends up on `MemorySessionStore`, the store that loses every
+    login there.
+
+- 8585eef: Read the session config's driver, and check its wiring (RFC 0020 Part 2c)
+
+  The deploy-runtime verdict keyed "backed session" on a constructed
+  `DatabaseSessionStore`, so an app that selects its store through a
+  `SessionManager` — everything `guren add session` scaffolds — was reported as
+  having no persistent store.
+
+  - `guren check`, `guren doctor` and the deploy builds now read a
+    `SessionConfig`-annotated object's `stores` and `default`, resolving
+    `process.env.SESSION_DRIVER ?? 'database'` through its literal fallback. A
+    persistent selection satisfies the session remediation; selecting `memory`
+    is its own warning; an unreadable `default` still counts as backed when every
+    declared store is. The type annotation is the anchor, since a cache config
+    keys `stores` identically.
+  - `guren check` gains two session rules: a `database` store bound to a table no
+    schema module exports (which throws on the first session write), and a
+    session config no provider binds as `session` (which leaves sessions on the
+    in-memory default while looking configured). Apps with no session config
+    contribute nothing.
+  - `appBindsService()` takes the app root it should scan (no `process.cwd()`
+    default) and returns the files that bind, so `runCheck({ cwd })` — the entry
+    point the MCP server uses — judges the app under check, and the session rule
+    can name the provider it found.
+  - `@guren/server` exports `DEFAULT_SESSION_STORE_NAME` and
+    `PER_PROCESS_SESSION_DRIVERS`, the two facts about `SessionManager` the
+    checks were restating.
+
+### Patch Changes
+
+- 68aa3d7: `createSessionManager()`: the `database` session driver (RFC 0020 Part 2a)
+
+  `SessionManager` (RFC 0020 Part 1) ships `memory` and `redis`; the
+  database-backed store cannot live in `@guren/server`, which must not depend on
+  the ORM. `@guren/core` now closes that:
+
+  - `createSessionManager(config)` builds a `SessionManager` with the `database`
+    driver registered, and `declare module '@guren/server'` widens
+    `SessionDrivers` so `{ driver: 'database', table: sessions }` type-checks in
+    an app's config. The driver takes the app's own drizzle `sessions` table plus
+    `DatabaseSessionStore`'s options (`dataMode`), and `pruneExpired()` sweeps it.
+  - `registerDatabaseSessionDriver(manager)` adds the driver to a manager built
+    elsewhere.
+  - Registration is a factory call, never a module side effect, so a bundler that
+    drops an unused import cannot drop the driver with it.
+
+  `@guren/server`: an unknown session driver's error now names the drivers that
+  _are_ registered, which is what tells a `new SessionManager()` caller that
+  `database` comes from `@guren/core`.
+
 ## 2.18.0
 
 ### Minor Changes
