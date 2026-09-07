@@ -6,22 +6,7 @@
 // Reports only a non-empty string or numeric fallback — `?? ''` is identical under
 // either operator, and a non-literal fallback cannot be judged from syntax.
 // Tests: `tests/oxlint-nullish-env-default.test.ts`.
-
-/** Strip wrappers that do not change which expression is the operand. */
-function unwrap(node) {
-  for (;;) {
-    switch (node?.type) {
-      case 'ChainExpression':
-      case 'TSNonNullExpression':
-      case 'TSAsExpression':
-      case 'ParenthesizedExpression':
-        node = node.expression
-        break
-      default:
-        return node
-    }
-  }
-}
+import { unwrap } from './ast.js'
 
 /** `process.env.FOO` or `process.env['FOO']`, returning the variable name. */
 function envKey(node) {
@@ -59,6 +44,11 @@ function envKeysReaching(node) {
   return key === undefined ? [] : [key]
 }
 
+/** The reported expression as written, flattened so a wrapped chain stays one line. */
+function text(context, node) {
+  return `\`${context.sourceCode.getText(node).replace(/\s+/gu, ' ')}\``
+}
+
 const rule = {
   create(context) {
     return {
@@ -69,11 +59,13 @@ const rule = {
         if (fallback === undefined) return
         const keys = envKeysReaching(node.left)
         if (keys.length === 0) return
-        const read = keys.map((k) => `process.env.${k}`).join(' ?? ')
+        // Every key, not the last: `??` is left-associative, so a blank *first*
+        // read wins and naming only the tail points at the wrong variable.
+        const blank = keys.map((k) => `\`${k}=\``).join(' or ')
         context.report({
           message:
-            `\`${read} ?? ${fallback}\` keeps a blank \`${keys[keys.length - 1]}=\` as '', which is not `
-            + `${fallback}. Use \`||\`, or disable this line with the reason an empty value is meaningful here.`,
+            `${text(context, node)} keeps a blank ${blank} as '', which is not ${fallback}. `
+            + "Use `||`, or disable this line with the reason an empty value is meaningful here.",
           node,
         })
       },

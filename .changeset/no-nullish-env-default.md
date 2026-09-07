@@ -8,4 +8,6 @@
 
 `@guren/server` carries the same fix at its own sites: a blank `AWS_REGION`, `AWS_LAMBDA_FUNCTION_VERSION` or `GUREN_INERTIA_ENTRY` no longer wins over the documented default, and `parseInt(process.env.AWS_LAMBDA_FUNCTION_MEMORY_SIZE ?? '128', 10)` no longer yields `NaN`.
 
+An app that already ran `guren add lint` keeps its existing `.oxlintrc.json` — the blueprint skips a file it has already written, and `agent:sync` does not manage that file — so the rule reaches newly scaffolded apps rather than arriving as a red lint on an upgrade.
+
 Where an empty value really is a choice — a mail `from` display name — the line carries `oxlint-disable-next-line guren/no-nullish-env-default` with that reason.

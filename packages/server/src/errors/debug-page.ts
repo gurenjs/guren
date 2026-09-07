@@ -296,7 +296,8 @@ function renderRequestSection(request: Request): string {
 
 function renderEnvironmentSection(): string {
   const nodeEnv =
-    typeof process !== 'undefined' ? process.env.NODE_ENV || 'undefined' : 'undefined'
+    // oxlint-disable-next-line guren/no-nullish-env-default -- a blank NODE_ENV is a state this page reports, not a missing one
+    typeof process !== 'undefined' ? process.env.NODE_ENV ?? 'undefined' : 'undefined'
   const bunVersion =
     typeof process !== 'undefined' ? process.versions?.bun ?? 'N/A' : 'N/A'
   const platform =

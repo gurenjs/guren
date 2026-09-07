@@ -348,9 +348,9 @@ describe('ユーザーアクション', () => {
 // config/database.ts
 function resolveDatabaseFilename(): string {
   if (process.env.NODE_ENV === 'test') {
-    return process.env.TEST_DATABASE_URL ?? './data/guren.test.db'
+    return process.env.TEST_DATABASE_URL || './data/guren.test.db'
   }
-  return process.env.DATABASE_URL ?? './data/guren.db'
+  return process.env.DATABASE_URL || './data/guren.db'
 }
 ```
 
@@ -364,15 +364,15 @@ function resolveDatabaseFilename(): string {
 >
 > +function resolveDatabaseFilename(): string {
 > +  if (process.env.NODE_ENV === 'test') {
-> +    return process.env.TEST_DATABASE_URL ?? './data/guren.test.db'
+> +    return process.env.TEST_DATABASE_URL || './data/guren.test.db'
 > +  }
-> +  return process.env.DATABASE_URL ?? './data/guren.db'
+> +  return process.env.DATABASE_URL || './data/guren.db'
 > +}
 > +
 >  const database = createSqliteDatabase({
 >    migrationsFolder: new URL('../db/migrations', import.meta.url),
 >    seedersFolder: new URL('../db/seeders', import.meta.url),
-> -  filename: () => process.env.DATABASE_URL ?? './data/guren.db',
+> -  filename: () => process.env.DATABASE_URL || './data/guren.db',
 > +  filename: resolveDatabaseFilename,
 >  })
 > ```

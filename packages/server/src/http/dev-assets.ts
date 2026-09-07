@@ -354,7 +354,7 @@ function createJsxRuntimeShim(helpers: Set<string>, runtimeUrl: string): string 
 }
 
 function isDev(): boolean {
-  return (process.env.NODE_ENV || 'development') !== 'production'
+  return process.env.NODE_ENV !== 'production'
 }
 
 function deriveCssRoute(prefix: string): string {
