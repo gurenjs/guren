@@ -193,6 +193,17 @@ the series it absorbed.
   carries the switch as a checklist row with the real diff. `add lint` is gone
   from the chapter too: the scaffold already ships `.oxlintrc.json`, so the
   command needs `--force` and then does nothing.
+- **The companion checkpoint repository is deferred.** The design above wanted
+  `gurenjs/tutorial-app` with a `chapter-NN` tag per chapter, for a reader whose
+  agent produced something else. Building the course showed that reader is
+  already served: every delegated slice carries a deterministic fallback of
+  complete files, and that fallback is the path CI executes, so the reference is
+  the text. What a published repository would still buy is starting mid-course
+  and diffing one chapter against the next; neither was judged worth a public
+  artifact that must be regenerated on every release to stay true. The tags
+  themselves ship: `smoke:tutorial` writes one per chapter, so a run kept with
+  `GUREN_KEEP_SMOKE_DIR=1` is navigable, and the clean-tree check they carry is
+  what verifies that every chapter really does end with a commit.
 - **Open Question 1 is decided.** Chapter 1 ends with a container image
   (`guren deploy --target docker`, then `docker build`/`docker run` shown but
   not executed); the hosted deploy belongs to chapter 14. Every chapter in
