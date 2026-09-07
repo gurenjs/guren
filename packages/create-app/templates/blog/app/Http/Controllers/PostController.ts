@@ -28,15 +28,15 @@ export default class PostController extends Controller {
   // Serves the HTTP QUERY route `posts.search` — a safe read that carries its
   // criteria in a JSON body. Matches posts with any keyword in title or
   // excerpt; `%` and `_` in a keyword act as SQL LIKE wildcards, which this
-  // starter treats as a feature. All keyword OR pairs sit inside one
-  // `where(callback)`, keeping this an any-keyword match while AND filters
-  // added later (a published flag, tenancy) apply to every hit instead of
-  // being OR'd away.
+  // starter treats as a feature.
   async search(): Promise<Response> {
     const { keywords, limit } = await this.validateBody(PostSearchSchema)
 
     const posts = await Post.newQuery()
       .with('author')
+      // All keyword OR pairs sit inside one callback, keeping this an
+      // any-keyword match while AND filters added later (a published flag,
+      // tenancy) apply to every hit instead of being OR'd away.
       .where((q) => {
         for (const keyword of keywords) {
           const pattern = `%${keyword}%`

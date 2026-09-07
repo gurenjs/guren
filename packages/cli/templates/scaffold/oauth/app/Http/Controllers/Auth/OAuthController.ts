@@ -19,9 +19,9 @@ export default class OAuthController extends Controller {
     // attacker could authorize their own account, keep the `code` unconsumed,
     // and walk a visitor through the callback — logging that visitor into the
     // attacker's account.
-    // `?redirectTo=` is user input — the manager only keeps app-relative
-    // paths (or hosts allowlisted via stateConfig.allowedRedirectHosts).
     const { url } = await this.oauth().authorize(provider, {
+      // User input — the manager only keeps app-relative paths (or hosts
+      // allowlisted via stateConfig.allowedRedirectHosts).
       redirectTo: this.request.query('redirectTo'),
       session: this.auth.session(),
     })
@@ -37,17 +37,17 @@ export default class OAuthController extends Controller {
       return this.json({ error: 'Missing OAuth callback parameters.' }, { status: 400 })
     }
 
-    // Replace this with your own account linking: look the user up by
+    // Replace what follows with your own account linking: look the user up by
     // profile.email, create one when missing, then `await this.auth.login(user)`
-    // and finish with `return this.redirect(redirectTo ?? '/')` —
-    // `redirectTo` is already sanitized against open redirects. Refuse to
-    // create an account when `profile.emailVerified === false`: the provider
-    // is saying it never checked that the address belongs to this user.
+    // and finish with `return this.redirect(redirectTo ?? '/')` — `redirectTo`
+    // is already sanitized against open redirects.
     const { profile, redirectTo } = await this.oauth().handleCallback(provider, {
       code,
       state,
       session: this.auth.session(),
     })
+    // Refuse to create an account when `profile.emailVerified === false`: the
+    // provider is saying it never checked that the address belongs to this user.
     return this.json({ provider, profile, redirectTo }, { status: 200 })
   }
 

@@ -4,8 +4,6 @@
  * controllers, models, schema, and pages) and oxlint (for any source file, when
  * the app has an .oxlintrc.json) and feed findings back so they get fixed
  * immediately instead of surfacing later in CI.
- *
- * Exit codes: 0 = ok / not applicable, 2 = findings reported back to the agent.
  */
 import { existsSync, realpathSync } from 'node:fs'
 import { isAbsolute, relative, sep } from 'node:path'
@@ -96,6 +94,7 @@ if (wantsLint && cli.isLintable(relPath)) {
   }
 }
 
+// Exit 2 is what carries the findings back to the agent; 0 is ok or not applicable.
 if (findings.length > 0) {
   console.error(`After editing ${relPath}:\n${findings.join('\n')}`)
   process.exit(2)
