@@ -6,25 +6,43 @@ import { ensureGurenUiTokens } from '../src/guren-css'
 
 const repoRoot = join(import.meta.dir, '../../..')
 
+const BLUEPRINT = 'packages/create-app/templates/default/resources/css/guren.css'
+
+const TOKEN_SHEETS = [
+  'examples/agents/resources/css/guren.css',
+  'packages/cli/templates/scaffold/guren-ui/resources/css/guren.css',
+  BLUEPRINT,
+]
+
+/** Tracked, so an untracked scratch copy is not a failure and node_modules is
+    never walked. */
+function trackedTokenSheets(): string[] {
+  const git = Bun.spawnSync(['git', 'ls-files', '-z', '--', '*resources/css/guren.css'], {
+    cwd: repoRoot,
+  })
+  if (git.exitCode !== 0) {
+    throw new Error(`git ls-files exited ${git.exitCode}: ${git.stderr.toString().trim()}`)
+  }
+  return git.stdout.toString().split('\0').filter(Boolean).sort()
+}
+
 /**
  * The token sheet ships in the create-app template, is written into older apps
- * by ensureGurenUiTokens, and is vendored into examples/agents; the three
- * copies must stay byte-identical, or an app's tokens depend on which command
- * wrote the file. Upstream is gurenjs/guren-ui, and lands here by hand.
+ * by ensureGurenUiTokens, and is vendored into examples/agents — which no
+ * command maintains, so it drifts silently. The copies must stay
+ * byte-identical, or an app's tokens depend on which command wrote the file.
+ * Upstream is gurenjs/guren-ui, and lands here by hand.
  */
 it('every guren.css copy matches the create-app template copy', async () => {
-  const blueprint = await readFile(
-    join(repoRoot, 'packages/create-app/templates/default/resources/css/guren.css'),
-    'utf8',
-  )
-  const scaffold = await readFile(
-    join(repoRoot, 'packages/cli/templates/scaffold/guren-ui/resources/css/guren.css'),
-    'utf8',
-  )
-  const example = await readFile(join(repoRoot, 'examples/agents/resources/css/guren.css'), 'utf8')
+  // Derived, then pinned: a fourth copy has to be added here deliberately, and
+  // a listing that came back empty cannot pass the comparison below vacuously.
+  const paths = trackedTokenSheets()
+  expect(paths).toEqual(TOKEN_SHEETS)
 
-  expect(scaffold).toBe(blueprint)
-  expect(example).toBe(blueprint)
+  const blueprint = await readFile(join(repoRoot, BLUEPRINT), 'utf8')
+  for (const path of paths) {
+    expect(await readFile(join(repoRoot, path), 'utf8')).toBe(blueprint)
+  }
 })
 
 async function makeApp(appCss?: string): Promise<string> {
