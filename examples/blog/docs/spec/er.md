@@ -39,6 +39,11 @@ erDiagram
     text body
     integer authorId FK
   }
+  sessions {
+    text id PK
+    jsonb data
+    timestamp expiresAt
+  }
   users {
     serial id PK
     text name
@@ -82,6 +87,14 @@ erDiagram
 | excerpt | text | not null |
 | body | text |  |
 | authorId | integer | not null, references users.id |
+
+## sessions
+
+| Column | Type | Constraints |
+|--------|------|-------------|
+| id | text | primary key |
+| data | jsonb | not null |
+| expiresAt | timestamp | not null |
 
 ## users
 
