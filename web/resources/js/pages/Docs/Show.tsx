@@ -368,7 +368,11 @@ export default function DocsShow({ categories, doc, active, locale, locales = []
       }
 
       button.addEventListener('click', handleClick)
-      pre.prepend(button)
+      // A listing that names its file has a sticky header; the button rides in
+      // it so it stays reachable while a long block scrolls.
+      const header = pre.querySelector('.doc-file-head')
+      if (header) header.appendChild(button)
+      else pre.prepend(button)
       cleanups.push(() => {
         button.removeEventListener('click', handleClick)
         button.remove()

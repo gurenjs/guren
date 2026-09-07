@@ -568,6 +568,42 @@ body.docs-theme {
 
 .guren-markdown-alert--caution .guren-markdown-alert__label { color: var(--g-danger); }
 
+/* ─── Tutorial listings: a fence that names the file it writes carries the
+   path as a sticky header, and a long one scrolls inside itself rather than
+   owning the page. The header is inside the <pre> because the markdown plugin
+   passes a highlighter's block through only when it opens with <pre>. ─── */
+.docs-content pre.doc-file {
+  padding-top: 0;
+}
+
+.doc-file-head {
+  position: sticky;
+  top: 0;
+  z-index: 11;
+  display: block;
+  margin: 0 -1.25rem 0.85rem;
+  padding: 0.45rem 1.25rem;
+  border-bottom: 1px solid rgba(255, 245, 245, 0.12);
+  background: rgba(10, 8, 10, 0.92);
+  color: rgba(255, 245, 245, 0.62);
+  font-family: var(--g-font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.01em;
+}
+
+.docs-content pre.doc-file--long {
+  max-height: 26rem;
+  overflow-y: auto;
+}
+
+/* Inside a sticky header the button rides with it; elsewhere it is absolute
+   against the <pre> (below). */
+.doc-file-head .docs-copy-btn {
+  position: absolute;
+  top: 0.3rem;
+  right: 0.35rem;
+}
+
 /* ─── Copy button — sits on the themeless ink surface, so it is themeless
    too ─── */
 .docs-copy-btn {
