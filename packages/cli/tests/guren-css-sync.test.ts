@@ -7,22 +7,24 @@ import { ensureGurenUiTokens } from '../src/guren-css'
 const repoRoot = join(import.meta.dir, '../../..')
 
 /**
- * The token sheet ships in the create-app template and is written into older
- * apps by ensureGurenUiTokens; the two copies must stay byte-identical, or an
- * app's tokens depend on which command wrote the file. Upstream is
- * gurenjs/guren-ui, and lands here by hand.
+ * The token sheet ships in the create-app template, is written into older apps
+ * by ensureGurenUiTokens, and is vendored into examples/agents; the three
+ * copies must stay byte-identical, or an app's tokens depend on which command
+ * wrote the file. Upstream is gurenjs/guren-ui, and lands here by hand.
  */
-it('the scaffold guren.css matches the create-app template copy', async () => {
-  const scaffold = await readFile(
-    join(repoRoot, 'packages/cli/templates/scaffold/guren-ui/resources/css/guren.css'),
-    'utf8',
-  )
+it('every guren.css copy matches the create-app template copy', async () => {
   const blueprint = await readFile(
     join(repoRoot, 'packages/create-app/templates/default/resources/css/guren.css'),
     'utf8',
   )
+  const scaffold = await readFile(
+    join(repoRoot, 'packages/cli/templates/scaffold/guren-ui/resources/css/guren.css'),
+    'utf8',
+  )
+  const example = await readFile(join(repoRoot, 'examples/agents/resources/css/guren.css'), 'utf8')
 
   expect(scaffold).toBe(blueprint)
+  expect(example).toBe(blueprint)
 })
 
 async function makeApp(appCss?: string): Promise<string> {

@@ -4,33 +4,47 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun --hot bin/serve.ts",
-    "build": "bun ../../packages/cli/src/bin.ts codegen --app . --routes routes/api.ts --out types/generated/routes.d.ts --force",
+    "dev": "bun run codegen && bun run dev:server",
+    "dev:server": "bun --hot bin/serve.ts",
+    "codegen": "bun ../../packages/cli/src/bin.ts codegen --app . --routes routes/web.ts --out types/generated/routes.d.ts --force",
+    "routes:types": "bun run codegen",
+    "build": "bun run codegen && bunx vite build",
     "test": "bun test tests",
     "typecheck": "tsc --noEmit",
     "check": "bun ../../packages/cli/src/bin.ts check",
-    "audit": "bun ../../packages/cli/src/bin.ts audit --routes routes/api.ts",
+    "audit": "bun ../../packages/cli/src/bin.ts audit",
     "tool:list": "bun ../../packages/cli/src/bin.ts tool:list",
     "db:make": "bun ../../packages/cli/src/bin.ts make:migration",
     "db:migrate": "bun ../../packages/cli/src/bin.ts db:migrate",
     "db:seed": "bun ../../packages/cli/src/bin.ts db:seed",
-    "cloudflare:build": "bun ../../packages/cli/src/bin.ts cloudflare:build",
-    "db:seed:d1": "bun db/seed-d1.ts"
+    "db:seed:d1": "bun db/seed-d1.ts",
+    "cloudflare:build": "bun run build && bun ../../packages/cli/src/bin.ts cloudflare:build"
   },
   "dependencies": {
     "@guren/cli": "workspace:*",
     "@guren/core": "workspace:*",
+    "@guren/inertia-client": "workspace:*",
     "@guren/orm": "workspace:*",
     "@guren/plugin-agents": "workspace:*",
     "@guren/plugin-cloudflare": "workspace:*",
     "@guren/testing": "workspace:*",
+    "@inertiajs/core": "^3.6.1",
+    "@inertiajs/react": "^3.6.1",
     "drizzle-orm": "1.0.0-rc.4",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
     "zod": "^4.5.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260702.1",
+    "@tailwindcss/vite": "^4.2.2",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^6.0.0",
     "drizzle-kit": "1.0.0-rc.4",
+    "tailwindcss": "^4.2.2",
     "typescript": "^7.0.2",
+    "vite": "^8.0.0",
     "wrangler": "^4.118.0"
   }
 }

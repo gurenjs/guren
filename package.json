@@ -17,7 +17,7 @@
     "build": "bun run ./scripts/build-packages.ts",
     "build:clean": "bun run ./scripts/build-packages.ts --clean",
     "build:list": "bun run ./scripts/build-packages.ts --list",
-    "build:routes": "bun run --cwd examples/blog routes:types",
+    "build:routes": "bun run --cwd examples/blog routes:types && bun run --cwd examples/agents codegen",
     "build:testing": "bun run --cwd packages/testing build",
     "build:core": "bun run --cwd packages/core build",
     "build:server": "bun run --cwd packages/server build",

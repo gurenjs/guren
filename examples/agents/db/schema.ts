@@ -34,6 +34,16 @@ export const apiTokens = sqliteTable(
   (table) => [index('api_tokens_user_id_idx').on(table.userId)],
 )
 
+/**
+ * The console's browser sessions. `DatabaseSessionStore` fixes the column
+ * property names: `id`, `data`, `expiresAt`.
+ */
+export const sessions = sqliteTable('sessions', {
+  id: text('id').primaryKey(),
+  data: text('data', { mode: 'json' }).$type<Record<string, unknown>>().notNull(),
+  expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
+})
+
 export const tickets = sqliteTable(
   'tickets',
   {
@@ -80,5 +90,5 @@ export const agentApprovals = sqliteTable(
   (table) => [index('agent_approvals_match_idx').on(table.tool, table.fingerprint, table.principalKey)],
 )
 
-export const schema = { users, apiTokens, tickets, agentApprovals }
+export const schema = { users, apiTokens, sessions, tickets, agentApprovals }
 export type AgentsSchema = typeof schema
